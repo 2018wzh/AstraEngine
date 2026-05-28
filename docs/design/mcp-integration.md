@@ -1,246 +1,286 @@
-# MCP Integration 设计
+# 统一 MCP / Agent 能力层设计
 
 ## 1. 目标
 
-MCP Integration 让外部 Agent 和工具通过标准协议访问 AstraEngine 的编辑器和开发工具链。
+统一重构后，MCP 不再只表示 Editor/Developer 的附属开发接口，而是 AstraEngine 的统一 Agent 能力协议层。
 
-MCP 的定位：
+它的职责是：
 
-- Editor / Developer 插件能力。
-- 本地受信开发接口。
-- 完整工具链入口。
-- 不替代 AI Provider。
-- 不进入默认 packaged runtime。
+- 定义统一的 resources、tools、prompts、sessions 和权限边界。
+- 让开发阶段 Agent 协作和运行时受控内容生成复用同一套协议表面。
+- 保持 Editor/Game 分离，不把编辑器 trusted write 语义带入 runtime。
+- 让 Runtime Generation、Provider 和 Audit 都能作为独立模块接入。
 
-MCP 的核心原则：
+MCP 的非职责：
 
-- 外部 Agent 通过 MCP 访问稳定 resources、tools、prompts。
-- MCP 不暴露 EnTT、ECS entity、编辑器 UI 对象或内部指针。
-- MCP mutating tools 在 trusted session 中允许直接写入项目源文件。
-- 每次 mutating tool 调用必须写入 Operation Log。
-- MCP resources、tools 和 prompts 可以由动态模块通过 ExtensionRegistry 注册，但模块必须声明 `mcp.register_tools` 等权限。
+- 不直接生成内容。
+- 不直接等价于 Runtime Generation Orchestrator。
+- 不直接等价于 Provider。
+- 不绕过 Boundary Manager、Save/Replay/Fallback 或 Release Gate。
 
 ## 2. 系统位置
 
 ```text
-External Agent / MCP Host
+External Agent
   -> AstraMCPServer
-  -> MCP Tool Router
+  -> Editor MCP Host
   -> Editor / Developer Services
-  -> Project Text Sources / Build Tools / Validation Tools
+  -> Project Text Sources / Validation / Cook / Package
+
+Runtime Session / Embedded Agent
+  -> Runtime MCP Host
+  -> Runtime Generation Orchestrator
+  -> Runtime Services / RuntimeCommand
+  -> Provider Modules
+  -> Agent Audit
 ```
 
 推荐模块：
 
 ```text
 Engine
+├── Runtime
+│   ├── MCPCore
+│   ├── RuntimeMCPHost
+│   ├── RuntimeGeneration
+│   └── AgentAudit
 ├── Editor
-│   └── MCPIntegration
+│   └── EditorMCPHost
 ├── Developer
 │   └── MCPTools
-├── Runtime
-│   └── ExtensionRegistry
 └── Programs
     └── AstraMCPServer
 ```
 
-第一阶段可以只作为 Editor/Developer 插件实现；`AstraMCPServer` 可作为后续独立开发工具封装同一套服务。
+## 3. Host 分层
 
-## 3. Hosting
+### 3.1 Editor MCP Host
 
-### 3.1 默认策略
+定位：
 
-- MCP server 默认禁用。
-- 用户必须显式为当前项目启动 trusted session。
-- MCP server 默认只服务当前 workspace/project。
-- Packaged runtime 默认不包含 MCP server。
+- 开发阶段 Agent 协作入口。
+- 面向项目上下文、验证、构建、发布和 trusted direct write。
+- 默认不进入 packaged runtime。
 
-### 3.2 Transport
+能力：
 
-第一阶段 transport：
-
-- `stdio`。
-
-后续可扩展：
-
-- 本地 HTTP。
-- WebSocket。
-- Editor 内嵌会话。
-
-## 4. Trusted Direct Write
-
-MCP 受信会话允许直接写入 workspace/project 内文本源文件。
-
-这是一条明确例外：
-
-- 普通 AI 输出默认进入 Review Queue。
-- MCP trusted direct write 不强制进入 Review Queue。
-- Review Queue 仍可作为可选 MCP tool 使用。
+- 读取 Text-First project resources。
+- 调用 Editor / Developer toolchain。
+- 在 trusted session 中直接写 workspace/project 内文本源文件。
+- 为 Agent Workbench、自动化脚本和外部 Agent 提供统一协议。
 
 限制：
 
-- 不允许访问明文 API key。
+- 只允许访问当前 workspace/project。
+- 不暴露明文密钥、Editor UI 对象、EnTT/ECS 内部状态。
+- direct write 只限文本源文件，不允许把 cooked/package 产物当作 canonical source。
+
+### 3.2 Runtime MCP Host
+
+定位：
+
+- 运行时受控内容生成入口。
+- 面向 runtime-safe resources、tools、prompts 和会话。
+- 只有在项目策略和打包资格允许时才可进入 packaged runtime。
+
+能力：
+
+- 读取运行时上下文、角色状态、剧情节点、受控 lore 视图和 Save/Replay 所需快照信息。
+- 调用 runtime-safe tools，例如查询上下文、请求生成、选择 fallback、读取约束或记录运行时决策。
+- 作为 Runtime Generation Orchestrator 的统一协议入口。
+
+限制：
+
+- 不允许 `project_write`。
 - 不允许访问未授权外部路径。
-- 不允许暴露或写入 EnTT/ECS 内部状态。
-- 不允许修改 packaged runtime 产物作为源数据。
-- 不允许把 DerivedDataCache 当作 canonical source。
-- 不允许未声明权限的动态模块注册 mutating MCP tool。
+- 不允许绕过 Save/Replay/Fallback。
+- 不允许获得 Editor trusted session 语义。
 
-每次 mutating tool 必须记录：
+## 4. Shared Session 模型
 
-```yaml
-operation_id: mcp_20260527_0001
-session_id: session_abc123
-tool: script.write
-input_hash: sha256_input_without_secrets
-affected_paths:
-  - Content/Scripts/chapter_01.astra
-timestamp: 2026-05-27T00:00:00Z
-caller: local_trusted_agent
-before_hash: sha256_before
-after_hash: sha256_after
-validation:
-  script_validate: pass
-  release_gate_required: false
-result: success
-diagnostics: []
-```
+统一 MCP 层共享 session 概念，但不同 host 的 session 权限不同。
 
-Operation Log 建议路径：
+### 4.1 Editor Session
 
-```text
-Saved/MCP/OperationLog/*.mcp-operation.yaml
-```
+- `read_only`：只读项目资源和诊断。
+- `trusted_write`：允许 mutating tools 修改文本源文件。
 
-## 5. Resources
+### 4.2 Runtime Session
 
-MCP resources 暴露只读上下文。
+- `runtime_read`：读取运行时上下文和受控状态。
+- `runtime_generate`：允许触发 Runtime Generation Orchestrator。
+- `runtime_fallback`：允许在既定策略内切换 fallback 或禁用动态生成。
+
+Session 规则：
+
+- Session 必须绑定 caller、project、policy snapshot 和 capability set。
+- Session 权限来自项目策略、模块权限、构建模式和当前运行环境的交集。
+- Session 不能提升模块未声明的权限。
+
+## 5. Shared Resources / Tools / Prompts
+
+### 5.1 Resources
+
+MCP resources 暴露只读上下文，返回文本源数据或稳定 DTO。
+
+Editor 侧示例：
 
 ```text
 astra://project/manifest
 astra://project/config
 astra://assets/registry
-astra://assets/{asset_id}/metadata
 astra://scripts/{path}
 astra://story/graph/{id}
 astra://lore/{id}
-astra://characters/{id}
-astra://localization/{locale}
 astra://review-queue
-astra://audit-log
 astra://build/status
 ```
 
-Resource 规则：
+Runtime 侧示例：
 
-- 返回文本源数据或稳定 DTO。
+```text
+astra://runtime/session
+astra://runtime/scene
+astra://runtime/characters/{id}
+astra://runtime/story/current
+astra://runtime/constraints
+astra://runtime/save-preview
+astra://runtime/fallbacks
+```
+
+规则：
+
 - 不返回 editor widget、native pointer、ECS entity。
-- 不返回密钥。
-- 对大文件支持分页或范围读取。
-- 路径必须限制在当前 workspace/project。
+- 不返回明文密钥。
+- 大对象支持分页或范围读取。
+- 路径边界始终受 host 和 session 约束。
 
-## 6. Tools
+### 5.2 Tools
 
-第一阶段工具面覆盖完整开发链路。
+Editor 侧工具面：
 
-### 6.1 Project
-
-- `project.open`
 - `project.inspect`
 - `project.write_file`
-
-### 6.2 Assets
-
-- `asset.query`
 - `asset.write_sidecar`
-- `asset.validate_sidecars`
-
-### 6.3 Script / Story
-
-- `script.validate`
 - `script.write`
-- `story.validate_graph`
 - `story.write_graph`
-
-### 6.4 Authoring Data
-
-- `lore.write`
-- `character.write`
-- `localization.write`
-
-### 6.5 Review / Audit
-
 - `review.enqueue`
-- `audit.generate_ai_report`
-
-### 6.6 Test / Build / Release
-
 - `test.run_headless`
 - `build.cook`
 - `build.package`
 - `release.run_gate`
 
-### 6.7 Compatibility
+Runtime 侧工具面：
 
-- `compat.probe_project`
-- `compat.validate_mount`
-- `compat.inspect_assets`
-- `compat.inspect_scripts`
-- `compat.validate_modernization`
-- `compat.generate_diagnostics`
+- `runtime.context.inspect`
+- `runtime.constraints.inspect`
+- `runtime.generation.request`
+- `runtime.generation.cancel`
+- `runtime.fallback.select`
+- `runtime.audit.annotate`
 
 Tool 规则：
 
-- Mutating tools write Operation Log.
-- Validation tools return structured diagnostics.
-- Build tools return artifact paths and summary status.
-- Compatibility tools write diagnostics, module config, external metadata, modernization config, and Operation Log entries. They do not copy external original assets by default.
-- Dynamically registered tools must declare capability, permission, input schema, output schema, and audit behavior.
+- Mutating tools 必须写 Operation Log。
+- Runtime mutating tools 只能修改运行时会话状态或受控生成状态，不能修改 project source。
+- 动态注册工具必须声明 capability、permission、input schema、output schema 和 audit behavior。
 
-## 7. Prompts
+### 5.3 Prompts
 
-MCP prompt templates should be project-aware but not provider-specific.
+Prompts 是项目感知但 provider 无关的模板，Editor 和 Runtime 共享命名体系。
+
+示例：
 
 ```text
 prompt.dialogue_polish
 prompt.lore_consistency_check
-prompt.character_ooc_check
-prompt.localization_draft
-prompt.qa_route_analysis
+prompt.asset_draft
+prompt.runtime_flavor_reply
+prompt.runtime_reactive_response
+prompt.runtime_branch_guarded
 ```
 
-Prompt inputs should prefer stable IDs:
+## 6. 审计模型
 
-- scene ID。
-- character ID。
-- lore ID。
-- localization key。
-- asset ID。
+审计从 MCP 和生成逻辑中抽离，统一交给 `Agent Audit` 模块。
 
-## 8. Relationship With AI Collaboration
+### 6.1 Operation Log
 
-MCP and AI Provider are separate:
+记录 tool side effect，例如：
 
-- AI Provider generates content.
-- MCP exposes project tools and context to an external agent.
+- Editor MCP trusted direct write。
+- runtime-safe tool 调用。
+- 验证/构建/打包动作。
 
-When MCP is used by an AI agent:
+建议路径：
 
-- Direct writes are allowed only in trusted session.
-- Operation Log records tool actions.
-- AI Audit Log records AI-assisted content when the tool identifies AI-generated or AI-edited output.
-- Review Queue can be used when the workflow wants human approval.
+```text
+Saved/Agent/Audit/Operations/*.operation.yaml
+```
 
-## 9. Testing
+### 6.2 Generation Audit Log
 
-Minimum tests:
+记录内容生成来源，例如：
 
-- Resource path boundary test.
-- Mutating tool operation log test.
-- Direct write script test.
-- Sidecar write and validation test.
-- Headless test invocation.
-- Cook/package invocation dry test.
-- Release gate invocation.
-- Secret redaction test.
-- Dynamic MCP provider permission and registration test.
+- prompt hash
+- context hash
+- output hash
+- provider id
+- fallback path
+- session id
+- final RuntimeCommand / reviewed patch id
+
+建议路径：
+
+```text
+Saved/Agent/Audit/Generation/*.generation.yaml
+```
+
+规则：
+
+- 两类日志都追加写入。
+- Editor trusted direct write 至少写 Operation Log。
+- Runtime generation 至少写 Generation Audit Log。
+- 如果某次写入既有工具副作用又有 AI 生成来源，两种日志都写。
+
+## 7. 与 Runtime Generation / Provider 的关系
+
+职责划分必须保持清晰：
+
+- MCP：统一协议层，负责 resources / tools / prompts / sessions / permissions。
+- Runtime Generation Orchestrator：负责 Context Builder、Boundary Manager、fallback、回放和把输出落成 RuntimeCommand。
+- Provider Modules：负责模型/服务调用，例如云端 LLM、本地 LLM、图像生成、TTS。
+- Agent Audit：负责记录副作用和来源，不负责执行生成。
+
+这意味着“统一 MCP 化”是统一协议和会话模型，不是把生成、provider 和审计都塞进同一个模块。
+
+## 8. 打包与安全
+
+默认策略：
+
+- Editor MCP Host 默认禁用。
+- Packaged runtime 默认不包含 Editor MCP Host。
+- Runtime MCP Host 默认不打包；仅在项目策略显式开启运行时生成，且模块声明 `runtime.packaged` 后才可进入 packaged runtime。
+- Provider Modules 必须独立声明 `network`、`ai.provider` 和 `runtime.packaged` 等权限。
+- Agent Audit 可以进入 packaged runtime，但必须遵守隐私和日志裁剪策略。
+
+安全规则：
+
+- MCP 不暴露明文 API key。
+- Runtime MCP Host 不暴露宿主文件系统任意访问。
+- Editor MCP trusted direct write 必须限制在 workspace/project 内文本源文件。
+- Runtime MCP Host 不得绕过 Save/Replay/Fallback。
+- Release Gate 必须校验 runtime MCP、generation、provider 和 audit 模块的 packaged eligibility。
+
+## 9. 测试
+
+最低测试：
+
+- Editor session path boundary test。
+- Editor trusted direct write operation log test。
+- Runtime session capability denial test。
+- Runtime generation request -> RuntimeCommand playback test。
+- Provider permission and packaged eligibility test。
+- Agent Audit operation/generation split log test。
+- Secret redaction test。
+- Dynamic MCP host/tool/resource registration test。

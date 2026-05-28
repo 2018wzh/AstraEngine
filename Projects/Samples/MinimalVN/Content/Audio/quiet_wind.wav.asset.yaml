@@ -1,0 +1,8 @@
+id: native:/Audio/QuietWind
+type: audio
+source_path: Audio/quiet_wind.wav
+display_name: Quiet Wind Placeholder
+origin: ToolGenerated
+tags:
+  - bgm
+  - demo

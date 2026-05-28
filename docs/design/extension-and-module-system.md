@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-AstraEngine 只专注视觉小说领域，但在该领域内提供接近 UE 的可定制化和扩展性。扩展系统应覆盖运行时、编辑器、资产管线、AI、MCP 和兼容模块，同时避免把内部 C++、EnTT、Renderer2D、AudioCore 或 Editor 对象泄露给插件。
+AstraEngine 只专注视觉小说领域，但在该领域内提供接近 UE 的可定制化和扩展性。扩展系统应覆盖运行时、编辑器、资产管线、统一 MCP / Agent 能力层、运行时生成、Provider、审计和兼容模块，同时避免把内部 C++、EnTT、Renderer2D、AudioCore 或 Editor 对象泄露给插件。
 
 核心目标：
 
@@ -131,7 +131,9 @@ ABI 规则：
 - `AssetValidator`：扩展 sidecar、依赖、license、external asset 校验。
 - `CookProcessor`：扩展图片、音频、字体、Live2D、Spine 或自定义 runtime asset cook。
 - `EditorPanelProvider`：扩展面板、菜单、详情页、预览器和诊断视图。
-- `McpProvider`：注册 MCP resources、tools 和 prompts。
+- `McpHostProvider`：注册 Editor MCP Host、Runtime MCP Host 以及对应的 resources、tools 和 prompts。
+- `RuntimeGenerationOrchestrator`：注册运行时生成编排器、fallback 策略和 RuntimeCommand 适配。
+- `AgentAuditSink`：注册 Operation Log、Generation Audit Log 和查询接口。
 - `AIProvider`：注册云端模型、本地模型、TTS 或图像生成提供者。
 
 注册规则：
@@ -139,7 +141,8 @@ ABI 规则：
 - 扩展点必须声明 capability。
 - 需要写项目、访问外部路径、联网或进入 packaged runtime 的扩展必须声明 permission。
 - Runtime 扩展不得依赖 Editor 扩展。
-- MCP 和 Developer 扩展默认不进入 packaged runtime。
+- Editor MCP 和 Developer 扩展默认不进入 packaged runtime。
+- Runtime MCP Host 只有在声明 `runtime.packaged` 且项目策略允许时才可进入 packaged runtime。
 
 ## 7. VN Property System
 
@@ -185,7 +188,11 @@ properties:
 - `filesystem.external_mount_write`
 - `network`
 - `mcp.register_tools`
+- `mcp.host.editor`
+- `mcp.host.runtime`
 - `ai.provider`
+- `runtime.generation`
+- `agent.audit`
 - `runtime.packaged`
 - `editor.extend_ui`
 - `cook.write_output`
@@ -219,6 +226,7 @@ properties:
 - 只打包启用的 runtime-safe 模块。
 - `editor`、`developer`、`mcp_debug`、`authoring_only` 模块默认排除。
 - `runtime.packaged` 权限必须显式声明。
+- `mcp.host.runtime`、`runtime.generation`、`ai.provider` 和 `agent.audit` 进入 packaged runtime 前必须通过项目策略和 Release Gate 校验。
 - 模块依赖必须闭包完整。
 - 模块 binary hash、descriptor hash 和 ABI version 进入 package manifest。
 - Mount-only compatibility 项目默认不复制外部原始资产。
@@ -236,6 +244,7 @@ properties:
 - VN Property System schema generation 和 serialization。
 - Dynamic compatibility module RuntimeCommand playback。
 - Editor extension registration。
-- MCP tool/resource registration。
+- MCP host/tool/resource registration。
+- Runtime generation / provider / audit registration。
 - Cook processor registration。
-- Packaged runtime 排除 Editor/Developer/MCP debug 模块。
+- Packaged runtime 排除 Editor/Developer/Editor MCP debug 模块，并只包含显式允许的 Runtime MCP / Generation / Provider / Audit 模块。

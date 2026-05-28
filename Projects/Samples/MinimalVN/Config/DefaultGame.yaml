@@ -1,0 +1,9 @@
+runtime:
+  window:
+    width: 1280
+    height: 720
+  entry_script: Content/Scripts/main.astra
+audio:
+  master_volume: 0.6
+  bgm_volume: 0.5
+  sfx_volume: 0.8

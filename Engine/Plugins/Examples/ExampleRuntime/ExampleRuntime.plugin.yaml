@@ -1,0 +1,18 @@
+id: astra.plugin.example_runtime
+display_name: Example Runtime Plugin
+version: 0.1.0
+astra_api: ">=0.1 <0.2"
+modules:
+  - id: example_runtime.runtime
+    type: runtime
+    entrypoint: Bin/win64/ExampleRuntimePlugin.dll
+    load_phase: runtime_startup
+    capabilities:
+      - runtime_command_source
+      - vn_property_type
+    permissions:
+      runtime:
+        packaged: true
+    platforms:
+      - windows-x64
+dependencies: []

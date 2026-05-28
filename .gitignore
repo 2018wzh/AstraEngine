@@ -1,0 +1,17 @@
+build/
+out/
+.cache/
+.vs/
+.vscode/
+DerivedDataCache/
+Saved/
+*.user
+*.suo
+*.log
+*.tmp
+*.key
+*.pem
+*.env
+!Projects/Samples/**/Saved/.gitkeep
+.vscode
+vcpkg_installed

@@ -1,0 +1,1 @@
+astra_add_header_only_library(Astra_ApplicationCore)

@@ -35,7 +35,7 @@
 - [ ] P1 编写 ADR：编辑器 UI 技术候选和第一阶段选择。
 - [ ] P1 编写 ADR：Renderer2D 第一阶段后端选择，候选为 SDL_GPU、bgfx、WebGPU 或 OpenGL。
 - [ ] P1 编写 ADR：Runtime Services 内部采用 EnTT + Bevy 风格 ECS。
-- [ ] P1 编写 ADR：MCP 作为 Editor/Developer 插件，trusted session 允许直接写入并记录 Operation Log。
+- [ ] P1 编写 ADR：MCP 作为统一 Agent 能力协议层，区分 Editor MCP Host 与 Runtime MCP Host，trusted session 允许直接写入并记录 Operation Log。
 - [ ] P1 编写 ADR：源数据采用 YAML + JSON Schema，二进制资源使用 `.asset.yaml` sidecar。
 - [ ] P1 编写 ADR：兼容/模拟通过动态模块和现有扩展机制实现，不做 Import Mode。
 
@@ -46,16 +46,16 @@
 
 ### 2.2 工程骨架
 
-- [ ] P0 创建顶层 `CMakeLists.txt`。
-- [ ] P0 创建 `vcpkg.json`。
-- [ ] P0 创建 `Engine/Runtime`、`Engine/Editor`、`Engine/Developer`、`Engine/Programs`、`Engine/Plugins`。
-- [ ] P0 创建 `Projects/Samples/MinimalVN` 样例项目目录。
-- [ ] P0 创建 `cmake` 辅助模块目录。
-- [ ] P0 创建 `.gitignore`，排除 build、Saved、DerivedDataCache、临时日志和本地密钥。
-- [ ] P1 创建 `docs/coding-style.md`，明确 C++ 标准、命名、错误处理、模块边界。
-- [ ] P1 创建 `docs/design/content-and-assets.md`，明确 Text-First 源数据和 asset sidecar。
-- [ ] P1 创建 `docs/design/mcp-integration.md`，明确 MCP resources、tools、prompts、trusted session 和 Operation Log。
-- [ ] P1 创建 `docs/design/extension-and-module-system.md`，明确 ModuleManager、ExtensionRegistry、AstraModule C ABI、PluginDescriptor、VN Property System、权限和打包规则。
+- [x] P0 创建顶层 `CMakeLists.txt`。
+- [x] P0 创建 `vcpkg.json`。
+- [x] P0 创建 `Engine/Runtime`、`Engine/Editor`、`Engine/Developer`、`Engine/Programs`、`Engine/Plugins`。
+- [x] P0 创建 `Projects/Samples/MinimalVN` 样例项目目录。
+- [x] P0 创建 `cmake` 辅助模块目录。
+- [x] P0 创建 `.gitignore`，排除 build、Saved、DerivedDataCache、临时日志和本地密钥。
+- [x] P1 创建 `docs/coding-style.md`，明确 C++ 标准、命名、错误处理、模块边界。
+- [x] P1 创建 `docs/design/content-and-assets.md`，明确 Text-First 源数据和 asset sidecar。
+- [x] P1 创建 `docs/design/mcp-integration.md`，明确统一 MCP / Agent 能力层、resources、tools、prompts、sessions 和审计契约。
+- [x] P1 创建 `docs/design/extension-and-module-system.md`，明确 ModuleManager、ExtensionRegistry、AstraModule C ABI、PluginDescriptor、VN Property System、权限和打包规则。
 
 验收标准：
 
@@ -67,9 +67,9 @@
 
 ### 2.3 基础 CI 与质量门槛
 
-- [ ] P1 添加格式化配置，优先 `clang-format`。
-- [ ] P1 添加基础 CI：配置 CMake、构建、运行测试。
-- [ ] P1 添加 `CTest` 支持。
+- [x] P1 添加格式化配置，优先 `clang-format`。
+- [x] P1 添加基础 CI：配置 CMake、构建、运行测试。
+- [x] P1 添加 `CTest` 支持。
 - [ ] P2 添加静态检查配置，候选为 `clang-tidy`。
 
 验收标准：
@@ -83,15 +83,15 @@
 
 ### 3.1 Core
 
-- [ ] P0 创建 `Astra_Core` target。
-- [ ] P0 实现日志封装，底层可用 spdlog。
-- [ ] P0 实现断言和 fatal error 入口。
-- [ ] P0 定义 `Expected` 使用策略，优先 `std::expected`。
-- [ ] P0 定义基础错误类型和错误码命名规范。
-- [ ] P0 实现路径工具，统一 `std::filesystem::path` 与 UTF-8 字符串边界。
-- [ ] P1 实现 YAML 配置加载，并接入 JSON Schema 校验。
-- [ ] P1 实现时间工具，基于 `std::chrono`。
-- [ ] P1 实现事件总线最小版本。
+- [x] P0 创建 `Astra_Core` target。
+- [x] P0 实现日志封装，底层可用 spdlog。
+- [x] P0 实现断言和 fatal error 入口。
+- [x] P0 定义 `Expected` 使用策略，优先 `std::expected`。
+- [x] P0 定义基础错误类型和错误码命名规范。
+- [x] P0 实现路径工具，统一 `std::filesystem::path` 与 UTF-8 字符串边界。
+- [x] P1 实现 YAML 配置加载，并接入 JSON Schema 校验。
+- [x] P1 实现时间工具，基于 `std::chrono`。
+- [x] P1 实现事件总线最小版本。
 - [ ] P1 实现模块注册接口。
 - [ ] P2 实现任务系统最小版本。
 - [ ] P2 实现轻量类型描述或反射元数据。
@@ -103,22 +103,23 @@
 
 ### 3.1.1 Dynamic Module / ExtensionRegistry / VN Property System
 
-- [ ] P0 创建 `Astra_ModuleRuntime` target。
-- [ ] P0 创建 `Astra_ExtensionRegistry` target。
-- [ ] P0 创建 `Astra_VNPropertySystem` target。
-- [ ] P0 定义 `PluginDescriptor` YAML schema。
-- [ ] P0 定义 `AstraModule` C ABI entrypoint。
-- [ ] P0 定义 ABI 基础类型：result code、opaque handle、string view、diagnostic sink、host api table。
-- [ ] P0 实现 `ModuleManager` 的插件目录扫描和 descriptor 校验。
-- [ ] P0 实现模块依赖解析、load phase 排序和版本约束校验。
-- [ ] P1 实现动态库加载、initialize、activate、deactivate、shutdown、unload 生命周期。
-- [ ] P1 实现 `ExtensionRegistry` 的扩展点注册和重复注册诊断。
-- [ ] P1 定义第一阶段扩展点：RuntimeCommandSource、CompatibilityAdapter、VfsMountProvider、ForeignAssetResolver、AssetValidator、CookProcessor、EditorPanelProvider、McpProvider、AIProvider。
-- [ ] P1 实现模块权限声明和 capability 校验。
-- [ ] P1 实现 VN Property System：TypeId、PropertyId、enum metadata、property descriptor、默认值。
-- [ ] P1 实现 VN Property System 到 JSON Schema 的生成。
-- [ ] P1 实现 `ai_editable`、`tool_generated`、`read_only`、`requires_review` 字段标记。
-- [ ] P1 创建示例动态模块，注册一个 RuntimeCommandSource 或测试扩展。
+- [x] P0 创建 `Astra_ModuleRuntime` target。
+- [x] P0 创建 `Astra_ExtensionRegistry` target。
+- [x] P0 创建 `Astra_VNPropertySystem` target。
+- [x] P0 定义 `PluginDescriptor` YAML schema。
+- [x] P0 定义 `AstraModule` C ABI entrypoint。
+- [x] P0 定义 ABI 基础类型：result code、opaque handle、string view、diagnostic sink、host api table。
+- [x] P0 实现 `ModuleManager` 的插件目录扫描和 descriptor 校验。
+- [x] P0 实现模块依赖解析、load phase 排序和版本约束校验。
+- [x] P1 实现动态库加载、initialize、activate、deactivate、shutdown、unload 生命周期。
+- [x] P1 实现 `ExtensionRegistry` 的扩展点注册和重复注册诊断。
+- [x] P1 定义第一阶段扩展点：RuntimeCommandSource、CompatibilityAdapter、VfsMountProvider、ForeignAssetResolver、AssetValidator、CookProcessor、EditorPanelProvider、McpProvider、AIProvider、PlatformProvider、RendererProvider、AudioProvider、ProjectContentProvider。
+- [x] P1 实现模块权限声明和 capability 校验。
+- [x] P1 实现 VN Property System：TypeId、PropertyId、enum metadata、property descriptor、默认值。
+- [x] P1 实现 VN Property System 到 JSON Schema 的生成。
+- [x] P1 实现 `ai_editable`、`tool_generated`、`read_only`、`requires_review` 字段标记。
+- [x] P1 创建示例动态模块，注册一个 RuntimeCommandSource 或测试扩展。
+- [x] P1 将默认 Platform、Renderer2D、Audio 和 ProjectContent 后端作为插件包由 ModuleManager 发现并注册。
 - [ ] P2 实现编辑器安全 unload/reload 开发路径。
 - [ ] P2 实现插件 SDK 包装层，但稳定边界仍是 C ABI。
 
@@ -131,15 +132,15 @@
 
 ### 3.2 ApplicationCore / PlatformSDL3
 
-- [ ] P0 创建 `Astra_ApplicationCore` target。
-- [ ] P0 创建 `Astra_PlatformSDL3` target。
-- [ ] P0 实现 SDL3 初始化和关闭。
-- [ ] P0 实现窗口创建、销毁、大小变更。
-- [ ] P0 实现主循环和事件泵。
-- [ ] P1 实现键盘、鼠标、手柄输入事件转换。
-- [ ] P1 实现剪贴板封装。
-- [ ] P1 实现高精度时间查询。
-- [ ] P1 实现平台路径查询，如用户目录、存档目录、缓存目录。
+- [x] P0 创建 `Astra_ApplicationCore` target。
+- [x] P0 创建 `Astra_PlatformSDL3` target。
+- [x] P0 实现 SDL3 初始化和关闭。
+- [x] P0 实现窗口创建、销毁、大小变更。
+- [x] P0 实现主循环和事件泵。
+- [x] P1 实现键盘、鼠标、手柄输入事件转换。
+- [x] P1 实现剪贴板封装。
+- [x] P1 实现高精度时间查询。
+- [x] P1 实现平台路径查询，如用户目录、存档目录、缓存目录。
 - [ ] P2 实现触摸输入。
 - [ ] P2 实现多显示器信息查询。
 
@@ -150,17 +151,17 @@
 
 ### 3.3 RHI / Renderer2D
 
-- [ ] P0 确定第一阶段 RHI 后端。
-- [ ] P0 创建 `Astra_RHI` target。
-- [ ] P0 创建 `Astra_Renderer2D` target。
-- [ ] P0 定义纹理、缓冲、着色器、命令提交的最小抽象。
-- [ ] P1 实现图片纹理加载。
-- [ ] P1 实现 Sprite 绘制。
-- [ ] P1 实现图层排序。
-- [ ] P1 实现 alpha 混合。
-- [ ] P1 实现背景绘制。
-- [ ] P1 实现立绘绘制。
-- [ ] P1 实现 UI 矩形和基础九宫格。
+- [x] P0 确定第一阶段 RHI 后端。
+- [x] P0 创建 `Astra_RHI` target。
+- [x] P0 创建 `Astra_Renderer2D` target。
+- [x] P0 定义纹理、缓冲、着色器、命令提交的最小抽象。
+- [x] P1 实现图片纹理加载。
+- [x] P1 实现 Sprite 绘制。
+- [x] P1 实现图层排序。
+- [x] P1 实现 alpha 混合。
+- [x] P1 实现背景绘制。
+- [x] P1 实现立绘绘制。
+- [x] P1 实现 UI 矩形和基础九宫格。
 - [ ] P2 实现转场系统，至少 fade。
 - [ ] P2 实现截图和缩略图。
 - [ ] P2 实现 debug overlay。
@@ -174,16 +175,16 @@
 
 ### 3.4 TextCore
 
-- [ ] P0 创建 `Astra_TextCore` target。
-- [ ] P0 接入 FreeType。
-- [ ] P0 接入 HarfBuzz。
-- [ ] P1 实现字体加载和 fallback。
-- [ ] P1 实现 glyph atlas。
-- [ ] P1 实现基础文本 shaping 和 layout。
-- [ ] P1 实现自动换行。
-- [ ] P1 实现富文本 span 数据结构。
-- [ ] P1 实现描边和阴影。
-- [ ] P1 实现打字机效果所需的 layout 可见范围。
+- [x] P0 创建 `Astra_TextCore` target。
+- [x] P0 接入 FreeType。
+- [x] P0 接入 HarfBuzz。
+- [x] P1 实现字体加载和 fallback。
+- [x] P1 实现 glyph atlas。
+- [x] P1 实现基础文本 shaping 和 layout。
+- [x] P1 实现自动换行。
+- [x] P1 实现富文本 span 数据结构。
+- [x] P1 实现描边和阴影。
+- [x] P1 实现打字机效果所需的 layout 可见范围。
 - [ ] P2 实现标点避头尾。
 - [ ] P2 实现 ruby / furigana。
 - [ ] P2 实现 emoji fallback。
@@ -197,12 +198,12 @@
 
 ### 3.5 AudioCore
 
-- [ ] P0 创建 `Astra_AudioCore` target。
-- [ ] P0 选择音频后端，默认候选 miniaudio。
-- [ ] P1 实现 BGM 播放和停止。
-- [ ] P1 实现 SFX 播放。
-- [ ] P1 实现 Voice 播放。
-- [ ] P1 实现音量总线：Master、BGM、SFX、Voice。
+- [x] P0 创建 `Astra_AudioCore` target。
+- [x] P0 选择音频后端，默认候选 miniaudio。
+- [x] P1 实现 BGM 播放和停止。
+- [x] P1 实现 SFX 播放。
+- [x] P1 实现 Voice 播放。
+- [x] P1 实现音量总线：Master、BGM、SFX、Voice。
 - [ ] P1 实现淡入淡出。
 - [ ] P2 实现音频流播放。
 - [ ] P2 实现 TTS 预览缓存路径规则。
@@ -216,25 +217,25 @@
 
 ### 3.6 AssetCore / AssetRegistry / VFS
 
-- [ ] P0 创建 `Astra_AssetCore` target。
-- [ ] P0 创建 `Astra_AssetRegistry` target。
-- [ ] P0 创建 `Astra_VFS` target。
-- [ ] P0 定义 `AssetId` 语法和解析器。
-- [ ] P0 定义 `AssetType`、`AssetMetadata`、`ContentOrigin`。
-- [ ] P0 定义 `.asset.yaml` sidecar schema。
-- [ ] P0 实现普通目录 mount。
-- [ ] P1 实现 YAML sidecar 解析。
-- [ ] P1 实现 JSON Schema 校验。
-- [ ] P1 实现 AssetRegistry 生成格式。
-- [ ] P1 实现资产扫描。
-- [ ] P1 实现按 ID、类型、标签查询。
-- [ ] P1 实现依赖记录。
-- [ ] P1 实现图片资产加载。
-- [ ] P1 实现音频资产加载。
+- [x] P0 创建 `Astra_AssetCore` target。
+- [x] P0 创建 `Astra_AssetRegistry` target。
+- [x] P0 创建 `Astra_VFS` target。
+- [x] P0 定义 `AssetId` 语法和解析器。
+- [x] P0 定义 `AssetType`、`AssetMetadata`、`ContentOrigin`。
+- [x] P0 定义 `.asset.yaml` sidecar schema。
+- [x] P0 实现普通目录 mount。
+- [x] P1 实现 YAML sidecar 解析。
+- [x] P1 实现 JSON Schema 校验。
+- [x] P1 实现 AssetRegistry 生成格式。
+- [x] P1 实现资产扫描。
+- [x] P1 实现按 ID、类型、标签查询。
+- [x] P1 实现依赖记录。
+- [x] P1 实现图片资产加载。
+- [x] P1 实现音频资产加载。
 - [ ] P2 实现 ZIP mount。
 - [ ] P2 实现补丁包 mount 优先级。
 - [ ] P2 实现缺失资产诊断。
-- [ ] P2 实现重复 AssetId 诊断。
+- [x] P2 实现重复 AssetId 诊断。
 - [ ] P2 实现 sidecar/source_path 不一致诊断。
 - [ ] P2 实现 external asset metadata 解析。
 - [ ] P2 实现 `foreign-director`、`foreign-renpy` 等 external AssetId scheme。
@@ -251,20 +252,20 @@
 
 ### 3.6.1 Text-First Source Data
 
-- [ ] P0 定义 YAML + JSON Schema 作为 canonical source format。
-- [ ] P0 定义 project manifest schema：`*.vnproj.yaml`。
-- [ ] P0 定义 config schema：`Config/*.yaml`。
-- [ ] P0 定义 character schema：`*.character.yaml`。
-- [ ] P0 定义 lore schema：`*.lore.yaml`。
-- [ ] P0 定义 story graph schema：`*.story.yaml`。
-- [ ] P0 定义 localization schema：`*.loc.yaml`。
-- [ ] P0 定义 review queue schema：`*.review.yaml`。
-- [ ] P0 定义 audit schema：`*.audit.yaml`。
-- [ ] P0 定义 plugin descriptor schema：`*.plugin.yaml`。
-- [ ] P1 实现稳定 ID 校验。
+- [x] P0 定义 YAML + JSON Schema 作为 canonical source format。
+- [x] P0 定义 project manifest schema：`*.vnproj.yaml`。
+- [x] P0 定义 config schema：`Config/*.yaml`。
+- [x] P0 定义 character schema：`*.character.yaml`。
+- [x] P0 定义 lore schema：`*.lore.yaml`。
+- [x] P0 定义 story graph schema：`*.story.yaml`。
+- [x] P0 定义 localization schema：`*.loc.yaml`。
+- [x] P0 定义 review queue schema：`*.review.yaml`。
+- [x] P0 定义 audit schema：`*.audit.yaml`。
+- [x] P0 定义 plugin descriptor schema：`*.plugin.yaml`。
+- [x] P1 实现稳定 ID 校验。
 - [ ] P1 实现 duplicate ID 校验。
-- [ ] P1 实现 AI-editable、tool-generated、read-only 字段标记。
-- [ ] P1 实现 YAML block scalar 使用规范文档。
+- [x] P1 实现 AI-editable、tool-generated、read-only 字段标记。
+- [x] P1 实现 YAML block scalar 使用规范文档。
 - [ ] P2 实现 schema migration 策略文档。
 
 验收标准：
@@ -276,39 +277,39 @@
 
 ### 3.7 VNRuntimeServices
 
-- [ ] P0 创建 `Astra_VNRuntimeServices` target。
-- [ ] P0 定义 `RuntimeCommand`。
-- [ ] P0 定义 `RuntimeCommandExecutor`。
-- [ ] P1 定义并实现 `StageService`。
-- [ ] P1 定义并实现 `DialogueService`。
-- [ ] P1 定义并实现 `ChoiceService`。
-- [ ] P1 定义并实现 `AudioService` facade。
-- [ ] P1 定义并实现 `AssetService` facade。
-- [ ] P1 定义并实现 `InputService`。
-- [ ] P1 定义并实现 `SaveService` 最小版本。
+- [x] P0 创建 `Astra_VNRuntimeServices` target。
+- [x] P0 定义 `RuntimeCommand`。
+- [x] P0 定义 `RuntimeCommandExecutor`。
+- [x] P1 定义并实现 `StageService`。
+- [x] P1 定义并实现 `DialogueService`。
+- [x] P1 定义并实现 `ChoiceService`。
+- [x] P1 定义并实现 `AudioService` facade。
+- [x] P1 定义并实现 `AssetService` facade。
+- [x] P1 定义并实现 `InputService`。
+- [x] P1 定义并实现 `SaveService` 最小版本。
 - [ ] P2 定义并实现 `LocalizationService` 最小版本。
-- [ ] P2 实现 Runtime Command Log。
+- [x] P2 实现 Runtime Command Log。
 
 验收标准：
 
 - Astra Runtime 只通过 Runtime Services 驱动舞台、对白、选择、音频和存档。
 - Headless Test 可替换渲染和音频实现。
 - EnTT 类型不出现在 Runtime Services 对外接口。
-- RuntimeCommand 是 Astra Runtime、Story Graph、Runtime AI 和 compatibility adapter 进入 Runtime Services 的稳定意图协议和可选日志格式。
+- RuntimeCommand 是 Astra Runtime、Story Graph、Runtime Generation Orchestrator 和 compatibility adapter 进入 Runtime Services 的稳定意图协议和可选日志格式。
 
 ### 3.7.1 VNRuntimeServices / ECS
 
-- [ ] P0 在 `Astra_VNRuntimeServices` 内建立 `ECS` 子模块，第一阶段不单独拆 target。
-- [ ] P0 封装 Runtime ECS World，底层使用 EnTT。
-- [ ] P0 定义 `CommandBuffer`，用于 RuntimeCommand 到 World 的延迟写入。
-- [ ] P0 定义固定 Schedule：Input、Script、CommandApply、Animation、Audio、RenderExtract、SaveSnapshot、Cleanup。
-- [ ] P1 定义组件：`Transform2DComponent`、`SpriteComponent`、`BackgroundComponent`、`DialogueComponent`、`ChoiceComponent`、`AudioRequestComponent`、`LifetimeComponent`、`TransitionComponent`。
-- [ ] P1 定义资源：`AssetRegistryResource`、`InputResource`、`SaveStateResource`、`DialogueHistoryResource`、`AudioBusResource`、`RuntimeConfigResource`。
-- [ ] P1 将 `RuntimeCommandExecutor` 改为写入 CommandBuffer、World 或 Resource。
-- [ ] P1 将 `StageService` 改为 ECS facade，不再持有与 World 分叉的权威舞台状态。
-- [ ] P1 将 `DialogueService` 改为 ECS facade，当前对白为组件，历史为资源。
-- [ ] P1 将 `AudioService` 改为写入音频请求，由 Audio 阶段消费。
-- [ ] P1 将 `SaveService` 改为从 World + Resources 生成确定性快照。
+- [x] P0 在 `Astra_VNRuntimeServices` 内建立 `ECS` 子模块，第一阶段不单独拆 target。
+- [x] P0 封装 Runtime ECS World，底层使用 EnTT。
+- [x] P0 定义 `CommandBuffer`，用于 RuntimeCommand 到 World 的延迟写入。
+- [x] P0 定义固定 Schedule：Input、Script、CommandApply、Animation、Audio、RenderExtract、SaveSnapshot、Cleanup。
+- [x] P1 定义组件：`Transform2DComponent`、`SpriteComponent`、`BackgroundComponent`、`DialogueComponent`、`ChoiceComponent`、`AudioRequestComponent`、`LifetimeComponent`、`TransitionComponent`。
+- [x] P1 定义资源：`AssetRegistryResource`、`InputResource`、`SaveStateResource`、`DialogueHistoryResource`、`AudioBusResource`、`RuntimeConfigResource`。
+- [x] P1 将 `RuntimeCommandExecutor` 改为写入 CommandBuffer、World 或 Resource。
+- [x] P1 将 `StageService` 改为 ECS facade，不再持有与 World 分叉的权威舞台状态。
+- [x] P1 将 `DialogueService` 改为 ECS facade，当前对白为组件，历史为资源。
+- [x] P1 将 `AudioService` 改为写入音频请求，由 Audio 阶段消费。
+- [x] P1 将 `SaveService` 改为从 World + Resources 生成确定性快照。
 - [ ] P2 实现 RenderExtract 系统，输出 Renderer2D 可消费的快照。
 - [ ] P2 实现 Audio 系统，输出 AudioCore 可消费的播放请求。
 - [ ] P2 实现 Cleanup 系统，清理短生命周期实体。
@@ -322,12 +323,12 @@
 
 ### 3.7.2 Astra Runtime Session / Extension API
 
-- [ ] P0 创建 `Astra_AstraRuntime` target。
-- [ ] P0 定义 Astra Runtime session 生命周期：loadProject、start、tick、submitInput、saveSnapshot、restoreSnapshot、shutdown。
-- [ ] P0 定义 Runtime extension API，允许动态模块注册 RuntimeCommandSource、Runtime Services extension、Runtime ECS system pack 和 SaveService extension state provider。
-- [ ] P1 实现 RuntimeCommandSource 调度顺序和诊断。
-- [ ] P1 实现 SaveService extension state snapshot。
-- [ ] P1 实现 project config：`compatibility.external_project_root`、`compatibility.mount_only`、`compatibility.allow_asset_copy`。
+- [x] P0 创建 `Astra_AstraRuntime` target。
+- [x] P0 定义 Astra Runtime session 生命周期：loadProject、start、tick、submitInput、saveSnapshot、restoreSnapshot、shutdown。
+- [x] P0 定义 Runtime extension API，允许动态模块注册 RuntimeCommandSource、Runtime Services extension、Runtime ECS system pack 和 SaveService extension state provider。
+- [x] P1 实现 RuntimeCommandSource 调度顺序和诊断。
+- [x] P1 实现 SaveService extension state snapshot。
+- [x] P1 实现 project config：`compatibility.external_project_root`、`compatibility.mount_only`、`compatibility.allow_asset_copy`。
 - [ ] P2 实现 mock compatibility module 测试夹具。
 
 验收标准：
@@ -339,15 +340,15 @@
 
 ### 3.8 Astra Runtime
 
-- [ ] P0 定义最小 Astra DSL AST。
-- [ ] P0 实现 Astra Runtime。
-- [ ] P0 实现场景、背景、立绘、对白、选择、变量、跳转语法。
-- [ ] P1 实现 DSL parser。
-- [ ] P1 实现 AST 到 RuntimeCommand 的 planner。
-- [ ] P1 实现变量系统。
-- [ ] P1 实现选择分支。
-- [ ] P1 实现场景状态。
-- [ ] P1 实现保存快照。
+- [x] P0 定义最小 Astra DSL AST。
+- [x] P0 实现 Astra Runtime。
+- [x] P0 实现场景、背景、立绘、对白、选择、变量、跳转语法。
+- [x] P1 实现 DSL parser。
+- [x] P1 实现 AST 到 RuntimeCommand 的 planner。
+- [x] P1 实现变量系统。
+- [x] P1 实现选择分支。
+- [x] P1 实现场景状态。
+- [x] P1 实现保存快照。
 - [ ] P2 实现 Story Graph 的运行时数据结构。
 - [ ] P2 实现 Agent Hook 占位节点，但默认不启用 AI。
 
@@ -359,13 +360,13 @@
 
 ### 3.9 AstraGame 与 Demo
 
-- [ ] P0 创建 `AstraGame` executable。
-- [ ] P0 创建 `Projects/Samples/MinimalVN`。
-- [ ] P1 添加最小背景、立绘、BGM、SFX、脚本样例。
-- [ ] P1 实现命令行启动项目路径。
-- [ ] P1 实现基础窗口和主循环。
-- [ ] P1 接入 Astra Runtime session。
-- [ ] P1 接入 SaveGame。
+- [x] P0 创建 `AstraGame` executable。
+- [x] P0 创建 `Projects/Samples/MinimalVN`。
+- [x] P1 添加最小背景、立绘、BGM、SFX、脚本样例。
+- [x] P1 实现命令行启动项目路径。
+- [x] P1 实现基础窗口和主循环。
+- [x] P1 接入 Astra Runtime session。
+- [x] P1 接入 SaveGame。
 - [ ] P2 添加 debug overlay 显示当前 scene、line、fps。
 
 验收标准：
@@ -566,25 +567,27 @@
 - AI 生成对白建议进入 Review Queue。
 - Agent Workbench 不能直接写正式脚本。
 
-### 5.8 MCP Integration
+### 5.8 Unified MCP / Agent Layer
 
-- [ ] P0 定义 MCP hosting：Editor/Developer 插件，默认禁用。
+- [ ] P0 定义 MCPCore、Editor MCP Host 和 shared session contracts。
 - [ ] P0 定义 trusted session lifecycle。
-- [ ] P0 定义 MCP Operation Log schema。
+- [ ] P0 定义 Operation Log 与 Generation Audit Log schema。
 - [ ] P0 定义 workspace/project path boundary。
 - [ ] P1 定义 resources：project manifest、config、assets registry、asset metadata、scripts、story graph、lore、characters、localization、review queue、audit log、build status。
 - [ ] P1 定义 tools：project.open、project.inspect、project.write_file、asset.query、asset.write_sidecar、asset.validate_sidecars、script.validate、script.write、story.validate_graph、story.write_graph、lore.write、character.write、localization.write、review.enqueue、audit.generate_ai_report、test.run_headless、compat.probe_project、compat.validate_mount、compat.inspect_assets、compat.inspect_scripts、compat.validate_modernization、compat.generate_diagnostics、build.cook、build.package、release.run_gate。
 - [ ] P1 定义 prompts：dialogue polish、lore consistency、character OOC、localization draft、QA route analysis。
 - [ ] P1 设计 mutating tools 的 direct write 行为。
-- [ ] P1 设计 mutating tools 的 Operation Log 写入。
+- [ ] P1 设计 mutating tools 的 Operation Log 写入与 Generation Audit 关联。
 - [ ] P1 设计 secret redaction 和外部路径拒绝。
 - [ ] P2 设计 `AstraMCPServer` 程序封装。
 
 验收标准：
 
-- MCP 不进入默认 packaged runtime。
+- Editor MCP Host 不进入默认 packaged runtime。
+- Runtime MCP contract 不允许 `project_write`。
 - MCP 不暴露 EnTT/ECS 内部状态。
 - Trusted direct write 可写文本源文件并记录 Operation Log。
+- Agent Audit 能区分 tool side effect 与生成来源。
 - MCP tools 能覆盖验证、headless test、compat probe/mount/assets/scripts/modernization diagnostics、cook、package、release gate。
 
 ## 6. Phase 4：完整 VN Authoring
@@ -733,7 +736,7 @@
 - [ ] P1 检查 AssetRegistry 与 sidecar 同步。
 - [ ] P1 检查本地化 key。
 - [ ] P1 检查未审核 AI 内容。
-- [ ] P1 检查 Runtime AI 与发布模式是否冲突。
+- [ ] P1 检查 Runtime MCP / Generation 与发布模式是否冲突。
 - [ ] P1 检查 PluginDescriptor schema、模块 ABI version、依赖闭包、权限声明和 runtime packaging eligibility。
 - [ ] P1 检查 external asset root 是否存在。
 - [ ] P1 检查 mount-only 项目是否试图复制外部原始资产。
@@ -852,25 +855,25 @@
 
 - 每个 fixture 有 golden RuntimeCommand log 或 diagnostics。
 
-## 9. Phase 7：Runtime AI 与高级插件
+## 9. Phase 7：Runtime MCP / Generation 与高级插件
 
-目标：在不破坏确定性发布的前提下支持受约束运行时 AI 和高级表现插件。
+目标：在不破坏确定性发布的前提下支持受约束运行时生成和高级表现插件。
 
-### 9.1 Runtime AI
+### 9.1 Runtime MCP / Generation
 
-- [ ] P2 定义 Runtime AI policy。
-- [ ] P2 定义 Flavor AI 模式。
-- [ ] P2 定义 Reactive AI 模式。
+- [ ] P2 定义 Runtime MCP policy。
+- [ ] P2 定义 Flavor Generation 模式。
+- [ ] P2 定义 Reactive Generation 模式。
 - [ ] P2 实现 runtime prompt snapshot。
 - [ ] P2 实现 output snapshot。
 - [ ] P2 实现 fallback 内容。
-- [ ] P2 实现禁用 Runtime AI 后的回放策略。
-- [ ] P3 研究 Branch AI。
+- [ ] P2 实现禁用 Runtime Generation 后的回放策略。
+- [ ] P3 研究 Branch Generation。
 - [ ] P3 研究 Experimental AI Director。
 
 验收标准：
 
-- Runtime AI 只能在项目策略允许时启用。
+- Runtime MCP Host 和 Runtime Generation 只能在项目策略允许时启用。
 - 运行时生成内容可保存、回放、禁用和 fallback。
 
 ### 9.2 TTS Provider
@@ -911,23 +914,23 @@
 ### 10.2 测试矩阵
 
 - [ ] P0 建立 `Engine/Developer/AutomationTest`。
-- [ ] P1 Core 单元测试。
+- [x] P1 Core 单元测试。
 - [ ] P1 VFS 单元测试。
 - [ ] P1 AssetId 单元测试。
-- [ ] P1 YAML source schema 单元测试。
-- [ ] P1 Asset sidecar validation 单元测试。
+- [x] P1 YAML source schema 单元测试。
+- [x] P1 Asset sidecar validation 单元测试。
 - [ ] P1 PluginDescriptor schema 单元测试。
-- [ ] P1 ModuleManager discovery / dependency / load phase 单元测试。
-- [ ] P1 Dynamic module ABI smoke test。
-- [ ] P1 ExtensionRegistry 注册和权限诊断测试。
-- [ ] P1 VN Property System schema generation 测试。
+- [x] P1 ModuleManager discovery / dependency / load phase 单元测试。
+- [x] P1 Dynamic module ABI smoke test。
+- [x] P1 ExtensionRegistry 注册和权限诊断测试。
+- [x] P1 VN Property System schema generation 测试。
 - [ ] P1 DSL parser 单元测试。
-- [ ] P1 RuntimeCommandExecutor 集成测试。
-- [ ] P1 Astra Runtime session lifecycle 单元测试。
-- [ ] P1 Runtime extension API 集成测试。
-- [ ] P1 Runtime ECS World 单元测试。
-- [ ] P1 Runtime ECS Schedule 集成测试。
-- [ ] P1 Headless VN Test。
+- [x] P1 RuntimeCommandExecutor 集成测试。
+- [x] P1 Astra Runtime session lifecycle 单元测试。
+- [x] P1 Runtime extension API 集成测试。
+- [x] P1 Runtime ECS World 单元测试。
+- [x] P1 Runtime ECS Schedule 集成测试。
+- [x] P1 Headless VN Test。
 - [ ] P2 TextCore golden test。
 - [ ] P2 AI Policy test。
 - [ ] P2 MCP trusted direct write test。
@@ -937,9 +940,9 @@
 
 ### 10.3 示例内容
 
-- [ ] P1 最小 VN Demo。
+- [x] P1 最小 VN Demo。
 - [ ] P1 多语言文本样例。
-- [ ] P1 Asset sidecar 样例。
+- [x] P1 Asset sidecar 样例。
 - [ ] P1 Character/Lore/Story/Localization YAML 样例。
 - [ ] P1 缺失资产诊断样例。
 - [ ] P2 复杂分支样例。
@@ -958,4 +961,4 @@
 8. 完成 Astra Runtime session。
 9. 完成最小 Astra DSL parser。
 10. 跑通 `AstraGame --project Projects/Samples/MinimalVN`。
-11. 再进入 Editor、AI Suggestion Layer、MCP Integration 和 Compatibility Modules。
+11. 再进入 Editor、AI Suggestion Layer、Unified MCP / Agent Layer 和 Compatibility Modules。

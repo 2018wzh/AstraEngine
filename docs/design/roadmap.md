@@ -7,12 +7,12 @@
 优先级规则：
 
 - 先稳定 Runtime Services，再做编辑器高级功能。
-- Runtime Services 内部先稳定 ECS World 和固定 Schedule，再扩展复杂舞台、动画和 Runtime AI。
+- Runtime Services 内部先稳定 ECS World 和固定 Schedule，再扩展复杂舞台、动画和 Runtime MCP / Generation。
 - 源项目数据先稳定 Text-First YAML + JSON Schema，再做高级编辑器功能。
-- MCP 先作为 Editor/Developer 插件服务完整工具链，默认不进入 packaged runtime。
+- MCP 先统一为 Agent 能力协议层；Phase 3 先落地 Editor MCP Host，Phase 7 再落地 Runtime MCP Host 和 Runtime Generation。
 - 动态模块作为默认扩展模型，源码级模块只用于核心、实验性底层能力或未稳定 ABI 的内部代码。
 - UE 级可定制化限定在视觉小说领域，不扩张为通用 3D / Gameplay 引擎。
-- 先确定性发布，再做运行时 AI。
+- 先确定性发布，再做运行时 MCP / Generation。
 - 先最小可玩 Demo，再做完整工具链。
 - 每阶段必须有可验收产物。
 
@@ -24,7 +24,7 @@
 
 - `docs/design` 设计文档。
 - Text-First 源数据规范。
-- MCP Integration 设计。
+- 统一 MCP / Agent 能力层设计。
 - Dynamic Module / ExtensionRegistry / VN Property System 设计。
 - 顶层 CMake 项目。
 - vcpkg manifest。
@@ -37,7 +37,7 @@
 - CMake 能配置空项目。
 - 文档明确 Runtime 不依赖 Editor。
 - 文档明确 canonical source data 是 YAML + JSON Schema。
-- 文档明确 MCP trusted direct write 必须记录 Operation Log。
+- 文档明确 Agent Audit、Operation Log 和 Generation Audit 的拆分。
 - 文档明确动态模块优先、C ABI 边界和 VN Property System。
 
 ## 3. Phase 1：基础 Runtime
@@ -112,10 +112,10 @@
 - Boundary Manager。
 - Review Queue。
 - Diff/Patch。
-- Provenance Log。
+- Agent Audit。
 - AI Provider 插件接口。
-- MCP Integration。
-- MCP Operation Log。
+- Editor MCP Host。
+- MCPCore 与 Operation / Generation Audit 契约。
 
 验收标准：
 
@@ -124,8 +124,9 @@
 - AI 不能修改 locked Canon Lore。
 - 发布前能生成 AI Content Audit。
 - 无审核内容时 Deterministic Build 通过 release gate。
-- MCP trusted direct write 能修改文本源文件并记录 Operation Log。
-- MCP resources 能读取项目上下文、资产元数据、脚本、设定和构建状态。
+- Editor MCP trusted direct write 能修改文本源文件并记录 Operation Log。
+- Editor MCP resources 能读取项目上下文、资产元数据、脚本、设定和构建状态。
+- Agent Audit 能区分 tool side effect 和内容生成来源。
 
 ## 6. Phase 4：完整 VN Authoring
 
@@ -200,23 +201,27 @@
 - Cook/package 默认拒绝复制外部原始资产。
 - 能在 Compatibility Inspector 中查看诊断。
 
-## 9. Phase 7：Runtime AI 与高级插件
+## 9. Phase 7：Runtime MCP / Generation 与高级插件
 
 目标：支持更丰富的互动与扩展。
 
 实现：
 
-- Runtime AI。
+- Runtime MCP Host。
+- Runtime Generation Orchestrator。
 - Local LLM Provider。
+- Image Generation Provider。
 - TTS Provider。
+- Agent Audit packaged runtime mode。
 - Live2D。
 - Spine。
 - 外部引擎高级兼容插件。
 
 验收标准：
 
-- Runtime AI 只能在项目策略允许时启用。
+- Runtime MCP Host 和 Runtime Generation 只能在项目策略允许时启用。
 - 运行时生成内容可保存、回放、禁用和 fallback。
+- Runtime 侧 generation / provider / audit 模块都通过 packaged eligibility 校验。
 - TTS 预览缓存可复用。
 - Live2D / Spine 作为插件接入 Renderer2D 或 StageService。
 
@@ -238,7 +243,7 @@
 
 缓解：
 
-- Runtime AI 默认插件化。
+- Runtime Generation、Provider 和 Audit 默认模块化。
 - AI 修改必须走 Patch 和 Review Queue。
 - Release Gate 默认阻止未审核内容。
 
@@ -252,15 +257,16 @@
 - RuntimeCommand 和 Runtime Services facade 保持稳定，兼容模块不直接访问 EnTT。
 - ADR 0004 明确 EnTT 是内部实现细节。
 
-### 10.4 MCP trusted direct write 风险
+### 10.4 MCP 权限边界风险
 
 风险：MCP 受信直写绕过 Review Queue，可能产生难以审查的项目变更。
 
 缓解：
 
-- MCP 默认禁用，需要显式 trusted session。
-- 每个 mutating tool 写 Operation Log。
-- 路径限制在 workspace/project。
+- Editor MCP 默认禁用，需要显式 trusted session。
+- Runtime MCP 不允许 project_write。
+- 每个 mutating tool 写 Operation Log，运行时生成写 Generation Audit Log。
+- 路径限制在 workspace/project 或 runtime-safe DTO 范围内。
 - Release Gate 校验 YAML、schema、依赖和构建状态。
 
 ### 10.5 Text-First schema 演进风险
@@ -314,7 +320,8 @@
 - 选择 Renderer2D 后端。
 - 定义 AssetId、AssetMetadata、AssetRegistry 文件格式。
 - 定义 `.asset.yaml` sidecar 和 JSON Schema。
-- 定义 MCP resources、tools、prompts 和 Operation Log。
+- 定义 MCPCore、Editor MCP Host、Runtime MCP Host、resources、tools、prompts 和审计契约。
+- 定义 Runtime Generation Orchestrator、Provider 接口和 Agent Audit 事件模型。
 - 定义 ModuleManager、AstraModule C ABI、ExtensionRegistry 和 PluginDescriptor schema。
 - 定义 VN Property System 的 TypeId、PropertyId、schema generation 和 editor metadata。
 - 定义最小 Astra DSL AST。

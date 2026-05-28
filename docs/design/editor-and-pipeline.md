@@ -42,7 +42,7 @@ AstraEditor
 - 编辑器资产操作必须通过 AssetTools 和 AssetRegistry。
 - AI 相关 UI 只能通过 Boundary Manager 和 Review Queue 修改项目。
 - PIE 通过 Runtime Services 运行，不走独立预览逻辑。
-- MCP trusted session 可以通过 MCP Integration 直接写入项目文本源文件，但必须记录 Operation Log。
+- Editor MCP trusted session 可以通过 Editor MCP Host 直接写入项目文本源文件，但必须记录 Operation Log。
 - Editor 扩展通过动态模块和 ExtensionRegistry 注册面板、菜单、属性详情页、预览器和验证器。
 
 ## 3. 项目目录设计
@@ -92,12 +92,12 @@ Projects/MyVisualNovel
     ├── Cooked
     ├── Logs
     ├── DerivedDataCache
-    ├── AI
-    │   ├── Suggestions
-    │   ├── Provenance
-    │   └── ReviewQueue
-    └── MCP
-        └── OperationLog
+    └── Agent
+        ├── Suggestions
+        ├── ReviewQueue
+        └── Audit
+            ├── Generation
+            └── Operations
 ```
 
 目录语义：
@@ -108,8 +108,7 @@ Projects/MyVisualNovel
 - `Schemas`：JSON Schema，用于校验 YAML 源数据。
 - `Plugins`：项目级插件。
 - `Saved`：本地生成内容，默认不进入版本控制，除非明确需要。
-- `Saved/AI`：AI 建议、审计和审核队列的本地或团队数据，是否入库由项目策略决定。
-- `Saved/MCP`：MCP trusted session 的 Operation Log。
+- `Saved/Agent`：Agent 建议、审核队列和审计数据。`Audit/Generation` 记录生成来源，`Audit/Operations` 记录 MCP tool side effect；是否入库由项目策略决定。
 
 ## 4. 资产生命周期
 
@@ -221,7 +220,7 @@ Deterministic Build
 
 Hybrid Build
 - 固定主线 + 动态闲聊。
-- 包含受约束 Runtime AI。
+- 包含 Runtime MCP Host、Runtime Generation 和 runtime-safe Provider。
 
 Experimental Build
 - 允许更高 AI 自由度。
@@ -243,7 +242,7 @@ Experimental Build
 - 本地化 key 完整。
 - 文本框无已知溢出，或溢出已被接受。
 - 未审核 AI 内容数量为 0，除非构建模式允许。
-- Runtime AI 策略与发布模式一致。
+- Runtime MCP / Generation 策略与发布模式一致。
 - PluginDescriptor、动态模块 ABI、依赖闭包、权限声明和 packaged runtime eligibility 有效。
 - Mount-only compatibility 项目没有复制或打包外部原始资产。
 - external asset root、package 或 member 引用可解析。
@@ -346,7 +345,7 @@ entries:
 - Compatibility Test：外部项目 probe、RuntimeCommand log、只读挂载、资产解析、mount-only policy。
 - AI Policy Test：Boundary Manager、Review Queue、Release Gate。
 - Text Source Test：YAML parse、JSON Schema、sidecar、重复 ID、依赖解析。
-- MCP Tool Test：trusted direct write、Operation Log、路径边界、secret redaction。
+- MCP Tool Test：Editor trusted direct write、Runtime capability boundary、Operation Log / Generation Audit、路径边界、secret redaction。
 - Module Test：descriptor schema、动态加载、依赖顺序、权限诊断、packaged runtime 模块过滤。
 
 测试数据应包含：

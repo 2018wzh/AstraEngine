@@ -1,0 +1,9 @@
+id: native:/Characters/Alice/Normal
+type: image
+source_path: Characters/alice_normal.placeholder
+display_name: Alice Normal Placeholder
+origin: HumanAuthored
+tags:
+  - character
+  - alice
+  - demo

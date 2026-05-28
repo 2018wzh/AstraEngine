@@ -1,0 +1,8 @@
+id: native:/Audio/Choice
+type: audio
+source_path: Audio/choice.wav
+display_name: Choice SFX Placeholder
+origin: ToolGenerated
+tags:
+  - sfx
+  - demo
