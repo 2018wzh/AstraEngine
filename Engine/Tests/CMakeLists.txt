@@ -1,28 +1,25 @@
-add_executable(Astra_RuntimeTests
-    RuntimeTests.cpp
+add_executable(Astra_Phase1Tests
+    Phase1Tests.cpp
 )
 
-astra_configure_target(Astra_RuntimeTests)
+astra_configure_target(Astra_Phase1Tests)
 
-target_link_libraries(Astra_RuntimeTests
+target_link_libraries(Astra_Phase1Tests
     PRIVATE
-        Astra_AstraRuntime
-        Astra_AssetRegistry
-        Astra_Bootstrap
-        Astra_ExtensionRegistry
+        Astra_Core
         Astra_ModuleRuntime
-        Astra_VNPropertySystem
+        Astra_Platform
+        Astra_PropertySystem
         Catch2::Catch2WithMain
 )
 
-target_compile_definitions(Astra_RuntimeTests
+target_compile_definitions(Astra_Phase1Tests
     PRIVATE
-        ASTRA_TEST_PLUGIN_ROOT="${ASTRA_PLUGIN_OUTPUT_ROOT}"
-        ASTRA_TEST_PROJECT_ROOT="${ASTRA_SAMPLE_PROJECT_ROOT}"
+        ASTRA_TEST_PLUGIN_ROOT="${ASTRA_PLUGIN_OUTPUT_ROOT}/Phase1ExampleModule"
 )
 
-add_dependencies(Astra_RuntimeTests
-    Astra_DefaultRuntimeProvidersPlugin
-    Astra_ExampleRuntimePlugin
+add_dependencies(Astra_Phase1Tests
+    Astra_Phase1ExampleModule
 )
-add_test(NAME Astra_RuntimeTests COMMAND Astra_RuntimeTests)
+
+add_test(NAME Astra_Phase1Tests COMMAND Astra_Phase1Tests)

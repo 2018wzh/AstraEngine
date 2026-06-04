@@ -1,62 +1,91 @@
-# 构建说明
+# 构建
 
-状态：Draft
+## 1. 当前构建范围
 
-## 工具链
+当前默认构建只包含 Phase 1 模块：
 
-当前验证路径使用 Windows、Ninja、vcpkg、Clang 工具链和动态链接：
+- `Astra_Core`
+- `Astra_Platform`
+- `Astra_ModuleRuntime`
+- `Astra_PropertySystem`
+- `Astra_Phase1ExampleModule`
+- `AstraPhase1Smoke`
+- `Astra_Phase1Tests`
 
-- C compiler：`clang`
-- C++ compiler：`clang++`
-- vcpkg triplet：`x64-windows`
-- 构建目录：`build`
-- 引擎 Runtime 模块输出为 DLL。
-- 默认 Runtime Provider 插件输出为 `build/Plugins/DefaultRuntimeProviders/Bin/win64/DefaultRuntimeProvidersPlugin.dll`。
-- 示例插件输出为 `build/Plugins/ExampleRuntime/Bin/win64/ExampleRuntimePlugin.dll`。
+旧主线如 `AstraRuntime`、`VNRuntimeServices`、`Bootstrap`、`AstraGame` 已不参与默认构建。
 
-如果 `build` 已经配置完成，直接执行：
+## 2. 依赖
 
-```powershell
-cmake --build build
-ctest --test-dir build --output-on-failure
-```
+当前 `vcpkg.json` 依赖为：
 
-首次配置可使用：
+- `fmt`
+- `spdlog`
+- `nlohmann-json`
+- `yaml-cpp`
+- `sdl3`
+- `catch2`
 
-```powershell
-cmake -S . -B build -G Ninja `
-  -DCMAKE_BUILD_TYPE=Debug `
-  -DCMAKE_C_COMPILER=clang `
-  -DCMAKE_CXX_COMPILER=clang++ `
-  -DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake `
-  -DVCPKG_TARGET_TRIPLET=x64-windows
-```
+## 3. 配置
 
-## 运行 Demo
-
-`AstraGame` 默认扫描 `build/Plugins`。运行前需要先构建插件目标；普通 `cmake --build build` 会同时构建默认 Runtime Provider 插件和示例插件。
-
-Headless 验证：
+Windows 本地配置示例：
 
 ```powershell
-.\build\Bin\AstraGame.exe --project Projects\Samples\MinimalVN --headless --route default
+cmake -S . -B build
 ```
 
-可视化 Demo：
+如果需要明确配置类型：
 
 ```powershell
-.\build\Bin\AstraGame.exe --project Projects\Samples\MinimalVN
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 ```
 
-窗口输入：
+## 4. 编译
 
-- `Space` / `Enter` / 鼠标点击：推进对白。
-- `1`：选择第一个选项。
-- `2`：选择第二个选项。
-- `Esc`：退出。
+```powershell
+cmake --build build --config Debug
+```
 
-## 依赖
+产物位置：
 
-`vcpkg.json` 固定第一阶段依赖集合：SDL3、FreeType、HarfBuzz、fmt、spdlog、nlohmann-json、yaml-cpp、glm、EnTT、miniaudio、Catch2、directx-dxc。
+- 可执行文件：`build/Bin`
+- 静态库：`build/Lib`
+- 示例模块：`build/Plugins/Phase1ExampleModule`
 
-Renderer2D 第一版通过 SDL3 的 GPU renderer 路径创建渲染器。当前 Demo 资产是占位资产，Renderer2D 按 AssetId 生成稳定颜色，用来验证窗口、渲染、RuntimeCommand 和 AssetRegistry 链路。
+## 5. CMake 主线
+
+顶层 [CMakeLists.txt](/E:/Documents/AstraEngine/CMakeLists.txt) 只挂接以下目录：
+
+- `Engine/Runtime/Core`
+- `Engine/Runtime/Platform`
+- `Engine/Runtime/ModuleRuntime`
+- `Engine/Runtime/PropertySystem`
+- `Engine/Plugins/Examples/Phase1ExampleModule`
+- `Engine/Programs/AstraPhase1Smoke`
+- `Engine/Tests`
+
+## 6. 当前目录约定
+
+```text
+Engine/
+├─ Runtime/
+│  ├─ Core/
+│  ├─ Platform/
+│  ├─ ModuleRuntime/
+│  └─ PropertySystem/
+├─ Plugins/
+│  └─ Examples/
+│     └─ Phase1ExampleModule/
+├─ Programs/
+│  └─ AstraPhase1Smoke/
+└─ Tests/
+```
+
+## 7. 非目标
+
+当前构建文档不覆盖：
+
+- Editor
+- VN demo
+- Asset cook pipeline
+- Renderer2D / Audio / Text
+- Legacy runtime compatibility modules

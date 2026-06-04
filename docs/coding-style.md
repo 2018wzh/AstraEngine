@@ -1,38 +1,32 @@
 # Coding Style
 
-Status: Draft
+## 1. 技术基线
 
-## C++ Baseline
+- C++23。
+- 优先使用标准库：`std::string`、`std::vector`、`std::span`、`std::optional`、`std::variant`、`std::expected`、`std::filesystem`、`std::chrono`。
+- 不重造基础容器、路径、时间或错误容器，除非跨 ABI 边界需要 POD descriptor。
 
-- Use C++23.
-- Prefer the C++ standard library for strings, containers, paths, time, optionals, variants, smart pointers, and `std::expected`.
-- Do not introduce engine-specific replacements for standard containers or strings unless an ADR documents the need.
+## 2. 架构边界
 
-## Naming
+- Core 不依赖 VN、AI、Live2D、legacy VM、Editor、Renderer backend。
+- Runtime 不依赖 Editor。
+- 插件跨 ABI 不传递 STL ownership、C++ Actor 指针、native handle 或 Editor widget。
+- Public API 使用 Astra 自有 DTO、opaque handle、stable ID。
 
-- Public CMake targets use the `Astra_` prefix, for example `Astra_Core`.
-- Types use `PascalCase`.
-- Functions and variables use `snake_case`.
-- Constants use `kPascalCase` when they have internal linkage and `PascalCase` for enum values.
-- File names should be descriptive and match the main type or module concept.
+## 3. 命名
 
-## Errors and Assertions
+- 类型使用 `PascalCase`。
+- 函数和变量使用 `camelCase`。
+- 常量使用 `kPascalCase`。
+- 文件名与主要类型保持一致。
+- 稳定 ID 使用小写 dotted 或 URI-like scheme，例如 `astra.vn.character`、`native:/Characters/Alice`。
 
-- Use `std::expected` for recoverable errors where the caller can reasonably handle failure.
-- Use assertions for programmer errors and invalid internal invariants.
-- Use fatal error entry points only when continuing would corrupt state or produce misleading output.
-- Error codes and messages should identify the failing subsystem and operation.
+## 4. 错误与诊断
 
-## Module Boundaries
+- 可恢复错误返回 `std::expected` 或等价 Result。
+- 跨 ABI 错误返回 result code，并写 diagnostics sink。
+- 不跨 ABI 抛异常。
 
-- Runtime modules must not depend on Editor modules.
-- Editor modules may depend on Runtime modules.
-- Core must remain free of SDL, rendering, audio, AI provider, and Editor dependencies.
-- Runtime plugins must not depend on Editor plugin modules.
-- AI output that can affect canonical project content must pass through patch or review queue flows.
+## 5. 文档
 
-## Formatting and Static Checks
-
-- Format C++ and CMake-adjacent source files with the repository `.clang-format`.
-- Use `.clang-tidy` as the initial static analysis baseline.
-- CI must configure CMake, build, and run CTest before changes can be merged.
+设计文档描述目标态。Development 文档也按目标态书写；若实现尚未达到目标，在代码 README 或 issue 中说明差距，不在目标文档中把旧实现作为中心。

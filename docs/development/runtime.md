@@ -1,76 +1,113 @@
-# Runtime 开发说明
+# Runtime 现状
 
-状态：Draft
+## 1. 当前实现范围
 
-## 模块边界
+当前代码中的“runtime”指 Phase 1 基础层，不是完整 Scene/Runtime 目标架构。
 
-Runtime 不依赖 Editor。当前第一版 Runtime targets 包括 Core、ApplicationCore、PlatformSDL3、RHI、Renderer2D、TextCore、AudioCore、AssetCore、VFS、AssetRegistry、ModuleRuntime、ExtensionRegistry、VNPropertySystem、VNRuntimeServices、Bootstrap 和 AstraRuntime。
+已实现：
 
-引擎 Runtime 模块以 DLL 形式构建，插件以独立动态库形式加载。`AstraGame` 初始化时只创建 `RuntimeProviderRegistry`、`ExtensionRegistry` 和 `ModuleManager`，然后扫描 `build/Plugins` 下的插件 descriptor。默认 Platform、Renderer2D、Audio 和 ProjectContent 后端由 `DefaultRuntimeProvidersPlugin` 注册，不在 `AstraGame` 或 `AstraRuntimeSession` 中硬编码构造。
+- `Astra_Core`
+- `Astra_Platform`
+- `Astra_ModuleRuntime`
+- `Astra_PropertySystem`
 
-Provider 初始化路径：
+未实现：
 
-```text
-PluginDescriptor
--> ModuleManager::discover
--> LoadLibrary
--> astra_module_main / initialize / activate
--> astra_register_native_runtime_providers
--> RuntimeProviderRegistry
-```
+- `ActorWorld`
+- `EventBus` 作为场景运行时主线
+- `StateMachineRuntime`
+- `Blackboard`
+- `ControlPolicy`
+- `Save / Load / Replay`
+- `ScriptRuntimeHost`
 
-`astra_register_native_runtime_providers` 是 engine-native 插件入口，只用于随引擎同工具链构建的 Runtime provider 插件。第三方模块的稳定边界仍是 `AstraModule` C ABI。
+## 2. 当前宿主链路
 
-## Session 生命周期
-
-`AstraRuntimeSession` 第一版生命周期：
-
-```text
-load_project -> start -> tick / advance / choose
--> save_snapshot -> restore_snapshot -> shutdown
-```
-
-数据流：
+当前可运行链路如下：
 
 ```text
-Project manifest + Config + sidecars
--> ProjectContentProvider
--> AssetRegistry / VFS
--> .astra parser
--> RuntimeCommand
--> VNRuntimeServices
--> ECS-backed state
--> RenderSnapshot / AudioRequest / SaveSnapshot
+Host program
+  -> create_default_platform_services()
+  -> ServiceRegistry
+  -> ExtensionRegistry
+  -> PropertyRegistry
+  -> ModuleManager.discover()
+  -> ModuleManager.load_discovered()
+  -> module initialize / activate
 ```
 
-## RuntimeCommand
+对应样例可见 [AstraPhase1Smoke main.cpp](/E:/Documents/AstraEngine/Engine/Programs/AstraPhase1Smoke/Private/main.cpp)。
 
-第一版命令覆盖：
+## 3. 当前模块职责
 
-- `ShowBackground`
-- `ShowCharacter`
-- `PlayBGM`
-- `PlaySFX`
-- `ShowDialogue`
-- `PresentChoice`
-- `SetVariable`
-- `JumpScene`
+### Core
 
-Runtime Services 内部使用 EnTT，但 public facade、RuntimeCommand、render/audio/save DTO 不暴露 EnTT 类型。
+提供：
 
-## Schedule
+- `Error` / `Expected`
+- `Diagnostic` / `DiagnosticSink`
+- `Assert`
+- `Log`
+- `Path`
+- `Config`
+- `Time`
 
-固定 schedule：
+### Platform
 
-```text
-Input
-Script
-CommandApply
-Animation
-Audio
-RenderExtract
-SaveSnapshot
-Cleanup
-```
+提供接口族：
 
-Headless test 不初始化 Renderer2D 或 AudioCore，也能执行 RuntimeCommand、schedule、选择分支和 save/restore。
+- `IWindowService`
+- `IInputService`
+- `IFileSystemService`
+- `ITimerService`
+- `IThreadService`
+- `IDynamicLibraryService`
+
+默认实现通过 SDL3 和本地动态库加载器提供，公开头文件不暴露 SDL 类型。
+
+### ModuleRuntime
+
+提供：
+
+- plugin descriptor 解析
+- `ModuleManager`
+- `ServiceRegistry`
+- `ExtensionRegistry`
+- `AstraModule` C ABI
+
+### PropertySystem
+
+提供：
+
+- `TypeId`
+- `PropertyId`
+- `PropertyTypeKind`
+- `PropertyFlags`
+- `PropertyDescriptor`
+- `TypeDescriptor`
+- `PropertyRegistry`
+
+## 4. 当前不是运行时中心的东西
+
+当前代码里不存在这些旧中心抽象：
+
+- `VNRuntimeServices`
+- `RuntimeCommand` 作为唯一主线
+- `Bootstrap`
+- `RuntimeProviderRegistry`
+
+这次 Phase 1 已经把它们从默认主线中移除。
+
+## 5. 下一阶段接口位置
+
+Phase 2 计划把真正的运行时基座加入：
+
+- `Scene`
+- `ActorWorld`
+- `EventBus`
+- `StateMachineRuntime`
+- `Blackboard`
+- `ControlPolicy`
+- `Director`
+
+届时本文件应升级为完整 Runtime 开发文档，而不是 Phase 1 现状说明。

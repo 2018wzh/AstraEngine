@@ -1,7 +1,0 @@
-id: project.minimal_vn
-display_name: Minimal VN
-version: 0.1.0
-runtime:
-  entry_script: Content/Scripts/main.astra
-compatibility:
-  enabled: false

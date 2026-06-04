@@ -14,29 +14,25 @@ enum class ModuleType {
     Runtime,
     Editor,
     Developer,
-    Mcp,
-    Cook,
-    Compatibility,
 };
 
 enum class LoadPhase {
     CoreStartup,
     ProjectLoad,
-    AssetRegistry,
-    CompatibilityProbe,
     RuntimeStartup,
     EditorStartup,
-    McpStartup,
-    CookStartup,
 };
+
+using CapabilitySet = std::unordered_set<std::string>;
+using PermissionSet = std::unordered_set<std::string>;
 
 struct ModuleDescriptor {
     std::string id;
     ModuleType type = ModuleType::Runtime;
     std::filesystem::path entrypoint;
     LoadPhase load_phase = LoadPhase::RuntimeStartup;
-    std::unordered_set<std::string> capabilities;
-    std::unordered_set<std::string> permissions;
+    CapabilitySet capabilities;
+    PermissionSet permissions;
     std::vector<std::string> platforms;
 };
 
@@ -52,6 +48,7 @@ struct PluginDescriptor {
 
 Expected<PluginDescriptor> load_plugin_descriptor(const std::filesystem::path& path,
                                                   DiagnosticSink& diagnostics);
+
 std::string module_type_to_string(ModuleType type);
 std::string load_phase_to_string(LoadPhase phase);
 int load_phase_order(LoadPhase phase);

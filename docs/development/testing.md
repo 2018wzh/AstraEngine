@@ -1,34 +1,63 @@
-# 测试说明
+# 测试
 
-状态：Draft
+## 1. 当前测试范围
 
-## 命令
+当前只维护 Phase 1 测试面：
 
-```powershell
-cmake --build build
-ctest --test-dir build --output-on-failure
-.\build\Bin\AstraGame.exe --project Projects\Samples\MinimalVN --headless --route default
-.\build\Bin\AstraGame.exe --project Projects\Samples\MinimalVN --headless --route second
-```
+- Core 基础行为
+- Platform 基础服务初始化
+- ModuleRuntime 注册、发现、加载
+- PropertySystem schema 生成
+- 示例模块 smoke
 
-## 当前覆盖
-
-`Astra_RuntimeTests` 覆盖：
-
-- AssetId 语法。
-- AssetRegistry sidecar 扫描。
-- ExtensionRegistry 重复注册诊断。
-- VN Property System JSON Schema generation。
-- ModuleManager discovery、真实动态库加载、生命周期和扩展注册。
-- DefaultRuntimeProviders 插件发现和 Platform / Renderer / Audio / ProjectContent Provider 注册。
-- AstraRuntimeSession headless 执行、选择分支、变量变化和 save/restore。
-
-## 手动验收
-
-可视化 Demo 需要人工确认窗口渲染、输入和关闭行为：
+## 2. 运行测试
 
 ```powershell
-.\build\Bin\AstraGame.exe --project Projects\Samples\MinimalVN
+ctest --test-dir build -C Debug --output-on-failure
 ```
 
-当前 Renderer2D 使用占位色块展示背景、立绘、对白框和选择菜单；这验证 Runtime 到渲染层的链路，不代表最终素材加载和文本排版品质。
+当前默认测试目标：
+
+- `Astra_Phase1Tests`
+
+## 3. 当前用例
+
+`Astra_Phase1Tests` 覆盖：
+
+- `DiagnosticSink`
+- `Path` UTF-8 roundtrip
+- YAML 配置加载
+- Platform service 初始化
+- `ServiceRegistry` capability / permission 限制
+- `ExtensionRegistry` 重复注册与 kind 过滤
+- plugin descriptor 解析
+- `PropertyRegistry` JSON schema 生成
+- `ModuleManager` 加载 `Phase1ExampleModule`
+
+## 4. Smoke 验证
+
+除 `ctest` 外，还应直接运行：
+
+```powershell
+.\build\Bin\AstraPhase1Smoke.exe
+```
+
+期望输出至少包含：
+
+- `Loaded modules: 1`
+- `phase1_example.service_extension`
+- `phase1_example.property_type_provider`
+
+## 5. 测试边界
+
+当前还没有：
+
+- ActorWorld integration tests
+- StateMachineRuntime tests
+- Save/Load/Replay tests
+- ScriptRuntimeHost tests
+- FilterGraph tests
+- VN runtime tests
+- Compat runtime tests
+
+这些测试属于 Phase 2 以后。

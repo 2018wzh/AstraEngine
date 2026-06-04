@@ -1,18 +1,17 @@
-# ADR 0002: Qt for First-Phase Editor UI
+# ADR 0002: Editor UI First Stage Uses Qt
 
 Status: Accepted
 
 ## Context
 
-AstraEditor needs a productive desktop UI for project browsing, asset tools, script editing, scene preview, review queues, and build/package workflows. Candidate UI technologies include Dear ImGui, Qt, WebView, native custom UI, and hybrid approaches.
+AstraEditor 需要 dockable 工作台、资产浏览、脚本/Graph/Timeline/FilterGraph 编辑、Inspector、Runtime Debugger、AI Review Queue 和 Compatibility Inspector。
 
 ## Decision
 
-The first-phase editor UI direction is Qt. Phase 0 records this design decision only; it does not add Qt dependencies or editor implementation code.
+第一阶段 Editor UI 使用 Qt 作为 shell 和工具面板框架。引擎渲染输出嵌入 Scene View。Editor 只访问 Runtime public DTO、ServiceRegistry 和 ExtensionRegistry，不访问内部 native object。
 
 ## Consequences
 
-- Editor architecture should assume a retained desktop UI toolkit can host complex panels, document views, trees, tables, and inspectors.
-- Runtime modules remain independent of Qt and Editor code.
-- Build scripts should keep editor dependencies behind `Astra_BUILD_EDITOR`.
-- If Qt integration proves too heavy, a later ADR must supersede this decision before switching UI stacks.
+- Runtime 不依赖 Editor。
+- Editor panel 可由动态模块注册。
+- UI 技术不决定 Runtime、Actor、StateMachine 或 FilterGraph 的公共接口。

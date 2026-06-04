@@ -1,14 +1,15 @@
 # Architecture Decision Records
 
-This directory contains numbered ADRs for decisions that affect project structure, dependencies, module boundaries, or long-lived implementation direction.
+本目录记录 AstraEngine 当前目标架构决策。旧结论已按“模块化 2D 引擎，VN 为第一垂直模块”的方向直接重写。
 
-## Records
-
-- [0001: Source-Level CMake Plugins](0001-source-level-cmake-plugins.md)
-- [0002: Editor UI Qt](0002-editor-ui-qt.md)
-- [0003: Renderer2D SDL_GPU](0003-renderer2d-sdl-gpu.md)
-- [0004: Bevy-Style ECS Runtime Internals](0004-bevy-style-ecs-runtime.md)
-- [0005: MCP Integration](0005-mcp-integration.md)
-- [0006: Text-First Source Data](0006-text-first-source-data.md)
-- [0008: Dynamic Module First VN Extensibility](0008-dynamic-module-first-vn-extensibility.md)
-- [0009: Compatibility via Existing Extension Mechanisms](0009-compatibility-via-existing-extension-mechanisms.md)
+| ADR | 决策 |
+| --- | --- |
+| [0001](0001-modular-2d-engine-baseline.md) | 模块化 2D 引擎基线 |
+| [0002](0002-editor-ui-qt.md) | 第一阶段 Editor UI 使用 Qt dockable shell |
+| [0003](0003-renderer2d-first-stage-backend.md) | 第一阶段 Renderer2D 后端 |
+| [0004](0004-actor-component-statemachine-runtime.md) | Actor/Component + StateMachineRuntime，ECS 仅用于热点 |
+| [0005](0005-mcp-agent-capability-protocol.md) | MCP 是 Agent 能力协议层 |
+| [0006](0006-text-first-source-data.md) | Text-First Source Data |
+| [0008](0008-dynamic-modules-service-registry-c-abi.md) | 动态模块优先、ServiceRegistry、C ABI |
+| [0009](0009-legacy-vn-emulator-modernization.md) | Legacy VN 模拟器和现代化插件 |
+| [0010](0010-actor-component-statemachine-core.md) | Core 承载 Actor/Component/StateMachine |

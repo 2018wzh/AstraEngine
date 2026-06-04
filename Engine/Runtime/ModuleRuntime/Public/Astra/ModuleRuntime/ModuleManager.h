@@ -2,9 +2,10 @@
 
 #include <Astra/Core/Diagnostics.h>
 #include <Astra/Core/Result.h>
-#include <Astra/ExtensionRegistry/ExtensionRegistry.h>
 #include <Astra/ModuleRuntime/AstraModuleABI.h>
+#include <Astra/ModuleRuntime/ExtensionRegistry.h>
 #include <Astra/ModuleRuntime/PluginDescriptor.h>
+#include <Astra/ModuleRuntime/ServiceRegistry.h>
 
 #include <filesystem>
 #include <memory>
@@ -12,12 +13,9 @@
 
 namespace astra {
 
-class RuntimeProviderRegistry;
-
 class ModuleManager {
   public:
-    explicit ModuleManager(ExtensionRegistry& extension_registry,
-                           RuntimeProviderRegistry* runtime_provider_registry = nullptr);
+    ModuleManager(ServiceRegistry& service_registry, ExtensionRegistry& extension_registry);
     ~ModuleManager();
 
     ModuleManager(const ModuleManager&) = delete;
@@ -36,12 +34,16 @@ class ModuleManager {
 
     static AstraResultCode register_extension_thunk(void* host_context,
                                                     const AstraExtensionDescriptor* descriptor);
+    static AstraResultCode get_service_thunk(void* host_context, AstraStringView service_id,
+                                             AstraOpaqueHandle* out_service);
+
     AstraResultCode register_extension_from_abi(const AstraExtensionDescriptor* descriptor);
+    AstraResultCode get_service_from_abi(AstraStringView service_id, AstraOpaqueHandle* out_service);
 
     std::vector<PluginDescriptor> plugins_;
     std::vector<std::unique_ptr<LoadedModule>> loaded_modules_;
+    ServiceRegistry& service_registry_;
     ExtensionRegistry& extension_registry_;
-    RuntimeProviderRegistry* runtime_provider_registry_ = nullptr;
     ModuleDescriptor* active_module_ = nullptr;
     DiagnosticSink* active_diagnostics_ = nullptr;
 };

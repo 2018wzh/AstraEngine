@@ -1,65 +1,90 @@
 # 插件 ABI
 
-状态：Draft
+## 1. 当前 ABI 目标
 
-## ABI 边界
+Phase 1 插件 ABI 只解决三件事：
 
-第一版 ABI 版本为 `ASTRA_MODULE_ABI_VERSION = 1`，入口固定为：
+- 动态模块发现与加载
+- 宿主向模块暴露受控服务访问
+- 模块向宿主注册受控扩展点
 
-```cpp
-extern "C" ASTRA_MODULE_EXPORT AstraResultCode astra_module_main(
-    const AstraModuleHostApi* host,
-    AstraModuleApi* out_module);
+当前 ABI 定义在 [AstraModuleABI.h](/E:/Documents/AstraEngine/Engine/Runtime/ModuleRuntime/Public/Astra/ModuleRuntime/AstraModuleABI.h)。
+
+## 2. 当前入口
+
+每个模块导出：
+
+```c
+AstraResultCode astra_module_main(const AstraModuleHostApi* host,
+                                  AstraModuleApi* out_module);
 ```
 
-ABI 只允许：
+宿主提供：
 
-- 固定宽度整数。
-- UTF-8 `AstraStringView`。
-- `AstraByteSpan`。
-- opaque handle。
-- 函数指针。
-- POD descriptor。
-- result code 和 diagnostic sink。
+- `abi_version`
+- diagnostics callback
+- `register_extension`
+- `get_service`
 
-ABI 不允许暴露 STL、exceptions、RTTI、EnTT、SDL、Renderer2D、AudioCore、Editor 对象或跨边界 C++ ownership。
+模块返回：
 
-## 生命周期
+- `module_id`
+- `module_context`
+- `initialize`
+- `activate`
+- `deactivate`
+- `shutdown`
 
-ModuleManager 加载顺序：
+## 3. 当前扩展点种类
 
-```text
-Discover -> ValidateDescriptor -> ResolveDependencies -> CheckVersion
--> LoadBinary -> astra_module_main -> initialize -> activate
--> deactivate -> shutdown -> unload
-```
+Phase 1 只保留三类扩展：
 
-当前示例模块位于 `Engine/Plugins/Examples/ExampleRuntime`，构建后 descriptor 会复制到 `build/Plugins/ExampleRuntime/ExampleRuntime.plugin.yaml`。
+- `service_extension`
+- `property_type_provider`
+- `editor_metadata_provider`
 
-默认运行时后端位于 `Engine/Plugins/Runtime/DefaultRuntimeProviders`，构建后 descriptor 会复制到 `build/Plugins/DefaultRuntimeProviders/DefaultRuntimeProviders.plugin.yaml`。它仍通过 `astra_module_main` 声明扩展：
+对应 C ABI 枚举：
 
-- `ASTRA_EXTENSION_PLATFORM_PROVIDER`
-- `ASTRA_EXTENSION_RENDERER_PROVIDER`
-- `ASTRA_EXTENSION_AUDIO_PROVIDER`
-- `ASTRA_EXTENSION_PROJECT_CONTENT_PROVIDER`
+- `ASTRA_EXTENSION_SERVICE_EXTENSION`
+- `ASTRA_EXTENSION_PROPERTY_TYPE_PROVIDER`
+- `ASTRA_EXTENSION_EDITOR_METADATA_PROVIDER`
 
-实际 Provider 对象注册使用 engine-native 入口 `astra_register_native_runtime_providers`。该入口不是公共插件 ABI，不允许第三方模块依赖；它只服务随引擎构建、同编译器和同 Runtime DLL 集合部署的后端插件。
+## 4. 宿主服务访问
 
-## Descriptor
+模块不能直接访问宿主内部对象，只能通过 `get_service` 按服务 ID 获取 opaque handle。
 
-插件 descriptor 使用 YAML，并由 `Schemas/plugin.schema.json` 描述字段形状。第一版字段包括：
+当前宿主服务 ID 包括：
 
-- `id`
-- `display_name`
-- `version`
-- `astra_api`
-- `modules`
-- `type`
-- `entrypoint`
-- `load_phase`
-- `capabilities`
-- `permissions`
-- `platforms`
-- `dependencies`
+- `astra.platform.window`
+- `astra.platform.input`
+- `astra.platform.filesystem`
+- `astra.platform.timer`
+- `astra.platform.thread`
+- `astra.platform.dynamic_library`
+- `astra.property.registry`
 
-能力注册必须与 descriptor 中的 capability 匹配。当前测试覆盖真实动态库加载、生命周期调用、默认 Runtime Provider 插件注册，以及 `RuntimeCommandSource` / `VNPropertyType` 扩展注册。
+## 5. capability 与 permission
+
+模块 descriptor 决定：
+
+- 它声明了哪些 capability
+- 它请求了哪些 permission
+
+`ServiceRegistry` 和 `ExtensionRegistry` 都会校验这些边界。
+
+Phase 1 示例模块只声明：
+
+- `service_extension`
+- `property_type_provider`
+
+## 6. 仍然禁止的跨 ABI 对象
+
+当前仍然禁止跨 ABI 直接传递：
+
+- STL ownership
+- C++ Actor 指针
+- renderer / audio native handle
+- Editor widget
+- future Scene / Runtime internals
+
+这条约束即使在 Phase 2+ 也不应放松。

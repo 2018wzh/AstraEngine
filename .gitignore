@@ -15,3 +15,7 @@ Saved/
 !Projects/Samples/**/Saved/.gitkeep
 .vscode
 vcpkg_installed
+node_modules/
+dist/
+Prototypes/**/node_modules/
+Prototypes/**/dist/

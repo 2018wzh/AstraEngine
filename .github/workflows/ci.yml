@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  runtime:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: seanmiddleditch/gha-setup-ninja@v5
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+      - name: Build
+        shell: pwsh
+        run: cmake --build build
+      - name: Test
+        shell: pwsh
+        run: ctest --test-dir build --output-on-failure
+      - name: Headless default route
+        shell: pwsh
+        run: .\build\Bin\AstraGame.exe --project Projects\Samples\MinimalVN --headless --route default
+      - name: Headless second route
+        shell: pwsh
+        run: .\build\Bin\AstraGame.exe --project Projects\Samples\MinimalVN --headless --route second
+      - name: Headless save/load route
+        shell: pwsh
+        run: .\build\Bin\AstraGame.exe --project Projects\Samples\MinimalVN --headless --route save-load

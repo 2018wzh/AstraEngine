@@ -16,17 +16,12 @@
 extern "C" {
 #endif
 
-#define ASTRA_MODULE_ABI_VERSION 1u
+#define ASTRA_MODULE_ABI_VERSION 2u
 
 typedef struct AstraStringView {
     const char* data;
     uint64_t size;
 } AstraStringView;
-
-typedef struct AstraByteSpan {
-    const uint8_t* data;
-    uint64_t size;
-} AstraByteSpan;
 
 typedef void* AstraOpaqueHandle;
 
@@ -35,7 +30,8 @@ typedef enum AstraResultCode {
     ASTRA_RESULT_ERROR = 1,
     ASTRA_RESULT_UNSUPPORTED_ABI = 2,
     ASTRA_RESULT_INVALID_ARGUMENT = 3,
-    ASTRA_RESULT_PERMISSION_DENIED = 4
+    ASTRA_RESULT_PERMISSION_DENIED = 4,
+    ASTRA_RESULT_NOT_FOUND = 5
 } AstraResultCode;
 
 typedef enum AstraDiagnosticSeverity {
@@ -46,24 +42,8 @@ typedef enum AstraDiagnosticSeverity {
 
 typedef enum AstraExtensionKind {
     ASTRA_EXTENSION_SERVICE_EXTENSION = 0,
-    ASTRA_EXTENSION_RUNTIME_COMMAND_SOURCE = 1,
-    ASTRA_EXTENSION_COMPATIBILITY_ADAPTER = 2,
-    ASTRA_EXTENSION_VFS_MOUNT_PROVIDER = 3,
-    ASTRA_EXTENSION_FOREIGN_ASSET_RESOLVER = 4,
-    ASTRA_EXTENSION_SAVE_EXTENSION_STATE_PROVIDER = 5,
-    ASTRA_EXTENSION_RUNTIME_ECS_SYSTEM_PACK = 6,
-    ASTRA_EXTENSION_SCRIPT_FUNCTION_PROVIDER = 7,
-    ASTRA_EXTENSION_STORY_GRAPH_NODE_PROVIDER = 8,
-    ASTRA_EXTENSION_ASSET_VALIDATOR = 9,
-    ASTRA_EXTENSION_COOK_PROCESSOR = 10,
-    ASTRA_EXTENSION_EDITOR_PANEL_PROVIDER = 11,
-    ASTRA_EXTENSION_MCP_PROVIDER = 12,
-    ASTRA_EXTENSION_AI_PROVIDER = 13,
-    ASTRA_EXTENSION_VN_PROPERTY_TYPE = 14,
-    ASTRA_EXTENSION_PLATFORM_PROVIDER = 15,
-    ASTRA_EXTENSION_RENDERER_PROVIDER = 16,
-    ASTRA_EXTENSION_AUDIO_PROVIDER = 17,
-    ASTRA_EXTENSION_PROJECT_CONTENT_PROVIDER = 18
+    ASTRA_EXTENSION_PROPERTY_TYPE_PROVIDER = 1,
+    ASTRA_EXTENSION_EDITOR_METADATA_PROVIDER = 2
 } AstraExtensionKind;
 
 typedef struct AstraDiagnosticSink {
@@ -85,6 +65,8 @@ typedef struct AstraModuleHostApi {
     AstraDiagnosticSink diagnostics;
     AstraResultCode (*register_extension)(void* host_context,
                                           const AstraExtensionDescriptor* descriptor);
+    AstraResultCode (*get_service)(void* host_context, AstraStringView service_id,
+                                   AstraOpaqueHandle* out_service);
 } AstraModuleHostApi;
 
 typedef AstraResultCode (*AstraModuleLifecycleFn)(void* module_context,

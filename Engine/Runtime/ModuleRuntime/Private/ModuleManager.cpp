@@ -1,11 +1,13 @@
 #include <Astra/ModuleRuntime/ModuleManager.h>
 
-#include <Astra/Bootstrap/NativeRuntimePlugin.h>
-#include <Astra/Bootstrap/RuntimeProviderRegistry.h>
 #include <Astra/Core/Path.h>
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
+#include <map>
+#include <sstream>
+#include <unordered_map>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -38,7 +40,108 @@ DiagnosticSeverity to_severity(AstraDiagnosticSeverity severity) {
 }
 
 ExtensionKind to_extension_kind(AstraExtensionKind kind) {
-    return static_cast<ExtensionKind>(static_cast<std::uint32_t>(kind));
+    switch (kind) {
+    case ASTRA_EXTENSION_SERVICE_EXTENSION:
+        return ExtensionKind::ServiceExtension;
+    case ASTRA_EXTENSION_PROPERTY_TYPE_PROVIDER:
+        return ExtensionKind::PropertyTypeProvider;
+    case ASTRA_EXTENSION_EDITOR_METADATA_PROVIDER:
+        return ExtensionKind::EditorMetadataProvider;
+    }
+    return ExtensionKind::ServiceExtension;
+}
+
+std::string current_platform_id() {
+#if defined(_WIN32)
+    return "windows-x64";
+#elif defined(__APPLE__)
+    return "macos-x64";
+#else
+    return "linux-x64";
+#endif
+}
+
+struct Version {
+    int major = 0;
+    int minor = 0;
+    int patch = 0;
+};
+
+Version parse_version(std::string value) {
+    Version version;
+    std::replace(value.begin(), value.end(), '.', ' ');
+    std::istringstream stream(value);
+    stream >> version.major >> version.minor >> version.patch;
+    return version;
+}
+
+int compare_version(Version lhs, Version rhs) {
+    if (lhs.major != rhs.major) {
+        return lhs.major < rhs.major ? -1 : 1;
+    }
+    if (lhs.minor != rhs.minor) {
+        return lhs.minor < rhs.minor ? -1 : 1;
+    }
+    if (lhs.patch != rhs.patch) {
+        return lhs.patch < rhs.patch ? -1 : 1;
+    }
+    return 0;
+}
+
+bool satisfies_constraint(Version host, std::string token) {
+    if (token.empty()) {
+        return true;
+    }
+    std::string op = "==";
+    if (token.starts_with(">=") || token.starts_with("<=") || token.starts_with("==")) {
+        op = token.substr(0, 2);
+        token = token.substr(2);
+    } else if (token.starts_with(">") || token.starts_with("<")) {
+        op = token.substr(0, 1);
+        token = token.substr(1);
+    }
+    const int comparison = compare_version(host, parse_version(token));
+    if (op == ">=") {
+        return comparison >= 0;
+    }
+    if (op == ">") {
+        return comparison > 0;
+    }
+    if (op == "<=") {
+        return comparison <= 0;
+    }
+    if (op == "<") {
+        return comparison < 0;
+    }
+    return comparison == 0;
+}
+
+bool astra_api_supported(std::string_view constraints) {
+    constexpr Version host{0, 2, 0};
+    std::istringstream stream{std::string(constraints)};
+    std::string token;
+    while (stream >> token) {
+        if (!satisfies_constraint(host, token)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool supports_current_platform(const ModuleDescriptor& module) {
+    if (module.platforms.empty()) {
+        return true;
+    }
+    const std::string platform = current_platform_id();
+    return std::find(module.platforms.begin(), module.platforms.end(), platform) !=
+           module.platforms.end();
+}
+
+int first_module_phase(const PluginDescriptor& plugin) {
+    if (plugin.modules.empty()) {
+        return 0;
+    }
+    return load_phase_order(plugin.modules.front().load_phase);
 }
 
 void emit_diagnostic(void* user_data, AstraDiagnosticSeverity severity, AstraStringView code,
@@ -52,13 +155,9 @@ void emit_diagnostic(void* user_data, AstraDiagnosticSeverity severity, AstraStr
 
 class DynamicLibrary {
   public:
-    DynamicLibrary() = default;
     ~DynamicLibrary() {
         close();
     }
-
-    DynamicLibrary(const DynamicLibrary&) = delete;
-    DynamicLibrary& operator=(const DynamicLibrary&) = delete;
 
     VoidResult open(const std::filesystem::path& path) {
 #if defined(_WIN32)
@@ -104,14 +203,15 @@ class DynamicLibrary {
 
 struct ModuleManager::LoadedModule {
     ModuleDescriptor descriptor;
+    CapabilitySet capabilities;
+    PermissionSet permissions;
     DynamicLibrary library;
     AstraModuleApi api{};
 };
 
-ModuleManager::ModuleManager(ExtensionRegistry& extension_registry,
-                             RuntimeProviderRegistry* runtime_provider_registry)
-    : extension_registry_(extension_registry),
-      runtime_provider_registry_(runtime_provider_registry) {}
+ModuleManager::ModuleManager(ServiceRegistry& service_registry,
+                             ExtensionRegistry& extension_registry)
+    : service_registry_(service_registry), extension_registry_(extension_registry) {}
 
 ModuleManager::~ModuleManager() {
     DiagnosticSink diagnostics;
@@ -137,21 +237,83 @@ VoidResult ModuleManager::discover(const std::vector<std::filesystem::path>& plu
             if (!descriptor) {
                 continue;
             }
+            std::erase_if(descriptor->modules, [](const ModuleDescriptor& module) {
+                return !supports_current_platform(module);
+            });
+            std::sort(descriptor->modules.begin(), descriptor->modules.end(),
+                      [](const auto& lhs, const auto& rhs) {
+                          if (load_phase_order(lhs.load_phase) !=
+                              load_phase_order(rhs.load_phase)) {
+                              return load_phase_order(lhs.load_phase) <
+                                     load_phase_order(rhs.load_phase);
+                          }
+                          return lhs.id < rhs.id;
+                      });
             plugins_.push_back(std::move(*descriptor));
         }
     }
 
-    std::sort(plugins_.begin(), plugins_.end(), [](const auto& lhs, const auto& rhs) {
-        const int lhs_phase =
-            lhs.modules.empty() ? 0 : load_phase_order(lhs.modules.front().load_phase);
-        const int rhs_phase =
-            rhs.modules.empty() ? 0 : load_phase_order(rhs.modules.front().load_phase);
-        return lhs_phase < rhs_phase;
+    std::unordered_map<std::string, PluginDescriptor*> by_id;
+    for (PluginDescriptor& plugin : plugins_) {
+        if (!astra_api_supported(plugin.astra_api)) {
+            diagnostics.error("module.astra_api_unsupported",
+                              plugin.id + " requires Astra API " + plugin.astra_api);
+        }
+        if (by_id.contains(plugin.id)) {
+            diagnostics.error("module.duplicate_plugin", "Duplicate plugin id: " + plugin.id);
+        }
+        by_id.emplace(plugin.id, &plugin);
+    }
+    for (const PluginDescriptor& plugin : plugins_) {
+        for (const std::string& dependency : plugin.dependencies) {
+            if (!by_id.contains(dependency)) {
+                diagnostics.error("module.dependency_missing",
+                                  plugin.id + " depends on missing plugin " + dependency);
+            }
+        }
+    }
+    if (diagnostics.has_errors()) {
+        return std::unexpected(make_error("module.discover_failed", "Plugin discovery failed"));
+    }
+
+    std::vector<PluginDescriptor*> seeds;
+    for (PluginDescriptor& plugin : plugins_) {
+        seeds.push_back(&plugin);
+    }
+    std::sort(seeds.begin(), seeds.end(), [](const auto* lhs, const auto* rhs) {
+        if (first_module_phase(*lhs) != first_module_phase(*rhs)) {
+            return first_module_phase(*lhs) < first_module_phase(*rhs);
+        }
+        return lhs->id < rhs->id;
     });
+
+    std::unordered_map<std::string, int> state;
+    std::vector<PluginDescriptor> ordered;
+    std::function<void(PluginDescriptor&)> visit = [&](PluginDescriptor& plugin) {
+        const int current = state[plugin.id];
+        if (current == 1) {
+            diagnostics.error("module.dependency_cycle",
+                              "Dependency cycle includes plugin " + plugin.id);
+            return;
+        }
+        if (current == 2) {
+            return;
+        }
+        state[plugin.id] = 1;
+        for (const std::string& dependency : plugin.dependencies) {
+            visit(*by_id[dependency]);
+        }
+        state[plugin.id] = 2;
+        ordered.push_back(plugin);
+    };
+    for (PluginDescriptor* plugin : seeds) {
+        visit(*plugin);
+    }
 
     if (diagnostics.has_errors()) {
         return std::unexpected(make_error("module.discover_failed", "Plugin discovery failed"));
     }
+    plugins_ = std::move(ordered);
     return {};
 }
 
@@ -167,6 +329,8 @@ VoidResult ModuleManager::load_discovered(DiagnosticSink& diagnostics) {
 
             auto loaded = std::make_unique<LoadedModule>();
             loaded->descriptor = module;
+            loaded->capabilities = module.capabilities;
+            loaded->permissions = module.permissions;
             if (auto opened = loaded->library.open(module.entrypoint); !opened) {
                 diagnostics.error(opened.error().code, opened.error().message);
                 return opened;
@@ -185,9 +349,10 @@ VoidResult ModuleManager::load_discovered(DiagnosticSink& diagnostics) {
             host.host_context = this;
             host.diagnostics = {&diagnostics, emit_diagnostic};
             host.register_extension = &ModuleManager::register_extension_thunk;
+            host.get_service = &ModuleManager::get_service_thunk;
 
             auto entrypoint = reinterpret_cast<AstraModuleMainFn>(symbol);
-            active_module_ = &module;
+            active_module_ = &loaded->descriptor;
             active_diagnostics_ = &diagnostics;
             const AstraResultCode main_result = entrypoint(&host, &loaded->api);
             if (main_result != ASTRA_RESULT_OK ||
@@ -214,24 +379,6 @@ VoidResult ModuleManager::load_discovered(DiagnosticSink& diagnostics) {
             }
             active_module_ = nullptr;
             active_diagnostics_ = nullptr;
-
-            if (runtime_provider_registry_ != nullptr) {
-                auto* native_symbol = loaded->library.symbol(kNativeRuntimeProviderEntrypoint);
-                if (native_symbol != nullptr) {
-                    auto native_entry =
-                        reinterpret_cast<AstraNativeRuntimeProviderEntryFn>(native_symbol);
-                    if (!native_entry(runtime_provider_registry_, &diagnostics)) {
-                        runtime_provider_registry_->clear();
-                        diagnostics.error("module.native_provider_register_failed",
-                                          module.id +
-                                              " native runtime provider registration failed");
-                        return std::unexpected(
-                            make_error("module.native_provider_register_failed",
-                                       "Native runtime provider registration failed"));
-                    }
-                }
-            }
-
             loaded_modules_.push_back(std::move(loaded));
         }
     }
@@ -239,15 +386,12 @@ VoidResult ModuleManager::load_discovered(DiagnosticSink& diagnostics) {
 }
 
 void ModuleManager::unload_all(DiagnosticSink& diagnostics) {
-    if (runtime_provider_registry_ != nullptr) {
-        runtime_provider_registry_->clear();
-    }
-
     AstraModuleHostApi host{};
     host.abi_version = ASTRA_MODULE_ABI_VERSION;
     host.host_context = this;
     host.diagnostics = {&diagnostics, emit_diagnostic};
     host.register_extension = &ModuleManager::register_extension_thunk;
+    host.get_service = &ModuleManager::get_service_thunk;
 
     for (auto it = loaded_modules_.rbegin(); it != loaded_modules_.rend(); ++it) {
         LoadedModule& loaded = **it;
@@ -273,14 +417,22 @@ std::size_t ModuleManager::loaded_module_count() const {
     return loaded_modules_.size();
 }
 
-AstraResultCode
-ModuleManager::register_extension_thunk(void* host_context,
-                                        const AstraExtensionDescriptor* descriptor) {
+AstraResultCode ModuleManager::register_extension_thunk(void* host_context,
+                                                        const AstraExtensionDescriptor* descriptor) {
     auto* manager = static_cast<ModuleManager*>(host_context);
     if (manager == nullptr) {
         return ASTRA_RESULT_INVALID_ARGUMENT;
     }
     return manager->register_extension_from_abi(descriptor);
+}
+
+AstraResultCode ModuleManager::get_service_thunk(void* host_context, AstraStringView service_id,
+                                                 AstraOpaqueHandle* out_service) {
+    auto* manager = static_cast<ModuleManager*>(host_context);
+    if (manager == nullptr) {
+        return ASTRA_RESULT_INVALID_ARGUMENT;
+    }
+    return manager->get_service_from_abi(service_id, out_service);
 }
 
 AstraResultCode
@@ -298,6 +450,21 @@ ModuleManager::register_extension_from_abi(const AstraExtensionDescriptor* descr
     auto result = extension_registry_.register_extension(
         converted, active_module_->capabilities, active_module_->permissions, *active_diagnostics_);
     return result ? ASTRA_RESULT_OK : ASTRA_RESULT_ERROR;
+}
+
+AstraResultCode ModuleManager::get_service_from_abi(AstraStringView service_id,
+                                                    AstraOpaqueHandle* out_service) {
+    if (active_module_ == nullptr || active_diagnostics_ == nullptr || out_service == nullptr) {
+        return ASTRA_RESULT_INVALID_ARGUMENT;
+    }
+    void* service = service_registry_.resolve(from_view(service_id), active_module_->capabilities,
+                                              active_module_->permissions, *active_diagnostics_);
+    if (service == nullptr) {
+        *out_service = nullptr;
+        return ASTRA_RESULT_NOT_FOUND;
+    }
+    *out_service = service;
+    return ASTRA_RESULT_OK;
 }
 
 } // namespace astra

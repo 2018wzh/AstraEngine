@@ -8,8 +8,18 @@ function(astra_configure_target target)
 endfunction()
 
 function(astra_add_library target)
-    add_library(${target} SHARED ${ARGN})
-    set_target_properties(${target} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    add_library(${target} STATIC ${ARGN})
+    astra_configure_target(${target})
+    target_include_directories(${target}
+        PUBLIC
+            "${CMAKE_CURRENT_SOURCE_DIR}/Public"
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/Private"
+    )
+endfunction()
+
+function(astra_add_module target)
+    add_library(${target} MODULE ${ARGN})
     astra_configure_target(${target})
     target_include_directories(${target}
         PUBLIC
