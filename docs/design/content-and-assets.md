@@ -70,6 +70,36 @@ cook:
 
 AssetRegistry 由 sidecar 扫描生成，不作为人工或 AI 编辑源。
 
+AI-generated asset sidecar 目标态示例：
+
+```yaml
+id: native:/Backgrounds/RainyStreet/Draft01
+type: image
+source_path: Backgrounds/rainy_street_draft01.png
+display_name: Rainy Street Draft 01
+tags: [background, rainy, street]
+origin: AIGenerated
+requires_review: true
+review:
+  status: pending
+  review_item: review:/ai/2026-06-05/rainy_street_draft01
+ai_generation:
+  provider: astra.ai.provider.example
+  session_hash: sha256:...
+  prompt_hash: sha256:...
+  context_hash: sha256:...
+  output_hash: sha256:...
+  source_draft: Saved/Agent/Drafts/rainy_street_draft01
+license:
+  owner: project
+  usage: internal
+  source: ai_generated
+cook:
+  texture_preset: background
+```
+
+AI 生成资产成为 `native:/` 正式资产前，必须有稳定 `id`、sidecar、license、review 状态和 Generation Audit 链接。被拒绝或取消的 draft 不进入 AssetRegistry，不参与 Cook；被接受后才复制或移动到 Content 并生成正式 sidecar。`origin: AIGenerated` 不表示自动可发布，Release Gate 仍按发布模式检查。
+
 ## 6. FilterProfile
 
 FilterProfile 是文本源资产：

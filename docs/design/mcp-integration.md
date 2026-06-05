@@ -28,13 +28,15 @@ Runtime Session
 
 - 读取项目文本源数据、资产、脚本、剧情图、设定和审计。
 - 调用验证、测试、Cook、Package、Release Gate。
-- 在 trusted session 中写 workspace/project 内文本源文件。
+- 生成 Copilot 式建议、patch proposal、asset draft 和 localization draft。
+- 在 trusted session 中应用 patch 或导入生成资产。
 
 限制：
 
 - 默认禁用，需要显式 trusted session。
 - 不进入 packaged runtime。
 - 不暴露明文密钥、Editor widget、native pointer。
+- 不写 Cooked、DerivedDataCache、package manifest 或外部 mount-only 原始资产。
 
 ### Runtime MCP Host
 
@@ -94,10 +96,16 @@ astra://runtime/save-preview
 Editor tools：
 
 - `project.inspect`
+- `project.plan_patch`
+- `project.apply_patch`
 - `project.write_file`
+- `asset.generate_draft`
+- `asset.preview_generated`
+- `asset.import_generated`
 - `asset.validate`
 - `script.validate`
 - `review.enqueue`
+- `review.apply`
 - `test.run_headless`
 - `build.cook`
 - `release.run_gate`
@@ -110,6 +118,8 @@ Runtime tools：
 - `runtime.audit.annotate`
 
 Prompts 只定义任务模板，不绑定 Provider。
+
+Editor mutating tools 只在 `trusted_write` session 可用，包括 `project.apply_patch`、`project.write_file`、`asset.import_generated` 和 `review.apply`。`read_only` session 可以读取 resources、生成 `project.plan_patch`、调用 `asset.generate_draft` 和预览 draft，但不能把结果写入 canonical source。
 
 ## 5. 审计
 

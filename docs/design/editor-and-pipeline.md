@@ -9,7 +9,7 @@ AstraEditor 是面向模块化 2D/VN 创作的工具链。它完整服务 Astra 
 ```text
 AstraEditor
 ├─ Project Browser
-├─ Asset Browser
+├─ Asset Browser / Asset Editor
 ├─ Scene / Actor Inspector
 ├─ Script Editor
 ├─ Graph Editor
@@ -38,6 +38,22 @@ Text Source / Binary Assets
 
 PIE 使用同一 Actor、EventBus、StateMachineRuntime、ScriptRuntimeHost 和 Media 管线。编辑器调试层只提供输入、overlay 和 inspector。
 
+Asset Editor 可从 AI Workbench 发起多模态生成。生成结果先进入 draft/review，不直接成为正式资产：
+
+```text
+Asset Editor Request
+  -> AI Workbench / Boundary Manager
+  -> AI Provider
+  -> Draft Asset + Sidecar Draft
+  -> Preview / Variants
+  -> Review Queue
+  -> Import / Edit / Reject
+  -> Content + Sidecar
+  -> AssetRegistry
+```
+
+第一目标态覆盖文本、图像、音频、语音、视频和动画草稿。导入时必须生成稳定 AssetId、license、review 状态和审计链接；拒绝或取消的 draft 不进入 AssetRegistry、Cook 或 Package。
+
 ## 4. 旧 VN 现代化链路
 
 ```text
@@ -57,6 +73,7 @@ Cook 阶段负责：
 
 - YAML + JSON Schema 校验。
 - Asset sidecar 扫描和 registry 生成。
+- AI-generated asset sidecar、license、review 状态和审计链接校验。
 - 脚本、Graph、Timeline、StateMachine 编译。
 - 图片、音频、字体、FilterProfile 和 shader cook。
 - 本地化表生成。
@@ -73,6 +90,7 @@ Package 默认生成 deterministic build，不包含运行时 AI Provider 和 au
 - 脚本/Graph/Timeline/StateMachine 可编译。
 - AssetId、依赖、本地化 key 和 FilterProfile 完整。
 - 未审核 AI 内容为 0，除非发布模式允许。
+- AI-generated asset 均有 sidecar、license、Generation Audit 和 accepted review 状态。
 - Runtime AI、MCP、Provider、Audit 模块权限与发布模式一致。
 - Legacy mount-only 项目没有复制外部原始资产。
 - 插件 ABI、权限、依赖闭包和 packaged eligibility 有效。

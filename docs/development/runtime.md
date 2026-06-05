@@ -2,7 +2,7 @@
 
 ## 1. 当前实现范围
 
-当前代码中的“runtime”指 Phase 1 基础层，不是完整 Scene/Runtime 目标架构。
+当前代码已经包含 Phase 1 基础层和 Phase 2 headless Scene/Runtime 基座。
 
 已实现：
 
@@ -10,84 +10,83 @@
 - `Astra_Platform`
 - `Astra_ModuleRuntime`
 - `Astra_PropertySystem`
+- `Astra_Scene`
+- `Astra_Runtime`
 
-未实现：
+仍未实现：
 
-- `ActorWorld`
-- `EventBus` 作为场景运行时主线
-- `StateMachineRuntime`
-- `Blackboard`
-- `ControlPolicy`
-- `Save / Load / Replay`
 - `ScriptRuntimeHost`
+- Asset / Media / FilterGraph
+- AstraVN DSL 和 VN 预定义状态机
+- Editor runtime debugger
 
-## 2. 当前宿主链路
+## 2. Phase 2 运行时链路
 
-当前可运行链路如下：
+Phase 2 的 headless 链路如下：
 
 ```text
-Host program
-  -> create_default_platform_services()
-  -> ServiceRegistry
-  -> ExtensionRegistry
-  -> PropertyRegistry
-  -> ModuleManager.discover()
-  -> ModuleManager.load_discovered()
-  -> module initialize / activate
+RuntimeWorld
+  -> ActorWorld
+  -> RuntimeEventBus.enqueue()
+  -> Director.tick()
+  -> ControlPolicyRuntime.accept_or_queue()
+  -> StateMachineRuntime.handle_event()
+  -> WorldSnapshot / ReplayLog
 ```
 
-对应样例可见 [AstraPhase1Smoke main.cpp](/E:/Documents/AstraEngine/Engine/Programs/AstraPhase1Smoke/Private/main.cpp)。
+对应样例可见 [AstraPhase2Smoke main.cpp](/E:/Documents/AstraEngine/Engine/Programs/AstraPhase2Smoke/Private/main.cpp)。
 
 ## 3. 当前模块职责
 
-### Core
+### Scene
 
 提供：
 
-- `Error` / `Expected`
-- `Diagnostic` / `DiagnosticSink`
-- `Assert`
-- `Log`
-- `Path`
-- `Config`
-- `Time`
+- `ActorId`、`ActorTypeId`、`ComponentTypeId`
+- `ActorHandle`
+- `ComponentDescriptor`
+- `ActorWorld`
+- `ActorSnapshot`
 
-### Platform
+`ActorId` 是稳定、可存档、可回放的公开身份。`ActorHandle` 只用于运行时访问，不写入存档。
 
-提供接口族：
-
-- `IWindowService`
-- `IInputService`
-- `IFileSystemService`
-- `ITimerService`
-- `IThreadService`
-- `IDynamicLibraryService`
-
-默认实现通过 SDL3 和本地动态库加载器提供，公开头文件不暴露 SDL 类型。
-
-### ModuleRuntime
+### Runtime
 
 提供：
 
-- plugin descriptor 解析
-- `ModuleManager`
-- `ServiceRegistry`
-- `ExtensionRegistry`
-- `AstraModule` C ABI
+- `RuntimeEventBus`
+- `StateMachineRuntime`
+- `BlackboardRuntime`
+- `ControlPolicyRuntime`
+- `Director`
+- `WorldSnapshot`
+- `ReplayRecorder` / `ReplayPlayer`
+- `Transform2DSystemPack`
 
-### PropertySystem
+`RuntimeEventBus` 为 Phase 2 的主事件线。`Director` drain queued events，经 `ControlPolicyRuntime` 仲裁后推进 Actor-bound 状态机。
 
-提供：
+### Local ECS / Data-Oriented Pack
 
-- `TypeId`
-- `PropertyId`
-- `PropertyTypeKind`
-- `PropertyFlags`
-- `PropertyDescriptor`
-- `TypeDescriptor`
-- `PropertyRegistry`
+`Transform2DSystemPack` 使用 EnTT 做内部批处理存储。Pack 边界只暴露 `ActorId`、DTO 和 snapshot，不暴露 EnTT entity、native pointer 或 Actor C++ 指针。
 
-## 4. 当前不是运行时中心的东西
+## 4. Save / Load / Replay
+
+`WorldSnapshot` 当前保存：
+
+- snapshot version
+- next actor id
+- actors 和 component JSON data
+- state machine state、blackboard、queued events
+- blackboard runtime values
+- control policy locks、priority table、queued events
+- runtime event queue
+- director tick/state
+- next event sequence
+- random seed
+
+存档格式为 JSON，版本为 `astra.phase2.snapshot.v1`。存档不得保存 native pointer、`ActorHandle`、EnTT entity 或 renderer/audio native handle。
+
+## 5. 当前不是运行时中心的东西
 
 当前代码里不存在这些旧中心抽象：
 
@@ -96,18 +95,4 @@ Host program
 - `Bootstrap`
 - `RuntimeProviderRegistry`
 
-这次 Phase 1 已经把它们从默认主线中移除。
-
-## 5. 下一阶段接口位置
-
-Phase 2 计划把真正的运行时基座加入：
-
-- `Scene`
-- `ActorWorld`
-- `EventBus`
-- `StateMachineRuntime`
-- `Blackboard`
-- `ControlPolicy`
-- `Director`
-
-届时本文件应升级为完整 Runtime 开发文档，而不是 Phase 1 现状说明。
+核心中心是 Actor、RuntimeEventBus、StateMachineRuntime、Blackboard、ControlPolicy、Director、Save/Replay。

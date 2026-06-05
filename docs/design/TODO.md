@@ -21,13 +21,13 @@
 
 ## 3. Phase 2：Scene / Runtime
 
-- [ ] P0 ActorWorld、ActorId、ActorTypeId、ActorHandle。
-- [ ] P0 ComponentDescriptor、Component serialization、ActorSnapshot。
-- [ ] P0 EventBus：RuntimeEvent、PresentationEvent、ScriptEvent。
-- [ ] P0 StateMachineRuntime、StateMachineComponent。
-- [ ] P1 BlackboardComponent、ControlPolicyComponent、Director。
-- [ ] P1 Save/Load/Replay：Actor、Component、StateMachine、Blackboard、event queue。
-- [ ] P2 局部 ECS / Data-Oriented system pack API。
+- [x] P0 ActorWorld、ActorId、ActorTypeId、ActorHandle。
+- [x] P0 ComponentDescriptor、Component serialization、ActorSnapshot。
+- [x] P0 EventBus：RuntimeEvent、PresentationEvent、ScriptEvent。
+- [x] P0 StateMachineRuntime、StateMachineComponent。
+- [x] P1 BlackboardComponent、ControlPolicyComponent、Director。
+- [x] P1 Save/Load/Replay：Actor、Component、StateMachine、Blackboard、event queue。
+- [x] P2 局部 ECS / Data-Oriented system pack API。
 
 ## 4. Phase 3：Asset / Media / FilterGraph
 
@@ -58,9 +58,12 @@
 
 ## 7. Phase 6：AI
 
-- [ ] P1 Boundary Manager、Context Builder、Diff/Patch、Review Queue。
+- [ ] P1 Editor Assistant：inline suggestion、diagnostics explanation、chat-driven patch。
+- [ ] P1 Boundary Manager、Context Builder、AIEditRequest、AIPatchProposal、Review Queue。
+- [ ] P1 Asset Generation：AIAssetGenerationRequest、AIAssetDraft、多模态 draft preview、sidecar import。
 - [ ] P1 IAIProvider、Provider permissions、SecretProvider。
-- [ ] P1 Agent Audit：Operation Log、Generation Audit Log。
+- [ ] P1 Agent Audit：Operation Log、Generation Audit Log、asset draft provenance。
+- [ ] P2 Trusted write session、MCP project/apply patch tools、review apply workflow。
 - [ ] P2 Runtime AIIntent、IntentValidator、Director integration。
 - [ ] P2 Runtime MCP Host 和 runtime-safe tools。
 
