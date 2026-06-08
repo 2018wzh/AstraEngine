@@ -18,21 +18,12 @@ include(cmake/AstraTargets.cmake)
 
 find_package(SDL3 CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
+find_package(EnTT CONFIG REQUIRED)
+find_package(Lua REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
 
 if(ASTRA_BUILD_TESTS)
     find_package(Catch2 CONFIG REQUIRED)
-endif()
-
-add_subdirectory(Engine/Runtime/Core)
-add_subdirectory(Engine/Runtime/Platform)
-add_subdirectory(Engine/Runtime/ModuleRuntime)
-add_subdirectory(Engine/Runtime/PropertySystem)
-add_subdirectory(Engine/Plugins/Examples/Phase1ExampleModule)
-add_subdirectory(Engine/Programs/AstraPhase1Smoke)
-
-if(ASTRA_BUILD_TESTS)
-    add_subdirectory(Engine/Tests)
 endif()

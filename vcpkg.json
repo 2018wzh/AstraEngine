@@ -3,7 +3,14 @@
   "version-string": "0.1.0",
   "dependencies": [
     "catch2",
+    "entt",
     "fmt",
+    {
+      "name": "lua",
+      "features": [
+        "cpp"
+      ]
+    },
     "nlohmann-json",
     "sdl3",
     "spdlog",

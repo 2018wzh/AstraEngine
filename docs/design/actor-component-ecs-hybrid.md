@@ -46,6 +46,76 @@ Actor 必须具备：
 
 公开接口传递 DTO、handle、descriptor、snapshot、event 或 command。动态模块不得跨 ABI 传递 C++ `Actor*`。
 
+### 3.1 Creator-facing Authoring
+
+Editor 必须向创作者提供：
+
+- Actor Type Palette：按模块、类别、tag 搜索可创建 Actor。
+- Component Palette：显示可挂载组件、依赖、互斥关系和默认值。
+- Defaults Panel：编辑 actor/component 默认值，写入 prefab 或 source object。
+- Prefab / Variant Browser：创建 base prefab、variant、override 和 revert。
+- Inspector Metadata：display name、category、tooltip、validation、requires review、read-only。
+- Preview Attach：在不写入正式 scene 的情况下预览 Actor、Component 或 Presentation 状态。
+
+组件可编辑性分级：
+
+- Creator Editable：Transform2D、Tag、SpritePresentation、DialogueText、ChoiceList、AudioCue、Camera、Timeline、FilterProfile。
+- Review Required：AI-editable text、character profile、route-critical choice、release-sensitive metadata。
+- Runtime Managed：Lifetime runtime state、StateMachine current state、queued events、ControlPolicy lock、ECS internal data。
+- System Only：native handle、ECS entity、renderer/audio resource instance、module private state。
+
+Authoring 状态流：
+
+```text
+Palette Selection -> Actor Draft -> Inspector Edit -> Validate -> Scene Source
+Prefab Base -> Variant Override -> Preview -> Apply/Revert
+PIE Runtime Snapshot -> Debug Inspect -> Optional Source Patch
+```
+
+Component inspector metadata 示例：
+
+```yaml
+type_id: astra.vn.character_profile
+display_name: Character Profile
+category: VN/Character
+properties:
+  - id: display_name
+    label: Display Name
+    editor: localized_text
+    order: 10
+    flags: [creator_editable]
+  - id: route_role
+    label: Route Role
+    editor: enum
+    order: 20
+    flags: [requires_review]
+  - id: current_emotion
+    label: Current Emotion
+    editor: readonly_badge
+    order: 30
+    flags: [runtime_only, read_only]
+validation:
+  - rule: display_name.required
+  - rule: route_role.review_for_release
+```
+
+Prefab/variant source 最小字段：
+
+```yaml
+id: native:/Prefabs/Characters/Alice
+actor_type: astra.vn.character
+base: null
+components:
+  astra.transform2d:
+    position: [0, 0]
+  astra.vn.character_profile:
+    display_name: loc:/characters/alice/name
+variants:
+  - id: native:/Prefabs/Characters/AliceSchool
+    overrides:
+      astra.vn.character_profile.costume: school
+```
+
 ## 4. Component 类型
 
 基础组件：
@@ -156,3 +226,9 @@ System
 ## 8. 存档
 
 存档必须使用 ActorId 和 Component data，不保存 ECS entity 原始值或 C++ 指针。状态机保存当前状态、延迟事件、计时器、Blackboard 引用和 ControlPolicy lock。
+
+验收：
+
+- 创作者可从 palette 创建 Character、DialogueSystem、ChoiceSystem、Camera，并通过 Inspector 配置。
+- Runtime-managed 字段在 Inspector 中可读但不可直接写入 source。
+- PIE 中的 runtime 改动必须明确区分为 preview state、debug command 或 source patch proposal。

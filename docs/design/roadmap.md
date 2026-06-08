@@ -2,19 +2,43 @@
 
 ## 1. 路线原则
 
-先建立通用 2D 引擎核心，再构建 VN 垂直模块；先确定性运行与存档，再引入 AI 和旧 VN 模拟器。
+AstraEngine 先完成可发布、可调试、可打包的原生 2D / VN-first runtime，
+再扩展 AI 和 legacy compatibility。这里的 “UE-class runtime” 指工程完备度：
+runtime 可脱离 Editor 完成 cook、package、launch、save、replay、debug、profile 和
+release validation；不表示追求复杂 3D、FPS、高实时网络竞技、大型开放世界或完整
+UE `UObject` / UHT / GC 体系。
 
 优先级：
 
-1. Core + Platform + Module + Property。
-2. Actor/Component + EventBus + StateMachineRuntime。
-3. Media + Asset + FilterGraph。
-4. ScriptRuntimeHost + Native VN。
-5. Editor。
-6. AI collaboration / runtime intent。
-7. Legacy VN emulator / modernization plugins。
+1. Foundation：Core + Platform + Module + Property。
+2. Foundation：Actor/Component + EventBus + StateMachineRuntime。
+3. Foundation：Asset + Media DTO + FilterGraph。
+4. Foundation：ScriptRuntimeHost + Native VN / Lua。
+5. Production runtime core：deterministic tick、save/replay、scheduler、diagnostics。
+6. Production asset pipeline：import、cook、package、release gate。
+7. Production media backend：real renderer/text/audio/timeline/filter execution。
+8. Creator experience：template、Content Browser、Inspector、Graph/Timeline、PIE、Cook/Package。
+9. Customization framework：plugin wizard、EngineModuleSlot、Editor panel、provider contracts、MCP tool。
+10. Editor and runtime debugging。
+11. AI MCP：Runtime AI MCP、Editor Copilot MCP、Editor Content Generation MCP。
+12. Production hardening and UE-class 2D runtime acceptance。
+13. Expansion track：legacy emulator / modernization plugins。
 
-## 2. Phase 0：文档与工程基线
+## 2. Completion Model
+
+- `Foundation`：最小可运行基座，可通过 headless test、smoke program 或 demo 验证。
+- `Feature Complete`：功能表面完整，覆盖真实项目主要工作流。
+- `Production Ready`：具备真实后端、错误恢复、版本迁移、调试观测、压力测试和发布门禁。
+- `UE-class 2D Runtime`：在 Astra 范围内达到可发布、可调试、可扩展、可维护的 runtime 完备度。
+
+当前 Phase 1-4 属于 Foundation，不应被解读为 production complete。
+
+## 3. Phase 0：文档与工程基线
+
+目标：
+
+- 建立模块化 2D 引擎目标态和工程基线。
+- 明确 Runtime 不依赖 Editor，VN、AI、Legacy 不污染 Core。
 
 交付：
 
@@ -24,16 +48,24 @@
 
 验收：
 
-- 新开发者能理解 AstraEngine 是模块化 2D 引擎，VN 是第一模块。
+- 新开发者能理解 AstraEngine 是模块化 2D 引擎，VN 是第一落地模块。
 - 文档明确 Core 不绑定 VN、Live2D、AI 或旧 VM。
 
-## 3. Phase 1：Core / Platform / Module / Property
+非目标：
 
-实现：
+- 不实现完整 runtime 功能。
+
+## 4. Phase 1：Foundation Core / Platform / Module / Property
+
+目标：
+
+- 建立最小引擎基础层和动态模块边界。
+
+交付：
 
 - Core foundation、logging、error、config、time、path。
 - Platform window/input/filesystem/timer/thread/dynamic library。
-- ModuleManager、ServiceRegistry、ExtensionRegistry、C ABI。
+- ModuleManager、ServiceRegistry、ExtensionRegistry、EngineModuleRegistry、C ABI。
 - PropertySystem 和 schema generation。
 
 验收：
@@ -41,9 +73,17 @@
 - 示例模块可加载、注册服务和扩展、停用卸载。
 - ABI 不暴露 C++ ownership、Actor 指针或 native handles。
 
-## 4. Phase 2：Scene / Runtime
+非目标：
 
-实现：
+- 不承诺 production plugin ABI compatibility、完整 platform input 或发布门禁。
+
+## 5. Phase 2：Foundation Scene / Runtime
+
+目标：
+
+- 建立 headless actor/component/runtime 基座。
+
+交付：
 
 - ActorWorld、ActorId、ActorTypeId、ComponentDescriptor。
 - EventBus、StateMachineRuntime、Blackboard、ControlPolicy、Director。
@@ -55,67 +95,325 @@
 - Headless world 可创建 Actor、派发事件、推进状态机、保存恢复。
 - 存档不保存 native pointer 或 ECS entity 原始值。
 
-## 5. Phase 3：Asset / Media / FilterGraph
+非目标：
 
-实现：
+- 不承诺完整 lifecycle、prefab、deterministic scheduler、timeline/resource/script state 存档。
+
+## 6. Phase 3：Foundation Asset / Media / FilterGraph
+
+目标：
+
+- 建立 asset sidecar、presentation DTO 和 headless media 验证链路。
+
+交付：
 
 - AssetId、VFS、AssetRegistry、sidecar。
-- Renderer2D、Text、Audio。
+- PresentationCommand、RenderGraph、Text/Audio command DTO。
+- HeadlessRenderer2D、SDL minimal renderer factory。
 - FilterGraph、FilterProfile、layer-aware targets。
+- Hot reload watch plumbing。
 
 验收：
 
-- 可渲染背景、角色、文本和 UI。
+- 可从 presentation event 生成背景、角色、文本、UI、音频和 filter command。
 - FilterProfile 能应用到 background、character、ui、text、final 层。
 
-## 6. Phase 4：ScriptRuntimeHost 与 AstraVN
+非目标：
 
-实现：
+- 不实现真实 image decode、font rasterization/text shaping、audio playback、GPU filter execution、cook/package。
 
-- ScriptRuntimeHost、Astra Native Script、ScriptEventBridge。
-- AstraVN DSL、VN Event、DialogueSM、ChoiceSM、CharacterPresentationSM、BackgroundSM、AudioSM。
-- 最小 VN demo。
+## 7. Phase 4：Foundation ScriptRuntimeHost / AstraVN
+
+目标：
+
+- 建立脚本 runtime host、最小 VN DSL/Lua 和 playable VN demo。
+
+交付：
+
+- ScriptRuntimeHost、Astra Native Script、LuaRuntime、ScriptEventBridge。
+- AstraVN DSL、VN Event、预定义 Actor 和状态机。
+- 最小 VN demo 和 save/restore path。
 
 验收：
 
 - 脚本通过事件驱动 Actor 状态机。
-- Demo 能显示背景、立绘、对白、选择、音频并保存恢复。
+- Demo 能显示背景/立绘/对白/选择的 presentation，记录音频/filter command，并保存恢复。
 
-## 7. Phase 5：Editor
+非目标：
 
-实现：
+- 不承诺完整脚本语言、debugger、sandbox、timeline graph 或真实 media 后端。
 
-- Project Browser、Asset Browser、Scene/Actor Inspector。
+## 8. Phase 5：Runtime Core Completion
+
+目标：
+
+- 把 headless runtime 基座提升到真实项目可用的 deterministic runtime core。
+
+交付：
+
+- Actor lifecycle、prefab/defaults、component schema migration。
+- deterministic tick、task/coroutine scheduler、timer state、event ordering。
+- ControlPolicy interrupt/queue/reject、priority inheritance、Director arbitration。
+- complete save/load/replay：World、Scene、Actor、Component、StateMachine、Director、Timeline、resources、script state。
+- memory/resource lifetime、error recovery、runtime diagnostics。
+
+验收：
+
+- 1000+ Actor、多状态机、脚本事件和 presentation event 可稳定 tick、保存、恢复和 replay。
+- Runtime snapshot 有版本号、migration path 和 compatibility tests。
+- Editor 只能通过公开 inspector/debugger 接口观察和控制 Runtime。
+
+非目标：
+
+- 不实现 Editor UI、不实现 legacy emulator。
+
+## 9. Phase 6：Asset Pipeline Completion
+
+目标：
+
+- 建立可发布 runtime package 的内容管线。
+
+交付：
+
+- Importer、Cooker、DerivedDataCache、package manifest。
+- asset dependency graph、incremental cook、hot reload invalidation。
+- native/foreign/virtual mount policy。
+- release gate：schema、broken dependency、license、AI provenance、package policy。
+
+验收：
+
+- native AstraVN 项目可从 source content cook 成 runtime package。
+- Cooked package 可脱离 Editor 启动、加载资源、保存、恢复和 replay。
+- Release gate 能阻止缺失资源、非法 foreign copy、未审核 AI asset 和不兼容 plugin 发布。
+
+非目标：
+
+- 不复制 legacy 外部资产；foreign asset 默认 mount-only。
+
+## 10. Phase 7：Media Backend Completion
+
+目标：
+
+- 把 presentation DTO 提升为真实可执行的 2D media runtime。
+
+交付：
+
+- real Renderer2D backend、texture decode/upload、sprite batching。
+- text shaping、font atlas、fallback font、localization-friendly layout。
+- audio mixer、streaming、voice/music/SFX routing。
+- animation/timeline、camera、UI、effects。
+- executable layer-aware FilterGraph。
+
+验收：
+
+- Runtime 可真实显示背景、角色、UI、文本和 filter output，可播放 voice/music/SFX。
+- Headless backend 可验证 render order、filter target、text/audio command 和 deterministic output。
+- Media backend 不向 public ABI 暴露 SDL、GPU handle、audio native handle 或 Editor widget。
+
+非目标：
+
+- 不实现复杂 3D renderer、physics renderer 或大型开放世界 streaming renderer。
+
+## 11. Phase 8：Script And AstraVN Completion
+
+目标：
+
+- 完成原生 AstraVN 项目所需的脚本、VN graph 和运行时状态模型。
+
+交付：
+
+- stable Script API surface。
+- Native DSL parser/runtime hardening。
+- Lua runtime sandboxing and host API。
+- VN graph/timeline/dialogue/choice/character/background/audio/camera integration。
+- script debugger hooks and deterministic snapshot/restore。
+
+验收：
+
+- 完整 native AstraVN 项目可通过 DSL 或 Lua 运行同等故事流程。
+- Dialogue、choice、character、background、audio、timeline、filter 和 camera 状态进入 save/replay。
+- Script runtime 只能通过 Script API、RuntimeEvent 和 Presentation API 影响 world。
+
+非目标：
+
+- 不让 Lua、AI 或 legacy VM 成为 Core 依赖。
+
+## 12. Phase 9：Creator Experience Rebuild
+
+目标：
+
+- 达到 UE 级创作者友好度，但限定在 2D / VN-first 范围。
+
+交付：
+
+- Project Wizard、Template Browser、Content Browser、Asset Import Wizard。
+- Actor/Component palette、Property Inspector、Prefab/Variant Browser。
+- Script/Graph/Timeline/FilterGraph authoring workflow。
+- Editor layout preset、command palette、asset picker、context menu、undo/redo、dirty/preview state。
+- CreatorWorkflow sample：模板、导入/生成资产、Script/Graph/Timeline、PIE、Package。
+
+验收：
+
+- 新创作者可从模板创建项目、导入/生成资产、写对白和选择、PIE 调试并打包。
+- 创作期修改有 undo/redo、diagnostics、review、preview 和 source/cooked 状态边界。
+- Project Wizard、Content Browser、Inspector、Graph/Timeline 和 Package panel 都定义输入、输出、Runtime API、diagnostics、undo/redo、preview 和 save 行为。
+
+非目标：
+
+- 不让 Editor 成为 runtime 发布前置条件。
+
+## 13. Phase 10：Customization Framework Rebuild
+
+目标：
+
+- 让插件作者和工具作者拥有 UE 级可定制入口，同时保持 Core 和 Runtime 边界稳定。
+
+交付：
+
+- Plugin Wizard、descriptor schema、capability/permission 模板、sample plugin、diagnostics。
+- Provider templates：Renderer2D、TextLayout、Audio、ScriptRuntime、PresentationLibrary、AssetImporter、CookProcessor。
+- `IEditorPanelProvider`、`IMcpToolProvider`、`IAIProvider` 和 Editor command/menu/context action。
+- EngineModuleSlot selection UI、project policy validation、packaged eligibility report。
+- Plugin release gate、ABI compatibility tests、hot reload level policy。
+
+验收：
+
+- 插件作者可创建 Editor panel、asset importer、renderer/text/audio provider，并通过 release gate。
+- 工具作者可添加 Editor panel 或 MCP tool，不修改 Runtime。
+- Project policy 可替换 provider；错误选择产生可修复 diagnostics。
+- 插件不能跨 ABI 暴露 C++ ownership、Editor widget 或 native handles。
+
+非目标：
+
+- 不允许插件替换 ModuleManager、Core diagnostics、PropertySystem 基础协议或 Runtime ownership。
+
+## 14. Phase 11：Editor And Runtime Debugging
+
+目标：
+
+- 提供生产 runtime 所需的调试和 authoring 工具，但 Runtime 仍可独立发布。
+
+交付：
+
+- Project Browser、Asset Browser、Scene Tree。
 - Script/Graph/Timeline/FilterGraph Editor。
-- StateMachine Debugger、Event Log、PIE。
+- Actor、Component、StateMachine、Asset、Script Inspector。
+- PIE、Runtime Debugger、Event Log、StateMachine visual debugger。
+- Save/Replay inspector、asset dependency inspector、diagnostic panels。
 
 验收：
 
 - Editor 使用同一 Runtime，不走独立预览逻辑。
-- 可查看 Actor、Component、StateMachine 和 EventBus 状态。
+- 可查看和调试 Actor、Component、StateMachine、EventBus、Asset dependency 和 save/replay。
+- Runtime 可脱离 Editor 发布。
 
-## 8. Phase 6：AI
+非目标：
 
-实现：
+- Editor 不是 runtime 的前置条件。
 
-- Boundary Manager、Context Builder、Review Queue、Diff/Patch。
-- Provider interface、Agent Audit。
-- Runtime AIIntent、IntentValidator、Runtime MCP Host。
+## 15. Phase 12：AI MCP Collaboration And Runtime Safety
+
+目标：
+
+- 支持 Runtime AI MCP、Editor Copilot MCP 和 Editor Content Generation MCP，同时保持 deterministic save/replay。
+
+交付：
+
+- Runtime MCP Host：feedback、context、intent request/validate/commit、fallback、audit。
+- Editor Copilot MCP：suggestion、diagnostics explanation、patch proposal、test/cook/release gate assistance。
+- Editor Content Generation MCP：draft generation、modification、enhancement、preview、review/import。
+- Boundary Manager、Context Builder、AIEditRequest、AIPatchProposal。
+- Provider permissions、SecretProvider、operation audit log。
+- AI asset draft、sidecar import、generation provenance。
+- Runtime AIIntent、IntentValidator、Director integration。
 
 验收：
 
-- AI 建议进入 Review Queue。
-- Runtime AI 只能提交受控 Intent，并可保存回放。
+- Editor AI 建议进入 review queue 或 trusted write session。
+- Editor Content Generation draft 必须 review 后才能进入 canonical source。
+- Runtime AI 只能提交受控 Intent，并由 Director/ControlPolicy 仲裁。
+- 已提交 AI 输出必须作为确定性数据进入 save/replay 和 release gate。
 
-## 9. Phase 7：Legacy VN Emulator / Modernization
+非目标：
 
-实现：
+- AI Provider 不进入 Core；AI 生成不绕过 review、audit 或 save determinism。
 
-- CompatRuntimeProvider、PackageReader、Legacy VM、API Mapper。
+## 16. Phase 13：Production Hardening
+
+目标：
+
+- 让 runtime 具备长期发布、诊断、维护和兼容能力。
+
+交付：
+
+- profiling/tracing、runtime markers、frame capture。
+- crash/error reports、diagnostic channel、log routing。
+- long-run soak tests、large-content stress tests。
+- plugin ABI compatibility tests。
+- save compatibility and migration tests。
+- multi-config/multi-platform build matrix。
+- release build packaging validation。
+
+验收：
+
+- Debug/Release 构建均可运行 test、smoke、package launch 和 release gate。
+- 长时间运行、热重载、存档迁移、插件加载失败和资源缺失都有稳定 diagnostics。
+- 性能、内存、asset load、render/audio/script tick 可被 profiling/tracing 捕获。
+
+非目标：
+
+- 不以 Editor 功能数量作为 runtime production readiness 的替代指标。
+
+## 17. Phase 14：UE-class 2D Runtime Acceptance
+
+目标：
+
+- 在 Astra 的 2D / VN-first 范围内达到可发布 runtime 完备度。
+
+交付：
+
+- 完整 native AstraVN sample project。
+- Source content -> cook -> package -> launch -> save -> replay -> debug -> profile -> release gate 全链路。
+- Runtime 独立发布包。
+
+验收：
+
+- sample project 可在无 Editor 情况下运行完整流程。
+- Runtime 支持真实 image/font/audio rendering、deterministic script execution、module/plugin loading、asset packages、development hot reload 和 release gate validation。
+- Editor 支持模板创建、Content Browser、Graph/Timeline/Script 创作、PIE、Runtime Debugger、AI Review Queue 和打包发布。
+- 插件可替换 renderer/text/audio 或添加 Editor panel / MCP tool，并通过 release gate。
+- Runtime AI MCP、Editor Copilot MCP、Editor Content Generation MCP 的权限、审计、review、save/replay 策略通过验收。
+- Core、Runtime、Asset、Media、Script、AstraVN 均有 unit、integration、headless、smoke、stress 和 compatibility tests。
+
+非目标：
+
+- 不要求复杂 3D、FPS、高实时网络竞技、大型开放世界或 UE UObject parity。
+
+## 18. Expansion Track：Legacy VN Emulator / Modernization
+
+目标：
+
+- 在 native runtime production parity 之后，使用稳定 Runtime/Asset/Media/Script API 承载旧 VN 兼容和现代化。
+
+交付：
+
+- CompatRuntimeProvider、ForeignProjectProbe、PackageReader。
+- Legacy VM state、opcode/timeline adapter、API Mapper。
+- Save extension state。
 - Compatibility Inspector。
-- Modernization Profile、字体替换、UI 覆盖、FilterProfile。
+- Modernization Profile、font replacement、UI overlay、FilterProfile。
+- Mock legacy runtime fixture。
+- BGI、Kirikiri、Ren'Py、NScripter prototype。
+- Artemis prototype：unpacked-directory probe、`foreign-artemis:/` resolver、`.iet/.asb/.ast` index、minimal `e:*` host API、tag/API coverage report。
 
 验收：
 
 - 至少一个 mock legacy runtime 可运行并输出 VN presentation。
+- Legacy save extension state 可进入 save/replay。
 - Mount-only 默认不复制外部原始资产。
+- Legacy 模块不反向污染 Core、Runtime、Asset、Media 的基础边界。
+- Artemis prototype can map high-frequency tags to AstraVN Events without sharing Artemis VM control flow with AstraVN source languages。
+
+非目标：
+
+- Legacy 不是 native runtime 达到 UE-class 2D parity 的前置条件。

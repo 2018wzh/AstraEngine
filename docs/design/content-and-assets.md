@@ -29,6 +29,20 @@ Projects/MyProject
    └─ Agent
 ```
 
+项目可以在 `.astra.yaml` 中显式选择可替换引擎模块 provider：
+
+```yaml
+engine_modules:
+  selections:
+    astra.renderer2d: project.renderer.dx11
+    astra.text_layout: project.text.japanese_ruby
+    astra.compat.artemis.runtime: astra.compat.artemis.default
+```
+
+`engine_modules.selections` 只表达 slot 到 provider 的选择，不复制、覆盖或重命名底层 service。
+未列出的 slot 使用该 slot 的默认 provider。Release Gate 必须校验所有 slot/provider 引用有效，
+并确认被选择模块满足发布权限。
+
 ## 3. 通用规则
 
 - 所有 source object 必须有稳定 `id`。
@@ -36,6 +50,93 @@ Projects/MyProject
 - 长文本使用 YAML block scalar。
 - 字段标记 `ai_editable`、`tool_generated`、`read_only`、`requires_review`。
 - Cooked、DerivedDataCache、package manifest 不是 AI/MCP 编辑源。
+
+## 3.1 Content Browser 工作流
+
+Content Browser 面向创作者，必须支持：
+
+- 导入：通过 import preset 生成 source asset、sidecar、tags、license 和 review 状态。
+- 批量操作：rename、move、retag、license update、metadata patch，必须更新引用或给出 broken reference diagnostics。
+- 依赖查看：显示 hard/soft reference、script/graph/timeline 引用、cook dependency。
+- 引用修复：missing asset 可选择重新定位、替换为 virtual asset、删除引用或创建 placeholder。
+- 迁移：跨项目复制 native asset 时保留 provenance、license、review 和 dependency closure。
+- AI draft import：draft 必须进入 Review Queue，接受后才成为 `native:/` asset。
+
+资产状态机：
+
+```text
+External File -> Source Asset -> Registered Asset -> Cooked Asset -> Packaged Asset
+AI Draft -> Review -> Accepted -> Source Asset
+Generated/Enhanced Draft -> Review -> Accepted -> Source Asset
+Rejected Draft -> Audit Only
+```
+
+Creator-facing import presets：
+
+- `sprite`：角色立绘、表情、layer/order 默认值。
+- `background`：背景图、scene usage、filter defaults。
+- `voice`：角色语音、line binding、volume bus。
+- `music`：BGM、loop point、fade defaults。
+- `font`：fallback set、locale、atlas policy。
+- `filter_profile`：background/character/ui/text/final target presets。
+- `timeline`：track template、camera/audio/dialogue event defaults。
+
+Project template descriptor 示例：
+
+```yaml
+id: astra.template.vn.standard
+display_name: Standard AstraVN
+runtime_profile: astra.vn.runtime
+engine_modules:
+  astra.renderer2d: astra.renderer2d.default
+  astra.text_layout: astra.text.default
+  astra.audio: astra.audio.default
+content_seed:
+  characters: [Alice]
+  backgrounds: [Room]
+  scripts: [Scripts/main.astra]
+wizard:
+  required_fields: [project_name, locale, target_platform]
+  optional_steps: [sample_assets, ai_policy, package_profile]
+acceptance:
+  - astra validate ${project}
+  - astra cook ${project} --config Debug
+  - astra run ${project}/Saved/Cooked --headless-smoke
+```
+
+Asset import preset 示例：
+
+```yaml
+id: astra.import.sprite.character
+source_extensions: [.png, .webp]
+asset_type: image
+sidecar_defaults:
+  tags: [character]
+  origin: HumanAuthored
+  review:
+    status: accepted
+cook_defaults:
+  texture_preset: sprite
+  atlas: characters
+diagnostics:
+  missing_alpha: warning
+  oversized_texture: blocking_for_release
+```
+
+Review queue item 示例：
+
+```yaml
+id: review:/asset/2026-06-05/alice_sprite
+kind: asset_import
+state: pending
+source_ref: Saved/Agent/Drafts/alice_sprite.png
+target_ref: native:/Characters/Alice/Normal
+diagnostics: []
+actions:
+  accept: import_asset
+  reject: audit_only
+  revise: create_new_draft
+```
 
 ## 4. AssetId
 
@@ -137,3 +238,9 @@ Mount-only 项目默认不复制外部原始资产。现代化替换必须引用
 ## 8. Release Gate
 
 Release Gate 检查 YAML、schema、重复 ID、缺失 sidecar、broken dependency、AI-editable 边界、foreign asset root、mount-only copy policy、FilterProfile target 和 plugin descriptor。
+
+Creator acceptance：
+
+- 创作者可导入角色、背景、语音、音乐、字体和 filter profile，并在 Content Browser 中看到依赖与诊断。
+- AI 生成或增强的 draft 没有 accepted review 前不能进入 Cook。
+- 批量移动或重命名资产后，引用要么自动修复，要么产生可点击 diagnostics。

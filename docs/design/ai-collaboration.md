@@ -2,52 +2,153 @@
 
 ## 1. 目标
 
-AI 是创作协作层和受控运行时内容来源，不是作品接管者。AstraEngine 支持两条 AI 链路：
+AI 分为三套独立工作流，均通过 MCP 暴露能力，但 session、权限、审计和发布策略不同：
 
-- Editor AI Collaboration：开发阶段建议、生成草稿、校验和 Review Queue。
-- Runtime AI Intent：运行时根据上下文生成结构化 Intent，经 Validator、ControlPolicy 和 Director 审核后转成事件。
+- `Runtime AI MCP`：根据玩家反馈和运行时上下文实时生成受控内容。
+- `Editor Copilot MCP`：类似 Copilot 的创作全流程辅助，生成建议、解释和 patch proposal。
+- `Editor Content Generation MCP`：创作期内容生成、修改和增强，产出 draft，经 Review Queue 后进入 canonical source。
 
-AI 不直接调用底层 API，不直接跳转剧情，不直接修改核心变量，不直接创建未授权资产。
+AI 不直接调用底层 Renderer、Audio、Asset、Script native API；不直接跳剧情；不直接修改核心变量；
+不直接创建未授权正式资产。Runtime AI 的提交结果必须可保存和回放；Editor AI 的正式写入必须经过
+Review Queue 或显式 trusted session。
 
-## 2. Editor AI 工作流
+## 2. Runtime AI MCP
 
-Editor AI Collaboration 默认是 assistant mode，类似 Copilot：
+Runtime AI MCP 只存在于允许 runtime generation 的发布模式。它根据玩家反馈、Actor 状态、
+剧情阶段、Blackboard、ControlPolicy、Director、Canon 和 fallback policy 生成结构化内容。
 
-- Inline suggestion：在脚本、Graph、Timeline、Inspector 字段旁给出补全、解释和替换建议。
-- Chat-driven patch：根据作者请求生成结构化 patch proposal，不立即写入正式源数据。
-- Batch refactor：对一组脚本、资产 metadata 或本地化条目提出批量变更。
-- Diagnostics explanation：解释 schema、Release Gate、Cook、测试或 runtime diagnostic，并给出修复建议。
-- Asset generation request：从 Asset Editor 或 AI Workbench 发起多模态资产草稿生成。
+```text
+Player Feedback / Runtime Event
+  -> Runtime MCP Host
+  -> Runtime Context Builder
+  -> RuntimeGenerationOrchestrator
+  -> AI Provider
+  -> AIIntent / RuntimeContentDraft
+  -> IntentValidator
+  -> Director + ControlPolicy
+  -> Commit
+  -> RuntimeEvent / VNEvent / PresentationCommand
+  -> Save / Replay committed output
+```
+
+### Runtime Resources
+
+```text
+astra://runtime/session
+astra://runtime/world
+astra://runtime/scene
+astra://runtime/actors/{id}
+astra://runtime/blackboards/{scope}
+astra://runtime/director
+astra://runtime/control-policy/{actorId}
+astra://runtime/constraints
+astra://runtime/feedback
+astra://runtime/fallbacks
+astra://runtime/committed-ai-output
+astra://runtime/save-preview
+```
+
+### Runtime Tools
+
+- `runtime.context.inspect`：读取 runtime-safe context。
+- `runtime.feedback.submit`：提交玩家反馈、偏好、自由输入或互动结果。
+- `runtime.intent.request`：请求生成结构化 `AIIntent`。
+- `runtime.intent.validate`：调用 IntentValidator，返回 allow/deny/requires_fallback。
+- `runtime.intent.commit`：提交已验证 intent，写入 committed output。
+- `runtime.fallback.select`：当 provider 不可用或 intent 被拒绝时选择确定性 fallback。
+- `runtime.audit.annotate`：写 runtime generation audit annotation。
+
+### Runtime Permissions
+
+- 允许：读取 runtime-safe context、请求 provider、提交已验证 committed output。
+- 禁止：project write、canonical source mutation、读取未授权外部路径、直接写 AssetRegistry、直接执行 provider raw output。
+- 必须：经 IntentValidator、Director、ControlPolicy、Save/Replay。
+
+### Runtime Data Contracts
+
+```cpp
+struct RuntimeFeedback {
+    RuntimeFeedbackId id;
+    ActorId source_actor;
+    StringView channel;
+    StringView text;
+    Json payload;
+};
+
+struct AIIntent {
+    AIIntentId id;
+    StringView type;
+    ActorId target_actor;
+    RuntimeEventCategory output_category;
+    Json payload;
+    AuditId generation_audit;
+};
+
+struct CommittedAIOutput {
+    AIIntentId intent_id;
+    Json committed_payload;
+    AuditId generation_audit;
+    uint64_t replay_sequence;
+};
+```
+
+### Runtime Save / Replay
+
+- Save 存储 `CommittedAIOutput`、generation audit reference、fallback choice 和 replay sequence。
+- Replay 使用 committed output，不重新请求 provider。
+- Runtime AI mismatch 必须定位到 feedback id、intent id、validator result、commit sequence。
+
+## 3. Editor Copilot MCP
+
+Editor Copilot MCP 面向创作全流程辅助，类似 Copilot。它帮助作者理解、修改和验证项目，
+默认只产出 suggestion 或 patch proposal。
 
 ```text
 Author Request
-  -> Boundary Manager
-  -> Context Builder
-  -> Provider Module
-  -> Schema Validation
-  -> Suggestion / Patch / Draft
+  -> Editor MCP Host
+  -> Project / Asset / Script / Graph / Timeline Context
+  -> Provider
+  -> Suggestion / Patch Proposal / Diagnostics Explanation
   -> Review Queue
-  -> Accept / Edit / Reject
-  -> Canonical Text Source
-  -> Agent Audit
+  -> Apply only by review or trusted session
 ```
 
-AI 输出默认是建议。正式内容必须有人类接受或编辑后进入项目源数据。Editor trusted direct write 是显式受信例外，仍必须记录 Operation Log。
-
-### 2.1 Patch / Review
-
-AI patch 必须表达为可审查 proposal，而不是直接覆盖文件：
+### Copilot Resources
 
 ```text
-AIEditRequest
-  -> AIPatchProposal
-  -> AIReviewItem
-  -> Preview Diff / Validate
-  -> Accept / Edit / Reject
-  -> Apply To Canonical Source
+astra://project/manifest
+astra://project/config
+astra://scripts/{path}
+astra://graphs/{id}
+astra://timelines/{id}
+astra://assets/registry
+astra://lore/{id}
+astra://diagnostics
+astra://release-gate/report
+astra://review-queue
+astra://audit
 ```
 
-目标态接口草案：
+### Copilot Tools
+
+- `project.inspect`
+- `project.plan_patch`
+- `script.suggest`
+- `graph.suggest`
+- `timeline.suggest`
+- `filtergraph.suggest`
+- `diagnostics.explain`
+- `schema.fix_proposal`
+- `test.run_headless`
+- `build.cook`
+- `release.run_gate`
+- `review.enqueue`
+- `review.apply`
+
+Mutating tools such as `project.apply_patch`, `project.write_file` and `review.apply`
+require trusted session and Operation Log.
+
+### Copilot Data Contracts
 
 ```cpp
 struct AIEditRequest {
@@ -64,46 +165,49 @@ struct AIPatchProposal {
     Span<RiskNote> risks;
     AuditId generation_audit;
 };
-
-struct AIReviewItem {
-    ReviewItemKind kind;
-    StringView summary;
-    AuditId generation_audit;
-    Optional<OperationId> applied_operation;
-};
 ```
 
-`AIReviewItem` 统一承载 patch、asset draft、localization draft 和 runtime intent preview。Review Queue 接受后才写入 canonical source；被拒绝的 draft 只能保留审计和临时预览，不进入 AssetRegistry 或 Cook。
+## 4. Editor Content Generation MCP
 
-### 2.2 Trusted Direct Write
+Editor Content Generation MCP 面向创作期内容生成、修改和增强。它产出 draft，不直接写正式 Content。
 
-Trusted direct write 用于作者明确授权 AI 代劳完成项目修改。它不是默认模式：
+支持内容：
 
-- Session 必须显式开启 `trusted_write`，并绑定 caller、project、policy snapshot、capability set 和 audit sink。
-- 写入范围限制在 workspace/project 内的 canonical source，不允许写 Cooked、DerivedDataCache、package manifest 或外部 mount-only 原始资产。
-- 每次写入必须先产出 patch proposal，再由 tool apply；生成写 Generation Audit，实际文件副作用写 Operation Log。
-- Operation Log 必须包含原始内容 hash、结果 hash、目标路径、session、provider 和可回滚记录。
-- Trusted write 仍受 Boundary Manager、schema validation、Review Queue policy 和 Release Gate 检查。
+- 文本、对白、设定、localization。
+- 图像、角色、背景、UI overlay。
+- 音频、语音、音乐、音效。
+- 视频、动画、timeline suggestion。
+- FilterProfile、现代化 profile、sidecar metadata。
 
-### 2.3 Asset Generation
-
-Asset Editor 和 AI Workbench 可发起多模态生成：文本、图像、音频、语音、视频或动画草稿。生成结果默认是 draft，不是正式资产。
+工作流：
 
 ```text
-Asset Generation Request
+Generation / Modification / Enhancement Request
+  -> Editor MCP Host
   -> Boundary Manager
   -> Context Builder
-  -> Provider Module
-  -> Draft Binary / Text Output
-  -> Sidecar Draft
+  -> Provider
+  -> Draft Binary/Text + Sidecar Draft
   -> Preview / Variants
   -> Review Queue
-  -> Import / Edit / Reject
-  -> Canonical Source + Asset Sidecar
-  -> Agent Audit
+  -> Accept / Edit / Reject / Regenerate
+  -> Canonical Source + Sidecar
+  -> AssetRegistry / Cook
 ```
 
-目标态接口草案：
+### Content Generation Tools
+
+- `asset.generate_draft`
+- `asset.modify_draft`
+- `asset.enhance_draft`
+- `asset.preview_draft`
+- `asset.compare_variants`
+- `asset.import_draft`
+- `asset.validate`
+- `review.enqueue`
+- `review.apply`
+
+### Draft Data Contracts
 
 ```cpp
 struct AIAssetGenerationRequest {
@@ -123,76 +227,49 @@ struct AIAssetDraft {
     PreviewMetadata preview;
     AuditId generation_audit;
 };
+
+struct AIReviewItem {
+    ReviewItemKind kind;
+    StringView summary;
+    AuditId generation_audit;
+    Optional<OperationId> applied_operation;
+};
 ```
 
-Draft import 必须生成稳定 `native:/` AssetId、sidecar、license、review 状态和审计链接。被取消或拒绝的 draft 不写入正式 Content，不进入 AssetRegistry，不参与 Cook。
+Draft import 必须生成稳定 `native:/` AssetId、sidecar、license、review 状态和 audit 链接。
+被取消或拒绝的 draft 不写入正式 Content，不进入 AssetRegistry，不参与 Cook。
 
-## 3. Runtime AI Intent 工作流
+## 5. Boundary Manager
 
-```text
-Player Input
-  -> Interaction StateMachine
-  -> Runtime Context Builder
-  -> RuntimeGenerationOrchestrator
-  -> AI Planner / Provider
-  -> Structured AIIntent
-  -> IntentValidator / Guard
-  -> Director + ControlPolicy
-  -> RuntimeEvent / VNEvent
-  -> Actor StateMachine
-  -> PresentationCommand
-```
-
-示例 Intent：
-
-```json
-{
-  "type": "DialogueIntent",
-  "speaker": "alice",
-  "emotion": "nervous",
-  "text": "我不确定你该不该知道这件事。"
-}
-```
-
-Validator 检查：
-
-- Actor 是否存在且在场。
-- 当前剧情阶段是否允许自由对话。
-- Timeline 或 Story Script 是否锁定该 Actor。
-- AI 是否允许改变情绪、变量或关系值。
-- 是否违反 Canon Lore、年龄分级、角色设定或发布策略。
-
-## 4. Boundary Manager
-
-Boundary Manager 合并项目策略、阶段策略、内容权限、运行时策略和审计要求：
+Boundary Manager 合并 project policy、stage policy、release profile、session permission、provider capability 和 audit requirement。
 
 ```yaml
 default_mode: assistant
-allow_ai_modify_canon: false
-require_human_approval: true
-allow_runtime_generation: false
-editor:
+editor_copilot:
   allow_inline_suggestions: true
   allow_patch_proposals: true
   allow_trusted_write: false
-asset_generation:
+editor_content_generation:
   allow_text: true
   allow_image: true
   allow_audio: true
   allow_voice: true
   allow_video: true
+  allow_enhancement: true
   require_review: true
-runtime_intent:
+runtime_ai_mcp:
+  allow_runtime_generation: false
   allow_dialogue: true
   allow_state_change: limited
   allow_story_jump: false
+  require_committed_output: true
 ```
 
-许可结果必须包含 allowed、requires_review、allowed_targets、blocked_targets 和 reason。
+许可结果必须包含 allowed、requires_review、allowed_targets、blocked_targets、release_mode 和 reason。
 
-## 5. Provider 模块
+## 6. Provider 模块
 
-Provider 是独立动态模块，不与 MCP、Runtime Generation 或 Audit 混合：
+Provider 是独立动态模块，不等同于 MCP Host、RuntimeGenerationOrchestrator 或 Agent Audit。
 
 ```cpp
 class IAIProvider {
@@ -203,28 +280,47 @@ public:
 };
 ```
 
-Provider 必须声明网络、离线、文本/图像/音频、多模态、运行时使用和 packaged eligibility。
+Provider 必须声明：
 
-## 6. Agent Audit
+- modality：text、image、audio、voice、video、animation、multimodal。
+- network/offline。
+- editor eligibility。
+- runtime eligibility。
+- packaged eligibility。
+- secret requirements。
+- streaming support。
+- audit fields。
 
-审计分两类：
+## 7. Agent Audit
 
-- Operation Log：工具副作用，如 trusted write、build、validation、runtime tool call。
+- Operation Log：工具副作用，如 trusted write、review apply、asset import、build/cook/package。
 - Generation Audit Log：prompt/context/output hash、provider、fallback、session、最终 patch、asset draft 或 committed intent。
 
-运行时 AI 输出一旦提交，必须保存为确定性数据。回放优先使用 committed output，不重新请求模型。
+Runtime AI 输出一旦 commit，必须保存为确定性数据。Editor draft 一旦 import，必须保留 provenance。
 
-## 7. 发布模式
+## 8. Release Modes
 
 ```text
 Deterministic Build
-  固定内容，无运行时 AI，默认商业发布模式。
+  固定内容，无 Runtime AI Provider；允许已审核并进入 Content 的 AI 资产。
 
 Hybrid Build
-  固定主线 + 受控闲聊/反应，包含 Runtime MCP、Generation、Provider、Audit。
+  固定主线 + 受控 runtime feedback generation；包含 Runtime MCP、Provider、Audit、Fallback。
 
 Experimental Build
-  更高自由度，仅用于研究或测试。
+  更高自由度，仅用于研究或测试；必须显式标记。
 ```
 
-Release Gate 必须阻止未审核 AI 内容进入 Deterministic Build，并校验 Runtime AI 模块权限。
+Release Gate：
+
+- 阻止未审核 AI draft。
+- 阻止 deterministic build 包含 runtime AI provider。
+- 校验 Runtime MCP tool 权限、provider packaged eligibility 和 committed output policy。
+- 校验 Editor MCP trusted write 不进入 packaged runtime。
+
+## 9. 验收
+
+- Runtime AI 能根据玩家反馈生成 intent、验证、commit、保存、回放，回放不访问 provider。
+- Editor Copilot 能提出脚本或 Graph 修复，进入 Review Queue，并只在 trusted session 中应用。
+- Editor Content Generation 能生成/修改/增强资产 draft，review 接受后导入 Content 并通过 Release Gate。
+- Deterministic Build 阻止未审核 draft 和 runtime AI provider。
