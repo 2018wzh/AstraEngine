@@ -1,0 +1,26 @@
+#include <Astra/Core/BuildInfo.hpp>
+
+namespace Astra::Core {
+
+BuildInfo GetBuildInfo() {
+    BuildInfo info;
+    info.engine_version = "@PROJECT_VERSION@";
+    info.git_commit = "@ASTRA_GIT_COMMIT@";
+#if defined(ASTRA_BUILD_CONFIG)
+    info.build_config = ASTRA_BUILD_CONFIG;
+#else
+    info.build_config = "unknown";
+#endif
+    info.abi_version = @ASTRA_ABI_VERSION@;
+    info.runtime_enabled = @ASTRA_BUILD_RUNTIME_VALUE@;
+    info.tools_enabled = @ASTRA_BUILD_TOOLS_VALUE@;
+    info.tests_enabled = @ASTRA_BUILD_TESTS_VALUE@;
+    info.samples_enabled = @ASTRA_BUILD_SAMPLES_VALUE@;
+    info.plugins_enabled = @ASTRA_BUILD_PLUGINS_VALUE@;
+    info.editor_enabled = @ASTRA_BUILD_EDITOR_VALUE@;
+    info.headless_backend_enabled = @ASTRA_ENABLE_HEADLESS_BACKEND_VALUE@;
+    info.sdl_backend_enabled = @ASTRA_ENABLE_SDL_BACKEND_VALUE@;
+    return info;
+}
+
+} // namespace Astra::Core

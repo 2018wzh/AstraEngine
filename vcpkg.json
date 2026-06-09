@@ -3,6 +3,7 @@
   "version-string": "0.1.0",
   "dependencies": [
     "catch2",
+    "cli11",
     "entt",
     "fmt",
     {
@@ -12,7 +13,9 @@
       ]
     },
     "nlohmann-json",
+    "openssl",
     "sdl3",
+    "sol2",
     "spdlog",
     "yaml-cpp"
   ]

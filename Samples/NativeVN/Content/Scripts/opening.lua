@@ -1,0 +1,11 @@
+astra.label("opening")
+astra.bg("native:/Backgrounds/Room")
+astra.show("alice", "native:/Characters/Alice/Normal", "center")
+astra.say("alice", "Good morning from Phase 4.", "native:/Voice/Alice/opening_001")
+astra.audio("music", "native:/Music/opening_theme")
+astra.filter("native:/Filters/soft_vn")
+astra.choice("Walk together", "route_walk")
+
+astra.label("route_walk")
+astra.set("route", "walk")
+astra.say("alice", "Let's go.")

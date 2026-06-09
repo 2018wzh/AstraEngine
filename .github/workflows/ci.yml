@@ -5,11 +5,14 @@ on:
   pull_request:
 
 jobs:
-  runtime:
+  phase0:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: seanmiddleditch/gha-setup-ninja@v5
+      - name: Phase 0 doc-check
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/doc-check.ps1
       - name: Configure
         shell: pwsh
         run: >
@@ -25,12 +28,6 @@ jobs:
       - name: Test
         shell: pwsh
         run: ctest --test-dir build --output-on-failure
-      - name: Headless default route
+      - name: CMake doc-check target
         shell: pwsh
-        run: .\build\Bin\AstraGame.exe --project Projects\Samples\MinimalVN --headless --route default
-      - name: Headless second route
-        shell: pwsh
-        run: .\build\Bin\AstraGame.exe --project Projects\Samples\MinimalVN --headless --route second
-      - name: Headless save/load route
-        shell: pwsh
-        run: .\build\Bin\AstraGame.exe --project Projects\Samples\MinimalVN --headless --route save-load
+        run: cmake --build build --target Astra_DocCheck

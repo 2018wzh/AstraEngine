@@ -38,10 +38,26 @@
 
 ## 3. Deliverable Matrix
 
+Phase 0 evidence means documentation and build-baseline evidence. Phase 1 foundation evidence includes `Astra_Core`, `Astra_Platform`, `Astra_ModuleRuntime`, `Astra_PropertySystem`, `Astra_ExampleFoundationPlugin`, `Astra_Tools`, `Astra_Phase1Tests`, foundation sample descriptors, foundation CLI smoke commands, and `foundation_core_gate` release evidence. Phase 2 foundation evidence includes `Astra_Scene` and `Astra_Runtime`. Phase 3 foundation evidence includes `Astra_Asset`, `Astra_Media`, Asset/Media tests, public header isolation, CLI headless Asset/Media/FilterGraph smoke hashes, and media provider release-gate foundation reports. Phase 4 foundation evidence includes `Astra_Script`, `Astra_AstraVN`, Native DSL/Lua parity tests, Script/AstraVN public header isolation, `Samples/NativeVN` Phase 4 sources, CLI `phase4_script_vn` evidence, and VN session save/restore hashes. Runtime deliverables beyond Foundation remain target acceptance evidence and are incomplete until the relevant systems and samples exist.
+
 | Deliverable | Required Evidence |
 | --- | --- |
+| Phase 0 manual baseline | `docs/manual` required pages and `tools/doc-check.ps1` output |
+| Phase 0 build baseline | CMake configure/build and CTest discovery output |
+| Phase 1 Core foundation | Core headers, `Astra_Core`, diagnostics/config/stable-id/serialization tests, diagnostic code registry, release policy, release config hash, unknown-field policy |
+| Phase 1 Platform foundation | `Astra_Platform`, headless service tests, opaque dynamic library handle, file-watch/pending-task/crash context tests, SDL private compile path, public header isolation scan |
+| Phase 1 Module foundation | descriptor validation, dependency resolver, C ABI headers, service resolve audit, engine module slot policy validation, example plugin load/register/unload test, module release-gate binary SHA-256 evidence |
+| Phase 1 Property foundation | `Astra_PropertySystem`, nested struct/array/map/tagged union JSON Schema, defaults/validation/migration tests, schema version graph, write policy and release-sensitive diff/audit tests |
+| Phase 1 foundation CLI | `astra --version`, `doc-check`, `validate`, `inspect`, `foundation_core_gate`, foundation-only `cook/package/run --headless-smoke` |
+| Phase 1 sample descriptors | `Samples/NativeVN`, `Samples/RuntimeStress`, `Samples/PackageSmoke` descriptors |
+| Phase 2 Scene foundation | `Astra_Scene`, ActorWorld spawn/destroy/snapshot tests, ComponentDescriptor tests, headless local ECS pack, EnTT private header isolation |
+| Phase 2 Runtime foundation | `Astra_Runtime`, RuntimeWorld event/state-machine/save/load/replay hash tests, ControlPolicy allow/queue/reject tests |
+| Phase 3 Asset foundation | `Astra_Asset`, AssetUri parse/normalize tests, VFS priority/read-only tests, sidecar validation, registry scan, dependency diagnostics |
+| Phase 3 Media foundation | `Astra_Media`, PresentationCommand/RenderGraph DTO tests, FilterProfile target validation/application, Renderer2D/TextLayout/Audio provider descriptor validation, media release-gate foundation reports, HeadlessRenderer2D deterministic hashes, SDL private compile-path stub |
+| Phase 4 Script foundation | `Astra_Script`, ScriptRuntimeHost, Native DSL parser diagnostics, Lua provider via `sol2`, shared command stream, ScriptEventBridge, ScriptSnapshot, Native/Lua parity hashes |
+| Phase 4 AstraVN foundation | `Astra_AstraVN`, VN event schemas, preset actors/components/state machines, VnSession, VnSessionSnapshot, NativeVN headless playable smoke, save/restore evidence |
 | Runtime can launch without Editor | PackageSmoke command output and package manifest without Editor modules |
-| NativeVN playable package | NativeVN run/replay/inspect reports |
+| NativeVN playable package | NativeVN run/replay/inspect reports; Phase 4 currently provides headless playable foundation evidence only |
 | Deterministic runtime | repeated replay state/event/presentation hash |
 | Real media backend | MediaBackend visual/audio/headless hash reports |
 | Script debug and snapshot | ScriptParity debugger and save/replay reports |
@@ -83,6 +99,9 @@ To claim docs/design complete for implementation planning:
 ## 6. 验收
 
 - README links every design spec.
+- README links the manual root.
+- Phase 0 doc-check validates required manual pages and local links.
+- Phase 1 tests validate foundation runtime targets and example module lifecycle.
 - TODO references every implementation-critical design spec.
 - Samples/Test Matrix maps acceptance to evidence.
 - Coverage Matrix has no major system without design, contract, TODO and evidence.

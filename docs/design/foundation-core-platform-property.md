@@ -1,7 +1,9 @@
 # Foundation：Core / Platform / Property 设计
 
-状态：Target Architecture  
+状态：Phase 1 Foundation Implemented / Target Architecture  
 定位：Astra 的基础类型、诊断、配置、序列化、平台抽象和轻量属性系统。它们支撑 Runtime、Editor、CLI、MCP、插件和 Release Gate，但不包含 VN、AI、Legacy 或 Editor 语义。
+
+Phase 1 implementation note：当前工作树已实现 `Astra_Core`、`Astra_Platform`、`Astra_ModuleRuntime` 和 `Astra_PropertySystem` 的 production-ready Foundation gate slice。它覆盖 diagnostics、diagnostic code registry、release profile policy、logging、error reporting、profiling markers、config layering/profile hash、stable id、versioned document/migration、unknown-field policy、build info、headless platform services、opaque dynamic library handles、thread/file-watch/crash smoke、SDL private backend compile path、module descriptor/service/provider release-gate checks、Property descriptors、nested JSON Schema generation、schema version graph、write policy、validation defaults、diff/audit output 和 migration helpers。future Editor/MCP consumers、完整 input/window feature set、save/package critical migration policy 仍是后续阶段。
 
 ## 1. 目标
 
@@ -342,3 +344,10 @@ Required tests：
 - Headless backend can run validation/replay/package smoke without window。
 - PropertySystem can drive Inspector metadata、JSON Schema、serialization、AI review and MCP field editing。
 - Public ABI headers expose only approved C ABI types and opaque handles。
+
+Phase 1 evidence：
+
+- `Astra_Core` builds without Platform、SDL、Lua、VN、AI、Editor、renderer、audio 或 Compat。
+- `Astra_Platform` headless tests cover thread dispatch、timer、crash packet；SDL types remain in private implementation.
+- `Astra_PropertySystem` tests cover JSON Schema、required/default validation 和 migration helper。
+- `Astra_Phase1Tests` includes public header forbidden-token isolation checks。

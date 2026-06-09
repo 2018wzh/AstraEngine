@@ -1,0 +1,9 @@
+schema: astra.sample.v1
+id: astra.sample.runtime_stress
+display_name: RuntimeStress
+phase: 1
+foundation_only: true
+status: scaffold
+description: Phase 1 descriptor only. Actor/runtime stress behavior belongs to later Scene/Runtime phases.
+acceptance:
+  - astra validate Samples/RuntimeStress --strict

@@ -1,10 +1,10 @@
 # AstraEngine
 
-状态：Target Architecture / 工程基线
+状态：Phase 4 Foundation ScriptRuntimeHost / AstraVN
 
 AstraEngine 的目标是在 2D / VN-first 范围内构建一个高度可定制、可发布、可调试、可扩展的模块化引擎。视觉小说和互动叙事是第一落地场景，但 Core 面向更广的 2D 叙事、演出和轻量玩法，而不是单一 VN 播放器。
 
-当前仓库主要保存目标架构文档、ADR、CMake/vcpkg 工程基线和编码约束。多数系统仍处于规划或待实现状态；阅读和实现时应区分“目标态”和“当前已存在的代码”。
+当前仓库包含目标架构文档、ADR、CMake/vcpkg 工程基线、编码约束，以及 Phase 1 Foundation、Phase 2 Foundation Scene / Runtime、Phase 3 Foundation Asset / Media / FilterGraph、Phase 4 Foundation ScriptRuntimeHost / AstraVN 的 runtime 基座代码。多数高层系统仍处于规划或待实现状态；阅读和实现时应区分“目标态”和“当前已存在的代码”。
 
 ## 设计北极星
 
@@ -21,12 +21,28 @@ AstraEngine 追求的是 **UE-class 2D runtime 工程完备度**，不是复制 
 
 当前可确认的仓库内容：
 
+- `Engine/Runtime/Core`：Phase 1 Core production Foundation gate slice，包含基础类型、diagnostics、diagnostic code registry、release policy、logging、config profile/hash、time、path、serialization、unknown-field migration policy、stable id 和 build info。
+- `Engine/Runtime/Platform`：Phase 1 Platform abstraction，包含 headless backend、SDL-backed window backend 编译路径、filesystem、timer、thread、opaque dynamic library handle、file-watch polling 和 crash capture context 服务。
+- `Engine/Runtime/ModuleRuntime`：Phase 1 module foundation，包含 plugin descriptor validation、dependency resolver、C ABI、`ModuleManager`、`ServiceRegistry` resolve audit、`ExtensionRegistry`、engine module provider registry、slot policy validation 和 module release-gate report。
+- `Engine/Runtime/PropertySystem`：Phase 1 reflection-lite foundation，包含 type/property descriptors、flags、validation/defaults、nested JSON Schema generation、schema version graph、write policy、diff/audit output 和 migration helpers。
+- `Engine/Runtime/Scene`：Phase 2 Scene foundation，包含 `ActorWorld`、stable Actor/Component DTO、generation-safe handle、基础 lifecycle、component JSON data、world snapshot 和 private EnTT-backed local storage。
+- `Engine/Runtime/Runtime`：Phase 2 Runtime foundation，包含 `RuntimeWorld`、`RuntimeEvent`、queued/deferred `EventBus`、基础 StateMachine transition、Director state、runtime snapshot、foundation save/load 和 deterministic hash smoke。
+- `Engine/Runtime/Asset`：Phase 3 Asset foundation，包含 asset URI/ID 解析、VFS mount、sidecar DTO/validation、registry scan、dependency diagnostics、import preset/project template/review item DTO 和 watch invalidation plumbing。
+- `Engine/Runtime/Media`：Phase 3 Media foundation，包含 PresentationCommand、RenderGraph/text/audio/filter DTO、FilterProfile validation/application、Renderer2D/TextLayout/Audio foundation provider descriptors、media release-gate foundation validation、HeadlessRenderer2D deterministic capture/hash 和 SDL renderer factory private compile-path stub。
+- `Engine/Runtime/Script`：Phase 4 Script foundation，包含 `ScriptRuntimeHost`、Native DSL parser、Lua provider via `sol2`、IR/debug-symbol DTO、`ScriptSnapshot` 和 `ScriptEventBridge`。
+- `Engine/Runtime/AstraVN`：Phase 4 AstraVN foundation，包含 VN event schema、预设 Actor/Component/StateMachine、`VnSession`、`VnSessionSnapshot`、Native/Lua parity 和 headless presentation/save-restore evidence。
+- `Engine/Plugins/Examples/Phase1Example`：示例动态模块，验证 C ABI lifecycle、service/extension/provider 注册和卸载。
+- `Engine/Programs/astra`：foundation CLI，支持 `--version`、`doc-check`、`validate`、`inspect`、foundation-only `cook/package/run --headless-smoke`，并输出 `foundation_core_gate`、module release gate binary hash、registered diagnostic-code gate、Phase 3 Asset/Media/FilterGraph evidence 和 NativeVN Phase 4 Script/AstraVN headless evidence。真实 asset cook、package launch、production replay 和 full runtime release gate 仍是后续目标。
+- `Samples/NativeVN`、`Samples/RuntimeStress`、`Samples/PackageSmoke`：foundation-only sample descriptors；`NativeVN` 当前提供 Phase 4 Native DSL/Lua playable headless VN smoke，`PackageSmoke` 提供 Phase 3 foundation smoke。
+- `Engine/Tests`：Catch2 tests，覆盖 Phase 1 Foundation、Phase 2 Scene/Runtime foundation、Phase 3 Asset/Media/FilterGraph foundation、Phase 4 Script/AstraVN foundation、public header isolation、示例模块加载、save/load 和 replay hash smoke。
 - `docs/design`：目标架构、路线图、系统规格、覆盖矩阵和 TODO。
+- `docs/manual`：面向使用者的手册骨架和 Phase 1-4 Foundation 手册页，标注当前已实现与计划中内容。
 - `docs/adr`：关键架构决策记录。
+- `tools/doc-check.ps1`：Phase 0 文档结构、链接和过期措辞检查。
 - `cmake`、`CMakeLists.txt`、`vcpkg.json`：工程基线。
 - `AGENTS.md`、`docs/coding-style.md`：实现和协作约束。
 
-Phase 0 是文档与工程基线。Phase 1 的目标是 Foundation Core / Platform / Module / Property，但当前 README 不应声称 runtime、smoke 程序、测试或 `Engine/Runtime` 代码已经存在，除非它们重新出现在工作树并通过验证。
+Phase 0 是文档与工程基线，已建立设计文档、ADR、手册骨架、CMake/vcpkg 基线、CI 文档检查和协作约束。Phase 1 已加入 Foundation Core / Platform / Module / Property 的 production Foundation gate slice 和测试/CLI 证据。Phase 2 已加入 headless Scene / Runtime foundation。Phase 3 已加入 Asset / Media / FilterGraph foundation，并补齐 media provider contract / release-gate foundation evidence。Phase 4 已加入 ScriptRuntimeHost / Native DSL / Lua via `sol2` / AstraVN headless foundation evidence。README 仍不应声称 production Asset Pipeline、真实 Media backend、完整 Script debugger/hot reload/Graph/Timeline、production AstraVN、Editor、AI/MCP、Legacy、完整 samples、完整 scheduler、完整 prefab 或 production replay/full runtime release gate 已实现，除非它们重新出现在工作树并通过验证。
 
 ## 核心定位
 
@@ -247,10 +263,10 @@ Legacy VN emulator / modernization 是 expansion track，排在 native runtime p
 阶段优先级：
 
 1. Phase 0：文档与工程基线。
-2. Phase 1：Foundation Core / Platform / Module / Property。
-3. Phase 2：Foundation Scene / Runtime。
-4. Phase 3：Foundation Asset / Media / FilterGraph。
-5. Phase 4：Foundation ScriptRuntimeHost / AstraVN。
+2. Phase 1：Foundation Core / Platform / Module / Property。当前已实现 production Foundation gate slice。
+3. Phase 2：Foundation Scene / Runtime。当前已实现 headless ActorWorld、RuntimeWorld、event/state-machine/save-load-replay foundation。
+4. Phase 3：Foundation Asset / Media / FilterGraph。当前已实现 foundation 基座。
+5. Phase 4：Foundation ScriptRuntimeHost / AstraVN。当前已实现 foundation 基座。
 6. Phase 5：Runtime Core Completion。
 7. Phase 6：Asset Pipeline Completion。
 8. Phase 7：Media Backend Completion。
@@ -261,9 +277,7 @@ Legacy VN emulator / modernization 是 expansion track，排在 native runtime p
 13. Phase 12：AI MCP Collaboration And Runtime Safety。
 14. Phase 13：Production Hardening。
 15. Phase 14：UE-class 2D Runtime Acceptance。
-16. Expansion Track：Legacy VN Emulator / Modernization。
-
-Phase 1-4 只是 Foundation，不应被解读为 production complete。
+16. Expansion Track：Legacy VN Emulator / Modernization。s
 
 Completion model：
 
@@ -333,9 +347,16 @@ ctest --test-dir build -C Release --output-on-failure
 cmake -S . -B build
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/doc-check.ps1
 ```
 
-如果当前没有可构建目标或测试，不能把命令成功作为 README 的前提；应以实际工作树和 CI 输出为准。
+也可以通过 CMake 运行 Phase 0 文档检查：
+
+```powershell
+cmake --build build --target Astra_DocCheck
+```
+
+当前已有 Phase 1 foundation runtime targets、Phase 2 Scene/Runtime foundation targets、Phase 3 Asset/Media/FilterGraph foundation targets、Phase 4 Script/AstraVN foundation targets、media provider release-gate foundation evidence、Native/Lua parity evidence 和 Catch2/CTest 测试。命令成功只能证明 Foundation Core / Platform / Module / Property / Scene / Runtime / Asset / Media / Script / AstraVN 的当前测试面通过，不能作为 production Asset Pipeline、真实 Media backend、完整 Script debugger/hot reload/Graph/Timeline、production AstraVN、Editor 或完整 release pipeline 已实现的前提；应以实际工作树和 CI 输出为准。Phase 4 继续复用成熟库和工具链：`yaml-cpp`、`nlohmann_json`、OpenSSL SHA-256、SDL3 编译路径、Lua、`sol2`、Catch2 和 CTest，不为解析、JSON、哈希、Lua 绑定或测试自造轮子。
 
 ## 实现时的快速判断
 
@@ -356,13 +377,14 @@ ctest --test-dir build -C Debug --output-on-failure
 
 推荐阅读顺序：
 
-1. [docs/design/README.md](docs/design/README.md)
-2. [docs/design/goals.md](docs/design/goals.md)
-3. [docs/design/architecture.md](docs/design/architecture.md)
-4. [docs/design/implementation-coverage.md](docs/design/implementation-coverage.md)
-5. [docs/design/roadmap.md](docs/design/roadmap.md)
-6. [docs/design/TODO.md](docs/design/TODO.md)
-7. [docs/adr](docs/adr)
+1. [docs/manual/README.md](docs/manual/README.md)
+2. [docs/design/README.md](docs/design/README.md)
+3. [docs/design/goals.md](docs/design/goals.md)
+4. [docs/design/architecture.md](docs/design/architecture.md)
+5. [docs/design/implementation-coverage.md](docs/design/implementation-coverage.md)
+6. [docs/design/roadmap.md](docs/design/roadmap.md)
+7. [docs/design/TODO.md](docs/design/TODO.md)
+8. [docs/adr](docs/adr)
 
 核心专题：
 
@@ -380,3 +402,16 @@ ctest --test-dir build -C Debug --output-on-failure
 - [Tools / Release / Observability](docs/design/tools-release-observability.md)
 - [Samples And Test Matrix](docs/design/samples-and-test-matrix.md)
 - [Compatibility Layer](docs/design/compatibility-layer.md)
+
+手册入口：
+
+- [Manual Root](docs/manual/README.md)
+- [Getting Started](docs/manual/getting-started/README.md)
+- [Programming](docs/manual/programming/README.md)
+- [Systems](docs/manual/systems/README.md)
+- [API Reference](docs/manual/api/README.md)
+- [Editor](docs/manual/editor/README.md)
+- [Samples](docs/manual/samples/README.md)
+- [Migration](docs/manual/migration/README.md)
+- [Release Notes](docs/manual/release-notes/README.md)
+- [Concepts](docs/manual/concepts/README.md)

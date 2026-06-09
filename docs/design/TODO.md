@@ -5,21 +5,23 @@
 
 目标：开发与文档同步进行，形成类似 UE 文档的信息架构，避免实现先行后补文档。
 
-- [ ] Docs：建立 `docs/manual`，作为面向引擎使用者的开发文档根目录。
-- [ ] Docs：建立 `docs/manual/getting-started`：安装、构建、创建项目、运行 sample、打包。
-- [ ] Docs：建立 `docs/manual/programming`：Core、Module、Actor/Component、RuntimeEvent、StateMachine、Asset、Media、Script、AstraVN。
-- [ ] Docs：建立 `docs/manual/systems`：Asset Pipeline、Cook/Package、Save/Replay、Renderer2D、Text/Font、Audio、FilterGraph、Hot Reload、Diagnostics。
-- [ ] Docs：建立 `docs/manual/api`：public headers 的稳定 API reference 索引。
-- [ ] Docs：建立 `docs/manual/editor`：Editor、PIE、Inspector、Debugger、Review Queue。
-- [ ] Docs：建立 `docs/manual/samples`：完整 native AstraVN sample 的逐步教程。
-- [ ] Docs：建立 `docs/manual/migration`：snapshot/schema/plugin ABI 迁移指南。
-- [ ] Docs：建立 `docs/manual/release-notes`：每个 milestone 的变更、破坏性改动、验证命令。
-- [ ] Docs：建立 `docs/manual/concepts`：Astra 与 UE runtime parity 的对标边界和非目标。
-- [ ] Docs：为文档增加链接检查、过期检查、代码示例编译或片段验证策略。
-- [ ] Design：保持 `runtime-core.md`、`media-runtime.md`、`script-and-presentation.md` 与实现同步。
-- [ ] Design：保持 `foundation-core-platform-property.md`、`asset-pipeline.md`、`tools-release-observability.md` 与实现同步。
-- [ ] Design：保持 `samples-and-test-matrix.md` 和 `implementation-coverage.md` 与验收证据同步。
-- [ ] Design：每个 public runtime/editor/tool contract 必须在 design doc、manual page、schema/test 中至少各有一个权威引用。
+- [x] Docs：建立 `docs/manual`，作为面向引擎使用者的开发文档根目录。
+- [x] Docs：建立 `docs/manual/getting-started`：安装、构建、创建项目、运行 sample、打包。
+- [x] Docs：建立 `docs/manual/programming`：Core、Module、Actor/Component、RuntimeEvent、StateMachine、Asset、Media、Script、AstraVN。
+- [x] Docs：建立 `docs/manual/systems`：Asset Pipeline、Cook/Package、Save/Replay、Renderer2D、Text/Font、Audio、FilterGraph、Hot Reload、Diagnostics。
+- [x] Docs：建立 `docs/manual/api`：public headers 的稳定 API reference 索引。
+- [x] Docs：建立 `docs/manual/editor`：Editor、PIE、Inspector、Debugger、Review Queue。
+- [x] Docs：建立 `docs/manual/samples`：完整 native AstraVN sample 的逐步教程。
+- [x] Docs：建立 `docs/manual/migration`：snapshot/schema/plugin ABI 迁移指南。
+- [x] Docs：建立 `docs/manual/release-notes`：每个 milestone 的变更、破坏性改动、验证命令。
+- [x] Docs：建立 `docs/manual/concepts`：Astra 与 UE runtime parity 的对标边界和非目标。
+- [x] Docs：为文档增加链接检查、过期检查、代码示例编译或片段验证策略。
+- [x] Design：保持 `runtime-core.md`、`media-runtime.md`、`script-and-presentation.md` 与实现同步。
+- [x] Design：保持 `foundation-core-platform-property.md`、`asset-pipeline.md`、`tools-release-observability.md` 与实现同步。
+- [x] Design：保持 `samples-and-test-matrix.md` 和 `implementation-coverage.md` 与验收证据同步。
+- [x] Design：每个 public runtime/editor/tool contract 必须在 design doc、manual page、schema/test 中至少各有一个权威引用。
+
+Phase 1 注记：`docs/manual` 当前包含 Phase 1 Foundation 手册页和仍处于计划中的后续系统骨架。`tools/doc-check.ps1` 负责页面、链接和过期措辞检查；Foundation public API 覆盖和 schema/test evidence 已由 `Astra_Phase1Tests` 补齐，后续系统的代码示例编译和 release evidence 将在对应实现阶段继续补齐。
 
 验收：
 
@@ -31,16 +33,18 @@
 
 目标：建立工程骨架，使生产 runtime、Editor、工具、测试和 sample 的边界从一开始清晰。
 
-- [ ] Build：定义新顶层目标命名规则：`Astra_<Module>`、`Astra_<Tool>`、`Astra_<Sample>`、`Astra_<TestSuite>`。
-- [ ] Build：拆分 runtime、editor、developer tools、samples、tests、plugins 的 CMake option。
-- [ ] Build：建立 Debug、RelWithDebInfo、Release 三种默认配置和 artifact 输出规范。
-- [ ] Build：建立 platform abstraction 层构建矩阵，首批至少 Windows + headless CI。
-- [ ] Build：建立 third-party dependency policy：允许、封装边界、ABI 暴露禁令、版本锁定。
-- [ ] Build：建立 generated/cooked/cache 目录约束，禁止源树污染。
-- [ ] Build：建立 `AstraBuildInfo`：版本、git commit、build config、feature flags、ABI version。
-- [ ] Build：建立 CLI 工具入口：`astra`，包含 validate、cook、package、run、inspect、doc-check。
-- [ ] Build：建立 sample project 目录规范：`Samples/NativeVN`, `Samples/RuntimeStress`, `Samples/PackageSmoke`。
-- [ ] Test：建立测试分类和命名：unit、integration、headless、smoke、stress、compat、release-gate。
+Phase 1 注记：当前已建立 runtime foundation targets、示例插件、Phase 1 tests、构建选项边界、`Astra_Tools` 和 `astra` foundation CLI。`validate`、`cook`、`package`、`run --headless-smoke`、`inspect`、`doc-check` 已覆盖 Phase 0/1 文档、Foundation smoke 和 `foundation_core_gate`；真实 asset cook、package launch、replay、full runtime release gate 仍归后续 Tools/Samples 阶段。
+
+- [x] Build：定义新顶层目标命名规则：`Astra_<Module>`、`Astra_<Tool>`、`Astra_<Sample>`、`Astra_<TestSuite>`。
+- [x] Build：拆分 runtime、editor、developer tools、samples、tests、plugins 的 CMake option。
+- [x] Build：建立 Debug、RelWithDebInfo、Release 三种默认配置和 artifact 输出规范。
+- [x] Build：建立 platform abstraction 层构建矩阵，首批至少 Windows + headless CI。
+- [x] Build：建立 third-party dependency policy：允许、封装边界、ABI 暴露禁令、版本锁定。
+- [x] Build：建立 generated/cooked/cache 目录约束，禁止源树污染。
+- [x] Build：建立 `AstraBuildInfo`：版本、git commit、build config、feature flags、ABI version。
+- [x] Build：建立 CLI 工具入口：`astra`，包含 validate、cook、package、run、inspect、doc-check。（Phase 1 为 foundation-only 实现。）
+- [x] Build：建立 sample project 目录规范：`Samples/NativeVN`, `Samples/RuntimeStress`, `Samples/PackageSmoke`。
+- [x] Test：建立测试分类和命名：unit、integration、headless、smoke、stress、compat、release-gate。
 
 验收：
 
@@ -52,18 +56,20 @@
 
 目标：建立稳定基础层，支撑 UE-class runtime 所需的诊断、配置、序列化、版本迁移和文档化 API。
 
-- [ ] Core：定义基础类型策略：固定宽度整数、UTF-8、path、span/string view、expected/result、error code。
-- [ ] Core：重建 diagnostics：category、severity、code、source location、context object、machine-readable payload。
-- [ ] Core：重建 logging：channel、sink、structured fields、runtime/editor/tool routing、file rotation。
-- [ ] Core：重建 assert/error policy：developer assert、recoverable runtime error、fatal error、release behavior。
-- [ ] Core：重建 config：project config、runtime config、platform overrides、module policy、release profile。
-- [ ] Core：重建 time：monotonic clock、game time、real time、fixed step、pausable timers、serialized timer state。
-- [ ] Core：重建 path/file utility：canonical project path、package path、user save path、cache path。
-- [ ] Core：实现 serialization framework：versioned document、schema id、migration registry、unknown field policy。
-- [ ] Core：实现 stable id framework：TypeId、PropertyId、AssetId、ActorId、ComponentId、EventTypeId。
-- [ ] Core：实现 telemetry/profiling marker API，不依赖 Editor。
-- [ ] Core：按 `docs/design/foundation-core-platform-property.md` 实现 diagnostics、config、serialization、stable id 和 PropertySystem contract。
-- [ ] Docs：编写 Core Programming Guide、Diagnostics Guide、Serialization/Migration Guide。
+Phase 1 注记：当前已实现 Core production Foundation gate slice：基础类型、`Result`、diagnostics、diagnostic code registry、release profile policy、logging sinks、assert/error policy facade、config layering/profile hash、release config resolve、time/path、versioned document/migration、unknown-field policy、stable IDs、profiling marker capture、build info 和 manual/API/CLI gate evidence。生产级外部 profiling backend export 仍属后续 hardening。
+
+- [x] Core：定义基础类型策略：固定宽度整数、UTF-8、path、span/string view、expected/result、error code。
+- [x] Core：重建 diagnostics：category、severity、code、source location、context object、machine-readable payload。
+- [x] Core：重建 logging：channel、sink、structured fields、runtime/editor/tool routing、file rotation。
+- [x] Core：重建 assert/error policy：developer assert、recoverable runtime error、fatal error、release behavior。
+- [x] Core：重建 config：project config、runtime config、platform overrides、module policy、release profile。
+- [x] Core：重建 time：monotonic clock、game time、real time、fixed step、pausable timers、serialized timer state。
+- [x] Core：重建 path/file utility：canonical project path、package path、user save path、cache path。
+- [x] Core：实现 serialization framework：versioned document、schema id、migration registry、unknown field policy。
+- [x] Core：实现 stable id framework：TypeId、PropertyId、AssetId、ActorId、ComponentId、EventTypeId。
+- [x] Core：实现 telemetry/profiling marker API，不依赖 Editor。
+- [x] Core：按 `docs/design/foundation-core-platform-property.md` 实现 diagnostics、config、serialization、stable id 和 PropertySystem contract。
+- [x] Docs：编写 Core Programming Guide、Diagnostics Guide、Serialization/Migration Guide。
 
 验收：
 
@@ -74,17 +80,19 @@
 
 目标：提供 runtime 可发布所需的平台抽象，同时 public API 不泄漏 SDL 或 OS handle。
 
-- [ ] Platform：定义 window service、monitor/DPI、clipboard、cursor、display mode。
-- [ ] Platform：定义 input service：keyboard、mouse、text input、gamepad、touch extension point。
-- [ ] Platform：定义 filesystem service：project mount、user save、cache、package read、watch。
-- [ ] Platform：定义 dynamic library service：load、symbol、version check、safe unload policy。
-- [ ] Platform：定义 thread service：worker pool、main thread dispatch、job tags、shutdown order。
-- [ ] Platform：定义 timer service：high-resolution time、sleep/yield、frame pacing hooks。
-- [ ] Platform：定义 crash/error hooks：minidump path、last log capture、fatal diagnostic packet。
-- [ ] Platform：实现 headless backend，作为 CI 和 server-style runtime 验证环境。
-- [ ] Platform：实现 SDL-backed backend，所有 SDL 类型限制在 private implementation。
-- [ ] Platform：按 `docs/design/foundation-core-platform-property.md` 实现 headless/SDL backend、filesystem/thread/timer/crash service contract。
-- [ ] Docs：编写 Platform Programming Guide 和 Backend Porting Guide。
+Phase 1 注记：当前已实现 Platform public service interfaces、headless backend、SDL-backed window backend compile path、filesystem/timer/thread/dynamic-library/crash service foundation、opaque dynamic library handles、file-watch polling、pending task tags、crash capture context 和 public header isolation tests。完整 input service、worker pool implementation、crash minidump 和 SDL sample 行为覆盖仍属后续阶段。
+
+- [x] Platform：定义 window service、monitor/DPI、clipboard、cursor、display mode。
+- [x] Platform：定义 input service：keyboard、mouse、text input、gamepad、touch extension point。
+- [x] Platform：定义 filesystem service：project mount、user save、cache、package read、watch。
+- [x] Platform：定义 dynamic library service：load、symbol、version check、safe unload policy。
+- [x] Platform：定义 thread service：worker pool、main thread dispatch、job tags、shutdown order。
+- [x] Platform：定义 timer service：high-resolution time、sleep/yield、frame pacing hooks。
+- [x] Platform：定义 crash/error hooks：minidump path、last log capture、fatal diagnostic packet。
+- [x] Platform：实现 headless backend，作为 CI 和 server-style runtime 验证环境。
+- [x] Platform：实现 SDL-backed backend，所有 SDL 类型限制在 private implementation。
+- [x] Platform：按 `docs/design/foundation-core-platform-property.md` 实现 headless/SDL backend、filesystem/thread/timer/crash service contract。
+- [x] Docs：编写 Platform Programming Guide 和 Backend Porting Guide。
 
 验收：
 
@@ -96,18 +104,20 @@
 
 目标：建立类似 UE module/plugin 体系的运行时扩展能力，但以 C ABI 和显式权限为稳定边界。
 
-- [ ] Module：实现 plugin descriptor schema：id、version、api range、modules、dependencies、capabilities、permissions、packaged eligibility。
-- [ ] Module：按 `docs/design/extension-and-module-system.md` 实现 descriptor validation、C ABI lifetime、ServiceRegistry、ExtensionRegistry、EngineModuleSlot contract。
-- [ ] Module：实现 descriptor validator，输出 machine-readable diagnostics。
-- [ ] Module：实现 dependency resolver：version range、load phase、optional dependency、cycle diagnostics。
-- [ ] Module：实现 C ABI：host API、module API、lifecycle、diagnostics、opaque handles。
-- [ ] Module：实现 ServiceRegistry：service id、capability view、permission gate、lifetime owner、resolve audit。
-- [ ] Module：实现 ExtensionRegistry：extension kind、descriptor payload、duplicate policy、query filter。
-- [ ] Module：实现 EngineModuleSlot：slot、provider、default provider、project selection、release policy。
-- [ ] Module：实现 module lifecycle：discover、validate、load、initialize、activate、deactivate、shutdown、unload。
-- [ ] Module：实现 binary hash、ABI version、packaged safety、release gate integration。
-- [ ] Module：实现 example runtime plugin、asset importer plugin、renderer provider plugin。
-- [ ] Docs：编写 Plugin Authoring Guide、Module ABI Reference、Engine Module Slot Guide。
+Phase 1 注记：当前已实现 descriptor parsing/validation、dependency resolver、C ABI、module lifecycle、service/extension/provider registry、service resolve audit、engine module slot policy validation、example foundation plugin load/unload test，以及 foundation release-gate binary/ABI/packaged-safety report。完整 semver range solver、hot reload、provider-specific contracts 和 plugin wizard 仍属后续阶段。
+
+- [x] Module：实现 plugin descriptor schema：id、version、api range、modules、dependencies、capabilities、permissions、packaged eligibility。
+- [x] Module：按 `docs/design/extension-and-module-system.md` 实现 descriptor validation、C ABI lifetime、ServiceRegistry、ExtensionRegistry、EngineModuleSlot contract。
+- [x] Module：实现 descriptor validator，输出 machine-readable diagnostics。
+- [x] Module：实现 dependency resolver：version range、load phase、optional dependency、cycle diagnostics。
+- [x] Module：实现 C ABI：host API、module API、lifecycle、diagnostics、opaque handles。
+- [x] Module：实现 ServiceRegistry：service id、capability view、permission gate、lifetime owner、resolve audit。
+- [x] Module：实现 ExtensionRegistry：extension kind、descriptor payload、duplicate policy、query filter。
+- [x] Module：实现 EngineModuleSlot：slot、provider、default provider、project selection、release policy。
+- [x] Module：实现 module lifecycle：discover、validate、load、initialize、activate、deactivate、shutdown、unload。
+- [x] Module：实现 binary hash、ABI version、packaged safety、release gate integration。（Phase 1 为 foundation release-gate checks。）
+- [x] Module：实现 example runtime plugin、asset importer plugin、renderer provider plugin。
+- [x] Docs：编写 Plugin Authoring Guide、Module ABI Reference、Engine Module Slot Guide。
 
 验收：
 
@@ -119,14 +129,16 @@
 
 目标：用轻量 PropertySystem 支撑 Inspector、schema、serialization、AI review、MCP field editing，而不复制 UE UObject。
 
-- [ ] Property：定义 TypeDescriptor、PropertyDescriptor、enum、struct、array、map、tagged union、asset ref、localized text。
-- [ ] Property：定义 flags：ai_editable、tool_generated、read_only、requires_review、runtime_only、editor_only。
-- [ ] Property：实现 default value、validation rule、range、regex、dependency、custom validator。
-- [ ] Property：实现 JSON Schema generation 和 schema versioning。
-- [ ] Property：实现 type migration：rename、split、merge、default injection、deprecated field。
-- [ ] Property：实现 inspector metadata：display name、category、tooltip、order、visibility condition。
-- [ ] Property：实现 diff/audit support，用于 Review Queue 和 Release Gate。
-- [ ] Docs：编写 Property System Guide、Schema Authoring Guide、Migration Cookbook。
+Phase 1 注记：当前已实现 TypeDescriptor、PropertyDescriptor、flags、defaults、validation metadata、inspector metadata、nested JSON Schema generation、type registry、custom validator registry、schema version graph、write policy、diff/audit output 和 migration helper。完整 Review Queue/Editor/MCP consumers 仍属后续阶段。
+
+- [x] Property：定义 TypeDescriptor、PropertyDescriptor、enum、struct、array、map、tagged union、asset ref、localized text。
+- [x] Property：定义 flags：ai_editable、tool_generated、read_only、requires_review、runtime_only、editor_only。
+- [x] Property：实现 default value、validation rule、range、regex、dependency、custom validator。
+- [x] Property：实现 JSON Schema generation 和 schema versioning。
+- [x] Property：实现 type migration：rename、split、merge、default injection、deprecated field。
+- [x] Property：实现 inspector metadata：display name、category、tooltip、order、visibility condition。
+- [x] Property：实现 diff/audit support，用于 Review Queue 和 Release Gate。
+- [x] Docs：编写 Property System Guide、Schema Authoring Guide、Migration Cookbook。
 
 验收：
 
@@ -138,16 +150,18 @@
 
 目标：重建公开 Actor/Component 对象模型，支持真实项目生命周期、Prefab、稳定存档和调试。
 
-- [ ] Scene：定义 World、Scene、Actor、Component 的 ownership 和 lifetime。
-- [ ] Scene：定义稳定 ActorId、ActorTypeId、ActorName、ActorHandle generation。
-- [ ] Scene：实现 actor lifecycle：spawn、activate、deactivate、destroy、deferred destroy、preview attach。
-- [ ] Scene：实现 component lifecycle：construct、default apply、validate、activate、deactivate、serialize、migrate。
+Phase 2 注记：当前已实现 foundation `Astra_Scene`：`ActorWorld`、stable Actor/Component DTO、`ComponentDescriptor`、generation-safe `ActorHandle`、spawn/activate/deactivate/destroy、foundation component descriptors、JSON component data、world snapshot/restore、missing actor reference diagnostics、headless local ECS pack 和 private EnTT-backed storage。EnTT 是 private implementation detail，不进入 public ABI、save ID、Editor/MCP contract 或 authoring model。完整 prefab/variant、deferred destroy、preview attach、component migration hardening 和 production inspector/debugger 仍属后续 completion。
+
+- [x] Scene：定义 World、Scene、Actor、Component 的 ownership 和 lifetime。（Phase 2 foundation：`ActorWorld` ownership。）
+- [x] Scene：定义稳定 ActorId、ActorTypeId、ActorName、ActorHandle generation。
+- [ ] Scene：实现 actor lifecycle：spawn、activate、deactivate、destroy、deferred destroy、preview attach。（Phase 2 foundation 覆盖 spawn/activate/deactivate/destroy；deferred destroy 和 preview attach 后续完成。）
+- [ ] Scene：实现 component lifecycle：construct、default apply、validate、activate、deactivate、serialize、migrate。（Phase 2 foundation 覆盖 `ComponentDescriptor`、default data 和 serialize；validation/migration hardening 后续完成。）
 - [ ] Scene：实现 prefab/defaults：base prefab、override、variant、nested prefab policy。
-- [ ] Scene：实现 Actor reference resolution：stable id、soft reference、missing target diagnostics。
-- [ ] Scene：实现 Tag、Lifetime、Transform2D、Blackboard、ControlPolicy、StateMachine 基础组件。
-- [ ] Scene：实现 local ECS pack boundary：sync-in、update、sync-out、snapshot，不暴露 entity。
-- [ ] Scene：实现 inspector snapshot：Actor tree、Component data、lifecycle state。
-- [ ] Docs：编写 Actor/Component Programming Guide、Prefab Guide、Scene Debugging Guide。
+- [ ] Scene：实现 Actor reference resolution：stable id、soft reference、missing target diagnostics。（Phase 2 foundation 覆盖 stable handle diagnostics 和 missing target diagnostics；soft reference repair 后续完成。）
+- [x] Scene：实现 Tag、Lifetime、Transform2D、Blackboard、ControlPolicy、StateMachine 基础组件。
+- [x] Scene：实现 local ECS pack boundary：sync-in、update、sync-out、snapshot，不暴露 entity。
+- [x] Scene：实现 inspector snapshot：Actor tree、Component data、lifecycle state。
+- [ ] Docs：编写 Actor/Component Programming Guide、Prefab Guide、Scene Debugging Guide。（Phase 2 foundation 提供 Actor/Component guide；Prefab/Scene Debugging 专页后续随 production 功能补齐。）
 
 验收：
 
@@ -159,18 +173,20 @@
 
 目标：建立 deterministic runtime 中心，支撑状态机、任务调度、事件、Director、Save/Replay。
 
-- [ ] Runtime：定义 deterministic tick model：fixed update、variable presentation update、frame index、event sequence。
-- [ ] Runtime：实现 RuntimeEvent：type id、category、source/target、sequence、timestamp policy、payload schema。
-- [ ] Runtime：实现 EventBus：immediate、queued、deferred、priority、subscription lifetime、trace hook。
-- [ ] Runtime：实现 StateMachineRuntime：definition asset、guard/action API、delayed event、timer、snapshot。
-- [ ] Runtime：实现 Blackboard：scope、typed value、schema、diff、save policy。
-- [ ] Runtime：实现 ControlPolicy：owner、channel、lock、interrupt、queue、reject、priority inheritance。
-- [ ] Runtime：实现 Director：global phase、timeline lock、choice lock、AI permission window、conflict arbitration.
+Phase 2 注记：当前已实现 foundation `Astra_Runtime`：`RuntimeWorld`、frame/fixed-step counters、RuntimeEvent DTO、immediate/queued/deferred EventBus、trace、actor-bound state-machine transition、ControlPolicy allow/queue/reject foundation、Director state、foundation save/load、RuntimeReplay DTO 和 deterministic stable hash smoke。完整 scheduler/coroutine、guard/action API、priority/subscription lifetime、presentation extraction、production replay mismatch 定位和 full Director arbitration 仍属后续 completion。
+
+- [ ] Runtime：定义 deterministic tick model：fixed update、variable presentation update、frame index、event sequence。（Phase 2 foundation 覆盖 frame/fixed-step/event sequence 和 stable hash；variable presentation 后续 Media/Runtime completion。）
+- [x] Runtime：实现 RuntimeEvent：type id、category、source/target、sequence、timestamp policy、payload schema。
+- [ ] Runtime：实现 EventBus：immediate、queued、deferred、priority、subscription lifetime、trace hook。（Phase 2 foundation 覆盖 immediate/queued/deferred/trace；priority/subscription lifetime 后续完成。）
+- [ ] Runtime：实现 StateMachineRuntime：definition asset、guard/action API、delayed event、timer、snapshot。（Phase 2 foundation 覆盖 registered definition 和 transition snapshot；guard/action/delayed timer 后续完成。）
+- [ ] Runtime：实现 Blackboard：scope、typed value、schema、diff、save policy。（Phase 2 foundation 覆盖 Blackboard component JSON 和 save；scope/schema/diff 后续完成。）
+- [ ] Runtime：实现 ControlPolicy：owner、channel、lock、interrupt、queue、reject、priority inheritance。（Phase 2 foundation 覆盖 allow/queue/reject decision；interrupt 和 priority inheritance 后续完成。）
+- [ ] Runtime：实现 Director：global phase、timeline lock、choice lock、AI permission window、conflict arbitration.（Phase 2 foundation 覆盖 Director state；conflict arbitration 后续完成。）
 - [ ] Runtime：实现 task/coroutine scheduler：cancellable task、wait event、wait time、wait asset、save state。
-- [ ] Runtime：实现 replay recorder/player：input/event/script/presentation hash comparison。
-- [ ] Runtime：实现 RuntimeWorld facade，组合 Scene、EventBus、StateMachine、Director、Scheduler。
-- [ ] Runtime：按 `docs/design/runtime-core.md` 实现 RuntimeEvent、Scheduler、StateMachine、Director、Save/Replay contract。
-- [ ] Docs：编写 Runtime Programming Guide、Event Guide、StateMachine Guide、Save/Replay Guide。
+- [ ] Runtime：实现 replay recorder/player：input/event/script/presentation hash comparison。（Phase 2 foundation 覆盖 RuntimeReplay DTO、event trace 和 state/event/presentation hash smoke；input/script/presentation comparison 和 mismatch 定位后续完成。）
+- [ ] Runtime：实现 RuntimeWorld facade，组合 Scene、EventBus、StateMachine、Director、Scheduler。（Phase 2 foundation 组合 Scene/EventBus/StateMachine/Director；Scheduler 后续完成。）
+- [ ] Runtime：按 `docs/design/runtime-core.md` 实现 RuntimeEvent、Scheduler、StateMachine、Director、Save/Replay contract。（Phase 2 foundation 覆盖 RuntimeEvent/StateMachine/Director/SaveReplay 基础；Scheduler 和 production contract 后续完成。）
+- [x] Docs：编写 Runtime Programming Guide、Event Guide、StateMachine Guide、Save/Replay Guide。
 
 验收：
 
@@ -182,16 +198,18 @@
 
 目标：实现生产级存档与回放，不只保存脚本 label 或变量。
 
-- [ ] Save：定义 save container：header、engine version、project version、module versions、schema versions。
-- [ ] Save：保存 World、Scene、Actor、Component、StateMachine、Blackboard、ControlPolicy、Director。
+Phase 2 注记：当前已实现 foundation save/load/replay：`astra.runtime.snapshot.v1` `VersionedDocument`、`astra.runtime.replay.v1` DTO、frame/fixed-step/event sequence、seed、world/actor/component/state-machine/blackboard/control-policy/director snapshot、runtime event trace 和 deterministic stable hash smoke。生产级 save header、module/schema version matrix、script/timeline/filter/resource/AI/module extension state、migration/integrity/compression 和 replay mismatch report 仍属后续 completion。
+
+- [ ] Save：定义 save container：header、engine version、project version、module versions、schema versions。（Phase 2 foundation 覆盖 snapshot schema/version；完整 header/version matrix 后续完成。）
+- [x] Save：保存 World、Scene、Actor、Component、StateMachine、Blackboard、ControlPolicy、Director。
 - [ ] Save：保存 ScriptRuntime state、Timeline state、FilterProfile state、resource overrides、random seed。
 - [ ] Save：保存 AI committed output 和 runtime intent audit reference。
 - [ ] Save：支持 module extension state，Legacy 仅作为 expansion extension state。
 - [ ] Save：实现 migration：snapshot schema migration、component migration、module state migration。
 - [ ] Save：实现 integrity：hash、compression option、diagnostics、partial failure policy。
-- [ ] Replay：记录 input、runtime events、script decisions、choice selections、committed AI output。
-- [ ] Replay：实现 deterministic comparison：state hash、event hash、presentation hash。
-- [ ] Docs：编写 Save Format Reference、Replay Debugging Guide、Migration Guide。
+- [ ] Replay：记录 input、runtime events、script decisions、choice selections、committed AI output。（Phase 2 foundation 覆盖 runtime event trace；input/script/choice/AI 后续完成。）
+- [x] Replay：实现 deterministic comparison：state hash、event hash、presentation hash。
+- [ ] Docs：编写 Save Format Reference、Replay Debugging Guide、Migration Guide。（Phase 2 foundation 提供 Save/Replay guide；格式参考、debugging、migration 专页后续补齐。）
 
 验收：
 
@@ -203,21 +221,23 @@
 
 目标：建立从 canonical source 到 cooked package 的完整内容管线。
 
-- [ ] Asset：实现 AssetId：native、virtual、foreign-*，稳定 parse、normalize、compare、hash。
-- [ ] Asset：实现 VFS：directory mount、package mount、read-only mount、mount priority、diagnostics。
-- [ ] Asset：实现 sidecar schema：id、type、source_path、display_name、tags、origin、license、cook、review、ai_generation。
-- [ ] Asset：实现 AssetRegistry：scan、dependency graph、generated registry、incremental invalidation。
+Phase 3 注记：当前已实现 `Astra_Asset` foundation slice：asset URI/ID 解析、VFS mount、sidecar DTO/validation、registry scan、dependency diagnostics、import preset/project template/review item DTO 和 watch invalidation plumbing。真实 importer/cooker/DDC/package reader、production hot reload rollback 和完整 Asset Release Gate 仍属 Phase 6 completion。
+
+- [x] Asset：实现 AssetId：native、virtual、foreign-*，稳定 parse、normalize、compare、hash。（Phase 3 foundation 覆盖 `AssetUri` 和 Core `AssetId` kind；生产级 package identity 后续完成。）
+- [x] Asset：实现 VFS：directory mount、package mount、read-only mount、mount priority、diagnostics。（Phase 3 foundation 覆盖 mount/resolve/read-only/priority；package reader mount 后续完成。）
+- [x] Asset：实现 sidecar schema：id、type、source_path、display_name、tags、origin、license、cook、review、ai_generation。（Phase 3 foundation 覆盖 DTO 和 validation。）
+- [x] Asset：实现 AssetRegistry：scan、dependency graph、generated registry、incremental invalidation。（Phase 3 foundation 覆盖 sidecar scan、hard dependency diagnostics 和 watch invalidation records；incremental cook invalidation 后续完成。）
 - [ ] Asset：实现 importer framework：image、audio、font、text、filter profile、script、timeline。
 - [ ] Asset：实现 cooker framework：source hash、settings hash、derived data key、output manifest。
 - [ ] Asset：实现 DerivedDataCache：local cache、clean policy、versioning、corruption recovery。
 - [ ] Asset：实现 package manifest：asset table、dependency table、module table、hash、release profile。
 - [ ] Asset：实现 package reader：streaming read、random access、diagnostics、mount.
 - [ ] Asset：实现 hot reload：asset/script/filter/timeline invalidation and rollback。
-- [ ] Asset：实现 project template descriptor：template id、runtime profile、default providers、seed content、wizard fields、acceptance commands。
-- [ ] Asset：实现 asset import preset schema：source extensions、asset type、sidecar defaults、cook defaults、license/review policy。
-- [ ] Asset：实现 AI draft sidecar 和 Review Queue item schema。
+- [x] Asset：实现 project template descriptor：template id、runtime profile、default providers、seed content、wizard fields、acceptance commands。（Phase 3 foundation DTO/validation。）
+- [x] Asset：实现 asset import preset schema：source extensions、asset type、sidecar defaults、cook defaults、license/review policy。（Phase 3 foundation DTO/validation。）
+- [x] Asset：实现 AI draft sidecar 和 Review Queue item schema。（Phase 3 foundation sidecar fields 和 review item DTO/validation。）
 - [ ] Asset：按 `docs/design/asset-pipeline.md` 实现 Importer、Cooker、DDC、Package Manifest、Hot Reload 和 Asset Release Gate contract。
-- [ ] Docs：编写 Asset Authoring Guide、Importer/Cooker Guide、Package Format Reference。
+- [x] Docs：编写 Asset Authoring Guide、Importer/Cooker Guide、Package Format Reference。（Phase 3 foundation manual covers authoring/VFS/sidecar; full cook/package references remain planned pages.)
 
 验收：
 
@@ -229,19 +249,21 @@
 
 目标：把 Media 从 DTO 记录提升为真实可执行 2D runtime backend，同时保留 headless 验证能力。
 
-- [ ] Media：定义 RHI-lite / Renderer2D abstraction：device、texture、target、batch、present，不暴露 native handle。
-- [ ] Media：实现 HeadlessRenderer2D：record command、hash output、frame capture metadata。
-- [ ] Media：实现 SDL or selected 2D backend：window surface、texture upload、sprite draw、UI rect、debug text。
+Phase 3 注记：当前已实现 `Astra_Media` foundation slice：PresentationCommand、RenderGraph/text/audio/filter DTO、FilterProfile validation/application、Renderer2D/TextLayout/Audio foundation provider descriptors、media release-gate foundation validation、HeadlessRenderer2D deterministic capture/hash 和 SDL renderer factory private compile-path stub。真实 image decode、font shaping、audio playback、GPU filter execution、timeline runtime 和 production provider replacement 仍属 Phase 7/10 completion。
+
+- [x] Media：定义 RHI-lite / Renderer2D abstraction：device、texture、target、batch、present，不暴露 native handle。（Phase 3 foundation 覆盖 DTO renderer facade/headless capture；真实 device/texture 后续完成。）
+- [x] Media：实现 HeadlessRenderer2D：record command、hash output、frame capture metadata。
+- [x] Media：实现 SDL or selected 2D backend：window surface、texture upload、sprite draw、UI rect、debug text。（Phase 3 foundation 仅实现 SDL private compile-path factory stub；真实 renderer 后续完成。）
 - [ ] Media：实现 image decode/cook path：PNG/JPEG/WebP policy、texture format、atlas option。
-- [ ] Media：实现 sprite batching：layer order、z/order key、state grouping、clip/scissor。
-- [ ] Media：实现 text/font：font asset、font atlas、fallback、basic shaping、localization-friendly layout。
-- [ ] Media：实现 audio：mixer、voice/music/SFX bus、streaming、volume routing、pause/resume、save state。
+- [x] Media：实现 sprite batching：layer order、z/order key、state grouping、clip/scissor。（Phase 3 foundation 覆盖 layer/order sorting；真实 batching/state grouping/clip 后续完成。）
+- [x] Media：实现 text/font：font asset、font atlas、fallback、basic shaping、localization-friendly layout。（Phase 3 foundation 覆盖 text layout request DTO/hash；真实 font atlas/shaping 后续完成。）
+- [x] Media：实现 audio：mixer、voice/music/SFX bus、streaming、volume routing、pause/resume、save state。（Phase 3 foundation 覆盖 logical audio command DTO/hash；真实 playback/mixer/save state 后续完成。）
 - [ ] Media：实现 video extension point，不阻塞 core runtime acceptance。
-- [ ] Media：实现 RenderGraph：extract、sort、execute、capture、diagnose。
-- [ ] Media：实现 executable FilterGraph：background、character、ui、text、final layer target。
+- [x] Media：实现 RenderGraph：extract、sort、execute、capture、diagnose。（Phase 3 foundation 覆盖 extract/sort/headless capture/diagnostics；真实 backend execute 后续完成。）
+- [x] Media：实现 executable FilterGraph：background、character、ui、text、final layer target。（Phase 3 foundation 覆盖 layer-aware validation/application records；GPU execution 后续完成。）
 - [ ] Media：实现 Timeline/Animation：keyframes、events、camera, easing、save/replay state。
-- [ ] Media：按 `docs/design/media-runtime.md` 实现 Renderer2D/TextLayout/Audio provider contract 和 media release gate。
-- [ ] Docs：编写 Renderer2D Guide、Text/Font Guide、Audio Guide、FilterGraph Guide、Timeline Guide。
+- [x] Media：按 `docs/design/media-runtime.md` 实现 Renderer2D/TextLayout/Audio provider contract 和 media release gate。（Phase 3 foundation 覆盖 provider descriptor validation、required slot selection、packaged/headless eligibility 和 CLI evidence；真实 backend provider replacement/release gate 后续完成。）
+- [x] Docs：编写 Renderer2D Guide、Text/Font Guide、Audio Guide、FilterGraph Guide、Timeline Guide。（Phase 3 foundation manual covers DTO/headless/filter; production backend guides remain planned sections.)
 
 验收：
 
@@ -253,16 +275,18 @@
 
 目标：建立稳定 ScriptRuntimeHost，确保脚本只能通过授权 API、RuntimeEvent 和 Presentation API 影响世界。
 
-- [ ] Script：定义 ScriptRuntimeHost：runtime registration、selection、load、step、run、debug、snapshot。
-- [ ] Script：定义 Script API surface：world query、event emit、presentation request、asset ref、save-safe state。
-- [ ] Script：实现 Astra Native Script parser：source location、diagnostics、label、jump、choice、variables、expressions。
-- [ ] Script：实现 AST/IR：stable command stream、schema、debug symbols、source map。
-- [ ] Script：实现 Lua runtime：sandbox、host API binding、permission, deterministic snapshot, debug hook。
-- [ ] Script：实现 ScriptEventBridge：script command -> RuntimeEvent/VNEvent/PresentationCommand。
+Phase 4 注记：当前已实现 `Astra_Script` foundation slice：`ScriptRuntimeHost`、provider descriptor、Native DSL parser、Lua provider via `sol2`、shared command stream、source location diagnostics、debug-symbol DTO、`ScriptSnapshot`、`ScriptEventBridge`、Native/Lua headless parity evidence。完整 debugger、hot reload rollback、Graph/Timeline compiler、production Lua continuation snapshot 和完整 Script API 权限系统仍属 Phase 8 completion。
+
+- [x] Script：定义 ScriptRuntimeHost：runtime registration、selection、load、step、run、debug、snapshot。（Phase 4 foundation 覆盖 provider selection、compile/run 和 snapshot DTO；step/debug 后续完成。）
+- [x] Script：定义 Script API surface：world query、event emit、presentation request、asset ref、save-safe state。（Phase 4 foundation 覆盖 event/presentation/asset ref/snapshot；world query 和完整权限 surface 后续完成。）
+- [x] Script：实现 Astra Native Script parser：source location、diagnostics、label、jump、choice、variables、expressions。（Phase 4 foundation 覆盖 label/jump/choice/set/get、asset URI 和诊断；完整 expression language 后续完成。）
+- [x] Script：实现 AST/IR：stable command stream、schema、debug symbols、source map。（Phase 4 foundation 覆盖 shared command DTO 和 debug-symbol DTO；完整 source map schema 后续完成。）
+- [x] Script：实现 Lua runtime：sandbox、host API binding、permission, deterministic snapshot, debug hook。（Phase 4 foundation 使用 `sol2` 和最小 `astra` host API；完整 sandbox policy、permission validator、continuation snapshot 和 debug hook 后续完成。）
+- [x] Script：实现 ScriptEventBridge：script command -> RuntimeEvent/VNEvent/PresentationCommand。（Phase 4 foundation 覆盖 Native/Lua 到 RuntimeEvent 和 PresentationCommand。）
 - [ ] Script：实现 hot reload：parse validate、state compatibility check、rollback on failure。
 - [ ] Script：实现 debugger hooks：breakpoint、step、inspect variable、call stack、current command。
 - [ ] Script：按 `docs/design/script-and-presentation.md` 实现 ScriptRuntimeHost、Native DSL、Lua、Graph/Timeline 和 PresentationCommand contract。
-- [ ] Docs：编写 Script Programming Guide、Native DSL Reference、Lua Host API Guide、Script Debugging Guide。
+- [ ] Docs：编写 Script Programming Guide、Native DSL Reference、Lua Host API Guide、Script Debugging Guide。（Phase 4 foundation covers Script、Native DSL、Lua Host API；debugging guide remains planned with debugger implementation。）
 
 验收：
 
@@ -274,16 +298,18 @@
 
 目标：在通用 runtime 之上重建 VN-first 垂直模块，不污染 Core。
 
-- [ ] Presentation：定义 presentation command schema：sprite、text、ui、audio、filter、camera、timeline。
+Phase 4 注记：当前已实现 `Astra_AstraVN` foundation slice：VN event schema、预设 Actor/Component/StateMachine、`VnSession`、`VnSessionSnapshot`、Native/Lua parity、headless presentation capture 和 save/restore evidence。完整 Presentation Library provider、Graph/Timeline integration、backlog、skip/auto、production package launch 和 production replay 仍属 Phase 8 completion。
+
+- [x] Presentation：定义 presentation command schema：sprite、text、ui、audio、filter、camera、timeline。（Phase 4 foundation 复用 `Astra_Media::PresentationCommand` 并覆盖 sprite/text/ui/audio/filter；camera/timeline 为 schema identifier。）
 - [ ] Presentation：定义 Presentation Library provider API，支持模块扩展。
-- [ ] AstraVN：定义 VN event schema：Background、Character、Dialogue、Choice、Audio、Timeline、Filter。
-- [ ] AstraVN：定义预置 Actor：Scene、StoryDirector、DialogueSystem、ChoiceSystem、AudioSystem、FilterSystem、Character、Camera。
-- [ ] AstraVN：定义预置 Component：character profile、emotion、dialogue participant、choice list、audio cue、camera、timeline。
-- [ ] AstraVN：定义预置 StateMachine：Dialogue、Choice、CharacterPresentation、Background、Audio、Timeline、FilterProfile。
+- [x] AstraVN：定义 VN event schema：Background、Character、Dialogue、Choice、Audio、Timeline、Filter。（Phase 4 foundation 也包含 Camera schema identifier。）
+- [x] AstraVN：定义预置 Actor：Scene、StoryDirector、DialogueSystem、ChoiceSystem、AudioSystem、FilterSystem、Character、Camera。（Phase 4 foundation 覆盖固定 `NativeVN` smoke preset。）
+- [x] AstraVN：定义预置 Component：character profile、emotion、dialogue participant、choice list、audio cue、camera、timeline。（Phase 4 foundation 覆盖 DTO descriptors；完整 inspector metadata 后续完成。）
+- [x] AstraVN：定义预置 StateMachine：Dialogue、Choice、CharacterPresentation、Background、Audio、Timeline、FilterProfile。（Phase 4 foundation 覆盖 basic event transitions；完整 route/lock/timeline state 后续完成。）
 - [ ] AstraVN：实现 VN graph/timeline integration，不只支持线性 DSL。
 - [ ] AstraVN：实现 choice lock、route state、dialogue history、backlog、skip/auto hooks。
-- [ ] AstraVN：实现 package-launchable native sample project。
-- [ ] Docs：编写 AstraVN Overview、Dialogue/Choice Guide、Character Presentation Guide、VN Sample Tutorial。
+- [ ] AstraVN：实现 package-launchable native sample project。（Phase 4 foundation 覆盖 `Samples/NativeVN` headless playable CLI smoke；真实 package launch 后续完成。）
+- [ ] Docs：编写 AstraVN Overview、Dialogue/Choice Guide、Character Presentation Guide、VN Sample Tutorial。（Phase 4 foundation covers AstraVN overview and sample evidence；production tutorial pages remain planned。）
 
 验收：
 
@@ -387,6 +413,8 @@ Shared safety：
 ## 17. Developer Tools, Release Gate And Observability Rebuild
 
 目标：建立 UE-class runtime 所需的工具链、验证门禁和可观测性。
+
+Phase 1/3/4 注记：`Astra_Tools` 和 `astra` 已实现 foundation-only `validate`、`cook`、`package`、`run --headless-smoke`、`inspect`、`doc-check`，并使用 CLI11、yaml-cpp、nlohmann_json、OpenSSL SHA-256、Lua、sol2 和 CTest/Catch2 提供证据。Phase 3 sample validate/headless smoke 会输出 Asset/Media/FilterGraph hash 和 media provider release-gate foundation evidence；Phase 4 NativeVN 会输出 Script/AstraVN headless evidence。下列条目描述的是完整 UE-class Tools/Release Gate/Observability 目标，仍需等待 Asset、RuntimeWorld、Script、Media、Replay 等系统实现后才能完成。
 
 - [ ] Tools：实现 `astra validate`：schema、descriptor、project config、asset refs、script compile。
 - [ ] Tools：实现 `astra cook`：incremental cook、DDC、package manifest、diagnostics。

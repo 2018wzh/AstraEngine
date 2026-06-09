@@ -1,5 +1,9 @@
 # 扩展与动态模块系统设计
 
+状态：Phase 1 Foundation Implemented / Target Architecture
+
+Phase 1 implementation note：当前工作树已实现 descriptor parsing/validation、dependency resolver、C ABI headers、`ModuleManager` lifecycle、`ServiceRegistry`、`ExtensionRegistry`、engine module provider registry、service resolve audit、engine module slot policy validation，以及 `Astra_ExampleFoundationPlugin` 的加载、注册、停用和卸载测试。`astra validate . --strict --json` 输出 Foundation module release-gate report，并包含模块 entrypoint binary existence 和 SHA-256 evidence。Plugin Wizard、hot reload 分层、provider-specific production contracts 和 Editor/AI/MCP provider 模板仍是后续阶段。
+
 ## 1. 目标
 
 AstraEngine 使用动态模块作为默认扩展模型。模块系统必须支持通用 2D 引擎能力、VN Presentation、AI Provider、运行时 Intent、Editor 扩展和 Cook/Package 工具，同时保持 Core 干净、ABI 稳定和发布可审计。旧 VN 模拟器、现代化滤镜和 Compatibility Inspector 属于 Legacy expansion track，必须在稳定 native runtime API 之上接入。

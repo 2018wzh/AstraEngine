@@ -1,7 +1,9 @@
 # Tools / Release Gate / Observability 设计
 
-状态：Target Architecture  
+状态：Phase 1 Foundation CLI / Target Architecture  
 定位：Astra 的 CLI、验证、Cook/Package、发布门禁、profiling、trace、crash/error report 和测试矩阵。
+
+Phase 1 implementation note：当前 `astra` 使用 CLI11 实现 foundation CLI：`--version`、`doc-check`、`validate`、`inspect`、foundation-only `cook`、`package`、`run --headless-smoke`。报告使用 JSON；`astra validate . --strict --json` 输出 `foundation_core_gate` artifact，包含 registered diagnostic-code gate、release config hash、unknown-field policy evidence、Property write/schema evidence、Module release-gate report 和插件 binary SHA-256。完整 asset cook/package/replay/full runtime release gate/trace/crash bundle 仍是后续目标。
 
 ## 1. 目标
 

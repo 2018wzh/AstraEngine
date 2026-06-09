@@ -1,0 +1,11 @@
+label opening
+bg native:/Backgrounds/Room
+show alice native:/Characters/Alice/Normal center
+say alice "Good morning from Phase 4." voice native:/Voice/Alice/opening_001
+audio music native:/Music/opening_theme
+filter native:/Filters/soft_vn
+choice "Walk together" -> route_walk
+
+label route_walk
+set route walk
+say alice "Let's go."

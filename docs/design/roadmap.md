@@ -43,6 +43,8 @@ UE `UObject` / UHT / GC 体系。
 交付：
 
 - 目标态设计文档和 ADR。
+- 面向使用者的 `docs/manual` 手册骨架。
+- Phase 0 文档检查脚本和 CI 门禁。
 - 顶层 CMake / vcpkg / 目录结构。
 - 编码规范。
 
@@ -50,34 +52,43 @@ UE `UObject` / UHT / GC 体系。
 
 - 新开发者能理解 AstraEngine 是模块化 2D 引擎，VN 是第一落地模块。
 - 文档明确 Core 不绑定 VN、Live2D、AI 或旧 VM。
+- `tools/doc-check.ps1` 验证手册页面、文档链接、设计入口和过期 legacy 措辞。
 
 非目标：
 
 - 不实现完整 runtime 功能。
+- 不实现 `astra` CLI、runtime sample、Editor 或 Foundation runtime target。
 
 ## 4. Phase 1：Foundation Core / Platform / Module / Property
 
+状态：Implemented production Foundation gate slice. 当前实现覆盖 Core、Platform、ModuleRuntime、PropertySystem、示例动态模块、`astra --version`、`foundation_core_gate`、registered diagnostic-code release policy、release config hash、opaque dynamic library handle、service resolve audit、engine module slot policy validation、module release-gate binary hash、Property schema version/write policy 和 Catch2/CTest 验证；完整 platform input、hot reload、provider-specific production contracts 和 plugin wizard 仍是后续阶段。
+
 目标：
 
-- 建立最小引擎基础层和动态模块边界。
+- 建立可审计的引擎基础层、动态模块边界和 Foundation release-gate 证据。
 
 交付：
 
-- Core foundation、logging、error、config、time、path。
-- Platform window/input/filesystem/timer/thread/dynamic library。
-- ModuleManager、ServiceRegistry、ExtensionRegistry、EngineModuleRegistry、C ABI。
-- PropertySystem 和 schema generation。
+- Core foundation、logging、error、config、time、path、diagnostic code registry、release policy 和 unknown-field migration policy。
+- Platform window/input/filesystem/timer/thread、opaque dynamic library handle、file-watch polling 和 crash capture context。
+- ModuleManager、ServiceRegistry resolve audit、ExtensionRegistry、EngineModuleRegistry policy validation、C ABI 和 module release-gate report。
+- PropertySystem nested schema generation、schema version graph、write policy、diff/audit output 和 migration helpers。
 
 验收：
 
-- 示例模块可加载、注册服务和扩展、停用卸载。
-- ABI 不暴露 C++ ownership、Actor 指针或 native handles。
+- 示例模块可加载、注册服务、扩展和 provider，停用并卸载。
+- ABI 不暴露 C++ ownership、Actor 指针或 native handles；public header isolation test 覆盖 SDL/OS/native handle 禁令。
+- Headless backend 可执行基础 filesystem/timer/thread/crash smoke。
+- PropertySystem 可生成 nested struct/array/map/tagged union JSON Schema、应用 defaults/validation、验证 schema version path 和执行 AI/editor/runtime/release 写入策略。
+- `astra validate . --strict --json` 输出 `foundation_core_gate.passed = true`，并包含 registered diagnostic codes、release config hash 和 module binary SHA-256。
 
 非目标：
 
-- 不承诺 production plugin ABI compatibility、完整 platform input 或发布门禁。
+- 不承诺完整 platform input、hot reload、provider-specific production contracts、plugin wizard 或 full runtime release gate。
 
 ## 5. Phase 2：Foundation Scene / Runtime
+
+状态：Implemented foundation slice. 当前实现覆盖 headless `Astra_Scene` 和 `Astra_Runtime`：`ActorWorld`、stable Actor/Component DTO、`ComponentDescriptor`、generation-safe handle、private EnTT-backed local storage、headless local ECS pack、`RuntimeWorld`、RuntimeEvent/EventBus、基础 StateMachine transition、Blackboard/ControlPolicy/Director foundation、foundation save/load、RuntimeReplay DTO 和 deterministic stable hash smoke。完整 lifecycle/prefab、production scheduler、timeline/resource/script/AI/module extension state 存档和 replay mismatch 定位仍属 Phase 5 及后续 production completion。
 
 目标：
 
@@ -98,8 +109,11 @@ UE `UObject` / UHT / GC 体系。
 非目标：
 
 - 不承诺完整 lifecycle、prefab、deterministic scheduler、timeline/resource/script state 存档。
+- EnTT 是 private implementation detail，不是 authoring model、ABI、save ID 或 Editor/MCP contract。
 
 ## 6. Phase 3：Foundation Asset / Media / FilterGraph
+
+状态：Implemented foundation slice. 当前实现覆盖 `Astra_Asset` 和 `Astra_Media`：asset URI/ID 解析、VFS mount、sidecar DTO/validation、registry scan、dependency diagnostics、import preset/project template/review item DTO、watch invalidation plumbing、PresentationCommand、RenderGraph/text/audio/filter DTO、FilterProfile validation/application、Renderer2D/TextLayout/Audio foundation provider descriptors、media release-gate foundation validation、HeadlessRenderer2D deterministic capture/hash，以及 SDL renderer factory private compile-path stub。真实 image decode、font shaping、audio playback、GPU filter execution、cook/package 和 package launch 仍属 Phase 6/7 production completion。
 
 目标：
 
@@ -123,6 +137,8 @@ UE `UObject` / UHT / GC 体系。
 - 不实现真实 image decode、font rasterization/text shaping、audio playback、GPU filter execution、cook/package。
 
 ## 7. Phase 4：Foundation ScriptRuntimeHost / AstraVN
+
+状态：Implemented foundation slice. 当前实现覆盖 `Astra_Script` 和 `Astra_AstraVN`：`ScriptRuntimeHost`、Native DSL parser、Lua provider via `sol2`、shared command stream、source diagnostics、debug-symbol DTO、`ScriptSnapshot`、`ScriptEventBridge`、VN event schema、预设 Actor/Component/StateMachine、`VnSession`、`VnSessionSnapshot`、Native/Lua parity headless hashes、NativeVN CLI smoke 和 save/restore evidence。完整脚本语言、debugger、hot reload、Graph/Timeline、真实 media backend、production package launch 和 production replay 仍属后续 completion。
 
 目标：
 

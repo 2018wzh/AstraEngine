@@ -83,7 +83,7 @@ Host API example：
 
 ```cpp
 struct AstraScriptHostApi {
-    AstraResult (*emit_event)(AstraScriptContext*, const AstraRuntimeEventDesc*);
+    AstraResult (*emit_event)(AstraScriptContext*, const AstraScriptEventDesc*);
     AstraResult (*request_presentation)(AstraScriptContext*, const AstraPresentationCommandDesc*);
     AstraResult (*get_actor_snapshot)(AstraScriptContext*, AstraActorId, AstraActorSnapshot*);
     AstraResult (*blackboard_get)(AstraScriptContext*, AstraBlackboardKey, AstraValue*);

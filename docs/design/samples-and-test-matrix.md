@@ -1,7 +1,9 @@
 # Samples And Test Matrix 设计
 
-状态：Target Architecture  
+状态：Phase 1 Foundation Scaffold / Target Architecture  
 定位：用样例项目和测试矩阵证明 AstraEngine 的 UE-class 2D runtime 完备度。样例不是演示摆设，而是 release gate、文档、CLI、Editor 和 Runtime 的共同验收载体。
+
+Phase 1 implementation note：当前已建立 `Samples/NativeVN`、`Samples/RuntimeStress`、`Samples/PackageSmoke` 的 foundation-only descriptor。`PackageSmoke` 可通过 `astra validate/package/run --headless-smoke` 证明 Phase 1 headless platform 和 example module lifecycle；真实 content、asset cooking、package launch、replay 和 media output 仍是后续阶段。
 
 ## 1. 目标
 

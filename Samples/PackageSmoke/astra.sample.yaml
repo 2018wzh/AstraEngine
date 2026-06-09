@@ -1,0 +1,11 @@
+schema: astra.sample.v1
+id: astra.sample.package_smoke
+display_name: PackageSmoke
+phase: 3
+foundation_only: true
+status: foundation-smoke
+description: Exercises foundation headless platform, example module load/unload, and Phase 3 Asset/Media/FilterGraph headless smoke only.
+acceptance:
+  - astra validate Samples/PackageSmoke --strict
+  - astra package Samples/PackageSmoke --profile development
+  - astra run Samples/PackageSmoke --headless-smoke

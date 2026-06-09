@@ -1,0 +1,22 @@
+id: astra.plugin.phase1_example
+display_name: Phase 1 Example Foundation Plugin
+version: 0.1.0
+astra_api: ">=0.1 <0.2"
+modules:
+  - id: phase1.example.runtime
+    type: runtime
+    entrypoint: Bin/win64/$<TARGET_FILE_NAME:Astra_ExampleFoundationPlugin>
+    load_phase: runtime_startup
+    capabilities:
+      - service_provider
+      - asset_importer
+      - renderer2d_provider
+      - engine_module_provider
+    permissions:
+      runtime:
+        packaged: true
+release:
+  packaged_eligible: true
+  require_binary_hash: false
+diagnostics:
+  code_prefix: ASTRA_PHASE1_EXAMPLE
