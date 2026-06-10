@@ -1,0 +1,18 @@
+id: native:/Voice/Alice/opening_001
+schema: astra.asset.sidecar.v1
+type: audio
+source_path: opening_001.foundation.txt
+display_name: Alice Opening Voice 001
+tags: [voice, alice, nativevn]
+origin: HumanAuthored
+license:
+  owner: project
+  usage: internal
+  source: synthetic_placeholder
+review:
+  status: accepted
+cook:
+  preset: voice
+dependencies:
+  hard: []
+  soft: []

@@ -1,6 +1,6 @@
 # AstraEngine Manual
 
-Status: Phase 4 manual scaffold. Foundation Core, Platform, ModuleRuntime, and PropertySystem now include production Foundation gate evidence; Scene, Runtime, Asset, Media, Script, AstraVN, the example plugin, and foundation CLI workflows are implemented as foundation slices. Production Editor, AI/MCP, Legacy, full package/replay, and production backend workflows are planned.
+Status: NativeVN runtime evidence scaffold. Foundation Core, Platform, ModuleRuntime, and PropertySystem now include production Foundation gate evidence; Scene, Runtime, Asset, Media, Script, AstraVN, the example plugin, and foundation CLI workflows are implemented as foundation slices. Engine libraries are dynamic-only `Astra*` DLLs. `Samples/NativeVN` now has source asset sidecars, package manifest evidence, package launch smoke, and golden replay comparison evidence. Production Editor, AI/MCP, Legacy, real binary asset cooking, full release gates, and production backend workflows are planned.
 
 ## Overview
 
@@ -14,6 +14,7 @@ This manual is the user-facing documentation root for AstraEngine. It complement
 - Dynamic modules and C ABI are the default project extension boundary.
 - Phase 1 provides a production Foundation gate slice for Core, Platform, ModuleRuntime, and PropertySystem, including `foundation_core_gate` CLI evidence.
 - Phase 2-4 provide executable foundations for Scene, Runtime, Asset, Media, ScriptRuntimeHost, and AstraVN.
+- NativeVN runtime evidence covers `validate -> cook -> package -> run --headless-smoke -> replay --compare -> inspect` for the current source-sidecar package workflow.
 
 ## Architecture
 
@@ -30,15 +31,15 @@ Start with:
 
 ## API Reference
 
-Foundation public headers exist for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Asset, Media, Script, and AstraVN. API pages index those headers, including the Phase 1 Foundation gate APIs, and keep later production runtime contracts marked planned.
+Foundation public headers exist for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Asset, Media, Script, AstraVN, and Tools. API pages index those headers, including generated dynamic-library export headers, the Phase 1 Foundation gate APIs, NativeVN package/replay evidence DTOs, and later production runtime contracts marked planned.
 
 ## Examples
 
-Foundation samples live under `Samples/NativeVN`, `Samples/RuntimeStress`, and `Samples/PackageSmoke`. See [Samples](samples/README.md) for target workflows and current status.
+Foundation samples live under `Samples/NativeVN`, `Samples/RuntimeStress`, and `Samples/PackageSmoke`. `NativeVN` currently carries the runtime package/replay evidence slice. See [Samples](samples/README.md) for target workflows and current status.
 
 ## Troubleshooting
 
-If a page describes a final release command such as `astra replay`, treat it as target acceptance unless the page explicitly marks it implemented. Current validation covers CMake configure/build, `Astra_Phase1Tests`, the example foundation plugin load path, `astra --version`, `astra validate`, `foundation_core_gate`, foundation `cook/package/run --headless-smoke`, Phase 4 NativeVN headless evidence, and `tools/doc-check.ps1`.
+If a page describes a final release command, check whether it is listed as current evidence or target acceptance. Current validation covers CMake configure/build, `AstraPhase1Tests`, the example foundation plugin load path, `astra --version`, `astra validate`, `foundation_core_gate`, dynamic engine DLL evidence, NativeVN `cook/package/run --headless-smoke/replay --compare/inspect` evidence, and `tools/doc-check.ps1`.
 
 ## Manual Sections
 

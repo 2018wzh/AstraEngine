@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Astra/Core/Export.hpp>
+
 #include <string>
 #include <vector>
 
@@ -19,9 +21,9 @@ struct BuildInfo {
     bool headless_backend_enabled = false;
     bool sdl_backend_enabled = false;
 
-    [[nodiscard]] std::vector<std::string> EnabledFeatures() const;
+    [[nodiscard]] ASTRA_CORE_API std::vector<std::string> EnabledFeatures() const;
 };
 
-BuildInfo GetBuildInfo();
+ASTRA_CORE_API BuildInfo GetBuildInfo();
 
 } // namespace Astra::Core

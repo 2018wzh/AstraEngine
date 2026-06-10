@@ -1,0 +1,2 @@
+Foundation placeholder for NativeVN room background.
+This text source stands in for binary image content until the real media backend and binary cook processors land.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Astra/Core/Export.hpp>
 #include <Astra/Core/Types.hpp>
 #include <nlohmann/json.hpp>
 
@@ -36,7 +37,7 @@ struct ResolvedConfig {
     bool user_overrides_included = true;
 };
 
-class ConfigStack {
+class ASTRA_CORE_API ConfigStack {
 public:
     void AddLayer(ConfigLayer layer);
     [[nodiscard]] nlohmann::json Resolve(bool include_user_overrides = true) const;
@@ -48,9 +49,9 @@ private:
     std::vector<ConfigLayer> layers_;
 };
 
-void MergeJsonObject(nlohmann::json& target, const nlohmann::json& overlay);
-[[nodiscard]] std::string ToString(ConfigScope scope);
-[[nodiscard]] std::string ToString(ConfigResolveProfile profile);
-[[nodiscard]] nlohmann::json ToJson(const ResolvedConfig& config);
+ASTRA_CORE_API void MergeJsonObject(nlohmann::json& target, const nlohmann::json& overlay);
+[[nodiscard]] ASTRA_CORE_API std::string ToString(ConfigScope scope);
+[[nodiscard]] ASTRA_CORE_API std::string ToString(ConfigResolveProfile profile);
+[[nodiscard]] ASTRA_CORE_API nlohmann::json ToJson(const ResolvedConfig& config);
 
 } // namespace Astra::Core

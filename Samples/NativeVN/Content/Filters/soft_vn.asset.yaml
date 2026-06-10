@@ -1,0 +1,20 @@
+id: native:/Filters/soft_vn
+schema: astra.asset.sidecar.v1
+type: filter_profile
+source_path: soft_vn.filter.yaml
+display_name: Soft VN Filter Profile
+tags: [filter, nativevn]
+origin: HumanAuthored
+license:
+  owner: project
+  usage: internal
+  source: synthetic_placeholder
+review:
+  status: accepted
+cook:
+  preset: filter_profile
+dependencies:
+  hard:
+    - native:/Backgrounds/Room
+    - native:/Characters/Alice/Normal
+  soft: []

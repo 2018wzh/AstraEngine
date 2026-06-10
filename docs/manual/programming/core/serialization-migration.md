@@ -26,7 +26,7 @@ Use `Astra/Core/Serialization.hpp`.
 
 ## Examples
 
-`Astra_Phase1Tests` includes sequential migration and preserve/warn/error/drop unknown-field policy examples.
+`AstraPhase1Tests` includes sequential migration and preserve/warn/error/drop unknown-field policy examples.
 
 ## Troubleshooting
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Astra/AstraVN/Export.hpp>
 #include <Astra/Core/Diagnostics.hpp>
 #include <Astra/Core/Serialization.hpp>
 #include <Astra/Core/StableId.hpp>
@@ -43,7 +44,7 @@ struct VnSessionSnapshot {
     Astra::Runtime::RuntimeHashes hashes;
 };
 
-class VnSession {
+class ASTRA_ASTRAVN_API VnSession {
 public:
     explicit VnSession(Astra::Core::u64 seed = 0);
     VnSession(VnSession&&) noexcept;
@@ -71,14 +72,14 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-[[nodiscard]] std::vector<VnEventSchema> FoundationEventSchemas();
-[[nodiscard]] std::vector<Astra::Scene::ActorDescriptor> FoundationActorPresets();
-[[nodiscard]] std::vector<Astra::Scene::ComponentDescriptor> FoundationComponentPresets();
-[[nodiscard]] std::vector<Astra::Runtime::StateMachineDefinition> FoundationStateMachines();
-[[nodiscard]] VnFoundationProfile FoundationProfile();
-[[nodiscard]] Astra::Media::FilterProfile FoundationFilterProfile();
-[[nodiscard]] nlohmann::json ToJson(const VnEventSchema& schema);
-[[nodiscard]] nlohmann::json ToJson(const VnFoundationProfile& profile);
-[[nodiscard]] nlohmann::json ToJson(const VnSessionSnapshot& snapshot);
+[[nodiscard]] ASTRA_ASTRAVN_API std::vector<VnEventSchema> FoundationEventSchemas();
+[[nodiscard]] ASTRA_ASTRAVN_API std::vector<Astra::Scene::ActorDescriptor> FoundationActorPresets();
+[[nodiscard]] ASTRA_ASTRAVN_API std::vector<Astra::Scene::ComponentDescriptor> FoundationComponentPresets();
+[[nodiscard]] ASTRA_ASTRAVN_API std::vector<Astra::Runtime::StateMachineDefinition> FoundationStateMachines();
+[[nodiscard]] ASTRA_ASTRAVN_API VnFoundationProfile FoundationProfile();
+[[nodiscard]] ASTRA_ASTRAVN_API Astra::Media::FilterProfile FoundationFilterProfile();
+[[nodiscard]] ASTRA_ASTRAVN_API nlohmann::json ToJson(const VnEventSchema& schema);
+[[nodiscard]] ASTRA_ASTRAVN_API nlohmann::json ToJson(const VnFoundationProfile& profile);
+[[nodiscard]] ASTRA_ASTRAVN_API nlohmann::json ToJson(const VnSessionSnapshot& snapshot);
 
 } // namespace Astra::AstraVN

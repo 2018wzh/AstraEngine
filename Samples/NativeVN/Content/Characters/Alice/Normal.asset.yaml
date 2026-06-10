@@ -1,0 +1,18 @@
+id: native:/Characters/Alice/Normal
+schema: astra.asset.sidecar.v1
+type: image
+source_path: Normal.foundation.txt
+display_name: Alice Normal
+tags: [character, alice, nativevn]
+origin: HumanAuthored
+license:
+  owner: project
+  usage: internal
+  source: synthetic_placeholder
+review:
+  status: accepted
+cook:
+  preset: sprite
+dependencies:
+  hard: []
+  soft: []

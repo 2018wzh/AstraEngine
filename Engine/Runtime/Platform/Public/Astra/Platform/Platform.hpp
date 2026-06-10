@@ -2,6 +2,7 @@
 
 #include <Astra/Core/Diagnostics.hpp>
 #include <Astra/Core/Types.hpp>
+#include <Astra/Platform/Export.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -134,14 +135,14 @@ struct CrashCaptureContext {
     std::vector<std::string> recent_logs;
 };
 
-class ICrashService {
+class ASTRA_PLATFORM_API ICrashService {
 public:
     virtual ~ICrashService() = default;
     [[nodiscard]] CrashPacket Capture(std::string_view build_info, const Astra::Core::DiagnosticSink& diagnostics) const;
     [[nodiscard]] virtual CrashPacket Capture(CrashCaptureContext context, const Astra::Core::DiagnosticSink& diagnostics) const = 0;
 };
 
-class PlatformServices {
+class ASTRA_PLATFORM_API PlatformServices {
 public:
     PlatformServices();
     ~PlatformServices();
@@ -179,11 +180,11 @@ private:
     };
     std::unique_ptr<Impl> impl_;
 
-    friend PlatformServices CreateHeadlessPlatform();
-    friend Astra::Core::Result<PlatformServices> CreateSdlPlatform(Astra::Core::DiagnosticSink& diagnostics);
+    friend ASTRA_PLATFORM_API PlatformServices CreateHeadlessPlatform();
+    friend ASTRA_PLATFORM_API Astra::Core::Result<PlatformServices> CreateSdlPlatform(Astra::Core::DiagnosticSink& diagnostics);
 };
 
-[[nodiscard]] PlatformServices CreateHeadlessPlatform();
-[[nodiscard]] Astra::Core::Result<PlatformServices> CreateSdlPlatform(Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_PLATFORM_API PlatformServices CreateHeadlessPlatform();
+[[nodiscard]] ASTRA_PLATFORM_API Astra::Core::Result<PlatformServices> CreateSdlPlatform(Astra::Core::DiagnosticSink& diagnostics);
 
 } // namespace Astra::Platform

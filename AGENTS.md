@@ -42,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/doc-check.ps1
 
 ## Coding Style & Naming Conventions
 
-Use C++23 and the repository `.clang-format`. Public headers should live in `Public/Astra/<ModuleName>/`; implementations belong in `Private/`. CMake targets use `Astra_<ModuleName>` for libraries, `Astra_<Name>` for tests, and plain executable names for future programs such as `astra`.
+Use C++23 and the repository `.clang-format`. Public headers should live in `Public/Astra/<ModuleName>/`; implementations belong in `Private/`. CMake targets use `Astra<ModuleName>` for libraries, `Astra<Name>` for tests, and plain executable names for future programs such as `astra`.
 
 Implementation style is modern C++23 / std-first engine code, not UE C++ clone. Prefer standard library containers, views, filesystem, chrono, RAII ownership, focused DTOs, stable IDs, explicit service interfaces, and Astra `Result`/diagnostics. Do not introduce UE-like replacements such as `TArray`, `TMap`, `FString`, `FName`, `UObject`, `UCLASS`, `UPROPERTY`, GC semantics, or macro-driven public object models.
 

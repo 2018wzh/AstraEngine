@@ -27,7 +27,7 @@ Use `Astra/Core/Diagnostics.hpp`.
 
 ## Examples
 
-`Astra_Phase1Tests` verifies JSON serialization, release-blocking severity behavior, registered-code thresholds, and unregistered-code rejection. `astra validate . --strict --json` emits the `foundation_core_gate.gate_report` artifact.
+`AstraPhase1Tests` verifies JSON serialization, release-blocking severity behavior, registered-code thresholds, and unregistered-code rejection. `astra validate . --strict --json` emits the `foundation_core_gate.gate_report` artifact.
 
 ## Troubleshooting
 

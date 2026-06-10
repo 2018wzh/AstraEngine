@@ -5,7 +5,7 @@ astra_api: ">=0.1 <0.2"
 modules:
   - id: phase1.example.runtime
     type: runtime
-    entrypoint: Bin/win64/$<TARGET_FILE_NAME:Astra_ExampleFoundationPlugin>
+    entrypoint: Bin/win64/$<TARGET_FILE_NAME:AstraExampleFoundationPlugin>
     load_phase: runtime_startup
     capabilities:
       - service_provider

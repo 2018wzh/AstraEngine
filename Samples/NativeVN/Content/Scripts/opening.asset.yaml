@@ -1,0 +1,23 @@
+id: native:/Scripts/opening
+schema: astra.asset.sidecar.v1
+type: script.native
+source_path: opening.astra
+display_name: NativeVN Opening Native DSL
+tags: [script, nativevn]
+origin: HumanAuthored
+license:
+  owner: project
+  usage: internal
+  source: project
+review:
+  status: accepted
+cook:
+  preset: native_script
+dependencies:
+  hard:
+    - native:/Backgrounds/Room
+    - native:/Characters/Alice/Normal
+    - native:/Voice/Alice/opening_001
+    - native:/Music/opening_theme
+    - native:/Filters/soft_vn
+  soft: []

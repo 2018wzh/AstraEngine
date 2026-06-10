@@ -1,6 +1,6 @@
 # Systems
 
-Status: Phase 4 scaffold. Foundation diagnostics, platform services, module loading, property schema generation, Scene, Runtime, Save/Replay snapshots, Asset sidecars/VFS/registry, Media provider release-gate checks, Media headless verification, ScriptRuntimeHost, Lua/Native DSL bridge, and AstraVN headless session evidence have executable implementations; production Asset/Media/Script/AstraVN/full Release Gate systems are planned.
+Status: NativeVN runtime evidence scaffold. Foundation diagnostics, platform services, module loading, property schema generation, dynamic engine DLL evidence, Scene, Runtime, Save/Replay snapshots, Asset sidecars/VFS/registry/dependency graph, DDC metadata DTOs, local DDC artifact execution/reuse/corruption recovery, embedded package payloads, PackageReader random-access/chunked-read/mount evidence, package/cook/payload integrity diagnostics, NativeVN cook/package/replay reports, Media provider release-gate checks, mature media backend capability reports, image metadata decode smoke, Media headless verification, ScriptRuntimeHost, Lua/Native DSL bridge, and AstraVN headless session evidence have executable implementations; production binary Asset/Media/Script/AstraVN/full Release Gate systems are planned.
 
 ## Overview
 
@@ -47,13 +47,13 @@ Future system pages should include inputs, outputs, diagnostics, release-gate ch
 
 ## API Reference
 
-Foundation system APIs are implemented for diagnostics, platform services, module registries, property schema generation, Scene, Runtime, Save snapshots, replay hash smoke, VFS, AssetRegistry scans, PresentationCommand DTOs, headless Renderer2D capture, TextLayout request DTOs, Audio command DTOs, FilterProfile validation, foundation media provider release-gate reports, ScriptRuntimeHost, ScriptEventBridge, and VnSession. Planned references include production importer/cooker/package reader, real Renderer2D provider, TextLayout provider, Audio provider, production Save container, production Replay stream, Script debugger, Graph/Timeline, and production AstraVN package launch.
+Foundation system APIs are implemented for diagnostics, platform services, module registries, property schema generation, Scene, Runtime, Save containers, replay hash comparison, VFS, AssetRegistry scans, dependency graph reports, cook/package manifests, DDC metadata entries, local DDC artifact execution, embedded package payload entries, PackageReader bytes/text/chunked reads and mount DTOs, package reader integrity diagnostics, PresentationCommand DTOs, headless Renderer2D capture, TextLayout request DTOs, Audio command DTOs, FilterProfile validation, media backend capability reports, image metadata inspect reports, foundation media provider release-gate reports, ScriptRuntimeHost, ScriptEventBridge, and VnSession. Planned references include production media-transform importer/cooker execution, real Renderer2D provider, TextLayout provider, Audio provider, production Replay stream, Script debugger, Graph/Timeline, and production AstraVN package launch.
 
 ## Examples
 
-Current examples include validating an asset sidecar in tests, headless media hash verification through `astra run --headless-smoke`, and NativeVN Phase 4 script/VN evidence. Planned examples include production cooking and replay mismatch reporting.
+Current examples include validating asset sidecars in tests, NativeVN AssetRegistry/dependency graph evidence, DDC artifact emission/reuse/corruption recovery, media backend capability evidence through `astra validate`, headless media hash verification through `astra run --headless-smoke`, NativeVN package manifest generation, embedded payload read/chunk/mount smoke, package integrity checks, package launch smoke, and golden replay comparison. Planned examples include production binary media cooking, real media execution backend verification, and richer replay mismatch localization.
 
 ## Troubleshooting
 
-- Treat `astra replay` and full asset/media release commands as target commands until those systems exist; current `astra validate`, `cook`, `package`, and `run --headless-smoke` remain foundation-only.
+- Treat full binary asset/media release commands as target commands until those systems exist; current NativeVN `validate`, `cook`, `package`, `run --headless-smoke`, `replay --compare`, and `inspect` are evidence-slice workflows, not proof of production media/backend completion.
 - Release evidence must be current command output, not design intent.

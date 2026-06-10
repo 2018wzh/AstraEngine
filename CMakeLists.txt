@@ -119,7 +119,7 @@ if(ASTRA_BUILD_DOC_CHECK)
         REQUIRED
     )
 
-    add_custom_target(Astra_DocCheck
+    add_custom_target(AstraDocCheck
         COMMAND
             "${ASTRA_POWERSHELL_EXECUTABLE}"
             -NoProfile
@@ -136,7 +136,7 @@ if(ASTRA_BUILD_DOC_CHECK)
 
     if(BUILD_TESTING)
         add_test(
-            NAME Astra_DocCheck
+            NAME AstraDocCheck
             COMMAND
                 "${ASTRA_POWERSHELL_EXECUTABLE}"
                 -NoProfile

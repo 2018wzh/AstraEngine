@@ -12,6 +12,6 @@ set(ASTRA_CORE_SOURCES
     "${CMAKE_BINARY_DIR}/Generated/AstraBuildInfo.cpp"
 )
 
-astra_add_library(Astra_Core ${ASTRA_CORE_SOURCES})
-target_link_libraries(Astra_Core PUBLIC nlohmann_json::nlohmann_json)
-target_compile_definitions(Astra_Core PRIVATE ASTRA_BUILD_CONFIG="$<CONFIG>")
+astra_add_library(AstraCore ${ASTRA_CORE_SOURCES})
+target_link_libraries(AstraCore PUBLIC nlohmann_json::nlohmann_json)
+target_compile_definitions(AstraCore PRIVATE ASTRA_BUILD_CONFIG="$<CONFIG>")

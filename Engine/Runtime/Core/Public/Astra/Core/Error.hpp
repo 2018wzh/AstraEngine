@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Astra/Core/Diagnostics.hpp>
+#include <Astra/Core/Export.hpp>
 
 #include <string>
 #include <string_view>
@@ -25,7 +26,7 @@ struct ErrorReport {
     Diagnostic diagnostic;
 };
 
-class ErrorReporter {
+class ASTRA_CORE_API ErrorReporter {
 public:
     explicit ErrorReporter(ErrorPolicy policy = {});
 

@@ -2,6 +2,7 @@
 
 #include <Astra/Core/Diagnostics.hpp>
 #include <Astra/ModuleRuntime/ModuleAbi.h>
+#include <Astra/ModuleRuntime/Export.hpp>
 #include <Astra/Platform/Platform.hpp>
 #include <nlohmann/json.hpp>
 
@@ -105,7 +106,7 @@ struct ModuleReleaseGateReport {
     nlohmann::json modules = nlohmann::json::array();
 };
 
-class ServiceRegistry {
+class ASTRA_MODULE_RUNTIME_API ServiceRegistry {
 public:
     [[nodiscard]] Astra::Core::Result<void> Register(RegisteredService service);
     [[nodiscard]] const RegisteredService* Find(std::string_view service_id) const;
@@ -116,7 +117,7 @@ private:
     std::vector<RegisteredService> services_;
 };
 
-class ExtensionRegistry {
+class ASTRA_MODULE_RUNTIME_API ExtensionRegistry {
 public:
     [[nodiscard]] Astra::Core::Result<void> Register(RegisteredExtension extension);
     [[nodiscard]] const std::vector<RegisteredExtension>& Extensions() const;
@@ -125,7 +126,7 @@ private:
     std::vector<RegisteredExtension> extensions_;
 };
 
-class EngineModuleRegistry {
+class ASTRA_MODULE_RUNTIME_API EngineModuleRegistry {
 public:
     [[nodiscard]] Astra::Core::Result<void> RegisterSlot(RegisteredSlot slot);
     [[nodiscard]] Astra::Core::Result<void> RegisterProvider(RegisteredProvider provider);
@@ -138,14 +139,14 @@ private:
     std::vector<RegisteredProvider> providers_;
 };
 
-[[nodiscard]] Astra::Core::Result<PluginDescriptor> LoadPluginDescriptor(const std::filesystem::path& path, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] Astra::Core::Result<void> ValidatePluginDescriptor(const PluginDescriptor& descriptor, const std::filesystem::path& plugin_root, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] Astra::Core::Result<std::vector<std::string>> ResolveModuleOrder(const PluginDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] Astra::Core::Result<ModuleReleaseGateReport> ValidateModuleReleaseGate(const PluginDescriptor& descriptor, const std::filesystem::path& plugin_root, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] nlohmann::json ToJson(const ServiceResolveAudit& audit);
-[[nodiscard]] nlohmann::json ToJson(const ModuleReleaseGateReport& report);
+[[nodiscard]] ASTRA_MODULE_RUNTIME_API Astra::Core::Result<PluginDescriptor> LoadPluginDescriptor(const std::filesystem::path& path, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MODULE_RUNTIME_API Astra::Core::Result<void> ValidatePluginDescriptor(const PluginDescriptor& descriptor, const std::filesystem::path& plugin_root, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MODULE_RUNTIME_API Astra::Core::Result<std::vector<std::string>> ResolveModuleOrder(const PluginDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MODULE_RUNTIME_API Astra::Core::Result<ModuleReleaseGateReport> ValidateModuleReleaseGate(const PluginDescriptor& descriptor, const std::filesystem::path& plugin_root, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MODULE_RUNTIME_API nlohmann::json ToJson(const ServiceResolveAudit& audit);
+[[nodiscard]] ASTRA_MODULE_RUNTIME_API nlohmann::json ToJson(const ModuleReleaseGateReport& report);
 
-class ModuleManager {
+class ASTRA_MODULE_RUNTIME_API ModuleManager {
 public:
     explicit ModuleManager(Astra::Platform::PlatformServices& platform);
     [[nodiscard]] Astra::Core::Result<void> LoadAndActivate(const PluginDescriptor& descriptor, const std::filesystem::path& plugin_root, Astra::Core::DiagnosticSink& diagnostics);

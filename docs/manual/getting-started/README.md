@@ -1,16 +1,16 @@
 # Getting Started
 
-Status: Phase 0 scaffold. Build baseline exists; runtime projects, samples, packaging, and `astra` CLI are planned.
+Status: NativeVN runtime evidence scaffold. The build baseline, dynamic-only engine DLLs, `astra` CLI, foundation samples, and NativeVN validate/cook/package/run/replay/inspect workflow exist. Production Editor, real media execution backends, binary asset transforms, full release gates, AI/MCP, and Legacy remain planned.
 
 ## Overview
 
-This section explains how to set up the current repository and how the future creator workflow will work once Phase 1+ systems are implemented.
+This section explains how to set up the current repository and run the current foundation/runtime evidence workflow. It also marks the later creator workflow boundaries that are not implemented yet.
 
 ## Key Concepts
 
-- Current repository contents are documentation, ADRs, CMake/vcpkg baseline, and documentation checks.
-- Phase 0 does not include `Engine/Runtime`, `Samples`, or a launchable game.
-- Future creator flow is `Template -> Project -> Content -> PIE -> Package`.
+- Current repository contents include documentation, ADRs, CMake/vcpkg baseline, dynamic `Astra*` runtime/tool libraries, runtime foundation modules, tests, samples, and documentation checks.
+- `Samples/NativeVN` currently provides a headless playable Script/AstraVN slice plus source asset sidecars, package payload evidence, local DDC evidence, package launch smoke, and golden replay comparison.
+- Future creator flow remains `Template -> Project -> Content -> PIE -> Package`; PIE and Editor workflows are not implemented.
 
 ## Architecture
 
@@ -27,20 +27,30 @@ ctest --test-dir build -C Debug --output-on-failure
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/doc-check.ps1
 ```
 
-The future project creation and packaging commands will be documented here after the `astra` CLI exists.
+Run the current NativeVN evidence chain:
+
+```powershell
+build\Bin\astra.exe validate Samples\NativeVN --strict --json
+build\Bin\astra.exe cook Samples\NativeVN --config Release --json
+build\Bin\astra.exe package Samples\NativeVN --profile deterministic --json
+build\Bin\astra.exe run build\Saved\Packages\NativeVN.astrapkg --headless-smoke --json
+build\Bin\astra.exe replay build\Saved\Replays\NativeVNGolden.replay --compare --json
+build\Bin\astra.exe inspect build\Saved\Packages\NativeVN.astrapkg --json
+```
+
+These commands prove the current source-sidecar runtime evidence workflow. They do not prove real texture upload, font atlas/glyph execution, audio playback/mixing, GPU filter execution, Editor workflows, or the final full release gate.
 
 ## API Reference
 
-No getting-started API is implemented in Phase 0. Future command references will live under [API](../api/README.md) and tool docs.
+Current command/API entry points are indexed under [API](../api/README.md), including dynamic-library export headers, Tools DTOs, package/replay evidence DTOs, media capability reports, and foundation runtime APIs.
 
 ## Examples
 
-Current example: run `tools/doc-check.ps1` to validate required manual pages, links, and stale legacy references.
-
-Planned examples: create `Samples/NativeVN`, run the sample, cook it, package it, and inspect release evidence.
+Current examples include running `tools/doc-check.ps1`, validating `Samples/NativeVN`, cooking and packaging its source sidecars, launching the generated package in headless smoke mode, comparing the golden replay, and inspecting the package manifest/mount evidence.
 
 ## Troubleshooting
 
 - If CMake cannot find third-party packages, configure with the intended vcpkg toolchain.
-- If a command references `astra`, it is currently target documentation, not a runnable Phase 0 command.
+- If `astra` cannot load engine libraries, confirm the command is run from the build tree with `build\Bin` containing the generated `Astra*.dll` files.
+- Treat commands that mention Editor, PIE, real media rendering/audio, AI/MCP, or Legacy as target documentation until those systems are implemented.
 - Do not restore legacy launch commands for deleted targets.

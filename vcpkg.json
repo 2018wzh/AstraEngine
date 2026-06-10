@@ -6,12 +6,18 @@
     "cli11",
     "entt",
     "fmt",
+    "freetype",
+    "harfbuzz",
+    "libjpeg-turbo",
+    "libpng",
+    "libwebp",
     {
       "name": "lua",
       "features": [
         "cpp"
       ]
     },
+    "miniaudio",
     "nlohmann-json",
     "openssl",
     "sdl3",

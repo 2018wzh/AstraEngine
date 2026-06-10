@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Astra/Core/Export.hpp>
 #include <Astra/Core/Types.hpp>
 
 #include <compare>
@@ -21,7 +22,7 @@ enum class StableIdKind {
     Unknown
 };
 
-class StableId {
+class ASTRA_CORE_API StableId {
 public:
     StableId() = default;
     StableId(StableIdKind kind, std::string value);
@@ -47,9 +48,9 @@ using ComponentId = StableId;
 using EventTypeId = StableId;
 using ProviderId = StableId;
 
-[[nodiscard]] Result<StableId> ParseStableId(std::string_view text);
-[[nodiscard]] std::string ToPrefix(StableIdKind kind);
-[[nodiscard]] StableIdKind StableIdKindFromPrefix(std::string_view prefix);
+[[nodiscard]] ASTRA_CORE_API Result<StableId> ParseStableId(std::string_view text);
+[[nodiscard]] ASTRA_CORE_API std::string ToPrefix(StableIdKind kind);
+[[nodiscard]] ASTRA_CORE_API StableIdKind StableIdKindFromPrefix(std::string_view prefix);
 
 } // namespace Astra::Core
 
@@ -59,4 +60,3 @@ struct std::hash<Astra::Core::StableId> {
         return std::hash<std::string>()(id.ToString());
     }
 };
-

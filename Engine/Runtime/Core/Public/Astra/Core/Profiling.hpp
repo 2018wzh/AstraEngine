@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Astra/Core/Export.hpp>
 #include <Astra/Core/Types.hpp>
 
 #include <string>
@@ -17,7 +18,7 @@ struct ProfilingMarker {
     std::unordered_map<std::string, std::string> fields;
 };
 
-class ProfilingCapture {
+class ASTRA_CORE_API ProfilingCapture {
 public:
     void Begin(std::string name, std::string category, u64 timestamp_ns);
     void End(std::string_view name, u64 timestamp_ns);

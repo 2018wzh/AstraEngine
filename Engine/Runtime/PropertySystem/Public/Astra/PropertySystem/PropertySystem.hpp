@@ -2,6 +2,7 @@
 
 #include <Astra/Core/Diagnostics.hpp>
 #include <Astra/Core/StableId.hpp>
+#include <Astra/PropertySystem/Export.hpp>
 #include <nlohmann/json.hpp>
 
 #include <optional>
@@ -34,8 +35,8 @@ enum class PropertyFlag : Astra::Core::u32 {
     ReleaseSensitive = 1u << 6u
 };
 
-[[nodiscard]] PropertyFlag operator|(PropertyFlag lhs, PropertyFlag rhs);
-[[nodiscard]] bool HasFlag(PropertyFlag value, PropertyFlag flag);
+[[nodiscard]] ASTRA_PROPERTY_SYSTEM_API PropertyFlag operator|(PropertyFlag lhs, PropertyFlag rhs);
+[[nodiscard]] ASTRA_PROPERTY_SYSTEM_API bool HasFlag(PropertyFlag value, PropertyFlag flag);
 
 struct InspectorMetadata {
     std::string display_name;
@@ -114,7 +115,7 @@ struct PropertyWriteResult {
     std::vector<Astra::Core::Diagnostic> diagnostics;
 };
 
-class TypeRegistry {
+class ASTRA_PROPERTY_SYSTEM_API TypeRegistry {
 public:
     using CustomValidator = std::function<Astra::Core::Result<void>(const nlohmann::json&)>;
 
@@ -135,8 +136,8 @@ private:
     std::map<std::string, CustomValidator> validators_;
 };
 
-[[nodiscard]] nlohmann::json ToJsonSchema(const TypeDescriptor& descriptor);
-[[nodiscard]] nlohmann::json ToJson(const PropertyDiff& diff);
-[[nodiscard]] nlohmann::json ToJson(const PropertyWriteResult& result);
+[[nodiscard]] ASTRA_PROPERTY_SYSTEM_API nlohmann::json ToJsonSchema(const TypeDescriptor& descriptor);
+[[nodiscard]] ASTRA_PROPERTY_SYSTEM_API nlohmann::json ToJson(const PropertyDiff& diff);
+[[nodiscard]] ASTRA_PROPERTY_SYSTEM_API nlohmann::json ToJson(const PropertyWriteResult& result);
 
 } // namespace Astra::PropertySystem

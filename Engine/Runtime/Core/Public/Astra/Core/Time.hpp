@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Astra/Core/Export.hpp>
 #include <Astra/Core/Types.hpp>
 
 #include <chrono>
@@ -17,12 +18,12 @@ struct GameTime {
     bool paused = false;
 };
 
-class MonotonicClock {
+class ASTRA_CORE_API MonotonicClock {
 public:
     [[nodiscard]] TimePoint Now() const;
 };
 
-class FixedStepClock {
+class ASTRA_CORE_API FixedStepClock {
 public:
     explicit FixedStepClock(double fixed_delta_seconds = 1.0 / 60.0);
     void Tick();
@@ -34,4 +35,3 @@ private:
 };
 
 } // namespace Astra::Core
-

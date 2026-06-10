@@ -7,6 +7,7 @@
 #include <Astra/Core/Types.hpp>
 #include <Astra/Media/Media.hpp>
 #include <Astra/Runtime/Runtime.hpp>
+#include <Astra/Script/Export.hpp>
 #include <nlohmann/json.hpp>
 
 #include <map>
@@ -115,7 +116,7 @@ struct ScriptExecutionResult {
     ScriptSnapshot snapshot;
 };
 
-class ScriptEventBridge {
+class ASTRA_SCRIPT_API ScriptEventBridge {
 public:
     [[nodiscard]] ScriptExecutionResult Execute(
         const CompiledScript& script,
@@ -124,7 +125,7 @@ public:
         Astra::Core::DiagnosticSink& diagnostics) const;
 };
 
-class ScriptRuntimeHost {
+class ASTRA_SCRIPT_API ScriptRuntimeHost {
 public:
     ScriptRuntimeHost();
 
@@ -142,15 +143,15 @@ private:
     ScriptEventBridge bridge_;
 };
 
-[[nodiscard]] std::vector<ScriptProviderDescriptor> FoundationScriptProviders();
-[[nodiscard]] std::string ToString(ScriptCommandKind kind);
-[[nodiscard]] nlohmann::json ToJson(const ScriptSourceLocation& location);
-[[nodiscard]] nlohmann::json ToJson(const ScriptChoice& choice);
-[[nodiscard]] nlohmann::json ToJson(const ScriptCommand& command);
-[[nodiscard]] nlohmann::json ToJson(const ScriptDebugSymbol& symbol);
-[[nodiscard]] nlohmann::json ToJson(const CompiledScript& script);
-[[nodiscard]] nlohmann::json ToJson(const ScriptSnapshot& snapshot);
-[[nodiscard]] nlohmann::json ToJson(const ScriptProviderDescriptor& descriptor);
-[[nodiscard]] nlohmann::json ToJson(const ScriptExecutionResult& result);
+[[nodiscard]] ASTRA_SCRIPT_API std::vector<ScriptProviderDescriptor> FoundationScriptProviders();
+[[nodiscard]] ASTRA_SCRIPT_API std::string ToString(ScriptCommandKind kind);
+[[nodiscard]] ASTRA_SCRIPT_API nlohmann::json ToJson(const ScriptSourceLocation& location);
+[[nodiscard]] ASTRA_SCRIPT_API nlohmann::json ToJson(const ScriptChoice& choice);
+[[nodiscard]] ASTRA_SCRIPT_API nlohmann::json ToJson(const ScriptCommand& command);
+[[nodiscard]] ASTRA_SCRIPT_API nlohmann::json ToJson(const ScriptDebugSymbol& symbol);
+[[nodiscard]] ASTRA_SCRIPT_API nlohmann::json ToJson(const CompiledScript& script);
+[[nodiscard]] ASTRA_SCRIPT_API nlohmann::json ToJson(const ScriptSnapshot& snapshot);
+[[nodiscard]] ASTRA_SCRIPT_API nlohmann::json ToJson(const ScriptProviderDescriptor& descriptor);
+[[nodiscard]] ASTRA_SCRIPT_API nlohmann::json ToJson(const ScriptExecutionResult& result);
 
 } // namespace Astra::Script

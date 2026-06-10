@@ -4,7 +4,7 @@ Status: Phase 3 implemented foundation.
 
 ## Overview
 
-Phase 3 represents text and audio as logical DTOs that can be hashed, inspected, saved later, and routed to future production providers. It does not rasterize fonts, shape glyphs, decode audio, mix buses, or play sound.
+Phase 3 represents text and audio as logical DTOs that can be hashed, inspected, saved later, and routed to future production providers. It now probes FreeType/HarfBuzz/miniaudio availability for release evidence, but it does not yet execute font atlas/glyph output, decode sample streams into runtime buffers, mix buses, or play sound.
 
 ## Key Concepts
 
@@ -12,6 +12,7 @@ Phase 3 represents text and audio as logical DTOs that can be hashed, inspected,
 - `AudioCommand` stores logical play commands, asset URI, bus, volume, and loop state.
 - Headless captures hash DTOs so tests can verify deterministic command order.
 - `MediaProviderDescriptor` records the foundation text/audio provider contracts used by release-gate evidence.
+- `MediaBackendCapabilityReport` records whether FreeType, HarfBuzz, and miniaudio are available for future text/audio execution.
 - Production text/font and audio providers will consume these DTOs later.
 
 ## Architecture
@@ -30,6 +31,8 @@ Create `PresentationCommandKind::Text` or `PresentationCommandKind::Audio` comma
 - `RenderGraph`
 - `FrameCapture`
 - `MediaProviderDescriptor`
+- `MediaBackendCapabilityReport`
+- `ProbeMediaBackendCapabilities()`
 - `ValidateMediaProviderDescriptor()`
 
 ## Examples
@@ -43,4 +46,4 @@ Voice command -> AudioCommand -> audio_hash
 
 - Text hashes prove logical command determinism, not glyph output.
 - Audio hashes prove logical command determinism, not playback output.
-- Missing font and audio decode diagnostics are future production media backend work.
+- Missing font/audio execution diagnostics are future production media backend work; current capability diagnostics only prove the supporting libraries are present.

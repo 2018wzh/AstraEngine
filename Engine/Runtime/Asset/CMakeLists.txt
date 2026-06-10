@@ -2,12 +2,13 @@ set(ASTRA_ASSET_SOURCES
     Private/Asset.cpp
 )
 
-astra_add_library(Astra_Asset ${ASTRA_ASSET_SOURCES})
-target_link_libraries(Astra_Asset
+astra_add_library(AstraAsset ${ASTRA_ASSET_SOURCES})
+target_link_libraries(AstraAsset
     PUBLIC
-        Astra_Core
-        Astra_Platform
+        AstraCore
+        AstraPlatform
         nlohmann_json::nlohmann_json
     PRIVATE
+        OpenSSL::Crypto
         yaml-cpp::yaml-cpp
 )

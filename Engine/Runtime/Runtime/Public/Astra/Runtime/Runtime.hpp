@@ -4,6 +4,7 @@
 #include <Astra/Core/Serialization.hpp>
 #include <Astra/Core/StableId.hpp>
 #include <Astra/Core/Types.hpp>
+#include <Astra/Runtime/Export.hpp>
 #include <Astra/Scene/Scene.hpp>
 #include <nlohmann/json.hpp>
 
@@ -18,6 +19,8 @@ namespace Astra::Runtime {
 
 constexpr const char* SnapshotSchema = "astra.runtime.snapshot.v1";
 constexpr const char* ReplaySchema = "astra.runtime.replay.v1";
+constexpr const char* SaveContainerSchema = "astra.runtime.save_container.v1";
+constexpr const char* ReplayComparisonSchema = "astra.runtime.replay_comparison.v1";
 
 enum class RuntimeEventMode {
     Immediate,
@@ -99,6 +102,14 @@ struct RuntimeReplay {
     RuntimeHashes hashes;
 };
 
+struct ReplayComparisonReport {
+    std::string schema = ReplayComparisonSchema;
+    bool passed = false;
+    RuntimeHashes expected;
+    RuntimeHashes actual;
+    std::vector<std::string> mismatches;
+};
+
 struct RuntimeSnapshot {
     std::string schema = SnapshotSchema;
     Astra::Core::u32 version = 1;
@@ -112,7 +123,18 @@ struct RuntimeSnapshot {
     RuntimeHashes hashes;
 };
 
-class RuntimeEventBus {
+struct SaveContainer {
+    std::string schema = SaveContainerSchema;
+    Astra::Core::u32 version = 1;
+    std::string engine_version;
+    std::string package_hash;
+    Astra::Core::u64 created_frame = 0;
+    RuntimeSnapshot runtime_snapshot;
+    nlohmann::json script_snapshot = nlohmann::json::object();
+    nlohmann::json media_state = nlohmann::json::object();
+};
+
+class ASTRA_RUNTIME_API RuntimeEventBus {
 public:
     void Emit(RuntimeEvent event, RuntimeEventMode mode);
     [[nodiscard]] std::vector<RuntimeEvent> DrainQueued();
@@ -128,7 +150,7 @@ private:
     std::vector<RuntimeEvent> trace_;
 };
 
-class RuntimeWorld {
+class ASTRA_RUNTIME_API RuntimeWorld {
 public:
     explicit RuntimeWorld(Astra::Core::u64 random_seed = 0);
     RuntimeWorld(RuntimeWorld&&) noexcept;
@@ -160,15 +182,18 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-[[nodiscard]] nlohmann::json ToJson(const RuntimeEventEndpoint& endpoint);
-[[nodiscard]] nlohmann::json ToJson(const RuntimeEventTrace& trace);
-[[nodiscard]] nlohmann::json ToJson(const RuntimeEvent& event);
-[[nodiscard]] nlohmann::json ToJson(const DirectorState& state);
-[[nodiscard]] nlohmann::json ToJson(const ControlPolicyResult& result);
-[[nodiscard]] nlohmann::json ToJson(const RuntimeHashes& hashes);
-[[nodiscard]] nlohmann::json ToJson(const RuntimeReplay& replay);
-[[nodiscard]] nlohmann::json ToJson(const RuntimeSnapshot& snapshot);
-[[nodiscard]] Astra::Core::Result<RuntimeEvent> RuntimeEventFromJson(const nlohmann::json& json);
-[[nodiscard]] Astra::Core::Result<RuntimeSnapshot> RuntimeSnapshotFromJson(const nlohmann::json& json);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeEventEndpoint& endpoint);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeEventTrace& trace);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeEvent& event);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const DirectorState& state);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const ControlPolicyResult& result);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeHashes& hashes);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeReplay& replay);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const SaveContainer& container);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const ReplayComparisonReport& report);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeSnapshot& snapshot);
+[[nodiscard]] ASTRA_RUNTIME_API Astra::Core::Result<RuntimeEvent> RuntimeEventFromJson(const nlohmann::json& json);
+[[nodiscard]] ASTRA_RUNTIME_API Astra::Core::Result<RuntimeSnapshot> RuntimeSnapshotFromJson(const nlohmann::json& json);
+[[nodiscard]] ASTRA_RUNTIME_API ReplayComparisonReport CompareReplayHashes(const RuntimeHashes& expected, const RuntimeHashes& actual);
 
 } // namespace Astra::Runtime

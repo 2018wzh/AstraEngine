@@ -1,0 +1,2 @@
+Foundation placeholder for Alice normal character sprite.
+This text source proves AssetRegistry, cook manifest, package manifest, and release evidence flow before real texture decode/upload.

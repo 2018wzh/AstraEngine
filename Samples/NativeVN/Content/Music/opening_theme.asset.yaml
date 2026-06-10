@@ -1,0 +1,18 @@
+id: native:/Music/opening_theme
+schema: astra.asset.sidecar.v1
+type: audio
+source_path: opening_theme.foundation.txt
+display_name: Opening Theme
+tags: [music, nativevn]
+origin: HumanAuthored
+license:
+  owner: project
+  usage: internal
+  source: synthetic_placeholder
+review:
+  status: accepted
+cook:
+  preset: music
+dependencies:
+  hard: []
+  soft: []

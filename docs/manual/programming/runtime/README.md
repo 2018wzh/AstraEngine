@@ -4,7 +4,7 @@ Status: Phase 2 Foundation.
 
 ## Overview
 
-`Astra_Runtime` provides a headless runtime facade that combines `ActorWorld`, `RuntimeEventBus`, basic StateMachine transitions, Director state, and foundation save/load/replay hashes.
+`AstraRuntime` provides a headless runtime facade that combines `ActorWorld`, `RuntimeEventBus`, basic StateMachine transitions, Director state, and foundation save/load/replay hashes.
 
 ## Key Concepts
 

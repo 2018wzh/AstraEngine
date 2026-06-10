@@ -332,6 +332,29 @@ nlohmann::json ToJson(const RuntimeReplay& replay) {
     return {{"schema", replay.schema}, {"version", replay.version}, {"random_seed", replay.random_seed}, {"events", replay.events}, {"hashes", ToJson(replay.hashes)}};
 }
 
+nlohmann::json ToJson(const SaveContainer& container) {
+    return {
+        {"schema", container.schema},
+        {"version", container.version},
+        {"engine_version", container.engine_version},
+        {"package_hash", container.package_hash},
+        {"created_frame", container.created_frame},
+        {"runtime_snapshot", ToJson(container.runtime_snapshot)},
+        {"script_snapshot", container.script_snapshot},
+        {"media_state", container.media_state},
+    };
+}
+
+nlohmann::json ToJson(const ReplayComparisonReport& report) {
+    return {
+        {"schema", report.schema},
+        {"passed", report.passed},
+        {"expected", ToJson(report.expected)},
+        {"actual", ToJson(report.actual)},
+        {"mismatches", report.mismatches},
+    };
+}
+
 nlohmann::json ToJson(const RuntimeSnapshot& snapshot) {
     return {
         {"schema", snapshot.schema},
@@ -345,6 +368,23 @@ nlohmann::json ToJson(const RuntimeSnapshot& snapshot) {
         {"replay_events", snapshot.replay_events},
         {"hashes", ToJson(snapshot.hashes)},
     };
+}
+
+ReplayComparisonReport CompareReplayHashes(const RuntimeHashes& expected, const RuntimeHashes& actual) {
+    ReplayComparisonReport report;
+    report.expected = expected;
+    report.actual = actual;
+    if (expected.state_hash != actual.state_hash) {
+        report.mismatches.push_back("state_hash");
+    }
+    if (expected.event_hash != actual.event_hash) {
+        report.mismatches.push_back("event_hash");
+    }
+    if (expected.presentation_hash != actual.presentation_hash) {
+        report.mismatches.push_back("presentation_hash");
+    }
+    report.passed = report.mismatches.empty();
+    return report;
 }
 
 Astra::Core::Result<RuntimeEvent> RuntimeEventFromJson(const nlohmann::json& json) {

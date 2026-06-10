@@ -31,7 +31,7 @@ UE `UObject` / UHT / GC 体系。
 - `Production Ready`：具备真实后端、错误恢复、版本迁移、调试观测、压力测试和发布门禁。
 - `UE-class 2D Runtime`：在 Astra 范围内达到可发布、可调试、可扩展、可维护的 runtime 完备度。
 
-当前 Phase 1-4 属于 Foundation，不应被解读为 production complete。
+当前 Phase 1-4 属于 Foundation，不应被解读为 production complete。当前工作树另有 NativeVN runtime feature-complete evidence slice：动态链接的 `Astra*` engine DLL、NativeVN package manifest、headless run、media backend capability report 和 golden replay comparison 已实现，用于推进 README 的 runtime-first 验收链路；真实 binary asset cook、真实 image/font/audio execution backend、Editor、AI/MCP 和 Legacy 仍不在该 slice 内。
 
 ## 3. Phase 0：文档与工程基线
 
@@ -88,7 +88,7 @@ UE `UObject` / UHT / GC 体系。
 
 ## 5. Phase 2：Foundation Scene / Runtime
 
-状态：Implemented foundation slice. 当前实现覆盖 headless `Astra_Scene` 和 `Astra_Runtime`：`ActorWorld`、stable Actor/Component DTO、`ComponentDescriptor`、generation-safe handle、private EnTT-backed local storage、headless local ECS pack、`RuntimeWorld`、RuntimeEvent/EventBus、基础 StateMachine transition、Blackboard/ControlPolicy/Director foundation、foundation save/load、RuntimeReplay DTO 和 deterministic stable hash smoke。完整 lifecycle/prefab、production scheduler、timeline/resource/script/AI/module extension state 存档和 replay mismatch 定位仍属 Phase 5 及后续 production completion。
+状态：Implemented foundation slice. 当前实现覆盖 headless `AstraScene` 和 `AstraRuntime`：`ActorWorld`、stable Actor/Component DTO、`ComponentDescriptor`、generation-safe handle、private EnTT-backed local storage、headless local ECS pack、`RuntimeWorld`、RuntimeEvent/EventBus、基础 StateMachine transition、Blackboard/ControlPolicy/Director foundation、foundation save/load、RuntimeReplay DTO 和 deterministic stable hash smoke。完整 lifecycle/prefab、production scheduler、timeline/resource/script/AI/module extension state 存档和 replay mismatch 定位仍属 Phase 5 及后续 production completion。
 
 目标：
 
@@ -113,7 +113,7 @@ UE `UObject` / UHT / GC 体系。
 
 ## 6. Phase 3：Foundation Asset / Media / FilterGraph
 
-状态：Implemented foundation slice. 当前实现覆盖 `Astra_Asset` 和 `Astra_Media`：asset URI/ID 解析、VFS mount、sidecar DTO/validation、registry scan、dependency diagnostics、import preset/project template/review item DTO、watch invalidation plumbing、PresentationCommand、RenderGraph/text/audio/filter DTO、FilterProfile validation/application、Renderer2D/TextLayout/Audio foundation provider descriptors、media release-gate foundation validation、HeadlessRenderer2D deterministic capture/hash，以及 SDL renderer factory private compile-path stub。真实 image decode、font shaping、audio playback、GPU filter execution、cook/package 和 package launch 仍属 Phase 6/7 production completion。
+状态：Implemented foundation slice. 当前实现覆盖 `AstraAsset` 和 `AstraMedia`：asset URI/ID 解析、VFS mount、sidecar DTO/validation、registry scan、dependency diagnostics、import preset/project template/review item DTO、watch invalidation plumbing、PresentationCommand、RenderGraph/text/audio/filter DTO、FilterProfile validation/application、Renderer2D/TextLayout/Audio foundation provider descriptors、media release-gate foundation validation、mature backend capability probe（SDL3、libpng、libjpeg-turbo、libwebp、FreeType、HarfBuzz、miniaudio）、PNG/JPEG/WebP image metadata inspect API、image cook artifact metadata、HeadlessRenderer2D deterministic capture/hash，以及 SDL renderer factory private compile-path stub。真实 decoded texture upload、font atlas/shaped glyph execution、audio playback/mixing execution、GPU filter execution、cook/package binary transforms 和 package launch 仍属 Phase 6/7 production completion。
 
 目标：
 
@@ -134,11 +134,11 @@ UE `UObject` / UHT / GC 体系。
 
 非目标：
 
-- 不实现真实 image decode、font rasterization/text shaping、audio playback、GPU filter execution、cook/package。
+- 不实现真实 decoded texture upload、font atlas/glyph execution、audio playback、GPU filter execution、cook/package binary transforms；当前建立 mature backend capability evidence 和 image cook metadata evidence。
 
 ## 7. Phase 4：Foundation ScriptRuntimeHost / AstraVN
 
-状态：Implemented foundation slice. 当前实现覆盖 `Astra_Script` 和 `Astra_AstraVN`：`ScriptRuntimeHost`、Native DSL parser、Lua provider via `sol2`、shared command stream、source diagnostics、debug-symbol DTO、`ScriptSnapshot`、`ScriptEventBridge`、VN event schema、预设 Actor/Component/StateMachine、`VnSession`、`VnSessionSnapshot`、Native/Lua parity headless hashes、NativeVN CLI smoke 和 save/restore evidence。完整脚本语言、debugger、hot reload、Graph/Timeline、真实 media backend、production package launch 和 production replay 仍属后续 completion。
+状态：Implemented foundation slice plus NativeVN runtime evidence. 当前实现覆盖 `AstraScript` 和 `AstraVN`：`ScriptRuntimeHost`、Native DSL parser、Lua provider via `sol2`、shared command stream、source diagnostics、debug-symbol DTO、`ScriptSnapshot`、`ScriptEventBridge`、VN event schema、预设 Actor/Component/StateMachine、`VnSession`、`VnSessionSnapshot`、Native/Lua parity headless hashes、NativeVN CLI smoke、save/restore evidence、package manifest evidence 和 golden replay comparison。完整脚本语言、debugger、hot reload、Graph/Timeline、真实 media backend 和 production release gate 仍属后续 completion。
 
 目标：
 

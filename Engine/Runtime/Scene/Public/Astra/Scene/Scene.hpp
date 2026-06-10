@@ -3,6 +3,7 @@
 #include <Astra/Core/Diagnostics.hpp>
 #include <Astra/Core/StableId.hpp>
 #include <Astra/Core/Types.hpp>
+#include <Astra/Scene/Export.hpp>
 #include <nlohmann/json.hpp>
 
 #include <memory>
@@ -119,10 +120,10 @@ public:
     [[nodiscard]] virtual EcsPackOutput SyncOut() const = 0;
 };
 
-[[nodiscard]] std::unique_ptr<LocalEcsPack> CreateHeadlessLocalEcsPack();
-[[nodiscard]] std::vector<ComponentDescriptor> FoundationComponentDescriptors();
+[[nodiscard]] ASTRA_SCENE_API std::unique_ptr<LocalEcsPack> CreateHeadlessLocalEcsPack();
+[[nodiscard]] ASTRA_SCENE_API std::vector<ComponentDescriptor> FoundationComponentDescriptors();
 
-class ActorWorld {
+class ASTRA_SCENE_API ActorWorld {
 public:
     ActorWorld();
     ActorWorld(ActorWorld&&) noexcept;
@@ -150,16 +151,16 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-[[nodiscard]] nlohmann::json ToJson(const Transform2DComponent& component);
-[[nodiscard]] nlohmann::json ToJson(const TagComponent& component);
-[[nodiscard]] nlohmann::json ToJson(const LifetimeComponent& component);
-[[nodiscard]] nlohmann::json ToJson(const BlackboardComponent& component);
-[[nodiscard]] nlohmann::json ToJson(const ControlPolicyComponent& component);
-[[nodiscard]] nlohmann::json ToJson(const StateMachineComponent& component);
-[[nodiscard]] nlohmann::json ToJson(const ComponentDescriptor& descriptor);
-[[nodiscard]] nlohmann::json ToJson(const ComponentData& component);
-[[nodiscard]] nlohmann::json ToJson(const ActorSnapshot& actor);
-[[nodiscard]] nlohmann::json ToJson(const WorldSnapshot& world);
-[[nodiscard]] Astra::Core::Result<WorldSnapshot> WorldSnapshotFromJson(const nlohmann::json& json);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const Transform2DComponent& component);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const TagComponent& component);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const LifetimeComponent& component);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const BlackboardComponent& component);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const ControlPolicyComponent& component);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const StateMachineComponent& component);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const ComponentDescriptor& descriptor);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const ComponentData& component);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const ActorSnapshot& actor);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const WorldSnapshot& world);
+[[nodiscard]] ASTRA_SCENE_API Astra::Core::Result<WorldSnapshot> WorldSnapshotFromJson(const nlohmann::json& json);
 
 } // namespace Astra::Scene

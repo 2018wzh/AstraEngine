@@ -1,0 +1,2 @@
+Foundation placeholder for NativeVN opening music.
+Logical music routing is verified headlessly until streaming audio backend completion.

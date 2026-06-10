@@ -333,7 +333,7 @@ CLI：
 - `astra validate <project>`
 - `astra import <project> <files> --preset <preset>`
 - `astra cook <project> --config <profile>`
-- `astra package <project> --deterministic`
+- `astra package <project> --profile deterministic`
 - `astra inspect <package-or-asset>`
 
 Editor：
@@ -365,9 +365,9 @@ Required tests：
 
 ## 13. 验收
 
-- NativeVN source project can validate、cook、package、inspect and launch package without Editor。
+- NativeVN source project can validate、cook、package、inspect and launch the current source-sidecar package without Editor。
 - Cook twice with identical inputs produces identical package hash。
 - Content Browser and CLI produce identical diagnostics for broken assets。
 - AI draft cannot enter Cook until accepted review。
 - Foreign assets remain mount-only by default。
-- Runtime package loads assets through package manifest and VFS, not source Content。
+- Runtime package loads assets through package manifest/payload evidence and package mount DTOs; production VFS-backed binary package loading remains future work。

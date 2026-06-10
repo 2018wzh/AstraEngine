@@ -4,7 +4,7 @@ Status: Phase 2 Foundation.
 
 ## Overview
 
-`Astra_Scene` provides the headless Actor/Component foundation for runtime, tools, future Editor inspectors, MCP field editing, and save/replay. It is a foundation slice, not the full production prefab and lifecycle system.
+`AstraScene` provides the headless Actor/Component foundation for runtime, tools, future Editor inspectors, MCP field editing, and save/replay. It is a foundation slice, not the full production prefab and lifecycle system.
 
 ## Key Concepts
 

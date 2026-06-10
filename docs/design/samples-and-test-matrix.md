@@ -1,9 +1,9 @@
 # Samples And Test Matrix 设计
 
-状态：Phase 1 Foundation Scaffold / Target Architecture  
+状态：NativeVN runtime evidence scaffold / Target Architecture  
 定位：用样例项目和测试矩阵证明 AstraEngine 的 UE-class 2D runtime 完备度。样例不是演示摆设，而是 release gate、文档、CLI、Editor 和 Runtime 的共同验收载体。
 
-Phase 1 implementation note：当前已建立 `Samples/NativeVN`、`Samples/RuntimeStress`、`Samples/PackageSmoke` 的 foundation-only descriptor。`PackageSmoke` 可通过 `astra validate/package/run --headless-smoke` 证明 Phase 1 headless platform 和 example module lifecycle；真实 content、asset cooking、package launch、replay 和 media output 仍是后续阶段。
+Current implementation note：当前已建立 `Samples/NativeVN`、`Samples/RuntimeStress`、`Samples/PackageSmoke` 的 foundation/evidence descriptors。`PackageSmoke` 可通过 `astra validate/package/run --headless-smoke` 证明 Phase 1 headless platform 和 example module lifecycle；`NativeVN` 可通过 validate/cook/package/run/replay/inspect 证明 source asset sidecars、AssetRegistry/dependency graph、local DDC artifact evidence、embedded package payloads、PackageReader mount/read smoke、headless Script/AstraVN execution 和 golden replay comparison。真实 binary media content、real renderer/text/audio output、full gameplay state coverage、Editor workflow 和 final release gate 仍是后续阶段。
 
 ## 1. 目标
 
@@ -53,14 +53,14 @@ release_profiles: [development, deterministic]
 requires_editor: false
 requires_network: false
 golden:
-  replay: Saved/Replays/NativeVNGolden.replay
+  replay: build/Saved/Replays/NativeVNGolden.replay
   package_hash: Saved/Reports/NativeVN.package.hash
 commands:
   validate: astra validate Samples/NativeVN --strict --json
   cook: astra cook Samples/NativeVN --config Release --json
   package: astra package Samples/NativeVN --profile deterministic --json
-  run: astra run Saved/Packages/NativeVN.astrapkg --headless-smoke --json
-  replay: astra replay Saved/Replays/NativeVNGolden.replay --compare --json
+  run: astra run build/Saved/Packages/NativeVN.astrapkg --headless-smoke --json
+  replay: astra replay build/Saved/Replays/NativeVNGolden.replay --compare --json
 acceptance:
   - no_editor_launch
   - deterministic_replay
@@ -308,7 +308,7 @@ test_id: astra.test.native_vn.package_launch
 category: headless
 sample: astra.sample.native_vn
 requires: [package]
-command: astra run Saved/Packages/NativeVN.astrapkg --headless-smoke --json
+command: astra run build/Saved/Packages/NativeVN.astrapkg --headless-smoke --json
 evidence:
   - diagnostics_report
   - trace_capture

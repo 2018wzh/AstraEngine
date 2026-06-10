@@ -3,6 +3,7 @@
 #include <Astra/Core/Diagnostics.hpp>
 #include <Astra/Core/StableId.hpp>
 #include <Astra/Core/Types.hpp>
+#include <Astra/Asset/Export.hpp>
 #include <Astra/Platform/Platform.hpp>
 #include <nlohmann/json.hpp>
 
@@ -17,6 +18,9 @@ namespace Astra::Asset {
 
 constexpr const char* AssetSidecarSchema = "astra.asset.sidecar.v1";
 constexpr const char* AssetRegistrySchema = "astra.asset.registry.v1";
+constexpr const char* CookManifestSchema = "astra.asset.cook_manifest.v1";
+constexpr const char* DerivedDataCacheEntrySchema = "astra.asset.ddc_entry.v1";
+constexpr const char* PackageManifestSchema = "astra.package.manifest.v1";
 
 enum class AssetScheme {
     Native,
@@ -32,8 +36,8 @@ struct AssetUri {
     std::string path;
     std::string fragment;
 
-    [[nodiscard]] std::string ToString() const;
-    [[nodiscard]] Astra::Core::AssetId ToStableId() const;
+    [[nodiscard]] ASTRA_ASSET_API std::string ToString() const;
+    [[nodiscard]] ASTRA_ASSET_API Astra::Core::AssetId ToStableId() const;
 };
 
 enum class VfsAccess {
@@ -150,11 +154,110 @@ struct AssetInvalidation {
     std::string reason;
 };
 
+struct AssetDependencyGraph {
+    std::string schema = "astra.asset.dependency_graph.v1";
+    std::vector<AssetRegistryEntry> assets;
+    std::map<std::string, std::vector<std::string>> hard_edges;
+    std::map<std::string, std::vector<std::string>> soft_edges;
+};
+
+struct DerivedDataCacheArtifact {
+    std::filesystem::path path;
+    std::string hash;
+    Astra::Core::u64 size_bytes = 0;
+};
+
+struct DerivedDataCacheEntry {
+    std::string schema = DerivedDataCacheEntrySchema;
+    std::string key;
+    std::string processor_id;
+    std::string input_hash;
+    std::string settings_hash;
+    std::string output_hash;
+    std::string platform = "win64";
+    std::string profile = "development";
+    std::string engine_version;
+    bool rebuilt = false;
+    bool corruption_recovered = false;
+    std::vector<DerivedDataCacheArtifact> artifacts;
+};
+
+struct CookArtifact {
+    AssetUri asset_id;
+    std::string type;
+    std::filesystem::path artifact_path;
+    std::string hash;
+    std::string processor_id;
+    std::string ddc_key;
+    nlohmann::json metadata = nlohmann::json::object();
+};
+
+struct CookManifest {
+    std::string schema = CookManifestSchema;
+    std::string project_id;
+    std::string profile = "development";
+    std::string manifest_hash;
+    std::vector<CookArtifact> artifacts;
+    std::vector<DerivedDataCacheEntry> ddc_entries;
+};
+
+struct PackageModuleEvidence {
+    std::string id;
+    std::string binary;
+    std::string sha256;
+    bool runtime_safe = true;
+};
+
+struct PackagePayloadEntry {
+    AssetUri asset_id;
+    std::filesystem::path artifact_path;
+    std::string hash;
+    Astra::Core::u64 size_bytes = 0;
+    std::string encoding = "base64";
+    std::string data;
+};
+
+struct PackagePayloadChunk {
+    AssetUri asset_id;
+    Astra::Core::u64 offset = 0;
+    std::vector<Astra::Core::u8> bytes;
+    bool final_chunk = false;
+};
+
+struct PackageManifest {
+    std::string schema = PackageManifestSchema;
+    std::string package_id;
+    std::string profile = "deterministic";
+    std::string package_hash;
+    std::string project_hash;
+    CookManifest cook_manifest;
+    std::vector<PackageModuleEvidence> modules;
+    std::vector<PackagePayloadEntry> payloads;
+    nlohmann::json runtime_evidence = nlohmann::json::object();
+};
+
+struct PackageMount {
+    std::string schema = "astra.package.mount.v1";
+    std::string package_id;
+    std::filesystem::path package_path;
+    bool read_only = true;
+    std::vector<AssetUri> assets;
+};
+
+class PackageReader {
+public:
+    [[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<PackageManifest> ReadManifest(const std::filesystem::path& package_path, Astra::Core::DiagnosticSink& diagnostics) const;
+    [[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<std::vector<Astra::Core::u8>> ReadPayloadBytes(const std::filesystem::path& package_path, const AssetUri& asset_id, Astra::Core::DiagnosticSink& diagnostics) const;
+    [[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<std::vector<PackagePayloadChunk>> ReadPayloadChunks(const std::filesystem::path& package_path, const AssetUri& asset_id, Astra::Core::u64 chunk_size, Astra::Core::DiagnosticSink& diagnostics) const;
+    [[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<std::string> ReadPayloadText(const std::filesystem::path& package_path, const AssetUri& asset_id, Astra::Core::DiagnosticSink& diagnostics) const;
+    [[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<PackageMount> MountPackage(const std::filesystem::path& package_path, Astra::Core::DiagnosticSink& diagnostics) const;
+};
+
 class Vfs {
 public:
-    [[nodiscard]] Astra::Core::Result<void> Mount(VfsMount mount, Astra::Core::DiagnosticSink& diagnostics);
-    [[nodiscard]] std::optional<ResolvedAssetPath> Resolve(const AssetUri& uri) const;
-    [[nodiscard]] const std::vector<VfsMount>& Mounts() const;
+    [[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<void> Mount(VfsMount mount, Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] ASTRA_ASSET_API std::optional<ResolvedAssetPath> Resolve(const AssetUri& uri) const;
+    [[nodiscard]] ASTRA_ASSET_API const std::vector<VfsMount>& Mounts() const;
 
 private:
     std::vector<VfsMount> mounts_;
@@ -162,23 +265,36 @@ private:
 
 class AssetRegistryBuilder {
 public:
-    [[nodiscard]] AssetRegistry Scan(const std::filesystem::path& content_root, Astra::Core::DiagnosticSink& diagnostics) const;
-    [[nodiscard]] std::vector<AssetInvalidation> WatchContent(Astra::Platform::IFileSystemService& filesystem, const std::filesystem::path& content_root) const;
+    [[nodiscard]] ASTRA_ASSET_API AssetRegistry Scan(const std::filesystem::path& content_root, Astra::Core::DiagnosticSink& diagnostics) const;
+    [[nodiscard]] ASTRA_ASSET_API std::vector<AssetInvalidation> WatchContent(Astra::Platform::IFileSystemService& filesystem, const std::filesystem::path& content_root) const;
 };
 
-[[nodiscard]] Astra::Core::Result<AssetUri> ParseAssetUri(std::string_view text);
-[[nodiscard]] std::string ToString(AssetScheme scheme);
-[[nodiscard]] AssetScheme AssetSchemeFromString(std::string_view value);
-[[nodiscard]] Astra::Core::Result<AssetSidecar> AssetSidecarFromJson(const nlohmann::json& json, const std::filesystem::path& sidecar_path, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] Astra::Core::Result<AssetSidecar> LoadAssetSidecar(const std::filesystem::path& path, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] Astra::Core::Result<void> ValidateAssetSidecar(const AssetSidecar& sidecar, const std::filesystem::path& sidecar_path, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] Astra::Core::Result<void> ValidateImportPreset(const ImportPresetDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] Astra::Core::Result<void> ValidateProjectTemplate(const ProjectTemplateDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] Astra::Core::Result<void> ValidateReviewQueueItem(const ReviewQueueItem& item, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<AssetUri> ParseAssetUri(std::string_view text);
+[[nodiscard]] ASTRA_ASSET_API std::string ToString(AssetScheme scheme);
+[[nodiscard]] ASTRA_ASSET_API AssetScheme AssetSchemeFromString(std::string_view value);
+[[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<AssetSidecar> AssetSidecarFromJson(const nlohmann::json& json, const std::filesystem::path& sidecar_path, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<AssetSidecar> LoadAssetSidecar(const std::filesystem::path& path, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<void> ValidateAssetSidecar(const AssetSidecar& sidecar, const std::filesystem::path& sidecar_path, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<void> ValidateImportPreset(const ImportPresetDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<void> ValidateProjectTemplate(const ProjectTemplateDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<void> ValidateReviewQueueItem(const ReviewQueueItem& item, Astra::Core::DiagnosticSink& diagnostics);
 
-[[nodiscard]] nlohmann::json ToJson(const AssetUri& uri);
-[[nodiscard]] nlohmann::json ToJson(const AssetSidecar& sidecar);
-[[nodiscard]] nlohmann::json ToJson(const AssetRegistryEntry& entry);
-[[nodiscard]] nlohmann::json ToJson(const AssetRegistry& registry);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const AssetUri& uri);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const AssetSidecar& sidecar);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const AssetRegistryEntry& entry);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const AssetRegistry& registry);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const AssetDependencyGraph& graph);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const DerivedDataCacheArtifact& artifact);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const DerivedDataCacheEntry& entry);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const CookArtifact& artifact);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const CookManifest& manifest);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const PackageModuleEvidence& module);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const PackagePayloadEntry& payload);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const PackageManifest& manifest);
+[[nodiscard]] ASTRA_ASSET_API nlohmann::json ToJson(const PackageMount& mount);
+[[nodiscard]] ASTRA_ASSET_API AssetDependencyGraph BuildDependencyGraph(const AssetRegistry& registry);
+[[nodiscard]] ASTRA_ASSET_API Astra::Core::Result<PackageManifest> PackageManifestFromJson(const nlohmann::json& json);
+[[nodiscard]] ASTRA_ASSET_API std::string ComputeCookManifestHash(nlohmann::json manifest_json);
+[[nodiscard]] ASTRA_ASSET_API std::string ComputePackageManifestHash(nlohmann::json manifest_json);
 
 } // namespace Astra::Asset

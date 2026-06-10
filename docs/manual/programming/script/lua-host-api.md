@@ -15,7 +15,7 @@ Phase 4 Lua support proves that a mature Lua runtime can drive the same VN event
 
 ## Architecture
 
-Lua is hosted by `Astra_Script`, not Core. The host compiles Lua-authored commands into `CompiledScript`, then `ScriptEventBridge` emits Runtime and Media DTOs.
+Lua is hosted by `AstraScript`, not Core. The host compiles Lua-authored commands into `CompiledScript`, then `ScriptEventBridge` emits Runtime and Media DTOs.
 
 ## Programming Guide
 

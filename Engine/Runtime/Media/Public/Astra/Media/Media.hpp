@@ -3,11 +3,13 @@
 #include <Astra/Asset/Asset.hpp>
 #include <Astra/Core/Diagnostics.hpp>
 #include <Astra/Core/Types.hpp>
+#include <Astra/Media/Export.hpp>
 #include <nlohmann/json.hpp>
 
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -158,31 +160,66 @@ struct MediaReleaseGateReport {
     std::vector<FilterApplication> filter_applications;
 };
 
-class IRenderer2D {
+struct MediaBackendLibrary {
+    std::string id;
+    std::string display_name;
+    bool available = false;
+    std::string version;
+    std::vector<std::string> formats;
+    std::vector<std::string> features;
+};
+
+struct MediaBackendCapabilityReport {
+    std::string schema = "astra.media.backend_capabilities.v1";
+    std::vector<MediaBackendLibrary> libraries;
+    std::vector<std::string> image_formats;
+    std::vector<std::string> font_features;
+    std::vector<std::string> audio_features;
+    bool image_decode_ready = false;
+    bool text_layout_ready = false;
+    bool audio_mixer_ready = false;
+};
+
+struct ImageDecodeReport {
+    std::string schema = "astra.media.image_decode.v1";
+    std::string format;
+    Astra::Core::u32 width = 0;
+    Astra::Core::u32 height = 0;
+    Astra::Core::u32 channels = 0;
+    bool has_alpha = false;
+    std::string decoded_by;
+};
+
+class ASTRA_MEDIA_API IRenderer2D {
 public:
     virtual ~IRenderer2D() = default;
     virtual void Submit(RenderGraph graph, Astra::Core::DiagnosticSink& diagnostics) = 0;
     [[nodiscard]] virtual FrameCapture Capture() const = 0;
 };
 
-[[nodiscard]] std::unique_ptr<IRenderer2D> CreateHeadlessRenderer2D();
-[[nodiscard]] std::unique_ptr<IRenderer2D> CreateSdlRenderer2DStub(Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] RenderGraph ExtractRenderGraph(const std::vector<PresentationCommand>& commands, const FilterProfile* filter_profile, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] std::vector<MediaProviderDescriptor> FoundationMediaProviders();
-[[nodiscard]] Astra::Core::Result<void> ValidateMediaProviderDescriptor(const MediaProviderDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] Astra::Core::Result<MediaReleaseGateReport> ValidateMediaReleaseGate(const MediaReleaseGateRequest& request, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] Astra::Core::Result<FilterProfile> FilterProfileFromJson(const nlohmann::json& json, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] Astra::Core::Result<void> ValidateFilterProfile(const FilterProfile& profile, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] std::vector<FilterApplication> ApplyFilterProfile(const FilterProfile& profile);
+[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IRenderer2D> CreateHeadlessRenderer2D();
+[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IRenderer2D> CreateSdlRenderer2DStub(Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API RenderGraph ExtractRenderGraph(const std::vector<PresentationCommand>& commands, const FilterProfile* filter_profile, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API std::vector<MediaProviderDescriptor> FoundationMediaProviders();
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<void> ValidateMediaProviderDescriptor(const MediaProviderDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<MediaReleaseGateReport> ValidateMediaReleaseGate(const MediaReleaseGateRequest& request, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API MediaBackendCapabilityReport ProbeMediaBackendCapabilities();
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<ImageDecodeReport> InspectImageBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<FilterProfile> FilterProfileFromJson(const nlohmann::json& json, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<void> ValidateFilterProfile(const FilterProfile& profile, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API std::vector<FilterApplication> ApplyFilterProfile(const FilterProfile& profile);
 
-[[nodiscard]] std::string ToString(PresentationCommandKind kind);
-[[nodiscard]] std::string ToString(FilterTarget target);
-[[nodiscard]] Astra::Core::Result<FilterTarget> FilterTargetFromString(std::string_view value);
-[[nodiscard]] nlohmann::json ToJson(const PresentationCommand& command);
-[[nodiscard]] nlohmann::json ToJson(const RenderGraph& graph);
-[[nodiscard]] nlohmann::json ToJson(const FrameCapture& capture);
-[[nodiscard]] nlohmann::json ToJson(const FilterProfile& profile);
-[[nodiscard]] nlohmann::json ToJson(const MediaProviderDescriptor& descriptor);
-[[nodiscard]] nlohmann::json ToJson(const MediaReleaseGateReport& report);
+[[nodiscard]] ASTRA_MEDIA_API std::string ToString(PresentationCommandKind kind);
+[[nodiscard]] ASTRA_MEDIA_API std::string ToString(FilterTarget target);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<FilterTarget> FilterTargetFromString(std::string_view value);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const PresentationCommand& command);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const RenderGraph& graph);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const FrameCapture& capture);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const FilterProfile& profile);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const MediaProviderDescriptor& descriptor);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const MediaReleaseGateReport& report);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const MediaBackendLibrary& library);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const MediaBackendCapabilityReport& report);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const ImageDecodeReport& report);
 
 } // namespace Astra::Media

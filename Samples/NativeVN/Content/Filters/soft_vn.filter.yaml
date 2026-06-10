@@ -1,0 +1,18 @@
+id: native:/Filters/soft_vn
+type: filter_profile
+passes:
+  - id: bg_soften
+    filter: astra.filter.foundation_hash
+    target: background
+    params:
+      strength: 0.25
+  - id: character_line
+    filter: astra.filter.foundation_hash
+    target: character
+    params:
+      strength: 0.5
+  - id: final_grade
+    filter: astra.filter.foundation_hash
+    target: final
+    params:
+      grade: warm

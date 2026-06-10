@@ -1,9 +1,9 @@
 # Tools / Release Gate / Observability 设计
 
-状态：Phase 1 Foundation CLI / Target Architecture  
+状态：NativeVN runtime evidence CLI / Target Architecture  
 定位：Astra 的 CLI、验证、Cook/Package、发布门禁、profiling、trace、crash/error report 和测试矩阵。
 
-Phase 1 implementation note：当前 `astra` 使用 CLI11 实现 foundation CLI：`--version`、`doc-check`、`validate`、`inspect`、foundation-only `cook`、`package`、`run --headless-smoke`。报告使用 JSON；`astra validate . --strict --json` 输出 `foundation_core_gate` artifact，包含 registered diagnostic-code gate、release config hash、unknown-field policy evidence、Property write/schema evidence、Module release-gate report 和插件 binary SHA-256。完整 asset cook/package/replay/full runtime release gate/trace/crash bundle 仍是后续目标。
+Current implementation note：当前 `astra` 使用 CLI11 实现 `--version`、`doc-check`、`validate`、`cook`、`package`、`run --headless-smoke`、`replay --compare` 和 `inspect`。报告使用 JSON；`astra validate . --strict --json` 输出 `foundation_core_gate` artifact，包含 registered diagnostic-code gate、release config hash、unknown-field policy evidence、Property write/schema evidence、Module release-gate report、engine DLL SHA-256 evidence 和插件 binary SHA-256。`Samples/NativeVN` 已覆盖 source asset sidecars、AssetRegistry/dependency graph evidence、local DDC artifact write/reuse/corruption recovery、embedded package payload table、PackageReader random-access/chunked-read/mount evidence、package/cook/payload integrity diagnostics、headless package launch smoke 和 golden replay comparison。完整 release gate、trace/crash bundle、real binary asset transforms、real media execution backend 和 production replay mismatch localization 仍是后续目标。
 
 ## 1. 目标
 
@@ -285,9 +285,9 @@ Required release commands：
 astra validate Samples/NativeVN --strict --json
 astra cook Samples/NativeVN --config Release --json
 astra package Samples/NativeVN --profile deterministic --json
-astra run Saved/Packages/NativeVN.astrapkg --headless-smoke --json
-astra replay Saved/Replays/NativeVNGolden.replay --compare --json
-astra inspect Saved/Packages/NativeVN.astrapkg --json
+astra run build/Saved/Packages/NativeVN.astrapkg --headless-smoke --json
+astra replay build/Saved/Replays/NativeVNGolden.replay --compare --json
+astra inspect build/Saved/Packages/NativeVN.astrapkg --json
 astra doc-check --json
 ctest --test-dir build -C Release --output-on-failure
 ```

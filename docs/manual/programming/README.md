@@ -1,6 +1,6 @@
 # Programming
 
-Status: Phase 4 scaffold. Foundation public headers are implemented for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Asset, Media, Script, and AstraVN; Editor, AI/MCP, Legacy, and production Script/AstraVN completion remain planned.
+Status: NativeVN runtime evidence scaffold. Foundation public headers are implemented for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Asset, Media, Script, and AstraVN; engine libraries are dynamic-only DLLs. NativeVN now has CLI package/run/replay/inspect evidence plus embedded package payloads, PackageReader random-access/chunked-read/mount evidence, mature media backend capability reports, local DDC artifact execution, corruption recovery, and package integrity diagnostics; Editor, AI/MCP, Legacy, real media execution backend, and production Script/AstraVN completion remain planned.
 
 ## Overview
 
@@ -52,7 +52,7 @@ Foundation headers are indexed in [API Reference](../api/README.md). Later publi
 
 ## Examples
 
-Current examples include the Phase 4 NativeVN dialogue flow. Planned examples include a Core diagnostics packet, a plugin descriptor, a module C ABI entrypoint, and production ScriptParity coverage.
+Current examples include the NativeVN dialogue flow plus source asset sidecars, AssetRegistry/dependency graph evidence, DDC artifact write/reuse/corruption recovery, embedded package payload read/mount evidence, package manifest integrity, and golden replay evidence. Planned examples include a Core diagnostics packet, a plugin descriptor, a module C ABI entrypoint, and production ScriptParity coverage.
 
 ## Troubleshooting
 

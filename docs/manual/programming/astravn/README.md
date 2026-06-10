@@ -4,7 +4,7 @@ Status: Phase 4 implemented foundation.
 
 ## Overview
 
-`Astra_AstraVN` provides the Phase 4 VN-first foundation layer on top of Runtime, Scene, Script, Asset, and Media. It supplies preset actors, components, state machines, VN event schemas, and a headless `VnSession` evidence path.
+`AstraVN` provides the Phase 4 VN-first foundation layer on top of Runtime, Scene, Script, Asset, and Media. It supplies preset actors, components, state machines, VN event schemas, and a headless `VnSession` evidence path.
 
 ## Key Concepts
 
@@ -17,7 +17,7 @@ Status: Phase 4 implemented foundation.
 
 Design reference: [Script and Presentation](../../../design/script-and-presentation.md).
 
-`Astra_AstraVN` depends on public Runtime, Scene, Script, Asset, and Media APIs. It does not expose SDL, GPU, audio, Editor, Lua, or legacy VM internals.
+`AstraVN` depends on public Runtime, Scene, Script, Asset, and Media APIs. It does not expose SDL, GPU, audio, Editor, Lua, or legacy VM internals.
 
 ## Programming Guide
 

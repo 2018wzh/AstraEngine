@@ -2,7 +2,7 @@
 
 状态：Phase 1 Foundation Implemented / Target Architecture
 
-Phase 1 implementation note：当前工作树已实现 descriptor parsing/validation、dependency resolver、C ABI headers、`ModuleManager` lifecycle、`ServiceRegistry`、`ExtensionRegistry`、engine module provider registry、service resolve audit、engine module slot policy validation，以及 `Astra_ExampleFoundationPlugin` 的加载、注册、停用和卸载测试。`astra validate . --strict --json` 输出 Foundation module release-gate report，并包含模块 entrypoint binary existence 和 SHA-256 evidence。Plugin Wizard、hot reload 分层、provider-specific production contracts 和 Editor/AI/MCP provider 模板仍是后续阶段。
+Phase 1 implementation note：当前工作树已实现 descriptor parsing/validation、dependency resolver、C ABI headers、`ModuleManager` lifecycle、`ServiceRegistry`、`ExtensionRegistry`、engine module provider registry、service resolve audit、engine module slot policy validation，以及 `AstraExampleFoundationPlugin` 的加载、注册、停用和卸载测试。`astra validate . --strict --json` 输出 Foundation module release-gate report，并包含模块 entrypoint binary existence 和 SHA-256 evidence。Plugin Wizard、hot reload 分层、provider-specific production contracts 和 Editor/AI/MCP provider 模板仍是后续阶段。
 
 ## 1. 目标
 

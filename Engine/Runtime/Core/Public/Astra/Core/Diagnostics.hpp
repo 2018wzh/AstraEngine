@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Astra/Core/Export.hpp>
 #include <Astra/Core/Types.hpp>
 #include <nlohmann/json.hpp>
 
@@ -38,7 +39,7 @@ struct Diagnostic {
     std::unordered_map<std::string, std::string> context;
     std::vector<std::string> suggested_fixes;
 
-    [[nodiscard]] bool BlocksRelease() const;
+    [[nodiscard]] ASTRA_CORE_API bool BlocksRelease() const;
 };
 
 struct DiagnosticCodeDescriptor {
@@ -48,7 +49,7 @@ struct DiagnosticCodeDescriptor {
     bool registered_for_release = true;
 };
 
-class DiagnosticCodeRegistry {
+class ASTRA_CORE_API DiagnosticCodeRegistry {
 public:
     [[nodiscard]] Result<void> Register(DiagnosticCodeDescriptor descriptor);
     [[nodiscard]] const DiagnosticCodeDescriptor* Find(std::string_view code) const;
@@ -79,7 +80,7 @@ struct FoundationGateReport {
     std::vector<std::string> registered_codes;
 };
 
-class DiagnosticSink {
+class ASTRA_CORE_API DiagnosticSink {
 public:
     void Emit(Diagnostic diagnostic);
     [[nodiscard]] bool HasBlocking() const;
@@ -90,13 +91,13 @@ private:
     std::vector<Diagnostic> diagnostics_;
 };
 
-[[nodiscard]] std::string ToString(DiagnosticSeverity severity);
-[[nodiscard]] std::string ToString(ReleaseProfile profile);
-[[nodiscard]] DiagnosticSeverity DiagnosticSeverityFromString(std::string_view value);
-[[nodiscard]] nlohmann::json ToJson(const Diagnostic& diagnostic);
-[[nodiscard]] nlohmann::json ToJson(const DiagnosticCodeDescriptor& descriptor);
-[[nodiscard]] nlohmann::json ToJson(const ReleasePolicy& policy);
-[[nodiscard]] nlohmann::json ToJson(const FoundationGateReport& report);
-[[nodiscard]] FoundationGateReport EvaluateFoundationGate(const DiagnosticSink& diagnostics, const DiagnosticCodeRegistry& registry, ReleasePolicy policy);
+[[nodiscard]] ASTRA_CORE_API std::string ToString(DiagnosticSeverity severity);
+[[nodiscard]] ASTRA_CORE_API std::string ToString(ReleaseProfile profile);
+[[nodiscard]] ASTRA_CORE_API DiagnosticSeverity DiagnosticSeverityFromString(std::string_view value);
+[[nodiscard]] ASTRA_CORE_API nlohmann::json ToJson(const Diagnostic& diagnostic);
+[[nodiscard]] ASTRA_CORE_API nlohmann::json ToJson(const DiagnosticCodeDescriptor& descriptor);
+[[nodiscard]] ASTRA_CORE_API nlohmann::json ToJson(const ReleasePolicy& policy);
+[[nodiscard]] ASTRA_CORE_API nlohmann::json ToJson(const FoundationGateReport& report);
+[[nodiscard]] ASTRA_CORE_API FoundationGateReport EvaluateFoundationGate(const DiagnosticSink& diagnostics, const DiagnosticCodeRegistry& registry, ReleasePolicy policy);
 
 } // namespace Astra::Core

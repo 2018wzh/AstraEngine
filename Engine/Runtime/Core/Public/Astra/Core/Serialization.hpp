@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Astra/Core/Export.hpp>
 #include <Astra/Core/Diagnostics.hpp>
 #include <nlohmann/json.hpp>
 
@@ -42,7 +43,7 @@ struct UnknownFieldPolicyResult {
     bool blocking = false;
 };
 
-class MigrationRegistry {
+class ASTRA_CORE_API MigrationRegistry {
 public:
     void Register(MigrationRule rule);
     [[nodiscard]] Result<VersionedDocument> Migrate(const VersionedDocument& document, u32 target_version, DiagnosticSink& diagnostics) const;
@@ -51,9 +52,9 @@ private:
     std::map<std::tuple<std::string, u32, u32>, MigrationRule> rules_;
 };
 
-[[nodiscard]] nlohmann::json ToJson(const VersionedDocument& document);
-[[nodiscard]] nlohmann::json ToJson(const UnknownFieldPolicyResult& result);
-[[nodiscard]] Result<VersionedDocument> VersionedDocumentFromJson(const nlohmann::json& json);
-[[nodiscard]] UnknownFieldPolicyResult ApplyUnknownFieldPolicy(nlohmann::json& payload, const MigrationRule& rule, DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_CORE_API nlohmann::json ToJson(const VersionedDocument& document);
+[[nodiscard]] ASTRA_CORE_API nlohmann::json ToJson(const UnknownFieldPolicyResult& result);
+[[nodiscard]] ASTRA_CORE_API Result<VersionedDocument> VersionedDocumentFromJson(const nlohmann::json& json);
+[[nodiscard]] ASTRA_CORE_API UnknownFieldPolicyResult ApplyUnknownFieldPolicy(nlohmann::json& payload, const MigrationRule& rule, DiagnosticSink& diagnostics);
 
 } // namespace Astra::Core

@@ -1,0 +1,23 @@
+id: native:/Scripts/opening_lua
+schema: astra.asset.sidecar.v1
+type: script.lua
+source_path: opening.lua
+display_name: NativeVN Opening Lua
+tags: [script, lua, nativevn]
+origin: HumanAuthored
+license:
+  owner: project
+  usage: internal
+  source: project
+review:
+  status: accepted
+cook:
+  preset: lua_script
+dependencies:
+  hard:
+    - native:/Backgrounds/Room
+    - native:/Characters/Alice/Normal
+    - native:/Voice/Alice/opening_001
+    - native:/Music/opening_theme
+    - native:/Filters/soft_vn
+  soft: []

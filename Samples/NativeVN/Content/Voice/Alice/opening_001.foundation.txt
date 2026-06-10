@@ -1,0 +1,2 @@
+Foundation placeholder for Alice opening voice line.
+Logical audio commands are verified headlessly until real audio decode and playback are implemented.

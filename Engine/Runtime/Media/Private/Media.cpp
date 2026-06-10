@@ -1,6 +1,29 @@
 #include <Astra/Media/Media.hpp>
 
+#if defined(ASTRA_MEDIA_HAS_LIBPNG)
+#include <png.h>
+#endif
+#if defined(ASTRA_MEDIA_HAS_LIBJPEG)
+#include <jpeglib.h>
+#endif
+#if defined(ASTRA_MEDIA_HAS_LIBWEBP)
+#include <webp/decode.h>
+#endif
+#if defined(ASTRA_MEDIA_HAS_FREETYPE)
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#endif
+#if defined(ASTRA_MEDIA_HAS_HARFBUZZ)
+#include <hb.h>
+#endif
+#if defined(ASTRA_ENABLE_SDL_BACKEND)
+#include <SDL3/SDL_version.h>
+#endif
+
 #include <algorithm>
+#include <csetjmp>
+#include <cstring>
+#include <initializer_list>
 #include <sstream>
 
 namespace Astra::Media {
@@ -40,6 +63,48 @@ void EmitBlocking(Astra::Core::DiagnosticSink& diagnostics, std::string code, st
     }
     diagnostics.Emit(std::move(diagnostic));
 }
+
+void AddUnique(std::vector<std::string>& values, std::string value) {
+    if (std::ranges::find(values, value) == values.end()) {
+        values.push_back(std::move(value));
+    }
+}
+
+std::string VersionFromPackedInteger(int version) {
+    const auto major = (version >> 16) & 0xff;
+    const auto minor = (version >> 8) & 0xff;
+    const auto patch = version & 0xff;
+    return std::to_string(major) + "." + std::to_string(minor) + "." + std::to_string(patch);
+}
+
+#if defined(ASTRA_MEDIA_HAS_LIBPNG)
+struct PngMemoryReader {
+    std::span<const Astra::Core::u8> bytes;
+    std::size_t offset = 0;
+};
+
+void PngReadCallback(png_structp png, png_bytep output, png_size_t size) {
+    auto* reader = static_cast<PngMemoryReader*>(png_get_io_ptr(png));
+    if (reader == nullptr || reader->offset + size > reader->bytes.size()) {
+        png_error(png, "PNG input ended unexpectedly");
+        return;
+    }
+    std::memcpy(output, reader->bytes.data() + reader->offset, size);
+    reader->offset += size;
+}
+#endif
+
+#if defined(ASTRA_MEDIA_HAS_LIBJPEG)
+struct JpegErrorManager {
+    jpeg_error_mgr base;
+    jmp_buf jump;
+};
+
+void JpegErrorExit(j_common_ptr info) {
+    auto* manager = reinterpret_cast<JpegErrorManager*>(info->err);
+    longjmp(manager->jump, 1);
+}
+#endif
 
 class HeadlessRenderer2D final : public IRenderer2D {
 public:
@@ -114,7 +179,8 @@ RenderGraph ExtractRenderGraph(const std::vector<PresentationCommand>& commands,
 }
 
 std::vector<MediaProviderDescriptor> FoundationMediaProviders() {
-    return {
+    auto capabilities = ProbeMediaBackendCapabilities();
+    auto providers = std::vector<MediaProviderDescriptor>{
         {
             "astra.renderer2d.headless",
             Renderer2DSlotId,
@@ -149,6 +215,25 @@ std::vector<MediaProviderDescriptor> FoundationMediaProviders() {
             "none",
         },
     };
+    for (const auto& format : capabilities.image_formats) {
+        AddUnique(providers[0].supported_formats, format);
+    }
+    for (const auto& feature : capabilities.font_features) {
+        AddUnique(providers[1].features, feature);
+    }
+    for (const auto& feature : capabilities.audio_features) {
+        AddUnique(providers[2].features, feature);
+    }
+    if (capabilities.image_decode_ready) {
+        AddUnique(providers[0].features, "mature_image_decode_backend_available");
+    }
+    if (capabilities.text_layout_ready) {
+        AddUnique(providers[1].features, "mature_font_shaping_backend_available");
+    }
+    if (capabilities.audio_mixer_ready) {
+        AddUnique(providers[2].features, "mature_audio_mixer_backend_available");
+    }
+    return providers;
 }
 
 Astra::Core::Result<void> ValidateMediaProviderDescriptor(const MediaProviderDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics) {
@@ -250,6 +335,259 @@ Astra::Core::Result<MediaReleaseGateReport> ValidateMediaReleaseGate(const Media
 
     report.passed = valid;
     return valid ? Astra::Core::Result<MediaReleaseGateReport>::Success(std::move(report)) : Astra::Core::Result<MediaReleaseGateReport>::Failure(Astra::Core::ErrorCode::InvalidFormat, "media release gate failed");
+}
+
+MediaBackendCapabilityReport ProbeMediaBackendCapabilities() {
+    MediaBackendCapabilityReport report;
+    auto add_library = [&](MediaBackendLibrary library) {
+        if (library.available) {
+            for (const auto& format : library.formats) {
+                if (format == "png" || format == "jpeg" || format == "webp") {
+                    AddUnique(report.image_formats, format);
+                }
+            }
+            for (const auto& feature : library.features) {
+                if (feature.starts_with("font_") || feature == "text_shaping") {
+                    AddUnique(report.font_features, feature);
+                } else if (feature.starts_with("audio_")) {
+                    AddUnique(report.audio_features, feature);
+                }
+            }
+        }
+        report.libraries.push_back(std::move(library));
+    };
+
+    add_library({
+        "sdl3",
+        "SDL3",
+#if defined(ASTRA_ENABLE_SDL_BACKEND)
+        true,
+        std::to_string(SDL_MAJOR_VERSION) + "." + std::to_string(SDL_MINOR_VERSION) + "." + std::to_string(SDL_MICRO_VERSION),
+        {"bmp"},
+        {"window_surface", "texture_upload_path", "event_loop"},
+#else
+        false,
+        "",
+        {},
+        {},
+#endif
+    });
+
+    add_library({
+        "libpng",
+        "libpng",
+#if defined(ASTRA_MEDIA_HAS_LIBPNG)
+        true,
+        PNG_LIBPNG_VER_STRING,
+        {"png"},
+        {"image_decode", "alpha"},
+#else
+        false,
+        "",
+        {},
+        {},
+#endif
+    });
+
+    add_library({
+        "libjpeg-turbo",
+        "libjpeg-turbo",
+#if defined(ASTRA_MEDIA_HAS_LIBJPEG)
+        true,
+        std::to_string(JPEG_LIB_VERSION),
+        {"jpeg"},
+        {"image_decode", "ycbcr"},
+#else
+        false,
+        "",
+        {},
+        {},
+#endif
+    });
+
+    add_library({
+        "libwebp",
+        "libwebp",
+#if defined(ASTRA_MEDIA_HAS_LIBWEBP)
+        true,
+        VersionFromPackedInteger(WebPGetDecoderVersion()),
+        {"webp"},
+        {"image_decode", "alpha"},
+#else
+        false,
+        "",
+        {},
+        {},
+#endif
+    });
+
+    add_library({
+        "freetype",
+        "FreeType",
+#if defined(ASTRA_MEDIA_HAS_FREETYPE)
+        true,
+        std::to_string(FREETYPE_MAJOR) + "." + std::to_string(FREETYPE_MINOR) + "." + std::to_string(FREETYPE_PATCH),
+        {"ttf", "otf"},
+        {"font_rasterization", "font_metrics"},
+#else
+        false,
+        "",
+        {},
+        {},
+#endif
+    });
+
+    add_library({
+        "harfbuzz",
+        "HarfBuzz",
+#if defined(ASTRA_MEDIA_HAS_HARFBUZZ)
+        true,
+        hb_version_string(),
+        {},
+        {"text_shaping", "font_fallback_ready"},
+#else
+        false,
+        "",
+        {},
+        {},
+#endif
+    });
+
+    add_library({
+        "miniaudio",
+        "miniaudio",
+#if defined(ASTRA_MEDIA_HAS_MINIAUDIO)
+        true,
+        "available",
+        {"wav", "flac", "mp3"},
+        {"audio_decode", "audio_mixer", "audio_streaming"},
+#else
+        false,
+        "",
+        {},
+        {},
+#endif
+    });
+
+    report.image_decode_ready = std::ranges::find(report.image_formats, "png") != report.image_formats.end()
+                             && std::ranges::find(report.image_formats, "jpeg") != report.image_formats.end()
+                             && std::ranges::find(report.image_formats, "webp") != report.image_formats.end();
+    report.text_layout_ready = std::ranges::find(report.font_features, "font_rasterization") != report.font_features.end()
+                            && std::ranges::find(report.font_features, "text_shaping") != report.font_features.end();
+    report.audio_mixer_ready = std::ranges::find(report.audio_features, "audio_mixer") != report.audio_features.end();
+    return report;
+}
+
+Astra::Core::Result<ImageDecodeReport> InspectImageBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics) {
+    if (bytes.empty()) {
+        diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_IMAGE_EMPTY", Astra::Core::DiagnosticSeverity::Blocking, "Image payload is empty."));
+        return Astra::Core::Result<ImageDecodeReport>::Failure(Astra::Core::ErrorCode::InvalidArgument, "image payload empty");
+    }
+
+    const auto starts_with = [&](std::initializer_list<Astra::Core::u8> magic) {
+        if (bytes.size() < magic.size()) {
+            return false;
+        }
+        return std::equal(magic.begin(), magic.end(), bytes.begin());
+    };
+
+    if (starts_with({0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a})) {
+#if defined(ASTRA_MEDIA_HAS_LIBPNG)
+        PngMemoryReader reader{bytes, 0};
+        png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+        if (png == nullptr) {
+            diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_IMAGE_BACKEND_FAILED", Astra::Core::DiagnosticSeverity::Blocking, "libpng read struct could not be created."));
+            return Astra::Core::Result<ImageDecodeReport>::Failure(Astra::Core::ErrorCode::InternalError, "libpng create failed");
+        }
+        png_infop info = png_create_info_struct(png);
+        if (info == nullptr) {
+            png_destroy_read_struct(&png, nullptr, nullptr);
+            diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_IMAGE_BACKEND_FAILED", Astra::Core::DiagnosticSeverity::Blocking, "libpng info struct could not be created."));
+            return Astra::Core::Result<ImageDecodeReport>::Failure(Astra::Core::ErrorCode::InternalError, "libpng info failed");
+        }
+        if (setjmp(png_jmpbuf(png)) != 0) {
+            png_destroy_read_struct(&png, &info, nullptr);
+            diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_IMAGE_DECODE_FAILED", Astra::Core::DiagnosticSeverity::Blocking, "libpng could not parse the image payload."));
+            return Astra::Core::Result<ImageDecodeReport>::Failure(Astra::Core::ErrorCode::InvalidFormat, "png decode failed");
+        }
+        png_set_read_fn(png, &reader, PngReadCallback);
+        png_read_info(png, info);
+        png_uint_32 width = 0;
+        png_uint_32 height = 0;
+        int bit_depth = 0;
+        int color_type = 0;
+        int interlace = 0;
+        int compression = 0;
+        int filter = 0;
+        png_get_IHDR(png, info, &width, &height, &bit_depth, &color_type, &interlace, &compression, &filter);
+        ImageDecodeReport report;
+        report.format = "png";
+        report.width = static_cast<Astra::Core::u32>(width);
+        report.height = static_cast<Astra::Core::u32>(height);
+        report.channels = static_cast<Astra::Core::u32>(png_get_channels(png, info));
+        report.has_alpha = (color_type & PNG_COLOR_MASK_ALPHA) != 0 || png_get_valid(png, info, PNG_INFO_tRNS) != 0;
+        report.decoded_by = "libpng";
+        png_destroy_read_struct(&png, &info, nullptr);
+        return Astra::Core::Result<ImageDecodeReport>::Success(std::move(report));
+#else
+        diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_IMAGE_BACKEND_MISSING", Astra::Core::DiagnosticSeverity::Blocking, "PNG image payload requires libpng support."));
+        return Astra::Core::Result<ImageDecodeReport>::Failure(Astra::Core::ErrorCode::Unsupported, "libpng unavailable");
+#endif
+    }
+
+    if (starts_with({0xff, 0xd8, 0xff})) {
+#if defined(ASTRA_MEDIA_HAS_LIBJPEG)
+        jpeg_decompress_struct jpeg{};
+        JpegErrorManager error{};
+        jpeg.err = jpeg_std_error(&error.base);
+        error.base.error_exit = JpegErrorExit;
+        if (setjmp(error.jump) != 0) {
+            jpeg_destroy_decompress(&jpeg);
+            diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_IMAGE_DECODE_FAILED", Astra::Core::DiagnosticSeverity::Blocking, "libjpeg-turbo could not parse the image payload."));
+            return Astra::Core::Result<ImageDecodeReport>::Failure(Astra::Core::ErrorCode::InvalidFormat, "jpeg decode failed");
+        }
+        jpeg_create_decompress(&jpeg);
+        jpeg_mem_src(&jpeg, bytes.data(), static_cast<unsigned long>(bytes.size()));
+        jpeg_read_header(&jpeg, TRUE);
+        ImageDecodeReport report;
+        report.format = "jpeg";
+        report.width = static_cast<Astra::Core::u32>(jpeg.image_width);
+        report.height = static_cast<Astra::Core::u32>(jpeg.image_height);
+        report.channels = static_cast<Astra::Core::u32>(jpeg.num_components);
+        report.has_alpha = false;
+        report.decoded_by = "libjpeg-turbo";
+        jpeg_destroy_decompress(&jpeg);
+        return Astra::Core::Result<ImageDecodeReport>::Success(std::move(report));
+#else
+        diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_IMAGE_BACKEND_MISSING", Astra::Core::DiagnosticSeverity::Blocking, "JPEG image payload requires libjpeg-turbo support."));
+        return Astra::Core::Result<ImageDecodeReport>::Failure(Astra::Core::ErrorCode::Unsupported, "libjpeg unavailable");
+#endif
+    }
+
+    if (bytes.size() >= 12 && std::memcmp(bytes.data(), "RIFF", 4) == 0 && std::memcmp(bytes.data() + 8, "WEBP", 4) == 0) {
+#if defined(ASTRA_MEDIA_HAS_LIBWEBP)
+        WebPBitstreamFeatures features{};
+        const auto status = WebPGetFeatures(bytes.data(), bytes.size(), &features);
+        if (status != VP8_STATUS_OK) {
+            diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_IMAGE_DECODE_FAILED", Astra::Core::DiagnosticSeverity::Blocking, "libwebp could not parse the image payload."));
+            return Astra::Core::Result<ImageDecodeReport>::Failure(Astra::Core::ErrorCode::InvalidFormat, "webp decode failed");
+        }
+        ImageDecodeReport report;
+        report.format = "webp";
+        report.width = static_cast<Astra::Core::u32>(features.width);
+        report.height = static_cast<Astra::Core::u32>(features.height);
+        report.channels = features.has_alpha != 0 ? 4u : 3u;
+        report.has_alpha = features.has_alpha != 0;
+        report.decoded_by = "libwebp";
+        return Astra::Core::Result<ImageDecodeReport>::Success(std::move(report));
+#else
+        diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_IMAGE_BACKEND_MISSING", Astra::Core::DiagnosticSeverity::Blocking, "WebP image payload requires libwebp support."));
+        return Astra::Core::Result<ImageDecodeReport>::Failure(Astra::Core::ErrorCode::Unsupported, "libwebp unavailable");
+#endif
+    }
+
+    diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_IMAGE_FORMAT_UNSUPPORTED", Astra::Core::DiagnosticSeverity::Blocking, "Image payload is not PNG, JPEG, or WebP."));
+    return Astra::Core::Result<ImageDecodeReport>::Failure(Astra::Core::ErrorCode::InvalidFormat, "unsupported image format");
 }
 
 Astra::Core::Result<FilterProfile> FilterProfileFromJson(const nlohmann::json& json, Astra::Core::DiagnosticSink& diagnostics) {
@@ -432,6 +770,46 @@ nlohmann::json ToJson(const MediaReleaseGateReport& report) {
         {"passed", report.passed},
         {"selected_providers", providers},
         {"filter_applications", filters},
+    };
+}
+
+nlohmann::json ToJson(const MediaBackendLibrary& library) {
+    return {
+        {"id", library.id},
+        {"display_name", library.display_name},
+        {"available", library.available},
+        {"version", library.version},
+        {"formats", library.formats},
+        {"features", library.features},
+    };
+}
+
+nlohmann::json ToJson(const MediaBackendCapabilityReport& report) {
+    nlohmann::json libraries = nlohmann::json::array();
+    for (const auto& library : report.libraries) {
+        libraries.push_back(ToJson(library));
+    }
+    return {
+        {"schema", report.schema},
+        {"libraries", libraries},
+        {"image_formats", report.image_formats},
+        {"font_features", report.font_features},
+        {"audio_features", report.audio_features},
+        {"image_decode_ready", report.image_decode_ready},
+        {"text_layout_ready", report.text_layout_ready},
+        {"audio_mixer_ready", report.audio_mixer_ready},
+    };
+}
+
+nlohmann::json ToJson(const ImageDecodeReport& report) {
+    return {
+        {"schema", report.schema},
+        {"format", report.format},
+        {"width", report.width},
+        {"height", report.height},
+        {"channels", report.channels},
+        {"has_alpha", report.has_alpha},
+        {"decoded_by", report.decoded_by},
     };
 }
 

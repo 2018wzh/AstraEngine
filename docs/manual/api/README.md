@@ -1,6 +1,6 @@
 # API Reference
 
-Status: Phase 4 scaffold. Foundation public runtime headers are present for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Asset, Media, Script, AstraVN, and Tools. Phase 1 Foundation gate APIs are implemented for Core/Platform/ModuleRuntime/PropertySystem; later production runtime systems remain planned.
+Status: NativeVN runtime evidence scaffold. Foundation public runtime headers are present for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Asset, Media, Script, AstraVN, and Tools. Engine libraries are dynamic-only `Astra*` DLLs with generated per-module export headers under `Astra/<Module>/Export.hpp`. Later production runtime systems remain planned.
 
 ## Overview
 
@@ -65,9 +65,14 @@ Phase 3 Media provider/release-gate foundation APIs are in `Media.hpp`:
 - `MediaProviderDescriptor`
 - `MediaReleaseGateRequest`
 - `MediaReleaseGateReport`
+- `MediaBackendLibrary`
+- `MediaBackendCapabilityReport`
+- `ImageDecodeReport`
 - `FoundationMediaProviders()`
 - `ValidateMediaProviderDescriptor()`
 - `ValidateMediaReleaseGate()`
+- `ProbeMediaBackendCapabilities()`
+- `InspectImageBytes()`
 
 Phase 1 production Foundation gate APIs are in Core, Platform, ModuleRuntime, PropertySystem, and Tools headers:
 
@@ -99,6 +104,25 @@ Phase 4 Script/AstraVN foundation APIs are in `Script.hpp` and `AstraVN.hpp`:
 - `FoundationStateMachines()`
 
 Planned later entries include production Asset Pipeline, production Media backend providers, full Script debugger/hot reload/Graph/Timeline, production AstraVN package launch, Editor, AI/MCP, and Release Gate APIs.
+
+NativeVN runtime evidence APIs now also include:
+
+- `Astra::Asset::CookManifest`
+- `Astra::Asset::DerivedDataCacheEntry`
+- `Astra::Asset::PackagePayloadEntry`
+- `Astra::Asset::PackagePayloadChunk`
+- `Astra::Asset::PackageManifest`
+- `Astra::Asset::PackageMount`
+- `Astra::Asset::PackageReader`
+- `Astra::Asset::PackageReader::ReadPayloadBytes()`
+- `Astra::Asset::PackageReader::ReadPayloadChunks()`
+- `Astra::Asset::PackageReader::ReadPayloadText()`
+- `Astra::Asset::PackageReader::MountPackage()`
+- `Astra::Asset::ComputeCookManifestHash()`
+- `Astra::Asset::ComputePackageManifestHash()`
+- `Astra::Runtime::SaveContainer`
+- `Astra::Runtime::ReplayComparisonReport`
+- `Astra::Tools::Replay()`
 
 ## Examples
 

@@ -1,0 +1,18 @@
+id: native:/Backgrounds/Room
+schema: astra.asset.sidecar.v1
+type: image
+source_path: Room.foundation.txt
+display_name: Foundation Room Background
+tags: [background, nativevn]
+origin: HumanAuthored
+license:
+  owner: project
+  usage: internal
+  source: synthetic_placeholder
+review:
+  status: accepted
+cook:
+  preset: background
+dependencies:
+  hard: []
+  soft: []
