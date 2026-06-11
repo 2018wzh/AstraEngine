@@ -1,8 +1,8 @@
-add_executable(AstraPhase1Tests
-    Phase1Tests.cpp
+add_executable(AstraPhaseTests
+    PhaseTests.cpp
 )
-astra_configure_target(AstraPhase1Tests)
-target_link_libraries(AstraPhase1Tests
+astra_configure_target(AstraPhaseTests)
+target_link_libraries(AstraPhaseTests
     PRIVATE
         AstraCore
         AstraAsset
@@ -17,15 +17,15 @@ target_link_libraries(AstraPhase1Tests
         Catch2::Catch2WithMain
 )
 if(TARGET AstraTools)
-    target_link_libraries(AstraPhase1Tests PRIVATE AstraTools)
-    target_compile_definitions(AstraPhase1Tests PRIVATE ASTRA_WITH_TOOLS=1)
+    target_link_libraries(AstraPhaseTests PRIVATE AstraTools)
+    target_compile_definitions(AstraPhaseTests PRIVATE ASTRA_WITH_TOOLS=1)
 endif()
-target_compile_definitions(AstraPhase1Tests
+target_compile_definitions(AstraPhaseTests
     PRIVATE
         ASTRA_SOURCE_ROOT="${CMAKE_SOURCE_DIR}"
 )
 
-add_test(NAME AstraPhase1Tests COMMAND AstraPhase1Tests)
+add_test(NAME AstraPhaseTests COMMAND AstraPhaseTests)
 
 if(TARGET astra)
     add_test(NAME AstraCliVersion COMMAND astra --version)
@@ -33,22 +33,32 @@ if(TARGET astra)
     add_test(NAME AstraCliValidatePackageSmoke COMMAND astra validate "${CMAKE_SOURCE_DIR}/Samples/PackageSmoke" --strict)
     add_test(NAME AstraCliValidateNativeVN COMMAND astra validate "${CMAKE_SOURCE_DIR}/Samples/NativeVN" --strict)
     add_test(NAME AstraCliValidateNativeVNJson COMMAND astra validate "${CMAKE_SOURCE_DIR}/Samples/NativeVN" --strict --json)
+    add_test(NAME AstraCliValidateArtemisVNJson COMMAND astra validate "${CMAKE_SOURCE_DIR}/Samples/ArtemisVN" --strict --json)
     add_test(NAME AstraCliPackageSmoke COMMAND astra package "${CMAKE_SOURCE_DIR}/Samples/PackageSmoke" --profile development)
     add_test(NAME AstraCliRunPackageSmoke COMMAND astra run "${CMAKE_SOURCE_DIR}/Samples/PackageSmoke" --headless-smoke)
     add_test(NAME AstraCliRunPackageSmokeJson COMMAND astra run "${CMAKE_SOURCE_DIR}/Samples/PackageSmoke" --headless-smoke --json)
     add_test(NAME AstraCliPackageNativeVN COMMAND astra package "${CMAKE_SOURCE_DIR}/Samples/NativeVN" --profile deterministic --json)
     add_test(NAME AstraCliRunNativeVNPackage COMMAND astra run "${CMAKE_BINARY_DIR}/Saved/Packages/NativeVN.astrapkg" --headless-smoke --json)
     add_test(NAME AstraCliReplayNativeVN COMMAND astra replay "${CMAKE_BINARY_DIR}/Saved/Replays/NativeVNGolden.replay" --compare --json)
+    add_test(NAME AstraCliPackageArtemisVN COMMAND astra package "${CMAKE_SOURCE_DIR}/Samples/ArtemisVN" --profile development --json)
+    add_test(NAME AstraCliRunArtemisVNPackage COMMAND astra run "${CMAKE_BINARY_DIR}/Saved/Packages/ArtemisVN.astrapkg" --headless-smoke --json)
+    add_test(NAME AstraCliReplayArtemisVN COMMAND astra replay "${CMAKE_BINARY_DIR}/Saved/Replays/ArtemisVNGolden.replay" --compare --json)
     set_tests_properties(AstraCliValidateNativeVNJson PROPERTIES PASS_REGULAR_EXPRESSION "phase4_script_vn")
+    set_tests_properties(AstraCliValidateArtemisVNJson PROPERTIES PASS_REGULAR_EXPRESSION "native:/Fonts/SourceHanSerif")
     set_tests_properties(AstraCliRunPackageSmokeJson PROPERTIES PASS_REGULAR_EXPRESSION "media_release_gate")
     set_tests_properties(AstraCliPackageNativeVN PROPERTIES PASS_REGULAR_EXPRESSION "golden_replay")
+    set_tests_properties(AstraCliRunNativeVNPackage PROPERTIES PASS_REGULAR_EXPRESSION "playable_vn")
     set_tests_properties(AstraCliReplayNativeVN PROPERTIES PASS_REGULAR_EXPRESSION "comparison")
+    set_tests_properties(AstraCliPackageArtemisVN PROPERTIES PASS_REGULAR_EXPRESSION "golden_replay")
+    set_tests_properties(AstraCliRunArtemisVNPackage PROPERTIES PASS_REGULAR_EXPRESSION "system_ui_state")
+    set_tests_properties(AstraCliReplayArtemisVN PROPERTIES PASS_REGULAR_EXPRESSION "comparison")
     set_tests_properties(AstraCliRunNativeVNPackage AstraCliReplayNativeVN PROPERTIES DEPENDS AstraCliPackageNativeVN)
+    set_tests_properties(AstraCliRunArtemisVNPackage AstraCliReplayArtemisVN PROPERTIES DEPENDS AstraCliPackageArtemisVN)
 endif()
 
 if(TARGET AstraExampleFoundationPlugin)
-    add_dependencies(AstraPhase1Tests AstraExampleFoundationPlugin AstraInvalidNoEntryPlugin AstraInvalidBadAbiPlugin)
-    target_compile_definitions(AstraPhase1Tests
+    add_dependencies(AstraPhaseTests AstraExampleFoundationPlugin AstraInvalidNoEntryPlugin AstraInvalidBadAbiPlugin)
+    target_compile_definitions(AstraPhaseTests
         PRIVATE
             ASTRA_PHASE1_PLUGIN_DESCRIPTOR="${ASTRA_PLUGIN_OUTPUT_ROOT}/Phase1Example/Phase1Example.plugin.yaml"
             ASTRA_PHASE1_INVALID_PLUGIN_ROOT="${ASTRA_PLUGIN_OUTPUT_ROOT}/Phase1Invalid"

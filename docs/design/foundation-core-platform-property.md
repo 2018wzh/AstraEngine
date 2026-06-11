@@ -350,4 +350,4 @@ Phase 1 evidence：
 - `AstraCore` builds without Platform、SDL、Lua、VN、AI、Editor、renderer、audio 或 Compat。
 - `AstraPlatform` headless tests cover thread dispatch、timer、crash packet；SDL types remain in private implementation.
 - `AstraPropertySystem` tests cover JSON Schema、required/default validation 和 migration helper。
-- `AstraPhase1Tests` includes public header forbidden-token isolation checks。
+- `AstraPhaseTests` includes public header forbidden-token isolation checks。

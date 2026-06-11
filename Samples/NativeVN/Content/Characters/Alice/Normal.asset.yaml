@@ -1,14 +1,14 @@
 id: native:/Characters/Alice/Normal
 schema: astra.asset.sidecar.v1
 type: image
-source_path: Normal.foundation.txt
-display_name: Alice Normal
+source_path: Normal.png
+display_name: NativeVN Generated Alice Normal
 tags: [character, alice, nativevn]
 origin: HumanAuthored
 license:
   owner: project
   usage: internal
-  source: synthetic_placeholder
+  source: generated_fixture_ffmpeg_color
 review:
   status: accepted
 cook:

@@ -10,7 +10,11 @@
     "harfbuzz",
     "libjpeg-turbo",
     "libpng",
+    "libvorbis",
     "libwebp",
+    "ffmpeg",
+    "libmagic",
+    "zstd",
     {
       "name": "lua",
       "features": [

@@ -1,0 +1,26 @@
+schema: astra.input.scripted.v1
+sample: NativeVN
+route: opening_to_walk
+events:
+  - frame: 1
+    action: start
+  - frame: 8
+    action: advance
+  - frame: 16
+    action: system_menu
+  - frame: 20
+    action: backlog
+  - frame: 24
+    action: config
+    set:
+      text_speed: fast
+      bgm_volume: 0.65
+  - frame: 30
+    action: save
+    slot: 1
+  - frame: 36
+    action: choose
+    index: 0
+  - frame: 48
+    action: load
+    slot: 1

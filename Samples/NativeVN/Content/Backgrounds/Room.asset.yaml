@@ -1,14 +1,14 @@
 id: native:/Backgrounds/Room
 schema: astra.asset.sidecar.v1
 type: image
-source_path: Room.foundation.txt
-display_name: Foundation Room Background
+source_path: Room.png
+display_name: NativeVN Generated Room Background
 tags: [background, nativevn]
 origin: HumanAuthored
 license:
   owner: project
   usage: internal
-  source: synthetic_placeholder
+  source: generated_fixture_ffmpeg_color
 review:
   status: accepted
 cook:

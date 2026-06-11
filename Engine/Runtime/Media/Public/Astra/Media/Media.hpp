@@ -138,7 +138,6 @@ struct MediaProviderDescriptor {
     std::string provider_id;
     std::string slot_id;
     std::string display_name;
-    bool headless_supported = true;
     bool packaged_eligible = true;
     std::vector<std::string> supported_formats;
     std::vector<std::string> features;
@@ -150,7 +149,6 @@ struct MediaReleaseGateRequest {
     std::map<std::string, std::string> selected_providers;
     std::vector<MediaProviderDescriptor> providers;
     std::optional<FilterProfile> filter_profile;
-    bool require_headless_fallback = true;
 };
 
 struct MediaReleaseGateReport {
@@ -190,6 +188,35 @@ struct ImageDecodeReport {
     std::string decoded_by;
 };
 
+struct DecodedImageRgba {
+    std::string schema = "astra.media.decoded_image_rgba.v1";
+    std::string format;
+    Astra::Core::u32 width = 0;
+    Astra::Core::u32 height = 0;
+    std::vector<Astra::Core::u8> pixels;
+    std::string decoded_by;
+};
+
+struct RasterizedTextRgba {
+    std::string schema = "astra.media.rasterized_text_rgba.v1";
+    Astra::Core::u32 width = 0;
+    Astra::Core::u32 height = 0;
+    Astra::Core::u32 glyph_count = 0;
+    Astra::Core::u32 pixel_height = 0;
+    std::vector<Astra::Core::u8> pixels;
+    std::string shaped_by;
+    std::string rasterized_by;
+};
+
+struct AudioDecodeReport {
+    std::string schema = "astra.media.audio_decode.v1";
+    std::string format;
+    Astra::Core::u32 channels = 0;
+    Astra::Core::u32 sample_rate = 0;
+    Astra::Core::u64 pcm_frame_count = 0;
+    std::string decoded_by;
+};
+
 class ASTRA_MEDIA_API IRenderer2D {
 public:
     virtual ~IRenderer2D() = default;
@@ -198,13 +225,15 @@ public:
 };
 
 [[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IRenderer2D> CreateHeadlessRenderer2D();
-[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IRenderer2D> CreateSdlRenderer2DStub(Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API RenderGraph ExtractRenderGraph(const std::vector<PresentationCommand>& commands, const FilterProfile* filter_profile, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API std::vector<MediaProviderDescriptor> FoundationMediaProviders();
 [[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<void> ValidateMediaProviderDescriptor(const MediaProviderDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<MediaReleaseGateReport> ValidateMediaReleaseGate(const MediaReleaseGateRequest& request, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API MediaBackendCapabilityReport ProbeMediaBackendCapabilities();
 [[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<ImageDecodeReport> InspectImageBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedImageRgba> DecodeImageRgbaBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<RasterizedTextRgba> RasterizeTextRgbaBytes(std::span<const Astra::Core::u8> font_bytes, std::string_view text, Astra::Core::u32 pixel_height, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<AudioDecodeReport> DecodeAudioBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<FilterProfile> FilterProfileFromJson(const nlohmann::json& json, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<void> ValidateFilterProfile(const FilterProfile& profile, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API std::vector<FilterApplication> ApplyFilterProfile(const FilterProfile& profile);

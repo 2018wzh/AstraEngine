@@ -1,0 +1,18 @@
+id: native:/Sfx/Confirm
+schema: astra.asset.sidecar.v1
+type: audio
+source_path: confirm.ogg
+display_name: NativeVN Generated Confirm SE
+tags: [sfx, nativevn, playable]
+origin: GeneratedFixture
+license:
+  owner: project
+  usage: redistributable_test_fixture
+  source: generated_fixture_ffmpeg_sine
+review:
+  status: accepted
+cook:
+  preset: sfx
+dependencies:
+  hard: []
+  soft: []

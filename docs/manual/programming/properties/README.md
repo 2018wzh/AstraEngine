@@ -27,7 +27,7 @@ Use `Engine/Runtime/PropertySystem/Public/Astra/PropertySystem/PropertySystem.hp
 
 ## Examples
 
-`AstraPhase1Tests` registers nested struct/array/map/tagged union descriptors and validates schema/default/migration/write-policy/diff behavior.
+`AstraPhaseTests` registers nested struct/array/map/tagged union descriptors and validates schema/default/migration/write-policy/diff behavior.
 
 ## Troubleshooting
 

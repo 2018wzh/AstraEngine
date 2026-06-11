@@ -126,7 +126,7 @@ NativeVN runtime evidence APIs now also include:
 
 ## Examples
 
-Compiled examples live in `Engine/Tests/Phase1Tests.cpp` and `Engine/Plugins/Examples/Phase1Example/Source/Phase1Example.cpp`.
+Compiled examples live in `Engine/Tests/PhaseTests.cpp` and `Engine/Plugins/Examples/Phase1Example/Source/Phase1Example.cpp`.
 
 ## Troubleshooting
 

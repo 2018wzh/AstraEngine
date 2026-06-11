@@ -14,10 +14,15 @@ struct CommandOptions {
     bool json = false;
     bool strict = false;
     bool headless_smoke = false;
+    bool windowed_smoke = false;
+    bool auto_close = false;
     bool compare = false;
     std::string config = "Debug";
     std::string profile = "development";
     std::filesystem::path diagnostics_out;
+    std::filesystem::path scripted_input;
+    std::filesystem::path save_out;
+    std::filesystem::path load;
 };
 
 struct CommandReport {

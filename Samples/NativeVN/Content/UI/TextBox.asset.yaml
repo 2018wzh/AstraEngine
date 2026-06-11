@@ -1,0 +1,18 @@
+id: native:/UI/TextBox
+schema: astra.asset.sidecar.v1
+type: image
+source_path: TextBox.png
+display_name: NativeVN Generated Text Box
+tags: [ui, nativevn, playable]
+origin: GeneratedFixture
+license:
+  owner: project
+  usage: redistributable_test_fixture
+  source: generated_fixture_ffmpeg_color
+review:
+  status: accepted
+cook:
+  preset: ui
+dependencies:
+  hard: []
+  soft: []

@@ -30,7 +30,7 @@ Attach a component with `state_machine_id` and `current_state`, register matchin
 
 ## Examples
 
-Compiled transition coverage lives in `Engine/Tests/Phase1Tests.cpp`.
+Compiled transition coverage lives in `Engine/Tests/PhaseTests.cpp`.
 
 ## Troubleshooting
 

@@ -1,0 +1,19 @@
+id: native:/Fonts/SourceHanSerif
+schema: astra.asset.sidecar.v1
+type: font
+source_path: sourcehanserif-medium.otf
+display_name: Source Han Serif Medium
+tags: [font, nativevn, playable, redistributable]
+origin: OpenSourceThirdParty
+license:
+  owner: Adobe
+  usage: redistributable_test_fixture
+  source: https://github.com/adobe-fonts/source-han-serif
+  license_id: SIL-OFL-1.1
+review:
+  status: accepted
+cook:
+  preset: font
+dependencies:
+  hard: []
+  soft: []

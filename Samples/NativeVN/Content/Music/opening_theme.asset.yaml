@@ -1,14 +1,14 @@
 id: native:/Music/opening_theme
 schema: astra.asset.sidecar.v1
 type: audio
-source_path: opening_theme.foundation.txt
-display_name: Opening Theme
+source_path: opening_theme.ogg
+display_name: NativeVN Generated Opening Theme
 tags: [music, nativevn]
 origin: HumanAuthored
 license:
   owner: project
   usage: internal
-  source: synthetic_placeholder
+  source: generated_fixture_ffmpeg_sine
 review:
   status: accepted
 cook:

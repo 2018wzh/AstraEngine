@@ -39,7 +39,7 @@ Foundation samples live under `Samples/NativeVN`, `Samples/RuntimeStress`, and `
 
 ## Troubleshooting
 
-If a page describes a final release command, check whether it is listed as current evidence or target acceptance. Current validation covers CMake configure/build, `AstraPhase1Tests`, the example foundation plugin load path, `astra --version`, `astra validate`, `foundation_core_gate`, dynamic engine DLL evidence, NativeVN `cook/package/run --headless-smoke/replay --compare/inspect` evidence, and `tools/doc-check.ps1`.
+If a page describes a final release command, check whether it is listed as current evidence or target acceptance. Current validation covers CMake configure/build, `AstraPhaseTests`, the example foundation plugin load path, `astra --version`, `astra validate`, `foundation_core_gate`, dynamic engine DLL evidence, NativeVN `cook/package/run --headless-smoke/replay --compare/inspect` evidence, and `tools/doc-check.ps1`.
 
 ## Manual Sections
 

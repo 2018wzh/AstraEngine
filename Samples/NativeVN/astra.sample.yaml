@@ -3,8 +3,20 @@ id: astra.sample.nativevn
 display_name: NativeVN
 phase: 4
 foundation_only: true
-status: foundation-playable
-description: Phase 4 foundation playable NativeVN descriptor with Native DSL, Lua, ScriptRuntimeHost, AstraVN, save/restore, and headless presentation evidence. Production asset cook, real media backend, debugger, and package launch remain later phases.
+status: playable-v1
+description: Redistributable playable NativeVN descriptor with Native DSL, Lua, ScriptRuntimeHost, AstraVN, generated PNG/OGG fixture media, UI/system state, save/load, replay, and windowed/headless evidence.
 acceptance:
   - astra validate Samples/NativeVN --strict
   - astra run Samples/NativeVN --headless-smoke
+  - astra run build/Saved/Packages/NativeVN.astrapkg --windowed-smoke --scripted-input Samples/NativeVN/Input/golden.yaml --auto-close --json
+playable:
+  stage:
+    width: 1280
+    height: 720
+  redistributable: true
+  route: opening_to_walk
+  ui_system:
+    title: true
+    backlog: true
+    save_load_slots: 3
+    config: true

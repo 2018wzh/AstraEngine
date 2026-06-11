@@ -25,10 +25,49 @@ struct WindowDesc {
     Astra::Core::u32 height = 720;
 };
 
+struct WindowColor {
+    Astra::Core::u8 r = 0;
+    Astra::Core::u8 g = 0;
+    Astra::Core::u8 b = 0;
+    Astra::Core::u8 a = 255;
+};
+
+struct WindowFramePrimitive {
+    std::string id;
+    std::string kind = "rect";
+    float x = 0.0F;
+    float y = 0.0F;
+    float width = 0.0F;
+    float height = 0.0F;
+    WindowColor color;
+    std::string label;
+    Astra::Core::u32 image_width = 0;
+    Astra::Core::u32 image_height = 0;
+    std::vector<Astra::Core::u8> image_rgba;
+};
+
+struct WindowFrameDesc {
+    Astra::Core::u64 frame_index = 0;
+    Astra::Core::u32 width = 1280;
+    Astra::Core::u32 height = 720;
+    WindowColor clear_color;
+    std::vector<WindowFramePrimitive> primitives;
+};
+
+struct WindowPresentEvidence {
+    bool presented = false;
+    std::string backend = "headless";
+    Astra::Core::u64 frame_index = 0;
+    Astra::Core::u32 primitive_count = 0;
+    Astra::Core::u32 image_primitive_count = 0;
+    std::string frame_hash;
+};
+
 class IWindowService {
 public:
     virtual ~IWindowService() = default;
     [[nodiscard]] virtual Astra::Core::Result<void> Create(WindowDesc desc, Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<WindowPresentEvidence> PresentFrame(const WindowFrameDesc& frame, Astra::Core::DiagnosticSink& diagnostics) = 0;
     virtual void PumpEvents() = 0;
     [[nodiscard]] virtual bool ShouldClose() const = 0;
     virtual void Close() = 0;

@@ -1,5 +1,6 @@
 label opening
 bg native:/Backgrounds/Room
+audio sfx native:/Sfx/Confirm
 show alice native:/Characters/Alice/Normal center
 say alice "Good morning from Phase 4." voice native:/Voice/Alice/opening_001
 audio music native:/Music/opening_theme
@@ -8,4 +9,4 @@ choice "Walk together" -> route_walk
 
 label route_walk
 set route walk
-say alice "Let's go."
+say alice "Let's open the menu, save, load, and replay this route."

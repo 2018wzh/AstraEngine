@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <map>
 #include <queue>
 #include <sstream>
@@ -18,11 +19,57 @@ namespace Astra::Platform {
 
 namespace {
 
+std::string WindowFrameHash(const WindowFrameDesc& frame) {
+    constexpr Astra::Core::u64 offset = 14695981039346656037ull;
+    constexpr Astra::Core::u64 prime = 1099511628211ull;
+    Astra::Core::u64 value = offset;
+    auto mix = [&](std::string_view text) {
+        for (const auto character : text) {
+            value ^= static_cast<unsigned char>(character);
+            value *= prime;
+        }
+    };
+    mix(std::to_string(frame.frame_index));
+    mix(std::to_string(frame.width));
+    mix(std::to_string(frame.height));
+    for (const auto& primitive : frame.primitives) {
+        mix(primitive.id);
+        mix(primitive.kind);
+        mix(std::to_string(primitive.x));
+        mix(std::to_string(primitive.y));
+        mix(std::to_string(primitive.width));
+        mix(std::to_string(primitive.height));
+        mix(primitive.label);
+        mix(std::to_string(primitive.image_width));
+        mix(std::to_string(primitive.image_height));
+        for (const auto byte : primitive.image_rgba) {
+            value ^= byte;
+            value *= prime;
+        }
+    }
+    std::ostringstream output;
+    output << std::hex << value;
+    return output.str();
+}
+
 class HeadlessWindowService final : public IWindowService {
 public:
     Astra::Core::Result<void> Create(WindowDesc, Astra::Core::DiagnosticSink&) override {
         created_ = true;
         return Astra::Core::Result<void>::Success();
+    }
+
+    Astra::Core::Result<WindowPresentEvidence> PresentFrame(const WindowFrameDesc& frame, Astra::Core::DiagnosticSink&) override {
+        WindowPresentEvidence evidence;
+        evidence.presented = created_;
+        evidence.backend = "headless";
+        evidence.frame_index = frame.frame_index;
+        evidence.primitive_count = static_cast<Astra::Core::u32>(frame.primitives.size());
+        evidence.image_primitive_count = static_cast<Astra::Core::u32>(std::ranges::count_if(frame.primitives, [](const WindowFramePrimitive& primitive) {
+            return !primitive.image_rgba.empty();
+        }));
+        evidence.frame_hash = WindowFrameHash(frame);
+        return Astra::Core::Result<WindowPresentEvidence>::Success(std::move(evidence));
     }
 
     void PumpEvents() override {}

@@ -32,7 +32,7 @@ Call `RuntimeWorld::Save()` for a versioned snapshot and `RuntimeWorld::Load()` 
 
 ## Examples
 
-Compiled save/load and hash smoke coverage lives in `Engine/Tests/Phase1Tests.cpp`.
+Compiled save/load and hash smoke coverage lives in `Engine/Tests/PhaseTests.cpp`.
 
 ## Troubleshooting
 

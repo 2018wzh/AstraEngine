@@ -28,7 +28,7 @@ Use `Engine/Runtime/Platform/Public/Astra/Platform/Platform.hpp`.
 
 ## Examples
 
-`AstraPhase1Tests` verifies headless filesystem, timer, thread dispatch/pending tags, dynamic-library error behavior, file-watch polling, crash packet capture, and public header isolation.
+`AstraPhaseTests` verifies headless filesystem, timer, thread dispatch/pending tags, dynamic-library error behavior, file-watch polling, crash packet capture, and public header isolation.
 
 ## Troubleshooting
 

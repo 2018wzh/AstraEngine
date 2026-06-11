@@ -1,0 +1,8 @@
+Source Han Serif Medium
+
+Upstream: https://github.com/adobe-fonts/source-han-serif
+Copyright: Adobe and contributors
+License: SIL Open Font License, Version 1.1
+
+This NativeVN fixture bundles the font as an unmodified redistributable test asset.
+The font sidecar records license_id: SIL-OFL-1.1 and the upstream source URL.

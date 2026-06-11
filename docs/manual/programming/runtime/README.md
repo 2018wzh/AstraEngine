@@ -4,7 +4,7 @@ Status: Phase 2 Foundation.
 
 ## Overview
 
-`AstraRuntime` provides a headless runtime facade that combines `ActorWorld`, `RuntimeEventBus`, basic StateMachine transitions, Director state, and foundation save/load/replay hashes.
+The Runtime module provides a headless facade that combines `ActorWorld`, `RuntimeEventBus`, basic StateMachine transitions, Director state, and foundation save/load/replay hashes.
 
 ## Key Concepts
 
@@ -44,7 +44,7 @@ Use `EvaluateControlPolicy()` for foundation owner/channel checks. Use `CaptureR
 
 ## Examples
 
-Compiled Phase 2 examples live in `Engine/Tests/Phase1Tests.cpp`.
+Compiled Phase 2 examples live in `Engine/Tests/PhaseTests.cpp`.
 
 ## Troubleshooting
 

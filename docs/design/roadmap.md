@@ -88,7 +88,7 @@ UE `UObject` / UHT / GC 体系。
 
 ## 5. Phase 2：Foundation Scene / Runtime
 
-状态：Implemented foundation slice. 当前实现覆盖 headless `AstraScene` 和 `AstraRuntime`：`ActorWorld`、stable Actor/Component DTO、`ComponentDescriptor`、generation-safe handle、private EnTT-backed local storage、headless local ECS pack、`RuntimeWorld`、RuntimeEvent/EventBus、基础 StateMachine transition、Blackboard/ControlPolicy/Director foundation、foundation save/load、RuntimeReplay DTO 和 deterministic stable hash smoke。完整 lifecycle/prefab、production scheduler、timeline/resource/script/AI/module extension state 存档和 replay mismatch 定位仍属 Phase 5 及后续 production completion。
+状态：Implemented foundation slice. 当前实现覆盖 headless `AstraScene` 和 Runtime module：`ActorWorld`、stable Actor/Component DTO、`ComponentDescriptor`、generation-safe handle、private EnTT-backed local storage、headless local ECS pack、`RuntimeWorld`、RuntimeEvent/EventBus、基础 StateMachine transition、Blackboard/ControlPolicy/Director foundation、foundation save/load、RuntimeReplay DTO 和 deterministic stable hash smoke。完整 lifecycle/prefab、production scheduler、timeline/resource/script/AI/module extension state 存档和 replay mismatch 定位仍属 Phase 5 及后续 production completion。
 
 目标：
 

@@ -47,7 +47,7 @@ Use `FoundationComponentDescriptors()` to discover the built-in foundation compo
 
 ## Examples
 
-Compiled Phase 2 examples live in `Engine/Tests/Phase1Tests.cpp`.
+Compiled Phase 2 examples live in `Engine/Tests/PhaseTests.cpp`.
 
 ## Troubleshooting
 

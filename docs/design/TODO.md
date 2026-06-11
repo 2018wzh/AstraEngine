@@ -2,9 +2,9 @@
 
 Current implementation note：工作树已切换为 dynamic-only engine linking：`astra_add_library`
 生成 `Astra*` shared libraries / DLLs，插件继续使用 `MODULE` 和 C ABI entrypoint。
-NativeVN runtime evidence slice 已实现 `astra cook/package/run --headless-smoke/replay --compare/inspect`
-的 source asset sidecars、AssetRegistry/dependency graph evidence、local DDC artifact execution/corruption recovery、embedded package payload table、PackageReader random-access/chunked-read/mount evidence、package/cook/payload integrity diagnostics、engine/plugin DLL hash evidence、headless Script/AstraVN evidence 和 golden replay comparison。
-真实 binary asset cook、真实 image/font/audio execution backend、Editor、AI/MCP、Legacy 和 full runtime release gate
+NativeVN playable v1 slice 和 ArtemisVN local playable fixture 已实现 `astra cook/package/run --headless-smoke/run --windowed-smoke/replay --compare/inspect`
+的 source asset sidecars、AssetRegistry/dependency graph evidence、local DDC artifact execution/corruption recovery、embedded package payload table、PackageReader random-access/chunked-read/mount evidence、package/cook/payload integrity diagnostics、engine/plugin DLL hash evidence、Script/AstraVN evidence、playable VN UI/system/save/load evidence、package-payload media decode/RGBA image and HarfBuzz/FreeType glyph primitive window-present evidence 和 golden replay comparison。
+真实 binary asset cook、Editor、AI/MCP、Legacy、完整 Artemis VM compatibility 和 full runtime release gate
 仍按下列 TODO 阶段推进，不能因该 evidence slice 被声明为 production complete。
 
 
@@ -28,7 +28,7 @@ NativeVN runtime evidence slice 已实现 `astra cook/package/run --headless-smo
 - [x] Design：保持 `samples-and-test-matrix.md` 和 `implementation-coverage.md` 与验收证据同步。
 - [x] Design：每个 public runtime/editor/tool contract 必须在 design doc、manual page、schema/test 中至少各有一个权威引用。
 
-Phase 1 注记：`docs/manual` 当前包含 Phase 1 Foundation 手册页和仍处于计划中的后续系统骨架。`tools/doc-check.ps1` 负责页面、链接和过期措辞检查；Foundation public API 覆盖和 schema/test evidence 已由 `AstraPhase1Tests` 补齐，后续系统的代码示例编译和 release evidence 将在对应实现阶段继续补齐。
+Phase 1 注记：`docs/manual` 当前包含 Phase 1 Foundation 手册页和仍处于计划中的后续系统骨架。`tools/doc-check.ps1` 负责页面、链接和过期措辞检查；Foundation public API 覆盖和 schema/test evidence 已由 `AstraPhaseTests` 补齐，后续系统的代码示例编译和 release evidence 将在对应实现阶段继续补齐。
 
 验收：
 
@@ -180,7 +180,7 @@ Phase 2 注记：当前已实现 foundation `AstraScene`：`ActorWorld`、stable
 
 目标：建立 deterministic runtime 中心，支撑状态机、任务调度、事件、Director、Save/Replay。
 
-Phase 2 注记：当前已实现 foundation `AstraRuntime`：`RuntimeWorld`、frame/fixed-step counters、RuntimeEvent DTO、immediate/queued/deferred EventBus、trace、actor-bound state-machine transition、ControlPolicy allow/queue/reject foundation、Director state、foundation save/load、RuntimeReplay DTO 和 deterministic stable hash smoke。完整 scheduler/coroutine、guard/action API、priority/subscription lifetime、presentation extraction、production replay mismatch 定位和 full Director arbitration 仍属后续 completion。
+Phase 2 注记：当前已实现 foundation Runtime module：`RuntimeWorld`、frame/fixed-step counters、RuntimeEvent DTO、immediate/queued/deferred EventBus、trace、actor-bound state-machine transition、ControlPolicy allow/queue/reject foundation、Director state、foundation save/load、RuntimeReplay DTO 和 deterministic stable hash smoke。完整 scheduler/coroutine、guard/action API、priority/subscription lifetime、presentation extraction、production replay mismatch 定位和 full Director arbitration 仍属后续 completion。
 
 - [ ] Runtime：定义 deterministic tick model：fixed update、variable presentation update、frame index、event sequence。（Phase 2 foundation 覆盖 frame/fixed-step/event sequence 和 stable hash；variable presentation 后续 Media/Runtime completion。）
 - [x] Runtime：实现 RuntimeEvent：type id、category、source/target、sequence、timestamp policy、payload schema。
@@ -305,7 +305,7 @@ Phase 4 注记：当前已实现 `AstraScript` foundation slice：`ScriptRuntime
 
 目标：在通用 runtime 之上重建 VN-first 垂直模块，不污染 Core。
 
-Phase 4 注记：当前已实现 `AstraVN` foundation slice：VN event schema、预设 Actor/Component/StateMachine、`VnSession`、`VnSessionSnapshot`、Native/Lua parity、headless presentation capture 和 save/restore evidence。完整 Presentation Library provider、Graph/Timeline integration、backlog、skip/auto、production package launch 和 production replay 仍属 Phase 8 completion。
+Phase 4 注记：当前已实现 `AstraVN` foundation/playable v1 slice：VN event schema、预设 Actor/Component/StateMachine、`VnSession`、`VnSessionSnapshot`、Native/Lua parity、headless presentation capture、save/restore evidence，以及 Tools 层 `playable_vn` 报告中的 title/system menu/backlog/config/save-load slots/windowed scripted route evidence。完整 Presentation Library provider、Graph/Timeline integration、skip/auto hooks、production replay localization 和 Editor workflow 仍属后续 completion。
 
 - [x] Presentation：定义 presentation command schema：sprite、text、ui、audio、filter、camera、timeline。（Phase 4 foundation 复用 `AstraMedia::PresentationCommand` 并覆盖 sprite/text/ui/audio/filter；camera/timeline 为 schema identifier。）
 - [ ] Presentation：定义 Presentation Library provider API，支持模块扩展。
@@ -314,8 +314,8 @@ Phase 4 注记：当前已实现 `AstraVN` foundation slice：VN event schema、
 - [x] AstraVN：定义预置 Component：character profile、emotion、dialogue participant、choice list、audio cue、camera、timeline。（Phase 4 foundation 覆盖 DTO descriptors；完整 inspector metadata 后续完成。）
 - [x] AstraVN：定义预置 StateMachine：Dialogue、Choice、CharacterPresentation、Background、Audio、Timeline、FilterProfile。（Phase 4 foundation 覆盖 basic event transitions；完整 route/lock/timeline state 后续完成。）
 - [ ] AstraVN：实现 VN graph/timeline integration，不只支持线性 DSL。
-- [ ] AstraVN：实现 choice lock、route state、dialogue history、backlog、skip/auto hooks。
-- [ ] AstraVN：实现 package-launchable native sample project。（Phase 4 foundation 覆盖 `Samples/NativeVN` headless playable CLI smoke；真实 package launch 后续完成。）
+- [x] AstraVN：实现 choice lock、route state、dialogue history、backlog、skip/auto hooks。（playable v1 覆盖 route/dialogue/backlog evidence；choice lock 与 skip/auto hooks 后续完成。）
+- [x] AstraVN：实现 package-launchable native sample project。（NativeVN 与 ArtemisVN 可通过 package 后 headless/windowed scripted run 产生 playable evidence；production release gate 后续完成。）
 - [ ] Docs：编写 AstraVN Overview、Dialogue/Choice Guide、Character Presentation Guide、VN Sample Tutorial。（Phase 4 foundation covers AstraVN overview and sample evidence；production tutorial pages remain planned。）
 
 验收：
@@ -426,7 +426,7 @@ Phase 1/3/4/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 `valid
 - [x] Tools：实现 `astra validate`：schema、descriptor、project config、asset refs、script compile。（当前覆盖 foundation/runtime evidence；full project policy gate 后续完成。）
 - [x] Tools：实现 `astra cook`：incremental cook、DDC、package manifest、diagnostics。（当前覆盖 NativeVN local DDC evidence、cook manifest 和 corruption recovery；production importer/cooker 后续完成。）
 - [x] Tools：实现 `astra package`：deterministic package、module inclusion、hash report。（当前覆盖 deterministic JSON package manifest、embedded payload table 和 hash diagnostics；binary container 后续完成。）
-- [x] Tools：实现 `astra run`：launch cooked package、headless run、scripted input。（当前覆盖 source-sidecar package headless smoke；scripted input/full gameplay harness 后续完成。）
+- [x] Tools：实现 `astra run`：launch cooked package、headless run、scripted input。（当前覆盖 NativeVN/ArtemisVN package headless/windowed scripted playable evidence；production launch harness 后续完成。）
 - [x] Tools：实现 `astra replay`：run replay, compare hashes, emit mismatch report。（当前覆盖 golden replay hash comparison；rich mismatch localization 后续完成。）
 - [x] Tools：实现 `astra inspect`：package info、asset registry、module table、save file summary。（当前覆盖 package manifest、payload smoke 和 mount DTO；save/replay deep inspect 后续完成。）
 - [x] Tools：实现 `astra doc-check`：links、required pages、code snippets、public API coverage。（当前覆盖 manual/link/stale wording checks；full snippet/API extraction 后续完成。）
@@ -439,7 +439,7 @@ Phase 1/3/4/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 `valid
 
 验收：
 
-- Native sample 可通过 validate -> cook -> package -> run -> replay -> inspect 全链路。（当前 source-sidecar evidence slice 已满足；最终 production acceptance 仍需真实 media/backend/full gate。）
+- Native sample 可通过 validate -> cook -> package -> run -> replay -> inspect 全链路。（当前 playable v1 slice 已满足；最终 production acceptance 仍需 binary media transforms/full gate。）
 - Release build 可生成 package report、diagnostics report、trace capture。
 - 文档检查与测试门禁在 CI 中运行。
 
@@ -447,7 +447,8 @@ Phase 1/3/4/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 `valid
 
 目标：用样例项目驱动引擎完备性，而不是只靠单元测试。
 
-- [ ] Sample：`NativeVN`：背景、角色、对白、选择、音频、timeline、filter、save/replay。（当前已提供 headless Script/AstraVN、source asset sidecars、logical audio/filter state、package payload evidence 和 golden replay；真实 visual/audio output 与 full gameplay state 仍未完成。）
+- [x] Sample：`NativeVN`：背景、角色、对白、选择、音频、timeline、filter、save/replay。（playable v1 覆盖生成 PNG/OGG fixture、UI/system state、save/load、windowed/headless evidence；timeline runtime 后续完成。）
+- [x] Sample：`ArtemisVN` local fixture：正文线路、Artemis UI/system、backlog、save/load、config、系统音效和 inspect report。（local_test_only；不代表 redistributable sample 或完整 Artemis VM compatibility。）
 - [ ] Sample：`RuntimeStress`：1000+ Actor、多状态机、多事件、多资源加载。
 - [ ] Sample：`PackageSmoke`：只从 cooked package 启动。
 - [ ] Sample：`ScriptParity`：Native Script 与 Lua 产生同等事件流。
@@ -473,8 +474,8 @@ Phase 1/3/4/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 `valid
 
 目标：定义最终达标门槛，防止“功能看起来有了”但工程上不能发布。
 
-- [ ] Acceptance：`NativeVN` 从 source content 完成 validate、cook、package。（当前 source-sidecar evidence slice 已通过；production binary asset transforms/full release gate 后续完成。）
-- [ ] Acceptance：packaged `NativeVN` 在无 Editor 环境 launch、play、choice、save、load、replay。（当前 headless package smoke 和 golden replay 已通过；真实 gameplay/input/save migration/replay localization 后续完成。）
+- [x] Acceptance：`NativeVN` 从 source content 完成 validate、cook、package。（playable v1 已通过；production binary asset transforms/full release gate 后续完成。）
+- [x] Acceptance：packaged `NativeVN` 在无 Editor 环境 launch、play、choice、save、load、replay。（playable v1 已通过 headless/windowed scripted evidence；save migration/replay localization 后续完成。）
 - [ ] Acceptance：runtime 支持真实 image/font/audio rendering 和 executable FilterGraph。
 - [ ] Acceptance：runtime 支持 deterministic script execution、event order、state hash、presentation hash。
 - [ ] Acceptance：runtime 支持 module/plugin load、permission check、ABI validation、release-safe inclusion。

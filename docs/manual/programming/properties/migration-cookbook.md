@@ -26,7 +26,7 @@ Use `Astra/PropertySystem/PropertySystem.hpp`.
 
 ## Examples
 
-`AstraPhase1Tests` migrates `name` to `display_name` and injects `age`.
+`AstraPhaseTests` migrates `name` to `display_name` and injects `age`.
 
 ## Troubleshooting
 

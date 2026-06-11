@@ -1,6 +1,5 @@
 set(ASTRA_MEDIA_SOURCES
     Private/Media.cpp
-    Private/SdlRendererStub.cpp
 )
 
 astra_add_library(AstraMedia ${ASTRA_MEDIA_SOURCES})
@@ -53,4 +52,18 @@ find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
 if(MINIAUDIO_INCLUDE_DIRS)
     target_include_directories(AstraMedia PRIVATE ${MINIAUDIO_INCLUDE_DIRS})
     target_compile_definitions(AstraMedia PRIVATE ASTRA_MEDIA_HAS_MINIAUDIO=1)
+endif()
+
+find_package(FFMPEG QUIET)
+if(FFMPEG_FOUND)
+    target_include_directories(AstraMedia PRIVATE ${FFMPEG_INCLUDE_DIRS})
+    target_link_directories(AstraMedia PRIVATE ${FFMPEG_LIBRARY_DIRS})
+    target_link_libraries(AstraMedia PRIVATE ${FFMPEG_LIBRARIES})
+    target_compile_definitions(AstraMedia PRIVATE ASTRA_MEDIA_HAS_FFMPEG=1)
+endif()
+
+find_package(Vorbis CONFIG QUIET)
+if(TARGET Vorbis::vorbisfile)
+    target_link_libraries(AstraMedia PRIVATE Vorbis::vorbisfile)
+    target_compile_definitions(AstraMedia PRIVATE ASTRA_MEDIA_HAS_VORBISFILE=1)
 endif()

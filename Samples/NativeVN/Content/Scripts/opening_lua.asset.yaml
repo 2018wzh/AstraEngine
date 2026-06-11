@@ -17,7 +17,10 @@ dependencies:
   hard:
     - native:/Backgrounds/Room
     - native:/Characters/Alice/Normal
+    - native:/Sfx/Confirm
     - native:/Voice/Alice/opening_001
     - native:/Music/opening_theme
     - native:/Filters/soft_vn
+    - native:/UI/TextBox
+    - native:/Fonts/SourceHanSerif
   soft: []

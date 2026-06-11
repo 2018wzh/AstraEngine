@@ -1,14 +1,14 @@
 id: native:/Voice/Alice/opening_001
 schema: astra.asset.sidecar.v1
 type: audio
-source_path: opening_001.foundation.txt
-display_name: Alice Opening Voice 001
+source_path: opening_001.ogg
+display_name: NativeVN Generated Alice Voice 001
 tags: [voice, alice, nativevn]
 origin: HumanAuthored
 license:
   owner: project
   usage: internal
-  source: synthetic_placeholder
+  source: generated_fixture_ffmpeg_sine
 review:
   status: accepted
 cook:

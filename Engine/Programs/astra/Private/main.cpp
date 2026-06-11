@@ -45,10 +45,15 @@ int main(int argc, char** argv) {
     package->add_option("--profile", options.profile, "Foundation profile");
     package->add_flag("--deterministic", options.compare, "Alias for deterministic package profile evidence");
     package->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
-    auto* run = app.add_subcommand("run", "Run a headless foundation smoke");
+    auto* run = app.add_subcommand("run", "Run a foundation/runtime smoke");
     run->add_option("target", run_target)->required();
     run->add_flag("--json", options.json, "Emit JSON report");
     run->add_flag("--headless-smoke", options.headless_smoke, "Run the headless smoke path");
+    run->add_flag("--windowed-smoke", options.windowed_smoke, "Run the SDL windowed smoke path");
+    run->add_flag("--auto-close", options.auto_close, "Close the windowed smoke automatically after evidence capture");
+    run->add_option("--scripted-input", options.scripted_input, "Scripted input YAML for smoke runs");
+    run->add_option("--save-out", options.save_out, "Write a save evidence JSON file");
+    run->add_option("--load", options.load, "Load a save evidence JSON file before smoke verification");
     run->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
     auto* replay = app.add_subcommand("replay", "Compare a golden runtime replay");
     replay->add_option("target", replay_target)->required();

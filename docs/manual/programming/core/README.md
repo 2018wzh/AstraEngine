@@ -29,7 +29,7 @@ Public headers live in `Engine/Runtime/Core/Public/Astra/Core`.
 
 ## Examples
 
-Compiled examples are in `Engine/Tests/Phase1Tests.cpp`.
+Compiled examples are in `Engine/Tests/PhaseTests.cpp`.
 
 ## Troubleshooting
 
