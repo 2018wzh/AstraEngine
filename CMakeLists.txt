@@ -114,24 +114,14 @@ if(ASTRA_BUILD_TESTS AND BUILD_TESTING)
     add_subdirectory(Engine/Tests)
 endif()
 
-if(ASTRA_BUILD_DOC_CHECK)
-    find_program(ASTRA_POWERSHELL_EXECUTABLE
-        NAMES pwsh powershell
-        REQUIRED
-    )
-
+if(ASTRA_BUILD_DOC_CHECK AND TARGET astra)
     add_custom_target(AstraDocCheck
         COMMAND
-            "${ASTRA_POWERSHELL_EXECUTABLE}"
-            -NoProfile
-            -ExecutionPolicy
-            Bypass
-            -File
-            "${CMAKE_CURRENT_SOURCE_DIR}/tools/doc-check.ps1"
-            -Root
-            "${CMAKE_CURRENT_SOURCE_DIR}"
+            $<TARGET_FILE:astra>
+            doc-check
+        DEPENDS astra
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        COMMENT "Running AstraEngine Phase 0 documentation checks"
+        COMMENT "Running AstraEngine documentation checks"
         VERBATIM
     )
 
@@ -139,14 +129,10 @@ if(ASTRA_BUILD_DOC_CHECK)
         add_test(
             NAME AstraDocCheck
             COMMAND
-                "${ASTRA_POWERSHELL_EXECUTABLE}"
-                -NoProfile
-                -ExecutionPolicy
-                Bypass
-                -File
-                "${CMAKE_CURRENT_SOURCE_DIR}/tools/doc-check.ps1"
-                -Root
-                "${CMAKE_CURRENT_SOURCE_DIR}"
+                $<TARGET_FILE:astra>
+                doc-check
         )
     endif()
+elseif(ASTRA_BUILD_DOC_CHECK)
+    message(STATUS "Skipping AstraDocCheck because ASTRA_BUILD_TOOLS is OFF and doc-check is implemented by astra-cli.")
 endif()

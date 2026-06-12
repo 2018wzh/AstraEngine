@@ -29,7 +29,7 @@ NativeVN playable v1 slice 和 TsuiNoSora local playable fixture 已实现 `astr
 - [x] Design：建立 Phase 5+ production contract 草案：Runtime、Save/Replay、Asset/Package、Media Backend、Hardware Decode、Provider、Editor/Runtime、AI/MCP、Legacy boundary、Release Gate/Observability。
 - [x] Design：每个 public runtime/editor/tool contract 必须在 design doc、manual page、schema/test 中至少各有一个权威引用。
 
-Phase 1 注记：`docs/manual` 当前包含 Phase 1 Foundation 手册页和仍处于计划中的后续系统骨架。`tools/doc-check.ps1` 负责页面、链接和过期措辞检查；Foundation public API 覆盖和 schema/test evidence 已由 `AstraPhaseTests` 补齐，后续系统的代码示例编译和 release evidence 将在对应实现阶段继续补齐。
+Phase 1 注记：`docs/manual` 当前包含 Phase 1 Foundation 手册页和仍处于计划中的后续系统骨架。`astra doc-check` 负责页面、链接和过期措辞检查；Foundation public API 覆盖和 schema/test evidence 已由 `AstraPhaseTests` 补齐，后续系统的代码示例编译和 release evidence 将在对应实现阶段继续补齐。
 
 验收：
 

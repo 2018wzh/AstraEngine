@@ -57,7 +57,7 @@ Phase 0 evidence means documentation and build-baseline evidence. Phase 1 founda
 
 | Deliverable | Required Evidence |
 | --- | --- |
-| Phase 0 manual baseline | `docs/manual` required pages and `tools/doc-check.ps1` output |
+| Phase 0 manual baseline | `docs/manual` required pages and `astra doc-check` output |
 | Phase 0 build baseline | CMake configure/build and CTest discovery output |
 | Phase 1 Core foundation | Core headers, `AstraCore`, diagnostics/config/stable-id/serialization tests, diagnostic code registry, release policy, release config hash, unknown-field policy |
 | Phase 1 Platform foundation | `AstraPlatform`, headless service tests, opaque dynamic library handle, file-watch/pending-task/crash context tests, SDL private compile path, public header isolation scan |

@@ -38,7 +38,6 @@ Foundation verification:
 cmake -S . -B build
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/doc-check.ps1
 build\Bin\astra.exe --version
 build\Bin\astra.exe doc-check
 build\Bin\astra.exe validate Samples\PackageSmoke --strict

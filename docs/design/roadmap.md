@@ -54,7 +54,7 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 
 - 新开发者能理解 AstraEngine 是模块化 2D 引擎，VN 是第一落地模块。
 - 文档明确 Core 不绑定 VN、Live2D、AI 或旧 VM。
-- `tools/doc-check.ps1` 验证手册页面、文档链接、设计入口和过期 legacy 措辞。
+- `astra doc-check` 验证手册页面、文档链接、设计入口和过期 legacy 措辞。
 
 非目标：
 

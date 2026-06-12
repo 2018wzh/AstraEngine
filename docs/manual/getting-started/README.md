@@ -24,7 +24,7 @@ Configure and build the baseline:
 cmake -S . -B build
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/doc-check.ps1
+build\Bin\astra.exe doc-check
 ```
 
 Run the current NativeVN evidence chain:
@@ -46,7 +46,7 @@ Current command/API entry points are indexed under [API](../api/README.md), incl
 
 ## Examples
 
-Current examples include running `tools/doc-check.ps1`, validating `Samples/NativeVN`, cooking and packaging its source sidecars, launching the generated package in headless smoke mode, comparing the golden replay, and inspecting the package manifest/mount evidence.
+Current examples include running `astra doc-check`, validating `Samples/NativeVN`, cooking and packaging its source sidecars, launching the generated package in headless smoke mode, comparing the golden replay, and inspecting the package manifest/mount evidence.
 
 ## Troubleshooting
 

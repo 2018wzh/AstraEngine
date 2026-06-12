@@ -38,7 +38,7 @@ AstraEngine 追求的是 **UE-class 2D runtime 工程完备度**，不是复制 
 - `docs/design`：目标架构、路线图、系统规格、覆盖矩阵和 TODO。
 - `docs/manual`：面向使用者的手册骨架和 Phase 1-4 Foundation 手册页，标注当前已实现与计划中内容。
 - `docs/adr`：关键架构决策记录。
-- `tools/doc-check.ps1`：Phase 0 文档结构、链接和过期措辞检查。
+- `Engine/Programs/astra` 的 `doc-check`：文档结构、链接、设计入口和过期措辞检查。
 - `cmake`、`CMakeLists.txt`、`vcpkg.json`：工程基线。
 - `AGENTS.md`、`docs/coding-style.md`：实现和协作约束。
 
@@ -349,7 +349,7 @@ ctest --test-dir build -C Release --output-on-failure
 cmake -S . -B build
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/doc-check.ps1
+build\Bin\astra.exe doc-check
 ```
 
 也可以通过 CMake 运行 Phase 0 文档检查：

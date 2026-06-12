@@ -34,10 +34,10 @@ Run tests:
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-Run the Phase 0 documentation check:
+Run the documentation check:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/doc-check.ps1
+build\Bin\astra.exe doc-check
 ```
 
 ## Coding Style & Naming Conventions
