@@ -23,6 +23,11 @@ struct CommandOptions {
     std::filesystem::path scripted_input;
     std::filesystem::path save_out;
     std::filesystem::path load;
+    std::string import_asset_id;
+    std::string import_asset_type = "image";
+    std::string import_preset = "default";
+    std::string import_license_owner = "project";
+    std::string import_license_usage = "internal";
 };
 
 struct CommandReport {
@@ -43,6 +48,7 @@ ASTRA_TOOLS_API void PrintReport(const CommandReport& report, const CommandOptio
 [[nodiscard]] ASTRA_TOOLS_API CommandReport DocCheck(const CommandOptions& options);
 [[nodiscard]] ASTRA_TOOLS_API CommandReport Validate(const std::filesystem::path& target, const CommandOptions& options);
 [[nodiscard]] ASTRA_TOOLS_API CommandReport Inspect(const std::filesystem::path& target, const CommandOptions& options);
+[[nodiscard]] ASTRA_TOOLS_API CommandReport Import(const std::filesystem::path& project, const std::filesystem::path& source, const CommandOptions& options);
 [[nodiscard]] ASTRA_TOOLS_API CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& options);
 [[nodiscard]] ASTRA_TOOLS_API CommandReport Package(const std::filesystem::path& sample, const CommandOptions& options);
 [[nodiscard]] ASTRA_TOOLS_API CommandReport Run(const std::filesystem::path& target, const CommandOptions& options);

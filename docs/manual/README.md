@@ -1,6 +1,6 @@
 # AstraEngine Manual
 
-Status: NativeVN runtime evidence scaffold. Foundation Core, Platform, ModuleRuntime, and PropertySystem now include production Foundation gate evidence; Scene, Runtime, Asset, Media, Script, AstraVN, the example plugin, and foundation CLI workflows are implemented as foundation slices. Engine libraries are dynamic-only `Astra*` DLLs. `Samples/NativeVN` now has source asset sidecars, package manifest evidence, package launch smoke, and golden replay comparison evidence. Production Editor, AI/MCP, Legacy, real binary asset cooking, full release gates, and production backend workflows are planned.
+Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline. Foundation Core, Platform, ModuleRuntime, and PropertySystem include production Foundation gate evidence; Scene, Runtime, Media, Script, AstraVN, the example plugin, and foundation CLI workflows are implemented as executable slices. Asset now includes the Phase 6 production pipeline: importers, cook processors, local DDC, binary `.astrapkg`, package reads, release gate and hot reload rollback DTOs. Engine libraries are dynamic-only `Astra*` DLLs. `Samples/NativeVN` now has source asset sidecars, binary package evidence, package-only launch/save/replay smoke, and golden replay comparison evidence. Production Editor, AI/MCP, Legacy, real media execution backends, and broader creator workflows are planned.
 
 ## Overview
 
@@ -13,8 +13,9 @@ This manual is the user-facing documentation root for AstraEngine. It complement
 - Core must stay free of VN, AI, Lua, renderer, editor, and legacy compatibility dependencies.
 - Dynamic modules and C ABI are the default project extension boundary.
 - Phase 1 provides a production Foundation gate slice for Core, Platform, ModuleRuntime, and PropertySystem, including `foundation_core_gate` CLI evidence.
-- Phase 2-4 provide executable foundations for Scene, Runtime, Asset, Media, ScriptRuntimeHost, and AstraVN.
-- NativeVN runtime evidence covers `validate -> cook -> package -> run --headless-smoke -> replay --compare -> inspect` for the current source-sidecar package workflow.
+- Phase 2-4 provide executable foundations for Scene, Runtime, Media, ScriptRuntimeHost, and AstraVN.
+- Phase 6 provides the production Asset Pipeline slice for `import -> cook -> package -> inspect -> run -> replay` with binary `.astrapkg` output.
+- NativeVN runtime evidence covers `validate -> cook -> package -> run --headless-smoke -> replay --compare -> inspect` for the current package-only workflow.
 
 ## Architecture
 
@@ -39,7 +40,7 @@ Foundation/evidence samples live under `Samples/NativeVN`, `Samples/RuntimeStres
 
 ## Troubleshooting
 
-If a page describes a final release command, check whether it is listed as current evidence or target acceptance. Current validation covers CMake configure/build, `AstraPhaseTests`, the example foundation plugin load path, `astra --version`, `astra validate`, `astra doc-check`, `foundation_core_gate`, dynamic engine DLL evidence, and NativeVN `cook/package/run --headless-smoke/replay --compare/inspect` evidence.
+If a page describes a final release command, check whether it is listed as current evidence or target acceptance. Current validation covers CMake configure/build, `AstraPhaseTests`, the example foundation plugin load path, `astra --version`, `astra validate`, `astra import`, `astra cook`, `astra package`, `astra doc-check`, `foundation_core_gate`, dynamic engine DLL evidence, and NativeVN binary `.astrapkg` `run --headless-smoke/replay --compare/inspect` evidence.
 
 ## Manual Sections
 

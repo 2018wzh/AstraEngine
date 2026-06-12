@@ -24,7 +24,7 @@ Current sample descriptors live in `Samples/*/astra.sample.yaml`. `Samples/Nativ
 
 ## API Reference
 
-Descriptors use `schema: astra.sample.v1` and `foundation_only: true` for the current Phase 4 playable v1 slice. `NativeVN` uses redistributable generated fixtures; `TsuiNoSora` uses `local_test_only` fixture sidecars.
+Descriptors use `schema: astra.sample.v1` and `foundation_only: true` for the current Phase 1-6 foundation/evidence slices. `NativeVN` uses redistributable generated fixtures; `TsuiNoSora` uses `local_test_only` fixture sidecars.
 
 ## Examples
 
@@ -53,7 +53,7 @@ astra replay build/Saved/Replays/NativeVNGolden.replay --compare
 astra inspect build/Saved/Packages/NativeVN.astrapkg
 ```
 
-These commands prove the current playable v1 slice, including generated/copy fixture media decode evidence, SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence sourced from package payloads for `.astrapkg` runs, playable VN state, UI/system state, local DDC artifact writes, DDC corruption recovery, embedded package payload random/chunked reads, package mount DTOs, and package/cook/payload manifest hash checks. They do not yet prove production binary package streaming at scale, Editor workflows, AI/MCP, Legacy, or the final full release gate.
+These commands prove the current Phase 6 playable slice, including binary `.astrapkg` packaging, zstd payloads, generated/copy fixture media decode evidence, SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence sourced from package payloads for `.astrapkg` runs, playable VN state, UI/system state, local DDC artifact writes/reuse/corruption recovery, PackageReader random/chunked reads, read-only package mount DTOs, package manifest hash/provider feature hash save-replay evidence, replay mismatch localization, Asset Release Gate evidence, and package/cook/payload manifest hash checks. They do not yet prove real media execution backends, Editor workflows, AI/MCP, Legacy, or final UE-class acceptance.
 
 TsuiNoSora local fixture commands include:
 

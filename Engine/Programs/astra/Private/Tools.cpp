@@ -22,7 +22,6 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <limits>
 #include <optional>
 #include <regex>
 #include <set>
@@ -119,14 +118,6 @@ std::vector<Astra::Core::u8> ReadBytes(const std::filesystem::path& path) {
     return {bytes.begin(), bytes.end()};
 }
 
-void WriteBinaryFile(const std::filesystem::path& path, std::string_view payload) {
-    if (path.has_parent_path()) {
-        std::filesystem::create_directories(path.parent_path());
-    }
-    std::ofstream file(path, std::ios::binary);
-    file.write(payload.data(), static_cast<std::streamsize>(payload.size()));
-}
-
 std::string StableSourcePath(const std::filesystem::path& path) {
     const auto absolute = std::filesystem::absolute(path).lexically_normal();
     const auto root = std::filesystem::absolute(SourceRoot()).lexically_normal();
@@ -151,21 +142,6 @@ std::string Sha256Text(std::string_view text) {
         output << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(digest[index]);
     }
     return output.str();
-}
-
-std::string Base64Encode(std::string_view payload) {
-    if (payload.empty()) {
-        return {};
-    }
-    if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-        return {};
-    }
-    std::vector<unsigned char> encoded(4 * ((payload.size() + 2) / 3) + 1);
-    const auto encoded_size =
-        EVP_EncodeBlock(encoded.data(), reinterpret_cast<const unsigned char*>(payload.data()),
-                        static_cast<int>(payload.size()));
-    return std::string(reinterpret_cast<const char*>(encoded.data()),
-                       static_cast<std::size_t>(encoded_size));
 }
 
 std::vector<Astra::Core::u8> OnePixelPngBytes() {
@@ -214,10 +190,10 @@ bool IsFoundationSample(const std::filesystem::path& sample, CommandReport& repo
         return false;
     }
     if (descriptor["foundation_only"].as<bool>(false) != true ||
-        descriptor["phase"].as<int>(0) > 5) {
+        descriptor["phase"].as<int>(0) > 6) {
         AddDiagnostic(report, "ASTRA_SAMPLE_NOT_FOUNDATION",
                       Astra::Core::DiagnosticSeverity::Blocking,
-                      "Foundation tools accept Phase 1-5 foundation/evidence sample descriptors.",
+                      "Foundation tools accept Phase 1-6 foundation/evidence sample descriptors.",
                       descriptor_path);
         return false;
     }
@@ -393,6 +369,36 @@ void RegisterFoundationGateCodes(Astra::Core::DiagnosticCodeRegistry& registry) 
         {"ASTRA_DDC_ARTIFACT_MISSING", "asset.foundation",
          Astra::Core::DiagnosticSeverity::Blocking, true},
         {"ASTRA_DDC_ARTIFACT_HASH_MISMATCH", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_DDC_CLEAN_PATH_ESCAPE", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_DDC_CLEAN_REMOVE_FAILED", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_ASSET_INVALID_LICENSE", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_ASSET_004", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_ASSET_VIRTUAL_UNRESOLVED", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_ASSET_FOREIGN_COPY", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_ASSET_DEPENDENCY_MISSING", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_ASSET_SOFT_DEPENDENCY_MISSING", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_COOK_ARTIFACT_MISSING", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_COOK_ARTIFACT_INVALID", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_COOK_FORMAT_UNSUPPORTED", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_DDC_HASH_MISMATCH", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_MODULE_NOT_PACKAGE_ELIGIBLE", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_PACKAGE_PAYLOAD_MISSING", "asset.foundation",
+         Astra::Core::DiagnosticSeverity::Blocking, true},
+        {"ASTRA_RELEASE_PACKAGE_PAYLOAD_HASH_MISMATCH", "asset.foundation",
          Astra::Core::DiagnosticSeverity::Blocking, true},
         {"ASTRA_MEDIA_IMAGE_BACKEND_FAILED", "media.foundation",
          Astra::Core::DiagnosticSeverity::Blocking, true},
@@ -960,39 +966,6 @@ Astra::Asset::AssetRegistry ScanSampleRegistry(const std::filesystem::path& samp
         return {};
     }
     return builder.Scan(content_root, diagnostics);
-}
-
-std::string CookProcessorForType(std::string_view type) {
-    if (type == "image") {
-        return "astra.cook.image.foundation";
-    }
-    if (type == "audio") {
-        return "astra.cook.audio.foundation";
-    }
-    if (type == "font") {
-        return "astra.cook.font.foundation";
-    }
-    if (type == "filter_profile") {
-        return "astra.cook.filter_profile.foundation";
-    }
-    if (type == "script.native") {
-        return "astra.cook.script.native";
-    }
-    if (type == "script.lua") {
-        return "astra.cook.script.lua";
-    }
-    return "astra.cook.asset.foundation";
-}
-
-std::filesystem::path ArtifactPathForSample(const std::filesystem::path& sample,
-                                            const std::filesystem::path& artifact) {
-    const auto absolute_artifact = std::filesystem::absolute(artifact).lexically_normal();
-    const auto absolute_sample = std::filesystem::absolute(sample).lexically_normal();
-    const auto relative = absolute_artifact.lexically_relative(absolute_sample);
-    if (!relative.empty() && !relative.generic_string().starts_with("..")) {
-        return std::filesystem::path(relative.generic_string());
-    }
-    return std::filesystem::path(absolute_artifact.generic_string());
 }
 
 nlohmann::json BuildCookArtifactMetadata(const Astra::Asset::AssetRegistryEntry& entry,
@@ -1601,146 +1574,6 @@ BuildPlayableWindowFrame(const nlohmann::json& playable,
     return frame;
 }
 
-void AddRegistryArtifactsToCookManifest(const Astra::Asset::AssetRegistry& registry,
-                                        const std::filesystem::path& sample,
-                                        Astra::Asset::CookManifest& manifest,
-                                        Astra::Core::DiagnosticSink& diagnostics) {
-    std::set<std::string> existing;
-    for (const auto& artifact : manifest.artifacts) {
-        existing.insert(artifact.asset_id.ToString());
-    }
-    for (const auto& entry : registry.entries) {
-        if (!existing.insert(entry.id.ToString()).second) {
-            continue;
-        }
-        Astra::Asset::CookArtifact artifact;
-        artifact.asset_id = entry.id;
-        artifact.type = entry.type;
-        artifact.artifact_path = ArtifactPathForSample(sample, entry.source_path);
-        artifact.hash = std::filesystem::exists(entry.source_path)
-                            ? Sha256Text(ReadText(entry.source_path))
-                            : entry.sidecar_hash;
-        artifact.processor_id = CookProcessorForType(entry.type);
-        artifact.metadata = BuildCookArtifactMetadata(entry, diagnostics);
-        manifest.artifacts.push_back(std::move(artifact));
-    }
-}
-
-void PopulateDdcEntries(Astra::Asset::CookManifest& manifest, const std::filesystem::path& sample) {
-    manifest.ddc_entries.clear();
-    const auto engine_version = BuildInfoJson().value("engine_version", "");
-    for (auto& artifact : manifest.artifacts) {
-        const auto input_hash = artifact.hash;
-        const auto settings_hash = Sha256Text(artifact.processor_id + "|" + artifact.type + "|" +
-                                              manifest.profile + "|ddc.v1");
-        const auto ddc_key =
-            "ddc:/" + artifact.processor_id + "/" + settings_hash + "/" + input_hash;
-        artifact.ddc_key = ddc_key;
-
-        Astra::Core::u64 size_bytes = 0;
-        const auto source_path = sample / artifact.artifact_path;
-        if (std::filesystem::exists(source_path)) {
-            size_bytes = static_cast<Astra::Core::u64>(std::filesystem::file_size(source_path));
-        }
-
-        Astra::Asset::DerivedDataCacheEntry entry;
-        entry.key = ddc_key;
-        entry.processor_id = artifact.processor_id;
-        entry.input_hash = input_hash;
-        entry.settings_hash = settings_hash;
-        entry.output_hash = artifact.hash;
-        entry.platform = "win64";
-        entry.profile = manifest.profile;
-        entry.engine_version = engine_version;
-        entry.rebuilt = true;
-        entry.artifacts.push_back({
-            std::filesystem::path("cache") / artifact.processor_id / (artifact.hash + ".bin"),
-            artifact.hash,
-            size_bytes,
-        });
-        manifest.ddc_entries.push_back(std::move(entry));
-    }
-}
-
-nlohmann::json WriteDdcArtifacts(Astra::Asset::CookManifest& manifest,
-                                 const std::filesystem::path& sample,
-                                 const std::filesystem::path& ddc_root) {
-    Astra::Core::u64 rebuilt = 0;
-    Astra::Core::u64 reused = 0;
-    Astra::Core::u64 corruption_recovered = 0;
-    for (auto& entry : manifest.ddc_entries) {
-        if (entry.artifacts.empty()) {
-            continue;
-        }
-        auto& cache_artifact = entry.artifacts.front();
-        const auto cache_path = ddc_root / cache_artifact.path;
-        const auto source_artifact = std::ranges::find_if(
-            manifest.artifacts, [&](const Astra::Asset::CookArtifact& artifact) {
-                return artifact.ddc_key == entry.key;
-            });
-        if (source_artifact == manifest.artifacts.end()) {
-            continue;
-        }
-        const auto source_path = sample / source_artifact->artifact_path;
-        const auto payload = ReadText(source_path);
-        const auto expected_hash = source_artifact->hash;
-        const auto existing_hash =
-            std::filesystem::exists(cache_path) ? Sha256File(cache_path) : std::string();
-        entry.corruption_recovered = !existing_hash.empty() && existing_hash != expected_hash;
-        entry.rebuilt = existing_hash != expected_hash;
-        if (entry.rebuilt) {
-            WriteBinaryFile(cache_path, payload);
-            ++rebuilt;
-            if (entry.corruption_recovered) {
-                ++corruption_recovered;
-            }
-        } else {
-            ++reused;
-        }
-        cache_artifact.hash = expected_hash;
-        if (std::filesystem::exists(cache_path)) {
-            cache_artifact.size_bytes =
-                static_cast<Astra::Core::u64>(std::filesystem::file_size(cache_path));
-        }
-    }
-    return {
-        {"schema", "astra.asset.ddc.execution.v1"},
-        {"root", ddc_root.string()},
-        {"rebuilt", rebuilt},
-        {"reused", reused},
-        {"corruption_recovered", corruption_recovered},
-    };
-}
-
-void PopulatePackagePayloads(Astra::Asset::PackageManifest& manifest,
-                             const std::filesystem::path& sample, CommandReport& report) {
-    manifest.payloads.clear();
-    std::set<std::string> added;
-    for (const auto& artifact : manifest.cook_manifest.artifacts) {
-        if (!added.insert(artifact.asset_id.ToString()).second) {
-            continue;
-        }
-        const auto source_path = sample / artifact.artifact_path;
-        if (!std::filesystem::exists(source_path)) {
-            AddDiagnostic(
-                report, "ASTRA_PACKAGE_PAYLOAD_SOURCE_MISSING",
-                Astra::Core::DiagnosticSeverity::Blocking,
-                "Cook artifact source payload is missing and cannot be embedded in the package.",
-                source_path);
-            continue;
-        }
-        const auto payload = ReadText(source_path);
-        Astra::Asset::PackagePayloadEntry entry;
-        entry.asset_id = artifact.asset_id;
-        entry.artifact_path = artifact.artifact_path;
-        entry.hash = Sha256Text(payload);
-        entry.size_bytes = static_cast<Astra::Core::u64>(payload.size());
-        entry.encoding = "base64";
-        entry.data = Base64Encode(payload);
-        manifest.payloads.push_back(std::move(entry));
-    }
-}
-
 std::set<std::string> RegistryIds(const Astra::Asset::AssetRegistry& registry) {
     std::set<std::string> ids;
     for (const auto& entry : registry.entries) {
@@ -2125,7 +1958,7 @@ CommandReport Validate(const std::filesystem::path& target, const CommandOptions
         AddDiagnostic(report, "ASTRA_VALIDATE_TARGET_UNSUPPORTED",
                       Astra::Core::DiagnosticSeverity::Blocking,
                       "Foundation validate supports repository roots, plugin descriptors, and "
-                      "Phase 1-3 foundation sample descriptors only.",
+                      "Phase 1-6 foundation/evidence sample descriptors only.",
                       absolute);
     }
     return report;
@@ -2136,9 +1969,50 @@ CommandReport Inspect(const std::filesystem::path& target, const CommandOptions&
     const auto absolute = ResolveToolTarget(target);
     if (std::filesystem::is_regular_file(absolute) && HasSuffix(absolute, ".yaml")) {
         ValidatePlugin(absolute, report);
+    } else if (std::filesystem::is_regular_file(absolute) && absolute.extension() == ".astrapkg") {
+        Astra::Core::DiagnosticSink diagnostics;
+        Astra::Asset::PackageReader reader;
+        auto manifest = reader.ReadManifest(absolute, diagnostics);
+        AppendDiagnostics(report, diagnostics);
+        diagnostics.Clear();
+        if (manifest) {
+            report.artifacts["package_manifest"] = Astra::Asset::ToJson(manifest.Value());
+            report.artifacts["document"] = report.artifacts["package_manifest"];
+            auto mount = reader.MountPackage(absolute, diagnostics);
+            AppendDiagnostics(report, diagnostics);
+            diagnostics.Clear();
+            if (mount) {
+                report.artifacts["package_mount"] = Astra::Asset::ToJson(mount.Value());
+            }
+            if (!manifest.Value().payloads.empty()) {
+                auto payload = reader.ReadPayloadBytes(
+                    absolute, manifest.Value().payloads.front().asset_id, diagnostics);
+                AppendDiagnostics(report, diagnostics);
+                diagnostics.Clear();
+                if (payload) {
+                    report.artifacts["payload_smoke"] = {
+                        {"asset_id", manifest.Value().payloads.front().asset_id.ToString()},
+                        {"size_bytes", payload.Value().size()},
+                        {"hash", manifest.Value().payloads.front().hash},
+                        {"encoding", manifest.Value().payloads.front().encoding},
+                        {"compression", manifest.Value().payloads.front().compression},
+                    };
+                }
+            }
+            if (manifest.Value().runtime_evidence.contains("playable_vn")) {
+                report.artifacts["playable_vn"] =
+                    manifest.Value().runtime_evidence["playable_vn"];
+            }
+            const auto source_sample =
+                manifest.Value().runtime_evidence.value("source_sample", "");
+            if (!source_sample.empty() && std::filesystem::exists(source_sample)) {
+                const auto registry = ScanSampleRegistry(source_sample, diagnostics);
+                report.artifacts["artemis_fixture"] =
+                    ArtemisFixtureReport(source_sample, registry);
+            }
+        }
     } else if (std::filesystem::is_regular_file(absolute) &&
-               (absolute.extension() == ".json" || absolute.extension() == ".astrapkg" ||
-                absolute.extension() == ".replay")) {
+               (absolute.extension() == ".json" || absolute.extension() == ".replay")) {
         std::ifstream file(absolute, std::ios::binary);
         report.artifacts["document"] = nlohmann::json::parse(file, nullptr, false);
         if (report.artifacts["document"].is_discarded()) {
@@ -2193,6 +2067,56 @@ CommandReport Inspect(const std::filesystem::path& target, const CommandOptions&
     return report;
 }
 
+CommandReport Import(const std::filesystem::path& project, const std::filesystem::path& source, const CommandOptions& options) {
+    auto report = MakeReport("astra import");
+    const auto project_path = ResolveToolTarget(project);
+    const auto source_path = ResolveToolTarget(source);
+    Astra::Core::DiagnosticSink diagnostics;
+    auto asset_id = Astra::Asset::ParseAssetUri(options.import_asset_id);
+    if (!asset_id) {
+        AddDiagnostic(report, "ASTRA_IMPORT_TARGET_INVALID", Astra::Core::DiagnosticSeverity::Blocking,
+                      asset_id.Message(), source_path);
+        return report;
+    }
+    const auto extension = source_path.extension().string();
+    std::string provider_id = "astra.importer.text";
+    if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".webp") {
+        provider_id = "astra.importer.image";
+    } else if (extension == ".ogg" || extension == ".wav" || extension == ".flac" || extension == ".mp3") {
+        provider_id = "astra.importer.audio";
+    } else if (extension == ".otf" || extension == ".ttf") {
+        provider_id = "astra.importer.font";
+    } else if (source_path.filename().string().ends_with(".filter.yaml")) {
+        provider_id = "astra.importer.filter_profile";
+    } else if (extension == ".astra" || extension == ".lua") {
+        provider_id = "astra.importer.script";
+    }
+    auto importer = Astra::Asset::CreateBuiltinImporter(provider_id);
+    if (!importer) {
+        AddDiagnostic(report, "ASTRA_IMPORTER_MISSING", Astra::Core::DiagnosticSeverity::Blocking,
+                      "No built-in importer is available for the source file.", source_path);
+        return report;
+    }
+    Astra::Asset::ImportRequest request;
+    request.source_path = source_path;
+    request.target_asset_id = asset_id.Value();
+    request.asset_type = options.import_asset_type;
+    request.preset = options.import_preset;
+    request.license.owner = options.import_license_owner;
+    request.license.usage = options.import_license_usage;
+    auto imported = importer->Import(request, project_path / "Content", diagnostics);
+    AppendDiagnostics(report, diagnostics);
+    if (imported) {
+        report.artifacts["importer"] = Astra::Asset::ToJson(importer->Describe());
+        report.artifacts["request"] = Astra::Asset::ToJson(request);
+        report.artifacts["sidecar"] = Astra::Asset::ToJson(imported.Value().sidecar);
+        report.artifacts["sidecar_path"] = imported.Value().sidecar_path.string();
+        report.artifacts["source_path"] = imported.Value().source_path.string();
+        report.artifacts["audit"] = imported.Value().audit;
+    }
+    return report;
+}
+
 CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& options) {
     auto report = MakeReport("astra cook");
     if (!IsFoundationSample(sample, report)) {
@@ -2201,25 +2125,6 @@ CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& op
     const auto cooked = CookManifestPathForSample(sample);
     Astra::Core::DiagnosticSink diagnostics;
     const auto registry = ScanSampleRegistry(sample, diagnostics);
-    Astra::Asset::CookManifest manifest;
-    manifest.project_id = "package:/" + sample.filename().string();
-    manifest.profile = options.config;
-
-    auto add_artifact = [&](std::string id, std::string type, std::filesystem::path artifact_path,
-                            std::string processor_id, std::string payload) {
-        auto uri = Astra::Asset::ParseAssetUri(id);
-        if (!uri) {
-            return;
-        }
-        Astra::Asset::CookArtifact artifact;
-        artifact.asset_id = uri.Value();
-        artifact.type = std::move(type);
-        artifact.artifact_path = std::move(artifact_path);
-        artifact.hash = Sha256Text(payload);
-        artifact.processor_id = std::move(processor_id);
-        manifest.artifacts.push_back(std::move(artifact));
-    };
-
     nlohmann::json cook_report = {{"schema", Astra::Asset::CookManifestSchema},
                                   {"sample", sample.filename().string()},
                                   {"status", "runtime-cooked"},
@@ -2237,14 +2142,6 @@ CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& op
             {"save_restore", true},
         };
     } else if (IsVnSmokeSample(sample)) {
-        const auto native_path = sample / "Content/Scripts/opening.astra";
-        const auto lua_path = sample / "Content/Scripts/opening.lua";
-        add_artifact("native:/Scripts/opening", "script.native",
-                     native_path.lexically_relative(sample), "astra.cook.script.native",
-                     ReadText(native_path));
-        add_artifact("native:/Scripts/opening_lua", "script.lua",
-                     lua_path.lexically_relative(sample), "astra.cook.script.lua",
-                     ReadText(lua_path));
         cook_report["phase4_script_vn"] = Phase4ScriptVnSmoke(sample, diagnostics);
         cook_report["playable_vn"] = BuildPlayableVnEvidence(
             sample, cook_report["phase4_script_vn"], registry, {}, false, diagnostics);
@@ -2263,12 +2160,37 @@ CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& op
         };
         ValidatePhase4AssetReferences(cook_report["phase4_script_vn"], registry, report, sample);
     }
-    AddRegistryArtifactsToCookManifest(registry, sample, manifest, diagnostics);
-    PopulateDdcEntries(manifest, sample);
-    auto ddc_status = WriteDdcArtifacts(manifest, sample, DdcRootForSample(sample));
-    manifest.manifest_hash = Astra::Asset::ComputeCookManifestHash(Astra::Asset::ToJson(manifest));
+    Astra::Asset::CookPipelineOptions pipeline;
+    pipeline.project_id = "package:/" + sample.filename().string();
+    pipeline.profile = options.config;
+    pipeline.content_root = sample / "Content";
+    pipeline.cooked_root = CookManifestPathForSample(sample).parent_path() / "Artifacts";
+    pipeline.ddc_root = DdcRootForSample(sample);
+    pipeline.selected_providers = {
+        {"astra.asset.import", "astra.importer.builtin"},
+        {"astra.asset.cook", "astra.cook.builtin"},
+    };
+    pipeline.provider_feature_hash = Astra::Asset::ComputeProviderFeatureHash(pipeline.selected_providers);
+    auto cooked_manifest = Astra::Asset::CookAssetRegistry(registry, pipeline, diagnostics);
+    Astra::Asset::CookManifest manifest;
+    if (cooked_manifest) {
+        manifest = cooked_manifest.Value();
+    }
+    nlohmann::json ddc_status = {
+        {"schema", "astra.asset.ddc.execution.v1"},
+        {"root", DdcRootForSample(sample).string()},
+        {"rebuilt", 0},
+        {"reused", 0},
+        {"corruption_recovered", 0},
+    };
+    for (const auto& entry : manifest.ddc_entries) {
+        ddc_status["rebuilt"] = ddc_status["rebuilt"].get<Astra::Core::u64>() + (entry.rebuilt ? 1 : 0);
+        ddc_status["reused"] = ddc_status["reused"].get<Astra::Core::u64>() + (!entry.rebuilt ? 1 : 0);
+        ddc_status["corruption_recovered"] = ddc_status["corruption_recovered"].get<Astra::Core::u64>() + (entry.corruption_recovered ? 1 : 0);
+    }
     cook_report["cook_manifest"] = Astra::Asset::ToJson(manifest);
     cook_report["ddc_status"] = ddc_status;
+    cook_report["provider_feature_hash"] = pipeline.provider_feature_hash;
     cook_report["asset_registry"] = Astra::Asset::ToJson(registry);
     cook_report["asset_dependency_graph"] =
         Astra::Asset::ToJson(Astra::Asset::BuildDependencyGraph(registry));
@@ -2308,38 +2230,22 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
         playable = BuildPlayableVnEvidence(sample, phase4, registry, {}, false, diagnostics);
     }
 
+    Astra::Asset::CookPipelineOptions pipeline;
+    pipeline.project_id = "package:/" + sample.filename().string();
+    pipeline.profile = options.compare ? "deterministic" : options.profile;
+    pipeline.content_root = sample / "Content";
+    pipeline.cooked_root = CookManifestPathForSample(sample).parent_path() / "Artifacts";
+    pipeline.ddc_root = DdcRootForSample(sample);
+    pipeline.selected_providers = {
+        {"astra.asset.import", "astra.importer.builtin"},
+        {"astra.asset.cook", "astra.cook.builtin"},
+    };
+    pipeline.provider_feature_hash = Astra::Asset::ComputeProviderFeatureHash(pipeline.selected_providers);
+    auto cooked = Astra::Asset::CookAssetRegistry(registry, pipeline, diagnostics);
     Astra::Asset::CookManifest cook_manifest;
-    cook_manifest.project_id = "package:/" + sample.filename().string();
-    cook_manifest.profile = options.config;
-    if (IsArtemisVnSample(sample)) {
-        auto native_uri = Astra::Asset::ParseAssetUri("native:/Scripts/opening");
-        if (native_uri) {
-            cook_manifest.artifacts.push_back(
-                {native_uri.Value(), "script.native", "Content/Scripts/opening.astra",
-                 Sha256Text(ReadText(sample / "Content/Scripts/opening.astra")),
-                 "astra.cook.script.native", ""});
-        }
-    } else if (IsVnSmokeSample(sample)) {
-        auto native_uri = Astra::Asset::ParseAssetUri("native:/Scripts/opening");
-        auto lua_uri = Astra::Asset::ParseAssetUri("native:/Scripts/opening_lua");
-        if (native_uri) {
-            cook_manifest.artifacts.push_back(
-                {native_uri.Value(), "script.native", "Content/Scripts/opening.astra",
-                 Sha256Text(ReadText(sample / "Content/Scripts/opening.astra")),
-                 "astra.cook.script.native", ""});
-        }
-        if (lua_uri) {
-            cook_manifest.artifacts.push_back(
-                {lua_uri.Value(), "script.lua", "Content/Scripts/opening.lua",
-                 Sha256Text(ReadText(sample / "Content/Scripts/opening.lua")),
-                 "astra.cook.script.lua", ""});
-        }
+    if (cooked) {
+        cook_manifest = cooked.Value();
     }
-    AddRegistryArtifactsToCookManifest(registry, sample, cook_manifest, diagnostics);
-    PopulateDdcEntries(cook_manifest, sample);
-    (void)WriteDdcArtifacts(cook_manifest, sample, DdcRootForSample(sample));
-    cook_manifest.manifest_hash =
-        Astra::Asset::ComputeCookManifestHash(Astra::Asset::ToJson(cook_manifest));
 
     Astra::Asset::PackageManifest manifest;
     manifest.package_id = "package:/" + sample.filename().string();
@@ -2356,6 +2262,8 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
         {"asset_registry", Astra::Asset::ToJson(registry)},
         {"asset_dependency_graph",
          Astra::Asset::ToJson(Astra::Asset::BuildDependencyGraph(registry))},
+        {"provider_feature_hash", pipeline.provider_feature_hash},
+        {"package_profile", manifest.profile},
     };
     if (!IsArtemisVnSample(sample)) {
         ValidatePhase4AssetReferences(phase4, registry, report, sample);
@@ -2364,10 +2272,21 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
         manifest.modules.push_back({"phase1.example.runtime", plugin_descriptor.string(),
                                     Sha256File(plugin_descriptor), true});
     }
-    PopulatePackagePayloads(manifest, sample, report);
+    Astra::Asset::AssetReleaseGateRequest gate_request;
+    gate_request.registry = registry;
+    gate_request.cook_manifest = cook_manifest;
+    gate_request.package_manifest = manifest;
+    gate_request.profile = manifest.profile;
+
+    Astra::Asset::PackageWriter writer;
+    auto written = writer.WritePackage(manifest, package, diagnostics);
+    if (written) {
+        manifest = written.Value();
+    }
+    gate_request.package_manifest = manifest;
+    auto release_gate = Astra::Asset::ValidateAssetReleaseGate(gate_request, diagnostics);
+    report.artifacts["asset_release_gate"] = Astra::Asset::ToJson(release_gate);
     auto package_json = Astra::Asset::ToJson(manifest);
-    package_json["package_hash"] = Astra::Asset::ComputePackageManifestHash(package_json);
-    WriteJsonFile(package, package_json);
 
     if (IsVnSmokeSample(sample) && phase4.is_object()) {
         const auto replay_path = ReplayPathForSample(sample);
@@ -2377,6 +2296,9 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
             {"source_sample",
              std::filesystem::absolute(sample).lexically_normal().generic_string()},
             {"package", package.string()},
+            {"package_manifest_hash", manifest.package_hash},
+            {"package_profile", manifest.profile},
+            {"provider_feature_hash", pipeline.provider_feature_hash},
             {"expected_hashes", phase4["native"]["hashes"]},
             {"expected_playable_hash",
              IsArtemisVnSample(sample) ? "" : playable.value("replay_route_hash", "")},
@@ -2588,6 +2510,8 @@ CommandReport Run(const std::filesystem::path& target, const CommandOptions& opt
         }
     }
     if (!options.save_out.empty()) {
+        const auto package_meta =
+            package_manifest.is_object() ? package_manifest : nlohmann::json::object();
         nlohmann::json save = {
             {"schema", "astra.runtime.save.evidence.v1"},
             {"target", target.string()},
@@ -2595,6 +2519,11 @@ CommandReport Run(const std::filesystem::path& target, const CommandOptions& opt
             {"headless_smoke", report.artifacts.value("headless_smoke", nlohmann::json::object())},
             {"windowed_smoke", report.artifacts.value("windowed_smoke", nlohmann::json::object())},
             {"playable_vn", report.artifacts.value("playable_vn", nlohmann::json::object())},
+            {"package_manifest_hash", package_meta.value("package_hash", "")},
+            {"package_profile", package_meta.value("profile", "")},
+            {"provider_feature_hash",
+             package_meta.value("runtime_evidence", nlohmann::json::object())
+                 .value("provider_feature_hash", "")},
             {"save_snapshot_hash", report.artifacts.value("playable_vn", nlohmann::json::object())
                                        .value("save_snapshot_hash", "")},
         };
@@ -2664,12 +2593,43 @@ CommandReport Replay(const std::filesystem::path& target, const CommandOptions& 
         expected_playable_hash.empty() || expected_playable_hash == actual_playable_hash;
     report.artifacts["comparison"]["expected_playable_hash"] = expected_playable_hash;
     report.artifacts["comparison"]["actual_playable_hash"] = actual_playable_hash;
+    report.artifacts["comparison"]["package_manifest_hash"] =
+        replay.value("package_manifest_hash", "");
+    report.artifacts["comparison"]["package_profile"] = replay.value("package_profile", "");
+    report.artifacts["comparison"]["provider_feature_hash"] =
+        replay.value("provider_feature_hash", "");
     report.artifacts["playable_vn"] = playable;
     if (!comparison.passed) {
+        report.artifacts["mismatch_report"] = {
+            {"schema", "astra.runtime.replay_mismatch.v1"},
+            {"frame", 0},
+            {"category", "runtime_hash"},
+            {"expected_hash", expected.state_hash + "|" + expected.event_hash + "|" +
+                                  expected.presentation_hash},
+            {"actual_hash", actual.state_hash + "|" + actual.event_hash + "|" +
+                                actual.presentation_hash},
+            {"nearest_event_sequence", 0},
+            {"record_kind", "checkpoint"},
+            {"package_manifest_hash", replay.value("package_manifest_hash", "")},
+            {"objects", nlohmann::json::array({{{"kind", "sample"}, {"id", sample.filename().string()}}})},
+            {"source", {{"file", (sample / "Content/Scripts/opening.astra").string()}, {"line", 1}}},
+        };
         AddDiagnostic(report, "ASTRA_REPLAY_MISMATCH", Astra::Core::DiagnosticSeverity::Blocking,
                       "Replay hashes do not match.", path);
     }
     if (!report.artifacts["comparison"].value("playable_route_hash_match", false)) {
+        report.artifacts["mismatch_report"] = {
+            {"schema", "astra.runtime.replay_mismatch.v1"},
+            {"frame", 0},
+            {"category", "playable_route"},
+            {"expected_hash", expected_playable_hash},
+            {"actual_hash", actual_playable_hash},
+            {"nearest_event_sequence", 0},
+            {"record_kind", "script_decision"},
+            {"package_manifest_hash", replay.value("package_manifest_hash", "")},
+            {"objects", nlohmann::json::array({{{"kind", "script"}, {"id", "native:/Scripts/opening"}}})},
+            {"source", {{"file", (sample / "Content/Scripts/opening.astra").string()}, {"line", 1}}},
+        };
         AddDiagnostic(report, "ASTRA_REPLAY_MISMATCH", Astra::Core::DiagnosticSeverity::Blocking,
                       "Playable route hash does not match.", path);
     }

@@ -1,6 +1,6 @@
 # Getting Started
 
-Status: NativeVN runtime evidence scaffold. The build baseline, dynamic-only engine DLLs, `astra` CLI, foundation samples, and NativeVN validate/cook/package/run/replay/inspect workflow exist. Production Editor, real media execution backends, binary asset transforms, full release gates, AI/MCP, and Legacy remain planned.
+Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline. The build baseline, dynamic-only engine DLLs, `astra` CLI, foundation samples, binary `.astrapkg` packaging, and NativeVN validate/cook/package/run/replay/inspect workflow exist. Production Editor, real media execution backends, AI/MCP, and Legacy remain planned.
 
 ## Overview
 
@@ -9,7 +9,7 @@ This section explains how to set up the current repository and run the current f
 ## Key Concepts
 
 - Current repository contents include documentation, ADRs, CMake/vcpkg baseline, dynamic `Astra*` runtime/tool libraries, runtime foundation modules, tests, samples, and documentation checks.
-- `Samples/NativeVN` currently provides a headless playable Script/AstraVN slice plus source asset sidecars, package payload evidence, local DDC evidence, package launch smoke, and golden replay comparison.
+- `Samples/NativeVN` currently provides a headless playable Script/AstraVN slice plus source asset sidecars, binary package payload evidence, local DDC evidence, package-only save/replay smoke, and golden replay comparison.
 - Future creator flow remains `Template -> Project -> Content -> PIE -> Package`; PIE and Editor workflows are not implemented.
 
 ## Architecture
@@ -38,7 +38,7 @@ build\Bin\astra.exe replay build\Saved\Replays\NativeVNGolden.replay --compare -
 build\Bin\astra.exe inspect build\Saved\Packages\NativeVN.astrapkg --json
 ```
 
-These commands prove the current source-sidecar runtime evidence workflow. They do not prove real texture upload, font atlas/glyph execution, audio playback/mixing, GPU filter execution, Editor workflows, or the final full release gate.
+These commands prove the current binary `.astrapkg` runtime evidence workflow. They do not prove real texture upload, font atlas/glyph execution, audio playback/mixing, GPU filter execution, Editor workflows, or final UE-class acceptance.
 
 ## API Reference
 
@@ -46,7 +46,7 @@ Current command/API entry points are indexed under [API](../api/README.md), incl
 
 ## Examples
 
-Current examples include running `astra doc-check`, validating `Samples/NativeVN`, cooking and packaging its source sidecars, launching the generated package in headless smoke mode, comparing the golden replay, and inspecting the package manifest/mount evidence.
+Current examples include running `astra doc-check`, validating `Samples/NativeVN`, cooking and packaging its source sidecars into a binary `.astrapkg`, launching the generated package in headless smoke mode, comparing the golden replay, and inspecting the package manifest/mount evidence.
 
 ## Troubleshooting
 

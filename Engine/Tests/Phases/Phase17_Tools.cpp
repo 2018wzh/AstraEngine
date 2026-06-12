@@ -85,12 +85,59 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     auto media_cook = Astra::Tools::Cook(media_sample, options);
     REQUIRE(media_cook.Passed());
     REQUIRE(media_cook.artifacts["cook_manifest"]["artifacts"].size() == 1);
+    REQUIRE(media_cook.artifacts["cook_manifest"]["artifacts"][0]["metadata"]["format"] ==
+            "astra.texture.source");
     REQUIRE(media_cook.artifacts["cook_manifest"]["artifacts"][0]["metadata"]["media_inspect"]
                                 ["status"] == "decoded");
     REQUIRE(media_cook.artifacts["cook_manifest"]["artifacts"][0]["metadata"]["media_inspect"]
                                 ["decoded_by"] == "libpng");
     REQUIRE(media_cook.artifacts["cook_manifest"]["artifacts"][0]["metadata"]["media_inspect"]
                                 ["width"] == 1);
+    REQUIRE(media_cook.artifacts["cook_manifest"]["artifacts"][0]["metadata"]
+                                ["provider_feature_hash"]
+                                    .get<std::string>()
+                                    .size() == 64);
+
+    const auto import_sample = std::filesystem::temp_directory_path() / "astra_import_cli_sample";
+    std::filesystem::remove_all(import_sample);
+    std::filesystem::create_directories(import_sample / "Imports");
+    {
+        std::ofstream descriptor(import_sample / "astra.sample.yaml", std::ios::binary);
+        descriptor << "schema: astra.sample.v1\n";
+        descriptor << "id: Samples/ImportCliSmoke\n";
+        descriptor << "phase: 6\n";
+        descriptor << "foundation_only: true\n";
+    }
+    const auto import_source = import_sample / "Imports/ImportedRoom.png";
+    {
+        const auto png = TestPng1x1Rgba();
+        std::ofstream image(import_source, std::ios::binary);
+        image.write(reinterpret_cast<const char*>(png.data()),
+                    static_cast<std::streamsize>(png.size()));
+    }
+    Astra::Tools::CommandOptions import_options = options;
+    import_options.import_asset_id = "native:/Backgrounds/ImportedRoom";
+    import_options.import_asset_type = "image";
+    import_options.import_preset = "background";
+    import_options.import_license_owner = "project";
+    import_options.import_license_usage = "internal";
+    auto imported = Astra::Tools::Import(import_sample, import_source, import_options);
+    REQUIRE(imported.Passed());
+    REQUIRE(std::filesystem::exists(imported.artifacts["sidecar_path"].get<std::string>()));
+    auto imported_validation = Astra::Tools::Validate(import_sample, options);
+    REQUIRE(imported_validation.Passed());
+    REQUIRE(imported_validation.artifacts["asset_registry"]["entries"].size() == 1);
+    auto imported_cook = Astra::Tools::Cook(import_sample, options);
+    REQUIRE(imported_cook.Passed());
+    REQUIRE(imported_cook.artifacts["cook_manifest"]["artifacts"].size() == 1);
+    auto imported_package = Astra::Tools::Package(import_sample, options);
+    REQUIRE(imported_package.Passed());
+    REQUIRE(imported_package.artifacts["package_manifest"]["payloads"][0]["compression"] ==
+            "zstd");
+    auto imported_inspect =
+        Astra::Tools::Inspect(imported_package.artifacts["package"].get<std::string>(), options);
+    REQUIRE(imported_inspect.Passed());
+    REQUIRE(imported_inspect.artifacts["package_mount"]["assets"].size() == 1);
 
     auto package = Astra::Tools::Package(
         std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageSmoke", options);
@@ -177,31 +224,40 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     REQUIRE(package_mount);
     REQUIRE(package_mount.Value().assets.size() >= 7);
 
-    auto tampered_package_json = native_package.artifacts["package_manifest"];
-    tampered_package_json["package_hash"] = "sha256:tampered";
     const auto tampered_package =
         std::filesystem::temp_directory_path() / "astra_nativevn_tampered.astrapkg";
     {
         std::ofstream file(tampered_package, std::ios::binary);
-        file << tampered_package_json.dump(2) << "\n";
+        file << "not an astra package";
     }
     Astra::Core::DiagnosticSink package_diagnostics;
     auto tampered = reader.ReadManifest(tampered_package, package_diagnostics);
     REQUIRE_FALSE(tampered);
     REQUIRE(package_diagnostics.HasBlocking());
 
-    auto tampered_payload_json = native_package.artifacts["package_manifest"];
-    tampered_payload_json["payloads"][0]["data"] = "dGFtcGVyZWQ=";
-    tampered_payload_json["package_hash"] =
-        Astra::Asset::ComputePackageManifestHash(tampered_payload_json);
     const auto tampered_payload_package =
         std::filesystem::temp_directory_path() / "astra_nativevn_payload_tampered.astrapkg";
+    std::filesystem::copy_file(native_package.artifacts["package"].get<std::string>(),
+                               tampered_payload_package,
+                               std::filesystem::copy_options::overwrite_existing);
+    auto tampered_asset = Astra::Asset::ParseAssetUri(
+        native_package.artifacts["package_manifest"]["payloads"][0]["asset_id"].get<std::string>());
+    REQUIRE(tampered_asset);
+    const auto tampered_offset =
+        native_package.artifacts["package_manifest"]["payloads"][0]["offset"]
+            .get<Astra::Core::u64>();
     {
-        std::ofstream file(tampered_payload_package, std::ios::binary);
-        file << tampered_payload_json.dump(2) << "\n";
+        std::fstream file(tampered_payload_package, std::ios::binary | std::ios::in | std::ios::out);
+        file.seekg(static_cast<std::streamoff>(tampered_offset), std::ios::beg);
+        char byte = 0;
+        file.read(&byte, 1);
+        file.seekp(static_cast<std::streamoff>(tampered_offset), std::ios::beg);
+        byte = static_cast<char>(byte ^ 0x7f);
+        file.write(&byte, 1);
     }
     Astra::Core::DiagnosticSink payload_diagnostics;
-    auto tampered_payload = reader.ReadManifest(tampered_payload_package, payload_diagnostics);
+    auto tampered_payload =
+        reader.ReadPayloadBytes(tampered_payload_package, tampered_asset.Value(), payload_diagnostics);
     REQUIRE_FALSE(tampered_payload);
     REQUIRE(payload_diagnostics.HasBlocking());
 

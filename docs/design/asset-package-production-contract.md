@@ -1,7 +1,7 @@
 # Asset / Package Production Contract
 
-状态：Production contract draft / not yet fully implemented  
-定位：定义 Importer、Cooker、DDC、package streaming、hot reload rollback 和 Asset Release Gate 的生产接口。本文补足 `asset-pipeline.md` 的实现级边界。
+状态：Phase 6 implemented / Phase 7 media execution pending  
+定位：定义并记录已实现的 Importer、Cooker、DDC、binary `.astrapkg` streaming、hot reload rollback DTO 和 Asset Release Gate 生产接口。本文补足 `asset-pipeline.md` 的实现级边界。
 
 ## 1. 目标
 
@@ -58,6 +58,7 @@ public:
 - Preview 可读取 source，但不能写 Content。
 - Import 成功必须写 sidecar、source copy/mount policy 和 audit record。
 - AI draft 必须先进入 Review Queue，accepted 后才可 Import。
+- Built-in importers cover image、audio、font、text、filter profile、native/Lua script source and timeline-style text descriptors. They are source/sidecar producers; media execution remains out of scope。
 
 ## 3. Cook Contract
 
@@ -103,8 +104,9 @@ packaged_eligible: true
 - Cook key includes source hash、processor version、selected provider ids、target platform、release profile。
 - Cook may use DDC, but package manifest records cooked artifact hash, not DDC trust.
 - Unsupported source or target format is cook-time blocking diagnostic.
+- Built-in cook processors write deterministic binary payloads and metadata for image/font/audio/script/filter/timeline assets using existing library evidence paths where available. They do not upload textures, execute glyph atlases, play audio, or run GPU filters。
 
-## 4. DDC And Package
+## 4. DDC And Binary Package
 
 DDC key：
 
@@ -148,6 +150,9 @@ foreign_copy_allowed: false
 - Package manifest stores selected EngineModuleSlot providers and provider feature hash.
 - PackageReader validates manifest hash, payload hash, payload size and compression before returning bytes.
 - Runtime package mount is read-only.
+- New `.astrapkg` files use the `ASTRAP6\0` binary header, version `1`, embedded canonical JSON manifest, SHA-256 payload table, and zstd-compressed payload bytes.
+- `PackageReader` supports random-access reads, chunked reads, text reads, mount summaries and blocking diagnostics for corrupt headers, unsupported encodings/compression, and payload hash mismatch.
+- `PackageWriter` is the only production writer; CLI `package` must call `AstraAsset` APIs instead of emitting ad-hoc package JSON.
 
 ## 5. Hot Reload
 
@@ -163,6 +168,7 @@ Rollback rules：
 - Provider prepare failure keeps old resource and records provider id.
 - Switch must be atomic at Runtime frame boundary.
 - Save stores logical asset id and presentation state, not provider resource ids.
+- Current Phase 6 implementation exposes transaction planning and rollback DTOs. Source/sidecar hash changes can switch at frame boundary after validation; removed or diagnostically invalid assets require rollback and retain the old resource.
 
 ## 6. Release Gate
 
@@ -170,11 +176,15 @@ Release Gate blocks:
 
 - missing sidecar or duplicate asset id.
 - broken hard dependency.
+- registry asset missing cook artifact.
 - unsupported cook target format.
 - unreviewed AI asset.
 - illegal foreign copy.
+- unresolved virtual refs.
+- DDC hash mismatch.
 - package payload hash mismatch.
 - selected provider not packaged eligible.
+- non-runtime-safe module evidence.
 
 `PackageSmoke` acceptance：
 
@@ -182,3 +192,8 @@ Release Gate blocks:
 - random-access and chunked PackageReader paths work.
 - corrupt DDC rebuilds; corrupt package blocks launch.
 
+NativeVN Phase 6 acceptance:
+
+- `validate -> import -> cook -> package -> inspect -> run --headless-smoke -> replay --compare` uses `AstraAsset` APIs for production package evidence.
+- Save/replay reports include package manifest hash, package profile and selected provider feature hash.
+- Replay mismatch reports localize to frame, record kind, expected/actual hash, nearest event sequence, source object, and package manifest hash.

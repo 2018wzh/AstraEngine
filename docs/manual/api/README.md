@@ -1,6 +1,6 @@
 # API Reference
 
-Status: NativeVN runtime evidence scaffold. Foundation public runtime headers are present for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Asset, Media, Script, AstraVN, and Tools. Engine libraries are dynamic-only `Astra*` DLLs with generated per-module export headers under `Astra/<Module>/Export.hpp`. Later production runtime systems remain planned.
+Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline. Foundation public runtime headers are present for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Media, Script, AstraVN, and Tools; Asset now includes production importer/cooker/DDC/package contracts. Engine libraries are dynamic-only `Astra*` DLLs with generated per-module export headers under `Astra/<Module>/Export.hpp`. Later media/editor/AI runtime systems remain planned.
 
 ## Overview
 
@@ -103,25 +103,45 @@ Phase 4 Script/AstraVN foundation APIs are in `Script.hpp` and `AstraVN.hpp`:
 - `FoundationProfile()`
 - `FoundationStateMachines()`
 
-Planned later entries include production Asset Pipeline, production Media backend providers, full Script debugger/hot reload/Graph/Timeline, production AstraVN package launch, Editor, AI/MCP, and Release Gate APIs.
+Planned later entries include production Media backend providers, full Script debugger/hot reload/Graph/Timeline, production AstraVN authoring workflow, Editor, AI/MCP, and broader runtime release/observability APIs.
 
-NativeVN runtime evidence APIs now also include:
+Phase 6 Asset and NativeVN runtime evidence APIs now also include:
 
+- `Astra::Asset::ImportRequest`
+- `Astra::Asset::ImporterDescriptor`
+- `Astra::Asset::IAssetImporter`
+- `Astra::Asset::DdcKey`
+- `Astra::Asset::CookRequest`
+- `Astra::Asset::CookArtifactDescriptor`
+- `Astra::Asset::ICookProcessor`
+- `Astra::Asset::CookPipelineOptions`
 - `Astra::Asset::CookManifest`
 - `Astra::Asset::DerivedDataCacheEntry`
+- `Astra::Asset::DdcCleanReport`
+- `Astra::Asset::PackageWriter`
 - `Astra::Asset::PackagePayloadEntry`
+- `Astra::Asset::PackagePayloadRef`
 - `Astra::Asset::PackagePayloadChunk`
 - `Astra::Asset::PackageManifest`
+- `Astra::Asset::PackageMountPolicy`
 - `Astra::Asset::PackageMount`
 - `Astra::Asset::PackageReader`
+- `Astra::Asset::AssetReleaseGateReport`
+- `Astra::Asset::HotReloadTransaction`
 - `Astra::Asset::PackageReader::ReadPayloadBytes()`
 - `Astra::Asset::PackageReader::ReadPayloadChunks()`
 - `Astra::Asset::PackageReader::ReadPayloadText()`
 - `Astra::Asset::PackageReader::MountPackage()`
+- `Astra::Asset::CookAssetRegistry()`
+- `Astra::Asset::CleanDerivedDataCache()`
+- `Astra::Asset::ValidateAssetReleaseGate()`
+- `Astra::Asset::PlanHotReloadTransaction()`
 - `Astra::Asset::ComputeCookManifestHash()`
 - `Astra::Asset::ComputePackageManifestHash()`
+- `Astra::Asset::ComputeProviderFeatureHash()`
 - `Astra::Runtime::SaveContainer`
 - `Astra::Runtime::ReplayComparisonReport`
+- `Astra::Tools::Import()`
 - `Astra::Tools::Replay()`
 
 ## Examples

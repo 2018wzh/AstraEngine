@@ -16,6 +16,8 @@ int main(int argc, char** argv) {
     app.add_flag("--version", version, "Print build info");
 
     std::filesystem::path target;
+    std::filesystem::path import_project;
+    std::filesystem::path import_source;
     std::filesystem::path sample;
     std::filesystem::path inspect_target;
     std::filesystem::path run_target;
@@ -33,6 +35,16 @@ int main(int argc, char** argv) {
     inspect->add_option("target", inspect_target)->required();
     inspect->add_flag("--json", options.json, "Emit JSON report");
     inspect->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
+    auto* import = app.add_subcommand("import", "Import a source asset into a project Content directory");
+    import->add_option("project", import_project)->required();
+    import->add_option("source", import_source)->required();
+    import->add_option("--asset-id", options.import_asset_id, "Target native:/ AssetId")->required();
+    import->add_option("--type", options.import_asset_type, "Asset type");
+    import->add_option("--preset", options.import_preset, "Import/cook preset");
+    import->add_option("--license-owner", options.import_license_owner, "License owner");
+    import->add_option("--license-usage", options.import_license_usage, "License usage");
+    import->add_flag("--json", options.json, "Emit JSON report");
+    import->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
     auto* cook = app.add_subcommand("cook", "Cook a runtime sample");
     cook->add_option("sample", sample)->required();
     cook->add_flag("--json", options.json, "Emit JSON report");
@@ -85,6 +97,8 @@ int main(int argc, char** argv) {
         report = Astra::Tools::Validate(target, options);
     } else if (*inspect) {
         report = Astra::Tools::Inspect(inspect_target, options);
+    } else if (*import) {
+        report = Astra::Tools::Import(import_project, import_source, options);
     } else if (*cook) {
         report = Astra::Tools::Cook(sample, options);
     } else if (*package) {

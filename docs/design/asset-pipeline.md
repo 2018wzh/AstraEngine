@@ -1,7 +1,7 @@
 # Asset Pipeline 设计
 
-状态：Target Architecture  
-定位：Astra 从 canonical source 到 cooked package 的完整内容管线，包括 AssetId、VFS、Importer、Cooker、DerivedDataCache、Package、Hot Reload 和 Release Gate。
+状态：Phase 6 implemented production Asset Pipeline slice  
+定位：Astra 从 canonical source 到 cooked binary package 的完整内容管线，包括 AssetId、VFS、Importer、Cooker、DerivedDataCache、binary `.astrapkg`、Hot Reload rollback DTO 和 Asset Release Gate。Phase 7 仍负责真实 renderer/font/audio/filter 执行。
 
 ## 1. 目标
 
@@ -166,6 +166,8 @@ Importer errors：
 - forbidden foreign copy。
 - invalid preset schema。
 
+当前内置 importer 覆盖 image、audio、font、text、filter profile、script source；它们共用 `ImportRequest`/`ImporterDescriptor`/`IAssetImporter` 合同，写入 accepted sidecar、source copy 和 import audit。Importer 负责生产 source/sidecar，不直接写 Cooked、DDC 或 package。
+
 ## 6. Cooker Framework
 
 `ICookProcessor` descriptor：
@@ -211,6 +213,8 @@ Load AssetRegistry
 
 Cook must be incremental and deterministic. Processor output must not depend on wall clock, random temp paths, provider response time or Editor state.
 
+当前内置 cook processors 覆盖 image texture、audio stream、font runtime、filter profile、native script、Lua script、timeline/text 和 generic asset binary。Phase 6 生成确定性的 binary payload metadata 与 payload hashes，并记录 provider feature hash；真实 GPU texture upload、font atlas execution、mixer playback 和 GPU filter execution 属于 Phase 7。
+
 ## 7. DerivedDataCache
 
 DDC entry：
@@ -238,7 +242,25 @@ Rules：
 - AI/MCP cannot write DDC directly。
 - DDC key version changes invalidate compatible entries。
 
-## 8. Package Manifest
+Phase 6 local DDC stores artifact bytes under stable derived keys, reports rebuilt/reused/corruption_recovered evidence, and is reused by `astra cook`/`astra package` through `AstraAsset::CookAssetRegistry` rather than duplicated CLI logic。
+
+## 8. Binary Package Format
+
+Phase 6 `.astrapkg` is a binary read-only container:
+
+```text
+magic      8 bytes  "ASTRAP6\0"
+version    u32      currently 1
+manifest   u64      canonical JSON byte length
+json       bytes    astra.package.manifest.v1
+payloads   bytes    zstd-compressed chunks referenced by payload table
+```
+
+The embedded manifest stores `package_hash`, `project_hash`, `cook_manifest`, `runtime_evidence`, module evidence, provider feature hash/profile evidence, and payload table entries with offset, uncompressed size, compressed size, compression, streaming mode, and SHA-256 hash.
+
+`PackageReader` validates header, manifest schema/hash, payload encoding/compression, payload size, and SHA-256 before returning bytes. It supports random-access payload reads, chunked reads, text reads, and a read-only `PackageMountPolicy`/`PackageMount` DTO. Legacy JSON/base64 manifests are accepted for migration diagnostics only; new packages are written as binary zstd containers by `PackageWriter`.
+
+## 9. Package Manifest
 
 Package manifest：
 
@@ -271,7 +293,7 @@ Package rules：
 - Package has manifest hash and asset table hash。
 - Runtime loads only package manifest, cooked artifacts, runtime config and allowed module binaries。
 
-## 9. Hot Reload
+## 10. Hot Reload
 
 Hot reload invalidation：
 
@@ -296,7 +318,9 @@ Hot reload levels：
 
 Release builds disable source hot reload unless explicit dev package profile.
 
-## 10. Release Gate
+Phase 6 exposes `HotReloadTransaction` rollback DTOs with stages from Detect through SwitchAtFrameBoundary/RolledBack. Current reload planning is source/sidecar hash driven and retains old resources on validation failure; provider resource preparation/execution hooks deepen in Phase 7/10.
+
+## 11. Release Gate
 
 Asset release gate checks：
 
@@ -311,6 +335,10 @@ Asset release gate checks：
 - import/cook processors packaged eligible。
 - package manifest complete。
 - DDC artifacts hash verified。
+- package payload hash verified。
+- registry assets have package-eligible cook artifacts。
+- unresolved virtual refs blocked。
+- non-packaged provider/module blocked。
 
 Blocking output example：
 
@@ -326,15 +354,19 @@ suggested_fixes:
   - reject_draft
 ```
 
-## 11. Tool Integration
+## 12. Tool Integration
 
 CLI：
 
 - `astra validate <project>`
-- `astra import <project> <files> --preset <preset>`
+- `astra import <project> <source-file> --asset-id <native:/...> [--type <type>] [--preset <preset>]`
 - `astra cook <project> --config <profile>`
 - `astra package <project> --profile deterministic`
 - `astra inspect <package-or-asset>`
+- `astra run <package> --headless-smoke`
+- `astra replay <replay> --compare`
+
+CLI orchestration now calls `AstraAsset` importer/cooker/package APIs for import, cook, package, inspect, package-only run evidence, and replay/package hash evidence instead of owning a parallel package pipeline。
 
 Editor：
 
@@ -349,7 +381,7 @@ MCP：
 - draft/review in editor sessions。
 - no direct Cooked/DDC/package manifest writes。
 
-## 12. Tests
+## 13. Tests
 
 Required tests：
 
@@ -363,11 +395,11 @@ Required tests：
 - release gate blocking for missing dependency、unreviewed AI draft、invalid license、illegal foreign copy。
 - package reader loads without Editor。
 
-## 13. 验收
+## 14. 验收
 
-- NativeVN source project can validate、cook、package、inspect and launch the current source-sidecar package without Editor。
+- NativeVN source project can validate、import selected sources、cook、package、inspect and launch a binary `.astrapkg` without Editor。
 - Cook twice with identical inputs produces identical package hash。
 - Content Browser and CLI produce identical diagnostics for broken assets。
 - AI draft cannot enter Cook until accepted review。
 - Foreign assets remain mount-only by default。
-- Runtime package loads assets through package manifest/payload evidence and package mount DTOs; production VFS-backed binary package loading remains future work。
+- Runtime package reads assets through `PackageReader` random-access/chunked paths, save/replay evidence records package manifest hash/profile/provider feature hash, and release gate blocks corrupt package/DDC/payload mismatches。

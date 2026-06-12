@@ -77,7 +77,14 @@ Phase 4 foundation additions:
 - CLI validate/headless smoke includes `foundation_core_gate`, Phase 3 Asset/Media/FilterGraph hash evidence, media provider release-gate foundation evidence, and Phase 4 NativeVN Script/AstraVN evidence.
 - NativeVN package/replay evidence includes source asset sidecars, AssetRegistry/dependency graph reports, cook manifests, image cook artifact metadata, local DDC artifact writes, DDC reuse/rebuild/corruption recovery reports, deterministic package manifests, embedded package payload tables, PackageReader random-access/chunked-read/mount smoke, package/cook/payload hash integrity diagnostics, mature media backend capability reports, libpng image metadata decode smoke, engine/plugin DLL hash evidence, package launch smoke, and golden replay hash comparison.
 
-Known gaps: Real binary media transforms, compressed binary package containers and large-resource streaming, production Media backend/provider replacement, real decoded texture/font/audio execution, full Script debugger/hot reload/Graph/Timeline, production AstraVN, Editor, AI/MCP, and Legacy remain planned.
+Phase 6 asset pipeline additions:
+
+- `AstraAsset`: `ImportRequest`, `ImporterDescriptor`, `IAssetImporter`, `CookRequest`, `CookArtifactDescriptor`, `DdcKey`, `DdcCleanReport`, `ICookProcessor`, `PackagePayloadRef`, `PackageMountPolicy`, `AssetReleaseGateReport`, `HotReloadTransaction`, built-in importers/cook processors, DDC reuse/rebuild/clean/corruption recovery, and provider feature hash helpers.
+- `.astrapkg`: binary `ASTRAP6\0` container with embedded canonical JSON manifest, zstd-compressed payload table, payload offsets, compressed sizes, SHA-256 validation, random-access reads, chunked reads, text reads, and read-only package mount policy.
+- CLI: `astra import`, production `cook/package/inspect`, package-only `run`, save/replay package manifest hash/provider feature hash evidence, and replay mismatch localization for current frame/record/source-object/package hash reports.
+- Tests: import validation, DDC reuse/rebuild/corruption recovery, release gate blockers, binary package hash validation, zstd payload reads, chunked reads, and hot reload rollback DTO coverage.
+
+Known gaps: production Media backend/provider replacement, real decoded texture upload, executable font atlas/glyph rendering, audio mixer playback, GPU filter execution, full Script debugger/hot reload/Graph/Timeline, production AstraVN authoring surface, Editor, AI/MCP, and Legacy remain planned.
 
 ## Troubleshooting
 
