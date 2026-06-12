@@ -1,6 +1,6 @@
 # Samples
 
-Status: NativeVN playable v1 plus local ArtemisVN playable fixture. `Samples/NativeVN`, `Samples/RuntimeStress`, `Samples/PackageSmoke`, and `Samples/ArtemisVN` exist as foundation descriptors; `NativeVN` is the redistributable playable acceptance sample, while `ArtemisVN` is a local-test-only sample copied from a curated Artemis resource subset for real PNG/OGG/font, UI/system, save/load, replay, and inspect evidence.
+Status: NativeVN playable v1 plus local TsuiNoSora playable fixture. `Samples/NativeVN`, `Samples/RuntimeStress`, `Samples/PackageSmoke`, and `Samples/TsuiNoSora` exist as foundation descriptors; `NativeVN` is the redistributable playable acceptance sample, while `TsuiNoSora` is a local-test-only sample copied from a curated Artemis resource subset for real PNG/OGG/font, UI/system, save/load, replay, and inspect evidence.
 
 ## Overview
 
@@ -9,7 +9,7 @@ Samples will provide acceptance evidence for runtime, tools, release gate, docum
 ## Key Concepts
 
 - `NativeVN` is the final UE-class acceptance sample and currently provides generated redistributable PNG/OGG fixture media, Script/AstraVN, package, playable VN state, save/load, and replay evidence.
-- `ArtemisVN` is a local verification fixture using copied test resources marked `local_test_only`; it includes a curated Aya route, Artemis-style UI/system metadata, backlog, save/load slots, config state, and system SE evidence, and it must not be treated as redistributable sample content.
+- `TsuiNoSora` is a local verification fixture using copied test resources marked `local_test_only`; it includes a curated Aya route, Artemis-style UI/system metadata, backlog, save/load slots, config state, and system SE evidence, and it must not be treated as redistributable sample content.
 - `PackageSmoke` currently proves the foundation headless platform plus example module load/unload and Phase 3 media smoke path; later it will prove packaged runtime has no Editor dependency.
 - `RuntimeStress`, `ScriptParity`, `MediaBackend`, `AIIntentSafety`, `CreatorWorkflow`, `CustomizationPlugin`, and `CompatMockExpansion` each cover a specific risk.
 - Evidence must come from current local or CI command output.
@@ -20,11 +20,11 @@ Sample requirements are specified in [Samples and Test Matrix](../../design/samp
 
 ## Programming Guide
 
-Current sample descriptors live in `Samples/*/astra.sample.yaml`. `Samples/NativeVN/Content` contains generated redistributable PNG/OGG fixture media plus Native DSL/Lua parity sources. `Samples/ArtemisVN/Content` contains copied local fixture PNG, OGG, font, UI/system, filter, and script sidecars for runtime verification.
+Current sample descriptors live in `Samples/*/astra.sample.yaml`. `Samples/NativeVN/Content` contains generated redistributable PNG/OGG fixture media plus Native DSL/Lua parity sources. `Samples/TsuiNoSora/Content` contains copied local fixture PNG, OGG, font, UI/system, filter, and script sidecars for runtime verification.
 
 ## API Reference
 
-Descriptors use `schema: astra.sample.v1` and `foundation_only: true` for the current Phase 4 playable v1 slice. `NativeVN` uses redistributable generated fixtures; `ArtemisVN` uses `local_test_only` fixture sidecars.
+Descriptors use `schema: astra.sample.v1` and `foundation_only: true` for the current Phase 4 playable v1 slice. `NativeVN` uses redistributable generated fixtures; `TsuiNoSora` uses `local_test_only` fixture sidecars.
 
 ## Examples
 
@@ -36,8 +36,8 @@ astra package Samples/PackageSmoke --profile development
 astra run Samples/PackageSmoke --headless-smoke
 astra validate Samples/NativeVN --strict
 astra run Samples/NativeVN --headless-smoke
-astra validate Samples/ArtemisVN --strict --json
-astra run build/Saved/Packages/ArtemisVN.astrapkg --headless-smoke --json
+astra validate Samples/TsuiNoSora --strict --json
+astra run build/Saved/Packages/TsuiNoSora.astrapkg --headless-smoke --json
 ```
 
 NativeVN runtime evidence commands include:
@@ -55,18 +55,18 @@ astra inspect build/Saved/Packages/NativeVN.astrapkg
 
 These commands prove the current playable v1 slice, including generated/copy fixture media decode evidence, SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence sourced from package payloads for `.astrapkg` runs, playable VN state, UI/system state, local DDC artifact writes, DDC corruption recovery, embedded package payload random/chunked reads, package mount DTOs, and package/cook/payload manifest hash checks. They do not yet prove production binary package streaming at scale, Editor workflows, AI/MCP, Legacy, or the final full release gate.
 
-ArtemisVN local fixture commands include:
+TsuiNoSora local fixture commands include:
 
 ```powershell
-astra validate Samples/ArtemisVN --strict --json
-astra cook Samples/ArtemisVN --config Debug --json
-astra package Samples/ArtemisVN --profile development --json
-astra run build/Saved/Packages/ArtemisVN.astrapkg --headless-smoke --json
-astra run build/Saved/Packages/ArtemisVN.astrapkg --headless-smoke --save-out build/Saved/Saves/ArtemisVN.save.json --json
-astra run build/Saved/Packages/ArtemisVN.astrapkg --load build/Saved/Saves/ArtemisVN.save.json --headless-smoke --json
-astra run build/Saved/Packages/ArtemisVN.astrapkg --windowed-smoke --scripted-input Samples/ArtemisVN/Input/golden.yaml --auto-close --json
-astra replay build/Saved/Replays/ArtemisVNGolden.replay --compare --json
-astra inspect build/Saved/Packages/ArtemisVN.astrapkg --json
+astra validate Samples/TsuiNoSora --strict --json
+astra cook Samples/TsuiNoSora --config Debug --json
+astra package Samples/TsuiNoSora --profile development --json
+astra run build/Saved/Packages/TsuiNoSora.astrapkg --headless-smoke --json
+astra run build/Saved/Packages/TsuiNoSora.astrapkg --headless-smoke --save-out build/Saved/Saves/TsuiNoSora.save.json --json
+astra run build/Saved/Packages/TsuiNoSora.astrapkg --load build/Saved/Saves/TsuiNoSora.save.json --headless-smoke --json
+astra run build/Saved/Packages/TsuiNoSora.astrapkg --windowed-smoke --scripted-input Samples/TsuiNoSora/Input/golden.yaml --auto-close --json
+astra replay build/Saved/Replays/TsuiNoSoraGolden.replay --compare --json
+astra inspect build/Saved/Packages/TsuiNoSora.astrapkg --json
 ```
 
 ## Troubleshooting

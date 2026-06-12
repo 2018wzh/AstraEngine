@@ -108,5 +108,105 @@ TEST_CASE("Runtime control policy allows queues and rejects locked channels") {
     REQUIRE(system.decision == Astra::Runtime::ControlDecision::Allow);
 }
 
+TEST_CASE("Runtime Phase 5 orders events by priority and wakes serializable scheduled tasks") {
+    Astra::Core::DiagnosticSink diagnostics;
+    Astra::Runtime::RuntimeWorld runtime(42);
+    auto actor_id = Astra::Core::ParseStableId("actor:/systems/phase5");
+    auto actor_type = Astra::Core::ParseStableId("type:/astra.test.system");
+    auto state_machine_id = Astra::Core::ParseStableId("state_machine:/phase5_order");
+    auto low_event = Astra::Core::ParseStableId("event:/astra.test.low");
+    auto high_event = Astra::Core::ParseStableId("event:/astra.test.high");
+    auto scheduled_event = Astra::Core::ParseStableId("event:/astra.test.scheduled");
+    auto state_component = Astra::Core::ParseStableId("component:/astra.state_machine");
+    REQUIRE(actor_id);
+    REQUIRE(actor_type);
+    REQUIRE(state_machine_id);
+    REQUIRE(low_event);
+    REQUIRE(high_event);
+    REQUIRE(scheduled_event);
+    REQUIRE(state_component);
+
+    Astra::Scene::ActorDescriptor descriptor;
+    descriptor.id = actor_id.Value();
+    descriptor.type_id = actor_type.Value();
+    descriptor.name = "Phase5";
+    descriptor.components.push_back({
+        state_component.Value(),
+        "astra.state_machine",
+        1,
+        {{"state_machine_id", state_machine_id.Value().ToString()}, {"current_state", "idle"}},
+    });
+    auto actor = runtime.Scene().Spawn(descriptor, diagnostics);
+    REQUIRE(actor);
+
+    Astra::Runtime::StateMachineDefinition definition;
+    definition.id = state_machine_id.Value();
+    definition.initial_state = "idle";
+    definition.transitions.push_back({"idle", low_event.Value(), "low", 0});
+    definition.transitions.push_back({"idle", high_event.Value(), "high", 100});
+    definition.transitions.push_back({"high", scheduled_event.Value(), "scheduled", 0});
+    runtime.RegisterStateMachine(std::move(definition));
+
+    Astra::Runtime::RuntimeEvent low;
+    low.type = low_event.Value();
+    low.priority = 1;
+    low.target = {"actor", actor_id.Value().ToString()};
+    REQUIRE(runtime.Emit(low, Astra::Runtime::RuntimeEventMode::Queued, diagnostics));
+    Astra::Runtime::RuntimeEvent high;
+    high.type = high_event.Value();
+    high.priority = 10;
+    high.target = {"actor", actor_id.Value().ToString()};
+    REQUIRE(runtime.Emit(high, Astra::Runtime::RuntimeEventMode::Queued, diagnostics));
+
+    Astra::Runtime::RuntimeTask task;
+    task.owner = {"actor", actor_id.Value().ToString()};
+    task.wait.kind = Astra::Runtime::RuntimeWaitKind::Time;
+    task.wait.wake_frame = 1;
+    task.emit_on_wake.type = scheduled_event.Value();
+    task.emit_on_wake.target = {"actor", actor_id.Value().ToString()};
+    REQUIRE(runtime.ScheduleTask(task, diagnostics));
+    REQUIRE(runtime.Tick(diagnostics));
+
+    auto state_machine = runtime.Scene().FindComponent(actor.Value(), "astra.state_machine");
+    REQUIRE(state_machine);
+    REQUIRE(state_machine->data["current_state"] == "scheduled");
+    REQUIRE(runtime.Scheduler().tasks.size() == 1);
+    REQUIRE(runtime.Scheduler().tasks[0].state == Astra::Runtime::RuntimeTaskState::Completed);
+
+    auto subscription = runtime.Subscribe(high_event.Value(), "test");
+    REQUIRE(subscription.active);
+    REQUIRE(runtime.Unsubscribe(subscription.id, diagnostics));
+}
+
+TEST_CASE("Runtime Phase 5 save container v2 compresses scheduler state and localizes replay mismatches") {
+    Astra::Core::DiagnosticSink diagnostics;
+    Astra::Runtime::RuntimeWorld runtime(99);
+    auto event_type = Astra::Core::ParseStableId("event:/astra.test.wait");
+    REQUIRE(event_type);
+    Astra::Runtime::RuntimeTask task;
+    task.wait.kind = Astra::Runtime::RuntimeWaitKind::Event;
+    task.wait.event_type = event_type.Value();
+    task.continuation = {{"note", "waiting for event"}};
+    REQUIRE(runtime.ScheduleTask(task, diagnostics));
+
+    auto save = runtime.SaveV2(true);
+    REQUIRE(save.schema == Astra::Runtime::SaveContainerV2Schema);
+    REQUIRE_FALSE(save.sections.empty());
+    REQUIRE(std::ranges::any_of(save.sections, [](const auto& section) { return section.compressed; }));
+    auto save_json = Astra::Runtime::ToJson(save);
+    auto parsed = Astra::Runtime::SaveContainerV2FromJson(save_json);
+    REQUIRE(parsed);
+
+    Astra::Runtime::RuntimeWorld loaded;
+    REQUIRE(loaded.Load(parsed.Value(), diagnostics));
+    REQUIRE(loaded.Scheduler().tasks.size() == 1);
+    REQUIRE(loaded.Scheduler().tasks[0].wait.kind == Astra::Runtime::RuntimeWaitKind::Event);
+
+    auto comparison = Astra::Runtime::CompareReplayHashes({"a", "b", "c"}, {"x", "b", "z"});
+    REQUIRE_FALSE(comparison.passed);
+    REQUIRE(comparison.localized_mismatches.size() == 2);
+    REQUIRE(Astra::Runtime::ToJson(comparison)["localized_mismatches"].size() == 2);
+}
+
 
 

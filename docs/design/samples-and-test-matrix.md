@@ -3,7 +3,7 @@
 状态：NativeVN runtime evidence scaffold / Target Architecture  
 定位：用样例项目和测试矩阵证明 AstraEngine 的 UE-class 2D runtime 完备度。样例不是演示摆设，而是 release gate、文档、CLI、Editor 和 Runtime 的共同验收载体。
 
-Current implementation note：当前已建立 `Samples/NativeVN`、`Samples/RuntimeStress`、`Samples/PackageSmoke` 和 `Samples/ArtemisVN` 的 foundation/evidence descriptors。`PackageSmoke` 可通过 `astra validate/package/run --headless-smoke` 证明 Phase 1 headless platform 和 example module lifecycle；`NativeVN` 可通过 validate/cook/package/run/replay/inspect 证明 source asset sidecars、generated PNG/OGG/font fixture media、AssetRegistry/dependency graph、local DDC artifact evidence、embedded package payloads、PackageReader mount/read smoke、Script/AstraVN execution、playable UI/system/save/load evidence、package-payload SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence 和 golden replay comparison。`ArtemisVN` 是 local-test-only playable fixture，用复制的 Artemis PNG/OGG/font/UI/system 资源验证真实资源 registry/cook/package/windowed/headless/run evidence，以及来自 package payload 的真实 PNG texture primitive 与 glyph primitive 提交，不代表 Legacy VM、完整 `.ast` converter 或 redistributable sample。Editor workflow、final release gate、production binary streaming 和 full Artemis compatibility 仍是后续阶段。
+Current implementation note：当前已建立 `Samples/NativeVN`、`Samples/RuntimeStress`、`Samples/PackageSmoke` 和 `Samples/TsuiNoSora` 的 foundation/evidence descriptors。`PackageSmoke` 可通过 `astra validate/package/run --headless-smoke` 证明 Phase 1 headless platform 和 example module lifecycle；`NativeVN` 可通过 validate/cook/package/run/replay/inspect 证明 source asset sidecars、generated PNG/OGG/font fixture media、AssetRegistry/dependency graph、local DDC artifact evidence、embedded package payloads、PackageReader mount/read smoke、Script/AstraVN execution、playable UI/system/save/load evidence、package-payload SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence 和 golden replay comparison。`TsuiNoSora` 是 local-test-only playable fixture，用复制的 Artemis PNG/OGG/font/UI/system 资源验证真实资源 registry/cook/package/windowed/headless/run evidence，以及来自 package payload 的真实 PNG texture primitive 与 glyph primitive 提交，不代表 Legacy VM、完整 `.ast` converter 或 redistributable sample。Editor workflow、final release gate、production binary streaming 和 full Artemis compatibility 仍是后续阶段。
 
 ## 1. 目标
 
@@ -34,7 +34,7 @@ Samples/
 ├─ NativeVN
 ├─ RuntimeStress
 ├─ PackageSmoke
-├─ ArtemisVN
+├─ TsuiNoSora
 ├─ ScriptParity
 ├─ MediaBackend
 ├─ AIIntentSafety
@@ -108,6 +108,8 @@ Must include：
 - scheduler waits for event/time/asset。
 - repeated save/load checkpoints。
 - long-run soak profile。
+- `runtime-production-contract.md` tick/scheduler/Director coverage。
+- `save-replay-production-contract.md` checkpoint and mismatch report coverage。
 
 Acceptance：
 
@@ -129,6 +131,8 @@ Must include：
 - runtime-safe module set。
 - package manifest。
 - CLI run in headless mode。
+- `asset-package-production-contract.md` PackageReader/package mount policy coverage。
+- `release-gate-observability-contract.md` release report and blocking diagnostic coverage。
 
 Acceptance：
 
@@ -149,6 +153,7 @@ Must include：
 - Graph source for at least one branch。
 - Timeline with camera/audio event。
 - debugger symbols and source maps。
+- `save-replay-production-contract.md` script decision, source map and replay mismatch coverage。
 
 Acceptance：
 
@@ -164,17 +169,21 @@ Purpose：
 
 Must include：
 
+- Decode Provider selection for `astra.image_decode`、`astra.audio_decode` and optional `astra.video_decode`。
 - texture decode/upload。
 - sprite batching/layer order。
 - text shaping/font fallback。
 - voice/music/SFX routing。
 - executable FilterGraph targets。
 - frame capture metadata。
+- `hardware-media-decode.md` capability/fallback/zero-copy diagnostics coverage。
+- `media-backend-production-contract.md` Renderer2D/TextLayout/Audio/FilterGraph execution coverage。
 
 Acceptance：
 
 - headless render/text/audio/filter hashes match expected。
 - selected Renderer2D/TextLayout/Audio providers pass release gate。
+- selected Decode providers pass release gate or emit allowed fallback diagnostics。
 - missing glyph/asset/audio cases produce diagnostics。
 
 ## 8. AIIntentSafety
@@ -190,6 +199,7 @@ Must include：
 - AIIntent request/validate/commit。
 - fallback select。
 - committed output saved and replayed without provider。
+- `ai-mcp-safety-contract.md` Review Queue, generation audit and provider-free replay coverage。
 
 Acceptance：
 
@@ -212,6 +222,7 @@ Must include：
 - Script/Graph/Timeline editing。
 - Inspector property edit with undo/redo。
 - PIE debug and package。
+- `editor-runtime-creator-contract.md` EditorRuntimeSession, InspectRequest, DebugCommand and SourcePatchProposal coverage。
 
 Acceptance：
 
@@ -234,6 +245,7 @@ Must include：
 - sample Renderer2D/TextLayout/Audio provider or provider stub。
 - sample `IMcpToolProvider` read-only tool。
 - plugin descriptor and release checklist。
+- `provider-contracts.md` ProviderDescriptor, capability negotiation, selection policy and shutdown contract coverage。
 
 Acceptance：
 
@@ -256,6 +268,7 @@ Must include：
 - LegacyApiMapper output to VN events。
 - modernization profile。
 - save extension state。
+- `legacy-compatibility-contract.md` CompatRuntimeProvider, LegacyPackageReader and SaveExtensionStateProvider boundary coverage。
 
 Optional local fixture：
 

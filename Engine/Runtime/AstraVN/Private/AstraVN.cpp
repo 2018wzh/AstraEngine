@@ -201,7 +201,7 @@ nlohmann::json ToJson(const VnFoundationProfile& profile) {
     }
     nlohmann::json actors = nlohmann::json::array();
     for (const auto& actor : profile.actor_presets) {
-        actors.push_back(Astra::Scene::ToJson(Astra::Scene::ActorSnapshot{actor.id, actor.type_id, actor.name, 0, Astra::Scene::ActorLifecycleState::Draft, actor.components}));
+        actors.push_back(Astra::Scene::ToJson(Astra::Scene::ActorSnapshot{actor.id, actor.type_id, actor.name, 0, Astra::Scene::ActorLifecycleState::Draft, false, actor.components}));
     }
     nlohmann::json components = nlohmann::json::array();
     for (const auto& component : profile.component_presets) {

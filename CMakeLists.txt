@@ -36,6 +36,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
 find_package(sol2 CONFIG REQUIRED)
 find_package(unofficial-lua CONFIG REQUIRED)
+find_package(zstd CONFIG REQUIRED)
 
 if(ASTRA_BUILD_TOOLS)
     find_package(CLI11 CONFIG REQUIRED)

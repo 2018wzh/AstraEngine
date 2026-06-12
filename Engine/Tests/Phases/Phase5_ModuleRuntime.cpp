@@ -151,4 +151,3 @@ TEST_CASE("Example foundation plugin loads registers and unloads through module 
 #endif
 }
 
-#if defined(ASTRA_WITH_TOOLS)

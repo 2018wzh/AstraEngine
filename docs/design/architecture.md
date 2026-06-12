@@ -88,6 +88,9 @@ IPresentationLibraryProvider
 IRenderer2DProvider
 ITextLayoutProvider
 IAudioProvider
+IImageDecodeProvider
+IAudioDecodeProvider
+IVideoDecodeProvider
 IMcpToolProvider
 IAIProvider
 ```
@@ -95,6 +98,23 @@ IAIProvider
 每个 contract 都必须定义 descriptor、required services、permission、diagnostics、sample plugin、
 release gate rule 和 packaged eligibility。Editor 可以提供可视化配置，但 Runtime 只消费通过
 Release Gate 验证过的 policy 和 package manifest。
+
+### Production Contract Layer
+
+Target architecture 文档描述目标形态；production contract 文档描述 Phase 5+ 实现者必须遵守的准 API 草案。两者关系如下：
+
+- `runtime-production-contract.md` 固化 tick、event ordering、Scheduler、Director 和 Actor lifecycle。
+- `save-replay-production-contract.md` 固化 Save section、migration、Replay stream 和 mismatch report。
+- `asset-package-production-contract.md` 固化 Import/Cook/DDC/Package/Hot Reload/Asset Release Gate。
+- `hardware-media-decode.md` 固化独立 Decode Provider slot：`astra.image_decode`、`astra.audio_decode`、`astra.video_decode`。
+- `media-backend-production-contract.md` 固化 Renderer2D/TextLayout/Audio/Timeline/FilterGraph provider 执行边界。
+- `provider-contracts.md` 固化 provider descriptor、capability negotiation、permissions、hot reload、shutdown 和 ABI/release gate。
+- `editor-runtime-creator-contract.md` 固化 Editor PIE/debug/Inspector/Creator workflow 与 Runtime 的连接边界。
+- `ai-mcp-safety-contract.md` 固化 Runtime AI intent、Editor Copilot、Content Generation、Review Queue、audit 和 provider-free replay。
+- `legacy-compatibility-contract.md` 固化 Legacy expansion 边界，不作为 native runtime 达标前置。
+- `release-gate-observability-contract.md` 固化 release report、trace/profiling 和 crash bundle。
+
+这些 contract 文档是设计输入，不表示对应生产代码已完成。实现完成必须同时满足 TODO、sample/test evidence 和 Release Gate。
 
 ### Dependency Matrix
 
@@ -131,6 +151,7 @@ Compat      -> Runtime, Asset, Media, Script (expansion only)
 - `media-runtime.md`：Renderer2D、TextLayout、Audio、Timeline、FilterGraph。
 - `script-and-presentation.md`：ScriptRuntimeHost、Native DSL、Lua、Graph/Timeline、PresentationCommand、AstraVN。
 - `tools-release-observability.md`：CLI、Release Gate、trace、profiling、crash report、CI matrix。
+- Production contract docs：Phase 5+ 的准 API 草案和验收边界。
 
 ## 2. 顶层分层
 

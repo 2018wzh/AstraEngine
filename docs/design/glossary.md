@@ -179,3 +179,24 @@ MCP 工具扩展 contract，声明 resources、tools、prompts、session require
 
 ## IAIProvider
 AI provider contract，声明 modality、network/offline、runtime eligibility、secret requirements、streaming 和 audit 支持。
+
+## DecodeProvider
+媒体解码 provider，按 `astra.image_decode`、`astra.audio_decode`、`astra.video_decode` slot 注册。它声明 codec/container/profile、硬件加速、zero-copy、CPU fallback、headless support 和 packaged eligibility。
+
+## MediaSurfaceToken
+Decode Provider 返回给兼容 Renderer2D provider 的 backend-scoped opaque surface token。它不可序列化，不暴露 D3D、Vulkan、Metal、SDL、OS 或平台视频解码 handle。
+
+## ProviderCapability
+Provider 声明并由 Release Gate 验证的能力项，例如 codec support、zero-copy、frame capture、hot reload level、headless fallback 或 package eligibility。
+
+## ReleaseProfile
+发布配置，决定 blocking severity、fallback 允许策略、runtime AI policy、provider hash/ABI 要求、save migration 要求和 package inclusion policy。
+
+## ReplayMismatch
+Replay 比较失败记录，定位 frame、record kind、event sequence、actor/component、script command、presentation command 或 provider output hash 的差异。
+
+## EditorRuntimeSession
+Editor 与 RuntimeWorld 的调试/PIE 会话边界。它提供 inspect、debug command、preview overlay 和 source patch proposal，不让 Runtime 依赖 Editor UI。
+
+## SaveSectionProvider
+模块注册 save section 的 provider contract，负责声明 section schema、写入 payload、读取 payload 和提供 migration edge。

@@ -1,9 +1,27 @@
 schema: astra.sample.v1
 id: astra.sample.runtime_stress
 display_name: RuntimeStress
-phase: 1
+phase: 5
 foundation_only: true
-status: scaffold
-description: Phase 1 descriptor only. Actor/runtime stress behavior belongs to later Scene/Runtime phases.
+status: phase5-runtime-core-evidence
+description: Phase 5 Runtime Core stress descriptor for 1000+ Actor deterministic tick, scheduler waits, save/load, replay hash stability, and handle lifetime evidence.
 acceptance:
   - astra validate Samples/RuntimeStress --strict
+  - ctest --test-dir build -C Debug -R AstraPhaseTests --output-on-failure
+runtime_stress:
+  actors: 1000
+  state_machines_per_actor: 1
+  event_modes:
+    - queued
+    - deferred
+    - scheduled
+  scheduler_waits:
+    - event
+    - time
+    - asset
+  save_replay:
+    save_container: astra.runtime.save_container.v2
+    deterministic_hashes:
+      - state_hash
+      - event_hash
+      - presentation_hash

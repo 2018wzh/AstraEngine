@@ -8,4 +8,6 @@ target_link_libraries(AstraRuntime
         AstraCore
         AstraScene
         nlohmann_json::nlohmann_json
+    PRIVATE
+        zstd::libzstd
 )

@@ -170,7 +170,11 @@ Astra::Runtime::RuntimeEvent MakeEvent(const ScriptCommand& command, std::string
     event.type = EventType(std::move(event_value));
     event.category = std::move(category);
     event.source = {"script", command.location.file};
-    event.target = {"actor", std::move(target)};
+    if (target == "broadcast") {
+        event.target = {"broadcast", ""};
+    } else {
+        event.target = {"actor", std::move(target)};
+    }
     event.payload_schema = "astra.vn." + ToString(command.kind) + ".v1";
     event.payload = std::move(payload);
     event.trace.script_location = command.location.file + ":" + std::to_string(command.location.line);
@@ -570,7 +574,7 @@ ScriptExecutionResult ScriptEventBridge::Execute(
             for (const auto& choice : command.choices) {
                 choices.push_back(ToJson(choice));
             }
-            event = MakeEvent(command, "astra.vn.choice.presented", "vn.choice", "actor:/systems/choice", {{"choices", choices}});
+            event = MakeEvent(command, "astra.vn.choice.presented", "vn.choice", "broadcast", {{"choices", choices}});
             break;
         }
         case ScriptCommandKind::Jump:

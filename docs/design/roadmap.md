@@ -33,6 +33,8 @@ UE `UObject` / UHT / GC 体系。
 
 当前 Phase 1-4 属于 Foundation，不应被解读为 production complete。当前工作树另有 NativeVN runtime feature-complete evidence slice：动态链接的 `Astra*` engine DLL、NativeVN package manifest、headless run、media backend capability report 和 golden replay comparison 已实现，用于推进 README 的 runtime-first 验收链路；真实 binary asset cook、真实 image/font/audio execution backend、Editor、AI/MCP 和 Legacy 仍不在该 slice 内。
 
+Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runtime-production-contract.md` 与 `save-replay-production-contract.md`，Asset/Package 见 `asset-package-production-contract.md`，Media/Decode 见 `media-backend-production-contract.md` 与 `hardware-media-decode.md`，Provider 见 `provider-contracts.md`，Editor/AI/Legacy/Release Gate 分别见对应 contract 文档。这些文档是准 API 草案，不代表当前生产代码已完成。
+
 ## 3. Phase 0：文档与工程基线
 
 目标：
@@ -164,6 +166,7 @@ UE `UObject` / UHT / GC 体系。
 目标：
 
 - 把 headless runtime 基座提升到真实项目可用的 deterministic runtime core。
+- 实现入口：`runtime-production-contract.md` 和 `save-replay-production-contract.md`。
 
 交付：
 
@@ -188,6 +191,7 @@ UE `UObject` / UHT / GC 体系。
 目标：
 
 - 建立可发布 runtime package 的内容管线。
+- 实现入口：`asset-package-production-contract.md`。
 
 交付：
 
@@ -211,6 +215,7 @@ UE `UObject` / UHT / GC 体系。
 目标：
 
 - 把 presentation DTO 提升为真实可执行的 2D media runtime。
+- 实现入口：`hardware-media-decode.md` 和 `media-backend-production-contract.md`。
 
 交付：
 
@@ -259,6 +264,7 @@ UE `UObject` / UHT / GC 体系。
 目标：
 
 - 达到 UE 级创作者友好度，但限定在 2D / VN-first 范围。
+- 实现入口：`editor-runtime-creator-contract.md`。
 
 交付：
 
@@ -283,6 +289,7 @@ UE `UObject` / UHT / GC 体系。
 目标：
 
 - 让插件作者和工具作者拥有 UE 级可定制入口，同时保持 Core 和 Runtime 边界稳定。
+- 实现入口：`provider-contracts.md`。
 
 交付：
 
@@ -332,6 +339,7 @@ UE `UObject` / UHT / GC 体系。
 目标：
 
 - 支持 Runtime AI MCP、Editor Copilot MCP 和 Editor Content Generation MCP，同时保持 deterministic save/replay。
+- 实现入口：`ai-mcp-safety-contract.md`。
 
 交付：
 
@@ -359,6 +367,7 @@ UE `UObject` / UHT / GC 体系。
 目标：
 
 - 让 runtime 具备长期发布、诊断、维护和兼容能力。
+- 实现入口：`release-gate-observability-contract.md`。
 
 交付：
 
@@ -410,6 +419,7 @@ UE `UObject` / UHT / GC 体系。
 目标：
 
 - 在 native runtime production parity 之后，使用稳定 Runtime/Asset/Media/Script API 承载旧 VN 兼容和现代化。
+- 实现入口：`legacy-compatibility-contract.md`。
 
 交付：
 

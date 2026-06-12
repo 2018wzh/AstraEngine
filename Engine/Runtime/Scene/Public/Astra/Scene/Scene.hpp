@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <memory>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -94,13 +95,65 @@ struct ActorSnapshot {
     std::string name;
     Astra::Core::u32 generation = 0;
     ActorLifecycleState lifecycle = ActorLifecycleState::Draft;
+    bool preview = false;
     std::vector<ComponentData> components;
 };
 
 struct WorldSnapshot {
     std::string schema = "astra.scene.world.v1";
-    Astra::Core::u32 version = 1;
+    Astra::Core::u32 version = 2;
     std::vector<ActorSnapshot> actors;
+};
+
+struct ComponentMigrationStep {
+    std::string component_type;
+    Astra::Core::u32 from_version = 0;
+    Astra::Core::u32 to_version = 0;
+    std::map<std::string, std::string> renamed_fields;
+    nlohmann::json default_data = nlohmann::json::object();
+    std::vector<std::string> deprecated_fields;
+};
+
+struct ComponentMigrationReport {
+    std::string component_type;
+    Astra::Core::u32 from_version = 0;
+    Astra::Core::u32 to_version = 0;
+    bool changed = false;
+    std::vector<std::string> applied_steps;
+};
+
+struct ComponentLifecycleReport {
+    std::string component_type;
+    bool valid = true;
+    bool migrated = false;
+    std::vector<std::string> messages;
+};
+
+struct PrefabOverride {
+    std::string component_type;
+    std::string property_path;
+    nlohmann::json value;
+};
+
+struct PrefabDescriptor {
+    Astra::Core::StableId id;
+    ActorTypeId actor_type;
+    std::string name;
+    Astra::Core::StableId base;
+    std::vector<ComponentData> components;
+    std::vector<PrefabOverride> overrides;
+};
+
+struct PrefabBuildReport {
+    ActorDescriptor actor;
+    std::vector<PrefabOverride> applied_overrides;
+    std::vector<std::string> diagnostics;
+};
+
+struct ActorReferenceRepair {
+    ActorId missing;
+    ActorId replacement;
+    std::string reason;
 };
 
 struct EcsPackInput {
@@ -137,7 +190,13 @@ public:
     [[nodiscard]] Astra::Core::Result<void> Activate(const ActorHandle& handle, Astra::Core::DiagnosticSink& diagnostics);
     [[nodiscard]] Astra::Core::Result<void> Deactivate(const ActorHandle& handle, Astra::Core::DiagnosticSink& diagnostics);
     [[nodiscard]] Astra::Core::Result<void> Destroy(const ActorHandle& handle, Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] Astra::Core::Result<void> RequestDestroy(const ActorHandle& handle, Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] Astra::Core::Result<Astra::Core::u32> FlushDeferredDestroy(Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] Astra::Core::Result<ActorHandle> PreviewAttach(const ActorDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] Astra::Core::Result<void> PreviewDetach(const ActorHandle& handle, Astra::Core::DiagnosticSink& diagnostics);
     [[nodiscard]] Astra::Core::Result<void> AddOrReplaceComponent(const ActorHandle& handle, ComponentData component, Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] ComponentLifecycleReport ValidateComponent(const ComponentData& component, Astra::Core::DiagnosticSink& diagnostics) const;
+    [[nodiscard]] Astra::Core::Result<ComponentMigrationReport> MigrateComponent(const ActorHandle& handle, const ComponentMigrationStep& step, Astra::Core::DiagnosticSink& diagnostics);
     [[nodiscard]] std::optional<ComponentData> FindComponent(const ActorHandle& handle, std::string_view type_id) const;
     [[nodiscard]] std::optional<ActorHandle> ResolveActor(const ActorId& id, Astra::Core::DiagnosticSink& diagnostics) const;
     [[nodiscard]] bool IsHandleAlive(const ActorHandle& handle) const;
@@ -159,8 +218,17 @@ private:
 [[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const StateMachineComponent& component);
 [[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const ComponentDescriptor& descriptor);
 [[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const ComponentData& component);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const ComponentMigrationReport& report);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const ComponentLifecycleReport& report);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const PrefabOverride& override_data);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const PrefabDescriptor& prefab);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const PrefabBuildReport& report);
+[[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const ActorReferenceRepair& repair);
 [[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const ActorSnapshot& actor);
 [[nodiscard]] ASTRA_SCENE_API nlohmann::json ToJson(const WorldSnapshot& world);
 [[nodiscard]] ASTRA_SCENE_API Astra::Core::Result<WorldSnapshot> WorldSnapshotFromJson(const nlohmann::json& json);
+[[nodiscard]] ASTRA_SCENE_API Astra::Core::Result<PrefabBuildReport> BuildActorFromPrefab(const PrefabDescriptor& prefab, const PrefabDescriptor* base, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_SCENE_API std::vector<PrefabOverride> DiffPrefabInstance(const ActorSnapshot& before, const ActorSnapshot& after);
+[[nodiscard]] ASTRA_SCENE_API Astra::Core::Result<ActorDescriptor> RollbackPrefabInstance(const ActorSnapshot& instance, const PrefabDescriptor& prefab, const PrefabDescriptor* base, Astra::Core::DiagnosticSink& diagnostics);
 
 } // namespace Astra::Scene
