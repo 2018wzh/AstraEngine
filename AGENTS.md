@@ -11,6 +11,7 @@ Runtime code lives under `Engine/Runtime`:
 - `ModuleRuntime`: plugin descriptors, module loading, `ServiceRegistry`, `ExtensionRegistry`, engine module provider registry, C ABI, service resolve audit, module release-gate evidence.
 - `PropertySystem`: property descriptors, flags, type registry, nested JSON schema generation, schema version graph, write policy, migration helpers.
 - `Scene`, `Runtime`, `Asset`, `Media`, `Script`, and `AstraVN`: implemented foundation slices only; production completion remains planned in `docs/design/TODO.md`.
+- When a runtime implementation file grows beyond roughly 800 lines or mixes independent workflows, split it into concrete `Private/<Feature>/` slices with at most two directory levels under the module root. Do not leave empty forwarding shells behind, update `docs/manual/api/README.md` with a brief implementation-module index, and rebuild plus test the affected target before continuing to the next split.
 
 Example plugins belong in `Engine/Plugins/Examples`, programs in `Engine/Programs`, samples in `Samples`, and tests in `Engine/Tests`. Development docs are in `docs/development` when introduced; architecture docs are in `docs/design`. Build output should stay in `build/` and is not source.
 

@@ -1,5 +1,6 @@
 set(ASTRA_RUNTIME_SOURCES
     Private/Runtime.cpp
+    Private/RuntimeSerialization.cpp
 )
 
 astra_add_library(AstraRuntime ${ASTRA_RUNTIME_SOURCES})

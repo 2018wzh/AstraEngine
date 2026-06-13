@@ -116,3 +116,10 @@ Existing early code may still contain PascalCase member functions such as `Emit`
 Design documents describe the target state. Development docs may describe target state too, but implementation notes must clearly mark what is implemented now versus planned.
 
 Do not document planned systems as currently working. If implementation lags behind the target architecture, call that out in an implementation note, issue, coverage matrix or TODO rather than silently changing the architecture goal.
+
+## 13. Implementation Slices
+
+- If a runtime implementation file grows beyond roughly 800 lines or mixes several independent workflows, split it into concrete slices under `Private/<Feature>/` with at most two directory levels under the module root.
+- Keep slices concrete. Do not leave behind empty forwarding shells or placeholder translation units.
+- After splitting one module, update the implementation index in `docs/manual/api/README.md`, rebuild the affected target, and run focused tests before moving to the next split.
+- Prefer a small number of feature-aligned slices over fine-grained sharding; split only when the boundary is clear and maintainability actually improves.

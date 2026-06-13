@@ -1,5 +1,6 @@
 set(ASTRA_MEDIA_SOURCES
     Private/Media.cpp
+    Private/MediaSerialization.cpp
 )
 
 astra_add_library(AstraMedia ${ASTRA_MEDIA_SOURCES})

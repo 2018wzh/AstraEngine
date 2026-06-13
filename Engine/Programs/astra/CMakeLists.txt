@@ -1,5 +1,6 @@
 set(ASTRA_TOOLS_SOURCES
     Private/Tools.cpp
+    Private/DocCheck.cpp
 )
 
 astra_add_library(AstraTools ${ASTRA_TOOLS_SOURCES})

@@ -1,5 +1,7 @@
 #include <Astra/Asset/Asset.hpp>
 
+#include "AssetInternal.hpp"
+
 #include <openssl/evp.h>
 #include <yaml-cpp/yaml.h>
 #if defined(ASTRA_ASSET_HAS_LIBPNG)
@@ -46,8 +48,6 @@
 
 namespace Astra::Asset {
 
-namespace {
-
 std::string NormalizePath(std::string_view value) {
     std::string result(value);
     std::replace(result.begin(), result.end(), '\\', '/');
@@ -60,7 +60,7 @@ std::string NormalizePath(std::string_view value) {
     return result;
 }
 
-Astra::Core::Diagnostic MakeDiagnostic(std::string code, Astra::Core::DiagnosticSeverity severity, std::string message, const std::filesystem::path& path = {}) {
+Astra::Core::Diagnostic MakeDiagnostic(std::string code, Astra::Core::DiagnosticSeverity severity, std::string message, const std::filesystem::path& path) {
     Astra::Core::Diagnostic diagnostic;
     diagnostic.code = std::move(code);
     diagnostic.category = "asset.foundation";
@@ -97,6 +97,32 @@ std::string LowerExtension(const std::filesystem::path& path) {
         return static_cast<char>(std::tolower(character));
     });
     return extension;
+}
+
+bool JsonValueAsBool(const nlohmann::json& json, std::string_view key, bool fallback) {
+    if (!json.contains(key)) {
+        return fallback;
+    }
+    const auto& value = json.at(key);
+    if (value.is_boolean()) {
+        return value.get<bool>();
+    }
+    if (value.is_string()) {
+        auto text = value.get<std::string>();
+        std::ranges::transform(text, text.begin(), [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+        if (text == "true" || text == "1") {
+            return true;
+        }
+        if (text == "false" || text == "0") {
+            return false;
+        }
+    }
+    if (value.is_number_integer()) {
+        return value.get<int>() != 0;
+    }
+    return fallback;
 }
 
 #if defined(ASTRA_ASSET_HAS_LIBPNG)
@@ -504,8 +530,6 @@ std::vector<AssetUri> AssetUriArray(const nlohmann::json& json, std::string_view
     return uris;
 }
 
-} // namespace
-
 std::string AssetUri::ToString() const {
     std::string output = scheme_name + ":/" + NormalizePath(path);
     if (!fragment.empty()) {
@@ -669,7 +693,7 @@ Astra::Core::Result<AssetSidecar> AssetSidecarFromJson(const nlohmann::json& jso
         sidecar.hard_dependencies = AssetUriArray(json.at("dependencies"), "hard", diagnostics, sidecar_path);
         sidecar.soft_dependencies = AssetUriArray(json.at("dependencies"), "soft", diagnostics, sidecar_path);
     }
-    sidecar.requires_review = json.value("requires_review", false);
+    sidecar.requires_review = JsonValueAsBool(json, "requires_review", false);
     if (json.contains("ai_generation")) {
         AiGenerationInfo info;
         info.provider = json.at("ai_generation").value("provider", "");
@@ -895,6 +919,7 @@ Astra::Core::Result<void> ValidateReviewQueueItem(const ReviewQueueItem& item, A
     return Astra::Core::Result<void>::Success();
 }
 
+#if 0
 namespace {
 
 ImporterDescriptor DescriptorForImporter(std::string_view provider_id) {
@@ -1346,7 +1371,7 @@ AssetReleaseGateReport ValidateAssetReleaseGate(const AssetReleaseGateRequest& r
             diagnostics.Emit(std::move(diagnostic));
         }
         for (const auto& dependency : entry.hard_dependencies) {
-            if (dependency.scheme == AssetScheme::Virtual) {
+            if (dependency.scheme == AssetScheme::Virtual || dependency.scheme_name == "virtual") {
                 auto diagnostic = MakeDiagnostic("ASTRA_RELEASE_ASSET_VIRTUAL_UNRESOLVED", Astra::Core::DiagnosticSeverity::Blocking, "Virtual hard dependency must be resolved before package release.", entry.sidecar_path);
                 diagnostic.objects.push_back({"AssetId", id});
                 diagnostic.objects.push_back({"VirtualAssetId", dependency.ToString()});
@@ -1362,7 +1387,7 @@ AssetReleaseGateReport ValidateAssetReleaseGate(const AssetReleaseGateRequest& r
             }
         }
         for (const auto& dependency : entry.soft_dependencies) {
-            if (dependency.scheme == AssetScheme::Virtual) {
+            if (dependency.scheme == AssetScheme::Virtual || dependency.scheme_name == "virtual") {
                 auto diagnostic = MakeDiagnostic("ASTRA_RELEASE_ASSET_VIRTUAL_UNRESOLVED", Astra::Core::DiagnosticSeverity::Blocking, "Virtual soft dependency must be resolved before package release.", entry.sidecar_path);
                 diagnostic.objects.push_back({"AssetId", id});
                 diagnostic.objects.push_back({"VirtualAssetId", dependency.ToString()});
@@ -2264,4 +2289,5 @@ std::string ComputeProviderFeatureHash(const std::map<std::string, std::string>&
     return Sha256Text(json.dump());
 }
 
+#endif
 } // namespace Astra::Asset

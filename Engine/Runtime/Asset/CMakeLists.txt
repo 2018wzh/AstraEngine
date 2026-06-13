@@ -1,5 +1,7 @@
 set(ASTRA_ASSET_SOURCES
     Private/Asset.cpp
+    Private/AssetCook.cpp
+    Private/AssetSerialization.cpp
 )
 
 astra_add_library(AstraAsset ${ASTRA_ASSET_SOURCES})

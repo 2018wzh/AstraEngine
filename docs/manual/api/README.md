@@ -33,6 +33,22 @@ When a public header is added, update this index with:
 - Related design section.
 - Test or schema evidence.
 
+## Implementation Module Index
+
+Current concrete implementation slices:
+
+- `Engine/Runtime/Asset/Private/Asset.cpp`: shared asset helpers, registry and schema handling, URI/hash utilities, and the remaining public asset entry points.
+- `Engine/Runtime/Asset/Private/AssetCook.cpp`: builtin importer and cook processor descriptors, cook pipeline dispatch, DDC handling, and asset release-gate checks.
+- `Engine/Runtime/Asset/Private/AssetSerialization.cpp`: asset registry, manifest, package, mount, and hot-reload JSON/binary serialization helpers.
+- `Engine/Programs/astra/Private/DocCheck.cpp`: documentation gate checks for required manual pages, markdown links, required design documents, and stale wording scans.
+- `Engine/Programs/astra/Private/Tools.cpp`: shared CLI command plumbing and evidence helpers for validate, inspect, import, cook, package, run, and replay workflows.
+- `Engine/Runtime/Media/Private/Media.cpp`: media backend probing, image/audio/font decode, filter validation, and media release-gate evaluation.
+- `Engine/Runtime/Media/Private/MediaSerialization.cpp`: media presentation and report JSON serialization for commands, render graphs, frame captures, and backend capability reports.
+- `Engine/Runtime/Runtime/Private/Runtime.cpp`: runtime event bus, scheduler, state machine wiring, control policy, snapshot capture, and world lifecycle.
+- `Engine/Runtime/Runtime/Private/RuntimeSerialization.cpp`: runtime JSON serialization/deserialization for events, snapshots, save containers, and replay comparison reports.
+
+As more oversized modules are split, add one line per concrete slice here with a short functional summary. Keep this index honest: do not list placeholder or forwarding-only translation units.
+
 ## API Reference
 
 Implemented foundation entries:
