@@ -61,6 +61,7 @@ if(FFMPEG_FOUND)
     target_link_directories(AstraMedia PRIVATE ${FFMPEG_LIBRARY_DIRS})
     target_link_libraries(AstraMedia PRIVATE ${FFMPEG_LIBRARIES})
     target_compile_definitions(AstraMedia PRIVATE ASTRA_MEDIA_HAS_FFMPEG=1)
+    target_link_options(AstraMedia PRIVATE "-Wl,-Bsymbolic")
 endif()
 
 find_package(Vorbis CONFIG QUIET)

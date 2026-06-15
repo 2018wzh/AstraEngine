@@ -12,6 +12,7 @@ file(GENERATE
 
 add_library(AstraInvalidNoEntryPlugin MODULE Source/InvalidNoEntry.cpp)
 astra_configure_target(AstraInvalidNoEntryPlugin)
+target_link_libraries(AstraInvalidNoEntryPlugin PRIVATE AstraModuleRuntime)
 set_target_properties(AstraInvalidNoEntryPlugin PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${ASTRA_PLUGIN_OUTPUT_ROOT}/Phase1Invalid/Bin/win64"
     LIBRARY_OUTPUT_DIRECTORY "${ASTRA_PLUGIN_OUTPUT_ROOT}/Phase1Invalid/Bin/win64"
