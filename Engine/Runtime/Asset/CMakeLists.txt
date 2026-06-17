@@ -1,6 +1,7 @@
 set(ASTRA_ASSET_SOURCES
     Private/Asset.cpp
     Private/AssetCook.cpp
+    Private/AssetMetadata.cpp
     Private/AssetSerialization.cpp
 )
 

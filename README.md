@@ -334,7 +334,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 被舍弃或后移的方向：
 
-- 不恢复旧主线目标 `AstraRuntime`、`VNRuntimeServices`、`Bootstrap`、`AstraGame`。
+- 不恢复旧主线目标 `VNRuntimeServices`、`Bootstrap`、`AstraGame`。
 - 不以旧 VN-first runtime 命名作为架构中心。
 - 不把源码级 CMake 插件作为默认 public plugin model；动态模块和 C ABI 是默认扩展边界。
 - 不把公开 Bevy/EnTT ECS runtime 作为 authoring、Editor、MCP、Save/Replay 或动态模块 ABI 中心。

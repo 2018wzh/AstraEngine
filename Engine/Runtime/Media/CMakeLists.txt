@@ -1,5 +1,7 @@
 set(ASTRA_MEDIA_SOURCES
     Private/Media.cpp
+    Private/MediaDecode.cpp
+    Private/MediaFilter.cpp
     Private/MediaSerialization.cpp
 )
 
@@ -61,7 +63,9 @@ if(FFMPEG_FOUND)
     target_link_directories(AstraMedia PRIVATE ${FFMPEG_LIBRARY_DIRS})
     target_link_libraries(AstraMedia PRIVATE ${FFMPEG_LIBRARIES})
     target_compile_definitions(AstraMedia PRIVATE ASTRA_MEDIA_HAS_FFMPEG=1)
-    target_link_options(AstraMedia PRIVATE "-Wl,-Bsymbolic")
+    if(NOT WIN32)
+        target_link_options(AstraMedia PRIVATE "-Wl,-Bsymbolic")
+    endif()
 endif()
 
 find_package(Vorbis CONFIG QUIET)

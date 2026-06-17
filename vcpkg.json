@@ -5,7 +5,6 @@
     "catch2",
     "cli11",
     "entt",
-    "fmt",
     "freetype",
     "harfbuzz",
     "libjpeg-turbo",
@@ -13,7 +12,6 @@
     "libvorbis",
     "libwebp",
     "ffmpeg",
-    "libmagic",
     "zstd",
     {
       "name": "lua",
@@ -26,7 +24,6 @@
     "openssl",
     "sdl3",
     "sol2",
-    "spdlog",
     "yaml-cpp"
   ]
 }

@@ -71,6 +71,6 @@ Pull requests should include a concise summary, verification commands run, and a
 
 ## Agent-Specific Instructions
 
-Do not revive deleted legacy targets such as `AstraRuntime`, `VNRuntimeServices`, `Bootstrap`, or `AstraGame`. Keep documentation honest about what is implemented now versus planned for later phases.
+Do not revive deleted legacy targets such as `VNRuntimeServices`, `Bootstrap`, or `AstraGame`. Keep documentation honest about what is implemented now versus planned for later phases.
 
 When adding runtime code, preserve the std-first style from `docs/coding-style.md`: use standard C++ and Astra DTO/handle/descriptor boundaries, keep backend/vendor types private, and avoid UE-style macro/object-system imitation. If a design needs reflection, editor metadata, module lifecycle, or provider registration, implement it through Astra `PropertySystem`, diagnostics, registries, C ABI, or explicit service interfaces rather than hidden macros or engine-object inheritance.

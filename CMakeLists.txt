@@ -93,7 +93,7 @@ if(ASTRA_BUILD_RUNTIME OR ASTRA_BUILD_TOOLS)
     add_subdirectory(Engine/Runtime/Media)
 endif()
 
-if(ASTRA_BUILD_RUNTIME)
+if(ASTRA_BUILD_RUNTIME OR ASTRA_BUILD_TOOLS)
     find_package(EnTT CONFIG REQUIRED)
     add_subdirectory(Engine/Runtime/PropertySystem)
     add_subdirectory(Engine/Runtime/Scene)
