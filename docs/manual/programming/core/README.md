@@ -23,6 +23,8 @@ Primary design reference: [Foundation Core / Platform / Property](../../../desig
 
 Use `Astra::Core::Result<T>` for recoverable operations, `DiagnosticSink` for user-facing or release-blocking evidence, `DiagnosticCodeRegistry` plus `EvaluateFoundationGate()` for Foundation release-gate evaluation, `ErrorReporter` for developer/recoverable/fatal policy, `ProfilingCapture` for runtime-independent markers, and `StableId` aliases for persistent identifiers. Config layers merge from defaults toward command-line style overrides; `ResolveForProfile()` produces release-safe resolved JSON and a stable hash.
 
+Use [Logging Guide](logging.md) for structured `astra.log.event.v1` JSONL output, CLI log flags, channel naming, and diagnostic-to-log mirroring.
+
 ## API Reference
 
 Public headers live in `Engine/Runtime/Core/Public/Astra/Core`.

@@ -1,5 +1,7 @@
 #include <Astra/ModuleRuntime/ModuleRuntime.hpp>
 
+#include <Astra/Core/Logging.hpp>
+
 #include <algorithm>
 #include <ranges>
 #include <yaml-cpp/yaml.h>
@@ -136,6 +138,7 @@ Astra::Core::Result<ServiceResolveAudit> ServiceRegistry::Resolve(const ServiceR
         diagnostic.severity = Astra::Core::DiagnosticSeverity::Blocking;
         diagnostic.message = audit.reason;
         diagnostic.objects = {{"module", request.requesting_module}, {"service", request.service_id}};
+        Astra::Core::LogDiagnostic(diagnostic, "module.service", request.requesting_module);
         diagnostics.Emit(std::move(diagnostic));
         return Astra::Core::Result<ServiceResolveAudit>::Failure(Astra::Core::ErrorCode::PermissionDenied, audit.reason);
     }
@@ -361,6 +364,12 @@ Astra::Core::Result<ModuleReleaseGateReport> ValidateModuleReleaseGate(const Plu
 ModuleManager::ModuleManager(Astra::Platform::PlatformServices& platform) : platform_(&platform) {}
 
 Astra::Core::Result<void> ModuleManager::LoadAndActivate(const PluginDescriptor& descriptor, const std::filesystem::path& plugin_root, Astra::Core::DiagnosticSink& diagnostics) {
+    Astra::Core::DefaultLogger().Log(
+        "module.lifecycle",
+        descriptor.id,
+        Astra::Core::LogLevel::Info,
+        "plugin activation started",
+        {{"plugin_root", plugin_root.string()}, {"modules", std::to_string(descriptor.modules.size())}});
     auto validation = ValidatePluginDescriptor(descriptor, plugin_root, diagnostics);
     if (!validation) {
         return validation;
@@ -372,6 +381,12 @@ Astra::Core::Result<void> ModuleManager::LoadAndActivate(const PluginDescriptor&
 
     for (const auto& module_id : order.Value()) {
         const auto& module = *std::ranges::find_if(descriptor.modules, [&](const ModuleDescriptor& item) { return item.id == module_id; });
+        Astra::Core::DefaultLogger().Log(
+            "module.lifecycle",
+            module.id,
+            Astra::Core::LogLevel::Info,
+            "module load started",
+            {{"entrypoint", (plugin_root / module.entrypoint).string()}, {"load_phase", module.load_phase}});
         states_[module.id] = ModuleState::DependenciesResolved;
         auto library = platform_->DynamicLibrary().Load(plugin_root / module.entrypoint);
         if (!library) {
@@ -381,6 +396,7 @@ Astra::Core::Result<void> ModuleManager::LoadAndActivate(const PluginDescriptor&
             diagnostic.category = "module.lifecycle";
             diagnostic.severity = Astra::Core::DiagnosticSeverity::Blocking;
             diagnostic.message = library.Message();
+            Astra::Core::LogDiagnostic(diagnostic, "module.lifecycle", module.id);
             diagnostics.Emit(std::move(diagnostic));
             return Astra::Core::Result<void>::Failure(library.Error(), library.Message());
         }
@@ -395,6 +411,7 @@ Astra::Core::Result<void> ModuleManager::LoadAndActivate(const PluginDescriptor&
             diagnostic.category = "module.abi";
             diagnostic.severity = Astra::Core::DiagnosticSeverity::Blocking;
             diagnostic.message = symbol.Message();
+            Astra::Core::LogDiagnostic(diagnostic, "module.abi", module.id);
             diagnostics.Emit(std::move(diagnostic));
             return Astra::Core::Result<void>::Failure(symbol.Error(), symbol.Message());
         }
@@ -411,6 +428,7 @@ Astra::Core::Result<void> ModuleManager::LoadAndActivate(const PluginDescriptor&
             diagnostic.category = "module.abi";
             diagnostic.severity = Astra::Core::DiagnosticSeverity::Blocking;
             diagnostic.message = "Module ABI is incompatible or missing lifecycle functions.";
+            Astra::Core::LogDiagnostic(diagnostic, "module.abi", module.id);
             diagnostics.Emit(std::move(diagnostic));
             return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::VersionMismatch, "invalid module ABI");
         }
@@ -425,12 +443,32 @@ Astra::Core::Result<void> ModuleManager::LoadAndActivate(const PluginDescriptor&
             return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InternalError, "module activate failed");
         }
         states_[module.id] = ModuleState::Active;
+        Astra::Core::DefaultLogger().Log(
+            "module.lifecycle",
+            module.id,
+            Astra::Core::LogLevel::Info,
+            "module active",
+            {{"services", std::to_string(services_.Services().size())},
+             {"extensions", std::to_string(extensions_.Extensions().size())},
+             {"providers", std::to_string(engine_modules_.Providers().size())}});
     }
 
+    Astra::Core::DefaultLogger().Log(
+        "module.lifecycle",
+        descriptor.id,
+        Astra::Core::LogLevel::Info,
+        "plugin activation finished",
+        {{"modules", std::to_string(modules_.size())}});
     return Astra::Core::Result<void>::Success();
 }
 
 void ModuleManager::DeactivateAndUnload(Astra::Core::DiagnosticSink&) {
+    Astra::Core::DefaultLogger().Log(
+        "module.lifecycle",
+        "module_manager",
+        Astra::Core::LogLevel::Info,
+        "module unload started",
+        {{"modules", std::to_string(modules_.size())}});
     for (auto it = modules_.rbegin(); it != modules_.rend(); ++it) {
         it->deactivate(it->module_state);
         it->shutdown(it->module_state);
@@ -448,6 +486,11 @@ void ModuleManager::DeactivateAndUnload(Astra::Core::DiagnosticSink&) {
     }
     libraries_.clear();
     modules_.clear();
+    Astra::Core::DefaultLogger().Log(
+        "module.lifecycle",
+        "module_manager",
+        Astra::Core::LogLevel::Info,
+        "module unload finished");
 }
 
 const ServiceRegistry& ModuleManager::Services() const { return services_; }

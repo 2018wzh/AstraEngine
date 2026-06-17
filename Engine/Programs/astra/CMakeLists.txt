@@ -1,5 +1,6 @@
 set(ASTRA_TOOLS_SOURCES
     Private/Tools.cpp
+    Private/ToolsLogging.cpp
     Private/DocCheck.cpp
     Private/ToolsHash.cpp
 )

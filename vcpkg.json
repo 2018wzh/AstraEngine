@@ -24,6 +24,7 @@
     "openssl",
     "sdl3",
     "sol2",
+    "spdlog",
     "yaml-cpp"
   ]
 }

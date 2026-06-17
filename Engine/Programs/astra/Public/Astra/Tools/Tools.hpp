@@ -17,9 +17,14 @@ struct CommandOptions {
     bool windowed_smoke = false;
     bool auto_close = false;
     bool compare = false;
+    bool log_async = true;
+    bool log_sync = false;
     std::string config = "Debug";
     std::string profile = "development";
+    std::string log_level = "debug";
     std::filesystem::path diagnostics_out;
+    std::filesystem::path log_dir;
+    std::filesystem::path log_file;
     std::filesystem::path scripted_input;
     std::filesystem::path save_out;
     std::filesystem::path load;
@@ -43,6 +48,7 @@ struct CommandReport {
 [[nodiscard]] ASTRA_TOOLS_API nlohmann::json ToJson(const CommandReport& report);
 ASTRA_TOOLS_API void WriteDiagnosticsIfRequested(const CommandReport& report, const CommandOptions& options);
 ASTRA_TOOLS_API void PrintReport(const CommandReport& report, const CommandOptions& options);
+ASTRA_TOOLS_API void ConfigureToolLogging(const CommandOptions& options);
 
 [[nodiscard]] ASTRA_TOOLS_API CommandReport VersionReport();
 [[nodiscard]] ASTRA_TOOLS_API CommandReport DocCheck(const CommandOptions& options);

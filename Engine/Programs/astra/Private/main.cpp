@@ -1,5 +1,7 @@
 #include <Astra/Tools/Tools.hpp>
 
+#include <Astra/Core/Logging.hpp>
+
 #include <CLI/CLI.hpp>
 #include <iostream>
 #include <string>
@@ -11,6 +13,14 @@ int main(int argc, char** argv) {
     app.add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
     app.add_flag("--strict", options.strict, "Treat warnings as strict validation input where supported");
     app.add_option("--profile", options.profile, "Foundation profile");
+    auto add_logging_options = [&](CLI::App* target) {
+        target->add_option("--log-dir", options.log_dir, "Write logs under this directory");
+        target->add_option("--log-file", options.log_file, "Write logs to this JSONL file");
+        target->add_option("--log-level", options.log_level, "File log level");
+        target->add_flag("--log-async", options.log_async, "Use async logging");
+        target->add_flag("--log-sync", options.log_sync, "Use synchronous logging");
+    };
+    add_logging_options(&app);
 
     bool version = false;
     app.add_flag("--version", version, "Print build info");
@@ -26,15 +36,18 @@ int main(int argc, char** argv) {
     auto* doc_check = app.add_subcommand("doc-check", "Run documentation checks");
     doc_check->add_flag("--json", options.json, "Emit JSON report");
     doc_check->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
+    add_logging_options(doc_check);
     auto* validate = app.add_subcommand("validate", "Validate repository, plugin, or foundation sample");
     validate->add_option("target", target)->required();
     validate->add_flag("--json", options.json, "Emit JSON report");
     validate->add_flag("--strict", options.strict, "Run strict foundation validation");
     validate->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
+    add_logging_options(validate);
     auto* inspect = app.add_subcommand("inspect", "Inspect plugin YAML or foundation report JSON");
     inspect->add_option("target", inspect_target)->required();
     inspect->add_flag("--json", options.json, "Emit JSON report");
     inspect->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
+    add_logging_options(inspect);
     auto* import = app.add_subcommand("import", "Import a source asset into a project Content directory");
     import->add_option("project", import_project)->required();
     import->add_option("source", import_source)->required();
@@ -45,18 +58,21 @@ int main(int argc, char** argv) {
     import->add_option("--license-usage", options.import_license_usage, "License usage");
     import->add_flag("--json", options.json, "Emit JSON report");
     import->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
+    add_logging_options(import);
     auto* cook = app.add_subcommand("cook", "Cook a runtime sample");
     cook->add_option("sample", sample)->required();
     cook->add_flag("--json", options.json, "Emit JSON report");
     cook->add_option("--config", options.config, "Cook/build configuration");
     cook->add_option("--profile", options.profile, "Foundation profile");
     cook->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
+    add_logging_options(cook);
     auto* package = app.add_subcommand("package", "Package a runtime sample");
     package->add_option("sample", sample)->required();
     package->add_flag("--json", options.json, "Emit JSON report");
     package->add_option("--profile", options.profile, "Foundation profile");
     package->add_flag("--deterministic", options.compare, "Alias for deterministic package profile evidence");
     package->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
+    add_logging_options(package);
     auto* run = app.add_subcommand("run", "Run a foundation/runtime smoke");
     run->add_option("target", run_target)->required();
     run->add_flag("--json", options.json, "Emit JSON report");
@@ -67,14 +83,17 @@ int main(int argc, char** argv) {
     run->add_option("--save-out", options.save_out, "Write a save evidence JSON file");
     run->add_option("--load", options.load, "Load a save evidence JSON file before smoke verification");
     run->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
+    add_logging_options(run);
     auto* replay = app.add_subcommand("replay", "Compare a golden runtime replay");
     replay->add_option("target", replay_target)->required();
     replay->add_flag("--json", options.json, "Emit JSON report");
     replay->add_flag("--compare", options.compare, "Compare replay hashes");
     replay->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
+    add_logging_options(replay);
 
     CLI11_PARSE(app, argc, argv);
 
+    Astra::Tools::ConfigureToolLogging(options);
     Astra::Tools::CommandReport report;
     if (version) {
         report = Astra::Tools::VersionReport();
@@ -114,5 +133,6 @@ int main(int argc, char** argv) {
 
     Astra::Tools::WriteDiagnosticsIfRequested(report, options);
     Astra::Tools::PrintReport(report, options);
+    Astra::Core::FlushLogs();
     return report.Passed() ? 0 : 1;
 }

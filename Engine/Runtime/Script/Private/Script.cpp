@@ -1,5 +1,7 @@
 #include <Astra/Script/Script.hpp>
 
+#include <Astra/Core/Logging.hpp>
+
 #include <sol/sol.hpp>
 
 #include <algorithm>
@@ -304,6 +306,12 @@ const std::vector<ScriptProviderDescriptor>& ScriptRuntimeHost::Providers() cons
 }
 
 Astra::Core::Result<CompiledScript> ScriptRuntimeHost::CompileNative(const ScriptSource& source, Astra::Core::DiagnosticSink& diagnostics) const {
+    Astra::Core::DefaultLogger().Log(
+        "script.compile",
+        NativeRuntimeId,
+        Astra::Core::LogLevel::Info,
+        "native script compile started",
+        {{"source", source.source_id}, {"file", source.file}});
     CompiledScript script;
     script.runtime_id = NativeRuntimeId;
     script.source_id = source.source_id;
@@ -412,10 +420,22 @@ Astra::Core::Result<CompiledScript> ScriptRuntimeHost::CompileNative(const Scrip
     if (!ValidateLabels(script, diagnostics) || diagnostics.HasBlocking()) {
         return Astra::Core::Result<CompiledScript>::Failure(Astra::Core::ErrorCode::InvalidFormat, "native script compilation failed");
     }
+    Astra::Core::DefaultLogger().Log(
+        "script.compile",
+        NativeRuntimeId,
+        Astra::Core::LogLevel::Info,
+        "native script compile finished",
+        {{"source", source.source_id}, {"commands", std::to_string(script.commands.size())}});
     return Astra::Core::Result<CompiledScript>::Success(std::move(script));
 }
 
 Astra::Core::Result<CompiledScript> ScriptRuntimeHost::CompileLua(const ScriptSource& source, Astra::Core::DiagnosticSink& diagnostics) const {
+    Astra::Core::DefaultLogger().Log(
+        "script.compile",
+        LuaRuntimeId,
+        Astra::Core::LogLevel::Info,
+        "lua script compile started",
+        {{"source", source.source_id}, {"file", source.file}});
     CompiledScript script;
     script.runtime_id = LuaRuntimeId;
     script.source_id = source.source_id;
@@ -524,6 +544,12 @@ Astra::Core::Result<CompiledScript> ScriptRuntimeHost::CompileLua(const ScriptSo
     if (!ValidateLabels(script, diagnostics) || diagnostics.HasBlocking()) {
         return Astra::Core::Result<CompiledScript>::Failure(Astra::Core::ErrorCode::InvalidFormat, "lua script compilation failed");
     }
+    Astra::Core::DefaultLogger().Log(
+        "script.compile",
+        LuaRuntimeId,
+        Astra::Core::LogLevel::Info,
+        "lua script compile finished",
+        {{"source", source.source_id}, {"commands", std::to_string(script.commands.size())}});
     return Astra::Core::Result<CompiledScript>::Success(std::move(script));
 }
 
@@ -532,7 +558,22 @@ ScriptExecutionResult ScriptRuntimeHost::Run(
     Astra::Runtime::RuntimeWorld& runtime,
     const ScriptExecutionOptions& options,
     Astra::Core::DiagnosticSink& diagnostics) const {
-    return bridge_.Execute(script, runtime, options, diagnostics);
+    Astra::Core::DefaultLogger().Log(
+        "script.execute",
+        script.runtime_id,
+        Astra::Core::LogLevel::Info,
+        "script execution started",
+        {{"source", script.source_id}, {"entry_label", options.entry_label}, {"commands", std::to_string(script.commands.size())}});
+    auto result = bridge_.Execute(script, runtime, options, diagnostics);
+    Astra::Core::DefaultLogger().Log(
+        "script.execute",
+        script.runtime_id,
+        Astra::Core::LogLevel::Info,
+        "script execution finished",
+        {{"source", script.source_id},
+         {"events", std::to_string(result.events.size())},
+         {"presentation_commands", std::to_string(result.presentation_commands.size())}});
+    return result;
 }
 
 ScriptExecutionResult ScriptEventBridge::Execute(

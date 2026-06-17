@@ -3,7 +3,7 @@
 状态：NativeVN runtime evidence CLI plus Phase 6 Asset Pipeline / Target Architecture  
 定位：Astra 的 CLI、验证、Cook/Package、发布门禁、profiling、trace、crash/error report 和测试矩阵。
 
-Current implementation note：当前 `astra` 使用 CLI11 实现 `--version`、`doc-check`、`validate`、`import`、`cook`、`package`、`run --headless-smoke`、`replay --compare` 和 `inspect`。报告使用 JSON；`astra validate . --strict --json` 输出 `foundation_core_gate` artifact，包含 registered diagnostic-code gate、release config hash、unknown-field policy evidence、Property write/schema evidence、Module release-gate report、engine DLL SHA-256 evidence 和插件 binary SHA-256。`Samples/NativeVN` 已覆盖 source asset sidecars、AssetRegistry/dependency graph evidence、local DDC artifact write/reuse/corruption recovery、binary `.astrapkg` zstd payload table、PackageReader random-access/chunked-read/mount evidence、Asset Release Gate evidence、Phase 7 media provider/decode/timeline/filter evidence、package manifest hash/provider feature hash save-replay evidence、package/cook/payload integrity diagnostics、headless package launch smoke 和 golden replay comparison。trace/crash bundle 和 deeper per-driver replay UI/audio diff 仍是后续目标。
+Current implementation note：当前 `astra` 使用 CLI11 实现 `--version`、`doc-check`、`validate`、`import`、`cook`、`package`、`run --headless-smoke`、`replay --compare` 和 `inspect`。报告使用 JSON；`astra validate . --strict --json` 输出 `foundation_core_gate` artifact，包含 registered diagnostic-code gate、release config hash、unknown-field policy evidence、Property write/schema evidence、Module release-gate report、engine DLL SHA-256 evidence 和插件 binary SHA-256。Core logging 已使用 private `spdlog` backend 实现 `astra.log.event.v1` JSONL、async rotating file sink、console sink、memory test capture、recent-log ring、diagnostic mirroring，以及 CLI `--log-dir/--log-file/--log-level/--log-async/--log-sync`。`Samples/NativeVN` 已覆盖 source asset sidecars、AssetRegistry/dependency graph evidence、local DDC artifact write/reuse/corruption recovery、binary `.astrapkg` zstd payload table、PackageReader random-access/chunked-read/mount evidence、Asset Release Gate evidence、Phase 7 media provider/decode/timeline/filter evidence、package manifest hash/provider feature hash save-replay evidence、package/cook/payload integrity diagnostics、headless package launch smoke 和 golden replay comparison。trace export/crash bundle 和 deeper per-driver replay UI/audio diff 仍是后续目标。
 
 ## 1. 目标
 
@@ -186,6 +186,10 @@ fields:
 
 Required channels：
 
+- tools lifecycle and diagnostics。
+- platform lifecycle, dynamic library, and window presentation。
+- module lifecycle and service resolve audit。
+- asset cook/package。
 - runtime frame。
 - event dispatch。
 - scheduler task。
@@ -196,6 +200,8 @@ Required channels：
 - AI intent validation/commit。
 - module load/unload。
 - save/load/replay。
+
+Implemented logging channels follow these names today; future trace capture should reuse the same channel taxonomy where possible.
 
 Profiler output：
 

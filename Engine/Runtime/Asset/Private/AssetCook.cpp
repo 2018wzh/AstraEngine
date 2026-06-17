@@ -2,6 +2,8 @@
 
 #include "AssetInternal.hpp"
 
+#include <Astra/Core/Logging.hpp>
+
 #include <algorithm>
 #include <csetjmp>
 #include <fstream>
@@ -268,6 +270,16 @@ std::unique_ptr<ICookProcessor> CreateBuiltinCookProcessor(std::string_view prov
 }
 
 Astra::Core::Result<CookManifest> CookAssetRegistry(const AssetRegistry& registry, const CookPipelineOptions& options, Astra::Core::DiagnosticSink& diagnostics) {
+    Astra::Core::DefaultLogger().Log(
+        "asset.cook",
+        options.project_id,
+        Astra::Core::LogLevel::Info,
+        "cook started",
+        {{"assets", std::to_string(registry.entries.size())},
+         {"profile", options.profile},
+         {"target_platform", options.target_platform},
+         {"cooked_root", options.cooked_root.string()},
+         {"ddc_root", options.ddc_root.string()}});
     CookManifest manifest;
     manifest.project_id = options.project_id.empty() ? "package:/project" : options.project_id;
     manifest.profile = options.profile;
@@ -275,6 +287,12 @@ Astra::Core::Result<CookManifest> CookAssetRegistry(const AssetRegistry& registr
     std::filesystem::create_directories(options.ddc_root);
 
     for (const auto& entry : registry.entries) {
+        Astra::Core::DefaultLogger().Log(
+            "asset.cook",
+            entry.id.ToString(),
+            Astra::Core::LogLevel::Debug,
+            "asset cook started",
+            {{"asset", entry.id.ToString()}, {"type", entry.type}, {"source", entry.source_path.string()}});
         if (!entry.diagnostics.empty()) {
             for (const auto& diagnostic : entry.diagnostics) {
                 if (diagnostic.BlocksRelease()) {
@@ -345,8 +363,25 @@ Astra::Core::Result<CookManifest> CookAssetRegistry(const AssetRegistry& registr
         ddc.corruption_recovered = corruption;
         ddc.artifacts.push_back({ddc_path, cooked.Value().payload_hash, static_cast<Astra::Core::u64>(source_bytes.size())});
         manifest.ddc_entries.push_back(std::move(ddc));
+        Astra::Core::DefaultLogger().Log(
+            "asset.cook",
+            entry.id.ToString(),
+            rebuild ? Astra::Core::LogLevel::Info : Astra::Core::LogLevel::Debug,
+            rebuild ? "asset cooked and cached" : "asset cook reused cache",
+            {{"asset", entry.id.ToString()},
+             {"processor", processor_id},
+             {"hash", manifest.artifacts.back().hash},
+             {"ddc_key", manifest.artifacts.back().ddc_key}});
     }
     manifest.manifest_hash = ComputeCookManifestHash(ToJson(manifest));
+    Astra::Core::DefaultLogger().Log(
+        "asset.cook",
+        manifest.project_id,
+        Astra::Core::LogLevel::Info,
+        "cook finished",
+        {{"artifacts", std::to_string(manifest.artifacts.size())},
+         {"ddc_entries", std::to_string(manifest.ddc_entries.size())},
+         {"manifest_hash", manifest.manifest_hash}});
     return Astra::Core::Result<CookManifest>::Success(std::move(manifest));
 }
 

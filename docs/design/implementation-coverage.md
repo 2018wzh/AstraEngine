@@ -32,7 +32,7 @@
 | Editor / Pipeline | `editor-and-pipeline.md`, `editor-ui-ai-collaboration-prototype.md`, `editor-runtime-creator-contract.md` | workflow contracts, layout preset, undo/redo, PIE | TODO 14 | CreatorWorkflow |
 | AI Collaboration | `ai-collaboration.md`, `ai-mcp-safety-contract.md` | Runtime AI MCP, Editor Copilot MCP, Content Generation MCP | TODO 16 | AIIntentSafety, CreatorWorkflow |
 | MCP Integration | `mcp-integration.md` | Editor/Runtime MCP hosts, resources/tools/prompts | TODO 16, 17 | MCP tool tests |
-| Tools / Release / Observability | `tools-release-observability.md`, `release-gate-observability-contract.md` | CLI output, release report, trace, crash bundle | TODO 17 | release commands |
+| Tools / Release / Observability | `tools-release-observability.md`, `release-gate-observability-contract.md` | CLI output, structured logging, release report, trace, crash bundle | TODO 17 | release commands, log JSONL |
 | Samples / Tests | `samples-and-test-matrix.md` | sample descriptor, test descriptor | TODO 18 | CI/local command output |
 | Legacy Expansion | `compatibility-layer.md`, `legacy-compatibility-contract.md` | CompatRuntimeProvider, PackageReader, LegacyApiMapper, Save extension | TODO 20 | CompatMockExpansion |
 
@@ -59,7 +59,7 @@ Phase 0 evidence means documentation and build-baseline evidence. Phase 1 founda
 | --- | --- |
 | Phase 0 manual baseline | `docs/manual` required pages and `astra doc-check` output |
 | Phase 0 build baseline | CMake configure/build and CTest discovery output |
-| Phase 1 Core foundation | Core headers, `AstraCore`, diagnostics/config/stable-id/serialization tests, diagnostic code registry, release policy, release config hash, unknown-field policy |
+| Phase 1 Core foundation | Core headers, `AstraCore`, diagnostics/config/stable-id/serialization/logging tests, diagnostic code registry, release policy, release config hash, unknown-field policy |
 | Phase 1 Platform foundation | `AstraPlatform`, headless service tests, opaque dynamic library handle, file-watch/pending-task/crash context tests, SDL private compile path, public header isolation scan |
 | Phase 1 Module foundation | descriptor validation, dependency resolver, C ABI headers, service resolve audit, engine module slot policy validation, example plugin load/register/unload test, module release-gate binary SHA-256 evidence |
 | Phase 1 Property foundation | `AstraPropertySystem`, nested struct/array/map/tagged union JSON Schema, defaults/validation/migration tests, schema version graph, write policy and release-sensitive diff/audit tests |
@@ -75,6 +75,7 @@ Phase 0 evidence means documentation and build-baseline evidence. Phase 1 founda
 | Phase 5 Runtime core evidence | Runtime module target-aware deterministic event ordering, subscription lifetime, serializable scheduler tasks, `astra.runtime.save_container.v2` with optional zstd JSON sections, replay mismatch localization, RuntimeStress 1000 Actor save/load/replay hash stability |
 | Runtime can launch without Editor | PackageSmoke command output and package manifest without Editor modules |
 | NativeVN playable package | NativeVN `cook/package/run --headless-smoke/run --windowed-smoke/replay --compare/inspect` reports with binary `.astrapkg` package manifest, zstd payload table, PackageReader payload/mount smoke, local DDC artifacts, Asset Release Gate evidence, package manifest hash/provider feature hash save-replay evidence, package integrity diagnostics, generated PNG/OGG fixture evidence, UI/system evidence, save/load evidence, and Script/AstraVN evidence |
+| Structured logging | `AstraCore` `astra.log.event.v1` JSONL, async rotating file sink, console sink, memory capture tests, recent-log ring, diagnostic mirroring, CLI log flags, and component channels across tools/platform/module/asset/runtime/media/script/AstraVN |
 | TsuiNoSora local playable fixture | TsuiNoSora `local_test_only` package/run/replay/inspect reports with copied Artemis PNG/OGG/font/UI/system assets, curated Aya route, system menu, backlog, config, save/load slots, and fixture report |
 | Deterministic runtime | repeated replay state/event/presentation hash |
 | Real media backend | Phase 7 provider/decode/timeline/filter evidence plus SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence from package payloads in NativeVN/TsuiNoSora reports; per-driver visual/audio diff remains the broader hardening target |

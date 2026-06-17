@@ -1,5 +1,7 @@
 #include <Astra/Platform/Platform.hpp>
 
+#include <Astra/Core/Logging.hpp>
+
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -56,6 +58,11 @@ class HeadlessWindowService final : public IWindowService {
 public:
     Astra::Core::Result<void> Create(WindowDesc, Astra::Core::DiagnosticSink&) override {
         created_ = true;
+        Astra::Core::DefaultLogger().Log(
+            "platform.window",
+            "headless",
+            Astra::Core::LogLevel::Info,
+            "headless window created");
         return Astra::Core::Result<void>::Success();
     }
 
@@ -69,6 +76,15 @@ public:
             return !primitive.image_rgba.empty();
         }));
         evidence.frame_hash = WindowFrameHash(frame);
+        Astra::Core::DefaultLogger().Log(
+            "platform.window",
+            "headless",
+            Astra::Core::LogLevel::Debug,
+            "headless frame presented",
+            {{"frame", std::to_string(frame.frame_index)},
+             {"primitives", std::to_string(evidence.primitive_count)},
+             {"image_primitives", std::to_string(evidence.image_primitive_count)},
+             {"frame_hash", evidence.frame_hash}});
         return Astra::Core::Result<WindowPresentEvidence>::Success(std::move(evidence));
     }
 
@@ -230,6 +246,12 @@ private:
 class DynamicLibraryService final : public IDynamicLibraryService {
 public:
     Astra::Core::Result<DynamicLibraryHandle> Load(const std::filesystem::path& path) override {
+        Astra::Core::DefaultLogger().Log(
+            "platform.dynamic_library",
+            "loader",
+            Astra::Core::LogLevel::Debug,
+            "dynamic library load started",
+            {{"path", path.string()}});
 #if defined(_WIN32)
         auto* handle = reinterpret_cast<void*>(LoadLibraryW(path.wstring().c_str()));
 #else
@@ -240,6 +262,12 @@ public:
         }
         const auto id = next_id_++;
         libraries_[id] = handle;
+        Astra::Core::DefaultLogger().Log(
+            "platform.dynamic_library",
+            "loader",
+            Astra::Core::LogLevel::Info,
+            "dynamic library loaded",
+            {{"path", path.string()}, {"handle", std::to_string(id)}});
         return Astra::Core::Result<DynamicLibraryHandle>::Success({id});
     }
 
@@ -311,6 +339,11 @@ public:
         packet.thread_id = context.thread_id.empty() ? CurrentThreadId() : std::move(context.thread_id);
         packet.package_or_project_hash = std::move(context.package_or_project_hash);
         packet.recent_logs = std::move(context.recent_logs);
+        if (packet.recent_logs.empty()) {
+            for (const auto& event : Astra::Core::DefaultLogger().RecentEvents()) {
+                packet.recent_logs.push_back(Astra::Core::ToJson(event).dump());
+            }
+        }
         packet.diagnostics = diagnostics.Diagnostics();
         return packet;
     }
@@ -349,6 +382,11 @@ CrashPacket ICrashService::Capture(std::string_view build_info, const Astra::Cor
 }
 
 PlatformServices CreateHeadlessPlatform() {
+    Astra::Core::DefaultLogger().Log(
+        "platform.lifecycle",
+        "headless",
+        Astra::Core::LogLevel::Info,
+        "headless platform created");
     PlatformServices services;
     services.impl_->kind = BackendKind::Headless;
     services.impl_->window = std::make_unique<HeadlessWindowService>();

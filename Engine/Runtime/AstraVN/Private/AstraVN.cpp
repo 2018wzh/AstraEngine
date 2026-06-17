@@ -1,5 +1,7 @@
 #include <Astra/AstraVN/AstraVN.hpp>
 
+#include <Astra/Core/Logging.hpp>
+
 #include <algorithm>
 
 namespace Astra::AstraVN {
@@ -54,11 +56,25 @@ public:
         const Astra::Script::ScriptExecutionOptions& options,
         bool lua,
         Astra::Core::DiagnosticSink& diagnostics) {
+        Astra::Core::DefaultLogger().Log(
+            "astravn.session",
+            lua ? "lua" : "native",
+            Astra::Core::LogLevel::Info,
+            "vn session run started",
+            {{"source", source.source_id}, {"entry_label", options.entry_label}});
         auto compiled = lua ? host.CompileLua(source, diagnostics) : host.CompileNative(source, diagnostics);
         if (!compiled) {
             return Astra::Core::Result<Astra::Script::ScriptExecutionResult>::Failure(compiled.Error(), compiled.Message());
         }
         last_result = host.Run(compiled.Value(), runtime, options, diagnostics);
+        Astra::Core::DefaultLogger().Log(
+            "astravn.session",
+            lua ? "lua" : "native",
+            Astra::Core::LogLevel::Info,
+            "vn session run finished",
+            {{"source", source.source_id},
+             {"events", std::to_string(last_result.events.size())},
+             {"presentation_commands", std::to_string(last_result.presentation_commands.size())}});
         return Astra::Core::Result<Astra::Script::ScriptExecutionResult>::Success(last_result);
     }
 
@@ -87,6 +103,11 @@ Astra::Core::Result<Astra::Script::ScriptExecutionResult> VnSession::RunLua(
 }
 
 VnSessionSnapshot VnSession::CaptureSnapshot(Astra::Core::DiagnosticSink& diagnostics) const {
+    Astra::Core::DefaultLogger().Log(
+        "astravn.session",
+        "snapshot",
+        Astra::Core::LogLevel::Debug,
+        "vn snapshot capture started");
     VnSessionSnapshot snapshot;
     snapshot.runtime_save = impl_->runtime.Save();
     snapshot.script_snapshot = impl_->last_result.snapshot;
@@ -104,16 +125,35 @@ VnSessionSnapshot VnSession::CaptureSnapshot(Astra::Core::DiagnosticSink& diagno
     renderer->Submit(std::move(graph), diagnostics);
     snapshot.headless_capture = renderer->Capture();
     snapshot.hashes = impl_->runtime.Hashes();
+    Astra::Core::DefaultLogger().Log(
+        "astravn.session",
+        "snapshot",
+        Astra::Core::LogLevel::Debug,
+        "vn snapshot capture finished",
+        {{"events", std::to_string(snapshot.vn_events.size())},
+         {"presentation_commands", std::to_string(snapshot.presentation_commands.size())},
+         {"state_hash", snapshot.hashes.state_hash}});
     return snapshot;
 }
 
 Astra::Core::Result<void> VnSession::Restore(const VnSessionSnapshot& snapshot, Astra::Core::DiagnosticSink& diagnostics) {
+    Astra::Core::DefaultLogger().Log(
+        "astravn.session",
+        "snapshot",
+        Astra::Core::LogLevel::Debug,
+        "vn snapshot restore started",
+        {{"events", std::to_string(snapshot.vn_events.size())}});
     impl_->last_result = {};
     impl_->last_result.snapshot = snapshot.script_snapshot;
     auto loaded = impl_->runtime.Load(snapshot.runtime_save, diagnostics);
     if (!loaded) {
         return loaded;
     }
+    Astra::Core::DefaultLogger().Log(
+        "astravn.session",
+        "snapshot",
+        Astra::Core::LogLevel::Debug,
+        "vn snapshot restore finished");
     return Astra::Core::Result<void>::Success();
 }
 

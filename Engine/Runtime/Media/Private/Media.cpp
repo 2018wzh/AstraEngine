@@ -1,5 +1,7 @@
 #include <Astra/Media/Media.hpp>
 
+#include <Astra/Core/Logging.hpp>
+
 #if defined(ASTRA_MEDIA_HAS_LIBPNG)
 #include <png.h>
 #endif
@@ -171,6 +173,13 @@ std::unique_ptr<IRenderer2D> CreateHeadlessRenderer2D() {
 }
 
 RenderGraph ExtractRenderGraph(const std::vector<PresentationCommand>& commands, const FilterProfile* filter_profile, Astra::Core::DiagnosticSink& diagnostics) {
+    Astra::Core::DefaultLogger().Log(
+        "media.render",
+        "render_graph",
+        Astra::Core::LogLevel::Debug,
+        "render graph extraction started",
+        {{"commands", std::to_string(commands.size())},
+         {"filter_profile", filter_profile == nullptr ? "" : filter_profile->id.ToString()}});
     RenderGraph graph;
     for (const auto& command : commands) {
         graph.frame_index = std::max(graph.frame_index, command.frame_index);
@@ -200,6 +209,16 @@ RenderGraph ExtractRenderGraph(const std::vector<PresentationCommand>& commands,
             graph.filter_applications = ApplyFilterProfile(*filter_profile);
         }
     }
+    Astra::Core::DefaultLogger().Log(
+        "media.render",
+        "render_graph",
+        Astra::Core::LogLevel::Debug,
+        "render graph extraction finished",
+        {{"frame", std::to_string(graph.frame_index)},
+         {"draws", std::to_string(graph.draws.size())},
+         {"text", std::to_string(graph.text_requests.size())},
+         {"audio", std::to_string(graph.audio_commands.size())},
+         {"filters", std::to_string(graph.filter_applications.size())}});
     return graph;
 }
 
@@ -389,6 +408,11 @@ Astra::Core::Result<MediaReleaseGateReport> ValidateMediaReleaseGate(const Media
 }
 
 MediaBackendCapabilityReport ProbeMediaBackendCapabilities() {
+    Astra::Core::DefaultLogger().Log(
+        "media.backend",
+        "capability_probe",
+        Astra::Core::LogLevel::Debug,
+        "media backend capability probe started");
     MediaBackendCapabilityReport report;
     auto add_library = [&](MediaBackendLibrary library) {
         if (library.available) {
@@ -526,6 +550,15 @@ MediaBackendCapabilityReport ProbeMediaBackendCapabilities() {
     report.text_layout_ready = std::ranges::find(report.font_features, "font_rasterization") != report.font_features.end()
                             && std::ranges::find(report.font_features, "text_shaping") != report.font_features.end();
     report.audio_mixer_ready = std::ranges::find(report.audio_features, "audio_mixer") != report.audio_features.end();
+    Astra::Core::DefaultLogger().Log(
+        "media.backend",
+        "capability_probe",
+        Astra::Core::LogLevel::Debug,
+        "media backend capability probe finished",
+        {{"libraries", std::to_string(report.libraries.size())},
+         {"image_decode_ready", report.image_decode_ready ? "true" : "false"},
+         {"text_layout_ready", report.text_layout_ready ? "true" : "false"},
+         {"audio_mixer_ready", report.audio_mixer_ready ? "true" : "false"}});
     return report;
 }
 } // namespace Astra::Media

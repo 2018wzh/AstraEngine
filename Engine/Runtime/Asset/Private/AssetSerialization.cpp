@@ -2,6 +2,8 @@
 
 #include "AssetInternal.hpp"
 
+#include <Astra/Core/Logging.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -523,6 +525,12 @@ std::string ComputePackageManifestHash(nlohmann::json manifest_json) {
 }
 
 Astra::Core::Result<PackageManifest> PackageReader::ReadManifest(const std::filesystem::path& package_path, Astra::Core::DiagnosticSink& diagnostics) const {
+    Astra::Core::DefaultLogger().Log(
+        "asset.package",
+        "package_reader",
+        Astra::Core::LogLevel::Debug,
+        "package manifest read started",
+        {{"package", package_path.string()}});
     auto package_json = ReadPackageJson(package_path, diagnostics);
     if (!package_json) {
         return Astra::Core::Result<PackageManifest>::Failure(package_json.Error(), package_json.Message());
@@ -534,17 +542,29 @@ Astra::Core::Result<PackageManifest> PackageReader::ReadManifest(const std::file
     }
     const auto actual_package_hash = ComputePackageManifestHash(json);
     if (manifest.Value().package_hash != actual_package_hash) {
-        diagnostics.Emit(MakeDiagnostic("ASTRA_PACKAGE_HASH_MISMATCH", Astra::Core::DiagnosticSeverity::Blocking, "Package hash mismatch.", package_path));
+        auto diagnostic = MakeDiagnostic("ASTRA_PACKAGE_HASH_MISMATCH", Astra::Core::DiagnosticSeverity::Blocking, "Package hash mismatch.", package_path);
+        Astra::Core::LogDiagnostic(diagnostic, "asset.package", "package_reader");
+        diagnostics.Emit(std::move(diagnostic));
         return Astra::Core::Result<PackageManifest>::Failure(Astra::Core::ErrorCode::InvalidFormat, "package hash mismatch");
     }
     if (json.contains("cook_manifest")) {
         const auto cook_json = json.at("cook_manifest");
         const auto actual_cook_hash = ComputeCookManifestHash(cook_json);
         if (cook_json.value("manifest_hash", std::string()) != actual_cook_hash) {
-            diagnostics.Emit(MakeDiagnostic("ASTRA_COOK_MANIFEST_HASH_MISMATCH", Astra::Core::DiagnosticSeverity::Blocking, "Cook manifest hash mismatch.", package_path));
+            auto diagnostic = MakeDiagnostic("ASTRA_COOK_MANIFEST_HASH_MISMATCH", Astra::Core::DiagnosticSeverity::Blocking, "Cook manifest hash mismatch.", package_path);
+            Astra::Core::LogDiagnostic(diagnostic, "asset.package", "package_reader");
+            diagnostics.Emit(std::move(diagnostic));
             return Astra::Core::Result<PackageManifest>::Failure(Astra::Core::ErrorCode::InvalidFormat, "cook manifest hash mismatch");
         }
     }
+    Astra::Core::DefaultLogger().Log(
+        "asset.package",
+        manifest.Value().package_id,
+        Astra::Core::LogLevel::Debug,
+        "package manifest read finished",
+        {{"package", package_path.string()},
+         {"package_hash", manifest.Value().package_hash},
+         {"payloads", std::to_string(manifest.Value().payloads.size())}});
     return manifest;
 }
 
@@ -648,6 +668,14 @@ Astra::Core::Result<PackageMount> PackageReader::MountPackage(const std::filesys
 }
 
 Astra::Core::Result<PackageManifest> PackageWriter::WritePackage(PackageManifest manifest, const std::filesystem::path& package_path, Astra::Core::DiagnosticSink& diagnostics) const {
+    Astra::Core::DefaultLogger().Log(
+        "asset.package",
+        manifest.package_id,
+        Astra::Core::LogLevel::Info,
+        "package write started",
+        {{"package", package_path.string()},
+         {"profile", manifest.profile},
+         {"artifacts", std::to_string(manifest.cook_manifest.artifacts.size())}});
     std::vector<std::vector<Astra::Core::u8>> compressed_payloads;
     compressed_payloads.reserve(manifest.cook_manifest.artifacts.size());
     manifest.payloads.clear();
@@ -720,6 +748,14 @@ Astra::Core::Result<PackageManifest> PackageWriter::WritePackage(PackageManifest
         diagnostics.Emit(MakeDiagnostic("ASTRA_PACKAGE_WRITE_FAILED", Astra::Core::DiagnosticSeverity::Blocking, "Package file write failed.", package_path));
         return Astra::Core::Result<PackageManifest>::Failure(Astra::Core::ErrorCode::InternalError, "package write failed");
     }
+    Astra::Core::DefaultLogger().Log(
+        "asset.package",
+        manifest.package_id,
+        Astra::Core::LogLevel::Info,
+        "package write finished",
+        {{"package", package_path.string()},
+         {"package_hash", manifest.package_hash},
+         {"payloads", std::to_string(manifest.payloads.size())}});
     return Astra::Core::Result<PackageManifest>::Success(std::move(manifest));
 }
 

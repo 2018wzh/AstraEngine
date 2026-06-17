@@ -430,7 +430,7 @@ Shared safety：
 
 目标：建立 UE-class runtime 所需的工具链、验证门禁和可观测性。
 
-Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 `validate`、`import`、`cook`、`package`、`run --headless-smoke`、`replay --compare`、`inspect`、`doc-check`，并使用 CLI11、yaml-cpp、nlohmann_json、OpenSSL SHA-256、zstd、Lua、sol2 和 CTest/Catch2 提供证据。Phase 7 sample validate/headless smoke 会输出 Asset/Media/FilterGraph hash、media backend capability report、image decode smoke、media provider release-gate evidence、media provider/decode/timeline/filter evidence、binary package evidence；NativeVN evidence slice 会输出 source asset sidecars、Script/AstraVN headless evidence、cook/package manifests、local DDC artifact evidence、PackageReader payload/mount smoke、package manifest hash/provider feature hash save-replay evidence、engine/plugin DLL hash evidence 和 golden replay comparison。下列条目描述的是完整 UE-class Tools/Release Gate/Observability 目标；trace/crash bundle 和 deeper per-driver UI/audio replay diff 仍未完成。
+Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 `validate`、`import`、`cook`、`package`、`run --headless-smoke`、`replay --compare`、`inspect`、`doc-check`，并使用 CLI11、yaml-cpp、nlohmann_json、spdlog、OpenSSL SHA-256、zstd、Lua、sol2 和 CTest/Catch2 提供证据。Core structured logging 已实现 `astra.log.event.v1`、async rotating JSONL、console sink、memory capture、recent-log ring、diagnostic mirroring 和 CLI log flags。Phase 7 sample validate/headless smoke 会输出 Asset/Media/FilterGraph hash、media backend capability report、image decode smoke、media provider release-gate evidence、media provider/decode/timeline/filter evidence、binary package evidence；NativeVN evidence slice 会输出 source asset sidecars、Script/AstraVN headless evidence、cook/package manifests、local DDC artifact evidence、PackageReader payload/mount smoke、package manifest hash/provider feature hash save-replay evidence、engine/plugin DLL hash evidence 和 golden replay comparison。下列条目描述的是完整 UE-class Tools/Release Gate/Observability 目标；trace/crash bundle 和 deeper per-driver UI/audio replay diff 仍未完成。
 
 - [x] Tools：实现 `astra validate`：schema、descriptor、project config、asset refs、script compile。（当前覆盖 foundation/runtime evidence；full project policy gate 后续完成。）
 - [x] Tools：实现 `astra cook`：incremental cook、DDC、package manifest、diagnostics。（Phase 6 uses `AstraAsset::CookAssetRegistry` for local DDC, provider feature hash, rebuild/reuse/corruption recovery and cook manifest evidence。）
@@ -441,10 +441,12 @@ Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 
 - [x] Tools：实现 `astra doc-check`：links、required pages、code snippets、public API coverage。（当前覆盖 manual/link/stale wording checks；full snippet/API extraction 后续完成。）
 - [ ] Release Gate：实现 blocking/non-blocking diagnostics policy。
 - [ ] Release Gate：实现 plugin ABI、permissions、packaged eligibility、binary hash checks。
-- [ ] Observability：实现 profiler markers、trace capture、frame timing、asset load timing、script timing。
+- [x] Observability：实现 structured logging、JSONL file output、console routing、diagnostic mirroring 和全组件 foundation workflow 日志。
+- [ ] Observability：实现 profiler export、trace capture、frame timing、asset load timing、script timing。
 - [ ] Observability：实现 crash/error report bundle：logs、diagnostics、build info、last frames。
 - [ ] Tools：按 `docs/design/tools-release-observability.md` 实现 CLI output、validation report、package report、release gate report、trace 和 crash bundle contract。
 - [ ] Tools：按 `docs/design/release-gate-observability-contract.md` 实现 `ReleaseReport`、`BlockingPolicy`、`TraceEvent` 和 `CrashBundle` production report contract。
+- [x] Docs：编写 Logging Guide，并同步 CLI log flags、API index、release notes 和 observability 文档。
 - [ ] Docs：编写 CLI Tools Reference、Release Gate Guide、Profiling Guide、Crash Diagnostics Guide。
 
 验收：

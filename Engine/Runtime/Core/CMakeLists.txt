@@ -13,5 +13,10 @@ set(ASTRA_CORE_SOURCES
 )
 
 astra_add_library(AstraCore ${ASTRA_CORE_SOURCES})
-target_link_libraries(AstraCore PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(AstraCore
+    PUBLIC
+        nlohmann_json::nlohmann_json
+    PRIVATE
+        spdlog::spdlog
+)
 target_compile_definitions(AstraCore PRIVATE ASTRA_BUILD_CONFIG="$<CONFIG>")

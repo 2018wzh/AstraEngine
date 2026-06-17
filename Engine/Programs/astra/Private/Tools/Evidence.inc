@@ -57,6 +57,7 @@ void AddDiagnostic(CommandReport& report, std::string code,
     diagnostic.severity = severity;
     diagnostic.message = std::move(message);
     diagnostic.source.file = file.string();
+    Astra::Core::LogDiagnostic(diagnostic, "tools.diagnostics", report.command);
     report.diagnostics.push_back(std::move(diagnostic));
     if (severity == Astra::Core::DiagnosticSeverity::Blocking ||
         severity == Astra::Core::DiagnosticSeverity::Fatal) {
@@ -583,6 +584,7 @@ nlohmann::json FoundationCoreGateEvidence() {
 
 void AppendDiagnostics(CommandReport& report, const Astra::Core::DiagnosticSink& diagnostics) {
     for (const auto& diagnostic : diagnostics.Diagnostics()) {
+        Astra::Core::LogDiagnostic(diagnostic, "tools.diagnostics", report.command);
         report.diagnostics.push_back(diagnostic);
         if (diagnostic.BlocksRelease()) {
             report.status = "failed";
@@ -824,6 +826,12 @@ CommandReport MakeReport(std::string command) {
     CommandReport report;
     report.command = std::move(command);
     report.build_info = BuildInfoJson();
+    Astra::Core::DefaultLogger().Log(
+        "tools.lifecycle",
+        report.command,
+        Astra::Core::LogLevel::Info,
+        "command started",
+        {{"command", report.command}});
     return report;
 }
 

@@ -171,7 +171,10 @@ TEST_CASE("Migration unknown field policies preserve warn error and drop") {
 TEST_CASE("Core logging supports structured memory and rotating file sinks") {
     Astra::Core::LogEvent event;
     event.monotonic_ns = 1;
+    event.sequence = 1;
     event.channel = "test";
+    event.component = "core-test";
+    event.level = Astra::Core::LogLevel::Debug;
     event.message = "hello";
     event.fields["key"] = "value";
 
@@ -179,6 +182,7 @@ TEST_CASE("Core logging supports structured memory and rotating file sinks") {
     memory.Write(event);
     REQUIRE(memory.Events().size() == 1);
     REQUIRE(Astra::Core::ToJson(memory.Events()[0])["fields"]["key"] == "value");
+    REQUIRE(Astra::Core::ToJson(memory.Events()[0])["schema"] == "astra.log.event.v1");
 
     const auto log_path = std::filesystem::temp_directory_path() / "astra_phase1_log.jsonl";
     const auto rotated_path = std::filesystem::path(log_path.string() + ".1");
@@ -188,6 +192,36 @@ TEST_CASE("Core logging supports structured memory and rotating file sinks") {
     file.Write(event);
     file.Write(event);
     REQUIRE(std::filesystem::exists(rotated_path));
+
+    Astra::Core::ResetLoggingForTests();
+    const auto configured_log = std::filesystem::temp_directory_path() / "astra_configured_log.jsonl";
+    std::filesystem::remove(configured_log);
+    Astra::Core::LogConfig config;
+    config.log_file = configured_log;
+    config.async = false;
+    config.console_enabled = false;
+    config.file_enabled = true;
+    config.capture_memory = true;
+    config.file_level = Astra::Core::LogLevel::Trace;
+    Astra::Core::ConfigureLogging(config);
+    Astra::Core::DefaultLogger().Write(event);
+    Astra::Core::Diagnostic diagnostic;
+    diagnostic.code = "ASTRA_TEST_LOG_DIAGNOSTIC";
+    diagnostic.category = "test";
+    diagnostic.severity = Astra::Core::DiagnosticSeverity::Blocking;
+    diagnostic.message = "diagnostic mirrored";
+    Astra::Core::LogDiagnostic(diagnostic, "core.diagnostics", "test");
+    Astra::Core::FlushLogs();
+
+    REQUIRE(std::filesystem::exists(configured_log));
+    REQUIRE(Astra::Core::DefaultLogger().MemoryEvents().size() == 2);
+    REQUIRE(Astra::Core::DefaultLogger().MemoryEvents()[1].diagnostic_code == "ASTRA_TEST_LOG_DIAGNOSTIC");
+    REQUIRE(Astra::Core::DefaultLogger().MemoryEvents()[1].level == Astra::Core::LogLevel::Error);
+    std::ifstream configured(configured_log, std::ios::binary);
+    const std::string contents(std::istreambuf_iterator<char>(configured), {});
+    REQUIRE(contents.find("astra.log.event.v1") != std::string::npos);
+    REQUIRE(contents.find("ASTRA_TEST_LOG_DIAGNOSTIC") != std::string::npos);
+    Astra::Core::ResetLoggingForTests();
 }
 
 

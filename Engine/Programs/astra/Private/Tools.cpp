@@ -57,6 +57,14 @@ void WriteDiagnosticsIfRequested(const CommandReport& report, const CommandOptio
 }
 
 void PrintReport(const CommandReport& report, const CommandOptions& options) {
+    Astra::Core::DefaultLogger().Log(
+        "tools.lifecycle",
+        report.command,
+        report.Passed() ? Astra::Core::LogLevel::Info : Astra::Core::LogLevel::Error,
+        "command finished",
+        {{"command", report.command},
+         {"status", report.status},
+         {"diagnostics", std::to_string(report.diagnostics.size())}});
     if (options.json) {
         std::cout << ToJson(report).dump(2) << "\n";
     } else {

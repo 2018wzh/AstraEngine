@@ -86,6 +86,15 @@ Phase 6 asset pipeline additions:
 
 Known gaps: per-driver visual/audio diff, full Script debugger/hot reload/Graph/Timeline, production AstraVN authoring surface, Editor, AI/MCP, and Legacy remain planned. Phase 7 media provider/decode/timeline/filter evidence is implemented through DTO-safe provider contracts and headless deterministic hashes.
 
+Production logging stage additions:
+
+- Dependency: `spdlog` is now a required private `AstraCore` dependency through vcpkg/CMake.
+- `AstraCore`: `LogLevel`, `LogEvent` schema `astra.log.event.v1`, `LogConfig`, process default `Logger`, async rotating JSONL file output, console output, memory capture for tests, recent-log ring, and `LogDiagnostic()` mirroring.
+- CLI: global/subcommand `--log-dir`, `--log-file`, `--log-level`, `--log-async`, and `--log-sync`; default tools logging writes console plus `build/Saved/Logs/astra.log.jsonl`.
+- Runtime coverage: representative lifecycle/operation channels now cover Tools, Platform, ModuleRuntime, Asset cook/package, Runtime events/tick/save/load, Media backend/render/decode, Script compile/execute, and AstraVN session/snapshot.
+- Tests: Core logging JSONL/memory/diagnostic mirroring coverage and `AstraCliValidateNativeVNLogs` CLI coverage.
+- Still planned: full trace capture/export, profiler backend export, and production crash bundle generation.
+
 ## Troubleshooting
 
 - Do not use target acceptance commands as proof until the relevant tool exists.

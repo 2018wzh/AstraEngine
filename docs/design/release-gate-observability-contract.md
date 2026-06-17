@@ -1,12 +1,13 @@
 # Release Gate / Observability Contract
 
-状态：Production contract draft / partially implemented as foundation reports  
+状态：Production contract draft / logging implemented, trace/crash partially planned  
 定位：定义 release report、diagnostics policy、trace/profiling 和 crash bundle 的生产契约。本文补足 `tools-release-observability.md` 的实现级输出结构。
 
 ## 1. 目标
 
 - Release Gate 用 machine-readable diagnostics 阻止不可发布内容。
 - CLI、Editor、MCP 和 CI 消费同一 validation/cook/package/release report schema。
+- Structured logging 覆盖 tools/platform/module/asset/runtime/media/script/AstraVN foundation workflows。
 - Trace/profiling 覆盖 runtime tick、scheduler、asset load、media backend、script、provider lifecycle 和 AI intent。
 - Crash bundle 包含 build info、diagnostics、recent logs、last frame summary 和 package/project hash。
 
@@ -14,6 +15,31 @@
 
 - Log 不替代 diagnostics。
 - Profiling UI 不是 Runtime dependency。
+- 当前 logging stage 不等于完整 trace export 或 production crash bundle。
+
+## 1.1 Implemented Logging
+
+Log event:
+
+```yaml
+schema: astra.log.event.v1
+sequence: 1
+time_ns: 123456
+thread_id: "..."
+channel: runtime.event
+component: event:/astra.vn.dialogue.say_requested
+level: debug
+message: runtime event emitted
+objects: []
+fields: {}
+```
+
+Rules:
+
+- `spdlog` is private to Core; public headers expose Astra DTOs only.
+- CLI defaults to console plus rotating JSONL under `Saved/Logs`.
+- Blocking/fatal diagnostics are mirrored with `diagnostic_code`.
+- Recent log events can feed existing crash packet fields; full crash bundle generation remains planned.
 
 ## 2. Release Report
 
@@ -149,4 +175,3 @@ astra run build/Saved/Packages/NativeVN.astrapkg --headless-smoke --json
 astra replay build/Saved/Replays/NativeVNGolden.replay --compare --json
 astra inspect build/Saved/Packages/NativeVN.astrapkg --json
 ```
-

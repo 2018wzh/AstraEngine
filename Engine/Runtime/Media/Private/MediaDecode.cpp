@@ -1,5 +1,7 @@
 #include <Astra/Media/Media.hpp>
 
+#include <Astra/Core/Logging.hpp>
+
 #if defined(ASTRA_MEDIA_HAS_LIBPNG)
 #include <png.h>
 #endif
@@ -436,6 +438,12 @@ Astra::Core::Result<ImageDecodeReport> InspectImageBytes(std::span<const Astra::
 }
 
 Astra::Core::Result<DecodedImageRgba> DecodeImageRgbaBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics) {
+    Astra::Core::DefaultLogger().Log(
+        "media.decode",
+        "image",
+        Astra::Core::LogLevel::Debug,
+        "image rgba decode started",
+        {{"bytes", std::to_string(bytes.size())}});
     if (bytes.empty()) {
         diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_IMAGE_EMPTY", Astra::Core::DiagnosticSeverity::Blocking, "Image payload is empty."));
         return Astra::Core::Result<DecodedImageRgba>::Failure(Astra::Core::ErrorCode::InvalidArgument, "image payload empty");
@@ -521,6 +529,15 @@ Astra::Core::Result<DecodedImageRgba> DecodeImageRgbaBytes(std::span<const Astra
     decoded.height = static_cast<Astra::Core::u32>(height);
     decoded.pixels = std::move(pixels);
     decoded.decoded_by = "libpng";
+    Astra::Core::DefaultLogger().Log(
+        "media.decode",
+        "image",
+        Astra::Core::LogLevel::Debug,
+        "image rgba decode finished",
+        {{"format", decoded.format},
+         {"width", std::to_string(decoded.width)},
+         {"height", std::to_string(decoded.height)},
+         {"decoded_by", decoded.decoded_by}});
     return Astra::Core::Result<DecodedImageRgba>::Success(std::move(decoded));
 #else
     diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_IMAGE_BACKEND_MISSING", Astra::Core::DiagnosticSeverity::Blocking, "PNG RGBA decode requires libpng support."));
@@ -692,6 +709,12 @@ Astra::Core::Result<RasterizedTextRgba> RasterizeTextRgbaBytes(std::span<const A
 }
 
 Astra::Core::Result<AudioDecodeReport> DecodeAudioBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics) {
+    Astra::Core::DefaultLogger().Log(
+        "media.decode",
+        "audio",
+        Astra::Core::LogLevel::Debug,
+        "audio decode started",
+        {{"bytes", std::to_string(bytes.size())}});
     if (bytes.empty()) {
         diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_AUDIO_EMPTY", Astra::Core::DiagnosticSeverity::Blocking, "Audio payload is empty."));
         return Astra::Core::Result<AudioDecodeReport>::Failure(Astra::Core::ErrorCode::InvalidArgument, "audio payload empty");
@@ -701,6 +724,15 @@ Astra::Core::Result<AudioDecodeReport> DecodeAudioBytes(std::span<const Astra::C
         Astra::Core::DiagnosticSink ffmpeg_diagnostics;
         auto decoded = DecodeAudioBytesWithFfmpeg(bytes, ffmpeg_diagnostics);
         if (decoded) {
+            Astra::Core::DefaultLogger().Log(
+                "media.decode",
+                "audio",
+                Astra::Core::LogLevel::Debug,
+                "audio decode finished",
+                {{"format", decoded.Value().format},
+                 {"channels", std::to_string(decoded.Value().channels)},
+                 {"sample_rate", std::to_string(decoded.Value().sample_rate)},
+                 {"decoded_by", decoded.Value().decoded_by}});
             return decoded;
         }
     }
@@ -737,6 +769,15 @@ Astra::Core::Result<AudioDecodeReport> DecodeAudioBytes(std::span<const Astra::C
             diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_AUDIO_DECODE_EMPTY", Astra::Core::DiagnosticSeverity::Blocking, "OGG decode produced no PCM frames."));
             return Astra::Core::Result<AudioDecodeReport>::Failure(Astra::Core::ErrorCode::InvalidFormat, "ogg decode empty");
         }
+        Astra::Core::DefaultLogger().Log(
+            "media.decode",
+            "audio",
+            Astra::Core::LogLevel::Debug,
+            "audio decode finished",
+            {{"format", report.format},
+             {"channels", std::to_string(report.channels)},
+             {"sample_rate", std::to_string(report.sample_rate)},
+             {"decoded_by", report.decoded_by}});
         return Astra::Core::Result<AudioDecodeReport>::Success(std::move(report));
     }
 #endif
@@ -777,6 +818,15 @@ Astra::Core::Result<AudioDecodeReport> DecodeAudioBytes(std::span<const Astra::C
         diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_AUDIO_DECODE_EMPTY", Astra::Core::DiagnosticSeverity::Blocking, "Audio decode produced no PCM frames."));
         return Astra::Core::Result<AudioDecodeReport>::Failure(Astra::Core::ErrorCode::InvalidFormat, "audio decode empty");
     }
+    Astra::Core::DefaultLogger().Log(
+        "media.decode",
+        "audio",
+        Astra::Core::LogLevel::Debug,
+        "audio decode finished",
+        {{"format", report.format},
+         {"channels", std::to_string(report.channels)},
+         {"sample_rate", std::to_string(report.sample_rate)},
+         {"decoded_by", report.decoded_by}});
     return Astra::Core::Result<AudioDecodeReport>::Success(std::move(report));
 #else
     diagnostics.Emit(MakeDiagnostic("ASTRA_MEDIA_MINIAUDIO_MISSING", Astra::Core::DiagnosticSeverity::Blocking, "Audio decode requires miniaudio support."));

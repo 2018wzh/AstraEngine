@@ -43,10 +43,12 @@ Current concrete implementation slices:
 - `Engine/Runtime/Asset/Private/AssetSerialization.cpp`: asset registry, manifest, package, mount, and hot-reload JSON/binary serialization helpers.
 - `Engine/Programs/astra/Private/DocCheck.cpp`: documentation gate checks for required manual pages, markdown links, required design documents, and stale wording scans.
 - `Engine/Programs/astra/Private/Tools.cpp`: CLI command entry points for validate, inspect, import, cook, package, run, and replay workflows.
+- `Engine/Programs/astra/Private/ToolsLogging.cpp`: CLI logging flag configuration, default log directory selection, and process logger setup.
 - `Engine/Programs/astra/Private/Tools/Evidence.inc`: shared CLI evidence helpers for foundation gates, samples, packages, and media smoke reports.
 - `Engine/Programs/astra/Private/Tools/PlayableEvidence.inc`: shared CLI evidence helpers for VN playable smoke, window frames, scripted input, and replay fixtures.
 - `Engine/Programs/astra/Private/Tools/ValidationEvidence.inc`: shared CLI evidence helpers for API coverage, plugin descriptor, and engine DLL validation reports.
 - `Engine/Programs/astra/Private/ToolsHash.cpp`: shared file hashing helper for CLI evidence reports.
+- `Engine/Runtime/Core/Private/Logging.cpp`: `spdlog`-backed async console/JSONL rotating file logging, memory capture, recent-log ring, and diagnostic mirroring.
 - `Engine/Runtime/Media/Private/Media.cpp`: media backend probing, renderer capture, provider validation, and media release-gate evaluation.
 - `Engine/Runtime/Media/Private/MediaDecode.cpp`: image/audio/font decode and inspect helpers for media backend evidence.
 - `Engine/Runtime/Media/Private/MediaProviders.cpp`: Phase 7 Renderer2D/TextLayout/Audio/ImageDecode/AudioDecode/VideoDecode provider contract implementations.
@@ -102,6 +104,15 @@ Phase 3 Media provider/release-gate foundation APIs are in `Media.hpp`:
 
 Phase 1 production Foundation gate APIs are in Core, Platform, ModuleRuntime, PropertySystem, and Tools headers:
 
+- `LogLevel`
+- `LogEvent`
+- `LogConfig`
+- `Logger`
+- `ConfigureLogging()`
+- `DefaultLogger()`
+- `FlushLogs()`
+- `ResetLoggingForTests()`
+- `LogDiagnostic()`
 - `DiagnosticCodeRegistry`
 - `ReleasePolicy`
 - `FoundationGateReport`

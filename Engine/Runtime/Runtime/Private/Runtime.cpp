@@ -1,5 +1,7 @@
 #include <Astra/Runtime/Runtime.hpp>
 
+#include <Astra/Core/Logging.hpp>
+
 #include <algorithm>
 #include <functional>
 #include <map>
@@ -374,6 +376,19 @@ Astra::Core::Result<void> RuntimeWorld::Emit(RuntimeEvent event, RuntimeEventMod
         event.event_id = Astra::Core::StableId(Astra::Core::StableIdKind::EventType, "runtime/" + std::to_string(event.sequence));
     }
     event.trace.audit_ref = EventModeToString(mode);
+    Astra::Core::LogEvent log;
+    log.channel = "runtime.event";
+    log.component = event.type.ToString();
+    log.level = mode == RuntimeEventMode::Immediate ? Astra::Core::LogLevel::Debug : Astra::Core::LogLevel::Trace;
+    log.message = "runtime event emitted";
+    log.frame_index = event.frame_index;
+    log.objects = {{"event", event.event_id.ToString()}};
+    log.fields = {{"type", event.type.ToString()},
+                  {"mode", EventModeToString(mode)},
+                  {"sequence", std::to_string(event.sequence)},
+                  {"source", event.source.id},
+                  {"target", event.target.id}};
+    Astra::Core::DefaultLogger().Write(std::move(log));
     const auto copied = event;
     impl_->events.Emit(std::move(event), mode);
     if (mode == RuntimeEventMode::Immediate) {
@@ -383,6 +398,12 @@ Astra::Core::Result<void> RuntimeWorld::Emit(RuntimeEvent event, RuntimeEventMod
 }
 
 Astra::Core::Result<void> RuntimeWorld::Tick(Astra::Core::DiagnosticSink&) {
+    Astra::Core::DefaultLogger().Log(
+        "runtime.tick",
+        "runtime_world",
+        Astra::Core::LogLevel::Trace,
+        "runtime tick started",
+        {{"frame", std::to_string(impl_->frame_index)}, {"queued", std::to_string(impl_->events.QueuedCount())}});
     impl_->events.AdvanceDeferred();
     const auto events = impl_->events.DrainQueued();
     for (const auto& event : events) {
@@ -396,6 +417,14 @@ Astra::Core::Result<void> RuntimeWorld::Tick(Astra::Core::DiagnosticSink&) {
     }
     impl_->frame_index += 1;
     impl_->fixed_step_index += 1;
+    Astra::Core::DefaultLogger().Log(
+        "runtime.tick",
+        "runtime_world",
+        Astra::Core::LogLevel::Trace,
+        "runtime tick finished",
+        {{"frame", std::to_string(impl_->frame_index)},
+         {"events", std::to_string(events.size() + scheduled_events.size())},
+         {"tasks", std::to_string(impl_->tasks.size())}});
     return Astra::Core::Result<void>::Success();
 }
 
@@ -427,6 +456,12 @@ RuntimeReplay RuntimeWorld::CaptureReplay() const {
 }
 
 Astra::Core::VersionedDocument RuntimeWorld::Save() const {
+    Astra::Core::DefaultLogger().Log(
+        "runtime.save",
+        "runtime_world",
+        Astra::Core::LogLevel::Debug,
+        "runtime save captured",
+        {{"frame", std::to_string(impl_->frame_index)}});
     return {SnapshotSchema, 1, "runtime:/world", ToJson(CaptureSnapshot())};
 }
 
@@ -472,6 +507,12 @@ SaveContainerV2 RuntimeWorld::SaveV2(bool compress_sections) const {
 }
 
 Astra::Core::Result<void> RuntimeWorld::Load(const Astra::Core::VersionedDocument& document, Astra::Core::DiagnosticSink& diagnostics) {
+    Astra::Core::DefaultLogger().Log(
+        "runtime.save",
+        "runtime_world",
+        Astra::Core::LogLevel::Debug,
+        "runtime load started",
+        {{"schema", document.schema}, {"object", document.object_id}});
     if (document.schema != SnapshotSchema) {
         return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InvalidFormat, "unsupported runtime snapshot schema");
     }
@@ -501,6 +542,12 @@ Astra::Core::Result<void> RuntimeWorld::Load(const Astra::Core::VersionedDocumen
     }
     impl_->events.Clear();
     impl_->events.RestoreTrace(std::move(trace));
+    Astra::Core::DefaultLogger().Log(
+        "runtime.save",
+        "runtime_world",
+        Astra::Core::LogLevel::Debug,
+        "runtime load finished",
+        {{"frame", std::to_string(impl_->frame_index)}, {"tasks", std::to_string(impl_->tasks.size())}});
     return Astra::Core::Result<void>::Success();
 }
 
