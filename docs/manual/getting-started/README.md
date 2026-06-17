@@ -1,6 +1,6 @@
 # Getting Started
 
-Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline. The build baseline, dynamic-only engine DLLs, `astra` CLI, foundation samples, binary `.astrapkg` packaging, and NativeVN validate/cook/package/run/replay/inspect workflow exist. Production Editor, real media execution backends, AI/MCP, and Legacy remain planned.
+Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline and Phase 7 Media Backend evidence. The build baseline, dynamic-only engine DLLs, `astra` CLI, foundation samples, binary `.astrapkg` packaging, media provider/decode/timeline/filter evidence, and NativeVN validate/cook/package/run/replay/inspect workflow exist. Production Editor, AI/MCP, Legacy, and per-driver visual/audio diff remain planned.
 
 ## Overview
 
@@ -38,7 +38,7 @@ build\Bin\astra.exe replay build\Saved\Replays\NativeVNGolden.replay --compare -
 build\Bin\astra.exe inspect build\Saved\Packages\NativeVN.astrapkg --json
 ```
 
-These commands prove the current binary `.astrapkg` runtime evidence workflow. They do not prove real texture upload, font atlas/glyph execution, audio playback/mixing, GPU filter execution, Editor workflows, or final UE-class acceptance.
+These commands prove the current binary `.astrapkg` runtime evidence workflow, including Phase 7 media provider/decode/timeline/filter evidence. They do not prove Editor workflows, AI/MCP, per-driver visual/audio diff, or final UE-class acceptance.
 
 ## API Reference
 
@@ -52,5 +52,5 @@ Current examples include running `astra doc-check`, validating `Samples/NativeVN
 
 - If CMake cannot find third-party packages, configure with the intended vcpkg toolchain.
 - If `astra` cannot load engine libraries, confirm the command is run from the build tree with `build\Bin` containing the generated `Astra*.dll` files.
-- Treat commands that mention Editor, PIE, real media rendering/audio, AI/MCP, or Legacy as target documentation until those systems are implemented.
+- Treat commands that mention Editor, PIE, AI/MCP, Legacy, or per-driver visual/audio diff as target documentation until those systems are implemented.
 - Do not restore legacy launch commands for deleted targets.

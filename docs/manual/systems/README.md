@@ -51,9 +51,9 @@ Foundation and Phase 6 system APIs are implemented for diagnostics, platform ser
 
 ## Examples
 
-Current examples include validating asset sidecars in tests, NativeVN AssetRegistry/dependency graph evidence, DDC artifact emission/reuse/corruption recovery, media backend capability evidence through `astra validate`, headless media hash verification through `astra run --headless-smoke`, NativeVN binary package generation, zstd payload read/chunk/mount smoke, Asset Release Gate checks, package manifest hash/provider feature hash save-replay evidence, package integrity checks, package launch smoke, and golden replay comparison. Planned examples include real media execution backend verification and deeper visual/audio replay diff.
+Current examples include validating asset sidecars in tests, NativeVN AssetRegistry/dependency graph evidence, DDC artifact emission/reuse/corruption recovery, media backend capability and Phase 7 provider evidence through `astra validate`, headless media hash verification through `astra run --headless-smoke`, NativeVN binary package generation, zstd payload read/chunk/mount smoke, Asset Release Gate checks, package manifest hash/provider feature hash save-replay evidence, package integrity checks, package launch smoke, and golden replay comparison. Planned examples include deeper per-driver visual/audio replay diff.
 
 ## Troubleshooting
 
-- Treat media-rendering/audio/filter release commands as target commands until those systems exist; current NativeVN `validate`, `cook`, `package`, `run --headless-smoke`, `replay --compare`, and `inspect` prove the Phase 6 package workflow, not production media/backend execution.
+- Current NativeVN `validate`, `cook`, `package`, `run --headless-smoke`, `replay --compare`, and `inspect` prove the Phase 6 package workflow plus Phase 7 media provider/decode/timeline/filter evidence; per-driver visual/audio diff remains later hardening.
 - Release evidence must be current command output, not design intent.

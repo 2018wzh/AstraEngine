@@ -119,6 +119,7 @@ nlohmann::json ToJson(const MediaReleaseGateReport& report) {
         {"passed", report.passed},
         {"selected_providers", providers},
         {"filter_applications", filters},
+        {"provider_hash_inputs", report.provider_hash_inputs},
     };
 }
 
@@ -160,6 +161,70 @@ nlohmann::json ToJson(const ImageDecodeReport& report) {
         {"has_alpha", report.has_alpha},
         {"decoded_by", report.decoded_by},
     };
+}
+
+nlohmann::json ToJson(const DecodedCpuBuffer& buffer) {
+    return {{"schema", buffer.schema}, {"format", buffer.format}, {"width", buffer.width}, {"height", buffer.height}, {"row_stride", buffer.row_stride}, {"color_space", buffer.color_space}, {"byte_count", buffer.pixels.size()}};
+}
+
+nlohmann::json ToJson(const GlyphRun& run) {
+    return {{"schema", run.schema}, {"request_id", run.request_id}, {"locale", run.locale}, {"glyph_count", run.glyph_count}, {"missing_glyph_count", run.missing_glyph_count}, {"run_hash", run.run_hash}};
+}
+
+nlohmann::json ToJson(const TextLayoutCapture& capture) {
+    nlohmann::json runs = nlohmann::json::array();
+    for (const auto& run : capture.glyph_runs) {
+        runs.push_back(ToJson(run));
+    }
+    return {{"schema", capture.schema}, {"glyph_runs", runs}, {"glyph_hash", capture.glyph_hash}};
+}
+
+nlohmann::json ToJson(const AudioStateCapture& capture) {
+    nlohmann::json commands = nlohmann::json::array();
+    for (const auto& command : capture.active_commands) {
+        commands.push_back({{"command_id", command.command_id}, {"kind", command.kind}, {"asset", command.asset.ToString()}, {"bus", command.bus}, {"volume", command.volume}, {"loop", command.loop}});
+    }
+    return {{"schema", capture.schema}, {"bus_volumes", capture.bus_volumes}, {"active_commands", commands}, {"state_hash", capture.state_hash}, {"silent_backend", capture.silent_backend}};
+}
+
+nlohmann::json ToJson(const VideoDecodeMetadata& metadata) {
+    return {{"schema", metadata.schema}, {"format", metadata.format}, {"width", metadata.width}, {"height", metadata.height}, {"duration_seconds", metadata.duration_seconds}, {"frame_rate", metadata.frame_rate}, {"decoded_by", metadata.decoded_by}};
+}
+
+nlohmann::json ToJson(const DecodedVideoFrame& frame) {
+    return {{"schema", frame.schema}, {"frame_index", frame.frame_index}, {"presentation_time_ns", frame.presentation_time_ns}, {"output_kind", frame.output_kind}, {"surface_token", frame.surface_token.id}, {"cpu_buffer", ToJson(frame.cpu_buffer)}, {"fallback_used", frame.fallback_used}};
+}
+
+nlohmann::json ToJson(const FilterGraphExecution& execution) {
+    nlohmann::json applications = nlohmann::json::array();
+    for (const auto& application : execution.applications) {
+        applications.push_back({{"pass_id", application.pass_id}, {"filter", application.filter}, {"target", application.target_name}, {"params_hash", application.params_hash}});
+    }
+    return {{"schema", execution.schema}, {"provider_id", execution.provider_id}, {"execution_mode", execution.execution_mode}, {"applications", applications}, {"output_hash", execution.output_hash}};
+}
+
+nlohmann::json ToJson(const TimelineAsset& timeline) {
+    nlohmann::json tracks = nlohmann::json::array();
+    for (const auto& track : timeline.tracks) {
+        nlohmann::json keys = nlohmann::json::array();
+        for (const auto& key : track.keys) {
+            keys.push_back({{"t", key.time_seconds}, {"value", key.value}, {"easing", key.easing}});
+        }
+        nlohmann::json audio = nlohmann::json::array();
+        for (const auto& command : track.audio_events) {
+            audio.push_back({{"command_id", command.command_id}, {"kind", command.kind}, {"asset", command.asset.ToString()}, {"bus", command.bus}, {"volume", command.volume}, {"loop", command.loop}});
+        }
+        nlohmann::json track_json = {{"id", track.id}, {"type", track.type}, {"keys", keys}, {"audio_events", audio}};
+        if (track.filter_profile.has_value()) {
+            track_json["filter_profile"] = ToJson(*track.filter_profile);
+        }
+        tracks.push_back(std::move(track_json));
+    }
+    return {{"schema", timeline.schema}, {"id", timeline.id.ToString()}, {"duration_seconds", timeline.duration_seconds}, {"tracks", tracks}};
+}
+
+nlohmann::json ToJson(const TimelineState& state) {
+    return {{"schema", state.schema}, {"timeline_id", state.timeline_id.ToString()}, {"cursor_time_ns", state.cursor_time_ns}, {"active_tracks", state.active_tracks}, {"pending_events", state.pending_events}, {"camera", state.camera}};
 }
 
 } // namespace Astra::Media

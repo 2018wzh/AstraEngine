@@ -1,8 +1,8 @@
 #include <Astra/Media/Media.hpp>
 
-#include <Astra/Asset/Asset.hpp>
+#include "MediaInternal.hpp"
 
-#include <sstream>
+#include <Astra/Asset/Asset.hpp>
 
 namespace Astra::Media {
 
@@ -17,19 +17,6 @@ Astra::Core::Diagnostic MakeDiagnostic(std::string code, Astra::Core::Diagnostic
     diagnostic.severity = severity;
     diagnostic.message = std::move(message);
     return diagnostic;
-}
-
-std::string StableHash(std::string_view text) {
-    constexpr Astra::Core::u64 offset = 14695981039346656037ull;
-    constexpr Astra::Core::u64 prime = 1099511628211ull;
-    Astra::Core::u64 value = offset;
-    for (const auto character : text) {
-        value ^= static_cast<unsigned char>(character);
-        value *= prime;
-    }
-    std::ostringstream output;
-    output << std::hex << value;
-    return output.str();
 }
 
 } // namespace
@@ -71,7 +58,7 @@ Astra::Core::Result<void> ValidateFilterProfile(const FilterProfile& profile, As
 std::vector<FilterApplication> ApplyFilterProfile(const FilterProfile& profile) {
     std::vector<FilterApplication> applications;
     for (const auto& pass : profile.passes) {
-        applications.push_back({pass.id, pass.filter, pass.target, ToString(pass.target), StableHash(pass.params.dump())});
+        applications.push_back({pass.id, pass.filter, pass.target, ToString(pass.target), Private::StableHash(pass.params.dump())});
     }
     return applications;
 }

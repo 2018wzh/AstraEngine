@@ -238,6 +238,60 @@ nlohmann::json Phase3MediaReleaseGateEvidence(Astra::Core::DiagnosticSink& diagn
     return Astra::Media::ToJson(report.Value());
 }
 
+nlohmann::json Phase7MediaBackendEvidence(Astra::Core::DiagnosticSink& diagnostics) {
+    auto providers = Astra::Media::ProductionMediaProviders();
+    Astra::Media::MediaReleaseGateRequest request;
+    request.providers = providers;
+    request.filter_profile = MakePhase3FoundationFilterProfile();
+    for (const auto& provider : providers) {
+        request.selected_providers[provider.slot_id] = provider.provider_id;
+    }
+    auto release = Astra::Media::ValidateMediaReleaseGate(request, diagnostics);
+
+    std::vector<Astra::Media::PresentationCommand> commands;
+    auto background = Astra::Asset::ParseAssetUri("native:/Backgrounds/Room");
+    if (background) {
+        Astra::Media::PresentationCommand draw;
+        draw.kind = Astra::Media::PresentationCommandKind::Sprite;
+        draw.command_id = "phase7.draw.background";
+        draw.frame_index = 7;
+        draw.layer = "background";
+        draw.asset = background.Value();
+        commands.push_back(std::move(draw));
+    }
+    auto graph = Astra::Media::ExtractRenderGraph(commands, &request.filter_profile.value(), diagnostics);
+    auto renderer = Astra::Media::CreateHeadlessRenderer2DProvider();
+    (void)renderer->BeginFrame({7, 1280, 720, "srgb"}, diagnostics);
+    (void)renderer->Execute(graph, diagnostics);
+    auto capture = renderer->Capture(diagnostics);
+    const auto filter_execution = Astra::Media::ExecuteFilterGraphHeadless(request.filter_profile.value(), graph);
+
+    const nlohmann::json timeline_json = {
+        {"schema", "astra.media.timeline.v1"},
+        {"id", "native:/Timelines/Opening"},
+        {"duration_seconds", 3.0},
+        {"tracks", nlohmann::json::array({
+            {{"id", "camera.main"}, {"type", "camera"}, {"keys", nlohmann::json::array({
+                {{"t", 0.0}, {"value", {{"x", 0}, {"y", 0}, {"zoom", 1.0}}}},
+                {{"t", 1.0}, {"value", {{"x", 24}, {"y", 0}, {"zoom", 1.05}}}, {"easing", "ease_out"}}
+            })}},
+            {{"id", "audio.bgm"}, {"type", "audio"}, {"audio_events", nlohmann::json::array({
+                {{"command_id", "timeline.bgm.opening"}, {"asset", "native:/Music/opening_theme"}, {"bus", "music"}, {"volume", 0.8}, {"loop", true}}
+            })}}
+        })},
+    };
+    auto timeline = Astra::Media::TimelineFromJson(timeline_json, diagnostics);
+
+    return {
+        {"schema", "astra.media.phase7_backend_evidence.v1"},
+        {"release_gate", release ? Astra::Media::ToJson(release.Value()) : nlohmann::json({{"schema", Astra::Media::MediaReleaseGateSchema}, {"passed", false}})},
+        {"renderer_capture", capture ? Astra::Media::ToJson(capture.Value()) : nlohmann::json::object()},
+        {"filter_graph", Astra::Media::ToJson(filter_execution)},
+        {"timeline_state", timeline ? Astra::Media::ToJson(Astra::Media::EvaluateTimeline(timeline.Value(), 1500000000ull)) : nlohmann::json::object()},
+        {"providers", providers.size()},
+    };
+}
+
 void RegisterFoundationGateCodes(Astra::Core::DiagnosticCodeRegistry& registry) {
     const std::vector<Astra::Core::DiagnosticCodeDescriptor> codes = {
         {"ASTRA_CORE_ASSERT", "core.error", Astra::Core::DiagnosticSeverity::Fatal, true},
@@ -598,6 +652,7 @@ nlohmann::json Phase3FoundationSmoke(Astra::Core::DiagnosticSink& diagnostics) {
         {"media_backend_capabilities",
          Astra::Media::ToJson(Astra::Media::ProbeMediaBackendCapabilities())},
         {"media_release_gate", Phase3MediaReleaseGateEvidence(diagnostics)},
+        {"phase7_media_backend", Phase7MediaBackendEvidence(diagnostics)},
     };
 }
 #include "ValidationEvidence.inc"

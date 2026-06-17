@@ -1,6 +1,6 @@
 # Asset / Package Production Contract
 
-状态：Phase 6 implemented / Phase 7 media execution pending  
+状态：Phase 6 implemented / Phase 7 media execution evidence implemented  
 定位：定义并记录已实现的 Importer、Cooker、DDC、binary `.astrapkg` streaming、hot reload rollback DTO 和 Asset Release Gate 生产接口。本文补足 `asset-pipeline.md` 的实现级边界。
 
 ## 1. 目标

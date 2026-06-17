@@ -88,9 +88,7 @@ IPresentationLibraryProvider
 IRenderer2DProvider
 ITextLayoutProvider
 IAudioProvider
-IImageDecodeProvider
-IAudioDecodeProvider
-IVideoDecodeProvider
+Decode provider slots (`astra.image_decode`, `astra.audio_decode`, `astra.video_decode`)
 IMcpToolProvider
 IAIProvider
 ```

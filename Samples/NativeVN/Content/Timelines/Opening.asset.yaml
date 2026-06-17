@@ -1,0 +1,20 @@
+schema: astra.asset.sidecar.v1
+id: native:/Timelines/Opening
+type: timeline
+source_path: Opening.timeline.yaml
+display_name: Opening Timeline
+tags: [nativevn, phase7, timeline]
+origin: HumanAuthored
+license:
+  owner: project
+  usage: internal
+  source: generated_fixture_timeline
+review:
+  status: accepted
+cook:
+  preset: timeline
+dependencies:
+  hard:
+    - native:/Music/opening_theme
+    - native:/Filters/soft_vn
+  soft: []

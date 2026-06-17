@@ -84,7 +84,7 @@ Phase 6 asset pipeline additions:
 - CLI: `astra import`, production `cook/package/inspect`, package-only `run`, save/replay package manifest hash/provider feature hash evidence, and replay mismatch localization for current frame/record/source-object/package hash reports.
 - Tests: import validation, DDC reuse/rebuild/corruption recovery, release gate blockers, binary package hash validation, zstd payload reads, chunked reads, and hot reload rollback DTO coverage.
 
-Known gaps: production Media backend/provider replacement, real decoded texture upload, executable font atlas/glyph rendering, audio mixer playback, GPU filter execution, full Script debugger/hot reload/Graph/Timeline, production AstraVN authoring surface, Editor, AI/MCP, and Legacy remain planned.
+Known gaps: per-driver visual/audio diff, full Script debugger/hot reload/Graph/Timeline, production AstraVN authoring surface, Editor, AI/MCP, and Legacy remain planned. Phase 7 media provider/decode/timeline/filter evidence is implemented through DTO-safe provider contracts and headless deterministic hashes.
 
 ## Troubleshooting
 

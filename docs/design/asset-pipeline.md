@@ -1,7 +1,7 @@
 # Asset Pipeline 设计
 
 状态：Phase 6 implemented production Asset Pipeline slice  
-定位：Astra 从 canonical source 到 cooked binary package 的完整内容管线，包括 AssetId、VFS、Importer、Cooker、DerivedDataCache、binary `.astrapkg`、Hot Reload rollback DTO 和 Asset Release Gate。Phase 7 仍负责真实 renderer/font/audio/filter 执行。
+定位：Astra 从 canonical source 到 cooked binary package 的完整内容管线，包括 AssetId、VFS、Importer、Cooker、DerivedDataCache、binary `.astrapkg`、Hot Reload rollback DTO 和 Asset Release Gate。Phase 7 media provider/decode/timeline/filter execution evidence now consumes these package payloads.
 
 ## 1. 目标
 
@@ -213,7 +213,7 @@ Load AssetRegistry
 
 Cook must be incremental and deterministic. Processor output must not depend on wall clock, random temp paths, provider response time or Editor state.
 
-当前内置 cook processors 覆盖 image texture、audio stream、font runtime、filter profile、native script、Lua script、timeline/text 和 generic asset binary。Phase 6 生成确定性的 binary payload metadata 与 payload hashes，并记录 provider feature hash；真实 GPU texture upload、font atlas execution、mixer playback 和 GPU filter execution 属于 Phase 7。
+当前内置 cook processors 覆盖 image texture、audio stream、font runtime、filter profile、native script、Lua script、timeline/text 和 generic asset binary。Phase 6 生成确定性的 binary payload metadata 与 payload hashes，并记录 provider feature hash；Phase 7 consumes those payloads through media decode/provider evidence for texture buffers、glyph runs、audio logical mixer state、timeline state and FilterGraph hashes.
 
 ## 7. DerivedDataCache
 
@@ -318,7 +318,7 @@ Hot reload levels：
 
 Release builds disable source hot reload unless explicit dev package profile.
 
-Phase 6 exposes `HotReloadTransaction` rollback DTOs with stages from Detect through SwitchAtFrameBoundary/RolledBack. Current reload planning is source/sidecar hash driven and retains old resources on validation failure; provider resource preparation/execution hooks deepen in Phase 7/10.
+Phase 6 exposes `HotReloadTransaction` rollback DTOs with stages from Detect through SwitchAtFrameBoundary/RolledBack. Phase 7 media providers use those stages as the resource prepare/switch boundary; broader provider hot-reload replacement policy deepens in customization/hardening.
 
 ## 11. Release Gate
 

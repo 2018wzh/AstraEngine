@@ -194,5 +194,104 @@ TEST_CASE("Media provider descriptors and release gate validate foundation slots
 
 }
 
+TEST_CASE("Media Phase 7 providers execute production DTO paths") {
+    Astra::Core::DiagnosticSink diagnostics;
+    auto providers = Astra::Media::ProductionMediaProviders();
+    REQUIRE(providers.size() == 8);
+
+    Astra::Media::MediaReleaseGateRequest request;
+    request.providers = providers;
+    for (const auto& provider : providers) {
+        request.selected_providers[provider.slot_id] = provider.provider_id;
+    }
+    auto release = Astra::Media::ValidateMediaReleaseGate(request, diagnostics);
+    REQUIRE(release);
+    REQUIRE(release.Value().selected_providers.size() == 8);
+    REQUIRE(release.Value().provider_hash_inputs.size() == 8);
+
+    const auto fixture_png = ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Content/UI/TextBox.png");
+    REQUIRE_FALSE(fixture_png.empty());
+    auto cpu_texture = Astra::Media::DecodeImageCpuBufferBytes(fixture_png, diagnostics);
+    REQUIRE(cpu_texture);
+    REQUIRE(cpu_texture.Value().row_stride == cpu_texture.Value().width * 4);
+
+    const auto audio_payload = ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Content/Music/opening_theme.ogg");
+    REQUIRE_FALSE(audio_payload.empty());
+    auto audio_decode = Astra::Media::DecodeAudioBytes(audio_payload, diagnostics);
+    REQUIRE(audio_decode);
+    REQUIRE(audio_decode.Value().pcm_frame_count > 0);
+
+    const std::vector<Astra::Core::u8> fake_video(12);
+    Astra::Core::DiagnosticSink video_diagnostics;
+    REQUIRE_FALSE(Astra::Media::InspectVideoBytes(fake_video, video_diagnostics));
+    REQUIRE(video_diagnostics.HasBlocking());
+
+    auto renderer = Astra::Media::CreateHeadlessRenderer2DProvider();
+    REQUIRE(renderer->BeginFrame({7, 1280, 720, "srgb"}, diagnostics));
+    auto texture = renderer->ImportTexture(cpu_texture.Value(), diagnostics);
+    REQUIRE(texture);
+    REQUIRE_FALSE(texture.Value().Empty());
+
+    std::vector<Astra::Media::PresentationCommand> commands;
+    Astra::Media::PresentationCommand draw;
+    draw.kind = Astra::Media::PresentationCommandKind::Sprite;
+    draw.command_id = "draw.phase7.texture";
+    draw.frame_index = 7;
+    draw.layer = "ui";
+    draw.asset = Astra::Asset::ParseAssetUri("native:/UI/TextBox").Value();
+    commands.push_back(std::move(draw));
+    auto graph = Astra::Media::ExtractRenderGraph(commands, nullptr, diagnostics);
+    REQUIRE(renderer->Execute(graph, diagnostics));
+    auto capture = renderer->Capture(diagnostics);
+    REQUIRE(capture);
+    REQUIRE_FALSE(capture.Value().render_hash.empty());
+    REQUIRE(capture.Value().commands["imported_texture_count"] == 1);
+
+    auto text_provider = Astra::Media::CreateFoundationTextLayoutProvider();
+    auto glyph = text_provider->Shape({"text.phase7", "Phase 7 text 確認", "ja-JP", "text", 10, {{"size", 28}}}, diagnostics);
+    REQUIRE(glyph);
+    REQUIRE(glyph.Value().glyph_count > 0);
+    REQUIRE(text_provider->PrepareAtlas(glyph.Value(), diagnostics));
+    auto text_capture = text_provider->Capture(diagnostics);
+    REQUIRE(text_capture);
+    REQUIRE_FALSE(text_capture.Value().glyph_hash.empty());
+
+    auto audio_provider = Astra::Media::CreateFoundationAudioProvider(true);
+    auto music = Astra::Asset::ParseAssetUri("native:/Music/opening_theme").Value();
+    REQUIRE(audio_provider->Submit({{"audio.phase7.music", "play", music, "music", 0.8, true}}, diagnostics));
+    auto audio_capture = audio_provider->Capture(diagnostics);
+    REQUIRE(audio_capture);
+    REQUIRE(audio_capture.Value().silent_backend);
+    REQUIRE_FALSE(audio_capture.Value().state_hash.empty());
+
+    Astra::Media::FilterProfile filter;
+    filter.id = Astra::Asset::ParseAssetUri("native:/Filters/soft_vn").Value();
+    filter.passes.push_back({"pass", "astra.filter.color_grade", Astra::Media::FilterTarget::Final, {{"preset", "warm"}}});
+    auto filter_execution = Astra::Media::ExecuteFilterGraphHeadless(filter, graph);
+    REQUIRE(filter_execution.execution_mode == "headless_hash_fallback");
+    REQUIRE_FALSE(filter_execution.output_hash.empty());
+
+    const auto timeline_json = nlohmann::json{
+        {"schema", "astra.media.timeline.v1"},
+        {"id", "native:/Timelines/Opening"},
+        {"duration_seconds", 3.0},
+        {"tracks", nlohmann::json::array({
+            {{"id", "camera.main"}, {"type", "camera"}, {"keys", nlohmann::json::array({
+                {{"t", 0.0}, {"value", {{"x", 0}, {"y", 0}, {"zoom", 1.0}}}},
+                {{"t", 1.0}, {"value", {{"x", 24}, {"y", 0}, {"zoom", 1.05}}}, {"easing", "ease_out"}}
+            })}},
+            {{"id", "audio.bgm"}, {"type", "audio"}, {"audio_events", nlohmann::json::array({
+                {{"command_id", "timeline.bgm"}, {"asset", "native:/Music/opening_theme"}, {"bus", "music"}, {"loop", true}}
+            })}}
+        })},
+    };
+    auto timeline = Astra::Media::TimelineFromJson(timeline_json, diagnostics);
+    REQUIRE(timeline);
+    auto state = Astra::Media::EvaluateTimeline(timeline.Value(), 1500000000ull);
+    REQUIRE(state.camera["zoom"] == 1.05);
+    REQUIRE_FALSE(state.pending_events.empty());
+    REQUIRE(Astra::Media::ToJson(state)["schema"] == "astra.media.timeline_state.v1");
+}
+
 
 

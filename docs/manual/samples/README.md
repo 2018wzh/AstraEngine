@@ -53,7 +53,7 @@ astra replay build/Saved/Replays/NativeVNGolden.replay --compare
 astra inspect build/Saved/Packages/NativeVN.astrapkg
 ```
 
-These commands prove the current Phase 6 playable slice, including binary `.astrapkg` packaging, zstd payloads, generated/copy fixture media decode evidence, SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence sourced from package payloads for `.astrapkg` runs, playable VN state, UI/system state, local DDC artifact writes/reuse/corruption recovery, PackageReader random/chunked reads, read-only package mount DTOs, package manifest hash/provider feature hash save-replay evidence, replay mismatch localization, Asset Release Gate evidence, and package/cook/payload manifest hash checks. They do not yet prove real media execution backends, Editor workflows, AI/MCP, Legacy, or final UE-class acceptance.
+These commands prove the current Phase 6 playable slice plus Phase 7 media backend evidence, including binary `.astrapkg` packaging, zstd payloads, generated/copy fixture media decode evidence, SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence sourced from package payloads for `.astrapkg` runs, playable VN state, UI/system state, timeline/media provider execution evidence, local DDC artifact writes/reuse/corruption recovery, PackageReader random/chunked reads, read-only package mount DTOs, package manifest hash/provider feature hash save-replay evidence, replay mismatch localization, Asset Release Gate evidence, and package/cook/payload manifest hash checks. They do not yet prove Editor workflows, AI/MCP, Legacy, per-driver visual/audio diff, or final UE-class acceptance.
 
 TsuiNoSora local fixture commands include:
 

@@ -1,8 +1,11 @@
 set(ASTRA_MEDIA_SOURCES
     Private/Media.cpp
     Private/MediaDecode.cpp
+    Private/MediaDecodePhase7.cpp
     Private/MediaFilter.cpp
+    Private/MediaProviders.cpp
     Private/MediaSerialization.cpp
+    Private/MediaTimeline.cpp
 )
 
 astra_add_library(AstraMedia ${ASTRA_MEDIA_SOURCES})

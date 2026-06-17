@@ -254,6 +254,8 @@ nlohmann::json ToJson(const ReplayComparisonReport& report) {
             {"actor", mismatch.actor},
             {"component", mismatch.component},
             {"script_location", mismatch.script_location},
+            {"provider_id", mismatch.provider_id},
+            {"asset_or_pass", mismatch.asset_or_pass},
             {"expected", mismatch.expected},
             {"actual", mismatch.actual},
         });
@@ -290,15 +292,15 @@ ReplayComparisonReport CompareReplayHashes(const RuntimeHashes& expected, const 
     report.actual = actual;
     if (expected.state_hash != actual.state_hash) {
         report.mismatches.push_back("state_hash");
-        report.localized_mismatches.push_back({"state_hash", 0, 0, "", "", "", expected.state_hash, actual.state_hash});
+        report.localized_mismatches.push_back({"state_hash", 0, 0, "", "", "", "", "", expected.state_hash, actual.state_hash});
     }
     if (expected.event_hash != actual.event_hash) {
         report.mismatches.push_back("event_hash");
-        report.localized_mismatches.push_back({"event_hash", 0, 0, "", "", "", expected.event_hash, actual.event_hash});
+        report.localized_mismatches.push_back({"event_hash", 0, 0, "", "", "", "", "", expected.event_hash, actual.event_hash});
     }
     if (expected.presentation_hash != actual.presentation_hash) {
         report.mismatches.push_back("presentation_hash");
-        report.localized_mismatches.push_back({"presentation_hash", 0, 0, "", "", "", expected.presentation_hash, actual.presentation_hash});
+        report.localized_mismatches.push_back({"presentation_hash", 0, 0, "", "", "", "astra.media", "presentation", expected.presentation_hash, actual.presentation_hash});
     }
     report.passed = report.mismatches.empty();
     return report;

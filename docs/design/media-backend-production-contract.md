@@ -39,7 +39,7 @@ features:
   - texture_import
   - render_target
   - frame_capture
-  - gpu_filter_graph
+  - filter_graph_execution
 headless_fallback: astra.renderer2d.headless
 packaged_eligible: true
 diagnostics_prefix: ASTRA_RENDERER2D
@@ -105,7 +105,7 @@ public:
 
 Rules:
 
-- Audio provider may consume `DecodedAudioPcm` or provider-owned stream token from `IAudioDecodeProvider`.
+- Audio provider may consume decoded PCM or provider-owned stream tokens once the future decode provider contract is implemented; current Phase 7 evidence records audio metadata and logical bus state.
 - Save stores logical bus state, currently playing logical cues, timeline sync and fade state.
 - Device unavailable falls back to silent provider when release profile allows it.
 
@@ -143,4 +143,3 @@ Diagnostic prefixes:
 - package payload image/font/audio decode flows into real provider execution.
 - headless and real backend produce comparable logical hashes.
 - GPU filter fallback and unsupported format diagnostics are covered.
-

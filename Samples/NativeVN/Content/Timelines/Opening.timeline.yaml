@@ -1,0 +1,31 @@
+schema: astra.media.timeline.v1
+id: native:/Timelines/Opening
+duration_seconds: 3.0
+tracks:
+  - id: camera.main
+    type: camera
+    keys:
+      - t: 0.0
+        value: { x: 0, y: 0, zoom: 1.0 }
+      - t: 1.0
+        easing: ease_out
+        value: { x: 24, y: 0, zoom: 1.05 }
+  - id: audio.bgm
+    type: audio
+    audio_events:
+      - command_id: timeline.bgm.opening
+        kind: play
+        asset: native:/Music/opening_theme
+        bus: music
+        volume: 0.8
+        loop: true
+  - id: filter.final
+    type: filter
+    filter_profile:
+      schema: astra.media.filter_profile.v1
+      id: native:/Filters/soft_vn
+      passes:
+        - id: final_grade
+          filter: astra.filter.color_grade
+          target: final
+          params: { preset: warm }

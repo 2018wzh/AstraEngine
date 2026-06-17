@@ -161,6 +161,8 @@ struct ReplayMismatch {
     std::string actor;
     std::string component;
     std::string script_location;
+    std::string provider_id;
+    std::string asset_or_pass;
     std::string expected;
     std::string actual;
 };

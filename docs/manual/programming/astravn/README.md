@@ -12,7 +12,7 @@ Status: Phase 4 implemented foundation with playable v1 sample evidence.
 - VN output crosses the same `RuntimeEvent` and `PresentationCommand` boundary as other runtime systems.
 - `VnSessionSnapshot` combines runtime save data, script snapshot, route/dialogue state, event logs, presentation commands, and headless capture hashes.
 - The tools playable evidence layer adds title/system menu/backlog/save/load/config state, media decode evidence, audio playback evidence, and replay route hashes for sample acceptance.
-- Camera and Timeline are represented as foundation schema identifiers only; production Timeline runtime is later work.
+- Camera and Timeline now have Phase 7 media timeline evidence for camera/audio/filter state; full graph authoring remains later work.
 
 ## Architecture
 

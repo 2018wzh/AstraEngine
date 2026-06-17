@@ -1,10 +1,10 @@
-# FilterGraph Foundation
+# FilterGraph
 
-Status: Phase 3 implemented foundation.
+Status: Phase 7 provider evidence implemented.
 
 ## Overview
 
-Phase 3 implements `FilterProfile` validation and deterministic headless application records for layer-aware 2D/VN effects. GPU filter execution is future production media work.
+`FilterProfile` validation now feeds Phase 7 FilterGraph provider evidence. The production provider descriptor is `astra.filter_graph.sdl_gpu`; CI and deterministic runs use `ExecuteFilterGraphHeadless()` to record the same layer-aware pass order and output hash without exposing GPU handles.
 
 ## Key Concepts
 
@@ -12,6 +12,7 @@ Phase 3 implements `FilterProfile` validation and deterministic headless applica
 - Each pass must have an `id` and `filter`.
 - Pass parameters are captured through deterministic JSON hashes.
 - Filter profiles are source assets and should use `native:/Filters/...` IDs.
+- Built-in pass names used by current evidence include gaussian blur, line enhance, color grade, and pass-through.
 
 ## Architecture
 
@@ -19,7 +20,7 @@ See [Media Runtime](../../../design/media-runtime.md) and [Content and Assets](.
 
 ## Programming Guide
 
-Use `FilterProfileFromJson()` to parse source data and `ValidateFilterProfile()` before applying it to a headless render graph. `ApplyFilterProfile()` returns application records that become part of the frame capture hash.
+Use `FilterProfileFromJson()` to parse source data and `ValidateFilterProfile()` before applying it to a render graph. `ApplyFilterProfile()` returns application records, and `ExecuteFilterGraphHeadless()` emits provider execution evidence and a deterministic output hash.
 
 ## API Reference
 
@@ -29,6 +30,8 @@ Use `FilterProfileFromJson()` to parse source data and `ValidateFilterProfile()`
 - `FilterProfileFromJson()`
 - `ValidateFilterProfile()`
 - `ApplyFilterProfile()`
+- `ExecuteFilterGraphHeadless()`
+- `FilterGraphExecution`
 
 ## Examples
 
@@ -45,4 +48,5 @@ passes:
 ## Troubleshooting
 
 - Invalid targets are blocking because layer names must be shared by tools, runtime, headless verification, and future release gates.
-- Phase 3 release-gate checks validate selected media providers and headless fallback support. Real filter implementation/provider execution checks remain future production media work.
+- Phase 7 release-gate checks validate selected filter provider descriptors and headless fallback support.
+- Unsupported filters in deterministic release should block unless the profile explicitly permits fallback.

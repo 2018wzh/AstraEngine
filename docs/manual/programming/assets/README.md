@@ -6,7 +6,7 @@ Status: Phase 6 implemented production Asset Pipeline slice.
 
 `AstraAsset` provides the asset contract for source sidecars, VFS resolution, generated registry scans, dependency diagnostics, importer descriptors, cook processors, local DDC read/write/rebuild/clean reports, binary `.astrapkg` writing/reading, package mount policy, hot reload rollback DTOs, and Asset Release Gate checks.
 
-It does not implement Phase 7 media execution: real renderer upload, executable font atlas/glyph rendering, mixer playback, or GPU filter execution.
+Phase 7 media provider evidence now consumes cooked/package payloads for texture buffers, glyph-run/atlas capture, logical audio mixer state, timeline state, and FilterGraph hashes. Per-driver visual/audio diff remains later hardening.
 
 ## Key Concepts
 

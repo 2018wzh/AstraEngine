@@ -115,7 +115,7 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 
 ## 6. Phase 3：Foundation Asset / Media / FilterGraph
 
-状态：Implemented foundation slice. 当前实现覆盖 `AstraAsset` 和 `AstraMedia`：asset URI/ID 解析、VFS mount、sidecar DTO/validation、registry scan、dependency diagnostics、import preset/project template/review item DTO、watch invalidation plumbing、PresentationCommand、RenderGraph/text/audio/filter DTO、FilterProfile validation/application、Renderer2D/TextLayout/Audio foundation provider descriptors、media release-gate foundation validation、mature backend capability probe（SDL3、libpng、libjpeg-turbo、libwebp、FreeType、HarfBuzz、miniaudio）、PNG/JPEG/WebP image metadata inspect API、image cook artifact metadata、HeadlessRenderer2D deterministic capture/hash，以及 SDL renderer factory private compile-path stub。Phase 6 已完成 cook/package binary transforms 和 package launch；真实 decoded texture upload、font atlas/shaped glyph execution、audio playback/mixing execution、GPU filter execution 仍属 Phase 7 production completion。
+状态：Implemented foundation slice plus Phase 7 media backend evidence. 当前实现覆盖 `AstraAsset` 和 `AstraMedia`：asset URI/ID 解析、VFS mount、sidecar DTO/validation、registry scan、dependency diagnostics、import preset/project template/review item DTO、watch invalidation plumbing、PresentationCommand、RenderGraph/text/audio/filter DTO、FilterProfile validation/application、Renderer2D/TextLayout/Audio/ImageDecode/AudioDecode/VideoDecode/Timeline/FilterGraph provider descriptors、media release-gate validation、mature backend capability probe（SDL3、libpng、libjpeg-turbo、libwebp、FreeType、HarfBuzz、miniaudio、FFmpeg）、PNG/JPEG/WebP image metadata/RGBA decode API、decoded CPU texture buffer import、glyph-run/atlas token capture、logical miniaudio mixer/bus capture、video decode extension-point diagnostics、Timeline camera/audio/filter state、image/audio cook artifact metadata、HeadlessRenderer2D deterministic capture/hash，以及 Phase 7 CLI/sample evidence。PCM sample decode、GPU shader execution、video frame decode 和 per-driver visual/audio diff remain later hardening。
 
 目标：
 
@@ -136,7 +136,7 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 
 非目标：
 
-- 不实现真实 decoded texture upload、font atlas/glyph execution、audio playback、GPU filter execution；当前建立 mature backend capability evidence、image cook metadata evidence，并由 Phase 6 提供 binary cook/package path。
+- Phase 7 evidence implements provider contracts, decoded texture-buffer import, glyph-run/atlas capture, audio logical mixer state, timeline state and FilterGraph execution hashes；不承诺跨驱动像素级视觉 diff 或真实设备音频 diff。
 
 ## 7. Phase 4：Foundation ScriptRuntimeHost / AstraVN
 
@@ -188,7 +188,7 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 
 ## 9. Phase 6：Asset Pipeline Completion
 
-状态：Implemented Phase 6 production Asset Pipeline slice. 当前实现覆盖 public Importer/Cooker/DDC/package contracts、built-in importers/cook processors、local DDC reuse/rebuild/corruption recovery、binary `.astrapkg` writer/reader、zstd payload compression、random-access/chunked package reads、read-only mount policy、Asset Release Gate blockers、hot reload rollback DTO、CLI `import/cook/package/inspect/run/replay` wiring，以及 NativeVN package-only save/replay/package-hash evidence。真实 media execution 仍属 Phase 7。
+状态：Implemented Phase 6 production Asset Pipeline slice with Phase 7 media execution evidence. 当前实现覆盖 public Importer/Cooker/DDC/package contracts、built-in importers/cook processors、local DDC reuse/rebuild/corruption recovery、binary `.astrapkg` writer/reader、zstd payload compression、random-access/chunked package reads、read-only mount policy、Asset Release Gate blockers、hot reload rollback DTO、CLI `import/cook/package/inspect/run/replay` wiring、NativeVN package-only save/replay/package-hash evidence，以及 media provider/decode/timeline/filter evidence。
 
 目标：
 

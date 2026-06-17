@@ -82,6 +82,11 @@ bool IsRequiredMediaSlot(std::string_view slot_id) {
     return slot_id == Renderer2DSlotId || slot_id == TextLayoutSlotId || slot_id == AudioSlotId;
 }
 
+bool IsKnownMediaSlot(std::string_view slot_id) {
+    return IsRequiredMediaSlot(slot_id) || slot_id == ImageDecodeSlotId || slot_id == AudioDecodeSlotId
+        || slot_id == VideoDecodeSlotId || slot_id == TimelineSlotId || slot_id == FilterGraphSlotId;
+}
+
 void EmitBlocking(Astra::Core::DiagnosticSink& diagnostics, std::string code, std::string message, std::string object_id = {}) {
     auto diagnostic = MakeDiagnostic(std::move(code), Astra::Core::DiagnosticSeverity::Blocking, std::move(message));
     if (!object_id.empty()) {
@@ -253,14 +258,38 @@ std::vector<MediaProviderDescriptor> FoundationMediaProviders() {
     return providers;
 }
 
+std::vector<MediaProviderDescriptor> ProductionMediaProviders() {
+    auto providers = FoundationMediaProviders();
+    auto capabilities = ProbeMediaBackendCapabilities();
+    providers[0].provider_id = "astra.renderer2d.sdl";
+    providers[0].display_name = "Astra SDL3 Renderer2D";
+    providers[0].features = {"texture_import", "sprite_batching", "render_target", "frame_capture", "clip_scissor", "device_recreate"};
+    providers[0].hot_reload_level = "asset";
+    providers[1].provider_id = "astra.text_layout.freetype_harfbuzz";
+    providers[1].display_name = "Astra FreeType/HarfBuzz Text Layout";
+    providers[1].features = {"text_shaping", "font_rasterization", "glyph_atlas", "fallback_font", "missing_glyph_diagnostics"};
+    providers[1].hot_reload_level = "asset";
+    providers[2].provider_id = "astra.audio.miniaudio";
+    providers[2].display_name = "Astra miniaudio Mixer";
+    providers[2].features = {"audio_decode", "audio_mixer", "audio_streaming", "bus_routing", "pause_resume", "fade", "ducking", "silent_fallback"};
+    providers[2].hot_reload_level = "asset";
+
+    providers.push_back({"astra.decode.image.foundation", ImageDecodeSlotId, "Astra Image Decode Provider", true, capabilities.image_formats, {"cpu_decode", "package_payload"}, "ASTRA_DECODE_IMAGE", "asset"});
+    providers.push_back({"astra.decode.audio.foundation", AudioDecodeSlotId, "Astra Audio Decode Provider", true, {"ogg", "wav", "flac", "mp3"}, {"metadata_decode", "package_payload"}, "ASTRA_DECODE_AUDIO", "asset"});
+    providers.push_back({"astra.decode.video.ffmpeg", VideoDecodeSlotId, "Astra FFmpeg Video Decode Extension", true, {"mp4", "webm", "mkv", "ogv"}, {"extension_point", "no_fake_fallback"}, "ASTRA_DECODE_VIDEO", "asset"});
+    providers.push_back({"astra.timeline.default", TimelineSlotId, "Astra Timeline Provider", true, {"astra.media.timeline.v1"}, {"camera_keys", "audio_events", "filter_events", "save_replay_state"}, "ASTRA_TIMELINE", "asset"});
+    providers.push_back({"astra.filter_graph.sdl_gpu", FilterGraphSlotId, "Astra FilterGraph Evidence", true, {"astra.media.filter_profile.v1"}, {"headless_hash_fallback", "gaussian_blur_descriptor", "line_enhance_descriptor", "color_grade_descriptor", "pass_through_descriptor"}, "ASTRA_FILTER_GRAPH", "asset"});
+    return providers;
+}
+
 Astra::Core::Result<void> ValidateMediaProviderDescriptor(const MediaProviderDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics) {
     bool valid = true;
     if (descriptor.provider_id.empty()) {
         EmitBlocking(diagnostics, "ASTRA_MEDIA_PROVIDER_ID_MISSING", "Media provider requires provider_id.");
         valid = false;
     }
-    if (descriptor.slot_id.empty() || !IsRequiredMediaSlot(descriptor.slot_id)) {
-        EmitBlocking(diagnostics, "ASTRA_MEDIA_PROVIDER_SLOT_INVALID", "Media provider slot_id must be astra.renderer2d, astra.text_layout, or astra.audio.", descriptor.provider_id);
+    if (descriptor.slot_id.empty() || !IsKnownMediaSlot(descriptor.slot_id)) {
+        EmitBlocking(diagnostics, "ASTRA_MEDIA_PROVIDER_SLOT_INVALID", "Media provider slot_id must be a known media or decode slot.", descriptor.provider_id);
         valid = false;
     }
     if (descriptor.display_name.empty()) {
@@ -314,7 +343,15 @@ Astra::Core::Result<MediaReleaseGateReport> ValidateMediaReleaseGate(const Media
     }
 
     MediaReleaseGateReport report;
-    for (const auto* slot : {Renderer2DSlotId, TextLayoutSlotId, AudioSlotId}) {
+    std::vector<const char*> required_slots = {Renderer2DSlotId, TextLayoutSlotId, AudioSlotId};
+    for (const auto& provider : providers) {
+        if (!IsRequiredMediaSlot(provider.slot_id)
+            && std::ranges::find(required_slots, provider.slot_id) == required_slots.end()) {
+            required_slots.push_back(provider.slot_id.c_str());
+        }
+    }
+
+    for (const auto* slot : required_slots) {
         const auto selected = selections.find(slot);
         if (selected == selections.end() || selected->second.empty()) {
             EmitBlocking(diagnostics, "ASTRA_MEDIA_RELEASE_SLOT_MISSING", std::string("Media release gate requires a selected provider for ") + slot + ".");
@@ -336,6 +373,7 @@ Astra::Core::Result<MediaReleaseGateReport> ValidateMediaReleaseGate(const Media
             valid = false;
         }
         report.selected_providers.push_back(*provider->second);
+        report.provider_hash_inputs.push_back(std::string(slot) + "=" + provider->second->provider_id);
     }
 
     if (request.filter_profile.has_value()) {

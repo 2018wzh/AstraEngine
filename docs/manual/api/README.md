@@ -49,6 +49,9 @@ Current concrete implementation slices:
 - `Engine/Programs/astra/Private/ToolsHash.cpp`: shared file hashing helper for CLI evidence reports.
 - `Engine/Runtime/Media/Private/Media.cpp`: media backend probing, renderer capture, provider validation, and media release-gate evaluation.
 - `Engine/Runtime/Media/Private/MediaDecode.cpp`: image/audio/font decode and inspect helpers for media backend evidence.
+- `Engine/Runtime/Media/Private/MediaProviders.cpp`: Phase 7 Renderer2D/TextLayout/Audio/ImageDecode/AudioDecode/VideoDecode provider contract implementations.
+- `Engine/Runtime/Media/Private/MediaTimeline.cpp`: timeline parsing/evaluation and FilterGraph execution hash evidence.
+- `Engine/Runtime/Media/Private/MediaDecodePhase7.cpp`: decoded CPU texture buffers, logical PCM buffers, and video extension decode helpers.
 - `Engine/Runtime/Media/Private/MediaFilter.cpp`: filter profile parsing, validation, target conversion, and application hashing.
 - `Engine/Runtime/Media/Private/MediaSerialization.cpp`: media presentation and report JSON serialization for commands, render graphs, frame captures, and backend capability reports.
 - `Engine/Runtime/Runtime/Private/Runtime.cpp`: runtime event bus, scheduler, state machine wiring, control policy, snapshot capture, and world lifecycle.
@@ -126,7 +129,7 @@ Phase 4 Script/AstraVN foundation APIs are in `Script.hpp` and `AstraVN.hpp`:
 - `FoundationProfile()`
 - `FoundationStateMachines()`
 
-Planned later entries include production Media backend providers, full Script debugger/hot reload/Graph/Timeline, production AstraVN authoring workflow, Editor, AI/MCP, and broader runtime release/observability APIs.
+Planned later entries include full Script debugger/hot reload/Graph, production AstraVN authoring workflow, Editor, AI/MCP, per-driver visual/audio diff, and broader runtime release/observability APIs.
 
 Phase 6 Asset and NativeVN runtime evidence APIs now also include:
 

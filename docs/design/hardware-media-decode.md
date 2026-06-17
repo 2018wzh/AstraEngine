@@ -1,7 +1,7 @@
 # Hardware Media Decode Contract
 
 状态：Production contract draft / not yet implemented  
-定位：定义独立 Image/Audio/Video Decode Provider。硬件加速解码不并入 Renderer2D 或 AudioProvider；Renderer2D/Audio 只消费解码输出或 provider-owned opaque token。
+定位：定义独立 Image/Audio/Video Decode Provider 目标形态。当前 Phase 7 代码只实现 decode slots、descriptor/release-gate evidence、image CPU decode、audio metadata decode 和 video extension-point diagnostics；硬件加速解码不并入 Renderer2D 或 AudioProvider。
 
 ## 1. 目标
 
@@ -32,7 +32,7 @@ Decode provider descriptor:
 ```yaml
 schema: astra.media.decode_provider.v1
 provider_id: astra.decode.video.media_foundation
-contract: IVideoDecodeProvider
+contract: VideoDecodeProvider
 slot_id: astra.video_decode
 hardware_accelerated: true
 zero_copy_supported: true
@@ -119,24 +119,24 @@ fallback_used: false
 
 ## 4. Interfaces
 
-准接口：
+准接口草案（尚未作为当前 public C++ provider class 暴露）：
 
 ```cpp
-class IImageDecodeProvider {
+class ImageDecodeProvider {
 public:
     virtual DecodeProviderDescriptor Describe() const = 0;
     virtual Result<ImageDecodeMetadata> Inspect(DecodeRequest, DiagnosticSink&) = 0;
     virtual Result<DecodedCpuBuffer> DecodeImage(DecodeRequest, DiagnosticSink&) = 0;
 };
 
-class IAudioDecodeProvider {
+class AudioDecodeProvider {
 public:
     virtual DecodeProviderDescriptor Describe() const = 0;
     virtual Result<AudioDecodeMetadata> Inspect(DecodeRequest, DiagnosticSink&) = 0;
-    virtual Result<DecodedAudioPcm> DecodeAudio(DecodeRequest, DiagnosticSink&) = 0;
+    virtual Result<DecodedAudioBuffer> DecodeAudio(DecodeRequest, DiagnosticSink&) = 0;
 };
 
-class IVideoDecodeProvider {
+class VideoDecodeProvider {
 public:
     virtual DecodeProviderDescriptor Describe() const = 0;
     virtual Result<VideoDecodeMetadata> Open(DecodeRequest, DiagnosticSink&) = 0;
@@ -184,4 +184,3 @@ Diagnostics:
 - video provider fallback to CPU or placeholder according to profile.
 - zero-copy compatibility failure diagnostic.
 - packaged payload decode using PackageReader, not source path.
-

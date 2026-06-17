@@ -439,22 +439,22 @@ SaveContainerV2 RuntimeWorld::SaveV2(bool compress_sections) const {
         {"created_frame", impl_->frame_index},
         {"project_version", 1},
         {"module_versions", nlohmann::json::object()},
-        {"schema_versions", {{"runtime_snapshot", 1}, {"scheduler", 1}, {"replay", 1}}},
+        {"schema_versions", {{"runtime_snapshot", 1}, {"scheduler", 1}, {"replay", 1}, {"media_logical_state", 1}}},
     };
     std::vector<std::pair<std::string, nlohmann::json>> section_payloads = {
-        {"runtime_snapshot", build_info.payload},
-        {"scheduler", ToJson(Scheduler())},
-        {"replay", ToJson(CaptureReplay())},
-        {"script_state", nlohmann::json::object()},
-        {"media_state", nlohmann::json::object()},
-        {"resource_overrides", nlohmann::json::object()},
-        {"ai_committed_output", nlohmann::json::array()},
-        {"module_extension_state", nlohmann::json::object()},
+        {"section:/runtime/world", build_info.payload},
+        {"section:/runtime/scheduler", ToJson(Scheduler())},
+        {"section:/runtime/replay", ToJson(CaptureReplay())},
+        {"section:/script/runtime", nlohmann::json::object()},
+        {"section:/media/logical_state", {{"schema", "astra.media.logical_state.v1"}, {"provider_hashes", nlohmann::json::object()}, {"timeline_states", nlohmann::json::array()}, {"audio_state", nlohmann::json::object()}, {"filter_state", nlohmann::json::object()}}},
+        {"section:/media/resource_overrides", nlohmann::json::object()},
+        {"section:/ai/committed_output", nlohmann::json::array()},
+        {"section:/modules/extension_state", nlohmann::json::object()},
     };
     for (const auto& [name, payload] : section_payloads) {
         SaveSection section;
         section.name = name;
-        section.schema = name == "runtime_snapshot" ? SnapshotSchema : "astra.runtime." + name + ".v1";
+        section.schema = name == "section:/runtime/world" ? SnapshotSchema : "astra.runtime." + name.substr(std::string("section:/").size()) + ".v1";
         section.payload = payload;
         const auto dumped = payload.dump();
         section.hash = StableHash(dumped);
@@ -510,7 +510,7 @@ Astra::Core::Result<void> RuntimeWorld::Load(const SaveContainerV2& container, A
     }
     const SaveSection* runtime_section = nullptr;
     for (const auto& section : container.sections) {
-        if (section.name == "runtime_snapshot") {
+        if (section.name == "runtime_snapshot" || section.name == "section:/runtime/world") {
             runtime_section = &section;
             break;
         }

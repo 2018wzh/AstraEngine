@@ -93,6 +93,7 @@ CommandReport Validate(const std::filesystem::path& target, const CommandOptions
         report.artifacts["phase3_media_backend_capabilities"] =
             Astra::Media::ToJson(Astra::Media::ProbeMediaBackendCapabilities());
         report.artifacts["phase3_media_release_gate"] = Phase3MediaReleaseGateEvidence(diagnostics);
+        report.artifacts["phase7_media_backend"] = Phase7MediaBackendEvidence(diagnostics);
         if (IsArtemisVnSample(absolute)) {
             report.artifacts["tsuinosora_fixture"] = ArtemisFixtureReport(absolute, registry);
         } else if (IsVnSmokeSample(absolute)) {

@@ -1,6 +1,6 @@
 # AstraEngine Manual
 
-Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline. Foundation Core, Platform, ModuleRuntime, and PropertySystem include production Foundation gate evidence; Scene, Runtime, Media, Script, AstraVN, the example plugin, and foundation CLI workflows are implemented as executable slices. Asset now includes the Phase 6 production pipeline: importers, cook processors, local DDC, binary `.astrapkg`, package reads, release gate and hot reload rollback DTOs. Engine libraries are dynamic-only `Astra*` DLLs. `Samples/NativeVN` now has source asset sidecars, binary package evidence, package-only launch/save/replay smoke, and golden replay comparison evidence. Production Editor, AI/MCP, Legacy, real media execution backends, and broader creator workflows are planned.
+Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline and Phase 7 Media Backend evidence. Foundation Core, Platform, ModuleRuntime, and PropertySystem include production Foundation gate evidence; Scene, Runtime, Media, Script, AstraVN, the example plugin, and CLI workflows are implemented as executable slices. Asset includes importers, cook processors, local DDC, binary `.astrapkg`, package reads, release gate and hot reload rollback DTOs. Media includes production provider descriptors, decode providers, texture-buffer import evidence, glyph-run/atlas capture, logical audio mixer state, timeline state and FilterGraph hashes. Production Editor, AI/MCP, Legacy, and broader creator workflows are planned.
 
 ## Overview
 
