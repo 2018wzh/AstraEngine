@@ -3,8 +3,7 @@
 ## 1. Editor 目标
 
 AstraEditor 是面向模块化 2D/VN 创作的工具链。它完整服务 Astra 原生脚本、Graph、Timeline、FilterGraph 和 VN 模块。
-旧 VN 兼容项目的只读脚本/反汇编/资源查看、运行时调试和现代化配置属于 Legacy expansion track，
-在 native runtime production parity 之后接入稳定 Runtime/Asset/Media/Script API。
+旧 VN 运行、增强和翻译由独立 AstraEmu Toolkit 承担，不进入 Editor 创作流程。
 
 ## 2. Editor 模块
 
@@ -20,7 +19,6 @@ AstraEditor
 ├─ Filter Graph Editor
 ├─ Runtime Debugger
 ├─ Editor Copilot MCP / Content Generation MCP / Review Queue
-├─ Compatibility Inspector (expansion track)
 └─ Build / Package / Release Gate
 ```
 
@@ -167,23 +165,7 @@ Asset Editor Request
 
 第一目标态覆盖文本、图像、音频、语音、视频和动画草稿。导入时必须生成稳定 AssetId、license、review 状态和审计链接；拒绝或取消的 draft 不进入 AssetRegistry、Cook 或 Package。
 
-## 4. Legacy Expansion Track：旧 VN 现代化链路
-
-旧 VN 现代化链路不是 Astra 原生 runtime 达到 UE-class 2D parity 的前置条件。
-它必须依赖稳定的 Runtime、Asset、Media、Script、Save 和 FilterGraph 边界，不能反向改变 Core。
-
-```text
-External Game Directory
-  -> Read-only VFS Mount
-  -> Legacy Package Reader
-  -> Compat Runtime / VM
-  -> Modernization Profile
-  -> Runtime Debugger / Inspector
-```
-
-Compatibility Inspector 支持查看 VM 状态、变量、缺失资源、未支持 API、FilterProfile、字体替换、UI 覆盖和高清替换。
-
-## 5. Cook / Package
+## 4. Cook / Package
 
 Cook 阶段负责：
 
@@ -194,11 +176,11 @@ Cook 阶段负责：
 - 图片、音频、字体、FilterProfile 和 shader cook。
 - 本地化表生成。
 - AI 审计报告。
-- Legacy compatibility metadata 和 modernization profile 校验仅在 compat expansion build 中启用。
+- AstraEmu Toolkit 不参与此流程；旧 VN 内容不作为 NativeVN source content 导入。
 
 Package 默认生成 deterministic build，不包含运行时 AI Provider 和 authoring-only 模块。
 
-## 6. Release Gate
+## 5. Release Gate
 
 发布前必须检查：
 
@@ -208,20 +190,17 @@ Package 默认生成 deterministic build，不包含运行时 AI Provider 和 au
 - 未审核 AI 内容为 0，除非发布模式允许。
 - AI-generated asset 均有 sidecar、license、Generation Audit 和 accepted review 状态。
 - Runtime AI、MCP、Provider、Audit 模块权限与发布模式一致。
-- Legacy mount-only 项目没有复制外部原始资产；此项仅在 compat expansion build 中启用。
 - 插件 ABI、权限、依赖闭包和 packaged eligibility 有效。
 
-## 7. 测试
+## 6. 测试
 
 测试层级：
 
 - Unit：Core、AssetId、PropertySystem、EventBus、StateMachineRuntime。
 - Integration：Actor World、ScriptRuntimeHost、FilterGraph、Save/Replay。
 - Headless：VN 路径、AI Intent。
-- Expansion Headless：legacy VM playback。
 - Editor Smoke：项目打开、资产导入、PIE、Inspector。
 - Release Gate：schema、AI、plugin、package policy。
-- Expansion Release Gate：compat、mount-only、modernization profile policy。
 
 Creator acceptance：
 
@@ -229,3 +208,4 @@ Creator acceptance：
 - 工具作者能添加 Editor panel，不修改 Runtime。
 - 插件作者能替换 Renderer2D/TextLayout/Audio provider，并通过 Release Gate。
 - AI Copilot 能提出脚本修复，AI 内容生成能导入 draft，二者都经过 Review Queue。
+- 旧 VN 运行和现代化由 AstraEmu Toolkit 文档单独验收。

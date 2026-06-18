@@ -416,32 +416,32 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 
 - 不要求复杂 3D、FPS、高实时网络竞技、大型开放世界或 UE UObject parity。
 
-## 18. Expansion Track：Legacy VN Emulator / Modernization
+## 18. Expansion Deliverable：AstraEmu Toolkit
 
 目标：
 
-- 在 native runtime production parity 之后，使用稳定 Runtime/Asset/Media/Script API 承载旧 VN 兼容和现代化。
+- 在 native runtime production parity 之后，交付独立 `AstraEmu Toolkit`，使用稳定 Runtime/Asset/Media/Script API 承载旧 VN 兼容和现代化。
+- AstraEmu 不进入 NativeVN 制作流程，不作为 Editor authoring 工具。
 - 实现入口：`legacy-compatibility-contract.md`。
 
 交付：
 
-- CompatRuntimeProvider、ForeignProjectProbe、PackageReader。
-- Legacy VM state、opcode/timeline adapter、API Mapper。
-- Save extension state。
-- Compatibility Inspector。
-- Modernization Profile、font replacement、UI overlay、FilterProfile。
-- Mock legacy runtime fixture。
-- BGI、Kirikiri、Ren'Py、NScripter prototype。
-- Artemis prototype：unpacked-directory probe、`foreign-artemis:/` resolver、`.iet/.asb/.ast` index、minimal `e:*` host API、tag/API coverage report。
+- AstraEmu Manager、Content Probe、Compat Core loader。
+- `ICompatRuntimeProvider`、Legacy VM state、opcode/timeline adapter、API Mapper。
+- Local mount reader、save-state、Runtime Inspector。
+- Enhancement Profile、font replacement、UI overlay、FilterProfile、TextCapture 和 translation bridge。
+- Mock Compat Core fixture。
+- BGI、Kirikiri、Ren'Py、NScripter core prototype。
+- Artemis core prototype：unpacked-directory probe、`foreign-artemis:/` resolver、`.iet/.asb/.ast` index、minimal `e:*` host API、tag/API coverage report。
 
 验收：
 
-- 至少一个 mock legacy runtime 可运行并输出 VN presentation。
-- Legacy save extension state 可进入 save/replay。
-- Mount-only 默认不复制外部原始资产。
-- Legacy 模块不反向污染 Core、Runtime、Asset、Media 的基础边界。
-- Artemis prototype can map high-frequency tags to AstraVN Events without sharing Artemis VM control flow with AstraVN source languages。
+- 至少一个 mock Compat Core 可运行并输出 VN presentation。
+- Save-state 可捕获并恢复 opaque VM state。
+- Mount-only 默认不修改 foreign source。
+- AstraEmu 不反向污染 Core、Runtime、Asset、Media 或 NativeVN 制作流程。
+- Artemis core can map high-frequency tags to AstraVN Events without sharing Artemis VM control flow with AstraVN source languages。
 
 非目标：
 
-- Legacy 不是 native runtime 达到 UE-class 2D parity 的前置条件。
+- AstraEmu 不是 native runtime 达到 UE-class 2D parity 的前置条件，也不是 NativeVN 创作流程的一部分。

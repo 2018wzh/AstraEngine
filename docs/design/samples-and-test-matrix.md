@@ -40,7 +40,7 @@ Samples/
 ├─ AIIntentSafety
 ├─ CreatorWorkflow
 ├─ CustomizationPlugin
-└─ CompatMockExpansion
+└─ AstraEmuToolkit
 ```
 
 Sample descriptor：
@@ -254,21 +254,23 @@ Acceptance：
 - invalid permission is blocked by Release Gate。
 - public ABI forbidden type scan passes。
 
-## 11. CompatMockExpansion
+## 11. AstraEmuToolkit
 
 Purpose：
 
-- Prove legacy expansion track does not pollute native runtime。
+- Prove AstraEmu is a standalone toolkit and does not participate in NativeVN creation workflow。
 
 Must include：
 
-- mock foreign project root。
-- mock package reader。
-- mock legacy VM state。
+- mock local game root。
+- mock content reader。
+- mock Compat Core state。
 - LegacyApiMapper output to VN events。
-- modernization profile。
-- save extension state。
-- `legacy-compatibility-contract.md` CompatRuntimeProvider, LegacyPackageReader and SaveExtensionStateProvider boundary coverage。
+- enhancement profile。
+- save-state。
+- TextCaptureEvent and translation Provider bridge。
+- core cold-swap rollback。
+- `legacy-compatibility-contract.md` AstraEmuManager, CompatRuntimeProvider, ILegacyContentReader, LegacyVmSnapshot and TextCapture boundary coverage。
 
 Optional local fixture：
 
@@ -284,15 +286,16 @@ Artemis-specific scenarios：
 - produce host API coverage report for Artemis `e:*` calls。
 - produce tag coverage report for high-frequency story tags and unsupported tags。
 - verify LegacyApiMapper emits AstraVN Events and PresentationCommand data。
-- verify mount-only policy blocks copying `foreign-artemis:/` assets。
-- verify save extension state stores Artemis VM cursor、variables、call stack and package mounts as opaque compat state。
+- verify mount-only policy blocks writes to `foreign-artemis:/` assets。
+- verify save-state stores Artemis VM cursor、variables and call stack as opaque compat state。
+- verify TextCaptureEvent can reach a translation Provider and return overlay output。
 
 Acceptance：
 
-- compat sample runs only when expansion profile enabled。
-- native samples build/package without compat module。
+- AstraEmu toolkit sample runs outside NativeVN project authoring。
+- native samples build/package without AstraEmu module。
 - foreign assets remain mount-only。
-- save extension state loads/replays without changing native save schema。
+- save-state loads without changing native save schema。
 
 ## 12. Test Matrix
 
@@ -308,7 +311,7 @@ smoke
 stress
   RuntimeStress / large content / long-run soak / hot reload rollback
 compat
-  CompatMockExpansion / mount-only / mapper fallback
+  AstraEmuToolkit / mount-only / mapper fallback / TextCapture
 release-gate
   missing dependency / unreviewed AI / invalid license / invalid plugin permission / runtime AI deterministic block
 doc
@@ -349,4 +352,4 @@ UE-class 2D runtime acceptance requires current evidence, not intent：
 - `NativeVN` is the final UE-class acceptance sample。
 - `CustomizationPlugin` proves tool/plugin authors can extend without Runtime edits。
 - `CreatorWorkflow` proves authoring ergonomics and review/undo/package flow。
-- `CompatMockExpansion` proves legacy remains post-parity expansion track。
+- `AstraEmuToolkit` proves legacy compatibility remains a standalone toolkit after native parity。

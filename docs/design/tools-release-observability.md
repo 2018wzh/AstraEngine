@@ -140,7 +140,7 @@ Release Gate profiles：
 - `development`：warnings allowed, source hot reload allowed, editor MCP allowed。
 - `deterministic`：runtime AI/MCP disabled, no unreviewed AI draft, deterministic package required。
 - `hybrid_ai`：runtime AI allowed only with explicit provider, fallback, audit and committed-output policy。
-- `compat_expansion`：legacy compat modules and foreign mounts allowed with mount-only policy。
+- `astra_emu_toolkit`：standalone AstraEmu modules and local foreign mounts allowed with mount-only policy。
 
 Blocking categories：
 

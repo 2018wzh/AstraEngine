@@ -34,7 +34,7 @@
 | MCP Integration | `mcp-integration.md` | Editor/Runtime MCP hosts, resources/tools/prompts | TODO 16, 17 | MCP tool tests |
 | Tools / Release / Observability | `tools-release-observability.md`, `release-gate-observability-contract.md` | CLI output, structured logging, release report, trace, crash bundle | TODO 17 | release commands, log JSONL |
 | Samples / Tests | `samples-and-test-matrix.md` | sample descriptor, test descriptor | TODO 18 | CI/local command output |
-| Legacy Expansion | `compatibility-layer.md`, `legacy-compatibility-contract.md` | CompatRuntimeProvider, PackageReader, LegacyApiMapper, Save extension | TODO 20 | CompatMockExpansion |
+| AstraEmu Toolkit | `compatibility-layer.md`, `legacy-compatibility-contract.md` | AstraEmuManager, CompatRuntimeProvider, Content Probe, TextCapture, save-state | TODO 20 | AstraEmuToolkit |
 
 ## 2.1 Production Contract Matrix
 
@@ -48,7 +48,7 @@
 | `provider-contracts.md` | `ProviderDescriptor`, `ProviderCapabilitySet`, `ProviderSelectionPolicy`, `ProviderShutdownContract` | CustomizationPlugin |
 | `editor-runtime-creator-contract.md` | `EditorRuntimeSession`, `InspectRequest`, `DebugCommand`, `PreviewOverlay`, `SourcePatchProposal` | CreatorWorkflow |
 | `ai-mcp-safety-contract.md` | `AIIntent`, `IntentValidationResult`, `CommittedAIOutput`, `GenerationAuditRecord`, `ReviewQueueItem` | AIIntentSafety |
-| `legacy-compatibility-contract.md` | `ICompatRuntimeProvider`, `ILegacyPackageReader`, `LegacyVmSnapshot`, `SaveExtensionStateProvider` | CompatMockExpansion |
+| `legacy-compatibility-contract.md` | `AstraEmuManager`, `ICompatRuntimeProvider`, `ILegacyContentReader`, `LegacyVmSnapshot`, `TextCaptureEvent` | AstraEmuToolkit |
 | `release-gate-observability-contract.md` | `ReleaseReport`, `BlockingPolicy`, `TraceEvent`, `CrashBundle` | PackageSmoke, CustomizationPlugin, RuntimeStress |
 
 ## 3. Deliverable Matrix
@@ -84,7 +84,7 @@ Phase 0 evidence means documentation and build-baseline evidence. Phase 1 founda
 | Plugin/provider customization | CustomizationPlugin build/load/release reports |
 | Runtime AI safety | AIIntentSafety save/replay/audit reports |
 | Release Gate correctness | blocking scenario reports |
-| Legacy remains expansion | CompatMockExpansion only under expansion profile |
+| AstraEmu remains standalone | AstraEmuToolkit does not participate in NativeVN creation workflow |
 
 ## 4. Non-goal Matrix
 

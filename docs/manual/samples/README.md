@@ -11,7 +11,7 @@ Samples will provide acceptance evidence for runtime, tools, release gate, docum
 - `NativeVN` is the final UE-class acceptance sample and currently provides generated redistributable PNG/OGG fixture media, Script/AstraVN, package, playable VN state, save/load, and replay evidence.
 - `TsuiNoSora` is a local verification fixture using copied test resources marked `local_test_only`; it includes a curated Aya route, Artemis-style UI/system metadata, backlog, save/load slots, config state, and system SE evidence, and it must not be treated as redistributable sample content.
 - `PackageSmoke` currently proves the foundation headless platform plus example module load/unload and Phase 3 media smoke path; later it will prove packaged runtime has no Editor dependency.
-- `RuntimeStress`, `ScriptParity`, `MediaBackend`, `AIIntentSafety`, `CreatorWorkflow`, `CustomizationPlugin`, and `CompatMockExpansion` each cover a specific risk.
+- `RuntimeStress`, `ScriptParity`, `MediaBackend`, `AIIntentSafety`, `CreatorWorkflow`, `CustomizationPlugin`, and future `AstraEmuToolkit` coverage each cover a specific risk.
 - Evidence must come from current local or CI command output.
 
 ## Architecture
@@ -73,4 +73,4 @@ astra inspect build/Saved/Packages/TsuiNoSora.astrapkg --json
 
 - Do not restore deleted `AstraGame` or `MinimalVN` flows.
 - Do not count a design document as sample evidence.
-- Keep legacy compatibility samples in the expansion track.
+- Keep old VN compatibility in the standalone AstraEmu Toolkit track, not NativeVN samples.

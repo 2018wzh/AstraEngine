@@ -6,7 +6,7 @@ Phase 1 implementation note：当前工作树已实现 descriptor parsing/valida
 
 ## 1. 目标
 
-AstraEngine 使用动态模块作为默认扩展模型。模块系统必须支持通用 2D 引擎能力、VN Presentation、AI Provider、运行时 Intent、Editor 扩展和 Cook/Package 工具，同时保持 Core 干净、ABI 稳定和发布可审计。旧 VN 模拟器、现代化滤镜和 Compatibility Inspector 属于 Legacy expansion track，必须在稳定 native runtime API 之上接入。
+AstraEngine 使用动态模块作为默认扩展模型。模块系统必须支持通用 2D 引擎能力、VN Presentation、AI Provider、运行时 Intent、Editor 扩展和 Cook/Package 工具，同时保持 Core 干净、ABI 稳定和发布可审计。旧 VN 模拟、现代化滤镜、TextCapture 和翻译桥接属于独立 AstraEmu Toolkit，必须在稳定 native runtime API 之上接入。
 
 ## 2. 核心原则
 

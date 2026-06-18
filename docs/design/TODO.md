@@ -511,26 +511,27 @@ Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 
 - `astra doc-check`
 - `ctest --test-dir build -C Release --output-on-failure`
 
-## 20. Expansion Track：Legacy Compatibility After Parity
+## 20. Expansion Deliverable：AstraEmu Toolkit After Parity
 
-目标：在 native runtime 达标后接入旧 VN 模拟和现代化，不反向污染 Core。
+目标：在 native runtime 达标后交付独立 AstraEmu Toolkit，用于旧 VN 模拟、增强和翻译；它不进入 NativeVN 制作流程，也不反向污染 Core。
 
-- [ ] Expansion：定义 CompatRuntimeProvider、ForeignProjectProbe、PackageReader、LegacyAssetResolver。
-- [ ] Expansion：定义 Legacy VM state、opcode/timeline adapter、LegacyApiMapper。
-- [ ] Expansion：定义 SaveExtensionStateProvider，进入 save/replay extension state。
-- [ ] Expansion：定义 Compatibility Inspector 和 modernization profile。
-- [ ] Expansion：实现 mock legacy runtime fixture。
-- [ ] Expansion：实现 BGI/Kirikiri/Ren'Py/NScripter prototype 之一。
-- [ ] Expansion：实现 Artemis prototype：unpacked-directory probe、`foreign-artemis:/` resolver、`.iet/.asb/.ast` index、minimal `e:*` host API。
+- [ ] Expansion：定义 AstraEmuManager、CompatContentProbe、Compat Core descriptor 和 capability set。
+- [ ] Expansion：定义 `ICompatRuntimeProvider`、Legacy VM state、opcode/timeline adapter、LegacyApiMapper。
+- [ ] Expansion：定义 local mount reader、save-state、core cold-swap 和 Runtime Inspector。
+- [ ] Expansion：定义 enhancement profile、TextCaptureEvent 和 translation Provider bridge。
+- [ ] Expansion：实现 mock Compat Core fixture。
+- [ ] Expansion：实现 BGI/Kirikiri/Ren'Py/NScripter Compat Core prototype 之一。
+- [ ] Expansion：实现 Artemis core prototype：unpacked-directory probe、`foreign-artemis:/` resolver、`.iet/.asb/.ast` index、minimal `e:*` host API。
 - [ ] Expansion：实现 Artemis tag/API coverage report 和 high-frequency tag mapper。
-- [ ] Expansion：实现 mount-only release gate 和 external asset diagnostics。
-- [ ] Expansion：按 `docs/design/legacy-compatibility-contract.md` 实现 `ICompatRuntimeProvider`、`ILegacyPackageReader`、`LegacyVmSnapshot` 和 `SaveExtensionStateProvider` boundary contract。
-- [ ] Docs：编写 Legacy Compatibility Guide、Modernization Guide、Compat Plugin Authoring Guide。
+- [ ] Expansion：实现 mount-only local content diagnostics。
+- [ ] Expansion：按 `docs/design/legacy-compatibility-contract.md` 实现 `AstraEmuManager`、`ICompatRuntimeProvider`、`ILegacyContentReader`、`LegacyVmSnapshot` 和 TextCapture boundary contract。
+- [ ] Docs：编写 AstraEmu Toolkit Guide、Enhancement Guide、Compat Core Authoring Guide。
 
 验收：
 
-- Mock legacy runtime 通过稳定 Runtime/Asset/Media/Script API 输出 Presentation events。
+- Mock Compat Core 通过稳定 Runtime/Asset/Media/Script API 输出 Presentation events。
 - Artemis prototype 输出 AstraVN Events，不把 Artemis VM 控制流并入 AstraVN source language。
-- Legacy save extension state 不污染 native save model。
-- Mount-only 默认不复制外部原始资产。
-- Compat 模块不能要求修改 Core、Runtime、Asset、Media 的基础边界。
+- AstraEmu save-state 不污染 native save model。
+- Mount-only 默认不修改 foreign source。
+- AstraEmu 模块不能要求修改 Core、Runtime、Asset、Media 的基础边界。
+- NativeVN 制作流程不依赖 AstraEmu。

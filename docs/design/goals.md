@@ -36,7 +36,7 @@ Save -> Load -> Replay -> Debug -> Profile -> Release Gate
 - Editor 支持 Content Browser、Inspector、Graph/Timeline、PIE、Runtime Debugger 和 Package panel。
 - AI 严格拆成 Runtime AI MCP、Editor Copilot MCP、Editor Content Generation MCP。
 - Provider、MCP tool、Editor panel 和 EngineModuleSlot 可通过插件扩展并被 release gate 验证。
-- Legacy compatibility 只作为 native runtime parity 之后的 expansion track。
+- 旧 VN compatibility 只作为 native runtime parity 之后的独立 AstraEmu Toolkit。
 
 ## 3. 非目标
 

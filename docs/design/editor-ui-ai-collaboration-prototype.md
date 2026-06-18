@@ -69,17 +69,10 @@ Runtime Debugger 必须能查看：
 - AI committed intent。
 - Legacy compat VM state；仅在 Legacy expansion track 模块启用时显示。
 
-## 6. Compatibility Inspector
+## 6. AstraEmu Boundary
 
-Compatibility Inspector 属于 Legacy expansion track，不是 native runtime production parity 的前置工具。
-旧 VN 项目显示：
-
-- 外部项目 probe 结果。
-- VFS/package mount 状态。
-- legacy asset refs。
-- VM/timeline/opcode 状态。
-- 未支持 API 统计。
-- 现代化配置和 FilterProfile。
+旧 VN 运行、TextCapture、翻译、增强和 Runtime Inspector 属于独立 AstraEmu Toolkit。
+AstraEditor 不提供旧 VN 兼容检查面板，也不把旧 VN 内容纳入 NativeVN 制作界面。
 
 ## 7. Qt 实现映射
 

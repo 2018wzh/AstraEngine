@@ -11,7 +11,7 @@ This section will document snapshot migration, schema migration, plugin ABI migr
 - Migration is schema-versioned.
 - Unknown fields follow explicit preserve, warn, error, or drop policy.
 - Save/package critical schemas require stricter diagnostics than editable source documents.
-- Legacy compatibility is an expansion track and does not redefine native runtime migration.
+- AstraEmu Toolkit is a standalone old-VN runtime toolkit and does not redefine native runtime migration.
 
 ## Architecture
 
@@ -20,7 +20,7 @@ Primary design references:
 - [Foundation Core / Platform / Property](../../design/foundation-core-platform-property.md)
 - [Runtime Core](../../design/runtime-core.md)
 - [Extension and Module System](../../design/extension-and-module-system.md)
-- [Compatibility Layer](../../design/compatibility-layer.md)
+- [AstraEmu Toolkit](../../design/compatibility-layer.md)
 
 ## Programming Guide
 

@@ -1,6 +1,6 @@
 # Programming
 
-Status: NativeVN playable v1 evidence. Foundation public headers are implemented for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Asset, Media, Script, and AstraVN; engine libraries are dynamic-only DLLs. NativeVN and the local TsuiNoSora fixture now have CLI package/run/replay/inspect evidence plus playable VN state, UI/system state, generated or copied PNG/OGG/font media evidence, embedded package payloads, PackageReader random-access/chunked-read/mount evidence, mature media backend capability reports, local DDC artifact execution, corruption recovery, and package integrity diagnostics; Editor, AI/MCP, Legacy, full Artemis VM compatibility, and production release gates remain planned.
+Status: NativeVN playable v1 evidence. Foundation public headers are implemented for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Asset, Media, Script, and AstraVN; engine libraries are dynamic-only DLLs. NativeVN and the local TsuiNoSora fixture now have CLI package/run/replay/inspect evidence plus playable VN state, UI/system state, generated or copied PNG/OGG/font media evidence, embedded package payloads, PackageReader random-access/chunked-read/mount evidence, mature media backend capability reports, local DDC artifact execution, corruption recovery, and package integrity diagnostics; Editor, AI/MCP, standalone AstraEmu Toolkit, full Artemis VM compatibility, and production release gates remain planned.
 
 ## Overview
 
@@ -11,7 +11,7 @@ This section will become the main programming guide for Core, Module, Actor/Comp
 - Core owns diagnostics, logging, config, path, time, serialization, stable IDs, and PropertySystem.
 - Modules cross the stable boundary through C ABI and opaque handles.
 - Actor/Component is the public runtime object model; ECS is only a local implementation boundary.
-- Script, AI, and legacy compatibility communicate through runtime events and provider contracts, not Core dependencies.
+- Script, AI, and AstraEmu communicate through runtime events and provider contracts, not Core dependencies.
 
 ## Architecture
 

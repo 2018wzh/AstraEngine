@@ -249,16 +249,16 @@ Preset state machines：
 - Timeline。
 - FilterProfile。
 
-## 8.1 Shared VN Semantics For Compat Runtimes
+## 8.1 Shared VN Semantics For AstraEmu Compat Cores
 
-Compat runtimes reuse AstraVN output semantics, not AstraVN input languages. Artemis、BGI、Kirikiri
-or other legacy runtimes may keep private parsers and VM state, but their visible story output must
+AstraEmu Compat Cores reuse AstraVN output semantics, not AstraVN input languages. Artemis、BGI、Kirikiri
+or other legacy cores may keep private parsers and VM state, but their visible story output must
 cross the same VN event and PresentationCommand boundary as native AstraVN content.
 
 Recommended chain：
 
 ```text
-ArtemisRuntime
+ArtemisCore
   -> ArtemisTagExecutor
   -> ArtemisApiMapper
   -> AstraVN Event / RuntimeEvent
@@ -272,7 +272,7 @@ Shared：
 - Preset systems：DialogueSystem、ChoiceSystem、AudioSystem、FilterSystem、Character、Camera。
 - PresentationCommand categories：sprite/background/character、text/dialogue/backlog、choice/ui、audio、timeline/effects、filter。
 - Dialogue semantics：speaker、text body、ruby annotation、voice binding、backlog entry、read/skip hooks。
-- Runtime hooks：choice result、auto/skip/click advance、timeline wait、filter profile、save/replay extension metadata。
+- Runtime hooks：choice result、auto/skip/click advance、timeline wait、filter profile、save-state metadata。
 
 Not shared：
 
@@ -282,7 +282,7 @@ Not shared：
 - Artemis magic path and package resolver。
 - Artemis system UI behavior for save/load、config、extra、quickjump unless mapped through explicit compat UI commands。
 
-Compat-specific details stay in compat private state or command payloads when required for diagnostics,
+AstraEmu-specific details stay in compat private state or command payloads when required for diagnostics,
 but native AstraVN DSL、Graph、Timeline and Lua must not depend on Artemis-only semantics.
 
 ## 9. Debugger And Hot Reload

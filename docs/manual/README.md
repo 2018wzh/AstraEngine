@@ -1,6 +1,6 @@
 # AstraEngine Manual
 
-Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline and Phase 7 Media Backend evidence. Foundation Core, Platform, ModuleRuntime, and PropertySystem include production Foundation gate evidence; Scene, Runtime, Media, Script, AstraVN, the example plugin, and CLI workflows are implemented as executable slices. Asset includes importers, cook processors, local DDC, binary `.astrapkg`, package reads, release gate and hot reload rollback DTOs. Media includes production provider descriptors, decode providers, texture-buffer import evidence, glyph-run/atlas capture, logical audio mixer state, timeline state and FilterGraph hashes. Production Editor, AI/MCP, Legacy, and broader creator workflows are planned.
+Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline and Phase 7 Media Backend evidence. Foundation Core, Platform, ModuleRuntime, and PropertySystem include production Foundation gate evidence; Scene, Runtime, Media, Script, AstraVN, the example plugin, and CLI workflows are implemented as executable slices. Asset includes importers, cook processors, local DDC, binary `.astrapkg`, package reads, release gate and hot reload rollback DTOs. Media includes production provider descriptors, decode providers, texture-buffer import evidence, glyph-run/atlas capture, logical audio mixer state, timeline state and FilterGraph hashes. Production Editor, AI/MCP, standalone AstraEmu Toolkit, and broader creator workflows are planned.
 
 ## Overview
 
@@ -10,7 +10,7 @@ This manual is the user-facing documentation root for AstraEngine. It complement
 
 - AstraEngine is a modular 2D engine with VN / interactive narrative as the first vertical module.
 - Runtime must be able to ship without Editor.
-- Core must stay free of VN, AI, Lua, renderer, editor, and legacy compatibility dependencies.
+- Core must stay free of VN, AI, Lua, renderer, editor, and AstraEmu dependencies.
 - Dynamic modules and C ABI are the default project extension boundary.
 - Phase 1 provides a production Foundation gate slice for Core, Platform, ModuleRuntime, and PropertySystem, including `foundation_core_gate` CLI evidence.
 - Phase 2-4 provide executable foundations for Scene, Runtime, Media, ScriptRuntimeHost, and AstraVN.
