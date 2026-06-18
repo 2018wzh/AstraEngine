@@ -1,9 +1,9 @@
 id: native:/Scripts/opening_lua
 schema: astra.asset.sidecar.v1
-type: script.lua
+type: script.extension.lua
 source_path: opening.lua
-display_name: NativeVN Opening Lua
-tags: [script, lua, nativevn]
+display_name: NativeVN Live2D Extension Schema Fixture
+tags: [script, lua, extension_schema, nativevn]
 origin: HumanAuthored
 license:
   owner: project
@@ -12,15 +12,7 @@ license:
 review:
   status: accepted
 cook:
-  preset: lua_script
+  preset: lua_extension_schema
 dependencies:
-  hard:
-    - native:/Backgrounds/Room
-    - native:/Characters/Alice/Normal
-    - native:/Sfx/Confirm
-    - native:/Voice/Alice/opening_001
-    - native:/Music/opening_theme
-    - native:/Filters/soft_vn
-    - native:/UI/TextBox
-    - native:/Fonts/SourceHanSerif
+  hard: []
   soft: []

@@ -1,7 +1,9 @@
 # Script 与 Presentation / AstraVN 设计
 
-状态：Target Architecture  
+状态：Phase 8 implemented slice / Target Architecture  
 定位：脚本运行时、VN DSL/Lua/Graph、PresentationCommand 和 AstraVN 垂直模块的实现规格。
+
+Current implementation note：Phase 8 已将 `.astra` 作为默认生产 DSL，加入 PEGTL-backed parser、统一 command schema registry、command manifest、AST/StateGraph/Narrative/Effect IR、source map、debug symbols、debug step、hot reload compatibility report、Lua extension schema sandbox、`ScriptSnapshot v2`、embedded graph/timeline IR、AstraVN stage/timeline/choice/backlog/UI state 和 NativeVN full playable demo evidence。Lua story runtime 已移除；真实 Live2D/Emote SDK 执行、Editor graph/timeline UI、AI/MCP 和 Legacy runtime 仍属于后续阶段。
 
 ## 1. 目标
 

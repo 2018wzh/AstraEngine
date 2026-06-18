@@ -39,12 +39,18 @@ std::string WaitKindToString(RuntimeWaitKind kind) {
         return "event";
     case RuntimeWaitKind::Time:
         return "time";
+    case RuntimeWaitKind::FixedSteps:
+        return "fixed_steps";
     case RuntimeWaitKind::Asset:
         return "asset";
+    case RuntimeWaitKind::AssetReady:
+        return "asset_ready";
     case RuntimeWaitKind::Script:
         return "script";
     case RuntimeWaitKind::Debugger:
         return "debugger";
+    case RuntimeWaitKind::ProviderSignal:
+        return "provider_signal";
     }
     return "none";
 }
@@ -72,14 +78,23 @@ RuntimeWaitKind WaitKindFromString(std::string_view value) {
     if (value == "time") {
         return RuntimeWaitKind::Time;
     }
+    if (value == "fixed_steps") {
+        return RuntimeWaitKind::FixedSteps;
+    }
     if (value == "asset") {
         return RuntimeWaitKind::Asset;
+    }
+    if (value == "asset_ready") {
+        return RuntimeWaitKind::AssetReady;
     }
     if (value == "script") {
         return RuntimeWaitKind::Script;
     }
     if (value == "debugger") {
         return RuntimeWaitKind::Debugger;
+    }
+    if (value == "provider_signal") {
+        return RuntimeWaitKind::ProviderSignal;
     }
     return RuntimeWaitKind::None;
 }

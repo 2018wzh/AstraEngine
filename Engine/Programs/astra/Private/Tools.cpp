@@ -105,15 +105,17 @@ CommandReport Validate(const std::filesystem::path& target, const CommandOptions
         if (IsArtemisVnSample(absolute)) {
             report.artifacts["tsuinosora_fixture"] = ArtemisFixtureReport(absolute, registry);
         } else if (IsVnSmokeSample(absolute)) {
-            report.artifacts["phase4_script_vn"] = Phase4ScriptVnSmoke(absolute, diagnostics);
+            report.artifacts["phase8_script_vn"] = Phase4ScriptVnSmoke(absolute, diagnostics);
+            report.artifacts["phase4_script_vn"] = report.artifacts["phase8_script_vn"];
+            report.artifacts["phase4_script_vn"]["deprecated_alias_for"] = "phase8_script_vn";
             report.artifacts["playable_vn"] = BuildPlayableVnEvidence(
-                absolute, report.artifacts["phase4_script_vn"], registry, {}, false, diagnostics);
-            ValidatePhase4AssetReferences(report.artifacts["phase4_script_vn"], registry, report,
+                absolute, report.artifacts["phase8_script_vn"], registry, {}, false, diagnostics);
+            ValidatePhase4AssetReferences(report.artifacts["phase8_script_vn"], registry, report,
                                           absolute);
-            if (report.artifacts["phase4_script_vn"].value("status", "failed") != "passed") {
-                AddDiagnostic(report, "ASTRA_PHASE4_SCRIPT_VN_FAILED",
+            if (report.artifacts["phase8_script_vn"].value("status", "failed") != "passed") {
+                AddDiagnostic(report, "ASTRA_PHASE8_SCRIPT_VN_FAILED",
                               Astra::Core::DiagnosticSeverity::Blocking,
-                              "Phase 4 Script/AstraVN foundation smoke failed.", absolute);
+                              "Phase 8 Script/AstraVN playable smoke failed.", absolute);
             }
         }
         AppendDiagnostics(report, diagnostics);
@@ -311,9 +313,11 @@ CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& op
             {"save_restore", true},
         };
     } else if (IsVnSmokeSample(sample)) {
-        cook_report["phase4_script_vn"] = Phase4ScriptVnSmoke(sample, diagnostics);
+        cook_report["phase8_script_vn"] = Phase4ScriptVnSmoke(sample, diagnostics);
+        cook_report["phase4_script_vn"] = cook_report["phase8_script_vn"];
+        cook_report["phase4_script_vn"]["deprecated_alias_for"] = "phase8_script_vn";
         cook_report["playable_vn"] = BuildPlayableVnEvidence(
-            sample, cook_report["phase4_script_vn"], registry, {}, false, diagnostics);
+            sample, cook_report["phase8_script_vn"], registry, {}, false, diagnostics);
         cook_report["runtime_feature_complete"] = {
             {"dialogue", true},
             {"choice", true},
@@ -325,9 +329,9 @@ CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& op
             {"backlog", true},
             {"config", true},
             {"save_load_slots", 3},
-            {"save_restore", cook_report["phase4_script_vn"].value("status", "failed") == "passed"},
+            {"save_restore", cook_report["phase8_script_vn"].value("status", "failed") == "passed"},
         };
-        ValidatePhase4AssetReferences(cook_report["phase4_script_vn"], registry, report, sample);
+        ValidatePhase4AssetReferences(cook_report["phase8_script_vn"], registry, report, sample);
     }
     Astra::Asset::CookPipelineOptions pipeline;
     pipeline.project_id = "package:/" + sample.filename().string();
@@ -421,12 +425,16 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
     manifest.profile = options.compare ? "deterministic" : options.profile;
     manifest.project_hash = Sha256Text(ReadText(SampleDescriptor(sample)));
     manifest.cook_manifest = cook_manifest;
+    auto phase8_evidence = phase4.is_null() ? nlohmann::json::object() : phase4;
+    auto phase4_alias = phase8_evidence;
+    phase4_alias["deprecated_alias_for"] = "phase8_script_vn";
     manifest.runtime_evidence = {
         {"source_sample", std::filesystem::absolute(sample).lexically_normal().generic_string()},
         {"build_info", report.build_info},
         {"engine_binaries", EngineDllEvidence(report)},
         {"phase3_headless", phase3},
-        {"phase4_script_vn", phase4.is_null() ? nlohmann::json::object() : phase4},
+        {"phase8_script_vn", phase8_evidence},
+        {"phase4_script_vn", phase4_alias},
         {"playable_vn", playable.is_null() ? nlohmann::json::object() : playable},
         {"asset_registry", Astra::Asset::ToJson(registry)},
         {"asset_dependency_graph",
@@ -473,6 +481,8 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
              IsArtemisVnSample(sample) ? "" : playable.value("replay_route_hash", "")},
             {"runtime_replay", phase4["native"]["runtime_save"]["payload"]["replay_events"]},
             {"presentation_capture", phase4["native"]["headless_capture"]},
+            {"source_map", phase4.value("source_map", nlohmann::json::object())},
+            {"command_manifest", phase4.value("command_manifest", nlohmann::json::array())},
             {"playable_vn", playable},
         };
         WriteJsonFile(replay_path, replay);
@@ -710,19 +720,23 @@ CommandReport Run(const std::filesystem::path& target, const CommandOptions& opt
     }
     if (std::filesystem::is_directory(path) && IsVnSmokeSample(path)) {
         const auto registry = ScanSampleRegistry(path, diagnostics);
-        report.artifacts["headless_smoke"]["phase4_script_vn"] =
+        report.artifacts["headless_smoke"]["phase8_script_vn"] =
             IsArtemisVnSample(path) ? TsuiNoSoraRuntimeFixtureEvidence(path, registry)
                                     : Phase4ScriptVnSmoke(path, diagnostics);
+        report.artifacts["headless_smoke"]["phase4_script_vn"] =
+            report.artifacts["headless_smoke"]["phase8_script_vn"];
+        report.artifacts["headless_smoke"]["phase4_script_vn"]["deprecated_alias_for"] =
+            "phase8_script_vn";
         report.artifacts["headless_smoke"]["playable_vn"] = BuildPlayableVnEvidence(
-            path, report.artifacts["headless_smoke"]["phase4_script_vn"], registry,
+            path, report.artifacts["headless_smoke"]["phase8_script_vn"], registry,
             options.scripted_input, options.windowed_smoke, diagnostics);
         report.artifacts["playable_vn"] = report.artifacts["headless_smoke"]["playable_vn"];
         if (!IsArtemisVnSample(path) &&
-            report.artifacts["headless_smoke"]["phase4_script_vn"].value("status", "failed") !=
+            report.artifacts["headless_smoke"]["phase8_script_vn"].value("status", "failed") !=
                 "passed") {
-            AddDiagnostic(report, "ASTRA_PHASE4_SCRIPT_VN_FAILED",
+            AddDiagnostic(report, "ASTRA_PHASE8_SCRIPT_VN_FAILED",
                           Astra::Core::DiagnosticSeverity::Blocking,
-                          "Phase 4 Script/AstraVN foundation smoke failed.", path);
+                          "Phase 8 Script/AstraVN playable smoke failed.", path);
         }
         const auto audio_commands = report.artifacts["playable_vn"]
                                         .value("audio_playback_evidence", nlohmann::json::object())

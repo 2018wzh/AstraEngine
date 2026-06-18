@@ -54,22 +54,21 @@ public:
     Astra::Core::Result<Astra::Script::ScriptExecutionResult> Run(
         const Astra::Script::ScriptSource& source,
         const Astra::Script::ScriptExecutionOptions& options,
-        bool lua,
         Astra::Core::DiagnosticSink& diagnostics) {
         Astra::Core::DefaultLogger().Log(
             "astravn.session",
-            lua ? "lua" : "native",
+            "native",
             Astra::Core::LogLevel::Info,
             "vn session run started",
             {{"source", source.source_id}, {"entry_label", options.entry_label}});
-        auto compiled = lua ? host.CompileLua(source, diagnostics) : host.CompileNative(source, diagnostics);
+        auto compiled = host.CompileNative(source, diagnostics);
         if (!compiled) {
             return Astra::Core::Result<Astra::Script::ScriptExecutionResult>::Failure(compiled.Error(), compiled.Message());
         }
         last_result = host.Run(compiled.Value(), runtime, options, diagnostics);
         Astra::Core::DefaultLogger().Log(
             "astravn.session",
-            lua ? "lua" : "native",
+            "native",
             Astra::Core::LogLevel::Info,
             "vn session run finished",
             {{"source", source.source_id},
@@ -92,14 +91,23 @@ Astra::Core::Result<Astra::Script::ScriptExecutionResult> VnSession::RunNative(
     const Astra::Script::ScriptSource& source,
     const Astra::Script::ScriptExecutionOptions& options,
     Astra::Core::DiagnosticSink& diagnostics) {
-    return impl_->Run(source, options, false, diagnostics);
+    return impl_->Run(source, options, diagnostics);
 }
 
 Astra::Core::Result<Astra::Script::ScriptExecutionResult> VnSession::RunLua(
     const Astra::Script::ScriptSource& source,
     const Astra::Script::ScriptExecutionOptions& options,
     Astra::Core::DiagnosticSink& diagnostics) {
-    return impl_->Run(source, options, true, diagnostics);
+    (void)options;
+    Astra::Core::Diagnostic diagnostic;
+    diagnostic.code = "ASTRA_VN_LUA_STORY_REMOVED";
+    diagnostic.category = "astravn.phase8";
+    diagnostic.severity = Astra::Core::DiagnosticSeverity::Blocking;
+    diagnostic.message = "AstraVN no longer executes Lua story scripts. Use .astra for story flow and Lua only for extension schema packages.";
+    diagnostic.source = {source.file.empty() ? source.source_id : source.file, 1, 1};
+    diagnostic.suggested_fixes.push_back("Call ScriptRuntimeHost::CompileLuaExtensionPackage() for Lua extension fixtures.");
+    diagnostics.Emit(std::move(diagnostic));
+    return Astra::Core::Result<Astra::Script::ScriptExecutionResult>::Failure(Astra::Core::ErrorCode::Unsupported, "lua story scripts are removed");
 }
 
 VnSessionSnapshot VnSession::CaptureSnapshot(Astra::Core::DiagnosticSink& diagnostics) const {
@@ -111,10 +119,15 @@ VnSessionSnapshot VnSession::CaptureSnapshot(Astra::Core::DiagnosticSink& diagno
     VnSessionSnapshot snapshot;
     snapshot.runtime_save = impl_->runtime.Save();
     snapshot.script_snapshot = impl_->last_result.snapshot;
+    snapshot.stage_state = impl_->last_result.snapshot.stage_state;
+    snapshot.timeline_state = impl_->last_result.snapshot.timeline_state;
+    snapshot.choice_state = impl_->last_result.snapshot.choice_state;
+    snapshot.skip_auto_state = {{"skip_enabled", false}, {"auto_enabled", false}, {"source", "deterministic_session"}};
     for (const auto& event : impl_->last_result.events) {
         snapshot.vn_events.push_back(Astra::Runtime::ToJson(event));
         AppendHistory(snapshot, event);
     }
+    snapshot.backlog = snapshot.dialogue_history;
     for (const auto& command : impl_->last_result.presentation_commands) {
         snapshot.presentation_commands.push_back(Astra::Media::ToJson(command));
     }
@@ -266,6 +279,11 @@ nlohmann::json ToJson(const VnSessionSnapshot& snapshot) {
         {"script_snapshot", Astra::Script::ToJson(snapshot.script_snapshot)},
         {"route_state", snapshot.route_state},
         {"dialogue_history", snapshot.dialogue_history},
+        {"backlog", snapshot.backlog},
+        {"stage_state", snapshot.stage_state},
+        {"timeline_state", snapshot.timeline_state},
+        {"choice_state", snapshot.choice_state},
+        {"skip_auto_state", snapshot.skip_auto_state},
         {"vn_events", snapshot.vn_events},
         {"presentation_commands", snapshot.presentation_commands},
         {"headless_capture", Astra::Media::ToJson(snapshot.headless_capture)},

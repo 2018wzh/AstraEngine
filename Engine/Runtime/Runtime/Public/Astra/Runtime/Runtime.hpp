@@ -121,9 +121,12 @@ enum class RuntimeWaitKind {
     None,
     Event,
     Time,
+    FixedSteps,
     Asset,
+    AssetReady,
     Script,
-    Debugger
+    Debugger,
+    ProviderSignal
 };
 
 struct RuntimeWaitCondition {

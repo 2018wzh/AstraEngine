@@ -1,17 +1,14 @@
-#include <Astra/Script/Script.hpp>
+#include "ScriptPrivate.hpp"
 
 #include <Astra/Core/Logging.hpp>
-
-#include <sol/sol.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <sstream>
-#include <unordered_set>
 
 namespace Astra::Script {
 
-namespace {
+namespace Private {
 
 std::string Trim(std::string_view text) {
     auto begin = text.begin();
@@ -39,46 +36,15 @@ std::vector<std::string> SplitWords(std::string_view text) {
     return words;
 }
 
-std::optional<std::pair<std::string, std::string>> ParseQuotedRoute(std::string_view text) {
-    const auto first_quote = text.find('"');
-    if (first_quote == std::string_view::npos) {
-        return std::nullopt;
-    }
-    const auto second_quote = text.find('"', first_quote + 1);
-    if (second_quote == std::string_view::npos) {
-        return std::nullopt;
-    }
-    const auto arrow = text.find("->", second_quote + 1);
-    if (arrow == std::string_view::npos) {
-        return std::nullopt;
-    }
-    return std::pair{
-        std::string(text.substr(first_quote + 1, second_quote - first_quote - 1)),
-        Trim(text.substr(arrow + 2)),
-    };
-}
-
-std::optional<std::string> ParseQuotedText(std::string_view text) {
-    const auto first_quote = text.find('"');
-    if (first_quote == std::string_view::npos) {
-        return std::nullopt;
-    }
-    const auto second_quote = text.find('"', first_quote + 1);
-    if (second_quote == std::string_view::npos) {
-        return std::nullopt;
-    }
-    return std::string(text.substr(first_quote + 1, second_quote - first_quote - 1));
-}
-
 Astra::Core::Diagnostic MakeDiagnostic(
     std::string code,
     Astra::Core::DiagnosticSeverity severity,
     std::string message,
     const ScriptSourceLocation& location,
-    std::string fix = {}) {
+    std::string fix) {
     Astra::Core::Diagnostic diagnostic;
     diagnostic.code = std::move(code);
-    diagnostic.category = "script.foundation";
+    diagnostic.category = "script.phase8";
     diagnostic.severity = severity;
     diagnostic.message = std::move(message);
     diagnostic.source = {location.file, location.line, location.column};
@@ -88,79 +54,59 @@ Astra::Core::Diagnostic MakeDiagnostic(
     return diagnostic;
 }
 
-void EmitBlocking(Astra::Core::DiagnosticSink& diagnostics, const ScriptSourceLocation& location, std::string code, std::string message, std::string fix = {}) {
+void EmitBlocking(Astra::Core::DiagnosticSink& diagnostics, const ScriptSourceLocation& location, std::string code, std::string message, std::string fix) {
     diagnostics.Emit(MakeDiagnostic(std::move(code), Astra::Core::DiagnosticSeverity::Blocking, std::move(message), location, std::move(fix)));
-}
-
-bool SetAsset(ScriptCommand& command, std::string_view asset_text, Astra::Core::DiagnosticSink& diagnostics) {
-    auto asset = Astra::Asset::ParseAssetUri(asset_text);
-    if (!asset) {
-        EmitBlocking(diagnostics, command.location, "ASTRA_SCRIPT_ASSET_INVALID", "Script command references an invalid asset URI.", "Use a stable URI such as native:/Backgrounds/Room.");
-        return false;
-    }
-    command.asset = asset.Value();
-    return true;
 }
 
 ScriptCommand MakeCommand(ScriptCommandKind kind, const ScriptSource& source, Astra::Core::u32 line, Astra::Core::u32 index) {
     ScriptCommand command;
     command.kind = kind;
     command.location = {source.file.empty() ? source.source_id : source.file, line, 1};
-    command.command_id = source.source_id + "#" + std::to_string(index);
+    command.command_id = source.source_id + "#cmd_" + std::to_string(index);
     return command;
-}
-
-void AddLabel(CompiledScript& script, const std::string& label, Astra::Core::u32 index, const ScriptSourceLocation& location, Astra::Core::DiagnosticSink& diagnostics) {
-    if (label.empty()) {
-        EmitBlocking(diagnostics, location, "ASTRA_SCRIPT_LABEL_MISSING", "Label command requires a name.", "Use: label opening");
-        return;
-    }
-    if (script.labels.contains(label)) {
-        EmitBlocking(diagnostics, location, "ASTRA_SCRIPT_LABEL_DUPLICATE", "Label is defined more than once.", "Rename one label or update jumps.");
-        return;
-    }
-    script.labels[label] = index;
-}
-
-void AddDebugSymbol(CompiledScript& script, const ScriptCommand& command) {
-    script.debug_symbols.push_back({command.command_id, command.location, command.label});
-}
-
-bool ValidateLabels(const CompiledScript& script, Astra::Core::DiagnosticSink& diagnostics) {
-    bool valid = true;
-    for (const auto& command : script.commands) {
-        auto check_label = [&](const std::string& target) {
-            if (!target.empty() && !script.labels.contains(target)) {
-                EmitBlocking(diagnostics, command.location, "ASTRA_SCRIPT_LABEL_UNKNOWN", "Script references an unknown label.", "Add the label or fix the jump target.");
-                valid = false;
-            }
-        };
-        check_label(command.target_label);
-        for (const auto& choice : command.choices) {
-            check_label(choice.target_label);
-        }
-    }
-    return valid;
 }
 
 void AppendCommand(CompiledScript& script, ScriptCommand command, Astra::Core::DiagnosticSink& diagnostics) {
     const auto index = static_cast<Astra::Core::u32>(script.commands.size());
-    if (command.kind == ScriptCommandKind::Label) {
-        AddLabel(script, command.label, index, command.location, diagnostics);
+    if (command.command_id.empty()) {
+        command.command_id = script.source_id + "#cmd_" + std::to_string(index);
     }
-    AddDebugSymbol(script, command);
+    BindCommandSchema(command, diagnostics);
+    if (command.kind == ScriptCommandKind::Label || command.kind == ScriptCommandKind::Scene) {
+        const auto label = command.kind == ScriptCommandKind::Scene ? command.scene : command.label;
+        if (!label.empty()) {
+            if (script.labels.contains(label)) {
+                EmitBlocking(diagnostics, command.location, "ASTRA_SCRIPT_LABEL_DUPLICATE", "Script label or scene is defined more than once.", "Rename the scene or label.");
+            } else {
+                script.labels[label] = index;
+            }
+        }
+    }
+    script.debug_symbols.push_back({command.command_id, command.stable_id, command.location, command.label.empty() ? command.scene : command.label, ToString(command.kind)});
+    script.source_map.entries.push_back({command.command_id, command.stable_id, command.location, command.stable_id, command.kind == ScriptCommandKind::Timeline ? command.stable_id : ""});
+    script.document.nodes.push_back({command.stable_id, ToString(command.kind), command.location, ToJson(command)});
+    if (!command.schema_id.empty()) {
+        script.command_manifest.push_back({{"schema_id", command.schema_id}, {"command_id", command.command_id}, {"stable_id", command.stable_id}, {"source", ToJson(command.location)}});
+    }
+    AddIrForCommand(script, command);
     script.commands.push_back(std::move(command));
 }
 
-std::string ChoiceText(const std::vector<ScriptChoice>& choices) {
-    std::string text;
-    for (std::size_t index = 0; index < choices.size(); ++index) {
-        if (index > 0) {
-            text += " | ";
+bool ValidateCompiledScript(const CompiledScript& script, Astra::Core::DiagnosticSink& diagnostics) {
+    bool valid = true;
+    for (const auto& command : script.commands) {
+        auto check_target = [&](const std::string& target) {
+            if (!target.empty() && !script.labels.contains(target)) {
+                EmitBlocking(diagnostics, command.location, "ASTRA_SCRIPT_TARGET_UNKNOWN", "Script references an unknown scene or label.", "Add the target scene or fix the transition.");
+                valid = false;
+            }
+        };
+        check_target(command.target_label);
+        for (const auto& choice : command.choices) {
+            check_target(choice.target_label);
         }
-        text += choices[index].text;
     }
-    return text;
+    return valid && !diagnostics.HasBlocking();
 }
 
 Astra::Core::EventTypeId EventType(std::string_view value) {
@@ -171,386 +117,232 @@ Astra::Runtime::RuntimeEvent MakeEvent(const ScriptCommand& command, std::string
     Astra::Runtime::RuntimeEvent event;
     event.type = EventType(std::move(event_value));
     event.category = std::move(category);
-    event.source = {"script", command.location.file};
-    if (target == "broadcast") {
-        event.target = {"broadcast", ""};
-    } else {
-        event.target = {"actor", std::move(target)};
-    }
+    event.source = {"script", command.command_id.empty() ? command.location.file : command.command_id};
+    event.target = target == "broadcast" ? Astra::Runtime::RuntimeEventEndpoint{"broadcast", ""} : Astra::Runtime::RuntimeEventEndpoint{"actor", std::move(target)};
     event.payload_schema = "astra.vn." + ToString(command.kind) + ".v1";
     event.payload = std::move(payload);
     event.trace.script_location = command.location.file + ":" + std::to_string(command.location.line);
     return event;
 }
 
-void AddPresentationForCommand(const ScriptCommand& command, std::vector<Astra::Media::PresentationCommand>& output, Astra::Core::u64 frame_index) {
+std::string SchemaIdForCommand(const ScriptCommand& command) {
+    if (!command.extension_id.empty() && !command.extension_command.empty()) {
+        return command.extension_id + "." + command.extension_command;
+    }
     switch (command.kind) {
-    case ScriptCommandKind::Background: {
-        Astra::Media::PresentationCommand presentation;
+    case ScriptCommandKind::Scene: return "astra.vn.scene.enter";
+    case ScriptCommandKind::Stage: return "astra.vn.stage.snapshot";
+    case ScriptCommandKind::Background: return "astra.vn.background.show";
+    case ScriptCommandKind::ShowCharacter: return "astra.vn.character.show";
+    case ScriptCommandKind::HideCharacter: return "astra.vn.character.hide";
+    case ScriptCommandKind::Pose:
+    case ScriptCommandKind::Move: return "astra.vn.character.update";
+    case ScriptCommandKind::Camera: return "astra.vn.camera.update";
+    case ScriptCommandKind::Timeline: return "astra.vn.timeline.start";
+    case ScriptCommandKind::Say: return "astra.vn.dialogue.say";
+    case ScriptCommandKind::Choice: return "astra.vn.choice.present";
+    case ScriptCommandKind::SetVariable:
+    case ScriptCommandKind::LetVariable:
+    case ScriptCommandKind::IncrementVariable:
+    case ScriptCommandKind::DecrementVariable:
+    case ScriptCommandKind::ToggleVariable:
+    case ScriptCommandKind::PushVariable:
+    case ScriptCommandKind::RemoveVariable:
+    case ScriptCommandKind::ClearVariable: return "astra.vn.variable.write";
+    case ScriptCommandKind::Audio: return "astra.vn.audio.play";
+    case ScriptCommandKind::Filter: return "astra.vn.filter.apply";
+    case ScriptCommandKind::Await: return "astra.vn.script.await";
+    case ScriptCommandKind::Jump: return "astra.vn.flow.jump";
+    case ScriptCommandKind::End: return "astra.vn.flow.end";
+    case ScriptCommandKind::Return: return "astra.vn.flow.return";
+    default: return {};
+    }
+}
+
+const ScriptCommandSchema* FindCommandSchema(std::string_view schema_id) {
+    static const auto schemas = FoundationCommandSchemas();
+    const auto found = std::ranges::find_if(schemas, [&](const ScriptCommandSchema& schema) {
+        return schema.schema_id == schema_id;
+    });
+    return found == schemas.end() ? nullptr : &*found;
+}
+
+void BindCommandSchema(ScriptCommand& command, Astra::Core::DiagnosticSink& diagnostics) {
+    command.schema_id = SchemaIdForCommand(command);
+    if (command.schema_id.empty()) {
+        return;
+    }
+    const auto* schema = FindCommandSchema(command.schema_id);
+    if (schema == nullptr) {
+        EmitBlocking(diagnostics, command.location, "ASTRA_SCRIPT_COMMAND_SCHEMA_UNKNOWN", "Script command has no registered command schema.", "Register an AstraVN built-in schema or Lua extension schema fixture before cook/package.");
+        return;
+    }
+    command.payload["schema_id"] = schema->schema_id;
+    command.payload["policy"] = schema->policy;
+    if (!schema->channels.empty()) {
+        command.payload["channels"] = schema->channels;
+    }
+}
+
+void AddPresentationForCommand(const ScriptCommand& command, std::vector<Astra::Media::PresentationCommand>& output, Astra::Core::u64 frame_index) {
+    Astra::Media::PresentationCommand presentation;
+    presentation.command_id = command.command_id;
+    presentation.frame_index = frame_index;
+    presentation.payload = command.payload;
+    switch (command.kind) {
+    case ScriptCommandKind::Background:
         presentation.kind = Astra::Media::PresentationCommandKind::Sprite;
-        presentation.command_id = command.command_id + ".background";
-        presentation.frame_index = frame_index;
         presentation.layer = "background";
         presentation.order = 0;
         presentation.asset = command.asset;
-        output.push_back(std::move(presentation));
         break;
-    }
-    case ScriptCommandKind::ShowCharacter: {
-        Astra::Media::PresentationCommand presentation;
+    case ScriptCommandKind::ShowCharacter:
+    case ScriptCommandKind::Pose:
+    case ScriptCommandKind::Move:
         presentation.kind = Astra::Media::PresentationCommandKind::Sprite;
-        presentation.command_id = command.command_id + ".character";
-        presentation.frame_index = frame_index;
         presentation.layer = "character";
         presentation.order = 100;
         presentation.asset = command.asset;
-        presentation.payload = {{"actor", command.actor}, {"placement", command.placement}};
-        output.push_back(std::move(presentation));
+        presentation.payload.update({{"actor", command.actor}, {"placement", command.placement}});
         break;
-    }
-    case ScriptCommandKind::Say: {
-        Astra::Media::PresentationCommand presentation;
+    case ScriptCommandKind::Say:
         presentation.kind = Astra::Media::PresentationCommandKind::Text;
-        presentation.command_id = command.command_id + ".dialogue";
-        presentation.frame_index = frame_index;
         presentation.layer = "text";
         presentation.order = 200;
         presentation.text = command.text;
         presentation.locale = "en-US";
-        presentation.payload = {{"speaker", command.actor}, {"typewriter", {{"speed", 32}}}};
-        output.push_back(std::move(presentation));
-        if (!command.asset.path.empty()) {
-            Astra::Media::PresentationCommand audio;
-            audio.kind = Astra::Media::PresentationCommandKind::Audio;
-            audio.command_id = command.command_id + ".voice";
-            audio.frame_index = frame_index;
-            audio.asset = command.asset;
-            audio.bus = "voice";
-            audio.payload = {{"kind", "play"}, {"volume", 1.0}, {"loop", false}};
-            output.push_back(std::move(audio));
-        }
+        presentation.payload.update({{"speaker", command.actor}, {"stable_id", command.stable_id}});
         break;
-    }
-    case ScriptCommandKind::Choice: {
-        Astra::Media::PresentationCommand presentation;
+    case ScriptCommandKind::Choice:
         presentation.kind = Astra::Media::PresentationCommandKind::Text;
-        presentation.command_id = command.command_id + ".choice";
-        presentation.frame_index = frame_index;
         presentation.layer = "ui";
         presentation.order = 210;
-        presentation.text = ChoiceText(command.choices);
-        presentation.payload = {{"choices", ToJson(command)["choices"]}};
-        output.push_back(std::move(presentation));
+        presentation.text = command.text;
+        presentation.payload.update({{"choices", ToJson(command)["choices"]}});
         break;
-    }
-    case ScriptCommandKind::Audio: {
-        Astra::Media::PresentationCommand presentation;
+    case ScriptCommandKind::Audio:
         presentation.kind = Astra::Media::PresentationCommandKind::Audio;
-        presentation.command_id = command.command_id + ".audio";
-        presentation.frame_index = frame_index;
         presentation.asset = command.asset;
         presentation.bus = command.payload.value("bus", "music");
-        presentation.payload = {{"kind", "play"}, {"volume", 1.0}, {"loop", command.payload.value("loop", false)}};
-        output.push_back(std::move(presentation));
+        presentation.payload.update({{"kind", "play"}});
         break;
-    }
-    case ScriptCommandKind::Filter: {
-        Astra::Media::PresentationCommand presentation;
-        presentation.kind = Astra::Media::PresentationCommandKind::Filter;
-        presentation.command_id = command.command_id + ".filter";
-        presentation.frame_index = frame_index;
-        presentation.asset = command.asset;
+    case ScriptCommandKind::Camera:
+        presentation.kind = Astra::Media::PresentationCommandKind::Timeline;
         presentation.layer = "final";
-        presentation.payload = {{"profile", command.asset.ToString()}};
-        output.push_back(std::move(presentation));
+        presentation.order = 50;
+        presentation.payload.update({{"track", "camera"}});
         break;
-    }
+    case ScriptCommandKind::Timeline:
+        presentation.kind = Astra::Media::PresentationCommandKind::Timeline;
+        presentation.layer = "final";
+        presentation.order = 40;
+        break;
+    case ScriptCommandKind::Filter:
+        presentation.kind = Astra::Media::PresentationCommandKind::Filter;
+        presentation.layer = "final";
+        presentation.asset = command.asset;
+        break;
     default:
-        break;
+        return;
+    }
+    output.push_back(std::move(presentation));
+}
+
+void AddIrForCommand(CompiledScript& script, const ScriptCommand& command) {
+    if (command.kind == ScriptCommandKind::State) {
+        script.state_graph.states.push_back({{"id", command.stable_id}, {"name", command.state}});
+    } else if (command.kind == ScriptCommandKind::Scene) {
+        script.state_graph.scenes.push_back({{"id", command.stable_id}, {"name", command.scene}, {"state", command.state}});
+    } else if (command.kind == ScriptCommandKind::Jump || command.kind == ScriptCommandKind::Await || command.kind == ScriptCommandKind::End) {
+        script.state_graph.transitions.push_back({{"command", command.command_id}, {"target", command.target_label}, {"kind", ToString(command.kind)}});
+    } else if (command.kind == ScriptCommandKind::Timeline || command.kind == ScriptCommandKind::Camera || command.kind == ScriptCommandKind::Extension) {
+        script.effects.effects.push_back(ToJson(command));
+        if (command.payload.contains("channels")) {
+            for (const auto& channel : command.payload["channels"]) {
+                script.effects.channels.push_back(channel);
+            }
+        }
+    } else {
+        script.narrative.commands.push_back(ToJson(command));
     }
 }
 
-} // namespace
+} // namespace Private
 
 std::vector<ScriptProviderDescriptor> FoundationScriptProviders() {
     return {
         {
             NativeRuntimeId,
-            "Astra Native Script Foundation",
-            false,
+            "Astra Native Script Phase 8",
+            true,
             true,
             true,
             true,
             {".astra"},
-            {"compile_ir", "runtime_events", "presentation_commands", "snapshot"},
+            {"ast", "state_graph_ir", "narrative_ir", "effect_graph_ir", "source_map", "debug", "hot_reload", "snapshot_v2"},
             {"project_read"},
         },
         {
-            LuaRuntimeId,
-            "Astra Lua Foundation",
-            false,
+            LuaExtensionRuntimeId,
+            "Astra Lua Extension Package SDK",
+            true,
             true,
             true,
             true,
             {".lua"},
-            {"sol2_binding", "runtime_events", "presentation_commands", "snapshot"},
+            {"extension_schema", "sandbox", "command_manifest"},
             {"project_read"},
         },
     };
 }
 
-ScriptRuntimeHost::ScriptRuntimeHost() : providers_(FoundationScriptProviders()) {}
+std::vector<ScriptCommandSchema> FoundationCommandSchemas() {
+    auto vn = [](std::string id, std::string event, std::string category, std::string target, std::vector<std::string> channels, nlohmann::json presentation = nlohmann::json::object()) {
+        return ScriptCommandSchema{
+            std::move(id),
+            "astra.vn",
+            "",
+            1,
+            nlohmann::json::object(),
+            {{"event", std::move(event)}, {"category", std::move(category)}, {"target", std::move(target)}},
+            std::move(presentation),
+            nlohmann::json::object(),
+            {{"save", "serializable"}, {"skip", "finish"}, {"rollback", "snapshot"}, {"debug", "source_mapped"}},
+            std::move(channels),
+            true,
+            false,
+        };
+    };
+    return {
+        vn("astra.vn.scene.enter", "astra.vn.scene.enter", "vn.scene", "actor:/systems/story_director", {"story"}),
+        vn("astra.vn.stage.snapshot", "astra.vn.stage.snapshot", "vn.stage", "actor:/systems/scene", {"stage"}),
+        vn("astra.vn.background.show", "astra.vn.background.show", "vn.background", "actor:/systems/scene", {"background"}, {{"kind", "sprite"}, {"layer", "background"}}),
+        vn("astra.vn.character.show", "astra.vn.character.show", "vn.character", "actor:/characters/{actor}", {"character"}, {{"kind", "sprite"}, {"layer", "character"}}),
+        vn("astra.vn.character.hide", "astra.vn.character.hide", "vn.character", "actor:/characters/{actor}", {"character"}),
+        vn("astra.vn.character.update", "astra.vn.character.update", "vn.character", "actor:/characters/{actor}", {"character"}, {{"kind", "sprite"}, {"layer", "character"}}),
+        vn("astra.vn.camera.update", "astra.vn.camera.update", "vn.camera", "actor:/systems/camera", {"camera"}, {{"kind", "timeline"}, {"layer", "final"}}),
+        vn("astra.vn.timeline.start", "astra.vn.timeline.start", "vn.timeline", "actor:/systems/story_director", {"timeline"}, {{"kind", "timeline"}, {"layer", "final"}}),
+        vn("astra.vn.dialogue.say", "astra.vn.dialogue.say_requested", "vn.dialogue", "actor:/systems/dialogue", {"text"}, {{"kind", "text"}, {"layer", "text"}}),
+        vn("astra.vn.choice.present", "astra.vn.choice.presented", "vn.choice", "broadcast", {"ui"}, {{"kind", "text"}, {"layer", "ui"}}),
+        vn("astra.vn.variable.write", "astra.vn.variable.write", "vn.script", "actor:/systems/story_director", {"script"}),
+        vn("astra.vn.audio.play", "astra.vn.audio.play", "vn.audio", "actor:/systems/audio", {"audio"}, {{"kind", "audio"}}),
+        vn("astra.vn.filter.apply", "astra.vn.filter.apply", "vn.filter", "actor:/systems/filter", {"filter"}, {{"kind", "filter"}, {"layer", "final"}}),
+        vn("astra.vn.script.await", "astra.vn.script.await", "vn.script", "actor:/systems/story_director", {"script"}),
+        vn("astra.vn.flow.jump", "astra.vn.flow.jump", "vn.script", "actor:/systems/story_director", {"script"}),
+        vn("astra.vn.flow.end", "astra.vn.flow.end", "vn.script", "actor:/systems/story_director", {"script"}),
+        vn("astra.vn.flow.return", "astra.vn.flow.return", "vn.script", "actor:/systems/story_director", {"script"}),
+        {"live2d.motion.play", "live2d", "motion.play", 1, {{"actor", {{"type", "ActorRef"}, {"required", true}}}, {"motion", {{"type", "string"}, {"required", true}}}}, {{"event", "astra.vn.extension.command"}, {"category", "vn.extension"}, {"target", "actor:/systems/story_director"}}, nlohmann::json::object(), nlohmann::json::object(), {{"save", "serializable"}, {"skip", "finish"}, {"rollback", "snapshot"}, {"debug", "source_mapped"}}, {"live2d.motion"}, true, true},
+    };
+}
+
+ScriptRuntimeHost::ScriptRuntimeHost() : providers_(FoundationScriptProviders()), command_schemas_(FoundationCommandSchemas()) {}
 
 const std::vector<ScriptProviderDescriptor>& ScriptRuntimeHost::Providers() const {
     return providers_;
 }
 
-Astra::Core::Result<CompiledScript> ScriptRuntimeHost::CompileNative(const ScriptSource& source, Astra::Core::DiagnosticSink& diagnostics) const {
-    Astra::Core::DefaultLogger().Log(
-        "script.compile",
-        NativeRuntimeId,
-        Astra::Core::LogLevel::Info,
-        "native script compile started",
-        {{"source", source.source_id}, {"file", source.file}});
-    CompiledScript script;
-    script.runtime_id = NativeRuntimeId;
-    script.source_id = source.source_id;
-
-    std::istringstream input(source.text);
-    std::string line;
-    Astra::Core::u32 line_number = 0;
-    while (std::getline(input, line)) {
-        ++line_number;
-        auto trimmed = Trim(line);
-        if (trimmed.empty() || StartsWith(trimmed, "#")) {
-            continue;
-        }
-        const auto words = SplitWords(trimmed);
-        if (words.empty()) {
-            continue;
-        }
-        auto command = MakeCommand(ScriptCommandKind::Label, source, line_number, static_cast<Astra::Core::u32>(script.commands.size()));
-        if (words[0] == "label" && words.size() >= 2) {
-            command.kind = ScriptCommandKind::Label;
-            command.label = words[1];
-            AppendCommand(script, std::move(command), diagnostics);
-        } else if (words[0] == "bg" && words.size() >= 2) {
-            command.kind = ScriptCommandKind::Background;
-            if (SetAsset(command, words[1], diagnostics)) {
-                AppendCommand(script, std::move(command), diagnostics);
-            }
-        } else if (words[0] == "show" && words.size() >= 3) {
-            command.kind = ScriptCommandKind::ShowCharacter;
-            command.actor = words[1];
-            command.placement = words.size() >= 4 ? words[3] : "center";
-            if (SetAsset(command, words[2], diagnostics)) {
-                AppendCommand(script, std::move(command), diagnostics);
-            }
-        } else if (words[0] == "say" && words.size() >= 3) {
-            command.kind = ScriptCommandKind::Say;
-            command.actor = words[1];
-            auto text = ParseQuotedText(trimmed);
-            if (!text) {
-                EmitBlocking(diagnostics, command.location, "ASTRA_SCRIPT_SAY_TEXT_INVALID", "say requires quoted dialogue text.", "Use: say alice \"Hello.\"");
-                continue;
-            }
-            command.text = *text;
-            const auto voice_position = trimmed.find("voice ");
-            if (voice_position != std::string::npos) {
-                const auto voice_asset = Trim(std::string_view(trimmed).substr(voice_position + 6));
-                (void)SetAsset(command, voice_asset, diagnostics);
-            }
-            AppendCommand(script, std::move(command), diagnostics);
-        } else if (words[0] == "choice") {
-            command.kind = ScriptCommandKind::Choice;
-            if (auto route = ParseQuotedRoute(trimmed)) {
-                command.choices.push_back({route->first, route->second});
-            } else if (trimmed == "choice:") {
-                while (std::getline(input, line)) {
-                    ++line_number;
-                    auto choice_line = Trim(line);
-                    if (choice_line.empty() || StartsWith(choice_line, "#")) {
-                        continue;
-                    }
-                    auto route = ParseQuotedRoute(choice_line);
-                    if (!route) {
-                        EmitBlocking(diagnostics, {source.file.empty() ? source.source_id : source.file, line_number, 1}, "ASTRA_SCRIPT_CHOICE_INVALID", "choice entry requires quoted text and a target label.", "Use: \"Choice\" -> target_label");
-                        continue;
-                    }
-                    command.choices.push_back({route->first, route->second});
-                    if (command.choices.size() >= 2) {
-                        break;
-                    }
-                }
-            }
-            if (command.choices.empty()) {
-                EmitBlocking(diagnostics, command.location, "ASTRA_SCRIPT_CHOICE_EMPTY", "choice requires at least one route.", "Use: choice \"Text\" -> target_label");
-                continue;
-            }
-            AppendCommand(script, std::move(command), diagnostics);
-        } else if (words[0] == "jump" && words.size() >= 2) {
-            command.kind = ScriptCommandKind::Jump;
-            command.target_label = words[1];
-            AppendCommand(script, std::move(command), diagnostics);
-        } else if (words[0] == "set" && words.size() >= 3) {
-            command.kind = ScriptCommandKind::SetVariable;
-            command.variable_name = words[1];
-            command.value = words[2];
-            AppendCommand(script, std::move(command), diagnostics);
-        } else if (words[0] == "get" && words.size() >= 2) {
-            command.kind = ScriptCommandKind::GetVariable;
-            command.variable_name = words[1];
-            AppendCommand(script, std::move(command), diagnostics);
-        } else if (words[0] == "audio" && words.size() >= 3) {
-            command.kind = ScriptCommandKind::Audio;
-            command.payload = {{"bus", words[1]}, {"loop", words.size() >= 4 && words[3] == "loop"}};
-            if (SetAsset(command, words[2], diagnostics)) {
-                AppendCommand(script, std::move(command), diagnostics);
-            }
-        } else if (words[0] == "filter" && words.size() >= 2) {
-            command.kind = ScriptCommandKind::Filter;
-            if (SetAsset(command, words[1], diagnostics)) {
-                AppendCommand(script, std::move(command), diagnostics);
-            }
-        } else {
-            EmitBlocking(diagnostics, command.location, "ASTRA_SCRIPT_COMMAND_UNKNOWN", "Unknown Native DSL command.", "Use label, bg, show, say, choice, jump, set, get, audio, or filter.");
-        }
-    }
-
-    if (!ValidateLabels(script, diagnostics) || diagnostics.HasBlocking()) {
-        return Astra::Core::Result<CompiledScript>::Failure(Astra::Core::ErrorCode::InvalidFormat, "native script compilation failed");
-    }
-    Astra::Core::DefaultLogger().Log(
-        "script.compile",
-        NativeRuntimeId,
-        Astra::Core::LogLevel::Info,
-        "native script compile finished",
-        {{"source", source.source_id}, {"commands", std::to_string(script.commands.size())}});
-    return Astra::Core::Result<CompiledScript>::Success(std::move(script));
-}
-
-Astra::Core::Result<CompiledScript> ScriptRuntimeHost::CompileLua(const ScriptSource& source, Astra::Core::DiagnosticSink& diagnostics) const {
-    Astra::Core::DefaultLogger().Log(
-        "script.compile",
-        LuaRuntimeId,
-        Astra::Core::LogLevel::Info,
-        "lua script compile started",
-        {{"source", source.source_id}, {"file", source.file}});
-    CompiledScript script;
-    script.runtime_id = LuaRuntimeId;
-    script.source_id = source.source_id;
-    try {
-        sol::state lua;
-        std::vector<ScriptCommand> commands;
-        auto append = [&](ScriptCommand command) {
-            command.command_id = source.source_id + "#" + std::to_string(commands.size());
-            command.location = {source.file.empty() ? source.source_id : source.file, static_cast<Astra::Core::u32>(commands.size() + 1), 1};
-            commands.push_back(std::move(command));
-        };
-
-        sol::table astra = lua.create_table();
-        astra.set_function("label", [&](const std::string& label) {
-            ScriptCommand command;
-            command.kind = ScriptCommandKind::Label;
-            command.label = label;
-            append(std::move(command));
-        });
-        astra.set_function("bg", [&](const std::string& asset) {
-            ScriptCommand command;
-            command.kind = ScriptCommandKind::Background;
-            auto parsed = Astra::Asset::ParseAssetUri(asset);
-            if (parsed) {
-                command.asset = parsed.Value();
-            }
-            append(std::move(command));
-        });
-        astra.set_function("show", [&](const std::string& actor, const std::string& asset, const std::string& placement) {
-            ScriptCommand command;
-            command.kind = ScriptCommandKind::ShowCharacter;
-            command.actor = actor;
-            command.placement = placement;
-            auto parsed = Astra::Asset::ParseAssetUri(asset);
-            if (parsed) {
-                command.asset = parsed.Value();
-            }
-            append(std::move(command));
-        });
-        astra.set_function("say", [&](const std::string& actor, const std::string& text, const sol::optional<std::string>& voice) {
-            ScriptCommand command;
-            command.kind = ScriptCommandKind::Say;
-            command.actor = actor;
-            command.text = text;
-            if (voice.has_value()) {
-                auto parsed = Astra::Asset::ParseAssetUri(voice.value());
-                if (parsed) {
-                    command.asset = parsed.Value();
-                }
-            }
-            append(std::move(command));
-        });
-        astra.set_function("choice", [&](const std::string& text, const std::string& target_label) {
-            ScriptCommand command;
-            command.kind = ScriptCommandKind::Choice;
-            command.choices.push_back({text, target_label});
-            append(std::move(command));
-        });
-        astra.set_function("jump", [&](const std::string& target_label) {
-            ScriptCommand command;
-            command.kind = ScriptCommandKind::Jump;
-            command.target_label = target_label;
-            append(std::move(command));
-        });
-        astra.set_function("set", [&](const std::string& name, const std::string& value) {
-            ScriptCommand command;
-            command.kind = ScriptCommandKind::SetVariable;
-            command.variable_name = name;
-            command.value = value;
-            append(std::move(command));
-        });
-        astra.set_function("audio", [&](const std::string& bus, const std::string& asset) {
-            ScriptCommand command;
-            command.kind = ScriptCommandKind::Audio;
-            command.payload = {{"bus", bus}, {"loop", false}};
-            auto parsed = Astra::Asset::ParseAssetUri(asset);
-            if (parsed) {
-                command.asset = parsed.Value();
-            }
-            append(std::move(command));
-        });
-        astra.set_function("filter", [&](const std::string& asset) {
-            ScriptCommand command;
-            command.kind = ScriptCommandKind::Filter;
-            auto parsed = Astra::Asset::ParseAssetUri(asset);
-            if (parsed) {
-                command.asset = parsed.Value();
-            }
-            append(std::move(command));
-        });
-        lua["astra"] = astra;
-        lua.script(source.text);
-
-        for (auto& command : commands) {
-            if ((command.kind == ScriptCommandKind::Background || command.kind == ScriptCommandKind::ShowCharacter || command.kind == ScriptCommandKind::Audio || command.kind == ScriptCommandKind::Filter) && command.asset.path.empty()) {
-                EmitBlocking(diagnostics, command.location, "ASTRA_SCRIPT_ASSET_INVALID", "Lua script command references an invalid asset URI.", "Use native:/ asset URIs.");
-                continue;
-            }
-            AppendCommand(script, std::move(command), diagnostics);
-        }
-    } catch (const sol::error& error) {
-        ScriptSourceLocation location{source.file.empty() ? source.source_id : source.file, 1, 1};
-        EmitBlocking(diagnostics, location, "ASTRA_SCRIPT_LUA_ERROR", error.what(), "Use only the astra host API table in Phase 4 foundation Lua.");
-    }
-
-    if (!ValidateLabels(script, diagnostics) || diagnostics.HasBlocking()) {
-        return Astra::Core::Result<CompiledScript>::Failure(Astra::Core::ErrorCode::InvalidFormat, "lua script compilation failed");
-    }
-    Astra::Core::DefaultLogger().Log(
-        "script.compile",
-        LuaRuntimeId,
-        Astra::Core::LogLevel::Info,
-        "lua script compile finished",
-        {{"source", source.source_id}, {"commands", std::to_string(script.commands.size())}});
-    return Astra::Core::Result<CompiledScript>::Success(std::move(script));
+const std::vector<ScriptCommandSchema>& ScriptRuntimeHost::CommandSchemas() const {
+    return command_schemas_;
 }
 
 ScriptExecutionResult ScriptRuntimeHost::Run(
@@ -570,216 +362,61 @@ ScriptExecutionResult ScriptRuntimeHost::Run(
         script.runtime_id,
         Astra::Core::LogLevel::Info,
         "script execution finished",
-        {{"source", script.source_id},
-         {"events", std::to_string(result.events.size())},
-         {"presentation_commands", std::to_string(result.presentation_commands.size())}});
+        {{"source", script.source_id}, {"events", std::to_string(result.events.size())}, {"presentation_commands", std::to_string(result.presentation_commands.size())}});
     return result;
 }
 
-ScriptExecutionResult ScriptEventBridge::Execute(
+ScriptStepResult ScriptRuntimeHost::Step(
     const CompiledScript& script,
+    const ScriptSnapshot& snapshot,
     Astra::Runtime::RuntimeWorld& runtime,
-    const ScriptExecutionOptions& options,
     Astra::Core::DiagnosticSink& diagnostics) const {
-    ScriptExecutionResult result;
-    result.snapshot.runtime_id = script.runtime_id;
-    result.snapshot.source_id = script.source_id;
-    auto start = script.labels.find(options.entry_label);
-    std::size_t index = start == script.labels.end() ? 0 : start->second;
-    std::unordered_set<std::size_t> visited_jumps;
-    Astra::Core::u64 frame = 1;
+    ScriptStepResult step;
+    if (snapshot.current_command_index >= script.commands.size()) {
+        step.completed = true;
+        return step;
+    }
+    CompiledScript one = script;
+    one.commands = {script.commands[snapshot.current_command_index]};
+    auto result = bridge_.Execute(one, runtime, {"", 0}, diagnostics);
+    step.paused = true;
+    step.completed = snapshot.current_command_index + 1 >= script.commands.size();
+    step.current_command = one.commands.front();
+    step.location = step.current_command.location;
+    step.variables = result.snapshot.variables;
+    step.events = std::move(result.events);
+    step.presentation_commands = std::move(result.presentation_commands);
+    return step;
+}
 
-    while (index < script.commands.size()) {
-        const auto& command = script.commands[index];
-        result.snapshot.current_command_index = static_cast<Astra::Core::u32>(index);
-        result.snapshot.commands_executed.push_back(command.command_id);
-        if (!command.label.empty()) {
-            result.snapshot.active_label = command.label;
-        }
-
-        std::optional<Astra::Runtime::RuntimeEvent> event;
-        switch (command.kind) {
-        case ScriptCommandKind::Label:
-            break;
-        case ScriptCommandKind::Background:
-            event = MakeEvent(command, "astra.vn.background.show", "vn.background", "actor:/systems/scene", {{"asset", command.asset.ToString()}});
-            break;
-        case ScriptCommandKind::ShowCharacter:
-            event = MakeEvent(command, "astra.vn.character.show", "vn.character", "actor:/characters/" + command.actor, {{"actor", command.actor}, {"asset", command.asset.ToString()}, {"placement", command.placement}});
-            break;
-        case ScriptCommandKind::Say:
-            event = MakeEvent(command, "astra.vn.dialogue.say_requested", "vn.dialogue", "actor:/systems/dialogue", {{"speaker", command.actor}, {"text", command.text}, {"voice", command.asset.ToString()}});
-            break;
-        case ScriptCommandKind::Choice: {
-            nlohmann::json choices = nlohmann::json::array();
-            for (const auto& choice : command.choices) {
-                choices.push_back(ToJson(choice));
+ScriptCompatibilityReport ScriptRuntimeHost::CheckHotReloadCompatibility(const CompiledScript& old_script, const CompiledScript& new_script, const ScriptSnapshot& snapshot) const {
+    ScriptCompatibilityReport report;
+    const auto active = snapshot.current_stable_id.empty() ? snapshot.current_command_id : snapshot.current_stable_id;
+    for (const auto& command : old_script.commands) {
+        const auto id = command.stable_id.empty() ? command.command_id : command.stable_id;
+        if (id == active) {
+            const auto compatible = std::ranges::find_if(new_script.commands, [&](const auto& candidate) {
+                return (candidate.stable_id.empty() ? candidate.command_id : candidate.stable_id) == id && candidate.kind == command.kind;
+            });
+            report.compatible = compatible != new_script.commands.end();
+            if (report.compatible) {
+                report.migrated_command_ids.push_back(id);
+            } else {
+                report.incompatible_command_ids.push_back(id);
             }
-            event = MakeEvent(command, "astra.vn.choice.presented", "vn.choice", "broadcast", {{"choices", choices}});
-            break;
+            return report;
         }
-        case ScriptCommandKind::Jump:
-            break;
-        case ScriptCommandKind::SetVariable:
-            result.snapshot.variables[command.variable_name] = command.value;
-            event = MakeEvent(command, "astra.vn.variable.set", "vn.script", "actor:/systems/story_director", {{"name", command.variable_name}, {"value", command.value}});
-            break;
-        case ScriptCommandKind::GetVariable:
-            event = MakeEvent(command, "astra.vn.variable.get", "vn.script", "actor:/systems/story_director", {{"name", command.variable_name}, {"value", result.snapshot.variables.value(command.variable_name, nlohmann::json())}});
-            break;
-        case ScriptCommandKind::Audio:
-            event = MakeEvent(command, "astra.vn.audio.play", "vn.audio", "actor:/systems/audio", {{"asset", command.asset.ToString()}, {"bus", command.payload.value("bus", "music")}});
-            break;
-        case ScriptCommandKind::Filter:
-            event = MakeEvent(command, "astra.vn.filter.apply", "vn.filter", "actor:/systems/filter", {{"profile", command.asset.ToString()}});
-            break;
-        }
-
-        if (event.has_value()) {
-            auto emitted = runtime.Emit(event.value(), Astra::Runtime::RuntimeEventMode::Queued, diagnostics);
-            if (emitted) {
-                result.events.push_back(event.value());
-            }
-        }
-        AddPresentationForCommand(command, result.presentation_commands, frame++);
-
-        if (command.kind == ScriptCommandKind::Choice && !command.choices.empty()) {
-            const auto selected = std::min<std::size_t>(options.choice_index, command.choices.size() - 1);
-            result.snapshot.last_choice = command.choices[selected].text;
-            const auto label = script.labels.find(command.choices[selected].target_label);
-            if (label != script.labels.end()) {
-                index = label->second;
-                continue;
-            }
-        }
-        if (command.kind == ScriptCommandKind::Jump) {
-            const auto label = script.labels.find(command.target_label);
-            if (label != script.labels.end()) {
-                if (visited_jumps.contains(index)) {
-                    EmitBlocking(diagnostics, command.location, "ASTRA_SCRIPT_LOOP_DETECTED", "Foundation script execution detected a repeated jump.", "Use finite Phase 4 smoke scripts.");
-                    break;
-                }
-                visited_jumps.insert(index);
-                index = label->second;
-                continue;
-            }
-        }
-        ++index;
     }
-
-    (void)runtime.Tick(diagnostics);
-    return result;
+    report.compatible = active.empty();
+    return report;
 }
 
-std::string ToString(ScriptCommandKind kind) {
-    switch (kind) {
-    case ScriptCommandKind::Label:
-        return "label";
-    case ScriptCommandKind::Background:
-        return "background";
-    case ScriptCommandKind::ShowCharacter:
-        return "show_character";
-    case ScriptCommandKind::Say:
-        return "say";
-    case ScriptCommandKind::Choice:
-        return "choice";
-    case ScriptCommandKind::Jump:
-        return "jump";
-    case ScriptCommandKind::SetVariable:
-        return "set_variable";
-    case ScriptCommandKind::GetVariable:
-        return "get_variable";
-    case ScriptCommandKind::Audio:
-        return "audio";
-    case ScriptCommandKind::Filter:
-        return "filter";
-    }
-    return "unknown";
-}
-
-nlohmann::json ToJson(const ScriptSourceLocation& location) {
-    return {{"file", location.file}, {"line", location.line}, {"column", location.column}};
-}
-
-nlohmann::json ToJson(const ScriptChoice& choice) {
-    return {{"text", choice.text}, {"target_label", choice.target_label}};
-}
-
-nlohmann::json ToJson(const ScriptCommand& command) {
-    nlohmann::json choices = nlohmann::json::array();
-    for (const auto& choice : command.choices) {
-        choices.push_back(ToJson(choice));
-    }
-    return {
-        {"kind", ToString(command.kind)},
-        {"command_id", command.command_id},
-        {"location", ToJson(command.location)},
-        {"label", command.label},
-        {"actor", command.actor},
-        {"asset", command.asset.ToString()},
-        {"placement", command.placement},
-        {"text", command.text},
-        {"target_label", command.target_label},
-        {"variable_name", command.variable_name},
-        {"value", command.value},
-        {"choices", choices},
-        {"payload", command.payload},
-    };
-}
-
-nlohmann::json ToJson(const ScriptDebugSymbol& symbol) {
-    return {{"command_id", symbol.command_id}, {"location", ToJson(symbol.location)}, {"label", symbol.label}};
-}
-
-nlohmann::json ToJson(const CompiledScript& script) {
-    nlohmann::json commands = nlohmann::json::array();
-    for (const auto& command : script.commands) {
-        commands.push_back(ToJson(command));
-    }
-    nlohmann::json symbols = nlohmann::json::array();
-    for (const auto& symbol : script.debug_symbols) {
-        symbols.push_back(ToJson(symbol));
-    }
-    return {{"runtime_id", script.runtime_id}, {"source_id", script.source_id}, {"commands", commands}, {"labels", script.labels}, {"debug_symbols", symbols}};
-}
-
-nlohmann::json ToJson(const ScriptSnapshot& snapshot) {
-    return {
-        {"schema", snapshot.schema},
-        {"runtime_id", snapshot.runtime_id},
-        {"source_id", snapshot.source_id},
-        {"current_command_index", snapshot.current_command_index},
-        {"active_label", snapshot.active_label},
-        {"variables", snapshot.variables},
-        {"last_choice", snapshot.last_choice},
-        {"commands_executed", snapshot.commands_executed},
-    };
-}
-
-nlohmann::json ToJson(const ScriptProviderDescriptor& descriptor) {
-    return {
-        {"runtime_id", descriptor.runtime_id},
-        {"display_name", descriptor.display_name},
-        {"debug_supported", descriptor.debug_supported},
-        {"snapshot_supported", descriptor.snapshot_supported},
-        {"deterministic", descriptor.deterministic},
-        {"packaged_eligible", descriptor.packaged_eligible},
-        {"source_extensions", descriptor.source_extensions},
-        {"capabilities", descriptor.capabilities},
-        {"permissions", descriptor.permissions},
-    };
-}
-
-nlohmann::json ToJson(const ScriptExecutionResult& result) {
-    nlohmann::json events = nlohmann::json::array();
-    for (const auto& event : result.events) {
-        events.push_back(Astra::Runtime::ToJson(event));
-    }
-    nlohmann::json commands = nlohmann::json::array();
-    for (const auto& command : result.presentation_commands) {
-        commands.push_back(Astra::Media::ToJson(command));
-    }
-    return {{"events", events}, {"presentation_commands", commands}, {"snapshot", ToJson(result.snapshot)}};
+ScriptHotReloadReport ScriptRuntimeHost::HotReload(const CompiledScript& old_script, const CompiledScript& new_script, const ScriptSnapshot& snapshot) const {
+    ScriptHotReloadReport report;
+    report.compatibility = CheckHotReloadCompatibility(old_script, new_script, snapshot);
+    report.reloaded = report.compatibility.compatible;
+    report.rolled_back = !report.reloaded;
+    return report;
 }
 
 } // namespace Astra::Script

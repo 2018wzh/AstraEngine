@@ -36,6 +36,7 @@ include(CTest)
 include(cmake/AstraTargets.cmake)
 
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(pegtl CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
 find_package(sol2 CONFIG REQUIRED)

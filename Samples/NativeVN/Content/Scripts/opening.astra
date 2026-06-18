@@ -1,12 +1,61 @@
-label opening
-bg native:/Backgrounds/Room
-audio sfx native:/Sfx/Confirm
-show alice native:/Characters/Alice/Normal center
-say alice "Good morning from Phase 4." voice native:/Voice/Alice/opening_001
-audio music native:/Music/opening_theme
-filter native:/Filters/soft_vn
-choice "Walk together" -> route_walk
+story prologue:
+  state alice_route:
+    initial title
 
-label route_walk
-set route walk
-say alice "Let's open the menu, save, load, and replay this route."
+    scene title: #@id scene_title
+      stage: #@id stage_title
+        background native:/Backgrounds/Room #@id cmd_title_bg
+        camera zoom to:1.0 over:0ms #@id cmd_title_camera
+      set ui.screen = title #@id cmd_ui_title
+      play music native:/Music/opening_theme loop:true volume:0.65 #@id cmd_title_music
+      narrator: NativeVN Phase 8 starts from a packaged .astra script. #@id line_title_001
+      await title.continue #@id wait_title_continue
+      -> station #@id trans_title_station
+
+    scene station: #@id scene_station
+      stage: #@id stage_station
+        background native:/Backgrounds/Room #@id cmd_stage_bg
+        camera zoom to:1.0 over:0ms #@id cmd_stage_camera
+
+      background native:/Backgrounds/Room with:crossfade over:600ms #@id cmd_bg_room
+      play sfx native:/Sfx/Confirm #@id cmd_sfx_confirm
+      play voice native:/Voice/Alice/opening_001 #@id cmd_voice_alice_001
+      show alice pose:normal native:/Characters/Alice/Normal at:center #@id cmd_show_alice
+      alice[normal]: Good morning. This demo is running as a cooked package, not loose source. #@id line_station_001
+      set ui.message_window = visible #@id cmd_ui_message
+
+      timeline 900ms: #@id timeline_station_intro
+        camera zoom to:1.08 over:700ms #@id cmd_camera_zoom
+        play music native:/Music/opening_theme #@id cmd_music_opening
+        filter native:/Filters/soft_vn #@id cmd_filter_soft
+
+      @live2d.motion.play actor:alice motion:greet mix:200ms #@id ext_live2d_greet
+
+      choice "How do we verify the route?": #@id choice_station_route
+        - "Walk the packaged route" -> route_walk #@id choice_walk
+        - "Stay and inspect the systems" -> route_systems #@id choice_systems
+
+      -> route_walk #@id trans_station_default
+
+    scene route_walk: #@id scene_route_walk
+      set route = walk #@id cmd_route_walk
+      move alice to:left over:300ms #@id cmd_move_alice_left
+      alice[normal]: We will open the menu, read the backlog, save, load, and replay the same route. #@id line_walk_001
+      play sfx native:/Sfx/Confirm #@id cmd_walk_confirm
+      -> route_merge #@id trans_walk_merge
+
+    scene route_systems: #@id scene_route_systems
+      set route = systems #@id cmd_route_systems
+      pose alice normal #@id cmd_pose_alice_systems
+      alice[normal]: Then let us inspect the UI state, command schemas, package payloads, and replay hash. #@id line_systems_001
+      filter native:/Filters/soft_vn #@id cmd_systems_filter
+      -> route_merge #@id trans_systems_merge
+
+    scene route_merge: #@id scene_route_merge
+      set ui.system_menu = verified #@id cmd_ui_menu_verified
+      set ui.backlog = verified #@id cmd_ui_backlog_verified
+      set ui.config = verified #@id cmd_ui_config_verified
+      set save.slot.1 = ready #@id cmd_save_slot_ready
+      alice[normal]: Both branches merge here with deterministic script state and presentation state. #@id line_merge_001
+      await dialogue.advance #@id wait_dialogue_advance
+      end #@id end_route_merge

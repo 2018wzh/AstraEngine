@@ -2,7 +2,7 @@
 
 Current implementation note：工作树已切换为 dynamic-only engine linking：`astra_add_library`
 生成 `Astra*` shared libraries / DLLs，插件继续使用 `MODULE` 和 C ABI entrypoint。
-NativeVN playable v1 slice 和 TsuiNoSora local playable fixture 已实现 `astra cook/package/run --headless-smoke/run --windowed-smoke/replay --compare/inspect`
+NativeVN Phase 8 full playable demo 和 TsuiNoSora local playable fixture 已实现 `astra cook/package/run --headless-smoke/run --windowed-smoke/replay --compare/inspect`
 的 source asset sidecars、AssetRegistry/dependency graph evidence、production importer/cooker evidence、local DDC artifact execution/corruption recovery、binary `.astrapkg` zstd payload table、PackageReader random-access/chunked-read/mount evidence、Asset Release Gate evidence、package/cook/payload integrity diagnostics、engine/plugin DLL hash evidence、Script/AstraVN evidence、playable VN UI/system/save/load evidence、package-payload media decode/RGBA image and HarfBuzz/FreeType glyph primitive window-present evidence 和 golden replay comparison。
 Editor、AI/MCP、Legacy、完整 Artemis VM compatibility、per-driver visual/audio diff 和 full runtime release gate
 仍按下列 TODO 阶段推进，不能因该 evidence slice 被声明为 production complete。
@@ -288,7 +288,7 @@ Phase 3/7 注记：当前已实现 `AstraMedia` foundation and Phase 7 backend e
 
 目标：建立稳定 ScriptRuntimeHost，确保脚本只能通过授权 API、RuntimeEvent 和 Presentation API 影响世界。
 
-Phase 4 注记：当前已实现 `AstraScript` foundation slice：`ScriptRuntimeHost`、provider descriptor、Native DSL parser、Lua provider via `sol2`、shared command stream、source location diagnostics、debug-symbol DTO、`ScriptSnapshot`、`ScriptEventBridge`、Native/Lua headless parity evidence。完整 debugger、hot reload rollback、Graph/Timeline compiler、production Lua continuation snapshot 和完整 Script API 权限系统仍属 Phase 8 completion。
+Phase 8 注记：当前已实现 `AstraScript` completion slice：`ScriptRuntimeHost`、PEGTL-backed production `.astra` parser、统一 command schema registry、command manifest、AST/StateGraph/Narrative/Effect IR、source map、debug-symbol DTO、debug step、hot reload compatibility/rollback report、Lua extension schema sandbox、Lua story rejection、`ScriptSnapshot v2`、`ScriptEventBridge` 和 NativeVN Phase 8 evidence。真实 Live2D/Emote SDK、Editor graph/timeline UI 和 AI/MCP 仍属后续阶段。
 
 - [x] Script：定义 ScriptRuntimeHost：runtime registration、selection、load、step、run、debug、snapshot。（Phase 4 foundation 覆盖 provider selection、compile/run 和 snapshot DTO；step/debug 后续完成。）
 - [x] Script：定义 Script API surface：world query、event emit、presentation request、asset ref、save-safe state。（Phase 4 foundation 覆盖 event/presentation/asset ref/snapshot；world query 和完整权限 surface 后续完成。）
@@ -296,9 +296,9 @@ Phase 4 注记：当前已实现 `AstraScript` foundation slice：`ScriptRuntime
 - [x] Script：实现 AST/IR：stable command stream、schema、debug symbols、source map。（Phase 4 foundation 覆盖 shared command DTO 和 debug-symbol DTO；完整 source map schema 后续完成。）
 - [x] Script：实现 Lua runtime：sandbox、host API binding、permission, deterministic snapshot, debug hook。（Phase 4 foundation 使用 `sol2` 和最小 `astra` host API；完整 sandbox policy、permission validator、continuation snapshot 和 debug hook 后续完成。）
 - [x] Script：实现 ScriptEventBridge：script command -> RuntimeEvent/VNEvent/PresentationCommand。（Phase 4 foundation 覆盖 Native/Lua 到 RuntimeEvent 和 PresentationCommand。）
-- [ ] Script：实现 hot reload：parse validate、state compatibility check、rollback on failure。
-- [ ] Script：实现 debugger hooks：breakpoint、step、inspect variable、call stack、current command。
-- [ ] Script：按 `docs/design/script-and-presentation.md` 实现 ScriptRuntimeHost、Native DSL、Lua、Graph/Timeline 和 PresentationCommand contract。
+- [x] Script：实现 hot reload：parse validate、state compatibility check、rollback on failure。（Phase 8 覆盖 compatibility report 和 rollback DTO。）
+- [x] Script：实现 debugger hooks：breakpoint、step、inspect variable、call stack、current command。（Phase 8 覆盖 public DTO、source map、debug symbols 和 step result。）
+- [x] Script：按 `docs/design/script-and-presentation.md` 实现 ScriptRuntimeHost、Native DSL、Lua、Graph/Timeline 和 PresentationCommand contract。（Phase 8 覆盖 embedded graph/timeline IR 和 Lua extension schema；Editor UI 后续。）
 - [ ] Docs：编写 Script Programming Guide、Native DSL Reference、Lua Host API Guide、Script Debugging Guide。（Phase 4 foundation covers Script、Native DSL、Lua Host API；debugging guide remains planned with debugger implementation。）
 
 验收：
@@ -311,7 +311,7 @@ Phase 4 注记：当前已实现 `AstraScript` foundation slice：`ScriptRuntime
 
 目标：在通用 runtime 之上重建 VN-first 垂直模块，不污染 Core。
 
-Phase 4 注记：当前已实现 `AstraVN` foundation/playable v1 slice：VN event schema、预设 Actor/Component/StateMachine、`VnSession`、`VnSessionSnapshot`、Native/Lua parity、headless presentation capture、save/restore evidence，以及 Tools 层 `playable_vn` 报告中的 title/system menu/backlog/config/save-load slots/windowed scripted route evidence。完整 Presentation Library provider、Graph/Timeline integration、skip/auto hooks、production replay localization 和 Editor workflow 仍属后续 completion。
+Phase 8 注记：当前已实现 `AstraVN` completion slice：VN event schema、预设 Actor/Component/StateMachine、`VnSession`、rich `VnSessionSnapshot`、Native `.astra` execution、stage/timeline/choice/backlog/skip-auto/UI state、headless presentation capture、save/restore evidence，以及 Tools 层 `phase8_script_vn`/`playable_vn` 报告中的 title/system menu/backlog/config/save-load slots/windowed scripted 双分支 route evidence。真实 Presentation Library SDK/provider UI、Editor workflow 和 AI/MCP 仍属后续阶段。
 
 - [x] Presentation：定义 presentation command schema：sprite、text、ui、audio、filter、camera、timeline。（Phase 4 foundation 复用 `AstraMedia::PresentationCommand` 并覆盖 sprite/text/ui/audio/filter；camera/timeline 为 schema identifier。）
 - [ ] Presentation：定义 Presentation Library provider API，支持模块扩展。
@@ -319,8 +319,8 @@ Phase 4 注记：当前已实现 `AstraVN` foundation/playable v1 slice：VN eve
 - [x] AstraVN：定义预置 Actor：Scene、StoryDirector、DialogueSystem、ChoiceSystem、AudioSystem、FilterSystem、Character、Camera。（Phase 4 foundation 覆盖固定 `NativeVN` smoke preset。）
 - [x] AstraVN：定义预置 Component：character profile、emotion、dialogue participant、choice list、audio cue、camera、timeline。（Phase 4 foundation 覆盖 DTO descriptors；完整 inspector metadata 后续完成。）
 - [x] AstraVN：定义预置 StateMachine：Dialogue、Choice、CharacterPresentation、Background、Audio、Timeline、FilterProfile。（Phase 4 foundation 覆盖 basic event transitions；完整 route/lock/timeline state 后续完成。）
-- [ ] AstraVN：实现 VN graph/timeline integration，不只支持线性 DSL。
-- [x] AstraVN：实现 choice lock、route state、dialogue history、backlog、skip/auto hooks。（playable v1 覆盖 route/dialogue/backlog evidence；choice lock 与 skip/auto hooks 后续完成。）
+- [x] AstraVN：实现 VN graph/timeline integration，不只支持线性 DSL。（Phase 8 覆盖 embedded `.astra` graph/timeline IR 和 timeline state；可视化编辑器后续。）
+- [x] AstraVN：实现 choice lock、route state、dialogue history、backlog、skip/auto hooks。（Phase 8 playable demo 覆盖 route/dialogue/backlog/skip-auto evidence；更完整 Director lock UI 后续完成。）
 - [x] AstraVN：实现 package-launchable native sample project。（NativeVN 与 TsuiNoSora 可通过 package 后 headless/windowed scripted run 产生 playable evidence；TsuiNoSora 使用 local-test-only Artemis-derived 资源，production release gate 后续完成。）
 - [ ] Docs：编写 AstraVN Overview、Dialogue/Choice Guide、Character Presentation Guide、VN Sample Tutorial。（Phase 4 foundation covers AstraVN overview and sample evidence；production tutorial pages remain planned。）
 
@@ -451,7 +451,7 @@ Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 
 
 验收：
 
-- Native sample 可通过 validate -> cook -> package -> run -> replay -> inspect 全链路。（当前 playable v1 slice 已满足；最终 production acceptance 仍需 binary media transforms/full gate。）
+- Native sample 可通过 validate -> cook -> package -> run -> replay -> inspect 全链路。（当前 Phase 8 playable demo 已满足；最终 production acceptance 仍需 binary media transforms/full gate。）
 - Release build 可生成 package report、diagnostics report、trace capture。
 - 文档检查与测试门禁在 CI 中运行。
 
@@ -459,7 +459,7 @@ Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 
 
 目标：用样例项目驱动引擎完备性，而不是只靠单元测试。
 
-- [x] Sample：`NativeVN`：背景、角色、对白、选择、音频、timeline、filter、save/replay。（playable v1 覆盖生成 PNG/OGG fixture、UI/system state、save/load、windowed/headless evidence；timeline runtime 后续完成。）
+- [x] Sample：`NativeVN`：背景、角色、对白、选择、音频、timeline、filter、save/replay。（Phase 8 full playable demo 覆盖生成 PNG/OGG fixture、双分支、UI/system state、save/load、windowed/headless evidence；真实 provider timeline UI 后续完成。）
 - [x] Sample：`TsuiNoSora` local fixture：正文线路、Artemis UI/system、backlog、save/load、config、系统音效和 inspect report。（local_test_only；不代表 redistributable sample 或完整 Artemis VM compatibility。）
 - [x] Sample：`RuntimeStress`：1000+ Actor、多状态机、多事件、多资源加载。（Phase 5 descriptor and `AstraPhaseTests` cover 1000 Actor deterministic scheduler/save/load/replay hash evidence；large resource-load expansion remains later sample work。）
 - [ ] Sample：`PackageSmoke`：只从 cooked package 启动。
@@ -487,7 +487,7 @@ Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 
 目标：定义最终达标门槛，防止“功能看起来有了”但工程上不能发布。
 
 - [x] Acceptance：`NativeVN` 从 source content 完成 validate、cook、package。（Phase 6 已通过 binary `.astrapkg`；full UE-class release gate 仍需 media/editor/AI hardening。）
-- [x] Acceptance：packaged `NativeVN` 在无 Editor 环境 launch、play、choice、save、load、replay。（playable v1 已通过 headless/windowed scripted evidence；save migration/replay localization 后续完成。）
+- [x] Acceptance：packaged `NativeVN` 在无 Editor 环境 launch、play、choice、save、load、replay。（Phase 8 playable demo 已通过 headless/windowed scripted evidence；save migration UI 和更深 replay localization 后续完成。）
 - [ ] Acceptance：runtime 支持真实 image/font/audio rendering 和 executable FilterGraph。
 - [ ] Acceptance：runtime 支持 deterministic script execution、event order、state hash、presentation hash。
 - [ ] Acceptance：runtime 支持 module/plugin load、permission check、ABI validation、release-safe inclusion。

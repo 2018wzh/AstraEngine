@@ -140,7 +140,7 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 
 ## 7. Phase 4：Foundation ScriptRuntimeHost / AstraVN
 
-状态：Implemented foundation slice plus NativeVN runtime evidence. 当前实现覆盖 `AstraScript` 和 `AstraVN`：`ScriptRuntimeHost`、Native DSL parser、Lua provider via `sol2`、shared command stream、source diagnostics、debug-symbol DTO、`ScriptSnapshot`、`ScriptEventBridge`、VN event schema、预设 Actor/Component/StateMachine、`VnSession`、`VnSessionSnapshot`、Native/Lua parity headless hashes、NativeVN CLI smoke、save/restore evidence、package manifest evidence 和 golden replay comparison。完整脚本语言、debugger、hot reload、Graph/Timeline、真实 media backend 和 production release gate 仍属后续 completion。
+状态：Historical foundation slice, superseded by Phase 8 Script/AstraVN completion. 当前实现覆盖 `AstraScript` 和 `AstraVN`：`ScriptRuntimeHost`、PEGTL-backed `.astra` parser、统一 command schema registry、Lua extension schema sandbox via `sol2`、shared command stream、source diagnostics、debug-symbol DTO、`ScriptSnapshot v2`、`ScriptEventBridge`、VN event schema、预设 Actor/Component/StateMachine、`VnSession`、`VnSessionSnapshot`、NativeVN Phase 8 full playable demo、save/restore evidence、package manifest evidence 和 golden replay comparison。真实 Live2D/Emote SDK、Editor graph/timeline UI、AI/MCP 和 per-driver diff 仍属后续 completion。
 
 目标：
 

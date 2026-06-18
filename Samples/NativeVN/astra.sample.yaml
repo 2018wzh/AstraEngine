@@ -1,22 +1,41 @@
 schema: astra.sample.v1
 id: astra.sample.nativevn
 display_name: NativeVN
-phase: 4
-foundation_only: true
-status: playable-v1
-description: Redistributable playable NativeVN descriptor with Native DSL, Lua, ScriptRuntimeHost, AstraVN, generated PNG/OGG fixture media, UI/system state, save/load, replay, and windowed/headless evidence.
+phase: 8
+foundation_only: false
+status: playable-demo
+description: Redistributable Phase 8 VN playable demo using .astra story scripts, Lua extension schema fixtures, package payloads, UI evidence, save/load, replay, timeline, filter, and audio validation.
 acceptance:
-  - astra validate Samples/NativeVN --strict
-  - astra run Samples/NativeVN --headless-smoke
+  - astra validate Samples/NativeVN --strict --json
+  - astra cook Samples/NativeVN --config Release --json
+  - astra package Samples/NativeVN --profile deterministic --json
+  - astra run build/Saved/Packages/NativeVN.astrapkg --headless-smoke --json
   - astra run build/Saved/Packages/NativeVN.astrapkg --windowed-smoke --scripted-input Samples/NativeVN/Input/golden.yaml --auto-close --json
+  - astra replay build/Saved/Replays/NativeVNGolden.replay --compare --json
+  - astra inspect build/Saved/Packages/NativeVN.astrapkg --json
 playable:
+  script: native:/Scripts/opening
+  extension_packages:
+    - native:/Scripts/opening_lua
+  routes:
+    - id: walk
+      entry: title
+      branch_choice: 0
+    - id: systems
+      entry: title
+      branch_choice: 1
   stage:
     width: 1280
     height: 720
   redistributable: true
-  route: opening_to_walk
+  deterministic_profile: deterministic
   ui_system:
     title: true
+    message_window: true
+    nameplate: true
+    choices: true
+    system_menu: true
     backlog: true
     save_load_slots: 3
     config: true
+    auto_skip_indicators: true

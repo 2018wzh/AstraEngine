@@ -58,6 +58,11 @@ Current concrete implementation slices:
 - `Engine/Runtime/Media/Private/MediaSerialization.cpp`: media presentation and report JSON serialization for commands, render graphs, frame captures, and backend capability reports.
 - `Engine/Runtime/Runtime/Private/Runtime.cpp`: runtime event bus, scheduler, state machine wiring, control policy, snapshot capture, and world lifecycle.
 - `Engine/Runtime/Runtime/Private/RuntimeSerialization.cpp`: runtime JSON serialization/deserialization for events, snapshots, save containers, and replay comparison reports.
+- `Engine/Runtime/Script/Private/NativeDslParser.cpp`: PEGTL-backed `.astra` parsing, stable-id diagnostics, scene fallthrough checks, and command-schema binding.
+- `Engine/Runtime/Script/Private/Script.cpp`: shared script helpers, provider descriptors, command schema registry, IR population, stepping, and hot reload reports.
+- `Engine/Runtime/Script/Private/ScriptExecution.cpp`: schema-bound command execution into RuntimeEvent, scheduler waits, presentation commands, and v2 snapshots.
+- `Engine/Runtime/Script/Private/ScriptLua.cpp`: sandboxed Lua extension schema package compiler; Lua story execution is rejected.
+- `Engine/Runtime/Script/Private/ScriptSerialization.cpp`: Script DTO, command manifest, source map, snapshot, and schema JSON serialization.
 
 As more oversized modules are split, add one line per concrete slice here with a short functional summary. Keep this index honest: do not list placeholder or forwarding-only translation units.
 
@@ -128,7 +133,7 @@ Phase 1 production Foundation gate APIs are in Core, Platform, ModuleRuntime, Pr
 - `TypeRegistry::EvaluateWrite()`
 - CLI `foundation_core_gate` artifact in `Astra::Tools::Validate()`
 
-Phase 4 Script/AstraVN foundation APIs are in `Script.hpp` and `AstraVN.hpp`:
+Phase 8 Script/AstraVN completion APIs are in `Script.hpp` and `AstraVN.hpp`:
 
 - `ScriptRuntimeHost`
 - `ScriptEventBridge`

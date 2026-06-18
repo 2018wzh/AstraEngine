@@ -21,10 +21,13 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     REQUIRE(native_validation.artifacts["asset_dependency_graph"]["hard_edges"].contains(
         "native:/Scripts/opening"));
     REQUIRE(native_validation.artifacts["phase3_media_release_gate"]["passed"] == true);
-    REQUIRE(native_validation.artifacts["phase4_script_vn"]["status"] == "passed");
+    REQUIRE(native_validation.artifacts["phase8_script_vn"]["status"] == "passed");
+    REQUIRE(native_validation.artifacts["phase4_script_vn"]["deprecated_alias_for"] ==
+            "phase8_script_vn");
     REQUIRE(
-        native_validation.artifacts["phase4_script_vn"]["parity"]["presentation_hashes_match"] ==
+        native_validation.artifacts["phase8_script_vn"]["parity"]["presentation_hashes_match"] ==
         true);
+    REQUIRE_FALSE(native_validation.artifacts["phase8_script_vn"]["command_manifest"].empty());
 
     auto native_cook =
         Astra::Tools::Cook(std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN", options);
@@ -191,7 +194,9 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
         reader.ReadPayloadText(native_package.artifacts["package"].get<std::string>(),
                                opening_asset.Value(), package_reader_diagnostics);
     REQUIRE(opening_payload);
-    REQUIRE(opening_payload.Value().find("label opening") != std::string::npos);
+    REQUIRE(opening_payload.Value().find("story prologue") != std::string::npos);
+    REQUIRE(opening_payload.Value().find("#@id scene_station") != std::string::npos);
+    REQUIRE(opening_payload.Value().find("scene route_systems") != std::string::npos);
     auto opening_chunks =
         reader.ReadPayloadChunks(native_package.artifacts["package"].get<std::string>(),
                                  opening_asset.Value(), 32, package_reader_diagnostics);
@@ -289,7 +294,9 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     auto native_run = Astra::Tools::Run(
         std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN", run_options);
     REQUIRE(native_run.Passed());
-    REQUIRE(native_run.artifacts["headless_smoke"]["phase4_script_vn"]["status"] == "passed");
+    REQUIRE(native_run.artifacts["headless_smoke"]["phase8_script_vn"]["status"] == "passed");
+    REQUIRE(native_run.artifacts["headless_smoke"]["phase4_script_vn"]["deprecated_alias_for"] ==
+            "phase8_script_vn");
 
     auto package_run =
         Astra::Tools::Run(native_package.artifacts["package"].get<std::string>(), run_options);

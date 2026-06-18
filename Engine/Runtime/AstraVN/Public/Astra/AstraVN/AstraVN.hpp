@@ -38,6 +38,11 @@ struct VnSessionSnapshot {
     Astra::Script::ScriptSnapshot script_snapshot;
     nlohmann::json route_state = nlohmann::json::object();
     nlohmann::json dialogue_history = nlohmann::json::array();
+    nlohmann::json backlog = nlohmann::json::array();
+    nlohmann::json stage_state = nlohmann::json::object();
+    nlohmann::json timeline_state = nlohmann::json::object();
+    nlohmann::json choice_state = nlohmann::json::object();
+    nlohmann::json skip_auto_state = nlohmann::json::object();
     nlohmann::json vn_events = nlohmann::json::array();
     nlohmann::json presentation_commands = nlohmann::json::array();
     Astra::Media::FrameCapture headless_capture;

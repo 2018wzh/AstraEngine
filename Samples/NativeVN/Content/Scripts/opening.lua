@@ -1,12 +1,24 @@
-astra.label("opening")
-astra.bg("native:/Backgrounds/Room")
-astra.audio("sfx", "native:/Sfx/Confirm")
-astra.show("alice", "native:/Characters/Alice/Normal", "center")
-astra.say("alice", "Good morning from Phase 4.", "native:/Voice/Alice/opening_001")
-astra.audio("music", "native:/Music/opening_theme")
-astra.filter("native:/Filters/soft_vn")
-astra.choice("Walk together", "route_walk")
+aivn.extension("live2d", "1.0.0")
 
-astra.label("route_walk")
-astra.set("route", "walk")
-astra.say("alice", "Let's open the menu, save, load, and replay this route.")
+aivn.command("motion.play", {
+  version = 1,
+  params = {
+    actor = { type = "ActorRef", required = true },
+    motion = { type = "Asset<Motion>", required = true },
+    mix = { type = "Duration", default = "200ms" }
+  },
+  execution = {
+    kind = "cue",
+    blocking = true,
+    deterministic = true,
+    save = "serializable",
+    skip = "finish",
+    rollback = "snapshot",
+    channels = { "actor:{actor}.live2d.motion" }
+  },
+  editor = {
+    label = "Live2D Motion",
+    category = "Live2D/Motion",
+    timelineTrack = "Live2D Motion"
+  }
+})

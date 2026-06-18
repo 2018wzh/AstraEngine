@@ -1,6 +1,6 @@
 # Samples
 
-Status: NativeVN playable v1 plus local TsuiNoSora playable fixture. `Samples/NativeVN`, `Samples/RuntimeStress`, `Samples/PackageSmoke`, and `Samples/TsuiNoSora` exist as foundation descriptors; `NativeVN` is the redistributable playable acceptance sample, while `TsuiNoSora` is a local-test-only sample copied from a curated Artemis resource subset for real PNG/OGG/font, UI/system, save/load, replay, and inspect evidence.
+Status: NativeVN Phase 8 full playable demo plus local TsuiNoSora playable fixture. `Samples/NativeVN`, `Samples/RuntimeStress`, `Samples/PackageSmoke`, and `Samples/TsuiNoSora` exist as evidence descriptors; `NativeVN` is the redistributable playable acceptance sample, while `TsuiNoSora` is a local-test-only sample copied from a curated Artemis resource subset for real PNG/OGG/font, UI/system, save/load, replay, and inspect evidence.
 
 ## Overview
 
@@ -20,11 +20,11 @@ Sample requirements are specified in [Samples and Test Matrix](../../design/samp
 
 ## Programming Guide
 
-Current sample descriptors live in `Samples/*/astra.sample.yaml`. `Samples/NativeVN/Content` contains generated redistributable PNG/OGG fixture media plus Native DSL/Lua parity sources. `Samples/TsuiNoSora/Content` contains copied local fixture PNG, OGG, font, UI/system, filter, and script sidecars for runtime verification.
+Current sample descriptors live in `Samples/*/astra.sample.yaml`. `Samples/NativeVN/Content` contains generated redistributable PNG/OGG fixture media, a `.astra` story script, and a Lua extension schema fixture. `Samples/TsuiNoSora/Content` contains copied local fixture PNG, OGG, font, UI/system, filter, and script sidecars for runtime verification.
 
 ## API Reference
 
-Descriptors use `schema: astra.sample.v1` and `foundation_only: true` for the current Phase 1-6 foundation/evidence slices. `NativeVN` uses redistributable generated fixtures; `TsuiNoSora` uses `local_test_only` fixture sidecars.
+Descriptors use `schema: astra.sample.v1`; Phase 1-6 foundation/evidence slices keep `foundation_only: true`, while `NativeVN` is the Phase 8 playable demo descriptor. `NativeVN` uses redistributable generated fixtures; `TsuiNoSora` uses `local_test_only` fixture sidecars.
 
 ## Examples
 
@@ -53,7 +53,7 @@ astra replay build/Saved/Replays/NativeVNGolden.replay --compare
 astra inspect build/Saved/Packages/NativeVN.astrapkg
 ```
 
-These commands prove the current Phase 6 playable slice plus Phase 7 media backend evidence, including binary `.astrapkg` packaging, zstd payloads, generated/copy fixture media decode evidence, SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence sourced from package payloads for `.astrapkg` runs, playable VN state, UI/system state, timeline/media provider execution evidence, local DDC artifact writes/reuse/corruption recovery, PackageReader random/chunked reads, read-only package mount DTOs, package manifest hash/provider feature hash save-replay evidence, replay mismatch localization, Asset Release Gate evidence, and package/cook/payload manifest hash checks. They do not yet prove Editor workflows, AI/MCP, Legacy, per-driver visual/audio diff, or final UE-class acceptance.
+These commands prove the current Phase 8 playable demo plus Phase 7 media backend evidence, including binary `.astrapkg` packaging, zstd payloads, generated/copy fixture media decode evidence, SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence sourced from package payloads for `.astrapkg` runs, playable VN state, UI/system state, command schema/source-map evidence, timeline/media provider execution evidence, local DDC artifact writes/reuse/corruption recovery, PackageReader random/chunked reads, read-only package mount DTOs, package manifest hash/provider feature hash save-replay evidence, replay mismatch localization, Asset Release Gate evidence, and package/cook/payload manifest hash checks. They do not yet prove Editor workflows, AI/MCP, Legacy, real Live2D/Emote SDK execution, or per-driver visual/audio diff.
 
 TsuiNoSora local fixture commands include:
 

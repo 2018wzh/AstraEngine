@@ -24,6 +24,7 @@
     "miniaudio",
     "nlohmann-json",
     "openssl",
+    "pegtl",
     "sdl3",
     "sol2",
     "spdlog",

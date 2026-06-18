@@ -2,8 +2,8 @@ id: native:/Scripts/opening
 schema: astra.asset.sidecar.v1
 type: script.native
 source_path: opening.astra
-display_name: NativeVN Opening Native DSL
-tags: [script, nativevn]
+display_name: NativeVN Phase 8 Playable Demo
+tags: [script, astra, nativevn, playable, phase8]
 origin: HumanAuthored
 license:
   owner: project
@@ -23,4 +23,5 @@ dependencies:
     - native:/Filters/soft_vn
     - native:/UI/TextBox
     - native:/Fonts/SourceHanSerif
+    - native:/Scripts/opening_lua
   soft: []

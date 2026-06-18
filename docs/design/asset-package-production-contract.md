@@ -58,7 +58,7 @@ public:
 - Preview 可读取 source，但不能写 Content。
 - Import 成功必须写 sidecar、source copy/mount policy 和 audit record。
 - AI draft 必须先进入 Review Queue，accepted 后才可 Import。
-- Built-in importers cover image、audio、font、text、filter profile、native/Lua script source and timeline-style text descriptors. They are source/sidecar producers; media execution remains out of scope。
+- Built-in importers cover image、audio、font、text、filter profile、native `.astra` script source、Lua extension schema packages and timeline-style text descriptors. They are source/sidecar producers; media execution remains out of scope。
 
 ## 3. Cook Contract
 

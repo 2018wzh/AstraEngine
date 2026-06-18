@@ -155,14 +155,16 @@ public:
             bool wake = false;
             if (task.wait.kind == RuntimeWaitKind::None) {
                 wake = true;
-            } else if (task.wait.kind == RuntimeWaitKind::Time) {
+            } else if (task.wait.kind == RuntimeWaitKind::Time || task.wait.kind == RuntimeWaitKind::FixedSteps) {
                 wake = task.wait.wake_frame <= fixed_step_index + 1;
-            } else if (task.wait.kind == RuntimeWaitKind::Event) {
+            } else if (task.wait.kind == RuntimeWaitKind::Event || task.wait.kind == RuntimeWaitKind::ProviderSignal) {
                 wake = std::ranges::any_of(event_types, [&](const auto& type) { return type == task.wait.event_type; });
-            } else if (task.wait.kind == RuntimeWaitKind::Asset) {
+            } else if (task.wait.kind == RuntimeWaitKind::Asset || task.wait.kind == RuntimeWaitKind::AssetReady) {
                 wake = task.continuation.value("asset_ready", false);
             } else if (task.wait.kind == RuntimeWaitKind::Script) {
                 wake = task.continuation.value("script_ready", false);
+            } else if (task.wait.kind == RuntimeWaitKind::Debugger) {
+                wake = task.continuation.value("debugger_resume", false);
             }
             if (wake) {
                 task.state = RuntimeTaskState::Completed;

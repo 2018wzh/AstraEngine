@@ -36,7 +36,7 @@ ImporterDescriptor DescriptorForImporter(std::string_view provider_id) {
         return {"astra.importer.filter_profile", "IAssetImporter", {".filter.yaml"}, {"filter_profile"}, AssetSidecarSchema, "ASTRA_IMPORT_FILTER"};
     }
     if (provider_id == "astra.importer.script") {
-        return {"astra.importer.script", "IAssetImporter", {".astra", ".lua"}, {"script.native", "script.lua"}, AssetSidecarSchema, "ASTRA_IMPORT_SCRIPT"};
+        return {"astra.importer.script", "IAssetImporter", {".astra", ".lua"}, {"script.native", "script.extension.lua"}, AssetSidecarSchema, "ASTRA_IMPORT_SCRIPT"};
     }
     return {};
 }
@@ -57,8 +57,8 @@ CookProcessorDescriptor DescriptorForProcessor(std::string_view provider_id) {
     if (provider_id == "astra.cook.script.native") {
         return {"astra.cook.script.native", "ICookProcessor", {"script.native"}, {"astra.script.native.ir"}, {"astra.script.native"}, true, 1, "ASTRA_COOK_SCRIPT"};
     }
-    if (provider_id == "astra.cook.script.lua") {
-        return {"astra.cook.script.lua", "ICookProcessor", {"script.lua"}, {"astra.script.lua.bytecode"}, {"astra.script.lua"}, true, 1, "ASTRA_COOK_SCRIPT"};
+    if (provider_id == "astra.cook.script.extension.lua") {
+        return {"astra.cook.script.extension.lua", "ICookProcessor", {"script.extension.lua"}, {"astra.script.extension.schema_manifest"}, {"astra.script.extension.lua"}, true, 1, "ASTRA_COOK_SCRIPT"};
     }
     if (provider_id == "astra.cook.timeline") {
         return {"astra.cook.timeline", "ICookProcessor", {"timeline", "text"}, {"astra.timeline.runtime"}, {}, true, 1, "ASTRA_COOK_TIMELINE"};
@@ -153,8 +153,8 @@ std::string ProcessorIdForType(std::string_view type) {
     if (type == "script.native") {
         return "astra.cook.script.native";
     }
-    if (type == "script.lua") {
-        return "astra.cook.script.lua";
+    if (type == "script.extension.lua") {
+        return "astra.cook.script.extension.lua";
     }
     if (type == "timeline" || type == "text") {
         return "astra.cook.timeline";
@@ -247,7 +247,7 @@ std::vector<CookProcessorDescriptor> BuiltinCookProcessorDescriptors() {
         DescriptorForProcessor("astra.cook.font.atlas"),
         DescriptorForProcessor("astra.cook.filter_profile"),
         DescriptorForProcessor("astra.cook.script.native"),
-        DescriptorForProcessor("astra.cook.script.lua"),
+        DescriptorForProcessor("astra.cook.script.extension.lua"),
         DescriptorForProcessor("astra.cook.timeline"),
         DescriptorForProcessor("astra.cook.asset.binary"),
     };

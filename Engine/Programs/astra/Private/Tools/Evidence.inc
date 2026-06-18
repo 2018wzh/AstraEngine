@@ -151,11 +151,14 @@ bool IsFoundationSample(const std::filesystem::path& sample, CommandReport& repo
     if (!descriptor) {
         return false;
     }
-    if (descriptor["foundation_only"].as<bool>(false) != true ||
-        descriptor["phase"].as<int>(0) > 6) {
+    const auto sample_id = descriptor["id"].as<std::string>("");
+    const auto phase = descriptor["phase"].as<int>(0);
+    const auto native_vn_phase8 = sample_id == "astra.sample.nativevn" && phase == 8;
+    if ((descriptor["foundation_only"].as<bool>(false) != true || phase > 6) &&
+        !native_vn_phase8) {
         AddDiagnostic(report, "ASTRA_SAMPLE_NOT_FOUNDATION",
                       Astra::Core::DiagnosticSeverity::Blocking,
-                      "Foundation tools accept Phase 1-6 foundation/evidence sample descriptors.",
+                      "Foundation tools accept Phase 1-6 foundation/evidence sample descriptors plus the Phase 8 NativeVN playable demo.",
                       descriptor_path);
         return false;
     }

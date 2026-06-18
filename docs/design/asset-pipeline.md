@@ -213,7 +213,7 @@ Load AssetRegistry
 
 Cook must be incremental and deterministic. Processor output must not depend on wall clock, random temp paths, provider response time or Editor state.
 
-当前内置 cook processors 覆盖 image texture、audio stream、font runtime、filter profile、native script、Lua script、timeline/text 和 generic asset binary。Phase 6 生成确定性的 binary payload metadata 与 payload hashes，并记录 provider feature hash；Phase 7 consumes those payloads through media decode/provider evidence for texture buffers、glyph runs、audio logical mixer state、timeline state and FilterGraph hashes.
+当前内置 cook processors 覆盖 image texture、audio stream、font runtime、filter profile、native `.astra` script、Lua extension schema package、timeline/text 和 generic asset binary。Phase 6 生成确定性的 binary payload metadata 与 payload hashes，并记录 provider feature hash；Phase 7 consumes those payloads through media decode/provider evidence for texture buffers、glyph runs、audio logical mixer state、timeline state and FilterGraph hashes.
 
 ## 7. DerivedDataCache
 
