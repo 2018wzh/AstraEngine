@@ -2,7 +2,7 @@
 
 Current implementation note：工作树已切换为 dynamic-only engine linking：`astra_add_library`
 生成 `Astra*` shared libraries / DLLs，插件继续使用 `MODULE` 和 C ABI entrypoint。
-NativeVN Phase 8 full playable demo 和 TsuiNoSora local playable fixture 已实现 `astra cook/package/run --headless-smoke/run --windowed-smoke/replay --compare/inspect`
+NativeVN Phase 8 full playable demo 已实现 `astra cook/package/run --headless-smoke/run --windowed-smoke/replay --compare/inspect`
 的 source asset sidecars、AssetRegistry/dependency graph evidence、production importer/cooker evidence、local DDC artifact execution/corruption recovery、binary `.astrapkg` zstd payload table、PackageReader random-access/chunked-read/mount evidence、Asset Release Gate evidence、package/cook/payload integrity diagnostics、engine/plugin DLL hash evidence、Script/AstraVN evidence、playable VN UI/system/save/load evidence、package-payload media decode/RGBA image and HarfBuzz/FreeType glyph primitive window-present evidence 和 golden replay comparison。
 Runtime-only release gate、trace/crash evidence、sectioned save descriptors、Runtime tick result DTO、Director arbitration DTO 和 Media driver diff evidence 已补齐；Editor、AI/MCP、Legacy、完整 Artemis VM compatibility 和 Editor-facing debug/visual diff tools 仍按下列 TODO 阶段推进，不能因 runtime-only evidence slice 被声明为 full engine/editor complete。
 
@@ -320,7 +320,7 @@ Phase 8 注记：当前已实现 `AstraVN` completion slice：VN event schema、
 - [x] AstraVN：定义预置 StateMachine：Dialogue、Choice、CharacterPresentation、Background、Audio、Timeline、FilterProfile。（Phase 4 foundation 覆盖 basic event transitions；完整 route/lock/timeline state 后续完成。）
 - [x] AstraVN：实现 VN graph/timeline integration，不只支持线性 DSL。（Phase 8 覆盖 embedded `.astra` graph/timeline IR 和 timeline state；可视化编辑器后续。）
 - [x] AstraVN：实现 choice lock、route state、dialogue history、backlog、skip/auto hooks。（Phase 8 playable demo 覆盖 route/dialogue/backlog/skip-auto evidence；更完整 Director lock UI 后续完成。）
-- [x] AstraVN：实现 package-launchable native sample project。（NativeVN 与 TsuiNoSora 可通过 package 后 headless/windowed scripted run 产生 playable evidence；TsuiNoSora 使用 local-test-only Artemis-derived 资源，production release gate 后续完成。）
+- [x] AstraVN：实现 package-launchable native sample project。（NativeVN 可通过 package 后 headless/windowed scripted run 产生 playable evidence，production release gate 后续完成。）
 - [ ] Docs：编写 AstraVN Overview、Dialogue/Choice Guide、Character Presentation Guide、VN Sample Tutorial。（Phase 4 foundation covers AstraVN overview and sample evidence；production tutorial pages remain planned。）
 
 验收：
@@ -434,7 +434,7 @@ Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 
 - [x] Tools：实现 `astra validate`：schema、descriptor、project config、asset refs、script compile。（当前覆盖 foundation/runtime evidence；full project policy gate 后续完成。）
 - [x] Tools：实现 `astra cook`：incremental cook、DDC、package manifest、diagnostics。（Phase 6 uses `AstraAsset::CookAssetRegistry` for local DDC, provider feature hash, rebuild/reuse/corruption recovery and cook manifest evidence。）
 - [x] Tools：实现 `astra package`：deterministic package、module inclusion、hash report。（Phase 6 writes binary zstd `.astrapkg` through `AstraAsset::PackageWriter` and records package hash/release-gate evidence。）
-- [x] Tools：实现 `astra run`：launch cooked package、headless run、scripted input。（当前覆盖 NativeVN/TsuiNoSora package headless/windowed scripted playable evidence；production launch harness 后续完成。）
+- [x] Tools：实现 `astra run`：launch cooked package、headless run、scripted input。（当前覆盖 NativeVN package headless/windowed scripted playable evidence；production launch harness 后续完成。）
 - [x] Tools：实现 `astra replay`：run replay, compare hashes, emit mismatch report。（Phase 5/6 covers frame/record/source-object/package manifest hash mismatch localization for current replay evidence；deeper UI diff remains later。）
 - [x] Tools：实现 `astra inspect`：package info、asset registry、module table、save file summary。（当前覆盖 package manifest、payload smoke 和 mount DTO；save/replay deep inspect 后续完成。）
 - [x] Tools：实现 `astra doc-check`：links、required pages、code snippets、public API coverage。（当前覆盖 manual/link/stale wording checks；full snippet/API extraction 后续完成。）
@@ -459,7 +459,7 @@ Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 
 目标：用样例项目驱动引擎完备性，而不是只靠单元测试。
 
 - [x] Sample：`NativeVN`：背景、角色、对白、选择、音频、timeline、filter、save/replay。（Phase 8 full playable demo 覆盖生成 PNG/OGG fixture、双分支、UI/system state、save/load、windowed/headless evidence；真实 provider timeline UI 后续完成。）
-- [x] Sample：`TsuiNoSora` local fixture：正文线路、Artemis UI/system、backlog、save/load、config、系统音效和 inspect report。（local_test_only；不代表 redistributable sample 或完整 Artemis VM compatibility。）
+- [x] Sample：`NativeVN` playable demo：正文线路、UI/system、backlog、save/load、config、音频和 inspect report。（redistributable sample；不代表完整 Artemis VM compatibility。）
 - [x] Sample：`RuntimeStress`：1000+ Actor、多状态机、多事件、多资源加载。（Phase 5 descriptor and `AstraPhaseTests` cover 1000 Actor deterministic scheduler/save/load/replay hash evidence；large resource-load expansion remains later sample work。）
 - [ ] Sample：`PackageSmoke`：只从 cooked package 启动。
 - [ ] Sample：`ScriptParity`：Native Script 与 Lua 产生同等事件流。

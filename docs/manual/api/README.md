@@ -1,6 +1,6 @@
 # API Reference
 
-Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline and Phase 7 provider hardening. Foundation public runtime headers are present for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Media, Script, AstraVN, and Tools; Asset now includes production importer/cooker/DDC/package contracts. Media now exposes opaque production provider factories while bgfx, Skia, SDL, OS handles, and backend details stay private. Engine libraries are dynamic-only `Astra*` DLLs with generated per-module export headers under `Astra/<Module>/Export.hpp`. Later editor/AI runtime systems remain planned.
+Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline and Phase 7 provider hardening. Foundation public runtime headers are present for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Media, Script, AstraVN, and Tools; Asset now includes production importer/cooker/DDC/package contracts. Platform now exposes target-platform descriptors and a facade-backed backend factory while SDL, OS handles, and mobile/Web backend stubs stay behind private implementation boundaries. Media now exposes opaque production provider factories while bgfx, Skia, SDL, OS handles, and backend details stay private. Engine libraries are dynamic-only `Astra*` DLLs with generated per-module export headers under `Astra/<Module>/Export.hpp`. Later editor/AI runtime systems remain planned.
 
 ## Overview
 
@@ -49,6 +49,10 @@ Current concrete implementation slices:
 - `Engine/Programs/astra/Private/Tools/ValidationEvidence.inc`: shared CLI evidence helpers for API coverage, plugin descriptor, and engine DLL validation reports.
 - `Engine/Programs/astra/Private/ToolsHash.cpp`: shared file hashing helper for CLI evidence reports.
 - `Engine/Runtime/Core/Private/Logging.cpp`: `spdlog`-backed async console/JSONL rotating file logging, memory capture, recent-log ring, and diagnostic mirroring.
+- `Engine/Runtime/Platform/Private/Platform.cpp`: Platform facade, headless/common services, and unified backend factory.
+- `Engine/Runtime/Platform/Private/Target/*.cpp`: per-OS target descriptors plus target-platform table, host target detection, and capability flags for desktop/mobile/Web targets.
+- `Engine/Runtime/Platform/Private/SdlPlatform.cpp`: SDL desktop window backend implementation kept behind the Platform public interfaces.
+- `Engine/Runtime/Platform/Private/BackendAnchor.cpp`: minimal backend DLL anchor used by headless, mobile stub, Web stub, and SDL backend targets.
 - `Engine/Runtime/Media/Private/Media.cpp`: media backend probing, renderer capture, provider validation, and media release-gate evaluation.
 - `Engine/Runtime/Media/Private/MediaDecode.cpp`: image/audio/font decode and inspect helpers for media backend evidence.
 - `Engine/Runtime/Media/Private/MediaProviders.cpp`: Phase 7 headless fallback and optional bgfx/Skia Renderer2D/TextLayout provider contract implementations.
@@ -125,6 +129,13 @@ Phase 1 production Foundation gate APIs are in Core, Platform, ModuleRuntime, Pr
 - `ApplyUnknownFieldPolicy()`
 - `DynamicLibraryHandle`
 - `CrashCaptureContext`
+- `TargetPlatformDesc`
+- `TargetCapabilityFlags`
+- `PlatformCreateDesc`
+- `CurrentHostTargetPlatform()`
+- `FindTargetPlatform()`
+- `KnownTargetPlatforms()`
+- `CreatePlatform()`
 - `ServiceResolveAudit`
 - `ValidateModuleReleaseGate()`
 - `PropertyWriteRequest`

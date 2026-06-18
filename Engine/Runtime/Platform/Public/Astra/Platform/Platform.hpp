@@ -16,7 +16,56 @@ namespace Astra::Platform {
 
 enum class BackendKind {
     Headless,
-    Sdl
+    Sdl,
+    Mobile,
+    Web
+};
+
+enum class TargetOsFamily {
+    Windows,
+    Linux,
+    MacOS,
+    IOS,
+    Android,
+    Web,
+    Unknown
+};
+
+enum class TargetArchitecture {
+    X64,
+    Arm64,
+    Wasm32,
+    Unknown
+};
+
+struct TargetCapabilityFlags {
+    bool window = false;
+    bool input = false;
+    bool filesystem = false;
+    bool dynamic_library = false;
+    bool threads = false;
+    bool clipboard = false;
+    bool cursor = false;
+    bool display = false;
+    bool crash_capture = false;
+};
+
+struct TargetPlatformDesc {
+    std::string id;
+    TargetOsFamily os_family = TargetOsFamily::Unknown;
+    TargetArchitecture architecture = TargetArchitecture::Unknown;
+    std::string launcher_name;
+    std::string dynamic_library_extension;
+    std::string plugin_bin_dir;
+    std::string script_name_prefix;
+    std::string script_extension;
+    bool is_host = false;
+    TargetCapabilityFlags capabilities;
+};
+
+struct PlatformCreateDesc {
+    BackendKind backend = BackendKind::Headless;
+    std::string target_platform;
 };
 
 struct WindowDesc {
@@ -231,8 +280,13 @@ private:
 
     friend ASTRA_PLATFORM_API PlatformServices CreateHeadlessPlatform();
     friend ASTRA_PLATFORM_API Astra::Core::Result<PlatformServices> CreateSdlPlatform(Astra::Core::DiagnosticSink& diagnostics);
+    friend ASTRA_PLATFORM_API Astra::Core::Result<PlatformServices> CreatePlatform(PlatformCreateDesc desc, Astra::Core::DiagnosticSink& diagnostics);
 };
 
+[[nodiscard]] ASTRA_PLATFORM_API TargetPlatformDesc CurrentHostTargetPlatform();
+[[nodiscard]] ASTRA_PLATFORM_API Astra::Core::Result<TargetPlatformDesc> FindTargetPlatform(std::string_view id);
+[[nodiscard]] ASTRA_PLATFORM_API std::vector<TargetPlatformDesc> KnownTargetPlatforms();
+[[nodiscard]] ASTRA_PLATFORM_API Astra::Core::Result<PlatformServices> CreatePlatform(PlatformCreateDesc desc, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_PLATFORM_API PlatformServices CreateHeadlessPlatform();
 [[nodiscard]] ASTRA_PLATFORM_API Astra::Core::Result<PlatformServices> CreateSdlPlatform(Astra::Core::DiagnosticSink& diagnostics);
 

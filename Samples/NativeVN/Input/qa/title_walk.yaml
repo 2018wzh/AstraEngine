@@ -1,0 +1,22 @@
+schema: astra.input.scripted.v1
+case_id: nativevn_title_walk
+persona: first_time_player
+objective: Start from title, advance dialogue, choose the walk branch, and close cleanly.
+sample: NativeVN
+route: title_walk
+expects:
+  title_continue: true
+  route_walk: true
+  windowed: true
+events:
+  - frame: 1
+    action: start
+  - frame: 4
+    action: title_continue
+  - frame: 8
+    action: advance
+  - frame: 18
+    action: choose
+    index: 0
+  - frame: 32
+    action: auto_close

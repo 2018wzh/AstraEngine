@@ -36,7 +36,7 @@ Foundation public headers exist for Core, Platform, ModuleRuntime, PropertySyste
 
 ## Examples
 
-Foundation/evidence samples live under `Samples/NativeVN`, `Samples/RuntimeStress`, `Samples/PackageSmoke`, and `Samples/TsuiNoSora`. `NativeVN` currently carries the redistributable runtime package/replay evidence slice, while `TsuiNoSora` is local-test-only fixture evidence. See [Samples](samples/README.md) for target workflows and current status.
+Foundation/evidence samples live under `Samples/NativeVN`, `Samples/RuntimeStress`, and `Samples/PackageSmoke`. `NativeVN` carries the redistributable runtime package/replay evidence slice. See [Samples](samples/README.md) for target workflows and current status.
 
 ## Troubleshooting
 

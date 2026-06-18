@@ -11,8 +11,19 @@ acceptance:
   - astra package Samples/NativeVN --profile deterministic --json
   - astra run build/Saved/Packages/NativeVN.astrapkg --headless-smoke --json
   - astra run build/Saved/Packages/NativeVN.astrapkg --windowed-smoke --scripted-input Samples/NativeVN/Input/golden.yaml --auto-close --json
+  - astra run build/Saved/Packages/NativeVN.astrapkg --windowed-smoke --scripted-input Samples/NativeVN/Input/qa/title_walk.yaml --auto-close --json
+  - astra run build/Saved/Packages/NativeVN.astrapkg --windowed-smoke --scripted-input Samples/NativeVN/Input/qa/system_save_load_systems.yaml --auto-close --json
+  - astra run build/Saved/Packages/NativeVN.astrapkg --windowed-smoke --scripted-input Samples/NativeVN/Input/qa/menu_reopen_smoke.yaml --auto-close --json
   - astra replay build/Saved/Replays/NativeVNGolden.replay --compare --json
   - astra inspect build/Saved/Packages/NativeVN.astrapkg --json
+player_qa:
+  matrix:
+    - Samples/NativeVN/Input/qa/title_walk.yaml
+    - Samples/NativeVN/Input/qa/system_save_load_systems.yaml
+    - Samples/NativeVN/Input/qa/menu_reopen_smoke.yaml
+  negative:
+    missing_save: ASTRA_RUN_SAVE_MISSING
+    malformed_input: ASTRA_SCRIPTED_INPUT_PARSE_FAILED
 playable:
   script: native:/Scripts/opening
   extension_packages:

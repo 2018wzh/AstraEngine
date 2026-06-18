@@ -1,5 +1,8 @@
 TEST_CASE("Headless platform provides filesystem timer thread and crash services") {
-    auto platform = Astra::Platform::CreateHeadlessPlatform();
+    Astra::Core::DiagnosticSink create_diagnostics;
+    auto created = Astra::Platform::CreatePlatform({}, create_diagnostics);
+    REQUIRE(created);
+    auto platform = std::move(created.Value());
     REQUIRE(platform.Kind() == Astra::Platform::BackendKind::Headless);
     bool ran = false;
     platform.Thread().DispatchTagged("phase1", [&] { ran = true; });
@@ -65,6 +68,44 @@ TEST_CASE("Headless platform provides filesystem timer thread and crash services
     REQUIRE(crash.frame_index == 42);
     REQUIRE_FALSE(crash.thread_id.empty());
     REQUIRE(crash.recent_logs[0] == "last log");
+}
+
+
+
+TEST_CASE("Platform target table describes host distribution data and backend capabilities") {
+    const auto host = Astra::Platform::CurrentHostTargetPlatform();
+    REQUIRE_FALSE(host.id.empty());
+#if defined(_WIN32)
+    REQUIRE(host.id == "win64");
+#elif defined(__APPLE__)
+    REQUIRE((host.id == "macos-x64" || host.id == "macos-arm64"));
+#else
+    REQUIRE(host.id == "linux-x64");
+#endif
+
+    auto win64 = Astra::Platform::FindTargetPlatform("win64");
+    REQUIRE(win64);
+    REQUIRE(win64.Value().launcher_name == "astra.exe");
+    REQUIRE(win64.Value().dynamic_library_extension == ".dll");
+    REQUIRE(win64.Value().plugin_bin_dir == "win64");
+    REQUIRE(win64.Value().script_extension == ".bat");
+    REQUIRE(win64.Value().capabilities.dynamic_library);
+
+    auto mobile = Astra::Platform::FindTargetPlatform("android-arm64");
+    REQUIRE(mobile);
+    REQUIRE_FALSE(mobile.Value().capabilities.dynamic_library);
+
+    auto web = Astra::Platform::FindTargetPlatform("web-wasm32");
+    REQUIRE(web);
+    REQUIRE(web.Value().architecture == Astra::Platform::TargetArchitecture::Wasm32);
+    REQUIRE_FALSE(web.Value().capabilities.threads);
+
+    Astra::Core::DiagnosticSink diagnostics;
+    auto unsupported = Astra::Platform::CreatePlatform({Astra::Platform::BackendKind::Web, "web-wasm32"}, diagnostics);
+    REQUIRE_FALSE(unsupported);
+    REQUIRE(unsupported.Error() == Astra::Core::ErrorCode::Unsupported);
+    REQUIRE_FALSE(diagnostics.Diagnostics().empty());
+    REQUIRE(diagnostics.Diagnostics().front().code == "ASTRA_PLATFORM_BACKEND_UNSUPPORTED");
 }
 
 

@@ -101,9 +101,7 @@ CommandReport Validate(const std::filesystem::path& target, const CommandOptions
             Astra::Media::ToJson(Astra::Media::ProbeMediaBackendCapabilities());
         report.artifacts["phase3_media_release_gate"] = Phase3MediaReleaseGateEvidence(diagnostics);
         report.artifacts["phase7_media_backend"] = Phase7MediaBackendEvidence(diagnostics);
-        if (IsArtemisVnSample(absolute)) {
-            report.artifacts["tsuinosora_fixture"] = ArtemisFixtureReport(absolute, registry);
-        } else if (IsVnSmokeSample(absolute)) {
+        if (IsVnSmokeSample(absolute)) {
             report.artifacts["phase8_script_vn"] = Phase4ScriptVnSmoke(absolute, diagnostics);
             report.artifacts["phase4_script_vn"] = report.artifacts["phase8_script_vn"];
             report.artifacts["phase4_script_vn"]["deprecated_alias_for"] = "phase8_script_vn";
@@ -172,11 +170,6 @@ CommandReport Inspect(const std::filesystem::path& target, const CommandOptions&
             if (manifest.Value().runtime_evidence.contains("playable_vn")) {
                 report.artifacts["playable_vn"] = manifest.Value().runtime_evidence["playable_vn"];
             }
-            const auto source_sample = manifest.Value().runtime_evidence.value("source_sample", "");
-            if (!source_sample.empty() && std::filesystem::exists(source_sample)) {
-                const auto registry = ScanSampleRegistry(source_sample, diagnostics);
-                report.artifacts["artemis_fixture"] = ArtemisFixtureReport(source_sample, registry);
-            }
         }
     } else if (std::filesystem::is_regular_file(absolute) &&
                (absolute.extension() == ".json" || absolute.extension() == ".replay")) {
@@ -216,13 +209,6 @@ CommandReport Inspect(const std::filesystem::path& target, const CommandOptions&
                 if (manifest.Value().runtime_evidence.contains("playable_vn")) {
                     report.artifacts["playable_vn"] =
                         manifest.Value().runtime_evidence["playable_vn"];
-                }
-                const auto source_sample =
-                    manifest.Value().runtime_evidence.value("source_sample", "");
-                if (!source_sample.empty() && std::filesystem::exists(source_sample)) {
-                    const auto registry = ScanSampleRegistry(source_sample, diagnostics);
-                    report.artifacts["artemis_fixture"] =
-                        ArtemisFixtureReport(source_sample, registry);
                 }
             }
         }
@@ -299,15 +285,7 @@ CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& op
                                   {"sample", sample.filename().string()},
                                   {"status", "runtime-cooked"},
                                   {"phase3_smoke", Phase3FoundationSmoke(diagnostics)}};
-    if (IsArtemisVnSample(sample)) {
-        cook_report["phase4_script_vn"] = TsuiNoSoraRuntimeFixtureEvidence(sample, registry);
-        cook_report["playable_vn"] = BuildPlayableVnEvidence(
-            sample, cook_report["phase4_script_vn"], registry, {}, false, diagnostics);
-        cook_report["runtime_feature_complete"] = {
-            {"local_fixture", true}, {"ui_system", true},    {"backlog", true},
-            {"config", true},        {"save_load_slots", 3}, {"save_restore", true},
-        };
-    } else if (IsVnSmokeSample(sample)) {
+    if (IsVnSmokeSample(sample)) {
         cook_report["phase8_script_vn"] = Phase4ScriptVnSmoke(sample, diagnostics);
         cook_report["phase4_script_vn"] = cook_report["phase8_script_vn"];
         cook_report["phase4_script_vn"]["deprecated_alias_for"] = "phase8_script_vn";
@@ -383,6 +361,224 @@ CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& op
     return report;
 }
 
+std::string LowerAscii(std::string value) {
+    for (auto& c : value) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return value;
+}
+
+bool IsPlatformDynamicLibrary(const std::filesystem::path& path,
+                              const Astra::Platform::TargetPlatformDesc& spec) {
+    const auto name = path.filename().string();
+    if (spec.id == "linux-x64") {
+        return name.find(".so") != std::string::npos;
+    }
+    return path.extension().string() == spec.dynamic_library_extension;
+}
+
+nlohmann::json CopyFileWithHash(const std::filesystem::path& source,
+                                const std::filesystem::path& destination,
+                                const std::filesystem::path& bundle_root, CommandReport& report) {
+    if (!std::filesystem::exists(source)) {
+        AddDiagnostic(report, "ASTRA_DISTRIBUTION_TARGET_BINARIES_MISSING",
+                      Astra::Core::DiagnosticSeverity::Blocking,
+                      "Distribution source file is missing.", source);
+        return nlohmann::json::object();
+    }
+    std::filesystem::create_directories(destination.parent_path());
+    std::filesystem::copy_file(source, destination,
+                               std::filesystem::copy_options::overwrite_existing);
+    return {
+        {"path", destination.lexically_relative(bundle_root).generic_string()},
+        {"sha256", Sha256File(destination)},
+        {"size_bytes", std::filesystem::file_size(destination)},
+    };
+}
+
+void WriteDistributionScript(const std::filesystem::path& script,
+                             const Astra::Platform::TargetPlatformDesc& spec, const std::string& sample_name) {
+    std::filesystem::create_directories(script.parent_path());
+    std::ofstream file(script, std::ios::binary);
+    if (spec.id == "win64") {
+        file << "@echo off\r\n";
+        file << "\"%~dp0" << spec.launcher_name << "\" run \"%~dp0Packages\\" << sample_name
+             << ".astrapkg\" --windowed-smoke %*\r\n";
+    } else {
+        file << "#!/usr/bin/env sh\n";
+        file << "DIR=\"$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\"\n";
+        file << "\"$DIR/" << spec.launcher_name << "\" run \"$DIR/Packages/" << sample_name
+             << ".astrapkg\" --windowed-smoke \"$@\"\n";
+    }
+#if !defined(_WIN32)
+    if (spec.id != "win64") {
+        std::filesystem::permissions(script,
+                                     std::filesystem::perms::owner_exec |
+                                         std::filesystem::perms::group_exec |
+                                         std::filesystem::perms::others_exec,
+                                     std::filesystem::perm_options::add);
+    }
+#endif
+}
+
+void BuildDistributionBundle(const std::filesystem::path& sample,
+                             const std::filesystem::path& package,
+                             const Astra::Asset::PackageManifest& manifest,
+                             const CommandOptions& options, CommandReport& report) {
+    if (options.no_distribution) {
+        return;
+    }
+
+    const auto sample_name = sample.filename().string();
+    const auto platform_id = options.target_platform.empty() ? Astra::Platform::CurrentHostTargetPlatform().id : options.target_platform;
+    const auto spec_result = Astra::Platform::FindTargetPlatform(platform_id);
+    if (!spec_result) {
+        AddDiagnostic(report, "ASTRA_DISTRIBUTION_PLATFORM_UNSUPPORTED",
+                      Astra::Core::DiagnosticSeverity::Blocking,
+                      "Unsupported distribution target platform.", platform_id);
+        return;
+    }
+    const auto spec = spec_result.Value();
+
+    const auto bin_root = BinaryRoot() / "Bin";
+    const auto launcher_source = bin_root / spec.launcher_name;
+    if (!std::filesystem::exists(launcher_source)) {
+        AddDiagnostic(report, "ASTRA_DISTRIBUTION_TARGET_BINARIES_MISSING",
+                      Astra::Core::DiagnosticSeverity::Blocking,
+                      "Distribution target launcher is missing.", launcher_source);
+        return;
+    }
+
+    bool has_dynamic_library = false;
+    for (const auto& entry : std::filesystem::directory_iterator(bin_root)) {
+        if (entry.is_regular_file() && IsPlatformDynamicLibrary(entry.path(), spec)) {
+            has_dynamic_library = true;
+            break;
+        }
+    }
+    if (!has_dynamic_library) {
+        AddDiagnostic(report, "ASTRA_DISTRIBUTION_TARGET_BINARIES_MISSING",
+                      Astra::Core::DiagnosticSeverity::Blocking,
+                      "Distribution target dynamic libraries are missing.", bin_root);
+        return;
+    }
+
+    const auto release_root = options.distribution_root.empty() ? BinaryRoot() / "Saved/Releases"
+                                                                : options.distribution_root;
+    const auto bundle_root = release_root / sample_name / (sample_name + "-" + spec.id);
+    std::filesystem::remove_all(bundle_root);
+    std::filesystem::create_directories(bundle_root);
+
+    nlohmann::json runtime_files = nlohmann::json::array();
+    nlohmann::json plugin_files = nlohmann::json::array();
+
+    runtime_files.push_back(
+        CopyFileWithHash(launcher_source, bundle_root / spec.launcher_name, bundle_root, report));
+    for (const auto& entry : std::filesystem::directory_iterator(bin_root)) {
+        if (entry.is_regular_file() && IsPlatformDynamicLibrary(entry.path(), spec)) {
+            runtime_files.push_back(CopyFileWithHash(
+                entry.path(), bundle_root / entry.path().filename(), bundle_root, report));
+        }
+    }
+
+    const auto package_destination = bundle_root / "Packages" / package.filename();
+    runtime_files.push_back(CopyFileWithHash(package, package_destination, bundle_root, report));
+
+    for (const auto& module : manifest.modules) {
+        if (!module.runtime_safe) {
+            continue;
+        }
+        const std::filesystem::path descriptor = module.binary;
+        const auto plugin_root = descriptor.parent_path();
+        if (!std::filesystem::exists(descriptor)) {
+            AddDiagnostic(report, "ASTRA_DISTRIBUTION_TARGET_BINARIES_MISSING",
+                          Astra::Core::DiagnosticSeverity::Blocking,
+                          "Packaged plugin descriptor is missing.", descriptor);
+            return;
+        }
+        const auto plugin_dest_root = bundle_root / "Plugins" / plugin_root.filename();
+        plugin_files.push_back(CopyFileWithHash(
+            descriptor, plugin_dest_root / descriptor.filename(), bundle_root, report));
+
+        Astra::Core::DiagnosticSink plugin_diagnostics;
+        auto descriptor_data =
+            Astra::ModuleRuntime::LoadPluginDescriptor(descriptor, plugin_diagnostics);
+        if (!descriptor_data) {
+            AddDiagnostic(report, "ASTRA_DISTRIBUTION_TARGET_BINARIES_MISSING",
+                          Astra::Core::DiagnosticSeverity::Blocking,
+                          "Packaged plugin descriptor could not be read.", descriptor);
+            return;
+        }
+        bool copied_plugin_binary = false;
+        for (const auto& plugin_module : descriptor_data.Value().modules) {
+            if (!plugin_module.packaged || plugin_module.id != module.id) {
+                continue;
+            }
+            const auto plugin_binary = plugin_root / plugin_module.entrypoint;
+            if (!std::filesystem::exists(plugin_binary)) {
+                AddDiagnostic(report, "ASTRA_DISTRIBUTION_TARGET_BINARIES_MISSING",
+                              Astra::Core::DiagnosticSeverity::Blocking,
+                              "Packaged plugin target binary is missing.", plugin_binary);
+                return;
+            }
+            plugin_files.push_back(CopyFileWithHash(
+                plugin_binary, plugin_dest_root / plugin_module.entrypoint, bundle_root, report));
+            copied_plugin_binary = true;
+        }
+        if (!copied_plugin_binary) {
+            AddDiagnostic(report, "ASTRA_DISTRIBUTION_TARGET_BINARIES_MISSING",
+                          Astra::Core::DiagnosticSeverity::Blocking,
+                          "Packaged plugin target library is missing.", plugin_root);
+            return;
+        }
+    }
+
+    const auto script_name =
+        spec.id == "win64"
+            ? spec.script_name_prefix + sample_name + spec.script_extension
+            : spec.script_name_prefix + LowerAscii(sample_name) + spec.script_extension;
+    const auto script_path = bundle_root / script_name;
+    WriteDistributionScript(script_path, spec, sample_name);
+    runtime_files.push_back({{"path", script_path.lexically_relative(bundle_root).generic_string()},
+                             {"sha256", Sha256File(script_path)},
+                             {"size_bytes", std::filesystem::file_size(script_path)}});
+
+    if (!report.Passed()) {
+        return;
+    }
+
+    nlohmann::json distribution_manifest = {
+        {"schema", "astra.distribution.manifest.v1"},
+        {"sample", sample_name},
+        {"platform", spec.id},
+        {"profile", manifest.profile},
+        {"package",
+         {{"path", ("Packages/" + package.filename().generic_string())},
+          {"manifest_hash", manifest.package_hash},
+          {"file_sha256", Sha256File(package_destination)}}},
+        {"launcher", spec.launcher_name},
+        {"runtime_files", runtime_files},
+        {"plugin_files", plugin_files},
+        {"build_info", report.build_info},
+        {"release_report", report.artifacts.value("release_report", nlohmann::json::object())},
+    };
+    const auto manifest_path = bundle_root / "distribution-manifest.json";
+    WriteJsonFile(manifest_path, distribution_manifest);
+
+    nlohmann::json all_files = runtime_files;
+    for (const auto& file : plugin_files) {
+        all_files.push_back(file);
+    }
+    all_files.push_back({{"path", "distribution-manifest.json"},
+                         {"sha256", Sha256File(manifest_path)},
+                         {"size_bytes", std::filesystem::file_size(manifest_path)}});
+
+    report.artifacts["distribution_bundle"] = bundle_root.string();
+    report.artifacts["distribution_manifest"] = manifest_path.string();
+    report.artifacts["distribution_platform"] = spec.id;
+    report.artifacts["distribution_files"] = all_files;
+}
+
 CommandReport Package(const std::filesystem::path& sample, const CommandOptions& options) {
     auto report = MakeReport("astra package");
     if (!IsFoundationSample(sample, report)) {
@@ -395,10 +591,7 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
     const auto phase3 = Phase3FoundationSmoke(diagnostics);
     nlohmann::json phase4;
     nlohmann::json playable;
-    if (IsArtemisVnSample(sample)) {
-        phase4 = TsuiNoSoraRuntimeFixtureEvidence(sample, registry);
-        playable = BuildPlayableVnEvidence(sample, phase4, registry, {}, false, diagnostics);
-    } else if (IsVnSmokeSample(sample)) {
+    if (IsVnSmokeSample(sample)) {
         phase4 = Phase4ScriptVnSmoke(sample, diagnostics);
         playable = BuildPlayableVnEvidence(sample, phase4, registry, {}, false, diagnostics);
     }
@@ -443,7 +636,7 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
         {"provider_feature_hash", pipeline.provider_feature_hash},
         {"package_profile", manifest.profile},
     };
-    if (!IsArtemisVnSample(sample)) {
+    if (IsVnSmokeSample(sample)) {
         ValidatePhase4AssetReferences(phase4, registry, report, sample);
     }
     if (std::filesystem::exists(plugin_descriptor)) {
@@ -478,8 +671,7 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
             {"package_profile", manifest.profile},
             {"provider_feature_hash", pipeline.provider_feature_hash},
             {"expected_hashes", phase4["native"]["hashes"]},
-            {"expected_playable_hash",
-             IsArtemisVnSample(sample) ? "" : playable.value("replay_route_hash", "")},
+            {"expected_playable_hash", playable.value("replay_route_hash", "")},
             {"runtime_replay", phase4["native"]["runtime_save"]["payload"]["replay_events"]},
             {"presentation_capture", phase4["native"]["headless_capture"]},
             {"source_map", phase4.value("source_map", nlohmann::json::object())},
@@ -504,6 +696,9 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
         if (!gate.Passed()) {
             report.status = "failed";
         }
+    }
+    if (report.Passed()) {
+        BuildDistributionBundle(sample, package, manifest, options, report);
     }
     return report;
 }
@@ -867,8 +1062,8 @@ CommandReport Run(const std::filesystem::path& target, const CommandOptions& opt
             return report;
         }
         platform = std::move(sdl_platform.Value());
-        auto created =
-            platform.Window().Create({"AstraEngine TsuiNoSora Smoke", 1280, 720}, diagnostics);
+        auto created = platform.Window().Create({"AstraEngine NativeVN Smoke", 1280, 720},
+                                                diagnostics);
         AppendDiagnostics(report, diagnostics);
         diagnostics.Clear();
         if (!created) {
@@ -935,9 +1130,7 @@ CommandReport Run(const std::filesystem::path& target, const CommandOptions& opt
     }
     if (std::filesystem::is_directory(path) && IsVnSmokeSample(path)) {
         const auto registry = ScanSampleRegistry(path, diagnostics);
-        report.artifacts["headless_smoke"]["phase8_script_vn"] =
-            IsArtemisVnSample(path) ? TsuiNoSoraRuntimeFixtureEvidence(path, registry)
-                                    : Phase4ScriptVnSmoke(path, diagnostics);
+        report.artifacts["headless_smoke"]["phase8_script_vn"] = Phase4ScriptVnSmoke(path, diagnostics);
         report.artifacts["headless_smoke"]["phase4_script_vn"] =
             report.artifacts["headless_smoke"]["phase8_script_vn"];
         report.artifacts["headless_smoke"]["phase4_script_vn"]["deprecated_alias_for"] =
@@ -946,9 +1139,8 @@ CommandReport Run(const std::filesystem::path& target, const CommandOptions& opt
             path, report.artifacts["headless_smoke"]["phase8_script_vn"], registry,
             options.scripted_input, options.windowed_smoke, diagnostics);
         report.artifacts["playable_vn"] = report.artifacts["headless_smoke"]["playable_vn"];
-        if (!IsArtemisVnSample(path) &&
-            report.artifacts["headless_smoke"]["phase8_script_vn"].value("status", "failed") !=
-                "passed") {
+        if (report.artifacts["headless_smoke"]["phase8_script_vn"].value("status", "failed") !=
+            "passed") {
             AddDiagnostic(report, "ASTRA_PHASE8_SCRIPT_VN_FAILED",
                           Astra::Core::DiagnosticSeverity::Blocking,
                           "Phase 8 Script/AstraVN playable smoke failed.", path);
@@ -1047,8 +1239,7 @@ CommandReport Replay(const std::filesystem::path& target, const CommandOptions& 
     }
     Astra::Core::DiagnosticSink diagnostics;
     const auto registry = ScanSampleRegistry(sample, diagnostics);
-    auto phase4 = IsArtemisVnSample(sample) ? TsuiNoSoraRuntimeFixtureEvidence(sample, registry)
-                                            : Phase4ScriptVnSmoke(sample, diagnostics);
+    auto phase4 = Phase4ScriptVnSmoke(sample, diagnostics);
     auto playable = BuildPlayableVnEvidence(sample, phase4, registry, {}, false, diagnostics);
     AppendDiagnostics(report, diagnostics);
     if (phase4.value("status", "failed") != "passed") {

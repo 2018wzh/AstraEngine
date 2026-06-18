@@ -100,7 +100,7 @@ TEST_CASE("Media foundation extracts presentation commands and produces stable h
     REQUIRE(rgba.Value().decoded_by == "libpng");
     const auto font_payload =
         ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) /
-                         "Samples/TsuiNoSora/Content/Fonts/sourcehanserif-medium.otf");
+                         "Samples/NativeVN/Content/Fonts/sourcehanserif-medium.otf");
     REQUIRE_FALSE(font_payload.empty());
     auto rasterized_text =
         Astra::Media::RasterizeTextRgbaBytes(font_payload, "Aya route text 確認", 28, diagnostics);
@@ -125,7 +125,7 @@ TEST_CASE("Media foundation extracts presentation commands and produces stable h
              audio_decode.Value().decoded_by == "libvorbisfile" ||
              audio_decode.Value().decoded_by == "miniaudio"));
     const auto artemis_bgm_payload = ReadFixtureBytes(
-        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/TsuiNoSora/Content/Music/bgm113.ogg");
+        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Content/Sfx/confirm.ogg");
     REQUIRE_FALSE(artemis_bgm_payload.empty());
     auto artemis_bgm_decode = Astra::Media::DecodeAudioBytes(artemis_bgm_payload, diagnostics);
     if (artemis_bgm_decode) {

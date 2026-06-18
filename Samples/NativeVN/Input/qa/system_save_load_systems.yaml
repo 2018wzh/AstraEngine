@@ -1,9 +1,9 @@
 schema: astra.input.scripted.v1
-case_id: nativevn_golden_full_playable
-persona: regression
-objective: Cover title, system UI, save/load, both choices, and replay checkpoint.
+case_id: nativevn_system_save_load_systems
+persona: advanced_player
+objective: Exercise system UI, save, branch, load, alternate branch, and replay checkpoint.
 sample: NativeVN
-route: phase8_full_playable
+route: system_save_load_systems
 expects:
   title_continue: true
   system_menu: true

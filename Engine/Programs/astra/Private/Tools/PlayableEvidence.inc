@@ -60,8 +60,9 @@ nlohmann::json Phase4ScriptVnSmoke(const std::filesystem::path& sample,
                                restored_hash.event_hash == native_snapshot.hashes.event_hash;
 
     const auto native_capture = Astra::Media::ToJson(native_snapshot.headless_capture);
-    const bool phase8_complete = save_restored && !lua_schema.Value().empty() &&
-                                 native_snapshot.script_snapshot.schema == Astra::Script::ScriptSnapshotV2Schema;
+    const bool phase8_complete =
+        save_restored && !lua_schema.Value().empty() &&
+        native_snapshot.script_snapshot.schema == Astra::Script::ScriptSnapshotV2Schema;
 
     nlohmann::json providers = nlohmann::json::array();
     for (const auto& provider : Astra::Script::FoundationScriptProviders()) {
@@ -83,14 +84,16 @@ nlohmann::json Phase4ScriptVnSmoke(const std::filesystem::path& sample,
         {"source_map", Astra::Script::ToJson(compiled_native.Value().source_map)},
         {"foundation_profile", Astra::AstraVN::ToJson(Astra::AstraVN::FoundationProfile())},
         {"native", Astra::AstraVN::ToJson(native_snapshot)},
-        {"lua_extension_schemas", [&] {
+        {"lua_extension_schemas",
+         [&] {
              nlohmann::json schemas = nlohmann::json::array();
              for (const auto& schema : lua_schema.Value()) {
                  schemas.push_back(Astra::Script::ToJson(schema));
              }
              return schemas;
          }()},
-        {"parity", {{"presentation_hashes_match", true}, {"mode", "native_dsl_plus_lua_extension_schema"}}},
+        {"parity",
+         {{"presentation_hashes_match", true}, {"mode", "native_dsl_plus_lua_extension_schema"}}},
         {"save_restore",
          {{"restored", save_restored},
           {"state_hash", restored_hash.state_hash},
@@ -98,37 +101,8 @@ nlohmann::json Phase4ScriptVnSmoke(const std::filesystem::path& sample,
     };
 }
 
-nlohmann::json TsuiNoSoraRuntimeFixtureEvidence(const std::filesystem::path& sample,
-                                                const Astra::Asset::AssetRegistry& registry) {
-    nlohmann::json stable_assets = nlohmann::json::array();
-    for (const auto& entry : registry.entries) {
-        stable_assets.push_back({{"id", entry.id.ToString()}, {"type", entry.type}});
-    }
-    const auto state_hash = Sha256Text(sample.filename().string() + stable_assets.dump());
-    const auto event_hash = Sha256Text("tsuinosora-local-fixture-events");
-    const auto presentation_hash = Sha256Text("tsuinosora-local-fixture-presentation");
-    return {
-        {"schema", Phase4SmokeSchema},
-        {"status", "passed"},
-        {"runtime", "tsuinosora.local_fixture"},
-        {"note", "Local Artemis-derived fixture evidence; not NativeVN story Lua parity."},
-        {"native",
-         {{"hashes",
-           {{"state_hash", state_hash},
-            {"event_hash", event_hash},
-            {"presentation_hash", presentation_hash}}},
-          {"runtime_save", {{"payload", {{"replay_events", nlohmann::json::array()}}}}},
-          {"headless_capture", nlohmann::json::object()},
-          {"presentation_commands", nlohmann::json::array()},
-          {"dialogue_history", nlohmann::json::array()},
-          {"route_state", {{"fixture", "TsuiNoSora"}}},
-          {"script_snapshot", {{"last_choice", "fixture"}}}}},
-        {"parity", {{"presentation_hashes_match", false}}},
-    };
-}
-
-
-nlohmann::json ScriptedInputEvidence(const std::filesystem::path& scripted_input) {
+nlohmann::json ScriptedInputEvidence(const std::filesystem::path& scripted_input,
+                                     Astra::Core::DiagnosticSink& diagnostics) {
     nlohmann::json evidence = {
         {"path", scripted_input.empty() ? "" : scripted_input.string()},
         {"exists", scripted_input.empty() ? false : std::filesystem::exists(scripted_input)},
@@ -139,6 +113,16 @@ nlohmann::json ScriptedInputEvidence(const std::filesystem::path& scripted_input
     }
     try {
         const auto input = YAML::LoadFile(scripted_input.string());
+        evidence["case_id"] = input["case_id"].as<std::string>("");
+        evidence["persona"] = input["persona"].as<std::string>("");
+        evidence["objective"] = input["objective"].as<std::string>("");
+        if (input["expects"]) {
+            nlohmann::json expects = nlohmann::json::object();
+            for (const auto& item : input["expects"]) {
+                expects[item.first.as<std::string>()] = item.second.as<bool>(false);
+            }
+            evidence["expects"] = expects;
+        }
         const auto steps = input["steps"] ? input["steps"] : input["events"];
         if (steps) {
             for (const auto& step : steps) {
@@ -162,8 +146,15 @@ nlohmann::json ScriptedInputEvidence(const std::filesystem::path& scripted_input
                 evidence["actions"].push_back(std::move(action));
             }
         }
-    } catch (const YAML::Exception&) {
+    } catch (const YAML::Exception& error) {
         evidence["parse_error"] = true;
+        Astra::Core::Diagnostic diagnostic;
+        diagnostic.code = "ASTRA_SCRIPTED_INPUT_PARSE_FAILED";
+        diagnostic.category = "tools.player_qa";
+        diagnostic.severity = Astra::Core::DiagnosticSeverity::Blocking;
+        diagnostic.message = std::string("Could not parse scripted input YAML: ") + error.what();
+        diagnostic.source.file = scripted_input.string();
+        diagnostics.Emit(std::move(diagnostic));
     }
     return evidence;
 }
@@ -175,6 +166,84 @@ bool HasScriptedAction(const nlohmann::json& scripted, std::string_view action) 
         }
     }
     return false;
+}
+
+bool JsonBoolAt(const nlohmann::json& object, std::initializer_list<std::string_view> path) {
+    const auto* cursor = &object;
+    for (const auto key : path) {
+        if (!cursor->is_object() || !cursor->contains(std::string(key))) {
+            return false;
+        }
+        cursor = &cursor->at(std::string(key));
+    }
+    return cursor->is_boolean() ? cursor->get<bool>() : false;
+}
+
+nlohmann::json BuildPlayerQaEvidence(const nlohmann::json& scripted, const nlohmann::json& playable,
+                                     Astra::Core::DiagnosticSink& diagnostics) {
+    nlohmann::json qa = {
+        {"schema", "astra.vn.player_qa.v1"},
+        {"case_id", scripted.value("case_id", "")},
+        {"persona", scripted.value("persona", "")},
+        {"objective", scripted.value("objective", "")},
+        {"passed", true},
+        {"assertions", nlohmann::json::array()},
+    };
+    const auto expects = scripted.value("expects", nlohmann::json::object());
+    if (!expects.is_object() || expects.empty()) {
+        return qa;
+    }
+
+    const auto actual_for = [&](const std::string& key) {
+        if (key == "title_continue") {
+            return JsonBoolAt(playable, {"system_ui_state", "title_continue"});
+        }
+        if (key == "system_menu") {
+            return JsonBoolAt(playable, {"system_ui_state", "system_menu_opened"});
+        }
+        if (key == "backlog") {
+            return JsonBoolAt(playable, {"system_ui_state", "backlog_opened"});
+        }
+        if (key == "config") {
+            return JsonBoolAt(playable, {"system_ui_state", "config_opened"});
+        }
+        if (key == "save_load") {
+            return JsonBoolAt(playable, {"system_ui_state", "save_load_screen_opened"});
+        }
+        if (key == "route_walk") {
+            return JsonBoolAt(playable, {"routes_verified", "walk"});
+        }
+        if (key == "route_systems") {
+            return JsonBoolAt(playable, {"routes_verified", "systems"});
+        }
+        if (key == "replay_checkpoint") {
+            return playable.value("replay_checkpoint", false);
+        }
+        if (key == "windowed") {
+            return playable.value("windowed", false);
+        }
+        return false;
+    };
+
+    for (const auto& [key, value] : expects.items()) {
+        const bool expected = value.is_boolean() ? value.get<bool>() : false;
+        const bool actual = actual_for(key);
+        const bool passed = expected == actual;
+        qa["assertions"].push_back(
+            {{"name", key}, {"expected", expected}, {"actual", actual}, {"passed", passed}});
+        qa["passed"] = qa.value("passed", true) && passed;
+    }
+    if (!qa.value("passed", true)) {
+        Astra::Core::Diagnostic diagnostic;
+        diagnostic.code = "ASTRA_PLAYER_QA_ASSERTION_FAILED";
+        diagnostic.category = "tools.player_qa";
+        diagnostic.severity = Astra::Core::DiagnosticSeverity::Blocking;
+        diagnostic.message = "Scripted NativeVN player QA expectations did not match evidence.";
+        diagnostic.source.file = scripted.value("path", "");
+        diagnostic.context["case_id"] = scripted.value("case_id", "");
+        diagnostics.Emit(std::move(diagnostic));
+    }
+    return qa;
 }
 
 nlohmann::json RegistryMediaEvidence(const Astra::Asset::AssetRegistry& registry,
@@ -208,47 +277,12 @@ nlohmann::json RegistryMediaEvidence(const Astra::Asset::AssetRegistry& registry
             {"decoded_audio", decoded_audio}};
 }
 
-nlohmann::json ArtemisFixtureReport(const std::filesystem::path& sample,
-                                    const Astra::Asset::AssetRegistry& registry) {
-    if (!IsArtemisVnSample(sample)) {
-        return nlohmann::json::object();
-    }
-    const auto system_ini = sample / "Content/System/system.ini";
-    nlohmann::json assets = nlohmann::json::array();
-    for (const auto& entry : registry.entries) {
-        assets.push_back({
-            {"asset_id", entry.id.ToString()},
-            {"type", entry.type},
-            {"source_path", entry.source_path.string()},
-        });
-    }
-    return {
-        {"schema", "astra.vn.artemis_fixture.inspect.v1"},
-        {"source_root", "D:/Workspace/subahibi15th_artemis/unpack/tsuinosora_remake2025ver"},
-        {"policy", "copied_subset_local_test_only"},
-        {"stage",
-         {{"width", 1600},
-          {"height", 1200},
-          {"source", system_ini.string()},
-          {"system_ini_present", std::filesystem::exists(system_ini)}}},
-        {"ui_system_modules_mirrored",
-         {"title", "menu", "backlog", "save", "config", "message", "bgm", "se"}},
-        {"route_mapping",
-         {{"source_shape", "gamestart/scene/select plus Aya fixture resources"},
-          {"runtime", "curated Astra Native DSL with extension-schema fixtures"},
-          {"executes_original_system_lua", false},
-          {"implements_full_ast_vm", false}}},
-        {"license_review", {{"usage", "local_test_only"}, {"redistributable", false}}},
-        {"copied_assets", assets},
-    };
-}
-
 nlohmann::json BuildPlayableVnEvidence(const std::filesystem::path& sample,
                                        const nlohmann::json& phase4,
                                        const Astra::Asset::AssetRegistry& registry,
                                        const std::filesystem::path& scripted_input, bool windowed,
                                        Astra::Core::DiagnosticSink& diagnostics) {
-    const auto scripted = ScriptedInputEvidence(scripted_input);
+    const auto scripted = ScriptedInputEvidence(scripted_input, diagnostics);
     const auto native = phase4.value("native", nlohmann::json::object());
     const auto capture = native.value("headless_capture", nlohmann::json::object());
     const auto media = RegistryMediaEvidence(registry, diagnostics);
@@ -270,48 +304,35 @@ nlohmann::json BuildPlayableVnEvidence(const std::filesystem::path& sample,
         }
     }
 
-    const bool artemis = IsArtemisVnSample(sample);
-    const auto config_state = artemis ? nlohmann::json{
-                                            {"text_speed", HasScriptedAction(scripted, "config") ? "fast" : "normal"},
-                                            {"bgm_volume", 0.7},
-                                            {"se_volume", 0.8},
-                                            {"voice_volume", 0.9},
-                                            {"window_scale", 1.0},
-                                            {"fullscreen", false},
-                                        }
-                                      : nlohmann::json{
-                                            {"text_speed", HasScriptedAction(scripted, "config") ? "fast" : "normal"},
-                                            {"bgm_volume", 0.65},
-                                            {"se_volume", 0.8},
-                                            {"voice_volume", 1.0},
-                                            {"window_scale", 1.0},
-                                            {"fullscreen", false},
-                                        };
+    const auto config_state = nlohmann::json{
+        {"text_speed", HasScriptedAction(scripted, "config") ? "fast" : "normal"},
+        {"bgm_volume", 0.65},
+        {"se_volume", 0.8},
+        {"voice_volume", 1.0},
+        {"window_scale", 1.0},
+        {"fullscreen", false},
+    };
     const auto system_ui_state = nlohmann::json{
         {"title_shown", true},
-        {"title_continue", HasScriptedAction(scripted, "title_continue") || artemis},
+        {"title_continue", HasScriptedAction(scripted, "title_continue")},
         {"message_window_drawn", !text_commands.empty()},
         {"nameplate_drawn", !dialogue.empty()},
         {"choice_list_drawn", !text_commands.empty()},
-        {"system_menu_opened", HasScriptedAction(scripted, "system_menu") || artemis},
-        {"backlog_opened", HasScriptedAction(scripted, "backlog") || artemis},
+        {"system_menu_opened", HasScriptedAction(scripted, "system_menu")},
+        {"backlog_opened", HasScriptedAction(scripted, "backlog")},
         {"save_load_screen_opened",
          HasScriptedAction(scripted, "save") || HasScriptedAction(scripted, "load")},
-        {"config_opened", HasScriptedAction(scripted, "config") || artemis},
+        {"config_opened", HasScriptedAction(scripted, "config")},
         {"auto_indicator_drawn", true},
         {"skip_indicator_drawn", true},
-        {"artemis_ui_drawn", artemis},
-        {"stage", artemis ? nlohmann::json{{"width", 1600},
-                                           {"height", 1200},
-                                           {"source", "Content/System/system.ini"}}
-                          : nlohmann::json{{"width", 1280}, {"height", 720}}},
+        {"stage", nlohmann::json{{"width", 1280}, {"height", 720}}},
     };
 
     nlohmann::json save_slots = nlohmann::json::array();
     for (int slot = 1; slot <= 3; ++slot) {
         save_slots.push_back(
             {{"slot", slot},
-             {"used", slot == 1 && (HasScriptedAction(scripted, "save") || artemis)},
+             {"used", slot == 1 && HasScriptedAction(scripted, "save")},
              {"label", slot == 1 ? "golden" : ""}});
     }
 
@@ -320,7 +341,7 @@ nlohmann::json BuildPlayableVnEvidence(const std::filesystem::path& sample,
     nlohmann::json evidence = {
         {"schema", "astra.vn.playable.evidence.v1"},
         {"sample", sample.filename().string()},
-        {"status", (phase4.value("status", "failed") == "passed" || artemis) ? "passed" : "failed"},
+        {"status", phase4.value("status", "failed") == "passed" ? "passed" : "failed"},
         {"windowed", windowed},
         {"windowed_playable",
          {{"status", windowed ? "passed" : "not_requested"},
@@ -328,8 +349,9 @@ nlohmann::json BuildPlayableVnEvidence(const std::filesystem::path& sample,
           {"auto_close_supported", true}}},
         {"route_completed", true},
         {"routes_verified",
-         {{"walk", HasScriptedAction(scripted, "choose") || artemis},
-          {"systems", HasScriptedAction(scripted, "choose") && HasScriptedAction(scripted, "load")}}},
+         {{"walk", HasScriptedAction(scripted, "choose")},
+          {"systems",
+           HasScriptedAction(scripted, "choose") && HasScriptedAction(scripted, "load")}}},
         {"replay_checkpoint", HasScriptedAction(scripted, "replay_checkpoint")},
         {"selected_branch_reached",
          native.value("script_snapshot", nlohmann::json::object()).value("last_choice", "") != ""},
@@ -357,10 +379,10 @@ nlohmann::json BuildPlayableVnEvidence(const std::filesystem::path& sample,
           {"se", true},
           {"voice", true}}},
         {"phase7_media_execution",
-        {{"renderer_provider", "astra.renderer2d.bgfx"},
-         {"text_provider", "astra.text_layout.skia_ui"},
-         {"audio_provider", "astra.audio.miniaudio"},
-         {"filter_graph_provider", "astra.filter_graph.bgfx"},
+         {{"renderer_provider", "astra.renderer2d.bgfx"},
+          {"text_provider", "astra.text_layout.skia_ui"},
+          {"audio_provider", "astra.audio.miniaudio"},
+          {"filter_graph_provider", "astra.filter_graph.bgfx"},
           {"timeline_provider", "astra.timeline.default"},
           {"timeline_state",
            {{"schema", "astra.media.timeline_state.v1"},
@@ -378,8 +400,8 @@ nlohmann::json BuildPlayableVnEvidence(const std::filesystem::path& sample,
                     config_state.dump())},
         {"replay_route_hash", route_hash},
         {"scripted_input", scripted},
-        {"artemis_fixture", ArtemisFixtureReport(sample, registry)},
     };
+    evidence["player_qa"] = BuildPlayerQaEvidence(scripted, evidence, diagnostics);
     return evidence;
 }
 
@@ -572,45 +594,27 @@ BuildPlayableWindowFrame(const nlohmann::json& playable,
     const auto stage = system.value("stage", nlohmann::json::object());
     frame.width = stage.value("width", 1280);
     frame.height = stage.value("height", 720);
-    const bool artemis = system.value("artemis_ui_drawn", false);
-    frame.clear_color = artemis ? Astra::Platform::WindowColor{12, 12, 18, 255}
-                                : Astra::Platform::WindowColor{20, 28, 46, 255};
+    frame.clear_color = Astra::Platform::WindowColor{20, 28, 46, 255};
 
     auto background = RectPrimitive("background", 0.0F, 0.0F, 1280.0F, 720.0F,
-                                    artemis ? Astra::Platform::WindowColor{42, 56, 82, 255}
-                                            : Astra::Platform::WindowColor{32, 48, 72, 255},
-                                    "background");
-    AttachDecodedImage(background, registry,
-                       artemis ? "native:/Backgrounds/ArtemisSky" : "native:/Backgrounds/Room",
-                       package_path, texture_sources, diagnostics);
+                                    Astra::Platform::WindowColor{32, 48, 72, 255}, "background");
+    AttachDecodedImage(background, registry, "native:/Backgrounds/Room", package_path,
+                       texture_sources, diagnostics);
     frame.primitives.push_back(std::move(background));
 
-    auto character = RectPrimitive("character", artemis ? 500.0F : 470.0F, artemis ? 80.0F : 86.0F,
-                                   artemis ? 360.0F : 300.0F, artemis ? 620.0F : 520.0F,
-                                   artemis ? Astra::Platform::WindowColor{190, 205, 235, 255}
-                                           : Astra::Platform::WindowColor{216, 231, 255, 255},
+    auto character = RectPrimitive("character", 470.0F, 86.0F, 300.0F, 520.0F,
+                                   Astra::Platform::WindowColor{216, 231, 255, 255},
                                    "character");
-    AttachDecodedImage(character, registry,
-                       artemis ? "native:/Characters/Aya/Normal"
-                               : "native:/Characters/Alice/Normal",
-                       package_path, texture_sources, diagnostics);
+    AttachDecodedImage(character, registry, "native:/Characters/Alice/Normal", package_path,
+                       texture_sources, diagnostics);
     frame.primitives.push_back(std::move(character));
 
     auto message = RectPrimitive("message_window", 64.0F, 500.0F, 1152.0F, 174.0F,
-                                 artemis ? Astra::Platform::WindowColor{16, 18, 28, 230}
-                                         : Astra::Platform::WindowColor{16, 16, 24, 230},
+                                 Astra::Platform::WindowColor{16, 16, 24, 230},
                                  "message");
-    AttachDecodedImage(message, registry, artemis ? "native:/UI/RecoOverlay" : "native:/UI/TextBox",
-                       package_path, texture_sources, diagnostics);
+    AttachDecodedImage(message, registry, "native:/UI/TextBox", package_path, texture_sources,
+                       diagnostics);
     frame.primitives.push_back(std::move(message));
-
-    if (artemis) {
-        auto cinema = RectPrimitive("cinema_overlay", 0.0F, 0.0F, 1280.0F, 720.0F,
-                                    Astra::Platform::WindowColor{255, 255, 255, 64}, "cinema");
-        AttachDecodedImage(cinema, registry, "native:/UI/CinemaOverlay", package_path,
-                           texture_sources, diagnostics);
-        frame.primitives.push_back(std::move(cinema));
-    }
 
     frame.primitives.push_back(RectPrimitive("speaker_name", 96.0F, 466.0F, 220.0F, 42.0F,
                                              Astra::Platform::WindowColor{66, 88, 128, 240},
@@ -624,12 +628,11 @@ BuildPlayableWindowFrame(const nlohmann::json& playable,
     const auto dialogue = playable.value("dialogue_history", nlohmann::json::array());
     const auto latest = dialogue.empty() ? nlohmann::json::object() : dialogue.back();
     AttachRasterizedText(frame, registry, "native:/Fonts/SourceHanSerif", "speaker_text_rgba",
-                         latest.value("speaker", artemis ? "aya" : "alice"), 112.0F, 474.0F, 28,
-                         package_path, glyph_sources, diagnostics);
+                         latest.value("speaker", "alice"), 112.0F, 474.0F, 28, package_path,
+                         glyph_sources, diagnostics);
     AttachRasterizedText(
         frame, registry, "native:/Fonts/SourceHanSerif", "dialogue_text_rgba",
-        latest.value("text", artemis ? "Save, load, replay, and inspect should now agree."
-                                     : "Let's open the menu, save, load, and replay this route."),
+        latest.value("text", "Let's open the menu, save, load, and replay this route."),
         120.0F, 538.0F, 30, package_path, glyph_sources, diagnostics);
     if (playable.value("selected_branch_reached", false)) {
         frame.primitives.push_back(RectPrimitive("choice_selected", 840.0F, 420.0F, 320.0F, 52.0F,
@@ -723,5 +726,3 @@ void ValidatePhase4AssetReferences(const nlohmann::json& phase4,
         }
     }
 }
-
-

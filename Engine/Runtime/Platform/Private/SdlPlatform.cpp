@@ -171,11 +171,8 @@ private:
 
 } // namespace
 
-Astra::Core::Result<PlatformServices> CreateSdlPlatform(Astra::Core::DiagnosticSink&) {
-    PlatformServices services = CreateHeadlessPlatform();
-    services.impl_->kind = BackendKind::Sdl;
-    services.impl_->window = std::make_unique<SdlWindowService>();
-    return Astra::Core::Result<PlatformServices>::Success(std::move(services));
+std::unique_ptr<IWindowService> CreateSdlWindowService() {
+    return std::make_unique<SdlWindowService>();
 }
 
 } // namespace Astra::Platform

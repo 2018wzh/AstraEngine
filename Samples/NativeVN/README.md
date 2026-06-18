@@ -1,30 +1,8 @@
-# NativeVN Samples
+# NativeVN Player QA Matrix
 
-Status: NativeVN Phase 8 full playable demo with automated scripted QA and a manual smoke checklist.
+Status: redistributable playable demo with automated scripted QA and a manual smoke checklist.
 
-## Overview
-
-NativeVN is the single playable sample for AstraEngine. It is the redistributable runtime vertical slice that proves `validate -> cook -> package -> run -> replay -> inspect` without Editor dependencies.
-
-## Key Concepts
-
-- Automated QA uses `astra run --windowed-smoke --scripted-input`.
-- Manual QA checks the same player-visible flows by hand.
-- The sample stays NativeVN-only; there is no second playable fixture track.
-
-## Architecture
-
-Sample requirements are specified in [Samples and Test Matrix](../../design/samples-and-test-matrix.md) and [Implementation Coverage](../../design/implementation-coverage.md).
-
-## Programming Guide
-
-Current sample descriptors live in `Samples/*/astra.sample.yaml`. `Samples/NativeVN/Content` contains generated redistributable PNG/OGG fixture media, a `.astra` story script, and a Lua extension schema fixture.
-
-## API Reference
-
-Descriptors use `schema: astra.sample.v1`; `NativeVN` is the Phase 8 playable demo descriptor and uses redistributable generated fixtures.
-
-## Examples
+## Automated Cases
 
 Run these after packaging:
 
@@ -38,7 +16,7 @@ build\Bin\astra.exe run build/Saved/Packages/NativeVN.astrapkg --windowed-smoke 
 Each scripted file may declare `case_id`, `persona`, `objective`, and `expects`.
 `astra run` writes the result to `playable_vn.player_qa`; failed expectations or malformed YAML fail the command.
 
-Manual smoke checklist:
+## Manual Smoke Checklist
 
 | Player step | Expected state | Automated case | Evidence field |
 | --- | --- | --- | --- |
@@ -54,6 +32,6 @@ Manual smoke checklist:
 | Hit replay checkpoint | Replay checkpoint is recorded | `system_save_load_systems.yaml` | `playable_vn.replay_checkpoint` |
 | Close window | Auto-close succeeds without changing pass status | all QA cases | `playable_vn.player_qa.passed` |
 
-## Troubleshooting
+## Current Limits
 
 This matrix does not cover gamepad, touch, IME text input, multi-resolution screenshot diff, or long soak play. Add those only when the runtime has real input-device capture and image baseline tooling.

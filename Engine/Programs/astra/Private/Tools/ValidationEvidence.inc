@@ -149,11 +149,6 @@ std::filesystem::path ReplayPathForSample(const std::filesystem::path& sample) {
     if (IsNativeVnSample(sample)) {
         return BinaryRoot() / "Saved/Replays/NativeVNGolden.replay";
     }
-    if (IsArtemisVnSample(sample)) {
-        return BinaryRoot() / "Saved/Replays" /
-               (sample.filename().string() == "TsuiNoSora" ? "TsuiNoSoraGolden.replay"
-                                                            : "TsuiNoSoraGolden.replay");
-    }
     return BinaryRoot() / "Saved/Replays" / (sample.filename().string() + ".replay");
 }
 

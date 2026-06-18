@@ -79,6 +79,11 @@ int main(int argc, char** argv) {
     package->add_option("sample", sample)->required();
     package->add_flag("--json", options.json, "Emit JSON report");
     package->add_option("--profile", options.profile, "Foundation profile");
+    package->add_option("--target-platform", options.target_platform,
+                        "Distribution target platform: win64, linux-x64, macos-x64, macos-arm64");
+    package->add_option("--dist-dir", options.distribution_root, "Distribution output root");
+    package->add_flag("--no-distribution", options.no_distribution,
+                      "Only write the .astrapkg payload, without a runtime distribution folder");
     package->add_flag("--deterministic", options.compare,
                       "Alias for deterministic package profile evidence");
     package->add_option("--diagnostics-out", options.diagnostics_out,

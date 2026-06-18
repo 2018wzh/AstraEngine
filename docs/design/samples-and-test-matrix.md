@@ -3,7 +3,7 @@
 状态：NativeVN runtime evidence scaffold / Target Architecture  
 定位：用样例项目和测试矩阵证明 AstraEngine 的 UE-class 2D runtime 完备度。样例不是演示摆设，而是 release gate、文档、CLI、Editor 和 Runtime 的共同验收载体。
 
-Current implementation note：当前已建立 `Samples/NativeVN`、`Samples/RuntimeStress`、`Samples/PackageSmoke` 和 `Samples/TsuiNoSora` 的 foundation/evidence descriptors。`PackageSmoke` 可通过 `astra validate/package/run --headless-smoke` 证明 Phase 1 headless platform 和 example module lifecycle；`NativeVN` 可通过 validate/cook/package/run/replay/inspect 证明 source asset sidecars、generated PNG/OGG/font fixture media、AssetRegistry/dependency graph、local DDC artifact evidence、embedded package payloads、PackageReader mount/read smoke、Script/AstraVN execution、playable UI/system/save/load evidence、package-payload SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence 和 golden replay comparison。`TsuiNoSora` 是 local-test-only playable fixture，用复制的 Artemis PNG/OGG/font/UI/system 资源验证真实资源 registry/cook/package/windowed/headless/run evidence，以及来自 package payload 的真实 PNG texture primitive 与 glyph primitive 提交，不代表 Legacy VM、完整 `.ast` converter 或 redistributable sample。Editor workflow、final release gate、production binary streaming 和 full Artemis compatibility 仍是后续阶段。
+Current implementation note：当前已建立 `Samples/NativeVN`、`Samples/RuntimeStress` 和 `Samples/PackageSmoke` 的 foundation/evidence descriptors。`PackageSmoke` 可通过 `astra validate/package/run --headless-smoke` 证明 Phase 1 headless platform 和 example module lifecycle；`NativeVN` 可通过 validate/cook/package/run/replay/inspect 证明 source asset sidecars、generated PNG/OGG/font fixture media、AssetRegistry/dependency graph、local DDC artifact evidence、embedded package payloads、PackageReader mount/read smoke、Script/AstraVN execution、playable UI/system/save/load evidence、package-payload SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence 和 golden replay comparison。Editor workflow、final release gate、production binary streaming 和 full Artemis compatibility 仍是后续阶段。
 
 ## 1. 目标
 
@@ -34,7 +34,6 @@ Samples/
 ├─ NativeVN
 ├─ RuntimeStress
 ├─ PackageSmoke
-├─ TsuiNoSora
 ├─ ScriptParity
 ├─ MediaBackend
 ├─ AIIntentSafety

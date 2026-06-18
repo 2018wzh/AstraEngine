@@ -191,18 +191,8 @@ bool IsNativeVnSample(const std::filesystem::path& sample) {
            (id.empty() && sample.filename().string() == "NativeVN");
 }
 
-bool IsArtemisVnSample(const std::filesystem::path& sample) {
-    const auto descriptor = TryLoadSampleDescriptor(sample);
-    if (!descriptor) {
-        return false;
-    }
-    return descriptor["id"].as<std::string>("") == "astra.sample.tsuinosora" ||
-           descriptor["status"].as<std::string>("").find("local-test") != std::string::npos ||
-           descriptor["fixture"];
-}
-
 bool IsVnSmokeSample(const std::filesystem::path& sample) {
-    return IsNativeVnSample(sample) || IsArtemisVnSample(sample);
+    return IsNativeVnSample(sample);
 }
 
 Astra::Media::FilterProfile MakePhase3FoundationFilterProfile() {
@@ -664,71 +654,6 @@ nlohmann::json Phase3FoundationSmoke(Astra::Core::DiagnosticSink& diagnostics) {
 
 Astra::Asset::AssetRegistry ScanSampleRegistry(const std::filesystem::path& sample,
                                                Astra::Core::DiagnosticSink& diagnostics) {
-    auto scan_sidecars = [&](const std::vector<std::filesystem::path>& sidecars) {
-        Astra::Asset::AssetRegistry registry;
-        std::set<std::string> ids;
-        for (const auto& relative : sidecars) {
-            const auto sidecar_path = sample / "Content" / relative;
-            auto sidecar = Astra::Asset::LoadAssetSidecar(sidecar_path, diagnostics);
-            if (!sidecar) {
-                continue;
-            }
-            Astra::Asset::AssetRegistryEntry entry;
-            entry.id = sidecar.Value().id;
-            entry.type = sidecar.Value().type;
-            entry.sidecar_path = sidecar_path;
-            entry.source_path = sidecar_path.parent_path() / sidecar.Value().source_path;
-            entry.sidecar_hash = Sha256Text(ReadText(sidecar_path));
-            if (std::filesystem::exists(entry.source_path)) {
-                entry.source_hash = Sha256Text(ReadText(entry.source_path));
-            }
-            entry.hard_dependencies = sidecar.Value().hard_dependencies;
-            entry.soft_dependencies = sidecar.Value().soft_dependencies;
-            ids.insert(entry.id.ToString());
-            registry.entries.push_back(std::move(entry));
-        }
-        for (auto& entry : registry.entries) {
-            for (const auto& dependency : entry.hard_dependencies) {
-                if (!ids.contains(dependency.ToString())) {
-                    Astra::Core::Diagnostic diagnostic;
-                    diagnostic.code = "ASTRA_ASSET_DEPENDENCY_MISSING";
-                    diagnostic.category = "asset.registry";
-                    diagnostic.severity = Astra::Core::DiagnosticSeverity::Blocking;
-                    diagnostic.message = "Curated fixture dependency is missing from registry evidence.";
-                    diagnostic.source.file = entry.sidecar_path.string();
-                    diagnostic.objects = {{"AssetId", entry.id.ToString()},
-                                          {"MissingAssetId", dependency.ToString()}};
-                    entry.diagnostics.push_back(diagnostic);
-                    diagnostics.Emit(std::move(diagnostic));
-                }
-            }
-        }
-        return registry;
-    };
-    if (IsArtemisVnSample(sample)) {
-        return scan_sidecars({
-            "Backgrounds/Black.asset.yaml",
-            "Backgrounds/White.asset.yaml",
-            "Backgrounds/ArtemisSky.asset.yaml",
-            "Backgrounds/ArtemisRoom.asset.yaml",
-            "Characters/Aya/Normal.asset.yaml",
-            "Characters/Aya/Smile.asset.yaml",
-            "Characters/Aya/Concern.asset.yaml",
-            "Music/ArtemisBgm.asset.yaml",
-            "Sfx/PageTurn.asset.yaml",
-            "Sfx/SystemConfirm.asset.yaml",
-            "Sfx/SystemCancel.asset.yaml",
-            "Voice/Aya/Line001.asset.yaml",
-            "Voice/Yukito/Line001.asset.yaml",
-            "Filters/artemis_soft.asset.yaml",
-            "Fonts/SourceHanSerif.asset.yaml",
-            "UI/RecoOverlay.asset.yaml",
-            "UI/CinemaOverlay.asset.yaml",
-            "UI/ArtemisSystem.asset.yaml",
-            "System/SystemIni.asset.yaml",
-            "Scripts/opening.asset.yaml",
-        });
-    }
     Astra::Asset::AssetRegistryBuilder builder;
     const auto content_root = sample / "Content";
     if (!std::filesystem::exists(content_root)) {

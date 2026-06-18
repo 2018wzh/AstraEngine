@@ -19,7 +19,18 @@
 
 namespace Astra::Platform {
 
+std::unique_ptr<IWindowService> CreateSdlWindowService();
+
 namespace {
+
+void EmitUnsupportedBackend(BackendKind backend, Astra::Core::DiagnosticSink& diagnostics) {
+    Astra::Core::Diagnostic diagnostic;
+    diagnostic.code = "ASTRA_PLATFORM_BACKEND_UNSUPPORTED";
+    diagnostic.category = "platform.backend";
+    diagnostic.severity = Astra::Core::DiagnosticSeverity::Blocking;
+    diagnostic.message = backend == BackendKind::Mobile ? "Mobile platform backend is not implemented." : "Web platform backend is not implemented.";
+    diagnostics.Emit(std::move(diagnostic));
+}
 
 std::string WindowFrameHash(const WindowFrameDesc& frame) {
     constexpr Astra::Core::u64 offset = 14695981039346656037ull;
@@ -389,14 +400,22 @@ CrashPacket ICrashService::Capture(std::string_view build_info, const Astra::Cor
     return Capture(std::move(context), diagnostics);
 }
 
-PlatformServices CreateHeadlessPlatform() {
+Astra::Core::Result<PlatformServices> CreatePlatform(PlatformCreateDesc desc, Astra::Core::DiagnosticSink& diagnostics) {
+    if (!desc.target_platform.empty() && !FindTargetPlatform(desc.target_platform)) {
+        return Astra::Core::Result<PlatformServices>::Failure(Astra::Core::ErrorCode::NotFound, "target platform not found");
+    }
+    if (desc.backend == BackendKind::Mobile || desc.backend == BackendKind::Web) {
+        EmitUnsupportedBackend(desc.backend, diagnostics);
+        return Astra::Core::Result<PlatformServices>::Failure(Astra::Core::ErrorCode::Unsupported, "platform backend is not implemented");
+    }
+
     Astra::Core::DefaultLogger().Log(
         "platform.lifecycle",
-        "headless",
+        desc.backend == BackendKind::Sdl ? "sdl3" : "headless",
         Astra::Core::LogLevel::Info,
-        "headless platform created");
+        desc.backend == BackendKind::Sdl ? "sdl platform created" : "headless platform created");
     PlatformServices services;
-    services.impl_->kind = BackendKind::Headless;
+    services.impl_->kind = desc.backend;
     services.impl_->window = std::make_unique<HeadlessWindowService>();
     services.impl_->filesystem = std::make_unique<FileSystemService>();
     services.impl_->input = std::make_unique<HeadlessInputService>();
@@ -407,7 +426,30 @@ PlatformServices CreateHeadlessPlatform() {
     services.impl_->cursor = std::make_unique<CursorService>();
     services.impl_->display = std::make_unique<DisplayService>();
     services.impl_->crash = std::make_unique<CrashService>();
+    if (desc.backend == BackendKind::Sdl) {
+#if ASTRA_ENABLE_SDL_BACKEND
+        services.impl_->window = CreateSdlWindowService();
+#else
+        EmitUnsupportedBackend(desc.backend, diagnostics);
+        return Astra::Core::Result<PlatformServices>::Failure(Astra::Core::ErrorCode::Unsupported, "SDL platform backend is not enabled");
+#endif
+    }
+    return Astra::Core::Result<PlatformServices>::Success(std::move(services));
+}
+
+PlatformServices CreateHeadlessPlatform() {
+    Astra::Core::DiagnosticSink diagnostics;
+    auto platform = CreatePlatform({}, diagnostics);
+    if (platform) {
+        return std::move(platform.Value());
+    }
+    PlatformServices services;
+    services.impl_->kind = BackendKind::Headless;
     return services;
+}
+
+Astra::Core::Result<PlatformServices> CreateSdlPlatform(Astra::Core::DiagnosticSink& diagnostics) {
+    return CreatePlatform({BackendKind::Sdl, {}}, diagnostics);
 }
 
 } // namespace Astra::Platform

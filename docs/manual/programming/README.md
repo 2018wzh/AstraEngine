@@ -1,6 +1,6 @@
 # Programming
 
-Status: NativeVN Phase 8 full playable evidence. Foundation public headers are implemented for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Asset, Media, Script, and AstraVN; engine libraries are dynamic-only DLLs. NativeVN and the local TsuiNoSora fixture now have CLI package/run/replay/inspect evidence plus playable VN state, UI/system state, command schema/source-map evidence, generated or copied PNG/OGG/font media evidence, embedded package payloads, PackageReader random-access/chunked-read/mount evidence, mature media backend capability reports, local DDC artifact execution, corruption recovery, and package integrity diagnostics; Editor, AI/MCP, standalone AstraEmu Toolkit, full Artemis VM compatibility, real Live2D/Emote SDK execution, and production release gates remain planned.
+Status: NativeVN Phase 8 full playable evidence. Foundation public headers are implemented for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Asset, Media, Script, and AstraVN; engine libraries are dynamic-only DLLs. NativeVN has CLI package/run/replay/inspect evidence plus playable VN state, UI/system state, command schema/source-map evidence, generated PNG/OGG/font media evidence, embedded package payloads, PackageReader random-access/chunked-read/mount evidence, mature media backend capability reports, local DDC artifact execution, corruption recovery, and package integrity diagnostics; Editor, AI/MCP, standalone AstraEmu Toolkit, full Artemis VM compatibility, real Live2D/Emote SDK execution, and production release gates remain planned.
 
 ## Overview
 
@@ -52,7 +52,7 @@ Foundation headers are indexed in [API Reference](../api/README.md). Later publi
 
 ## Examples
 
-Current examples include the NativeVN playable route and TsuiNoSora local playable route plus source asset sidecars, AssetRegistry/dependency graph evidence, DDC artifact write/reuse/corruption recovery, embedded package payload read/mount evidence, package manifest integrity, save/load evidence, UI/system evidence, and golden replay evidence. Planned examples include a Core diagnostics packet, a plugin descriptor, a module C ABI entrypoint, and production ScriptParity coverage.
+Current examples include the NativeVN playable route plus source asset sidecars, AssetRegistry/dependency graph evidence, DDC artifact write/reuse/corruption recovery, embedded package payload read/mount evidence, package manifest integrity, save/load evidence, UI/system evidence, and golden replay evidence. Planned examples include a Core diagnostics packet, a plugin descriptor, a module C ABI entrypoint, and production ScriptParity coverage.
 
 ## Troubleshooting
 

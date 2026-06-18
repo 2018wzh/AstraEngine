@@ -1,18 +1,15 @@
 schema: astra.input.scripted.v1
-case_id: nativevn_golden_full_playable
-persona: regression
-objective: Cover title, system UI, save/load, both choices, and replay checkpoint.
+case_id: nativevn_menu_reopen_smoke
+persona: menu_heavy_player
+objective: Reopen player-facing menus and save UI without losing visible state.
 sample: NativeVN
-route: phase8_full_playable
+route: menu_reopen_smoke
 expects:
   title_continue: true
   system_menu: true
   backlog: true
   config: true
   save_load: true
-  route_walk: true
-  route_systems: true
-  replay_checkpoint: true
   windowed: true
 events:
   - frame: 1
@@ -20,32 +17,27 @@ events:
   - frame: 4
     action: title_continue
   - frame: 8
-    action: advance
+    action: system_menu
   - frame: 12
     action: system_menu
   - frame: 16
     action: backlog
   - frame: 20
+    action: backlog
+  - frame: 24
     action: config
     set:
       text_speed: fast
       bgm_volume: 0.65
       se_volume: 0.8
       voice_volume: 1.0
-  - frame: 26
+  - frame: 30
+    action: config
+  - frame: 36
     action: save
     slot: 1
-  - frame: 32
-    action: choose
-    index: 0
-  - frame: 40
+  - frame: 44
     action: load
     slot: 1
-  - frame: 46
-    action: choose
-    index: 1
-  - frame: 56
-    action: replay_checkpoint
-    label: branch_merge
-  - frame: 64
+  - frame: 52
     action: auto_close

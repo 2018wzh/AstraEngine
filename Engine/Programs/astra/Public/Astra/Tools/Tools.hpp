@@ -18,14 +18,17 @@ struct CommandOptions {
     bool gpu_smoke = false;
     bool auto_close = false;
     bool compare = false;
+    bool no_distribution = false;
     bool log_async = true;
     bool log_sync = false;
     std::string config = "Debug";
     std::string profile = "development";
+    std::string target_platform;
     std::string log_level = "debug";
     std::filesystem::path diagnostics_out;
     std::filesystem::path log_dir;
     std::filesystem::path log_file;
+    std::filesystem::path distribution_root;
     std::filesystem::path scripted_input;
     std::filesystem::path save_out;
     std::filesystem::path load;

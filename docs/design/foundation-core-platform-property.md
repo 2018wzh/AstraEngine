@@ -3,7 +3,7 @@
 状态：Phase 1 Foundation Implemented / Target Architecture  
 定位：Astra 的基础类型、诊断、配置、序列化、平台抽象和轻量属性系统。它们支撑 Runtime、Editor、CLI、MCP、插件和 Release Gate，但不包含 VN、AI、Legacy 或 Editor 语义。
 
-Phase 1 implementation note：当前工作树已实现 `AstraCore`、`AstraPlatform`、`AstraModuleRuntime` 和 `AstraPropertySystem` 的 production-ready Foundation gate slice。它覆盖 diagnostics、diagnostic code registry、release profile policy、`spdlog`-backed structured logging、error reporting、profiling markers、config layering/profile hash、stable id、versioned document/migration、unknown-field policy、build info、headless platform services、opaque dynamic library handles、thread/file-watch/crash smoke、SDL private backend compile path、module descriptor/service/provider release-gate checks、Property descriptors、nested JSON Schema generation、schema version graph、write policy、validation defaults、diff/audit output 和 migration helpers。future Editor/MCP consumers、完整 input/window feature set、save/package critical migration policy、trace export 和完整 crash bundle 仍是后续阶段。
+Phase 1 implementation note：当前工作树已实现 `AstraCore`、`AstraPlatform`、`AstraModuleRuntime` 和 `AstraPropertySystem` 的 production-ready Foundation gate slice。它覆盖 diagnostics、diagnostic code registry、release profile policy、`spdlog`-backed structured logging、error reporting、profiling markers、config layering/profile hash、stable id、versioned document/migration、unknown-field policy、build info、headless platform services、Platform facade + backend DLL targets、target-platform descriptor/capability table、opaque dynamic library handles、thread/file-watch/crash smoke、SDL private backend compile path、mobile/Web unsupported backend stubs、module descriptor/service/provider release-gate checks、Property descriptors、nested JSON Schema generation、schema version graph、write policy、validation defaults、diff/audit output 和 migration helpers。future Editor/MCP consumers、完整 input/window feature set、save/package critical migration policy、trace export、真实 mobile/Web runtime backend 和完整 crash bundle 仍是后续阶段。
 
 ## 1. 目标
 
@@ -225,10 +225,21 @@ CrashService
 Clipboard/Cursor/Display service
 ```
 
+Target abstraction：
+
+```text
+TargetPlatformDesc
+TargetCapabilityFlags
+CurrentHostTargetPlatform()
+FindTargetPlatform(id)
+KnownTargetPlatforms()
+```
+
 Backend requirements：
 
 - Headless backend：CI、server-style runtime validation、package smoke、replay。
 - SDL-backed backend：window/input/timer/filesystem/dynamic library, SDL private only。
+- Mobile/Web backend stubs：target descriptors and capability flags exist; runtime creation returns `Unsupported` until real SDK-backed services are implemented。
 - Future backend：must conform to same public descriptors and diagnostics。
 
 FileSystem mounts：
@@ -348,6 +359,6 @@ Required tests：
 Phase 1 evidence：
 
 - `AstraCore` builds without Platform、SDL、Lua、VN、AI、Editor、renderer、audio 或 Compat。
-- `AstraPlatform` headless tests cover thread dispatch、timer、crash packet；SDL types remain in private implementation.
+- `AstraPlatform` headless tests cover thread dispatch、timer、crash packet、target-platform descriptors、unsupported mobile/Web backend diagnostics；SDL types remain in private implementation.
 - `AstraPropertySystem` tests cover JSON Schema、required/default validation 和 migration helper。
 - `AstraPhaseTests` includes public header forbidden-token isolation checks。
