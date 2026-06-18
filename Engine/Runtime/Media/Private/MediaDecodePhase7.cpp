@@ -30,6 +30,19 @@ Astra::Core::Result<DecodedCpuBuffer> DecodeImageCpuBufferBytes(std::span<const 
     return Astra::Core::Result<DecodedCpuBuffer>::Success(std::move(buffer));
 }
 
+Astra::Core::Result<DecodedCpuBuffer> RasterizeUiTextCpuBufferBytes(std::span<const Astra::Core::u8> font_bytes, std::string_view text, Astra::Core::u32 pixel_height, Astra::Core::DiagnosticSink& diagnostics) {
+    auto rasterized = RasterizeTextRgbaBytes(font_bytes, text, pixel_height, diagnostics);
+    if (!rasterized) {
+        return Astra::Core::Result<DecodedCpuBuffer>::Failure(rasterized.Error(), rasterized.Message());
+    }
+    DecodedCpuBuffer buffer;
+    buffer.width = rasterized.Value().width;
+    buffer.height = rasterized.Value().height;
+    buffer.row_stride = rasterized.Value().width * 4;
+    buffer.pixels = std::move(rasterized.Value().pixels);
+    return Astra::Core::Result<DecodedCpuBuffer>::Success(std::move(buffer));
+}
+
 Astra::Core::Result<VideoDecodeMetadata> InspectVideoBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics) {
     if (bytes.empty()) {
         diagnostics.Emit(MakeDiagnostic("ASTRA_DECODE_VIDEO_EMPTY", Astra::Core::DiagnosticSeverity::Blocking, "Video payload is empty."));

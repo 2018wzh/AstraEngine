@@ -83,7 +83,7 @@ TEST_CASE("Public headers do not expose forbidden native ABI types") {
         source_root / "Engine/Runtime/Script/Public",
         source_root / "Engine/Runtime/AstraVN/Public",
     };
-    const std::vector<std::string> forbidden = {"SDL_", "SDL.h", "HWND", "HINSTANCE", "Vk", "ID3D", "ALuint", "EditorWidget", "Actor*", "entt::", "entt/"};
+    const std::vector<std::string> forbidden = {"SDL_", "SDL.h", "SDL_Window", "HWND", "HINSTANCE", "Vk", "ID3D", "ALuint", "bgfx", "Sk", "EditorWidget", "Actor*", "entt::", "entt/"};
 
     for (const auto& root : public_roots) {
         for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {

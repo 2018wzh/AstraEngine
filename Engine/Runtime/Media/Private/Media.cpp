@@ -280,13 +280,19 @@ std::vector<MediaProviderDescriptor> FoundationMediaProviders() {
 std::vector<MediaProviderDescriptor> ProductionMediaProviders() {
     auto providers = FoundationMediaProviders();
     auto capabilities = ProbeMediaBackendCapabilities();
-    providers[0].provider_id = "astra.renderer2d.sdl";
-    providers[0].display_name = "Astra SDL3 Renderer2D";
-    providers[0].features = {"texture_import", "sprite_batching", "render_target", "frame_capture", "clip_scissor", "device_recreate"};
+    providers[0].provider_id = "astra.renderer2d.bgfx";
+    providers[0].display_name = "Astra bgfx Renderer2D";
+    providers[0].features = {"texture_import", "sprite_batching", "render_target", "frame_capture", "clip_scissor", "device_recreate", "cross_api_backend"};
+    if (!capabilities.renderer2d_ready) {
+        AddUnique(providers[0].features, "bgfx_unavailable_at_build_time");
+    }
     providers[0].hot_reload_level = "asset";
-    providers[1].provider_id = "astra.text_layout.freetype_harfbuzz";
-    providers[1].display_name = "Astra FreeType/HarfBuzz Text Layout";
-    providers[1].features = {"text_shaping", "font_rasterization", "glyph_atlas", "fallback_font", "missing_glyph_diagnostics"};
+    providers[1].provider_id = "astra.text_layout.skia_ui";
+    providers[1].display_name = "Astra Skia UI Text Raster";
+    providers[1].features = {"ui_text_raster_to_texture", "text_shaping", "font_rasterization", "glyph_atlas", "fallback_font", "missing_glyph_diagnostics"};
+    if (!capabilities.ui_text_raster_ready) {
+        AddUnique(providers[1].features, "skia_unavailable_at_build_time");
+    }
     providers[1].hot_reload_level = "asset";
     providers[2].provider_id = "astra.audio.miniaudio";
     providers[2].display_name = "Astra miniaudio Mixer";
@@ -297,7 +303,7 @@ std::vector<MediaProviderDescriptor> ProductionMediaProviders() {
     providers.push_back({"astra.decode.audio.foundation", AudioDecodeSlotId, "Astra Audio Decode Provider", true, {"ogg", "wav", "flac", "mp3"}, {"metadata_decode", "package_payload"}, "ASTRA_DECODE_AUDIO", "asset"});
     providers.push_back({"astra.decode.video.ffmpeg", VideoDecodeSlotId, "Astra FFmpeg Video Decode Extension", true, {"mp4", "webm", "mkv", "ogv"}, {"extension_point", "no_fake_fallback"}, "ASTRA_DECODE_VIDEO", "asset"});
     providers.push_back({"astra.timeline.default", TimelineSlotId, "Astra Timeline Provider", true, {"astra.media.timeline.v1"}, {"camera_keys", "audio_events", "filter_events", "save_replay_state"}, "ASTRA_TIMELINE", "asset"});
-    providers.push_back({"astra.filter_graph.sdl_gpu", FilterGraphSlotId, "Astra FilterGraph Evidence", true, {"astra.media.filter_profile.v1"}, {"headless_hash_fallback", "gaussian_blur_descriptor", "line_enhance_descriptor", "color_grade_descriptor", "pass_through_descriptor"}, "ASTRA_FILTER_GRAPH", "asset"});
+    providers.push_back({"astra.filter_graph.bgfx", FilterGraphSlotId, "Astra FilterGraph Evidence", true, {"astra.media.filter_profile.v1"}, {"headless_hash_fallback", "gaussian_blur_descriptor", "line_enhance_descriptor", "color_grade_descriptor", "pass_through_descriptor"}, "ASTRA_FILTER_GRAPH", "asset"});
     return providers;
 }
 
@@ -337,6 +343,7 @@ Astra::Core::Result<void> ValidateMediaProviderDescriptor(const MediaProviderDes
 Astra::Core::Result<MediaReleaseGateReport> ValidateMediaReleaseGate(const MediaReleaseGateRequest& request, Astra::Core::DiagnosticSink& diagnostics) {
     bool valid = true;
     auto providers = request.providers.empty() ? FoundationMediaProviders() : request.providers;
+    const auto capabilities = ProbeMediaBackendCapabilities();
     std::map<std::string, const MediaProviderDescriptor*> by_provider;
     for (const auto& provider : providers) {
         if (!ValidateMediaProviderDescriptor(provider, diagnostics)) {
@@ -391,6 +398,14 @@ Astra::Core::Result<MediaReleaseGateReport> ValidateMediaReleaseGate(const Media
             EmitBlocking(diagnostics, "ASTRA_MEDIA_RELEASE_PROVIDER_NOT_PACKAGED", "Selected media provider is not packaged eligible.", provider->second->provider_id);
             valid = false;
         }
+        if (request.require_available_backends && provider->second->provider_id == "astra.renderer2d.bgfx" && !capabilities.renderer2d_ready) {
+            EmitBlocking(diagnostics, "ASTRA_MEDIA_RELEASE_BGFX_UNAVAILABLE", "bgfx renderer provider was selected but bgfx is not available in this build.", provider->second->provider_id);
+            valid = false;
+        }
+        if (request.require_available_backends && provider->second->provider_id == "astra.text_layout.skia_ui" && !capabilities.ui_text_raster_ready) {
+            EmitBlocking(diagnostics, "ASTRA_MEDIA_RELEASE_SKIA_UNAVAILABLE", "Skia UI text provider was selected but Skia is not available in this build.", provider->second->provider_id);
+            valid = false;
+        }
         report.selected_providers.push_back(*provider->second);
         report.provider_hash_inputs.push_back(std::string(slot) + "=" + provider->second->provider_id);
     }
@@ -440,6 +455,38 @@ MediaBackendCapabilityReport ProbeMediaBackendCapabilities() {
         std::to_string(SDL_MAJOR_VERSION) + "." + std::to_string(SDL_MINOR_VERSION) + "." + std::to_string(SDL_MICRO_VERSION),
         {"bmp"},
         {"window_surface", "texture_upload_path", "event_loop"},
+#else
+        false,
+        "",
+        {},
+        {},
+#endif
+    });
+
+    add_library({
+        "bgfx",
+        "bgfx",
+#if defined(ASTRA_MEDIA_HAS_BGFX)
+        true,
+        "available",
+        {"texture", "render_target"},
+        {"renderer2d", "cross_api_backend", "sprite_batching"},
+#else
+        false,
+        "",
+        {},
+        {},
+#endif
+    });
+
+    add_library({
+        "skia",
+        "Skia",
+#if defined(ASTRA_MEDIA_HAS_SKIA)
+        true,
+        "available",
+        {"rgba8"},
+        {"ui_text_raster", "canvas_raster"},
 #else
         false,
         "",
@@ -550,6 +597,10 @@ MediaBackendCapabilityReport ProbeMediaBackendCapabilities() {
     report.text_layout_ready = std::ranges::find(report.font_features, "font_rasterization") != report.font_features.end()
                             && std::ranges::find(report.font_features, "text_shaping") != report.font_features.end();
     report.audio_mixer_ready = std::ranges::find(report.audio_features, "audio_mixer") != report.audio_features.end();
+    report.renderer2d_ready =
+        std::ranges::any_of(report.libraries, [](const MediaBackendLibrary& library) { return library.id == "bgfx" && library.available; });
+    report.ui_text_raster_ready =
+        std::ranges::any_of(report.libraries, [](const MediaBackendLibrary& library) { return library.id == "skia" && library.available; });
     Astra::Core::DefaultLogger().Log(
         "media.backend",
         "capability_probe",

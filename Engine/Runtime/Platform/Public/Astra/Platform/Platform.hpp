@@ -63,11 +63,21 @@ struct WindowPresentEvidence {
     std::string frame_hash;
 };
 
+struct WindowGraphicsBinding {
+    Astra::Core::u64 id = 0;
+    std::string backend = "headless";
+    Astra::Core::u32 width = 0;
+    Astra::Core::u32 height = 0;
+
+    [[nodiscard]] bool Empty() const { return id == 0; }
+};
+
 class IWindowService {
 public:
     virtual ~IWindowService() = default;
     [[nodiscard]] virtual Astra::Core::Result<void> Create(WindowDesc desc, Astra::Core::DiagnosticSink& diagnostics) = 0;
     [[nodiscard]] virtual Astra::Core::Result<WindowPresentEvidence> PresentFrame(const WindowFrameDesc& frame, Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual WindowGraphicsBinding GraphicsBinding() const = 0;
     virtual void PumpEvents() = 0;
     [[nodiscard]] virtual bool ShouldClose() const = 0;
     virtual void Close() = 0;

@@ -69,6 +69,7 @@ public:
             diagnostics.Emit(std::move(diagnostic));
             return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InternalError, SDL_GetError());
         }
+        binding_ = {1, "sdl3", desc.width, desc.height};
         renderer_ = SDL_CreateRenderer(window_, nullptr);
         if (renderer_ == nullptr) {
             Astra::Core::Diagnostic diagnostic;
@@ -135,6 +136,8 @@ public:
         return Astra::Core::Result<WindowPresentEvidence>::Success(std::move(evidence));
     }
 
+    WindowGraphicsBinding GraphicsBinding() const override { return binding_; }
+
     void PumpEvents() override {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -155,12 +158,14 @@ public:
             SDL_DestroyWindow(window_);
             window_ = nullptr;
         }
+        binding_ = {};
         SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
     }
 
 private:
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
+    WindowGraphicsBinding binding_;
     bool close_requested_ = false;
 };
 

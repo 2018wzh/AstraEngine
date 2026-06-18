@@ -5,6 +5,10 @@
 #include <algorithm>
 #include <utility>
 
+#if defined(ASTRA_MEDIA_HAS_BGFX)
+#include <bgfx/bgfx.h>
+#endif
+
 namespace Astra::Media {
 
 namespace {
@@ -24,12 +28,17 @@ MediaProviderDescriptor FindProvider(std::string_view provider_id) {
             return provider;
         }
     }
+    for (const auto& provider : FoundationMediaProviders()) {
+        if (provider.provider_id == provider_id) {
+            return provider;
+        }
+    }
     return {};
 }
 
 class HeadlessRenderer2DProvider final : public IRenderer2DProvider {
 public:
-    MediaProviderDescriptor Describe() const override { return FindProvider("astra.renderer2d.sdl"); }
+    MediaProviderDescriptor Describe() const override { return FindProvider("astra.renderer2d.headless"); }
 
     Astra::Core::Result<void> BeginFrame(const RenderFrameDesc& desc, Astra::Core::DiagnosticSink&) override {
         frame_ = desc;
@@ -102,9 +111,121 @@ private:
     std::vector<DecodedCpuBuffer> imported_textures_;
 };
 
+class ProductionRenderer2DProvider final : public IRenderer2DProvider {
+public:
+    explicit ProductionRenderer2DProvider(RenderTargetBinding binding) : binding_(std::move(binding)) {}
+
+    ~ProductionRenderer2DProvider() override {
+#if defined(ASTRA_MEDIA_HAS_BGFX)
+        if (initialized_) {
+            bgfx::shutdown();
+        }
+#endif
+    }
+
+    MediaProviderDescriptor Describe() const override { return FindProvider("astra.renderer2d.bgfx"); }
+
+    Astra::Core::Result<void> BeginFrame(const RenderFrameDesc& desc, Astra::Core::DiagnosticSink& diagnostics) override {
+        frame_ = desc;
+        graph_ = {};
+        imported_textures_.clear();
+#if defined(ASTRA_MEDIA_HAS_BGFX)
+        if (!initialized_) {
+            bgfx::Init init;
+            // ponytail: opaque platform binding keeps native handles out of public ABI; resolve a real surface when pixel-diff smoke needs it.
+            init.type = bgfx::RendererType::Noop;
+            init.resolution.width = desc.width;
+            init.resolution.height = desc.height;
+            if (!bgfx::init(init)) {
+                diagnostics.Emit(MakeDiagnostic("ASTRA_RENDERER2D_BGFX_INIT_FAILED", Astra::Core::DiagnosticSeverity::Blocking, "bgfx renderer could not initialize."));
+                return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InternalError, "bgfx init failed");
+            }
+            initialized_ = true;
+        }
+        bgfx::reset(desc.width, desc.height, BGFX_RESET_NONE);
+        return Astra::Core::Result<void>::Success();
+#else
+        diagnostics.Emit(MakeDiagnostic("ASTRA_RENDERER2D_BGFX_UNAVAILABLE", Astra::Core::DiagnosticSeverity::Blocking, "bgfx renderer provider was requested but bgfx was not available at build time."));
+        return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::Unsupported, "bgfx unavailable");
+#endif
+    }
+
+    Astra::Core::Result<TextureToken> ImportTexture(const DecodedCpuBuffer& buffer, Astra::Core::DiagnosticSink& diagnostics) override {
+        if (buffer.width == 0 || buffer.height == 0 || buffer.pixels.empty()) {
+            diagnostics.Emit(MakeDiagnostic("ASTRA_RENDERER2D_TEXTURE_EMPTY", Astra::Core::DiagnosticSeverity::Blocking, "Decoded texture buffer is empty."));
+            return Astra::Core::Result<TextureToken>::Failure(Astra::Core::ErrorCode::InvalidArgument, "empty texture");
+        }
+        imported_textures_.push_back(buffer);
+        return Astra::Core::Result<TextureToken>::Success(TextureToken{static_cast<Astra::Core::u64>(imported_textures_.size())});
+    }
+
+    Astra::Core::Result<TextureToken> ImportSurface(MediaSurfaceToken token, Astra::Core::DiagnosticSink& diagnostics) override {
+        if (token.Empty()) {
+            diagnostics.Emit(MakeDiagnostic("ASTRA_RENDERER2D_SURFACE_EMPTY", Astra::Core::DiagnosticSeverity::Blocking, "Media surface token is empty."));
+            return Astra::Core::Result<TextureToken>::Failure(Astra::Core::ErrorCode::InvalidArgument, "empty surface");
+        }
+        return Astra::Core::Result<TextureToken>::Success(TextureToken{token.id});
+    }
+
+    Astra::Core::Result<void> Execute(const RenderGraph& graph, Astra::Core::DiagnosticSink& diagnostics) override {
+        graph_ = graph;
+        std::ranges::sort(graph_.draws, [](const RenderDraw& left, const RenderDraw& right) {
+            if (left.layer == right.layer) {
+                return left.order == right.order ? left.draw_id < right.draw_id : left.order < right.order;
+            }
+            return left.layer < right.layer;
+        });
+        for (const auto& draw : graph_.draws) {
+            if (std::ranges::find(graph_.layers, draw.layer) == graph_.layers.end()) {
+                diagnostics.Emit(MakeDiagnostic("ASTRA_RENDERER2D_LAYER_UNKNOWN", Astra::Core::DiagnosticSeverity::Blocking, "Render draw references an unknown layer."));
+            }
+        }
+        return diagnostics.HasBlocking() ? Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InvalidFormat, "renderer diagnostics")
+                                         : Astra::Core::Result<void>::Success();
+    }
+
+    Astra::Core::Result<FrameCapture> Capture(Astra::Core::DiagnosticSink&) override {
+        FrameCapture capture;
+        capture.frame_index = frame_.frame_index == 0 ? graph_.frame_index : frame_.frame_index;
+        capture.commands = ToJson(graph_);
+        capture.commands["frame_desc"] = {{"width", frame_.width}, {"height", frame_.height}, {"color_space", frame_.color_space}};
+        capture.commands["target_binding"] = {{"id", binding_.id}, {"backend", binding_.backend}, {"width", binding_.width}, {"height", binding_.height}};
+        capture.commands["imported_texture_count"] = imported_textures_.size();
+        capture.commands["provider"] = Describe().provider_id;
+        capture.render_hash = Private::StableHash(capture.commands.dump());
+        capture.text_hash = Private::StableHash(capture.commands.at("text_requests").dump());
+        capture.audio_hash = Private::StableHash(capture.commands.at("audio_commands").dump());
+        capture.filter_hash = Private::StableHash(capture.commands.at("filter_applications").dump());
+        return Astra::Core::Result<FrameCapture>::Success(std::move(capture));
+    }
+
+    Astra::Core::Result<void> Present(PresentRequest request, Astra::Core::DiagnosticSink& diagnostics) override {
+        if (!request.allow_headless && binding_.Empty()) {
+            diagnostics.Emit(MakeDiagnostic("ASTRA_RENDERER2D_PRESENT_TARGET_MISSING", Astra::Core::DiagnosticSeverity::Blocking, "Present target is missing."));
+            return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InvalidArgument, "present target missing");
+        }
+#if defined(ASTRA_MEDIA_HAS_BGFX)
+        if (initialized_) {
+            bgfx::touch(0);
+            bgfx::frame();
+        }
+#endif
+        return Astra::Core::Result<void>::Success();
+    }
+
+private:
+    RenderTargetBinding binding_;
+    RenderFrameDesc frame_;
+    RenderGraph graph_;
+    std::vector<DecodedCpuBuffer> imported_textures_;
+    bool initialized_ = false;
+};
+
 class FoundationTextLayoutProvider final : public ITextLayoutProvider {
 public:
-    MediaProviderDescriptor Describe() const override { return FindProvider("astra.text_layout.freetype_harfbuzz"); }
+    explicit FoundationTextLayoutProvider(std::string provider_id = "astra.text_layout.foundation") : provider_id_(std::move(provider_id)) {}
+
+    MediaProviderDescriptor Describe() const override { return FindProvider(provider_id_); }
 
     Astra::Core::Result<GlyphRun> Shape(TextLayoutRequest request, Astra::Core::DiagnosticSink& diagnostics) override {
         if (request.text.empty()) {
@@ -140,6 +261,7 @@ public:
     }
 
 private:
+    std::string provider_id_;
     std::vector<GlyphRun> runs_;
 };
 
@@ -197,8 +319,16 @@ std::unique_ptr<IRenderer2DProvider> CreateHeadlessRenderer2DProvider() {
     return std::make_unique<HeadlessRenderer2DProvider>();
 }
 
+std::unique_ptr<IRenderer2DProvider> CreateProductionRenderer2DProvider(RenderTargetBinding binding) {
+    return std::make_unique<ProductionRenderer2DProvider>(std::move(binding));
+}
+
 std::unique_ptr<ITextLayoutProvider> CreateFoundationTextLayoutProvider() {
     return std::make_unique<FoundationTextLayoutProvider>();
+}
+
+std::unique_ptr<ITextLayoutProvider> CreateProductionTextLayoutProvider() {
+    return std::make_unique<FoundationTextLayoutProvider>("astra.text_layout.skia_ui");
 }
 
 std::unique_ptr<IAudioProvider> CreateFoundationAudioProvider(bool silent_backend) {

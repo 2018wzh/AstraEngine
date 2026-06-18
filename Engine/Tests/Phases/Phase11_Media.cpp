@@ -124,6 +124,8 @@ TEST_CASE("Media provider descriptors and release gate validate foundation slots
     REQUIRE(capabilities_json["schema"] == "astra.media.backend_capabilities.v1");
     REQUIRE(capabilities_json["libraries"].size() >= 6);
     REQUIRE(capabilities_json["libraries"][0]["id"] == "sdl3");
+    REQUIRE(capabilities_json["renderer2d_ready"].is_boolean());
+    REQUIRE(capabilities_json["ui_text_raster_ready"].is_boolean());
 
     auto providers = Astra::Media::FoundationMediaProviders();
     REQUIRE(providers.size() == 3);
@@ -152,6 +154,22 @@ TEST_CASE("Media provider descriptors and release gate validate foundation slots
     REQUIRE(report.Value().selected_providers.size() == 3);
     REQUIRE(report.Value().filter_applications.size() == 2);
     REQUIRE(Astra::Media::ToJson(report.Value())["schema"] == Astra::Media::MediaReleaseGateSchema);
+
+    auto production_request = request;
+    production_request.providers = Astra::Media::ProductionMediaProviders();
+    production_request.selected_providers.clear();
+    production_request.require_available_backends = true;
+    for (const auto& provider : production_request.providers) {
+        production_request.selected_providers[provider.slot_id] = provider.provider_id;
+    }
+    Astra::Core::DiagnosticSink production_diagnostics;
+    auto production_report = Astra::Media::ValidateMediaReleaseGate(production_request, production_diagnostics);
+    if (capabilities.renderer2d_ready && capabilities.ui_text_raster_ready) {
+        REQUIRE(production_report);
+    } else {
+        REQUIRE_FALSE(production_report);
+        REQUIRE(production_diagnostics.HasBlocking());
+    }
 
     std::vector<Astra::Media::PresentationCommand> commands;
     Astra::Media::PresentationCommand draw;
@@ -247,6 +265,15 @@ TEST_CASE("Media Phase 7 providers execute production DTO paths") {
     REQUIRE_FALSE(capture.Value().render_hash.empty());
     REQUIRE(capture.Value().commands["imported_texture_count"] == 1);
 
+    auto production_renderer = Astra::Media::CreateProductionRenderer2DProvider({1, "headless", 64, 64});
+    Astra::Core::DiagnosticSink production_renderer_diagnostics;
+    auto production_begin = production_renderer->BeginFrame({8, 64, 64, "srgb"}, production_renderer_diagnostics);
+    if (Astra::Media::ProbeMediaBackendCapabilities().renderer2d_ready) {
+        REQUIRE(production_begin);
+    } else {
+        REQUIRE_FALSE(production_begin);
+    }
+
     auto text_provider = Astra::Media::CreateFoundationTextLayoutProvider();
     auto glyph = text_provider->Shape({"text.phase7", "Phase 7 text 確認", "ja-JP", "text", 10, {{"size", 28}}}, diagnostics);
     REQUIRE(glyph);
@@ -255,6 +282,9 @@ TEST_CASE("Media Phase 7 providers execute production DTO paths") {
     auto text_capture = text_provider->Capture(diagnostics);
     REQUIRE(text_capture);
     REQUIRE_FALSE(text_capture.Value().glyph_hash.empty());
+
+    auto production_text_provider = Astra::Media::CreateProductionTextLayoutProvider();
+    REQUIRE(production_text_provider->Describe().provider_id == "astra.text_layout.skia_ui");
 
     auto audio_provider = Astra::Media::CreateFoundationAudioProvider(true);
     auto music = Astra::Asset::ParseAssetUri("native:/Music/opening_theme").Value();

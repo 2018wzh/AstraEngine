@@ -148,6 +148,8 @@ nlohmann::json ToJson(const MediaBackendCapabilityReport& report) {
         {"image_decode_ready", report.image_decode_ready},
         {"text_layout_ready", report.text_layout_ready},
         {"audio_mixer_ready", report.audio_mixer_ready},
+        {"renderer2d_ready", report.renderer2d_ready},
+        {"ui_text_raster_ready", report.ui_text_raster_ready},
     };
 }
 
@@ -185,6 +187,21 @@ nlohmann::json ToJson(const AudioStateCapture& capture) {
         commands.push_back({{"command_id", command.command_id}, {"kind", command.kind}, {"asset", command.asset.ToString()}, {"bus", command.bus}, {"volume", command.volume}, {"loop", command.loop}});
     }
     return {{"schema", capture.schema}, {"bus_volumes", capture.bus_volumes}, {"active_commands", commands}, {"state_hash", capture.state_hash}, {"silent_backend", capture.silent_backend}};
+}
+
+nlohmann::json ToJson(const RenderBackendSmoke& smoke) {
+    return {
+        {"schema", smoke.schema},
+        {"renderer_provider", smoke.renderer_provider},
+        {"text_provider", smoke.text_provider},
+        {"renderer_available", smoke.renderer_available},
+        {"text_available", smoke.text_available},
+        {"presented", smoke.presented},
+        {"imported_texture_count", smoke.imported_texture_count},
+        {"draw_count", smoke.draw_count},
+        {"text_texture_count", smoke.text_texture_count},
+        {"frame_hash", smoke.frame_hash},
+    };
 }
 
 nlohmann::json ToJson(const VideoDecodeMetadata& metadata) {

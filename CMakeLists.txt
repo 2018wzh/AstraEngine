@@ -19,6 +19,9 @@ option(ASTRA_BUILD_DOC_CHECK "Enable Phase 0 documentation validation target" ON
 option(ASTRA_BUILD_EDITOR "Build AstraEngine editor tools" OFF)
 option(ASTRA_ENABLE_SDL_BACKEND "Build SDL-backed platform backend" ON)
 option(ASTRA_ENABLE_HEADLESS_BACKEND "Build headless platform backend" ON)
+option(ASTRA_ENABLE_BGFX_RENDERER "Build bgfx-backed Renderer2D provider when bgfx is available" ON)
+option(ASTRA_ENABLE_SKIA_UI_TEXT "Build Skia-backed UI/text raster provider when Skia is available" ON)
+option(ASTRA_ENABLE_GPU_SMOKE_TESTS "Enable GPU/window renderer smoke tests" OFF)
 
 set(ASTRA_PLUGIN_OUTPUT_ROOT "${CMAKE_BINARY_DIR}/Plugins")
 set(ASTRA_ABI_VERSION 1)

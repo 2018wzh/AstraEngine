@@ -73,7 +73,7 @@ target_platform: windows
 release_profile: deterministic
 selected_providers:
   astra.image_decode: astra.decode.image.libpng
-  astra.renderer2d: astra.renderer2d.sdl_gpu
+  astra.renderer2d: astra.renderer2d.bgfx
 ```
 
 Cook artifact：

@@ -11,7 +11,7 @@ Text and audio still enter Media as logical DTOs, but Phase 7 adds provider exec
 - `TextLayoutRequest` stores text, locale, target layer, order, and style metadata.
 - `AudioCommand` stores logical play commands, asset URI, bus, volume, and loop state.
 - Headless captures hash DTOs so tests can verify deterministic command order.
-- `MediaProviderDescriptor` records `astra.text_layout.freetype_harfbuzz` and `astra.audio.miniaudio` for release-gate evidence.
+- `MediaProviderDescriptor` records `astra.text_layout.skia_ui` and `astra.audio.miniaudio` for release-gate evidence; the current text raster path still uses FreeType/HarfBuzz internally for deterministic glyph evidence.
 - `TextLayoutCapture` and `AudioStateCapture` provide deterministic hashes for replay and CI.
 - Save/replay stores logical text/audio state, not glyph atlas tokens or native audio handles.
 

@@ -78,6 +78,7 @@ int main(int argc, char** argv) {
     run->add_flag("--json", options.json, "Emit JSON report");
     run->add_flag("--headless-smoke", options.headless_smoke, "Run the headless smoke path");
     run->add_flag("--windowed-smoke", options.windowed_smoke, "Run the SDL windowed smoke path");
+    run->add_flag("--gpu-smoke", options.gpu_smoke, "Run the production renderer smoke path");
     run->add_flag("--auto-close", options.auto_close, "Close the windowed smoke automatically after evidence capture");
     run->add_option("--scripted-input", options.scripted_input, "Scripted input YAML for smoke runs");
     run->add_option("--save-out", options.save_out, "Write a save evidence JSON file");

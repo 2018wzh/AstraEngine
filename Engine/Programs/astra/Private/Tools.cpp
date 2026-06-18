@@ -484,6 +484,87 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
     return report;
 }
 
+nlohmann::json BuildGpuSmokeEvidence(const std::filesystem::path& sample,
+                                     const Astra::Platform::WindowGraphicsBinding& binding,
+                                     const Astra::Platform::WindowFrameDesc& frame,
+                                     Astra::Core::DiagnosticSink& diagnostics) {
+    Astra::Media::RenderTargetBinding target{binding.id, binding.backend, binding.width, binding.height};
+    Astra::Media::RenderBackendSmoke smoke;
+    auto renderer = Astra::Media::CreateProductionRenderer2DProvider(target);
+    auto text_provider = Astra::Media::CreateProductionTextLayoutProvider();
+    smoke.renderer_provider = renderer->Describe().provider_id;
+    smoke.text_provider = text_provider->Describe().provider_id;
+
+    Astra::Media::MediaReleaseGateRequest gate;
+    gate.providers = Astra::Media::ProductionMediaProviders();
+    gate.require_available_backends = true;
+    for (const auto& provider : gate.providers) {
+        gate.selected_providers[provider.slot_id] = provider.provider_id;
+    }
+    auto release = Astra::Media::ValidateMediaReleaseGate(gate, diagnostics);
+
+    auto begun = renderer->BeginFrame({frame.frame_index, frame.width, frame.height, "srgb"}, diagnostics);
+    std::vector<Astra::Media::PresentationCommand> commands;
+    if (begun) {
+        for (std::size_t index = 0; index < frame.primitives.size(); ++index) {
+            const auto& primitive = frame.primitives[index];
+            if (!primitive.image_rgba.empty() && primitive.image_width > 0 && primitive.image_height > 0) {
+                Astra::Media::DecodedCpuBuffer buffer;
+                buffer.width = primitive.image_width;
+                buffer.height = primitive.image_height;
+                buffer.row_stride = primitive.image_width * 4;
+                buffer.pixels = primitive.image_rgba;
+                if (renderer->ImportTexture(buffer, diagnostics)) {
+                    ++smoke.imported_texture_count;
+                }
+            }
+            auto asset = Astra::Asset::ParseAssetUri("native:/GpuSmoke/Primitive" + std::to_string(index));
+            if (asset) {
+                Astra::Media::PresentationCommand command;
+                command.kind = primitive.image_rgba.empty() ? Astra::Media::PresentationCommandKind::UiRect : Astra::Media::PresentationCommandKind::Sprite;
+                command.command_id = primitive.id.empty() ? "gpu.primitive." + std::to_string(index) : primitive.id;
+                command.frame_index = frame.frame_index;
+                command.layer = primitive.kind == "text" ? "text" : "ui";
+                command.order = static_cast<Astra::Core::i32>(index);
+                command.asset = asset.Value();
+                command.transform.x = primitive.x;
+                command.transform.y = primitive.y;
+                commands.push_back(std::move(command));
+            }
+        }
+
+        const auto font_path = sample / "Content/Fonts/sourcehanserif-medium.otf";
+        if (std::filesystem::exists(font_path)) {
+            const auto font_bytes = ReadBytes(font_path);
+            auto text_texture = Astra::Media::RasterizeUiTextCpuBufferBytes(font_bytes, "GPU smoke text", 24, diagnostics);
+            if (text_texture && renderer->ImportTexture(text_texture.Value(), diagnostics)) {
+                ++smoke.text_texture_count;
+            }
+        }
+
+        auto graph = Astra::Media::ExtractRenderGraph(commands, nullptr, diagnostics);
+        smoke.draw_count = static_cast<Astra::Core::u32>(graph.draws.size());
+        (void)renderer->Execute(graph, diagnostics);
+        auto capture = renderer->Capture(diagnostics);
+        if (capture) {
+            smoke.frame_hash = capture.Value().render_hash;
+        }
+        if (renderer->Present({"target:/main", false}, diagnostics)) {
+            smoke.presented = true;
+        }
+    }
+
+    const auto capabilities = Astra::Media::ProbeMediaBackendCapabilities();
+    smoke.renderer_available = capabilities.renderer2d_ready && begun;
+    smoke.text_available = capabilities.ui_text_raster_ready || smoke.text_texture_count > 0;
+    return {
+        {"schema", "astra.gpu_smoke.v1"},
+        {"release_gate", release ? Astra::Media::ToJson(release.Value()) : nlohmann::json({{"schema", Astra::Media::MediaReleaseGateSchema}, {"passed", false}})},
+        {"capabilities", Astra::Media::ToJson(capabilities)},
+        {"smoke", Astra::Media::ToJson(smoke)},
+    };
+}
+
 CommandReport Run(const std::filesystem::path& target, const CommandOptions& options) {
     auto report = MakeReport("astra run");
     if (!options.headless_smoke && !options.windowed_smoke) {
@@ -667,6 +748,10 @@ CommandReport Run(const std::filesystem::path& target, const CommandOptions& opt
                 report.artifacts["windowed_smoke"]["window_present"] = ToJson(presented.Value());
                 report.artifacts["windowed_smoke"]["window_texture_sources"] = texture_sources;
                 report.artifacts["windowed_smoke"]["window_glyph_sources"] = glyph_sources;
+            }
+            if (options.gpu_smoke) {
+                report.artifacts["windowed_smoke"]["gpu_smoke"] =
+                    BuildGpuSmokeEvidence(path, platform.Window().GraphicsBinding(), frame, diagnostics);
             }
             report.artifacts["windowed_smoke"]["playable_vn"] = report.artifacts["playable_vn"];
             report.artifacts["windowed_smoke"]["presentation_frame_hash"] =

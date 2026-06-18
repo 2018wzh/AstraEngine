@@ -32,7 +32,7 @@ engine_modules:
 Provider descriptor 公共字段：
 
 ```yaml
-provider_id: astra.renderer2d.sdl_gpu
+provider_id: astra.renderer2d.bgfx
 contract: IRenderer2DProvider
 slot_id: astra.renderer2d
 features:

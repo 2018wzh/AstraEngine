@@ -4,7 +4,7 @@ Status: Phase 7 provider evidence implemented.
 
 ## Overview
 
-`FilterProfile` validation now feeds Phase 7 FilterGraph provider evidence. The production provider descriptor is `astra.filter_graph.sdl_gpu`; CI and deterministic runs use `ExecuteFilterGraphHeadless()` to record the same layer-aware pass order and output hash without exposing GPU handles.
+`FilterProfile` validation now feeds Phase 7 FilterGraph provider evidence. The production provider descriptor is `astra.filter_graph.bgfx`; CI and deterministic runs use `ExecuteFilterGraphHeadless()` to record the same layer-aware pass order and output hash without exposing backend handles.
 
 ## Key Concepts
 

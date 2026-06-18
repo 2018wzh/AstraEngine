@@ -15,6 +15,7 @@ struct CommandOptions {
     bool strict = false;
     bool headless_smoke = false;
     bool windowed_smoke = false;
+    bool gpu_smoke = false;
     bool auto_close = false;
     bool compare = false;
     bool log_async = true;

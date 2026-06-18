@@ -112,6 +112,15 @@ struct PresentRequest {
     bool allow_headless = true;
 };
 
+struct RenderTargetBinding {
+    Astra::Core::u64 id = 0;
+    std::string backend = "headless";
+    Astra::Core::u32 width = 0;
+    Astra::Core::u32 height = 0;
+
+    [[nodiscard]] bool Empty() const { return id == 0; }
+};
+
 struct TextureToken {
     Astra::Core::u64 id = 0;
     [[nodiscard]] bool Empty() const { return id == 0; }
@@ -282,6 +291,7 @@ struct MediaReleaseGateRequest {
     std::map<std::string, std::string> selected_providers;
     std::vector<MediaProviderDescriptor> providers;
     std::optional<FilterProfile> filter_profile;
+    bool require_available_backends = false;
 };
 
 struct MediaReleaseGateReport {
@@ -310,6 +320,8 @@ struct MediaBackendCapabilityReport {
     bool image_decode_ready = false;
     bool text_layout_ready = false;
     bool audio_mixer_ready = false;
+    bool renderer2d_ready = false;
+    bool ui_text_raster_ready = false;
 };
 
 struct ImageDecodeReport {
@@ -340,6 +352,19 @@ struct RasterizedTextRgba {
     std::vector<Astra::Core::u8> pixels;
     std::string shaped_by;
     std::string rasterized_by;
+};
+
+struct RenderBackendSmoke {
+    std::string schema = "astra.media.render_backend_smoke.v1";
+    std::string renderer_provider;
+    std::string text_provider;
+    bool renderer_available = false;
+    bool text_available = false;
+    bool presented = false;
+    Astra::Core::u32 imported_texture_count = 0;
+    Astra::Core::u32 draw_count = 0;
+    Astra::Core::u32 text_texture_count = 0;
+    std::string frame_hash;
 };
 
 struct AudioDecodeReport {
@@ -390,7 +415,9 @@ public:
 
 [[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IRenderer2D> CreateHeadlessRenderer2D();
 [[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IRenderer2DProvider> CreateHeadlessRenderer2DProvider();
+[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IRenderer2DProvider> CreateProductionRenderer2DProvider(RenderTargetBinding binding = {});
 [[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<ITextLayoutProvider> CreateFoundationTextLayoutProvider();
+[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<ITextLayoutProvider> CreateProductionTextLayoutProvider();
 [[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IAudioProvider> CreateFoundationAudioProvider(bool silent_backend = true);
 [[nodiscard]] ASTRA_MEDIA_API RenderGraph ExtractRenderGraph(const std::vector<PresentationCommand>& commands, const FilterProfile* filter_profile, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API std::vector<MediaProviderDescriptor> FoundationMediaProviders();
@@ -402,6 +429,7 @@ public:
 [[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedImageRgba> DecodeImageRgbaBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedCpuBuffer> DecodeImageCpuBufferBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<RasterizedTextRgba> RasterizeTextRgbaBytes(std::span<const Astra::Core::u8> font_bytes, std::string_view text, Astra::Core::u32 pixel_height, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedCpuBuffer> RasterizeUiTextCpuBufferBytes(std::span<const Astra::Core::u8> font_bytes, std::string_view text, Astra::Core::u32 pixel_height, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<AudioDecodeReport> DecodeAudioBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<VideoDecodeMetadata> InspectVideoBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedVideoFrame> DecodeVideoFrameRgbaBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::u64 frame_index, Astra::Core::DiagnosticSink& diagnostics);
@@ -429,6 +457,7 @@ public:
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const GlyphRun& run);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const TextLayoutCapture& capture);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const AudioStateCapture& capture);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const RenderBackendSmoke& smoke);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const VideoDecodeMetadata& metadata);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const DecodedVideoFrame& frame);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const FilterGraphExecution& execution);

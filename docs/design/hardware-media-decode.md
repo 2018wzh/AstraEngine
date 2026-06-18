@@ -72,7 +72,7 @@ payload_ref: package:/Movies/Opening.mp4
 media_kind: video
 preferred_hardware: true
 allow_cpu_fallback: true
-target_provider: astra.renderer2d.sdl_gpu
+target_provider: astra.renderer2d.bgfx
 frame_time_ns: 1200000000
 ```
 

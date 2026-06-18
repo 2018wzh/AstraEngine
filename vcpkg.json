@@ -12,7 +12,9 @@
     "libvorbis",
     "libwebp",
     "ffmpeg",
+    "bgfx",
     "zstd",
+    "skia",
     {
       "name": "lua",
       "features": [
@@ -25,6 +27,8 @@
     "sdl3",
     "sol2",
     "spdlog",
-    "yaml-cpp"
+    "yaml-cpp",
+    "bgfx",
+    "skia"
   ]
 }

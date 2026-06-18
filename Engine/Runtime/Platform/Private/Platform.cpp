@@ -56,8 +56,10 @@ std::string WindowFrameHash(const WindowFrameDesc& frame) {
 
 class HeadlessWindowService final : public IWindowService {
 public:
-    Astra::Core::Result<void> Create(WindowDesc, Astra::Core::DiagnosticSink&) override {
+    Astra::Core::Result<void> Create(WindowDesc desc, Astra::Core::DiagnosticSink&) override {
         created_ = true;
+        width_ = desc.width;
+        height_ = desc.height;
         Astra::Core::DefaultLogger().Log(
             "platform.window",
             "headless",
@@ -88,6 +90,10 @@ public:
         return Astra::Core::Result<WindowPresentEvidence>::Success(std::move(evidence));
     }
 
+    WindowGraphicsBinding GraphicsBinding() const override {
+        return {created_ ? 1ull : 0ull, "headless", width_, height_};
+    }
+
     void PumpEvents() override {}
     bool ShouldClose() const override { return close_requested_; }
     void Close() override { close_requested_ = true; }
@@ -95,6 +101,8 @@ public:
 private:
     bool created_ = false;
     bool close_requested_ = false;
+    Astra::Core::u32 width_ = 0;
+    Astra::Core::u32 height_ = 0;
 };
 
 class FileSystemService final : public IFileSystemService {

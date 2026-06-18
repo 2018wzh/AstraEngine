@@ -1,6 +1,6 @@
 # API Reference
 
-Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline. Foundation public runtime headers are present for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Media, Script, AstraVN, and Tools; Asset now includes production importer/cooker/DDC/package contracts. Engine libraries are dynamic-only `Astra*` DLLs with generated per-module export headers under `Astra/<Module>/Export.hpp`. Later media/editor/AI runtime systems remain planned.
+Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline and Phase 7 provider hardening. Foundation public runtime headers are present for Core, Platform, ModuleRuntime, PropertySystem, Scene, Runtime, Media, Script, AstraVN, and Tools; Asset now includes production importer/cooker/DDC/package contracts. Media now exposes opaque production provider factories while bgfx, Skia, SDL, OS handles, and backend details stay private. Engine libraries are dynamic-only `Astra*` DLLs with generated per-module export headers under `Astra/<Module>/Export.hpp`. Later editor/AI runtime systems remain planned.
 
 ## Overview
 
@@ -10,7 +10,7 @@ This section will index stable public headers and public contracts. During Phase
 
 - Public headers belong under `Public/Astra/<ModuleName>/`.
 - Cross-ABI contracts use fixed-width scalars, UTF-8 buffers with lengths, POD descriptors, opaque handles, callbacks, and explicit ownership.
-- Public API must not expose SDL, OS handles, renderer/audio native handles, Editor widgets, STL ownership, or C++ Actor/Component pointers across ABI.
+- Public API must not expose SDL, bgfx, Skia, OS handles, renderer/audio native handles, Editor widgets, STL ownership, or C++ Actor/Component pointers across ABI.
 
 ## Architecture
 
@@ -51,7 +51,7 @@ Current concrete implementation slices:
 - `Engine/Runtime/Core/Private/Logging.cpp`: `spdlog`-backed async console/JSONL rotating file logging, memory capture, recent-log ring, and diagnostic mirroring.
 - `Engine/Runtime/Media/Private/Media.cpp`: media backend probing, renderer capture, provider validation, and media release-gate evaluation.
 - `Engine/Runtime/Media/Private/MediaDecode.cpp`: image/audio/font decode and inspect helpers for media backend evidence.
-- `Engine/Runtime/Media/Private/MediaProviders.cpp`: Phase 7 Renderer2D/TextLayout/Audio/ImageDecode/AudioDecode/VideoDecode provider contract implementations.
+- `Engine/Runtime/Media/Private/MediaProviders.cpp`: Phase 7 headless fallback and optional bgfx/Skia Renderer2D/TextLayout provider contract implementations.
 - `Engine/Runtime/Media/Private/MediaTimeline.cpp`: timeline parsing/evaluation and FilterGraph execution hash evidence.
 - `Engine/Runtime/Media/Private/MediaDecodePhase7.cpp`: decoded CPU texture buffers, logical PCM buffers, and video extension decode helpers.
 - `Engine/Runtime/Media/Private/MediaFilter.cpp`: filter profile parsing, validation, target conversion, and application hashing.

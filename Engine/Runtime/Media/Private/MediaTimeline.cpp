@@ -26,7 +26,7 @@ double CursorSeconds(Astra::Core::u64 cursor_time_ns) {
 
 FilterGraphExecution ExecuteFilterGraphHeadless(const FilterProfile& profile, const RenderGraph& graph) {
     FilterGraphExecution execution;
-    execution.provider_id = "astra.filter_graph.sdl_gpu";
+    execution.provider_id = "astra.filter_graph.bgfx";
     execution.execution_mode = "headless_hash_fallback";
     execution.applications = ApplyFilterProfile(profile);
     nlohmann::json json = nlohmann::json::array();
