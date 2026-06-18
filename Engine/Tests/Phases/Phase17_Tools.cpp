@@ -96,10 +96,10 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
                                 ["decoded_by"] == "libpng");
     REQUIRE(media_cook.artifacts["cook_manifest"]["artifacts"][0]["metadata"]["media_inspect"]
                                 ["width"] == 1);
-    REQUIRE(media_cook.artifacts["cook_manifest"]["artifacts"][0]["metadata"]
-                                ["provider_feature_hash"]
-                                    .get<std::string>()
-                                    .size() == 64);
+    REQUIRE(
+        media_cook.artifacts["cook_manifest"]["artifacts"][0]["metadata"]["provider_feature_hash"]
+            .get<std::string>()
+            .size() == 64);
 
     const auto import_sample = std::filesystem::temp_directory_path() / "astra_import_cli_sample";
     std::filesystem::remove_all(import_sample);
@@ -135,8 +135,7 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     REQUIRE(imported_cook.artifacts["cook_manifest"]["artifacts"].size() == 1);
     auto imported_package = Astra::Tools::Package(import_sample, options);
     REQUIRE(imported_package.Passed());
-    REQUIRE(imported_package.artifacts["package_manifest"]["payloads"][0]["compression"] ==
-            "zstd");
+    REQUIRE(imported_package.artifacts["package_manifest"]["payloads"][0]["compression"] == "zstd");
     auto imported_inspect =
         Astra::Tools::Inspect(imported_package.artifacts["package"].get<std::string>(), options);
     REQUIRE(imported_inspect.Passed());
@@ -160,6 +159,9 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     auto native_package = Astra::Tools::Package(
         std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN", deterministic_options);
     REQUIRE(native_package.Passed());
+    REQUIRE(native_package.artifacts["release_report"]["schema"] == "astra.release.report.v1");
+    REQUIRE(native_package.artifacts["release_report"]["driver_diff"]["schema"] ==
+            "astra.media.driver_diff.v1");
     REQUIRE(native_package.artifacts["package_manifest"]["profile"] == "deterministic");
     REQUIRE(native_package.artifacts["package_manifest"]["cook_manifest"]["artifacts"].size() >= 7);
     REQUIRE(native_package.artifacts["package_manifest"]["cook_manifest"]["ddc_entries"].size() >=
@@ -185,6 +187,13 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     REQUIRE(native_inspected.artifacts["package_mount"]["assets"].size() >= 7);
     REQUIRE(native_inspected.artifacts["payload_smoke"]["asset_id"].get<std::string>().starts_with(
         "native:/"));
+    auto release_gate = Astra::Tools::ReleaseGate(
+        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN", deterministic_options);
+    REQUIRE(release_gate.Passed());
+    REQUIRE(release_gate.artifacts["release_report"]["passed"] == true);
+    REQUIRE(release_gate.artifacts["release_report"]["trace_events"].size() >= 2);
+    REQUIRE(release_gate.artifacts["release_report"]["crash_bundle"]["schema"] ==
+            "astra.crash.bundle.v1");
 
     Astra::Core::DiagnosticSink package_reader_diagnostics;
     Astra::Asset::PackageReader reader;
@@ -252,7 +261,8 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
         native_package.artifacts["package_manifest"]["payloads"][0]["offset"]
             .get<Astra::Core::u64>();
     {
-        std::fstream file(tampered_payload_package, std::ios::binary | std::ios::in | std::ios::out);
+        std::fstream file(tampered_payload_package,
+                          std::ios::binary | std::ios::in | std::ios::out);
         file.seekg(static_cast<std::streamoff>(tampered_offset), std::ios::beg);
         char byte = 0;
         file.read(&byte, 1);
@@ -261,8 +271,8 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
         file.write(&byte, 1);
     }
     Astra::Core::DiagnosticSink payload_diagnostics;
-    auto tampered_payload =
-        reader.ReadPayloadBytes(tampered_payload_package, tampered_asset.Value(), payload_diagnostics);
+    auto tampered_payload = reader.ReadPayloadBytes(tampered_payload_package,
+                                                    tampered_asset.Value(), payload_diagnostics);
     REQUIRE_FALSE(tampered_payload);
     REQUIRE(payload_diagnostics.HasBlocking());
 

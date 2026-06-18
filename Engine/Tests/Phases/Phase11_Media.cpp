@@ -11,9 +11,18 @@ TEST_CASE("Media foundation extracts presentation commands and produces stable h
 
     Astra::Media::FilterProfile profile;
     profile.id = filter_id.Value();
-    profile.passes.push_back({"bg_blur", "astra.filter.gaussian_blur", Astra::Media::FilterTarget::Background, {{"radius", 2}}});
-    profile.passes.push_back({"character_line", "astra.filter.line_enhance", Astra::Media::FilterTarget::Character, {{"strength", 0.4}}});
-    profile.passes.push_back({"final_grade", "astra.filter.color_grade", Astra::Media::FilterTarget::Final, {{"preset", "warm"}}});
+    profile.passes.push_back({"bg_blur",
+                              "astra.filter.gaussian_blur",
+                              Astra::Media::FilterTarget::Background,
+                              {{"radius", 2}}});
+    profile.passes.push_back({"character_line",
+                              "astra.filter.line_enhance",
+                              Astra::Media::FilterTarget::Character,
+                              {{"strength", 0.4}}});
+    profile.passes.push_back({"final_grade",
+                              "astra.filter.color_grade",
+                              Astra::Media::FilterTarget::Final,
+                              {{"preset", "warm"}}});
     REQUIRE(Astra::Media::ValidateFilterProfile(profile, diagnostics));
 
     std::vector<Astra::Media::PresentationCommand> commands;
@@ -79,24 +88,32 @@ TEST_CASE("Media foundation extracts presentation commands and produces stable h
     REQUIRE(image.Value().height == 1);
     REQUIRE(image.Value().has_alpha);
     REQUIRE(Astra::Media::ToJson(image.Value())["decoded_by"] == "libpng");
-    const auto fixture_png = ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Content/Backgrounds/Room.png");
+    const auto fixture_png = ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) /
+                                              "Samples/NativeVN/Content/Backgrounds/Room.png");
     REQUIRE_FALSE(fixture_png.empty());
     auto rgba = Astra::Media::DecodeImageRgbaBytes(fixture_png, diagnostics);
     REQUIRE(rgba);
     REQUIRE(rgba.Value().width > 1);
     REQUIRE(rgba.Value().height > 1);
-    REQUIRE(rgba.Value().pixels.size() == static_cast<std::size_t>(rgba.Value().width) * rgba.Value().height * 4);
+    REQUIRE(rgba.Value().pixels.size() ==
+            static_cast<std::size_t>(rgba.Value().width) * rgba.Value().height * 4);
     REQUIRE(rgba.Value().decoded_by == "libpng");
-    const auto font_payload = ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/TsuiNoSora/Content/Fonts/sourcehanserif-medium.otf");
+    const auto font_payload =
+        ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) /
+                         "Samples/TsuiNoSora/Content/Fonts/sourcehanserif-medium.otf");
     REQUIRE_FALSE(font_payload.empty());
-    auto rasterized_text = Astra::Media::RasterizeTextRgbaBytes(font_payload, "Aya route text 確認", 28, diagnostics);
+    auto rasterized_text =
+        Astra::Media::RasterizeTextRgbaBytes(font_payload, "Aya route text 確認", 28, diagnostics);
     REQUIRE(rasterized_text);
     REQUIRE(rasterized_text.Value().glyph_count > 0);
     REQUIRE(rasterized_text.Value().width > 0);
     REQUIRE(rasterized_text.Value().height > 0);
-    REQUIRE(rasterized_text.Value().pixels.size() == static_cast<std::size_t>(rasterized_text.Value().width) * rasterized_text.Value().height * 4);
+    REQUIRE(rasterized_text.Value().pixels.size() ==
+            static_cast<std::size_t>(rasterized_text.Value().width) *
+                rasterized_text.Value().height * 4);
     REQUIRE(rasterized_text.Value().rasterized_by == "freetype");
-    const auto audio_payload = ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Content/Music/opening_theme.ogg");
+    const auto audio_payload = ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) /
+                                                "Samples/NativeVN/Content/Music/opening_theme.ogg");
     REQUIRE_FALSE(audio_payload.empty());
     auto audio_decode = Astra::Media::DecodeAudioBytes(audio_payload, diagnostics);
     REQUIRE(audio_decode);
@@ -104,8 +121,11 @@ TEST_CASE("Media foundation extracts presentation commands and produces stable h
     REQUIRE(audio_decode.Value().channels > 0);
     REQUIRE(audio_decode.Value().sample_rate > 0);
     REQUIRE(audio_decode.Value().pcm_frame_count > 0);
-    REQUIRE((audio_decode.Value().decoded_by.starts_with("ffmpeg/") || audio_decode.Value().decoded_by == "libvorbisfile" || audio_decode.Value().decoded_by == "miniaudio"));
-    const auto artemis_bgm_payload = ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/TsuiNoSora/Content/Music/bgm113.ogg");
+    REQUIRE((audio_decode.Value().decoded_by.starts_with("ffmpeg/") ||
+             audio_decode.Value().decoded_by == "libvorbisfile" ||
+             audio_decode.Value().decoded_by == "miniaudio"));
+    const auto artemis_bgm_payload = ReadFixtureBytes(
+        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/TsuiNoSora/Content/Music/bgm113.ogg");
     REQUIRE_FALSE(artemis_bgm_payload.empty());
     auto artemis_bgm_decode = Astra::Media::DecodeAudioBytes(artemis_bgm_payload, diagnostics);
     if (artemis_bgm_decode) {
@@ -115,8 +135,6 @@ TEST_CASE("Media foundation extracts presentation commands and produces stable h
         REQUIRE(artemis_bgm_decode.Value().decoded_by.starts_with("ffmpeg/"));
     }
 }
-
-
 
 TEST_CASE("Media provider descriptors and release gate validate foundation slots") {
     const auto capabilities = Astra::Media::ProbeMediaBackendCapabilities();
@@ -140,8 +158,14 @@ TEST_CASE("Media provider descriptors and release gate validate foundation slots
     REQUIRE(filter_id);
     Astra::Media::FilterProfile profile;
     profile.id = filter_id.Value();
-    profile.passes.push_back({"bg_soften", "astra.filter.foundation_hash", Astra::Media::FilterTarget::Background, {{"strength", 0.25}}});
-    profile.passes.push_back({"final_grade", "astra.filter.foundation_hash", Astra::Media::FilterTarget::Final, {{"grade", "warm"}}});
+    profile.passes.push_back({"bg_soften",
+                              "astra.filter.foundation_hash",
+                              Astra::Media::FilterTarget::Background,
+                              {{"strength", 0.25}}});
+    profile.passes.push_back({"final_grade",
+                              "astra.filter.foundation_hash",
+                              Astra::Media::FilterTarget::Final,
+                              {{"grade", "warm"}}});
 
     Astra::Media::MediaReleaseGateRequest request;
     request.providers = providers;
@@ -163,7 +187,8 @@ TEST_CASE("Media provider descriptors and release gate validate foundation slots
         production_request.selected_providers[provider.slot_id] = provider.provider_id;
     }
     Astra::Core::DiagnosticSink production_diagnostics;
-    auto production_report = Astra::Media::ValidateMediaReleaseGate(production_request, production_diagnostics);
+    auto production_report =
+        Astra::Media::ValidateMediaReleaseGate(production_request, production_diagnostics);
     if (capabilities.renderer2d_ready && capabilities.ui_text_raster_ready) {
         REQUIRE(production_report);
     } else {
@@ -209,7 +234,6 @@ TEST_CASE("Media provider descriptors and release gate validate foundation slots
     Astra::Core::DiagnosticSink prefix_diagnostics;
     REQUIRE_FALSE(Astra::Media::ValidateMediaReleaseGate(missing_prefix, prefix_diagnostics));
     REQUIRE(prefix_diagnostics.HasBlocking());
-
 }
 
 TEST_CASE("Media Phase 7 providers execute production DTO paths") {
@@ -227,13 +251,15 @@ TEST_CASE("Media Phase 7 providers execute production DTO paths") {
     REQUIRE(release.Value().selected_providers.size() == 8);
     REQUIRE(release.Value().provider_hash_inputs.size() == 8);
 
-    const auto fixture_png = ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Content/UI/TextBox.png");
+    const auto fixture_png = ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) /
+                                              "Samples/NativeVN/Content/UI/TextBox.png");
     REQUIRE_FALSE(fixture_png.empty());
     auto cpu_texture = Astra::Media::DecodeImageCpuBufferBytes(fixture_png, diagnostics);
     REQUIRE(cpu_texture);
     REQUIRE(cpu_texture.Value().row_stride == cpu_texture.Value().width * 4);
 
-    const auto audio_payload = ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Content/Music/opening_theme.ogg");
+    const auto audio_payload = ReadFixtureBytes(std::filesystem::path(ASTRA_SOURCE_ROOT) /
+                                                "Samples/NativeVN/Content/Music/opening_theme.ogg");
     REQUIRE_FALSE(audio_payload.empty());
     auto audio_decode = Astra::Media::DecodeAudioBytes(audio_payload, diagnostics);
     REQUIRE(audio_decode);
@@ -265,9 +291,11 @@ TEST_CASE("Media Phase 7 providers execute production DTO paths") {
     REQUIRE_FALSE(capture.Value().render_hash.empty());
     REQUIRE(capture.Value().commands["imported_texture_count"] == 1);
 
-    auto production_renderer = Astra::Media::CreateProductionRenderer2DProvider({1, "headless", 64, 64});
+    auto production_renderer =
+        Astra::Media::CreateProductionRenderer2DProvider({1, "headless", 64, 64});
     Astra::Core::DiagnosticSink production_renderer_diagnostics;
-    auto production_begin = production_renderer->BeginFrame({8, 64, 64, "srgb"}, production_renderer_diagnostics);
+    auto production_begin =
+        production_renderer->BeginFrame({8, 64, 64, "srgb"}, production_renderer_diagnostics);
     if (Astra::Media::ProbeMediaBackendCapabilities().renderer2d_ready) {
         REQUIRE(production_begin);
     } else {
@@ -275,7 +303,8 @@ TEST_CASE("Media Phase 7 providers execute production DTO paths") {
     }
 
     auto text_provider = Astra::Media::CreateFoundationTextLayoutProvider();
-    auto glyph = text_provider->Shape({"text.phase7", "Phase 7 text 確認", "ja-JP", "text", 10, {{"size", 28}}}, diagnostics);
+    auto glyph = text_provider->Shape(
+        {"text.phase7", "Phase 7 text 確認", "ja-JP", "text", 10, {{"size", 28}}}, diagnostics);
     REQUIRE(glyph);
     REQUIRE(glyph.Value().glyph_count > 0);
     REQUIRE(text_provider->PrepareAtlas(glyph.Value(), diagnostics));
@@ -288,7 +317,8 @@ TEST_CASE("Media Phase 7 providers execute production DTO paths") {
 
     auto audio_provider = Astra::Media::CreateFoundationAudioProvider(true);
     auto music = Astra::Asset::ParseAssetUri("native:/Music/opening_theme").Value();
-    REQUIRE(audio_provider->Submit({{"audio.phase7.music", "play", music, "music", 0.8, true}}, diagnostics));
+    REQUIRE(audio_provider->Submit({{"audio.phase7.music", "play", music, "music", 0.8, true}},
+                                   diagnostics));
     auto audio_capture = audio_provider->Capture(diagnostics);
     REQUIRE(audio_capture);
     REQUIRE(audio_capture.Value().silent_backend);
@@ -296,7 +326,10 @@ TEST_CASE("Media Phase 7 providers execute production DTO paths") {
 
     Astra::Media::FilterProfile filter;
     filter.id = Astra::Asset::ParseAssetUri("native:/Filters/soft_vn").Value();
-    filter.passes.push_back({"pass", "astra.filter.color_grade", Astra::Media::FilterTarget::Final, {{"preset", "warm"}}});
+    filter.passes.push_back({"pass",
+                             "astra.filter.color_grade",
+                             Astra::Media::FilterTarget::Final,
+                             {{"preset", "warm"}}});
     auto filter_execution = Astra::Media::ExecuteFilterGraphHeadless(filter, graph);
     REQUIRE(filter_execution.execution_mode == "headless_hash_fallback");
     REQUIRE_FALSE(filter_execution.output_hash.empty());
@@ -305,15 +338,21 @@ TEST_CASE("Media Phase 7 providers execute production DTO paths") {
         {"schema", "astra.media.timeline.v1"},
         {"id", "native:/Timelines/Opening"},
         {"duration_seconds", 3.0},
-        {"tracks", nlohmann::json::array({
-            {{"id", "camera.main"}, {"type", "camera"}, {"keys", nlohmann::json::array({
-                {{"t", 0.0}, {"value", {{"x", 0}, {"y", 0}, {"zoom", 1.0}}}},
-                {{"t", 1.0}, {"value", {{"x", 24}, {"y", 0}, {"zoom", 1.05}}}, {"easing", "ease_out"}}
-            })}},
-            {{"id", "audio.bgm"}, {"type", "audio"}, {"audio_events", nlohmann::json::array({
-                {{"command_id", "timeline.bgm"}, {"asset", "native:/Music/opening_theme"}, {"bus", "music"}, {"loop", true}}
-            })}}
-        })},
+        {"tracks",
+         nlohmann::json::array(
+             {{{"id", "camera.main"},
+               {"type", "camera"},
+               {"keys",
+                nlohmann::json::array({{{"t", 0.0}, {"value", {{"x", 0}, {"y", 0}, {"zoom", 1.0}}}},
+                                       {{"t", 1.0},
+                                        {"value", {{"x", 24}, {"y", 0}, {"zoom", 1.05}}},
+                                        {"easing", "ease_out"}}})}},
+              {{"id", "audio.bgm"},
+               {"type", "audio"},
+               {"audio_events", nlohmann::json::array({{{"command_id", "timeline.bgm"},
+                                                        {"asset", "native:/Music/opening_theme"},
+                                                        {"bus", "music"},
+                                                        {"loop", true}}})}}})},
     };
     auto timeline = Astra::Media::TimelineFromJson(timeline_json, diagnostics);
     REQUIRE(timeline);
@@ -323,5 +362,55 @@ TEST_CASE("Media Phase 7 providers execute production DTO paths") {
     REQUIRE(Astra::Media::ToJson(state)["schema"] == "astra.media.timeline_state.v1");
 }
 
+TEST_CASE("Media production driver diff and CPU FilterGraph hardening") {
+    Astra::Core::DiagnosticSink diagnostics;
+    auto filter_id = Astra::Asset::ParseAssetUri("native:/Filters/cpu");
+    auto asset = Astra::Asset::ParseAssetUri("native:/Images/pixel");
+    REQUIRE(filter_id);
+    REQUIRE(asset);
 
+    Astra::Media::FilterProfile profile;
+    profile.id = filter_id.Value();
+    profile.passes = {
+        {"gray", "grayscale", Astra::Media::FilterTarget::Final, {}},
+        {"opacity", "opacity", Astra::Media::FilterTarget::Final, {{"alpha", 0.5}}},
+        {"tint", "tint", Astra::Media::FilterTarget::Final, {{"r", 1.0}, {"g", 0.5}, {"b", 0.5}}},
+        {"blur", "blur3x3", Astra::Media::FilterTarget::Final, {}},
+    };
 
+    Astra::Media::RenderGraph graph;
+    graph.frame_index = 1;
+    graph.draws.push_back({"draw", asset.Value(), "final", 0, {}, {}});
+    graph.text_requests.push_back({"text", "abc", "en", "text", 0, {}});
+    graph.audio_commands.push_back({"audio", "play", asset.Value(), "sfx", 1.0, false});
+
+    Astra::Media::DecodedCpuBuffer buffer;
+    buffer.width = 3;
+    buffer.height = 3;
+    buffer.row_stride = 12;
+    buffer.pixels.assign(3 * 3 * 4, 128);
+    auto execution = Astra::Media::ExecuteFilterGraphCpu(profile, graph, &buffer, diagnostics);
+    REQUIRE_FALSE(diagnostics.HasBlocking());
+    REQUIRE(execution.execution_mode == "cpu_rgba");
+    REQUIRE_FALSE(execution.output_hash.empty());
+
+    auto headless = Astra::Media::CreateHeadlessRenderer2DProvider();
+    REQUIRE(headless->BeginFrame({1, 64, 64, "srgb"}, diagnostics));
+    REQUIRE(headless->Execute(graph, diagnostics));
+    auto reference = headless->Capture(diagnostics);
+    REQUIRE(reference);
+
+    auto production = Astra::Media::CreateProductionRenderer2DProvider();
+    auto capabilities = Astra::Media::ProbeMediaBackendCapabilities();
+    if (production->BeginFrame({1, 64, 64, "srgb"}, diagnostics)) {
+        REQUIRE(production->Execute(graph, diagnostics));
+        auto candidate = production->Capture(diagnostics);
+        REQUIRE(candidate);
+        auto diff = Astra::Media::CompareDriverCaptures(reference.Value(), candidate.Value(),
+                                                        capabilities, true);
+        REQUIRE(Astra::Media::ToJson(diff)["schema"] == "astra.media.driver_diff.v1");
+    } else {
+        auto diff = Astra::Media::CompareDriverCaptures(reference.Value(), {}, capabilities, true);
+        REQUIRE_FALSE(diff.passed);
+    }
+}

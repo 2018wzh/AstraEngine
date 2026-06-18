@@ -65,8 +65,6 @@ TEST_CASE("Runtime world orders events advances state machine and saves loads") 
     REQUIRE(loaded.Hashes().state_hash == runtime.Hashes().state_hash);
 }
 
-
-
 TEST_CASE("Runtime control policy allows queues and rejects locked channels") {
     Astra::Core::DiagnosticSink diagnostics;
     Astra::Runtime::RuntimeWorld runtime;
@@ -90,21 +88,26 @@ TEST_CASE("Runtime control policy allows queues and rejects locked channels") {
     auto handle = runtime.Scene().Spawn(descriptor, diagnostics);
     REQUIRE(handle);
 
-    auto owner = runtime.EvaluateControlPolicy({actor_id.Value(), "pose", "story_script", 80}, diagnostics);
+    auto owner =
+        runtime.EvaluateControlPolicy({actor_id.Value(), "pose", "story_script", 80}, diagnostics);
     REQUIRE(owner.decision == Astra::Runtime::ControlDecision::Allow);
-    auto queued = runtime.EvaluateControlPolicy({actor_id.Value(), "pose", "runtime_ai", 40}, diagnostics);
+    auto queued =
+        runtime.EvaluateControlPolicy({actor_id.Value(), "pose", "runtime_ai", 40}, diagnostics);
     REQUIRE(queued.decision == Astra::Runtime::ControlDecision::Queue);
 
     auto bob_id = Astra::Core::ParseStableId("actor:/characters/bob");
     REQUIRE(bob_id);
     descriptor.id = bob_id.Value();
     descriptor.name = "Bob";
-    descriptor.components[0].data = {{"owner", "story_script"}, {"locked_channels", {"pose"}}, {"queue_locked", false}};
+    descriptor.components[0].data = {
+        {"owner", "story_script"}, {"locked_channels", {"pose"}}, {"queue_locked", false}};
     auto reject_handle = runtime.Scene().Spawn(descriptor, diagnostics);
     REQUIRE(reject_handle);
-    auto rejected = runtime.EvaluateControlPolicy({descriptor.id, "pose", "runtime_ai", 40}, diagnostics);
+    auto rejected =
+        runtime.EvaluateControlPolicy({descriptor.id, "pose", "runtime_ai", 40}, diagnostics);
     REQUIRE(rejected.decision == Astra::Runtime::ControlDecision::Reject);
-    auto system = runtime.EvaluateControlPolicy({descriptor.id, "pose", "system", 100}, diagnostics);
+    auto system =
+        runtime.EvaluateControlPolicy({descriptor.id, "pose", "system", 100}, diagnostics);
     REQUIRE(system.decision == Astra::Runtime::ControlDecision::Allow);
 }
 
@@ -165,7 +168,13 @@ TEST_CASE("Runtime Phase 5 orders events by priority and wakes serializable sche
     task.emit_on_wake.type = scheduled_event.Value();
     task.emit_on_wake.target = {"actor", actor_id.Value().ToString()};
     REQUIRE(runtime.ScheduleTask(task, diagnostics));
-    REQUIRE(runtime.Tick(diagnostics));
+    Astra::Runtime::RuntimeTickInput input;
+    input.package_profile = "deterministic";
+    auto frame = runtime.Tick(input, diagnostics);
+    REQUIRE(frame);
+    REQUIRE(frame.Value().schema == "astra.runtime.frame_result.v1");
+    REQUIRE(frame.Value().fixed_steps_executed == 1);
+    REQUIRE(frame.Value().scheduled_tasks_completed.size() == 1);
 
     auto state_machine = runtime.Scene().FindComponent(actor.Value(), "astra.state_machine");
     REQUIRE(state_machine);
@@ -176,9 +185,21 @@ TEST_CASE("Runtime Phase 5 orders events by priority and wakes serializable sche
     auto subscription = runtime.Subscribe(high_event.Value(), "test");
     REQUIRE(subscription.active);
     REQUIRE(runtime.Unsubscribe(subscription.id, diagnostics));
+
+    Astra::Runtime::DirectorArbitrationRequest director_request;
+    director_request.channel = "choice";
+    director_request.owner = "runtime_ai";
+    director_request.conflicts = {"story_script"};
+    auto director = runtime.Director();
+    director.choice_locked = true;
+    runtime.SetDirector(director);
+    auto arbitration = runtime.ArbitrateDirector(director_request, diagnostics);
+    REQUIRE(arbitration.decision == Astra::Runtime::ControlDecision::Queue);
+    REQUIRE(Astra::Runtime::ToJson(runtime.Director())["arbitration_log"].size() == 1);
 }
 
-TEST_CASE("Runtime Phase 5 save container v2 compresses scheduler state and localizes replay mismatches") {
+TEST_CASE("Runtime Phase 5 save container v2 compresses scheduler state and localizes replay "
+          "mismatches") {
     Astra::Core::DiagnosticSink diagnostics;
     Astra::Runtime::RuntimeWorld runtime(99);
     auto event_type = Astra::Core::ParseStableId("event:/astra.test.wait");
@@ -192,7 +213,15 @@ TEST_CASE("Runtime Phase 5 save container v2 compresses scheduler state and loca
     auto save = runtime.SaveV2(true);
     REQUIRE(save.schema == Astra::Runtime::SaveContainerV2Schema);
     REQUIRE_FALSE(save.sections.empty());
-    REQUIRE(std::ranges::any_of(save.sections, [](const auto& section) { return section.compressed; }));
+    REQUIRE(save.section_descriptors.size() == save.sections.size());
+    REQUIRE(std::ranges::any_of(save.section_descriptors, [](const auto& section) {
+        return section.section_id == "section:/scene/actors" && section.required;
+    }));
+    REQUIRE(std::ranges::any_of(save.section_descriptors, [](const auto& section) {
+        return section.section_id == "section:/ai/committed_output" && !section.required;
+    }));
+    REQUIRE(
+        std::ranges::any_of(save.sections, [](const auto& section) { return section.compressed; }));
     auto save_json = Astra::Runtime::ToJson(save);
     auto parsed = Astra::Runtime::SaveContainerV2FromJson(save_json);
     REQUIRE(parsed);
@@ -206,7 +235,9 @@ TEST_CASE("Runtime Phase 5 save container v2 compresses scheduler state and loca
     REQUIRE_FALSE(comparison.passed);
     REQUIRE(comparison.localized_mismatches.size() == 2);
     REQUIRE(Astra::Runtime::ToJson(comparison)["localized_mismatches"].size() == 2);
+
+    Astra::Runtime::ReplayStream stream;
+    stream.records.push_back({1, 2, "scheduler_wake", "hash", {{"task", "task:/runtime/1"}}});
+    stream.checkpoints.push_back({1, loaded.Hashes()});
+    REQUIRE(Astra::Runtime::ToJson(stream)["schema"] == Astra::Runtime::ReplayStreamSchema);
 }
-
-
-

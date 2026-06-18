@@ -118,11 +118,13 @@ Astra::Core::Result<RuntimeTask> RuntimeTaskFromJson(const nlohmann::json& json)
     RuntimeTask task;
     auto id = Astra::Core::ParseStableId(json.value("id", ""));
     if (!id) {
-        return Astra::Core::Result<RuntimeTask>::Failure(Astra::Core::ErrorCode::InvalidFormat, "runtime task has invalid id");
+        return Astra::Core::Result<RuntimeTask>::Failure(Astra::Core::ErrorCode::InvalidFormat,
+                                                         "runtime task has invalid id");
     }
     task.id = id.Value();
     task.state = TaskStateFromString(json.value("state", "pending"));
-    task.owner = {json.value("owner", nlohmann::json::object()).value("kind", ""), json.value("owner", nlohmann::json::object()).value("id", "")};
+    task.owner = {json.value("owner", nlohmann::json::object()).value("kind", ""),
+                  json.value("owner", nlohmann::json::object()).value("id", "")};
     task.wait = RuntimeWaitFromJson(json.value("wait", nlohmann::json::object()));
     task.continuation = json.value("continuation", nlohmann::json::object());
     task.cancellation_policy = json.value("cancellation_policy", "cancel_on_owner_destroy");
@@ -171,7 +173,12 @@ nlohmann::json ToJson(const RuntimeEventSubscription& subscription) {
 }
 
 nlohmann::json ToJson(const DirectorState& state) {
-    return {{"phase", state.phase}, {"timeline_locked", state.timeline_locked}, {"choice_locked", state.choice_locked}, {"ai_permission_window", state.ai_permission_window}, {"player_input_window", state.player_input_window}, {"arbitration_log", state.arbitration_log}};
+    return {{"phase", state.phase},
+            {"timeline_locked", state.timeline_locked},
+            {"choice_locked", state.choice_locked},
+            {"ai_permission_window", state.ai_permission_window},
+            {"player_input_window", state.player_input_window},
+            {"arbitration_log", state.arbitration_log}};
 }
 
 nlohmann::json ToJson(const ControlPolicyResult& result) {
@@ -182,6 +189,64 @@ nlohmann::json ToJson(const ControlPolicyResult& result) {
         decision = "reject";
     }
     return {{"decision", decision}, {"reason", result.reason}};
+}
+
+nlohmann::json ToJson(const DirectorArbitrationRequest& request) {
+    return {
+        {"schema", request.schema},         {"frame_index", request.frame_index},
+        {"request_id", request.request_id}, {"channel", request.channel},
+        {"owner", request.owner},           {"requested_mode", request.requested_mode},
+        {"priority", request.priority},     {"interrupt_allowed", request.interrupt_allowed},
+        {"conflicts", request.conflicts},
+    };
+}
+
+nlohmann::json ToJson(const DirectorArbitrationResult& result) {
+    std::string decision = "allow";
+    if (result.decision == ControlDecision::Queue) {
+        decision = "queue";
+    } else if (result.decision == ControlDecision::Reject) {
+        decision = "reject";
+    }
+    return {
+        {"schema", result.schema}, {"decision", decision},
+        {"queued", result.queued}, {"blocking_owner", result.blocking_owner},
+        {"reason", result.reason},
+    };
+}
+
+nlohmann::json ToJson(const RuntimeTickInput& input) {
+    nlohmann::json events = nlohmann::json::array();
+    for (const auto& event : input.input_events) {
+        events.push_back(ToJson(event));
+    }
+    return {
+        {"schema", input.schema},
+        {"frame_index", input.frame_index},
+        {"fixed_step_index", input.fixed_step_index},
+        {"delta_ns", input.delta_ns},
+        {"fixed_delta_ns", input.fixed_delta_ns},
+        {"input_events", events},
+        {"package_profile", input.package_profile},
+        {"debug_commands", input.debug_commands},
+    };
+}
+
+nlohmann::json ToJson(const RuntimeFrameResult& result) {
+    nlohmann::json completed = nlohmann::json::array();
+    for (const auto& task : result.scheduled_tasks_completed) {
+        completed.push_back(task.ToString());
+    }
+    return {
+        {"schema", result.schema},
+        {"frame_index", result.frame_index},
+        {"fixed_steps_executed", result.fixed_steps_executed},
+        {"event_sequence_begin", result.event_sequence_begin},
+        {"event_sequence_end", result.event_sequence_end},
+        {"scheduled_tasks_completed", completed},
+        {"presentation_commands", result.presentation_commands},
+        {"hashes", ToJson(result.hashes)},
+    };
 }
 
 nlohmann::json ToJson(const RuntimeWaitCondition& wait) {
@@ -215,15 +280,54 @@ nlohmann::json ToJson(const SchedulerSnapshot& scheduler) {
 }
 
 nlohmann::json ToJson(const RuntimeHashes& hashes) {
-    return {{"state_hash", hashes.state_hash}, {"event_hash", hashes.event_hash}, {"presentation_hash", hashes.presentation_hash}};
+    return {{"state_hash", hashes.state_hash},
+            {"event_hash", hashes.event_hash},
+            {"presentation_hash", hashes.presentation_hash}};
+}
+
+nlohmann::json ToJson(const ReplayRecord& record) {
+    return {{"frame", record.frame},
+            {"sequence", record.sequence},
+            {"kind", record.kind},
+            {"hash", record.hash},
+            {"object", record.object}};
+}
+
+nlohmann::json ToJson(const ReplayStream& stream) {
+    nlohmann::json records = nlohmann::json::array();
+    for (const auto& record : stream.records) {
+        records.push_back(ToJson(record));
+    }
+    nlohmann::json checkpoints = nlohmann::json::array();
+    for (const auto& checkpoint : stream.checkpoints) {
+        checkpoints.push_back(
+            {{"frame_index", checkpoint.frame_index}, {"hashes", ToJson(checkpoint.hashes)}});
+    }
+    return {
+        {"schema", stream.schema},
+        {"package_manifest_hash", stream.package_manifest_hash},
+        {"initial_save_hash", stream.initial_save_hash},
+        {"records", records},
+        {"checkpoints", checkpoints},
+    };
 }
 
 nlohmann::json ToJson(const RuntimeReplay& replay) {
     nlohmann::json checkpoints = nlohmann::json::array();
     for (const auto& checkpoint : replay.checkpoints) {
-        checkpoints.push_back({{"frame_index", checkpoint.frame_index}, {"hashes", ToJson(checkpoint.hashes)}});
+        checkpoints.push_back(
+            {{"frame_index", checkpoint.frame_index}, {"hashes", ToJson(checkpoint.hashes)}});
     }
-    return {{"schema", replay.schema}, {"version", replay.version}, {"random_seed", replay.random_seed}, {"inputs", replay.inputs}, {"script_decisions", replay.script_decisions}, {"choice_selections", replay.choice_selections}, {"committed_ai_output", replay.committed_ai_output}, {"events", replay.events}, {"checkpoints", checkpoints}, {"hashes", ToJson(replay.hashes)}};
+    return {{"schema", replay.schema},
+            {"version", replay.version},
+            {"random_seed", replay.random_seed},
+            {"inputs", replay.inputs},
+            {"script_decisions", replay.script_decisions},
+            {"choice_selections", replay.choice_selections},
+            {"committed_ai_output", replay.committed_ai_output},
+            {"events", replay.events},
+            {"checkpoints", checkpoints},
+            {"hashes", ToJson(replay.hashes)}};
 }
 
 nlohmann::json ToJson(const SaveContainer& container) {
@@ -251,12 +355,46 @@ nlohmann::json ToJson(const SaveSection& section) {
     };
 }
 
+nlohmann::json ToJson(const SaveSectionDescriptor& descriptor) {
+    return {
+        {"schema", descriptor.schema},
+        {"section_id", descriptor.section_id},
+        {"owner_module", descriptor.owner_module},
+        {"payload_schema", descriptor.payload_schema},
+        {"payload_version", descriptor.payload_version},
+        {"required", descriptor.required},
+        {"hash", descriptor.hash},
+        {"compression", descriptor.compression},
+        {"recovery_policy", descriptor.recovery_policy},
+    };
+}
+
+nlohmann::json ToJson(const SaveMigrationEdge& edge) {
+    return {
+        {"schema", edge.schema},
+        {"payload_schema", edge.payload_schema},
+        {"from_version", edge.from_version},
+        {"to_version", edge.to_version},
+        {"owner_module", edge.owner_module},
+        {"unknown_field_policy", edge.unknown_field_policy},
+        {"diagnostic_prefix", edge.diagnostic_prefix},
+    };
+}
+
 nlohmann::json ToJson(const SaveContainerV2& container) {
+    nlohmann::json descriptors = nlohmann::json::array();
+    for (const auto& descriptor : container.section_descriptors) {
+        descriptors.push_back(ToJson(descriptor));
+    }
     nlohmann::json sections = nlohmann::json::array();
     for (const auto& section : container.sections) {
         sections.push_back(ToJson(section));
     }
-    return {{"schema", container.schema}, {"version", container.version}, {"header", container.header}, {"sections", sections}};
+    return {{"schema", container.schema},
+            {"version", container.version},
+            {"header", container.header},
+            {"section_descriptors", descriptors},
+            {"sections", sections}};
 }
 
 nlohmann::json ToJson(const ReplayComparisonReport& report) {
@@ -301,21 +439,26 @@ nlohmann::json ToJson(const RuntimeSnapshot& snapshot) {
     };
 }
 
-ReplayComparisonReport CompareReplayHashes(const RuntimeHashes& expected, const RuntimeHashes& actual) {
+ReplayComparisonReport CompareReplayHashes(const RuntimeHashes& expected,
+                                           const RuntimeHashes& actual) {
     ReplayComparisonReport report;
     report.expected = expected;
     report.actual = actual;
     if (expected.state_hash != actual.state_hash) {
         report.mismatches.push_back("state_hash");
-        report.localized_mismatches.push_back({"state_hash", 0, 0, "", "", "", "", "", expected.state_hash, actual.state_hash});
+        report.localized_mismatches.push_back(
+            {"state_hash", 0, 0, "", "", "", "", "", expected.state_hash, actual.state_hash});
     }
     if (expected.event_hash != actual.event_hash) {
         report.mismatches.push_back("event_hash");
-        report.localized_mismatches.push_back({"event_hash", 0, 0, "", "", "", "", "", expected.event_hash, actual.event_hash});
+        report.localized_mismatches.push_back(
+            {"event_hash", 0, 0, "", "", "", "", "", expected.event_hash, actual.event_hash});
     }
     if (expected.presentation_hash != actual.presentation_hash) {
         report.mismatches.push_back("presentation_hash");
-        report.localized_mismatches.push_back({"presentation_hash", 0, 0, "", "", "", "astra.media", "presentation", expected.presentation_hash, actual.presentation_hash});
+        report.localized_mismatches.push_back({"presentation_hash", 0, 0, "", "", "", "astra.media",
+                                               "presentation", expected.presentation_hash,
+                                               actual.presentation_hash});
     }
     report.passed = report.mismatches.empty();
     return report;
@@ -325,7 +468,8 @@ Astra::Core::Result<RuntimeEvent> RuntimeEventFromJson(const nlohmann::json& jso
     auto event_id = Astra::Core::ParseStableId(json.at("event_id").get<std::string>());
     auto type = Astra::Core::ParseStableId(json.at("type").get<std::string>());
     if (!event_id || !type) {
-        return Astra::Core::Result<RuntimeEvent>::Failure(Astra::Core::ErrorCode::InvalidFormat, "runtime event has invalid stable id");
+        return Astra::Core::Result<RuntimeEvent>::Failure(Astra::Core::ErrorCode::InvalidFormat,
+                                                          "runtime event has invalid stable id");
     }
     RuntimeEvent event;
     event.event_id = event_id.Value();
@@ -334,17 +478,21 @@ Astra::Core::Result<RuntimeEvent> RuntimeEventFromJson(const nlohmann::json& jso
     event.priority = json.value("priority", 0u);
     event.sequence = json.value("sequence", 0ull);
     event.frame_index = json.value("frame_index", 0ull);
-    event.source = {json.value("source", nlohmann::json::object()).value("kind", ""), json.value("source", nlohmann::json::object()).value("id", "")};
-    event.target = {json.value("target", nlohmann::json::object()).value("kind", ""), json.value("target", nlohmann::json::object()).value("id", "")};
+    event.source = {json.value("source", nlohmann::json::object()).value("kind", ""),
+                    json.value("source", nlohmann::json::object()).value("id", "")};
+    event.target = {json.value("target", nlohmann::json::object()).value("kind", ""),
+                    json.value("target", nlohmann::json::object()).value("id", "")};
     event.payload_schema = json.value("payload_schema", "");
     event.payload = json.value("payload", nlohmann::json::object());
-    event.trace = {json.value("trace", nlohmann::json::object()).value("script_location", ""), json.value("trace", nlohmann::json::object()).value("audit_ref", "")};
+    event.trace = {json.value("trace", nlohmann::json::object()).value("script_location", ""),
+                   json.value("trace", nlohmann::json::object()).value("audit_ref", "")};
     return Astra::Core::Result<RuntimeEvent>::Success(std::move(event));
 }
 
 Astra::Core::Result<RuntimeSnapshot> RuntimeSnapshotFromJson(const nlohmann::json& json) {
     if (json.value("schema", std::string()) != SnapshotSchema) {
-        return Astra::Core::Result<RuntimeSnapshot>::Failure(Astra::Core::ErrorCode::InvalidFormat, "unsupported runtime snapshot schema");
+        return Astra::Core::Result<RuntimeSnapshot>::Failure(Astra::Core::ErrorCode::InvalidFormat,
+                                                             "unsupported runtime snapshot schema");
     }
     auto world = Astra::Scene::WorldSnapshotFromJson(json.at("world"));
     if (!world) {
@@ -359,7 +507,8 @@ Astra::Core::Result<RuntimeSnapshot> RuntimeSnapshotFromJson(const nlohmann::jso
     snapshot.world = world.Value();
     snapshot.director = DirectorFromJson(json.value("director", nlohmann::json::object()));
     if (json.contains("scheduler")) {
-        snapshot.scheduler.schema = json.at("scheduler").value("schema", "astra.runtime.scheduler.v1");
+        snapshot.scheduler.schema =
+            json.at("scheduler").value("schema", "astra.runtime.scheduler.v1");
         for (const auto& task_json : json.at("scheduler").value("tasks", nlohmann::json::array())) {
             auto task = RuntimeTaskFromJson(task_json);
             if (task) {
@@ -380,11 +529,24 @@ Astra::Core::Result<RuntimeSnapshot> RuntimeSnapshotFromJson(const nlohmann::jso
 
 Astra::Core::Result<SaveContainerV2> SaveContainerV2FromJson(const nlohmann::json& json) {
     if (json.value("schema", std::string()) != SaveContainerV2Schema) {
-        return Astra::Core::Result<SaveContainerV2>::Failure(Astra::Core::ErrorCode::InvalidFormat, "unsupported runtime save container schema");
+        return Astra::Core::Result<SaveContainerV2>::Failure(
+            Astra::Core::ErrorCode::InvalidFormat, "unsupported runtime save container schema");
     }
     SaveContainerV2 container;
     container.version = json.value("version", 2u);
     container.header = json.value("header", nlohmann::json::object());
+    for (const auto& descriptor_json : json.value("section_descriptors", nlohmann::json::array())) {
+        SaveSectionDescriptor descriptor;
+        descriptor.section_id = descriptor_json.value("section_id", "");
+        descriptor.owner_module = descriptor_json.value("owner_module", "");
+        descriptor.payload_schema = descriptor_json.value("payload_schema", "");
+        descriptor.payload_version = descriptor_json.value("payload_version", 1u);
+        descriptor.required = descriptor_json.value("required", true);
+        descriptor.hash = descriptor_json.value("hash", "");
+        descriptor.compression = descriptor_json.value("compression", "none");
+        descriptor.recovery_policy = descriptor_json.value("recovery_policy", "fail_load");
+        container.section_descriptors.push_back(std::move(descriptor));
+    }
     for (const auto& section_json : json.value("sections", nlohmann::json::array())) {
         SaveSection section;
         section.name = section_json.value("name", "");
@@ -393,7 +555,8 @@ Astra::Core::Result<SaveContainerV2> SaveContainerV2FromJson(const nlohmann::jso
         section.hash = section_json.value("hash", "");
         section.compressed = section_json.value("compressed", false);
         section.payload = section_json.value("payload", nlohmann::json::object());
-        section.compressed_payload = section_json.value("compressed_payload", std::vector<Astra::Core::u8>{});
+        section.compressed_payload =
+            section_json.value("compressed_payload", std::vector<Astra::Core::u8>{});
         container.sections.push_back(std::move(section));
     }
     return Astra::Core::Result<SaveContainerV2>::Success(std::move(container));

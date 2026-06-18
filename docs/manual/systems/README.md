@@ -1,6 +1,6 @@
 # Systems
 
-Status: NativeVN runtime evidence plus Phase 6 Asset Pipeline. Foundation diagnostics, platform services, module loading, property schema generation, dynamic engine DLL evidence, Scene, Runtime, Save/Replay snapshots, Asset sidecars/VFS/registry/dependency graph, production import/cook/DDC, binary `.astrapkg`, PackageReader random-access/chunked-read/mount evidence, Asset Release Gate reports, package/cook/payload integrity diagnostics, NativeVN cook/package/replay reports, Media provider release-gate checks, mature media backend capability reports, image metadata decode smoke, Media headless verification, ScriptRuntimeHost, Lua/Native DSL bridge, and AstraVN headless session evidence have executable implementations; production Media/Script/AstraVN/Editor/AI systems are planned.
+Status: Runtime-only UE-class core evidence. Foundation diagnostics, platform services, module loading, property schema generation, dynamic engine DLL evidence, Scene, Runtime tick contracts, sectioned Save/Replay, Asset sidecars/VFS/registry/dependency graph, production import/cook/DDC, binary `.astrapkg`, PackageReader random-access/chunked-read/mount evidence, Asset Release Gate reports, package/cook/payload integrity diagnostics, NativeVN cook/package/replay reports, production Media provider release-gate checks, driver diff reports, trace/crash bundle evidence, ScriptRuntimeHost, Lua/Native DSL bridge, and AstraVN headless session evidence have executable implementations; Editor UI, full AI/MCP, Legacy/AstraEmu, and visual debugging tools remain planned.
 
 ## Overview
 
@@ -51,9 +51,9 @@ Foundation and Phase 6 system APIs are implemented for diagnostics, platform ser
 
 ## Examples
 
-Current examples include validating asset sidecars in tests, NativeVN AssetRegistry/dependency graph evidence, DDC artifact emission/reuse/corruption recovery, media backend capability and Phase 7 provider evidence through `astra validate`, headless media hash verification through `astra run --headless-smoke`, NativeVN binary package generation, zstd payload read/chunk/mount smoke, Asset Release Gate checks, package manifest hash/provider feature hash save-replay evidence, package integrity checks, package launch smoke, and golden replay comparison. Planned examples include deeper per-driver visual/audio replay diff.
+Current examples include validating asset sidecars in tests, NativeVN AssetRegistry/dependency graph evidence, DDC artifact emission/reuse/corruption recovery, media backend capability and provider evidence through `astra validate`, headless media hash verification through `astra run --headless-smoke`, NativeVN binary package generation, zstd payload read/chunk/mount smoke, Asset Release Gate checks, runtime release-gate reports, package manifest hash/provider feature hash save-replay evidence, package integrity checks, package launch smoke, driver diff evidence, and golden replay comparison.
 
 ## Troubleshooting
 
-- Current NativeVN `validate`, `cook`, `package`, `run --headless-smoke`, `replay --compare`, and `inspect` prove the Phase 6 package workflow plus Phase 7 media provider/decode/timeline/filter evidence; per-driver visual/audio diff remains later hardening.
+- Current NativeVN `validate`, `cook`, `package`, `release-gate`, `run --headless-smoke`, `replay --compare`, and `inspect` prove the runtime-only package workflow plus media provider/decode/timeline/filter and driver-diff evidence.
 - Release evidence must be current command output, not design intent.

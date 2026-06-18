@@ -47,19 +47,30 @@ struct CommandReport {
 };
 
 [[nodiscard]] ASTRA_TOOLS_API nlohmann::json ToJson(const CommandReport& report);
-ASTRA_TOOLS_API void WriteDiagnosticsIfRequested(const CommandReport& report, const CommandOptions& options);
+ASTRA_TOOLS_API void WriteDiagnosticsIfRequested(const CommandReport& report,
+                                                 const CommandOptions& options);
 ASTRA_TOOLS_API void PrintReport(const CommandReport& report, const CommandOptions& options);
 ASTRA_TOOLS_API void ConfigureToolLogging(const CommandOptions& options);
 
 [[nodiscard]] ASTRA_TOOLS_API CommandReport VersionReport();
 [[nodiscard]] ASTRA_TOOLS_API CommandReport DocCheck(const CommandOptions& options);
-[[nodiscard]] ASTRA_TOOLS_API CommandReport Validate(const std::filesystem::path& target, const CommandOptions& options);
-[[nodiscard]] ASTRA_TOOLS_API CommandReport Inspect(const std::filesystem::path& target, const CommandOptions& options);
-[[nodiscard]] ASTRA_TOOLS_API CommandReport Import(const std::filesystem::path& project, const std::filesystem::path& source, const CommandOptions& options);
-[[nodiscard]] ASTRA_TOOLS_API CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& options);
-[[nodiscard]] ASTRA_TOOLS_API CommandReport Package(const std::filesystem::path& sample, const CommandOptions& options);
-[[nodiscard]] ASTRA_TOOLS_API CommandReport Run(const std::filesystem::path& target, const CommandOptions& options);
-[[nodiscard]] ASTRA_TOOLS_API CommandReport Replay(const std::filesystem::path& target, const CommandOptions& options);
+[[nodiscard]] ASTRA_TOOLS_API CommandReport Validate(const std::filesystem::path& target,
+                                                     const CommandOptions& options);
+[[nodiscard]] ASTRA_TOOLS_API CommandReport Inspect(const std::filesystem::path& target,
+                                                    const CommandOptions& options);
+[[nodiscard]] ASTRA_TOOLS_API CommandReport Import(const std::filesystem::path& project,
+                                                   const std::filesystem::path& source,
+                                                   const CommandOptions& options);
+[[nodiscard]] ASTRA_TOOLS_API CommandReport Cook(const std::filesystem::path& sample,
+                                                 const CommandOptions& options);
+[[nodiscard]] ASTRA_TOOLS_API CommandReport Package(const std::filesystem::path& sample,
+                                                    const CommandOptions& options);
+[[nodiscard]] ASTRA_TOOLS_API CommandReport ReleaseGate(const std::filesystem::path& target,
+                                                        const CommandOptions& options);
+[[nodiscard]] ASTRA_TOOLS_API CommandReport Run(const std::filesystem::path& target,
+                                                const CommandOptions& options);
+[[nodiscard]] ASTRA_TOOLS_API CommandReport Replay(const std::filesystem::path& target,
+                                                   const CommandOptions& options);
 
 [[nodiscard]] ASTRA_TOOLS_API std::string Sha256File(const std::filesystem::path& path);
 

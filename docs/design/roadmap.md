@@ -31,9 +31,9 @@ UE `UObject` / UHT / GC 体系。
 - `Production Ready`：具备真实后端、错误恢复、版本迁移、调试观测、压力测试和发布门禁。
 - `UE-class 2D Runtime`：在 Astra 范围内达到可发布、可调试、可扩展、可维护的 runtime 完备度。
 
-当前 Phase 1-4 属于 Foundation，不应被解读为 production complete。当前工作树另有 Phase 5/6 runtime evidence slice：动态链接的 `Astra*` engine DLL、NativeVN binary `.astrapkg` package manifest、headless run、package-only save/replay evidence、media backend capability report 和 golden replay comparison 已实现，用于推进 README 的 runtime-first 验收链路；真实 image/font/audio/filter execution backend、Editor、AI/MCP 和 Legacy 仍不在该 slice 内。
+当前工作树已推进到 runtime-only UE-class core evidence slice：动态链接的 `Astra*` engine DLL、NativeVN binary `.astrapkg` package manifest、headless run、package-only save/replay evidence、sectioned save descriptors、`RuntimeTickInput/RuntimeFrameResult`、Director arbitration、media backend capability report、CPU RGBA FilterGraph execution、driver diff report、runtime release-gate report、trace/crash bundle DTO evidence 和 golden replay comparison 已实现，用于推进 runtime-first 验收链路；Editor UI、完整 AI/MCP、Legacy/AstraEmu、Editor-facing debug viewers 和完整可视化 diff tooling 仍不在该 slice 内。
 
-Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runtime-production-contract.md` 与 `save-replay-production-contract.md`，Asset/Package 见 `asset-package-production-contract.md`，Media/Decode 见 `media-backend-production-contract.md` 与 `hardware-media-decode.md`，Provider 见 `provider-contracts.md`，Editor/AI/Legacy/Release Gate 分别见对应 contract 文档。这些文档是准 API 草案，不代表当前生产代码已完成。
+Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runtime-production-contract.md` 与 `save-replay-production-contract.md`，Asset/Package 见 `asset-package-production-contract.md`，Media/Decode 见 `media-backend-production-contract.md` 与 `hardware-media-decode.md`，Provider 见 `provider-contracts.md`，Editor/AI/Legacy/Release Gate 分别见对应 contract 文档。Runtime-only core contracts已有可执行证据；Editor/AI/Legacy contract 仍是后续实现目标。
 
 ## 3. Phase 0：文档与工程基线
 
@@ -90,7 +90,7 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 
 ## 5. Phase 2：Foundation Scene / Runtime
 
-状态：Implemented foundation slice. 当前实现覆盖 headless `AstraScene` 和 Runtime module：`ActorWorld`、stable Actor/Component DTO、`ComponentDescriptor`、generation-safe handle、private EnTT-backed local storage、headless local ECS pack、`RuntimeWorld`、RuntimeEvent/EventBus、基础 StateMachine transition、Blackboard/ControlPolicy/Director foundation、foundation save/load、RuntimeReplay DTO 和 deterministic stable hash smoke。完整 lifecycle/prefab、production scheduler、timeline/resource/script/AI/module extension state 存档和 replay mismatch 定位仍属 Phase 5 及后续 production completion。
+状态：Implemented runtime-only production core slice. 当前实现覆盖 headless `AstraScene` 和 Runtime module：`ActorWorld`、stable Actor/Component DTO、`ComponentDescriptor`、generation-safe handle、private EnTT-backed local storage、headless local ECS pack、`RuntimeWorld`、RuntimeEvent/EventBus、StateMachine transition、Blackboard/ControlPolicy、Director arbitration、`RuntimeTickInput/RuntimeFrameResult`、serializable scheduler、sectioned SaveV2 descriptors、ReplayStream DTO、mismatch localization evidence、RuntimeStress 1000 Actor save/load/replay hash stability。Editor preview tooling、external plugin save-section provider registration、AI MCP host 和 visual replay inspector 仍属后续 completion。
 
 目标：
 
@@ -115,7 +115,7 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 
 ## 6. Phase 3：Foundation Asset / Media / FilterGraph
 
-状态：Implemented foundation slice plus Phase 7 media backend evidence. 当前实现覆盖 `AstraAsset` 和 `AstraMedia`：asset URI/ID 解析、VFS mount、sidecar DTO/validation、registry scan、dependency diagnostics、import preset/project template/review item DTO、watch invalidation plumbing、PresentationCommand、RenderGraph/text/audio/filter DTO、FilterProfile validation/application、Renderer2D/TextLayout/Audio/ImageDecode/AudioDecode/VideoDecode/Timeline/FilterGraph provider descriptors、media release-gate validation、mature backend capability probe（SDL3、bgfx、Skia、libpng、libjpeg-turbo、libwebp、FreeType、HarfBuzz、miniaudio、FFmpeg）、PNG/JPEG/WebP image metadata/RGBA decode API、decoded CPU texture buffer import、glyph-run/atlas token capture、logical miniaudio mixer/bus capture、video decode extension-point diagnostics、Timeline camera/audio/filter state、image/audio cook artifact metadata、HeadlessRenderer2D deterministic capture/hash、可选 bgfx/Skia provider smoke，以及 Phase 7 CLI/sample evidence。PCM sample decode、video frame decode、per-driver visual/audio diff 和真实平台 surface 绑定仍属后续 hardening。
+状态：Implemented runtime-only media backend hardening slice. 当前实现覆盖 `AstraAsset` 和 `AstraMedia`：asset URI/ID 解析、VFS mount、sidecar DTO/validation、registry scan、dependency diagnostics、import preset/project template/review item DTO、watch invalidation plumbing、PresentationCommand、RenderGraph/text/audio/filter DTO、FilterProfile validation/application、Renderer2D/TextLayout/Audio/ImageDecode/AudioDecode/VideoDecode/Timeline/FilterGraph provider descriptors、media release-gate validation、mature backend capability probe（SDL3、bgfx、Skia、libpng、libjpeg-turbo、libwebp、FreeType、HarfBuzz、miniaudio、FFmpeg）、PNG/JPEG/WebP image metadata/RGBA decode API、decoded CPU texture buffer import、glyph-run/atlas token capture、logical miniaudio mixer/bus capture、CPU RGBA FilterGraph passes、DriverDiffReport、video decode extension-point diagnostics、Timeline camera/audio/filter state、image/audio cook artifact metadata、HeadlessRenderer2D deterministic capture/hash、bgfx/Skia provider smoke，以及 CLI release-gate evidence。Video frame decode、native audio device perceptual diff 和 Editor visual diff viewer 仍属后续 hardening。
 
 目标：
 

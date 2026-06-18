@@ -1,4 +1,3 @@
-#include <Astra/Tools/Tools.hpp>
 #include <Astra/Asset/Asset.hpp>
 #include <Astra/AstraVN/AstraVN.hpp>
 #include <Astra/Core/BuildInfo.hpp>
@@ -10,8 +9,7 @@
 #include <Astra/Platform/Platform.hpp>
 #include <Astra/PropertySystem/PropertySystem.hpp>
 #include <Astra/Script/Script.hpp>
-#include <openssl/evp.h>
-#include <yaml-cpp/yaml.h>
+#include <Astra/Tools/Tools.hpp>
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -19,11 +17,13 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <openssl/evp.h>
 #include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
 #include <vector>
+#include <yaml-cpp/yaml.h>
 
 namespace Astra::Tools {
 
@@ -57,14 +57,13 @@ void WriteDiagnosticsIfRequested(const CommandReport& report, const CommandOptio
 }
 
 void PrintReport(const CommandReport& report, const CommandOptions& options) {
-    Astra::Core::DefaultLogger().Log(
-        "tools.lifecycle",
-        report.command,
-        report.Passed() ? Astra::Core::LogLevel::Info : Astra::Core::LogLevel::Error,
-        "command finished",
-        {{"command", report.command},
-         {"status", report.status},
-         {"diagnostics", std::to_string(report.diagnostics.size())}});
+    Astra::Core::DefaultLogger().Log("tools.lifecycle", report.command,
+                                     report.Passed() ? Astra::Core::LogLevel::Info
+                                                     : Astra::Core::LogLevel::Error,
+                                     "command finished",
+                                     {{"command", report.command},
+                                      {"status", report.status},
+                                      {"diagnostics", std::to_string(report.diagnostics.size())}});
     if (options.json) {
         std::cout << ToJson(report).dump(2) << "\n";
     } else {
@@ -171,15 +170,12 @@ CommandReport Inspect(const std::filesystem::path& target, const CommandOptions&
                 }
             }
             if (manifest.Value().runtime_evidence.contains("playable_vn")) {
-                report.artifacts["playable_vn"] =
-                    manifest.Value().runtime_evidence["playable_vn"];
+                report.artifacts["playable_vn"] = manifest.Value().runtime_evidence["playable_vn"];
             }
-            const auto source_sample =
-                manifest.Value().runtime_evidence.value("source_sample", "");
+            const auto source_sample = manifest.Value().runtime_evidence.value("source_sample", "");
             if (!source_sample.empty() && std::filesystem::exists(source_sample)) {
                 const auto registry = ScanSampleRegistry(source_sample, diagnostics);
-                report.artifacts["artemis_fixture"] =
-                    ArtemisFixtureReport(source_sample, registry);
+                report.artifacts["artemis_fixture"] = ArtemisFixtureReport(source_sample, registry);
             }
         }
     } else if (std::filesystem::is_regular_file(absolute) &&
@@ -238,22 +234,25 @@ CommandReport Inspect(const std::filesystem::path& target, const CommandOptions&
     return report;
 }
 
-CommandReport Import(const std::filesystem::path& project, const std::filesystem::path& source, const CommandOptions& options) {
+CommandReport Import(const std::filesystem::path& project, const std::filesystem::path& source,
+                     const CommandOptions& options) {
     auto report = MakeReport("astra import");
     const auto project_path = ResolveToolTarget(project);
     const auto source_path = ResolveToolTarget(source);
     Astra::Core::DiagnosticSink diagnostics;
     auto asset_id = Astra::Asset::ParseAssetUri(options.import_asset_id);
     if (!asset_id) {
-        AddDiagnostic(report, "ASTRA_IMPORT_TARGET_INVALID", Astra::Core::DiagnosticSeverity::Blocking,
-                      asset_id.Message(), source_path);
+        AddDiagnostic(report, "ASTRA_IMPORT_TARGET_INVALID",
+                      Astra::Core::DiagnosticSeverity::Blocking, asset_id.Message(), source_path);
         return report;
     }
     const auto extension = source_path.extension().string();
     std::string provider_id = "astra.importer.text";
-    if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".webp") {
+    if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
+        extension == ".webp") {
         provider_id = "astra.importer.image";
-    } else if (extension == ".ogg" || extension == ".wav" || extension == ".flac" || extension == ".mp3") {
+    } else if (extension == ".ogg" || extension == ".wav" || extension == ".flac" ||
+               extension == ".mp3") {
         provider_id = "astra.importer.audio";
     } else if (extension == ".otf" || extension == ".ttf") {
         provider_id = "astra.importer.font";
@@ -305,12 +304,8 @@ CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& op
         cook_report["playable_vn"] = BuildPlayableVnEvidence(
             sample, cook_report["phase4_script_vn"], registry, {}, false, diagnostics);
         cook_report["runtime_feature_complete"] = {
-            {"local_fixture", true},
-            {"ui_system", true},
-            {"backlog", true},
-            {"config", true},
-            {"save_load_slots", 3},
-            {"save_restore", true},
+            {"local_fixture", true}, {"ui_system", true},    {"backlog", true},
+            {"config", true},        {"save_load_slots", 3}, {"save_restore", true},
         };
     } else if (IsVnSmokeSample(sample)) {
         cook_report["phase8_script_vn"] = Phase4ScriptVnSmoke(sample, diagnostics);
@@ -343,7 +338,8 @@ CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& op
         {"astra.asset.import", "astra.importer.builtin"},
         {"astra.asset.cook", "astra.cook.builtin"},
     };
-    pipeline.provider_feature_hash = Astra::Asset::ComputeProviderFeatureHash(pipeline.selected_providers);
+    pipeline.provider_feature_hash =
+        Astra::Asset::ComputeProviderFeatureHash(pipeline.selected_providers);
     auto cooked_manifest = Astra::Asset::CookAssetRegistry(registry, pipeline, diagnostics);
     Astra::Asset::CookManifest manifest;
     if (cooked_manifest) {
@@ -357,9 +353,13 @@ CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& op
         {"corruption_recovered", 0},
     };
     for (const auto& entry : manifest.ddc_entries) {
-        ddc_status["rebuilt"] = ddc_status["rebuilt"].get<Astra::Core::u64>() + (entry.rebuilt ? 1 : 0);
-        ddc_status["reused"] = ddc_status["reused"].get<Astra::Core::u64>() + (!entry.rebuilt ? 1 : 0);
-        ddc_status["corruption_recovered"] = ddc_status["corruption_recovered"].get<Astra::Core::u64>() + (entry.corruption_recovered ? 1 : 0);
+        ddc_status["rebuilt"] =
+            ddc_status["rebuilt"].get<Astra::Core::u64>() + (entry.rebuilt ? 1 : 0);
+        ddc_status["reused"] =
+            ddc_status["reused"].get<Astra::Core::u64>() + (!entry.rebuilt ? 1 : 0);
+        ddc_status["corruption_recovered"] =
+            ddc_status["corruption_recovered"].get<Astra::Core::u64>() +
+            (entry.corruption_recovered ? 1 : 0);
     }
     cook_report["cook_manifest"] = Astra::Asset::ToJson(manifest);
     cook_report["ddc_status"] = ddc_status;
@@ -413,7 +413,8 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
         {"astra.asset.import", "astra.importer.builtin"},
         {"astra.asset.cook", "astra.cook.builtin"},
     };
-    pipeline.provider_feature_hash = Astra::Asset::ComputeProviderFeatureHash(pipeline.selected_providers);
+    pipeline.provider_feature_hash =
+        Astra::Asset::ComputeProviderFeatureHash(pipeline.selected_providers);
     auto cooked = Astra::Asset::CookAssetRegistry(registry, pipeline, diagnostics);
     Astra::Asset::CookManifest cook_manifest;
     if (cooked) {
@@ -491,6 +492,210 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
     AppendDiagnostics(report, diagnostics);
     report.artifacts["package"] = package.string();
     report.artifacts["package_manifest"] = package_json;
+    if (manifest.profile == "deterministic") {
+        CommandOptions gate_options = options;
+        gate_options.profile = manifest.profile;
+        auto gate = ReleaseGate(sample, gate_options);
+        report.artifacts["release_report"] =
+            gate.artifacts.value("release_report", nlohmann::json::object());
+        for (const auto& diagnostic : gate.diagnostics) {
+            report.diagnostics.push_back(diagnostic);
+        }
+        if (!gate.Passed()) {
+            report.status = "failed";
+        }
+    }
+    return report;
+}
+
+CommandReport ReleaseGate(const std::filesystem::path& target, const CommandOptions& options) {
+    auto report = MakeReport("astra release-gate");
+    const auto absolute = ResolveToolTarget(target);
+    const auto profile = options.profile.empty() ? "deterministic" : options.profile;
+    const bool deterministic = profile == "deterministic";
+    std::filesystem::path sample = absolute;
+    std::filesystem::path package_path;
+    Astra::Asset::PackageManifest manifest;
+    Astra::Core::DiagnosticSink diagnostics;
+
+    if (std::filesystem::is_regular_file(absolute) && absolute.extension() == ".astrapkg") {
+        package_path = absolute;
+        Astra::Asset::PackageReader reader;
+        auto read = reader.ReadManifest(absolute, diagnostics);
+        AppendDiagnostics(report, diagnostics);
+        diagnostics.Clear();
+        if (!read) {
+            return report;
+        }
+        manifest = read.Value();
+        const auto source_sample = manifest.runtime_evidence.value("source_sample", "");
+        if (!source_sample.empty()) {
+            sample = source_sample;
+        }
+    } else if (std::filesystem::is_directory(absolute) && IsFoundationSample(absolute, report)) {
+        package_path = PackagePathForSample(absolute);
+        if (std::filesystem::exists(package_path)) {
+            Astra::Asset::PackageReader reader;
+            auto read = reader.ReadManifest(package_path, diagnostics);
+            AppendDiagnostics(report, diagnostics);
+            diagnostics.Clear();
+            if (read) {
+                manifest = read.Value();
+            }
+        }
+    } else {
+        AddDiagnostic(report, "ASTRA_RELEASE_TARGET_UNSUPPORTED",
+                      Astra::Core::DiagnosticSeverity::Blocking,
+                      "Release gate expects a sample directory or .astrapkg package.", absolute);
+        return report;
+    }
+
+    if (package_path.empty() || !std::filesystem::exists(package_path)) {
+        AddDiagnostic(
+            report, "ASTRA_RELEASE_PACKAGE_MISSING", Astra::Core::DiagnosticSeverity::Blocking,
+            "Release gate requires an existing packaged .astrapkg artifact.", package_path);
+    }
+
+    auto registry = std::filesystem::is_directory(sample) ? ScanSampleRegistry(sample, diagnostics)
+                                                          : Astra::Asset::AssetRegistry{};
+    AppendDiagnostics(report, diagnostics);
+    diagnostics.Clear();
+
+    Astra::Asset::AssetReleaseGateReport asset_gate;
+    if (!manifest.package_id.empty()) {
+        Astra::Asset::AssetReleaseGateRequest asset_request;
+        asset_request.registry = registry;
+        asset_request.cook_manifest = manifest.cook_manifest;
+        asset_request.package_manifest = manifest;
+        asset_request.profile = profile;
+        asset_gate = Astra::Asset::ValidateAssetReleaseGate(asset_request, diagnostics);
+        AppendDiagnostics(report, diagnostics);
+        diagnostics.Clear();
+    }
+
+    Astra::Media::MediaReleaseGateRequest media_request;
+    media_request.providers = Astra::Media::ProductionMediaProviders();
+    media_request.require_available_backends = deterministic;
+    for (const auto& provider : media_request.providers) {
+        media_request.selected_providers[provider.slot_id] = provider.provider_id;
+    }
+    auto media_gate = Astra::Media::ValidateMediaReleaseGate(media_request, diagnostics);
+    AppendDiagnostics(report, diagnostics);
+    diagnostics.Clear();
+
+    Astra::Media::RenderGraph graph;
+    graph.frame_index = 1;
+    graph.layers = {"background", "character", "ui", "text", "final"};
+    auto smoke_asset = Astra::Asset::ParseAssetUri("native:/ReleaseGate/Smoke");
+    if (smoke_asset) {
+        graph.draws.push_back({"draw.release", smoke_asset.Value(), "ui", 0, {}, {}});
+    }
+    graph.text_requests.push_back({"text.release", "Release Gate", "en", "text", 0, {}});
+    graph.audio_commands.push_back({"audio.release", "play",
+                                    smoke_asset ? smoke_asset.Value() : Astra::Asset::AssetUri{},
+                                    "sfx", 1.0, false});
+
+    auto headless = Astra::Media::CreateHeadlessRenderer2DProvider();
+    (void)headless->BeginFrame({1, 64, 64, "srgb"}, diagnostics);
+    (void)headless->Execute(graph, diagnostics);
+    auto headless_capture = headless->Capture(diagnostics);
+    auto production = Astra::Media::CreateProductionRenderer2DProvider();
+    (void)production->BeginFrame({1, 64, 64, "srgb"}, diagnostics);
+    (void)production->Execute(graph, diagnostics);
+    auto production_capture = production->Capture(diagnostics);
+    AppendDiagnostics(report, diagnostics);
+    diagnostics.Clear();
+
+    auto capabilities = Astra::Media::ProbeMediaBackendCapabilities();
+    auto driver_diff = (headless_capture && production_capture)
+                           ? Astra::Media::CompareDriverCaptures(headless_capture.Value(),
+                                                                 production_capture.Value(),
+                                                                 capabilities, deterministic)
+                           : Astra::Media::DriverDiffReport{};
+    if (deterministic && !driver_diff.passed) {
+        AddDiagnostic(report, "ASTRA_RELEASE_DRIVER_DIFF_FAILED",
+                      Astra::Core::DiagnosticSeverity::Blocking,
+                      "Deterministic release requires driver diff hardening evidence.", sample);
+    }
+
+    const bool editor_module_present =
+        std::ranges::any_of(manifest.modules, [](const auto& module) {
+            return module.id.find("editor") != std::string::npos ||
+                   module.binary.find("Editor") != std::string::npos;
+        });
+    if (editor_module_present) {
+        AddDiagnostic(report, "ASTRA_RELEASE_EDITOR_MODULE_INCLUDED",
+                      Astra::Core::DiagnosticSeverity::Blocking,
+                      "Packaged runtime includes an Editor module.", package_path);
+    }
+
+    nlohmann::json trace = nlohmann::json::array({
+        {{"schema", "astra.trace.event.v1"},
+         {"frame_index", 1},
+         {"channel", "runtime.tick"},
+         {"name", "release_gate_tick"},
+         {"duration_ns", 0},
+         {"objects", nlohmann::json::array()},
+         {"fields", nlohmann::json::object()}},
+        {{"schema", "astra.trace.event.v1"},
+         {"frame_index", 1},
+         {"channel", "media.render"},
+         {"name", "driver_diff"},
+         {"duration_ns", 0},
+         {"objects", nlohmann::json::array()},
+         {"fields", {{"profile", profile}}}},
+    });
+    nlohmann::json crash_bundle = {
+        {"schema", "astra.crash.bundle.v1"},
+        {"build_info", report.build_info},
+        {"package_or_project_hash", manifest.package_hash},
+        {"frame_index", 1},
+        {"thread_id", "release-gate"},
+        {"last_runtime_hashes", nlohmann::json::object()},
+        {"recent_diagnostics", nlohmann::json::array()},
+        {"recent_logs", nlohmann::json::array()},
+        {"last_events", nlohmann::json::array()},
+        {"provider_states", nlohmann::json::array()},
+        {"minidump_path", ""},
+    };
+
+    nlohmann::json diagnostics_json = nlohmann::json::array();
+    for (const auto& diagnostic : report.diagnostics) {
+        diagnostics_json.push_back(Astra::Core::ToJson(diagnostic));
+    }
+    const auto passed = !std::ranges::any_of(report.diagnostics, [](const auto& diagnostic) {
+        return diagnostic.severity == Astra::Core::DiagnosticSeverity::Blocking ||
+               diagnostic.severity == Astra::Core::DiagnosticSeverity::Fatal;
+    });
+    report.artifacts["release_report"] = {
+        {"schema", "astra.release.report.v1"},
+        {"target", absolute.string()},
+        {"profile", profile},
+        {"passed", passed},
+        {"reports", {{"package", package_path.string()}}},
+        {"diagnostics", diagnostics_json},
+        {"provider_policy_hash", manifest.runtime_evidence.value("provider_feature_hash", "")},
+        {"package_manifest_hash", manifest.package_hash},
+        {"asset_release_gate", Astra::Asset::ToJson(asset_gate)},
+        {"media_release_gate",
+         media_gate
+             ? Astra::Media::ToJson(media_gate.Value())
+             : nlohmann::json{{"schema", Astra::Media::MediaReleaseGateSchema}, {"passed", false}}},
+        {"media_backend_capabilities", Astra::Media::ToJson(capabilities)},
+        {"driver_diff", Astra::Media::ToJson(driver_diff)},
+        {"trace_events", trace},
+        {"crash_bundle", crash_bundle},
+        {"blocking_policy",
+         {{"schema", "astra.release.blocking_policy.v1"},
+          {"profile", profile},
+          {"deny_runtime_ai_provider", deterministic},
+          {"require_provider_binary_hash", deterministic},
+          {"require_save_migration", deterministic},
+          {"allow_media_fallback", !deterministic}}},
+    };
+    if (!passed) {
+        report.status = "failed";
+    }
     return report;
 }
 
@@ -498,7 +703,8 @@ nlohmann::json BuildGpuSmokeEvidence(const std::filesystem::path& sample,
                                      const Astra::Platform::WindowGraphicsBinding& binding,
                                      const Astra::Platform::WindowFrameDesc& frame,
                                      Astra::Core::DiagnosticSink& diagnostics) {
-    Astra::Media::RenderTargetBinding target{binding.id, binding.backend, binding.width, binding.height};
+    Astra::Media::RenderTargetBinding target{binding.id, binding.backend, binding.width,
+                                             binding.height};
     Astra::Media::RenderBackendSmoke smoke;
     auto renderer = Astra::Media::CreateProductionRenderer2DProvider(target);
     auto text_provider = Astra::Media::CreateProductionTextLayoutProvider();
@@ -513,12 +719,14 @@ nlohmann::json BuildGpuSmokeEvidence(const std::filesystem::path& sample,
     }
     auto release = Astra::Media::ValidateMediaReleaseGate(gate, diagnostics);
 
-    auto begun = renderer->BeginFrame({frame.frame_index, frame.width, frame.height, "srgb"}, diagnostics);
+    auto begun =
+        renderer->BeginFrame({frame.frame_index, frame.width, frame.height, "srgb"}, diagnostics);
     std::vector<Astra::Media::PresentationCommand> commands;
     if (begun) {
         for (std::size_t index = 0; index < frame.primitives.size(); ++index) {
             const auto& primitive = frame.primitives[index];
-            if (!primitive.image_rgba.empty() && primitive.image_width > 0 && primitive.image_height > 0) {
+            if (!primitive.image_rgba.empty() && primitive.image_width > 0 &&
+                primitive.image_height > 0) {
                 Astra::Media::DecodedCpuBuffer buffer;
                 buffer.width = primitive.image_width;
                 buffer.height = primitive.image_height;
@@ -528,11 +736,15 @@ nlohmann::json BuildGpuSmokeEvidence(const std::filesystem::path& sample,
                     ++smoke.imported_texture_count;
                 }
             }
-            auto asset = Astra::Asset::ParseAssetUri("native:/GpuSmoke/Primitive" + std::to_string(index));
+            auto asset =
+                Astra::Asset::ParseAssetUri("native:/GpuSmoke/Primitive" + std::to_string(index));
             if (asset) {
                 Astra::Media::PresentationCommand command;
-                command.kind = primitive.image_rgba.empty() ? Astra::Media::PresentationCommandKind::UiRect : Astra::Media::PresentationCommandKind::Sprite;
-                command.command_id = primitive.id.empty() ? "gpu.primitive." + std::to_string(index) : primitive.id;
+                command.kind = primitive.image_rgba.empty()
+                                   ? Astra::Media::PresentationCommandKind::UiRect
+                                   : Astra::Media::PresentationCommandKind::Sprite;
+                command.command_id =
+                    primitive.id.empty() ? "gpu.primitive." + std::to_string(index) : primitive.id;
                 command.frame_index = frame.frame_index;
                 command.layer = primitive.kind == "text" ? "text" : "ui";
                 command.order = static_cast<Astra::Core::i32>(index);
@@ -546,7 +758,8 @@ nlohmann::json BuildGpuSmokeEvidence(const std::filesystem::path& sample,
         const auto font_path = sample / "Content/Fonts/sourcehanserif-medium.otf";
         if (std::filesystem::exists(font_path)) {
             const auto font_bytes = ReadBytes(font_path);
-            auto text_texture = Astra::Media::RasterizeUiTextCpuBufferBytes(font_bytes, "GPU smoke text", 24, diagnostics);
+            auto text_texture = Astra::Media::RasterizeUiTextCpuBufferBytes(
+                font_bytes, "GPU smoke text", 24, diagnostics);
             if (text_texture && renderer->ImportTexture(text_texture.Value(), diagnostics)) {
                 ++smoke.text_texture_count;
             }
@@ -569,7 +782,9 @@ nlohmann::json BuildGpuSmokeEvidence(const std::filesystem::path& sample,
     smoke.text_available = capabilities.ui_text_raster_ready || smoke.text_texture_count > 0;
     return {
         {"schema", "astra.gpu_smoke.v1"},
-        {"release_gate", release ? Astra::Media::ToJson(release.Value()) : nlohmann::json({{"schema", Astra::Media::MediaReleaseGateSchema}, {"passed", false}})},
+        {"release_gate", release ? Astra::Media::ToJson(release.Value())
+                                 : nlohmann::json({{"schema", Astra::Media::MediaReleaseGateSchema},
+                                                   {"passed", false}})},
         {"capabilities", Astra::Media::ToJson(capabilities)},
         {"smoke", Astra::Media::ToJson(smoke)},
     };
@@ -764,8 +979,8 @@ CommandReport Run(const std::filesystem::path& target, const CommandOptions& opt
                 report.artifacts["windowed_smoke"]["window_glyph_sources"] = glyph_sources;
             }
             if (options.gpu_smoke) {
-                report.artifacts["windowed_smoke"]["gpu_smoke"] =
-                    BuildGpuSmokeEvidence(path, platform.Window().GraphicsBinding(), frame, diagnostics);
+                report.artifacts["windowed_smoke"]["gpu_smoke"] = BuildGpuSmokeEvidence(
+                    path, platform.Window().GraphicsBinding(), frame, diagnostics);
             }
             report.artifacts["windowed_smoke"]["playable_vn"] = report.artifacts["playable_vn"];
             report.artifacts["windowed_smoke"]["presentation_frame_hash"] =
@@ -872,15 +1087,17 @@ CommandReport Replay(const std::filesystem::path& target, const CommandOptions& 
             {"schema", "astra.runtime.replay_mismatch.v1"},
             {"frame", 0},
             {"category", "runtime_hash"},
-            {"expected_hash", expected.state_hash + "|" + expected.event_hash + "|" +
-                                  expected.presentation_hash},
-            {"actual_hash", actual.state_hash + "|" + actual.event_hash + "|" +
-                                actual.presentation_hash},
+            {"expected_hash",
+             expected.state_hash + "|" + expected.event_hash + "|" + expected.presentation_hash},
+            {"actual_hash",
+             actual.state_hash + "|" + actual.event_hash + "|" + actual.presentation_hash},
             {"nearest_event_sequence", 0},
             {"record_kind", "checkpoint"},
             {"package_manifest_hash", replay.value("package_manifest_hash", "")},
-            {"objects", nlohmann::json::array({{{"kind", "sample"}, {"id", sample.filename().string()}}})},
-            {"source", {{"file", (sample / "Content/Scripts/opening.astra").string()}, {"line", 1}}},
+            {"objects",
+             nlohmann::json::array({{{"kind", "sample"}, {"id", sample.filename().string()}}})},
+            {"source",
+             {{"file", (sample / "Content/Scripts/opening.astra").string()}, {"line", 1}}},
         };
         AddDiagnostic(report, "ASTRA_REPLAY_MISMATCH", Astra::Core::DiagnosticSeverity::Blocking,
                       "Replay hashes do not match.", path);
@@ -895,8 +1112,10 @@ CommandReport Replay(const std::filesystem::path& target, const CommandOptions& 
             {"nearest_event_sequence", 0},
             {"record_kind", "script_decision"},
             {"package_manifest_hash", replay.value("package_manifest_hash", "")},
-            {"objects", nlohmann::json::array({{{"kind", "script"}, {"id", "native:/Scripts/opening"}}})},
-            {"source", {{"file", (sample / "Content/Scripts/opening.astra").string()}, {"line", 1}}},
+            {"objects",
+             nlohmann::json::array({{{"kind", "script"}, {"id", "native:/Scripts/opening"}}})},
+            {"source",
+             {{"file", (sample / "Content/Scripts/opening.astra").string()}, {"line", 1}}},
         };
         AddDiagnostic(report, "ASTRA_REPLAY_MISMATCH", Astra::Core::DiagnosticSeverity::Blocking,
                       "Playable route hash does not match.", path);

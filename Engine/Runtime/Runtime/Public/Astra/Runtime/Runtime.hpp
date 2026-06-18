@@ -19,15 +19,13 @@ namespace Astra::Runtime {
 
 constexpr const char* SnapshotSchema = "astra.runtime.snapshot.v1";
 constexpr const char* ReplaySchema = "astra.runtime.replay.v1";
+constexpr const char* ReplayStreamSchema = "astra.runtime.replay_stream.v1";
 constexpr const char* SaveContainerSchema = "astra.runtime.save_container.v1";
 constexpr const char* SaveContainerV2Schema = "astra.runtime.save_container.v2";
 constexpr const char* ReplayComparisonSchema = "astra.runtime.replay_comparison.v1";
+constexpr const char* ReplayMismatchSchema = "astra.runtime.replay_mismatch.v1";
 
-enum class RuntimeEventMode {
-    Immediate,
-    Queued,
-    Deferred
-};
+enum class RuntimeEventMode { Immediate, Queued, Deferred };
 
 struct RuntimeEventEndpoint {
     std::string kind;
@@ -84,11 +82,7 @@ struct DirectorState {
     nlohmann::json arbitration_log = nlohmann::json::array();
 };
 
-enum class ControlDecision {
-    Allow,
-    Queue,
-    Reject
-};
+enum class ControlDecision { Allow, Queue, Reject };
 
 struct ControlPolicyRequest {
     Astra::Scene::ActorId actor_id;
@@ -109,13 +103,49 @@ struct RuntimeHashes {
     std::string presentation_hash;
 };
 
-enum class RuntimeTaskState {
-    Pending,
-    Running,
-    Waiting,
-    Cancelled,
-    Completed
+struct RuntimeTickInput {
+    std::string schema = "astra.runtime.tick_input.v1";
+    Astra::Core::u64 frame_index = 0;
+    Astra::Core::u64 fixed_step_index = 0;
+    Astra::Core::u64 delta_ns = 16666667;
+    Astra::Core::u64 fixed_delta_ns = 16666667;
+    std::vector<RuntimeEvent> input_events;
+    std::string package_profile = "deterministic";
+    nlohmann::json debug_commands = nlohmann::json::array();
 };
+
+struct RuntimeFrameResult {
+    std::string schema = "astra.runtime.frame_result.v1";
+    Astra::Core::u64 frame_index = 0;
+    Astra::Core::u64 fixed_steps_executed = 0;
+    Astra::Core::u64 event_sequence_begin = 0;
+    Astra::Core::u64 event_sequence_end = 0;
+    std::vector<Astra::Core::StableId> scheduled_tasks_completed;
+    nlohmann::json presentation_commands = nlohmann::json::array();
+    RuntimeHashes hashes;
+};
+
+struct DirectorArbitrationRequest {
+    std::string schema = "astra.runtime.director_arbitration_request.v1";
+    Astra::Core::u64 frame_index = 0;
+    std::string request_id;
+    std::string channel;
+    std::string owner;
+    std::string requested_mode = "exclusive";
+    Astra::Core::u32 priority = 0;
+    bool interrupt_allowed = false;
+    std::vector<std::string> conflicts;
+};
+
+struct DirectorArbitrationResult {
+    std::string schema = "astra.runtime.director_arbitration_result.v1";
+    ControlDecision decision = ControlDecision::Allow;
+    bool queued = false;
+    std::string blocking_owner;
+    std::string reason;
+};
+
+enum class RuntimeTaskState { Pending, Running, Waiting, Cancelled, Completed };
 
 enum class RuntimeWaitKind {
     None,
@@ -155,6 +185,22 @@ struct SchedulerSnapshot {
 struct ReplayCheckpoint {
     Astra::Core::u64 frame_index = 0;
     RuntimeHashes hashes;
+};
+
+struct ReplayRecord {
+    Astra::Core::u64 frame = 0;
+    Astra::Core::u64 sequence = 0;
+    std::string kind;
+    std::string hash;
+    nlohmann::json object = nlohmann::json::object();
+};
+
+struct ReplayStream {
+    std::string schema = ReplayStreamSchema;
+    std::string package_manifest_hash;
+    std::string initial_save_hash;
+    std::vector<ReplayRecord> records;
+    std::vector<ReplayCheckpoint> checkpoints;
 };
 
 struct ReplayMismatch {
@@ -227,15 +273,38 @@ struct SaveSection {
     std::vector<Astra::Core::u8> compressed_payload;
 };
 
+struct SaveSectionDescriptor {
+    std::string schema = "astra.runtime.save_section.v1";
+    std::string section_id;
+    std::string owner_module;
+    std::string payload_schema;
+    Astra::Core::u32 payload_version = 1;
+    bool required = true;
+    std::string hash;
+    std::string compression = "none";
+    std::string recovery_policy = "fail_load";
+};
+
+struct SaveMigrationEdge {
+    std::string schema = "astra.runtime.save_migration_edge.v1";
+    std::string payload_schema;
+    Astra::Core::u32 from_version = 0;
+    Astra::Core::u32 to_version = 0;
+    std::string owner_module;
+    std::string unknown_field_policy = "preserve";
+    std::string diagnostic_prefix = "ASTRA_MIGRATION";
+};
+
 struct SaveContainerV2 {
     std::string schema = SaveContainerV2Schema;
     Astra::Core::u32 version = 2;
     nlohmann::json header = nlohmann::json::object();
+    std::vector<SaveSectionDescriptor> section_descriptors;
     std::vector<SaveSection> sections;
 };
 
 class ASTRA_RUNTIME_API RuntimeEventBus {
-public:
+  public:
     void Emit(RuntimeEvent event, RuntimeEventMode mode);
     [[nodiscard]] std::vector<RuntimeEvent> DrainQueued();
     void AdvanceDeferred();
@@ -244,14 +313,14 @@ public:
     void RestoreTrace(std::vector<RuntimeEvent> trace);
     void Clear();
 
-private:
+  private:
     std::deque<RuntimeEvent> queued_;
     std::deque<RuntimeEvent> deferred_;
     std::vector<RuntimeEvent> trace_;
 };
 
 class ASTRA_RUNTIME_API RuntimeWorld {
-public:
+  public:
     explicit RuntimeWorld(Astra::Core::u64 random_seed = 0);
     RuntimeWorld(RuntimeWorld&&) noexcept;
     RuntimeWorld& operator=(RuntimeWorld&&) noexcept;
@@ -268,23 +337,38 @@ public:
     void SetDirector(DirectorState state);
 
     void RegisterStateMachine(StateMachineDefinition definition);
-    [[nodiscard]] RuntimeEventSubscription Subscribe(Astra::Core::EventTypeId event_type, std::string owner);
-    [[nodiscard]] Astra::Core::Result<void> Unsubscribe(const Astra::Core::StableId& subscription, Astra::Core::DiagnosticSink& diagnostics);
-    [[nodiscard]] Astra::Core::Result<void> ScheduleTask(RuntimeTask task, Astra::Core::DiagnosticSink& diagnostics);
-    [[nodiscard]] Astra::Core::Result<void> CancelTask(const Astra::Core::StableId& task_id, std::string reason, Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] RuntimeEventSubscription Subscribe(Astra::Core::EventTypeId event_type,
+                                                     std::string owner);
+    [[nodiscard]] Astra::Core::Result<void> Unsubscribe(const Astra::Core::StableId& subscription,
+                                                        Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] Astra::Core::Result<void> ScheduleTask(RuntimeTask task,
+                                                         Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] Astra::Core::Result<void> CancelTask(const Astra::Core::StableId& task_id,
+                                                       std::string reason,
+                                                       Astra::Core::DiagnosticSink& diagnostics);
     [[nodiscard]] SchedulerSnapshot Scheduler() const;
-    [[nodiscard]] ControlPolicyResult EvaluateControlPolicy(const ControlPolicyRequest& request, Astra::Core::DiagnosticSink& diagnostics) const;
-    [[nodiscard]] Astra::Core::Result<void> Emit(RuntimeEvent event, RuntimeEventMode mode, Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] ControlPolicyResult
+    EvaluateControlPolicy(const ControlPolicyRequest& request,
+                          Astra::Core::DiagnosticSink& diagnostics) const;
+    [[nodiscard]] DirectorArbitrationResult
+    ArbitrateDirector(const DirectorArbitrationRequest& request,
+                      Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] Astra::Core::Result<void> Emit(RuntimeEvent event, RuntimeEventMode mode,
+                                                 Astra::Core::DiagnosticSink& diagnostics);
     [[nodiscard]] Astra::Core::Result<void> Tick(Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] Astra::Core::Result<RuntimeFrameResult>
+    Tick(const RuntimeTickInput& input, Astra::Core::DiagnosticSink& diagnostics);
     [[nodiscard]] RuntimeSnapshot CaptureSnapshot() const;
     [[nodiscard]] RuntimeReplay CaptureReplay() const;
     [[nodiscard]] Astra::Core::VersionedDocument Save() const;
     [[nodiscard]] SaveContainerV2 SaveV2(bool compress_sections) const;
-    [[nodiscard]] Astra::Core::Result<void> Load(const Astra::Core::VersionedDocument& document, Astra::Core::DiagnosticSink& diagnostics);
-    [[nodiscard]] Astra::Core::Result<void> Load(const SaveContainerV2& container, Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] Astra::Core::Result<void> Load(const Astra::Core::VersionedDocument& document,
+                                                 Astra::Core::DiagnosticSink& diagnostics);
+    [[nodiscard]] Astra::Core::Result<void> Load(const SaveContainerV2& container,
+                                                 Astra::Core::DiagnosticSink& diagnostics);
     [[nodiscard]] RuntimeHashes Hashes() const;
 
-private:
+  private:
     class Impl;
     std::unique_ptr<Impl> impl_;
 };
@@ -295,19 +379,31 @@ private:
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeEventSubscription& subscription);
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const DirectorState& state);
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const ControlPolicyResult& result);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const DirectorArbitrationRequest& request);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const DirectorArbitrationResult& result);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeTickInput& input);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeFrameResult& result);
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeWaitCondition& wait);
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeTask& task);
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const SchedulerSnapshot& scheduler);
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeHashes& hashes);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const ReplayRecord& record);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const ReplayStream& stream);
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeReplay& replay);
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const SaveContainer& container);
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const SaveSection& section);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const SaveSectionDescriptor& descriptor);
+[[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const SaveMigrationEdge& edge);
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const SaveContainerV2& container);
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const ReplayComparisonReport& report);
 [[nodiscard]] ASTRA_RUNTIME_API nlohmann::json ToJson(const RuntimeSnapshot& snapshot);
-[[nodiscard]] ASTRA_RUNTIME_API Astra::Core::Result<RuntimeEvent> RuntimeEventFromJson(const nlohmann::json& json);
-[[nodiscard]] ASTRA_RUNTIME_API Astra::Core::Result<RuntimeSnapshot> RuntimeSnapshotFromJson(const nlohmann::json& json);
-[[nodiscard]] ASTRA_RUNTIME_API Astra::Core::Result<SaveContainerV2> SaveContainerV2FromJson(const nlohmann::json& json);
-[[nodiscard]] ASTRA_RUNTIME_API ReplayComparisonReport CompareReplayHashes(const RuntimeHashes& expected, const RuntimeHashes& actual);
+[[nodiscard]] ASTRA_RUNTIME_API Astra::Core::Result<RuntimeEvent>
+RuntimeEventFromJson(const nlohmann::json& json);
+[[nodiscard]] ASTRA_RUNTIME_API Astra::Core::Result<RuntimeSnapshot>
+RuntimeSnapshotFromJson(const nlohmann::json& json);
+[[nodiscard]] ASTRA_RUNTIME_API Astra::Core::Result<SaveContainerV2>
+SaveContainerV2FromJson(const nlohmann::json& json);
+[[nodiscard]] ASTRA_RUNTIME_API ReplayComparisonReport
+CompareReplayHashes(const RuntimeHashes& expected, const RuntimeHashes& actual);
 
 } // namespace Astra::Runtime

@@ -26,22 +26,9 @@ constexpr const char* VideoDecodeSlotId = "astra.video_decode";
 constexpr const char* TimelineSlotId = "astra.timeline";
 constexpr const char* FilterGraphSlotId = "astra.filter_graph";
 
-enum class PresentationCommandKind {
-    Sprite,
-    Text,
-    UiRect,
-    Audio,
-    Filter,
-    Timeline
-};
+enum class PresentationCommandKind { Sprite, Text, UiRect, Audio, Filter, Timeline };
 
-enum class FilterTarget {
-    Background,
-    Character,
-    Ui,
-    Text,
-    Final
-};
+enum class FilterTarget { Background, Character, Ui, Text, Final };
 
 struct Transform2D {
     double x = 0.0;
@@ -118,32 +105,44 @@ struct RenderTargetBinding {
     Astra::Core::u32 width = 0;
     Astra::Core::u32 height = 0;
 
-    [[nodiscard]] bool Empty() const { return id == 0; }
+    [[nodiscard]] bool Empty() const {
+        return id == 0;
+    }
 };
 
 struct TextureToken {
     Astra::Core::u64 id = 0;
-    [[nodiscard]] bool Empty() const { return id == 0; }
+    [[nodiscard]] bool Empty() const {
+        return id == 0;
+    }
 };
 
 struct GlyphAtlasToken {
     Astra::Core::u64 id = 0;
-    [[nodiscard]] bool Empty() const { return id == 0; }
+    [[nodiscard]] bool Empty() const {
+        return id == 0;
+    }
 };
 
 struct AudioStreamToken {
     Astra::Core::u64 id = 0;
-    [[nodiscard]] bool Empty() const { return id == 0; }
+    [[nodiscard]] bool Empty() const {
+        return id == 0;
+    }
 };
 
 struct DecodeStreamToken {
     Astra::Core::u64 id = 0;
-    [[nodiscard]] bool Empty() const { return id == 0; }
+    [[nodiscard]] bool Empty() const {
+        return id == 0;
+    }
 };
 
 struct MediaSurfaceToken {
     Astra::Core::u64 id = 0;
-    [[nodiscard]] bool Empty() const { return id == 0; }
+    [[nodiscard]] bool Empty() const {
+        return id == 0;
+    }
 };
 
 struct DecodedCpuBuffer {
@@ -276,6 +275,35 @@ struct FrameCapture {
     nlohmann::json commands = nlohmann::json::array();
 };
 
+struct FrameCaptureRequest {
+    std::string schema = "astra.media.frame_capture_request.v1";
+    bool include_commands = true;
+    bool include_pixels = false;
+    std::string comparison_mode = "logical_hash";
+};
+
+struct AudioCaptureRequest {
+    std::string schema = "astra.media.audio_capture_request.v1";
+    bool include_active_commands = true;
+    bool include_pcm_checksum = true;
+};
+
+struct DriverDiffReport {
+    std::string schema = "astra.media.driver_diff.v1";
+    bool passed = false;
+    std::string reference_provider;
+    std::string candidate_provider;
+    std::string render_hash_reference;
+    std::string render_hash_candidate;
+    std::string text_hash_reference;
+    std::string text_hash_candidate;
+    std::string audio_hash_reference;
+    std::string audio_hash_candidate;
+    std::string filter_hash_reference;
+    std::string filter_hash_candidate;
+    std::vector<std::string> missing_required_capabilities;
+};
+
 struct MediaProviderDescriptor {
     std::string provider_id;
     std::string slot_id;
@@ -377,73 +405,124 @@ struct AudioDecodeReport {
 };
 
 class ASTRA_MEDIA_API IRenderer2D {
-public:
+  public:
     virtual ~IRenderer2D() = default;
     virtual void Submit(RenderGraph graph, Astra::Core::DiagnosticSink& diagnostics) = 0;
     [[nodiscard]] virtual FrameCapture Capture() const = 0;
 };
 
 class ASTRA_MEDIA_API IRenderer2DProvider {
-public:
+  public:
     virtual ~IRenderer2DProvider() = default;
     [[nodiscard]] virtual MediaProviderDescriptor Describe() const = 0;
-    [[nodiscard]] virtual Astra::Core::Result<void> BeginFrame(const RenderFrameDesc& desc, Astra::Core::DiagnosticSink& diagnostics) = 0;
-    [[nodiscard]] virtual Astra::Core::Result<TextureToken> ImportTexture(const DecodedCpuBuffer& buffer, Astra::Core::DiagnosticSink& diagnostics) = 0;
-    [[nodiscard]] virtual Astra::Core::Result<TextureToken> ImportSurface(MediaSurfaceToken token, Astra::Core::DiagnosticSink& diagnostics) = 0;
-    [[nodiscard]] virtual Astra::Core::Result<void> Execute(const RenderGraph& graph, Astra::Core::DiagnosticSink& diagnostics) = 0;
-    [[nodiscard]] virtual Astra::Core::Result<FrameCapture> Capture(Astra::Core::DiagnosticSink& diagnostics) = 0;
-    [[nodiscard]] virtual Astra::Core::Result<void> Present(PresentRequest request, Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<void>
+    BeginFrame(const RenderFrameDesc& desc, Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<TextureToken>
+    ImportTexture(const DecodedCpuBuffer& buffer, Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<TextureToken>
+    ImportSurface(MediaSurfaceToken token, Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<void>
+    Execute(const RenderGraph& graph, Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<FrameCapture>
+    Capture(Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<void>
+    Present(PresentRequest request, Astra::Core::DiagnosticSink& diagnostics) = 0;
 };
 
 class ASTRA_MEDIA_API ITextLayoutProvider {
-public:
+  public:
     virtual ~ITextLayoutProvider() = default;
     [[nodiscard]] virtual MediaProviderDescriptor Describe() const = 0;
-    [[nodiscard]] virtual Astra::Core::Result<GlyphRun> Shape(TextLayoutRequest request, Astra::Core::DiagnosticSink& diagnostics) = 0;
-    [[nodiscard]] virtual Astra::Core::Result<GlyphAtlasToken> PrepareAtlas(const GlyphRun& run, Astra::Core::DiagnosticSink& diagnostics) = 0;
-    [[nodiscard]] virtual Astra::Core::Result<TextLayoutCapture> Capture(Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<GlyphRun>
+    Shape(TextLayoutRequest request, Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<GlyphAtlasToken>
+    PrepareAtlas(const GlyphRun& run, Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<TextLayoutCapture>
+    Capture(Astra::Core::DiagnosticSink& diagnostics) = 0;
 };
 
 class ASTRA_MEDIA_API IAudioProvider {
-public:
+  public:
     virtual ~IAudioProvider() = default;
     [[nodiscard]] virtual MediaProviderDescriptor Describe() const = 0;
-    [[nodiscard]] virtual Astra::Core::Result<AudioStreamToken> CreateStream(const AudioCommand& command, Astra::Core::DiagnosticSink& diagnostics) = 0;
-    [[nodiscard]] virtual Astra::Core::Result<void> Submit(const std::vector<AudioCommand>& commands, Astra::Core::DiagnosticSink& diagnostics) = 0;
-    [[nodiscard]] virtual Astra::Core::Result<AudioStateCapture> Capture(Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<AudioStreamToken>
+    CreateStream(const AudioCommand& command, Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<void>
+    Submit(const std::vector<AudioCommand>& commands, Astra::Core::DiagnosticSink& diagnostics) = 0;
+    [[nodiscard]] virtual Astra::Core::Result<AudioStateCapture>
+    Capture(Astra::Core::DiagnosticSink& diagnostics) = 0;
 };
 
 [[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IRenderer2D> CreateHeadlessRenderer2D();
-[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IRenderer2DProvider> CreateHeadlessRenderer2DProvider();
-[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IRenderer2DProvider> CreateProductionRenderer2DProvider(RenderTargetBinding binding = {});
-[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<ITextLayoutProvider> CreateFoundationTextLayoutProvider();
-[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<ITextLayoutProvider> CreateProductionTextLayoutProvider();
-[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IAudioProvider> CreateFoundationAudioProvider(bool silent_backend = true);
-[[nodiscard]] ASTRA_MEDIA_API RenderGraph ExtractRenderGraph(const std::vector<PresentationCommand>& commands, const FilterProfile* filter_profile, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IRenderer2DProvider>
+CreateHeadlessRenderer2DProvider();
+[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IRenderer2DProvider>
+CreateProductionRenderer2DProvider(RenderTargetBinding binding = {});
+[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<ITextLayoutProvider>
+CreateFoundationTextLayoutProvider();
+[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<ITextLayoutProvider>
+CreateProductionTextLayoutProvider();
+[[nodiscard]] ASTRA_MEDIA_API std::unique_ptr<IAudioProvider>
+CreateFoundationAudioProvider(bool silent_backend = true);
+[[nodiscard]] ASTRA_MEDIA_API RenderGraph
+ExtractRenderGraph(const std::vector<PresentationCommand>& commands,
+                   const FilterProfile* filter_profile, Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API std::vector<MediaProviderDescriptor> FoundationMediaProviders();
 [[nodiscard]] ASTRA_MEDIA_API std::vector<MediaProviderDescriptor> ProductionMediaProviders();
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<void> ValidateMediaProviderDescriptor(const MediaProviderDescriptor& descriptor, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<MediaReleaseGateReport> ValidateMediaReleaseGate(const MediaReleaseGateRequest& request, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<void>
+ValidateMediaProviderDescriptor(const MediaProviderDescriptor& descriptor,
+                                Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<MediaReleaseGateReport>
+ValidateMediaReleaseGate(const MediaReleaseGateRequest& request,
+                         Astra::Core::DiagnosticSink& diagnostics);
 [[nodiscard]] ASTRA_MEDIA_API MediaBackendCapabilityReport ProbeMediaBackendCapabilities();
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<ImageDecodeReport> InspectImageBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedImageRgba> DecodeImageRgbaBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedCpuBuffer> DecodeImageCpuBufferBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<RasterizedTextRgba> RasterizeTextRgbaBytes(std::span<const Astra::Core::u8> font_bytes, std::string_view text, Astra::Core::u32 pixel_height, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedCpuBuffer> RasterizeUiTextCpuBufferBytes(std::span<const Astra::Core::u8> font_bytes, std::string_view text, Astra::Core::u32 pixel_height, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<AudioDecodeReport> DecodeAudioBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<VideoDecodeMetadata> InspectVideoBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedVideoFrame> DecodeVideoFrameRgbaBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::u64 frame_index, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<FilterProfile> FilterProfileFromJson(const nlohmann::json& json, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<void> ValidateFilterProfile(const FilterProfile& profile, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API std::vector<FilterApplication> ApplyFilterProfile(const FilterProfile& profile);
-[[nodiscard]] ASTRA_MEDIA_API FilterGraphExecution ExecuteFilterGraphHeadless(const FilterProfile& profile, const RenderGraph& graph);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<TimelineAsset> TimelineFromJson(const nlohmann::json& json, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<void> ValidateTimeline(const TimelineAsset& timeline, Astra::Core::DiagnosticSink& diagnostics);
-[[nodiscard]] ASTRA_MEDIA_API TimelineState EvaluateTimeline(const TimelineAsset& timeline, Astra::Core::u64 cursor_time_ns);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<ImageDecodeReport>
+InspectImageBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedImageRgba>
+DecodeImageRgbaBytes(std::span<const Astra::Core::u8> bytes,
+                     Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedCpuBuffer>
+DecodeImageCpuBufferBytes(std::span<const Astra::Core::u8> bytes,
+                          Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<RasterizedTextRgba>
+RasterizeTextRgbaBytes(std::span<const Astra::Core::u8> font_bytes, std::string_view text,
+                       Astra::Core::u32 pixel_height, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedCpuBuffer>
+RasterizeUiTextCpuBufferBytes(std::span<const Astra::Core::u8> font_bytes, std::string_view text,
+                              Astra::Core::u32 pixel_height,
+                              Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<AudioDecodeReport>
+DecodeAudioBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<VideoDecodeMetadata>
+InspectVideoBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<DecodedVideoFrame>
+DecodeVideoFrameRgbaBytes(std::span<const Astra::Core::u8> bytes, Astra::Core::u64 frame_index,
+                          Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<FilterProfile>
+FilterProfileFromJson(const nlohmann::json& json, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<void>
+ValidateFilterProfile(const FilterProfile& profile, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API std::vector<FilterApplication>
+ApplyFilterProfile(const FilterProfile& profile);
+[[nodiscard]] ASTRA_MEDIA_API FilterGraphExecution
+ExecuteFilterGraphHeadless(const FilterProfile& profile, const RenderGraph& graph);
+[[nodiscard]] ASTRA_MEDIA_API FilterGraphExecution
+ExecuteFilterGraphCpu(const FilterProfile& profile, const RenderGraph& graph,
+                      DecodedCpuBuffer* buffer, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API DriverDiffReport CompareDriverCaptures(
+    const FrameCapture& reference, const FrameCapture& candidate,
+    const MediaBackendCapabilityReport& capabilities, bool require_driver_hardening);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<TimelineAsset>
+TimelineFromJson(const nlohmann::json& json, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<void>
+ValidateTimeline(const TimelineAsset& timeline, Astra::Core::DiagnosticSink& diagnostics);
+[[nodiscard]] ASTRA_MEDIA_API TimelineState EvaluateTimeline(const TimelineAsset& timeline,
+                                                             Astra::Core::u64 cursor_time_ns);
 
 [[nodiscard]] ASTRA_MEDIA_API std::string ToString(PresentationCommandKind kind);
 [[nodiscard]] ASTRA_MEDIA_API std::string ToString(FilterTarget target);
-[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<FilterTarget> FilterTargetFromString(std::string_view value);
+[[nodiscard]] ASTRA_MEDIA_API Astra::Core::Result<FilterTarget>
+FilterTargetFromString(std::string_view value);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const PresentationCommand& command);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const RenderGraph& graph);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const FrameCapture& capture);
@@ -458,6 +537,9 @@ public:
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const TextLayoutCapture& capture);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const AudioStateCapture& capture);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const RenderBackendSmoke& smoke);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const FrameCaptureRequest& request);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const AudioCaptureRequest& request);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const DriverDiffReport& report);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const VideoDecodeMetadata& metadata);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const DecodedVideoFrame& frame);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const FilterGraphExecution& execution);

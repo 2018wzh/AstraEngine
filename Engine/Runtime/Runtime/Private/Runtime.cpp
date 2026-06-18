@@ -55,12 +55,15 @@ std::vector<Astra::Core::u8> CompressText(std::string_view text) {
 Astra::Core::Result<std::string> DecompressText(const std::vector<Astra::Core::u8>& compressed) {
     const auto expected_size = ZSTD_getFrameContentSize(compressed.data(), compressed.size());
     if (expected_size == ZSTD_CONTENTSIZE_ERROR || expected_size == ZSTD_CONTENTSIZE_UNKNOWN) {
-        return Astra::Core::Result<std::string>::Failure(Astra::Core::ErrorCode::InvalidFormat, "invalid zstd save section");
+        return Astra::Core::Result<std::string>::Failure(Astra::Core::ErrorCode::InvalidFormat,
+                                                         "invalid zstd save section");
     }
     std::string output(static_cast<std::size_t>(expected_size), '\0');
-    const auto size = ZSTD_decompress(output.data(), output.size(), compressed.data(), compressed.size());
+    const auto size =
+        ZSTD_decompress(output.data(), output.size(), compressed.data(), compressed.size());
     if (ZSTD_isError(size)) {
-        return Astra::Core::Result<std::string>::Failure(Astra::Core::ErrorCode::InvalidFormat, "could not decompress zstd save section");
+        return Astra::Core::Result<std::string>::Failure(Astra::Core::ErrorCode::InvalidFormat,
+                                                         "could not decompress zstd save section");
     }
     output.resize(size);
     return Astra::Core::Result<std::string>::Success(std::move(output));
@@ -69,7 +72,7 @@ Astra::Core::Result<std::string> DecompressText(const std::vector<Astra::Core::u
 } // namespace
 
 class RuntimeWorld::Impl {
-public:
+  public:
     explicit Impl(Astra::Core::u64 seed) : random_seed(seed) {}
 
     Astra::Scene::ActorWorld scene;
@@ -85,29 +88,33 @@ public:
     std::map<std::string, RuntimeEventSubscription> subscriptions;
     std::map<std::string, RuntimeTask> tasks;
 
-    void ApplyStateMachineForActor(const RuntimeEvent& event, const Astra::Scene::ActorSnapshot& actor) {
-            Astra::Scene::ActorHandle handle{actor.id, actor.generation};
-            auto state_machine = scene.FindComponent(handle, "astra.state_machine");
-            if (!state_machine) {
-                return;
+    void ApplyStateMachineForActor(const RuntimeEvent& event,
+                                   const Astra::Scene::ActorSnapshot& actor) {
+        Astra::Scene::ActorHandle handle{actor.id, actor.generation};
+        auto state_machine = scene.FindComponent(handle, "astra.state_machine");
+        if (!state_machine) {
+            return;
+        }
+        const auto definition_id = state_machine->data.value("state_machine_id", "");
+        const auto definition_it = definitions.find(definition_id);
+        if (definition_it == definitions.end()) {
+            return;
+        }
+        const auto current_state =
+            state_machine->data.value("current_state", definition_it->second.initial_state);
+        for (const auto& transition : definition_it->second.transitions) {
+            if (transition.from_state == current_state && transition.event_type == event.type) {
+                state_machine->data["current_state"] = transition.to_state;
+                state_machine->data["last_transition_event"] = event.event_id.ToString();
+                state_machine->data["last_transition_sequence"] = event.sequence;
+                state_machine->data["trace"].push_back({{"from", transition.from_state},
+                                                        {"to", transition.to_state},
+                                                        {"event", event.type.ToString()}});
+                Astra::Core::DiagnosticSink ignored;
+                (void)scene.AddOrReplaceComponent(handle, *state_machine, ignored);
+                break;
             }
-            const auto definition_id = state_machine->data.value("state_machine_id", "");
-            const auto definition_it = definitions.find(definition_id);
-            if (definition_it == definitions.end()) {
-                return;
-            }
-            const auto current_state = state_machine->data.value("current_state", definition_it->second.initial_state);
-            for (const auto& transition : definition_it->second.transitions) {
-                if (transition.from_state == current_state && transition.event_type == event.type) {
-                    state_machine->data["current_state"] = transition.to_state;
-                    state_machine->data["last_transition_event"] = event.event_id.ToString();
-                    state_machine->data["last_transition_sequence"] = event.sequence;
-                    state_machine->data["trace"].push_back({{"from", transition.from_state}, {"to", transition.to_state}, {"event", event.type.ToString()}});
-                    Astra::Core::DiagnosticSink ignored;
-                    (void)scene.AddOrReplaceComponent(handle, *state_machine, ignored);
-                    break;
-                }
-            }
+        }
     }
 
     void ApplyStateMachines(const RuntimeEvent& event) {
@@ -131,14 +138,17 @@ public:
         }
     }
 
-    void StepScheduler(const std::vector<RuntimeEvent>& drained, Astra::Core::DiagnosticSink& diagnostics) {
+    std::vector<Astra::Core::StableId> StepScheduler(const std::vector<RuntimeEvent>& drained,
+                                                     Astra::Core::DiagnosticSink& diagnostics) {
+        std::vector<Astra::Core::StableId> completed;
         std::vector<Astra::Core::EventTypeId> event_types;
         for (const auto& event : drained) {
             event_types.push_back(event.type);
         }
         for (auto& [task_key, task] : tasks) {
             (void)task_key;
-            if (task.state == RuntimeTaskState::Cancelled || task.state == RuntimeTaskState::Completed) {
+            if (task.state == RuntimeTaskState::Cancelled ||
+                task.state == RuntimeTaskState::Completed) {
                 continue;
             }
             if (task.owner.kind == "actor") {
@@ -155,11 +165,15 @@ public:
             bool wake = false;
             if (task.wait.kind == RuntimeWaitKind::None) {
                 wake = true;
-            } else if (task.wait.kind == RuntimeWaitKind::Time || task.wait.kind == RuntimeWaitKind::FixedSteps) {
+            } else if (task.wait.kind == RuntimeWaitKind::Time ||
+                       task.wait.kind == RuntimeWaitKind::FixedSteps) {
                 wake = task.wait.wake_frame <= fixed_step_index + 1;
-            } else if (task.wait.kind == RuntimeWaitKind::Event || task.wait.kind == RuntimeWaitKind::ProviderSignal) {
-                wake = std::ranges::any_of(event_types, [&](const auto& type) { return type == task.wait.event_type; });
-            } else if (task.wait.kind == RuntimeWaitKind::Asset || task.wait.kind == RuntimeWaitKind::AssetReady) {
+            } else if (task.wait.kind == RuntimeWaitKind::Event ||
+                       task.wait.kind == RuntimeWaitKind::ProviderSignal) {
+                wake = std::ranges::any_of(
+                    event_types, [&](const auto& type) { return type == task.wait.event_type; });
+            } else if (task.wait.kind == RuntimeWaitKind::Asset ||
+                       task.wait.kind == RuntimeWaitKind::AssetReady) {
                 wake = task.continuation.value("asset_ready", false);
             } else if (task.wait.kind == RuntimeWaitKind::Script) {
                 wake = task.continuation.value("script_ready", false);
@@ -168,6 +182,7 @@ public:
             }
             if (wake) {
                 task.state = RuntimeTaskState::Completed;
+                completed.push_back(task.id);
                 if (!task.emit_on_wake.type.Empty()) {
                     auto event = task.emit_on_wake;
                     if (event.sequence == 0) {
@@ -175,7 +190,9 @@ public:
                     }
                     event.frame_index = frame_index;
                     if (event.event_id.Empty()) {
-                        event.event_id = Astra::Core::StableId(Astra::Core::StableIdKind::EventType, "runtime/" + std::to_string(event.sequence));
+                        event.event_id =
+                            Astra::Core::StableId(Astra::Core::StableIdKind::EventType,
+                                                  "runtime/" + std::to_string(event.sequence));
                     }
                     event.trace.audit_ref = "scheduled";
                     events.Emit(std::move(event), RuntimeEventMode::Queued);
@@ -184,6 +201,7 @@ public:
                 task.state = RuntimeTaskState::Waiting;
             }
         }
+        return completed;
     }
 };
 
@@ -242,7 +260,8 @@ void RuntimeEventBus::Clear() {
     trace_.clear();
 }
 
-RuntimeWorld::RuntimeWorld(Astra::Core::u64 random_seed) : impl_(std::make_unique<Impl>(random_seed)) {}
+RuntimeWorld::RuntimeWorld(Astra::Core::u64 random_seed)
+    : impl_(std::make_unique<Impl>(random_seed)) {}
 RuntimeWorld::RuntimeWorld(RuntimeWorld&&) noexcept = default;
 RuntimeWorld& RuntimeWorld::operator=(RuntimeWorld&&) noexcept = default;
 RuntimeWorld::~RuntimeWorld() = default;
@@ -275,16 +294,20 @@ void RuntimeWorld::RegisterStateMachine(StateMachineDefinition definition) {
     impl_->definitions[definition.id.ToString()] = std::move(definition);
 }
 
-RuntimeEventSubscription RuntimeWorld::Subscribe(Astra::Core::EventTypeId event_type, std::string owner) {
+RuntimeEventSubscription RuntimeWorld::Subscribe(Astra::Core::EventTypeId event_type,
+                                                 std::string owner) {
     RuntimeEventSubscription subscription;
-    subscription.id = Astra::Core::StableId(Astra::Core::StableIdKind::Unknown, "runtime/subscription/" + std::to_string(impl_->next_subscription_sequence++));
+    subscription.id = Astra::Core::StableId(
+        Astra::Core::StableIdKind::Unknown,
+        "runtime/subscription/" + std::to_string(impl_->next_subscription_sequence++));
     subscription.event_type = std::move(event_type);
     subscription.owner = std::move(owner);
     impl_->subscriptions[subscription.id.ToString()] = subscription;
     return subscription;
 }
 
-Astra::Core::Result<void> RuntimeWorld::Unsubscribe(const Astra::Core::StableId& subscription, Astra::Core::DiagnosticSink& diagnostics) {
+Astra::Core::Result<void> RuntimeWorld::Unsubscribe(const Astra::Core::StableId& subscription,
+                                                    Astra::Core::DiagnosticSink& diagnostics) {
     auto it = impl_->subscriptions.find(subscription.ToString());
     if (it == impl_->subscriptions.end()) {
         Astra::Core::Diagnostic diagnostic;
@@ -294,15 +317,18 @@ Astra::Core::Result<void> RuntimeWorld::Unsubscribe(const Astra::Core::StableId&
         diagnostic.message = "Runtime event subscription is missing or already removed.";
         diagnostic.objects = {{"subscription", subscription.ToString()}};
         diagnostics.Emit(std::move(diagnostic));
-        return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::NotFound, "subscription is missing");
+        return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::NotFound,
+                                                  "subscription is missing");
     }
     impl_->subscriptions.erase(it);
     return Astra::Core::Result<void>::Success();
 }
 
-Astra::Core::Result<void> RuntimeWorld::ScheduleTask(RuntimeTask task, Astra::Core::DiagnosticSink&) {
+Astra::Core::Result<void> RuntimeWorld::ScheduleTask(RuntimeTask task,
+                                                     Astra::Core::DiagnosticSink&) {
     if (task.id.Empty()) {
-        task.id = Astra::Core::StableId(Astra::Core::StableIdKind::Task, "runtime/" + std::to_string(impl_->next_task_sequence++));
+        task.id = Astra::Core::StableId(Astra::Core::StableIdKind::Task,
+                                        "runtime/" + std::to_string(impl_->next_task_sequence++));
     }
     if (task.state == RuntimeTaskState::Pending && task.wait.kind != RuntimeWaitKind::None) {
         task.state = RuntimeTaskState::Waiting;
@@ -311,7 +337,9 @@ Astra::Core::Result<void> RuntimeWorld::ScheduleTask(RuntimeTask task, Astra::Co
     return Astra::Core::Result<void>::Success();
 }
 
-Astra::Core::Result<void> RuntimeWorld::CancelTask(const Astra::Core::StableId& task_id, std::string reason, Astra::Core::DiagnosticSink& diagnostics) {
+Astra::Core::Result<void> RuntimeWorld::CancelTask(const Astra::Core::StableId& task_id,
+                                                   std::string reason,
+                                                   Astra::Core::DiagnosticSink& diagnostics) {
     auto it = impl_->tasks.find(task_id.ToString());
     if (it == impl_->tasks.end()) {
         Astra::Core::Diagnostic diagnostic;
@@ -321,7 +349,8 @@ Astra::Core::Result<void> RuntimeWorld::CancelTask(const Astra::Core::StableId& 
         diagnostic.message = "Runtime scheduler task is missing.";
         diagnostic.objects = {{"task", task_id.ToString()}};
         diagnostics.Emit(std::move(diagnostic));
-        return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::NotFound, "task is missing");
+        return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::NotFound,
+                                                  "task is missing");
     }
     it->second.state = RuntimeTaskState::Cancelled;
     it->second.continuation["cancel_reason"] = std::move(reason);
@@ -337,7 +366,9 @@ SchedulerSnapshot RuntimeWorld::Scheduler() const {
     return snapshot;
 }
 
-ControlPolicyResult RuntimeWorld::EvaluateControlPolicy(const ControlPolicyRequest& request, Astra::Core::DiagnosticSink& diagnostics) const {
+ControlPolicyResult
+RuntimeWorld::EvaluateControlPolicy(const ControlPolicyRequest& request,
+                                    Astra::Core::DiagnosticSink& diagnostics) const {
     auto handle = impl_->scene.ResolveActor(request.actor_id, diagnostics);
     if (!handle) {
         return {ControlDecision::Reject, "missing actor"};
@@ -347,7 +378,10 @@ ControlPolicyResult RuntimeWorld::EvaluateControlPolicy(const ControlPolicyReque
         return {ControlDecision::Allow, "no policy component"};
     }
     const auto locked_channels = policy->data.value("locked_channels", nlohmann::json::array());
-    const auto channel_locked = std::ranges::any_of(locked_channels, [&](const nlohmann::json& value) { return value.get<std::string>() == request.channel; });
+    const auto channel_locked =
+        std::ranges::any_of(locked_channels, [&](const nlohmann::json& value) {
+            return value.get<std::string>() == request.channel;
+        });
     if (!channel_locked) {
         return {ControlDecision::Allow, "channel unlocked"};
     }
@@ -364,10 +398,39 @@ ControlPolicyResult RuntimeWorld::EvaluateControlPolicy(const ControlPolicyReque
         return {ControlDecision::Reject, "locked channel rejects lower priority request"};
     }
     const auto queue_locked = policy->data.value("queue_locked", true);
-    return queue_locked ? ControlPolicyResult{ControlDecision::Queue, "locked channel queues lower priority request"} : ControlPolicyResult{ControlDecision::Reject, "locked channel rejects lower priority request"};
+    return queue_locked ? ControlPolicyResult{ControlDecision::Queue,
+                                              "locked channel queues lower priority request"}
+                        : ControlPolicyResult{ControlDecision::Reject,
+                                              "locked channel rejects lower priority request"};
 }
 
-Astra::Core::Result<void> RuntimeWorld::Emit(RuntimeEvent event, RuntimeEventMode mode, Astra::Core::DiagnosticSink&) {
+DirectorArbitrationResult RuntimeWorld::ArbitrateDirector(const DirectorArbitrationRequest& request,
+                                                          Astra::Core::DiagnosticSink&) {
+    DirectorArbitrationResult result;
+    auto channel_blocked = [&](std::string_view channel) {
+        return (channel == "timeline" && impl_->director.timeline_locked) ||
+               (channel == "choice" && impl_->director.choice_locked) ||
+               (channel == "ai" && !impl_->director.ai_permission_window);
+    };
+    if (channel_blocked(request.channel) && !request.interrupt_allowed && request.priority < 100) {
+        result.decision = ControlDecision::Queue;
+        result.queued = true;
+        result.blocking_owner =
+            request.conflicts.empty() ? impl_->director.phase : request.conflicts.front();
+        result.reason = "director channel is locked";
+    } else if (channel_blocked(request.channel) && request.interrupt_allowed) {
+        result.decision = ControlDecision::Allow;
+        result.reason = "interrupt allowed";
+    } else {
+        result.reason = "director allowed";
+    }
+    impl_->director.arbitration_log.push_back(
+        {{"request", ToJson(request)}, {"result", ToJson(result)}});
+    return result;
+}
+
+Astra::Core::Result<void> RuntimeWorld::Emit(RuntimeEvent event, RuntimeEventMode mode,
+                                             Astra::Core::DiagnosticSink&) {
     if (event.sequence == 0) {
         event.sequence = impl_->next_event_sequence++;
     } else {
@@ -375,13 +438,15 @@ Astra::Core::Result<void> RuntimeWorld::Emit(RuntimeEvent event, RuntimeEventMod
     }
     event.frame_index = impl_->frame_index;
     if (event.event_id.Empty()) {
-        event.event_id = Astra::Core::StableId(Astra::Core::StableIdKind::EventType, "runtime/" + std::to_string(event.sequence));
+        event.event_id = Astra::Core::StableId(Astra::Core::StableIdKind::EventType,
+                                               "runtime/" + std::to_string(event.sequence));
     }
     event.trace.audit_ref = EventModeToString(mode);
     Astra::Core::LogEvent log;
     log.channel = "runtime.event";
     log.component = event.type.ToString();
-    log.level = mode == RuntimeEventMode::Immediate ? Astra::Core::LogLevel::Debug : Astra::Core::LogLevel::Trace;
+    log.level = mode == RuntimeEventMode::Immediate ? Astra::Core::LogLevel::Debug
+                                                    : Astra::Core::LogLevel::Trace;
     log.message = "runtime event emitted";
     log.frame_index = event.frame_index;
     log.objects = {{"event", event.event_id.ToString()}};
@@ -399,34 +464,54 @@ Astra::Core::Result<void> RuntimeWorld::Emit(RuntimeEvent event, RuntimeEventMod
     return Astra::Core::Result<void>::Success();
 }
 
-Astra::Core::Result<void> RuntimeWorld::Tick(Astra::Core::DiagnosticSink&) {
-    Astra::Core::DefaultLogger().Log(
-        "runtime.tick",
-        "runtime_world",
-        Astra::Core::LogLevel::Trace,
-        "runtime tick started",
-        {{"frame", std::to_string(impl_->frame_index)}, {"queued", std::to_string(impl_->events.QueuedCount())}});
+Astra::Core::Result<RuntimeFrameResult>
+RuntimeWorld::Tick(const RuntimeTickInput& input, Astra::Core::DiagnosticSink& diagnostics) {
+    RuntimeFrameResult result;
+    result.frame_index = impl_->frame_index;
+    result.event_sequence_begin = impl_->next_event_sequence;
+    for (auto event : input.input_events) {
+        auto emitted = Emit(std::move(event), RuntimeEventMode::Queued, diagnostics);
+        if (!emitted) {
+            return Astra::Core::Result<RuntimeFrameResult>::Failure(emitted.Error(),
+                                                                    emitted.Message());
+        }
+    }
+    Astra::Core::DefaultLogger().Log("runtime.tick", "runtime_world", Astra::Core::LogLevel::Trace,
+                                     "runtime tick started",
+                                     {{"frame", std::to_string(impl_->frame_index)},
+                                      {"queued", std::to_string(impl_->events.QueuedCount())}});
     impl_->events.AdvanceDeferred();
     const auto events = impl_->events.DrainQueued();
     for (const auto& event : events) {
         impl_->ApplyStateMachines(event);
     }
-    Astra::Core::DiagnosticSink ignored;
-    impl_->StepScheduler(events, ignored);
+    result.scheduled_tasks_completed = impl_->StepScheduler(events, diagnostics);
     const auto scheduled_events = impl_->events.DrainQueued();
     for (const auto& event : scheduled_events) {
         impl_->ApplyStateMachines(event);
     }
+    (void)impl_->scene.FlushDeferredDestroy(diagnostics);
     impl_->frame_index += 1;
     impl_->fixed_step_index += 1;
+    result.frame_index = impl_->frame_index;
+    result.fixed_steps_executed = 1;
+    result.event_sequence_end =
+        impl_->next_event_sequence == 0 ? 0 : impl_->next_event_sequence - 1;
+    result.hashes = Hashes();
     Astra::Core::DefaultLogger().Log(
-        "runtime.tick",
-        "runtime_world",
-        Astra::Core::LogLevel::Trace,
-        "runtime tick finished",
+        "runtime.tick", "runtime_world", Astra::Core::LogLevel::Trace, "runtime tick finished",
         {{"frame", std::to_string(impl_->frame_index)},
          {"events", std::to_string(events.size() + scheduled_events.size())},
          {"tasks", std::to_string(impl_->tasks.size())}});
+    return Astra::Core::Result<RuntimeFrameResult>::Success(std::move(result));
+}
+
+Astra::Core::Result<void> RuntimeWorld::Tick(Astra::Core::DiagnosticSink& diagnostics) {
+    RuntimeTickInput input;
+    auto result = Tick(input, diagnostics);
+    if (!result) {
+        return Astra::Core::Result<void>::Failure(result.Error(), result.Message());
+    }
     return Astra::Core::Result<void>::Success();
 }
 
@@ -458,40 +543,50 @@ RuntimeReplay RuntimeWorld::CaptureReplay() const {
 }
 
 Astra::Core::VersionedDocument RuntimeWorld::Save() const {
-    Astra::Core::DefaultLogger().Log(
-        "runtime.save",
-        "runtime_world",
-        Astra::Core::LogLevel::Debug,
-        "runtime save captured",
-        {{"frame", std::to_string(impl_->frame_index)}});
+    Astra::Core::DefaultLogger().Log("runtime.save", "runtime_world", Astra::Core::LogLevel::Debug,
+                                     "runtime save captured",
+                                     {{"frame", std::to_string(impl_->frame_index)}});
     return {SnapshotSchema, 1, "runtime:/world", ToJson(CaptureSnapshot())};
 }
 
 SaveContainerV2 RuntimeWorld::SaveV2(bool compress_sections) const {
     SaveContainerV2 container;
-    const auto build_info = Astra::Core::VersionedDocument{SnapshotSchema, 1, "runtime:/world", ToJson(CaptureSnapshot())};
+    const auto build_info = Astra::Core::VersionedDocument{SnapshotSchema, 1, "runtime:/world",
+                                                           ToJson(CaptureSnapshot())};
     container.header = {
         {"engine_version", "0.2.0"},
         {"save_schema", SaveContainerV2Schema},
         {"created_frame", impl_->frame_index},
         {"project_version", 1},
         {"module_versions", nlohmann::json::object()},
-        {"schema_versions", {{"runtime_snapshot", 1}, {"scheduler", 1}, {"replay", 1}, {"media_logical_state", 1}}},
+        {"schema_versions",
+         {{"runtime_snapshot", 1}, {"scheduler", 1}, {"replay", 1}, {"media_logical_state", 1}}},
     };
     std::vector<std::pair<std::string, nlohmann::json>> section_payloads = {
         {"section:/runtime/world", build_info.payload},
+        {"section:/scene/actors", Astra::Scene::ToJson(impl_->scene.Snapshot())},
+        {"section:/runtime/event_bus", nlohmann::json{{"schema", "astra.runtime.event_bus.v1"},
+                                                      {"events", CaptureSnapshot().replay_events}}},
         {"section:/runtime/scheduler", ToJson(Scheduler())},
-        {"section:/runtime/replay", ToJson(CaptureReplay())},
+        {"section:/runtime/director", ToJson(impl_->director)},
         {"section:/script/runtime", nlohmann::json::object()},
-        {"section:/media/logical_state", {{"schema", "astra.media.logical_state.v1"}, {"provider_hashes", nlohmann::json::object()}, {"timeline_states", nlohmann::json::array()}, {"audio_state", nlohmann::json::object()}, {"filter_state", nlohmann::json::object()}}},
-        {"section:/media/resource_overrides", nlohmann::json::object()},
-        {"section:/ai/committed_output", nlohmann::json::array()},
+        {"section:/presentation/state", nlohmann::json::object()},
+        {"section:/media/logical_state",
+         {{"schema", "astra.media.logical_state.v1"},
+          {"provider_hashes", nlohmann::json::object()},
+          {"timeline_states", nlohmann::json::array()},
+          {"audio_state", nlohmann::json::object()},
+          {"filter_state", nlohmann::json::object()}}},
         {"section:/modules/extension_state", nlohmann::json::object()},
+        {"section:/ai/committed_output", nlohmann::json::array()},
     };
     for (const auto& [name, payload] : section_payloads) {
         SaveSection section;
         section.name = name;
-        section.schema = name == "section:/runtime/world" ? SnapshotSchema : "astra.runtime." + name.substr(std::string("section:/").size()) + ".v1";
+        section.schema =
+            name == "section:/runtime/world"
+                ? SnapshotSchema
+                : "astra.runtime." + name.substr(std::string("section:/").size()) + ".v1";
         section.payload = payload;
         const auto dumped = payload.dump();
         section.hash = StableHash(dumped);
@@ -503,20 +598,34 @@ SaveContainerV2 RuntimeWorld::SaveV2(bool compress_sections) const {
                 section.payload = nlohmann::json::object();
             }
         }
+        SaveSectionDescriptor descriptor;
+        descriptor.section_id = section.name;
+        descriptor.owner_module = section.name.starts_with("section:/media")    ? "astra.media"
+                                  : section.name.starts_with("section:/script") ? "astra.script"
+                                  : section.name.starts_with("section:/scene")  ? "astra.scene"
+                                  : section.name.starts_with("section:/modules")
+                                      ? "astra.module_runtime"
+                                  : section.name.starts_with("section:/ai") ? "astra.runtime_ai"
+                                                                            : "astra.runtime";
+        descriptor.payload_schema = section.schema;
+        descriptor.payload_version = section.version;
+        descriptor.required = section.name != "section:/ai/committed_output";
+        descriptor.hash = section.hash;
+        descriptor.compression = section.compressed ? "zstd" : "none";
+        container.section_descriptors.push_back(std::move(descriptor));
         container.sections.push_back(std::move(section));
     }
     return container;
 }
 
-Astra::Core::Result<void> RuntimeWorld::Load(const Astra::Core::VersionedDocument& document, Astra::Core::DiagnosticSink& diagnostics) {
-    Astra::Core::DefaultLogger().Log(
-        "runtime.save",
-        "runtime_world",
-        Astra::Core::LogLevel::Debug,
-        "runtime load started",
-        {{"schema", document.schema}, {"object", document.object_id}});
+Astra::Core::Result<void> RuntimeWorld::Load(const Astra::Core::VersionedDocument& document,
+                                             Astra::Core::DiagnosticSink& diagnostics) {
+    Astra::Core::DefaultLogger().Log("runtime.save", "runtime_world", Astra::Core::LogLevel::Debug,
+                                     "runtime load started",
+                                     {{"schema", document.schema}, {"object", document.object_id}});
     if (document.schema != SnapshotSchema) {
-        return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InvalidFormat, "unsupported runtime snapshot schema");
+        return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InvalidFormat,
+                                                  "unsupported runtime snapshot schema");
     }
     auto snapshot = RuntimeSnapshotFromJson(document.payload);
     if (!snapshot) {
@@ -544,18 +653,18 @@ Astra::Core::Result<void> RuntimeWorld::Load(const Astra::Core::VersionedDocumen
     }
     impl_->events.Clear();
     impl_->events.RestoreTrace(std::move(trace));
-    Astra::Core::DefaultLogger().Log(
-        "runtime.save",
-        "runtime_world",
-        Astra::Core::LogLevel::Debug,
-        "runtime load finished",
-        {{"frame", std::to_string(impl_->frame_index)}, {"tasks", std::to_string(impl_->tasks.size())}});
+    Astra::Core::DefaultLogger().Log("runtime.save", "runtime_world", Astra::Core::LogLevel::Debug,
+                                     "runtime load finished",
+                                     {{"frame", std::to_string(impl_->frame_index)},
+                                      {"tasks", std::to_string(impl_->tasks.size())}});
     return Astra::Core::Result<void>::Success();
 }
 
-Astra::Core::Result<void> RuntimeWorld::Load(const SaveContainerV2& container, Astra::Core::DiagnosticSink& diagnostics) {
+Astra::Core::Result<void> RuntimeWorld::Load(const SaveContainerV2& container,
+                                             Astra::Core::DiagnosticSink& diagnostics) {
     if (container.schema != SaveContainerV2Schema) {
-        return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InvalidFormat, "unsupported runtime save container schema");
+        return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InvalidFormat,
+                                                  "unsupported runtime save container schema");
     }
     const SaveSection* runtime_section = nullptr;
     for (const auto& section : container.sections) {
@@ -565,7 +674,8 @@ Astra::Core::Result<void> RuntimeWorld::Load(const SaveContainerV2& container, A
         }
     }
     if (runtime_section == nullptr) {
-        return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InvalidFormat, "runtime snapshot section is missing");
+        return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InvalidFormat,
+                                                  "runtime snapshot section is missing");
     }
     nlohmann::json payload = runtime_section->payload;
     if (runtime_section->compressed) {
@@ -575,7 +685,9 @@ Astra::Core::Result<void> RuntimeWorld::Load(const SaveContainerV2& container, A
         }
         payload = nlohmann::json::parse(decompressed.Value(), nullptr, false);
         if (payload.is_discarded()) {
-            return Astra::Core::Result<void>::Failure(Astra::Core::ErrorCode::InvalidFormat, "compressed runtime snapshot is invalid JSON");
+            return Astra::Core::Result<void>::Failure(
+                Astra::Core::ErrorCode::InvalidFormat,
+                "compressed runtime snapshot is invalid JSON");
         }
     }
     return Load({SnapshotSchema, 1, "runtime:/world", payload}, diagnostics);
@@ -587,7 +699,8 @@ RuntimeHashes RuntimeWorld::Hashes() const {
     for (const auto& event : impl_->events.Trace()) {
         events.push_back(ToJson(event));
     }
-    return {StableHash(world_json), StableHash(events.dump()), StableHash(world_json + events.dump())};
+    return {StableHash(world_json), StableHash(events.dump()),
+            StableHash(world_json + events.dump())};
 }
 
 } // namespace Astra::Runtime
