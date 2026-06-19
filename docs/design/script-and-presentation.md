@@ -3,14 +3,14 @@
 状态：Phase 8 implemented slice / Target Architecture  
 定位：脚本运行时、VN DSL/Lua/Graph、PresentationCommand 和 AstraVN 垂直模块的实现规格。
 
-Current implementation note：Phase 8 已将 `.astra` 作为默认生产 DSL，加入 PEGTL-backed parser、统一 command schema registry、command manifest、AST/StateGraph/Narrative/Effect IR、source map、debug symbols、debug step、hot reload compatibility report、Lua extension schema sandbox、`ScriptSnapshot v2`、embedded graph/timeline IR、AstraVN stage/timeline/choice/backlog/UI state 和 NativeVN full playable demo evidence。Lua story runtime 已移除；真实 Live2D/Emote SDK 执行、Editor graph/timeline UI、AI/MCP 和 Legacy runtime 仍属于后续阶段。
+Current implementation note：Phase 8 已将 `.astra` 作为默认生产 DSL，加入 PEGTL-backed parser、统一 command schema registry、command manifest、AST/StateGraph/Narrative/Effect IR、source map、debug symbols、debug step、hot reload compatibility report、Lua extension schema sandbox、`ScriptSnapshot v2`、embedded graph/timeline IR、AstraVN stage/timeline/choice/backlog/UI state 和 NativeVN full playable demo evidence。当前代码只完成 Lua extension schema sandbox；Lua-as-AstraVN-source 是目标能力，仍需 source map、debug symbols、hot reload、save/replay 和 ScriptParity evidence。真实 Live2D/Emote SDK 执行、Editor graph/timeline UI、AI/MCP 和 Legacy runtime 仍属于后续阶段。
 
 ## 1. 目标
 
 Script 与 Presentation 层必须让创作者能用文本、Graph、Timeline 或 Lua 编写 2D/VN 内容，
 同时保证 Runtime deterministic、save/replay、debugger 和 package launch：
 
-- ScriptRuntimeHost 支持 Native DSL、Lua 和自定义 runtime provider。
+- ScriptRuntimeHost 支持 Native DSL、Lua-as-AstraVN-source 和自定义 runtime provider。
 - Script 只能通过 Script API、RuntimeEvent 和 Presentation API 影响世界。
 - AstraVN 提供 VN-first 的 Actor、Component、StateMachine、Event 和 Presentation Library。
 - Graph/Timeline 与文本脚本共享 canonical source、debug symbol 和 runtime path。
@@ -136,9 +136,9 @@ Diagnostics：
 - route/label missing：label、call site、available labels。
 - localization missing：text key、locale、fallback policy。
 
-## 5. Lua Runtime
+## 5. Lua Runtime And AstraVN Source
 
-Lua runtime is optional but native parity target includes sandboxed host support：
+Lua runtime belongs to Script/AstraVN, not Core. It can be used as a first-class AstraVN script source when a project selects a packaged-eligible Lua provider, and it must follow the same deterministic runtime boundary as `.astra`, Graph and Timeline sources：
 
 - deterministic random service。
 - restricted standard library。
@@ -146,12 +146,16 @@ Lua runtime is optional but native parity target includes sandboxed host support
 - host API binding only through registered Script API。
 - snapshot of Lua VM state or equivalent deterministic continuation state。
 - debug hook for breakpoint、step、call stack、local variables。
+- source map and debug symbols for authored Lua story/system scripts。
+- hot reload compatibility report with rollback on incompatible continuation state。
+- save/replay state that does not depend on Editor source files after package build。
 
 Release Gate：
 
 - blocks Lua runtime if provider lacks packaged eligibility。
 - blocks scripts using forbidden host APIs。
 - verifies snapshot support for save/replay-required scripts。
+- requires Lua story/source parity evidence before Lua-authored VN content can be marked production complete。
 
 ## 6. Graph And Timeline Source
 

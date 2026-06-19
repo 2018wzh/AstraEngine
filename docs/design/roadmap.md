@@ -430,17 +430,19 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 - `ICompatRuntimeProvider`、Legacy VM state、opcode/timeline adapter、API Mapper。
 - Local mount reader、save-state、Runtime Inspector。
 - Enhancement Profile、font replacement、UI overlay、FilterProfile、TextCapture 和 translation bridge。
-- Mock Compat Core fixture。
-- BGI、Kirikiri、Ren'Py、NScripter core prototype。
-- Artemis core prototype：unpacked-directory probe、`foreign-artemis:/` resolver、`.iet/.asb/.ast` index、minimal `e:*` host API、tag/API coverage report。
+- Package patch script sandbox、hash、reader/index/decode/resource-map 和 protected-content blocking diagnostics。
+- Artemis core for `Sakura no Uta 10th Anniversary Edition`：original-release probe、package patch、`foreign-artemis:/` resolver、`.iet/.asb/.ast/.ipt/.sli/.tbl` index、system Lua、minimal `e:*` host API、tag/API coverage report。
+- KrKr/KAG/TJS/XP3 core for `Senren Banka`：XP3 package patch、KAG executor、target-required TJS host API、system UI/save/config bridge、coverage report。
+- BGI/Ethornell core for `Subarashiki Hibi 15th Anniversary Edition`：archive package patch、scenario/system script VM、mapper、save/replay、coverage report。
+- `astra.emu.local_case_report.v1` for local commercial case audit without committing source payloads。
 
 验收：
 
-- 至少一个 mock Compat Core 可运行并输出 VN presentation。
+- 三个 local commercial cases 均达到 100% full-content-flow coverage。
 - Save-state 可捕获并恢复 opaque VM state。
 - Mount-only 默认不修改 foreign source。
 - AstraEmu 不反向污染 Core、Runtime、Asset、Media 或 NativeVN 制作流程。
-- Artemis core can map high-frequency tags to AstraVN Events without sharing Artemis VM control flow with AstraVN source languages。
+- Artemis、KrKr、BGI cores map visible output to AstraVN Events / PresentationCommand without sharing legacy VM control flow with AstraVN source languages。
 
 非目标：
 

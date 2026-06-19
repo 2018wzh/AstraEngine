@@ -3,17 +3,18 @@
 状态：NativeVN runtime evidence scaffold / Target Architecture  
 定位：用样例项目和测试矩阵证明 AstraEngine 的 UE-class 2D runtime 完备度。样例不是演示摆设，而是 release gate、文档、CLI、Editor 和 Runtime 的共同验收载体。
 
-Current implementation note：当前已建立 `Samples/NativeVN`、`Samples/RuntimeStress` 和 `Samples/PackageLaunch` 的 foundation/evidence descriptors。`PackageLaunch` 可通过 `astra validate/package/run --backend headless` 证明 Phase 1 headless platform 和 example module lifecycle；`NativeVN` 可通过 validate/cook/package/run/replay/inspect 证明 source asset sidecars、generated PNG/OGG/font fixture media、AssetRegistry/dependency graph、local DDC artifact evidence、embedded package payloads、PackageReader mount/read validation、Script/AstraVN execution、playable UI/system/save/load evidence、package-payload SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence 和 golden replay comparison。Editor workflow、final release gate、production binary streaming 和 full Artemis compatibility 仍是后续阶段。
+Current implementation note：当前已建立 `Samples/NativeVN`、`Samples/RuntimeStress` 和 `Samples/PackageLaunch` 的 foundation/evidence descriptors。`PackageLaunch` 可通过 `astra validate/package/run --backend headless` 证明 Phase 1 headless platform 和 example module lifecycle；`NativeVN` 可通过 validate/cook/package/run/replay/inspect 证明 source asset sidecars、generated PNG/OGG/font fixture media、AssetRegistry/dependency graph、local DDC artifact evidence、embedded package payloads、PackageReader mount/read validation、Script/AstraVN execution、playable UI/system/save/load evidence、package-payload SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence 和 golden replay comparison。当前证据仍主要是 Windows/headless runtime slice；EngineCore 最终完成要求 NativeVN 与 TsuiNoSora 在 Windows、Linux、macOS、iOS、Android 和 Web 均有完整游玩报告。Editor workflow、AI/MCP、CustomizationPlugin、production binary streaming、Lua-as-AstraVN-source parity 和 AstraEmu Artemis/KrKr/BGI 完整本地商业 case 仍是后续阶段。
 
 ## 1. 目标
 
 Samples/Test Matrix 必须覆盖：
 
 - creator workflow：模板、导入/生成资产、Script/Graph/Timeline、PIE、打包。
-- runtime workflow：launch、tick、save、load、replay、debug、profile。
+- runtime workflow：Windows、Linux、macOS、iOS、Android、Web 上的 launch、input、tick、media、script、save、load、replay、debug、profile。
 - customization workflow：plugin、provider replacement、Editor panel、MCP tool。
 - AI workflow：Runtime AI MCP、Editor Copilot MCP、Editor Content Generation MCP。
 - release workflow：validate、cook、package、run、replay、inspect、doc-check、ctest。
+- commercial/local-data workflow：TsuiNoSora 转换为普通 AstraVN 内容后的完整游玩，以及 AstraEmu 本地原始发行数据报告。
 
 每个 sample 必须有：
 
@@ -86,14 +87,16 @@ Must include：
 - camera。
 - save/load/replay。
 - package launch without Editor。
+- Windows、Linux、macOS、iOS、Android、Web target reports。
 
 Acceptance：
 
-- `validate -> cook -> package -> run -> replay -> inspect` pass。
+- `validate -> cook -> package -> run -> replay -> inspect -> release-gate` pass。
 - packaged runtime shows/records real image/text/audio/filter output。
 - save after choice can reload to same route state。
 - golden replay state/event/presentation hash match。
 - `AstraGame` QA player plans pass with player actions, explicit RuntimeEvent injection, and JSON Pointer assertions。
+- full-playthrough reports exist for every target platform before EngineCore can be marked complete。
 
 ## 3.1 TsuiNoSora
 
@@ -112,7 +115,9 @@ Acceptance：
 
 - User supplies a legal `--source-root`。
 - Converter writes `Samples/TsuiNoSora/Content` and `Saved/ConversionReports/coverage.json`。
-- `validate -> package --shipping -> play` pass on converted output；`run --backend sdl` remains optional QA evidence。
+- Converted output is ordinary AstraVN content and belongs to EngineCore/AstraVN acceptance, not AstraEmu acceptance。
+- `validate -> cook -> package --shipping -> play -> replay -> inspect -> release-gate` pass on converted output。
+- Full-playthrough reports pass on Windows、Linux、macOS、iOS、Android and Web before EngineCore can be marked complete。
 - Missing required content blocks conversion unless patched。
 
 ## 4. RuntimeStress
@@ -166,21 +171,22 @@ Acceptance：
 
 Purpose：
 
-- Prove Native DSL、Lua、Graph/Timeline paths share Runtime semantics。
+- Prove Native DSL、Lua-as-AstraVN-source、Graph/Timeline paths share Runtime semantics。
 
 Must include：
 
-- equivalent dialogue/choice flow in Native DSL and Lua。
+- equivalent dialogue/choice flow in Native DSL and first-class AstraVN Lua source。
 - Graph source for at least one branch。
 - Timeline with camera/audio event。
 - debugger symbols and source maps。
+- Lua source map、debug symbols、hot reload report、snapshot/save/replay state。
 - `save-replay-production-contract.md` script decision, source map and replay mismatch coverage。
 
 Acceptance：
 
 - authored-equivalent paths produce equivalent RuntimeEvent and PresentationCommand hashes。
-- breakpoints work in DSL and Graph。
-- script snapshot/restore survives wait state。
+- breakpoints work in DSL、Lua and Graph。
+- script snapshot/restore survives wait state for DSL、Lua、Graph/Timeline。
 
 ## 7. MediaBackend
 
@@ -279,25 +285,29 @@ Acceptance：
 
 Purpose：
 
-- Prove AstraEmu is a standalone toolkit and does not participate in NativeVN creation workflow。
+- Prove AstraEmu is a standalone toolkit that runs original-release local commercial VN data without participating in NativeVN creation workflow。
 
 Must include：
 
-- mock local game root。
-- mock content reader。
-- mock Compat Core state。
+- local commercial case descriptors without committed source payloads。
+- package patch script/report support for original release data。
+- Artemis Compat Core for `Sakura no Uta 10th Anniversary Edition`。
+- KrKr/KAG/TJS/XP3 Compat Core for `Senren Banka`。
+- BGI/Ethornell Compat Core for `Subarashiki Hibi 15th Anniversary Edition`。
 - LegacyApiMapper output to VN events。
 - enhancement profile。
 - save-state。
 - TextCaptureEvent and translation Provider bridge。
 - core cold-swap rollback。
-- `legacy-compatibility-contract.md` AstraEmuManager, CompatRuntimeProvider, ILegacyContentReader, LegacyVmSnapshot and TextCapture boundary coverage。
+- `legacy-compatibility-contract.md` AstraEmuManager, CompatRuntimeProvider, package patch, LegacyVmSnapshot, TextCapture and local case report boundary coverage。
 
-Optional local fixture：
+Local commercial case rules：
 
-- Anonymous Artemis 2025 VN case study may be used on developer machines only。
-- Fixture path is supplied by local environment or test configuration and is never committed。
-- Default CI uses synthetic/mock data; real commercial assets are not copied into the repository。
+- User supplies legal original-release local data on the developer/test machine。
+- Source files, unpacked payloads, private absolute paths and unauthorized screenshots are not committed。
+- Committed evidence is `astra.emu.local_case_report.v1` plus command transcript, hashes, coverage and diagnostics。
+- Each target case requires 100% full-content-flow coverage: routes、branches、endings、choices、text、voice、BGM、SE、CG、backgrounds、characters、transitions、system menu、save/load、backlog and replay。
+- Protected or unsupported content blocks acceptance with diagnostics; AstraEmu does not bypass DRM or commercial protection。
 
 Artemis-specific scenarios：
 
@@ -311,12 +321,29 @@ Artemis-specific scenarios：
 - verify save-state stores Artemis VM cursor、variables and call stack as opaque compat state。
 - verify TextCaptureEvent can reach a translation Provider and return overlay output。
 
+KrKr-specific scenarios：
+
+- probe `.xp3` packages、KAG scripts、TJS/system scripts、plugins、media roots、fonts and save/config data。
+- validate package patch scripts for XP3 index/resource access without DRM bypass。
+- cover KAG text、label、jump、call、macro、choice、variables、layers、background、character、transition、wait、voice、BGM、SE、movie。
+- cover target-required TJS host API and system UI/save/config calls。
+- verify full `Senren Banka` report has zero uncovered required items。
+
+BGI-specific scenarios：
+
+- probe BGI/Ethornell archives、scenario scripts、system scripts、media roots、fonts and save/config data。
+- validate package patch scripts for archive index/resource access without DRM bypass。
+- preserve scenario/system script boundary while mapping visible output to AstraVN events and PresentationCommand。
+- cover text、choice、variables、route flow、system menu、backlog、config、background/CG、character、transition、voice、BGM、SE、movie、save/load and endings。
+- verify full `Subarashiki Hibi 15th Anniversary Edition` report has zero uncovered required items。
+
 Acceptance：
 
 - AstraEmu toolkit sample runs outside NativeVN project authoring。
 - native samples build/package without AstraEmu module。
 - foreign assets remain mount-only。
 - save-state loads without changing native save schema。
+- `Sakura no Uta 10th Anniversary Edition`、`Senren Banka` and `Subarashiki Hibi 15th Anniversary Edition` each have committed local case reports with 100% full-content-flow coverage。
 
 ## 12. Test Matrix
 

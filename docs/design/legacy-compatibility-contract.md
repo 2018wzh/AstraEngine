@@ -6,10 +6,12 @@
 ## 1. 目标
 
 - AstraEmu 只新增 Compat Core、probe result 和 TextCapture DTO；其他能力优先复用 AstraEngine 现有服务。
+- AstraEmu 新增 package patch script/report contract，用于用户提供的原始发行数据结构描述和本地验收审计。
 - ModuleRuntime 负责发现、加载、激活、停用和卸载 AstraEmu core/provider 模块。
 - ServiceRegistry / ExtensionRegistry 暴露 Asset VFS、PackageReader、ScriptRuntimeHost、RuntimeWorld、Save/Replay、Renderer2D、TextLayout、Audio 和 FilterGraph 服务。
 - EngineModuleSlot 选择 Compat Core、translation provider 和现有 media backends。
 - 本地旧游戏目录和只读 package mount 默认 mount-only，不修改 foreign source。
+- 首批 production family gate 覆盖 Artemis、KrKr/KAG/TJS/XP3 和 BGI/Ethornell。
 
 非目标：
 
@@ -26,6 +28,7 @@
 | Core selection | EngineModuleSlot provider selection |
 | Local content access | Asset VFS read-only directory mount |
 | Indexed packaged content | PackageReader read-only package mount |
+| Original package adaptation | user-provided package patch script, sandbox, hash and diagnostics |
 | Service access | ServiceRegistry capability views |
 | Core registration | ExtensionRegistry `CompatRuntimeProvider` |
 | Runtime stepping | RuntimeTickInput and Runtime scheduler ordering |
@@ -35,6 +38,7 @@
 | Rendering/text/audio/filter | Renderer2D, TextLayout, Audio and FilterGraph providers |
 | Save/load | ISaveSectionProvider with opaque compat section payload |
 | Core cold swap | ModuleRuntime deactivate -> shutdown -> unload -> load -> initialize -> activate |
+| Local commercial acceptance | `astra.emu.local_case_report.v1` committed report without source payloads |
 
 AstraEmu Manager is only a thin host facade over those services. It does not own a parallel runtime lifecycle, file system, save system, renderer, audio backend or package format.
 
@@ -58,6 +62,7 @@ required_services:
   - astra.presentation.library
 capabilities:
   - content_probe
+  - package_patch
   - script_index
   - vm_debug
   - text_capture
@@ -109,6 +114,22 @@ resource_roots:
 diagnostics: []
 ```
 
+Package patch result is a user-provided, sandboxed structural description for original-release data:
+
+```yaml
+schema: astra.emu.package_patch_result.v1
+patch_id: local.krkr.senren_banka
+engine_family: krkr
+case_title: Senren Banka
+hash: sha256:...
+readers:
+  - kind: xp3_index
+    source: patch:/readers/xp3_index.lua
+resource_maps:
+  - foreign-krkr:/data/scenario.xp3#scenario/...
+diagnostics: []
+```
+
 Mount rules:
 
 - Local directories are mounted through Asset VFS as read-only `foreign-*:/` schemes.
@@ -117,6 +138,7 @@ Mount rules:
 - Probe may read filenames, headers and lightweight indexes.
 - Probe must not mutate local content.
 - Protected or encrypted content returns unsupported diagnostics.
+- Package patch scripts may describe reader/index/decode/offset/table/resource-map logic, but must not bypass DRM or access control.
 
 ## 5. Compat Core Contract
 
@@ -127,10 +149,12 @@ class ICompatRuntimeProvider {
 public:
     virtual CompatCoreDescriptor Describe() const = 0;
     virtual Result<CompatContentProbeResult> Probe(CompatProbeRequest, DiagnosticSink&) = 0;
+    virtual Result<CompatPackagePatchResult> ApplyPackagePatch(CompatPackagePatchRequest, DiagnosticSink&) = 0;
     virtual Result<void> LoadContent(CompatContentMount, DiagnosticSink&) = 0;
     virtual Result<CompatStepResult> Step(RuntimeTickInput, DiagnosticSink&) = 0;
     virtual Result<void> WriteSaveSection(SaveWriteContext, DiagnosticSink&) = 0;
     virtual Result<void> ReadSaveSection(SaveReadContext, DiagnosticSink&) = 0;
+    virtual Result<CompatCoverageReport> ExportCoverage(CompatCoverageRequest, DiagnosticSink&) = 0;
 };
 ```
 
@@ -142,6 +166,7 @@ Execution rules:
 - Renderer, text, audio, decode and filter handles remain private to media providers.
 - VM private state is opaque outside the compat save section.
 - Core-specific control flow never becomes AstraVN native source syntax.
+- Package patch scripts are input/config artifacts, not Compat Core private hard-coding.
 
 ## 6. Save / Replay Reuse
 
@@ -158,6 +183,7 @@ required: false
 Rules:
 
 - Save stores opaque VM state, logical media state references, selected enhancement profile id and translation cache references.
+- Save stores selected package patch hash and coverage checkpoint references when running a local commercial case.
 - Save does not store native handles, threads, file descriptors, backend tokens or package reader internals.
 - Replay records emitted event/presentation hashes and selected provider feature hashes through existing replay reports.
 - Missing Compat Core leaves the section preserved but not executable.
@@ -194,7 +220,60 @@ Translation rules:
 - Embedded replacement requires explicit Compat Core capability.
 - Translation cache is local toolkit state, not foreign source mutation.
 
-## 8. Core Cold Swap
+## 8. Family v1 Contracts
+
+首批 production acceptance 使用本地合法原始发行数据，不提交商业源文件：
+
+| Family | Local case | Required package/data support | Required runtime coverage |
+| --- | --- | --- | --- |
+| Artemis | `Sakura no Uta 10th Anniversary Edition` | `.pfs`, `.pfs.000`, `.pfs.721`, movie data, fonts, `system.ini`, `.iet`, `.asb`, `.ast`, `.ipt`, `.sli`, `.tbl`, system Lua modules | `e:*` host API, tag executor, variables, call stack, waits, choices, image/text/audio/movie/system UI/save/load/backlog/replay |
+| KrKr / KAG / TJS / XP3 | `Senren Banka` | `.xp3`, KAG scenario, TJS/system script, plugin metadata, media/font/save/config data | KAG tags, TJS required API, macros, choices, layers, media, movie, system menu, config, backlog, save/load/replay |
+| BGI / Ethornell | `Subarashiki Hibi 15th Anniversary Edition` | BGI/Ethornell archives, scenario script, system script, media/font/save/config data | scenario/system script VM, route flow, choices, variables, media, movie, system menu, backlog, config, save/load/replay |
+
+Full-content-flow coverage means 100% coverage for:
+
+- main routes, branches, endings and choices.
+- text, ruby/control metadata, voice, BGM and SE.
+- CG, background, character sprite, transition, movie and visual effects.
+- system menu, config, backlog, save/load and replay.
+
+Uncovered required items block acceptance unless the local case report explicitly classifies the source data as protected/unsupported and the release profile accepts that failure as non-playable.
+
+## 9. Local Case Report
+
+```yaml
+schema: astra.emu.local_case_report.v1
+case_title: Senren Banka
+engine_family: krkr
+edition: original_release_local
+local_root_hash: sha256:...
+core_id: astra.emu.krkr.core
+package_patch_set:
+  id: local.krkr.senren_banka
+  hash: sha256:...
+probe_summary:
+  confidence: 0.98
+  entry_candidates: []
+coverage:
+  required_total: 0
+  required_covered: 0
+  uncovered_required: []
+save_replay_summary:
+  checkpoints: []
+text_capture_summary:
+  captured: 0
+diagnostics: []
+commands: []
+```
+
+Report rules:
+
+- Report may be committed for audit.
+- Commercial source files, unpacked payloads, private absolute paths and unauthorized screenshots must not be committed.
+- Report records title/edition because these are the acceptance cases.
+- Report records package patch hashes and provider feature hashes so local evidence is reproducible on a machine with the same legal data.
+
+## 10. Core Cold Swap
 
 Cold swap uses existing ModuleRuntime lifecycle:
 
@@ -218,11 +297,13 @@ Rules:
 - If a media provider cannot rebuild resources, use normal provider fallback such as headless when available.
 - Enhancement profile, translation config, font, filter and overlay data may reload through existing asset/config hot-reload paths without core swap.
 
-## 9. Acceptance
+## 11. Acceptance
 
 - AstraEmu discovers Compat Core modules through ModuleRuntime and selects one through EngineModuleSlot.
 - Local content is read through VFS or PackageReader read-only mounts.
-- Mock Compat Core steps through RuntimeTickInput and emits RuntimeEvent / PresentationCommand.
+- User-provided package patch scripts are sandboxed, hashed and audited.
+- Artemis, KrKr and BGI local commercial cases each produce `astra.emu.local_case_report.v1`.
+- Each required local case reaches 100% full-content-flow coverage, with zero uncovered required item.
 - Compat state is saved and restored through ISaveSectionProvider.
 - Core cold swap follows ModuleRuntime lifecycle and restores the previous module on failure.
 - TextCaptureEvent reaches a selected translation provider and returns overlay PresentationCommand output.
