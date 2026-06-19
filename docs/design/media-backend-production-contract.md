@@ -143,3 +143,5 @@ Diagnostic prefixes:
 - package payload image/font/audio decode flows into real provider execution.
 - headless and real backend produce comparable logical hashes.
 - GPU filter fallback and unsupported format diagnostics are covered.
+
+

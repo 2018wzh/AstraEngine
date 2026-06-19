@@ -186,7 +186,7 @@ Release Gate blocks:
 - selected provider not packaged eligible.
 - non-runtime-safe module evidence.
 
-`PackageSmoke` acceptance：
+`PackageLaunch` acceptance：
 
 - run from `.astrapkg` with no source Content reads.
 - random-access and chunked PackageReader paths work.
@@ -194,6 +194,8 @@ Release Gate blocks:
 
 NativeVN Phase 6 acceptance:
 
-- `validate -> import -> cook -> package -> inspect -> run --headless-smoke -> replay --compare` uses `AstraAsset` APIs for production package evidence.
+- `validate -> import -> cook -> package -> inspect -> run --backend headless -> replay --compare` uses `AstraAsset` APIs for production package evidence.
 - Save/replay reports include package manifest hash, package profile and selected provider feature hash.
 - Replay mismatch reports localize to frame, record kind, expected/actual hash, nearest event sequence, source object, and package manifest hash.
+
+

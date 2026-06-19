@@ -36,9 +36,11 @@ auto snapshot = session.CaptureSnapshot(diagnostics);
 
 ## Examples
 
-`astra run Samples/NativeVN --headless-smoke --json` emits `phase8_script_vn` plus a deprecated `phase4_script_vn` alias. The Phase 8 payload includes Native `.astra` execution, command schemas, Lua extension schemas, source maps, v2 script snapshots, VN state, UI evidence, media evidence, save/restore evidence, and replay route hashes.
+`AstraGame launcher Samples/NativeVN --backend headless --json` emits `phase8_script_vn` plus a deprecated `phase4_script_vn` alias. The Phase 8 payload includes Native `.astra` execution, command schemas, Lua extension schemas, source maps, v2 script snapshots, VN state, UI evidence, media evidence, save/restore evidence, and replay route hashes.
 
 ## Troubleshooting
 
 - If NativeVN validation fails, first inspect script diagnostics for missing IDs or scene fallthrough.
 - Extension commands are schema-first in Phase 8; real Live2D/Emote provider execution remains later provider/plugin work.
+
+

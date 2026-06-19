@@ -15,3 +15,5 @@ Canonical source 使用 YAML + JSON Schema。所有 source object 使用稳定 I
 - AssetRegistry、Cooked content、DerivedDataCache 不是人工或 AI 编辑源。
 - Release Gate 校验 schema、重复 ID、broken dependency、sidecar、AI-editable 边界和 mount-only policy。
 - 外部原游戏资产使用 `foreign-*` AssetId，不伪装为 `native:/`。
+
+

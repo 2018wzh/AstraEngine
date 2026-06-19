@@ -35,3 +35,5 @@ The Phase 1 example plugin descriptor is generated under `build/Plugins/Phase1Ex
 
 - Descriptor paths that escape the plugin root are rejected.
 - Required dependency cycles or missing dependencies are blocking diagnostics.
+
+

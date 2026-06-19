@@ -1,8 +1,8 @@
 namespace {
 
 constexpr const char* ValidationSchema = "astra.validation.report.v1";
-constexpr const char* Phase3SmokeSchema = "astra.phase3.foundation.smoke.v1";
-constexpr const char* Phase4SmokeSchema = "astra.phase4.script_vn.foundation.v1";
+constexpr const char* Phase3ValidationSchema = "astra.phase3.foundation.validation.v1";
+constexpr const char* Phase8ScriptVnValidationSchema = "astra.phase8.script_vn.validation.v1";
 constexpr const char* ReplayEvidenceSchema = "astra.nativevn.replay.v1";
 
 std::filesystem::path SourceRoot() {
@@ -203,7 +203,7 @@ bool IsAstraVnPlayableSample(const std::filesystem::path& sample) {
     return runtime == "astra_vn" || descriptor["playable"];
 }
 
-bool IsVnSmokeSample(const std::filesystem::path& sample) {
+bool IsVnValidationSample(const std::filesystem::path& sample) {
     return IsNativeVnSample(sample) || IsAstraVnPlayableSample(sample);
 }
 
@@ -597,12 +597,12 @@ void AppendDiagnostics(CommandReport& report, const Astra::Core::DiagnosticSink&
     }
 }
 
-nlohmann::json Phase3FoundationSmoke(Astra::Core::DiagnosticSink& diagnostics) {
+nlohmann::json Phase3FoundationValidation(Astra::Core::DiagnosticSink& diagnostics) {
     auto background = Astra::Asset::ParseAssetUri("native:/Backgrounds/Room");
     auto character = Astra::Asset::ParseAssetUri("native:/Characters/Alice/Normal");
     auto voice = Astra::Asset::ParseAssetUri("native:/Voice/Alice/opening_001");
     if (!background || !character || !voice) {
-        return {{"schema", Phase3SmokeSchema}, {"status", "failed"}};
+        return {{"schema", Phase3ValidationSchema}, {"status", "failed"}};
     }
 
     auto profile = MakePhase3FoundationFilterProfile();
@@ -649,9 +649,9 @@ nlohmann::json Phase3FoundationSmoke(Astra::Core::DiagnosticSink& diagnostics) {
     const auto png_bytes = OnePixelPngBytes();
     auto image_decode = Astra::Media::InspectImageBytes(png_bytes, diagnostics);
     return {
-        {"schema", Phase3SmokeSchema},
+        {"schema", Phase3ValidationSchema},
         {"headless_capture", Astra::Media::ToJson(capture)},
-        {"image_decode_smoke",
+        {"image_decode_validation",
          image_decode ? Astra::Media::ToJson(image_decode.Value())
                       : nlohmann::json::object(
                             {{"schema", "astra.media.image_decode.v1"}, {"status", "failed"}})},
@@ -776,5 +776,7 @@ CommandReport MakeReport(std::string command) {
 }
 
 } // namespace
+
+
 
 

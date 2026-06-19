@@ -339,3 +339,5 @@ AstraEmu Inspector 是运行时诊断面板，不是 Editor authoring 工具。
 - TextCaptureEvent 可进入外部 translation Provider，并以 overlay 显示结果。
 - Headless、SDL、bgfx、Skia backend 通过 capability report 声明可用性。
 - mount-only 默认阻止修改 foreign source。
+
+

@@ -40,16 +40,16 @@ cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 build\Bin\astra.exe --version
 build\Bin\astra.exe doc-check
-build\Bin\astra.exe validate Samples\PackageSmoke --strict
+build\Bin\astra.exe validate Samples\PackageLaunch --strict
 build\Bin\astra.exe validate Samples\NativeVN --strict --json
 build\Bin\astra.exe validate . --strict --json
-build\Bin\astra.exe package Samples\PackageSmoke --profile development
-build\Bin\astra.exe run Samples\PackageSmoke --headless-smoke --json
-build\Bin\astra.exe run Samples\NativeVN --headless-smoke --json
+build\Bin\astra.exe package Samples\PackageLaunch --profile development
+build\Bin\astra.exe run Samples\PackageLaunch --backend headless --json
+build\Bin\astra.exe run Samples\NativeVN --backend headless --json
 build\Bin\astra.exe cook Samples\NativeVN --config Release --json
 build\Bin\astra.exe package Samples\NativeVN --profile deterministic --json
-build\Bin\astra.exe run build\Saved\Packages\NativeVN.astrapkg --headless-smoke --json
-build\Bin\astra.exe replay build\Saved\Replays\NativeVNGolden.replay --compare --json
+build\Bin\astra.exe run build\Saved\Packages\NativeVN.astrapkg --backend headless --json
+build\Saved\Releases\NativeVN\NativeVN-win64\NativeVN.exe --backend headless --json
 build\Bin\astra.exe inspect build\Saved\Packages\NativeVN.astrapkg --json
 ```
 
@@ -74,8 +74,8 @@ Phase 4 foundation additions:
 - `AstraMedia`: PresentationCommand, RenderGraph/text/audio/filter DTOs, FilterProfile validation/application, Renderer2D/TextLayout/Audio foundation provider descriptors, media release-gate foundation validation, HeadlessRenderer2D hashes, and SDL renderer factory compile-path stub.
 - `AstraScript`: `ScriptRuntimeHost`, Native DSL parser, Lua provider via `sol2`, shared command stream, diagnostics, debug-symbol DTOs, `ScriptSnapshot`, and `ScriptEventBridge`.
 - `AstraVN`: VN event schemas, preset actors/components/state machines, `VnSession`, `VnSessionSnapshot`, headless presentation capture, and save/restore evidence.
-- CLI validate/headless smoke includes `foundation_core_gate`, Phase 3 Asset/Media/FilterGraph hash evidence, media provider release-gate foundation evidence, and Phase 4 NativeVN Script/AstraVN evidence.
-- NativeVN package/replay evidence includes source asset sidecars, AssetRegistry/dependency graph reports, cook manifests, image cook artifact metadata, local DDC artifact writes, DDC reuse/rebuild/corruption recovery reports, deterministic package manifests, embedded package payload tables, PackageReader random-access/chunked-read/mount smoke, package/cook/payload hash integrity diagnostics, mature media backend capability reports, libpng image metadata decode smoke, engine/plugin DLL hash evidence, package launch smoke, and golden replay hash comparison.
+- CLI validate/headless validation includes `foundation_core_gate`, Phase 3 Asset/Media/FilterGraph hash evidence, media provider release-gate foundation evidence, and Phase 4 NativeVN Script/AstraVN evidence.
+- NativeVN package/replay evidence includes source asset sidecars, AssetRegistry/dependency graph reports, cook manifests, image cook artifact metadata, local DDC artifact writes, DDC reuse/rebuild/corruption recovery reports, deterministic package manifests, embedded package payload tables, PackageReader random-access/chunked-read/mount validation, package/cook/payload hash integrity diagnostics, mature media backend capability reports, libpng image metadata decode validation, engine/plugin DLL hash evidence, package launch validation, and golden replay hash comparison.
 
 Phase 6 asset pipeline additions:
 
@@ -100,7 +100,7 @@ TsuiNoSora local-data port additions:
 - `Samples/TsuiNoSora` is a local-data AstraVN conversion sample.
 - TsuiNoSora-specific conversion, patching, and Director-era container probing live only under `Samples/TsuiNoSora/Tools`.
 - Engine tools now accept Phase 8 AstraVN playable samples described by `runtime: astra_vn` or `playable:` instead of hard-coding only `NativeVN`.
-- Engine tools now provide `astra package --shipping` and `astra play` so Shipping bundles use a production launcher instead of smoke QA commands.
+- Engine tools now provide `astra package --shipping` and `astra play` so Shipping bundles use a production launcher instead of validation QA commands.
 - SDL input now fills the existing `InputSnapshot` DTO for generic packaged VN interaction.
 - Original data and generated commercial `Content/` stay untracked.
 
@@ -108,3 +108,5 @@ TsuiNoSora local-data port additions:
 
 - Do not use target acceptance commands as proof until the relevant tool exists.
 - If CI skips a planned system, call that out as a known gap instead of implying it passed.
+
+

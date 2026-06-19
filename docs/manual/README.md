@@ -15,7 +15,7 @@ This manual is the user-facing documentation root for AstraEngine. It complement
 - Phase 1 provides a production Foundation gate slice for Core, Platform, ModuleRuntime, and PropertySystem, including `foundation_core_gate` CLI evidence.
 - Phase 2-4 provide executable foundations for Scene, Runtime, Media, ScriptRuntimeHost, and AstraVN.
 - Phase 6 provides the production Asset Pipeline slice for `import -> cook -> package -> inspect -> run -> replay` with binary `.astrapkg` output.
-- NativeVN runtime evidence covers `validate -> cook -> package -> run --headless-smoke -> test -> replay --compare -> inspect` for the current package-only workflow.
+- NativeVN runtime evidence covers `validate -> cook -> package -> run --backend headless -> test -> replay --compare -> inspect` for the current package-only workflow.
 
 ## Architecture
 
@@ -36,11 +36,11 @@ Foundation public headers exist for Core, Platform, ModuleRuntime, PropertySyste
 
 ## Examples
 
-Foundation/evidence samples live under `Samples/NativeVN`, `Samples/RuntimeStress`, and `Samples/PackageSmoke`. `NativeVN` carries the redistributable runtime package/replay evidence slice. See [Samples](samples/README.md) for target workflows and current status.
+Foundation/evidence samples live under `Samples/NativeVN`, `Samples/RuntimeStress`, and `Samples/PackageLaunch`. `NativeVN` carries the redistributable runtime package/replay evidence slice. See [Samples](samples/README.md) for target workflows and current status.
 
 ## Troubleshooting
 
-If a page describes a final release command, check whether it is listed as current evidence or target acceptance. Current validation covers CMake configure/build, `AstraPhaseTests`, the example foundation plugin load path, `astra --version`, `astra validate`, `astra import`, `astra cook`, `astra package`, `astra doc-check`, `foundation_core_gate`, dynamic engine DLL evidence, and NativeVN binary `.astrapkg` `run --headless-smoke/replay --compare/inspect` evidence.
+If a page describes a final release command, check whether it is listed as current evidence or target acceptance. Current validation covers CMake configure/build, `AstraPhaseTests`, the example foundation plugin load path, `astra --version`, `astra validate`, `astra import`, `astra cook`, `astra package`, `astra doc-check`, `foundation_core_gate`, dynamic engine DLL evidence, and NativeVN binary `.astrapkg` `run --backend headless/replay --compare/inspect` evidence.
 
 ## Manual Sections
 
@@ -53,3 +53,5 @@ If a page describes a final release command, check whether it is listed as curre
 - [Migration](migration/README.md)
 - [Release Notes](release-notes/README.md)
 - [Concepts](concepts/README.md)
+
+

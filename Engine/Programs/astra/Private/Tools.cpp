@@ -103,10 +103,8 @@ CommandReport Validate(const std::filesystem::path& target, const CommandOptions
             Astra::Media::ToJson(Astra::Media::ProbeMediaBackendCapabilities());
         report.artifacts["phase3_media_release_gate"] = Phase3MediaReleaseGateEvidence(diagnostics);
         report.artifacts["phase7_media_backend"] = Phase7MediaBackendEvidence(diagnostics);
-        if (IsVnSmokeSample(absolute)) {
-            report.artifacts["phase8_script_vn"] = Phase4ScriptVnSmoke(absolute, diagnostics);
-            report.artifacts["phase4_script_vn"] = report.artifacts["phase8_script_vn"];
-            report.artifacts["phase4_script_vn"]["deprecated_alias_for"] = "phase8_script_vn";
+        if (IsVnValidationSample(absolute)) {
+            report.artifacts["phase8_script_vn"] = Phase8ScriptVnValidation(absolute, diagnostics);
             report.artifacts["playable_vn"] = BuildPlayableVnEvidence(
                 absolute, report.artifacts["phase8_script_vn"], registry, {}, false, diagnostics);
             ValidatePhase4AssetReferences(report.artifacts["phase8_script_vn"], registry, report,
@@ -114,7 +112,7 @@ CommandReport Validate(const std::filesystem::path& target, const CommandOptions
             if (report.artifacts["phase8_script_vn"].value("status", "failed") != "passed") {
                 AddDiagnostic(report, "ASTRA_PHASE8_SCRIPT_VN_FAILED",
                               Astra::Core::DiagnosticSeverity::Blocking,
-                              "Phase 8 Script/AstraVN playable smoke failed.", absolute);
+                              "Phase 8 Script/AstraVN playable launch failed.", absolute);
             }
         }
         AppendDiagnostics(report, diagnostics);
@@ -160,7 +158,7 @@ CommandReport Inspect(const std::filesystem::path& target, const CommandOptions&
                 AppendDiagnostics(report, diagnostics);
                 diagnostics.Clear();
                 if (payload) {
-                    report.artifacts["payload_smoke"] = {
+                    report.artifacts["payload_read"] = {
                         {"asset_id", manifest.Value().payloads.front().asset_id.ToString()},
                         {"size_bytes", payload.Value().size()},
                         {"hash", manifest.Value().payloads.front().hash},
@@ -201,7 +199,7 @@ CommandReport Inspect(const std::filesystem::path& target, const CommandOptions&
                     AppendDiagnostics(report, diagnostics);
                     diagnostics.Clear();
                     if (payload) {
-                        report.artifacts["payload_smoke"] = {
+                        report.artifacts["payload_read"] = {
                             {"asset_id", manifest.Value().payloads.front().asset_id.ToString()},
                             {"size_bytes", payload.Value().size()},
                             {"hash", manifest.Value().payloads.front().hash},
@@ -286,11 +284,9 @@ CommandReport Cook(const std::filesystem::path& sample, const CommandOptions& op
     nlohmann::json cook_report = {{"schema", Astra::Asset::CookManifestSchema},
                                   {"sample", sample.filename().string()},
                                   {"status", "runtime-cooked"},
-                                  {"phase3_smoke", Phase3FoundationSmoke(diagnostics)}};
-    if (IsVnSmokeSample(sample)) {
-        cook_report["phase8_script_vn"] = Phase4ScriptVnSmoke(sample, diagnostics);
-        cook_report["phase4_script_vn"] = cook_report["phase8_script_vn"];
-        cook_report["phase4_script_vn"]["deprecated_alias_for"] = "phase8_script_vn";
+                                  {"phase3_validation", Phase3FoundationValidation(diagnostics)}};
+    if (IsVnValidationSample(sample)) {
+        cook_report["phase8_script_vn"] = Phase8ScriptVnValidation(sample, diagnostics);
         cook_report["playable_vn"] = BuildPlayableVnEvidence(
             sample, cook_report["phase8_script_vn"], registry, {}, false, diagnostics);
         cook_report["runtime_feature_complete"] = {
@@ -404,13 +400,12 @@ void WriteDistributionScript(const std::filesystem::path& script,
     std::ofstream file(script, std::ios::binary);
     if (spec.id == "win64") {
         file << "@echo off\r\n";
-        file << "\"%~dp0" << spec.launcher_name << "\" run \"%~dp0Packages\\" << sample_name
-             << ".astrapkg\" --windowed-smoke %*\r\n";
+        file << "\"%~dp0" << sample_name << std::filesystem::path(spec.launcher_name).extension().string()
+             << "\" %*\r\n";
     } else {
         file << "#!/usr/bin/env sh\n";
         file << "DIR=\"$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\"\n";
-        file << "\"$DIR/" << spec.launcher_name << "\" run \"$DIR/Packages/" << sample_name
-             << ".astrapkg\" --windowed-smoke \"$@\"\n";
+        file << "\"$DIR/" << sample_name << "\" \"$@\"\n";
     }
 #if !defined(_WIN32)
     if (spec.id != "win64") {
@@ -429,13 +424,12 @@ void WriteShippingPlayScript(const std::filesystem::path& script,
     std::ofstream file(script, std::ios::binary);
     if (spec.id == "win64") {
         file << "@echo off\r\n";
-        file << "\"%~dp0Engine\\" << spec.launcher_name << "\" play \"%~dp0Packages\\" << sample_name
-             << ".astrapkg\" %*\r\n";
+        file << "\"%~dp0" << sample_name << std::filesystem::path(spec.launcher_name).extension().string()
+             << "\" %*\r\n";
     } else {
         file << "#!/usr/bin/env sh\n";
         file << "DIR=\"$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\"\n";
-        file << "\"$DIR/Engine/" << spec.launcher_name << "\" play \"$DIR/Packages/" << sample_name
-             << ".astrapkg\" \"$@\"\n";
+        file << "\"$DIR/" << sample_name << "\" \"$@\"\n";
     }
 }
 
@@ -525,195 +519,6 @@ nlohmann::json EvaluateShippingGate(const std::filesystem::path& sample) {
     return {{"schema", "astra.shipping.gate.v1"}, {"passed", passed}, {"checks", checks}};
 }
 
-std::vector<std::filesystem::path> CollectPlayerPlans(const std::filesystem::path& plan,
-                                                       CommandReport& report) {
-    std::vector<std::filesystem::path> plans;
-    const auto absolute = ResolveToolTarget(plan);
-    if (std::filesystem::is_regular_file(absolute)) {
-        plans.push_back(absolute);
-    } else if (std::filesystem::is_directory(absolute)) {
-        for (const auto& entry : std::filesystem::directory_iterator(absolute)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".yaml") {
-                plans.push_back(entry.path());
-            }
-        }
-        std::ranges::sort(plans);
-    } else {
-        AddDiagnostic(report, "ASTRA_PLAYER_TEST_PLAN_INVALID",
-                      Astra::Core::DiagnosticSeverity::Blocking,
-                      "Player test plan file or directory is missing.", absolute);
-    }
-    return plans;
-}
-
-std::filesystem::path WriteCaseScriptedInput(const YAML::Node& test_case,
-                                             const std::filesystem::path& plan_path,
-                                             CommandReport& report) {
-    const auto case_id = test_case["case_id"].as<std::string>("");
-    if (case_id.empty()) {
-        AddDiagnostic(report, "ASTRA_PLAYER_TEST_PLAN_INVALID",
-                      Astra::Core::DiagnosticSeverity::Blocking,
-                      "Player test case requires case_id.", plan_path);
-        return {};
-    }
-    nlohmann::json scripted = {
-        {"schema", "astra.input.scripted.v1"},
-        {"case_id", case_id},
-        {"persona", test_case["persona"].as<std::string>("")},
-        {"objective", test_case["objective"].as<std::string>("")},
-        {"events", nlohmann::json::array()},
-    };
-    for (const auto& step : test_case["steps"]) {
-        const auto kind = step["kind"].as<std::string>(step["action"] ? "player_action" : "");
-        if (kind != "player_action") {
-            continue;
-        }
-        nlohmann::json action = {
-            {"frame", step["frame"].as<int>(0)},
-            {"action", step["action"].as<std::string>("")},
-        };
-        if (step["index"]) {
-            action["index"] = step["index"].as<int>(0);
-        }
-        if (step["slot"]) {
-            action["slot"] = step["slot"].as<std::string>("");
-        }
-        if (step["label"]) {
-            action["label"] = step["label"].as<std::string>("");
-        }
-        if (step["set"]) {
-            action["set"] = YamlToJson(step["set"]);
-        }
-        scripted["events"].push_back(std::move(action));
-    }
-    const auto out = std::filesystem::temp_directory_path() /
-                     ("astra_player_" + case_id + "_" + Sha256Text(plan_path.string()).substr(0, 8) +
-                      ".yaml");
-    std::ofstream file(out, std::ios::binary);
-    file << "schema: astra.input.scripted.v1\n";
-    file << "case_id: " << scripted["case_id"].get<std::string>() << "\n";
-    file << "persona: " << scripted["persona"].get<std::string>() << "\n";
-    file << "objective: " << scripted["objective"].get<std::string>() << "\n";
-    file << "events:\n";
-    for (const auto& event : scripted["events"]) {
-        file << "  - frame: " << event.value("frame", 0) << "\n";
-        file << "    action: " << event.value("action", "") << "\n";
-        if (event.contains("index")) {
-            file << "    index: " << event["index"].get<int>() << "\n";
-        }
-        if (event.contains("slot")) {
-            file << "    slot: " << event["slot"].get<std::string>() << "\n";
-        }
-        if (event.contains("label")) {
-            file << "    label: " << event["label"].get<std::string>() << "\n";
-        }
-        if (event.contains("set")) {
-            file << "    set:\n";
-            for (const auto& [key, value] : event["set"].items()) {
-                file << "      " << key << ": " << value.get<std::string>() << "\n";
-            }
-        }
-    }
-    return out;
-}
-
-nlohmann::json RunRuntimeEventSteps(const YAML::Node& test_case,
-                                    const std::filesystem::path& plan_path,
-                                    CommandReport& report) {
-    nlohmann::json evidence = {
-        {"schema", "astra.test.runtime_event_injection.v1"},
-        {"events", nlohmann::json::array()},
-        {"frame_results", nlohmann::json::array()},
-    };
-    Astra::Runtime::RuntimeWorld world(44);
-    Astra::Core::DiagnosticSink diagnostics;
-    for (const auto& step : test_case["steps"]) {
-        if (step["kind"].as<std::string>("") != "runtime_event") {
-            continue;
-        }
-        const auto event_json = YamlToJson(step["event"]);
-        Astra::Core::Result<Astra::Runtime::RuntimeEvent> event =
-            Astra::Core::Result<Astra::Runtime::RuntimeEvent>::Failure(
-                Astra::Core::ErrorCode::InvalidFormat, "runtime event is invalid");
-        try {
-            event = Astra::Runtime::RuntimeEventFromJson(event_json);
-        } catch (const std::exception& error) {
-            event = Astra::Core::Result<Astra::Runtime::RuntimeEvent>::Failure(
-                Astra::Core::ErrorCode::InvalidFormat, error.what());
-        }
-        if (!event) {
-            AddDiagnostic(report, "ASTRA_PLAYER_TEST_RUNTIME_EVENT_INVALID",
-                          Astra::Core::DiagnosticSeverity::Blocking, event.Message(), plan_path);
-            evidence["events"].push_back({{"status", "invalid"}, {"event", event_json}});
-            continue;
-        }
-        Astra::Runtime::RuntimeTickInput input;
-        input.frame_index = step["frame"].as<Astra::Core::u64>(0);
-        input.fixed_step_index = input.frame_index;
-        input.input_events.push_back(event.Value());
-        auto tick = world.Tick(input, diagnostics);
-        evidence["events"].push_back(
-            {{"status", tick ? "injected" : "failed"}, {"event", Astra::Runtime::ToJson(event.Value())}});
-        if (tick) {
-            evidence["frame_results"].push_back(Astra::Runtime::ToJson(tick.Value()));
-        }
-    }
-    AppendDiagnostics(report, diagnostics);
-    return evidence;
-}
-
-nlohmann::json JsonPointerValue(const nlohmann::json& root, const std::string& pointer) {
-    try {
-        return root.at(nlohmann::json::json_pointer(pointer));
-    } catch (const std::exception&) {
-        return nullptr;
-    }
-}
-
-nlohmann::json EvaluatePlayerAssertions(const YAML::Node& test_case,
-                                        const nlohmann::json& case_report,
-                                        const std::filesystem::path& plan_path,
-                                        CommandReport& report) {
-    nlohmann::json assertions = nlohmann::json::array();
-    for (const auto& assertion : test_case["assertions"]) {
-        const auto pointer = assertion["path"].as<std::string>("");
-        const auto actual = JsonPointerValue(case_report, pointer);
-        bool passed = true;
-        nlohmann::json expected = nullptr;
-        const auto op = assertion["op"].as<std::string>(
-            assertion["equals"] ? "equals" : assertion["matches"] ? "matches"
-                                        : assertion["min_count"] ? "min_count"
-                                                                 : "exists");
-        if (op == "exists") {
-            passed = !actual.is_null();
-        } else if (op == "equals") {
-            expected = YamlToJson(assertion["equals"]);
-            passed = actual == expected;
-        } else if (op == "matches") {
-            expected = assertion["matches"].as<std::string>("");
-            passed = actual.is_string() &&
-                     std::regex_search(actual.get<std::string>(),
-                                       std::regex(expected.get<std::string>()));
-        } else if (op == "min_count") {
-            expected = assertion["min_count"].as<int>(0);
-            passed = actual.is_array() && actual.size() >= static_cast<std::size_t>(expected.get<int>());
-        } else {
-            passed = false;
-        }
-        assertions.push_back({{"path", pointer},
-                              {"op", op},
-                              {"expected", expected},
-                              {"actual", actual},
-                              {"passed", passed}});
-        if (!passed) {
-            AddDiagnostic(report, "ASTRA_PLAYER_TEST_ASSERTION_FAILED",
-                          Astra::Core::DiagnosticSeverity::Blocking,
-                          "Player test assertion failed.", plan_path);
-        }
-    }
-    return assertions;
-}
-
 void BuildDistributionBundle(const std::filesystem::path& sample,
                              const std::filesystem::path& package,
                              const Astra::Asset::PackageManifest& manifest,
@@ -735,7 +540,7 @@ void BuildDistributionBundle(const std::filesystem::path& sample,
 
     const auto bin_root = BinaryRoot() / "Bin";
     const auto launcher_source = bin_root / spec.launcher_name;
-    if (!std::filesystem::exists(launcher_source)) {
+    if (!options.shipping && !std::filesystem::exists(launcher_source)) {
         AddDiagnostic(report, "ASTRA_DISTRIBUTION_TARGET_BINARIES_MISSING",
                       Astra::Core::DiagnosticSeverity::Blocking,
                       "Distribution target launcher is missing.", launcher_source);
@@ -743,10 +548,10 @@ void BuildDistributionBundle(const std::filesystem::path& sample,
     }
     const auto wrapper_name = "astra-shipping-wrapper" + std::filesystem::path(spec.launcher_name).extension().string();
     const auto wrapper_source = bin_root / wrapper_name;
-    if (options.shipping && !std::filesystem::exists(wrapper_source)) {
+    if (!std::filesystem::exists(wrapper_source)) {
         AddDiagnostic(report, "ASTRA_DISTRIBUTION_TARGET_BINARIES_MISSING",
                       Astra::Core::DiagnosticSeverity::Blocking,
-                      "Shipping wrapper launcher is missing.", wrapper_source);
+                      "AstraGame launcher is missing.", wrapper_source);
         return;
     }
 
@@ -776,18 +581,21 @@ void BuildDistributionBundle(const std::filesystem::path& sample,
     nlohmann::json runtime_files = nlohmann::json::array();
     nlohmann::json plugin_files = nlohmann::json::array();
 
-    const auto engine_root = options.shipping ? bundle_root / "Engine" : bundle_root;
+    const auto engine_root = bundle_root;
     std::filesystem::create_directories(engine_root);
     const auto launcher_name = spec.launcher_name;
-    const auto root_launcher_name = options.shipping
-                                        ? sample_name + std::filesystem::path(spec.launcher_name).extension().string()
-                                        : launcher_name;
+    const auto root_launcher_name =
+        sample_name + std::filesystem::path(spec.launcher_name).extension().string();
     if (options.shipping) {
         runtime_files.push_back(
             CopyFileWithHash(wrapper_source, bundle_root / root_launcher_name, bundle_root, report));
     }
-    runtime_files.push_back(
-        CopyFileWithHash(launcher_source, engine_root / launcher_name, bundle_root, report));
+    if (!options.shipping) {
+        runtime_files.push_back(
+            CopyFileWithHash(wrapper_source, bundle_root / root_launcher_name, bundle_root, report));
+        runtime_files.push_back(
+            CopyFileWithHash(launcher_source, engine_root / launcher_name, bundle_root, report));
+    }
     for (const auto& entry : std::filesystem::directory_iterator(bin_root)) {
         if (entry.is_regular_file() && IsPlatformDynamicLibrary(entry.path(), spec)) {
             runtime_files.push_back(CopyFileWithHash(
@@ -867,7 +675,7 @@ void BuildDistributionBundle(const std::filesystem::path& sample,
             std::ofstream readme(readme_path, std::ios::binary);
             readme << sample_name << " shipping package\n\n";
             readme << "Run " << root_launcher_name << " to play.\n";
-            readme << "This launcher uses astra play, not smoke QA mode.\n";
+            readme << "This launcher uses AstraGame directly.\n";
         }
         runtime_files.push_back({{"path", "README.txt"},
                                  {"sha256", Sha256File(readme_path)},
@@ -902,7 +710,7 @@ void BuildDistributionBundle(const std::filesystem::path& sample,
           {"manifest_hash", manifest.package_hash},
           {"file_sha256", Sha256File(package_destination)}}},
         {"launcher", root_launcher_name},
-        {"engine_launcher", options.shipping ? ("Engine/" + launcher_name) : launcher_name},
+        {"engine_launcher", options.shipping ? root_launcher_name : launcher_name},
         {"runtime_files", runtime_files},
         {"plugin_files", plugin_files},
         {"build_info", report.build_info},
@@ -972,11 +780,11 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
     const auto plugin_descriptor = BinaryRoot() / "Plugins/Phase1Example/Phase1Example.plugin.yaml";
     Astra::Core::DiagnosticSink diagnostics;
     const auto registry = ScanSampleRegistry(sample, diagnostics);
-    const auto phase3 = Phase3FoundationSmoke(diagnostics);
+    const auto phase3 = Phase3FoundationValidation(diagnostics);
     nlohmann::json phase4;
     nlohmann::json playable;
-    if (IsVnSmokeSample(sample)) {
-        phase4 = Phase4ScriptVnSmoke(sample, diagnostics);
+    if (IsVnValidationSample(sample)) {
+        phase4 = Phase8ScriptVnValidation(sample, diagnostics);
         playable = BuildPlayableVnEvidence(sample, phase4, registry, {}, false, diagnostics);
     }
 
@@ -1005,15 +813,12 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
     manifest.cook_manifest = cook_manifest;
     auto phase8_evidence = phase4.is_null() ? nlohmann::json::object() : phase4;
     auto compact_phase8 = CompactPhase8Evidence(phase8_evidence);
-    auto phase4_alias = compact_phase8;
-    phase4_alias["deprecated_alias_for"] = "phase8_script_vn";
     manifest.runtime_evidence = {
         {"source_sample", std::filesystem::absolute(sample).lexically_normal().generic_string()},
         {"build_info", report.build_info},
         {"engine_binaries", EngineDllEvidence(report)},
         {"phase3_headless", phase3},
         {"phase8_script_vn", compact_phase8},
-        {"phase4_script_vn", phase4_alias},
         {"playable_vn", playable.is_null() ? nlohmann::json::object() : playable},
         {"asset_registry", Astra::Asset::ToJson(registry)},
         {"asset_dependency_graph",
@@ -1021,7 +826,7 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
         {"provider_feature_hash", pipeline.provider_feature_hash},
         {"package_profile", manifest.profile},
     };
-    if (IsVnSmokeSample(sample)) {
+    if (IsVnValidationSample(sample)) {
         ValidatePhase4AssetReferences(phase4, registry, report, sample);
     }
     if (std::filesystem::exists(plugin_descriptor)) {
@@ -1044,28 +849,6 @@ CommandReport Package(const std::filesystem::path& sample, const CommandOptions&
     report.artifacts["asset_release_gate"] = Astra::Asset::ToJson(release_gate);
     auto package_json = Astra::Asset::ToJson(manifest);
 
-    if (IsVnSmokeSample(sample) && phase4.is_object()) {
-        const auto replay_path = ReplayPathForSample(sample);
-        nlohmann::json replay = {
-            {"schema", ReplayEvidenceSchema},
-            {"sample", sample.filename().string()},
-            {"source_sample",
-             std::filesystem::absolute(sample).lexically_normal().generic_string()},
-            {"package", package.string()},
-            {"package_manifest_hash", manifest.package_hash},
-            {"package_profile", manifest.profile},
-            {"provider_feature_hash", pipeline.provider_feature_hash},
-            {"expected_hashes", phase4["native"]["hashes"]},
-            {"expected_playable_hash", playable.value("replay_route_hash", "")},
-            {"runtime_replay", phase4["native"]["runtime_save"]["payload"]["replay_events"]},
-            {"presentation_capture", phase4["native"]["headless_capture"]},
-            {"source_map", phase4.value("source_map", nlohmann::json::object())},
-            {"command_manifest", phase4.value("command_manifest", nlohmann::json::array())},
-            {"playable_vn", playable},
-        };
-        WriteJsonFile(replay_path, replay);
-        report.artifacts["golden_replay"] = replay_path.string();
-    }
     AppendDiagnostics(report, diagnostics);
     report.artifacts["package"] = package.string();
     report.artifacts["package_manifest"] = package_json;
@@ -1166,13 +949,13 @@ CommandReport ReleaseGate(const std::filesystem::path& target, const CommandOpti
     Astra::Media::RenderGraph graph;
     graph.frame_index = 1;
     graph.layers = {"background", "character", "ui", "text", "final"};
-    auto smoke_asset = Astra::Asset::ParseAssetUri("native:/ReleaseGate/Smoke");
-    if (smoke_asset) {
-        graph.draws.push_back({"draw.release", smoke_asset.Value(), "ui", 0, {}, {}});
+    auto launch_asset = Astra::Asset::ParseAssetUri("native:/ReleaseGate/Launch");
+    if (launch_asset) {
+        graph.draws.push_back({"draw.release", launch_asset.Value(), "ui", 0, {}, {}});
     }
     graph.text_requests.push_back({"text.release", "Release Gate", "en", "text", 0, {}});
     graph.audio_commands.push_back({"audio.release", "play",
-                                    smoke_asset ? smoke_asset.Value() : Astra::Asset::AssetUri{},
+                                    launch_asset ? launch_asset.Value() : Astra::Asset::AssetUri{},
                                     "sfx", 1.0, false});
 
     auto headless = Astra::Media::CreateHeadlessRenderer2DProvider();
@@ -1279,623 +1062,6 @@ CommandReport ReleaseGate(const std::filesystem::path& target, const CommandOpti
     return report;
 }
 
-nlohmann::json BuildGpuSmokeEvidence(const std::filesystem::path& sample,
-                                     const Astra::Platform::WindowGraphicsBinding& binding,
-                                     const Astra::Platform::WindowFrameDesc& frame,
-                                     Astra::Core::DiagnosticSink& diagnostics) {
-    Astra::Media::RenderTargetBinding target{binding.id, binding.backend, binding.width,
-                                             binding.height};
-    Astra::Media::RenderBackendSmoke smoke;
-    auto renderer = Astra::Media::CreateProductionRenderer2DProvider(target);
-    auto text_provider = Astra::Media::CreateProductionTextLayoutProvider();
-    smoke.renderer_provider = renderer->Describe().provider_id;
-    smoke.text_provider = text_provider->Describe().provider_id;
-
-    Astra::Media::MediaReleaseGateRequest gate;
-    gate.providers = Astra::Media::ProductionMediaProviders();
-    gate.require_available_backends = true;
-    for (const auto& provider : gate.providers) {
-        gate.selected_providers[provider.slot_id] = provider.provider_id;
-    }
-    auto release = Astra::Media::ValidateMediaReleaseGate(gate, diagnostics);
-
-    auto begun =
-        renderer->BeginFrame({frame.frame_index, frame.width, frame.height, "srgb"}, diagnostics);
-    std::vector<Astra::Media::PresentationCommand> commands;
-    if (begun) {
-        for (std::size_t index = 0; index < frame.primitives.size(); ++index) {
-            const auto& primitive = frame.primitives[index];
-            if (!primitive.image_rgba.empty() && primitive.image_width > 0 &&
-                primitive.image_height > 0) {
-                Astra::Media::DecodedCpuBuffer buffer;
-                buffer.width = primitive.image_width;
-                buffer.height = primitive.image_height;
-                buffer.row_stride = primitive.image_width * 4;
-                buffer.pixels = primitive.image_rgba;
-                if (renderer->ImportTexture(buffer, diagnostics)) {
-                    ++smoke.imported_texture_count;
-                }
-            }
-            auto asset =
-                Astra::Asset::ParseAssetUri("native:/GpuSmoke/Primitive" + std::to_string(index));
-            if (asset) {
-                Astra::Media::PresentationCommand command;
-                command.kind = primitive.image_rgba.empty()
-                                   ? Astra::Media::PresentationCommandKind::UiRect
-                                   : Astra::Media::PresentationCommandKind::Sprite;
-                command.command_id =
-                    primitive.id.empty() ? "gpu.primitive." + std::to_string(index) : primitive.id;
-                command.frame_index = frame.frame_index;
-                command.layer = primitive.kind == "text" ? "text" : "ui";
-                command.order = static_cast<Astra::Core::i32>(index);
-                command.asset = asset.Value();
-                command.transform.x = primitive.x;
-                command.transform.y = primitive.y;
-                commands.push_back(std::move(command));
-            }
-        }
-
-        const auto font_path = sample / "Content/Fonts/sourcehanserif-medium.otf";
-        if (std::filesystem::exists(font_path)) {
-            const auto font_bytes = ReadBytes(font_path);
-            auto text_texture = Astra::Media::RasterizeUiTextCpuBufferBytes(
-                font_bytes, "GPU smoke text", 24, diagnostics);
-            if (text_texture && renderer->ImportTexture(text_texture.Value(), diagnostics)) {
-                ++smoke.text_texture_count;
-            }
-        }
-
-        auto graph = Astra::Media::ExtractRenderGraph(commands, nullptr, diagnostics);
-        smoke.draw_count = static_cast<Astra::Core::u32>(graph.draws.size());
-        (void)renderer->Execute(graph, diagnostics);
-        auto capture = renderer->Capture(diagnostics);
-        if (capture) {
-            smoke.frame_hash = capture.Value().render_hash;
-        }
-        if (renderer->Present({"target:/main", false}, diagnostics)) {
-            smoke.presented = true;
-        }
-    }
-
-    const auto capabilities = Astra::Media::ProbeMediaBackendCapabilities();
-    smoke.renderer_available = capabilities.renderer2d_ready && begun;
-    smoke.text_available = capabilities.ui_text_raster_ready || smoke.text_texture_count > 0;
-    return {
-        {"schema", "astra.gpu_smoke.v1"},
-        {"release_gate", release ? Astra::Media::ToJson(release.Value())
-                                 : nlohmann::json({{"schema", Astra::Media::MediaReleaseGateSchema},
-                                                   {"passed", false}})},
-        {"capabilities", Astra::Media::ToJson(capabilities)},
-        {"smoke", Astra::Media::ToJson(smoke)},
-    };
-}
-
-CommandReport Run(const std::filesystem::path& target, const CommandOptions& options) {
-    auto report = MakeReport("astra run");
-    if (!options.headless_smoke && !options.windowed_smoke) {
-        AddDiagnostic(report, "ASTRA_RUN_HEADLESS_REQUIRED",
-                      Astra::Core::DiagnosticSeverity::Blocking,
-                      "Run requires --headless-smoke or --windowed-smoke.");
-        return report;
-    }
-
-    Astra::Core::DiagnosticSink diagnostics;
-    auto path = ResolveToolTarget(target);
-    std::filesystem::path package_path;
-    nlohmann::json package_manifest;
-    nlohmann::json package_mount;
-    nlohmann::json package_payload_smoke;
-    nlohmann::json package_runtime_evidence = nlohmann::json::object();
-    if (std::filesystem::is_regular_file(path) && path.extension() == ".astrapkg") {
-        package_path = path;
-        Astra::Asset::PackageReader reader;
-        auto manifest = reader.ReadManifest(path, diagnostics);
-        AppendDiagnostics(report, diagnostics);
-        diagnostics.Clear();
-        if (!manifest) {
-            return report;
-        }
-        package_manifest = Astra::Asset::ToJson(manifest.Value());
-        package_runtime_evidence = manifest.Value().runtime_evidence;
-        if (package_manifest.contains("runtime_evidence")) {
-            package_manifest["runtime_evidence"] = {
-                {"source_sample", package_runtime_evidence.value("source_sample", "")},
-                {"phase8_script_vn",
-                 CompactPhase8Evidence(
-                     package_runtime_evidence.value("phase8_script_vn", nlohmann::json::object()))},
-                {"playable_vn",
-                 {{"status",
-                   package_runtime_evidence.value("playable_vn", nlohmann::json::object())
-                       .value("status", "")},
-                  {"replay_route_hash",
-                   package_runtime_evidence.value("playable_vn", nlohmann::json::object())
-                       .value("replay_route_hash", "")}}},
-            };
-        }
-        auto mount = reader.MountPackage(path, diagnostics);
-        AppendDiagnostics(report, diagnostics);
-        diagnostics.Clear();
-        if (mount) {
-            package_mount = Astra::Asset::ToJson(mount.Value());
-        }
-        auto payload_id = Astra::Asset::ParseAssetUri("native:/Scripts/opening");
-        if ((!payload_id ||
-             std::ranges::none_of(manifest.Value().payloads,
-                                  [&](const Astra::Asset::PackagePayloadEntry& payload) {
-                                      return payload.asset_id.ToString() ==
-                                             payload_id.Value().ToString();
-                                  })) &&
-            !manifest.Value().payloads.empty()) {
-            payload_id = Astra::Core::Result<Astra::Asset::AssetUri>::Success(
-                manifest.Value().payloads.front().asset_id);
-        }
-        if (payload_id) {
-            auto payload = reader.ReadPayloadBytes(path, payload_id.Value(), diagnostics);
-            AppendDiagnostics(report, diagnostics);
-            diagnostics.Clear();
-            auto chunks = reader.ReadPayloadChunks(path, payload_id.Value(), 64, diagnostics);
-            AppendDiagnostics(report, diagnostics);
-            diagnostics.Clear();
-            if (payload) {
-                package_payload_smoke = {
-                    {"asset_id", payload_id.Value().ToString()},
-                    {"size_bytes", payload.Value().size()},
-                    {"stream_chunks", chunks ? chunks.Value().size() : 0},
-                    {"read_mode", "random_access"},
-                };
-            }
-        }
-        const auto source_sample = manifest.Value().runtime_evidence.value("source_sample", "");
-        if (!source_sample.empty()) {
-            path = source_sample;
-        }
-    }
-    if (std::filesystem::is_directory(path) && !IsFoundationSample(path, report)) {
-        return report;
-    }
-
-    auto platform = Astra::Platform::CreateHeadlessPlatform();
-    nlohmann::json windowed_evidence = nlohmann::json::object();
-    if (options.windowed_smoke) {
-        auto sdl_platform = Astra::Platform::CreateSdlPlatform(diagnostics);
-        AppendDiagnostics(report, diagnostics);
-        diagnostics.Clear();
-        if (!sdl_platform) {
-            return report;
-        }
-        platform = std::move(sdl_platform.Value());
-        auto created = platform.Window().Create({"AstraEngine NativeVN Smoke", 1280, 720},
-                                                diagnostics);
-        AppendDiagnostics(report, diagnostics);
-        diagnostics.Clear();
-        if (!created) {
-            return report;
-        }
-        platform.Window().PumpEvents();
-        windowed_evidence = {
-            {"schema", "astra.windowed_smoke.v1"},
-            {"backend", "sdl3"},
-            {"created_window", true},
-            {"auto_close", options.auto_close},
-            {"scripted_input",
-             options.scripted_input.empty() ? "" : options.scripted_input.string()},
-        };
-    }
-    const auto plugin_descriptor = BinaryRoot() / "Plugins/Phase1Example/Phase1Example.plugin.yaml";
-    auto descriptor = Astra::ModuleRuntime::LoadPluginDescriptor(plugin_descriptor, diagnostics);
-    if (!descriptor) {
-        AddDiagnostic(report, "ASTRA_RUN_PLUGIN_DESCRIPTOR",
-                      Astra::Core::DiagnosticSeverity::Blocking,
-                      "Could not load Phase 1 example plugin descriptor.", plugin_descriptor);
-        return report;
-    }
-    Astra::ModuleRuntime::ModuleManager manager(platform);
-    auto loaded =
-        manager.LoadAndActivate(descriptor.Value(), plugin_descriptor.parent_path(), diagnostics);
-    AppendDiagnostics(report, diagnostics);
-    if (!loaded) {
-        AddDiagnostic(report, "ASTRA_RUN_PLUGIN_LOAD", Astra::Core::DiagnosticSeverity::Blocking,
-                      "Phase 1 example plugin failed to load.", plugin_descriptor);
-        return report;
-    }
-    diagnostics.Clear();
-    report.artifacts["headless_smoke"] = {
-        {"services", manager.Services().Services().size()},
-        {"extensions", manager.Extensions().Extensions().size()},
-        {"providers", manager.EngineModules().Providers().size()},
-        {"package_manifest",
-         package_manifest.is_null() ? nlohmann::json::object() : package_manifest},
-        {"package_mount", package_mount.is_null() ? nlohmann::json::object() : package_mount},
-        {"package_payload_smoke",
-         package_payload_smoke.is_null() ? nlohmann::json::object() : package_payload_smoke},
-        {"phase3", Phase3FoundationSmoke(diagnostics)},
-    };
-    if (!windowed_evidence.empty()) {
-        report.artifacts["windowed_smoke"] = windowed_evidence;
-    }
-    if (!options.scripted_input.empty()) {
-        report.artifacts["scripted_input"] = {
-            {"path", options.scripted_input.string()},
-            {"exists", std::filesystem::exists(options.scripted_input)},
-        };
-    }
-    if (!options.load.empty()) {
-        report.artifacts["loaded_save"] = {
-            {"path", options.load.string()},
-            {"exists", std::filesystem::exists(options.load)},
-        };
-        if (!std::filesystem::exists(options.load)) {
-            AddDiagnostic(report, "ASTRA_RUN_SAVE_MISSING",
-                          Astra::Core::DiagnosticSeverity::Blocking,
-                          "Requested save file does not exist.", options.load);
-        }
-    }
-    if (std::filesystem::is_directory(path) && IsVnSmokeSample(path)) {
-        const auto registry = ScanSampleRegistry(path, diagnostics);
-        auto phase8 = package_runtime_evidence.value("phase8_script_vn", nlohmann::json::object());
-        if (phase8.empty()) {
-            phase8 = Phase4ScriptVnSmoke(path, diagnostics);
-        }
-        report.artifacts["headless_smoke"]["phase8_script_vn"] =
-            package_runtime_evidence.empty() ? phase8 : CompactPhase8Evidence(phase8);
-        report.artifacts["headless_smoke"]["phase4_script_vn"] =
-            report.artifacts["headless_smoke"]["phase8_script_vn"];
-        report.artifacts["headless_smoke"]["phase4_script_vn"]["deprecated_alias_for"] =
-            "phase8_script_vn";
-        if (!package_runtime_evidence.empty() && package_runtime_evidence.contains("playable_vn")) {
-            report.artifacts["headless_smoke"]["playable_vn"] = ApplyScriptedInputToPlayable(
-                package_runtime_evidence["playable_vn"], options.scripted_input,
-                options.windowed_smoke, diagnostics);
-        } else {
-            report.artifacts["headless_smoke"]["playable_vn"] = BuildPlayableVnEvidence(
-                path, phase8, registry, options.scripted_input, options.windowed_smoke,
-                diagnostics);
-        }
-        report.artifacts["playable_vn"] = report.artifacts["headless_smoke"]["playable_vn"];
-        if (report.artifacts["headless_smoke"]["phase8_script_vn"].value("status", "failed") !=
-            "passed") {
-            AddDiagnostic(report, "ASTRA_PHASE8_SCRIPT_VN_FAILED",
-                          Astra::Core::DiagnosticSeverity::Blocking,
-                          "Phase 8 Script/AstraVN playable smoke failed.", path);
-        }
-        const auto audio_commands = report.artifacts["playable_vn"]
-                                        .value("audio_playback_evidence", nlohmann::json::object())
-                                        .value("commands", nlohmann::json::array());
-        auto decoded_audio_payloads =
-            BuildPackageAudioEvidence(registry, audio_commands, package_path, diagnostics);
-        report.artifacts["playable_vn"]["audio_playback_evidence"]["decoded_payloads"] =
-            decoded_audio_payloads;
-        report.artifacts["headless_smoke"]["playable_vn"] = report.artifacts["playable_vn"];
-        if (!windowed_evidence.empty()) {
-            nlohmann::json texture_sources = nlohmann::json::array();
-            nlohmann::json glyph_sources = nlohmann::json::array();
-            auto frame =
-                BuildPlayableWindowFrame(report.artifacts["playable_vn"], registry, package_path,
-                                         texture_sources, glyph_sources, diagnostics);
-            auto presented = platform.Window().PresentFrame(frame, diagnostics);
-            AppendDiagnostics(report, diagnostics);
-            diagnostics.Clear();
-            if (presented) {
-                report.artifacts["playable_vn"]["window_present"] = ToJson(presented.Value());
-                report.artifacts["playable_vn"]["window_texture_sources"] = texture_sources;
-                report.artifacts["playable_vn"]["window_glyph_sources"] = glyph_sources;
-                report.artifacts["windowed_smoke"]["window_present"] = ToJson(presented.Value());
-                report.artifacts["windowed_smoke"]["window_texture_sources"] = texture_sources;
-                report.artifacts["windowed_smoke"]["window_glyph_sources"] = glyph_sources;
-            }
-            if (options.gpu_smoke) {
-                report.artifacts["windowed_smoke"]["gpu_smoke"] = BuildGpuSmokeEvidence(
-                    path, platform.Window().GraphicsBinding(), frame, diagnostics);
-            }
-            report.artifacts["windowed_smoke"]["playable_vn"] = report.artifacts["playable_vn"];
-            report.artifacts["windowed_smoke"]["presentation_frame_hash"] =
-                report.artifacts["playable_vn"].value("presentation_frame_hash", "");
-            report.artifacts["windowed_smoke"]["windowed_playable"] =
-                report.artifacts["playable_vn"]["windowed_playable"];
-            if (options.auto_close) {
-                platform.Window().Close();
-            }
-        }
-    }
-    if (!options.save_out.empty()) {
-        const auto package_meta =
-            package_manifest.is_object() ? package_manifest : nlohmann::json::object();
-        nlohmann::json save = {
-            {"schema", "astra.runtime.save.evidence.v1"},
-            {"target", target.string()},
-            {"sample", std::filesystem::is_directory(path) ? path.filename().string() : ""},
-            {"headless_smoke", report.artifacts.value("headless_smoke", nlohmann::json::object())},
-            {"windowed_smoke", report.artifacts.value("windowed_smoke", nlohmann::json::object())},
-            {"playable_vn", report.artifacts.value("playable_vn", nlohmann::json::object())},
-            {"package_manifest_hash", package_meta.value("package_hash", "")},
-            {"package_profile", package_meta.value("profile", "")},
-            {"provider_feature_hash",
-             package_meta.value("runtime_evidence", nlohmann::json::object())
-                 .value("provider_feature_hash", "")},
-            {"save_snapshot_hash", report.artifacts.value("playable_vn", nlohmann::json::object())
-                                       .value("save_snapshot_hash", "")},
-        };
-        WriteJsonFile(options.save_out, save);
-        report.artifacts["save_out"] = options.save_out.string();
-    }
-    AppendDiagnostics(report, diagnostics);
-    manager.DeactivateAndUnload(diagnostics);
-    return report;
-}
-
-CommandReport Test(const std::filesystem::path& target, const CommandOptions& options) {
-    auto report = MakeReport("astra test");
-    auto plan_paths = CollectPlayerPlans(options.test_plan, report);
-    nlohmann::json cases = nlohmann::json::array();
-    std::size_t executed = 0;
-
-    for (const auto& plan_path : plan_paths) {
-        YAML::Node plan;
-        try {
-            plan = YAML::LoadFile(plan_path.string());
-        } catch (const YAML::Exception& error) {
-            AddDiagnostic(report, "ASTRA_PLAYER_TEST_PLAN_INVALID",
-                          Astra::Core::DiagnosticSeverity::Blocking, error.what(), plan_path);
-            continue;
-        }
-        if (plan["schema"].as<std::string>("") != "astra.test.player_plan.v1" ||
-            !plan["cases"] || !plan["cases"].IsSequence()) {
-            AddDiagnostic(report, "ASTRA_PLAYER_TEST_PLAN_INVALID",
-                          Astra::Core::DiagnosticSeverity::Blocking,
-                          "Player test plan requires schema astra.test.player_plan.v1 and cases.",
-                          plan_path);
-            continue;
-        }
-
-        for (const auto& test_case : plan["cases"]) {
-            const auto case_id = test_case["case_id"].as<std::string>("");
-            if (!options.test_case.empty() && case_id != options.test_case) {
-                continue;
-            }
-            ++executed;
-            auto scripted_input = WriteCaseScriptedInput(test_case, plan_path, report);
-            CommandOptions run_options = options;
-            run_options.scripted_input = scripted_input;
-            if (!run_options.headless_smoke && !run_options.windowed_smoke) {
-                run_options.headless_smoke = true;
-            }
-            auto run_report = Run(target, run_options);
-            for (const auto& diagnostic : run_report.diagnostics) {
-                report.diagnostics.push_back(diagnostic);
-            }
-            if (!run_report.Passed()) {
-                report.status = "failed";
-                AddDiagnostic(report, "ASTRA_PLAYER_TEST_CASE_FAILED",
-                              Astra::Core::DiagnosticSeverity::Blocking,
-                              "Player test run command failed.", plan_path);
-            }
-
-            nlohmann::json case_report = {
-                {"schema", "astra.test.player_case_report.v1"},
-                {"suite_id", plan["suite_id"].as<std::string>("")},
-                {"case_id", case_id},
-                {"persona", test_case["persona"].as<std::string>("")},
-                {"objective", test_case["objective"].as<std::string>("")},
-                {"plan", StableSourcePath(plan_path)},
-                {"run", ToJson(run_report)},
-                {"runtime_events", RunRuntimeEventSteps(test_case, plan_path, report)},
-            };
-            case_report["assertions"] =
-                EvaluatePlayerAssertions(test_case, case_report, plan_path, report);
-            bool assertions_passed = true;
-            for (const auto& assertion : case_report["assertions"]) {
-                assertions_passed = assertions_passed && assertion.value("passed", false);
-            }
-            case_report["status"] =
-                run_report.Passed() && assertions_passed ? "passed" : "failed";
-            cases.push_back(std::move(case_report));
-        }
-    }
-
-    if (executed == 0 && report.Passed()) {
-        AddDiagnostic(report, "ASTRA_PLAYER_TEST_PLAN_INVALID",
-                      Astra::Core::DiagnosticSeverity::Blocking,
-                      "No player test cases matched the requested plan/case filter.",
-                      options.test_plan);
-    }
-    std::size_t passed = 0;
-    for (const auto& test_case : cases) {
-        passed += test_case.value("status", "") == "passed" ? 1 : 0;
-    }
-    report.artifacts["player_tests"] = {
-        {"schema", "astra.test.player_report.v1"},
-        {"target", target.string()},
-        {"plan", options.test_plan.string()},
-        {"case_filter", options.test_case},
-        {"total", cases.size()},
-        {"passed", passed},
-        {"failed", cases.size() - passed},
-        {"cases", cases},
-    };
-    if (passed != cases.size()) {
-        report.status = "failed";
-    }
-    return report;
-}
-
-CommandReport Play(const std::filesystem::path& target, const CommandOptions& options) {
-    auto report = MakeReport("astra play");
-    Astra::Core::DiagnosticSink diagnostics;
-    const auto package_path = ResolveToolTarget(target);
-    if (!std::filesystem::is_regular_file(package_path) || package_path.extension() != ".astrapkg") {
-        AddDiagnostic(report, "ASTRA_PLAY_PACKAGE_MISSING",
-                      Astra::Core::DiagnosticSeverity::Blocking,
-                      "Play requires an existing .astrapkg package.", package_path);
-        return report;
-    }
-
-    Astra::Asset::PackageReader reader;
-    auto manifest = reader.ReadManifest(package_path, diagnostics);
-    AppendDiagnostics(report, diagnostics);
-    diagnostics.Clear();
-    if (!manifest) {
-        return report;
-    }
-    auto package_manifest = Astra::Asset::ToJson(manifest.Value());
-    const auto source_sample = manifest.Value().runtime_evidence.value("source_sample", "");
-    const auto sample = source_sample.empty() ? std::filesystem::path{} : std::filesystem::path(source_sample);
-    auto registry = std::filesystem::is_directory(sample) ? ScanSampleRegistry(sample, diagnostics)
-                                                          : Astra::Asset::AssetRegistry{};
-    nlohmann::json playable =
-        manifest.Value().runtime_evidence.value("playable_vn", nlohmann::json::object());
-    if (playable.empty() && std::filesystem::is_directory(sample) && IsVnSmokeSample(sample)) {
-        auto phase8 = Phase4ScriptVnSmoke(sample, diagnostics);
-        playable = BuildPlayableVnEvidence(sample, phase8, registry, {}, true, diagnostics);
-    }
-
-    auto sdl_platform = Astra::Platform::CreateSdlPlatform(diagnostics);
-    AppendDiagnostics(report, diagnostics);
-    diagnostics.Clear();
-    if (!sdl_platform) {
-        return report;
-    }
-    auto platform = std::move(sdl_platform.Value());
-    auto created = platform.Window().Create({"AstraEngine Play", 1280, 720}, diagnostics);
-    AppendDiagnostics(report, diagnostics);
-    diagnostics.Clear();
-    if (!created) {
-        return report;
-    }
-
-    nlohmann::json texture_sources = nlohmann::json::array();
-    nlohmann::json glyph_sources = nlohmann::json::array();
-    auto frame = BuildPlayableWindowFrame(playable, registry, package_path, texture_sources,
-                                          glyph_sources, diagnostics);
-    auto presented = platform.Window().PresentFrame(frame, diagnostics);
-    AppendDiagnostics(report, diagnostics);
-    diagnostics.Clear();
-    if (presented) {
-        report.artifacts["production_play"] = {
-            {"schema", "astra.production_play.v1"},
-            {"package", package_path.string()},
-            {"package_manifest_hash", package_manifest.value("package_hash", "")},
-            {"profile", package_manifest.value("profile", "")},
-            {"source_sample", source_sample},
-            {"window_present", ToJson(presented.Value())},
-            {"window_texture_sources", texture_sources},
-            {"window_glyph_sources", glyph_sources},
-            {"playable_vn", playable},
-        };
-    }
-    if (!options.json) {
-        while (!platform.Window().ShouldClose()) {
-            platform.Window().PumpEvents();
-            (void)platform.Window().PresentFrame(frame, diagnostics);
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
-        }
-    } else {
-        platform.Window().Close();
-    }
-    return report;
-}
-
-CommandReport Replay(const std::filesystem::path& target, const CommandOptions& options) {
-    auto report = MakeReport("astra replay");
-    const auto path = ResolveToolTarget(target);
-    if (!std::filesystem::is_regular_file(path)) {
-        AddDiagnostic(report, "ASTRA_REPLAY_MISSING", Astra::Core::DiagnosticSeverity::Blocking,
-                      "Replay file is missing.", path);
-        return report;
-    }
-    std::ifstream file(path, std::ios::binary);
-    auto replay = nlohmann::json::parse(file, nullptr, false);
-    if (replay.is_discarded() || replay.value("schema", "") != ReplayEvidenceSchema) {
-        AddDiagnostic(report, "ASTRA_REPLAY_INVALID", Astra::Core::DiagnosticSeverity::Blocking,
-                      "Replay file has an unsupported schema.", path);
-        return report;
-    }
-    report.artifacts["replay"] = replay;
-    if (!options.compare) {
-        return report;
-    }
-
-    const auto sample = std::filesystem::path(replay.value("source_sample", ""));
-    if (!std::filesystem::exists(sample)) {
-        AddDiagnostic(report, "ASTRA_REPLAY_SOURCE_MISSING",
-                      Astra::Core::DiagnosticSeverity::Blocking, "Replay source sample is missing.",
-                      sample);
-        return report;
-    }
-    Astra::Core::DiagnosticSink diagnostics;
-    const auto registry = ScanSampleRegistry(sample, diagnostics);
-    auto phase4 = Phase4ScriptVnSmoke(sample, diagnostics);
-    auto playable = BuildPlayableVnEvidence(sample, phase4, registry, {}, false, diagnostics);
-    AppendDiagnostics(report, diagnostics);
-    if (phase4.value("status", "failed") != "passed") {
-        AddDiagnostic(report, "ASTRA_REPLAY_RUN_FAILED", Astra::Core::DiagnosticSeverity::Blocking,
-                      "Replay comparison could not re-run NativeVN headless evidence.", sample);
-        return report;
-    }
-    const auto expected_json = replay.at("expected_hashes");
-    const auto actual_json = phase4["native"]["hashes"];
-    Astra::Runtime::RuntimeHashes expected{
-        expected_json.value("state_hash", ""),
-        expected_json.value("event_hash", ""),
-        expected_json.value("presentation_hash", ""),
-    };
-    Astra::Runtime::RuntimeHashes actual{
-        actual_json.value("state_hash", ""),
-        actual_json.value("event_hash", ""),
-        actual_json.value("presentation_hash", ""),
-    };
-    auto comparison = Astra::Runtime::CompareReplayHashes(expected, actual);
-    const auto expected_playable_hash = replay.value("expected_playable_hash", "");
-    const auto actual_playable_hash = playable.value("replay_route_hash", "");
-    report.artifacts["comparison"] = Astra::Runtime::ToJson(comparison);
-    report.artifacts["comparison"]["playable_route_hash_match"] =
-        expected_playable_hash.empty() || expected_playable_hash == actual_playable_hash;
-    report.artifacts["comparison"]["expected_playable_hash"] = expected_playable_hash;
-    report.artifacts["comparison"]["actual_playable_hash"] = actual_playable_hash;
-    report.artifacts["comparison"]["package_manifest_hash"] =
-        replay.value("package_manifest_hash", "");
-    report.artifacts["comparison"]["package_profile"] = replay.value("package_profile", "");
-    report.artifacts["comparison"]["provider_feature_hash"] =
-        replay.value("provider_feature_hash", "");
-    report.artifacts["playable_vn"] = playable;
-    if (!comparison.passed) {
-        report.artifacts["mismatch_report"] = {
-            {"schema", "astra.runtime.replay_mismatch.v1"},
-            {"frame", 0},
-            {"category", "runtime_hash"},
-            {"expected_hash",
-             expected.state_hash + "|" + expected.event_hash + "|" + expected.presentation_hash},
-            {"actual_hash",
-             actual.state_hash + "|" + actual.event_hash + "|" + actual.presentation_hash},
-            {"nearest_event_sequence", 0},
-            {"record_kind", "checkpoint"},
-            {"package_manifest_hash", replay.value("package_manifest_hash", "")},
-            {"objects",
-             nlohmann::json::array({{{"kind", "sample"}, {"id", sample.filename().string()}}})},
-            {"source",
-             {{"file", (sample / "Content/Scripts/opening.astra").string()}, {"line", 1}}},
-        };
-        AddDiagnostic(report, "ASTRA_REPLAY_MISMATCH", Astra::Core::DiagnosticSeverity::Blocking,
-                      "Replay hashes do not match.", path);
-    }
-    if (!report.artifacts["comparison"].value("playable_route_hash_match", false)) {
-        report.artifacts["mismatch_report"] = {
-            {"schema", "astra.runtime.replay_mismatch.v1"},
-            {"frame", 0},
-            {"category", "playable_route"},
-            {"expected_hash", expected_playable_hash},
-            {"actual_hash", actual_playable_hash},
-            {"nearest_event_sequence", 0},
-            {"record_kind", "script_decision"},
-            {"package_manifest_hash", replay.value("package_manifest_hash", "")},
-            {"objects",
-             nlohmann::json::array({{{"kind", "script"}, {"id", "native:/Scripts/opening"}}})},
-            {"source",
-             {{"file", (sample / "Content/Scripts/opening.astra").string()}, {"line", 1}}},
-        };
-        AddDiagnostic(report, "ASTRA_REPLAY_MISMATCH", Astra::Core::DiagnosticSeverity::Blocking,
-                      "Playable route hash does not match.", path);
-    }
-    return report;
-}
-
 } // namespace Astra::Tools
+
+

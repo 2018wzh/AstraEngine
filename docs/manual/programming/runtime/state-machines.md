@@ -35,3 +35,5 @@ Compiled transition coverage lives in `Engine/Tests/PhaseTests.cpp`.
 ## Troubleshooting
 
 - Guard/action APIs, delayed event migration, hot reload validation, and debugger hooks remain later production work.
+
+

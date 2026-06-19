@@ -26,3 +26,5 @@ Legacy VN 支持通过兼容插件实现：
 - 兼容模块可以拥有 VM 状态，但必须通过 Save extension state 进入统一存档。
 - 旧 API 输出映射为 RuntimeEvent 或 PresentationCommand，不直接调用底层渲染或音频 native handle。
 - Cook/package 默认不复制外部原始资产。
+
+

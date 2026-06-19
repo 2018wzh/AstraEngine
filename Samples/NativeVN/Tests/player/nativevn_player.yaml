@@ -105,7 +105,7 @@ cases:
       - path: /run/artifacts/playable_vn/replay_checkpoint
         equals: true
 
-  - case_id: nativevn_menu_reopen_smoke
+  - case_id: nativevn_menu_reopen
     persona: menu_heavy_player
     objective: Reopen player-facing menus and save UI without losing visible state.
     steps:
@@ -157,3 +157,6 @@ cases:
       - path: /run/artifacts/playable_vn/save_slots
         op: min_count
         min_count: 3
+
+
+

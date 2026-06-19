@@ -24,3 +24,5 @@ AstraEngine 采用以下基线：
 - 旧的 VN-first runtime 命名不能作为长期架构中心。
 - Core 不依赖 VN、AI、Live2D、Lua 或旧 VM。
 - 文档和代码演进应优先围绕通用 2D Core，再构建 AstraVN。
+
+

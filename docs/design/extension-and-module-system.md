@@ -144,7 +144,7 @@ release_gate:
   forbid_native_handle_in_abi: true
 sample_acceptance:
   - astra validate Plugins/${plugin_id}
-  - astra run Samples/CustomizationPlugin --renderer ${provider_id}
+  - AstraGame launcher Samples/CustomizationPlugin --renderer ${provider_id}
 ```
 
 插件作者验收：
@@ -492,3 +492,5 @@ Level 5: Runtime Module Development Reload
 ## 11. 打包与 Release Gate
 
 发布包只包含启用且 runtime-safe 的模块。Editor、Developer、debug MCP、authoring-only 模块默认排除。Release Gate 校验 descriptor schema、ABI version、权限、依赖闭包、packaged eligibility、binary hash 和模块策略。
+
+

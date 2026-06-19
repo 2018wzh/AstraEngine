@@ -1,0 +1,12 @@
+schema: astra.sample.v1
+id: astra.sample.package_launch
+display_name: PackageLaunch
+phase: 3
+foundation_only: true
+status: foundation-launch
+description: Exercises foundation headless platform, example module load/unload, and Phase 3 Asset/Media/FilterGraph validation.
+acceptance:
+  - astra validate Samples/PackageLaunch --strict
+  - astra package Samples/PackageLaunch --profile development
+
+

@@ -26,7 +26,7 @@ UE `UObject` / UHT / GC 体系。
 
 ## 2. Completion Model
 
-- `Foundation`：最小可运行基座，可通过 headless test、smoke program 或 demo 验证。
+- `Foundation`：最小可运行基座，可通过 headless test、validation program 或 demo 验证。
 - `Feature Complete`：功能表面完整，覆盖真实项目主要工作流。
 - `Production Ready`：具备真实后端、错误恢复、版本迁移、调试观测、压力测试和发布门禁。
 - `UE-class 2D Runtime`：在 Astra 范围内达到可发布、可调试、可扩展、可维护的 runtime 完备度。
@@ -80,7 +80,7 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 
 - 示例模块可加载、注册服务、扩展和 provider，停用并卸载。
 - ABI 不暴露 C++ ownership、Actor 指针或 native handles；public header isolation test 覆盖 SDL/OS/native handle 禁令。
-- Headless backend 可执行基础 filesystem/timer/thread/crash smoke。
+- Headless backend 可执行基础 filesystem/timer/thread/crash validation。
 - PropertySystem 可生成 nested struct/array/map/tagged union JSON Schema、应用 defaults/validation、验证 schema version path 和执行 AI/editor/runtime/release 写入策略。
 - `astra validate . --strict --json` 输出 `foundation_core_gate.passed = true`，并包含 registered diagnostic codes、release config hash 和 module binary SHA-256。
 
@@ -115,7 +115,7 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 
 ## 6. Phase 3：Foundation Asset / Media / FilterGraph
 
-状态：Implemented runtime-only media backend hardening slice. 当前实现覆盖 `AstraAsset` 和 `AstraMedia`：asset URI/ID 解析、VFS mount、sidecar DTO/validation、registry scan、dependency diagnostics、import preset/project template/review item DTO、watch invalidation plumbing、PresentationCommand、RenderGraph/text/audio/filter DTO、FilterProfile validation/application、Renderer2D/TextLayout/Audio/ImageDecode/AudioDecode/VideoDecode/Timeline/FilterGraph provider descriptors、media release-gate validation、mature backend capability probe（SDL3、bgfx、Skia、libpng、libjpeg-turbo、libwebp、FreeType、HarfBuzz、miniaudio、FFmpeg）、PNG/JPEG/WebP image metadata/RGBA decode API、decoded CPU texture buffer import、glyph-run/atlas token capture、logical miniaudio mixer/bus capture、CPU RGBA FilterGraph passes、DriverDiffReport、video decode extension-point diagnostics、Timeline camera/audio/filter state、image/audio cook artifact metadata、HeadlessRenderer2D deterministic capture/hash、bgfx/Skia provider smoke，以及 CLI release-gate evidence。Video frame decode、native audio device perceptual diff 和 Editor visual diff viewer 仍属后续 hardening。
+状态：Implemented runtime-only media backend hardening slice. 当前实现覆盖 `AstraAsset` 和 `AstraMedia`：asset URI/ID 解析、VFS mount、sidecar DTO/validation、registry scan、dependency diagnostics、import preset/project template/review item DTO、watch invalidation plumbing、PresentationCommand、RenderGraph/text/audio/filter DTO、FilterProfile validation/application、Renderer2D/TextLayout/Audio/ImageDecode/AudioDecode/VideoDecode/Timeline/FilterGraph provider descriptors、media release-gate validation、mature backend capability probe（SDL3、bgfx、Skia、libpng、libjpeg-turbo、libwebp、FreeType、HarfBuzz、miniaudio、FFmpeg）、PNG/JPEG/WebP image metadata/RGBA decode API、decoded CPU texture buffer import、glyph-run/atlas token capture、logical miniaudio mixer/bus capture、CPU RGBA FilterGraph passes、DriverDiffReport、video decode extension-point diagnostics、Timeline camera/audio/filter state、image/audio cook artifact metadata、HeadlessRenderer2D deterministic capture/hash、bgfx/Skia provider validation，以及 CLI release-gate evidence。Video frame decode、native audio device perceptual diff 和 Editor visual diff viewer 仍属后续 hardening。
 
 目标：
 
@@ -383,7 +383,7 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 
 验收：
 
-- Debug/Release 构建均可运行 test、smoke、package launch 和 release gate。
+- Debug/Release 构建均可运行 test、validation、package launch 和 release gate。
 - 长时间运行、热重载、存档迁移、插件加载失败和资源缺失都有稳定 diagnostics。
 - 性能、内存、asset load、render/audio/script tick 可被 profiling/tracing 捕获。
 
@@ -410,7 +410,7 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 - Editor 支持模板创建、Content Browser、Graph/Timeline/Script 创作、PIE、Runtime Debugger、AI Review Queue 和打包发布。
 - 插件可替换 renderer/text/audio 或添加 Editor panel / MCP tool，并通过 release gate。
 - Runtime AI MCP、Editor Copilot MCP、Editor Content Generation MCP 的权限、审计、review、save/replay 策略通过验收。
-- Core、Runtime、Asset、Media、Script、AstraVN 均有 unit、integration、headless、smoke、stress 和 compatibility tests。
+- Core、Runtime、Asset、Media、Script、AstraVN 均有 unit、integration、headless、validation、stress 和 compatibility tests。
 
 非目标：
 
@@ -445,3 +445,5 @@ Phase 5+ 的实现入口以 production contract 文档为准：Runtime 见 `runt
 非目标：
 
 - AstraEmu 不是 native runtime 达到 UE-class 2D parity 的前置条件，也不是 NativeVN 创作流程的一部分。
+
+

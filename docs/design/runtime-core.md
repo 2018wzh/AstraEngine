@@ -267,3 +267,5 @@ Debugger API：
 - Replay mismatch 能定位 frame、event、actor/component、script command 或 presentation command。
 - Editor PIE 与 packaged runtime 共享同一 `RuntimeWorld` 路径。
 - Runtime public API 不暴露 Editor widget、C++ Actor pointer、ECS entity、SDL/GPU/audio native handle。
+
+

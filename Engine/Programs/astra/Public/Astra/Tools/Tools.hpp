@@ -13,9 +13,6 @@ namespace Astra::Tools {
 struct CommandOptions {
     bool json = false;
     bool strict = false;
-    bool headless_smoke = false;
-    bool windowed_smoke = false;
-    bool gpu_smoke = false;
     bool auto_close = false;
     bool compare = false;
     bool no_distribution = false;
@@ -31,11 +28,6 @@ struct CommandOptions {
     std::filesystem::path log_dir;
     std::filesystem::path log_file;
     std::filesystem::path distribution_root;
-    std::filesystem::path scripted_input;
-    std::filesystem::path test_plan;
-    std::filesystem::path save_out;
-    std::filesystem::path load;
-    std::string test_case;
     std::string import_asset_id;
     std::string import_asset_type = "image";
     std::string import_preset = "default";
@@ -74,14 +66,6 @@ ASTRA_TOOLS_API void ConfigureToolLogging(const CommandOptions& options);
                                                     const CommandOptions& options);
 [[nodiscard]] ASTRA_TOOLS_API CommandReport ReleaseGate(const std::filesystem::path& target,
                                                         const CommandOptions& options);
-[[nodiscard]] ASTRA_TOOLS_API CommandReport Run(const std::filesystem::path& target,
-                                                const CommandOptions& options);
-[[nodiscard]] ASTRA_TOOLS_API CommandReport Test(const std::filesystem::path& target,
-                                                 const CommandOptions& options);
-[[nodiscard]] ASTRA_TOOLS_API CommandReport Play(const std::filesystem::path& target,
-                                                 const CommandOptions& options);
-[[nodiscard]] ASTRA_TOOLS_API CommandReport Replay(const std::filesystem::path& target,
-                                                   const CommandOptions& options);
 
 [[nodiscard]] ASTRA_TOOLS_API std::string Sha256File(const std::filesystem::path& path);
 

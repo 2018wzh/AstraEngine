@@ -95,3 +95,5 @@ The CLI `astra validate Samples/NativeVN --strict --json` emits media backend ca
 - `ASTRA_MEDIA_LAYER_UNKNOWN` means a draw command references a layer missing from the render graph.
 - `ASTRA_MEDIA_RELEASE_*` diagnostics mean the selected foundation provider set cannot pass packaged/headless release-gate checks.
 - Video frame decode remains an extension point. Runtime-only driver diff hardening is implemented as capture/hash evidence; Editor visual diff viewers remain future tooling.
+
+

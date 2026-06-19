@@ -9,7 +9,7 @@ This section explains how to set up the current repository and run the current f
 ## Key Concepts
 
 - Current repository contents include documentation, ADRs, CMake/vcpkg baseline, dynamic `Astra*` runtime/tool libraries, runtime foundation modules, tests, samples, and documentation checks.
-- `Samples/NativeVN` currently provides a headless playable Script/AstraVN slice plus source asset sidecars, binary package payload evidence, local DDC evidence, package-only save/replay smoke, and golden replay comparison.
+- `Samples/NativeVN` currently provides a headless playable Script/AstraVN slice plus source asset sidecars, binary package payload evidence, local DDC evidence, package-only save/replay validation, and golden replay comparison.
 - Future creator flow remains `Template -> Project -> Content -> PIE -> Package`; PIE and Editor workflows are not implemented.
 
 ## Architecture
@@ -33,8 +33,8 @@ Run the current NativeVN evidence chain:
 build\Bin\astra.exe validate Samples\NativeVN --strict --json
 build\Bin\astra.exe cook Samples\NativeVN --config Release --json
 build\Bin\astra.exe package Samples\NativeVN --profile deterministic --json
-build\Bin\astra.exe run build\Saved\Packages\NativeVN.astrapkg --headless-smoke --json
-build\Bin\astra.exe replay build\Saved\Replays\NativeVNGolden.replay --compare --json
+build\Bin\astra.exe run build\Saved\Packages\NativeVN.astrapkg --backend headless --json
+build\Saved\Releases\NativeVN\NativeVN-win64\NativeVN.exe --backend headless --json
 build\Bin\astra.exe inspect build\Saved\Packages\NativeVN.astrapkg --json
 ```
 
@@ -46,7 +46,7 @@ Current command/API entry points are indexed under [API](../api/README.md), incl
 
 ## Examples
 
-Current examples include running `astra doc-check`, validating `Samples/NativeVN`, cooking and packaging its source sidecars into a binary `.astrapkg`, launching the generated package in headless smoke mode, comparing the golden replay, and inspecting the package manifest/mount evidence.
+Current examples include running `astra doc-check`, validating `Samples/NativeVN`, cooking and packaging its source sidecars into a binary `.astrapkg`, launching the generated package in headless validation mode, comparing the golden replay, and inspecting the package manifest/mount evidence.
 
 ## Troubleshooting
 
@@ -54,3 +54,5 @@ Current examples include running `astra doc-check`, validating `Samples/NativeVN
 - If `astra` cannot load engine libraries, confirm the command is run from the build tree with `build\Bin` containing the generated `Astra*.dll` files.
 - Treat commands that mention Editor, PIE, AI/MCP, Legacy, or per-driver visual/audio diff as target documentation until those systems are implemented.
 - Do not restore legacy launch commands for deleted targets.
+
+

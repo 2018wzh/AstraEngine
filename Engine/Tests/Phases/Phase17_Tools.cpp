@@ -3,7 +3,7 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     options.strict = true;
 
     auto validation = Astra::Tools::Validate(
-        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageSmoke", options);
+        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageLaunch", options);
     REQUIRE(validation.Passed());
     REQUIRE(Astra::Tools::ToJson(validation)["command"] == "astra validate");
     REQUIRE(validation.artifacts["foundation_core_gate"]["passed"] == true);
@@ -22,8 +22,6 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
         "native:/Scripts/opening"));
     REQUIRE(native_validation.artifacts["phase3_media_release_gate"]["passed"] == true);
     REQUIRE(native_validation.artifacts["phase8_script_vn"]["status"] == "passed");
-    REQUIRE(native_validation.artifacts["phase4_script_vn"]["deprecated_alias_for"] ==
-            "phase8_script_vn");
     REQUIRE(
         native_validation.artifacts["phase8_script_vn"]["parity"]["presentation_hashes_match"] ==
         true);
@@ -61,7 +59,7 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     {
         std::ofstream descriptor(media_sample / "astra.sample.yaml", std::ios::binary);
         descriptor << "schema: astra.sample.v1\n";
-        descriptor << "id: Samples/MediaCookSmoke\n";
+        descriptor << "id: Samples/MediaCookLaunch\n";
         descriptor << "phase: 3\n";
         descriptor << "foundation_only: true\n";
     }
@@ -107,7 +105,7 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     {
         std::ofstream descriptor(import_sample / "astra.sample.yaml", std::ios::binary);
         descriptor << "schema: astra.sample.v1\n";
-        descriptor << "id: Samples/ImportCliSmoke\n";
+        descriptor << "id: Samples/ImportCliLaunch\n";
         descriptor << "phase: 6\n";
         descriptor << "foundation_only: true\n";
     }
@@ -142,7 +140,7 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     REQUIRE(imported_inspect.artifacts["package_mount"]["assets"].size() == 1);
 
     auto package = Astra::Tools::Package(
-        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageSmoke", options);
+        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageLaunch", options);
     REQUIRE(package.Passed());
     REQUIRE(package.artifacts.contains("package"));
     REQUIRE(std::filesystem::exists(package.artifacts["package"].get<std::string>()));
@@ -177,7 +175,6 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     REQUIRE(native_package
                 .artifacts["package_manifest"]["runtime_evidence"]["asset_registry"]["entries"]
                 .size() >= 7);
-    REQUIRE(std::filesystem::exists(native_package.artifacts["golden_replay"].get<std::string>()));
 
     auto native_inspected =
         Astra::Tools::Inspect(native_package.artifacts["package"].get<std::string>(), options);
@@ -185,7 +182,7 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     REQUIRE(native_inspected.artifacts["package_manifest"]["cook_manifest"]["ddc_entries"].size() >=
             7);
     REQUIRE(native_inspected.artifacts["package_mount"]["assets"].size() >= 7);
-    REQUIRE(native_inspected.artifacts["payload_smoke"]["asset_id"].get<std::string>().starts_with(
+    REQUIRE(native_inspected.artifacts["payload_read"]["asset_id"].get<std::string>().starts_with(
         "native:/"));
     auto release_gate = Astra::Tools::ReleaseGate(
         std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN", deterministic_options);
@@ -276,74 +273,10 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     REQUIRE_FALSE(tampered_payload);
     REQUIRE(payload_diagnostics.HasBlocking());
 
-    auto replay = Astra::Tools::Replay(native_package.artifacts["golden_replay"].get<std::string>(),
-                                       deterministic_options);
-    REQUIRE(replay.Passed());
-    REQUIRE(replay.artifacts["comparison"]["passed"] == true);
-
     const auto descriptor = std::filesystem::path(ASTRA_PHASE1_PLUGIN_DESCRIPTOR);
     auto plugin = Astra::Tools::Validate(descriptor, options);
     REQUIRE(plugin.Passed());
     REQUIRE(plugin.artifacts["plugin"]["modules"][0].contains("sha256"));
-
-    Astra::Tools::CommandOptions run_options;
-    run_options.headless_smoke = true;
-    auto run = Astra::Tools::Run(std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageSmoke",
-                                 run_options);
-    REQUIRE(run.Passed());
-    auto native_run = Astra::Tools::Run(
-        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN", run_options);
-    REQUIRE(native_run.Passed());
-    REQUIRE(native_run.artifacts["headless_smoke"]["phase8_script_vn"]["status"] == "passed");
-    REQUIRE(native_run.artifacts["headless_smoke"]["phase4_script_vn"]["deprecated_alias_for"] ==
-            "phase8_script_vn");
-
-    auto package_run =
-        Astra::Tools::Run(native_package.artifacts["package"].get<std::string>(), run_options);
-    REQUIRE(package_run.Passed());
-    REQUIRE(package_run.artifacts["headless_smoke"]["package_manifest"]["schema"] ==
-            Astra::Asset::PackageManifestSchema);
-    REQUIRE(package_run.artifacts["headless_smoke"]["package_payload_smoke"]["read_mode"] ==
-            "random_access");
-    REQUIRE(package_run.artifacts["headless_smoke"]["package_payload_smoke"]["stream_chunks"]
-                .get<std::size_t>() > 1);
-
-    Astra::Tools::CommandOptions player_test_options;
-    player_test_options.headless_smoke = true;
-    player_test_options.test_plan =
-        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Tests/player/nativevn_player.yaml";
-    auto player_test =
-        Astra::Tools::Test(native_package.artifacts["package"].get<std::string>(), player_test_options);
-    REQUIRE(player_test.Passed());
-    REQUIRE(player_test.artifacts["player_tests"]["schema"] == "astra.test.player_report.v1");
-    REQUIRE(player_test.artifacts["player_tests"]["total"] == 3);
-    REQUIRE(player_test.artifacts["player_tests"]["failed"] == 0);
-    REQUIRE(player_test.artifacts["player_tests"]["cases"][0]["runtime_events"]["events"].size() ==
-            1);
-
-    Astra::Tools::CommandOptions bad_assertion_options = player_test_options;
-    bad_assertion_options.test_plan =
-        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Tests/player/bad_assertion.yaml";
-    auto bad_assertion = Astra::Tools::Test(native_package.artifacts["package"].get<std::string>(),
-                                            bad_assertion_options);
-    REQUIRE_FALSE(bad_assertion.Passed());
-    REQUIRE(std::ranges::any_of(bad_assertion.diagnostics, [](const auto& diagnostic) {
-        return diagnostic.code == "ASTRA_PLAYER_TEST_ASSERTION_FAILED";
-    }));
-
-    Astra::Tools::CommandOptions bad_event_options = player_test_options;
-    bad_event_options.test_plan =
-        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Tests/player/bad_runtime_event.yaml";
-    auto bad_event =
-        Astra::Tools::Test(native_package.artifacts["package"].get<std::string>(), bad_event_options);
-    REQUIRE_FALSE(bad_event.Passed());
-    REQUIRE(std::ranges::any_of(bad_event.diagnostics, [](const auto& diagnostic) {
-        return diagnostic.code == "ASTRA_PLAYER_TEST_RUNTIME_EVENT_INVALID";
-    }));
-
-    auto missing_play = Astra::Tools::Play(
-        std::filesystem::temp_directory_path() / "missing-production-play.astrapkg", options);
-    REQUIRE_FALSE(missing_play.Passed());
 
     Astra::Tools::CommandOptions shipping_options = deterministic_options;
     shipping_options.shipping = true;
@@ -351,27 +284,29 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
         std::filesystem::temp_directory_path() / "astra_phase17_shipping";
     std::filesystem::remove_all(shipping_options.distribution_root);
     auto shipping_package = Astra::Tools::Package(
-        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageSmoke", shipping_options);
+        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageLaunch", shipping_options);
     REQUIRE(shipping_package.Passed());
     const auto shipping_root =
         std::filesystem::path(shipping_package.artifacts["shipping_bundle"].get<std::string>());
-    const auto launcher = shipping_root / "PackageSmoke.exe";
+    const auto launcher = shipping_root / "PackageLaunch.exe";
     REQUIRE(std::filesystem::exists(launcher));
-    REQUIRE(std::filesystem::exists(shipping_root / "Engine" / "astra.exe"));
+    REQUIRE_FALSE(std::filesystem::exists(shipping_root / "Engine" / "astra.exe"));
     REQUIRE_FALSE(std::filesystem::exists(shipping_root / "astra.exe"));
-    REQUIRE_FALSE(std::filesystem::exists(shipping_root / "PlayPackageSmoke.bat"));
+    REQUIRE_FALSE(std::filesystem::exists(shipping_root / "PlayPackageLaunch.bat"));
     REQUIRE(std::filesystem::exists(shipping_root / "shipping-manifest.json"));
     REQUIRE(std::filesystem::exists(shipping_root / "checksums.sha256"));
     std::ifstream manifest_file(shipping_root / "shipping-manifest.json", std::ios::binary);
     const auto shipping_manifest =
         nlohmann::json::parse(std::string(std::istreambuf_iterator<char>(manifest_file), {}));
-    REQUIRE(shipping_manifest["launcher"] == "PackageSmoke.exe");
-    REQUIRE(shipping_manifest["engine_launcher"] == "Engine/astra.exe");
+    REQUIRE(shipping_manifest["launcher"] == "PackageLaunch.exe");
+    REQUIRE(shipping_manifest["engine_launcher"] == "PackageLaunch.exe");
     REQUIRE(shipping_package.artifacts["shipping_files"].size() >= 4);
 
     Astra::Tools::CommandOptions invalid_shipping = shipping_options;
     invalid_shipping.no_distribution = true;
     auto invalid_shipping_package = Astra::Tools::Package(
-        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageSmoke", invalid_shipping);
+        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageLaunch", invalid_shipping);
     REQUIRE_FALSE(invalid_shipping_package.Passed());
 }
+
+

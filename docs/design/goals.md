@@ -45,3 +45,5 @@ Save -> Load -> Replay -> Debug -> Profile -> Release Gate
 - 不让 Editor、AI Provider、MCP server、Lua、Live2D 或 Legacy VM 进入 Core 依赖。
 - 不把旧 VN 项目默认导入为 Astra canonical source。
 - 不允许 AI 或 MCP 绕过 Review Queue、trusted session、Audit、Save/Replay 和 Release Gate。
+
+

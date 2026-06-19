@@ -1,9 +1,9 @@
 schema: astra.input.scripted.v1
-case_id: nativevn_menu_reopen_smoke
+case_id: nativevn_menu_reopen
 persona: menu_heavy_player
 objective: Reopen player-facing menus and save UI without losing visible state.
 sample: NativeVN
-route: menu_reopen_smoke
+route: menu_reopen
 expects:
   title_continue: true
   system_menu: true
@@ -41,3 +41,6 @@ events:
     slot: 1
   - frame: 52
     action: auto_close
+
+
+

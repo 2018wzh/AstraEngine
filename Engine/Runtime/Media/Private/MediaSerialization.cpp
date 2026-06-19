@@ -242,18 +242,18 @@ nlohmann::json ToJson(const AudioStateCapture& capture) {
             {"silent_backend", capture.silent_backend}};
 }
 
-nlohmann::json ToJson(const RenderBackendSmoke& smoke) {
+nlohmann::json ToJson(const RenderBackendValidation& validation) {
     return {
-        {"schema", smoke.schema},
-        {"renderer_provider", smoke.renderer_provider},
-        {"text_provider", smoke.text_provider},
-        {"renderer_available", smoke.renderer_available},
-        {"text_available", smoke.text_available},
-        {"presented", smoke.presented},
-        {"imported_texture_count", smoke.imported_texture_count},
-        {"draw_count", smoke.draw_count},
-        {"text_texture_count", smoke.text_texture_count},
-        {"frame_hash", smoke.frame_hash},
+        {"schema", validation.schema},
+        {"renderer_provider", validation.renderer_provider},
+        {"text_provider", validation.text_provider},
+        {"renderer_available", validation.renderer_available},
+        {"text_available", validation.text_available},
+        {"presented", validation.presented},
+        {"imported_texture_count", validation.imported_texture_count},
+        {"draw_count", validation.draw_count},
+        {"text_texture_count", validation.text_texture_count},
+        {"frame_hash", validation.frame_hash},
     };
 }
 
@@ -362,3 +362,5 @@ nlohmann::json ToJson(const TimelineState& state) {
 }
 
 } // namespace Astra::Media
+
+

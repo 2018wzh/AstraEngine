@@ -3,7 +3,7 @@
 状态：NativeVN runtime evidence scaffold / Target Architecture  
 定位：用样例项目和测试矩阵证明 AstraEngine 的 UE-class 2D runtime 完备度。样例不是演示摆设，而是 release gate、文档、CLI、Editor 和 Runtime 的共同验收载体。
 
-Current implementation note：当前已建立 `Samples/NativeVN`、`Samples/RuntimeStress` 和 `Samples/PackageSmoke` 的 foundation/evidence descriptors。`PackageSmoke` 可通过 `astra validate/package/run --headless-smoke` 证明 Phase 1 headless platform 和 example module lifecycle；`NativeVN` 可通过 validate/cook/package/run/replay/inspect 证明 source asset sidecars、generated PNG/OGG/font fixture media、AssetRegistry/dependency graph、local DDC artifact evidence、embedded package payloads、PackageReader mount/read smoke、Script/AstraVN execution、playable UI/system/save/load evidence、package-payload SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence 和 golden replay comparison。Editor workflow、final release gate、production binary streaming 和 full Artemis compatibility 仍是后续阶段。
+Current implementation note：当前已建立 `Samples/NativeVN`、`Samples/RuntimeStress` 和 `Samples/PackageLaunch` 的 foundation/evidence descriptors。`PackageLaunch` 可通过 `astra validate/package/run --backend headless` 证明 Phase 1 headless platform 和 example module lifecycle；`NativeVN` 可通过 validate/cook/package/run/replay/inspect 证明 source asset sidecars、generated PNG/OGG/font fixture media、AssetRegistry/dependency graph、local DDC artifact evidence、embedded package payloads、PackageReader mount/read validation、Script/AstraVN execution、playable UI/system/save/load evidence、package-payload SDL/headless RGBA image and HarfBuzz/FreeType glyph primitive present evidence 和 golden replay comparison。Editor workflow、final release gate、production binary streaming 和 full Artemis compatibility 仍是后续阶段。
 
 ## 1. 目标
 
@@ -34,7 +34,7 @@ Samples/
 ├─ NativeVN
 ├─ TsuiNoSora
 ├─ RuntimeStress
-├─ PackageSmoke
+├─ PackageLaunch
 ├─ ScriptParity
 ├─ MediaBackend
 ├─ AIIntentSafety
@@ -60,8 +60,8 @@ commands:
   validate: astra validate Samples/NativeVN --strict --json
   cook: astra cook Samples/NativeVN --config Release --json
   package: astra package Samples/NativeVN --profile deterministic --json
-  run: astra run build/Saved/Packages/NativeVN.astrapkg --headless-smoke --json
-  replay: astra replay build/Saved/Replays/NativeVNGolden.replay --compare --json
+  run: build/Saved/Releases/NativeVN/NativeVN-win64/NativeVN.exe --backend headless --json
+  replay: build/Saved/Releases/NativeVN/NativeVN-win64/NativeVN.exe --backend headless --json
 acceptance:
   - no_editor_launch
   - deterministic_replay
@@ -93,7 +93,7 @@ Acceptance：
 - packaged runtime shows/records real image/text/audio/filter output。
 - save after choice can reload to same route state。
 - golden replay state/event/presentation hash match。
-- `astra test` player plans pass with player actions, explicit RuntimeEvent injection, and JSON Pointer assertions。
+- `AstraGame` QA player plans pass with player actions, explicit RuntimeEvent injection, and JSON Pointer assertions。
 
 ## 3.1 TsuiNoSora
 
@@ -112,7 +112,7 @@ Acceptance：
 
 - User supplies a legal `--source-root`。
 - Converter writes `Samples/TsuiNoSora/Content` and `Saved/ConversionReports/coverage.json`。
-- `validate -> package --shipping -> play` pass on converted output；`run --windowed-smoke` remains optional QA evidence。
+- `validate -> package --shipping -> play` pass on converted output；`run --backend sdl` remains optional QA evidence。
 - Missing required content blocks conversion unless patched。
 
 ## 4. RuntimeStress
@@ -140,7 +140,7 @@ Acceptance：
 - state hash stable across repeated runs。
 - trace captures frame/runtime bottlenecks。
 
-## 5. PackageSmoke
+## 5. PackageLaunch
 
 Purpose：
 
@@ -326,10 +326,10 @@ unit
 integration
   ActorWorld / ScriptRuntimeHost / Asset Cook / Media Headless / Save Replay
 headless
-  NativeVN / PackageSmoke / AIIntentSafety
+  NativeVN / PackageLaunch / AIIntentSafety
 player-automation
   NativeVN scripted player plans / RuntimeEvent injection / JSON Pointer assertions
-smoke
+validation
   Module load/unload / CLI commands / Plugin Wizard generated project
 stress
   RuntimeStress / large content / long-run soak / hot reload rollback
@@ -348,7 +348,7 @@ test_id: astra.test.native_vn.package_launch
 category: headless
 sample: astra.sample.native_vn
 requires: [package]
-command: astra run build/Saved/Packages/NativeVN.astrapkg --headless-smoke --json
+command: build/Saved/Releases/NativeVN/NativeVN-win64/NativeVN.exe --backend headless --json
 evidence:
   - diagnostics_report
   - trace_capture
@@ -358,7 +358,7 @@ evidence:
 Player automation tests use `schema: astra.test.player_plan.v1` and are run with:
 
 ```powershell
-astra test build/Saved/Packages/NativeVN.astrapkg --plan Samples/NativeVN/Tests/player/nativevn_player.yaml --windowed-smoke --auto-close --json
+build/Saved/Releases/NativeVN/NativeVN-win64/NativeVN.exe --backend sdl --auto-close --json
 ```
 
 ## 13. Completion Evidence
@@ -382,3 +382,5 @@ UE-class 2D runtime acceptance requires current evidence, not intent：
 - `CustomizationPlugin` proves tool/plugin authors can extend without Runtime edits。
 - `CreatorWorkflow` proves authoring ergonomics and review/undo/package flow。
 - `AstraEmuToolkit` proves legacy compatibility remains a standalone toolkit after native parity。
+
+

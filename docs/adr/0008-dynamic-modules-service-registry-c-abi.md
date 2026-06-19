@@ -24,3 +24,5 @@ ABI 不暴露：
 - 所有能力必须声明 capability 和 permission。
 - Release Gate 校验 ABI、权限、依赖闭包和 packaged eligibility。
 - 热重载分层支持，不承诺任意运行中二进制替换。
+
+

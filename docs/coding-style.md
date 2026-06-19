@@ -109,7 +109,7 @@ Existing early code may still contain PascalCase member functions such as `Emit`
 - Add focused tests for behavior, not only construction.
 - Test names should describe expected behavior, for example `ServiceRegistry enforces required permissions`.
 - ABI/public header tests should scan for forbidden public tokens when adding new module boundaries.
-- For plugin work, include at least one integration path through `ModuleManager` or a smoke program once the relevant systems exist.
+- For plugin work, include at least one integration path through `ModuleManager` or a validation program once the relevant systems exist.
 
 ## 12. Documentation
 
@@ -123,3 +123,5 @@ Do not document planned systems as currently working. If implementation lags beh
 - Keep slices concrete. Do not leave behind empty forwarding shells or placeholder translation units.
 - After splitting one module, update the implementation index in `docs/manual/api/README.md`, rebuild the affected target, and run focused tests before moving to the next split.
 - Prefer a small number of feature-aligned slices over fine-grained sharding; split only when the boundary is clear and maintainability actually improves.
+
+

@@ -23,3 +23,5 @@ Runtime MCP 永远没有 project_write 语义。
 - Editor trusted write 是显式受信例外，并写 Operation Log。
 - Runtime generation 输出 AIIntent，经 Validator、ControlPolicy 和 Director 后才能执行。
 - Release Gate 校验 Runtime MCP、Generation、Provider 和 Audit 的 packaged eligibility。
+
+

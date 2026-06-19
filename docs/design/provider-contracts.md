@@ -164,3 +164,5 @@ Diagnostic prefixes:
 
 `CustomizationPlugin` must include at least one provider selection, one invalid permission case and one ABI/release gate report.
 
+
+

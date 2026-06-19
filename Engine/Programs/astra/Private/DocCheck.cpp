@@ -272,9 +272,6 @@ void CheckStaleWording(CommandReport& report, const std::filesystem::path& root,
                        nlohmann::json& artifacts) {
     const auto flags = std::regex_constants::ECMAScript | std::regex_constants::icase;
     const std::vector<ForbiddenDocWording> checks = {
-        {std::regex(R"(AstraGame(\.exe|`|\b))", flags),
-         std::regex(R"(do not revive|deleted legacy|historical|history|deleted|VNRuntimeServices.*Bootstrap.*AstraGame)",
-                    flags)},
         {std::regex(R"(VNRuntimeServices(`|\b))", flags),
          std::regex(R"(do not revive|deleted legacy|historical|history|deleted|VNRuntimeServices.*Bootstrap.*AstraGame)",
                     flags)},

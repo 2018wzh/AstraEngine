@@ -4,7 +4,7 @@
 
 ## 1. 目标
 
-Player Automation Testing provides a reusable way to simulate player-facing QA flows without making Editor a runtime dependency. The first implementation is centered on `astra test` and reuses the existing packaged `run` evidence path.
+Player Automation Testing provides a reusable way to simulate player-facing QA flows without making Editor a runtime dependency. The first implementation is centered on `AstraGame` QA and reuses the existing packaged `run` evidence path.
 
 Goals:
 
@@ -27,16 +27,16 @@ Those are later hardening layers, not requirements for the NativeVN Tools slice.
 ## 2. CLI Contract
 
 ```powershell
-astra test <target> --plan <file-or-dir> [--case <case_id>] [--headless-smoke|--windowed-smoke] [--auto-close] --json
+AstraGame QA <target> --plan <file-or-dir> [--case <case_id>] [--backend headless|--backend sdl] [--auto-close] --json
 ```
 
 Rules:
 
-- `<target>` is the same target accepted by `astra run`, usually a packaged `.astrapkg`.
+- `<target>` is the same target accepted by `AstraGame` launcher, usually a packaged `.astrapkg`.
 - `--plan` may point to one YAML file or a directory of YAML files.
 - `--case` filters by `case_id`.
-- If neither smoke mode is supplied, the runner defaults to headless smoke.
-- `astra test` calls the existing `astra run` path for player actions, then evaluates explicit runtime-event steps and assertions.
+- If neither validation mode is supplied, the runner defaults to headless validation.
+- `AstraGame` QA calls the existing `AstraGame` launcher path for player actions, then evaluates explicit runtime-event steps and assertions.
 
 ## 3. Plan Schema
 
@@ -83,7 +83,7 @@ Assertions use `nlohmann::json_pointer` over each case report. Supported operati
 
 ## 4. Report And Diagnostics
 
-`astra test` emits:
+`AstraGame` QA emits:
 
 ```yaml
 schema: astra.test.player_report.v1
@@ -108,3 +108,5 @@ Stable diagnostics:
 - CTest runs the successful NativeVN plan and two negative plans for assertion failure and invalid runtime event.
 - `AstraPhaseTests` covers the Tools API path.
 - `astra doc-check` passes with this design page linked from the design and manual indexes.
+
+

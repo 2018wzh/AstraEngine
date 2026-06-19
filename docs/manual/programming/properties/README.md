@@ -33,3 +33,5 @@ Use `Engine/Runtime/PropertySystem/Public/Astra/PropertySystem/PropertySystem.hp
 
 - Do not use PropertySystem to introduce Actor, Editor, AI provider, renderer, audio, or Legacy dependencies into Core.
 - Mark review-sensitive fields with flags now so future release gates can enforce them.
+
+

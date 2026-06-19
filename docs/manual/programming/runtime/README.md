@@ -60,3 +60,5 @@ Compiled examples live in `Engine/Tests/PhaseTests.cpp`, including RuntimeStress
 
 - Script, media logical state, AI committed output, and module extension state are explicit save sections. Runtime-only release gate validates that the sections and hashes exist; richer Editor viewers remain later tooling work.
 - Replay mismatch reports localize hash category and object/provider/source hints; full visual UI diff tooling remains outside runtime core.
+
+

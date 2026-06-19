@@ -101,7 +101,7 @@ wizard:
 acceptance:
   - astra validate ${project}
   - astra cook ${project} --config Debug
-  - astra run ${project}/Saved/Cooked --headless-smoke
+  - packaged AstraGame launcher --backend headless
 ```
 
 Asset import preset 示例：
@@ -244,3 +244,5 @@ Creator acceptance：
 - 创作者可导入角色、背景、语音、音乐、字体和 filter profile，并在 Content Browser 中看到依赖与诊断。
 - AI 生成或增强的 draft 没有 accepted review 前不能进入 Cook。
 - 批量移动或重命名资产后，引用要么自动修复，要么产生可点击 diagnostics。
+
+

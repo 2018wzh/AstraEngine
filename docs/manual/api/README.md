@@ -44,8 +44,8 @@ Current concrete implementation slices:
 - `Engine/Programs/astra/Private/DocCheck.cpp`: documentation gate checks for required manual pages, markdown links, required design documents, and stale wording scans.
 - `Engine/Programs/astra/Private/Tools.cpp`: CLI command entry points for validate, inspect, import, cook, package, run, test, play, and replay workflows.
 - `Engine/Programs/astra/Private/ToolsLogging.cpp`: CLI logging flag configuration, default log directory selection, and process logger setup.
-- `Engine/Programs/astra/Private/Tools/Evidence.inc`: shared CLI evidence helpers for foundation gates, samples, packages, and media smoke reports.
-- `Engine/Programs/astra/Private/Tools/PlayableEvidence.inc`: shared CLI evidence helpers for VN playable smoke, window frames, scripted input, and replay fixtures.
+- `Engine/Programs/astra/Private/Tools/Evidence.inc`: shared CLI evidence helpers for foundation gates, samples, packages, and media validation reports.
+- `Engine/Programs/astra/Private/Tools/PlayableEvidence.inc`: shared CLI evidence helpers for VN playable validation, window frames, scripted input, and replay fixtures.
 - `Engine/Programs/astra/Private/Tools/ValidationEvidence.inc`: shared CLI evidence helpers for API coverage, plugin descriptor, and engine DLL validation reports.
 - `Engine/Programs/astra/Private/ToolsHash.cpp`: shared file hashing helper for CLI evidence reports.
 - `Engine/Runtime/Core/Private/Logging.cpp`: `spdlog`-backed async console/JSONL rotating file logging, memory capture, recent-log ring, and diagnostic mirroring.
@@ -196,8 +196,8 @@ Phase 6 Asset and NativeVN runtime evidence APIs now also include:
 - `Astra::Runtime::SaveContainer`
 - `Astra::Runtime::ReplayComparisonReport`
 - `Astra::Tools::Import()`
-- `Astra::Tools::Test()`
-- `Astra::Tools::Replay()`
+- `Astra::Game::GameSession`
+- `Astra::Game::GameRunReport`
 
 ## Examples
 
@@ -207,3 +207,5 @@ Compiled examples live in `Engine/Tests/PhaseTests.cpp` and `Engine/Plugins/Exam
 
 - If a manual page references a public contract, ensure a design document also references it.
 - If a header exposes forbidden ABI types, treat that as a release-blocking issue when ABI scans exist.
+
+

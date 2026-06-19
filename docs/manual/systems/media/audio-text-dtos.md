@@ -52,3 +52,5 @@ Voice command -> AudioCommand -> AudioStateCapture
 - Text capture proves glyph-run determinism and atlas-token preparation, not saved native atlas state.
 - Audio capture proves bus routing and logical playback state; CI may use silent backend fallback.
 - Native device failures should emit `ASTRA_AUDIO_*` diagnostics and fall back only when the selected profile allows it.
+
+

@@ -39,3 +39,5 @@ Planned examples include renaming a component field, migrating a plugin descript
 - Do not silently drop source fields without an explicit migration rule.
 - Do not claim old saves are compatible until migration tests exist.
 - Keep migration diagnostics machine-readable.
+
+

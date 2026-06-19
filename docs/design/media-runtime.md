@@ -255,8 +255,10 @@ Media release gate 检查：
 
 ## 10. 验收
 
-- Current NativeVN package smoke records deterministic headless presentation/image metadata evidence; final packaged runtime must still truly display background、character、UI、text and filter output。
+- Current NativeVN package validation records deterministic headless presentation/image metadata evidence; final packaged runtime must still truly display background、character、UI、text and filter output。
 - voice/music/SFX 可播放、暂停、恢复、淡入淡出，并在 replay 中保持 logical state 一致。
 - Headless backend 可验证 render order、filter target、glyph run、audio command hash。
 - Renderer2D/TextLayout/Audio provider 可通过 EngineModuleSlot 替换并通过 release gate。
 - Public API 不暴露 SDL/GPU/audio/font native handle。
+
+

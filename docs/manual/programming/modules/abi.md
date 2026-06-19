@@ -35,3 +35,5 @@ See `Engine/Plugins/Examples/Phase1Example/Source/Phase1Example.cpp`.
 - Do not pass STL ownership, C++ Actor pointers, SDL/native handles, renderer/audio handles, or Editor widgets across the ABI.
 - Missing lifecycle callbacks are treated as blocking ABI errors.
 - Missing entrypoints, bad ABI versions, and missing release-gate binary evidence are reported as machine-readable diagnostics.
+
+

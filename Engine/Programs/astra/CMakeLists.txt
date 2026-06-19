@@ -33,3 +33,4 @@ target_link_libraries(astra PRIVATE AstraTools CLI11::CLI11)
 
 add_executable(astra-shipping-wrapper Private/ShippingWrapper.cpp)
 astra_configure_target(astra-shipping-wrapper)
+target_link_libraries(astra-shipping-wrapper PRIVATE AstraGame)

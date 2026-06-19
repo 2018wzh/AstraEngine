@@ -159,7 +159,7 @@ Rules:
 
 Required samples/tests:
 
-- `PackageSmoke`: release report blocks missing package dependency.
+- `PackageLaunch`: release report blocks missing package dependency.
 - `CustomizationPlugin`: invalid provider permission blocks release.
 - `MediaBackend`: unsupported codec/render feature blocks or falls back by profile.
 - `RuntimeStress`: trace captures frame timing and scheduler timing.
@@ -171,7 +171,9 @@ CLI acceptance commands remain:
 astra validate Samples/NativeVN --strict --json
 astra cook Samples/NativeVN --config Release --json
 astra package Samples/NativeVN --profile deterministic --json
-astra run build/Saved/Packages/NativeVN.astrapkg --headless-smoke --json
-astra replay build/Saved/Replays/NativeVNGolden.replay --compare --json
+build/Saved/Releases/NativeVN/NativeVN-win64/NativeVN.exe --backend headless --json
+build/Saved/Releases/NativeVN/NativeVN-win64/NativeVN.exe --backend headless --json
 astra inspect build/Saved/Packages/NativeVN.astrapkg --json
 ```
+
+

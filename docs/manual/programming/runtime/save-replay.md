@@ -47,3 +47,5 @@ Compiled save/load, compressed save v2, section descriptor, scheduler restore, r
 - Do not add C++ pointers, EnTT entities, native handles, Editor widgets, or provider-private state to snapshot payloads.
 - Missing required section or migration evidence is a release-gate concern, not a best-effort load path.
 - Full UI tooling for replay mismatch inspection remains later Editor/debugger work.
+
+

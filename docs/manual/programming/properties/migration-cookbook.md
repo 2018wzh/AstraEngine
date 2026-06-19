@@ -32,3 +32,5 @@ Use `Astra/PropertySystem/PropertySystem.hpp`.
 
 - Keep migration steps explicit and reviewable.
 - Do not silently reinterpret unrelated fields.
+
+

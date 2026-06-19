@@ -382,8 +382,8 @@ struct RasterizedTextRgba {
     std::string rasterized_by;
 };
 
-struct RenderBackendSmoke {
-    std::string schema = "astra.media.render_backend_smoke.v1";
+struct RenderBackendValidation {
+    std::string schema = "astra.media.render_backend_validation.v1";
     std::string renderer_provider;
     std::string text_provider;
     bool renderer_available = false;
@@ -536,7 +536,7 @@ FilterTargetFromString(std::string_view value);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const GlyphRun& run);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const TextLayoutCapture& capture);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const AudioStateCapture& capture);
-[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const RenderBackendSmoke& smoke);
+[[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const RenderBackendValidation& validation);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const FrameCaptureRequest& request);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const AudioCaptureRequest& request);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const DriverDiffReport& report);
@@ -547,3 +547,5 @@ FilterTargetFromString(std::string_view value);
 [[nodiscard]] ASTRA_MEDIA_API nlohmann::json ToJson(const TimelineState& state);
 
 } // namespace Astra::Media
+
+

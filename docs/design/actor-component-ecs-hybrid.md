@@ -232,3 +232,5 @@ System
 - 创作者可从 palette 创建 Character、DialogueSystem、ChoiceSystem、Camera，并通过 Inspector 配置。
 - Runtime-managed 字段在 Inspector 中可读但不可直接写入 source。
 - PIE 中的 runtime 改动必须明确区分为 preview state、debug command 或 source patch proposal。
+
+

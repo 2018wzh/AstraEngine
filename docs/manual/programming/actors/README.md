@@ -54,3 +54,5 @@ Compiled Phase 2 examples live in `Engine/Tests/PhaseTests.cpp`.
 - Use `ActorId` in saves, events, scripts, and snapshots.
 - Do not store C++ pointers, EnTT entities, registry internals, renderer/audio handles, or Editor-only objects in component data.
 - Prefab, variants, full lifecycle hooks, and migration hardening remain production-phase work.
+
+

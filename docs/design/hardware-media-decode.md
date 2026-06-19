@@ -184,3 +184,5 @@ Diagnostics:
 - video provider fallback to CPU or placeholder according to profile.
 - zero-copy compatibility failure diagnostic.
 - packaged payload decode using PackageReader, not source path.
+
+

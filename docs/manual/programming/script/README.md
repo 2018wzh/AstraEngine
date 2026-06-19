@@ -58,3 +58,5 @@ Use `CompileLuaExtensionPackage()` for Lua extension schema files. `CompileLua()
 - `ASTRA_SCRIPT_COMMAND_SCHEMA_UNKNOWN` means a command or extension has no registered schema.
 - `ASTRA_SCRIPT_LUA_STORY_REMOVED` means a Lua file was sent through the removed story runtime path.
 - Lua files must use the `aivn.extension()` and `aivn.command()` sandbox API.
+
+

@@ -37,3 +37,5 @@ Compiled examples are in `Engine/Tests/PhaseTests.cpp`.
 
 - Do not add SDL, Lua, AI, VN, Editor, renderer, audio, or Legacy includes to Core.
 - Use diagnostics for actionable failures and logs for observation.
+
+

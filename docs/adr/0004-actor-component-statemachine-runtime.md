@@ -24,3 +24,5 @@ ECS / Data-Oriented system pack 只用于性能热点和批量处理，例如粒
 - Save/Load 使用 ActorId、Component data、StateMachine state 和 Blackboard，不保存 ECS entity 原始值。
 - 脚本、Editor、MCP 和插件 API 不暴露内部 ECS。
 - 局部 ECS 与 Actor 世界通过稳定 ID、event、snapshot 和 service DTO 同步。
+
+

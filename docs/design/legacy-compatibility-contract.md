@@ -227,3 +227,5 @@ Rules:
 - Core cold swap follows ModuleRuntime lifecycle and restores the previous module on failure.
 - TextCaptureEvent reaches a selected translation provider and returns overlay PresentationCommand output.
 - Existing Renderer2D, TextLayout, Audio and FilterGraph providers execute presentation and enhancement output.
+
+

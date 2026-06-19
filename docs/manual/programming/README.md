@@ -59,3 +59,5 @@ Current examples include the NativeVN playable route plus source asset sidecars,
 - Keep public ABI examples free of STL ownership, native handles, Editor widgets, and C++ Actor pointers.
 - Do not use VN, AI, Lua, or legacy concepts in Core examples.
 - Mark examples as planned unless they compile in the current tree.
+
+

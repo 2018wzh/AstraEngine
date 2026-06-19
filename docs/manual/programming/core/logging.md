@@ -59,3 +59,5 @@ Astra::Core::DefaultLogger().Log(
 - Use diagnostics for actionable failures and release blocking.
 - Use logs for temporal context: lifecycle, timing-adjacent counts, hashes, selected providers, package paths, frame/event IDs.
 - Do not include secrets or native handles in log fields.
+
+

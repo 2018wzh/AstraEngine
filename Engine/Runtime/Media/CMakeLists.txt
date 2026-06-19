@@ -40,8 +40,8 @@ if(ASTRA_ENABLE_SKIA_UI_TEXT)
     endif()
 endif()
 
-if(ASTRA_ENABLE_GPU_SMOKE_TESTS)
-    target_compile_definitions(AstraMedia PRIVATE ASTRA_ENABLE_GPU_SMOKE_TESTS=1)
+if(ASTRA_ENABLE_GPU_RENDER_VALIDATION)
+    target_compile_definitions(AstraMedia PRIVATE ASTRA_ENABLE_GPU_RENDER_VALIDATION=1)
 endif()
 
 find_package(PNG QUIET)

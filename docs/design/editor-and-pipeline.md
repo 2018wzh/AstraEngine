@@ -199,7 +199,7 @@ Package 默认生成 deterministic build，不包含运行时 AI Provider 和 au
 - Unit：Core、AssetId、PropertySystem、EventBus、StateMachineRuntime。
 - Integration：Actor World、ScriptRuntimeHost、FilterGraph、Save/Replay。
 - Headless：VN 路径、AI Intent。
-- Editor Smoke：项目打开、资产导入、PIE、Inspector。
+- Editor Validation：项目打开、资产导入、PIE、Inspector。
 - Release Gate：schema、AI、plugin、package policy。
 
 Creator acceptance：
@@ -209,3 +209,5 @@ Creator acceptance：
 - 插件作者能替换 Renderer2D/TextLayout/Audio provider，并通过 Release Gate。
 - AI Copilot 能提出脚本修复，AI 内容生成能导入 draft，二者都经过 Review Queue。
 - 旧 VN 运行和现代化由 AstraEmu Toolkit 文档单独验收。
+
+

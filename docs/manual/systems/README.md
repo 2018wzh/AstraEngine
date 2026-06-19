@@ -51,9 +51,11 @@ Foundation and Phase 6 system APIs are implemented for diagnostics, platform ser
 
 ## Examples
 
-Current examples include validating asset sidecars in tests, NativeVN AssetRegistry/dependency graph evidence, DDC artifact emission/reuse/corruption recovery, media backend capability and provider evidence through `astra validate`, headless media hash verification through `astra run --headless-smoke`, NativeVN binary package generation, zstd payload read/chunk/mount smoke, Asset Release Gate checks, runtime release-gate reports, package manifest hash/provider feature hash save-replay evidence, package integrity checks, package launch smoke, driver diff evidence, and golden replay comparison.
+Current examples include validating asset sidecars in tests, NativeVN AssetRegistry/dependency graph evidence, DDC artifact emission/reuse/corruption recovery, media backend capability and provider evidence through `astra validate`, headless media hash verification through `AstraGame launcher --backend headless`, NativeVN binary package generation, zstd payload read/chunk/mount validation, Asset Release Gate checks, runtime release-gate reports, package manifest hash/provider feature hash save-replay evidence, package integrity checks, package launch validation, driver diff evidence, and golden replay comparison.
 
 ## Troubleshooting
 
-- Current NativeVN `validate`, `cook`, `package`, `release-gate`, `run --headless-smoke`, `replay --compare`, and `inspect` prove the runtime-only package workflow plus media provider/decode/timeline/filter and driver-diff evidence.
+- Current NativeVN `validate`, `cook`, `package`, `release-gate`, `run --backend headless`, `replay --compare`, and `inspect` prove the runtime-only package workflow plus media provider/decode/timeline/filter and driver-diff evidence.
 - Release evidence must be current command output, not design intent.
+
+

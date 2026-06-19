@@ -132,7 +132,7 @@ public:
 #if defined(ASTRA_MEDIA_HAS_BGFX)
         if (!initialized_) {
             bgfx::Init init;
-            // ponytail: opaque platform binding keeps native handles out of public ABI; resolve a real surface when pixel-diff smoke needs it.
+            // ponytail: opaque platform binding keeps native handles out of public ABI; resolve a real surface when pixel-diff validation needs it.
             init.type = bgfx::RendererType::Noop;
             init.resolution.width = desc.width;
             init.resolution.height = desc.height;
@@ -336,3 +336,4 @@ std::unique_ptr<IAudioProvider> CreateFoundationAudioProvider(bool silent_backen
 }
 
 } // namespace Astra::Media
+

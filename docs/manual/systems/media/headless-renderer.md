@@ -4,7 +4,7 @@ Status: Phase 3 implemented foundation.
 
 ## Overview
 
-The headless renderer records render, text, audio, and filter commands and produces deterministic hashes. It is intended for tests, CLI smoke reports, Phase 3 media release-gate foundation evidence, and future production release gates.
+The headless renderer records render, text, audio, and filter commands and produces deterministic hashes. It is intended for tests, CLI validation reports, Phase 3 media release-gate foundation evidence, and future production release gates.
 
 ## Key Concepts
 
@@ -40,3 +40,5 @@ PresentationCommand -> ExtractRenderGraph -> HeadlessRenderer2D -> FrameCapture 
 
 - Empty hashes usually mean the corresponding command category is empty.
 - Unknown layer diagnostics are blocking because render order must be deterministic.
+
+

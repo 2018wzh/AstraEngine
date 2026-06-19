@@ -34,3 +34,5 @@ Use `Astra/Core/Diagnostics.hpp`.
 - Do not use free-text logs as a substitute for diagnostics.
 - Use [Logging Guide](logging.md) when you need temporal context around diagnostics.
 - Include object IDs when a diagnostic points at a schema, module, service, asset, or future runtime object.
+
+

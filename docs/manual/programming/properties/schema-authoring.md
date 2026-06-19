@@ -34,3 +34,5 @@ The Phase 1 tests show schema generation for localized text, integer fields, nes
 
 - Keep generated schemas deterministic.
 - Treat missing type descriptors as blocking diagnostics.
+
+

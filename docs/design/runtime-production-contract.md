@@ -184,3 +184,5 @@ Release Gate 检查：
 - repeated replay state/event/presentation hash 一致。
 - mismatch report 能定位到 frame、event sequence、actor/component 或 task。
 
+
+

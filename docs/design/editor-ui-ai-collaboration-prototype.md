@@ -77,3 +77,5 @@ AstraEditor 不提供旧 VN 兼容检查面板，也不把旧 VN 内容纳入 Na
 ## 7. Qt 实现映射
 
 第一阶段可用 Qt 实现 dockable editor shell。Scene View 通过引擎渲染输出嵌入；脚本、Graph、Timeline、FilterGraph、Inspector 均调用 Runtime public DTO，不访问内部 native object。
+
+

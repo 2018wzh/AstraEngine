@@ -45,3 +45,5 @@ aivn.command("motion.play", {
 - `io`, `os`, `package`, and `debug` are not available.
 - Non-deterministic command schemas are blocking in deterministic VN script evidence.
 - `CompileLua()` and `VnSession::RunLua()` reject Lua story execution; use `.astra` for narrative flow.
+
+

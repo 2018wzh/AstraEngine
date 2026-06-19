@@ -1,5 +1,6 @@
 #include <Astra/Asset/Asset.hpp>
 #include <Astra/AstraVN/AstraVN.hpp>
+#include <Astra/AstraGame/AstraGame.hpp>
 #include <Astra/Core/BuildInfo.hpp>
 #include <Astra/Core/Config.hpp>
 #include <Astra/Core/Diagnostics.hpp>
@@ -70,6 +71,8 @@ std::vector<Astra::Core::u8> ReadFixtureBytes(const std::filesystem::path& path)
 #include "Phases/Phase12_Script.cpp"
 
 #include "Phases/Phase13_AstraVN.cpp"
+
+#include "Phases/Phase18_AstraGame.cpp"
 
 #if defined(ASTRA_WITH_TOOLS)
 #include "Phases/Phase17_Tools.cpp"

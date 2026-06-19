@@ -363,8 +363,8 @@ CLI：
 - `astra cook <project> --config <profile>`
 - `astra package <project> --profile deterministic`
 - `astra inspect <package-or-asset>`
-- `astra run <package> --headless-smoke`
-- `astra replay <replay> --compare`
+- `packaged AstraGame launcher --backend headless`
+- `AstraGame replay/session report validation`
 
 CLI orchestration now calls `AstraAsset` importer/cooker/package APIs for import, cook, package, inspect, package-only run evidence, and replay/package hash evidence instead of owning a parallel package pipeline。
 
@@ -403,3 +403,5 @@ Required tests：
 - AI draft cannot enter Cook until accepted review。
 - Foreign assets remain mount-only by default。
 - Runtime package reads assets through `PackageReader` random-access/chunked paths, save/replay evidence records package manifest hash/profile/provider feature hash, and release gate blocks corrupt package/DDC/payload mismatches。
+
+

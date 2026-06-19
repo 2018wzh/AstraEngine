@@ -1,9 +1,9 @@
-nlohmann::json Phase4ScriptVnSmoke(const std::filesystem::path& sample,
+nlohmann::json Phase8ScriptVnValidation(const std::filesystem::path& sample,
                                    Astra::Core::DiagnosticSink& diagnostics) {
     const auto native_path = sample / "Content/Scripts/opening.astra";
     const auto lua_path = sample / "Content/Scripts/opening.lua";
     if (!std::filesystem::exists(native_path) || !std::filesystem::exists(lua_path)) {
-        return {{"schema", Phase4SmokeSchema},
+        return {{"schema", Phase8ScriptVnValidationSchema},
                 {"status", "failed"},
                 {"reason", "NativeVN script sources are missing."}};
     }
@@ -27,7 +27,7 @@ nlohmann::json Phase4ScriptVnSmoke(const std::filesystem::path& sample,
     Astra::Script::ScriptRuntimeHost script_host;
     auto compiled_native = script_host.CompileNative(native_source, diagnostics);
     if (!compiled_native) {
-        return {{"schema", Phase4SmokeSchema},
+        return {{"schema", Phase8ScriptVnValidationSchema},
                 {"phase", 8},
                 {"status", "failed"},
                 {"runtime", "native"},
@@ -37,7 +37,7 @@ nlohmann::json Phase4ScriptVnSmoke(const std::filesystem::path& sample,
     Astra::AstraVN::VnSession native_session(44);
     auto native_result = native_session.RunNative(native_source, options, diagnostics);
     if (!native_result) {
-        return {{"schema", Phase4SmokeSchema},
+        return {{"schema", Phase8ScriptVnValidationSchema},
                 {"status", "failed"},
                 {"runtime", "native"},
                 {"reason", native_result.Message()}};
@@ -46,7 +46,7 @@ nlohmann::json Phase4ScriptVnSmoke(const std::filesystem::path& sample,
 
     auto lua_schema = script_host.CompileLuaExtensionPackage(lua_source, diagnostics);
     if (!lua_schema) {
-        return {{"schema", Phase4SmokeSchema},
+        return {{"schema", Phase8ScriptVnValidationSchema},
                 {"status", "failed"},
                 {"runtime", "lua_extension_schema"},
                 {"reason", lua_schema.Message()}};
@@ -74,7 +74,7 @@ nlohmann::json Phase4ScriptVnSmoke(const std::filesystem::path& sample,
     }
 
     return {
-        {"schema", Phase4SmokeSchema},
+        {"schema", Phase8ScriptVnValidationSchema},
         {"phase", 8},
         {"evidence_key", "phase8_script_vn"},
         {"status", phase8_complete ? "passed" : "failed"},
@@ -790,3 +790,4 @@ void ValidatePhase4AssetReferences(const nlohmann::json& phase4,
         }
     }
 }
+

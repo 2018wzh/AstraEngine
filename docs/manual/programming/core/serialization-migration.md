@@ -32,3 +32,5 @@ Use `Astra/Core/Serialization.hpp`.
 
 - Treat missing migration paths as blocking for runtime/save/package critical schemas.
 - Do not silently drop unknown fields unless an explicit migration rule says to.
+
+

@@ -49,3 +49,5 @@ priority: 100
 - Use `native:/` only for project-owned assets.
 - Do not put generated registry files under manual editing workflows.
 - Package mounts do not allow writes or foreign copies by default; corrupt package headers or payload hashes are blocking diagnostics.
+
+

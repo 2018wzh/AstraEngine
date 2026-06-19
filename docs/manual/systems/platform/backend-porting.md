@@ -9,7 +9,7 @@ Platform exposes public services for window, filesystem, dynamic library, thread
 ## Key Concepts
 
 - Public headers do not expose SDL or OS/native handles.
-- Headless backend is the CI and smoke-test default.
+- Headless backend is the CI and validation-test default.
 - SDL is confined to private implementation files.
 - `TargetPlatformDesc` is the shared source of OS/architecture, binary naming, plugin bin directory, script extension, and backend capability flags.
 - Mobile and Web targets are described for packaging and release-gate planning, but their runtime backends are stubs that return `Unsupported`.
@@ -45,3 +45,5 @@ Backend build targets are:
 - Never put SDL includes or native handles in public headers.
 - Do not duplicate target-platform tables in tools; use `FindTargetPlatform()`.
 - Dynamic library failures should become diagnostics or `Result` errors.
+
+

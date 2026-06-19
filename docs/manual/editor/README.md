@@ -39,3 +39,5 @@ Planned examples include opening a project, inspecting an Actor, reviewing an AI
 - Do not document Editor-only state as runtime state.
 - Do not allow Editor panels or widgets through runtime/module ABI.
 - Mark screenshots and workflows as planned until the Editor exists.
+
+
