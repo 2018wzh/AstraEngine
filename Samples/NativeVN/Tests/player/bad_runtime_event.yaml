@@ -1,0 +1,25 @@
+schema: astra.test.player_plan.v1
+suite_id: astra.nativevn.player.bad_runtime_event
+cases:
+  - case_id: nativevn_bad_runtime_event
+    persona: regression
+    objective: Fixture that proves malformed explicit RuntimeEvent steps are rejected.
+    steps:
+      - kind: runtime_event
+        frame: 1
+        event:
+          type: event:/astra.vn.dialogue.say_requested
+          category: tools.player_test
+          source:
+            kind: test
+            id: astra.nativevn.player
+          target:
+            kind: actor
+            id: actor:/systems/dialogue
+          payload_schema: astra.test.player_probe.v1
+          payload:
+            probe: missing_event_id
+    assertions:
+      - path: /runtime_events/events
+        op: min_count
+        min_count: 1

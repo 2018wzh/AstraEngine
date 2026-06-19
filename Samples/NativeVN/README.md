@@ -8,13 +8,15 @@ Run these after packaging:
 
 ```powershell
 build\Bin\astra.exe package Samples/NativeVN --profile deterministic --json
+build\Bin\astra.exe test build/Saved/Packages/NativeVN.astrapkg --plan Samples/NativeVN/Tests/player/nativevn_player.yaml --windowed-smoke --auto-close --json
 build\Bin\astra.exe run build/Saved/Packages/NativeVN.astrapkg --windowed-smoke --scripted-input Samples/NativeVN/Input/qa/title_walk.yaml --auto-close --json
 build\Bin\astra.exe run build/Saved/Packages/NativeVN.astrapkg --windowed-smoke --scripted-input Samples/NativeVN/Input/qa/system_save_load_systems.yaml --auto-close --json
 build\Bin\astra.exe run build/Saved/Packages/NativeVN.astrapkg --windowed-smoke --scripted-input Samples/NativeVN/Input/qa/menu_reopen_smoke.yaml --auto-close --json
 ```
 
-Each scripted file may declare `case_id`, `persona`, `objective`, and `expects`.
-`astra run` writes the result to `playable_vn.player_qa`; failed expectations or malformed YAML fail the command.
+`astra test` is the main automated QA entry. Player plans declare `case_id`, `persona`, `objective`, `steps`, and JSON Pointer `assertions`; failed assertions or malformed runtime events fail the command.
+
+The older scripted files remain valid for lower-level smoke runs. Each scripted file may declare `case_id`, `persona`, `objective`, and `expects`; `astra run` writes the result to `playable_vn.player_qa`.
 
 ## Manual Smoke Checklist
 

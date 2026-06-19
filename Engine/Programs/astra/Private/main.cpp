@@ -32,6 +32,8 @@ int main(int argc, char** argv) {
     std::filesystem::path sample;
     std::filesystem::path inspect_target;
     std::filesystem::path run_target;
+    std::filesystem::path test_target;
+    std::filesystem::path play_target;
     std::filesystem::path replay_target;
     std::filesystem::path release_target;
 
@@ -84,6 +86,10 @@ int main(int argc, char** argv) {
     package->add_option("--dist-dir", options.distribution_root, "Distribution output root");
     package->add_flag("--no-distribution", options.no_distribution,
                       "Only write the .astrapkg payload, without a runtime distribution folder");
+    package->add_flag("--shipping", options.shipping,
+                      "Build a shipping distribution folder with production launcher");
+    package->add_flag("--allow-unsigned-shipping", options.allow_unsigned_shipping,
+                      "Allow shipping output when sample shipping gates are incomplete");
     package->add_flag("--deterministic", options.compare,
                       "Alias for deterministic package profile evidence");
     package->add_option("--diagnostics-out", options.diagnostics_out,
@@ -111,6 +117,25 @@ int main(int argc, char** argv) {
                     "Load a save evidence JSON file before smoke verification");
     run->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
     add_logging_options(run);
+    auto* test = app.add_subcommand("test", "Run player automation test plans");
+    test->add_option("target", test_target)->required();
+    test->add_option("--plan", options.test_plan, "Player test plan YAML file or directory")
+        ->required();
+    test->add_option("--case", options.test_case, "Run one case_id from the plan");
+    test->add_flag("--json", options.json, "Emit JSON report");
+    test->add_flag("--headless-smoke", options.headless_smoke, "Run the headless smoke path");
+    test->add_flag("--windowed-smoke", options.windowed_smoke, "Run the SDL windowed smoke path");
+    test->add_flag("--auto-close", options.auto_close,
+                   "Close the windowed smoke automatically after evidence capture");
+    test->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
+    add_logging_options(test);
+    auto* play = app.add_subcommand("play", "Play a packaged Astra runtime project");
+    play->add_option("target", play_target)->required();
+    play->add_flag("--json", options.json, "Emit JSON report");
+    play->add_option("--save-out", options.save_out, "Write a save evidence JSON file");
+    play->add_option("--load", options.load, "Load a save evidence JSON file before play");
+    play->add_option("--diagnostics-out", options.diagnostics_out, "Write diagnostics/report JSON");
+    add_logging_options(play);
     auto* replay = app.add_subcommand("replay", "Compare a golden runtime replay");
     replay->add_option("target", replay_target)->required();
     replay->add_flag("--json", options.json, "Emit JSON report");
@@ -154,6 +179,10 @@ int main(int argc, char** argv) {
         report = Astra::Tools::ReleaseGate(release_target, options);
     } else if (*run) {
         report = Astra::Tools::Run(run_target, options);
+    } else if (*test) {
+        report = Astra::Tools::Test(test_target, options);
+    } else if (*play) {
+        report = Astra::Tools::Play(play_target, options);
     } else if (*replay) {
         report = Astra::Tools::Replay(replay_target, options);
     } else {

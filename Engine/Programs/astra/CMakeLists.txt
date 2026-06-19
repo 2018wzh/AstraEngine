@@ -30,3 +30,6 @@ target_compile_definitions(AstraTools
 add_executable(astra Private/main.cpp)
 astra_configure_target(astra)
 target_link_libraries(astra PRIVATE AstraTools CLI11::CLI11)
+
+add_executable(astra-shipping-wrapper Private/ShippingWrapper.cpp)
+astra_configure_target(astra-shipping-wrapper)

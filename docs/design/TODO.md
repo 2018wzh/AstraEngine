@@ -435,6 +435,7 @@ Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 
 - [x] Tools：实现 `astra cook`：incremental cook、DDC、package manifest、diagnostics。（Phase 6 uses `AstraAsset::CookAssetRegistry` for local DDC, provider feature hash, rebuild/reuse/corruption recovery and cook manifest evidence。）
 - [x] Tools：实现 `astra package`：deterministic package、module inclusion、hash report。（Phase 6 writes binary zstd `.astrapkg` through `AstraAsset::PackageWriter` and records package hash/release-gate evidence。）
 - [x] Tools：实现 `astra run`：launch cooked package、headless run、scripted input。（当前覆盖 NativeVN package headless/windowed scripted playable evidence；production launch harness 后续完成。）
+- [x] Tools：实现 `astra test`：player automation test plan、player action、explicit RuntimeEvent injection、JSON Pointer assertions 和 `astra.test.player_report.v1`。（当前覆盖 NativeVN Tools slice；真实设备输入、Editor PIE、AI/MCP、perceptual diff 和 long soak 后续完成。）
 - [x] Tools：实现 `astra replay`：run replay, compare hashes, emit mismatch report。（Phase 5/6 covers frame/record/source-object/package manifest hash mismatch localization for current replay evidence；deeper UI diff remains later。）
 - [x] Tools：实现 `astra inspect`：package info、asset registry、module table、save file summary。（当前覆盖 package manifest、payload smoke 和 mount DTO；save/replay deep inspect 后续完成。）
 - [x] Tools：实现 `astra doc-check`：links、required pages、code snippets、public API coverage。（当前覆盖 manual/link/stale wording checks；full snippet/API extraction 后续完成。）
@@ -460,6 +461,8 @@ Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 
 
 - [x] Sample：`NativeVN`：背景、角色、对白、选择、音频、timeline、filter、save/replay。（Phase 8 full playable demo 覆盖生成 PNG/OGG fixture、双分支、UI/system state、save/load、windowed/headless evidence；真实 provider timeline UI 后续完成。）
 - [x] Sample：`NativeVN` playable demo：正文线路、UI/system、backlog、save/load、config、音频和 inspect report。（redistributable sample；不代表完整 Artemis VM compatibility。）
+- [x] Sample：`NativeVN` player automation plans：`Samples/NativeVN/Tests/player/nativevn_player.yaml` 覆盖 title/route/menu/save/load/replay checkpoint 和 explicit RuntimeEvent injection，负例覆盖 assertion failure 与 malformed RuntimeEvent。
+- [x] Sample：`TsuiNoSora` local-data modern port scaffold：项目本地 `Tools` 转换器、patch 入口、sample descriptor、golden scripted input 和文档边界。（完整商业内容由用户本地 `--source-root` 转换生成，不提交进仓库；game-specific code 不进入引擎主线。）
 - [x] Sample：`RuntimeStress`：1000+ Actor、多状态机、多事件、多资源加载。（Phase 5 descriptor and `AstraPhaseTests` cover 1000 Actor deterministic scheduler/save/load/replay hash evidence；large resource-load expansion remains later sample work。）
 - [ ] Sample：`PackageSmoke`：只从 cooked package 启动。
 - [ ] Sample：`ScriptParity`：Native Script 与 Lua 产生同等事件流。
@@ -470,6 +473,7 @@ Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 
 - [ ] Test：Core unit、Property unit、Module ABI unit、Scene unit、Runtime unit。
 - [ ] Test：Asset integration、Cook/package integration、Media headless/render integration。
 - [ ] Test：Save migration、Replay determinism、Plugin compatibility、Release Gate blocking。
+- [x] Test：NativeVN player automation CTest：`astra test` success plan、bad assertion 和 bad runtime event diagnostics。
 - [ ] Test：Long-run soak、large-content stress、hot reload rollback、crash/error recovery。
 - [ ] Docs：每个 sample 有 tutorial、expected output、troubleshooting、release checklist。
 - [ ] Docs：按 `docs/design/samples-and-test-matrix.md` 为每个 sample 建立 descriptor、golden evidence 和 CI command。
@@ -487,6 +491,7 @@ Phase 1/3/4/5/6/7/NativeVN evidence 注记：`AstraTools` 和 `astra` 已实现 
 
 - [x] Acceptance：`NativeVN` 从 source content 完成 validate、cook、package。（Phase 6 已通过 binary `.astrapkg`；full UE-class release gate 仍需 media/editor/AI hardening。）
 - [x] Acceptance：packaged `NativeVN` 在无 Editor 环境 launch、play、choice、save、load、replay。（Phase 8 playable demo 已通过 headless/windowed scripted evidence；save migration UI 和更深 replay localization 后续完成。）
+- [ ] Acceptance：converted `TsuiNoSora` 使用用户本地原始数据生成普通 AstraVN `Content`，并完成 full-playable packaged playthrough。（仓库只提供转换器、patch schema、文档和可跳过的本地验收路径。）
 - [x] Acceptance：runtime 支持真实 image/font/audio rendering 和 executable FilterGraph。（Runtime-only evidence covers package payload image/font/audio decode, provider capture, CPU RGBA FilterGraph and driver diff reports。）
 - [x] Acceptance：runtime 支持 deterministic script execution、event order、state hash、presentation hash。
 - [x] Acceptance：runtime 支持 module/plugin load、permission check、ABI validation、release-safe inclusion。

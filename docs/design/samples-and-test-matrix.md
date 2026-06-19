@@ -32,6 +32,7 @@ Samples/Test Matrix 必须覆盖：
 ```text
 Samples/
 ├─ NativeVN
+├─ TsuiNoSora
 ├─ RuntimeStress
 ├─ PackageSmoke
 ├─ ScriptParity
@@ -92,6 +93,27 @@ Acceptance：
 - packaged runtime shows/records real image/text/audio/filter output。
 - save after choice can reload to same route state。
 - golden replay state/event/presentation hash match。
+- `astra test` player plans pass with player actions, explicit RuntimeEvent injection, and JSON Pointer assertions。
+
+## 3.1 TsuiNoSora
+
+Purpose：
+
+- Prove a full-playable local-data modern AstraVN port can be produced without adding game-specific code to engine mainline。
+
+Rules：
+
+- All TsuiNoSora/Director conversion logic lives under `Samples/TsuiNoSora/Tools`。
+- The converter output is ordinary AstraVN content：`.astra` scripts、asset sidecars、media、QA input and package metadata。
+- Original and generated commercial content is not committed。
+- `Patches/port.json` is the authority for unresolved route、choice、speaker、asset alias and modernization mappings。
+
+Acceptance：
+
+- User supplies a legal `--source-root`。
+- Converter writes `Samples/TsuiNoSora/Content` and `Saved/ConversionReports/coverage.json`。
+- `validate -> package --shipping -> play` pass on converted output；`run --windowed-smoke` remains optional QA evidence。
+- Missing required content blocks conversion unless patched。
 
 ## 4. RuntimeStress
 
@@ -305,6 +327,8 @@ integration
   ActorWorld / ScriptRuntimeHost / Asset Cook / Media Headless / Save Replay
 headless
   NativeVN / PackageSmoke / AIIntentSafety
+player-automation
+  NativeVN scripted player plans / RuntimeEvent injection / JSON Pointer assertions
 smoke
   Module load/unload / CLI commands / Plugin Wizard generated project
 stress
@@ -329,6 +353,12 @@ evidence:
   - diagnostics_report
   - trace_capture
   - state_hash
+```
+
+Player automation tests use `schema: astra.test.player_plan.v1` and are run with:
+
+```powershell
+astra test build/Saved/Packages/NativeVN.astrapkg --plan Samples/NativeVN/Tests/player/nativevn_player.yaml --windowed-smoke --auto-close --json
 ```
 
 ## 13. Completion Evidence

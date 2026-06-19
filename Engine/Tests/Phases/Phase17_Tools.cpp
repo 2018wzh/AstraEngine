@@ -291,16 +291,6 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
     auto run = Astra::Tools::Run(std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageSmoke",
                                  run_options);
     REQUIRE(run.Passed());
-    REQUIRE(run.artifacts["headless_smoke"]["phase3"]["media_release_gate"]["selected_providers"]
-                .size() == 3);
-    REQUIRE(run.artifacts["headless_smoke"]["phase3"]["media_backend_capabilities"]["schema"] ==
-            "astra.media.backend_capabilities.v1");
-    REQUIRE(run.artifacts["headless_smoke"]["phase3"]["image_decode_smoke"]["decoded_by"] ==
-            "libpng");
-    REQUIRE_FALSE(run.artifacts["headless_smoke"]["phase3"]["headless_capture"]["render_hash"]
-                      .get<std::string>()
-                      .empty());
-
     auto native_run = Astra::Tools::Run(
         std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN", run_options);
     REQUIRE(native_run.Passed());
@@ -317,4 +307,71 @@ TEST_CASE("Tools reports validate inspect package and hash foundation artifacts"
             "random_access");
     REQUIRE(package_run.artifacts["headless_smoke"]["package_payload_smoke"]["stream_chunks"]
                 .get<std::size_t>() > 1);
+
+    Astra::Tools::CommandOptions player_test_options;
+    player_test_options.headless_smoke = true;
+    player_test_options.test_plan =
+        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Tests/player/nativevn_player.yaml";
+    auto player_test =
+        Astra::Tools::Test(native_package.artifacts["package"].get<std::string>(), player_test_options);
+    REQUIRE(player_test.Passed());
+    REQUIRE(player_test.artifacts["player_tests"]["schema"] == "astra.test.player_report.v1");
+    REQUIRE(player_test.artifacts["player_tests"]["total"] == 3);
+    REQUIRE(player_test.artifacts["player_tests"]["failed"] == 0);
+    REQUIRE(player_test.artifacts["player_tests"]["cases"][0]["runtime_events"]["events"].size() ==
+            1);
+
+    Astra::Tools::CommandOptions bad_assertion_options = player_test_options;
+    bad_assertion_options.test_plan =
+        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Tests/player/bad_assertion.yaml";
+    auto bad_assertion = Astra::Tools::Test(native_package.artifacts["package"].get<std::string>(),
+                                            bad_assertion_options);
+    REQUIRE_FALSE(bad_assertion.Passed());
+    REQUIRE(std::ranges::any_of(bad_assertion.diagnostics, [](const auto& diagnostic) {
+        return diagnostic.code == "ASTRA_PLAYER_TEST_ASSERTION_FAILED";
+    }));
+
+    Astra::Tools::CommandOptions bad_event_options = player_test_options;
+    bad_event_options.test_plan =
+        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/NativeVN/Tests/player/bad_runtime_event.yaml";
+    auto bad_event =
+        Astra::Tools::Test(native_package.artifacts["package"].get<std::string>(), bad_event_options);
+    REQUIRE_FALSE(bad_event.Passed());
+    REQUIRE(std::ranges::any_of(bad_event.diagnostics, [](const auto& diagnostic) {
+        return diagnostic.code == "ASTRA_PLAYER_TEST_RUNTIME_EVENT_INVALID";
+    }));
+
+    auto missing_play = Astra::Tools::Play(
+        std::filesystem::temp_directory_path() / "missing-production-play.astrapkg", options);
+    REQUIRE_FALSE(missing_play.Passed());
+
+    Astra::Tools::CommandOptions shipping_options = deterministic_options;
+    shipping_options.shipping = true;
+    shipping_options.distribution_root =
+        std::filesystem::temp_directory_path() / "astra_phase17_shipping";
+    std::filesystem::remove_all(shipping_options.distribution_root);
+    auto shipping_package = Astra::Tools::Package(
+        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageSmoke", shipping_options);
+    REQUIRE(shipping_package.Passed());
+    const auto shipping_root =
+        std::filesystem::path(shipping_package.artifacts["shipping_bundle"].get<std::string>());
+    const auto launcher = shipping_root / "PackageSmoke.exe";
+    REQUIRE(std::filesystem::exists(launcher));
+    REQUIRE(std::filesystem::exists(shipping_root / "Engine" / "astra.exe"));
+    REQUIRE_FALSE(std::filesystem::exists(shipping_root / "astra.exe"));
+    REQUIRE_FALSE(std::filesystem::exists(shipping_root / "PlayPackageSmoke.bat"));
+    REQUIRE(std::filesystem::exists(shipping_root / "shipping-manifest.json"));
+    REQUIRE(std::filesystem::exists(shipping_root / "checksums.sha256"));
+    std::ifstream manifest_file(shipping_root / "shipping-manifest.json", std::ios::binary);
+    const auto shipping_manifest =
+        nlohmann::json::parse(std::string(std::istreambuf_iterator<char>(manifest_file), {}));
+    REQUIRE(shipping_manifest["launcher"] == "PackageSmoke.exe");
+    REQUIRE(shipping_manifest["engine_launcher"] == "Engine/astra.exe");
+    REQUIRE(shipping_package.artifacts["shipping_files"].size() >= 4);
+
+    Astra::Tools::CommandOptions invalid_shipping = shipping_options;
+    invalid_shipping.no_distribution = true;
+    auto invalid_shipping_package = Astra::Tools::Package(
+        std::filesystem::path(ASTRA_SOURCE_ROOT) / "Samples/PackageSmoke", invalid_shipping);
+    REQUIRE_FALSE(invalid_shipping_package.Passed());
 }

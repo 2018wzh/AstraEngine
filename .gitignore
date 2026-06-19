@@ -18,3 +18,4 @@ vcpkg_installed
 node_modules/
 dist/
 .tmp
+Samples/TsuiNoSora/

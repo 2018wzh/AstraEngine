@@ -15,7 +15,7 @@ This manual is the user-facing documentation root for AstraEngine. It complement
 - Phase 1 provides a production Foundation gate slice for Core, Platform, ModuleRuntime, and PropertySystem, including `foundation_core_gate` CLI evidence.
 - Phase 2-4 provide executable foundations for Scene, Runtime, Media, ScriptRuntimeHost, and AstraVN.
 - Phase 6 provides the production Asset Pipeline slice for `import -> cook -> package -> inspect -> run -> replay` with binary `.astrapkg` output.
-- NativeVN runtime evidence covers `validate -> cook -> package -> run --headless-smoke -> replay --compare -> inspect` for the current package-only workflow.
+- NativeVN runtime evidence covers `validate -> cook -> package -> run --headless-smoke -> test -> replay --compare -> inspect` for the current package-only workflow.
 
 ## Architecture
 

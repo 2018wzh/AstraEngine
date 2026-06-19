@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iomanip>
 #include <map>
+#include <memory>
 #include <queue>
 #include <sstream>
 #include <thread>
@@ -19,7 +20,8 @@
 
 namespace Astra::Platform {
 
-std::unique_ptr<IWindowService> CreateSdlWindowService();
+std::unique_ptr<IWindowService> CreateSdlWindowService(std::shared_ptr<InputSnapshot> input);
+std::unique_ptr<IInputService> CreateSdlInputService(std::shared_ptr<InputSnapshot> input);
 
 namespace {
 
@@ -428,7 +430,9 @@ Astra::Core::Result<PlatformServices> CreatePlatform(PlatformCreateDesc desc, As
     services.impl_->crash = std::make_unique<CrashService>();
     if (desc.backend == BackendKind::Sdl) {
 #if ASTRA_ENABLE_SDL_BACKEND
-        services.impl_->window = CreateSdlWindowService();
+        auto input = std::make_shared<InputSnapshot>();
+        services.impl_->window = CreateSdlWindowService(input);
+        services.impl_->input = CreateSdlInputService(std::move(input));
 #else
         EmitUnsupportedBackend(desc.backend, diagnostics);
         return Astra::Core::Result<PlatformServices>::Failure(Astra::Core::ErrorCode::Unsupported, "SDL platform backend is not enabled");

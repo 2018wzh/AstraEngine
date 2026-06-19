@@ -12,7 +12,7 @@ AstraEngine 追求的是 **UE-class 2D runtime 工程完备度**，不是复制 
 
 - `validate -> cook -> package -> launch`
 - `save -> load -> replay`
-- `debug -> profile -> diagnostics -> release gate`
+- `debug -> profile -> diagnostics -> player automation -> release gate`
 - provider、插件、脚本、资产、媒体后端和 AI/MCP 的可审计扩展
 
 最终成功状态以完整 `NativeVN` sample project 通过 release gate 为证据，而不是仅靠概念文档或局部 demo。
@@ -32,7 +32,7 @@ AstraEngine 追求的是 **UE-class 2D runtime 工程完备度**，不是复制 
 - `Engine/Runtime/Script`：Phase 8 Script runtime slice，包含 `ScriptRuntimeHost`、PEGTL-backed `.astra` parser、统一 command schema registry、command manifest、AST/StateGraph/Narrative/Effect IR、source map、debug-symbol DTO、debug step、hot reload compatibility report、Lua extension schema sandbox、`ScriptSnapshot v2` 和 `ScriptEventBridge`。Lua story runtime 已移除，Lua 仅作为 extension package SDK。
 - `Engine/Runtime/AstraVN`：Phase 8 AstraVN slice，包含 VN event schema、预设 Actor/Component/StateMachine、`VnSession`、rich `VnSessionSnapshot`、stage/timeline/choice/backlog/skip-auto state 和 headless presentation/save-restore evidence。
 - `Engine/Plugins/Examples/Phase1Example`：示例动态模块，验证 C ABI lifecycle、service/extension/provider 注册和卸载。
-- `Engine/Programs/astra`：runtime evidence CLI，支持 `--version`、`doc-check`、`validate`、`import`、`cook`、`package`、`run --headless-smoke/--windowed-smoke/--gpu-smoke`、`replay --compare` 和 `inspect`。当前输出 `foundation_core_gate`、module release gate binary hash、registered diagnostic-code gate、engine DLL SHA-256 evidence、Phase 6 Asset Pipeline evidence、Phase 7 media backend provider evidence、media backend capability report、libpng image decode/RGBA texture smoke、image/font/audio cook metadata、NativeVN `phase8_script_vn` Script/AstraVN evidence、deprecated `phase4_script_vn` alias、`playable_vn` UI/system/save/load/timeline/media execution evidence、SDL/headless `window_present` frame evidence、可选 bgfx/Skia production provider smoke evidence、binary `astra.package.manifest.v1` `.astrapkg` package manifest、zstd package payload table、package mount/payload read smoke、local DDC artifacts、DDC reuse/rebuild/corruption recovery evidence、package/cook/payload hash integrity diagnostics、package manifest hash/provider feature hash save-replay evidence 和 replay mismatch report。Editor/AI release gate、真实 Live2D/Emote SDK 和 per-driver visual/audio diff 仍是后续 production completion。
+- `Engine/Programs/astra`：runtime evidence CLI，支持 `--version`、`doc-check`、`validate`、`import`、`cook`、`package`、`run --headless-smoke/--windowed-smoke/--gpu-smoke`、`test`、`replay --compare` 和 `inspect`。当前输出 `foundation_core_gate`、module release gate binary hash、registered diagnostic-code gate、engine DLL SHA-256 evidence、Phase 6 Asset Pipeline evidence、Phase 7 media backend provider evidence、media backend capability report、libpng image decode/RGBA texture smoke、image/font/audio cook metadata、NativeVN `phase8_script_vn` Script/AstraVN evidence、deprecated `phase4_script_vn` alias、`playable_vn` UI/system/save/load/timeline/media execution evidence、`astra.test.player_report.v1` player automation evidence、SDL/headless `window_present` frame evidence、可选 bgfx/Skia production provider smoke evidence、binary `astra.package.manifest.v1` `.astrapkg` package manifest、zstd package payload table、package mount/payload read smoke、local DDC artifacts、DDC reuse/rebuild/corruption recovery evidence、package/cook/payload hash integrity diagnostics、package manifest hash/provider feature hash save-replay evidence 和 replay mismatch report。Editor/AI release gate、真实 Live2D/Emote SDK、真实设备输入自动化和 per-driver visual/audio diff 仍是后续 production completion。
 - `Samples/NativeVN`、`Samples/RuntimeStress`、`Samples/PackageSmoke`：foundation/evidence sample descriptors；`NativeVN` 当前是 Phase 8 full playable demo，提供 `.astra` story-only 双分支路线、Lua extension schema fixture、生成的可再分发 PNG/OGG fixture、UI、语音、音乐、SE、FilterProfile 和脚本 sidecar source assets，用于 AssetRegistry、dependency graph、cook manifest、local DDC artifact execution、package manifest、embedded payload table、PackageReader random-access/chunked-read/mount evidence、package integrity、save/load、windowed UI smoke 和 golden replay evidence；`PackageSmoke` 提供 Phase 3 foundation smoke。
 - `Engine/Tests`：Catch2 tests，覆盖 Phase 1 Foundation、Phase 2 Scene/Runtime foundation、Phase 3 Asset/Media/FilterGraph foundation、Phase 8 Script/AstraVN completion、public header isolation、示例模块加载、save/load 和 replay hash smoke。
 - `docs/design`：目标架构、路线图、系统规格、覆盖矩阵和 TODO。
@@ -310,13 +310,14 @@ astra cook Samples/NativeVN --config Release --json
 astra package Samples/NativeVN --profile deterministic --json
 astra run build/Saved/Packages/NativeVN.astrapkg --headless-smoke --json
 astra run build/Saved/Packages/NativeVN.astrapkg --windowed-smoke --scripted-input Samples/NativeVN/Input/golden.yaml --auto-close --json
+astra test build/Saved/Packages/NativeVN.astrapkg --plan Samples/NativeVN/Tests/player/nativevn_player.yaml --windowed-smoke --auto-close --json
 astra replay build/Saved/Replays/NativeVNGolden.replay --compare --json
 astra inspect build/Saved/Packages/NativeVN.astrapkg --json
 astra doc-check
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-这些命令证明当前 binary `.astrapkg` package/replay/playable workflow，包括窗口创建、scripted input、UI/system 状态、Phase 7 media provider/decode/timeline/filter evidence、save/load、package manifest hash/provider feature hash 和 replay route hash。最终 UE-class acceptance 仍要求 Editor/creator workflow、AI/MCP 策略、per-driver visual/audio diff 和长期压力/迁移测试等目标全部达成。
+这些命令证明当前 binary `.astrapkg` package/replay/playable workflow，包括窗口创建、scripted input、`astra test` player automation、explicit RuntimeEvent injection、UI/system 状态、Phase 7 media provider/decode/timeline/filter evidence、save/load、package manifest hash/provider feature hash 和 replay route hash。最终 UE-class acceptance 仍要求 Editor/creator workflow、AI/MCP 策略、per-driver visual/audio diff 和长期压力/迁移测试等目标全部达成。
 
 ## 历史取舍
 

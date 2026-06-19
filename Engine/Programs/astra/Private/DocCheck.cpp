@@ -249,6 +249,7 @@ void CheckRequiredDesignFiles(CommandReport& report, const std::filesystem::path
         "docs/design/foundation-core-platform-property.md",
         "docs/design/extension-and-module-system.md",
         "docs/design/tools-release-observability.md",
+        "docs/design/player-automation-testing.md",
         "docs/design/samples-and-test-matrix.md",
     };
     artifacts["required_design_files"] = required_design_files.size();

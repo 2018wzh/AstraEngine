@@ -95,6 +95,15 @@ Production logging stage additions:
 - Tests: Core logging JSONL/memory/diagnostic mirroring coverage and `AstraCliValidateNativeVNLogs` CLI coverage.
 - Still planned: full trace capture/export, profiler backend export, and production crash bundle generation.
 
+TsuiNoSora local-data port additions:
+
+- `Samples/TsuiNoSora` is a local-data AstraVN conversion sample.
+- TsuiNoSora-specific conversion, patching, and Director-era container probing live only under `Samples/TsuiNoSora/Tools`.
+- Engine tools now accept Phase 8 AstraVN playable samples described by `runtime: astra_vn` or `playable:` instead of hard-coding only `NativeVN`.
+- Engine tools now provide `astra package --shipping` and `astra play` so Shipping bundles use a production launcher instead of smoke QA commands.
+- SDL input now fills the existing `InputSnapshot` DTO for generic packaged VN interaction.
+- Original data and generated commercial `Content/` stay untracked.
+
 ## Troubleshooting
 
 - Do not use target acceptance commands as proof until the relevant tool exists.

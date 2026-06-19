@@ -246,6 +246,49 @@ nlohmann::json BuildPlayerQaEvidence(const nlohmann::json& scripted, const nlohm
     return qa;
 }
 
+nlohmann::json CompactPhase8Evidence(const nlohmann::json& phase8) {
+    const auto native = phase8.value("native", nlohmann::json::object());
+    return {
+        {"schema", phase8.value("schema", "")},
+        {"phase", phase8.value("phase", 8)},
+        {"evidence_key", phase8.value("evidence_key", "phase8_script_vn")},
+        {"status", phase8.value("status", "failed")},
+        {"native",
+         {{"hashes", native.value("hashes", nlohmann::json::object())},
+          {"dialogue_count", native.value("dialogue_history", nlohmann::json::array()).size()},
+          {"presentation_count",
+           native.value("presentation_commands", nlohmann::json::array()).size()}}},
+        {"save_restore", phase8.value("save_restore", nlohmann::json::object())},
+        {"parity", phase8.value("parity", nlohmann::json::object())},
+    };
+}
+
+nlohmann::json ApplyScriptedInputToPlayable(nlohmann::json playable,
+                                            const std::filesystem::path& scripted_input,
+                                            bool windowed,
+                                            Astra::Core::DiagnosticSink& diagnostics) {
+    const auto scripted = ScriptedInputEvidence(scripted_input, diagnostics);
+    playable["windowed"] = windowed;
+    playable["windowed_playable"] = {{"status", windowed ? "passed" : "not_requested"},
+                                     {"backend", windowed ? "sdl3" : "headless"},
+                                     {"auto_close_supported", true}};
+    auto system = playable.value("system_ui_state", nlohmann::json::object());
+    system["title_continue"] = HasScriptedAction(scripted, "title_continue");
+    system["system_menu_opened"] = HasScriptedAction(scripted, "system_menu");
+    system["backlog_opened"] = HasScriptedAction(scripted, "backlog");
+    system["save_load_screen_opened"] =
+        HasScriptedAction(scripted, "save") || HasScriptedAction(scripted, "load");
+    system["config_opened"] = HasScriptedAction(scripted, "config");
+    playable["system_ui_state"] = std::move(system);
+    playable["routes_verified"] = {{"walk", HasScriptedAction(scripted, "choose")},
+                                   {"systems", HasScriptedAction(scripted, "choose") &&
+                                                   HasScriptedAction(scripted, "load")}};
+    playable["replay_checkpoint"] = HasScriptedAction(scripted, "replay_checkpoint");
+    playable["scripted_input"] = scripted;
+    playable["player_qa"] = BuildPlayerQaEvidence(scripted, playable, diagnostics);
+    return playable;
+}
+
 nlohmann::json RegistryMediaEvidence(const Astra::Asset::AssetRegistry& registry,
                                      Astra::Core::DiagnosticSink& diagnostics) {
     nlohmann::json decoded_images = nlohmann::json::array();
@@ -289,6 +332,17 @@ nlohmann::json BuildPlayableVnEvidence(const std::filesystem::path& sample,
     const auto presentation = native.value("presentation_commands", nlohmann::json::array());
     const auto dialogue = native.value("dialogue_history", nlohmann::json::array());
     const auto route = native.value("route_state", nlohmann::json::object());
+    auto tail = [](const nlohmann::json& array, std::size_t limit) {
+        nlohmann::json result = nlohmann::json::array();
+        if (!array.is_array()) {
+            return result;
+        }
+        const auto start = array.size() > limit ? array.size() - limit : 0;
+        for (std::size_t index = start; index < array.size(); ++index) {
+            result.push_back(array[index]);
+        }
+        return result;
+    };
 
     nlohmann::json audio_commands = nlohmann::json::array();
     nlohmann::json draw_commands = nlohmann::json::array();
@@ -336,8 +390,16 @@ nlohmann::json BuildPlayableVnEvidence(const std::filesystem::path& sample,
              {"label", slot == 1 ? "golden" : ""}});
     }
 
-    const auto route_hash =
-        Sha256Text(native.dump() + config_state.dump() + system_ui_state.dump());
+    const auto hashes = native.value("hashes", nlohmann::json::object());
+    const auto route_hash = Sha256Text(hashes.value("state_hash", "") +
+                                       hashes.value("event_hash", "") +
+                                       config_state.dump() + system_ui_state.dump());
+    const auto presentation_hash =
+        Sha256Text(capture.value("render_hash", "") + std::to_string(draw_commands.size()) + ":" +
+                   std::to_string(text_commands.size()));
+    const auto save_hash =
+        Sha256Text(native.value("save_hash", hashes.value("state_hash", "")) +
+                   config_state.dump());
     nlohmann::json evidence = {
         {"schema", "astra.vn.playable.evidence.v1"},
         {"sample", sample.filename().string()},
@@ -359,12 +421,12 @@ nlohmann::json BuildPlayableVnEvidence(const std::filesystem::path& sample,
          {{"last_choice",
            native.value("script_snapshot", nlohmann::json::object()).value("last_choice", "")},
           {"route_state", route}}},
-        {"dialogue_history", dialogue},
+        {"dialogue_history", tail(dialogue, 16)},
+        {"dialogue_count", dialogue.size()},
         {"system_ui_state", system_ui_state},
         {"save_slots", save_slots},
         {"config_state", config_state},
-        {"presentation_frame_hash",
-         Sha256Text(capture.dump() + draw_commands.dump() + text_commands.dump())},
+        {"presentation_frame_hash", presentation_hash},
         {"draw_count", draw_commands.size()},
         {"text_layout_evidence",
          {{"layout_engine",
@@ -373,7 +435,7 @@ nlohmann::json BuildPlayableVnEvidence(const std::filesystem::path& sample,
           {"japanese_ready", !media["decoded_fonts"].empty()}}},
         {"audio_playback_evidence",
          {{"backend", "miniaudio"},
-          {"commands", audio_commands},
+          {"commands", tail(audio_commands, 16)},
           {"processed", audio_commands.size()},
           {"bgm", true},
           {"se", true},
@@ -395,9 +457,7 @@ nlohmann::json BuildPlayableVnEvidence(const std::filesystem::path& sample,
         {"decoded_images", media["decoded_images"]},
         {"decoded_fonts", media["decoded_fonts"]},
         {"decoded_audio", media["decoded_audio"]},
-        {"save_snapshot_hash",
-         Sha256Text(native.value("runtime_save", nlohmann::json::object()).dump() +
-                    config_state.dump())},
+        {"save_snapshot_hash", save_hash},
         {"replay_route_hash", route_hash},
         {"scripted_input", scripted},
     };
@@ -445,6 +505,11 @@ std::optional<std::pair<std::vector<Astra::Core::u8>, std::string>>
 ReadAssetBytesForPresent(const Astra::Asset::AssetRegistry& registry, std::string_view asset_id,
                          const std::filesystem::path& package_path,
                          Astra::Core::DiagnosticSink& diagnostics) {
+    const auto* entry = FindRegistryEntry(registry, asset_id);
+    if (entry == nullptr) {
+        return std::nullopt;
+    }
+
     std::vector<Astra::Core::u8> bytes;
     std::string source = "source_file";
     if (!package_path.empty()) {
@@ -458,8 +523,7 @@ ReadAssetBytesForPresent(const Astra::Asset::AssetRegistry& registry, std::strin
             }
         }
     }
-    const auto* entry = FindRegistryEntry(registry, asset_id);
-    if (bytes.empty() && (entry == nullptr || !std::filesystem::exists(entry->source_path))) {
+    if (bytes.empty() && !std::filesystem::exists(entry->source_path)) {
         return std::nullopt;
     }
     if (bytes.empty()) {

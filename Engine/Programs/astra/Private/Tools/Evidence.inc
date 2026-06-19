@@ -154,11 +154,14 @@ bool IsFoundationSample(const std::filesystem::path& sample, CommandReport& repo
     const auto sample_id = descriptor["id"].as<std::string>("");
     const auto phase = descriptor["phase"].as<int>(0);
     const auto native_vn_phase8 = sample_id == "astra.sample.nativevn" && phase == 8;
+    const auto playable_vn_phase8 =
+        phase == 8 && (descriptor["runtime"].as<std::string>("") == "astra_vn" ||
+                       static_cast<bool>(descriptor["playable"]));
     if ((descriptor["foundation_only"].as<bool>(false) != true || phase > 6) &&
-        !native_vn_phase8) {
+        !native_vn_phase8 && !playable_vn_phase8) {
         AddDiagnostic(report, "ASTRA_SAMPLE_NOT_FOUNDATION",
                       Astra::Core::DiagnosticSeverity::Blocking,
-                      "Foundation tools accept Phase 1-6 foundation/evidence sample descriptors plus the Phase 8 NativeVN playable demo.",
+                      "Foundation tools accept Phase 1-6 foundation/evidence sample descriptors plus Phase 8 AstraVN playable samples.",
                       descriptor_path);
         return false;
     }
@@ -191,8 +194,17 @@ bool IsNativeVnSample(const std::filesystem::path& sample) {
            (id.empty() && sample.filename().string() == "NativeVN");
 }
 
+bool IsAstraVnPlayableSample(const std::filesystem::path& sample) {
+    const auto descriptor = TryLoadSampleDescriptor(sample);
+    if (!descriptor) {
+        return false;
+    }
+    const auto runtime = descriptor["runtime"].as<std::string>("");
+    return runtime == "astra_vn" || descriptor["playable"];
+}
+
 bool IsVnSmokeSample(const std::filesystem::path& sample) {
-    return IsNativeVnSample(sample);
+    return IsNativeVnSample(sample) || IsAstraVnPlayableSample(sample);
 }
 
 Astra::Media::FilterProfile MakePhase3FoundationFilterProfile() {

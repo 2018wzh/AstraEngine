@@ -3,6 +3,8 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cctype>
+#include <memory>
 #include <sstream>
 
 namespace Astra::Platform {
@@ -44,6 +46,8 @@ std::string WindowFrameHash(const WindowFrameDesc& frame) {
 
 class SdlWindowService final : public IWindowService {
 public:
+    explicit SdlWindowService(std::shared_ptr<InputSnapshot> input) : input_(std::move(input)) {}
+
     ~SdlWindowService() override {
         Close();
     }
@@ -143,11 +147,32 @@ public:
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_QUIT) {
                 close_requested_ = true;
+                if (input_) {
+                    input_->quit_requested = true;
+                }
+            } else if (event.type == SDL_EVENT_TEXT_INPUT && input_) {
+                input_->text_input += event.text.text;
+            } else if (event.type == SDL_EVENT_KEY_DOWN && input_) {
+                const char* name = SDL_GetKeyName(event.key.key);
+                std::string key = name == nullptr ? "" : name;
+                std::ranges::transform(key, key.begin(), [](unsigned char character) {
+                    return static_cast<char>(std::tolower(character));
+                });
+                if (key == "return") {
+                    key = "enter";
+                } else if (key == "left ctrl" || key == "right ctrl") {
+                    key = "ctrl";
+                }
+                if (!key.empty()) {
+                    input_->pressed_keys.push_back(std::move(key));
+                }
             }
         }
     }
 
-    bool ShouldClose() const override { return close_requested_; }
+    bool ShouldClose() const override {
+        return close_requested_ || (input_ && input_->quit_requested);
+    }
 
     void Close() override {
         if (renderer_ != nullptr) {
@@ -166,13 +191,36 @@ private:
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     WindowGraphicsBinding binding_;
+    std::shared_ptr<InputSnapshot> input_;
     bool close_requested_ = false;
+};
+
+class SdlInputService final : public IInputService {
+public:
+    explicit SdlInputService(std::shared_ptr<InputSnapshot> input) : input_(std::move(input)) {}
+
+    InputSnapshot Snapshot() const override {
+        return input_ ? *input_ : InputSnapshot{};
+    }
+
+    void ResetFrameState() override {
+        if (input_) {
+            *input_ = {};
+        }
+    }
+
+private:
+    std::shared_ptr<InputSnapshot> input_;
 };
 
 } // namespace
 
-std::unique_ptr<IWindowService> CreateSdlWindowService() {
-    return std::make_unique<SdlWindowService>();
+std::unique_ptr<IWindowService> CreateSdlWindowService(std::shared_ptr<InputSnapshot> input) {
+    return std::make_unique<SdlWindowService>(std::move(input));
+}
+
+std::unique_ptr<IInputService> CreateSdlInputService(std::shared_ptr<InputSnapshot> input) {
+    return std::make_unique<SdlInputService>(std::move(input));
 }
 
 } // namespace Astra::Platform

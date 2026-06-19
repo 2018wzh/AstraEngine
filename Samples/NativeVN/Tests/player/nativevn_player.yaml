@@ -1,0 +1,159 @@
+schema: astra.test.player_plan.v1
+suite_id: astra.nativevn.player
+cases:
+  - case_id: nativevn_title_walk
+    persona: first_time_player
+    objective: Start from title, advance dialogue, inject one runtime event, choose the walk branch, and close cleanly.
+    steps:
+      - kind: player_action
+        frame: 1
+        action: start
+      - kind: player_action
+        frame: 4
+        action: title_continue
+      - kind: runtime_event
+        frame: 6
+        event:
+          event_id: event:/astra.test.player/title_walk_probe
+          type: event:/astra.vn.dialogue.say_requested
+          category: tools.player_test
+          source:
+            kind: test
+            id: astra.nativevn.player
+          target:
+            kind: actor
+            id: actor:/systems/dialogue
+          payload_schema: astra.test.player_probe.v1
+          payload:
+            probe: title_walk
+      - kind: player_action
+        frame: 8
+        action: advance
+      - kind: player_action
+        frame: 18
+        action: choose
+        index: 0
+      - kind: player_action
+        frame: 32
+        action: auto_close
+    assertions:
+      - path: /run/artifacts/playable_vn/system_ui_state/title_continue
+        equals: true
+      - path: /run/artifacts/playable_vn/routes_verified/walk
+        equals: true
+      - path: /runtime_events/events
+        op: min_count
+        min_count: 1
+
+  - case_id: nativevn_system_save_load_systems
+    persona: advanced_player
+    objective: Exercise system UI, save, branch, load, alternate branch, and replay checkpoint.
+    steps:
+      - kind: player_action
+        frame: 1
+        action: start
+      - kind: player_action
+        frame: 4
+        action: title_continue
+      - kind: player_action
+        frame: 8
+        action: advance
+      - kind: player_action
+        frame: 12
+        action: system_menu
+      - kind: player_action
+        frame: 16
+        action: backlog
+      - kind: player_action
+        frame: 20
+        action: config
+        set:
+          text_speed: fast
+          bgm_volume: 0.65
+          se_volume: 0.8
+          voice_volume: 1.0
+      - kind: player_action
+        frame: 26
+        action: save
+        slot: 1
+      - kind: player_action
+        frame: 32
+        action: choose
+        index: 0
+      - kind: player_action
+        frame: 40
+        action: load
+        slot: 1
+      - kind: player_action
+        frame: 46
+        action: choose
+        index: 1
+      - kind: player_action
+        frame: 56
+        action: replay_checkpoint
+        label: branch_merge
+      - kind: player_action
+        frame: 64
+        action: auto_close
+    assertions:
+      - path: /run/artifacts/playable_vn/system_ui_state/system_menu_opened
+        equals: true
+      - path: /run/artifacts/playable_vn/system_ui_state/save_load_screen_opened
+        equals: true
+      - path: /run/artifacts/playable_vn/routes_verified/systems
+        equals: true
+      - path: /run/artifacts/playable_vn/replay_checkpoint
+        equals: true
+
+  - case_id: nativevn_menu_reopen_smoke
+    persona: menu_heavy_player
+    objective: Reopen player-facing menus and save UI without losing visible state.
+    steps:
+      - kind: player_action
+        frame: 1
+        action: start
+      - kind: player_action
+        frame: 4
+        action: title_continue
+      - kind: player_action
+        frame: 8
+        action: system_menu
+      - kind: player_action
+        frame: 12
+        action: system_menu
+      - kind: player_action
+        frame: 16
+        action: backlog
+      - kind: player_action
+        frame: 20
+        action: backlog
+      - kind: player_action
+        frame: 24
+        action: config
+        set:
+          text_speed: fast
+          bgm_volume: 0.65
+          se_volume: 0.8
+          voice_volume: 1.0
+      - kind: player_action
+        frame: 30
+        action: config
+      - kind: player_action
+        frame: 36
+        action: save
+        slot: 1
+      - kind: player_action
+        frame: 44
+        action: load
+        slot: 1
+      - kind: player_action
+        frame: 52
+        action: auto_close
+    assertions:
+      - path: /run/artifacts/playable_vn/system_ui_state/backlog_opened
+        equals: true
+      - path: /run/artifacts/playable_vn/system_ui_state/config_opened
+        equals: true
+      - path: /run/artifacts/playable_vn/save_slots
+        op: min_count
+        min_count: 3

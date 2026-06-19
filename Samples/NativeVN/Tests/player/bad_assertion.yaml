@@ -1,0 +1,16 @@
+schema: astra.test.player_plan.v1
+suite_id: astra.nativevn.player.bad_assertion
+cases:
+  - case_id: nativevn_bad_assertion
+    persona: regression
+    objective: Fixture that proves failed JSON Pointer assertions block the test command.
+    steps:
+      - kind: player_action
+        frame: 1
+        action: start
+      - kind: player_action
+        frame: 4
+        action: title_continue
+    assertions:
+      - path: /run/artifacts/playable_vn/system_ui_state/title_continue
+        equals: false

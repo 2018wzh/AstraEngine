@@ -42,7 +42,7 @@ Current concrete implementation slices:
 - `Engine/Runtime/Asset/Private/AssetMetadata.cpp`: image, font, and audio cook metadata inspection helpers used by cook artifacts.
 - `Engine/Runtime/Asset/Private/AssetSerialization.cpp`: asset registry, manifest, package, mount, and hot-reload JSON/binary serialization helpers.
 - `Engine/Programs/astra/Private/DocCheck.cpp`: documentation gate checks for required manual pages, markdown links, required design documents, and stale wording scans.
-- `Engine/Programs/astra/Private/Tools.cpp`: CLI command entry points for validate, inspect, import, cook, package, run, and replay workflows.
+- `Engine/Programs/astra/Private/Tools.cpp`: CLI command entry points for validate, inspect, import, cook, package, run, test, play, and replay workflows.
 - `Engine/Programs/astra/Private/ToolsLogging.cpp`: CLI logging flag configuration, default log directory selection, and process logger setup.
 - `Engine/Programs/astra/Private/Tools/Evidence.inc`: shared CLI evidence helpers for foundation gates, samples, packages, and media smoke reports.
 - `Engine/Programs/astra/Private/Tools/PlayableEvidence.inc`: shared CLI evidence helpers for VN playable smoke, window frames, scripted input, and replay fixtures.
@@ -51,7 +51,7 @@ Current concrete implementation slices:
 - `Engine/Runtime/Core/Private/Logging.cpp`: `spdlog`-backed async console/JSONL rotating file logging, memory capture, recent-log ring, and diagnostic mirroring.
 - `Engine/Runtime/Platform/Private/Platform.cpp`: Platform facade, headless/common services, and unified backend factory.
 - `Engine/Runtime/Platform/Private/Target/*.cpp`: per-OS target descriptors plus target-platform table, host target detection, and capability flags for desktop/mobile/Web targets.
-- `Engine/Runtime/Platform/Private/SdlPlatform.cpp`: SDL desktop window backend implementation kept behind the Platform public interfaces.
+- `Engine/Runtime/Platform/Private/SdlPlatform.cpp`: SDL desktop window/input backend implementation kept behind the Platform public interfaces.
 - `Engine/Runtime/Platform/Private/BackendAnchor.cpp`: minimal backend DLL anchor used by headless, mobile stub, Web stub, and SDL backend targets.
 - `Engine/Runtime/Media/Private/Media.cpp`: media backend probing, renderer capture, provider validation, and media release-gate evaluation.
 - `Engine/Runtime/Media/Private/MediaDecode.cpp`: image/audio/font decode and inspect helpers for media backend evidence.
@@ -132,6 +132,7 @@ Phase 1 production Foundation gate APIs are in Core, Platform, ModuleRuntime, Pr
 - `TargetPlatformDesc`
 - `TargetCapabilityFlags`
 - `PlatformCreateDesc`
+- `InputSnapshot`
 - `CurrentHostTargetPlatform()`
 - `FindTargetPlatform()`
 - `KnownTargetPlatforms()`
@@ -195,6 +196,7 @@ Phase 6 Asset and NativeVN runtime evidence APIs now also include:
 - `Astra::Runtime::SaveContainer`
 - `Astra::Runtime::ReplayComparisonReport`
 - `Astra::Tools::Import()`
+- `Astra::Tools::Test()`
 - `Astra::Tools::Replay()`
 
 ## Examples
