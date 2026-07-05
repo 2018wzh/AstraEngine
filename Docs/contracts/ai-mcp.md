@@ -28,3 +28,7 @@ Editor Copilot 和 Content Generation 可以在 Trusted session 中直写 canoni
 ## MCP Tool Policy
 
 每个 MCP tool 必须声明 mutating behavior、required session、input schema、permission、audit sink、rollback policy 和 packaged eligibility。Runtime MCP tool 不能访问 Editor widget 或 provider secret。
+
+## Checks
+
+Runtime AI、Editor Copilot、Content Generation 和 MCP tool 的接口与 gate 见 [AI And MCP Runtime Blueprint](../implementation/ai-mcp-runtime.md)。`ai.provider_free_replay`、`ai.audit_complete`、`ai.draft_acceptance`、`mcp.permission_policy` 都是 release check。

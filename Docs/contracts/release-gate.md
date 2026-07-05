@@ -25,7 +25,7 @@ checks:
 
 ## Blocking Domains
 
-Runtime determinism、schema migration、package integrity、plugin fingerprint、permission policy、AI replay、Lua sandbox、media decode、save/load、headless scenario、platform eligibility 和 manual signoff 都可以阻止发布。
+Runtime determinism、schema migration、package integrity、plugin fingerprint、permission policy、AI replay、Luau sandbox、media decode、save/load、headless scenario、platform eligibility 和 manual signoff 都可以阻止发布。
 
 ## Verification Commands
 
@@ -34,3 +34,5 @@ astra package validate target/nativevn.astrapkg --profile desktop-release
 astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --headless
 astra report explain target/release_report.yaml
 ```
+
+完整 check matrix 见 [Release Gate Checks Blueprint](../implementation/release-gate-checks.md)。每个 check 必须声明 id、domain、input、blocking condition、evidence、source_ref 和期望输出。

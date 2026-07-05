@@ -24,7 +24,7 @@ state prologue #@id state.prologue
 
 state library #@id state.library
   scene library #@id scene.library
-    when lua:"astra.var.get('project', 'affinity') >= 1"
+    when luau:"astra.var.get('project', 'affinity') >= 1"
     text key:library.followup speaker:hero voice:voice.hero.0002 #@id line.library
     jump ending.good #@id jump.good
 

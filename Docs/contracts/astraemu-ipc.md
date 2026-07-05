@@ -20,7 +20,7 @@ Core 输出 RuntimeEvent、PresentationCommand、AudioCommand、TextCaptureEvent
 
 ## Family 顺序
 
-按通用性排序实现：KrKr/KAG/TJS、Artemis、BGI/Ethornell、SoftPAL、FVP、Siglus。SoftPAL 参考 `D:/Workspace/sena-rs`，FVP 参考 `D:/Workspace/rfvp`，Siglus 参考 `D:/Workspace/siglus_rs`，BGI 参考 `ethornell-rs`。
+v1 可用 family 是 Artemis。后续按通用性排序扩展：KrKr/KAG/TJS、BGI/Ethornell、SoftPAL、FVP、Siglus。SoftPAL 参考 `D:/Workspace/sena-rs`，FVP 参考 `D:/Workspace/rfvp`，Siglus 参考 `D:/Workspace/siglus_rs`，BGI 参考 `ethornell-rs`。
 
 ## Report
 

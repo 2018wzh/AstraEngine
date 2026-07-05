@@ -32,13 +32,15 @@ FooterHash
 
 Section payload 默认使用 `postcard` + serde。大型媒体 payload 可以用 raw compressed block，但必须在 section table 中记录 codec、hash、offset、length 和 migration policy。
 
+容器 ABI 在 [Package And Save](../implementation/package-save.md) 中锁定：little-endian、8 byte alignment、header magic、section table、schema id、codec、hash、optional encryption descriptor、migration policy 和 footer hash。Encryption descriptor 只描述 provider 能力，不提供 DRM 或访问控制绕过方案。
+
 ## Save
 
 Save 必须包含 Runtime state、Actor/Component、StateMachine、Blackboard、Director、AwaitToken、script snapshot、VN backlog、AudioGraph state、FilterGraph state、committed AI output、plugin opaque sections 和 migration manifest。
 
 ## Package
 
-Package 必须包含 cooked assets、compiled `.astra` IR、Lua policy bundle、policy lock/vendor cache、schema registry、provider policy、module fingerprint、release report summary、test scenario references 和 platform eligibility。Runtime 不依赖源 YAML 启动。
+Package 必须包含 cooked assets、compiled `.astra` IR、Luau policy bundle、policy lock/vendor cache、schema registry、provider policy、module fingerprint、release report summary、test scenario references 和 platform eligibility。Runtime 不依赖源 YAML 启动。
 
 ## Migration
 

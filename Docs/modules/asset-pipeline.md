@@ -28,3 +28,9 @@ review: accepted
 ## Release Rules
 
 Missing asset、invalid license、missing sidecar、stale cooked artifact、provider-ineligible artifact 和 schema migration gap 都是 blocking diagnostic。
+
+## 实现接口
+
+`astra-asset` 暴露 `AssetId`、`AssetSidecar`、`AssetRegistry` 和 VFS lookup。`astra-cook` 暴露 `AssetImporter`、`CookProcessor`、`CookArtifact`、dependency key 和 import audit。`astra-package` 只接收 cooked artifact 和 manifest section，不读取源素材目录。
+
+完整流程和默认检查见 [Asset And Media Pipeline Blueprint](../implementation/asset-media-pipeline.md)。

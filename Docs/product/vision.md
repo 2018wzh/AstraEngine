@@ -15,16 +15,20 @@ AstraEngine 是 Rust + WGPU-first 的 2D/VN-first 高性能游戏引擎。它的
 
 - EngineCore 使用 Actor/Component + StateMachine 驱动 deterministic runtime。
 - Runtime 可脱离 Editor 完成 launch、tick、save、load、replay、diagnostics、profiling 和 release validation。
-- AstraVN 使用 `.astra` 作为 canonical story source，Lua 5.4 用于扩展和受控逻辑。
+- AstraVN 使用 `.astra` 作为 canonical story source，Luau policy 用于扩展和受控演出策略。
 - Editor 使用 Qt/QML + Rust core，覆盖完整 creator workflow。
 - 插件采用 Rust-facing `abi_stable` 风格 ABI，支持加载/卸载和 provider selection，不支持热重载。
 - 平台硬目标是 Windows、Linux、macOS、iOS、Android、Web；旧主机/掌机是实验模块。
 - Runtime AI 可以发布，但所有 committed AI output 必须进入 save/replay，不允许回放时重新请求 provider。
-- AstraEMU 使用独立进程 core，按 KrKr、Artemis、BGI、SoftPAL、FVP、Siglus 的顺序逐个实现 family。
+- AstraEMU 使用独立进程 core，v1 可用 family 是 Artemis；KrKr、BGI、SoftPAL、FVP、Siglus 输出 alpha probe report 后逐步实现。
 
 ## 非目标
 
 - 不追求复杂 3D、FPS、高实时网络竞技、大型开放世界 streaming 或 UE full object model。
-- 不把 Editor、AI provider、MCP server、Lua runtime、legacy VM、平台图形句柄放进 Core 依赖。
+- 不把 Editor、AI provider、MCP server、Luau runtime、legacy VM、平台图形句柄放进 Core 依赖。
 - 不把旧 VN 导入为 Astra canonical source。
 - 不在文档或工具中提供绕过 DRM、商业保护或访问控制的方案。
+
+## v1 Definition
+
+v1 不是单个 crate 可编译，而是全系列可发布闭环：EngineCore native smoke、AstraVN commercial baseline、AstraEditor creator workflow、Windows/Linux/macOS/iOS/Android/Web profile gate、AI/MCP audit 和 Artemis full-flow report 都通过 Release Gate。

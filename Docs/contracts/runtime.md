@@ -7,8 +7,16 @@ Runtime 的权威模型是 Actor/Component + StateMachine。局部 ECS 可以优
 ```rust
 pub struct RuntimeWorld;
 pub struct RuntimeConfig;
-pub struct TickInput { pub fixed_step: u64, pub delta_ns: u64 }
-pub struct TickReport { pub state_hash: Hash128, pub event_hash: Hash128, pub presentation_hash: Hash128 }
+pub struct ActorId(pub StableId);
+pub struct ComponentId(pub StableId);
+pub struct TickInput { pub fixed_step: u64, pub delta_ns: u64, pub seed: u64 }
+pub struct TickReport {
+    pub step: u64,
+    pub state_hash: Hash128,
+    pub event_hash: Hash128,
+    pub presentation_hash: Hash128,
+    pub diagnostics: Vec<Diagnostic>,
+}
 
 impl RuntimeWorld {
     pub fn create(config: RuntimeConfig, package: PackageHandle) -> Result<Self, RuntimeError>;
@@ -19,6 +27,23 @@ impl RuntimeWorld {
     pub fn debug(&mut self) -> RuntimeDebugSession<'_>;
 }
 ```
+
+字段级实现蓝图见 [Runtime API Blueprint](../implementation/runtime-api.md) 和 [Runtime Execution](../implementation/runtime-execution.md)。
+
+## Actor / Component
+
+Actor 只保存 stable id、parent/child relation、tag 和 component refs。Component payload 必须有 schema id、schema version、serde data、migration policy 和 Inspector metadata。Runtime public API 不暴露内部 arena index。
+
+```rust
+pub struct ActorSnapshot {
+    pub actor_id: ActorId,
+    pub name: String,
+    pub tags: Vec<String>,
+    pub components: Vec<ComponentId>,
+}
+```
+
+Save、Inspector、Debug、MCP patch 都通过 snapshot 和 MutationLog 访问 Actor/Component。
 
 ## AwaitToken
 
@@ -46,3 +71,7 @@ Tokio task 完成后只提交 `AwaitResult`。Runtime 在固定 tick 边界按 `
 ## 失败策略
 
 Unknown event、invalid payload、missing required module、schema migration failure 都是 blocking diagnostic。PIE 可以暂停，packaged runtime 只能按 release profile 的 fatal policy 退出或进入安全错误页。
+
+## Release Gate
+
+`runtime.replay.determinism`、`runtime.await.ordering`、`runtime.save_load`、`runtime.debug_snapshot` 是必需检查。每个检查必须输出 step、hash、source_ref 或 diagnostic code。

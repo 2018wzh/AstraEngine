@@ -6,7 +6,7 @@ iOS 和 Android 使用独立平台模块。移动壳负责原生生命周期、s
 
 - Swift/SwiftUI launcher + Rust staticlib。
 - AVFoundation decode provider 优先。
-- iOS 禁止 JIT，因此 LuaJIT 不作为默认方案；Lua 5.4 解释执行。
+- iOS 禁止 JIT，因此 Luau 以解释执行进入 AstraVN policy；legacy EMU bridge 也不能依赖 JIT。
 
 ## Android
 
@@ -17,3 +17,7 @@ iOS 和 Android 使用独立平台模块。移动壳负责原生生命周期、s
 ## Testing
 
 移动 release gate 至少覆盖启动、旋转/resize、触控、音频焦点、save/load、package import 和 foreground/background resume。
+
+## Capability
+
+iOS 和 Android 都必须报告 safe area、touch profile、audio focus/background policy、package import source、save persistence、platform decode、network permission 和 Luau no-JIT mode。字段以 [Platform Host Blueprint](../implementation/platform-host.md) 为准。

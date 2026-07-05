@@ -1,6 +1,6 @@
 # AstraVN Script Spec
 
-AstraVN 脚本层采用“Core 语义稳定，Lua 策略可换”的分工。`.astra` 仍是 canonical source；Lua 不是另一套剧情格式，而是策略层语言，用来定义表现、系统页和复杂演出。
+AstraVN 脚本层采用“Core 语义稳定，Luau 策略可换”的分工。`.astra` 仍是 canonical source；Luau 不是另一套剧情格式，而是策略层语言，用来定义表现、系统页和复杂演出。
 
 ## 分层
 
@@ -8,9 +8,9 @@ AstraVN 脚本层采用“Core 语义稳定，Lua 策略可换”的分工。`.a
 | --- | --- | --- |
 | AstraVN Core | dialogue、choice、backlog、save/load、read-state、voice replay、变量域、AwaitToken/Fence、Mutation API | 不决定项目的 UI 风格、演出套路或系统页流程 |
 | Rust Plugin | FilterGraph、AudioGraph、TextLayout、renderer、decode、native capability、性能敏感节点 | 不保存剧情权威状态，不跨 ABI 暴露 native handle |
-| Lua Policy | message/choice UI、title/config/gallery/replay/chart、timeline preset、复杂演出、fallback、Editor metadata | 不破坏 Core save/backlog/read-state 语义 |
+| Luau Policy | message/choice UI、title/config/gallery/replay/chart、timeline preset、复杂演出、fallback、Editor metadata | 不破坏 Core save/backlog/read-state 语义 |
 
-Core 提供完整 VN 权威语义。官方 Lua 策略包提供完整商业 VN 体验，第三方策略包可以替换表现和系统流程，但不能重写存档、回放、已读、backlog 等语义边界。
+Core 提供完整 VN 权威语义。官方 Luau 策略包提供完整商业 VN 体验，第三方策略包可以替换表现和系统流程，但不能重写存档、回放、已读、backlog 等语义边界。
 
 ## `.astra` Source
 
@@ -44,7 +44,7 @@ pub struct CompiledStory {
     pub system_manifest: SystemStoryManifest,
     pub variable_manifest: VariableManifest,
     pub command_manifest: CommandManifest,
-    pub lua_manifest: LuaPolicyManifest,
+    pub luau_manifest: LuauPolicyManifest,
     pub timeline_ir: TimelineIr,
     pub text_effect_ir: TextEffectIr,
     pub source_map: SourceMap,
@@ -56,18 +56,18 @@ pub struct CompiledStory {
 
 | 域 | 生命周期 | 写入规则 |
 | --- | --- | --- |
-| `project` | 随 save/load 回滚 | Lua 可通过 `astra.mutate` 写入 |
+| `project` | 随 save/load 回滚 | Luau 可通过 `astra.mutate` 写入 |
 | `global` | 跨 save/load 和路线保留 | 只能由显式 command 或授权策略写入 |
-| `temp` | scene/story 临时状态 | Lua 可写，默认不进 save |
+| `temp` | scene/story 临时状态 | Luau 可写，默认不进 save |
 | `system` | 引擎和设置状态 | 只允许声明过的 system command 写入 |
 
-所有权威写入都走 `astra.mutate`。直接改 Lua table 只能改策略私有缓存，不能改变 Runtime state。
+所有权威写入都走 `astra.mutate`。直接改 Luau table 只能改策略私有缓存，不能改变 Runtime state。
 
-## Lua Mechanism API
+## Luau Mechanism API
 
-Lua 5.4 通过 `mlua` 运行。AstraVN 给 Lua 足够机制，不内置复杂演出策略。
+Luau 通过 `mlua` 运行。AstraVN 给 Luau 足够机制，不内置复杂演出策略。
 
-```lua
+```luau
 astra.command.register(name, manifest, handler)
 astra.command.filter(name, filter)
 astra.command.emit(name, params)
@@ -91,7 +91,7 @@ astra.trace.performance_scope(name)
 
 Lifecycle hook 全开放，但写入必须走记录型 Mutation API：
 
-```lua
+```luau
 policy:on("load", fn)
 policy:on("compile_preview", fn)
 policy:on("runtime_start", fn)
@@ -107,11 +107,11 @@ policy:on("release_check", fn)
 
 `render_frame` 和 `audio_frame` 可以提交可回放的 presentation/audio command，不能读取平台 native handle、墙钟或回调顺序。所有随机数、时间、输入和 provider 结果都必须来自 Runtime 提供的 deterministic source。
 
-Lua snapshot 只接受 table、number、string、bool、stable ref。function、thread、userdata、native handle 和 coroutine 状态不能进入发布包；Release Gate 遇到这些值必须阻断。
+Luau snapshot 只接受 table、number、string、bool、stable ref。function、thread、userdata、native handle 和 coroutine 状态不能进入发布包；Release Gate 遇到这些值必须阻断。
 
 ## Policy Bundle
 
-复杂演出插件采用 Rust 机制、Lua 策略：
+复杂演出插件采用 Rust 机制、Luau 策略：
 
 ```yaml
 schema: astra.policy_bundle.v1
@@ -119,7 +119,7 @@ id: com.example.cinematic
 version: 0.1.0
 engine_version: 0.1.0
 rust_plugin: com.example.cinematic_nodes
-lua_entry: cinematic_policy.lua
+luau_entry: cinematic_policy.luau
 provides:
   commands:
     - astra.cinematic.reveal_text
@@ -133,25 +133,25 @@ capabilities:
   - audio_graph.node
   - text_effect.policy
 editor:
-  visual_model: lua_base_visual_derived
+  visual_model: luau_base_visual_derived
   nodes: true
   inspector: true
   timeline_preview: true
 dependencies:
-  lua:
-    - name: easing
-      source: luarocks
+  pesde:
+    - name: jsdotlua/luau-regexp
+      source: pesde
       version: 1.0.0
 package_lock: auto
 ```
 
-开发期可以联网解析外部 Lua 依赖。Package 阶段必须生成 lock/vendor cache，记录版本、hash、license、capability 和来源；CI 和 Release Gate 只接受锁定结果。
+开发期可以通过 pesde 解析外部 Luau 依赖。Package 阶段必须生成 lock/vendor cache，记录版本、hash、license、capability 和来源；CI 和 Release Gate 只接受锁定结果。
 
 多个策略包提供同一 command 或 preset 时，项目 manifest 必须显式绑定 provider。AstraVN 不按加载顺序抢占策略。
 
 ## Editor Contract
 
-Lua 策略像 UE 的 C++ 基类，Graph/Timeline 像可视派生层。Lua 策略暴露属性、节点、事件和轨道；Editor 允许创作者改参数、事件连接、timeline、fence 和 fallback，不要求展开 Lua 内部算法。
+Luau 策略像 UE 的 C++ 基类，Graph/Timeline 像可视派生层。Luau 策略暴露属性、节点、事件和轨道；Editor 允许创作者改参数、事件连接、timeline、fence 和 fallback，不要求展开 Luau 内部算法。
 
 策略包必须提供：
 
@@ -161,9 +161,9 @@ Lua 策略像 UE 的 C++ 基类，Graph/Timeline 像可视派生层。Lua 策略
 - source map、diagnostic span、release check。
 - performance budget 和采样标签。
 
-Editor 默认按段落/场景级编辑。可视层修改后必须能回写 `.astra`、Lua metadata 或 policy override；不能产生第二套 runtime model。
+Editor 默认按段落/场景级编辑。可视层修改后必须能回写 `.astra`、Luau metadata 或 policy override；不能产生第二套 runtime model。
 
-PIE/Preview 支持 Editor-only Lua hot reload。发布 runtime 不支持策略热重载；打包时固定策略、依赖、schema 和 migrator。
+PIE/Preview 支持 Editor-only Luau refresh。发布 runtime 不支持策略热重载；打包时固定策略、依赖、schema 和 migrator。
 
 ## System Stories
 
@@ -212,9 +212,9 @@ Editor 提供并排预览。Release Gate 检查缺失 key、voice variant、ruby
 
 以下情况阻断发布：
 
-- Lua 写入绕过 `astra.mutate`。
+- Luau 写入绕过 `astra.mutate`。
 - 策略缺 schema、Editor metadata、migrator、performance budget 或 lock/vendor cache。
 - 策略覆盖 Core save/backlog/read-state 语义。
-- Lua snapshot 含不可序列化值。
+- Luau snapshot 含不可序列化值。
 - Graph/Timeline 派生层无法回写 source map。
 - full playthrough、system stories、save/load、replay hash、backlog/read-state、voice replay、localization preview 任一失败。

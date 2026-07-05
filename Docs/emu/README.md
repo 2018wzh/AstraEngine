@@ -4,6 +4,8 @@
 
 ## Engine 目录
 
+Artemis 是 AstraEMU v1 的可用 family，其余 family 按 alpha probe profile 接入后再提升兼容深度。
+
 | Engine | 样本 | 参考实现或工具 | 资料入口 |
 | --- | --- | --- | --- |
 | BGI / Ethornell | `E:/Games/樱之诗春之雪`, `E:/Games/サクラノ詩`, `E:/Games/素晴らしき日々15th` | `D:/Workspace/ethornell-rs`, `D:/Workspace/BGITool` | [bgi/README.md](bgi/README.md) |

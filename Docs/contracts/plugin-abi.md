@@ -46,11 +46,27 @@ pub trait Renderer2DProvider: StableProvider {
 }
 ```
 
-## Lua Policy Bundle
+完整 provider trait 族见 [Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。v1 必须覆盖 Renderer2D、TextLayout、AudioOutput、DecodeProvider、AssetImporter、CookProcessor、LuauPolicyBundle、EditorPanel、AIProvider、MCPToolProvider 和 EMUCoreBridge。
 
-复杂演出插件采用 Rust 机制、Lua 策略。Rust 插件声明 provider、native node 和 capability；Lua policy bundle 声明 command schema、hook、mutation scope、Editor metadata、preview、performance budget、save migrator 和 release check。项目 manifest 必须显式绑定 command/preset provider，不按加载顺序抢占。
+## Load / Unload Report
 
-开发期可以联网解析 Lua 依赖；Package 阶段必须生成 lock/vendor cache。Release Gate 校验依赖 hash、license、capability、schema、migrator 和 Lua snapshot policy。
+```yaml
+schema: astra.plugin_report.v1
+plugin: com.example.renderer.wgpu_plus
+status: unloaded
+registered_slots: [renderer2d]
+callbacks_released: true
+opaque_sections_registered: []
+diagnostics: []
+```
+
+卸载后仍有 callback、opaque state 未注册 migrator、capability 与 permission 不匹配，都是 blocking diagnostic。
+
+## Luau Policy Bundle
+
+复杂演出插件采用 Rust 机制、Luau 策略。Rust 插件声明 provider、native node 和 capability；Luau policy bundle 声明 command schema、hook、mutation scope、Editor metadata、preview、performance budget、save migrator 和 release check。项目 manifest 必须显式绑定 command/preset provider，不按加载顺序抢占。
+
+开发期可以通过 pesde 解析 Luau 依赖；Package 阶段必须生成 lock/vendor cache。Release Gate 校验依赖 hash、license、capability、schema、migrator 和 Luau snapshot policy。
 
 ## derive 宏
 

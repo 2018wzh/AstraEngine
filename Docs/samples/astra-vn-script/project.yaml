@@ -18,12 +18,12 @@ policies:
     id: astra.policy.standard
     version: 0.1.0
     source: official
-    lua_entry: standard_policy.lua
+    luau_entry: standard_policy.luau
   cinematic:
     id: com.example.cinematic
     version: 0.1.0
-    source: luarocks
-    lua_entry: cinematic_policy.lua
+    source: pesde
+    luau_entry: cinematic_policy.luau
     rust_plugin: com.example.cinematic_nodes
     package_lock: auto
 

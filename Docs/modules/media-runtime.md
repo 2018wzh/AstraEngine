@@ -13,7 +13,7 @@ Media Runtime 执行表现，不保存剧情权威状态。它消费 Presentatio
 - `astra.filter_node`
 - `astra.audio_node`
 
-## 最小内置 provider
+## 内置 provider
 
 - Renderer2D：wgpu provider，headless capture provider。
 - TextLayout：cosmic-text/Swash provider。
@@ -23,3 +23,7 @@ Media Runtime 执行表现，不保存剧情权威状态。它消费 Presentatio
 ## 测试
 
 Media tests 必须覆盖 image/font/text/filter/audio/video decode、headless capture、AudioGraph bus、FilterGraph typed node validation 和 provider fallback。
+
+## Runtime 边界
+
+Media Runtime 只消费 command，不写 VN route、backlog、read-state 或 save authority。视频、音频、滤镜等待点必须回到 AwaitToken/Fence，不能通过 provider callback 改 Runtime state。实现 trait、默认 provider 和 gate 见 [Asset And Media Pipeline Blueprint](../implementation/asset-media-pipeline.md)。
