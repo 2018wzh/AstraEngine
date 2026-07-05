@@ -1,0 +1,15 @@
+# Architecture Decision Records
+
+ADR 记录已经锁定的产品级决策。被替换的旧决策必须在新 ADR 中说明取代关系。
+
+| ADR | 决策 |
+| --- | --- |
+| [0001](0001-modular-2d-engine-baseline.md) | 模块化 2D/VN-first 引擎基线 |
+| [0002](0002-editor-ui-qt.md) | Editor 使用 Qt/QML + Rust core |
+| [0003](0003-renderer2d-first-stage-backend.md) | Renderer2D 后端可替换，wgpu 为默认 provider |
+| [0004](0004-actor-component-statemachine-runtime.md) | Actor/Component + StateMachine 是 Runtime 权威模型 |
+| [0005](0005-mcp-agent-capability-protocol.md) | MCP 是受权限和审计约束的能力协议 |
+| [0006](0006-text-first-source-data.md) | Text-first source，binary runtime data |
+| [0008](0008-rust-plugin-abi.md) | 插件采用 Rust-facing `abi_stable` 风格 ABI |
+| [0009](0009-astraemu-out-of-process-core.md) | AstraEMU compat core 独立进程化 |
+| [0010](0010-platform-decode-and-renderer-slots.md) | 平台解码优先，Renderer2D provider 可替换 |

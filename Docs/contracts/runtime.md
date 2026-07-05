@@ -1,0 +1,48 @@
+# Runtime Contract
+
+Runtime 的权威模型是 Actor/Component + StateMachine。局部 ECS 可以优化批量 transform、粒子、sprite sorting 或音频 voice 更新，但不能进入 public save、Inspector 或脚本对象模型。
+
+## Public API 草案
+
+```rust
+pub struct RuntimeWorld;
+pub struct RuntimeConfig;
+pub struct TickInput { pub fixed_step: u64, pub delta_ns: u64 }
+pub struct TickReport { pub state_hash: Hash128, pub event_hash: Hash128, pub presentation_hash: Hash128 }
+
+impl RuntimeWorld {
+    pub fn create(config: RuntimeConfig, package: PackageHandle) -> Result<Self, RuntimeError>;
+    pub fn tick(&mut self, input: TickInput) -> Result<TickReport, RuntimeError>;
+    pub fn apply_input(&mut self, input: PlayerInput) -> Result<(), RuntimeError>;
+    pub fn save(&self, request: SaveRequest) -> Result<SaveBlob, RuntimeError>;
+    pub fn load(&mut self, save: SaveBlob) -> Result<LoadReport, RuntimeError>;
+    pub fn debug(&mut self) -> RuntimeDebugSession<'_>;
+}
+```
+
+## AwaitToken
+
+Runtime action 可以发起异步工作，但 await 点必须显式序列化：
+
+```rust
+pub struct AwaitToken {
+    pub token_id: StableId,
+    pub kind: AwaitKind,
+    pub requested_at_step: u64,
+    pub deterministic_timeout_step: Option<u64>,
+    pub replay_policy: AwaitReplayPolicy,
+}
+```
+
+Tokio task 完成后只提交 `AwaitResult`。Runtime 在固定 tick 边界按 `token_id` 和 sequence 消费结果。Guard 必须是同步纯函数；Action 可以拆成 `start -> await token -> resume`。
+
+## 状态机规则
+
+- Guard 只读取 event payload、Actor snapshot、Blackboard、Director state。
+- Action 可发事件、改 Blackboard、调度 AwaitToken、提交 PresentationCommand，但必须进入 trace。
+- 状态机定义分双轨：引擎系统用 Rust code-first；项目 gameplay/VN 可以用 YAML/Graph 定义并 Cook 成 IR。
+- Save 不保存 ECS entity、native handle 或 Future 内部状态。
+
+## 失败策略
+
+Unknown event、invalid payload、missing required module、schema migration failure 都是 blocking diagnostic。PIE 可以暂停，packaged runtime 只能按 release profile 的 fatal policy 退出或进入安全错误页。
