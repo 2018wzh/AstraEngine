@@ -6,6 +6,7 @@
 | Asset Pipeline | [asset-pipeline.md](asset-pipeline.md) |
 | Media Runtime | [media-runtime.md](media-runtime.md) |
 | AstraVN | [astra-vn.md](astra-vn.md) |
+| AstraVN Script | [astra-vn-script.md](astra-vn-script.md) |
 | AstraEditor | [editor.md](editor.md) |
 | AI / MCP | [ai-mcp.md](ai-mcp.md) |
 | AstraEMU | [astra-emu.md](astra-emu.md) |

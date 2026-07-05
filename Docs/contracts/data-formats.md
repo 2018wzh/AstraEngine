@@ -38,7 +38,7 @@ Save 必须包含 Runtime state、Actor/Component、StateMachine、Blackboard、
 
 ## Package
 
-Package 必须包含 cooked assets、compiled `.astra` IR、schema registry、provider policy、module fingerprint、release report summary、test scenario references 和 platform eligibility。Runtime 不依赖源 YAML 启动。
+Package 必须包含 cooked assets、compiled `.astra` IR、Lua policy bundle、policy lock/vendor cache、schema registry、provider policy、module fingerprint、release report summary、test scenario references 和 platform eligibility。Runtime 不依赖源 YAML 启动。
 
 ## Migration
 

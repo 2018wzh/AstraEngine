@@ -26,7 +26,7 @@
 2. 加 DSC decode，并把 decoded-kind probe 接到 index report。
 3. 实现 BCS/BP parser，只输出 source map、opcode histogram 和 diagnostics。
 4. 实现最小 VM：BP push/load/store/call/ret、BCS command iteration、dispatch trace。
-5. 接 System/Graph/Sound/User dispatch stub，稳定 unknown 行为。
+5. 接 System/Graph/Sound/User dispatch skeleton，稳定 unknown 行为。
 6. 接 presentation/media probe，不急于完整渲染。
 7. 加 snapshot/replay，并把 await token 放入固定 tick 队列。
 8. 最后接 release gate：fixture tests、metadata smoke tests、report schema 校验。

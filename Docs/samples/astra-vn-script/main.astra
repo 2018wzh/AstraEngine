@@ -1,0 +1,34 @@
+story main #@id story.main
+
+state prologue #@id state.prologue
+  scene room #@id scene.room
+    stage:
+      background asset:bg.room preset:soft_fade duration:300 #@id bg.room
+      show character:hero pose:normal at:center preset:hero_enter #@id hero.enter
+
+    timeline intro #@id timeline.intro
+      task bgm:
+        play_bgm asset:bgm.morning loop:true fade_in:600
+      task text_fx:
+        fence wait_for:voice.ready
+        command astra.cinematic.camera_pulse intensity:0.15 duration:240
+
+    text key:prologue.hello speaker:hero voice:voice.hero.0001 #@id line.hello
+      effect command:astra.cinematic.reveal_text speed:36 lip_sync:true
+
+    mutate project.affinity += 1 reason:"greeted hero" #@id var.affinity
+
+    choice key:prologue.where #@id choice.where
+      option key:choice.library -> library #@id choice.library
+      option key:choice.rooftop -> rooftop #@id choice.rooftop
+
+state library #@id state.library
+  scene library #@id scene.library
+    when lua:"astra.var.get('project', 'affinity') >= 1"
+    text key:library.followup speaker:hero voice:voice.hero.0002 #@id line.library
+    jump ending.good #@id jump.good
+
+state rooftop #@id state.rooftop
+  scene rooftop #@id scene.rooftop
+    text key:rooftop.line speaker:hero voice:voice.hero.0003 #@id line.rooftop
+    jump ending.normal #@id jump.normal

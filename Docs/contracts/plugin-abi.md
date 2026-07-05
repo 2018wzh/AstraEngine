@@ -46,6 +46,12 @@ pub trait Renderer2DProvider: StableProvider {
 }
 ```
 
+## Lua Policy Bundle
+
+复杂演出插件采用 Rust 机制、Lua 策略。Rust 插件声明 provider、native node 和 capability；Lua policy bundle 声明 command schema、hook、mutation scope、Editor metadata、preview、performance budget、save migrator 和 release check。项目 manifest 必须显式绑定 command/preset provider，不按加载顺序抢占。
+
+开发期可以联网解析 Lua 依赖；Package 阶段必须生成 lock/vendor cache。Release Gate 校验依赖 hash、license、capability、schema、migrator 和 Lua snapshot policy。
+
 ## derive 宏
 
 derive 宏可以生成 descriptor、schema、Inspector、save/replay、MCP patch glue 和注册样板。宏必须支持 `cargo expand` 调试路径，不得生成隐藏继承、全局对象系统或不可见生命周期。

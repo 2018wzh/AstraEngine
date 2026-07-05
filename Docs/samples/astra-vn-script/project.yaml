@@ -1,0 +1,46 @@
+schema: astra.project.v1
+id: com.example.astra_vn_script_sample
+runtime: astra-vn
+
+stories:
+  main: main.astra
+  system: system.astra
+
+system_stories:
+  title: system.title
+  config: system.config
+  gallery: system.gallery
+  replay: system.replay
+  chart: system.chart
+
+policies:
+  standard:
+    id: astra.policy.standard
+    version: 0.1.0
+    source: official
+    lua_entry: standard_policy.lua
+  cinematic:
+    id: com.example.cinematic
+    version: 0.1.0
+    source: luarocks
+    lua_entry: cinematic_policy.lua
+    rust_plugin: com.example.cinematic_nodes
+    package_lock: auto
+
+bindings:
+  astra.vn.dialogue: astra.policy.standard
+  astra.vn.choice: astra.policy.standard
+  astra.vn.system_pages: astra.policy.standard
+  astra.cinematic.reveal_text: com.example.cinematic
+  astra.cinematic.camera_pulse: com.example.cinematic
+
+localization:
+  default_locale: zh-Hans
+  text_tables:
+    - text/zh-Hans.yaml
+    - text/ja-JP.yaml
+
+release:
+  dependency_lock: auto
+  evidence: hash_trace
+  require_full_playthrough: true

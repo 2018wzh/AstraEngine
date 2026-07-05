@@ -1,0 +1,31 @@
+schema: astra.scenario.v1
+package: target/astra-vn-script-sample.astrapkg
+seed: 42
+locale: zh-Hans
+
+actions:
+  - launch: {}
+  - wait_for: system.title
+  - choose: system.start
+  - wait_for: dialogue
+  - advance: {}
+  - wait_for: choice
+  - choose: choice.library
+  - wait_for: ending.good
+  - open_system: config
+  - set: { key: audio.bgm_volume, value: 80 }
+  - open_system: gallery
+  - open_system: replay
+  - replay_voice: voice.hero.0001
+  - save: slot.auto
+  - load: slot.auto
+  - replay_from_start: {}
+
+assertions:
+  - route_reached: ending.good
+  - backlog_has_key: prologue.hello
+  - read_state_has: line.hello
+  - voice_replay_available: voice.hero.0001
+  - localization_keys_resolved: true
+  - no_timeline_task_leak: true
+  - replay_hash_match: true

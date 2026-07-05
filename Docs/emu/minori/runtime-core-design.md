@@ -31,7 +31,7 @@ Core 输出：
 | 情况 | Diagnostic | 行为 |
 | --- | --- | --- |
 | 缺 PAZ key | `NeedsUserKey` | 阻止加载 case |
-| entry 缺失 | `MissingResource` | 可恢复，输出 placeholder command |
+| entry 缺失 | `MissingResource` | 可恢复，输出 fallback command |
 | opcode 未识别 | `UnknownOpcode` | 保留 raw operand，继续或暂停由 severity 决定 |
 | payload 解码失败 | `DecodeFailed` | 阻止使用该资源 |
 

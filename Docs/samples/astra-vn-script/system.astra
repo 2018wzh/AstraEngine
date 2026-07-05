@@ -1,0 +1,27 @@
+story system.title #@id system.title
+  scene title_menu #@id system.title.menu
+    system_page kind:title policy:astra.policy.standard #@id page.title
+    option key:system.start -> story.main:state.prologue #@id system.start
+    option key:system.config -> system.config #@id system.config.link
+    option key:system.gallery -> system.gallery #@id system.gallery.link
+
+story system.config #@id system.config
+  scene config #@id system.config.scene
+    system_page kind:config policy:astra.policy.standard #@id page.config
+    bind_setting key:audio.bgm_volume target:system.audio.bgm_volume
+    bind_setting key:text.speed target:system.text.speed
+
+story system.gallery #@id system.gallery
+  scene gallery #@id system.gallery.scene
+    system_page kind:gallery policy:astra.policy.standard #@id page.gallery
+    source read_state:cg_unlocks
+
+story system.replay #@id system.replay
+  scene replay #@id system.replay.scene
+    system_page kind:replay policy:astra.policy.standard #@id page.replay
+    source backlog:voice_replay
+
+story system.chart #@id system.chart
+  scene chart #@id system.chart.scene
+    system_page kind:chart policy:astra.policy.standard #@id page.chart
+    source route_coverage:true

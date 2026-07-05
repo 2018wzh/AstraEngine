@@ -1,6 +1,8 @@
 # Script and AstraVN Contract
 
-`.astra` 是 AstraVN 的 canonical story source。Lua 5.4 通过 `mlua` 提供扩展、逻辑和 EMU patch/decode runtime；Lua 不是 EngineCore 依赖。
+`.astra` 是 AstraVN 的 canonical story source。AstraVN Core 固化 dialogue、choice、backlog、save/load、read-state、voice replay 等权威语义；Lua 5.4 通过 `mlua` 提供策略层能力，用于表现、系统页、复杂演出和插件组合。
+
+完整脚本规格见 [AstraVN Script Spec](../modules/astra-vn-script.md)。
 
 ## `.astra` 输出
 
@@ -8,12 +10,15 @@
 
 ```rust
 pub struct CompiledStory {
-    pub state_graph: StateGraphIr,
-    pub narrative: NarrativeIr,
-    pub effects: EffectGraphIr,
+    pub story_manifest: StoryManifest,
+    pub system_manifest: SystemStoryManifest,
+    pub variable_manifest: VariableManifest,
+    pub command_manifest: CommandManifest,
+    pub lua_manifest: LuaPolicyManifest,
+    pub timeline_ir: TimelineIr,
+    pub text_effect_ir: TextEffectIr,
     pub source_map: SourceMap,
     pub debug_symbols: DebugSymbols,
-    pub command_manifest: CommandManifest,
 }
 ```
 
@@ -21,17 +26,20 @@ Graph 和 Timeline 保存作者元数据，必须能编译到同一 IR。Editor 
 
 ## 商业 VN 基线
 
-AstraVN v1 覆盖 dialogue、choice、variables、call/return、backlog、auto、skip、read-state、save/load、config、voice replay、movie、常见 transition、screen effects、message window、route flags 和 timed delay blocks。
+AstraVN v1 覆盖 dialogue、choice、variables、call/return、backlog、auto、skip、read-state、save/load、config、gallery、replay、route chart、voice replay、movie、常见 transition、screen effects、message window、route flags 和 timed delay blocks。
+
+官方 Lua 策略包覆盖 message UI、choice UI、system stories、timeline presets、localization UI 和常用演出。第三方策略包可以替换表现和系统流程，不能破坏 Core save/backlog/read-state 语义。
 
 ## Lua Capability Sandbox
 
-Lua 默认无文件、网络或系统调用。能力通过 descriptor 声明：
+Lua 默认无文件、网络或系统调用。权威写入必须通过记录型 `astra.mutate` API，产生 trace、rollback、dirty scope 和 replay event。能力通过 descriptor 声明：
 
 ```yaml
 lua:
   runtime: lua54
   capabilities:
     - astra.vn.command_extension
+    - astra.vn.policy_bundle
     - astra.emu.patch.decode
   fs:
     read_roots: [foreign-content]
