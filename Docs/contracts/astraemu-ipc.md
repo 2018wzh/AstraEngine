@@ -87,6 +87,42 @@ pub struct LegacyRuntimeHostCtx {
 
 Host context 只传 ABI-safe value、stable id、hash、section ref、source span、capability ref 和 DTO。旧 VM 指针、Actor 指针、`RuntimeWorld` 指针、platform file descriptor、renderer/audio native handle、Editor widget、商业 payload 和完整脚本文本不得进入 public API。
 
+## Manager Modernization DTO
+
+这些 DTO 属于 AstraEMU Manager 和 plugin/provider contract，不进入 family VM public API。它们只选择、包裹或消费 `LegacyRuntimeProvider` 的输出。
+
+```rust
+pub struct FamilyAutoProbePolicy {
+    pub priority: Vec<FamilyId>,
+    pub manual_override: Option<LegacyFamilyProfileId>,
+    pub selected: Option<FamilyId>,
+    pub diagnostics: Vec<LegacyProbeDiagnostic>,
+}
+
+pub struct TrustedEmuScriptProfile {
+    pub script_bundle: PackageSectionRef,
+    pub trusted_profile: bool,
+    pub host_capabilities: Vec<PermissionId>,
+    pub violation_policy: ScriptViolationPolicy,
+}
+
+pub struct TextCapturePipeline {
+    pub local_dump: TextDumpPolicy,
+    pub translation_provider: Option<ProviderId>,
+    pub overlay_policy: TranslationOverlayPolicy,
+    pub redaction: RedactionPolicyId,
+}
+
+pub struct EmuFilterPresetBinding {
+    pub final_frame: Option<FilterGraphRef>,
+    pub per_layer_roles: Vec<LayerFilterBinding>,
+}
+```
+
+默认 auto probe 顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori。用户 profile 可以覆盖最终 family。Luau 是唯一用户脚本语言；旧 Lua/TJS 只描述 family 内部 legacy 事实。Trusted script 可以提交 `LegacyEffect`、Blackboard、input 或 tag intent，但这些 intent 必须在 fixed tick 边界进入 Runtime。脚本请求未授权 key 提取、商业保护处理或访问控制规避时，Manager 隔离禁用该脚本，并继续以无补丁模式运行 case。
+
+Text dump 默认只写 hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才能保存全文 dump。翻译 overlay 是非权威 UI 状态，不进入 replay hash。Filter preset 复用 `FilterGraph`；family 缺少 layer metadata 时，只启用 final-frame preset 并输出 diagnostic。
+
 ## Step Contract
 
 ```rust

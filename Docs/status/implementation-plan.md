@@ -22,7 +22,7 @@
 | Stage 2 Media + Package | `NOT_STARTED` | `astra-asset`、`astra-package`、`astra-media`、`astra-release` crate 尚不存在 |
 | Stage 3 AstraVN | `SPEC_READY` | `.astra`、Luau、presentation、standard commands、system UI 和 advanced sample 已写入文档；`astra-vn` crate 尚不存在 |
 | Stage 4 Editor + AI/MCP | `SPEC_READY` | Editor workflow、Plugin Manager、AI/MCP gate 已写入文档；`Editor/Source` 尚不存在 |
-| Stage 5 AstraEMU | `SPEC_READY` | `Docs/contracts/astraemu-ipc.md`、`Docs/implementation/astraemu-legacy-runtime-framework.md` 和 `Docs/emu` 已写清 `LegacyRuntimeProvider` facade；`AstraEMU/Source` 尚不存在 |
+| Stage 5 AstraEMU | `SPEC_READY` | `Docs/contracts/astraemu-ipc.md`、`Docs/implementation/astraemu-legacy-runtime-framework.md` 和 `Docs/emu` 已写清 `LegacyRuntimeProvider` facade、auto probe、Trusted Luau、文本翻译和 FilterGraph preset；`AstraEMU/Source` 尚不存在 |
 | Six platforms | `SPEC_READY` | platform host/profile gate 已写入文档；平台 host crate 尚不存在 |
 
 ## Stage 1 完成项
@@ -53,7 +53,7 @@
 | 5 | `S3-SCRIPT-01` + `S3-SCRIPT-02` `.astra` parser/compiler | `SPEC_READY` | AstraVN Core 和 Editor visual model 的前置 |
 | 6 | `S3-PRESENT-01` + `S3-SYSTEM-01` | `SPEC_READY` | 新增设计要求 commercial baseline 和 system UI 阻断普通发布 |
 | 7 | `S4-PLUGIN-01` Plugin Manager | `SPEC_READY` | 新插件设计需要 enablement、dependency graph 和 extension diagnostics |
-| 8 | `S5-MANAGER-01` + `S5-FAMILY-01` | `SPEC_READY` | AstraEMU 已改为 RuntimeWorld + `LegacyRuntimeProvider` facade 架构 |
+| 8 | `S5-MANAGER-01` + `S5-FAMILY-01` + `S5-AUTOPROBE-01` + `S5-SCRIPT-01` + `S5-TEXT-01` + `S5-FILTER-01` | `SPEC_READY` | AstraEMU 已改为 RuntimeWorld + `LegacyRuntimeProvider` facade，并补齐统一管理、脚本、翻译和滤镜计划 |
 
 ## 验证命令
 

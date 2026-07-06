@@ -16,6 +16,10 @@ astra-emu-family-api
 astra-emu-manager
   RuntimeWorld bridge
   family enablement
+  auto probe policy
+  trusted Luau host
+  text capture pipeline
+  filter preset binding
   StateMachine action adapter
   local case report
 
@@ -27,6 +31,16 @@ astra-emu-family-*
 ```
 
 `astra-emu-family-api` 只放 DTO、trait 和 schema。它不能依赖 Manager UI、Editor、renderer backend、audio backend、旧 DLL、Luau/TJS VM 或 family crate。
+
+## Manager Modernization Layer
+
+统一管理能力放在 Manager 上，不把 RetroArch/libretro 风格 core ABI 引进 family 层。Manager 先按 `FamilyAutoProbePolicy` 调用各 family `probe`，默认顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori；用户 profile 可以覆盖最终选择。probe 只记录 marker、confidence、blocker、skipped reason 和 override reason，不执行商业脚本。
+
+Trusted Luau 是 Manager host API，不是 EngineCore public API。Trusted Project Profile 可以打开 read-only VFS、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 effect intent。脚本只能提交 deterministic `LegacyEffect`、Blackboard、input 或 tag intent，host adapter 在 fixed tick 边界应用。脚本请求未授权 key 提取、商业保护处理、访问控制规避、raw filesystem/network/system call 或 native handle 时，Manager 隔离禁用脚本，并写入 redacted diagnostic。
+
+`TextCapturePipeline` 消费 `LegacyEffect::TextCapture`。默认 report 只存 hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才写全文 dump。`TranslationProvider` 由 Plugin Manager 显式绑定，`translate_batch` 必须实现，`translate_stream` 是可选 capability。DeepL-style provider 走 batch fallback；LLM provider 可以 streaming 更新 overlay。翻译 overlay 非权威，不进入 replay hash。
+
+`EmuFilterPresetBinding` 复用 Media `FilterGraph`。final-frame preset 作用在合成后画面；per-layer preset 绑定 `PresentationCommand` 的 layer id 或 role。family 缺少 layer metadata 时只启用 final-frame，并在 report 里记录 missing-layer diagnostic。
 
 ## StateMachine Shape
 

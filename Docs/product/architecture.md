@@ -14,7 +14,7 @@ AstraEditor
 AstraPlatform
   desktop/mobile/web/experimental native shells and platform decode
 AstraEMU
-  manager, RuntimeWorld-driven family plugins, Artemis v1 family, Luau patch/decode API
+  manager, RuntimeWorld-driven family plugins, auto probe, Trusted Luau patch/decode, text translation, FilterGraph presets
 ```
 
 ## 运行链路
@@ -42,11 +42,11 @@ Runtime 拥有 World、Scene、Actor、Component、StateMachine、EventBus、Sch
 
 ## Module Slot
 
-可替换能力通过 EngineModuleSlot 和 ExtensionRegistry 明确选择，不按加载顺序抢占。默认 slot 包括 Renderer2D、TextLayout、AudioOutput、DecodeProvider、ScriptRuntime、PresentationLibrary、AssetResolver、AIProvider、MCPToolProvider、AstraEMU LegacyRuntimeProvider 和可选 EMUCoreBridge。
+可替换能力通过 EngineModuleSlot 和 ExtensionRegistry 明确选择，不按加载顺序抢占。默认 slot 包括 Renderer2D、TextLayout、AudioOutput、DecodeProvider、ScriptRuntime、PresentationLibrary、AssetResolver、AIProvider、TranslationProvider、MCPToolProvider、AstraEMU LegacyRuntimeProvider 和可选 EMUCoreBridge。
 
 ## 产品边界
 
-AstraVN 是原生 VN 垂直模块。AstraEMU 是旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动 RuntimeWorld，family plugin 只注册 `LegacyRuntimeProvider`。Provider session 持有旧 VM、资源解析、媒体状态和 snapshot section；NativeVN 创作流程不能依赖 EMU family plugin。
+AstraVN 是原生 VN 垂直模块。AstraEMU 是旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动 RuntimeWorld，family plugin 只注册 `LegacyRuntimeProvider`。自动探测、Trusted Luau、文本翻译和滤镜 preset 位于 Manager/RuntimeWorld 层；Provider session 持有旧 VM、资源解析、媒体状态和 snapshot section。NativeVN 创作流程不能依赖 EMU family plugin。
 
 ## v1 验收边界
 

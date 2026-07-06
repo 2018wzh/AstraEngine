@@ -20,7 +20,7 @@ AstraEngine 是 Rust + WGPU-first 的 2D/VN-first 高性能游戏引擎。它的
 - 插件采用 Rust-facing `abi_stable` 风格 ABI，支持加载/卸载和 provider selection，不支持热重载。
 - 平台硬目标是 Windows、Linux、macOS、iOS、Android、Web；旧主机/掌机是实验模块。
 - Runtime AI 可以发布，但所有 committed AI output 必须进入 save/replay，不允许回放时重新请求 provider。
-- AstraEMU 使用 Manager + RuntimeWorld + in-process family plugin + `LegacyRuntimeProvider` facade，v1 可用 family 是 Artemis；KrKr、BGI、SoftPAL、FVP、Siglus 输出 alpha probe report 后逐步实现。
+- AstraEMU 使用 Manager + RuntimeWorld + in-process family plugin + `LegacyRuntimeProvider` facade，统一管理通过 auto probe 和 profile override 完成，现代化能力通过 Trusted Luau、TranslationProvider 和 FilterGraph preset 接入；v1 可用 family 是 Artemis，KrKr、BGI、SoftPAL、FVP、Siglus 输出 alpha probe report 后逐步实现。
 
 ## 非目标
 

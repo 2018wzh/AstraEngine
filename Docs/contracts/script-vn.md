@@ -50,4 +50,4 @@ luau:
   network: false
 ```
 
-AstraEMU 的 Luau patch/decode API 只提供本地结构、索引、压缩、用户授权 key 输入和 payload transform。遇到 DRM、商业保护或访问控制必须返回 blocking diagnostic。旧引擎研究文档中的 Lua/TJS 名称只描述 legacy engine 原有机制。
+AstraEMU 的用户脚本统一使用 Luau。Trusted Project Profile 可以开启 read-only VFS、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 deterministic effect intent；状态注入只能在 fixed tick 边界变成 `LegacyEffect`、Blackboard、input 或 tag intent。AstraEMU 只处理本地结构、索引、压缩、用户授权 key 输入和 payload transform。脚本请求未授权 key 提取、商业保护处理或访问控制规避时，Manager 隔离禁用该脚本，并按无补丁模式继续 case。旧引擎研究文档中的 Lua/TJS 名称只描述 legacy engine 原有机制。

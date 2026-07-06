@@ -19,6 +19,7 @@ AstraEMU v1 采用 Manager + AstraEngine `RuntimeWorld` + in-process family plug
 - 旧引擎语义必须落成可序列化 `LegacyEffect`、RuntimeEvent、PresentationCommand、AudioCommand、TextCaptureEvent、AwaitToken 和 package/save section。
 - family plugin 不能替换 Runtime tick、MutationLog、Save container、Release Gate core checks、renderer/audio native handle 或 StateMachine 调度。
 - 插件权限、dependency graph、enablement、redaction 和 packaged 裁剪都走统一 Plugin Manager 和 Release Gate。
+- auto probe、Trusted Luau、文本 dump/翻译和 FilterGraph preset 都属于 Manager/RuntimeWorld 侧能力，不扩大 family VM public API。
 - 崩溃隔离改由 capability sandbox、permission policy、deterministic effect list、redacted report、provider unload 和 headless scenario gate 共同处理。
 - Artemis 仍是 v1 可用 family；KrKr、BGI、SoftPAL、FVP、Siglus 和 Minori 先输出 alpha probe report，再补 full-flow gate。
 
@@ -31,4 +32,4 @@ astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/r
 cargo test -p astra-release emu_gate
 ```
 
-Expected report includes `emu.legacy_runtime_provider`, `plugin.extension_registry`, `runtime.replay.determinism`, `emu.artemis_full_flow` and `emu.report_redaction`.
+Expected report includes `emu.legacy_runtime_provider`, `emu.auto_probe`, `emu.trusted_luau_policy`, `emu.text_redaction`, `emu.filter_preset`, `plugin.extension_registry`, `runtime.replay.determinism`, `emu.artemis_full_flow` and `emu.report_redaction`.

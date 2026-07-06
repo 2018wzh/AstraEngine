@@ -33,6 +33,8 @@ checks:
 
 Runtime determinism、schema migration、package integrity、plugin fingerprint、plugin extension registry、permission policy、AI replay、Luau sandbox、media decode、VN commercial baseline、system UI profile、advanced presentation opt-in、AstraEMU legacy runtime provider、save/load、headless scenario、platform eligibility 和 manual signoff 都可以阻止发布。
 
+AstraEMU 还要检查 auto probe、Trusted Luau policy、text redaction 和 FilterGraph preset。翻译 overlay 是非权威 UI 状态，不改变 replay hash；它的 release gate 只检查 provider 绑定、redaction 和禁用策略。
+
 ## Verification Commands
 
 ```bash

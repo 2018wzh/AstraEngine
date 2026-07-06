@@ -1,6 +1,6 @@
 # Stage 5 AstraEMU Work
 
-Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动 AstraEngine `RuntimeWorld`；legacy family 以 in-process plugin 接入，并只向 host 注册 `LegacyRuntimeProvider` facade。Provider session 持有 family 私有 VM、资源解析、媒体状态、诊断和 snapshot section；AstraEngine `StateMachine` 只建模 `Booting`、`Active`、`Awaiting`、`Saving`、`Loading`、`Faulted` 和 `Shutdown` 这些粗粒度生命周期。本页是 planned target 清单，不表示实现已经存在。
+Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动 AstraEngine `RuntimeWorld`；legacy family 以 in-process plugin 接入，并只向 host 注册 `LegacyRuntimeProvider` facade。Provider session 持有 family 私有 VM、资源解析、媒体状态、诊断和 snapshot section；AstraEngine `StateMachine` 只建模 `Booting`、`Active`、`Awaiting`、`Saving`、`Loading`、`Faulted` 和 `Shutdown` 这些粗粒度生命周期。统一管理、Trusted Luau、文本翻译和滤镜 preset 都位于 Manager/RuntimeWorld 侧，不进入 family VM public API。本页是 planned target 清单，不表示实现已经存在。
 
 ## S5-MANAGER-01 Manager RuntimeWorld bridge
 
@@ -45,6 +45,94 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 **Done Evidence:** family plugin 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks，family VM state 只存在于 provider session。
 
 **Linked Test IDs:** `T-S5-FAMILY-01`
+
+## S5-AUTOPROBE-01 Manager auto probe
+
+**ID:** `S5-AUTOPROBE-01`
+
+**Goal:** Manager 能按固定 family 优先级自动 probe case，并允许用户用 profile 手动覆盖。
+
+**Depends On:** `S5-MANAGER-01`、`S5-FAMILY-01`
+
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/auto_probe.rs`、`AstraEMU/Tests/manager_auto_probe.rs` planned target
+
+**Steps:**
+
+1. 定义 `FamilyAutoProbePolicy`，默认顺序为 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori。
+2. 让 Manager 逐个调用 family `probe`，收集 marker、confidence、blocker 和 skipped reason。
+3. 支持 case profile 显式指定 family/profile，并在 report 中记录 override reason。
+4. 无命中或全部 blocker 时进入手动选择，不尝试执行商业脚本。
+5. 编写 synthetic multi-family marker、manual override 和 no-match report 测试。
+
+**Done Evidence:** 自动选择结果可复现，report 能解释命中、跳过、覆盖和最终 family。
+
+**Linked Test IDs:** `T-S5-AUTOPROBE-01`
+
+## S5-SCRIPT-01 Trusted Luau patch/decode runtime
+
+**ID:** `S5-SCRIPT-01`
+
+**Goal:** AstraEMU 支持用户 Luau 脚本在 Trusted Project Profile 下执行 patch、decode、text/media hook 和 deterministic effect injection。
+
+**Depends On:** `S5-FAMILY-01`、`S3-LUAU-01`、`Docs/contracts/script-vn.md`
+
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/trusted_luau.rs`、`AstraEMU/Tests/trusted_luau_patch.rs` planned target
+
+**Steps:**
+
+1. 定义 `TrustedEmuScriptProfile`，统一使用 Luau，不把 Lua/TJS 作为用户脚本语言。
+2. 暴露 read-only VFS、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 effect intent host API。
+3. 状态注入只能提交 `LegacyEffect`、Blackboard、input 或 tag intent，并在 fixed tick 边界应用。
+4. 禁止 native handle、Actor 指针、raw filesystem、raw network、system call、未授权 key 提取和访问控制规避。
+5. 脚本触发禁止能力时隔离禁用该脚本，case 按无补丁模式继续，并写入 redacted diagnostic。
+
+**Done Evidence:** Trusted Luau 能产生 deterministic effect；违规脚本被隔离，不污染 RuntimeWorld、family session 或 report。
+
+**Linked Test IDs:** `T-S5-SCRIPT-01`
+
+## S5-TEXT-01 Text dump and translation provider
+
+**ID:** `S5-TEXT-01`
+
+**Goal:** `TextCaptureEvent` 进入 Manager 文本管线，支持本地 opt-in 全文 dump、`TranslationProvider`、DeepL-style batch fallback 和 LLM-style streaming overlay。
+
+**Depends On:** `S5-MANAGER-01`、`S5-FAMILY-01`、`S4-AI-01`
+
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/text_pipeline.rs`、`Engine/Source/Runtime/astra-plugin/src/translation_provider.rs`、`AstraEMU/Tests/text_translation_pipeline.rs` planned target
+
+**Steps:**
+
+1. 定义 `TextCapturePipeline`：dump sink、translation queue、overlay sink 和 redaction policy。
+2. 默认 report 只保存 text hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才能写全文 dump。
+3. 定义 `TranslationProvider` slot：`translate_batch` 必选，`translate_stream` 可选，provider 声明 language、glossary、context hint 和 rate limit capability。
+4. 非 streaming provider 通过 batch fallback 一次性更新 overlay；streaming provider 可以逐段更新 overlay。
+5. 翻译 overlay 非权威，不进入 replay hash；session cache 只服务当前 UI。
+
+**Done Evidence:** text dump 不泄露到 report；翻译 provider 可替换；overlay 不改变 runtime replay hash。
+
+**Linked Test IDs:** `T-S5-TEXT-01`
+
+## S5-FILTER-01 AstraEMU FilterGraph presets
+
+**ID:** `S5-FILTER-01`
+
+**Goal:** AstraEMU 复用引擎 `FilterGraph`，为旧 VN case 绑定 final-frame 和 per-layer filter preset。
+
+**Depends On:** `S2-MEDIA-04`、`S5-MANAGER-01`
+
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/filter_presets.rs`、`AstraEMU/Tests/filter_preset_binding.rs` planned target
+
+**Steps:**
+
+1. 定义 `EmuFilterPresetBinding`，包含 final-frame preset 和可选 per-layer role preset。
+2. final-frame preset 对 RuntimeWorld 合成后的画面做后处理。
+3. per-layer preset 绑定 `PresentationCommand` 的 layer id 或 role；family 缺少 layer metadata 时只启用 final-frame。
+4. 输出 missing layer metadata diagnostic，不新增 family 专属 shader/filter API。
+5. 编写 final-frame、per-layer、metadata 缺失和 headless hash 测试。
+
+**Done Evidence:** filter preset 使用同一 `FilterGraph` contract；family plugin 不直接持有 renderer handle 或 shader object。
+
+**Linked Test IDs:** `T-S5-FILTER-01`
 
 ## S5-ARTEMIS-01 Artemis family plugin
 
@@ -179,18 +267,18 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 **ID:** `S5-GATE-01`
 
-**Goal:** Release Gate 检查 Artemis full-flow scenario、`LegacyRuntimeProvider` facade、local case report、trace、snapshot、TextCaptureEvent 和 redaction policy。
+**Goal:** Release Gate 检查 Artemis full-flow scenario、`LegacyRuntimeProvider` facade、auto probe、Trusted Luau policy、text redaction、filter preset、snapshot、TextCaptureEvent 和 report policy。
 
-**Depends On:** `S5-FAMILY-01`、`S5-ARTEMIS-01`
+**Depends On:** `S5-FAMILY-01`、`S5-AUTOPROBE-01`、`S5-SCRIPT-01`、`S5-TEXT-01`、`S5-FILTER-01`、`S5-ARTEMIS-01`
 
 **Target Paths:** `Engine/Source/Developer/astra-release/src/emu_gate.rs`、`Engine/Source/Developer/astra-release/tests/emu_gate.rs` planned target
 
 **Steps:**
 
-1. 增加 `emu.legacy_runtime_provider`、`emu.local_case_report`、`emu.artemis_full_flow`、`emu.report_redaction` 和 `emu.snapshot_replay` gate check。
-2. 校验 report schema、plugin provider registration、hash、trace coverage、TextCaptureEvent 和 snapshot replay。
-3. 校验报告不含商业 payload、未授权截图、音频采样、完整剧情脚本或私有绝对路径。
-4. 编写 gate pass、missing provider blocked、missing trace blocked 和 redaction blocked 测试。
+1. 增加 `emu.legacy_runtime_provider`、`emu.auto_probe`、`emu.trusted_luau_policy`、`emu.text_redaction`、`emu.filter_preset`、`emu.report_redaction` 和 `emu.snapshot_replay` gate check。
+2. 校验 report schema、plugin provider registration、hash、trace coverage、TextCaptureEvent、snapshot replay 和 manual override evidence。
+3. 校验报告不含商业 payload、未授权截图、音频采样、完整剧情脚本、私有绝对路径、provider secret 或访问控制规避步骤。
+4. 编写 gate pass、missing provider blocked、missing trace blocked、denied script isolated 和 redaction blocked 测试。
 
 **Done Evidence:** 每个 family 都能用同一 release gate 输出脱敏 local case report。
 

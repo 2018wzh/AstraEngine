@@ -131,9 +131,17 @@ pub trait AssetImporter: StableProvider {
 pub trait CookProcessor: StableProvider {
     fn cook(&self, request: CookRequest) -> ProviderResult<CookArtifact>;
 }
+
+pub trait TranslationProvider: StableProvider {
+    fn capability(&self) -> TranslationCapabilityReport;
+    fn translate_batch(&self, request: TranslationBatchRequest) -> ProviderResult<TranslationBatchResult>;
+    fn translate_stream(&self, request: TranslationStreamRequest) -> ProviderResult<OptionalStreamRef>;
+}
 ```
 
-Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AIProvider`、`MCPToolProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref 和 capability report。
+Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AIProvider`、`MCPToolProvider`、`TranslationProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref 和 capability report。
+
+`TranslationProvider` 是文本翻译专用 slot。`translate_batch` 必须实现；`translate_stream` 只在 provider capability 声明支持时使用。DeepL-style provider 可以只返回 batch 结果，LLM provider 可以 streaming 更新 AstraEMU overlay。翻译结果默认是 UI overlay 状态，不改变 Runtime replay hash。
 
 ## Legacy Runtime Provider
 

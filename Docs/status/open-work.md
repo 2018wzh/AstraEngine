@@ -18,7 +18,7 @@
 ## P2
 
 - Runtime AI committed output、Trusted session audit、MCP tool descriptor。
-- AstraEMU Manager RuntimeWorld bridge、`LegacyRuntimeProvider` facade 和 Artemis full-flow。
+- AstraEMU Manager RuntimeWorld bridge、`LegacyRuntimeProvider` facade、auto probe、Trusted Luau、文本翻译、FilterGraph preset 和 Artemis full-flow。
 - 移动/Web host module capability report。
 
 完整状态表见 [implementation-plan](implementation-plan.md)。
