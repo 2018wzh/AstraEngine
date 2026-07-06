@@ -10,7 +10,7 @@ default = []
 desktop-wgpu = ["dep:wgpu"]
 desktop-audio = ["dep:kira"]
 ffmpeg = []
-ffmpeg-system = ["ffmpeg", "dep:ffmpeg-next"]
+ffmpeg-vcpkg = ["ffmpeg", "dep:ffmpeg-next"]
 
 [dependencies]
 astra-core = { path = "../astra-core" }

@@ -102,7 +102,7 @@ fn ffmpeg_decode_provider_records_explicit_feature_gate() {
         return;
     }
     let provider = astra_media::FfmpegDecodeProvider::probe()
-        .expect("ASTRA_RUN_FFMPEG_TESTS requires the ffmpeg-system feature and native FFmpeg");
+        .expect("ASTRA_RUN_FFMPEG_TESTS requires the ffmpeg-vcpkg feature and native FFmpeg");
     assert!(provider
         .capability()
         .codecs

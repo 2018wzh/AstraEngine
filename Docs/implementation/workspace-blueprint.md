@@ -47,7 +47,7 @@ targets = [
 | `astra-asset` | 2 | AssetId、VFS、sidecar schema、AssetRegistry | `astra-core`, `serde`, `schemars` | decoder native handle |
 | `astra-cook` | 2 | Importer/CookProcessor、DDC key、cook audit | `astra-asset`, `astra-package`, `image` | Editor UI |
 | `astra-package` | 2 | binary package/save container、section reader/writer、Zstd codec、crypto descriptor | `astra-core`, `postcard`, `serde`, `zstd` | story/runtime semantics |
-| `astra-media` | 2 | Renderer2D/TextLayout/Decode/FilterGraph/AudioGraph traits and headless providers | `astra-core`, `image`, `symphonia`, `cosmic-text`, optional `wgpu`/`ffmpeg-next`/`kira` | VN state |
+| `astra-media` | 2 | Renderer2D/TextLayout/Decode/FilterGraph/AudioGraph traits and headless providers | `astra-core`, `image`, `symphonia`, `cosmic-text`, optional `wgpu`/`ffmpeg-next` via `ffmpeg-vcpkg`/`kira` | VN state |
 | `astra-release` | 2 | Release Gate validators、report writer | `astra-core`, `astra-package`, `astra-media` | Editor-only state |
 | `astra-vn` | 3 | `.astra` parser/compiler、VN Core、Luau policy host | `astra-core`, `astra-runtime`, `astra-media`, `pest`, `mlua` | platform-native handles |
 | `astra-editor-bridge` | 4 | Qt/Rust bridge、PIE/debug API | `astra-runtime`, `astra-vn`, `astra-release` | packaged runtime dependency |

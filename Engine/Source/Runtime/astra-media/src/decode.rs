@@ -370,16 +370,16 @@ impl FfmpegDecodeProvider {
     }
 
     pub fn probe() -> Result<Self, MediaError> {
-        #[cfg(feature = "ffmpeg-system")]
+        #[cfg(feature = "ffmpeg-vcpkg")]
         {
             ffmpeg_next::init()
                 .map_err(|err| MediaError::message(format!("ffmpeg init: {err}")))?;
             return Ok(Self { probed: true });
         }
-        #[cfg(not(feature = "ffmpeg-system"))]
+        #[cfg(not(feature = "ffmpeg-vcpkg"))]
         {
             Err(MediaError::message(
-                "ffmpeg feature is enabled without ffmpeg-system native bindings",
+                "ffmpeg feature is enabled without ffmpeg-vcpkg native bindings",
             ))
         }
     }
