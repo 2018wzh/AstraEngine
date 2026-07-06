@@ -1,0 +1,41 @@
+story system #@id story.system
+state title #@id system.title
+  scene title_menu #@id system.scene.title
+    system_page kind:config #@id system.title.config
+    system_page kind:load #@id system.title.load
+
+state save #@id system.save
+  scene save_menu #@id system.scene.save
+    system_page kind:save #@id system.save.page
+
+state load #@id system.load
+  scene load_menu #@id system.scene.load
+    system_page kind:load #@id system.load.page
+
+state config #@id system.config
+  scene config_menu #@id system.scene.config
+    system_page kind:config #@id system.config.page
+
+state backlog #@id system.backlog
+  scene backlog_menu #@id system.scene.backlog
+    system_page kind:backlog #@id system.backlog.page
+
+state gallery #@id system.gallery
+  scene gallery_menu #@id system.scene.gallery
+    system_page kind:gallery #@id system.gallery.page
+
+state replay #@id system.replay
+  scene replay_menu #@id system.scene.replay
+    system_page kind:replay #@id system.replay.page
+
+state route_chart #@id system.route_chart
+  scene chart_menu #@id system.scene.chart
+    system_page kind:route_chart #@id system.chart.page
+
+state voice_replay #@id system.voice_replay
+  scene voice_menu #@id system.scene.voice
+    system_page kind:voice_replay #@id system.voice.page
+
+state localization_preview #@id system.localization_preview
+  scene localization_menu #@id system.scene.localization
+    system_page kind:localization_preview #@id system.localization.page

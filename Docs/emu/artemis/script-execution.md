@@ -27,7 +27,7 @@ debug, lua, calllua, wt, return, stop, loading, if, load, lydel
 
 ## Execution Model
 
-Artemis core 的最小状态：
+Artemis family plugin 的最小状态：
 
 ```text
 ArtemisCoreState
@@ -95,7 +95,7 @@ raw tag -> normalize params -> setTagFilter hook -> built-in tag or skip -> outp
 | `t.` | 临时变量，不保存；load、reset、退出时删除 |
 | `s.` | 系统变量，由引擎读写；部分只读但脚本仍可能覆盖 |
 
-`s.bgmvol`、`s.sevol`、`s.videovol`、`s.automodewait` 这类可写变量直接映射到 core state。`s.engineversion`、`s.datapath`、`s.savepath` 这类只读变量由 compat core 提供，写入时记录 warning。
+`s.bgmvol`、`s.sevol`、`s.videovol`、`s.automodewait` 这类可写变量直接映射到 family state。`s.engineversion`、`s.datapath`、`s.savepath` 这类只读变量由 family plugin 提供，写入时记录 warning。
 
 ## Save/Load
 

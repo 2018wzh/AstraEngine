@@ -4,7 +4,7 @@
 
 ## Rust 参考实现
 
-`D:\Workspace\siglus_rs` 是主要参考。仓库 README 将其定位为非官方 Rust 实现和多平台 SiglusEngine port，包含资源解析、Scene VM、媒体播放和平台壳。
+Siglus Rust 参考实现是主要参考。仓库 README 将其定位为非官方 Rust 实现和多平台 SiglusEngine port，包含资源解析、Scene VM、媒体播放和平台壳。
 
 已使用的关键路径：
 
@@ -31,7 +31,7 @@
 
 ## 旧 C/C++ 取证代码
 
-`D:\Workspace\FuckGalEngine\SiglusEngine` 提供了较早的格式取证代码。它能验证很多结构名和字段顺序，但包含 patcher、DLL、静态 byte table 和注入相关材料。AstraEMU 文档只取结构，不复制可执行绕过步骤。
+历史 SiglusEngine 取证代码提供了较早的格式线索。它能验证很多结构名和字段顺序，但包含 patcher、DLL、静态 byte table 和注入相关材料。AstraEMU 文档只取结构，不复制可执行绕过步骤。
 
 已使用的关键路径：
 
@@ -49,7 +49,7 @@
 
 | 样本 | 观测范围 |
 | --- | --- |
-| `E:\Games\anemoi 体験版` | `Scene.pck` header、`Gameexe.dat` header、资源扩展名分布、G00/OMV/OVK/OWP/Ogg/WMV presence |
-| `E:\Games\Rewrite_PLUS` | `Scene.pck` header、`Gameexe.dat`/`Gameexe.chs` header、资源扩展名分布、G00/OMV/OVK/NWA/Ogg/MPEG/WMV presence |
+| `<siglus-anemoi-case>` | `Scene.pck` header、`Gameexe.dat` header、资源扩展名分布、G00/OMV/OVK/OWP/Ogg/WMV presence |
+| `<siglus-rewrite-case>` | `Scene.pck` header、`Gameexe.dat`/`Gameexe.chs` header、资源扩展名分布、G00/OMV/OVK/NWA/Ogg/MPEG/WMV presence |
 
 观测命令见 [tooling.md](tooling.md)。文档中只保留 machine-readable header 和文件名级例子。

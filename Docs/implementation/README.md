@@ -15,12 +15,15 @@
 | [astra-grammar-ir.md](astra-grammar-ir.md) | `.astra` pest grammar、AST、IR、source map、formatter、错误恢复 |
 | [runtime-execution.md](runtime-execution.md) | tick 顺序、EventQueue、AwaitToken/Fence、MutationLog、hash/replay |
 | [luau-policy.md](luau-policy.md) | Luau host API、sandbox、typed policy、pesde、lock/vendor cache |
+| [../modules/astra-vn-presentation-model.md](../modules/astra-vn-presentation-model.md) | Stage/Layer/Camera/Sprite/TextWindow/VideoLayer 和 advanced presentation profile |
+| [../modules/astra-vn-standard-commands.md](../modules/astra-vn-standard-commands.md) | AstraVN 标准命令库、schema、IR、Editor metadata 和 release check |
+| [../modules/astra-vn-system-ui-profile.md](../modules/astra-vn-system-ui-profile.md) | save/load、config、backlog、gallery、replay、route chart、voice replay 和 localization preview |
 | [package-save.md](package-save.md) | serde+postcard section、schema/migrator、package/save/replay 容器 |
 | [editor-visual-protocol.md](editor-visual-protocol.md) | Graph/Timeline 派生层、Inspector 控件、source round-trip |
 | [editor-workflow.md](editor-workflow.md) | UE 级 creator workflow、面板状态、Qt/Rust bridge |
 | [ai-mcp-runtime.md](ai-mcp-runtime.md) | Runtime AI、Editor Copilot、Content Generation、MCP tool policy |
 | [platform-host.md](platform-host.md) | 六平台 host trait、capability report、profile gate |
-| [astraemu-artemis-core.md](astraemu-artemis-core.md) | Artemis v1 compat core、IPC、probe、snapshot、report |
+| [astraemu-artemis-core.md](astraemu-artemis-core.md) | Artemis v1 engine-native family plugin、probe、snapshot、report |
 | [release-gate-report.md](release-gate-report.md) | machine-readable report、blocking checks、证据格式 |
 | [release-gate-checks.md](release-gate-checks.md) | release check id、domain、输入、阻断条件和 evidence |
 

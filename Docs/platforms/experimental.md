@@ -1,6 +1,6 @@
 # Experimental Platforms
 
-实验平台参考 `D:/Workspace/rfvp` 的多平台经验，允许 PSP、PS2、PS3、PSV、3DS、Wii、WiiU、UEFI 等作为独立 host module。实验平台不阻塞 v1.0 硬目标。
+实验平台参考 FVP 研究实现中的多平台经验，允许 PSP、PS2、PS3、PSV、3DS、Wii、WiiU、UEFI 等作为独立 host module。实验平台不阻塞 v1.0 硬目标。
 
 ## Rules
 

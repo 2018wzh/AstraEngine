@@ -1,5 +1,7 @@
 # ADR 0009: AstraEMU compat core 独立进程化
 
+Status: Superseded by [ADR 0012](0012-astraemu-engine-native-family-plugin.md).
+
 ## Context
 
 旧 VN core 可能包含复杂 VM、解码、脚本补丁和 family-specific 行为。把它们放进主 Runtime 会扩大崩溃和安全面。

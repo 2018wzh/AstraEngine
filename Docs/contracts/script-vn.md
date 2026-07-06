@@ -2,7 +2,7 @@
 
 `.astra` 是 AstraVN 的 canonical story source。AstraVN Core 固化 dialogue、choice、backlog、save/load、read-state、voice replay 等权威语义；Luau 通过 `mlua` 提供策略层能力，用于表现、系统页、复杂演出和插件组合。
 
-完整脚本规格见 [AstraVN Script Spec](../modules/astra-vn-script.md)。
+完整脚本规格见 [AstraVN Script Spec](../modules/astra-vn-script.md)。演出模型、标准命令库和系统 UI 分别见 [AstraVN Presentation Model](../modules/astra-vn-presentation-model.md)、[AstraVN Standard Command Library](../modules/astra-vn-standard-commands.md) 和 [AstraVN System UI Profile](../modules/astra-vn-system-ui-profile.md)。
 
 ## `.astra` 输出
 
@@ -28,7 +28,11 @@ Graph 和 Timeline 保存作者元数据，必须能编译到同一 IR。Editor 
 
 AstraVN v1 覆盖 dialogue、choice、variables、call/return、backlog、auto、skip、read-state、save/load、config、gallery、replay、route chart、voice replay、movie、常见 transition、screen effects、message window、route flags 和 timed delay blocks。
 
-官方 Luau 策略包覆盖 message UI、choice UI、system stories、timeline presets、localization UI 和常用演出。第三方策略包可以替换表现和系统流程，不能破坏 Core save/backlog/read-state 语义。
+官方 Luau 策略包覆盖 message UI、choice UI、system stories、timeline presets、localization UI、常用演出和 command provider binding。第三方策略包可以替换表现和系统流程，不能破坏 Core save/backlog/read-state 语义。
+
+## Presentation Profiles
+
+`vn.commercial_baseline` 和 `vn.system_ui_profile` 是普通商业 VN 发布的阻断 gate。`vn.advanced_presentation` 是项目显式启用的高表现 profile，用于验证多层 stage、camera、video layer、shader/filter、voice sync、复杂 text effect、Timeline join/cancel、skip/auto/replay 和 fallback。
 
 ## Luau Capability Sandbox
 

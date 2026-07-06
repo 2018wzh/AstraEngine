@@ -14,7 +14,7 @@ AstraEditor
 AstraPlatform
   desktop/mobile/web/experimental native shells and platform decode
 AstraEMU
-  manager, out-of-process compat cores, Artemis v1 family, Luau patch/decode API
+  manager, RuntimeWorld-driven family plugins, Artemis v1 family, Luau patch/decode API
 ```
 
 ## 运行链路
@@ -42,12 +42,12 @@ Runtime 拥有 World、Scene、Actor、Component、StateMachine、EventBus、Sch
 
 ## Module Slot
 
-可替换能力通过 EngineModuleSlot 明确选择，不按加载顺序抢占。默认 slot 包括 Renderer2D、TextLayout、AudioOutput、DecodeProvider、ScriptRuntime、PresentationLibrary、AssetResolver、AIProvider、MCPToolProvider 和 AstraEMU CompatCoreBridge。
+可替换能力通过 EngineModuleSlot 和 ExtensionRegistry 明确选择，不按加载顺序抢占。默认 slot 包括 Renderer2D、TextLayout、AudioOutput、DecodeProvider、ScriptRuntime、PresentationLibrary、AssetResolver、AIProvider、MCPToolProvider、AstraEMU LegacyFamilyPlugin 和可选 EMUCoreBridge。
 
 ## 产品边界
 
-AstraVN 是原生 VN 垂直模块。AstraEMU 是旧 VN 兼容与现代化套件。两者共享 Runtime、Media、Script、Save/Replay、Release Gate 语义，但 NativeVN 创作流程不能依赖 EMU family core。
+AstraVN 是原生 VN 垂直模块。AstraEMU 是旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动 RuntimeWorld，family plugin 只注册 VFS、legacy script、StateMachine action、media mapper 和 snapshot codec；NativeVN 创作流程不能依赖 EMU family plugin。
 
 ## v1 验收边界
 
-全系列 v1 同时要求 EngineCore deterministic gate、NativeVN commercial baseline、UE 级 Editor workflow、六平台 profile gate、AI/MCP audit gate 和 Artemis compat core gate。任一产品线可以独立开发，但 release 口径由本仓 contracts、implementation specs 和 status matrix 统一定义。
+全系列 v1 同时要求 EngineCore deterministic gate、NativeVN commercial baseline、UE 级 Editor workflow、六平台 profile gate、AI/MCP audit gate 和 Artemis engine-native family gate。任一产品线可以独立开发，但 release 口径由本仓 contracts、implementation specs 和 status matrix 统一定义。

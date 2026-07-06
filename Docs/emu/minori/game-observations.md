@@ -5,7 +5,7 @@
 本地路径：
 
 ```text
-E:\Games\夏空的英仙座（夏空のペルセウス）
+<minori-case-root>
 ```
 
 文件事实：
@@ -25,8 +25,8 @@ E:\Games\夏空的英仙座（夏空のペルセウス）
 ## 研究命令
 
 ```bash
-python Tools/AstraEMU/minori_probe.py "E:\Games\夏空的英仙座（夏空のペルセウス）" --json
-python Tools/AstraEMU/minori_paz.py "E:\Games\夏空的英仙座（夏空のペルセウス）\scr.paz" --json
+python Tools/AstraEMU/minori_probe.py "<minori-case-root>" --json
+python Tools/AstraEMU/minori_paz.py "<minori-case-root>/scr.paz" --json
 ```
 
 预期输出包含 PAZ 文件列表、大小、hash、head bytes 和 `key_supplied=false`。

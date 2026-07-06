@@ -4,7 +4,7 @@
 
 ## anemoi 体験版
 
-Root：`E:\Games\anemoi 体験版`。实际游戏数据位于 `StartData/GameData`。
+Root：`<siglus-anemoi-case>`。实际游戏数据位于 `StartData/GameData`。
 
 扩展名计数：
 
@@ -55,7 +55,7 @@ Root：`E:\Games\anemoi 体験版`。实际游戏数据位于 `StartData/GameDat
 
 ## Rewrite_PLUS
 
-Root：`E:\Games\Rewrite_PLUS`。
+Root：`<siglus-rewrite-case>`。
 
 扩展名计数：
 

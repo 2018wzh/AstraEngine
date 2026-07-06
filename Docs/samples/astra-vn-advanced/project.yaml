@@ -1,0 +1,45 @@
+schema: astra.project.v1
+id: com.example.astra.advanced_vn
+profiles:
+  - nativevn-commercial
+  - advanced-vn
+command_providers:
+  show: astra.vn.standard
+  hide: astra.vn.standard
+  move: astra.vn.standard
+  camera: astra.vn.standard
+  transition: astra.vn.standard
+  shake: astra.vn.standard
+  movie: astra.vn.standard
+  voice: astra.vn.standard
+  bgm: astra.vn.standard
+  se: astra.vn.standard
+  wait: astra.vn.standard
+  choice: astra.vn.standard
+  system_page: astra.vn.system
+luau:
+  runtime: luau
+  policy_bundle: com.example.advanced_presentation
+  entry: advanced_policy.luau
+  capabilities:
+    - astra.vn.policy_bundle
+    - astra.vn.command_extension
+    - filter_graph.node
+    - text_effect.policy
+system_stories:
+  title: system.title
+  save: system.save
+  load: system.load
+  config: system.config
+  backlog: system.backlog
+  gallery: system.gallery
+  replay: system.replay
+  route_chart: system.route_chart
+  voice_replay: system.voice_replay
+  localization_preview: system.localization_preview
+release_checks:
+  required:
+    - vn.commercial_baseline
+    - vn.system_ui_profile
+    - vn.advanced_presentation
+    - plugin.extension_registry

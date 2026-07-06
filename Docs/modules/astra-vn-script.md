@@ -12,6 +12,8 @@ AstraVN 脚本层采用“Core 语义稳定，Luau 策略可换”的分工。`.
 
 Core 提供完整 VN 权威语义。官方 Luau 策略包提供完整商业 VN 体验，第三方策略包可以替换表现和系统流程，但不能重写存档、回放、已读、backlog 等语义边界。
 
+演出舞台、标准命令和系统页数据模型分别由 [AstraVN Presentation Model](astra-vn-presentation-model.md)、[AstraVN Standard Command Library](astra-vn-standard-commands.md) 和 [AstraVN System UI Profile](astra-vn-system-ui-profile.md) 定义。本页只保留脚本核心契约。
+
 ## `.astra` Source
 
 `.astra` 使用缩进块和具名命令，不把旧引擎 tag 语法作为一等语法。传统引擎的优势进入语义和策略，不进入旧语法兼容承诺。
@@ -149,6 +151,8 @@ package_lock: auto
 
 多个策略包提供同一 command 或 preset 时，项目 manifest 必须显式绑定 provider。AstraVN 不按加载顺序抢占策略。
 
+标准命令库覆盖 `show`、`hide`、`move`、`camera`、`transition`、`shake`、`movie`、`voice`、`bgm`、`se`、`wait`、`choice` 和 `system_page`。命令扩展必须提供 schema、Editor metadata、IR 输出、skip/auto/replay 规则和 release check。
+
 ## Editor Contract
 
 Luau 策略像 UE 的 C++ 基类，Graph/Timeline 像可视派生层。Luau 策略暴露属性、节点、事件和轨道；Editor 允许创作者改参数、事件连接、timeline、fence 和 fallback，不要求展开 Luau 内部算法。
@@ -218,3 +222,4 @@ Editor 提供并排预览。Release Gate 检查缺失 key、voice variant、ruby
 - Luau snapshot 含不可序列化值。
 - Graph/Timeline 派生层无法回写 source map。
 - full playthrough、system stories、save/load、replay hash、backlog/read-state、voice replay、localization preview 任一失败。
+- 标准命令 provider 未显式绑定，或 advanced presentation profile 启用后缺少多层 stage、camera、video layer、shader/filter、voice sync、fallback 和性能证据。

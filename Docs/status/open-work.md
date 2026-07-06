@@ -16,5 +16,5 @@
 ## P2
 
 - Runtime AI committed output、Trusted session audit、MCP tool descriptor。
-- AstraEMU Manager IPC prototype 和 Artemis core full-flow。
+- AstraEMU Manager RuntimeWorld bridge、family plugin API 和 Artemis engine-native full-flow。
 - 移动/Web host module capability report。

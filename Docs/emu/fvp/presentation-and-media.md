@@ -78,4 +78,4 @@ Manager owns the actual OS cursor. Core emits cursor commands and receives input
 | Movie start/stop/state | `PresentationCommand::VideoStart` / `VideoStop`, `AudioCommand` when modal |
 | Thread wait/sleep/text/dissolve | `StateMachineTrace` with yield reason |
 
-No output may carry native GPU/audio handles across IPC. Large media moves through shared memory or content-addressed media block references.
+No output may carry native GPU/audio handles across provider boundaries. Large media moves through content-addressed media block references.

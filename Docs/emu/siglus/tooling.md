@@ -14,9 +14,9 @@
 安全命令：
 
 ```bash
-python Tools/AstraEMU/siglus_probe.py "E:/Games/Rewrite_PLUS" --json
-python Tools/AstraEMU/siglus_scene.py "E:/Games/Rewrite_PLUS/Scene.pck" --json
-python Tools/AstraEMU/siglus_gameexe.py "E:/Games/Rewrite_PLUS/Gameexe.dat" --json
+python Tools/AstraEMU/siglus_probe.py "<game-root>" --json
+python Tools/AstraEMU/siglus_scene.py "<game-root>/Scene.pck" --json
+python Tools/AstraEMU/siglus_gameexe.py "<game-root>/Gameexe.dat" --json
 ```
 
 这些命令不写输出目录，不导出 payload。

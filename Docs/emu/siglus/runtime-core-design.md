@@ -1,14 +1,17 @@
-# Siglus Runtime Core Design
+# Siglus Runtime Family Plugin Design
 
-Siglus family 在 AstraEMU 中作为独立 compat core 实现。Core 持有原 Siglus 状态机和 VM，Manager 只做 host、窗口、输入、报告和 shared memory 映射。
+Siglus family 在 AstraEMU 中作为 engine-native family plugin 实现。Plugin 持有原 Siglus 状态机和 VM，Manager 只做 host、窗口、输入、报告和 RuntimeWorld bridge。
 
-## 进程边界
+## Provider 边界
 
 ```text
 AstraEMU Manager
-  framed local RPC
-  shared memory media blocks
-Siglus Compat Core
+  RuntimeWorld
+  LegacyVfsProvider
+  LegacyScriptProvider
+  LegacyActionProvider
+  LegacyMediaMapper
+Siglus Family Plugin
   ScenePackage
   SceneVm
   ResourceResolver
@@ -16,7 +19,7 @@ Siglus Compat Core
   Save/Snapshot bridge
 ```
 
-Manager 不加载 Siglus 脚本，也不解析 `.ss` 私有栈。Core 输出：
+Manager 不加载 Siglus 脚本，也不解析 `.ss` 私有栈。Plugin 输出：
 
 | 输出 | 内容 |
 | --- | --- |
@@ -25,16 +28,16 @@ Manager 不加载 Siglus 脚本，也不解析 `.ss` 私有栈。Core 输出：
 | `AudioCommand` | BGM、voice、SE、movie audio |
 | `TextCaptureEvent` | text hash、length、speaker hash、read flag、line |
 | `StateMachineTrace` | scene、line、pc、command、wait kind |
-| `LegacyVmSnapshotRef` | core 私有 snapshot handle |
+| `LegacyVmSnapshotRef` | plugin 私有 snapshot section ref |
 | `Diagnostics` | unknown form/opcode、missing resource、decode failure |
 
 ## 启动流程
 
 1. `ProbeContent` 检查 `Scene.pck`、`Gameexe.dat`/`Gameexe.chs`、常见资源目录。
 2. `LoadCase` 建立 resolver，读取 `Gameexe.*` config，加载 `Scene.pck` header 和 scene name table。
-3. Core 选择 boot scene。若 `Gameexe.*` 指定 title/config/save/load scene，按 config 进入；否则从 scene 0 或可识别 main scene 启动。
+3. Plugin 选择 boot scene。若 `Gameexe.*` 指定 title/config/save/load scene，按 config 进入；否则从 scene 0 或可识别 main scene 启动。
 4. VM 执行到第一个 wait/presentation boundary。
-5. Manager 按 RPC 输出渲染和音频命令。
+5. RuntimeWorld 收集渲染和音频命令。
 
 ## Resolver
 
@@ -99,4 +102,4 @@ Siglus save/load 不能只保存画面。Snapshot 至少包含：
 
 ## 不做的事
 
-Siglus core 不提供 patch 注入、key 提取、商业包导出、脚本文本全文导出或 DRM/访问控制规避能力。需要 title-specific decode 材料时，只消费用户已合法提供的配置。
+Siglus family plugin 不提供 patch 注入、key 提取、商业包导出、脚本文本全文导出或 DRM/访问控制规避能力。需要 title-specific decode 材料时，只消费用户已合法提供的配置。

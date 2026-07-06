@@ -51,7 +51,7 @@ BP opcode 是 1 byte，operand 长度由 opcode 决定。核心指令：
 
 ## 观测样例
 
-`E:\Games\樱之诗春之雪\system.arc:ipl._bp`：
+`<bgi-packfile-case>/system.arc:ipl._bp`：
 
 - archive format：`PackFile`。
 - raw DSC size：1,983 bytes。
@@ -61,7 +61,7 @@ BP opcode 是 1 byte，operand 长度由 opcode 决定。核心指令：
 - code start：`0x10`。
 - last `ret` 后的 code end：约 `0x82E`。
 
-`E:\Games\サクラノ詩\sysprg.arc:scrmsg._bp`：
+`<bgi-modern-case>/sysprg.arc:scrmsg._bp`：
 
 - archive format：`BURIKO ARC20`。
 - raw DSC size：8,365 bytes。
@@ -71,7 +71,7 @@ BP opcode 是 1 byte，operand 长度由 opcode 决定。核心指令：
 - code start：`0x10`。
 - last `ret` 后的 code end：约 `0x4A31`。
 
-`E:\Games\素晴らしき日々15th\system.arc:ipl._bp`：
+`<bgi-15th-case>/system.arc:ipl._bp`：
 
 - archive format：`BURIKO ARC20`。
 - raw DSC size：2,283 bytes。

@@ -150,6 +150,69 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Linked Test IDs:** `T-S3-LUAU-02`
 
+## S3-PRESENT-01 Presentation model 与标准命令库
+
+**ID:** `S3-PRESENT-01`
+
+**Goal:** 实现 `StageModel`、`LayerState`、`CameraState`、`TextWindowState`、`VideoLayerState`、`PresentationTimeline` 和标准命令库。
+
+**Depends On:** `S3-SCRIPT-02`、`S2-MEDIA-04`、[AstraVN Presentation Model](../../modules/astra-vn-presentation-model.md)、[AstraVN Standard Command Library](../../modules/astra-vn-standard-commands.md)
+
+**Target Paths:** `Engine/Source/Runtime/astra-vn/src/presentation.rs`、`Engine/Source/Runtime/astra-vn/src/standard_commands.rs`、`Engine/Source/Runtime/astra-vn/tests/presentation_model.rs` planned target
+
+**Steps:**
+
+1. 定义 Stage/Layer/Camera/Sprite/TextWindow/VideoLayer serde 类型和 schema。
+2. 实现 `show`、`hide`、`move`、`camera`、`transition`、`shake`、`movie`、`voice`、`bgm`、`se`、`wait`、`choice`、`system_page` 的 schema、IR 和 release check。
+3. 实现 skip、auto、replay、voice sync、movie end、fallback 和 performance budget。
+4. 编写 provider binding、timeline join/cancel、effect fallback 和 deterministic hash 测试。
+
+**Done Evidence:** 标准命令从 `.astra` 编译到 IR，headless Runtime 输出稳定 PresentationCommand/AudioCommand。
+
+**Linked Test IDs:** `T-S3-PRESENT-01`
+
+## S3-SYSTEM-01 System UI profile
+
+**ID:** `S3-SYSTEM-01`
+
+**Goal:** 完成 save/load、config、backlog、gallery、replay、route chart、voice replay 和 localization preview 的系统 UI 数据模型和 gate。
+
+**Depends On:** `S3-CORE-03`、`S3-LUAU-02`、[AstraVN System UI Profile](../../modules/astra-vn-system-ui-profile.md)
+
+**Target Paths:** `Engine/Source/Runtime/astra-vn/src/system_ui.rs`、`Engine/Source/Runtime/astra-vn/tests/system_ui_profile.rs`、`Examples/NativeVN/system.astra` planned target
+
+**Steps:**
+
+1. 定义 `SystemStoryManifest`、save slot metadata、config schema、unlock source、route chart graph 和 localization preview schema。
+2. 让 Luau policy 只负责页面流程和视觉策略，Core 继续持有 save/backlog/read-state/voice replay 权威状态。
+3. 实现 system page reachability、return-to-savepoint、migration、gallery/replay unlock source 和 font fallback 检查。
+4. 编写 save/load、config invalid key、backlog voice replay、gallery unlock、route chart 和 localization preview 测试。
+
+**Done Evidence:** `vn.system_ui_profile` 能阻断缺入口、状态不一致、schema 无 migrator 和 localization coverage 缺口。
+
+**Linked Test IDs:** `T-S3-SYSTEM-01`
+
+## S3-ADVANCED-01 Advanced presentation opt-in profile
+
+**ID:** `S3-ADVANCED-01`
+
+**Goal:** 建立旗舰演出 profile，覆盖多层 stage、camera、video layer、shader/filter、voice sync、复杂 text effect、skip/auto/replay 和 fallback。
+
+**Depends On:** `S3-PRESENT-01`、`S3-SYSTEM-01`、`S2-MEDIA-04`
+
+**Target Paths:** `Examples/AdvancedVN/`、`scenarios/advanced_presentation.yaml`、`Engine/Source/Developer/astra-test/tests/advanced_presentation.rs` planned target
+
+**Steps:**
+
+1. 建立 opt-in sample project，绑定 advanced Luau policy、standard command provider 和 system story manifest。
+2. 覆盖多层 stage、camera keyframe、video layer、shader/filter fallback、voice sync 和 text effect。
+3. 编写 full scenario，穿过 system UI、save/load、replay 和 release gate。
+4. 接入 `vn.advanced_presentation`、`presentation.fallback`、`renderer.effect_budget` 和 `timeline.join_cancel` evidence。
+
+**Done Evidence:** Advanced scenario 输出 machine-readable report；项目未 opt-in 时该 profile 不阻断普通商业 VN 发布。
+
+**Linked Test IDs:** `T-S3-ADVANCED-01`
+
 ## S3-EDIT-01 Graph/Timeline 同源 metadata
 
 **ID:** `S3-EDIT-01`
@@ -183,10 +246,10 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Steps:**
 
-1. 创建 sample project，覆盖 dialogue、choice、backlog、auto、skip、read-state、config、gallery、replay、voice replay、movie 和 transition。
+1. 创建 sample project，覆盖 dialogue、choice、backlog、auto、skip、read-state、config、gallery、replay、voice replay、movie、transition、system UI 和 command provider binding。
 2. Cook 并 package sample，记录 package id、profile 和 scenario refs。
 3. 编写 full playthrough scenario，覆盖启动、路线、系统页、save/load 和 replay_from_start。
-4. 接入 release gate，验证 Luau policy、localization、timeline fence 和 replay hash。
+4. 接入 release gate，验证 Luau policy、localization、system UI、timeline fence、advanced opt-in 和 replay hash。
 
 **Done Evidence:** `astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --headless` 通过，并输出 release report。
 

@@ -8,7 +8,7 @@
 2. `root.pfs`。
 3. 特殊的 exe+pfs 合并形态。
 
-AstraEMU 不需要执行 exe，也不依赖 exe 内部状态。Manager 在 `LoadCase` 时传入 data root 和可选 product executable name；compat core 只用这些信息推导候选根包名。
+AstraEMU 不需要执行 exe，也不依赖 exe 内部状态。Manager 在 case profile 中传入 data root 和可选 product executable name；family plugin 只用这些信息推导候选根包名。
 
 ## 文件查找顺序
 

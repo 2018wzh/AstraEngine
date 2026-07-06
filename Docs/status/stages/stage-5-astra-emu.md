@@ -1,77 +1,56 @@
 # Stage 5 AstraEMU Work
 
-Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engine 权威状态机，Manager 通过本地 RPC 和 shared memory 接收 trace、media block、TextCaptureEvent 和 snapshot。v1 可用 family 是 Artemis，其他 family 输出 alpha probe report。本页是 planned target 清单，不表示实现已经存在。
+Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动 AstraEngine `RuntimeWorld`；legacy family 以 in-process plugin/provider 接入，旧引擎语义通过 StateMachine action provider、VFS/archive provider、legacy script provider、media mapper 和 snapshot codec 落到引擎可审计的状态机。本页是 planned target 清单，不表示实现已经存在。
 
-## S5-MANAGER-01 Manager IPC 与 shared memory
+## S5-MANAGER-01 Manager RuntimeWorld bridge
 
 **ID:** `S5-MANAGER-01`
 
-**Goal:** 建立 Manager/Core 本地 RPC、shared memory channel、capability handshake 和 report channel。
+**Goal:** Manager 能创建 RuntimeWorld，启用 family plugin，挂载 VFS，注册 legacy action provider，并输出 local case report。
 
-**Depends On:** `Docs/contracts/astraemu-ipc.md`、`S1-CORE-01`
+**Depends On:** `Docs/contracts/astraemu-ipc.md`、`S1-CORE-01`、`S1-PLUGIN-01`
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/ipc.rs`、`AstraEMU/Source/CoreApi/astra-emu-core-api/src/lib.rs`、`AstraEMU/Tests/ipc_handshake.rs` planned target
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/runtime_world.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/plugin_enablement.rs`、`AstraEMU/Tests/manager_runtime_world.rs` planned target
 
 **Steps:**
 
-1. 定义 core launch request、capability descriptor、protocol version 和 feature flags。
-2. 定义 trace、media block、TextCaptureEvent、snapshot 和 diagnostic message。
-3. 建立 shared memory bounded buffer，不传递 Actor 指针、Editor widget 或 native handle。
-4. 编写 handshake、version mismatch 和 bounded media block 测试。
+1. 定义 case launch request、profile、family selection、provider binding 和 report destination。
+2. 创建 RuntimeWorld，加载项目 package 或 synthetic fixture，启用 selected family plugin。
+3. 建立 input、overlay、diagnostics、TextCaptureEvent 和 presentation/audio command 采集路径。
+4. 编写 plugin disabled、permission denied、missing provider 和 report redaction 测试。
 
-**Done Evidence:** Manager 能拒绝不兼容 core，并输出 machine-readable diagnostic。
+**Done Evidence:** Manager 不解析 family 私有 VM 内存，所有玩家可见输出都来自 RuntimeWorld event/presentation/audio/report。
 
 **Linked Test IDs:** `T-S5-MANAGER-01`
 
-## S5-MANAGER-02 Core process lifecycle
+## S5-FAMILY-01 Engine-native family plugin API
 
-**ID:** `S5-MANAGER-02`
+**ID:** `S5-FAMILY-01`
 
-**Goal:** Manager 控制 compat core 启动、健康检查、停止、crash bundle 和 snapshot export。
+**Goal:** 定义并实现 `LegacyFamilyPluginDescriptor`、`LegacyVfsProvider`、`LegacyScriptProvider`、`LegacyActionProvider`、`LegacyMediaMapper` 和 `LegacySnapshotCodec`。
 
-**Depends On:** `S5-MANAGER-01`
+**Depends On:** `S5-MANAGER-01`、`Docs/implementation/provider-plugin-api.md`
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/process.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/crash_bundle.rs`、`AstraEMU/Tests/core_lifecycle.rs` planned target
-
-**Steps:**
-
-1. 实现 core process spawn、ready timeout、heartbeat 和 graceful shutdown。
-2. core crash 时收集脱敏 crash bundle，不包含商业 payload 或私有绝对路径。
-3. 支持 snapshot request 和 local report request。
-4. 编写 startup timeout、crash bundle redaction 和 shutdown 测试。
-
-**Done Evidence:** core lifecycle 失败能被 release gate 复查，不泄露本机路径。
-
-**Linked Test IDs:** `T-S5-MANAGER-02`
-
-## S5-CORE-01 Family core common API
-
-**ID:** `S5-CORE-01`
-
-**Goal:** 定义 family core 公共接口：probe、boot、tick、input、snapshot、report 和 shutdown。
-
-**Depends On:** `S5-MANAGER-01`
-
-**Target Paths:** `AstraEMU/Source/CoreApi/astra-emu-core-api/src/family.rs`、`AstraEMU/Source/CoreApi/astra-emu-core-api/src/report.rs`、`AstraEMU/Tests/family_core_api.rs` planned target
+**Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`AstraEMU/Tests/family_plugin_api.rs` planned target
 
 **Steps:**
 
-1. 定义 FamilyDescriptor、CaseProfile、ProbeReport、StateMachineTrace 和 LocalCaseReport。
-2. 让 family core 输出 TextCaptureEvent、PresentationCommand、AudioCommand 和 snapshot section。
-3. 统一 DONE、DONE_WITH_CONCERNS、BLOCKED failure classification。
-4. 编写 API serialization、failure classification 和 report redaction 测试。
+1. 定义 family descriptor、format capability、permission、failure classification 和 redaction policy。
+2. 定义 provider DTO，所有输入输出都是 stable id、hash、section ref、source span 和 postcard payload。
+3. 让 legacy action provider 返回可序列化 effect list，由 host adapter 应用到 `DeterministicActionContext`。
+4. 编写 provider registration、dependency graph、effect serialization、snapshot section 和 redaction 测试。
 
-**Done Evidence:** KrKr、Artemis、BGI 等 family 共享同一 Manager contract。
+**Done Evidence:** family plugin 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
 
-**Linked Test IDs:** `T-S5-CORE-01`
+**Linked Test IDs:** `T-S5-FAMILY-01`
 
-## S5-ARTEMIS-01 Artemis family core
+## S5-ARTEMIS-01 Artemis family plugin
 
 **ID:** `S5-ARTEMIS-01`
 
-**Goal:** Artemis core 支持 PFS/PF6/PF8 probe、boot keys、`.iet` tag、legacy Lua call/filter、presentation/media command、snapshot 和 report。
+**Goal:** Artemis family plugin 支持 PFS/PF6/PF8 probe、boot keys、`.iet` tag、legacy Lua call/filter、presentation/media command、snapshot 和 report。
 
-**Depends On:** `S5-CORE-01`、`Docs/emu/artemis/implementation-checklist.md`
+**Depends On:** `S5-FAMILY-01`、`Docs/emu/artemis/implementation-checklist.md`
 
 **Target Paths:** `AstraEMU/Source/Families/astra-emu-artemis/`、`AstraEMU/Tests/artemis/`、`scenarios/emu/artemis_full_flow.yaml` planned target
 
@@ -91,9 +70,9 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **ID:** `S5-KRKR-01`
 
-**Goal:** KrKr core 在 v1 输出 alpha probe profile，验证 XP3 probe、virtual storage、script classifier、KAG boot trace、media bridge 和 release report。
+**Goal:** KrKr family 输出 alpha probe profile，验证 XP3 probe、virtual storage、script classifier、KAG boot trace、media bridge 和 release report。
 
-**Depends On:** `S5-CORE-01`、`Docs/emu/krkr/implementation-checklist.md`
+**Depends On:** `S5-FAMILY-01`、`Docs/emu/krkr/implementation-checklist.md`
 
 **Target Paths:** `AstraEMU/Source/Families/astra-emu-krkr/`、`AstraEMU/Tests/krkr/`、`scenarios/emu/krkr_probe.yaml` planned target
 
@@ -108,13 +87,13 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Linked Test IDs:** `T-S5-KRKR-01`
 
-## S5-BGI-01 BGI family core
+## S5-BGI-01 BGI family plugin
 
 **ID:** `S5-BGI-01`
 
-**Goal:** BGI core 支持 PackFile/BURIKO ARC20、DSC decode、BCS/BP probe、VM memory、host dispatch、media probe 和 report。
+**Goal:** BGI family plugin 支持 PackFile/BURIKO ARC20、DSC decode、BCS/BP probe、VM memory、host dispatch、media probe 和 report。
 
-**Depends On:** `S5-CORE-01`、`Docs/emu/bgi/implementation-checklist.md`
+**Depends On:** `S5-FAMILY-01`、`Docs/emu/bgi/implementation-checklist.md`
 
 **Target Paths:** `AstraEMU/Source/Families/astra-emu-bgi/`、`AstraEMU/Tests/bgi/`、`scenarios/emu/bgi_full_flow.yaml` planned target
 
@@ -142,7 +121,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Steps:**
 
-1. 复用 family core API，不新增 Manager 私有通道。
+1. 复用 family plugin API，不新增 Manager 私有通道。
 2. 实现 PAC/DAT probe、resource catalog 和 script VM alpha route。
 3. Unknown extcall 默认输出 diagnostic；presentation/audio/save/control-flow side effect 缺失时 release gate 不算通过。
 4. 编写 fixture smoke、extcall report 和 full-flow scenario 测试。
@@ -163,7 +142,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Steps:**
 
-1. 复用 family core API 和 release report schema。
+1. 复用 family plugin API 和 release report schema。
 2. 实现 pack/media resolver 和 HCB VM minimal execution。
 3. 把 graph、text、sound、movie、thread syscall 转成 trace/event。
 4. 编写 generated fixture、syscall mapper 和 full-flow scenario 测试。
@@ -184,7 +163,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Steps:**
 
-1. 复用 family core API 和 failure classification。
+1. 复用 family plugin API 和 failure classification。
 2. 实现 Siglus root、Scene.pck、Gameexe header 和授权 material 缺失 diagnostic。
 3. 实现 `.ss` header、string table、label、operand decoder 和 basic stack model。
 4. 实现 G00/Ogg/OVK/NWA/OMV probe，受保护 stream 只消费用户合法提供的材料。
@@ -198,18 +177,18 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **ID:** `S5-GATE-01`
 
-**Goal:** Release Gate 检查 Artemis full-flow scenario、local case report、trace、snapshot、TextCaptureEvent 和 redaction policy。
+**Goal:** Release Gate 检查 Artemis full-flow scenario、engine-native family provider、local case report、trace、snapshot、TextCaptureEvent 和 redaction policy。
 
-**Depends On:** `S5-CORE-01`、`S5-ARTEMIS-01`
+**Depends On:** `S5-FAMILY-01`、`S5-ARTEMIS-01`
 
 **Target Paths:** `Engine/Source/Developer/astra-release/src/emu_gate.rs`、`Engine/Source/Developer/astra-release/tests/emu_gate.rs` planned target
 
 **Steps:**
 
-1. 增加 `emu.local_case_report`、`emu.artemis_full_flow`、`emu.report_redaction` 和 `emu.snapshot_replay` gate check。
-2. 校验 report schema、hash、trace coverage、TextCaptureEvent 和 snapshot replay。
+1. 增加 `emu.engine_native_family`、`emu.local_case_report`、`emu.artemis_full_flow`、`emu.report_redaction` 和 `emu.snapshot_replay` gate check。
+2. 校验 report schema、plugin provider registration、hash、trace coverage、TextCaptureEvent 和 snapshot replay。
 3. 校验报告不含商业 payload、未授权截图、音频采样、完整剧情脚本或私有绝对路径。
-4. 编写 gate pass、missing trace blocked 和 redaction blocked 测试。
+4. 编写 gate pass、missing provider blocked、missing trace blocked 和 redaction blocked 测试。
 
 **Done Evidence:** 每个 family 都能用同一 release gate 输出脱敏 local case report。
 

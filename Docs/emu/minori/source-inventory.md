@@ -4,8 +4,8 @@
 
 | 路径 | 用途 |
 | --- | --- |
-| `E:\Games\夏空的英仙座（夏空のペルセウス）` | 当前 Minori game case |
-| `D:\Workspace\FuckGalEngine\Minori` | 历史翻译/封包工具参考，只提炼格式事实 |
+| `<minori-case-root>` | 当前 Minori game case |
+| 历史 Minori 工具参考 | 历史翻译/封包工具参考，只提炼格式事实 |
 
 游戏根目录观测：
 
@@ -29,10 +29,10 @@ mov.paz
 
 | 文件 | 可借鉴点 | 不纳入内容 |
 | --- | --- | --- |
-| `D:\Workspace\FuckGalEngine\Minori\sc_text_out.py` | `.sc` 文本提取规则线索 | 商业脚本文本 |
-| `D:\Workspace\FuckGalEngine\Minori\sc_text_in.py` | 文本回写字段顺序线索 | patch 注入流程 |
-| `D:\Workspace\FuckGalEngine\Minori\Minori\fuckpaz\main.cpp` | PAZ TOC 和 payload 处理线索 | 内置 key 或保护绕过 |
-| `D:\Workspace\FuckGalEngine\Minori\Minori\MinoriPatch\scriptparser.cpp` | `.sc` command/text 解析线索 | hook 和 exe 修改 |
+| `sc_text_out.py` | `.sc` 文本提取规则线索 | 商业脚本文本 |
+| `sc_text_in.py` | 文本回写字段顺序线索 | patch 注入流程 |
+| `fuckpaz/main.cpp` | PAZ TOC 和 payload 处理线索 | 内置 key 或保护绕过 |
+| `scriptparser.cpp` | `.sc` command/text 解析线索 | hook 和 exe 修改 |
 
 ## 资料可信度
 

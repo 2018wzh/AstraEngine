@@ -1,6 +1,6 @@
 # Siglus Presentation And Media
 
-Siglus presentation 由脚本命令驱动，核心对象是 stage、object、message window、button/select item、screen effect、audio/movie channel。AstraEMU core 负责把这些 legacy 状态转成 AstraEMU IPC 事件，Manager 不直接解释 Siglus layer 内存。
+Siglus presentation 由脚本命令驱动，核心对象是 stage、object、message window、button/select item、screen effect、audio/movie channel。AstraEMU family plugin 负责把这些 legacy 状态转成 Runtime presentation/audio event，Manager 不直接解释 Siglus layer 内存。
 
 ## G00 图像
 
@@ -84,15 +84,15 @@ OMV 是 Siglus 的 Ogg/Theora wrapper。header 固定字段：
 | `anemoi/.../bgm/M01A.owp` | header `76 5e 5e 6a ...`，不是裸 Ogg |
 | `Rewrite_PLUS/koe/2036/Z203600522.nwa` | stereo、16-bit、44100 Hz、`pack_mod=-1`、`sample_cnt=155700` |
 
-OWP 的具体 transform 不写入文档。Core 只声明“需要合法资源 provider 解码”。
+OWP 的具体 transform 不写入文档。Family plugin 只声明“需要合法资源 provider 解码”。
 
 ## MPEG/WMV
 
 Rewrite_PLUS 同时有 `.mpg` 和 `.wmv`。MPEG 可用 sequence header `00 00 01 B3` 取基本信息；样本 `Rewrite_PLUS/mov/op01.mpg` 在 offset 2078 处有 1280x720，`frame_rate_code=1`。WMV 交给平台 decoder。
 
-## IPC 输出
+## Provider 输出
 
-Core 不把原始像素或音频塞进普通 RPC。大块媒体走 shared memory block，RPC 只传：
+Plugin 不把原始像素或音频塞进普通 event。大块媒体走 content-addressed media block，provider event 只传：
 
 ```text
 resource_id, decoded_format, width/height or sample_rate/channels, frame_no, hash, diagnostics

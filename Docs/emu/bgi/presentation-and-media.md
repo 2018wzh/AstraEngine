@@ -76,13 +76,13 @@ resource alias fallback 可覆盖常见缺图：`ef_softN` 可回退到较小编
 | `0x14` | `0x04` | `u32le` | channels，常见 2。 |
 | `header_len` | variable | bytes | OggS 或 RIFF payload。 |
 
-示例：`E:\Games\サクラノ詩\data05000.arc:bgm001` 是 `BurikoWaveBox`，raw size 为 7,228,532 bytes，header 起始为 `40 00 00 00 62 77 20 20`。core 输出 `BgiMediaBlock { kind: Audio, codec: Ogg | RiffWave, resource_id, timing }`，不跨进程传递 decoder handle。
+示例：`<bgi-modern-case>/data05000.arc:bgm001` 是 `BurikoWaveBox`，raw size 为 7,228,532 bytes，header 起始为 `40 00 00 00 62 77 20 20`。family plugin 输出 `BgiMediaBlock { kind: Audio, codec: Ogg | RiffWave, resource_id, timing }`，不传递 decoder handle。
 
 ## Movie
 
 观测到两类 movie payload：
 
-- MPEG stream：payload 以 `00 00 01 BA` 或 `00 00 01 B3` 等 start code 开头，例如 `E:\Games\素晴らしき日々15th\data02101.arc:op.mpg`。
-- `BF_Movie____`：例如 `E:\Games\素晴らしき日々15th\data02931.arc:guruguru.bm`。该类先作为 proprietary movie container 记录 magic 和 size，不在没有公开规格时猜测解码。
+- MPEG stream：payload 以 `00 00 01 BA` 或 `00 00 01 B3` 等 start code 开头，例如 `<bgi-15th-case>/data02101.arc:op.mpg`。
+- `BF_Movie____`：例如 `<bgi-15th-case>/data02931.arc:guruguru.bm`。该类先作为 proprietary movie container 记录 magic 和 size，不在没有公开规格时猜测解码。
 
 movie playback 应生成 `AwaitToken(kind=Movie)`。回放使用记录的 start/complete event，不依赖平台 decoder 完成顺序。

@@ -6,9 +6,9 @@
 | --- | --- |
 | [stage-1-enginecore.md](stage-1-enginecore.md) | EngineCore、Runtime、Save/Replay、Plugin ABI 和 headless test，已实现 |
 | [stage-2-media-package.md](stage-2-media-package.md) | Asset/Cook/Package、Media provider 和 release report |
-| [stage-3-astra-vn.md](stage-3-astra-vn.md) | `.astra`、AstraVN Core、Luau policy 和 full playthrough |
+| [stage-3-astra-vn.md](stage-3-astra-vn.md) | `.astra`、AstraVN Core、Luau policy、standard commands、system UI 和 full playthrough |
 | [stage-4-editor-ai-mcp.md](stage-4-editor-ai-mcp.md) | Editor workflow、PIE、Release Gate UI、Runtime AI 和 MCP |
-| [stage-5-astra-emu.md](stage-5-astra-emu.md) | AstraEMU Manager、family core 和 local case report |
+| [stage-5-astra-emu.md](stage-5-astra-emu.md) | AstraEMU Manager、engine-native family plugin 和 local case report |
 | [stage-test-matrix.md](stage-test-matrix.md) | Stage 1-5 工作项对应的测试项目 |
 
 ## Work Item 格式

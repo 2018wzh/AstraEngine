@@ -4,10 +4,10 @@
 
 | 来源 | 可用事实 | AstraEMU 用法 |
 | --- | --- | --- |
-| `D:/Workspace/pfs-rs` | PF6/PF8 reader、writer、CLI、`system.ini` smart detection、path 转换和默认非加密扩展 | archive reader、probe、patch-chain resolver 和 synthetic fixture |
-| `D:/Downloads/Compressed/Artemis engine开发文档说明/中文翻译/spec` | `system.ini`、script syntax、pack file、macro、layer、system variables | boot contract、tag parser、变量模型、release gate 检查 |
-| `D:/Downloads/Compressed/Artemis engine开发文档说明/中文翻译/tag` | graphics、scenario、script、sound、system、var tag 参考 | tag executor vocabulary、PresentationCommand 和 AudioCommand 映射 |
-| `D:/Downloads/Compressed/Artemis engine开发文档说明/中文翻译/lua` | `engine` Lua object、`setTagFilter`、`tag`、`enqueueTag`、输入和脚本状态 API | Lua sandbox allowlist、tag/Lua 互操作和 diagnostics |
+| PFS 公开研究实现 | PF6/PF8 reader、writer、CLI、`system.ini` smart detection、path 转换和默认非加密扩展 | archive reader、probe、patch-chain resolver 和 synthetic fixture |
+| Artemis spec 文档镜像 | `system.ini`、script syntax、pack file、macro、layer、system variables | boot contract、tag parser、变量模型、release gate 检查 |
+| Artemis tag 文档镜像 | graphics、scenario、script、sound、system、var tag 参考 | tag executor vocabulary、PresentationCommand 和 AudioCommand 映射 |
+| Artemis Lua 文档镜像 | `engine` Lua object、`setTagFilter`、`tag`、`enqueueTag`、输入和脚本状态 API | Lua sandbox allowlist、tag/Lua 互操作和 diagnostics |
 | 本地样本「サクラノ詩10th」 | PF8 根包与 patch 包、`system.ini` boot、`.iet/.ast/.asb/.lua/.sli/.ipt/.tbl` 分布、loose WMV movie | file-level case report 和启动链验证 |
 | 本地样本「终之空Remake2025」 | PF8 根包、PF8 patch、PF6 backup 包、`system.ini` boot、ASB/Lua 系统脚本、loose ASF/WMV movie | PF6/PF8 双格式 probe 和 patch-chain 边界验证 |
 
@@ -57,4 +57,4 @@
 
 ## 不进入 AstraEMU core 的内容
 
-`*.exe`、`*.dll`、环境信息脚本、卸载脚本、商业补丁包和媒体 payload 不属于 compat core 输入。Artemis core 只需要合法安装后的 data root、PFS/loose resolver、脚本 metadata、可解码 media block 引用和用户授权的 save root。
+`*.exe`、`*.dll`、环境信息脚本、卸载脚本、商业补丁包和媒体 payload 不属于 family plugin 输入。Artemis plugin 只需要合法安装后的 data root、PFS/loose resolver、脚本 metadata、可解码 media block 引用和用户授权的 save root。

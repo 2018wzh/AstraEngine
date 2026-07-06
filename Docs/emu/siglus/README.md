@@ -1,6 +1,6 @@
 # AstraEMU Siglus
 
-本目录记录 AstraEMU 接入 Siglus family 所需的公开契约、格式事实和验收口径。内容来自三个来源：`D:\Workspace\siglus_rs` 的 Rust 参考实现、`D:\Workspace\FuckGalEngine\SiglusEngine` 的旧 C/C++ 取证代码，以及本地两个已安装样本的只读观测：`E:\Games\anemoi 体験版`、`E:\Games\Rewrite_PLUS`。
+本目录记录 AstraEMU 接入 Siglus family 所需的公开契约、格式事实和验收口径。内容来自 Siglus Rust 参考实现、历史 C/C++ 取证代码，以及两个合法本地样本的只读观测。
 
 这些文档只覆盖兼容 core 的合法读取、执行和诊断边界。不包含商业 payload、脚本文本全文、截图、音频、视频、key 表、key 提取流程、补丁注入步骤或访问控制规避说明。
 

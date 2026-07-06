@@ -43,7 +43,7 @@ ReadRaw -> DecodeToc -> ResolveEntry -> DecodePayload -> VerifyHash -> ExposeRea
 本地 case：
 
 ```text
-root = E:\Games\夏空的英仙座（夏空のペルセウス）
+root = <minori-case-root>
 archive = scr.paz
 role = script
 expected output = entry list + script candidates

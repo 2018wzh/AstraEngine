@@ -1,15 +1,15 @@
 # FVP Source Inventory
 
-## rfvp 参考入口
+## FVP 参考入口
 
-`D:/Workspace/rfvp` 是本次 FVP 设计输入的主要参考。AstraEMU 只吸收格式、状态机和验收经验，不复制 rfvp 的产品结构。
+FVP 研究实现是本次设计输入的主要参考。AstraEMU 只吸收格式、状态机和验收经验，不复制该实现的产品结构。
 
 | 路径 | 可用事实 | AstraEMU 用法 |
 | --- | --- | --- |
 | `crates/rfvp/src/script/parser.rs` | `.hcb` header、`Nls`、syscall table、screen mode 映射 | 编写 `FvpScriptHeader`、probe 和 diagnostics |
 | `crates/rfvp/src/script/opcode.rs` | 0x00..0x27 opcode 名称 | 定义 bytecode decoder 和 trace vocabulary |
-| `crates/rfvp/src/script/context.rs` | stack VM、`Variant`、`ConstString` offset、`VmSyscall` dispatch | compat core VM 执行模型 |
-| `crates/rfvp/src/vm_runner.rs` | frame tick、thread state、yield、save/load safe point | AstraEMU core tick 边界和 ordered event 输出 |
+| `crates/rfvp/src/script/context.rs` | stack VM、`Variant`、`ConstString` offset、`VmSyscall` dispatch | family plugin VM 执行模型 |
+| `crates/rfvp/src/vm_runner.rs` | frame tick、thread state、yield、save/load safe point | AstraEMU RuntimeWorld tick 边界和 ordered event 输出 |
 | `crates/rfvp/src/subsystem/resources/vfs.rs` | `.bin` pack parser、loose file override、VFS path 规范化 | archive reader 和 media resolver |
 | `crates/rfvp/src/subsystem/world.rs` | `GameData` 资源集合和 syscall registry | family-private 状态聚合，不进入 EngineCore |
 | `crates/rfvp/src/subsystem/components/syscalls/*.rs` | graph、text、sound、movie、thread 等 syscall 行为 | legacy API mapper 和最小兼容矩阵 |
@@ -28,7 +28,7 @@
 
 ## 本地样本清单
 
-样本名为「樱花萌放」。文档中统一写 `<game-root>`，不记录本机绝对路径。
+合法本地样本在文档中统一写 `<game-root>`，不记录本机绝对路径。
 
 | 文件 | 字节数 | 观察 |
 | --- | ---: | --- |
@@ -52,4 +52,4 @@
 
 ## 不进入 AstraEMU core 的内容
 
-`Sakura.exe`、`SakuraChs.exe`、`launch.exe`、`filter.dll`、`libass-9.dll`、安装器、卸载器和补丁安装包都不属于 compat core 输入。FVP core 只需要合法安装后的 data root、`.hcb`、`.bin`、loose movie、loose cursor 和可选字幕 metadata。对可执行文件的行为观察只能进入本地结构化 diagnostics。
+`Sakura.exe`、`SakuraChs.exe`、`launch.exe`、`filter.dll`、`libass-9.dll`、安装器、卸载器和补丁安装包都不属于 family plugin 输入。FVP plugin 只需要合法安装后的 data root、`.hcb`、`.bin`、loose movie、loose cursor 和可选字幕 metadata。对可执行文件的行为观察只能进入本地结构化 diagnostics。

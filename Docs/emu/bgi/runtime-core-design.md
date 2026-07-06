@@ -1,11 +1,11 @@
-# AstraEMU BGI Runtime Core Design
+# AstraEMU BGI Runtime Family Plugin Design
 
-BGI core 是 AstraEMU compat core 的一个 family 实现。它在独立进程内运行旧 VM、archive reader、resource decoder 和 presentation adapter；Manager 通过 IPC 观察状态，不拥有旧引擎对象。
+BGI family 以 engine-native plugin 接入 AstraEMU。它在 family plugin 内运行旧 VM、archive reader、resource decoder 和 presentation adapter；Manager 通过 RuntimeWorld 和 provider event 观察状态，不拥有旧引擎对象。
 
 ## 模块
 
 ```text
-BgiCoreProcess
+BgiFamilyPlugin
   BgiCaseProfile
   BgiArchiveIndex
   BgiResourceStore
@@ -52,14 +52,14 @@ RunVmTick -> Shutdown
 - `Snapshot`：写自描述 save section。
 - `Shutdown`：释放 core 内部资源。
 
-## IPC 输出
+## Provider 输出
 
-BGI core 对 Manager 的输出：
+BGI family plugin 对 RuntimeWorld 的输出：
 
 - `BgiTraceEvent`：dispatch、resource load、decode diagnostic、VM stop reason。
 - `TextCaptureEvent`：文本类别、source span、speaker id、message hash 和可显示短文本片段策略。
 - `BgiPresentationPatch`：layer/object/surface/text window 的增量变化。
-- `BgiMediaBlock`：audio/movie resource id、codec、timing、shared memory block id。
+- `BgiMediaBlock`：audio/movie resource id、codec、timing、content-addressed media block id。
 - `BgiSnapshotReport`：snapshot section id、hash、version 和 replay cursor。
 
 输出中不得包含旧 VM 指针、renderer/audio native handle、Editor widget 或 plugin-owned object。
@@ -103,7 +103,7 @@ BgiSnapshot {
 
 ## 实现边界
 
-- BGI core 可使用 Tokio 或平台异步 IO，但 deterministic state 只在固定 tick 边界更新。
+- BGI family plugin 可使用 Tokio 或平台异步 IO，但 deterministic state 只在固定 tick 边界更新。
 - Renderer2D 和 AudioGraph 只接收 decoded media block 或 presentation patch；不能接收 BGI native handle。
 - Lua、Editor UI、MCP server、AI provider 和 legacy VM 细节都不能进入 EngineCore public contract。
-- 旧 VN 兼容不是 NativeVN、Editor 或 EngineCore 达标前置条件；BGI core 只作为 AstraEMU family adapter 推进。
+- 旧 VN 兼容不是 NativeVN、Editor 或 EngineCore 达标前置条件；BGI family plugin 只作为 AstraEMU family adapter 推进。

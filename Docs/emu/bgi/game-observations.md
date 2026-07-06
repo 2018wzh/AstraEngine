@@ -2,7 +2,7 @@
 
 本页记录三个本地游戏目录的 metadata 观测。所有数字来自 header、entry table、payload magic 和局部 parser 统计；未复制完整商业 script、图像、音频或影片内容。后续验收报告应使用 case id 和相对路径，不输出这些开发机绝对根目录。
 
-## `E:\Games\樱之诗春之雪`
+## `<bgi-packfile-case>`
 
 总体：
 
@@ -35,7 +35,7 @@
 
 注意：该本地化发行的部分 scenario-like DSC payload 解码后不一定是 BCS magic。case profile 需要允许 compact/headerless scenario 分支，并在未确认前只输出 diagnostic。
 
-## `E:\Games\サクラノ詩`
+## `<bgi-modern-case>`
 
 总体：
 
@@ -74,7 +74,7 @@
 - `code_end=0x11750`。
 - command count 约 8,936。
 
-## `E:\Games\素晴らしき日々15th`
+## `<bgi-15th-case>`
 
 总体：
 

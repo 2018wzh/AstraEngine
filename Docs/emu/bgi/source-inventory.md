@@ -6,21 +6,21 @@
 
 | 路径 | 可采用事实 | 不采用内容 |
 | --- | --- | --- |
-| `D:\Workspace\ethornell-rs\crates\ethornell-archive` | `PackFile`、`BURIKO ARC20`、`DSC FORMAT 1.00` header 和安全输出路径规则。 | CLI 的本地输出布局不构成 AstraEMU package contract。 |
-| `D:\Workspace\ethornell-rs\crates\ethornell-script` | `ScriptFormat` 检测、BCS dword opcode、BP bytecode、call catalog。 | 反编译文本输出格式不作为 runtime API。 |
-| `D:\Workspace\ethornell-rs\crates\ethornell-vm` | BP VM memory 常量、dispatch trait、yield/stop reason、BCS shadow string 处理。 | demo VM 的 UI 行为不作为 AstraEMU Manager 行为。 |
-| `D:\Workspace\ethornell-rs\crates\ethornell-image` | `CompressedBG___`、raw BGI image、RGBA 输出规则。 | viewer 交互和调试 UI。 |
-| `D:\Workspace\ethornell-rs\crates\ethornell-audio` | `BurikoWaveBox` header、Ogg/RIFF payload 探测。 | 本机播放命令。 |
-| `D:\Workspace\BGITool` | BCS header 结构、dword instruction table、BP header、CBG/DSC 解码交叉验证。 | 文本替换工作流和编码猜测策略。 |
-| `D:\Workspace\FuckGalEngine\BGI` | `BURIKO ARC20` entry layout、BCS text offset 扫描、翻译工具对 header 的处理。 | `BGIPatch` 类 patch/hook 代码、商业访问控制相关步骤。 |
+| `ethornell-archive` | `PackFile`、`BURIKO ARC20`、`DSC FORMAT 1.00` header 和安全输出路径规则。 | CLI 的本地输出布局不构成 AstraEMU package contract。 |
+| `ethornell-script` | `ScriptFormat` 检测、BCS dword opcode、BP bytecode、call catalog。 | 反编译文本输出格式不作为 runtime API。 |
+| `ethornell-vm` | BP VM memory 常量、dispatch trait、yield/stop reason、BCS shadow string 处理。 | demo VM 的 UI 行为不作为 AstraEMU Manager 行为。 |
+| `ethornell-image` | `CompressedBG___`、raw BGI image、RGBA 输出规则。 | viewer 交互和调试 UI。 |
+| `ethornell-audio` | `BurikoWaveBox` header、Ogg/RIFF payload 探测。 | 本机播放命令。 |
+| BGI 工具研究代码 | BCS header 结构、dword instruction table、BP header、CBG/DSC 解码交叉验证。 | 文本替换工作流和编码猜测策略。 |
+| 历史 BGI 格式线索 | `BURIKO ARC20` entry layout、BCS text offset 扫描、翻译工具对 header 的处理。 | patch/hook 代码、商业访问控制相关步骤。 |
 
 ## 游戏样本
 
 | 本地根目录 | 用途 |
 | --- | --- |
-| `E:\Games\樱之诗春之雪` | `PackFile` 为主的早期/中文发行形态，`._bp` 和 compact scenario payload。 |
-| `E:\Games\サクラノ詩` | 混合 `PackFile` 与 `BURIKO ARC20`，大量 BCS scenario、CBG 和 `BurikoWaveBox`。 |
-| `E:\Games\素晴らしき日々15th` | `BURIKO ARC20` 全量样本，BCS scenario、MPEG、`BF_Movie____` 和大量 voice box。 |
+| `<bgi-packfile-case>` | `PackFile` 为主的早期/中文发行形态，`._bp` 和 compact scenario payload。 |
+| `<bgi-modern-case>` | 混合 `PackFile` 与 `BURIKO ARC20`，大量 BCS scenario、CBG 和 `BurikoWaveBox`。 |
+| `<bgi-15th-case>` | `BURIKO ARC20` 全量样本，BCS scenario、MPEG、`BF_Movie____` 和大量 voice box。 |
 
 ## 可固化为 core 规则的事实
 

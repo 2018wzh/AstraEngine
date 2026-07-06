@@ -12,7 +12,7 @@ BGI script 不能只靠文件扩展名判断。archive entry 常见外层是 `DS
 4. extensionless scenario bytes 非空但没有 BCS magic：`BgiScriptKind::HeaderlessScenario`，只允许在 case profile 明确支持时进入 VM。
 5. 其他 payload 返回 `UnknownScript`，写入 case report。
 
-`E:\Games\サクラノ詩\data01100.arc:00_op_01` 是 DSC-wrapped BCS：raw size 34,372 bytes，decoded size 114,699 bytes，decoded header 的 `body_start` 为 `0x40`。`E:\Games\樱之诗春之雪\system.arc:ipl._bp` 是 DSC-wrapped BP：raw size 1,983 bytes，decoded BP length 2,608 bytes。
+`<bgi-modern-case>/data01100.arc:00_op_01` 是 DSC-wrapped BCS：raw size 34,372 bytes，decoded size 114,699 bytes，decoded header 的 `body_start` 为 `0x40`。`<bgi-packfile-case>/system.arc:ipl._bp` 是 DSC-wrapped BP：raw size 1,983 bytes，decoded BP length 2,608 bytes。
 
 ## 字符串编码
 

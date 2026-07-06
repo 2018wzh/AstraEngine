@@ -49,7 +49,11 @@ pub trait Renderer2DProvider: StableProvider {
 }
 ```
 
-完整 provider trait 族见 [Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。v1 必须覆盖 Renderer2D、TextLayout、AudioOutput、DecodeProvider、AssetImporter、CookProcessor、LuauPolicyBundle、EditorPanel、AIProvider、MCPToolProvider 和 EMUCoreBridge。
+完整 provider trait 族见 [Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。v1 必须覆盖 Renderer2D、TextLayout、AudioOutput、DecodeProvider、AssetImporter、CookProcessor、LuauPolicyBundle、EditorPanel、AIProvider、MCPToolProvider、LegacyFamilyPlugin 和可选 EMUCoreBridge。
+
+## Extension Registry
+
+插件可以注册 provider slot、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check 和 legacy family provider。每条注册必须声明 `LoadPhase`、依赖、冲突策略、enablement scope、packaged eligibility 和 diagnostic source。Editor 的 Plugin Manager 只能改变 enablement 和 binding，不能绕过 descriptor gate。
 
 ## StateMachine Action ABI
 

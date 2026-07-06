@@ -42,11 +42,11 @@
 | DONE_WITH_CONCERNS | full-screen movie | 已观察 loose ASF/WMV；后端选择归 Manager/provider |
 | BLOCKED | MJA video layer | 需要公开 fixture，不从商业 payload 提取 |
 
-## Runtime Core
+## Runtime Family Plugin
 
 | Status | 项目 | 验收 |
 | --- | --- | --- |
-| DONE | out-of-process core 边界 | 只输出 IPC event，不暴露 VM 内存 |
+| DONE | engine-native family plugin 边界 | 只输出 provider effect、Runtime event 和 report，不暴露 VM 内存 |
 | DONE | deterministic wait model | 所有 wait/transition/audio/video fence 使用 `AwaitToken` |
 | DONE_WITH_CONCERNS | Lua state snapshot | 先保存白名单 state；复杂 closure/coroutine 需 gate 标记 |
 | DONE_WITH_CONCERNS | ASB execution | metadata probe 先行，执行器等 fixture |

@@ -1,17 +1,42 @@
-# AstraEMU Artemis Core Blueprint
+# AstraEMU Artemis Family Plugin Blueprint
 
-Artemis 是 AstraEMU v1 的首个可用 family。目标是通用 Artemis compat core：覆盖 PFS/PF6/PF8、boot、text/tag、legacy Lua bridge、presentation/media、snapshot 和 local case report。所有样例和报告只使用合法本地数据、synthetic fixtures 和脱敏 metadata。
+Artemis 是 AstraEMU v1 的首个可用 family。目标是通用 Artemis engine-native family plugin：覆盖 PFS/PF6/PF8、boot、text/tag、legacy Lua bridge、presentation/media、snapshot 和 local case report。所有样例和报告只使用合法本地数据、synthetic fixtures 和脱敏 metadata。
 
-## Process Boundary
+## Runtime Boundary
 
 ```text
 AstraEMU Manager
-  -> local RPC: ProbeContent, LoadCase, Step, ApplyInput, SaveSnapshot
-  -> shared memory: media block, decoded frame, audio chunk
-  <- trace: TextCaptureEvent, PresentationCommand, AudioCommand, StateMachineTrace
+  -> create RuntimeWorld
+  -> enable Artemis family plugin
+  -> mount LegacyVfsProvider
+  -> compile legacy script to StateMachine action graph
+  -> register LegacyActionProvider
+  -> tick RuntimeWorld
+  <- RuntimeEvent / PresentationCommand / AudioCommand / TextCaptureEvent
+  <- LocalCaseReport / ReleaseReport
 ```
 
-Compat core 持有 Artemis VM 和权威状态机。Manager 不解析 core 私有内存，不接收商业 payload。
+Artemis plugin 可以持有 family-private interpreter state，但推进必须通过 StateMachine action provider 和可序列化 effect list。Manager 不解析 private state，不接收商业 payload。`EMUCoreBridge` 不参与 v1 主路径。
+
+## Provider Registration
+
+```rust
+pub struct ArtemisFamilyPlugin {
+    pub descriptor: LegacyFamilyPluginDescriptor,
+    pub vfs: ArtemisVfsProvider,
+    pub script: ArtemisScriptProvider,
+    pub actions: ArtemisActionProvider,
+    pub media: ArtemisMediaMapper,
+    pub snapshot: ArtemisSnapshotCodec,
+}
+```
+
+注册流程：
+
+1. `PluginDescriptor` 通过 fingerprint、permission、feature 和 packaged eligibility gate。
+2. `LegacyFamilyPluginDescriptor` 声明 Artemis family、PFS/PF6/PF8、`.iet`、`.ast`、`.asb` 和 legacy Lua bridge capability。
+3. ExtensionRegistry 注册 VFS、script、action、media mapper、snapshot codec 和 release check。
+4. Manager 根据 project/case profile 显式启用 Artemis provider，不按加载顺序选择。
 
 ## Artemis Probe
 
@@ -27,18 +52,18 @@ pub struct ArtemisProbeReport {
 }
 ```
 
-Probe 顺序：root marker、PFS header、PF6/PF8 index、patch chain、`system.ini`、BOOT entry、script/media distribution。
+Probe 顺序：root marker、PFS header、PF6/PF8 index、patch chain、`system.ini`、BOOT entry、script/media distribution。probe 只输出 hash、offset、entry count、format capability 和 diagnostic。
 
 ## Script Execution
 
-Core 支持 `.iet` text/tag、`.ast` table row、`.asb` probe classification 和 legacy Lua bridge。`[lua]` block 和 `calllua` 是 Artemis legacy fact；AstraVN policy 仍使用 Luau。
+Artemis provider 支持 `.iet` text/tag、`.ast` table row、`.asb` probe classification 和 legacy Lua bridge。`[lua]` block 和 `calllua` 是 Artemis legacy fact；AstraVN policy 仍使用 Luau。
 
 ```rust
-pub enum ArtemisCommand {
+pub enum ArtemisActionEffect {
     Text(TextCaptureEvent),
     Tag(TagCommand),
     CallLegacyLua { function: String, args_hash: Hash256 },
-    Wait(AwaitToken),
+    Await(AwaitToken),
     Presentation(PresentationCommand),
     Audio(AudioCommand),
 }
@@ -48,9 +73,9 @@ pub enum ArtemisCommand {
 
 ## Snapshot
 
-Snapshot section 最少包含 script stack、current entry hash、tag queue、serializable legacy Lua state allowlist、media state ref、save variables 和 diagnostics cursor。
+Snapshot section 最少包含 script stack、current entry hash、tag queue、serializable legacy Lua state allowlist、media state ref、save variables 和 diagnostics cursor。section 使用 Astra package/save 容器和 postcard payload，不另开私有存档格式。
 
-## Checks
+## Release Gate
 
 ```bash
 cargo test -p astra-emu-artemis artemis_pfs_probe
@@ -59,4 +84,4 @@ astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/r
 cargo test -p astra-release emu_gate
 ```
 
-Expected report: boot、text、choice、media command、save/load、snapshot replay、redaction policy 通过；报告不包含 key、完整脚本、截图、音频采样或私有绝对路径。
+Expected report: `emu.engine_native_family`、`plugin.extension_registry`、boot、text、choice、media command、save/load、snapshot replay、Runtime replay hash 和 redaction policy 通过；报告不包含 key、完整脚本、截图、音频采样或私有绝对路径。

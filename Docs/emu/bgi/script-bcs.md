@@ -69,7 +69,7 @@ BCS payload 后部可能包含 string pool。parser 不能把 string pool 当 co
 
 ## 观测样例
 
-`E:\Games\サクラノ詩\data01100.arc:00_op_01`：
+`<bgi-modern-case>/data01100.arc:00_op_01`：
 
 - archive format：`BURIKO ARC20`。
 - raw DSC size：34,372 bytes。
@@ -82,7 +82,7 @@ BCS payload 后部可能包含 string pool。parser 不能把 string pool 当 co
 - command count 约 8,936。
 - 常见 opcode：`0x000` 约 3,870 次，`0x003` 约 1,910 次，`0x07F` 约 1,570 次，`0x140` 约 963 次，`0x280` 约 123 次，`0x110` 约 81 次。
 
-`E:\Games\素晴らしき日々15th\data01101.arc:1-1_0710_dream`：
+`<bgi-15th-case>/data01101.arc:1-1_0710_dream`：
 
 - raw DSC size：5,169 bytes。
 - decoded BCS length：16,694 bytes。

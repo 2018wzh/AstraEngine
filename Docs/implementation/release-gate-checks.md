@@ -21,13 +21,20 @@ pub struct ReleaseCheckRecord {
 | --- | --- | --- | --- | --- |
 | runtime | `runtime.replay.determinism` | scenario report | hash mismatch | state/event/presentation hash |
 | plugin | `plugin.fingerprint` | plugin descriptor | version or feature mismatch | descriptor hash |
+| plugin | `plugin.extension_registry` | extension registration report | conflict, missing phase, invalid extension point or packaged trim error | extension id, phase, plugin id |
+| plugin | `plugin.dependency_graph` | plugin enablement report | missing required dependency or unresolved version conflict | dependency edge, selected provider |
 | package | `package.integrity` | package container | invalid section/hash/bounds | section table hash |
 | media | `media.decode.capability` | platform report | required codec missing | provider id, codec list |
 | vn | `vn.full_playthrough` | VN scenario | route/system story failure | route id, command id |
+| vn | `vn.commercial_baseline` | VN release profile | dialogue/system flow baseline missing | command coverage, route coverage |
+| vn | `vn.system_ui_profile` | system story report | save/load/config/backlog/gallery/replay/chart/voice/localization missing | system story id, state hash |
+| vn | `vn.advanced_presentation` | opt-in scenario report | advanced profile missing or nondeterministic | timeline id, provider capability |
 | editor | `editor.source_roundtrip` | editor report | source map identity failure | source_ref, command id |
+| editor | `editor.plugin_manager` | plugin manager report | enablement/dependency/diagnostic jump failure | plugin id, extension id |
 | ai_mcp | `ai.provider_free_replay` | save/replay | provider required during replay | committed output hash |
 | platform | `platform.eligibility` | capability report | profile requirement missing | platform id, capability id |
 | emu | `emu.artemis_full_flow` | local case report | trace/snapshot/redaction failure | trace hash, redaction status |
+| emu | `emu.engine_native_family` | family plugin report | family bypasses RuntimeWorld or missing provider binding | family id, provider id |
 
 ## Report Schema
 
@@ -47,6 +54,16 @@ checks:
     status: blocked
     diagnostic: ASTRA_EMU_REDACTION_FAILED
     source_ref: null
+  - id: vn.advanced_presentation
+    domain: vn
+    status: pass
+    evidence:
+      timeline_hash: hash128:...
+  - id: plugin.extension_registry
+    domain: plugin
+    status: pass
+    evidence:
+      extension_count: 42
 ```
 
 ## Commands

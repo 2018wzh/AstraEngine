@@ -1,10 +1,10 @@
-# FVP Runtime Core Design
+# FVP Runtime Family Plugin Design
 
-AstraEMU FVP runs as an out-of-process compat core. The core owns all FVP-private state. Manager owns windows, platform input, provider selection, overlays, reports and release gate UI.
+AstraEMU FVP runs as an engine-native family plugin. The plugin owns all FVP-private state. Manager owns windows, platform input, provider selection, overlays, reports and release gate UI, then drives the plugin through RuntimeWorld and provider registration.
 
-## Core state
+## Family state
 
-The core contains:
+The plugin contains:
 
 - `FvpProbe`: discovers `.hcb`, `.bin`, loose movie and cursor files.
 - `FvpArchiveSet`: pack metadata, VFS lookup and safe stream opening.
@@ -16,11 +16,11 @@ The core contains:
 - `FvpSaveState`: VM snapshot plus FVP-specific graph/text/audio/history state.
 - `FvpDiagnostics`: local structured trace ring, coverage counters and failure details.
 
-These types are family-private. EngineCore only sees AstraEMU IPC events and opaque snapshot sections.
+These types are family-private. EngineCore only sees provider effects, Runtime events and opaque snapshot sections.
 
-## Manager/Core boundary
+## Manager / family boundary
 
-Core accepts:
+Family providers accept:
 
 - `ProbeContent { root_ref, nls_hint }`
 - `LoadCase { case_id, root_ref, hcb_name, nls }`
@@ -30,7 +30,7 @@ Core accepts:
 - `LoadSnapshot { slot }`
 - `Shutdown`
 
-Core emits:
+Family providers emit:
 
 - `RuntimeEvent`
 - `PresentationCommand`
@@ -39,9 +39,9 @@ Core emits:
 - `StateMachineTrace`
 - `LegacyVmSnapshotRef`
 - `DiagnosticBatch`
-- `MediaBlockRef`
+- `MediaRef`
 
-The core may read local files through a capability-limited mount issued by Manager. It does not receive arbitrary filesystem authority.
+The plugin may read local files through a capability-limited mount issued by Manager. It does not receive arbitrary filesystem authority.
 
 ## Determinism
 

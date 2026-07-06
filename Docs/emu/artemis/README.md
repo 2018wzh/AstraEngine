@@ -1,6 +1,6 @@
 # AstraEMU Artemis
 
-本目录记录 AstraEMU 的 Artemis family 设计输入和实施口径。资料来自 `D:/Workspace/pfs-rs`、Artemis 官方开发文档镜像，以及两份本地合法安装样本的文件级观察。这里不保存商业 payload、剧情正文、截图、音频、视频帧，也不写绕过访问控制的步骤。
+本目录记录 AstraEMU 的 Artemis family 设计输入和实施口径。资料来自 PFS 公开研究实现、Artemis 官方开发文档镜像，以及合法安装样本的文件级观察。这里不保存商业 payload、剧情正文、截图、音频、视频帧，也不写绕过访问控制的步骤。
 
 ## 阅读顺序
 
@@ -13,14 +13,14 @@
 | [script-execution.md](script-execution.md) | `system.ini` boot、tag 执行、Lua 调用和等待点 |
 | [script-tags-lua.md](script-tags-lua.md) | `lua`、`calllua`、`tag`、`setTagFilter`、`enqueueTag` 的互操作 |
 | [presentation-and-media.md](presentation-and-media.md) | layer、transition、message、BGM/SE/voice/movie 映射 |
-| [runtime-core-design.md](runtime-core-design.md) | Artemis compat core 的边界、状态机、IPC 输出和 sandbox |
+| [runtime-core-design.md](runtime-core-design.md) | Artemis family plugin 的边界、状态机、provider 输出和 sandbox |
 | [game-observations.md](game-observations.md) | 两个本地样本的本地结构化统计和启动链观察 |
 | [tooling.md](tooling.md) | 现有 probe、PFS 工具和下一步 fixture 边界 |
 | [implementation-checklist.md](implementation-checklist.md) | 最小实施清单、状态和验收口径 |
 
 ## 范围
 
-Artemis 在 AstraEMU 中是独立 family adapter。Compat core 持有 PFS resolver、Artemis script VM、Lua sandbox、legacy tag executor、media state 和 save snapshot。Manager 只接收本地结构化 trace、`PresentationCommand`、`AudioCommand`、`TextCaptureEvent`、`StateMachineTrace` 和 media block reference。
+Artemis 在 AstraEMU 中是 engine-native family plugin。Plugin 持有 PFS resolver、Artemis script VM、Lua sandbox、legacy tag executor、media state 和 save snapshot；Manager 创建 RuntimeWorld 并通过 provider/action/report 接收本地结构化 trace、`PresentationCommand`、`AudioCommand`、`TextCaptureEvent` 和 `StateMachineTrace`。
 
 Artemis 不改变 EngineCore 的 Actor/Component + StateMachine 权威模型，也不把 Artemis 的 tag、Lua 环境、PFS patch 规则或平台视频限制变成公共 Runtime contract。
 

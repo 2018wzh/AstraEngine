@@ -1,19 +1,18 @@
-# Artemis Runtime Core Design
+# Artemis Runtime Family Plugin Design
 
-## Core Boundary
+## Boundary
 
-Artemis compat core 是独立进程，持有 legacy 权威状态。Manager 只做窗口、输入、配置、provider selection、插件分发、报告和 Astra Runtime bridge。
+Artemis family 以 in-process plugin/provider 接入 AstraEMU。Manager 创建 RuntimeWorld，启用 Artemis plugin，挂载 VFS，注册 legacy action provider，并从 RuntimeWorld 收集 trace、presentation、audio、TextCaptureEvent、snapshot section 和 diagnostics。
 
-Core 内部可以按 Artemis 的 tag/Lua/PFS 规则实现；对外只暴露 AstraEMU IPC contract：
+Artemis plugin 内部可以按 Artemis 的 tag/Lua/PFS 规则实现；对外只暴露 engine-native provider contract：
 
 ```text
-RuntimeEvent
-PresentationCommand
-AudioCommand
-TextCaptureEvent
-StateMachineTrace
-LegacyVmSnapshotRef
-diagnostics
+LegacyVfsProvider
+LegacyScriptProvider
+LegacyActionProvider
+LegacyMediaMapper
+LegacySnapshotCodec
+ReleaseCheckProvider
 ```
 
 EngineCore 不依赖 Artemis Lua、PFS、ASB、Windows movie backend 或具体 renderer/audio handle。
@@ -27,7 +26,7 @@ EngineCore 不依赖 Artemis Lua、PFS、ASB、Windows movie backend 或具体 r
 | `SystemIniLoader` | 读取平台段、stage、charset、boot、save policy |
 | `ScriptStore` | `.iet/.ast/.asb/.lua/.ipt/.tbl/.sli` 只读解析和 source map |
 | `TagExecutor` | 内置 tag、macro、自定义 tag、Lua filter dispatch |
-| `LuaHost` | Lua 5.4 sandbox、engine object、deterministic host capability |
+| `LuaHost` | Lua sandbox、engine object、deterministic host capability |
 | `PresentationModel` | layer tree、message layer、transition fence |
 | `AudioModel` | BGM、SE、voice、loop marker、fade |
 | `SnapshotCodec` | save/load、自描述 section、Lua serializable state |
@@ -49,15 +48,14 @@ Unloaded
 
 ## Public Contract
 
-Artemis family adapter 的 public contract 是 data root + report，不是脚本编辑器。
+Artemis family plugin 的 public contract 是 case profile + report，不是脚本编辑器。
 
-```text
-LoadCase {
-  family = "artemis"
-  data_root = exact local path
-  executable_name = optional basename
-  platform = windows | ios | android | wasm
-}
+```yaml
+schema: astra.emu.case_profile.v1
+family: artemis
+data_root: user_authorized_case_root
+executable_name: optional_basename
+platform: windows
 ```
 
 输出 report 包含：
@@ -99,8 +97,6 @@ Snapshot 使用 AstraEngine 自描述二进制容器，section payload 走 serde
 
 ## Diagnostics
 
-严重度：
-
 | Level | 例子 |
 | --- | --- |
 | error | PFS index 越界、boot script 缺失、ASB 不可识别且必须执行 |
@@ -109,11 +105,11 @@ Snapshot 使用 AstraEngine 自描述二进制容器，section payload 走 serde
 
 诊断只用 basename、entry path、hash prefix 和 tag 名。
 
-## Minimal Implementation Order
+## Implementation Order
 
 1. Probe + PF6/PF8 resolver。
 2. `system.ini` + boot `.iet` parser。
-3. Tag trace executor，不做画面，只输出 command。
+3. Tag trace executor，只输出 command。
 4. Lua host allowlist + `calllua`/`setTagFilter`/`e:tag`。
 5. Presentation/audio command 映射。
 6. `.ast` command row parser。

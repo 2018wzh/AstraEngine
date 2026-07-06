@@ -1,20 +1,20 @@
 # AstraEMU Legacy Engine Research
 
-本目录保存 AstraEMU legacy family core 的实现级研究资料。资料目标是服务 compat core 编码：archive reader、脚本反编译、VM/tick、presentation/audio mapper、snapshot 和 release gate。
+本目录保存 AstraEMU legacy family 的实现级研究资料。资料目标是服务 engine-native family plugin 编码：archive reader、脚本反编译、VM/tick、presentation/audio mapper、snapshot 和 release gate。架构边界以 [ADR 0012](../adr/0012-astraemu-engine-native-family-plugin.md) 和 [AstraEMU Family Plugin Contract](../contracts/astraemu-ipc.md) 为准。
 
 ## Engine 目录
 
 Artemis 是 AstraEMU v1 的可用 family，其余 family 按 alpha probe profile 接入后再提升兼容深度。
 
-| Engine | 样本 | 参考实现或工具 | 资料入口 |
+| Engine | 合法样本来源 | 参考实现或工具 | 资料入口 |
 | --- | --- | --- | --- |
-| BGI / Ethornell | `E:/Games/樱之诗春之雪`, `E:/Games/サクラノ詩`, `E:/Games/素晴らしき日々15th` | `D:/Workspace/ethornell-rs`, `D:/Workspace/BGITool` | [bgi/README.md](bgi/README.md) |
-| FVP | `E:/Games/樱花萌放` | `D:/Workspace/rfvp` | [fvp/README.md](fvp/README.md) |
-| Artemis | `E:/Games/サクラノ詩10th`, `E:/Games/终之空Remake2025` | `D:/Workspace/pfs-rs`, Artemis engine docs | [artemis/README.md](artemis/README.md) |
-| Siglus | `E:/Games/anemoi 体験版`, `E:/Games/Rewrite_PLUS` | `D:/Workspace/siglus_rs` | [siglus/README.md](siglus/README.md) |
-| KrKr / KAG / TJS | `D:/Downloads/3lj` | `D:/Workspace/FuckGalEngine/Krkr` | [krkr/README.md](krkr/README.md) |
-| SoftPAL | `E:/Games/SteamLibrary/steamapps/common/koikake` | `D:/Workspace/sena-rs` | [softpal/README.md](softpal/README.md) |
-| Minori | `E:/Games/夏空的英仙座（夏空のペルセウス）` | `D:/Workspace/FuckGalEngine/Minori` | [minori/README.md](minori/README.md) |
+| BGI / Ethornell | 用户本地合法安装和 synthetic fixture | 公开 Ethornell/BGI 研究与本仓 probe 工具 | [bgi/README.md](bgi/README.md) |
+| FVP | 用户本地合法安装和 generated fixture | FVP 研究实现与本仓 HCB probe 工具 | [fvp/README.md](fvp/README.md) |
+| Artemis | 用户本地合法安装和 synthetic PFS fixture | PFS/PF6/PF8 研究实现与 Artemis engine docs | [artemis/README.md](artemis/README.md) |
+| Siglus | 公开体验版或用户本地合法安装 | Siglus 研究实现与本仓 Scene.pck probe 工具 | [siglus/README.md](siglus/README.md) |
+| KrKr / KAG / TJS | 用户本地合法安装和 generated XP3 fixture | KiriKiri/KAG/TJS 公开研究资料 | [krkr/README.md](krkr/README.md) |
+| SoftPAL | 用户本地合法安装和 synthetic PAC/DAT fixture | SoftPAL 研究实现与本仓 extcall probe 工具 | [softpal/README.md](softpal/README.md) |
+| Minori | 用户本地合法安装和 synthetic PAZ fixture | Minori 研究实现与本仓 PAZ probe 工具 | [minori/README.md](minori/README.md) |
 
 ## 统一文档切分
 
@@ -27,13 +27,13 @@ archive-format.md
 script-format.md
 script-execution.md
 presentation-and-media.md
-runtime-core-design.md
+runtime-family-plugin.md
 game-observations.md
 tooling.md
 implementation-checklist.md
 ```
 
-特化文档只放 family 私有细节，例如 BGI 的 `script-bcs.md` / `script-bp.md`、Artemis 的 `script-tags-lua.md`、KrKr 的 `kag-tjs.md`、SoftPAL 的 `sv20-extcalls.md`。
+特化文档只放 family 私有细节，例如 BGI 的 `script-bcs.md` / `script-bp.md`、Artemis 的 `script-tags-lua.md`、KrKr 的 `kag-tjs.md`、SoftPAL 的 `sv20-extcalls.md`。已存在的 `runtime-core-design.md` 继续保留文件名，但内容应按 ADR 0012 解释为 family plugin 内部设计。
 
 ## Tooling
 

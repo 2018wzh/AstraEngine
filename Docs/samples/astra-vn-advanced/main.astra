@@ -1,0 +1,38 @@
+story main #@id story.main
+state prologue #@id state.prologue
+  scene opening_room #@id scene.opening_room
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.opening
+      layer id:bg kind:background z:0 blend:normal #@id layer.bg
+      layer id:characters kind:sprite z:100 blend:normal #@id layer.characters
+      layer id:video_fx kind:video z:200 blend:screen clip:stage #@id layer.video_fx
+      layer id:ui kind:text z:900 input:message #@id layer.ui
+      background asset:bg.room layer:bg preset:soft_fade duration:300 #@id bg.room
+      show character:hero pose:normal layer:characters at:center preset:hero_enter #@id hero.show
+      camera target:main zoom:1.06 duration:480 preset:slow_push #@id camera.push
+      movie layer:video_fx asset:movie.light_leak alpha:0.35 loop:true end:continue fallback:flat_fade #@id movie.light
+      voice asset:voice.hero.0001 sync:text #@id voice.hero.0001
+    text key:prologue.hello speaker:hero window:main #@id line.hello
+      effect text:cinematic.reveal lip_sync:true filter:soft_glow
+    wait fence:voice_end #@id wait.voice
+    transition preset:flash_soft duration:220 #@id trans.flash
+    choice key:prologue.where #@id choice.where
+      option key:choice.library -> library #@id choice.library
+      option key:choice.rooftop -> rooftop #@id choice.rooftop
+
+state library #@id state.library
+  scene library_night #@id scene.library_night
+    stage #@id stage.library
+      background asset:bg.library layer:bg preset:crossfade duration:420 #@id bg.library
+      hide character:hero preset:fade duration:180 #@id hero.hide
+      bgm asset:bgm.library loop:true fade:600 #@id bgm.library
+    text key:library.entry speaker:narrator #@id line.library
+    system_page kind:save #@id system.save.open
+
+state rooftop #@id state.rooftop
+  scene rooftop_night #@id scene.rooftop_night
+    stage #@id stage.rooftop
+      background asset:bg.rooftop layer:bg preset:crossfade duration:420 #@id bg.rooftop
+      shake target:camera.main strength:3 duration:160 #@id camera.shake
+      se asset:se.wind bus:se #@id se.wind
+    text key:rooftop.entry speaker:narrator #@id line.rooftop
+    system_page kind:route_chart #@id system.chart.open

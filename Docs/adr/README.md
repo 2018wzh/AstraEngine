@@ -11,6 +11,7 @@ ADR 记录已经锁定的产品级决策。被替换的旧决策必须在新 ADR
 | [0005](0005-mcp-agent-capability-protocol.md) | MCP 是受权限和审计约束的能力协议 |
 | [0006](0006-text-first-source-data.md) | Text-first source，binary runtime data |
 | [0008](0008-rust-plugin-abi.md) | 插件采用 Rust-facing `abi_stable` 风格 ABI |
-| [0009](0009-astraemu-out-of-process-core.md) | AstraEMU compat core 独立进程化 |
+| [0009](0009-astraemu-out-of-process-core.md) | Superseded: AstraEMU compat core 独立进程化 |
 | [0010](0010-state-machine-action-provider.md) | StateMachine action provider 采用 host context 与 FFI effect list |
 | [0011](0011-platform-decode-and-renderer-slots.md) | 平台解码优先，Renderer2D provider 可替换 |
+| [0012](0012-astraemu-engine-native-family-plugin.md) | AstraEMU 使用 engine-native family plugin |

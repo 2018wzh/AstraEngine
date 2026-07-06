@@ -71,4 +71,4 @@ SoftPAL family 只能在这些条件同时满足后进入 `DONE`：
 - no payload/no screenshot/no absolute private path 检查通过；
 - unknown 或 partial extcall 不影响被声明通过的 route；
 - snapshot restore 和 replay 不重新请求非 deterministic provider；
-- Manager/Core IPC 中没有 legacy pointer、DLL handle、GPU handle 或 audio handle。
+- Family plugin provider boundary 中没有 legacy pointer、DLL handle、GPU handle 或 audio handle。

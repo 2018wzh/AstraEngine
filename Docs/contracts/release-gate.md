@@ -14,8 +14,14 @@ checks:
     status: pass
   - id: plugin.fingerprint
     status: pass
+  - id: plugin.extension_registry
+    status: pass
   - id: media.decode.platform_fallback
     status: warning
+  - id: vn.system_ui_profile
+    status: pass
+  - id: emu.engine_native_family
+    status: pass
   - id: ai.provider_free_replay
     status: pass
   - id: scenario.full_playthrough
@@ -25,7 +31,7 @@ checks:
 
 ## Blocking Domains
 
-Runtime determinism、schema migration、package integrity、plugin fingerprint、permission policy、AI replay、Luau sandbox、media decode、save/load、headless scenario、platform eligibility 和 manual signoff 都可以阻止发布。
+Runtime determinism、schema migration、package integrity、plugin fingerprint、plugin extension registry、permission policy、AI replay、Luau sandbox、media decode、VN commercial baseline、system UI profile、advanced presentation opt-in、AstraEMU engine-native family、save/load、headless scenario、platform eligibility 和 manual signoff 都可以阻止发布。
 
 ## Verification Commands
 
