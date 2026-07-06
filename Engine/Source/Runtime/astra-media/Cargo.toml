@@ -37,5 +37,9 @@ windows = { workspace = true, features = [
     "Win32_System_Memory",
 ] }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true

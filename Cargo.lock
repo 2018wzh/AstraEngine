@@ -336,6 +336,7 @@ dependencies = [
  "cosmic-text",
  "ffmpeg-next",
  "image",
+ "js-sys",
  "kira",
  "postcard",
  "schemars",
@@ -346,6 +347,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tracing",
+ "wasm-bindgen",
  "wgpu",
  "windows",
 ]
@@ -409,6 +411,9 @@ name = "astra-platform-web"
 version = "0.1.0"
 dependencies = [
  "astra-platform",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -4059,7 +4064,6 @@ version = "1.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf80a72845275afea99e7f2b434723d3bc7e38470fcd1c7ed39a599c73319a53"
 dependencies = [
- "getrandom 0.4.3",
  "js-sys",
  "serde_core",
  "wasm-bindgen",

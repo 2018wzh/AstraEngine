@@ -115,6 +115,32 @@ fn windows_wmf_decode_provider_video_without_transform_reports_blocking_diagnost
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[test]
+fn webcodecs_decode_provider_returns_browser_surface_token() {
+    let provider = astra_media::WebCodecsDecodeProvider;
+    let capability = provider.capability();
+    assert_eq!(capability.provider_id, "astra.decode.webcodecs");
+    assert!(capability.codecs.iter().any(|codec| codec == "mp4"));
+
+    let result = provider
+        .decode(&DecodeRequest {
+            kind: DecodeKind::Video,
+            codec: "mp4".to_string(),
+            bytes: vec![1, 2, 3, 4],
+            profile: "web-release".to_string(),
+        })
+        .unwrap();
+
+    match result.output {
+        DecodeOutput::MediaSurfaceToken(token) => {
+            assert_eq!(token.provider_id, "astra.decode.webcodecs");
+            assert_eq!(token.format, "mp4");
+        }
+        DecodeOutput::CpuBuffer { .. } => panic!("expected browser-owned media token"),
+    }
+}
+
 fn tiny_wav() -> Vec<u8> {
     let samples = [0i16, 1000, -1000, 0];
     let data_len = samples.len() * 2;

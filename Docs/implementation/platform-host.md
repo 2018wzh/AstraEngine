@@ -1,6 +1,6 @@
 # Platform Host Blueprint
 
-平台模块只适配原生能力，不拥有引擎状态。六个 v1 目标平台都必须输出 capability report 并通过 profile gate。当前只有 Windows 的真实 smoke 已落地；其他平台的 host smoke 是 Stage 2 后续缺口。
+平台模块只适配原生能力，不拥有引擎状态。六个 v1 目标平台都必须输出 capability report 并通过 profile gate。当前 Windows 和 Web 的真实 smoke 已落地；Linux、macOS、iOS 和 Android host smoke 是 Stage 2 后续缺口。
 
 Target 与 Platform 的共同规则见 [Target And Platform Blueprint](target-platform.md)。本页只展开 host adapter。
 
@@ -30,7 +30,7 @@ pub trait PlatformHost {
 | `astra-platform-macos` | macOS capability crate；AppKit/AVFoundation/CoreAudio smoke 待实现 |
 | `astra-platform-ios` | iOS capability crate；launcher、safe area、touch、AVFoundation、no-JIT Luau gate 待实现 |
 | `astra-platform-android` | Android capability crate；launcher、MediaCodec、SAF、audio focus、no-JIT Luau gate 待实现 |
-| `astra-platform-web` | Web capability crate；WASM host、WebGPU/WebGL、WebCodecs、WebAudio、OPFS/IndexedDB smoke 待实现 |
+| `astra-platform-web` | Web host probe；WASM browser、WebGPU/WebGL、WebCodecs、WebAudio、OPFS/IndexedDB、File API/fetch package source smoke |
 
 每个 host crate 可以用平台私有类型实现内部 bridge，但 public report 和 Runtime 入口只传 DTO 或 token。
 
@@ -70,7 +70,7 @@ smoke:
     summary: Media Foundation startup/shutdown completed
 ```
 
-Required smoke 按平台分开定义。Windows 当前要求 `windowed_smoke`、`decode.wmf` 和 `save.known_folder`。Linux 计划要求 `windowed_smoke`、`decode.linux_media`；macOS 计划要求 `windowed_smoke`、`decode.avfoundation`；iOS 计划要求 `launcher_smoke`、`decode.avfoundation`；Android 计划要求 `launcher_smoke`、`decode.mediacodec`；Web 计划要求 `browser_smoke`、`decode.webcodecs`。
+Required smoke 按平台分开定义。Windows 当前要求 `windowed_smoke`、`decode.wmf` 和 `save.known_folder`。Web 当前要求 `browser_smoke`、`renderer.webgpu_or_webgl`、`decode.webcodecs`、`audio.webaudio_unlock`、`save.web_storage` 和 `package.web_source`。Linux 计划要求 `windowed_smoke` 和 `decode.linux_media`；macOS 计划要求 `windowed_smoke` 和 `decode.avfoundation`；iOS 计划要求 `launcher_smoke` 和 `decode.avfoundation`；Android 计划要求 `launcher_smoke` 和 `decode.mediacodec`。
 
 ## Checks
 

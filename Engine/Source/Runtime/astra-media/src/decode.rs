@@ -406,6 +406,101 @@ impl DecodeProvider for WindowsMediaFoundationDecodeProvider {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, Default)]
+pub struct WebCodecsDecodeProvider;
+
+#[cfg(target_arch = "wasm32")]
+impl WebCodecsDecodeProvider {
+    pub fn probe() -> Result<Self, MediaError> {
+        if webcodecs_available() {
+            Ok(Self)
+        } else {
+            Err(MediaError::Diagnostics(vec![Diagnostic::blocking(
+                "ASTRA_WEBCODECS_PROBE",
+                "WebCodecs audio/video decoder APIs are unavailable",
+            )]))
+        }
+    }
+
+    pub fn probe_available(&self) -> bool {
+        webcodecs_available()
+    }
+
+    pub fn capability(&self) -> DecodeCapability {
+        DecodeCapability {
+            provider_id: "astra.decode.webcodecs".to_string(),
+            priority: ProviderPriority::Platform,
+            kinds: vec![DecodeKind::Audio, DecodeKind::Video],
+            codecs: vec![
+                "mp4".to_string(),
+                "webm".to_string(),
+                "h264".to_string(),
+                "vp8".to_string(),
+                "vp9".to_string(),
+                "aac".to_string(),
+                "opus".to_string(),
+            ],
+            feature_gated: false,
+            packaged_eligible: true,
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl DecodeProvider for WebCodecsDecodeProvider {
+    fn capability(&self) -> DecodeCapability {
+        WebCodecsDecodeProvider::capability(self)
+    }
+
+    fn decode(&self, request: &DecodeRequest) -> Result<DecodeResult, MediaError> {
+        if !matches!(request.kind, DecodeKind::Audio | DecodeKind::Video) {
+            return Err(MediaError::Diagnostics(vec![Diagnostic::blocking(
+                "ASTRA_WEBCODECS_UNSUPPORTED_KIND",
+                "WebCodecs provider only supports audio and video decode",
+            )]));
+        }
+        let capability = self.capability();
+        if !capability
+            .codecs
+            .iter()
+            .any(|codec| codec == &request.codec)
+        {
+            return Err(MediaError::Diagnostics(vec![Diagnostic::blocking(
+                "ASTRA_WEBCODECS_UNSUPPORTED_CODEC",
+                format!(
+                    "WebCodecs provider does not support codec {}",
+                    request.codec
+                ),
+            )]));
+        }
+        Ok(DecodeResult {
+            provider_id: capability.provider_id.clone(),
+            kind: request.kind,
+            codec: request.codec.clone(),
+            output: DecodeOutput::MediaSurfaceToken(MediaSurfaceToken {
+                provider_id: capability.provider_id,
+                token_id: format!(
+                    "webcodecs:{}",
+                    Hash256::from_sha256(&request.bytes).to_hex()
+                ),
+                format: request.codec.clone(),
+            }),
+            diagnostics: Vec::new(),
+        })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn webcodecs_available() -> bool {
+    use js_sys::Reflect;
+    use wasm_bindgen::JsValue;
+
+    let global = js_sys::global();
+    Reflect::has(&global, &JsValue::from_str("VideoDecoder")).unwrap_or(false)
+        && Reflect::has(&global, &JsValue::from_str("AudioDecoder")).unwrap_or(false)
+}
+
 #[cfg(windows)]
 mod wmf_decode {
     use std::{ptr, slice};

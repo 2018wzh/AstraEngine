@@ -58,7 +58,7 @@ targets = [
 | `astra-platform-macos` | 2 | macOS capability probe 和 host adapter | `astra-platform` | AppKit object crossing public API |
 | `astra-platform-ios` | 2 | iOS capability probe 和 host adapter | `astra-platform` | JIT requirement、UIKit object crossing public API |
 | `astra-platform-android` | 2 | Android capability probe 和 host adapter | `astra-platform` | JVM object crossing public API |
-| `astra-platform-web` | 2 | Web capability probe 和 host adapter | `astra-platform` | browser object crossing public API |
+| `astra-platform-web` | 2 | Web browser probe、required smoke 和 host adapter | `astra-platform` | browser object crossing public API |
 | `astra-vn` | 3 | `.astra` parser/compiler、VN Core、Luau policy host | `astra-core`, `astra-runtime`, `astra-media`, `pest`, `mlua` | platform-native handles |
 | `astra-editor-bridge` | 4 | Qt/Rust bridge、PIE/debug API | `astra-runtime`, `astra-vn`, `astra-release` | packaged runtime dependency |
 | `astra-ai` | 4 | Runtime Director、provider profile、memory ledger、Editor AI audit | `astra-core`, `astra-runtime`, `astra-package` | provider secret in replay |

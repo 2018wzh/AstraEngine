@@ -49,6 +49,8 @@ pub struct ReleaseCheckRecord {
 | emu | `emu.text_redaction` | text pipeline report | report contains full commercial text without local opt-in | text hash, source ref, dump policy |
 | emu | `emu.filter_preset` | filter preset report | preset bypasses FilterGraph validation or leaks native handle | preset id, target layer, validation status |
 
+Web release 使用同一 `platform.capability_report` check。真实浏览器缺 `browser_smoke`、`renderer.webgpu_or_webgl`、`decode.webcodecs`、`audio.webaudio_unlock`、`save.web_storage` 或 `package.web_source` 时，check 必须是 `blocked`，不能降级成 fallback pass。
+
 ## Report Schema
 
 ```yaml

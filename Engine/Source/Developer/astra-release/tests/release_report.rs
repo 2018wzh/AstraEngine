@@ -156,6 +156,126 @@ fn release_report_includes_windows_platform_smoke_evidence() {
 }
 
 #[test]
+fn release_report_blocks_web_platform_report_without_required_smoke() {
+    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "web-release",
+        vec![SectionPayload::raw(
+            "asset.characters.hero",
+            "astra.cooked_asset.v1",
+            b"hero".to_vec(),
+        )],
+    ))
+    .unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "web-release".to_string(),
+            require_ffmpeg: false,
+            target: Some("nativevn-web".to_string()),
+            platform_report: Some(PlatformCapabilityReport::new(
+                PlatformId::Web,
+                Some("nativevn-web".to_string()),
+                SdkStatus::Present,
+                vec!["webgpu".to_string(), "webgl_fallback".to_string()],
+                vec!["webcodecs".to_string()],
+                vec!["webaudio".to_string()],
+                vec!["opfs".to_string(), "indexeddb".to_string()],
+                vec!["keyboard".to_string(), "touch".to_string()],
+                vec!["browser_launch".to_string()],
+                vec!["browser_sandbox".to_string()],
+            )),
+        })
+        .unwrap();
+
+    let platform_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "platform.capability_report")
+        .unwrap();
+    assert_eq!(platform_check.status, CheckStatus::Blocked);
+    assert_eq!(
+        platform_check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_PLATFORM_SMOKE_MISSING"
+    );
+}
+
+#[test]
+fn release_report_includes_web_platform_smoke_evidence() {
+    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "web-release",
+        vec![SectionPayload::raw(
+            "asset.characters.hero",
+            "astra.cooked_asset.v1",
+            b"hero".to_vec(),
+        )],
+    ))
+    .unwrap();
+    let platform_report = PlatformCapabilityReport::new(
+        PlatformId::Web,
+        Some("nativevn-web".to_string()),
+        SdkStatus::Present,
+        vec!["webgpu".to_string(), "webgl_fallback".to_string()],
+        vec!["webcodecs".to_string()],
+        vec!["webaudio".to_string()],
+        vec![
+            "opfs".to_string(),
+            "indexeddb".to_string(),
+            "file_api".to_string(),
+            "http_range".to_string(),
+        ],
+        vec![
+            "keyboard".to_string(),
+            "mouse".to_string(),
+            "touch".to_string(),
+        ],
+        vec![
+            "browser_launch".to_string(),
+            "visibility_resume".to_string(),
+            "worker".to_string(),
+        ],
+        vec!["browser_sandbox".to_string()],
+    )
+    .with_smoke(vec![
+        smoke("browser_smoke", PlatformSmokeStatus::Pass),
+        smoke("renderer.webgpu_or_webgl", PlatformSmokeStatus::Pass),
+        smoke("decode.webcodecs", PlatformSmokeStatus::Pass),
+        smoke("audio.webaudio_unlock", PlatformSmokeStatus::Pass),
+        smoke("save.web_storage", PlatformSmokeStatus::Pass),
+        smoke("package.web_source", PlatformSmokeStatus::Pass),
+        smoke("input.browser", PlatformSmokeStatus::Pass),
+        smoke("lifecycle.worker_visibility", PlatformSmokeStatus::Pass),
+    ]);
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "web-release".to_string(),
+            require_ffmpeg: false,
+            target: Some("nativevn-web".to_string()),
+            platform_report: Some(platform_report),
+        })
+        .unwrap();
+
+    let platform_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "platform.capability_report")
+        .unwrap();
+    assert_eq!(platform_check.status, CheckStatus::Pass);
+    assert!(platform_check
+        .evidence
+        .iter()
+        .any(|entry| entry.key == "smoke.decode.webcodecs.status" && entry.value == "pass"));
+    assert!(platform_check
+        .evidence
+        .iter()
+        .any(|entry| entry.key == "smoke.package.web_source.status" && entry.value == "pass"));
+}
+
+#[test]
 fn release_gate_blocks_package_target_manifests_with_editor_descriptors() {
     let mut request = PackageBuildRequest::minimal(
         "com.example.nativevn",

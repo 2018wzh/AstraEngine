@@ -101,9 +101,9 @@ pub struct PlatformCapabilityReport {
 | macOS | `astra-platform-macos` | host macOS | planned Metal、AVFoundation、CoreAudio、AppKit lifecycle |
 | iOS | `astra-platform-ios` | iOS target or Apple developer env | planned Metal、AVFoundation、safe area、touch、no-JIT Luau |
 | Android | `astra-platform-android` | Android SDK env | planned Vulkan、MediaCodec、SAF、touch、no-JIT Luau |
-| Web | `astra-platform-web` | wasm target or web SDK env | planned WebGPU/WebGL、WebCodecs、WebAudio、OPFS/IndexedDB |
+| Web | `astra-platform-web` | wasm32 browser environment | WebGPU/WebGL、WebCodecs、WebAudio、OPFS/IndexedDB、File API/fetch package source |
 
-缺 SDK 的平台必须输出 `sdk_status: missing`，Release Gate 对真实平台完成项判为 blocked。`sdk_status: present` 还必须附带该平台 required smoke：Windows 当前要求 `windowed_smoke`、`decode.wmf` 和 `save.known_folder`；其他平台 required smoke 已登记为计划项，代码未实现前不能标为 `DONE`。普通 CI 可以验证 schema、report 和 CLI，不把缺 SDK 或缺 smoke 平台标成已完成。
+缺 SDK 的平台必须输出 `sdk_status: missing`，Release Gate 对真实平台完成项判为 blocked。`sdk_status: present` 还必须附带该平台 required smoke：Windows 当前要求 `windowed_smoke`、`decode.wmf` 和 `save.known_folder`；Web 当前要求 `browser_smoke`、`renderer.webgpu_or_webgl`、`decode.webcodecs`、`audio.webaudio_unlock`、`save.web_storage` 和 `package.web_source`。Linux、macOS、iOS 和 Android required smoke 已登记为计划项，代码未实现前不能标为 `DONE`。普通 CI 可以验证 schema、report 和 CLI，不把缺 SDK 或缺 smoke 平台标成已完成。
 
 ## CLI And Gate
 

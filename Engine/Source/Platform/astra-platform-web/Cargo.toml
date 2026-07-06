@@ -7,3 +7,8 @@ rust-version.workspace = true
 
 [dependencies]
 astra-platform = { path = "../astra-platform" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = ["Document", "Window"] }

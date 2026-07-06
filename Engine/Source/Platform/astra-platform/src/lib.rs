@@ -385,7 +385,14 @@ fn required_smoke_checks(platform: PlatformId) -> &'static [&'static str] {
         PlatformId::Macos => &["windowed_smoke", "decode.avfoundation"],
         PlatformId::Ios => &["launcher_smoke", "decode.avfoundation"],
         PlatformId::Android => &["launcher_smoke", "decode.mediacodec"],
-        PlatformId::Web => &["browser_smoke", "decode.webcodecs"],
+        PlatformId::Web => &[
+            "browser_smoke",
+            "renderer.webgpu_or_webgl",
+            "decode.webcodecs",
+            "audio.webaudio_unlock",
+            "save.web_storage",
+            "package.web_source",
+        ],
     }
 }
 
@@ -461,5 +468,49 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|diag| diag.code == "ASTRA_PLATFORM_SMOKE_MISSING"));
+    }
+
+    #[test]
+    fn present_sdk_requires_web_required_smoke_evidence() {
+        let report = PlatformCapabilityReport::new(
+            PlatformId::Web,
+            Some("nativevn-web".to_string()),
+            SdkStatus::Present,
+            vec!["webgpu".to_string(), "webgl_fallback".to_string()],
+            vec!["webcodecs".to_string()],
+            vec!["webaudio".to_string()],
+            vec![
+                "opfs".to_string(),
+                "indexeddb".to_string(),
+                "file_api".to_string(),
+                "http_range".to_string(),
+            ],
+            vec!["keyboard".to_string(), "touch".to_string()],
+            vec![
+                "browser_launch".to_string(),
+                "visibility_resume".to_string(),
+            ],
+            vec!["browser_sandbox".to_string()],
+        );
+
+        let (status, diagnostics) = validate_capability_report(&report);
+
+        assert_eq!(status, PlatformValidationStatus::Blocked);
+        for required in [
+            "browser_smoke",
+            "renderer.webgpu_or_webgl",
+            "decode.webcodecs",
+            "audio.webaudio_unlock",
+            "save.web_storage",
+            "package.web_source",
+        ] {
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diag| diag.code == "ASTRA_PLATFORM_SMOKE_MISSING"
+                        && diag.fields.get("check").map(String::as_str) == Some(required)),
+                "missing diagnostic for {required}: {diagnostics:?}"
+            );
+        }
     }
 }

@@ -73,6 +73,35 @@ fn target_validate_and_platform_probe_emit_machine_readable_reports() {
     } else {
         assert_eq!(platform_report["sdk_status"], "missing");
     }
+
+    let web_output = Command::new(env!("CARGO_BIN_EXE_astra"))
+        .args([
+            "platform",
+            "probe",
+            "--platform",
+            "web",
+            "--target",
+            "nativevn-web",
+            "--format",
+            "json",
+        ])
+        .env("ASTRA_WEB_SDK", "1")
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        web_output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&web_output.stderr)
+    );
+    let web_report: serde_json::Value = serde_json::from_slice(&web_output.stdout).unwrap();
+    assert_eq!(web_report["platform"], "web");
+    if cfg!(target_arch = "wasm32") {
+        assert_eq!(web_report["sdk_status"], "present");
+    } else {
+        assert_eq!(web_report["sdk_status"], "missing");
+        assert!(web_report["smoke"].as_array().unwrap().is_empty());
+    }
 }
 
 #[test]

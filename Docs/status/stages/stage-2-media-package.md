@@ -1,6 +1,6 @@
 # Stage 2 Media + Package Work
 
-Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider 和 Platform capability。资产、Cook、Package、headless media、release report 和 Target manifest 已落地。平台侧改成分层验收：Windows 已进入真实 probe 和 smoke；Linux、macOS、iOS、Android、Web 目前只保留 capability crate 和明确缺口计划，不能写成六平台完成。
+Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider 和 Platform capability。资产、Cook、Package、headless media、release report 和 Target manifest 已落地。平台侧改成分层验收：Windows 和 Web 已进入真实 probe 和 smoke；Linux、macOS、iOS、Android 目前只保留 capability crate 和明确缺口计划，不能写成六平台完成。
 
 ## S2-ASSET-01 AssetId、VFS 与 sidecar schema
 
@@ -210,7 +210,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 4. `sdk_status: present` 时必须提供该平台 required smoke；缺 smoke 由 Release Gate 阻断。
 5. 编写 capability report validation 测试。
 
-**Done Evidence:** `cargo test -p astra-platform` 通过；共享 report schema、SDK 分层和 required smoke validation 已落地。六个平台 capability crate 仍在 workspace 中编译，但只有 Windows 有真实 smoke evidence。
+**Done Evidence:** `cargo test -p astra-platform` 通过；共享 report schema、SDK 分层和 required smoke validation 已落地。六个平台 capability crate 仍在 workspace 中编译，Windows 和 Web 有真实 smoke evidence。
 
 **Linked Test IDs:** `T-S2-PLATFORM-01`
 
@@ -340,17 +340,25 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **Linked Test IDs:** `T-S2-ANDROID-HOST-01`
 
-## S2-WEB-HOST-01 Web host gap plan
+## S2-WEB-HOST-01 Web host probe and browser smoke
 
 **ID:** `S2-WEB-HOST-01`
 
-**Status:** `SPEC_READY`
+**Status:** `DONE`
 
-**Goal:** 补 wasm host、WebGPU/WebGL、WebCodecs、WebAudio unlock、OPFS/IndexedDB/File API/HTTP range package source、worker/visibility resume 和 browser smoke。
+**Goal:** 补 wasm host、WebGPU/WebGL、WebCodecs、WebAudio unlock、OPFS/IndexedDB/File API/fetch package source、worker/visibility resume 和 browser smoke。
 
-**Target Paths:** `Engine/Source/Platform/astra-platform-web/`、`Docs/platforms/web.md`
+**Target Paths:** `Engine/Source/Platform/astra-platform-web/`、`Engine/Source/Runtime/astra-media/src/decode.rs`、`Docs/platforms/web.md`
 
-**Planned Gate:** required smoke 暂定 `browser_smoke` 和 `decode.webcodecs`。本轮不实现 wasm launcher、browser smoke 或 WebCodecs provider。
+**Steps:**
+
+1. native host 下 Web probe 始终报告 `sdk_status: missing`，不接受环境变量伪造 browser SDK。
+2. wasm32 browser 下探测 `window`/`document`、WebGPU/WebGL、WebCodecs、WebAudio、IndexedDB/OPFS、File API/fetch、input、Worker 和 visibility。
+3. Web required smoke 是 `browser_smoke`、`renderer.webgpu_or_webgl`、`decode.webcodecs`、`audio.webaudio_unlock`、`save.web_storage` 和 `package.web_source`。
+4. `WebCodecsDecodeProvider` 只在 wasm32 编译，输出 `MediaSurfaceToken`，不暴露 browser object 或 native handle。
+5. `uuid` workspace 依赖不启用随机生成 feature，保证 `astra-core` 和 Web platform crate 可在 `wasm32-unknown-unknown` 编译。
+
+**Done Evidence:** `cargo test -p astra-platform-web`、`cargo test -p astra-platform-web --target wasm32-unknown-unknown --no-run`、`cargo test -p astra-media decode_provider --target wasm32-unknown-unknown --no-run`、`cargo test -p astra-release release_report` 和 `cargo test -p astra-cli --test target_platform` 通过。真实浏览器缺 required smoke 时，release gate 仍会阻断 Web release。
 
 **Linked Test IDs:** `T-S2-WEB-HOST-01`
 
