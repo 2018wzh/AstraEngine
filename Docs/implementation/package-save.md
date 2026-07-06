@@ -1,6 +1,6 @@
 # Package And Save
 
-Package and save share one self-describing container. Rust types are schema source; section payload defaults to `serde` + `postcard`.
+Package and save share one self-describing container implemented by `astra-package`. Rust types are schema source; section payload defaults to `serde` + `postcard`, with `Raw` and `Zstd` available for cooked assets.
 
 ## Container
 
@@ -45,7 +45,7 @@ pub struct EncryptionDescriptor {
 }
 ```
 
-Encryption descriptor 只记录 provider 能力和外部 key reference。Package writer 不内置商业 key，不提供访问控制绕过。
+Encryption descriptor 只记录 provider 能力、AAD hash 和外部 key reference。Package writer 不内置商业 key，不提供访问控制绕过；没有匹配 crypto provider 时，reader 只报告 blocking diagnostic。
 
 ## Package Sections
 

@@ -1,6 +1,6 @@
 # Stage Test Matrix
 
-本矩阵把 Stage 1-5 的工作项映射到测试项目。Stage 1 路径已经落在 UE 风格 workspace；Stage 2-5 仍是未实现目标路径。
+本矩阵把 Stage 1-5 的工作项映射到测试项目。Stage 1 和 Stage 2 路径已经落在 UE 风格 workspace；Stage 3-5 仍是未实现目标路径。
 
 | Test ID | Stage | Test Project | Planned Path | Command | Covered Work IDs | Gate Domain | Expected Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |

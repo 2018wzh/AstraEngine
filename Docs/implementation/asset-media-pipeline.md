@@ -56,12 +56,12 @@ Runtime 发 command，Media provider 执行 command。Media provider 不写剧�
 
 | Slot | Default | Fallback |
 | --- | --- | --- |
-| Renderer2D | `wgpu` | headless capture provider |
+| Renderer2D | optional `wgpu` provider | headless capture provider |
 | TextLayout | `cosmic-text` + Swash | missing glyph diagnostic |
 | Image Decode | platform image API | Rust image decoder where profile allows |
-| Audio Decode | platform decoder | FFmpeg desktop fallback |
-| Video Decode | AVFoundation/MediaCodec/WebCodecs/WMF | FFmpeg desktop fallback |
-| Audio Output | platform output | headless meter |
+| Audio Decode | platform decoder | Symphonia fallback; FFmpeg optional |
+| Video Decode | AVFoundation/MediaCodec/WebCodecs/WMF | FFmpeg optional |
+| Audio Output | platform output or optional Kira provider | headless meter |
 
 ## Graph Validation
 

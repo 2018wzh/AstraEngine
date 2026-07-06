@@ -2,17 +2,17 @@
 
 ## P0
 
-- Stage 2 的 `Engine/Source/Runtime/astra-package`、`Engine/Source/Runtime/astra-asset`、`Engine/Source/Developer/astra-cook`、`Engine/Source/Runtime/astra-media` 和 `Engine/Source/Developer/astra-release` 尚未实现。
-- Stage 1 的 runtime save container 已在 `astra-runtime` 内实现；Stage 2 需要抽出或复用到 package container。
-- Release Gate 独立 validator 尚未实现；当前 Stage 1 只有 `astra.scenario_report.v1` 和 plugin descriptor/load tests。
-- 当前优先顺序是 package container、asset/cook、release report、media provider。Stage 3/4/5 不应先写绕过这些 contract 的私有格式。
+- Stage 2 的 `astra-package`、`astra-asset`、`astra-cook`、`astra-media` 和 `astra-release` 已落地。后续工作不应绕过这些 contract 写私有 package、media 或 release report 格式。
+- Runtime save 已迁移到 `astra-package` 共享 container。后续 save section 扩展应继续使用同一 header、section table、codec 和 footer hash 规则。
+- Release Gate 独立 validator 已实现 Stage 2 package/media/scenario refs 基线；Stage 3/4/5 需要继续补 VN、Editor、AI/MCP、platform 和 EMU domain。
+- 当前优先顺序转为 Stage 3 `.astra` parser/compiler、AstraVN Core 和 presentation model。
 
 ## P1
 
 - `.astra` parser/compiler 到 CompiledStory IR。
 - AstraVN presentation model、standard command library、system UI profile 和 advanced presentation opt-in scenario。
-- headless YAML scenario runner 和 release report writer。
-- wgpu Renderer2D provider、headless capture provider、cosmic-text provider。
+- headless YAML scenario runner 已存在；release report writer 已实现 package validate 基线，后续需要 VN full playthrough domain。
+- `astra-media` 已实现 headless capture、cosmic-text layout contract、AudioGraph meter、FilterGraph validator 和 DecodeProvider policy。wgpu/FFmpeg 仍通过 explicit feature gate 接入。
 - Qt/QML Editor shell、PIE bridge、Plugin Manager 和 extension diagnostics。
 
 ## P2

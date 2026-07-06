@@ -22,7 +22,7 @@ Media Runtime 执行表现，不保存剧情权威状态。它消费 Presentatio
 
 ## 测试
 
-Media tests 必须覆盖 image/font/text/filter/audio/video decode、headless capture、AudioGraph bus、FilterGraph typed node validation 和 provider fallback。
+Media tests 覆盖 image/font/text/filter/audio decode、headless capture、AudioGraph bus、FilterGraph typed node validation 和 provider fallback。视频 fallback 通过 optional `ffmpeg` feature 接入；默认 workspace build 不要求本机 FFmpeg。
 
 ## Runtime 边界
 

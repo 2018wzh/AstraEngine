@@ -1,6 +1,6 @@
 # Stage 2 Media + Package Work
 
-Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media provider。目标是可构建二进制 package、可 headless capture、可验证 release report。本页是 planned target 清单，不表示实现已经存在。
+Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media provider。当前完成边界是 Desktop Native + Headless：可构建二进制 package、可 headless capture、可验证 release report；六平台 native provider 继续作为后续 platform 接入工作。
 
 ## S2-ASSET-01 AssetId、VFS 与 sidecar schema
 
@@ -10,7 +10,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S1-CORE-01`、`Docs/modules/asset-pipeline.md`
 
-**Target Paths:** `Engine/Source/Runtime/astra-asset/src/id.rs`、`Engine/Source/Runtime/astra-asset/src/registry.rs`、`Engine/Source/Runtime/astra-asset/src/sidecar.rs`、`Engine/Source/Runtime/astra-asset/tests/sidecar_schema.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-asset/src/id.rs`、`Engine/Source/Runtime/astra-asset/src/registry.rs`、`Engine/Source/Runtime/astra-asset/src/sidecar.rs`、`Engine/Source/Runtime/astra-asset/tests/sidecar_schema.rs`
 
 **Steps:**
 
@@ -19,7 +19,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 3. 实现 sidecar validation：缺失 license、非法 source、重复 AssetId 都输出 blocking diagnostic。
 4. 编写 YAML roundtrip 和 invalid sidecar 测试。
 
-**Done Evidence:** sidecar schema 测试覆盖有效样例、缺失字段、重复 id 和非法路径。
+**Done Evidence:** `cargo test -p astra-asset sidecar_schema` 覆盖有效样例、缺失字段、重复 id 和非法路径。
 
 **Linked Test IDs:** `T-S2-ASSET-01`
 
@@ -31,7 +31,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S2-ASSET-01`
 
-**Target Paths:** `Engine/Source/Developer/astra-cook/src/importer.rs`、`Engine/Source/Developer/astra-cook/src/cook.rs`、`Engine/Source/Developer/astra-cook/src/audit.rs`、`Engine/Source/Developer/astra-cook/tests/import_cook.rs` planned target
+**Target Paths:** `Engine/Source/Developer/astra-cook/src/importer.rs`、`Engine/Source/Developer/astra-cook/src/cook.rs`、`Engine/Source/Developer/astra-cook/src/audit.rs`、`Engine/Source/Developer/astra-cook/tests/import_cook.rs`
 
 **Steps:**
 
@@ -40,7 +40,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 3. 建 Stage 2 image/font/audio metadata importer，不写商业 payload 到测试仓库。
 4. 编写 stale artifact、license blocked 和 cook artifact hash 测试。
 
-**Done Evidence:** cook 测试能区分 fresh、stale、blocked 三种 artifact 状态。
+**Done Evidence:** `cargo test -p astra-cook import_cook` 区分 fresh、stale、blocked 三种 artifact 状态。
 
 **Linked Test IDs:** `T-S2-ASSET-02`
 
@@ -52,7 +52,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S1-SAVE-01`、`S2-ASSET-02`
 
-**Target Paths:** `Engine/Source/Runtime/astra-package/src/container.rs`、`Engine/Source/Runtime/astra-package/src/builder.rs`、`Engine/Source/Runtime/astra-package/src/reader.rs`、`Engine/Source/Runtime/astra-package/tests/package_roundtrip.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-package/src/container.rs`、`Engine/Source/Runtime/astra-package/src/builder.rs`、`Engine/Source/Runtime/astra-package/src/reader.rs`、`Engine/Source/Runtime/astra-package/tests/package_roundtrip.rs`
 
 **Steps:**
 
@@ -62,7 +62,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 4. 实现 streaming reader，只暴露 bounded read API。
 5. 编写 package roundtrip、footer hash mismatch 和 section bounds 测试。
 
-**Done Evidence:** package reader 可验证 hash 和 section bounds，Runtime 不依赖源 YAML 启动。
+**Done Evidence:** `cargo test -p astra-package package_roundtrip` 验证 hash、section bounds、Zstd codec、crypto descriptor 和 schema registry；Runtime save 已改用同一 container。
 
 **Linked Test IDs:** `T-S2-PACKAGE-01`
 
@@ -74,7 +74,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S1-PLUGIN-01`、`Docs/contracts/media.md`
 
-**Target Paths:** `Engine/Source/Runtime/astra-media/src/renderer2d.rs`、`Engine/Source/Runtime/astra-media/src/headless.rs`、`Engine/Source/Runtime/astra-media/tests/headless_capture.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-media/src/renderer2d.rs`、`Engine/Source/Runtime/astra-media/tests/headless_capture.rs`
 
 **Steps:**
 
@@ -83,7 +83,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 3. 实现 headless capture provider，输出 deterministic image hash。
 4. 编写 provider eligibility、headless render command 和 hash repeatability 测试。
 
-**Done Evidence:** headless capture 在同输入下输出相同 hash，provider descriptor 可被 release gate 检查。
+**Done Evidence:** `cargo test -p astra-media headless_capture` 证明 headless capture hash 可重复，provider descriptor 可被 release gate 检查。
 
 **Linked Test IDs:** `T-S2-MEDIA-01`
 
@@ -95,7 +95,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S2-MEDIA-01`
 
-**Target Paths:** `Engine/Source/Runtime/astra-media/src/text_layout.rs`、`Engine/Source/Runtime/astra-media/tests/text_layout.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-media/src/text_layout.rs`、`Engine/Source/Runtime/astra-media/tests/text_layout.rs`
 
 **Steps:**
 
@@ -104,7 +104,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 3. 实现 headless layout hash，避免截图作为唯一证据。
 4. 编写 CJK shaping、ruby span、line wrap 和 missing font diagnostic 测试。
 
-**Done Evidence:** TextLayout 测试能证明 backlog 与 runtime text key 使用同一 layout contract。
+**Done Evidence:** `cargo test -p astra-media text_layout` 覆盖 CJK、ruby、wrapping、voice replay metadata 和 missing font diagnostic。
 
 **Linked Test IDs:** `T-S2-MEDIA-02`
 
@@ -116,7 +116,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S1-RUNTIME-03`
 
-**Target Paths:** `Engine/Source/Runtime/astra-media/src/audio_graph.rs`、`Engine/Source/Runtime/astra-media/src/audio_provider.rs`、`Engine/Source/Runtime/astra-media/tests/audio_graph.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-media/src/audio_graph.rs`、`Engine/Source/Runtime/astra-media/tests/audio_graph.rs`
 
 **Steps:**
 
@@ -125,7 +125,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 3. 把 audio wait/fade/loop 完成事件接入 AwaitToken。
 4. 编写 bus mix、fade completion、loop marker 和 headless meter hash 测试。
 
-**Done Evidence:** AudioGraph 不保存剧情状态，音频 fence 通过 AwaitToken 在固定 tick 边界完成。
+**Done Evidence:** `cargo test -p astra-media audio_graph` 覆盖 bus mix、fade completion、loop marker 和 headless meter hash。
 
 **Linked Test IDs:** `T-S2-MEDIA-03`
 
@@ -137,7 +137,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S2-MEDIA-01`
 
-**Target Paths:** `Engine/Source/Runtime/astra-media/src/filter_graph.rs`、`Engine/Source/Runtime/astra-media/tests/filter_graph.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-media/src/filter_graph.rs`、`Engine/Source/Runtime/astra-media/tests/filter_graph.rs`
 
 **Steps:**
 
@@ -146,7 +146,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 3. 校验环路、缺失 target、参数类型错误和 provider ineligible。
 4. 编写 typed validation 和 fallback diagnostic 测试。
 
-**Done Evidence:** FilterGraph validator 输出可被 release gate 使用的 blocking/warning diagnostic。
+**Done Evidence:** `cargo test -p astra-media filter_graph` 覆盖 typed validation 和 fallback diagnostic。
 
 **Linked Test IDs:** `T-S2-MEDIA-04`
 
@@ -158,7 +158,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S1-PLUGIN-01`
 
-**Target Paths:** `Engine/Source/Runtime/astra-media/src/decode.rs`、`Engine/Source/Runtime/astra-media/tests/decode_provider.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-media/src/decode.rs`、`Engine/Source/Runtime/astra-media/tests/decode_provider.rs`
 
 **Steps:**
 
@@ -167,7 +167,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 3. public API 只返回 CPU buffer 或 MediaSurfaceToken，不暴露 native handle。
 4. 编写 unsupported codec、fallback disabled 和 fallback selected 测试。
 
-**Done Evidence:** decode 测试能证明 provider 选择和 release profile 绑定，而不是按加载顺序抢占。
+**Done Evidence:** `cargo test -p astra-media decode_provider` 证明 provider 选择和 release profile 绑定，而不是按加载顺序抢占；FFmpeg 由 optional feature 显式接入。
 
 **Linked Test IDs:** `T-S2-MEDIA-05`
 
@@ -179,7 +179,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S2-PACKAGE-01`、`S2-MEDIA-01`、`S2-MEDIA-05`
 
-**Target Paths:** `Engine/Source/Programs/astra-cli/src/package.rs`、`Engine/Source/Developer/astra-release/src/report.rs`、`Engine/Source/Developer/astra-release/tests/release_report.rs` planned target
+**Target Paths:** `Engine/Source/Programs/astra-cli/src/main.rs`、`Engine/Source/Developer/astra-release/src/lib.rs`、`Engine/Source/Developer/astra-release/tests/release_report.rs`
 
 **Steps:**
 
@@ -188,6 +188,6 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 3. 实现 `astra package validate target/nativevn.astrapkg --profile desktop-release`。
 4. 编写 pass、warning、blocked report schema 测试。
 
-**Done Evidence:** release report 可机器读取，blocking domains 与 `Docs/contracts/release-gate.md` 对齐。
+**Done Evidence:** `cargo test -p astra-release release_report` 和 `astra package validate target/nativevn.astrapkg --profile desktop-release --report target/release_report.yaml` 输出可机器读取的 `astra.release_report.v1`。
 
 **Linked Test IDs:** `T-S2-GATE-01`

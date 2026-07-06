@@ -41,4 +41,4 @@ astra test run scenarios/native_smoke.yaml --headless --log-dir target/logs
 | `astra.plugin_report.v1` | 插件加载、卸载和 provider |
 | `astra.emu.local_case_report.v1` | AstraEMU Artemis 和后续 family |
 
-Release Gate check matrix 见 [Release Gate Checks Blueprint](../implementation/release-gate-checks.md)。
+Stage 2 的 `astra package validate` 已输出 `astra.release_report.v1`，覆盖 package integrity、section bounds/hash、provider policy、media fallback policy、scenario refs 和 platform eligibility。FFmpeg fallback 是 optional feature；profile 必须把缺失 FFmpeg 写成 warning 或 blocking。Release Gate check matrix 见 [Release Gate Checks Blueprint](../implementation/release-gate-checks.md)。

@@ -8,7 +8,7 @@ Asset Pipeline 从 text-first source 和外部素材生成 binary package。Impo
 | --- | --- |
 | `astra-asset` | AssetId、VFS、AssetRegistry、sidecar schema |
 | `astra-cook` | Importer/CookProcessor traits、DDC key、package builder |
-| `astra-package` | Binary container、section table、hash、streaming read |
+| `astra-package` | Binary container、section table、hash、Zstd codec、crypto descriptor、bounded read |
 
 ## Source Sidecar
 
@@ -31,6 +31,6 @@ Missing asset、invalid license、missing sidecar、stale cooked artifact、prov
 
 ## 实现接口
 
-`astra-asset` 暴露 `AssetId`、`AssetSidecar`、`AssetRegistry` 和 VFS lookup。`astra-cook` 暴露 `AssetImporter`、`CookProcessor`、`CookArtifact`、dependency key 和 import audit。`astra-package` 只接收 cooked artifact 和 manifest section，不读取源素材目录。
+`astra-asset` 暴露 `AssetId`、`AssetSidecar`、`AssetRegistry` 和 VFS lookup。`astra-cook` 暴露 metadata importer、cook processor、`CookArtifact`、DDC key 和 import audit。`astra-package` 只接收 cooked artifact 和 manifest section，不读取源素材目录。
 
 完整流程和默认检查见 [Asset And Media Pipeline Blueprint](../implementation/asset-media-pipeline.md)。

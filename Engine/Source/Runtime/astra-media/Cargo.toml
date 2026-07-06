@@ -1,0 +1,32 @@
+[package]
+name = "astra-media"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+desktop-wgpu = ["dep:wgpu"]
+desktop-audio = ["dep:kira"]
+ffmpeg = []
+ffmpeg-system = ["ffmpeg", "dep:ffmpeg-next"]
+
+[dependencies]
+astra-core = { path = "../astra-core" }
+cosmic-text.workspace = true
+ffmpeg-next = { workspace = true, optional = true }
+image.workspace = true
+kira = { workspace = true, optional = true }
+postcard.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+symphonia.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+wgpu = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true

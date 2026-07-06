@@ -1,24 +1,23 @@
 [package]
-name = "astra-cli"
+name = "astra-cook"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
 rust-version.workspace = true
 
-[[bin]]
-name = "astra"
-path = "src/main.rs"
-
 [dependencies]
+astra-asset = { path = "../../Runtime/astra-asset" }
 astra-core = { path = "../../Runtime/astra-core" }
 astra-package = { path = "../../Runtime/astra-package" }
-astra-release = { path = "../../Developer/astra-release" }
-astra-test = { path = "../../Developer/astra-test" }
-clap.workspace = true
+camino.workspace = true
+image.workspace = true
+postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
-tracing-appender.workspace = true
-tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

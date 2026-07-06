@@ -8,7 +8,7 @@ wgpu 是默认 provider，但不是唯一后端。Renderer2D provider 声明 bac
 
 ## DecodeProvider
 
-平台解码优先：AVFoundation、MediaCodec、WebCodecs、Windows Media Foundation 等平台模块先接管可用格式。桌面 fallback 可通过 vcpkg 接 FFmpeg。DecodeProvider 输出 CPU buffer 或 `MediaSurfaceToken`；public API 不暴露平台 native handle。
+平台解码优先：AVFoundation、MediaCodec、WebCodecs、Windows Media Foundation 等平台模块先接管可用格式。桌面 fallback 可通过 optional FFmpeg feature 接入；默认 build 不要求本机 FFmpeg。DecodeProvider 输出 CPU buffer 或 `MediaSurfaceToken`；public API 不暴露平台 native handle。
 
 ## FilterGraph
 

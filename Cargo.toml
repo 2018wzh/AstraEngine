@@ -2,8 +2,13 @@
 resolver = "2"
 members = [
     "Engine/Source/Runtime/astra-core",
+    "Engine/Source/Runtime/astra-package",
+    "Engine/Source/Runtime/astra-asset",
+    "Engine/Source/Runtime/astra-media",
     "Engine/Source/Runtime/astra-runtime",
     "Engine/Source/Runtime/astra-plugin",
+    "Engine/Source/Developer/astra-cook",
+    "Engine/Source/Developer/astra-release",
     "Engine/Source/Developer/astra-property",
     "Engine/Source/Developer/astra-property-derive",
     "Engine/Source/Developer/astra-test",
@@ -20,9 +25,14 @@ rust-version = "1.85"
 [workspace.dependencies]
 abi_stable = "0.11"
 blake3 = "1"
+camino = { version = "1", features = ["serde1"] }
 clap = { version = "4", features = ["derive"] }
+cosmic-text = "0.19"
+ffmpeg-next = "8.1"
 hex = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 indexmap = { version = "2", features = ["serde"] }
+kira = "0.12"
 libloading = "0.8"
 miette = { version = "7", features = ["fancy"] }
 postcard = { version = "1", features = ["alloc"] }
@@ -34,9 +44,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10"
+symphonia = { version = "0.6", features = ["all"] }
 syn = { version = "2", features = ["full"] }
+tempfile = "3"
 thiserror = "1"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 uuid = { version = "1", features = ["serde", "v4", "v7"] }
+wgpu = "30"
+zstd = "0.13"

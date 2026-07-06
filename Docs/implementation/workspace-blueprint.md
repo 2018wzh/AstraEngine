@@ -45,10 +45,10 @@ targets = [
 | `astra-test` | 1 | YAML scenario runner、report compare | `astra-core`, `astra-runtime`, `serde_yaml` | platform UI |
 | `astra-cli` | 1 | `astra test run`、`astra report explain` | `astra-test`, `clap` | package build、release validation |
 | `astra-asset` | 2 | AssetId、VFS、sidecar schema、AssetRegistry | `astra-core`, `serde`, `schemars` | decoder native handle |
-| `astra-cook` | 2 | Importer/CookProcessor、DDC key、package builder | `astra-asset`, `astra-package` | Editor UI |
-| `astra-package` | 2 | binary package/save container、section reader/writer | `astra-core`, `postcard`, `serde` | story/runtime semantics |
-| `astra-media` | 2 | Renderer2D/TextLayout/Decode/FilterGraph/AudioGraph traits | `astra-core`, `wgpu`, `cosmic-text` | VN state |
-| `astra-release` | 2 | Release Gate validators、report writer | `astra-core`, `astra-package`, `astra-test` | Editor-only state |
+| `astra-cook` | 2 | Importer/CookProcessor、DDC key、cook audit | `astra-asset`, `astra-package`, `image` | Editor UI |
+| `astra-package` | 2 | binary package/save container、section reader/writer、Zstd codec、crypto descriptor | `astra-core`, `postcard`, `serde`, `zstd` | story/runtime semantics |
+| `astra-media` | 2 | Renderer2D/TextLayout/Decode/FilterGraph/AudioGraph traits and headless providers | `astra-core`, `image`, `symphonia`, `cosmic-text`, optional `wgpu`/`ffmpeg-next`/`kira` | VN state |
+| `astra-release` | 2 | Release Gate validators、report writer | `astra-core`, `astra-package`, `astra-media` | Editor-only state |
 | `astra-vn` | 3 | `.astra` parser/compiler、VN Core、Luau policy host | `astra-core`, `astra-runtime`, `astra-media`, `pest`, `mlua` | platform-native handles |
 | `astra-editor-bridge` | 4 | Qt/Rust bridge、PIE/debug API | `astra-runtime`, `astra-vn`, `astra-release` | packaged runtime dependency |
 | `astra-ai` | 4 | Runtime AI committed output、Editor AI audit | `astra-core`, `astra-runtime` | provider secret in replay |
@@ -61,7 +61,7 @@ targets = [
 
 | Binary | Crate | Command |
 | --- | --- | --- |
-| `astra` | `astra-cli` | Stage 1: `astra test run`, `astra report explain`; Stage 2 adds `astra package validate` |
+| `astra` | `astra-cli` | `astra cook`, `astra package build`, `astra package validate`, `astra test run`, `astra report explain` |
 | `astra-editor` | `astra-editor-app` | Qt/QML creator editor |
 | `astra-emu-manager` | `astra-emu-manager` | legacy VN manager that creates RuntimeWorld, selects family plugin and owns overlay/filter/text pipelines |
 | `astra-emu-family-*` | family crate | in-process legacy family plugin |
