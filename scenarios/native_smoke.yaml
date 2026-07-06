@@ -1,0 +1,25 @@
+schema: astra.scenario.v1
+stage: stage1-enginecore
+seed: 42
+actions:
+  - launch: {}
+  - emit:
+      kind: dialogue
+      data:
+        speaker: narrator
+        text: EngineCore native smoke.
+  - advance: { ticks: 1 }
+  - emit:
+      kind: choice
+      data:
+        prompt: route?
+        options:
+          - library
+          - rooftop
+  - choose: library
+  - save: slot.auto
+  - load: slot.auto
+  - replay_from_start: {}
+assertions:
+  - replay_hash_match: true
+  - no_blocking_diagnostics: true

@@ -1,6 +1,6 @@
 # Stage 1 EngineCore Work
 
-Stage 1 交付 EngineCore 的可运行闭环：workspace、核心类型、Runtime tick、StateMachine、AwaitToken、Save/Replay、Plugin ABI、PropertySystem 和 headless scenario runner。本页是 planned target 清单，不表示实现已经存在。
+Stage 1 已交付 EngineCore 的可运行闭环：UE 风格 workspace、核心类型、Runtime tick、StateMachine、AwaitToken、Save/Replay、Plugin ABI、PropertySystem 和 headless scenario runner。后续 Stage 的页面仍记录未实现工作。
 
 ## S1-BOOT-01 Workspace 与基础 CI
 
@@ -10,14 +10,14 @@ Stage 1 交付 EngineCore 的可运行闭环：workspace、核心类型、Runtim
 
 **Depends On:** `Docs/modules/engine-core.md`、`Docs/contracts/runtime.md`
 
-**Target Paths:** `Cargo.toml`、`rust-toolchain.toml`、`crates/astra-core/`、`crates/astra-runtime/`、`crates/astra-plugin/`、`crates/astra-property/`、`crates/astra-test/`、`.github/workflows/ci.yml` planned target
+**Target Paths:** `Cargo.toml`、`rust-toolchain.toml`、`Engine/Source/Runtime/astra-core/`、`Engine/Source/Runtime/astra-runtime/`、`Engine/Source/Runtime/astra-plugin/`、`Engine/Source/Developer/astra-property/`、`Engine/Source/Developer/astra-property-derive/`、`Engine/Source/Developer/astra-test/`、`Engine/Source/Programs/astra-cli/`、`Engine/Plugins/Fixtures/headless-presentation-provider/`、`.github/workflows/ci.yml`
 
 **Steps:**
 
 1. 新建 workspace manifest，启用 resolver 2，并登记 Stage 1 crate。
 2. 固定 stable Rust toolchain，记录目标 host triple。
 3. 给每个 crate 建 Stage 1 `lib.rs`，只暴露本 Stage 必需 public module。
-4. 配置 CI 顺序：`python Tools\check_docs.py`、`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`。
+4. 配置 CI 顺序：`python Tools/check_docs.py`、`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`。
 5. 本地执行同一组命令，保存命令输出作为合入证据。
 
 **Done Evidence:** CI 配置存在，本地四条命令通过；crate graph 不包含 Editor、Luau、GPU/audio native handle 或 provider 实现。
@@ -32,14 +32,14 @@ Stage 1 交付 EngineCore 的可运行闭环：workspace、核心类型、Runtim
 
 **Depends On:** `S1-BOOT-01`
 
-**Target Paths:** `crates/astra-core/src/id.rs`、`crates/astra-core/src/diagnostic.rs`、`crates/astra-core/src/schema.rs`、`crates/astra-core/src/hash.rs`、`crates/astra-core/tests/core_types.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-core/src/id.rs`、`Engine/Source/Runtime/astra-core/src/diagnostic.rs`、`Engine/Source/Runtime/astra-core/src/schema.rs`、`Engine/Source/Runtime/astra-core/src/hash.rs`、`Engine/Source/Runtime/astra-core/tests/core_types.rs`
 
 **Steps:**
 
 1. 定义 StableId 的生成、解析、显示和 serde 形态。
 2. 定义 Diagnostic severity、code、message、source span 和 machine-readable fields。
 3. 定义 SchemaVersion、migration range 和 Hash128 newtype。
-4. 用标准库 hash/input bytes 封装稳定 hash API，不引入额外依赖。
+4. 用 BLAKE3 生成 tick/report `Hash128`，用 SHA-256 生成 container/binary `Hash256`。
 5. 编写 roundtrip、display 和 serde 测试。
 
 **Done Evidence:** `astra-core` 测试覆盖 id roundtrip、diagnostic serialization、schema ordering 和 hash repeatability。
@@ -54,7 +54,7 @@ Stage 1 交付 EngineCore 的可运行闭环：workspace、核心类型、Runtim
 
 **Depends On:** `S1-CORE-01`
 
-**Target Paths:** `crates/astra-runtime/src/world.rs`、`crates/astra-runtime/src/actor.rs`、`crates/astra-runtime/src/component.rs`、`crates/astra-runtime/tests/world_actor.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-runtime/src/world.rs`、`Engine/Source/Runtime/astra-runtime/src/actor.rs`、`Engine/Source/Runtime/astra-runtime/src/blackboard.rs`、`Engine/Source/Runtime/astra-runtime/tests/world_actor.rs`
 
 **Steps:**
 
@@ -76,7 +76,7 @@ Stage 1 交付 EngineCore 的可运行闭环：workspace、核心类型、Runtim
 
 **Depends On:** `S1-RUNTIME-01`
 
-**Target Paths:** `crates/astra-runtime/src/event.rs`、`crates/astra-runtime/src/state_machine.rs`、`crates/astra-runtime/src/scheduler.rs`、`crates/astra-runtime/tests/state_machine_tick.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-runtime/src/event.rs`、`Engine/Source/Runtime/astra-runtime/src/state_machine.rs`、`Engine/Source/Runtime/astra-runtime/src/world.rs`、`Engine/Source/Runtime/astra-runtime/tests/state_machine_tick.rs`
 
 **Steps:**
 
@@ -98,7 +98,7 @@ Stage 1 交付 EngineCore 的可运行闭环：workspace、核心类型、Runtim
 
 **Depends On:** `S1-RUNTIME-02`
 
-**Target Paths:** `crates/astra-runtime/src/await_token.rs`、`crates/astra-runtime/src/scheduler.rs`、`crates/astra-runtime/tests/await_token.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-runtime/src/await_token.rs`、`Engine/Source/Runtime/astra-runtime/src/world.rs`、`Engine/Source/Runtime/astra-runtime/tests/await_token.rs`
 
 **Steps:**
 
@@ -120,7 +120,7 @@ Stage 1 交付 EngineCore 的可运行闭环：workspace、核心类型、Runtim
 
 **Depends On:** `S1-RUNTIME-03`、`Docs/contracts/data-formats.md`
 
-**Target Paths:** `crates/astra-runtime/src/save.rs`、`crates/astra-runtime/src/replay.rs`、`crates/astra-runtime/tests/save_replay.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-runtime/src/save.rs`、`Engine/Source/Runtime/astra-runtime/src/world.rs`、`Engine/Source/Runtime/astra-runtime/tests/save_replay.rs`
 
 **Steps:**
 
@@ -142,17 +142,17 @@ Stage 1 交付 EngineCore 的可运行闭环：workspace、核心类型、Runtim
 
 **Depends On:** `S1-CORE-01`、`Docs/contracts/plugin-abi.md`
 
-**Target Paths:** `crates/astra-plugin/src/descriptor.rs`、`crates/astra-plugin/src/loader.rs`、`crates/astra-plugin/src/registry.rs`、`crates/astra-plugin/tests/descriptor_gate.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-plugin/src/descriptor.rs`、`Engine/Source/Runtime/astra-plugin/src/loader.rs`、`Engine/Source/Runtime/astra-plugin/src/registry.rs`、`Engine/Source/Runtime/astra-plugin/tests/descriptor_gate.rs`、`Engine/Source/Runtime/astra-plugin/tests/load_unload.rs`
 
 **Steps:**
 
 1. 定义 PluginDescriptor、capability、permission、engine version、rustc fingerprint 和 feature fingerprint。
-2. 实现 descriptor YAML parsing 和 validation diagnostics。
+2. 实现 descriptor YAML parsing、`abi_style`、binary hash 和 validation diagnostics。
 3. 建立 ServiceRegistry、ExtensionRegistry 和 EngineModuleSlot 注册入口。
-4. 实现 load/unload 状态机，不支持运行中热重载。
+4. 用 `abi_stable::RootModule` 和 `libloading` 实现 load/unload 状态机，不支持运行中热重载。
 5. 编写 fingerprint mismatch、permission missing 和 unload cleanup 测试。
 
-**Done Evidence:** 插件 gate 能拒绝不匹配 descriptor，并记录 machine-readable diagnostic。
+**Done Evidence:** 插件 gate 能拒绝不匹配 descriptor，fixture cdylib 通过 root module 注册 provider，unload 会清理 registry 并记录 machine-readable diagnostic。
 
 **Linked Test IDs:** `T-S1-PLUGIN-01`
 
@@ -164,7 +164,7 @@ Stage 1 交付 EngineCore 的可运行闭环：workspace、核心类型、Runtim
 
 **Depends On:** `S1-CORE-01`
 
-**Target Paths:** `crates/astra-property/`、`crates/astra-property/tests/property_metadata.rs`、`crates/astra-property/tests/expand_smoke.rs` planned target
+**Target Paths:** `Engine/Source/Developer/astra-property/`、`Engine/Source/Developer/astra-property-derive/`、`Engine/Source/Developer/astra-property/tests/property_metadata.rs`、`Engine/Source/Developer/astra-property/tests/expand_smoke.rs`
 
 **Steps:**
 
@@ -185,7 +185,7 @@ Stage 1 交付 EngineCore 的可运行闭环：workspace、核心类型、Runtim
 
 **Depends On:** `S1-SAVE-01`、`S1-PLUGIN-01`
 
-**Target Paths:** `crates/astra-test/src/runner.rs`、`crates/astra-test/src/report.rs`、`scenarios/native_smoke.yaml`、`crates/astra-test/tests/native_smoke.rs` planned target
+**Target Paths:** `Engine/Source/Developer/astra-test/src/runner.rs`、`Engine/Source/Developer/astra-test/src/report.rs`、`Engine/Source/Programs/astra-cli/src/main.rs`、`scenarios/native_smoke.yaml`、`Engine/Source/Developer/astra-test/tests/native_smoke.rs`
 
 **Steps:**
 

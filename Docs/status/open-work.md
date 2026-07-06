@@ -2,11 +2,9 @@
 
 ## P0
 
-- 建立 Rust workspace、fixed stable toolchain、`tools/check_docs.py` 和基础 CI。
-- 实现 `astra-core`、`astra-runtime`、`astra-test` 的 Stage 1 public API。
-- 定义 binary container header、section table 和 postcard payload reader/writer。
-- 建立 plugin descriptor validator 和 `abi_stable` loader lifecycle。
-- 实现 Runtime API、Provider API 和 Release Gate check matrix 中的 P0 checks。
+- Stage 2 的 `Engine/Source/Runtime/astra-package`、`Engine/Source/Runtime/astra-asset`、`Engine/Source/Developer/astra-cook`、`Engine/Source/Runtime/astra-media` 和 `Engine/Source/Developer/astra-release` 尚未实现。
+- Stage 1 的 runtime save container 已在 `astra-runtime` 内实现；Stage 2 需要抽出或复用到 package container。
+- Release Gate 独立 validator 尚未实现；当前 Stage 1 只有 `astra.scenario_report.v1` 和 plugin descriptor/load tests。
 
 ## P1
 

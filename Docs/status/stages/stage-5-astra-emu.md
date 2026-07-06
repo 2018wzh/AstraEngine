@@ -10,7 +10,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Depends On:** `Docs/contracts/astraemu-ipc.md`、`S1-CORE-01`
 
-**Target Paths:** `crates/astra-emu-manager/src/ipc.rs`、`crates/astra-emu-core-api/src/lib.rs`、`tests/emu/ipc_handshake.rs` planned target
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/ipc.rs`、`AstraEMU/Source/CoreApi/astra-emu-core-api/src/lib.rs`、`AstraEMU/Tests/ipc_handshake.rs` planned target
 
 **Steps:**
 
@@ -31,7 +31,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Depends On:** `S5-MANAGER-01`
 
-**Target Paths:** `crates/astra-emu-manager/src/process.rs`、`crates/astra-emu-manager/src/crash_bundle.rs`、`tests/emu/core_lifecycle.rs` planned target
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/process.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/crash_bundle.rs`、`AstraEMU/Tests/core_lifecycle.rs` planned target
 
 **Steps:**
 
@@ -52,7 +52,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Depends On:** `S5-MANAGER-01`
 
-**Target Paths:** `crates/astra-emu-core-api/src/family.rs`、`crates/astra-emu-core-api/src/report.rs`、`tests/emu/family_core_api.rs` planned target
+**Target Paths:** `AstraEMU/Source/CoreApi/astra-emu-core-api/src/family.rs`、`AstraEMU/Source/CoreApi/astra-emu-core-api/src/report.rs`、`AstraEMU/Tests/family_core_api.rs` planned target
 
 **Steps:**
 
@@ -73,7 +73,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Depends On:** `S5-CORE-01`、`Docs/emu/artemis/implementation-checklist.md`
 
-**Target Paths:** `crates/astra-emu-artemis/`、`tests/emu/artemis/`、`scenarios/emu/artemis_full_flow.yaml` planned target
+**Target Paths:** `AstraEMU/Source/Families/astra-emu-artemis/`、`AstraEMU/Tests/artemis/`、`scenarios/emu/artemis_full_flow.yaml` planned target
 
 **Steps:**
 
@@ -95,7 +95,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Depends On:** `S5-CORE-01`、`Docs/emu/krkr/implementation-checklist.md`
 
-**Target Paths:** `crates/astra-emu-krkr/`、`tests/emu/krkr/`、`scenarios/emu/krkr_probe.yaml` planned target
+**Target Paths:** `AstraEMU/Source/Families/astra-emu-krkr/`、`AstraEMU/Tests/krkr/`、`scenarios/emu/krkr_probe.yaml` planned target
 
 **Steps:**
 
@@ -116,7 +116,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Depends On:** `S5-CORE-01`、`Docs/emu/bgi/implementation-checklist.md`
 
-**Target Paths:** `crates/astra-emu-bgi/`、`tests/emu/bgi/`、`scenarios/emu/bgi_full_flow.yaml` planned target
+**Target Paths:** `AstraEMU/Source/Families/astra-emu-bgi/`、`AstraEMU/Tests/bgi/`、`scenarios/emu/bgi_full_flow.yaml` planned target
 
 **Steps:**
 
@@ -138,7 +138,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Depends On:** `S5-KRKR-01`、`S5-ARTEMIS-01`、`S5-BGI-01`、`Docs/emu/softpal/implementation-checklist.md`
 
-**Target Paths:** `crates/astra-emu-softpal/`、`tests/emu/softpal/`、`scenarios/emu/softpal_full_flow.yaml` planned target
+**Target Paths:** `AstraEMU/Source/Families/astra-emu-softpal/`、`AstraEMU/Tests/softpal/`、`scenarios/emu/softpal_full_flow.yaml` planned target
 
 **Steps:**
 
@@ -159,7 +159,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Depends On:** `S5-KRKR-01`、`S5-ARTEMIS-01`、`S5-BGI-01`、`Docs/emu/fvp/implementation-checklist.md`
 
-**Target Paths:** `crates/astra-emu-fvp/`、`tests/emu/fvp/`、`scenarios/emu/fvp_full_flow.yaml` planned target
+**Target Paths:** `AstraEMU/Source/Families/astra-emu-fvp/`、`AstraEMU/Tests/fvp/`、`scenarios/emu/fvp_full_flow.yaml` planned target
 
 **Steps:**
 
@@ -180,7 +180,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Depends On:** `S5-KRKR-01`、`S5-ARTEMIS-01`、`S5-BGI-01`、`Docs/emu/siglus/implementation-checklist.md`
 
-**Target Paths:** `crates/astra-emu-siglus/`、`tests/emu/siglus/`、`scenarios/emu/siglus_full_flow.yaml` planned target
+**Target Paths:** `AstraEMU/Source/Families/astra-emu-siglus/`、`AstraEMU/Tests/siglus/`、`scenarios/emu/siglus_full_flow.yaml` planned target
 
 **Steps:**
 
@@ -202,7 +202,7 @@ Stage 5 实现旧 VN compat core。AstraEMU core 独立进程持有 legacy engin
 
 **Depends On:** `S5-CORE-01`、`S5-ARTEMIS-01`
 
-**Target Paths:** `crates/astra-release/src/emu_gate.rs`、`crates/astra-release/tests/emu_gate.rs` planned target
+**Target Paths:** `Engine/Source/Developer/astra-release/src/emu_gate.rs`、`Engine/Source/Developer/astra-release/tests/emu_gate.rs` planned target
 
 **Steps:**
 

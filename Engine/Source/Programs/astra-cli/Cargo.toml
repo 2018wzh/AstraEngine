@@ -1,0 +1,16 @@
+[package]
+name = "astra-cli"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "astra"
+path = "src/main.rs"
+
+[dependencies]
+astra-test = { path = "../../Developer/astra-test" }
+clap.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true

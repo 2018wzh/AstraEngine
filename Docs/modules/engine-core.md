@@ -11,6 +11,9 @@ EngineCore 是所有产品线共享的引擎内核。它提供 RuntimeWorld、Ac
 | `astra-plugin` | `abi_stable` 风格插件 ABI、descriptor、loader、registry |
 | `astra-property` | derive 宏、PropertySystem metadata、Inspector/MCP/save glue |
 | `astra-test` | headless runner、scenario engine、report comparison |
+| `astra-cli` | Stage 1 CLI：`astra test run`、`astra report explain` |
+
+Stage 1 代码位于 UE 风格 workspace：`Engine/Source/Runtime/`、`Engine/Source/Developer/`、`Engine/Source/Programs/` 和 `Engine/Plugins/Fixtures/`。
 
 ## 实现顺序
 

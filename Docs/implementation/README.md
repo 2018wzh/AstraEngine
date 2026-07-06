@@ -34,6 +34,6 @@
 ## 验证
 
 ```bash
-python tools/check_docs.py
+python Tools/check_docs.py
 git diff --check
 ```

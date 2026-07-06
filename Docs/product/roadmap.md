@@ -6,7 +6,7 @@
 
 | Stage | 目标 | 退出标准 | Work |
 | --- | --- | --- | --- |
-| Stage 1 EngineCore | RuntimeWorld、Actor/Component、StateMachine、EventBus、Scheduler、AwaitToken、Save/Replay、PropertySystem、Plugin ABI 和 headless scenario runner。 | Native sample 可 package、headless run、save/load/replay，Runtime determinism 和插件 fingerprint gate 通过。 | [stage-1-enginecore](../status/stages/stage-1-enginecore.md) |
+| Stage 1 EngineCore | RuntimeWorld、Actor/Component、StateMachine、EventBus、Scheduler、AwaitToken、Save/Replay、PropertySystem、Plugin ABI 和 headless scenario runner。 | Native smoke 可 headless run、save/load/replay，Runtime determinism 和插件 fingerprint/load-unload gate 通过；package build 留 Stage 2。 | [stage-1-enginecore](../status/stages/stage-1-enginecore.md) |
 | Stage 2 Media + Package | Import/Cook、binary package、Renderer2D slot、TextLayout、AudioGraph、FilterGraph、DecodeProvider 和 release report。 | Package integrity、provider eligibility、headless capture、decode fallback 和 release report schema 通过。 | [stage-2-media-package](../status/stages/stage-2-media-package.md) |
 | Stage 3 AstraVN | `.astra` 编译、Luau policy、Graph/Timeline 同源、商业 VN 系统 UI 和完整 playthrough scenario。 | `.astra` sample 完成 dialogue、choice、backlog、auto、skip、save/load、config、video 和 replay hash gate。 | [stage-3-astra-vn](../status/stages/stage-3-astra-vn.md) |
 | Stage 4 Editor + AI/MCP | Qt/QML editor、PIE、Inspector、Debugger、Package panel、Runtime AI、Editor Copilot、Content Generation 和 audit。 | Project Wizard 到 Package/Release Gate 闭环可用，Trusted session、Review Queue、provider-free replay 和 audit gate 通过。 | [stage-4-editor-ai-mcp](../status/stages/stage-4-editor-ai-mcp.md) |

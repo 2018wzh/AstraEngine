@@ -13,8 +13,8 @@
 **Report Schema:** `astra.scenario_report.v1`
 
 ```bash
-astra test run scenarios/native_smoke.yaml --headless --report target/reports/stage1.yaml
-astra report explain target/reports/stage1.yaml
+cargo run -p astra-cli -- test run scenarios/native_smoke.yaml --headless --report target/reports/stage1.yaml
+cargo run -p astra-cli -- report explain target/reports/stage1.yaml
 ```
 
 Expected report:
@@ -28,9 +28,12 @@ hashes:
   event: "hash128"
   presentation: "hash128"
 checks:
-  runtime.determinism: pass
-  save.load.replay: pass
-  plugin.descriptor_gate: pass
+- id: runtime.determinism
+  status: pass
+- id: save.load.replay
+  status: pass
+- id: plugin.descriptor_gate
+  status: pass
 ```
 
 ## Stage 2：Media + Package
@@ -39,12 +42,12 @@ checks:
 
 **Test IDs:** `T-S2-PACKAGE-01`、`T-S2-MEDIA-01`、`T-S2-MEDIA-05`、`T-S2-GATE-01`
 
-**Sample:** `samples/native_smoke`
+**Sample:** `Examples/NativeSmoke`
 
 **Report Schema:** `astra.release_report.v1`
 
 ```bash
-astra package build samples/native_smoke --out target/native_smoke.astrapkg
+astra package build Examples/NativeSmoke --out target/native_smoke.astrapkg
 astra package validate target/native_smoke.astrapkg --profile desktop-release --report target/reports/stage2.yaml
 ```
 
@@ -56,12 +59,12 @@ Expected report includes `package.integrity`, `renderer.headless_capture`, `deco
 
 **Test IDs:** `T-S3-SCRIPT-01`、`T-S3-LUAU-01`、`T-S3-LUAU-02`、`T-S3-SAMPLE-01`
 
-**Sample:** `samples/nativevn`、`scenarios/full_playthrough.yaml`
+**Sample:** `Examples/NativeVN`、`scenarios/full_playthrough.yaml`
 
 **Report Schema:** `astra.scenario_report.v1` + `astra.release_report.v1`
 
 ```bash
-astra package build samples/nativevn --out target/nativevn.astrapkg
+astra package build Examples/NativeVN --out target/nativevn.astrapkg
 astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --headless --report target/reports/stage3.yaml
 ```
 
@@ -73,7 +76,7 @@ Expected report includes `script.compile`, `luau.policy_lock`, `system_stories.c
 
 **Test IDs:** `T-S4-EDITOR-01`、`T-S4-EDITOR-04`、`T-S4-EDITOR-05`、`T-S4-AI-02`、`T-S4-MCP-01`
 
-**Sample:** `samples/nativevn` opened through Project Wizard
+**Sample:** `Examples/NativeVN` opened through Project Wizard
 
 **Report Schema:** `astra.editor_report.v1`
 

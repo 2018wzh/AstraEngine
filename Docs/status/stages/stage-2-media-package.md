@@ -10,7 +10,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S1-CORE-01`、`Docs/modules/asset-pipeline.md`
 
-**Target Paths:** `crates/astra-asset/src/id.rs`、`crates/astra-asset/src/registry.rs`、`crates/astra-asset/src/sidecar.rs`、`crates/astra-asset/tests/sidecar_schema.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-asset/src/id.rs`、`Engine/Source/Runtime/astra-asset/src/registry.rs`、`Engine/Source/Runtime/astra-asset/src/sidecar.rs`、`Engine/Source/Runtime/astra-asset/tests/sidecar_schema.rs` planned target
 
 **Steps:**
 
@@ -31,7 +31,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S2-ASSET-01`
 
-**Target Paths:** `crates/astra-cook/src/importer.rs`、`crates/astra-cook/src/cook.rs`、`crates/astra-cook/src/audit.rs`、`crates/astra-cook/tests/import_cook.rs` planned target
+**Target Paths:** `Engine/Source/Developer/astra-cook/src/importer.rs`、`Engine/Source/Developer/astra-cook/src/cook.rs`、`Engine/Source/Developer/astra-cook/src/audit.rs`、`Engine/Source/Developer/astra-cook/tests/import_cook.rs` planned target
 
 **Steps:**
 
@@ -52,7 +52,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S1-SAVE-01`、`S2-ASSET-02`
 
-**Target Paths:** `crates/astra-package/src/container.rs`、`crates/astra-package/src/builder.rs`、`crates/astra-package/src/reader.rs`、`crates/astra-package/tests/package_roundtrip.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-package/src/container.rs`、`Engine/Source/Runtime/astra-package/src/builder.rs`、`Engine/Source/Runtime/astra-package/src/reader.rs`、`Engine/Source/Runtime/astra-package/tests/package_roundtrip.rs` planned target
 
 **Steps:**
 
@@ -74,7 +74,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S1-PLUGIN-01`、`Docs/contracts/media.md`
 
-**Target Paths:** `crates/astra-media/src/renderer2d.rs`、`crates/astra-media/src/headless.rs`、`crates/astra-media/tests/headless_capture.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-media/src/renderer2d.rs`、`Engine/Source/Runtime/astra-media/src/headless.rs`、`Engine/Source/Runtime/astra-media/tests/headless_capture.rs` planned target
 
 **Steps:**
 
@@ -95,7 +95,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S2-MEDIA-01`
 
-**Target Paths:** `crates/astra-media/src/text_layout.rs`、`crates/astra-media/tests/text_layout.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-media/src/text_layout.rs`、`Engine/Source/Runtime/astra-media/tests/text_layout.rs` planned target
 
 **Steps:**
 
@@ -116,7 +116,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S1-RUNTIME-03`
 
-**Target Paths:** `crates/astra-media/src/audio_graph.rs`、`crates/astra-media/src/audio_provider.rs`、`crates/astra-media/tests/audio_graph.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-media/src/audio_graph.rs`、`Engine/Source/Runtime/astra-media/src/audio_provider.rs`、`Engine/Source/Runtime/astra-media/tests/audio_graph.rs` planned target
 
 **Steps:**
 
@@ -137,7 +137,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S2-MEDIA-01`
 
-**Target Paths:** `crates/astra-media/src/filter_graph.rs`、`crates/astra-media/tests/filter_graph.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-media/src/filter_graph.rs`、`Engine/Source/Runtime/astra-media/tests/filter_graph.rs` planned target
 
 **Steps:**
 
@@ -158,7 +158,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S1-PLUGIN-01`
 
-**Target Paths:** `crates/astra-media/src/decode.rs`、`crates/astra-media/tests/decode_provider.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-media/src/decode.rs`、`Engine/Source/Runtime/astra-media/tests/decode_provider.rs` planned target
 
 **Steps:**
 
@@ -179,7 +179,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 
 **Depends On:** `S2-PACKAGE-01`、`S2-MEDIA-01`、`S2-MEDIA-05`
 
-**Target Paths:** `crates/astra-cli/src/package.rs`、`crates/astra-release/src/report.rs`、`crates/astra-release/tests/release_report.rs` planned target
+**Target Paths:** `Engine/Source/Programs/astra-cli/src/package.rs`、`Engine/Source/Developer/astra-release/src/report.rs`、`Engine/Source/Developer/astra-release/tests/release_report.rs` planned target
 
 **Steps:**
 

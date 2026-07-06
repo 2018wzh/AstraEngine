@@ -1,0 +1,16 @@
+[package]
+name = "astra-plugin"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+abi_stable.workspace = true
+astra-core = { path = "../astra-core" }
+libloading.workspace = true
+schemars.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true

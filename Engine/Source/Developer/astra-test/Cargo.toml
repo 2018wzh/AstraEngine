@@ -1,0 +1,17 @@
+[package]
+name = "astra-test"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+astra-core = { path = "../../Runtime/astra-core" }
+astra-plugin = { path = "../../Runtime/astra-plugin" }
+astra-runtime = { path = "../../Runtime/astra-runtime" }
+schemars.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true

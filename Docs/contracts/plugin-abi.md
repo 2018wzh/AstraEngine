@@ -26,14 +26,17 @@ Release Gate 在加载前校验 descriptor、binary hash、engine version、rust
 
 ```rust
 #[repr(C)]
-pub struct PluginEntry {
-    pub descriptor: PluginDescriptor,
-    pub register: extern "C" fn(&mut PluginRegistrar) -> PluginResult,
-    pub shutdown: extern "C" fn(&mut PluginShutdownContext) -> PluginResult,
+#[derive(StableAbi)]
+#[sabi(kind(Prefix(prefix_ref = AstraPluginModuleRef)))]
+pub struct AstraPluginModule {
+    pub descriptor_yaml: extern "C" fn() -> RString,
+    pub register: extern "C" fn() -> FfiPluginRegistration,
+    #[sabi(last_prefix_field)]
+    pub shutdown: extern "C" fn() -> FfiPluginShutdown,
 }
 ```
 
-SDK 可以用 Rust trait 包装 entry，但稳定边界仍以 descriptor 和 ABI-safe value 为准。插件可以加载和卸载，不支持运行中重载。需要替换版本时，Runtime/Editor 必须完成 unload，再加载新 binary。
+插件用 `abi_stable::export_root_module` 导出 `AstraPluginModuleRef`。`libloading` 负责打开动态库，loader 读取 `abi_stable` root module header 并校验 layout，再取 descriptor、register 和 shutdown 函数。SDK 可以用 Rust trait 包装 entry，但稳定边界仍以 descriptor YAML 和 ABI-safe value 为准。插件可以加载和卸载，不支持运行中重载。需要替换版本时，Runtime/Editor 必须完成 unload，再加载新 binary。
 
 ## Provider 注册
 

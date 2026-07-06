@@ -10,7 +10,7 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Depends On:** `Docs/modules/astra-vn-script.md`
 
-**Target Paths:** `crates/astra-vn/src/parser.rs`、`crates/astra-vn/tests/parser_astra.rs`、`samples/nativevn/main.astra` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-vn/src/parser.rs`、`Engine/Source/Runtime/astra-vn/tests/parser_astra.rs`、`Examples/NativeVN/main.astra` planned target
 
 **Steps:**
 
@@ -31,7 +31,7 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Depends On:** `S3-SCRIPT-01`
 
-**Target Paths:** `crates/astra-vn/src/compiler.rs`、`crates/astra-vn/src/compiled_story.rs`、`crates/astra-vn/tests/compiled_story.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-vn/src/compiler.rs`、`Engine/Source/Runtime/astra-vn/src/compiled_story.rs`、`Engine/Source/Runtime/astra-vn/tests/compiled_story.rs` planned target
 
 **Steps:**
 
@@ -52,7 +52,7 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Depends On:** `S1-RUNTIME-02`、`S3-SCRIPT-02`
 
-**Target Paths:** `crates/astra-vn/src/runtime.rs`、`crates/astra-vn/src/variables.rs`、`crates/astra-vn/tests/vn_core_flow.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-vn/src/runtime.rs`、`Engine/Source/Runtime/astra-vn/src/variables.rs`、`Engine/Source/Runtime/astra-vn/tests/vn_core_flow.rs` planned target
 
 **Steps:**
 
@@ -73,7 +73,7 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Depends On:** `S3-CORE-01`、`S2-MEDIA-02`
 
-**Target Paths:** `crates/astra-vn/src/backlog.rs`、`crates/astra-vn/src/read_state.rs`、`crates/astra-vn/src/voice_replay.rs`、`crates/astra-vn/tests/backlog_read_voice.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-vn/src/backlog.rs`、`Engine/Source/Runtime/astra-vn/src/read_state.rs`、`Engine/Source/Runtime/astra-vn/src/voice_replay.rs`、`Engine/Source/Runtime/astra-vn/tests/backlog_read_voice.rs` planned target
 
 **Steps:**
 
@@ -94,7 +94,7 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Depends On:** `S1-SAVE-01`、`S3-CORE-02`
 
-**Target Paths:** `crates/astra-vn/src/save.rs`、`crates/astra-vn/tests/vn_save_replay.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-vn/src/save.rs`、`Engine/Source/Runtime/astra-vn/tests/vn_save_replay.rs` planned target
 
 **Steps:**
 
@@ -115,7 +115,7 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Depends On:** `S3-CORE-01`、`Docs/contracts/script-vn.md`
 
-**Target Paths:** `crates/astra-vn/src/luau_policy.rs`、`crates/astra-vn/src/mutation.rs`、`crates/astra-vn/tests/luau_sandbox.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-vn/src/luau_policy.rs`、`Engine/Source/Runtime/astra-vn/src/mutation.rs`、`Engine/Source/Runtime/astra-vn/tests/luau_sandbox.rs` planned target
 
 **Steps:**
 
@@ -137,7 +137,7 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Depends On:** `S3-LUAU-01`
 
-**Target Paths:** `samples/nativevn/policies/standard_policy.luau`、`samples/nativevn/system.astra`、`crates/astra-vn/tests/system_stories.rs` planned target
+**Target Paths:** `Examples/NativeVN/policies/standard_policy.luau`、`Examples/NativeVN/system.astra`、`Engine/Source/Runtime/astra-vn/tests/system_stories.rs` planned target
 
 **Steps:**
 
@@ -158,7 +158,7 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Depends On:** `S3-SCRIPT-02`
 
-**Target Paths:** `crates/astra-vn/src/editor_metadata.rs`、`crates/astra-vn/tests/graph_timeline_roundtrip.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-vn/src/editor_metadata.rs`、`Engine/Source/Runtime/astra-vn/tests/graph_timeline_roundtrip.rs` planned target
 
 **Steps:**
 
@@ -179,7 +179,7 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Depends On:** `S3-CORE-03`、`S3-LUAU-02`、`S2-GATE-01`
 
-**Target Paths:** `samples/nativevn/`、`scenarios/full_playthrough.yaml`、`crates/astra-test/tests/vn_full_playthrough.rs` planned target
+**Target Paths:** `Examples/NativeVN/`、`scenarios/full_playthrough.yaml`、`Engine/Source/Developer/astra-test/tests/vn_full_playthrough.rs` planned target
 
 **Steps:**
 

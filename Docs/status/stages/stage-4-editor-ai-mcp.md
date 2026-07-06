@@ -10,7 +10,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Depends On:** `Docs/modules/editor.md`、`S3-SAMPLE-01`
 
-**Target Paths:** `apps/astra-editor/`、`crates/astra-editor-bridge/`、`tests/editor/project_wizard.rs` planned target
+**Target Paths:** `Editor/Source/App/astra-editor/`、`Editor/Source/Bridge/astra-editor-bridge/`、`Editor/Tests/project_wizard.rs` planned target
 
 **Steps:**
 
@@ -31,7 +31,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Depends On:** `S4-EDITOR-01`、`S3-CORE-03`
 
-**Target Paths:** `crates/astra-editor-bridge/src/pie.rs`、`tests/editor/pie_bridge.rs` planned target
+**Target Paths:** `Editor/Source/Bridge/astra-editor-bridge/src/pie.rs`、`Editor/Tests/pie_bridge.rs` planned target
 
 **Steps:**
 
@@ -52,7 +52,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Depends On:** `S1-PROP-01`、`S4-EDITOR-02`
 
-**Target Paths:** `crates/astra-editor-bridge/src/inspector.rs`、`crates/astra-editor-bridge/src/debugger.rs`、`tests/editor/inspector_debugger.rs` planned target
+**Target Paths:** `Editor/Source/Bridge/astra-editor-bridge/src/inspector.rs`、`Editor/Source/Bridge/astra-editor-bridge/src/debugger.rs`、`Editor/Tests/inspector_debugger.rs` planned target
 
 **Steps:**
 
@@ -73,7 +73,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Depends On:** `S3-EDIT-01`、`S4-EDITOR-03`
 
-**Target Paths:** `apps/astra-editor/qml/GraphView.qml`、`apps/astra-editor/qml/TimelineView.qml`、`tests/editor/graph_timeline_edit.rs` planned target
+**Target Paths:** `Editor/Source/App/astra-editor/qml/GraphView.qml`、`Editor/Source/App/astra-editor/qml/TimelineView.qml`、`Editor/Tests/graph_timeline_edit.rs` planned target
 
 **Steps:**
 
@@ -94,7 +94,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Depends On:** `S2-GATE-01`、`S4-EDITOR-02`
 
-**Target Paths:** `crates/astra-editor-bridge/src/package_panel.rs`、`apps/astra-editor/qml/ReleaseGatePanel.qml`、`tests/editor/release_gate_panel.rs` planned target
+**Target Paths:** `Editor/Source/Bridge/astra-editor-bridge/src/package_panel.rs`、`Editor/Source/App/astra-editor/qml/ReleaseGatePanel.qml`、`Editor/Tests/release_gate_panel.rs` planned target
 
 **Steps:**
 
@@ -115,7 +115,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Depends On:** `S1-SAVE-01`、`Docs/contracts/ai-mcp.md`
 
-**Target Paths:** `crates/astra-ai/src/runtime_ai.rs`、`crates/astra-ai/src/intent_validator.rs`、`crates/astra-ai/tests/runtime_ai_replay.rs` planned target
+**Target Paths:** `Engine/Source/Developer/astra-ai/src/runtime_ai.rs`、`Engine/Source/Developer/astra-ai/src/intent_validator.rs`、`Engine/Source/Developer/astra-ai/tests/runtime_ai_replay.rs` planned target
 
 **Steps:**
 
@@ -136,7 +136,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Depends On:** `S4-EDITOR-05`
 
-**Target Paths:** `crates/astra-ai/src/editor_copilot.rs`、`crates/astra-ai/src/trusted_session.rs`、`tests/ai/editor_copilot.rs` planned target
+**Target Paths:** `Engine/Source/Developer/astra-ai/src/editor_copilot.rs`、`Engine/Source/Developer/astra-ai/src/trusted_session.rs`、`Engine/Tests/AI/editor_copilot.rs` planned target
 
 **Steps:**
 
@@ -157,7 +157,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Depends On:** `S4-AI-02`、`Docs/contracts/ai-mcp.md`
 
-**Target Paths:** `crates/astra-mcp/src/tool_descriptor.rs`、`crates/astra-mcp/src/capability.rs`、`tests/mcp/capability_protocol.rs` planned target
+**Target Paths:** `Engine/Source/Developer/astra-mcp/src/tool_descriptor.rs`、`Engine/Source/Developer/astra-mcp/src/capability.rs`、`Engine/Tests/MCP/capability_protocol.rs` planned target
 
 **Steps:**
 
@@ -178,7 +178,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Depends On:** `S4-AI-01`、`S4-AI-02`、`S4-MCP-01`
 
-**Target Paths:** `crates/astra-release/src/ai_gate.rs`、`crates/astra-release/tests/ai_mcp_gate.rs` planned target
+**Target Paths:** `Engine/Source/Developer/astra-release/src/ai_gate.rs`、`Engine/Source/Developer/astra-release/tests/ai_mcp_gate.rs` planned target
 
 **Steps:**
 

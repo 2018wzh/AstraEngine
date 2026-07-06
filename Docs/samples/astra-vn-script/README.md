@@ -14,5 +14,5 @@
 验证文档链接：
 
 ```bash
-python tools/check_docs.py
+python Tools/check_docs.py
 ```
