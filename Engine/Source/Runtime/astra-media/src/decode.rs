@@ -357,6 +357,332 @@ impl DecodeProvider for SymphoniaAudioDecodeProvider {
     }
 }
 
+#[cfg(windows)]
+#[derive(Debug, Clone, Default)]
+pub struct WindowsMediaFoundationDecodeProvider;
+
+#[cfg(windows)]
+impl WindowsMediaFoundationDecodeProvider {
+    pub fn probe() -> Result<Self, MediaError> {
+        let _session = wmf_decode::startup()?;
+        Ok(Self)
+    }
+
+    pub fn capability(&self) -> DecodeCapability {
+        DecodeCapability {
+            provider_id: "astra.decode.wmf".to_string(),
+            priority: ProviderPriority::Platform,
+            kinds: vec![DecodeKind::Audio, DecodeKind::Video],
+            codecs: vec![
+                "wav".to_string(),
+                "mp3".to_string(),
+                "wma".to_string(),
+                "aac".to_string(),
+                "mp4".to_string(),
+                "wmv".to_string(),
+                "h264".to_string(),
+            ],
+            feature_gated: false,
+            packaged_eligible: true,
+        }
+    }
+}
+
+#[cfg(windows)]
+impl DecodeProvider for WindowsMediaFoundationDecodeProvider {
+    fn capability(&self) -> DecodeCapability {
+        WindowsMediaFoundationDecodeProvider::capability(self)
+    }
+
+    fn decode(&self, request: &DecodeRequest) -> Result<DecodeResult, MediaError> {
+        match request.kind {
+            DecodeKind::Audio => wmf_decode::decode_audio(self.capability().provider_id, request),
+            DecodeKind::Video => wmf_decode::decode_video(self.capability().provider_id, request),
+            DecodeKind::Image => Err(wmf_decode::blocking(
+                "ASTRA_WMF_UNSUPPORTED_KIND",
+                "Windows Media Foundation provider only supports audio and video decode",
+            )),
+        }
+    }
+}
+
+#[cfg(windows)]
+mod wmf_decode {
+    use std::{ptr, slice};
+
+    use astra_core::{Diagnostic, Hash256};
+    use windows::{
+        core::{Error as WindowsError, Interface, HRESULT},
+        Win32::{
+            Foundation::{RPC_E_CHANGED_MODE, S_FALSE, S_OK},
+            Media::MediaFoundation::{
+                IMFAttributes, IMFMediaType, IMFSample, MFAudioFormat_PCM,
+                MFCreateMFByteStreamOnStreamEx, MFCreateMediaType,
+                MFCreateSourceReaderFromByteStream, MFMediaType_Audio, MFMediaType_Video,
+                MFShutdown, MFStartup, MFVideoFormat_RGB32, MFSTARTUP_FULL,
+                MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_MAJOR_TYPE,
+                MF_MT_SUBTYPE, MF_SOURCE_READERF_ENDOFSTREAM, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_VERSION,
+            },
+            System::{
+                Com::{
+                    CoInitializeEx, CoUninitialize, StructuredStorage::CreateStreamOnHGlobal,
+                    COINIT_MULTITHREADED,
+                },
+                Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
+            },
+        },
+    };
+
+    use super::{
+        DecodeKind, DecodeOutput, DecodeRequest, DecodeResult, MediaError, MAX_DECODED_AUDIO_BYTES,
+    };
+
+    pub(super) fn startup() -> Result<WmfSession, MediaError> {
+        WmfSession::new().map_err(|err| {
+            blocking(
+                "ASTRA_WMF_PROBE",
+                format!("Media Foundation startup failed: {err}"),
+            )
+        })
+    }
+
+    pub(super) fn decode_audio(
+        provider_id: String,
+        request: &DecodeRequest,
+    ) -> Result<DecodeResult, MediaError> {
+        let _session = startup()?;
+        let output = decode_audio_inner(&request.bytes).map_err(decode_error)?;
+        Ok(DecodeResult {
+            provider_id,
+            kind: DecodeKind::Audio,
+            codec: request.codec.clone(),
+            output: DecodeOutput::CpuBuffer {
+                hash: Hash256::from_sha256(&output.pcm),
+                bytes: output.pcm,
+                format: format!("pcm_s16le:{}:{}", output.sample_rate, output.channels),
+            },
+            diagnostics: output.diagnostics,
+        })
+    }
+
+    pub(super) fn decode_video(
+        provider_id: String,
+        request: &DecodeRequest,
+    ) -> Result<DecodeResult, MediaError> {
+        let _session = startup()?;
+        let bytes = decode_video_inner(&request.bytes).map_err(decode_error)?;
+        Ok(DecodeResult {
+            provider_id,
+            kind: DecodeKind::Video,
+            codec: request.codec.clone(),
+            output: DecodeOutput::CpuBuffer {
+                hash: Hash256::from_sha256(&bytes),
+                bytes,
+                format: "bgra8:first_frame".to_string(),
+            },
+            diagnostics: Vec::new(),
+        })
+    }
+
+    pub(super) fn blocking(code: &'static str, message: impl Into<String>) -> MediaError {
+        MediaError::Diagnostics(vec![Diagnostic::blocking(code, message.into())])
+    }
+
+    fn decode_error(err: WindowsError) -> MediaError {
+        blocking(
+            "ASTRA_WMF_DECODE",
+            format!("Media Foundation decode failed: {err}"),
+        )
+    }
+
+    struct AudioOutput {
+        pcm: Vec<u8>,
+        sample_rate: u32,
+        channels: u32,
+        diagnostics: Vec<Diagnostic>,
+    }
+
+    pub(super) struct WmfSession {
+        com_initialized: bool,
+    }
+
+    impl WmfSession {
+        fn new() -> windows::core::Result<Self> {
+            unsafe {
+                let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+                let com_initialized = match hr {
+                    S_OK | S_FALSE => true,
+                    RPC_E_CHANGED_MODE => false,
+                    other => {
+                        other.ok()?;
+                        false
+                    }
+                };
+                MFStartup(MF_VERSION, MFSTARTUP_FULL)?;
+                Ok(Self { com_initialized })
+            }
+        }
+    }
+
+    impl Drop for WmfSession {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = MFShutdown();
+                if self.com_initialized {
+                    CoUninitialize();
+                }
+            }
+        }
+    }
+
+    fn decode_audio_inner(bytes: &[u8]) -> windows::core::Result<AudioOutput> {
+        unsafe {
+            let reader = source_reader_from_bytes(bytes)?;
+            let stream_index = MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
+            let media_type = media_type(&MFMediaType_Audio, &MFAudioFormat_PCM)?;
+            reader.SetCurrentMediaType(stream_index, None, &media_type)?;
+            let current_type = reader.GetCurrentMediaType(stream_index)?;
+            let sample_rate =
+                attribute_u32(&current_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND).unwrap_or_default();
+            let channels =
+                attribute_u32(&current_type, &MF_MT_AUDIO_NUM_CHANNELS).unwrap_or_default();
+            let mut pcm = Vec::new();
+            let mut diagnostics = Vec::new();
+
+            loop {
+                let mut flags = 0;
+                let mut sample = None;
+                reader.ReadSample(
+                    stream_index,
+                    0,
+                    None,
+                    Some(&mut flags),
+                    None,
+                    Some(&mut sample),
+                )?;
+                if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+                    break;
+                }
+                let Some(sample) = sample else {
+                    continue;
+                };
+                let chunk = sample_bytes(&sample)?;
+                if chunk.is_empty() {
+                    continue;
+                }
+                let remaining = MAX_DECODED_AUDIO_BYTES.saturating_sub(pcm.len());
+                if chunk.len() > remaining {
+                    pcm.extend_from_slice(&chunk[..remaining]);
+                    diagnostics.push(Diagnostic::warning(
+                        "ASTRA_WMF_AUDIO_DECODE_TRUNCATED",
+                        "decoded audio exceeded the bounded CPU buffer limit",
+                    ));
+                    break;
+                }
+                pcm.extend_from_slice(&chunk);
+            }
+
+            if pcm.is_empty() {
+                return Err(wmf_error("audio decode produced no PCM samples"));
+            }
+            Ok(AudioOutput {
+                pcm,
+                sample_rate,
+                channels,
+                diagnostics,
+            })
+        }
+    }
+
+    fn decode_video_inner(bytes: &[u8]) -> windows::core::Result<Vec<u8>> {
+        unsafe {
+            let reader = source_reader_from_bytes(bytes)?;
+            let stream_index = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
+            let media_type = media_type(&MFMediaType_Video, &MFVideoFormat_RGB32)?;
+            reader.SetCurrentMediaType(stream_index, None, &media_type)?;
+
+            loop {
+                let mut flags = 0;
+                let mut sample = None;
+                reader.ReadSample(
+                    stream_index,
+                    0,
+                    None,
+                    Some(&mut flags),
+                    None,
+                    Some(&mut sample),
+                )?;
+                if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+                    break;
+                }
+                let Some(sample) = sample else {
+                    continue;
+                };
+                let bytes = sample_bytes(&sample)?;
+                if !bytes.is_empty() {
+                    return Ok(bytes);
+                }
+            }
+            Err(wmf_error("video decode produced no BGRA frame"))
+        }
+    }
+
+    unsafe fn source_reader_from_bytes(
+        bytes: &[u8],
+    ) -> windows::core::Result<windows::Win32::Media::MediaFoundation::IMFSourceReader> {
+        if bytes.is_empty() {
+            return Err(wmf_error("decode input is empty"));
+        }
+        let hglobal = GlobalAlloc(GMEM_MOVEABLE, bytes.len())?;
+        let locked = GlobalLock(hglobal);
+        if locked.is_null() {
+            return Err(WindowsError::from_thread());
+        }
+        ptr::copy_nonoverlapping(bytes.as_ptr(), locked.cast::<u8>(), bytes.len());
+        let _ = GlobalUnlock(hglobal);
+        let stream = CreateStreamOnHGlobal(hglobal, true)?;
+        let byte_stream = MFCreateMFByteStreamOnStreamEx(&stream)?;
+        MFCreateSourceReaderFromByteStream(&byte_stream, Option::<&IMFAttributes>::None)
+    }
+
+    unsafe fn media_type(
+        major_type: &windows::core::GUID,
+        subtype: &windows::core::GUID,
+    ) -> windows::core::Result<IMFMediaType> {
+        let media_type = MFCreateMediaType()?;
+        let attrs: IMFAttributes = media_type.cast()?;
+        attrs.SetGUID(&MF_MT_MAJOR_TYPE, major_type)?;
+        attrs.SetGUID(&MF_MT_SUBTYPE, subtype)?;
+        Ok(media_type)
+    }
+
+    unsafe fn attribute_u32(media_type: &IMFMediaType, key: &windows::core::GUID) -> Option<u32> {
+        let attrs: IMFAttributes = media_type.cast().ok()?;
+        attrs.GetUINT32(key).ok()
+    }
+
+    fn wmf_error(message: &'static str) -> WindowsError {
+        WindowsError::new(HRESULT(0x80004005_u32 as i32), message)
+    }
+
+    unsafe fn sample_bytes(sample: &IMFSample) -> windows::core::Result<Vec<u8>> {
+        let buffer = sample.ConvertToContiguousBuffer()?;
+        let len = buffer.GetCurrentLength()? as usize;
+        let mut data = ptr::null_mut();
+        let mut current_len = 0;
+        buffer.Lock(&mut data, None, Some(&mut current_len))?;
+        let copy_len = (current_len as usize).min(len);
+        let bytes = if copy_len == 0 || data.is_null() {
+            Vec::new()
+        } else {
+            slice::from_raw_parts(data, copy_len).to_vec()
+        };
+        buffer.Unlock()?;
+        Ok(bytes)
+    }
+}
+
 #[cfg(feature = "ffmpeg")]
 #[derive(Debug, Clone)]
 pub struct FfmpegDecodeProvider {

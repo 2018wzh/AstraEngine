@@ -97,7 +97,24 @@ pub struct PlatformCapabilityReport {
     pub lifecycle: Vec<String>,
     pub permissions: Vec<String>,
     #[serde(default)]
+    pub smoke: Vec<PlatformSmokeCheck>,
+    #[serde(default)]
     pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlatformSmokeCheck {
+    pub id: String,
+    pub status: PlatformSmokeStatus,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlatformSmokeStatus {
+    Pass,
+    Warning,
+    Blocked,
 }
 
 impl PlatformCapabilityReport {
@@ -136,8 +153,14 @@ impl PlatformCapabilityReport {
             input,
             lifecycle,
             permissions,
+            smoke: Vec::new(),
             diagnostics,
         }
+    }
+
+    pub fn with_smoke(mut self, smoke: Vec<PlatformSmokeCheck>) -> Self {
+        self.smoke = smoke;
+        self
     }
 }
 
@@ -272,6 +295,54 @@ pub fn validate_capability_report(
             .with_field("platform", report.platform.as_str()),
         );
     }
+    if report.sdk_status == SdkStatus::Present {
+        let required_checks = required_smoke_checks(report.platform);
+        for required in required_checks {
+            match report.smoke.iter().find(|check| check.id == *required) {
+                Some(check) if check.status == PlatformSmokeStatus::Pass => {}
+                Some(check) => diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_PLATFORM_SMOKE",
+                        "required platform smoke check did not pass",
+                    )
+                    .with_field("platform", report.platform.as_str())
+                    .with_field("check", &check.id),
+                ),
+                None => diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_PLATFORM_SMOKE_MISSING",
+                        "required platform smoke check is missing",
+                    )
+                    .with_field("platform", report.platform.as_str())
+                    .with_field("check", *required),
+                ),
+            }
+        }
+        for check in &report.smoke {
+            if required_checks.contains(&check.id.as_str()) {
+                continue;
+            }
+            match check.status {
+                PlatformSmokeStatus::Pass => {}
+                PlatformSmokeStatus::Warning => diagnostics.push(
+                    Diagnostic::warning(
+                        "ASTRA_PLATFORM_SMOKE_WARNING",
+                        "platform smoke check reported a warning",
+                    )
+                    .with_field("platform", report.platform.as_str())
+                    .with_field("check", &check.id),
+                ),
+                PlatformSmokeStatus::Blocked => diagnostics.push(
+                    Diagnostic::warning(
+                        "ASTRA_PLATFORM_SMOKE_OPTIONAL_BLOCKED",
+                        "optional platform smoke check is blocked",
+                    )
+                    .with_field("platform", report.platform.as_str())
+                    .with_field("check", &check.id),
+                ),
+            }
+        }
+    }
     for (field, values) in [
         ("renderer", &report.renderer),
         ("decode", &report.decode),
@@ -305,6 +376,17 @@ pub fn validate_capability_report(
         PlatformValidationStatus::Pass
     };
     (status, diagnostics)
+}
+
+fn required_smoke_checks(platform: PlatformId) -> &'static [&'static str] {
+    match platform {
+        PlatformId::Windows => &["windowed_smoke", "decode.wmf", "save.known_folder"],
+        PlatformId::Linux => &["windowed_smoke", "decode.linux_media"],
+        PlatformId::Macos => &["windowed_smoke", "decode.avfoundation"],
+        PlatformId::Ios => &["launcher_smoke", "decode.avfoundation"],
+        PlatformId::Android => &["launcher_smoke", "decode.mediacodec"],
+        PlatformId::Web => &["browser_smoke", "decode.webcodecs"],
+    }
 }
 
 #[cfg(test)]
@@ -356,5 +438,28 @@ mod tests {
                 title: "invalid".to_string(),
             })
             .is_err());
+    }
+
+    #[test]
+    fn present_sdk_requires_window_and_decode_smoke_evidence() {
+        let report = PlatformCapabilityReport::new(
+            PlatformId::Windows,
+            Some("nativevn-game".to_string()),
+            SdkStatus::Present,
+            vec!["wgpu".to_string()],
+            vec!["wmf".to_string()],
+            vec!["wasapi".to_string()],
+            vec!["known_folder".to_string()],
+            vec!["keyboard".to_string()],
+            vec!["window".to_string()],
+            vec!["network_profile_gated".to_string()],
+        );
+
+        let (status, diagnostics) = validate_capability_report(&report);
+
+        assert_eq!(status, PlatformValidationStatus::Blocked);
+        assert!(diagnostics
+            .iter()
+            .any(|diag| diag.code == "ASTRA_PLATFORM_SMOKE_MISSING"));
     }
 }

@@ -69,6 +69,52 @@ fn symphonia_decode_provider_decodes_bounded_wav_to_cpu_pcm() {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn windows_wmf_decode_provider_decodes_wav_to_cpu_pcm() {
+    let provider = astra_media::WindowsMediaFoundationDecodeProvider::probe().unwrap();
+    let result = provider
+        .decode(&DecodeRequest {
+            kind: DecodeKind::Audio,
+            codec: "wav".to_string(),
+            bytes: tiny_wav(),
+            profile: "desktop-release".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(result.provider_id, "astra.decode.wmf");
+    match result.output {
+        DecodeOutput::CpuBuffer { bytes, format, .. } => {
+            assert!(format.starts_with("pcm_s16le:8000:1"));
+            assert_eq!(bytes.len(), 8);
+        }
+        DecodeOutput::MediaSurfaceToken(_) => panic!("expected CPU PCM output"),
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_wmf_decode_provider_video_without_transform_reports_blocking_diagnostic() {
+    let provider = astra_media::WindowsMediaFoundationDecodeProvider::probe().unwrap();
+    let err = provider
+        .decode(&DecodeRequest {
+            kind: DecodeKind::Video,
+            codec: "wmv".to_string(),
+            bytes: b"not a video".to_vec(),
+            profile: "desktop-release".to_string(),
+        })
+        .unwrap_err();
+
+    match err {
+        astra_media::MediaError::Diagnostics(diagnostics) => {
+            assert!(diagnostics
+                .iter()
+                .any(|diag| diag.code == "ASTRA_WMF_DECODE"));
+        }
+        other => panic!("expected WMF diagnostic, got {other:?}"),
+    }
+}
+
 fn tiny_wav() -> Vec<u8> {
     let samples = [0i16, 1000, -1000, 0];
     let data_len = samples.len() * 2;

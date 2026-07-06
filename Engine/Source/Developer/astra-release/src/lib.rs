@@ -353,6 +353,21 @@ fn platform_report_check(report: Option<&PlatformCapabilityReport>) -> ReleaseCh
     };
 
     let (status, diagnostics) = astra_platform::validate_capability_report(report);
+    let mut evidence_values = vec![
+        evidence("platform", report.platform),
+        evidence(
+            "sdk_status",
+            format!("{:?}", report.sdk_status).to_lowercase(),
+        ),
+        evidence("smoke_count", report.smoke.len()),
+    ];
+    for check in &report.smoke {
+        evidence_values.push(evidence(
+            format!("smoke.{}.status", check.id),
+            format!("{:?}", check.status).to_lowercase(),
+        ));
+    }
+
     ReleaseCheckRecord {
         id: "platform.capability_report".to_string(),
         domain: ReleaseDomain::Platform,
@@ -363,13 +378,7 @@ fn platform_report_check(report: Option<&PlatformCapabilityReport>) -> ReleaseCh
         },
         summary: "platform capability report matches the requested native SDK state".to_string(),
         diagnostic: diagnostics.first().cloned(),
-        evidence: vec![
-            evidence("platform", report.platform),
-            evidence(
-                "sdk_status",
-                format!("{:?}", report.sdk_status).to_lowercase(),
-            ),
-        ],
+        evidence: evidence_values,
     }
 }
 

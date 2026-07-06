@@ -1,6 +1,6 @@
 # Stage 2 Media + Package Work
 
-Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider 和 Platform capability。当前完成边界包含 Desktop Native、Headless、六平台 capability report schema 和 SDK 分层 gate；真实平台完成仍要求对应 SDK probe 通过。
+Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider 和 Platform capability。资产、Cook、Package、headless media、release report 和 Target manifest 已落地。平台侧改成分层验收：Windows 已进入真实 probe 和 smoke；Linux、macOS、iOS、Android、Web 目前只保留 capability crate 和明确缺口计划，不能写成六平台完成。
 
 ## S2-ASSET-01 AssetId、VFS 与 sidecar schema
 
@@ -167,7 +167,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 3. public API 只返回 CPU buffer 或 MediaSurfaceToken，不暴露 native handle。
 4. 编写 unsupported codec、fallback disabled 和 fallback selected 测试。
 
-**Done Evidence:** `cargo test -p astra-media decode_provider` 证明 provider 选择和 release profile 绑定，而不是按加载顺序抢占；FFmpeg 由 optional feature 显式接入。
+**Done Evidence:** `cargo test -p astra-media decode_provider` 证明 provider 选择和 release profile 绑定，而不是按加载顺序抢占；Windows WMF provider 覆盖 bounded PCM CPU buffer 和视频失败 blocking diagnostic，FFmpeg 由 optional feature 显式接入。
 
 **Linked Test IDs:** `T-S2-MEDIA-05`
 
@@ -192,11 +192,11 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **Linked Test IDs:** `T-S2-GATE-01`
 
-## S2-PLATFORM-01 Platform capability crate 与六平台 probe
+## S2-PLATFORM-01 Platform capability crate 与分层 probe
 
 **ID:** `S2-PLATFORM-01`
 
-**Goal:** `Engine/Source/Platform` 提供共享 `PlatformHost` contract 和六个平台 capability probe。
+**Goal:** `Engine/Source/Platform` 提供共享 `PlatformHost` contract、六个平台 capability crate 和平台 smoke report schema。真实 host 完成按平台分开验收，不再把六个平台 capability crate 编译通过等同于六平台完成。
 
 **Depends On:** `S1-TARGET-01`、`Docs/implementation/platform-host.md`
 
@@ -205,13 +205,154 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 **Steps:**
 
 1. 定义 `PlatformId`、`SdkStatus`、`PlatformCapabilityReport`、`PlatformHost` 和 token DTO。
-2. 每个平台 crate 输出 renderer、decode、audio、filesystem、input、lifecycle 和 permission capability。
+2. 每个平台 crate 输出 renderer、decode、audio、filesystem、input、lifecycle、permission capability 和 smoke evidence。
 3. 缺 SDK 时报告 `sdk_status: missing`，不把平台完成状态拔高。
-4. 编写 capability report validation 测试。
+4. `sdk_status: present` 时必须提供该平台 required smoke；缺 smoke 由 Release Gate 阻断。
+5. 编写 capability report validation 测试。
 
-**Done Evidence:** `cargo test -p astra-platform` 通过；六个平台 crate 在 workspace 中编译。
+**Done Evidence:** `cargo test -p astra-platform` 通过；共享 report schema、SDK 分层和 required smoke validation 已落地。六个平台 capability crate 仍在 workspace 中编译，但只有 Windows 有真实 smoke evidence。
 
 **Linked Test IDs:** `T-S2-PLATFORM-01`
+
+## S2-WINDOWS-HOST-01 Windows host probe 与 windowed smoke
+
+**ID:** `S2-WINDOWS-HOST-01`
+
+**Status:** `DONE`
+
+**Goal:** Windows probe 输出真实 SDK、短生命周期 windowed smoke、DPI、IME、input pipe、gamepad capability、WASAPI、known-folder save store 和 SDK 状态。
+
+**Depends On:** `S2-PLATFORM-01`
+
+**Target Paths:** `Engine/Source/Platform/astra-platform-windows/src/lib.rs`、`Engine/Source/Platform/astra-platform/src/lib.rs`
+
+**Steps:**
+
+1. 使用 winit 创建隐藏短生命周期窗口，记录窗口尺寸、DPI scale、IME enable 和输入事件循环可用性。
+2. 使用 XInput probe gamepad capability；无手柄连接不阻断。
+3. 使用 CPAL/WASAPI probe 默认输出设备；无默认设备进入 warning，不静默吞掉。
+4. 使用 Windows Known Folder API 验证 RoamingAppData save store；报告只写能力状态，不写本地路径。
+5. `PlatformCapabilityReport.smoke` 只保存 DTO 状态，不暴露 native handle。
+
+**Done Evidence:** `cargo test -p astra-platform-windows` 通过；`astra platform probe --platform windows --target nativevn-game --format json` 输出 `windowed_smoke`、`decode.wmf` 和 `save.known_folder` smoke。
+
+**Linked Test IDs:** `T-S2-WINDOWS-HOST-01`
+
+## S2-WINDOWS-WMF-01 Windows Media Foundation DecodeProvider
+
+**ID:** `S2-WINDOWS-WMF-01`
+
+**Status:** `DONE`
+
+**Goal:** Windows Media Foundation provider 作为一拍式 `DecodeProvider`，audio 输出 bounded PCM CPU buffer，video 输出首帧 BGRA CPU buffer；无法 decode 时返回 blocking diagnostic。
+
+**Depends On:** `S2-MEDIA-05`
+
+**Target Paths:** `Engine/Source/Runtime/astra-media/src/decode.rs`、`Engine/Source/Runtime/astra-media/tests/decode_provider.rs`
+
+**Steps:**
+
+1. 使用 `windows` crate 接入 COM、Media Foundation byte stream 和 `IMFSourceReader`。
+2. Audio stream 强制输出 PCM，CPU buffer 受 `MAX_DECODED_AUDIO_BYTES` 限制。
+3. Video stream 请求 RGB32/BGRA 首帧；失败返回 `ASTRA_WMF_DECODE` blocking diagnostic。
+4. public API 仍只返回 `DecodeOutput::CpuBuffer`，不暴露 WMF object、COM pointer 或 native handle。
+
+**Done Evidence:** `cargo test -p astra-media decode_provider` 覆盖 WMF WAV 到 PCM、invalid video blocking diagnostic、platform-first provider selection 和 fallback policy。
+
+**Linked Test IDs:** `T-S2-WINDOWS-WMF-01`
+
+## S2-WINDOWS-GATE-01 Windows platform evidence 接入 Release Gate
+
+**ID:** `S2-WINDOWS-GATE-01`
+
+**Status:** `DONE`
+
+**Goal:** CLI 和 release report 读取 Windows platform report、windowed smoke、WMF decode evidence 和 save store smoke。缺 SDK、缺 WMF、缺 window smoke 或缺 known-folder smoke 都不能静默通过。
+
+**Depends On:** `S2-WINDOWS-HOST-01`、`S2-WINDOWS-WMF-01`、`S2-TARGET-GATE-01`
+
+**Target Paths:** `Engine/Source/Programs/astra-cli/tests/target_platform.rs`、`Engine/Source/Developer/astra-release/tests/release_report.rs`、`Engine/Source/Platform/astra-platform/src/lib.rs`
+
+**Steps:**
+
+1. `validate_capability_report` 对 `sdk_status: present` 的平台检查 required smoke。
+2. Windows required smoke 是 `windowed_smoke`、`decode.wmf` 和 `save.known_folder`。
+3. `astra platform probe` JSON 输出 smoke evidence；CLI 测试断言 Windows smoke 为 `pass`。
+4. Release report 缺 required smoke 时输出 blocking check。
+
+**Done Evidence:** `cargo test -p astra-release release_report` 和 `cargo test -p astra-cli --test target_platform` 通过。
+
+**Linked Test IDs:** `T-S2-WINDOWS-GATE-01`
+
+## S2-LINUX-HOST-01 Linux host gap plan
+
+**ID:** `S2-LINUX-HOST-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 补 Linux window/input/audio/save/decode probe，覆盖 winit/wgpu、IME、gamepad、PipeWire/PulseAudio、XDG data、GStreamer/FFmpeg profile 和 windowed smoke。
+
+**Target Paths:** `Engine/Source/Platform/astra-platform-linux/`、`Docs/platforms/desktop.md`
+
+**Planned Gate:** required smoke 暂定 `windowed_smoke` 和 `decode.linux_media`。本轮不实现代码，只在文档和测试矩阵登记。
+
+**Linked Test IDs:** `T-S2-LINUX-HOST-01`
+
+## S2-MACOS-HOST-01 macOS host gap plan
+
+**ID:** `S2-MACOS-HOST-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 补 macOS AppKit/winit lifecycle、Metal/wgpu、IME/gamepad、CoreAudio、App Support save store、AVFoundation decode 和 notarization-relevant capability。
+
+**Target Paths:** `Engine/Source/Platform/astra-platform-macos/`、`Docs/platforms/desktop.md`
+
+**Planned Gate:** required smoke 暂定 `windowed_smoke` 和 `decode.avfoundation`。本轮不实现代码。
+
+**Linked Test IDs:** `T-S2-MACOS-HOST-01`
+
+## S2-IOS-HOST-01 iOS host gap plan
+
+**ID:** `S2-IOS-HOST-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 补 Swift/SwiftUI launcher、Metal surface、safe area/touch、AVAudio/AVFoundation、app container save、no-JIT Luau gate 和 foreground/background resume。
+
+**Target Paths:** `Engine/Source/Platform/astra-platform-ios/`、`Docs/platforms/mobile.md`
+
+**Planned Gate:** required smoke 暂定 `launcher_smoke` 和 `decode.avfoundation`。本轮不实现 launcher 或 native smoke。
+
+**Linked Test IDs:** `T-S2-IOS-HOST-01`
+
+## S2-ANDROID-HOST-01 Android host gap plan
+
+**ID:** `S2-ANDROID-HOST-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 补 Kotlin/Java launcher、Vulkan/wgpu surface、touch/safe area、AAudio/OpenSL ES、MediaCodec、SAF/package import、activity resume 和 no-JIT Luau gate。
+
+**Target Paths:** `Engine/Source/Platform/astra-platform-android/`、`Docs/platforms/mobile.md`
+
+**Planned Gate:** required smoke 暂定 `launcher_smoke` 和 `decode.mediacodec`。本轮不实现 launcher 或 native smoke。
+
+**Linked Test IDs:** `T-S2-ANDROID-HOST-01`
+
+## S2-WEB-HOST-01 Web host gap plan
+
+**ID:** `S2-WEB-HOST-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 补 wasm host、WebGPU/WebGL、WebCodecs、WebAudio unlock、OPFS/IndexedDB/File API/HTTP range package source、worker/visibility resume 和 browser smoke。
+
+**Target Paths:** `Engine/Source/Platform/astra-platform-web/`、`Docs/platforms/web.md`
+
+**Planned Gate:** required smoke 暂定 `browser_smoke` 和 `decode.webcodecs`。本轮不实现 wasm launcher、browser smoke 或 WebCodecs provider。
+
+**Linked Test IDs:** `T-S2-WEB-HOST-01`
 
 ## S2-TARGET-GATE-01 Package target manifest 与 platform gate
 
@@ -231,6 +372,6 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 4. `astra package validate` 可读取 `--platform-report` 并阻断缺 SDK 的真实平台完成。
 5. 编写 package section、release report 和 CLI probe 测试。
 
-**Done Evidence:** `cargo test -p astra-package package_roundtrip`、`cargo test -p astra-release release_report` 和 `cargo test -p astra-cli --test target_platform` 通过。
+**Done Evidence:** `cargo test -p astra-package package_roundtrip`、`cargo test -p astra-release release_report` 和 `cargo test -p astra-cli --test target_platform` 通过；platform report 现在包含 required smoke evidence，缺失项会阻断 release check。
 
 **Linked Test IDs:** `T-S2-TARGET-GATE-01`

@@ -88,6 +88,7 @@ pub struct PlatformCapabilityReport {
     pub input: Vec<String>,
     pub lifecycle: Vec<String>,
     pub permissions: Vec<String>,
+    pub smoke: Vec<PlatformSmokeCheck>,
 }
 ```
 
@@ -95,14 +96,14 @@ pub struct PlatformCapabilityReport {
 
 | Platform | Crate | SDK 判定 | 必备能力 |
 | --- | --- | --- | --- |
-| Windows | `astra-platform-windows` | host Windows | wgpu/headless、WMF、WASAPI、IME、gamepad |
-| Linux | `astra-platform-linux` | host Linux | wgpu/headless、GStreamer or FFmpeg profile、XDG data、IME |
-| macOS | `astra-platform-macos` | host macOS | Metal、AVFoundation、CoreAudio、AppKit lifecycle |
-| iOS | `astra-platform-ios` | iOS target or Apple developer env | Metal、AVFoundation、safe area、touch、no-JIT Luau |
-| Android | `astra-platform-android` | Android SDK env | Vulkan、MediaCodec、SAF、touch、no-JIT Luau |
-| Web | `astra-platform-web` | wasm target or web SDK env | WebGPU/WebGL、WebCodecs、WebAudio、OPFS/IndexedDB |
+| Windows | `astra-platform-windows` | host Windows | winit window smoke、WMF、WASAPI、Known Folder save store、IME、gamepad |
+| Linux | `astra-platform-linux` | host Linux | planned winit/wgpu、GStreamer or FFmpeg profile、XDG data、IME |
+| macOS | `astra-platform-macos` | host macOS | planned Metal、AVFoundation、CoreAudio、AppKit lifecycle |
+| iOS | `astra-platform-ios` | iOS target or Apple developer env | planned Metal、AVFoundation、safe area、touch、no-JIT Luau |
+| Android | `astra-platform-android` | Android SDK env | planned Vulkan、MediaCodec、SAF、touch、no-JIT Luau |
+| Web | `astra-platform-web` | wasm target or web SDK env | planned WebGPU/WebGL、WebCodecs、WebAudio、OPFS/IndexedDB |
 
-缺 SDK 的平台必须输出 `sdk_status: missing`，Release Gate 对真实平台完成项判为 blocked。普通 CI 可以验证 schema、report 和 CLI，不把缺 SDK 平台标成已完成。
+缺 SDK 的平台必须输出 `sdk_status: missing`，Release Gate 对真实平台完成项判为 blocked。`sdk_status: present` 还必须附带该平台 required smoke：Windows 当前要求 `windowed_smoke`、`decode.wmf` 和 `save.known_folder`；其他平台 required smoke 已登记为计划项，代码未实现前不能标为 `DONE`。普通 CI 可以验证 schema、report 和 CLI，不把缺 SDK 或缺 smoke 平台标成已完成。
 
 ## CLI And Gate
 

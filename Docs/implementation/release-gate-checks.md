@@ -41,6 +41,7 @@ pub struct ReleaseCheckRecord {
 | ai_mcp | `mcp.context_permission` | MCP audit | read/search/tool call exceeds session scope or Context Pack is not redacted | session id, tool id, source ref |
 | ai_mcp | `mcp.command_allowlist` | MCP command report | undeclared command or arbitrary shell execution | command id, template id |
 | platform | `platform.eligibility` | capability report | profile requirement missing | platform id, capability id |
+| platform | `platform.capability_report` | capability report | missing SDK, missing required smoke, blocked required smoke or invalid schema | platform id, SDK status, smoke id, diagnostic |
 | emu | `emu.artemis_full_flow` | local case report | trace/snapshot/redaction failure | trace hash, redaction status |
 | emu | `emu.legacy_runtime_provider` | family plugin report | family bypasses RuntimeWorld or missing provider session binding | family id, provider id, session id |
 | emu | `emu.auto_probe` | auto probe report | selected family is not reproducible or override reason missing | selected family, priority list, override reason |

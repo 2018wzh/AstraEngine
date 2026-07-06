@@ -62,6 +62,17 @@ fn target_validate_and_platform_probe_emit_machine_readable_reports() {
         "astra.platform_capability_report.v1"
     );
     assert_eq!(platform_report["platform"], "windows");
+    if cfg!(windows) {
+        let smoke = platform_report["smoke"].as_array().unwrap();
+        assert!(smoke
+            .iter()
+            .any(|check| { check["id"] == "windowed_smoke" && check["status"] == "pass" }));
+        assert!(smoke
+            .iter()
+            .any(|check| check["id"] == "decode.wmf" && check["status"] == "pass"));
+    } else {
+        assert_eq!(platform_report["sdk_status"], "missing");
+    }
 }
 
 #[test]

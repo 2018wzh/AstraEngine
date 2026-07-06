@@ -36,6 +36,7 @@ blake3 = "1"
 camino = { version = "1", features = ["serde1"] }
 clap = { version = "4", features = ["derive"] }
 cosmic-text = "0.19"
+cpal = "0.17"
 ffmpeg-next = "8.1"
 hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
@@ -60,5 +61,7 @@ tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 uuid = { version = "1", features = ["serde", "v4", "v7"] }
+windows = { version = "0.62", default-features = false }
+winit = "0.30"
 wgpu = "30"
 zstd = "0.13"
