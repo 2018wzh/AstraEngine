@@ -36,4 +36,7 @@ serde_yaml = "0.9"
 sha2 = "0.10"
 syn = { version = "2", features = ["full"] }
 thiserror = "1"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 uuid = { version = "1", features = ["serde", "v4", "v7"] }

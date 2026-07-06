@@ -8,6 +8,7 @@ use astra_plugin::{
     FfiPluginRegistration, FfiPluginShutdown, FfiProviderRegistration, PresentationCommand,
 };
 use std::collections::BTreeMap;
+use tracing::{debug, warn};
 
 extern "C" fn descriptor_yaml() -> RString {
     r#"
@@ -32,6 +33,11 @@ extern "C" fn run_fixture_action(request: RVec<u8>) -> RVec<u8> {
     let request: Vec<u8> = request.into_iter().collect();
     let result = match postcard::from_bytes::<ActionCallRequest>(&request) {
         Ok(request) => {
+            debug!(
+                step = request.step,
+                action_id = %request.action_id,
+                "fixture.action.run"
+            );
             let mut payload = BTreeMap::new();
             payload.insert("fixture.action".to_string(), BlackboardValue::from("ran"));
             ActionCallResult::Ok {
@@ -56,16 +62,23 @@ extern "C" fn run_fixture_action(request: RVec<u8>) -> RVec<u8> {
                 ],
             }
         }
-        Err(err) => ActionCallResult::Err {
-            code: "ASTRA_FIXTURE_ACTION_DECODE".to_string(),
-            message: err.to_string(),
-        },
+        Err(err) => {
+            warn!(
+                diagnostic_code = "ASTRA_FIXTURE_ACTION_DECODE",
+                "fixture.action.decode_failed"
+            );
+            ActionCallResult::Err {
+                code: "ASTRA_FIXTURE_ACTION_DECODE".to_string(),
+                message: err.to_string(),
+            }
+        }
     };
     let encoded = postcard::to_allocvec(&result).expect("fixture action result must encode");
     RVec::from(encoded)
 }
 
 extern "C" fn register() -> FfiPluginRegistration {
+    debug!("fixture.register");
     FfiPluginRegistration {
         providers: RVec::from(vec![FfiProviderRegistration {
             slot: "presentation".into(),
@@ -84,6 +97,7 @@ extern "C" fn register() -> FfiPluginRegistration {
 }
 
 extern "C" fn shutdown() -> FfiPluginShutdown {
+    debug!("fixture.shutdown");
     FfiPluginShutdown {
         callbacks_released: true,
     }

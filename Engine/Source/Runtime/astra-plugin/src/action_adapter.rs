@@ -5,6 +5,7 @@ use astra_runtime::{
     RuntimeAction, RuntimeError, RuntimeWorld,
 };
 use std::collections::BTreeMap;
+use tracing::{debug, warn};
 
 use crate::{FfiActionInvoke, FfiActionRegistration, PluginError};
 
@@ -33,6 +34,11 @@ impl LoadedFfiAction {
     }
 
     pub fn install(&self, world: &mut RuntimeWorld) {
+        debug!(
+            provider_id = %self.provider_id,
+            action_id = %self.descriptor.id,
+            "plugin.action.register"
+        );
         world.register_action(
             self.provider_id.clone(),
             FfiRuntimeAction {
@@ -68,6 +74,11 @@ impl RuntimeAction for FfiRuntimeAction {
         ctx: &mut DeterministicActionContext<'_>,
         input: &BTreeMap<String, astra_runtime::BlackboardValue>,
     ) -> Result<ActionTrace, RuntimeError> {
+        debug!(
+            step = ctx.step(),
+            action_id = %self.descriptor.id,
+            "plugin.action.invoke"
+        );
         let request = ActionCallRequest {
             step: ctx.step(),
             action_id: self.descriptor.id.clone(),
@@ -81,14 +92,26 @@ impl RuntimeAction for FfiRuntimeAction {
             .map_err(|err| RuntimeError::message(format!("decode ffi action result: {err}")))?;
         match result {
             ActionCallResult::Ok { trace, effects } => {
+                debug!(
+                    step = ctx.step(),
+                    action_id = %trace.action_id,
+                    effect_count = effects.len(),
+                    "plugin.action.ok"
+                );
                 for effect in effects {
                     ctx.apply_effect(effect)?;
                 }
                 Ok(trace)
             }
-            ActionCallResult::Err { code, message } => Err(RuntimeError::diagnostic(
-                Diagnostic::blocking(code, message),
-            )),
+            ActionCallResult::Err { code, message } => Err(RuntimeError::diagnostic({
+                warn!(
+                    step = ctx.step(),
+                    action_id = %self.descriptor.id,
+                    diagnostic_code = %code,
+                    "plugin.action.err"
+                );
+                Diagnostic::blocking(code, message)
+            })),
         }
     }
 }

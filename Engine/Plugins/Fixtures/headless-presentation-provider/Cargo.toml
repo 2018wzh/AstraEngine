@@ -12,3 +12,4 @@ crate-type = ["cdylib"]
 abi_stable.workspace = true
 astra-plugin = { path = "../../../Source/Runtime/astra-plugin" }
 postcard.workspace = true
+tracing.workspace = true

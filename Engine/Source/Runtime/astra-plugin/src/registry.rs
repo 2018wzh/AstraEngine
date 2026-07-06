@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use tracing::debug;
 
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
@@ -77,6 +78,12 @@ pub struct PluginRegistrar {
 
 impl PluginRegistrar {
     pub fn register_provider(&mut self, provider: RegisteredProvider) {
+        debug!(
+            slot = %provider.slot.0,
+            provider_id = %provider.provider_id,
+            capability = %provider.capability,
+            "plugin.provider.register"
+        );
         self.services
             .register(provider.slot.0.clone(), provider.provider_id.clone());
         self.extensions.register(provider);
@@ -91,6 +98,11 @@ impl PluginRegistrar {
     }
 
     pub fn unregister_provider(&mut self, provider: &RegisteredProvider) {
+        debug!(
+            slot = %provider.slot.0,
+            provider_id = %provider.provider_id,
+            "plugin.provider.unregister"
+        );
         self.services
             .unregister(&provider.slot.0, &provider.provider_id);
         self.extensions

@@ -7,6 +7,7 @@ use astra_core::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::{debug, info, warn};
 
 use crate::{
     ActionRegistry, ActorId, ActorRecord, ActorSnapshot, ActorStore, AwaitQueue, AwaitResult,
@@ -116,6 +117,13 @@ impl RuntimeWorld {
         actions.register(EmitEventAction);
         actions.register(CreateAwaitAction);
         actions.register(PresentationAction);
+        info!(
+            seed = config.seed,
+            required_slot_count = config.required_slots.len(),
+            package_id = %package.package_id,
+            default_action_count = 4,
+            "runtime.create"
+        );
         Ok(Self {
             id_source: StableIdGenerator::new(config.seed),
             config,
@@ -135,7 +143,10 @@ impl RuntimeWorld {
     }
 
     pub fn mount_module(&mut self, slot: impl Into<String>, provider_id: impl Into<String>) {
-        self.mounted_modules.insert(slot.into(), provider_id.into());
+        let slot = slot.into();
+        let provider_id = provider_id.into();
+        info!(slot = %slot, provider_id = %provider_id, "runtime.module.mount");
+        self.mounted_modules.insert(slot, provider_id);
     }
 
     pub fn register_action<A: RuntimeAction + 'static>(
@@ -143,15 +154,24 @@ impl RuntimeWorld {
         provider_id: impl Into<String>,
         action: A,
     ) {
+        let provider_id = provider_id.into();
+        let action_id = action.descriptor().id;
+        info!(
+            provider_id = %provider_id,
+            action_id = %action_id,
+            "runtime.action.register"
+        );
         self.actions.register_with_provider(provider_id, action);
     }
 
     pub fn unregister_action_provider(&mut self, provider_id: &str) {
+        info!(provider_id, "runtime.action.unregister_provider");
         self.actions.unregister_provider(provider_id);
     }
 
     pub fn create_actor(&mut self, name: impl Into<String>, tags: Vec<String>) -> ActorId {
         let actor_id = ActorId(self.next_id());
+        debug!(?actor_id, tag_count = tags.len(), "runtime.actor.create");
         self.actors.insert_actor(ActorRecord {
             actor_id,
             name: name.into(),
@@ -168,36 +188,61 @@ impl RuntimeWorld {
         data: BlackboardValue,
     ) -> Result<ComponentId, RuntimeError> {
         let component_id = ComponentId(self.next_id());
+        let schema = schema.into();
         let attached = self.actors.attach_component(ComponentRecord {
             component_id,
             actor_id,
-            schema: schema.into(),
+            schema: schema.clone(),
             version: SchemaVersion::default(),
             data,
         });
         if attached {
+            debug!(
+                ?actor_id,
+                ?component_id,
+                schema = %schema,
+                "runtime.component.attach"
+            );
             Ok(component_id)
         } else {
-            Err(RuntimeError::diagnostic(Diagnostic::blocking(
+            let diagnostic = Diagnostic::blocking(
                 "ASTRA_RUNTIME_ACTOR_MISSING",
                 format!("cannot attach component to missing actor {actor_id:?}"),
-            )))
+            );
+            warn!(
+                ?actor_id,
+                diagnostic_code = %diagnostic.code,
+                "runtime.diagnostic"
+            );
+            Err(RuntimeError::diagnostic(diagnostic))
         }
     }
 
     pub fn remove_actor(&mut self, actor_id: ActorId) -> bool {
-        self.actors.remove_actor(actor_id).is_some()
+        let removed = self.actors.remove_actor(actor_id).is_some();
+        debug!(?actor_id, removed, "runtime.actor.remove");
+        removed
     }
 
     pub fn detach_component(&mut self, component_id: ComponentId) -> bool {
-        self.actors.detach_component(component_id).is_some()
+        let detached = self.actors.detach_component(component_id).is_some();
+        debug!(?component_id, detached, "runtime.component.detach");
+        detached
     }
 
     pub fn add_state_machine(&mut self, definition: StateMachineDefinition) {
+        debug!(
+            machine_id = ?definition.id,
+            owner = ?definition.owner,
+            state_count = definition.states.len(),
+            transition_count = definition.transitions.len(),
+            "runtime.state_machine.add"
+        );
         self.machines.add(definition);
     }
 
     pub fn emit_event(&mut self, source: EventSource, payload: EventPayload) {
+        let kind = payload.kind.clone();
         let event = RuntimeEvent {
             id: EventId(self.next_id()),
             source,
@@ -205,6 +250,13 @@ impl RuntimeWorld {
             sequence: 0,
             payload,
         };
+        debug!(
+            event_id = ?event.id,
+            source = ?event.source,
+            step = event.step,
+            kind = %kind,
+            "runtime.event.emit"
+        );
         self.events.push(event);
     }
 
@@ -214,6 +266,8 @@ impl RuntimeWorld {
         source: EventSource,
         payload: EventPayload,
     ) -> DelayedEventId {
+        let kind = payload.kind.clone();
+        let source_for_log = source.clone();
         let event = ScheduledEvent {
             id: DelayedEventId(self.next_id()),
             due_tick,
@@ -221,15 +275,31 @@ impl RuntimeWorld {
             source,
             payload,
         };
-        self.delayed_events.schedule(event)
+        let id = self.delayed_events.schedule(event);
+        debug!(
+            ?id,
+            due_tick,
+            source = ?source_for_log,
+            kind = %kind,
+            "runtime.delayed_event.schedule"
+        );
+        id
     }
 
     pub fn cancel_delayed_event(&mut self, id: DelayedEventId) -> bool {
-        self.delayed_events.cancel(id)
+        let cancelled = self.delayed_events.cancel(id);
+        debug!(?id, cancelled, "runtime.delayed_event.cancel");
+        cancelled
     }
 
     pub fn emit_presentation(&mut self, command: PresentationCommand) {
         let sequence = self.presentation.len() as u64;
+        debug!(
+            step = self.step,
+            sequence,
+            command_kind = presentation_kind(&command),
+            "runtime.presentation.emit"
+        );
         self.presentation.push(PresentationRecord {
             step: self.step,
             sequence,
@@ -238,6 +308,13 @@ impl RuntimeWorld {
     }
 
     pub fn submit_await_result(&mut self, result: AwaitResult) {
+        debug!(
+            token_id = ?result.token_id,
+            sequence = result.sequence,
+            completed_at_step = result.completed_at_step,
+            kind = %result.payload.kind,
+            "runtime.await.submit_result"
+        );
         self.awaits.submit_result(result);
     }
 
@@ -251,18 +328,36 @@ impl RuntimeWorld {
     }
 
     pub fn tick(&mut self, input: TickInput) -> Result<TickReport, RuntimeError> {
+        debug!(
+            step = input.fixed_step,
+            delta_ns = input.delta_ns,
+            required_slot_count = self.config.required_slots.len(),
+            "runtime.tick.start"
+        );
         self.step = input.fixed_step;
         self.id_source.set_step(input.fixed_step);
         self.diagnostics.clear();
         for slot in &self.config.required_slots {
             if !self.mounted_modules.contains_key(slot) {
-                self.diagnostics.push(Diagnostic::blocking(
+                let diagnostic = Diagnostic::blocking(
                     "ASTRA_RUNTIME_MODULE_MISSING",
                     format!("missing required module slot {slot}"),
-                ));
+                );
+                warn!(
+                    slot,
+                    diagnostic_code = %diagnostic.code,
+                    "runtime.diagnostic"
+                );
+                self.diagnostics.push(diagnostic);
             }
         }
-        for result in self.awaits.drain_ordered_results(input.fixed_step) {
+        let await_results = self.awaits.drain_ordered_results(input.fixed_step);
+        debug!(
+            step = input.fixed_step,
+            count = await_results.len(),
+            "runtime.await.drain"
+        );
+        for result in await_results {
             let id = EventId(self.next_id());
             self.events.push(RuntimeEvent {
                 id,
@@ -272,10 +367,21 @@ impl RuntimeWorld {
                 payload: result.payload,
             });
         }
-        for event in self.delayed_events.drain_due(input.fixed_step) {
+        let delayed_events = self.delayed_events.drain_due(input.fixed_step);
+        debug!(
+            step = input.fixed_step,
+            count = delayed_events.len(),
+            "runtime.delayed_event.drain"
+        );
+        for event in delayed_events {
             self.events.push(event);
         }
         let ready = self.events.drain_ordered_for_step(input.fixed_step);
+        debug!(
+            step = input.fixed_step,
+            count = ready.len(),
+            "runtime.event.drain"
+        );
         let output = self.machines.tick(
             input.fixed_step,
             &ready,
@@ -284,6 +390,14 @@ impl RuntimeWorld {
             &self.actions,
             &mut self.id_source,
         );
+        for diagnostic in &output.diagnostics {
+            warn!(
+                step = input.fixed_step,
+                diagnostic_code = %diagnostic.code,
+                "runtime.diagnostic"
+            );
+        }
+        let output_diagnostic_count = output.diagnostics.len();
         self.diagnostics.extend(output.diagnostics);
         for id in output.delayed_cancellations {
             self.delayed_events.cancel(id);
@@ -300,20 +414,36 @@ impl RuntimeWorld {
         for command in output.presentation {
             self.emit_presentation(command);
         }
-        Ok(TickReport {
+        let report = TickReport {
             step: input.fixed_step,
             state_hash: self.state_hash(),
             event_hash: self.event_hash(),
             presentation_hash: self.presentation_hash(),
             diagnostics: self.diagnostics.clone(),
-        })
+        };
+        info!(
+            step = report.step,
+            state_hash = %report.state_hash,
+            event_hash = %report.event_hash,
+            presentation_hash = %report.presentation_hash,
+            diagnostic_count = report.diagnostics.len(),
+            output_diagnostic_count,
+            "runtime.tick"
+        );
+        Ok(report)
     }
 
     pub fn save(&self, request: SaveRequest) -> Result<SaveBlob, RuntimeError> {
+        debug!(
+            minimum_supported_version = ?request.minimum_supported_version,
+            step = self.step,
+            "runtime.save"
+        );
         crate::save::write_runtime_save(self.snapshot(), request)
     }
 
     pub fn load(&mut self, save: SaveBlob) -> Result<LoadReport, RuntimeError> {
+        debug!("runtime.load");
         self.load_with_registry(save, &SchemaMigrationRegistry::default())
     }
 
@@ -322,6 +452,7 @@ impl RuntimeWorld {
         save: SaveBlob,
         registry: &SchemaMigrationRegistry,
     ) -> Result<LoadReport, RuntimeError> {
+        debug!("runtime.load.with_registry");
         let snapshot = crate::save::read_runtime_save(&save, registry)?;
         self.config = snapshot.config;
         self.package = snapshot.package;
@@ -337,20 +468,30 @@ impl RuntimeWorld {
         self.presentation = snapshot.presentation;
         self.mounted_modules = snapshot.mounted_modules;
         self.step = snapshot.step;
-        Ok(LoadReport {
+        let report = LoadReport {
             state_hash: self.state_hash(),
-        })
+        };
+        info!(state_hash = %report.state_hash, "runtime.load");
+        Ok(report)
     }
 
     pub fn replay(&mut self, replay: ReplayInput) -> Result<ReplayReport, RuntimeError> {
+        info!(input_count = replay.inputs.len(), "runtime.replay.start");
         for input in replay.inputs {
             self.tick(input)?;
         }
-        Ok(ReplayReport {
+        let report = ReplayReport {
             state_hash: self.state_hash(),
             event_hash: self.event_hash(),
             presentation_hash: self.presentation_hash(),
-        })
+        };
+        info!(
+            state_hash = %report.state_hash,
+            event_hash = %report.event_hash,
+            presentation_hash = %report.presentation_hash,
+            "runtime.replay"
+        );
+        Ok(report)
     }
 
     pub fn debug_session(&self) -> RuntimeDebugSession<'_> {
@@ -396,6 +537,16 @@ impl RuntimeWorld {
 
     fn next_id(&mut self) -> StableId {
         self.id_source.next_id()
+    }
+}
+
+fn presentation_kind(command: &PresentationCommand) -> &str {
+    match command {
+        PresentationCommand::Dialogue { .. } => "dialogue",
+        PresentationCommand::Choice { .. } => "choice",
+        PresentationCommand::TextEvent { .. } => "text_event",
+        PresentationCommand::Marker { .. } => "marker",
+        PresentationCommand::Custom { .. } => "custom",
     }
 }
 

@@ -11,6 +11,22 @@ astra package validate target/game.astrapkg --profile desktop-release
 astra test run scenarios/full_playthrough.yaml --package target/game.astrapkg --headless
 ```
 
+## 日志命令
+
+`astra` 默认把 machine-readable report 写到 stdout，把日志写到 stderr。需要结构化日志时使用：
+
+```bash
+astra test run scenarios/native_smoke.yaml --headless --format json --log-format json --log-filter astra_runtime=debug,astra_test=debug,astra_plugin=debug
+```
+
+需要落盘时显式传入相对目录：
+
+```bash
+astra test run scenarios/native_smoke.yaml --headless --log-dir target/logs
+```
+
+日志只用于排障，不参与 replay、hash、save 或 release 判定。
+
 ## 平台能力报告
 
 每个平台模块必须输出 renderer、decode、audio、filesystem、input、save persistence、network 和 AI permission capability。Release Gate 根据 profile 判断是否可发布。

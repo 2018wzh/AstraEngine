@@ -12,6 +12,7 @@ use astra_runtime::{
 };
 use semver::Version;
 use thiserror::Error;
+use tracing::{debug, info, warn};
 
 use crate::{
     EmitAction, Scenario, ScenarioAction, ScenarioCheck, ScenarioHashes, ScenarioReport,
@@ -39,11 +40,23 @@ impl ScenarioRunner {
         let path = path.as_ref();
         let text = fs::read_to_string(path)?;
         let scenario: Scenario = serde_yaml::from_str(&text)?;
+        info!(
+            schema = %scenario.schema,
+            action_count = scenario.actions.len(),
+            assertion_count = scenario.assertions.len(),
+            "scenario.load"
+        );
         let root = scenario_root(path)?;
         Self::run_with_root(&scenario, root)
     }
 
     pub fn run(scenario: &Scenario) -> Result<ScenarioReport, ScenarioError> {
+        info!(
+            schema = %scenario.schema,
+            action_count = scenario.actions.len(),
+            assertion_count = scenario.assertions.len(),
+            "scenario.run"
+        );
         let root = std::env::current_dir()?;
         Self::run_with_root(scenario, root)
     }
@@ -52,6 +65,12 @@ impl ScenarioRunner {
         scenario: &Scenario,
         workspace_root: PathBuf,
     ) -> Result<ScenarioReport, ScenarioError> {
+        info!(
+            schema = %scenario.schema,
+            action_count = scenario.actions.len(),
+            assertion_count = scenario.assertions.len(),
+            "scenario.run"
+        );
         let mut context = RunContext::new(scenario.seed, workspace_root.clone())?;
         let mut replayable = Vec::new();
         for action in &scenario.actions {
@@ -133,6 +152,13 @@ impl ScenarioRunner {
         } else {
             ScenarioStatus::Blocked
         };
+        info!(
+            schema = "astra.scenario_report.v1",
+            status = ?status,
+            check_count = checks.len(),
+            diagnostic_count = diagnostics.len(),
+            "scenario.report"
+        );
         Ok(ScenarioReport {
             schema: "astra.scenario_report.v1".to_string(),
             stage: scenario
@@ -151,11 +177,19 @@ impl ScenarioRunner {
         workspace_root: PathBuf,
         actions: &[ScenarioAction],
     ) -> Result<ScenarioHashes, ScenarioError> {
+        info!(action_count = actions.len(), "scenario.replay.start");
         let mut context = RunContext::new(seed, workspace_root)?;
         for action in actions {
             context.apply(action)?;
         }
-        Ok(context.hashes())
+        let hashes = context.hashes();
+        info!(
+            state_hash = %hashes.state,
+            event_hash = %hashes.event,
+            presentation_hash = %hashes.presentation,
+            "scenario.replay"
+        );
+        Ok(hashes)
     }
 }
 
@@ -195,6 +229,7 @@ impl RunContext {
     }
 
     fn apply(&mut self, action: &ScenarioAction) -> Result<(), ScenarioError> {
+        debug!(action = scenario_action_kind(action), "scenario.action");
         if action.register_fixture_actions.is_some() {
             self.register_fixture_actions()?;
         }
@@ -249,11 +284,13 @@ impl RunContext {
     fn register_fixture_actions(&mut self) -> Result<(), ScenarioError> {
         let dylib = dylib_path(&self.workspace_root, "headless_presentation_provider");
         if !dylib.exists() {
+            info!("scenario.fixture.build");
             let status = Command::new("cargo")
                 .args(["build", "-p", "headless-presentation-provider"])
                 .current_dir(&self.workspace_root)
                 .status()?;
             if !status.success() {
+                warn!("scenario.fixture.build_failed");
                 return Err(ScenarioError::Message(
                     "fixture action provider build failed".to_string(),
                 ));
@@ -274,6 +311,7 @@ impl RunContext {
                 "runtime.action".to_string(),
             ],
         });
+        info!("scenario.fixture.load");
         let plugin = loader.load(dylib, &mut registrar)?;
         if let Some(provider) =
             registrar.selected_provider(&astra_plugin::EngineModuleSlot("presentation".to_string()))
@@ -284,6 +322,7 @@ impl RunContext {
         plugin.install_runtime_actions(&mut self.world)?;
         self.loaded_plugins.push(plugin);
         self.fixture_actions_registered = true;
+        info!("scenario.fixture.ready");
         Ok(())
     }
 
@@ -370,11 +409,19 @@ impl RunContext {
     fn advance(&mut self, ticks: u64) -> Result<(), ScenarioError> {
         for _ in 0..ticks {
             self.step += 1;
+            debug!(step = self.step, "scenario.advance");
             let report = self.world.tick(TickInput {
                 fixed_step: self.step,
                 delta_ns: 16_666_667,
                 seed: 0,
             })?;
+            for diagnostic in &report.diagnostics {
+                warn!(
+                    step = report.step,
+                    diagnostic_code = %diagnostic.code,
+                    "scenario.diagnostic"
+                );
+            }
             self.diagnostics.extend(report.diagnostics);
         }
         Ok(())
@@ -404,6 +451,32 @@ impl RunContext {
 
     fn named_id(&self, name: &str) -> StableId {
         StableId::deterministic_v7(10, stable_hash(name), self.world.snapshot().config.seed)
+    }
+}
+
+fn scenario_action_kind(action: &ScenarioAction) -> &'static str {
+    if action.register_fixture_actions.is_some() {
+        "register_fixture_actions"
+    } else if action.add_state_machine.is_some() {
+        "add_state_machine"
+    } else if action.schedule_delayed_event.is_some() {
+        "schedule_delayed_event"
+    } else if action.launch.is_some() {
+        "launch"
+    } else if action.emit.is_some() {
+        "emit"
+    } else if action.advance.is_some() {
+        "advance"
+    } else if action.choose.is_some() {
+        "choose"
+    } else if action.save.is_some() {
+        "save"
+    } else if action.load.is_some() {
+        "load"
+    } else if action.replay_from_start.is_some() {
+        "replay_from_start"
+    } else {
+        "empty"
     }
 }
 

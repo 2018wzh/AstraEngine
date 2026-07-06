@@ -8,6 +8,7 @@ use astra_core::Hash256;
 use libloading::Library;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
 
 use crate::{
     install_actions, AstraPluginModuleRef, EngineModuleSlot, FfiPluginShutdown, LoadedFfiAction,
@@ -44,6 +45,11 @@ impl LoadedPlugin {
     }
 
     pub fn install_runtime_actions(&self, world: &mut RuntimeWorld) -> Result<(), PluginError> {
+        info!(
+            plugin_id = %self.descriptor.id,
+            action_count = self.registered_actions.len(),
+            "plugin.action.install"
+        );
         install_actions(&self.registered_actions, world)
     }
 
@@ -51,12 +57,22 @@ impl LoadedPlugin {
         mut self,
         registrar: &mut PluginRegistrar,
     ) -> Result<PluginLoadReport, PluginError> {
+        info!(
+            plugin_id = %self.descriptor.id,
+            provider_count = self.registered_providers.len(),
+            "plugin.unload.start"
+        );
         for provider in &self.registered_providers {
             registrar.unregister_provider(provider);
         }
         let shutdown: FfiPluginShutdown = (self.module.shutdown())();
         self.report.status = "unloaded".to_string();
         self.report.callbacks_released = shutdown.callbacks_released;
+        info!(
+            plugin_id = %self.descriptor.id,
+            callbacks_released = shutdown.callbacks_released,
+            "plugin.unload"
+        );
         Ok(self.report)
     }
 
@@ -87,6 +103,7 @@ impl PluginLoader {
         registrar: &mut PluginRegistrar,
     ) -> Result<LoadedPlugin, PluginError> {
         let path = path.as_ref();
+        debug!("plugin.load.start");
         let library = unsafe { Library::new(path) }
             .map_err(|err| PluginError::Load(format!("{}: {err}", path.display())))?;
         let module = unsafe { root_module(&library)? };
@@ -109,11 +126,17 @@ impl PluginLoader {
             registered_providers.push(provider.clone());
             registrar.register_provider(provider);
         }
-        let registered_actions = registration
+        let registered_actions: Vec<LoadedFfiAction> = registration
             .actions
             .into_iter()
             .map(LoadedFfiAction::from_registration)
             .collect();
+        info!(
+            plugin_id = %descriptor.id,
+            provider_count = registered_providers.len(),
+            action_count = registered_actions.len(),
+            "plugin.load"
+        );
         Ok(LoadedPlugin {
             descriptor: descriptor.clone(),
             module,

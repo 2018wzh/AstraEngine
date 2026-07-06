@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::{debug, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PluginDescriptor {
@@ -44,10 +45,18 @@ pub enum PluginError {
 
 impl PluginDescriptor {
     pub fn from_yaml(input: &str) -> Result<Self, PluginError> {
-        serde_yaml::from_str(input).map_err(|err| PluginError::DescriptorParse(err.to_string()))
+        let descriptor: Self = serde_yaml::from_str(input)
+            .map_err(|err| PluginError::DescriptorParse(err.to_string()))?;
+        debug!(plugin_id = %descriptor.id, "plugin.descriptor.parse");
+        Ok(descriptor)
     }
 
     pub fn validate(&self, gate: &PluginGate) -> Result<(), PluginError> {
+        debug!(
+            plugin_id = %self.id,
+            engine_version = %self.engine_version,
+            "plugin.gate.validate"
+        );
         let mut diagnostics = Vec::new();
         if self.engine_version != gate.engine_version {
             diagnostics.push(Diagnostic::blocking(
@@ -90,19 +99,33 @@ impl PluginDescriptor {
             }
         }
         if diagnostics.is_empty() {
+            debug!(plugin_id = %self.id, "plugin.gate.pass");
             Ok(())
         } else {
+            for diagnostic in &diagnostics {
+                warn!(
+                    plugin_id = %self.id,
+                    diagnostic_code = %diagnostic.code,
+                    "plugin.gate.diagnostic"
+                );
+            }
             Err(PluginError::GateBlocked(diagnostics))
         }
     }
 
     pub fn validate_binary_hash(&self, actual: Hash256) -> Result<(), PluginError> {
         if self.binary_hash.is_some_and(|expected| expected != actual) {
+            warn!(
+                plugin_id = %self.id,
+                diagnostic_code = "ASTRA_PLUGIN_BINARY_HASH",
+                "plugin.binary_hash"
+            );
             Err(PluginError::GateBlocked(vec![Diagnostic::blocking(
                 "ASTRA_PLUGIN_BINARY_HASH",
                 "plugin binary hash does not match descriptor",
             )]))
         } else {
+            debug!(plugin_id = %self.id, "plugin.binary_hash");
             Ok(())
         }
     }

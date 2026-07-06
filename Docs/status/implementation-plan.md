@@ -40,6 +40,7 @@
 | `S1-PLUGIN-02` | `DONE` | `cargo test -p astra-plugin ffi_action_provider` |
 | `S1-PROP-01` | `DONE` | `cargo test -p astra-property --test property_metadata` and `cargo test -p astra-property --test expand_smoke` |
 | `S1-TEST-01` | `DONE` | `cargo test -p astra-test native_smoke` |
+| `S1-OBS-01` | `DONE` | `cargo test -p astra-cli --test logging` |
 
 ## 下一步实施顺序
 

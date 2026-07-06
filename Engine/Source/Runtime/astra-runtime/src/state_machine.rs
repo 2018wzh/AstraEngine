@@ -1,6 +1,7 @@
 use astra_core::{Diagnostic, SourceRef, StableId, StableIdGenerator};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, warn};
 
 use crate::{
     ActionInvocation, ActionRegistry, ActionTrace, ActorId, ActorStore, AwaitToken, Blackboard,
@@ -93,6 +94,14 @@ impl StateMachineStore {
             else {
                 continue;
             };
+            debug!(
+                step,
+                machine_id = ?machine.definition.id,
+                from_state = ?transition.from,
+                to_state = ?transition.to,
+                action_count = transition.actions.len(),
+                "state_machine.transition.match"
+            );
             let mut candidate_actors = actors.clone();
             let mut candidate_blackboard = blackboard.clone();
             let mut candidate_id_source = id_source.clone();
@@ -100,11 +109,24 @@ impl StateMachineStore {
             let mut failed = None;
 
             for invocation in &transition.actions {
+                debug!(
+                    step,
+                    machine_id = ?machine.definition.id,
+                    action_id = %invocation.action_id,
+                    "state_machine.action.start"
+                );
                 let Some(action) = actions.get(&invocation.action_id) else {
                     failed = Some(Diagnostic::blocking(
                         "ASTRA_RUNTIME_ACTION_MISSING",
                         format!("missing action {}", invocation.action_id),
                     ));
+                    warn!(
+                        step,
+                        machine_id = ?machine.definition.id,
+                        action_id = %invocation.action_id,
+                        diagnostic_code = "ASTRA_RUNTIME_ACTION_MISSING",
+                        "state_machine.action.missing"
+                    );
                     break;
                 };
                 let mut next_id = || candidate_id_source.next_id();
@@ -120,12 +142,27 @@ impl StateMachineStore {
                     &mut candidate_output.delayed_cancellations,
                 );
                 match action.run(&mut ctx, &invocation.input) {
-                    Ok(trace) => candidate_output.trace.push(trace),
+                    Ok(trace) => {
+                        debug!(
+                            step,
+                            machine_id = ?machine.definition.id,
+                            action_id = %trace.action_id,
+                            "state_machine.action.end"
+                        );
+                        candidate_output.trace.push(trace);
+                    }
                     Err(err) => {
                         failed = Some(Diagnostic::blocking(
                             "ASTRA_RUNTIME_ACTION_FAILED",
                             format!("{} failed: {err}", invocation.action_id),
                         ));
+                        warn!(
+                            step,
+                            machine_id = ?machine.definition.id,
+                            action_id = %invocation.action_id,
+                            diagnostic_code = "ASTRA_RUNTIME_ACTION_FAILED",
+                            "state_machine.action.failed"
+                        );
                         break;
                     }
                 }
@@ -135,6 +172,13 @@ impl StateMachineStore {
                 if let Some(source) = failure_source {
                     diagnostic.source = Some(source);
                 }
+                debug!(
+                    step,
+                    machine_id = ?machine.definition.id,
+                    current_state = ?machine.current_state,
+                    diagnostic_code = %diagnostic.code,
+                    "state_machine.transition.rollback"
+                );
                 output.diagnostics.push(diagnostic);
                 continue;
             }
@@ -145,6 +189,12 @@ impl StateMachineStore {
             self.trace.extend(candidate_output.trace.iter().cloned());
             output.append(candidate_output);
             machine.current_state = transition.to;
+            debug!(
+                step,
+                machine_id = ?machine.definition.id,
+                current_state = ?machine.current_state,
+                "state_machine.transition.commit"
+            );
         }
         output
     }
