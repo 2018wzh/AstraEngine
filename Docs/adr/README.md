@@ -14,4 +14,4 @@ ADR 记录已经锁定的产品级决策。被替换的旧决策必须在新 ADR
 | [0009](0009-astraemu-out-of-process-core.md) | Superseded: AstraEMU compat core 独立进程化 |
 | [0010](0010-state-machine-action-provider.md) | StateMachine action provider 采用 host context 与 FFI effect list |
 | [0011](0011-platform-decode-and-renderer-slots.md) | 平台解码优先，Renderer2D provider 可替换 |
-| [0012](0012-astraemu-engine-native-family-plugin.md) | AstraEMU 使用 engine-native family plugin |
+| [0012](0012-astraemu-engine-native-family-plugin.md) | AstraEMU 使用 engine-native family plugin + LegacyRuntimeProvider facade |

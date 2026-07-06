@@ -1,12 +1,12 @@
 # Stage 5 AstraEMU Work
 
-Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动 AstraEngine `RuntimeWorld`；legacy family 以 in-process plugin/provider 接入，旧引擎语义通过 StateMachine action provider、VFS/archive provider、legacy script provider、media mapper 和 snapshot codec 落到引擎可审计的状态机。本页是 planned target 清单，不表示实现已经存在。
+Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动 AstraEngine `RuntimeWorld`；legacy family 以 in-process plugin 接入，并只向 host 注册 `LegacyRuntimeProvider` facade。Provider session 持有 family 私有 VM、资源解析、媒体状态、诊断和 snapshot section；AstraEngine `StateMachine` 只建模 `Booting`、`Active`、`Awaiting`、`Saving`、`Loading`、`Faulted` 和 `Shutdown` 这些粗粒度生命周期。本页是 planned target 清单，不表示实现已经存在。
 
 ## S5-MANAGER-01 Manager RuntimeWorld bridge
 
 **ID:** `S5-MANAGER-01`
 
-**Goal:** Manager 能创建 RuntimeWorld，启用 family plugin，挂载 VFS，注册 legacy action provider，并输出 local case report。
+**Goal:** Manager 能创建 RuntimeWorld，启用 family plugin，打开 `LegacyRuntimeProvider` session，驱动生命周期 StateMachine，并输出 local case report。
 
 **Depends On:** `Docs/contracts/astraemu-ipc.md`、`S1-CORE-01`、`S1-PLUGIN-01`
 
@@ -14,33 +14,35 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 **Steps:**
 
-1. 定义 case launch request、profile、family selection、provider binding 和 report destination。
+1. 定义 case launch request、profile、family selection、`LegacyRuntimeHostCtx` binding 和 report destination。
 2. 创建 RuntimeWorld，加载项目 package 或 synthetic fixture，启用 selected family plugin。
-3. 建立 input、overlay、diagnostics、TextCaptureEvent 和 presentation/audio command 采集路径。
-4. 编写 plugin disabled、permission denied、missing provider 和 report redaction 测试。
+3. 通过 `LegacyRuntimeProvider::open` 建立 session，并让生命周期 StateMachine 在固定 tick 调用 `step`。
+4. 建立 input、overlay、diagnostics、TextCaptureEvent 和 presentation/audio command 采集路径。
+5. 编写 plugin disabled、permission denied、missing provider、session fault 和 report redaction 测试。
 
-**Done Evidence:** Manager 不解析 family 私有 VM 内存，所有玩家可见输出都来自 RuntimeWorld event/presentation/audio/report。
+**Done Evidence:** Manager 不解析 family 私有 VM 内存，不持有 family 文件系统、renderer/audio handle 或 Actor 指针；所有玩家可见输出都来自 RuntimeWorld event/presentation/audio/report。
 
 **Linked Test IDs:** `T-S5-MANAGER-01`
 
-## S5-FAMILY-01 Engine-native family plugin API
+## S5-FAMILY-01 LegacyRuntimeProvider facade
 
 **ID:** `S5-FAMILY-01`
 
-**Goal:** 定义并实现 `LegacyFamilyPluginDescriptor`、`LegacyVfsProvider`、`LegacyScriptProvider`、`LegacyActionProvider`、`LegacyMediaMapper` 和 `LegacySnapshotCodec`。
+**Goal:** 定义并实现 `LegacyFamilyPluginDescriptor`、`LegacyRuntimeProvider`、`LegacyRuntimeSessionId`、`LegacyRuntimeHostCtx`、`LegacyStepInput`、`LegacyStepOutput`、`LegacyEffect`、`LegacyWaitRequest` 和 `LegacySnapshotEnvelope`。
 
-**Depends On:** `S5-MANAGER-01`、`Docs/implementation/provider-plugin-api.md`
+**Depends On:** `S5-MANAGER-01`、`Docs/contracts/astraemu-ipc.md`、`Docs/implementation/astraemu-legacy-runtime-framework.md`、`Docs/implementation/provider-plugin-api.md`
 
 **Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`AstraEMU/Tests/family_plugin_api.rs` planned target
 
 **Steps:**
 
-1. 定义 family descriptor、format capability、permission、failure classification 和 redaction policy。
-2. 定义 provider DTO，所有输入输出都是 stable id、hash、section ref、source span 和 postcard payload。
-3. 让 legacy action provider 返回可序列化 effect list，由 host adapter 应用到 `DeterministicActionContext`。
-4. 编写 provider registration、dependency graph、effect serialization、snapshot section 和 redaction 测试。
+1. 定义 family descriptor、runtime provider id、format capability、permission、failure classification 和 redaction policy。
+2. 定义 lifecycle API：`probe`、`open`、`step`、`save`、`restore`、`shutdown`；`open` 返回 session id，provider 负责区分并行 case。
+3. 定义 provider DTO，所有输入输出都是 stable id、hash、section ref、source span、capability diagnostic 和 postcard payload。
+4. 让 `step` 返回有序 `LegacyEffect`、`LegacyWaitRequest`、snapshot dirty section 和 redaction summary，由 host adapter 应用到 `DeterministicActionContext`。
+5. 编写 provider registration、session lifecycle、effect serialization、snapshot envelope、restore compatibility 和 redaction 测试。
 
-**Done Evidence:** family plugin 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
+**Done Evidence:** family plugin 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks，family VM state 只存在于 provider session。
 
 **Linked Test IDs:** `T-S5-FAMILY-01`
 
@@ -121,7 +123,7 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 **Steps:**
 
-1. 复用 family plugin API，不新增 Manager 私有通道。
+1. 复用 `LegacyRuntimeProvider` facade，不新增 Manager 私有通道。
 2. 实现 PAC/DAT probe、resource catalog 和 script VM alpha route。
 3. Unknown extcall 默认输出 diagnostic；presentation/audio/save/control-flow side effect 缺失时 release gate 不算通过。
 4. 编写 fixture smoke、extcall report 和 full-flow scenario 测试。
@@ -142,8 +144,8 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 **Steps:**
 
-1. 复用 family plugin API 和 release report schema。
-2. 实现 pack/media resolver 和 HCB VM minimal execution。
+1. 复用 `LegacyRuntimeProvider` facade 和 release report schema。
+2. 实现 pack/media resolver 和 HCB VM execution route。
 3. 把 graph、text、sound、movie、thread syscall 转成 trace/event。
 4. 编写 generated fixture、syscall mapper 和 full-flow scenario 测试。
 
@@ -163,7 +165,7 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 **Steps:**
 
-1. 复用 family plugin API 和 failure classification。
+1. 复用 `LegacyRuntimeProvider` facade 和 failure classification。
 2. 实现 Siglus root、Scene.pck、Gameexe header 和授权 material 缺失 diagnostic。
 3. 实现 `.ss` header、string table、label、operand decoder 和 basic stack model。
 4. 实现 G00/Ogg/OVK/NWA/OMV probe，受保护 stream 只消费用户合法提供的材料。
@@ -177,7 +179,7 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 **ID:** `S5-GATE-01`
 
-**Goal:** Release Gate 检查 Artemis full-flow scenario、engine-native family provider、local case report、trace、snapshot、TextCaptureEvent 和 redaction policy。
+**Goal:** Release Gate 检查 Artemis full-flow scenario、`LegacyRuntimeProvider` facade、local case report、trace、snapshot、TextCaptureEvent 和 redaction policy。
 
 **Depends On:** `S5-FAMILY-01`、`S5-ARTEMIS-01`
 
@@ -185,7 +187,7 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 **Steps:**
 
-1. 增加 `emu.engine_native_family`、`emu.local_case_report`、`emu.artemis_full_flow`、`emu.report_redaction` 和 `emu.snapshot_replay` gate check。
+1. 增加 `emu.legacy_runtime_provider`、`emu.local_case_report`、`emu.artemis_full_flow`、`emu.report_redaction` 和 `emu.snapshot_replay` gate check。
 2. 校验 report schema、plugin provider registration、hash、trace coverage、TextCaptureEvent 和 snapshot replay。
 3. 校验报告不含商业 payload、未授权截图、音频采样、完整剧情脚本或私有绝对路径。
 4. 编写 gate pass、missing provider blocked、missing trace blocked 和 redaction blocked 测试。

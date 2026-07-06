@@ -10,5 +10,5 @@
 | Media | [media.md](media.md) |
 | Script / VN | [script-vn.md](script-vn.md) |
 | AI / MCP | [ai-mcp.md](ai-mcp.md) |
-| AstraEMU Family Plugin | [astraemu-ipc.md](astraemu-ipc.md) |
+| AstraEMU Legacy Runtime Provider | [astraemu-ipc.md](astraemu-ipc.md) |
 | Release Gate | [release-gate.md](release-gate.md) |

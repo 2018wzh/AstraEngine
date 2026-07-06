@@ -34,7 +34,7 @@
 ## 4. KAG/TJS Boot Trace
 
 - [ ] 初始化 TJS runtime shell。
-- [ ] 实现 `Storages`、`Scripts`、`Plugins` 的最小 facade。
+- [ ] 实现 `Storages`、`Scripts`、`Plugins` 的统一 facade。
 - [ ] 加载 `appconfig.tjs`、`default.tjs`、作品配置脚本。
 - [ ] 记录 `KAGLoadScript`、plugin link、storage lookup。
 - [ ] 输出 boot trace，不输出商业文本。

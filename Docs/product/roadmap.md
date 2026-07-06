@@ -10,7 +10,7 @@
 | Stage 2 Media + Package | Import/Cook、binary package、Renderer2D slot、TextLayout、AudioGraph、FilterGraph、DecodeProvider 和 release report。 | Package integrity、provider eligibility、headless capture、decode fallback 和 release report schema 通过。 | [stage-2-media-package](../status/stages/stage-2-media-package.md) |
 | Stage 3 AstraVN | `.astra` 编译、Luau policy、Graph/Timeline 同源、商业 VN 系统 UI、标准命令库、演出模型和完整 playthrough scenario。 | `.astra` sample 完成 dialogue、choice、backlog、auto、skip、save/load、config、video、system UI、advanced presentation opt-in 和 replay hash gate。 | [stage-3-astra-vn](../status/stages/stage-3-astra-vn.md) |
 | Stage 4 Editor + AI/MCP | Qt/QML editor、PIE、Inspector、Debugger、Package panel、Plugin Manager、Runtime AI、Editor Copilot、Content Generation 和 audit。 | Project Wizard 到 Package/Release Gate 闭环可用，插件启用诊断、Trusted session、Review Queue、provider-free replay 和 audit gate 通过。 | [stage-4-editor-ai-mcp](../status/stages/stage-4-editor-ai-mcp.md) |
-| Stage 5 AstraEMU | Manager + RuntimeWorld、engine-native family plugin API、Artemis 通用 family plugin、其他 family alpha scaffold。 | Manager 驱动 RuntimeWorld，Artemis engine-native family full-flow gate 和其他 family probe report 通过。 | [stage-5-astra-emu](../status/stages/stage-5-astra-emu.md) |
+| Stage 5 AstraEMU | Manager + RuntimeWorld、`LegacyRuntimeProvider` facade、Artemis 通用 family plugin、其他 family alpha scaffold。 | Manager 驱动 RuntimeWorld，Artemis full-flow gate、provider session snapshot/replay 和其他 family probe report 通过。 | [stage-5-astra-emu](../status/stages/stage-5-astra-emu.md) |
 
 ## 测试矩阵
 

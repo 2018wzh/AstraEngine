@@ -52,7 +52,7 @@
 | DONE_WITH_CONCERNS | ASB execution | metadata probe 先行，执行器等 fixture |
 | DONE | report 本地结构化规则 | 不输出 payload、剧情正文、截图、音频、视频帧、本机绝对路径 |
 
-## 最小实施顺序
+## 实施顺序
 
 1. `ArtemisProbe`：index-only PF6/PF8 probe、movie magic、`system.ini` summary。
 2. `ArtemisResolver`：loose/root/patch/folder pack lookup 和 safe path。

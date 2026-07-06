@@ -1,6 +1,6 @@
 # XP3 Archive Format
 
-XP3 是 KrKr family 的主要资源容器。AstraEMU 第一阶段只需要可靠读取 index、建立虚拟 storage、定位 segment、计算校验和报告能力缺口。payload decode 由格式 provider 或 KrKr compat core 处理。
+XP3 是 KrKr family 的主要资源容器。AstraEMU 第一阶段需要可靠读取 index、建立虚拟 storage、定位 segment、计算校验和报告能力缺口。payload decode 由格式 provider 或 KrKr provider session 内部处理。
 
 ## Header
 
@@ -50,7 +50,7 @@ index data 是一串 `File` chunk。每个 `File` chunk 内至少有：
 
 ## Reader Contract
 
-最小 reader 输出：
+Reader 必需输出：
 
 ```text
 ArchiveIndex {
@@ -78,4 +78,4 @@ ArchiveIndex {
 - 不在文档或工具中复制 payload。
 - 不实现通用绕过或商业保护处理。
 - 不把 DLL filter、hook 或反编译流程写入 public contract。
-- 不把 XP3 直接变成 Astra package；compat core 先按 KrKr 语义读取，Cook 到 Astra package 是后续迁移任务。
+- 不把 XP3 直接变成 Astra package；KrKr provider session 先按旧引擎语义读取，Cook 到 Astra package 是后续迁移任务。

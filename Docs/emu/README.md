@@ -33,7 +33,7 @@ tooling.md
 implementation-checklist.md
 ```
 
-特化文档只放 family 私有细节，例如 BGI 的 `script-bcs.md` / `script-bp.md`、Artemis 的 `script-tags-lua.md`、KrKr 的 `kag-tjs.md`、SoftPAL 的 `sv20-extcalls.md`。已存在的 `runtime-core-design.md` 继续保留文件名，但内容应按 ADR 0012 解释为 family plugin 内部设计。
+特化文档只放 family 私有细节，例如 BGI 的 `script-bcs.md` / `script-bp.md`、Artemis 的 `script-tags-lua.md`、KrKr 的 `kag-tjs.md`、SoftPAL 的 `sv20-extcalls.md`。`runtime-family-plugin.md` 是每个 family 接入 `LegacyRuntimeProvider` facade 的实现页。
 
 ## Tooling
 

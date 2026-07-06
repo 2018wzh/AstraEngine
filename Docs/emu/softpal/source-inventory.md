@@ -71,4 +71,4 @@ st, st2, st3, st4, st5, update, update2, update3, update4, update5
 
 ## 代码事实和 AstraEMU 取舍
 
-`sena-rs` 是可运行参考，不是 AstraEMU 的 API 边界。AstraEMU 可以复用格式知识、测试思路和最小算法，但不能把 `sena-rs` launcher、平台 UI、software renderer、Kira audio handle 或 app bundle 结构带进 EngineCore。SoftPAL core 的输出必须先落到 AstraEMU IPC contract，再由 Manager 转成 Astra Runtime / Media / Release Gate 可观测事件。
+`sena-rs` 是可运行参考，不是 AstraEMU 的 API 边界。AstraEMU 可以复用格式知识、测试思路和局部算法，但不能把 `sena-rs` launcher、平台 UI、software renderer、Kira audio handle 或 app bundle 结构带进 EngineCore。SoftPAL provider session 的输出必须先落到 `LegacyRuntimeProvider` contract，再由 Manager 转成 Astra Runtime / Media / Release Gate 可观测事件。

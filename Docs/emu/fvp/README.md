@@ -11,14 +11,14 @@
 | [script-format.md](script-format.md) | `.hcb` header、opcode、syscall table 和编码规则 |
 | [script-execution.md](script-execution.md) | VM context、thread state、syscall dispatch 和 yield 流程 |
 | [presentation-and-media.md](presentation-and-media.md) | graph/text/prim/audio/movie 的表现层映射 |
-| [runtime-core-design.md](runtime-core-design.md) | AstraEMU FVP family plugin 边界和 provider 输出 |
+| [runtime-family-plugin.md](runtime-family-plugin.md) | AstraEMU FVP family plugin 的 session 边界和 step 输出 |
 | [game-observations.md](game-observations.md) | 「樱花萌放」样本观察，保留 metadata 和 hash |
 | [tooling.md](tooling.md) | disassembler、assembler、hcb2lua、lua2hcb、nvsg_pack 的使用边界 |
-| [implementation-checklist.md](implementation-checklist.md) | FVP family adapter 最小实施清单和验收口径 |
+| [implementation-checklist.md](implementation-checklist.md) | FVP family adapter 实施清单和验收口径 |
 
 ## 范围
 
-FVP 在 AstraEMU 中是 engine-native family plugin。Plugin 持有 `.hcb` VM、`.bin` VFS、legacy syscall mapper、媒体解析状态和 save snapshot。Manager 通过 RuntimeWorld 接收本地结构化 trace、`PresentationCommand`、`AudioCommand`、`TextCaptureEvent` 和 `StateMachineTrace`。
+FVP 在 AstraEMU 中是 engine-native family plugin。Plugin 通过 `LegacyRuntimeProvider` session 持有 `.hcb` VM、`.bin` resolver、legacy syscall mapper、媒体解析状态和 save snapshot。Manager 通过 RuntimeWorld 接收本地结构化 trace、`PresentationCommand`、`AudioCommand`、`TextCaptureEvent` 和 `StateMachineTrace`。
 
 FVP 不改变 EngineCore 的 Actor/Component + StateMachine 权威模型，也不把 rfvp 的单 family 主循环、no_std 约束或平台 host 细节变成公共 Runtime contract。
 

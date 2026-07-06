@@ -48,7 +48,7 @@ KAG parser 至少要识别四类行：
 1. archive reader 只读取 metadata 和 hash。
 2. PSB probe 识别 header、version、name tree、string table、resource table。
 3. 如果没有执行器，就把该 storage 标成 `unsupported_binary_scenario`，但仍保留 layer 覆盖关系。
-4. KrKr compat core 后续要么实现 PSB scenario executor，要么通过旧 VM trace 输出 KAG 等价事件。
+4. KrKr provider session 后续要么实现 PSB scenario executor，要么通过旧 VM trace 输出 KAG 等价事件。
 
 ## PSB 参考字段
 
@@ -62,7 +62,7 @@ KAG parser 至少要识别四类行：
 - `nDibRes`
 - `nResIndexTree`
 
-对 `.ks.scn`，这些字段先用于识别和诊断。不要默认它和图片 PSB 完全同构；执行语义要由 KrKr core 验证。
+对 `.ks.scn`，这些字段先用于识别和诊断。不要默认它和图片 PSB 完全同构；执行语义要由 KrKr provider session 验证。
 
 ## 关联文本和配置
 

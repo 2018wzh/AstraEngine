@@ -26,7 +26,7 @@
 - 变量可由 `var` 创建，`$` 开头的参数值按表达式求值。
 - `g.` 是全局变量，`t.` 是临时变量，`s.` 是系统变量。
 
-最小 parser 输出：
+Parser 必需输出：
 
 ```text
 ScriptText(text, source_span)
@@ -47,7 +47,7 @@ text, rt2, ruby, bg, fg, vo, se, bgm, msg, msgoff, extrans, quake, cacheclear
 
 这些名称不是官方 tag 文档的完整集合，也包含项目自定义 ADV macro。AstraEMU 不能把它们提前提升成 EngineCore API；它们只属于 Artemis family 的 tag/macro layer。
 
-`.ast` parser 最小输出：
+`.ast` parser 必需输出：
 
 ```text
 AstTable {
@@ -86,7 +86,7 @@ AstraEMU 只暴露 `engine` object 的 capability allowlist。默认禁止文件
 | `.tbl` | `init = { ... }` | game/system config；可进入 diagnostics，但不要复制商业文本 |
 | `.sli` | text header + `Label { Position=...; Name=... }` | BGM/voice loop marker；转换为 AudioCommand loop metadata |
 
-## 最小验收
+## 验收
 
 - 读取 `CHARSET` 后能正确解析 UTF-8 和 Shift_JIS `.iet`。
 - 能从 `.iet` 输出 tag 序列、Lua block hash、label 和 source span。

@@ -8,7 +8,7 @@ AstraEMU Manager 负责窗口和实际输出尺寸。Compat core 只输出虚拟
 
 ## Layer Tags
 
-官方 graphics tag 中最小要覆盖：
+官方 graphics tag 首批要覆盖：
 
 | Tag | 行为 | AstraEMU 输出 |
 | --- | --- | --- |

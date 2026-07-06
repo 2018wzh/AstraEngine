@@ -54,7 +54,7 @@ bucket index 等于 key 的第一个 byte。`0xFF` 不能放进 255-bucket table
 
 AstraEMU 文档和 report 不提供面向终端用户的批量解包步骤。core 内部可以实现同等 reader，用于合法本地运行、hash、诊断和测试 fixture。
 
-## 最小错误模型
+## 错误模型
 
 Archive reader 至少要区分这些错误，方便 Release Gate 定位：
 

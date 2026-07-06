@@ -27,7 +27,7 @@ debug, lua, calllua, wt, return, stop, loading, if, load, lydel
 
 ## Execution Model
 
-Artemis family plugin 的最小状态：
+Artemis family plugin 的必需状态：
 
 ```text
 ArtemisCoreState

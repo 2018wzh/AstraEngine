@@ -32,7 +32,7 @@ BGI script 不能只靠文件扩展名判断。archive entry 常见外层是 `DS
 - `vm_address`：BCS 使用 body-relative address；BP 使用 file/code offset。
 - `line_hint`：BCS `0x7F` debug command 的 line number；没有则为空。
 
-source map 是 replay、trace、error report 和 text capture 的最小定位单位。它不能包含私有开发机绝对路径。
+source map 是 replay、trace、error report 和 text capture 的基础定位单位。它不能包含私有开发机绝对路径。
 
 ## Runtime 分类
 

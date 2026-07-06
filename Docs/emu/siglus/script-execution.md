@@ -1,10 +1,10 @@
 # Siglus Script Execution
 
-Siglus VM 是 stack-based interpreter，加上 form/element dispatch。AstraEMU core 要复刻 VM 行为；Manager 只看到稳定事件。
+Siglus VM 是 stack-based interpreter，加上 form/element dispatch。AstraEMU Siglus provider session 要复刻 VM 行为；Manager 只看到稳定事件。
 
 ## 执行状态
 
-最小 VM state：
+VM state：
 
 ```text
 SceneVm
@@ -89,7 +89,7 @@ AstraEMU snapshot 分两层：
 
 | 层 | 内容 |
 | --- | --- |
-| `LegacyVmSnapshotRef` | core 私有 VM、scene stream、栈、user props、local save |
+| `LegacySnapshotEnvelope` | provider session 私有 VM、scene stream、栈、user props、local save |
 | Manager report | snapshot hash、scene name、line、资源引用、feature coverage |
 
 Report 不包含完整 local stream。

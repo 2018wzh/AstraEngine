@@ -59,7 +59,7 @@ cargo run -p siglus_ss_decompiler -- --scene-pck path/to/Scene.pck --list
 python Tools/check_docs.py
 ```
 
-Siglus core 实现后再加最小 fixture：
+Siglus core 实现后再加小型 fixture：
 
 ```text
 fixtures/siglus/minimal_scene_pck/

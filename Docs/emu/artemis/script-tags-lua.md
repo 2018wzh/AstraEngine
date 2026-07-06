@@ -13,7 +13,7 @@ Artemis 有两条 Lua 入口：
 
 ## Engine Object
 
-最小 `engine` object allowlist：
+基础 `engine` object allowlist：
 
 | 函数 | 行为 | AstraEMU 状态 |
 | --- | --- | --- |

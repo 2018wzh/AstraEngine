@@ -11,6 +11,6 @@
 | pfs-rs | 本地合法参考仓库 | Artemis PF6/PF8 archive、patch chain、PFS CLI | key 和 payload 不进入 EngineCore |
 | FuckGalEngine | 本地合法参考仓库 | KrKr、Minori、BGI、Siglus 历史格式线索 | hook、crack、detours 和保护绕过说明不纳入 AstraEngine |
 
-参考仓库进入 AstraEMU family plugin 的 audit checklist：probe、archive map、script VM、legacy API mapper、media decode、system UI、save/load、trace、report redaction。
+参考仓库进入 AstraEMU family plugin 的 audit checklist：`LegacyRuntimeProvider` facade、probe、archive map、script VM、legacy API mapper、media decode、system UI、save/load、trace、report redaction。
 
 Family 研究资料入口：[../emu/README.md](../emu/README.md)。

@@ -1,38 +1,33 @@
-# Runtime Family Plugin Design
+# KrKr Runtime Family Plugin Design
 
-KrKr family 以 engine-native plugin 接入 AstraEMU。Plugin 持有 TJS VM、KAG conductor、archive resolver、插件 facade 和旧状态机。Manager 只做窗口、输入、配置、provider selection、报告和 RuntimeWorld bridge。
+KrKr family 以 engine-native plugin 接入 AstraEMU。Plugin 注册 `LegacyRuntimeProvider`，session 持有 XP3 VirtualStorage、TJS VM、KAG conductor、插件 facade、media state 和 snapshot store。Manager 只做窗口、输入、配置、provider selection、报告和 `RuntimeWorld` bridge。
 
-## 模块
+## Session Modules
 
 | 模块 | 职责 |
 | --- | --- |
 | `KrkrProbe` | 扫描目录、识别 XP3、plugin、savedata、standalone TJS |
+| `KrkrRuntimeProvider` | 实现 lifecycle facade，隔离每个 case session |
 | `Xp3Reader` | 读取 index、segment metadata、Adler-32、storage name |
 | `VirtualStorage` | 生成 layer order、处理覆盖、提供 storage lookup |
 | `TjsRuntime` | 执行 source/bytecode TJS，持有 `System`、`Storages`、`Scripts` |
 | `KagRuntime` | 执行 `.ks`、tag handler、wait/trigger、macro、call stack |
 | `BinaryScenarioRuntime` | 识别并执行 `.ks.scn`/PSB，未完成时输出 diagnostic |
-| `PluginFacade` | 将旧 DLL/API 映射成 capability requirement 或隔离加载 |
+| `PluginFacade` | 将旧 DLL/API 映射成 capability requirement 或受限 native requirement |
 | `MediaBridge` | 输出 presentation/audio/movie command 和 media ref |
 | `SnapshotStore` | 保存 legacy VM snapshot，返回 package/save snapshot section |
 
-这已经是最小划分。不要再为每个 KrKr 插件建 public module；插件能力先统一进 `PluginFacade`。
+这是 public facade 之后的内部划分。不要再为每个 KrKr 插件建 public module；插件能力先统一进 `PluginFacade`。
 
-## Provider flow
+## Lifecycle
 
-Family plugin 支持 [AstraEMU Family Plugin Contract](../../contracts/astraemu-ipc.md) 的 provider：
+`probe` 可以在不执行商业脚本的情况下完成 archive、plugin、media 和 script inventory。`open` 才初始化 VirtualStorage、TJS/KAG VM 和 PluginFacade。`step` 按 fixed tick 推进 KAG/TJS，遇到 wait、trigger、media fence、unsupported plugin 或 fault 时返回 `LegacyStepOutput`。
 
-- `LegacyVfsProvider`
-- `LegacyScriptProvider`
-- `LegacyActionProvider`
-- `LegacyMediaMapper`
-- `LegacySnapshotCodec`
+StateMachine 不理解 KAG tag、TJS object 或插件 API。session 只输出 stable trace、effect、AwaitToken 和 opaque snapshot section。
 
-`ProbeContent` 可以在不执行商业脚本的情况下完成 archive/plugin/media/script inventory。`LoadCase` 才初始化 TJS/KAG VM。
+## Host Boundary
 
-## Provider Boundary
-
-Provider 只能通过 ServiceRegistry、ExtensionRegistry、EngineModuleSlot 暴露能力。KrKr core 可以请求：
+KrKr session 可以通过 host context 请求：
 
 - image decode。
 - audio decode。
@@ -41,14 +36,7 @@ Provider 只能通过 ServiceRegistry、ExtensionRegistry、EngineModuleSlot 暴
 - file-like read-only storage。
 - local report writer。
 
-不能跨 ABI 传递：
-
-- TJS object。
-- KAG layer pointer。
-- Actor pointer。
-- GPU/audio native handle。
-- Editor widget。
-- 旧 DLL ownership。
+不能跨 ABI 传递 TJS object、KAG layer pointer、Actor pointer、GPU/audio native handle、Editor widget 或旧 DLL ownership。
 
 ## Plugin Policy
 
@@ -64,7 +52,7 @@ Provider 只能通过 ServiceRegistry、ExtensionRegistry、EngineModuleSlot 暴
 
 ## Report
 
-KrKr report 是 machine-readable，不包含商业 payload。最小字段：
+KrKr report 是 machine-readable，不包含商业 payload。必需字段：
 
 ```text
 {

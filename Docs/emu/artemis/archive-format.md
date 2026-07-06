@@ -59,7 +59,7 @@ streaming 读写大文件时，key index 必须随 payload offset 继续递增�
 
 ## Archive API
 
-Artemis family plugin 需要的最小 VFS API：
+Artemis family plugin 需要的必需 reader API：
 
 | API | 输出 | 说明 |
 | --- | --- | --- |

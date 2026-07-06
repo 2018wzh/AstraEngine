@@ -1,6 +1,6 @@
 # Presentation And Media
 
-KrKr 的 presentation 由 layer、message layer、transition、movie 和 audio graph 共同组成。AstraEMU 只接收规范化 command；旧插件和旧 renderer state 留在 KrKr compat core。
+KrKr 的 presentation 由 layer、message layer、transition、movie 和 audio graph 共同组成。AstraEMU 只接收规范化 command；旧插件和旧 renderer state 留在 KrKr provider session。
 
 ## 图像和 UI
 

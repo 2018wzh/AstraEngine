@@ -76,7 +76,7 @@ cargo run -p pal-disassembled -- <tmp>/SCRIPT.SRC --start entry --end 0x400 --an
 
 ## AstraEMU release gate inputs
 
-SoftPAL gate 最小输入：
+SoftPAL gate 输入：
 
 ```yaml
 family: softpal

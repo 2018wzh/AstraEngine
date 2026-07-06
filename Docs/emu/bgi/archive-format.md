@@ -77,4 +77,4 @@ DSC decode 规则：
 - `entry_count` 必须使 entry table 完整落在文件内。
 - `data_base + relative_offset + size` 必须在 archive 文件长度内，使用 64-bit 中间值避免整数溢出。
 - name 正规化时拒绝 `..`、root、drive prefix 和 path separator 穿越；原始 name bytes 仍保存在 trace 里。
-- archive index 不写出 payload。需要提取测试 fixture 时，只允许自造最小文件或公开许可样本。
+- archive index 不写出 payload。需要提取测试 fixture 时，只允许自造小型文件或公开许可样本。

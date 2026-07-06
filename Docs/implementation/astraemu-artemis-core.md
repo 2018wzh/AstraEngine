@@ -8,26 +8,21 @@ Artemis 是 AstraEMU v1 的首个可用 family。目标是通用 Artemis engine-
 AstraEMU Manager
   -> create RuntimeWorld
   -> enable Artemis family plugin
-  -> mount LegacyVfsProvider
-  -> compile legacy script to StateMachine action graph
-  -> register LegacyActionProvider
+  -> open LegacyRuntimeProvider session
+  -> register coarse StateMachine action adapter
   -> tick RuntimeWorld
   <- RuntimeEvent / PresentationCommand / AudioCommand / TextCaptureEvent
   <- LocalCaseReport / ReleaseReport
 ```
 
-Artemis plugin 可以持有 family-private interpreter state，但推进必须通过 StateMachine action provider 和可序列化 effect list。Manager 不解析 private state，不接收商业 payload。`EMUCoreBridge` 不参与 v1 主路径。
+Artemis plugin 可以持有 family-private interpreter state，但推进必须通过 `LegacyRuntimeProvider.step` 和可序列化 effect list。Manager 不解析 private state，不接收商业 payload。`EMUCoreBridge` 不参与 v1 主路径。
 
-## Provider Registration
+## Runtime Provider Registration
 
 ```rust
 pub struct ArtemisFamilyPlugin {
     pub descriptor: LegacyFamilyPluginDescriptor,
-    pub vfs: ArtemisVfsProvider,
-    pub script: ArtemisScriptProvider,
-    pub actions: ArtemisActionProvider,
-    pub media: ArtemisMediaMapper,
-    pub snapshot: ArtemisSnapshotCodec,
+    pub runtime: ArtemisRuntimeProvider,
 }
 ```
 
@@ -35,7 +30,7 @@ pub struct ArtemisFamilyPlugin {
 
 1. `PluginDescriptor` 通过 fingerprint、permission、feature 和 packaged eligibility gate。
 2. `LegacyFamilyPluginDescriptor` 声明 Artemis family、PFS/PF6/PF8、`.iet`、`.ast`、`.asb` 和 legacy Lua bridge capability。
-3. ExtensionRegistry 注册 VFS、script、action、media mapper、snapshot codec 和 release check。
+3. ExtensionRegistry 注册 `LegacyRuntimeProvider` 和 release check。
 4. Manager 根据 project/case profile 显式启用 Artemis provider，不按加载顺序选择。
 
 ## Artemis Probe
@@ -56,7 +51,7 @@ Probe 顺序：root marker、PFS header、PF6/PF8 index、patch chain、`system.
 
 ## Script Execution
 
-Artemis provider 支持 `.iet` text/tag、`.ast` table row、`.asb` probe classification 和 legacy Lua bridge。`[lua]` block 和 `calllua` 是 Artemis legacy fact；AstraVN policy 仍使用 Luau。
+Artemis provider session 支持 `.iet` text/tag、`.ast` table row、`.asb` probe classification 和 legacy Lua bridge。`[lua]` block 和 `calllua` 是 Artemis legacy fact；AstraVN policy 仍使用 Luau。
 
 ```rust
 pub enum ArtemisActionEffect {
@@ -84,4 +79,4 @@ astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/r
 cargo test -p astra-release emu_gate
 ```
 
-Expected report: `emu.engine_native_family`、`plugin.extension_registry`、boot、text、choice、media command、save/load、snapshot replay、Runtime replay hash 和 redaction policy 通过；报告不包含 key、完整脚本、截图、音频采样或私有绝对路径。
+Expected report: `emu.legacy_runtime_provider`、`plugin.extension_registry`、boot、text、choice、media command、save/load、snapshot replay、Runtime replay hash 和 redaction policy 通过；报告不包含 key、完整脚本、截图、音频采样或私有绝对路径。

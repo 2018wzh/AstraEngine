@@ -138,4 +138,4 @@ Last descriptors include `TimerSuspend`, `TitleMenu`, `V3DMotion`, `V3DMotionPau
 
 ## Format policy
 
-AstraEMU may expose a structured HCB metadata report, but the report must not include full `push_string` payloads. Store string length, source offset, encoding and hash prefix. Full text stays inside the compat core and only enters `TextCaptureEvent` when the user has explicitly enabled local text capture for a legally owned copy.
+AstraEMU may expose a structured HCB metadata report, but the report must not include full `push_string` payloads. Store string length, source offset, encoding and hash prefix. Full text stays inside the FVP provider session and only enters `TextCaptureEvent` when the user has explicitly enabled local text capture for a legally owned copy.

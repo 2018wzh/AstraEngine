@@ -34,7 +34,7 @@ pub struct ReleaseCheckRecord {
 | ai_mcp | `ai.provider_free_replay` | save/replay | provider required during replay | committed output hash |
 | platform | `platform.eligibility` | capability report | profile requirement missing | platform id, capability id |
 | emu | `emu.artemis_full_flow` | local case report | trace/snapshot/redaction failure | trace hash, redaction status |
-| emu | `emu.engine_native_family` | family plugin report | family bypasses RuntimeWorld or missing provider binding | family id, provider id |
+| emu | `emu.legacy_runtime_provider` | family plugin report | family bypasses RuntimeWorld or missing provider session binding | family id, provider id, session id |
 
 ## Report Schema
 

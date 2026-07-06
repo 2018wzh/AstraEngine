@@ -92,7 +92,7 @@ Expected report: `astra.editor_report.v1` with source span links for failed chec
 
 ## Stage 5：AstraEMU
 
-**闭环：** Manager 创建并驱动 RuntimeWorld，engine-native family plugin API 和 Artemis 通用 family plugin 通过 full-flow gate。其他 family 可以停在 alpha profile，但必须有 probe report。
+**闭环：** Manager 创建并驱动 RuntimeWorld，`LegacyRuntimeProvider` facade 和 Artemis 通用 family plugin 通过 full-flow gate。其他 family 可以停在 alpha profile，但必须有 probe report。
 
 **Test IDs:** `T-S5-MANAGER-01`、`T-S5-FAMILY-01`、`T-S5-ARTEMIS-01`、`T-S5-GATE-01`
 
@@ -105,7 +105,7 @@ astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/r
 astra emu probe <case-root> --family auto --report target/reports/emu-probe.yaml
 ```
 
-Expected report omits commercial payload and contains `emu.engine_native_family`、trace、TextCaptureEvent、snapshot ref、redaction status and Runtime replay hash.
+Expected report omits commercial payload and contains `emu.legacy_runtime_provider`、trace、TextCaptureEvent、snapshot ref、redaction status and Runtime replay hash.
 
 ## v1 Gate
 

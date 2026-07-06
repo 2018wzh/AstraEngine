@@ -2,7 +2,7 @@
 
 本清单描述 AstraEMU BGI core 的建议实现顺序和验收口径，不表示当前仓库已经完成这些项。
 
-| Area | 状态 | 最小交付 | 验收 |
+| Area | 状态 | 交付内容 | 验收 |
 | --- | --- | --- | --- |
 | Archive index | 未开始 | `PackFile`、`BURIKO ARC20` reader，entry bounds check，name normalization。 | 自造 fixture 通过；三组本地样本 entry count 和 data base 与观测一致。 |
 | DSC decode | 未开始 | `DSC FORMAT 1.00` header、Huffman/LZ decode、size 校验。 | 小 fixture roundtrip；样本 script entry decoded magic 可识别。 |
@@ -25,13 +25,13 @@
 1. 先做 archive index 和 safe path normalization。
 2. 加 DSC decode，并把 decoded-kind probe 接到 index report。
 3. 实现 BCS/BP parser，只输出 source map、opcode histogram 和 diagnostics。
-4. 实现最小 VM：BP push/load/store/call/ret、BCS command iteration、dispatch trace。
+4. 实现首批 VM：BP push/load/store/call/ret、BCS command iteration、dispatch trace。
 5. 接 System/Graph/Sound/User dispatch skeleton，稳定 unknown 行为。
 6. 接 presentation/media probe，不急于完整渲染。
 7. 加 snapshot/replay，并把 await token 放入固定 tick 队列。
 8. 最后接 release gate：fixture tests、metadata smoke tests、report schema 校验。
 
-## Release gate 最小标准
+## Release gate 标准
 
 - `python Tools\check_docs.py` 通过。
 - archive fixture tests 覆盖两种 archive 格式。

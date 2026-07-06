@@ -58,7 +58,7 @@ python Tools/AstraEMU/krkr_ks.py scenario.ks --json
 
 不要把 KRPatch、hook、decrypt 笔记做成 AstraEMU 工具。兼容工具只做合法输入的读取、诊断、trace 和 provider 能力映射。
 
-## 最小自检
+## 自检
 
 工具实现后至少提供一个无商业 payload 的 synthetic case：
 

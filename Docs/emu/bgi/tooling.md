@@ -54,7 +54,7 @@ python Tools/AstraEMU/bgi_dsc.py <payload.dsc> --out <decoded.bin> --json
 
 ## Fixture 策略
 
-自动化测试不使用商业 payload。需要覆盖格式时，创建最小自造 fixture：
+自动化测试不使用商业 payload。需要覆盖格式时，创建小型自造 fixture：
 
 - `PackFile`：1 个 entry，name 为 ASCII，payload 为小字节串。
 - `BURIKO ARC20`：1 个 entry，tail fields 覆盖全零和非零两种。

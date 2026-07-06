@@ -13,14 +13,14 @@
 | [script-execution.md](script-execution.md) | `system.ini` boot、tag 执行、Lua 调用和等待点 |
 | [script-tags-lua.md](script-tags-lua.md) | `lua`、`calllua`、`tag`、`setTagFilter`、`enqueueTag` 的互操作 |
 | [presentation-and-media.md](presentation-and-media.md) | layer、transition、message、BGM/SE/voice/movie 映射 |
-| [runtime-core-design.md](runtime-core-design.md) | Artemis family plugin 的边界、状态机、provider 输出和 sandbox |
+| [runtime-family-plugin.md](runtime-family-plugin.md) | Artemis family plugin 的 `LegacyRuntimeProvider` session、step 输出和 sandbox |
 | [game-observations.md](game-observations.md) | 两个本地样本的本地结构化统计和启动链观察 |
 | [tooling.md](tooling.md) | 现有 probe、PFS 工具和下一步 fixture 边界 |
-| [implementation-checklist.md](implementation-checklist.md) | 最小实施清单、状态和验收口径 |
+| [implementation-checklist.md](implementation-checklist.md) | 实施清单、状态和验收口径 |
 
 ## 范围
 
-Artemis 在 AstraEMU 中是 engine-native family plugin。Plugin 持有 PFS resolver、Artemis script VM、Lua sandbox、legacy tag executor、media state 和 save snapshot；Manager 创建 RuntimeWorld 并通过 provider/action/report 接收本地结构化 trace、`PresentationCommand`、`AudioCommand`、`TextCaptureEvent` 和 `StateMachineTrace`。
+Artemis 在 AstraEMU 中是 engine-native family plugin。Plugin 通过 `LegacyRuntimeProvider` session 持有 PFS resolver、Artemis script VM、Lua sandbox、legacy tag executor、media state 和 save snapshot；Manager 创建 RuntimeWorld，并通过 legacy lifecycle action 接收本地结构化 trace、`PresentationCommand`、`AudioCommand`、`TextCaptureEvent` 和 `StateMachineTrace`。
 
 Artemis 不改变 EngineCore 的 Actor/Component + StateMachine 权威模型，也不把 Artemis 的 tag、Lua 环境、PFS patch 规则或平台视频限制变成公共 Runtime contract。
 

@@ -28,7 +28,7 @@
 - `PackFile` 与 `BURIKO ARC20` 的 entry offset 都是相对 data block 的偏移，absolute offset 为 `data_base + relative_offset`。
 - 多数 script 和 system resource 在 archive 内先以 `DSC FORMAT 1.00` 包裹，core 必须先 decode payload，再检测 BP、BCS、image、audio 或 movie。
 - 现代 scenario payload 通常是 `BurikoCompiledScriptVer1.00`。system program 通常是 `._bp`，但 archive entry 原始 bytes 也常以 DSC magic 开头。
-- 文本、选择、声音和图像 command 必须转成 trace/event，不复制原始商业文本块。测试 fixture 只能使用自造最小 payload。
+- 文本、选择、声音和图像 command 必须转成 trace/event，不复制原始商业文本块。测试 fixture 只能使用自造小型 payload。
 
 ## 明确排除
 

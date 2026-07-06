@@ -1,6 +1,6 @@
 # Presentation and Media
 
-BGI presentation adapter 把 graph/sound/movie command 转成 AstraEMU 可记录的 presentation patch 和 media block。旧引擎内部对象、surface 指针或平台 handle 不能跨进程传递。
+BGI presentation adapter 把 graph/sound/movie command 转成 AstraEMU 可记录的 presentation patch 和 media block。旧引擎内部对象、surface 指针或平台 handle 不能跨 provider ABI 边界传递。
 
 ## `CompressedBG___`
 

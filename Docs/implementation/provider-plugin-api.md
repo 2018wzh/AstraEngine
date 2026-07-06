@@ -133,22 +133,18 @@ pub trait CookProcessor: StableProvider {
 }
 ```
 
-Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AIProvider`、`MCPToolProvider`、`LegacyFamilyPluginProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref 和 capability report。
+Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AIProvider`、`MCPToolProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref 和 capability report。
 
-## Legacy Family Provider
+## Legacy Runtime Provider
 
 ```rust
 pub struct LegacyFamilyProviderRegistration {
     pub descriptor: LegacyFamilyPluginDescriptor,
-    pub vfs: Option<ProviderId>,
-    pub script: Option<ProviderId>,
-    pub action: Option<ProviderId>,
-    pub media_mapper: Option<ProviderId>,
-    pub snapshot_codec: Option<ProviderId>,
+    pub runtime: ProviderId,
 }
 ```
 
-AstraEMU family plugin 使用普通 extension registry 注册，不拥有私有 loader 通道。family plugin 可以注册 VFS/archive provider、legacy script provider、StateMachine action provider、legacy VM adapter、media mapper 和 snapshot codec；不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
+AstraEMU family plugin 使用普通 extension registry 注册，不拥有私有 loader 通道。family plugin 注册一个 `LegacyRuntimeProvider` facade；archive reader、旧脚本 VM、media bridge 和 snapshot serializer 都留在 provider session 内。Provider 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
 
 ## Permissions
 

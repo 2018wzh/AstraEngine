@@ -33,6 +33,7 @@ IMPLEMENTATION_SPECS = [
     "editor-workflow.md",
     "ai-mcp-runtime.md",
     "platform-host.md",
+    "astraemu-legacy-runtime-framework.md",
     "astraemu-artemis-core.md",
     "release-gate-report.md",
     "release-gate-checks.md",
@@ -105,13 +106,14 @@ REQUIRED_RELEASE_CHECK_IDS = [
     "vn.system_ui_profile",
     "plugin.extension_registry",
     "plugin.dependency_graph",
-    "emu.engine_native_family",
+    "emu.legacy_runtime_provider",
     "editor.plugin_manager",
 ]
 ASTRAEMU_PRIMARY_DOCS = [
     ROOT / "AGENTS.md",
     DOCS / "contracts" / "astraemu-ipc.md",
     DOCS / "implementation" / "README.md",
+    DOCS / "implementation" / "astraemu-legacy-runtime-framework.md",
     DOCS / "implementation" / "astraemu-artemis-core.md",
     DOCS / "implementation" / "phase-delivery.md",
     DOCS / "implementation" / "workspace-blueprint.md",
@@ -371,7 +373,7 @@ def check_plugin_extension_registry() -> list[str]:
 
 def check_astraemu_engine_native_architecture() -> list[str]:
     errors: list[str] = []
-    required_terms = ["RuntimeWorld", "family plugin", "StateMachine action provider"]
+    required_terms = ["RuntimeWorld", "family plugin", "LegacyRuntimeProvider"]
     for path in ASTRAEMU_PRIMARY_DOCS:
         text = path.read_text(encoding="utf-8")
         for pattern in ASTRAEMU_OLD_PRIMARY_PATTERNS:

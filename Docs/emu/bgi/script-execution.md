@@ -77,7 +77,7 @@ BgiRunOutput {
 
 ## Save/replay
 
-BGI save/replay 最小状态：
+BGI save/replay 必需状态：
 
 - 当前 program id、PC、call stack、data stack。
 - VM memory dirty ranges 或完整 snapshot。

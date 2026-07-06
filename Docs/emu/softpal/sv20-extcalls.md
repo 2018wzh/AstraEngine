@@ -89,5 +89,5 @@ extcall handler 不直接触碰 EngineCore 对象。推荐映射：
 | sprite state | `PresentationCommand::Sprite*` |
 | audio | `AudioCommand::Load/Play/Stop/Volume` |
 | wait | serializable `AwaitToken` |
-| save/load | `LegacyVmSnapshotRef` + diagnostics |
+| save/load | `LegacySnapshotEnvelope` + diagnostics |
 | file/profile read | capability-checked local read result |

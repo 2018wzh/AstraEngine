@@ -23,6 +23,7 @@
 | [editor-workflow.md](editor-workflow.md) | UE 级 creator workflow、面板状态、Qt/Rust bridge |
 | [ai-mcp-runtime.md](ai-mcp-runtime.md) | Runtime AI、Editor Copilot、Content Generation、MCP tool policy |
 | [platform-host.md](platform-host.md) | 六平台 host trait、capability report、profile gate |
+| [astraemu-legacy-runtime-framework.md](astraemu-legacy-runtime-framework.md) | AstraEMU LegacyRuntimeProvider、session、step、effect、snapshot 和 release gate |
 | [astraemu-artemis-core.md](astraemu-artemis-core.md) | Artemis v1 engine-native family plugin、probe、snapshot、report |
 | [release-gate-report.md](release-gate-report.md) | machine-readable report、blocking checks、证据格式 |
 | [release-gate-checks.md](release-gate-checks.md) | release check id、domain、输入、阻断条件和 evidence |

@@ -42,7 +42,7 @@
 | platform/service | `krkrsteam.dll`、`dmmcloud.dll`、`httprequest.dll`、`win32dialog.dll`、`win32ole.dll` |
 | KAG compatibility | `k2compat.dll`、`kagexopt.dll`、`KAGParserEx.dll` |
 
-AstraEMU 需要把这些 DLL 识别成 capability requirement。Manager 不直接加载旧 DLL；需要加载时也只能发生在 KrKr compat core 的隔离边界内。
+AstraEMU 需要把这些 DLL 识别成 capability requirement。Manager 不直接加载旧 DLL；需要加载时也只能发生在 KrKr provider session 的 capability sandbox 内。
 
 ## FuckGalEngine/Krkr 参考
 

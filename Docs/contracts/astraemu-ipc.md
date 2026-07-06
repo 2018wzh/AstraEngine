@@ -1,8 +1,8 @@
-# AstraEMU Family Plugin Contract
+# AstraEMU Legacy Runtime Provider Contract
 
-AstraEMU v1 采用 Manager + AstraEngine `RuntimeWorld` + in-process family plugin 架构。Manager 负责窗口、输入、配置、project policy、插件启用、报告和 overlay；RuntimeWorld 持有 tick、MutationLog、Save/Replay 和 Release Gate 语义；family plugin 只把旧引擎语义翻译成引擎可审计的 provider、action 和 section。
+AstraEMU v1 采用 Manager + AstraEngine `RuntimeWorld` + in-process family plugin 架构。Manager 负责窗口、输入、配置、project policy、插件启用、报告和 overlay；`RuntimeWorld` 持有 tick、MutationLog、Save/Replay 和 Release Gate 语义；family plugin 通过 `LegacyRuntimeProvider` facade 把旧引擎行为转成可审计的 Runtime effect 和 save section。
 
-`EMUCoreBridge` 保留为普通 extension point，用于外部工具桥接或研究环境；它不属于 v1 主路径，也不能替换 `RuntimeWorld`。
+`EMUCoreBridge` 只作为 extension point 保留，用于外部工具或研究环境。它不属于 v1 主路径，也不能替换 `RuntimeWorld`。
 
 ## Descriptor
 
@@ -13,7 +13,7 @@ pub struct LegacyFamilyPluginDescriptor {
     pub engine_version: SemVer,
     pub feature_fingerprint: String,
     pub supported_formats: Vec<LegacyFormatId>,
-    pub providers: Vec<LegacyProviderKind>,
+    pub runtime_provider: ProviderId,
     pub permissions: Vec<PermissionId>,
     pub report_redaction: RedactionPolicyId,
 }
@@ -21,36 +21,141 @@ pub struct LegacyFamilyPluginDescriptor {
 
 descriptor 必须通过 plugin fingerprint、capability、permission、license 和 family feature gate。family plugin 不能声明替换 Runtime tick、Save container、MutationLog、Release Gate core checks 或 renderer/audio native handle。
 
-## Provider API
+## Runtime Provider
+
+`LegacyRuntimeProvider` 是 family runtime 的唯一 public facade。provider 可以在内部拆分 archive reader、script VM、media bridge、snapshot serializer 和 diagnostics，但这些模块不成为顶层 AstraEngine provider。
 
 ```rust
-pub trait LegacyVfsProvider {
-    fn probe(&self, request: LegacyProbeRequest) -> ProviderResult<LegacyProbeReport>;
-    fn mount(&self, request: LegacyMountRequest) -> ProviderResult<LegacyVfsMount>;
-    fn read_entry(&self, entry: LegacyEntryRef) -> ProviderResult<LegacyBytesRef>;
-}
+pub trait LegacyRuntimeProvider {
+    fn descriptor(&self) -> LegacyFamilyPluginDescriptor;
 
-pub trait LegacyScriptProvider {
-    fn classify(&self, entry: LegacyEntryRef) -> ProviderResult<LegacyScriptKind>;
-    fn compile_actions(&self, request: LegacyCompileRequest) -> ProviderResult<LegacyActionGraph>;
-}
+    fn probe(
+        &self,
+        ctx: LegacyRuntimeHostCtx,
+        request: LegacyProbeRequest,
+    ) -> ProviderResult<LegacyProbeReport>;
 
-pub trait LegacyActionProvider {
-    fn invoke(&self, request: LegacyActionRequest) -> ProviderResult<LegacyActionEffects>;
-}
+    fn open(
+        &self,
+        ctx: LegacyRuntimeHostCtx,
+        request: LegacyOpenRequest,
+    ) -> ProviderResult<LegacyRuntimeSessionId>;
 
-pub trait LegacyMediaMapper {
-    fn map_media(&self, request: LegacyMediaRequest) -> ProviderResult<PresentationCommand>;
-    fn map_audio(&self, request: LegacyAudioRequest) -> ProviderResult<AudioCommand>;
-}
+    fn step(
+        &self,
+        ctx: LegacyRuntimeHostCtx,
+        session: LegacyRuntimeSessionId,
+        input: LegacyStepInput,
+    ) -> ProviderResult<LegacyStepOutput>;
 
-pub trait LegacySnapshotCodec {
-    fn save(&self, request: LegacySnapshotSaveRequest) -> ProviderResult<PackageSection>;
-    fn load(&self, section: PackageSectionRef) -> ProviderResult<LegacySnapshotRef>;
+    fn save(
+        &self,
+        ctx: LegacyRuntimeHostCtx,
+        session: LegacyRuntimeSessionId,
+        request: LegacySnapshotSaveRequest,
+    ) -> ProviderResult<LegacySnapshotEnvelope>;
+
+    fn restore(
+        &self,
+        ctx: LegacyRuntimeHostCtx,
+        session: LegacyRuntimeSessionId,
+        snapshot: LegacySnapshotEnvelopeRef,
+    ) -> ProviderResult<LegacyRestoreReport>;
+
+    fn shutdown(
+        &self,
+        ctx: LegacyRuntimeHostCtx,
+        session: LegacyRuntimeSessionId,
+    ) -> ProviderResult<LegacyShutdownReport>;
 }
 ```
 
-所有 provider 只传 stable id、hash、source span、section ref 和 ABI-safe DTO。旧 VM 指针、平台句柄、Editor widget、商业 payload 和完整脚本文本不得进入 public API。
+`open` 返回 `LegacyRuntimeSessionId`。session 持有 family 私有 VM state、resource resolver、legacy presentation/audio state、await state、snapshot cursor 和 trace cursor。Manager 可以并行 probe 多个 case，也可以在测试里同时打开多个 session；provider 必须用 session id 隔离状态。
+
+## Host Context
+
+```rust
+pub struct LegacyRuntimeHostCtx {
+    pub case_id: StableId,
+    pub package: PackageRef,
+    pub read_mount: CapabilityRef,
+    pub media_services: MediaServiceRefs,
+    pub report_sink: ReportSinkRef,
+    pub permission_policy: PermissionPolicyRef,
+}
+```
+
+Host context 只传 ABI-safe value、stable id、hash、section ref、source span、capability ref 和 DTO。旧 VM 指针、Actor 指针、`RuntimeWorld` 指针、platform file descriptor、renderer/audio native handle、Editor widget、商业 payload 和完整脚本文本不得进入 public API。
+
+## Step Contract
+
+```rust
+pub struct LegacyStepInput {
+    pub tick_index: u64,
+    pub frame_time_ms: u32,
+    pub input_edges: Vec<LegacyInputEdge>,
+    pub await_results: Vec<LegacyAwaitResult>,
+    pub provider_results: Vec<LegacyProviderResult>,
+    pub budget: LegacyStepBudget,
+    pub replay_mode: ReplayMode,
+}
+
+pub struct LegacyStepOutput {
+    pub status: LegacyRuntimeStatus,
+    pub effects: Vec<LegacyEffect>,
+    pub waits: Vec<LegacyWaitRequest>,
+    pub trace: Vec<StateMachineTrace>,
+    pub diagnostics: Vec<Diagnostic>,
+    pub snapshot_hint: Option<LegacySnapshotHint>,
+    pub coverage: LegacyCoverageDelta,
+}
+```
+
+Runtime 每个 tick 按固定顺序把 input、await result 和 provider result 交给 provider。provider 在 family session 内推进旧 VM，直到遇到 wait、halt、fault、预算耗尽或 presentation boundary。所有输出必须在本 tick 结束前变成有序 `LegacyStepOutput`。
+
+## Effects And Wait
+
+```rust
+pub enum LegacyEffect {
+    RuntimeEvent(RuntimeEvent),
+    Presentation(PresentationCommand),
+    Audio(AudioCommand),
+    TextCapture(TextCaptureEvent),
+    Trace(StateMachineTrace),
+    SetBlackboard { key: String, value: BlackboardValue },
+    Await(AwaitToken),
+    ScheduleEvent(ScheduledRuntimeEvent),
+    SnapshotSection(PackageSectionRef),
+}
+
+pub enum LegacyWaitRequest {
+    Frame { frames: u32 },
+    Time { milliseconds: u32 },
+    Input { mask: LegacyInputMask },
+    MediaFence { media_id: StableId },
+    PresentationFence { fence_id: StableId },
+    ProviderCompletion { request_id: StableId },
+    FamilyOpaque { kind: String, payload_hash: Hash256 },
+}
+```
+
+Framework adapter 把 `LegacyEffect` 逐条应用到 `DeterministicActionContext`。任何异步 IO、decode、timer、audio/video completion 和平台回调都必须变成 `AwaitToken` 或 provider result，在下一 fixed tick 回到 `step`。Replay 消费录制结果，不重新询问平台 provider。
+
+## Snapshot
+
+```rust
+pub struct LegacySnapshotEnvelope {
+    pub family_id: FamilyId,
+    pub session_id: LegacyRuntimeSessionId,
+    pub schema_version: SchemaVersion,
+    pub case_fingerprint: Hash256,
+    pub runtime_cursor: LegacyRuntimeCursor,
+    pub family_sections: Vec<PackageSection>,
+    pub redaction: RedactionStatus,
+}
+```
+
+Snapshot envelope 是公共壳，family section 是 opaque postcard payload。Manager 和 EngineCore 只能校验 section id、version、hash、migration manifest 和 redaction，不解析 family VM stack、opcode state、TJS object、Lua state、Siglus scene stream 或旧引擎 presentation object。
 
 ## Runtime Flow
 
@@ -58,19 +163,20 @@ pub trait LegacySnapshotCodec {
 AstraEMU Manager
   -> create RuntimeWorld
   -> enable family plugin
-  -> mount LegacyVfsProvider
-  -> compile legacy script into LegacyActionGraph
-  -> register StateMachine action provider
+  -> open LegacyRuntimeProvider session
+  -> register coarse StateMachine action adapter
   -> tick RuntimeWorld
+  -> StateMachine invokes legacy.step
+  -> adapter applies LegacyEffect list
   -> collect RuntimeEvent / PresentationCommand / AudioCommand / TextCaptureEvent
   -> write LocalCaseReport
 ```
 
-family plugin 可以持有 family-private interpreter state，但权威推进必须通过 StateMachine action 和可序列化 effect list。每个 effect 在固定 tick 边界进入 Runtime，有 source span、trace id 和 replay hash。
+family plugin 可以持有 private interpreter state，但权威推进必须通过 StateMachine action 和可序列化 effect list。每个 effect 在固定 tick 边界进入 Runtime，有 source span、trace id 和 replay hash。
 
 ## Family 顺序
 
-v1 可用 family 是 Artemis。后续按通用性排序扩展：KrKr/KAG/TJS、BGI/Ethornell、SoftPAL、FVP、Siglus、Minori。所有 family 复用同一 provider API 和 release gate；私有格式知识留在 family plugin 内，不反向扩展 EngineCore 对象模型。
+v1 可用 family 是 Artemis。后续按通用性排序扩展：KrKr/KAG/TJS、BGI/Ethornell、SoftPAL、FVP、Siglus、Minori。所有 family 复用同一 `LegacyRuntimeProvider` contract 和 release gate；私有格式知识留在 family session 内，不反向扩展 EngineCore 对象模型。
 
 ## Report
 
@@ -81,4 +187,4 @@ astra emu probe cases/artemis-synthetic --family artemis --report target/reports
 astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/reports/artemis.yaml
 ```
 
-Expected report includes `emu.engine_native_family`, `emu.artemis_full_flow`, `emu.report_redaction`, `runtime.replay.determinism` and `plugin.extension_registry`.
+Expected report includes `emu.legacy_runtime_provider`, `emu.artemis_full_flow`, `emu.report_redaction`, `runtime.replay.determinism` and `plugin.extension_registry`.
