@@ -9,6 +9,8 @@ rust-version.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }
 astra-media = { path = "../../Runtime/astra-media" }
 astra-package = { path = "../../Runtime/astra-package" }
+astra-platform = { path = "../../Platform/astra-platform" }
+astra-target = { path = "../../Platform/astra-target" }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

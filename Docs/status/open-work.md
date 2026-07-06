@@ -4,7 +4,7 @@
 
 - Stage 2 的 `astra-package`、`astra-asset`、`astra-cook`、`astra-media` 和 `astra-release` 已落地。后续工作不应绕过这些 contract 写私有 package、media 或 release report 格式。
 - Runtime save 已迁移到 `astra-package` 共享 container。后续 save section 扩展应继续使用同一 header、section table、codec 和 footer hash 规则。
-- Release Gate 独立 validator 已实现 Stage 2 package/media/scenario refs 基线；Stage 3/4/5 需要继续补 VN、Editor、AI/MCP、platform 和 EMU domain。
+- Release Gate 独立 validator 已实现 Stage 2 package/media/scenario refs、Target manifest 和 platform report 基线；Stage 3/4/5 需要继续补 VN、Editor、AI/MCP 和 EMU domain。
 - 当前优先顺序转为 Stage 3 `.astra` parser/compiler、AstraVN Core 和 presentation model。
 
 ## P1
@@ -19,6 +19,6 @@
 
 - Runtime AI committed output、Trusted session audit、MCP tool descriptor。
 - AstraEMU Manager RuntimeWorld bridge、`LegacyRuntimeProvider` facade、auto probe、Trusted Luau、文本翻译、FilterGraph preset 和 Artemis full-flow。
-- 移动/Web host module capability report。
+- 移动/Web 真实 SDK probe、launcher 和 windowed/browser smoke。
 
 完整状态表见 [implementation-plan](implementation-plan.md)。

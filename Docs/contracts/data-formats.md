@@ -15,6 +15,13 @@ engine_modules:
   text_layout: astra.text.cosmic
   audio: astra.audio.platform
 platforms: [windows, linux, macos, ios, android, web]
+targets:
+  - id: nativevn-game
+    kind: game
+    crate: astra-vn
+    default_profile: desktop-release
+    platforms: [windows, linux, macos, ios, android, web]
+    packaged: true
 ```
 
 每个 YAML schema 必须有 Rust 类型、schema version、migrator 和验证命令。
@@ -40,7 +47,7 @@ Save 必须包含 Runtime state、Actor/Component、StateMachine、Blackboard、
 
 ## Package
 
-Package 必须包含 cooked assets、compiled `.astra` IR、Luau policy bundle、policy lock/vendor cache、schema registry、provider policy、module fingerprint、release report summary、test scenario references 和 platform eligibility。Runtime 不依赖源 YAML 启动。
+Package 必须包含 cooked assets、compiled `.astra` IR、Luau policy bundle、policy lock/vendor cache、schema registry、provider policy、module fingerprint、target manifest、release report summary、test scenario references 和 platform eligibility。Runtime 不依赖源 YAML 启动。
 
 ## Migration
 

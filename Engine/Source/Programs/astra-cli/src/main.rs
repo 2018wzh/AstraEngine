@@ -2,7 +2,9 @@ use std::{env, fs, path::PathBuf};
 
 use astra_core::Hash256;
 use astra_package::{PackageBuildRequest, PackageBuilder, SectionPayload};
+use astra_platform::{PlatformCapabilityReport, PlatformId};
 use astra_release::{PackageValidateRequest, ReleaseReport, ReleaseValidator};
+use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationReport};
 use astra_test::{ScenarioReport, ScenarioRunner};
 use clap::{Parser, Subcommand, ValueEnum};
 use schemars::JsonSchema;
@@ -34,6 +36,8 @@ enum Command {
         #[arg(long)]
         profile: String,
         #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
         out: PathBuf,
     },
     Package {
@@ -48,6 +52,14 @@ enum Command {
         #[command(subcommand)]
         command: ReportCommand,
     },
+    Target {
+        #[command(subcommand)]
+        command: TargetCommand,
+    },
+    Platform {
+        #[command(subcommand)]
+        command: PlatformCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -56,11 +68,17 @@ enum PackageCommand {
         cooked: PathBuf,
         #[arg(long)]
         out: PathBuf,
+        #[arg(long)]
+        target: Option<String>,
     },
     Validate {
         package: PathBuf,
         #[arg(long)]
         profile: String,
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
+        platform_report: Option<PathBuf>,
         #[arg(long)]
         report: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = ReportFormat::Yaml)]
@@ -75,6 +93,10 @@ enum TestCommand {
         #[arg(long)]
         headless: bool,
         #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
+        package: Option<PathBuf>,
+        #[arg(long)]
         report: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = ReportFormat::Yaml)]
         format: ReportFormat,
@@ -84,6 +106,36 @@ enum TestCommand {
 #[derive(Subcommand)]
 enum ReportCommand {
     Explain { report: PathBuf },
+}
+
+#[derive(Subcommand)]
+enum TargetCommand {
+    List {
+        project: PathBuf,
+        #[arg(long, value_enum, default_value_t = ReportFormat::Yaml)]
+        format: ReportFormat,
+    },
+    Validate {
+        project: PathBuf,
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long, value_enum, default_value_t = ReportFormat::Yaml)]
+        format: ReportFormat,
+    },
+}
+
+#[derive(Subcommand)]
+enum PlatformCommand {
+    Probe {
+        #[arg(long, value_enum)]
+        platform: PlatformArg,
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
+        report: Option<PathBuf>,
+        #[arg(long, value_enum, default_value_t = ReportFormat::Yaml)]
+        format: ReportFormat,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -98,6 +150,29 @@ enum LogFormat {
     Json,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum PlatformArg {
+    Windows,
+    Linux,
+    Macos,
+    Ios,
+    Android,
+    Web,
+}
+
+impl From<PlatformArg> for PlatformId {
+    fn from(value: PlatformArg) -> Self {
+        match value {
+            PlatformArg::Windows => PlatformId::Windows,
+            PlatformArg::Linux => PlatformId::Linux,
+            PlatformArg::Macos => PlatformId::Macos,
+            PlatformArg::Ios => PlatformId::Ios,
+            PlatformArg::Android => PlatformId::Android,
+            PlatformArg::Web => PlatformId::Web,
+        }
+    }
+}
+
 fn main() -> Result<(), CliError> {
     let cli = Cli::parse();
     let _log_guard = init_logging(&cli)?;
@@ -105,15 +180,20 @@ fn main() -> Result<(), CliError> {
         Command::Cook {
             project,
             profile,
+            target,
             out,
         } => {
-            let manifest = cook_project(project, &profile, out)?;
+            let manifest = cook_project(project, &profile, target.as_deref(), out)?;
             println!("{}", serde_yaml::to_string(&manifest)?);
         }
         Command::Package { command } => match command {
-            PackageCommand::Build { cooked, out } => {
+            PackageCommand::Build {
+                cooked,
+                out,
+                target,
+            } => {
                 let manifest = read_cook_manifest(&cooked)?;
-                let package = build_package_from_cooked(&cooked, manifest)?;
+                let package = build_package_from_cooked(&cooked, manifest, target.as_deref())?;
                 if let Some(parent) = out.parent() {
                     fs::create_dir_all(parent)?;
                 }
@@ -122,14 +202,19 @@ fn main() -> Result<(), CliError> {
             PackageCommand::Validate {
                 package,
                 profile,
+                target,
+                platform_report,
                 report,
                 format,
             } => {
                 let bytes = fs::read(package)?;
+                let platform_report = read_platform_report(platform_report.as_deref())?;
                 let release_report = ReleaseValidator.validate_package(PackageValidateRequest {
                     package_bytes: bytes,
                     profile,
                     require_ffmpeg: false,
+                    target,
+                    platform_report,
                 })?;
                 let encoded = encode_release_report(&release_report, format)?;
                 if let Some(path) = report {
@@ -147,6 +232,8 @@ fn main() -> Result<(), CliError> {
                 TestCommand::Run {
                     scenario,
                     headless,
+                    target,
+                    package,
                     report,
                     format,
                 },
@@ -156,6 +243,8 @@ fn main() -> Result<(), CliError> {
             }
             info!(
                 headless,
+                target = target.as_deref().unwrap_or(""),
+                package = package.as_ref().map(|_| "provided").unwrap_or(""),
                 format = ?format,
                 has_report_path = report.is_some(),
                 "cli.test.run"
@@ -188,6 +277,40 @@ fn main() -> Result<(), CliError> {
             let text = fs::read_to_string(report)?;
             println!("{}", explain_report(&text)?);
         }
+        Command::Target { command } => match command {
+            TargetCommand::List { project, format } => {
+                let manifest = read_target_manifest(&project)?;
+                println!("{}", encode_target_manifest(&manifest, format)?);
+            }
+            TargetCommand::Validate {
+                project,
+                target,
+                format,
+            } => {
+                let manifest = read_target_manifest(&project)?;
+                let report = validate_manifest(&manifest, target.as_deref());
+                println!("{}", encode_target_report(&report, format)?);
+            }
+        },
+        Command::Platform { command } => match command {
+            PlatformCommand::Probe {
+                platform,
+                target,
+                report,
+                format,
+            } => {
+                let platform_report = probe_platform(platform.into(), target.as_deref());
+                let encoded = encode_platform_report(&platform_report, format)?;
+                if let Some(path) = report {
+                    if let Some(parent) = path.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::write(path, &encoded)?;
+                } else {
+                    println!("{encoded}");
+                }
+            }
+        },
     }
     Ok(())
 }
@@ -253,6 +376,36 @@ fn encode_release_report(report: &ReleaseReport, format: ReportFormat) -> Result
     })
 }
 
+fn encode_target_manifest(
+    manifest: &TargetManifest,
+    format: ReportFormat,
+) -> Result<String, CliError> {
+    Ok(match format {
+        ReportFormat::Json => serde_json::to_string_pretty(manifest)?,
+        ReportFormat::Yaml => serde_yaml::to_string(manifest)?,
+    })
+}
+
+fn encode_target_report(
+    report: &TargetValidationReport,
+    format: ReportFormat,
+) -> Result<String, CliError> {
+    Ok(match format {
+        ReportFormat::Json => serde_json::to_string_pretty(report)?,
+        ReportFormat::Yaml => serde_yaml::to_string(report)?,
+    })
+}
+
+fn encode_platform_report(
+    report: &PlatformCapabilityReport,
+    format: ReportFormat,
+) -> Result<String, CliError> {
+    Ok(match format {
+        ReportFormat::Json => serde_json::to_string_pretty(report)?,
+        ReportFormat::Yaml => serde_yaml::to_string(report)?,
+    })
+}
+
 fn explain_report(text: &str) -> Result<String, CliError> {
     let value: serde_yaml::Value = serde_yaml::from_str(text)?;
     let schema = value
@@ -268,12 +421,35 @@ fn explain_report(text: &str) -> Result<String, CliError> {
     }
 }
 
+fn read_platform_report(
+    path: Option<&std::path::Path>,
+) -> Result<Option<PlatformCapabilityReport>, CliError> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let text = fs::read_to_string(path)?;
+    Ok(Some(serde_yaml::from_str(&text)?))
+}
+
+fn probe_platform(platform: PlatformId, target: Option<&str>) -> PlatformCapabilityReport {
+    match platform {
+        PlatformId::Windows => astra_platform_windows::probe(target),
+        PlatformId::Linux => astra_platform_linux::probe(target),
+        PlatformId::Macos => astra_platform_macos::probe(target),
+        PlatformId::Ios => astra_platform_ios::probe(target),
+        PlatformId::Android => astra_platform_android::probe(target),
+        PlatformId::Web => astra_platform_web::probe(target),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 struct CookManifest {
     schema: String,
     package_id: String,
     profile: String,
+    target: String,
     project_hash: String,
+    target_manifest: TargetManifest,
     artifacts: Vec<CookedArtifactRef>,
 }
 
@@ -285,9 +461,35 @@ struct CookedArtifactRef {
     hash: String,
 }
 
-fn cook_project(project: PathBuf, profile: &str, out: PathBuf) -> Result<CookManifest, CliError> {
+fn read_target_manifest(project: &std::path::Path) -> Result<TargetManifest, CliError> {
+    let text = fs::read_to_string(project)?;
+    TargetManifest::from_project_yaml(&text).map_err(|err| err.to_string().into())
+}
+
+fn cook_project(
+    project: PathBuf,
+    profile: &str,
+    target: Option<&str>,
+    out: PathBuf,
+) -> Result<CookManifest, CliError> {
     let project_text = fs::read_to_string(&project)?;
     let project_yaml: serde_yaml::Value = serde_yaml::from_str(&project_text)?;
+    let target_manifest = TargetManifest::from_project_value(&project_yaml)?;
+    let target = target
+        .or_else(|| {
+            target_manifest
+                .targets
+                .first()
+                .map(|target| target.id.as_str())
+        })
+        .ok_or("project has no targets")?;
+    let target_report = validate_manifest(&target_manifest, Some(target));
+    if matches!(
+        target_report.status,
+        astra_target::TargetValidationStatus::Blocked
+    ) {
+        return Err(format!("target validation failed: {target}").into());
+    }
     let package_id = project_yaml
         .get("id")
         .and_then(serde_yaml::Value::as_str)
@@ -300,6 +502,7 @@ fn cook_project(project: PathBuf, profile: &str, out: PathBuf) -> Result<CookMan
         "schema": "astra.cooked_project.v1",
         "package_id": package_id,
         "profile": profile,
+        "target": target,
         "project_hash": project_hash,
     })
     .to_string()
@@ -310,7 +513,9 @@ fn cook_project(project: PathBuf, profile: &str, out: PathBuf) -> Result<CookMan
         schema: "astra.cook_manifest.v1".to_string(),
         package_id,
         profile: profile.to_string(),
+        target: target.to_string(),
         project_hash,
+        target_manifest,
         artifacts: vec![CookedArtifactRef {
             section_id: "compiled.project".to_string(),
             schema: "astra.cooked_project.v1".to_string(),
@@ -333,7 +538,24 @@ fn read_cook_manifest(cooked: &std::path::Path) -> Result<CookManifest, CliError
 fn build_package_from_cooked(
     cooked: &std::path::Path,
     manifest: CookManifest,
+    target: Option<&str>,
 ) -> Result<astra_package::ContainerBlob, CliError> {
+    let target = target.unwrap_or(&manifest.target);
+    if target != manifest.target {
+        return Err(format!(
+            "package target {target} does not match cooked target {}",
+            manifest.target
+        )
+        .into());
+    }
+    let target_report = validate_manifest(&manifest.target_manifest, Some(target));
+    if matches!(
+        target_report.status,
+        astra_target::TargetValidationStatus::Blocked
+    ) {
+        return Err(format!("target validation failed: {target}").into());
+    }
+    let package_target_manifest = package_target_manifest(&manifest.target_manifest, target)?;
     let mut artifacts = Vec::new();
     for artifact in &manifest.artifacts {
         let bytes = fs::read(cooked.join(&artifact.path))?;
@@ -352,6 +574,8 @@ fn build_package_from_cooked(
         manifest.profile.clone(),
         artifacts,
     );
+    request.target_manifest = serde_json::to_vec(&package_target_manifest)?;
+    request.platform_eligibility = platform_eligibility(&package_target_manifest, target)?;
     request.asset_registry = serde_json::to_vec(&serde_json::json!({
         "schema": "astra.asset_registry.v1",
         "package_id": &manifest.package_id,
@@ -364,4 +588,33 @@ fn build_package_from_cooked(
     }))?;
     request.release_summary = br#"{"schema":"astra.release_summary.v1","status":"built"}"#.to_vec();
     PackageBuilder::build(request).map_err(|err| err.to_string().into())
+}
+
+fn package_target_manifest(
+    manifest: &TargetManifest,
+    target: &str,
+) -> Result<TargetManifest, CliError> {
+    let target = manifest
+        .find(target)
+        .ok_or_else(|| format!("target {target} is not defined"))?;
+    if target.kind != TargetKind::Game || !target.packaged {
+        return Err(format!(
+            "package target {} must be a packaged game target",
+            target.id
+        )
+        .into());
+    }
+    Ok(TargetManifest::new(vec![target.clone()]))
+}
+
+fn platform_eligibility(manifest: &TargetManifest, target: &str) -> Result<Vec<u8>, CliError> {
+    let target = manifest
+        .find(target)
+        .ok_or_else(|| format!("target {target} is not defined"))?;
+    Ok(serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.platform_eligibility.v1",
+        "target": target.id,
+        "profiles": target.default_profile.iter().collect::<Vec<_>>(),
+        "platforms": target.platforms,
+    }))?)
 }

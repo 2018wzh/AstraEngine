@@ -211,3 +211,24 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 **Done Evidence:** v0.4 gate 能阻断缺失 audit 或 provider-free replay 失败的 package。
 
 **Linked Test IDs:** `T-S4-GATE-01`
+
+## S4-EDITOR-TARGET-01 AstraEditor Editor target
+
+**ID:** `S4-EDITOR-TARGET-01`
+
+**Goal:** AstraEditor 以 `Editor` target 运行 Project Wizard、PIE、Debugger 和 Release Gate panel。
+
+**Depends On:** `S1-TARGET-01`、`S4-EDITOR-01`、`S4-EDITOR-02`、`S4-EDITOR-05`
+
+**Target Paths:** `Editor/Source/App/astra-editor/`、`Editor/Source/Bridge/astra-editor-bridge/src/target.rs`、`Editor/Tests/editor_target.rs` planned target
+
+**Steps:**
+
+1. 定义 `astra-editor` Target，kind 为 `editor`，绑定 desktop platforms，`packaged` 为 false。
+2. Editor launch 前校验 Target manifest，不允许 Editor target 写入 packaged runtime。
+3. PIE 使用所选 Game target 启动 RuntimeWorld，不复用 Editor target 的 state。
+4. 编写 Editor target launch、PIE target handoff 和 package isolation 测试。
+
+**Done Evidence:** Editor target 不出现在 game package，PIE 能显式选择 Game target。
+
+**Linked Test IDs:** `T-S4-EDITOR-TARGET-01`

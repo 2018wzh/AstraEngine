@@ -213,7 +213,15 @@ version = "0.1.0"
 dependencies = [
  "astra-core",
  "astra-package",
+ "astra-platform",
+ "astra-platform-android",
+ "astra-platform-ios",
+ "astra-platform-linux",
+ "astra-platform-macos",
+ "astra-platform-web",
+ "astra-platform-windows",
  "astra-release",
+ "astra-target",
  "astra-test",
  "clap",
  "schemars",
@@ -298,6 +306,58 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-platform"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "schemars",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "astra-platform-android"
+version = "0.1.0"
+dependencies = [
+ "astra-platform",
+]
+
+[[package]]
+name = "astra-platform-ios"
+version = "0.1.0"
+dependencies = [
+ "astra-platform",
+]
+
+[[package]]
+name = "astra-platform-linux"
+version = "0.1.0"
+dependencies = [
+ "astra-platform",
+]
+
+[[package]]
+name = "astra-platform-macos"
+version = "0.1.0"
+dependencies = [
+ "astra-platform",
+]
+
+[[package]]
+name = "astra-platform-web"
+version = "0.1.0"
+dependencies = [
+ "astra-platform",
+]
+
+[[package]]
+name = "astra-platform-windows"
+version = "0.1.0"
+dependencies = [
+ "astra-platform",
+]
+
+[[package]]
 name = "astra-plugin"
 version = "0.1.0"
 dependencies = [
@@ -340,6 +400,8 @@ dependencies = [
  "astra-core",
  "astra-media",
  "astra-package",
+ "astra-platform",
+ "astra-target",
  "schemars",
  "serde",
  "serde_json",
@@ -363,6 +425,17 @@ dependencies = [
  "sha2",
  "thiserror 1.0.69",
  "tracing",
+]
+
+[[package]]
+name = "astra-target"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "schemars",
+ "serde",
+ "serde_yaml",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

@@ -9,4 +9,4 @@
 | [web.md](web.md) | Web/WASM/WebGPU/WebCodecs |
 | [experimental.md](experimental.md) | 旧主机/掌机实验模块 |
 
-六平台 host trait、capability report 和 profile gate 见 [Platform Host Blueprint](../implementation/platform-host.md)。
+六平台 host trait、Target binding、capability report 和 profile gate 见 [Target And Platform Blueprint](../implementation/target-platform.md) 与 [Platform Host Blueprint](../implementation/platform-host.md)。

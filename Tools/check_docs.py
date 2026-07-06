@@ -23,6 +23,7 @@ IMPLEMENTATION_SPECS = [
     "workspace-blueprint.md",
     "phase-delivery.md",
     "runtime-api.md",
+    "target-platform.md",
     "provider-plugin-api.md",
     "asset-media-pipeline.md",
     "astra-grammar-ir.md",
@@ -158,6 +159,7 @@ REQUIRED_COVERAGE_COLUMNS = [
 ]
 REQUIRED_RELEASE_DOMAINS = [
     "runtime",
+    "target",
     "plugin",
     "package",
     "media",

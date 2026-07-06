@@ -2,6 +2,8 @@
 
 Desktop host 覆盖 Windows、Linux、macOS。窗口和输入默认使用 winit，渲染默认 wgpu，解码优先平台 API，FFmpeg/vcpkg 作为 fallback。
 
+对应 crate 是 `astra-platform-windows`、`astra-platform-linux` 和 `astra-platform-macos`。每个平台先输出 `astra.platform_capability_report.v1`，再进入 windowed smoke 和 release profile gate。
+
 ## Responsibilities
 
 - 创建 surface、处理 DPI、窗口、输入法、手柄、文件选择、权限和 crash bundle。

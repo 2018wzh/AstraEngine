@@ -133,6 +133,7 @@ fn package_roundtrip_builder_writes_required_runtime_sections() {
         "media.manifest",
         "provider.policy",
         "module.fingerprint",
+        "target.manifest",
         "release.summary",
         "scenario.refs",
         "platform.eligibility",

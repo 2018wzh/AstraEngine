@@ -1,5 +1,12 @@
 schema: astra.project.v1
 id: com.example.astra.advanced_vn
+targets:
+  - id: advanced-vn-game
+    kind: game
+    crate: astra-vn
+    default_profile: advanced-vn
+    platforms: [windows, linux, macos, ios, android, web]
+    packaged: true
 profiles:
   - nativevn-commercial
   - advanced-vn

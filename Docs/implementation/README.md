@@ -9,6 +9,7 @@
 | [workspace-blueprint.md](workspace-blueprint.md) | Rust workspace、crate、feature、binary、依赖方向 |
 | [phase-delivery.md](phase-delivery.md) | Stage 1-5 的可运行闭环、命令、报告和退出标准 |
 | [runtime-api.md](runtime-api.md) | RuntimeWorld lifecycle、Actor/Component、StateMachine、Debug API |
+| [target-platform.md](target-platform.md) | Editor/Game/Program Target、project.yaml targets、六平台 SDK 分层验收 |
 | [state-machine-action-provider.md](state-machine-action-provider.md) | StateMachine action provider、deterministic context、FFI effect list |
 | [provider-plugin-api.md](provider-plugin-api.md) | 插件 descriptor、provider trait、权限、load/unload lifecycle |
 | [asset-media-pipeline.md](asset-media-pipeline.md) | Asset import/cook/package、Media command、默认 provider 和 graph validation |

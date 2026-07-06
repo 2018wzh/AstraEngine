@@ -19,6 +19,10 @@ evidence:
   schema_registry_hash: sha256:...
   policy_lock_hash: sha256:...
 checks:
+  - id: target.manifest
+    domain: target
+    status: pass
+    source_ref: null
   - id: runtime.replay.determinism
     domain: runtime
     status: pass
@@ -35,6 +39,7 @@ checks:
 - runtime determinism
 - schema migration
 - package integrity
+- target manifest
 - plugin fingerprint
 - permission policy
 - Luau sandbox and snapshot

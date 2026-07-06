@@ -2,6 +2,8 @@
 
 Web 目标是 wasm32 + WebGPU/WebGL fallback + WebCodecs。Web 平台必须遵守浏览器 sandbox，不提供任意本地文件系统或后台线程假设。
 
+对应 crate 是 `astra-platform-web`。没有 wasm/browser SDK 时只输出缺失 SDK 的 capability report，不把 Web release 标为完成。
+
 ## Boundaries
 
 - Package 通过 File API、Origin Private File System 或 HTTP range source 加载。

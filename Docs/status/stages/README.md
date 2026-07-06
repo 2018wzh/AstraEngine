@@ -1,14 +1,14 @@
 # Stage Work
 
-本目录把路线图拆成可执行工作项。Stage 1 已实现；Stage 2-5 仍记录未实现目标、步骤和验收证据。当前代码完成度和下一步顺序见 [implementation-plan](../implementation-plan.md)。
+本目录把路线图拆成可执行工作项。Stage 1-2 已实现基础闭环；Stage 3-5 仍记录未实现目标、步骤和验收证据。当前代码完成度和下一步顺序见 [implementation-plan](../implementation-plan.md)。
 
 | 文档 | 内容 |
 | --- | --- |
-| [stage-1-enginecore.md](stage-1-enginecore.md) | EngineCore、Runtime、Save/Replay、Plugin ABI 和 headless test，已实现 |
-| [stage-2-media-package.md](stage-2-media-package.md) | Asset/Cook/Package、Media provider 和 release report |
-| [stage-3-astra-vn.md](stage-3-astra-vn.md) | `.astra`、AstraVN Core、Luau policy、standard commands、system UI 和 full playthrough |
-| [stage-4-editor-ai-mcp.md](stage-4-editor-ai-mcp.md) | Editor workflow、PIE、Release Gate UI、Runtime AI 和 MCP |
-| [stage-5-astra-emu.md](stage-5-astra-emu.md) | AstraEMU Manager、LegacyRuntimeProvider facade、auto probe、Trusted Luau、文本翻译和 FilterGraph preset |
+| [stage-1-enginecore.md](stage-1-enginecore.md) | EngineCore、Runtime、Save/Replay、Plugin ABI、Target manifest 和 headless test，已实现 |
+| [stage-2-media-package.md](stage-2-media-package.md) | Asset/Cook/Package、Media provider、Platform capability 和 release report |
+| [stage-3-astra-vn.md](stage-3-astra-vn.md) | `.astra`、AstraVN Core、Game target、Luau policy、standard commands、system UI 和 full playthrough |
+| [stage-4-editor-ai-mcp.md](stage-4-editor-ai-mcp.md) | Editor target、Editor workflow、PIE、Release Gate UI、Runtime AI 和 MCP |
+| [stage-5-astra-emu.md](stage-5-astra-emu.md) | Program target、AstraEMU Manager、LegacyRuntimeProvider facade、auto probe、Trusted Luau、文本翻译和 FilterGraph preset |
 | [stage-test-matrix.md](stage-test-matrix.md) | Stage 1-5 工作项对应的测试项目 |
 
 ## Work Item 格式

@@ -254,3 +254,24 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 **Done Evidence:** `astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --headless` 通过，并输出 release report。
 
 **Linked Test IDs:** `T-S3-SAMPLE-01`
+
+## S3-GAME-TARGET-01 NativeVN Game target
+
+**ID:** `S3-GAME-TARGET-01`
+
+**Goal:** NativeVN sample 以 `Game` target 完成 cook、package、full playthrough 和 release gate。
+
+**Depends On:** `S2-TARGET-GATE-01`、`S3-SAMPLE-01`
+
+**Target Paths:** `Examples/NativeVN/project.yaml`、`scenarios/full_playthrough.yaml`、`Engine/Source/Runtime/astra-vn/tests/vn_game_target.rs` planned target
+
+**Steps:**
+
+1. 在 sample project 中声明 `nativevn-game`，绑定 `desktop-release` 和六平台列表。
+2. `astra cook`、`astra package build`、`astra test run` 和 `astra package validate` 全部使用 `--target nativevn-game`。
+3. Release report 同时包含 `target.manifest`、`vn.commercial_baseline`、`vn.system_ui_profile` 和 `platform.eligibility`。
+4. 编写 Game target package 和 full playthrough 测试。
+
+**Done Evidence:** NativeVN package 的 `target.manifest` 与 full playthrough 使用同一个 Game target id。
+
+**Linked Test IDs:** `T-S3-GAME-TARGET-01`

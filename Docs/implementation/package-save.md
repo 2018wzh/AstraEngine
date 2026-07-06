@@ -59,6 +59,7 @@ Minimum package sections:
 - `media.manifest`
 - `provider.policy`
 - `module.fingerprint`
+- `target.manifest`：只包含当前包内单一 packaged `Game` target
 - `release.summary`
 - `scenario.refs`
 - `platform.eligibility`
@@ -102,7 +103,7 @@ Package validation report includes section table hash, schema registry hash, pol
 ```bash
 cargo test -p astra-package package_roundtrip
 cargo test -p astra-runtime save_replay
-astra package validate target/nativevn.astrapkg --profile desktop-release
+astra package validate target/nativevn.astrapkg --profile desktop-release --target nativevn-game
 ```
 
 Expected: invalid offset, hash mismatch and missing migration produce blocking diagnostics.

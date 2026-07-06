@@ -24,6 +24,7 @@ pub struct PackageBuildRequest {
     pub media_manifest: Vec<u8>,
     pub provider_policy: Vec<u8>,
     pub module_fingerprint: Vec<u8>,
+    pub target_manifest: Vec<u8>,
     pub release_summary: Vec<u8>,
     pub scenario_refs: Vec<u8>,
     pub platform_eligibility: Vec<u8>,
@@ -65,6 +66,17 @@ impl PackageBuildRequest {
                 "schema": "astra.module_fingerprint.v1",
                 "modules": []
             })),
+            target_manifest: json_bytes(serde_json::json!({
+                "schema": "astra.target_manifest.v1",
+                "targets": [{
+                    "id": "native-smoke-game",
+                    "kind": "game",
+                    "crate": "astra-runtime",
+                    "default_profile": "desktop-release",
+                    "platforms": ["windows", "linux", "macos", "ios", "android", "web"],
+                    "packaged": true
+                }]
+            })),
             release_summary: json_bytes(serde_json::json!({
                 "schema": "astra.release_summary.v1",
                 "status": "unchecked"
@@ -75,7 +87,9 @@ impl PackageBuildRequest {
             })),
             platform_eligibility: json_bytes(serde_json::json!({
                 "schema": "astra.platform_eligibility.v1",
-                "profiles": ["desktop-release", "headless"]
+                "target": "native-smoke-game",
+                "profiles": ["desktop-release", "headless"],
+                "platforms": ["windows", "linux", "macos", "ios", "android", "web"]
             })),
         }
     }
@@ -125,6 +139,11 @@ impl PackageBuilder {
                 "module.fingerprint",
                 "astra.module_fingerprint.v1",
                 request.module_fingerprint,
+            ))
+            .add_section(SectionPayload::raw(
+                "target.manifest",
+                "astra.target_manifest.v1",
+                request.target_manifest,
             ))
             .add_section(SectionPayload::raw(
                 "release.summary",

@@ -1,5 +1,7 @@
 use astra_core::{Diagnostic, Hash256};
 use astra_package::{PackageManifest, PackageReader};
+use astra_platform::{PlatformCapabilityReport, PlatformValidationStatus};
+use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -15,6 +17,8 @@ pub struct PackageValidateRequest {
     pub package_bytes: Vec<u8>,
     pub profile: String,
     pub require_ffmpeg: bool,
+    pub target: Option<String>,
+    pub platform_report: Option<PlatformCapabilityReport>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -59,6 +63,7 @@ pub struct ReleaseCheckRecord {
 #[serde(rename_all = "snake_case")]
 pub enum ReleaseDomain {
     Runtime,
+    Target,
     Plugin,
     Package,
     Media,
@@ -117,12 +122,15 @@ impl ReleaseValidator {
                     "asset.registry",
                     "media.manifest",
                     "provider.policy",
+                    "target.manifest",
                     "scenario.refs",
                     "platform.eligibility",
                 ] {
                     checks.push(section_check(&package, section));
                 }
+                checks.push(target_manifest_check(&package, request.target.as_deref()));
                 checks.push(media_check(request.require_ffmpeg));
+                checks.push(platform_report_check(request.platform_report.as_ref()));
                 checks.push(ReleaseCheckRecord {
                     id: "scenario.refs".to_string(),
                     domain: ReleaseDomain::Scenario,
@@ -145,6 +153,7 @@ impl ReleaseValidator {
                     evidence: vec![evidence("package_hash", &package_hash)],
                 });
                 checks.push(media_check(request.require_ffmpeg));
+                checks.push(platform_report_check(request.platform_report.as_ref()));
             }
         }
 
@@ -179,6 +188,7 @@ fn section_check(package: &PackageReader, section: &str) -> ReleaseCheckRecord {
             id: format!("{section}.present"),
             domain: match section {
                 "media.manifest" => ReleaseDomain::Media,
+                "target.manifest" => ReleaseDomain::Target,
                 "platform.eligibility" => ReleaseDomain::Platform,
                 _ => ReleaseDomain::Package,
             },
@@ -200,6 +210,98 @@ fn section_check(package: &PackageReader, section: &str) -> ReleaseCheckRecord {
             evidence: vec![evidence("section", section)],
         }
     }
+}
+
+fn target_manifest_check(package: &PackageReader, selected: Option<&str>) -> ReleaseCheckRecord {
+    let bytes = match package
+        .container()
+        .read_bounded("target.manifest", 256 * 1024)
+    {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            return ReleaseCheckRecord {
+                id: "target.manifest".to_string(),
+                domain: ReleaseDomain::Target,
+                status: CheckStatus::Blocked,
+                summary: "target manifest section could not be read".to_string(),
+                diagnostic: Some(Diagnostic::blocking(
+                    "ASTRA_TARGET_MANIFEST",
+                    err.to_string(),
+                )),
+                evidence: vec![evidence("section", "target.manifest")],
+            };
+        }
+    };
+    let manifest: TargetManifest = match serde_json::from_slice(&bytes) {
+        Ok(manifest) => manifest,
+        Err(err) => {
+            return ReleaseCheckRecord {
+                id: "target.manifest".to_string(),
+                domain: ReleaseDomain::Target,
+                status: CheckStatus::Blocked,
+                summary: "target manifest is not valid JSON".to_string(),
+                diagnostic: Some(Diagnostic::blocking(
+                    "ASTRA_TARGET_MANIFEST_JSON",
+                    err.to_string(),
+                )),
+                evidence: vec![evidence("section", "target.manifest")],
+            };
+        }
+    };
+    let report = validate_manifest(&manifest, selected);
+    let package_shape_diagnostic = package_target_shape_diagnostic(&manifest);
+    let status = if package_shape_diagnostic.is_some() {
+        CheckStatus::Blocked
+    } else {
+        match report.status {
+            TargetValidationStatus::Pass => CheckStatus::Pass,
+            TargetValidationStatus::Warning => CheckStatus::Warning,
+            TargetValidationStatus::Blocked => CheckStatus::Blocked,
+        }
+    };
+    ReleaseCheckRecord {
+        id: "target.manifest".to_string(),
+        domain: ReleaseDomain::Target,
+        status,
+        summary: "target manifest contains one packaged Game target".to_string(),
+        diagnostic: package_shape_diagnostic.or_else(|| {
+            report
+                .diagnostics
+                .iter()
+                .find(|diagnostic| {
+                    matches!(
+                        diagnostic.severity,
+                        astra_core::DiagnosticSeverity::Blocking
+                            | astra_core::DiagnosticSeverity::Error
+                    )
+                })
+                .cloned()
+        }),
+        evidence: vec![
+            evidence("target_count", report.target_count),
+            evidence("selected_target", selected.unwrap_or("")),
+        ],
+    }
+}
+
+fn package_target_shape_diagnostic(manifest: &TargetManifest) -> Option<Diagnostic> {
+    if manifest.targets.len() != 1 {
+        return Some(Diagnostic::blocking(
+            "ASTRA_TARGET_PACKAGE_SHAPE",
+            "package target manifest must contain exactly one target",
+        ));
+    }
+    let target = &manifest.targets[0];
+    if target.kind != TargetKind::Game || !target.packaged {
+        return Some(
+            Diagnostic::blocking(
+                "ASTRA_TARGET_PACKAGE_GAME",
+                "package target manifest must contain one packaged game target",
+            )
+            .with_field("target", &target.id),
+        );
+    }
+    None
 }
 
 fn media_check(require_ffmpeg: bool) -> ReleaseCheckRecord {
@@ -232,6 +334,42 @@ fn media_check(require_ffmpeg: bool) -> ReleaseCheckRecord {
             )),
             evidence: vec![evidence("symphonia_available", symphonia_available)],
         }
+    }
+}
+
+fn platform_report_check(report: Option<&PlatformCapabilityReport>) -> ReleaseCheckRecord {
+    let Some(report) = report else {
+        return ReleaseCheckRecord {
+            id: "platform.capability_report".to_string(),
+            domain: ReleaseDomain::Platform,
+            status: CheckStatus::Warning,
+            summary: "platform capability report was not supplied".to_string(),
+            diagnostic: Some(Diagnostic::warning(
+                "ASTRA_PLATFORM_REPORT_MISSING",
+                "platform probe evidence is required before native platform completion",
+            )),
+            evidence: vec![],
+        };
+    };
+
+    let (status, diagnostics) = astra_platform::validate_capability_report(report);
+    ReleaseCheckRecord {
+        id: "platform.capability_report".to_string(),
+        domain: ReleaseDomain::Platform,
+        status: match status {
+            PlatformValidationStatus::Pass => CheckStatus::Pass,
+            PlatformValidationStatus::Warning => CheckStatus::Warning,
+            PlatformValidationStatus::Blocked => CheckStatus::Blocked,
+        },
+        summary: "platform capability report matches the requested native SDK state".to_string(),
+        diagnostic: diagnostics.first().cloned(),
+        evidence: vec![
+            evidence("platform", report.platform),
+            evidence(
+                "sdk_status",
+                format!("{:?}", report.sdk_status).to_lowercase(),
+            ),
+        ],
     }
 }
 

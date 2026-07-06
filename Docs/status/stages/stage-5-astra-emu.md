@@ -283,3 +283,24 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 **Done Evidence:** 每个 family 都能用同一 release gate 输出脱敏 local case report。
 
 **Linked Test IDs:** `T-S5-GATE-01`
+
+## S5-PROGRAM-TARGET-01 AstraEMU Manager Program target
+
+**ID:** `S5-PROGRAM-TARGET-01`
+
+**Goal:** AstraEMU Manager 以 `Program` target 运行，family plugin 仍通过 `LegacyRuntimeProvider` 注册，不升级成 Game target。
+
+**Depends On:** `S1-TARGET-01`、`S5-MANAGER-01`、`S5-FAMILY-01`
+
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/target.rs`、`AstraEMU/Tests/manager_program_target.rs` planned target
+
+**Steps:**
+
+1. 定义 `astra-emu-manager` Target，kind 为 `program`，绑定 desktop platforms。
+2. Manager 启动时校验 Program target 和 platform capability。
+3. family plugin descriptor 只进入 plugin registry，不写成独立 Target。
+4. 编写 Manager target validation、family plugin isolation 和 local case report 测试。
+
+**Done Evidence:** Manager report 包含 Program target id，family report 仍只记录 provider id 和 session id。
+
+**Linked Test IDs:** `T-S5-PROGRAM-TARGET-01`

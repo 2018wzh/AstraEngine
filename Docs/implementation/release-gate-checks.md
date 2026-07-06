@@ -20,6 +20,7 @@ pub struct ReleaseCheckRecord {
 | Domain | Check ID | Input | Blocking Condition | Evidence |
 | --- | --- | --- | --- | --- |
 | runtime | `runtime.replay.determinism` | scenario report | hash mismatch | state/event/presentation hash |
+| target | `target.manifest` | package target manifest | missing target, not exactly one packaged Game, selected target absent | target id, kind, profile |
 | plugin | `plugin.fingerprint` | plugin descriptor | version or feature mismatch | descriptor hash |
 | plugin | `plugin.extension_registry` | extension registration report | conflict, missing phase, invalid extension point or packaged trim error | extension id, phase, plugin id |
 | plugin | `plugin.dependency_graph` | plugin enablement report | missing required dependency or unresolved version conflict | dependency edge, selected provider |
@@ -58,6 +59,11 @@ checks:
     status: blocked
     diagnostic: ASTRA_EMU_REDACTION_FAILED
     source_ref: null
+  - id: target.manifest
+    domain: target
+    status: pass
+    evidence:
+      target_count: 1
   - id: vn.advanced_presentation
     domain: vn
     status: pass

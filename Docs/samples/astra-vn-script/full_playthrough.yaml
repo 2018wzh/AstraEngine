@@ -1,5 +1,6 @@
 schema: astra.scenario.v1
 package: target/astra-vn-script-sample.astrapkg
+target: nativevn-game
 seed: 42
 locale: zh-Hans
 

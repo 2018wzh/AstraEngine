@@ -1,6 +1,6 @@
 # Stage 2 Media + Package Work
 
-Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media provider。当前完成边界是 Desktop Native + Headless：可构建二进制 package、可 headless capture、可验证 release report；六平台 native provider 继续作为后续 platform 接入工作。
+Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider 和 Platform capability。当前完成边界包含 Desktop Native、Headless、六平台 capability report schema 和 SDK 分层 gate；真实平台完成仍要求对应 SDK probe 通过。
 
 ## S2-ASSET-01 AssetId、VFS 与 sidecar schema
 
@@ -191,3 +191,46 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package 和 Media pr
 **Done Evidence:** `cargo test -p astra-release release_report` 和 `astra package validate target/nativevn.astrapkg --profile desktop-release --report target/release_report.yaml` 输出可机器读取的 `astra.release_report.v1`。
 
 **Linked Test IDs:** `T-S2-GATE-01`
+
+## S2-PLATFORM-01 Platform capability crate 与六平台 probe
+
+**ID:** `S2-PLATFORM-01`
+
+**Goal:** `Engine/Source/Platform` 提供共享 `PlatformHost` contract 和六个平台 capability probe。
+
+**Depends On:** `S1-TARGET-01`、`Docs/implementation/platform-host.md`
+
+**Target Paths:** `Engine/Source/Platform/astra-platform/`、`Engine/Source/Platform/astra-platform-windows/`、`Engine/Source/Platform/astra-platform-linux/`、`Engine/Source/Platform/astra-platform-macos/`、`Engine/Source/Platform/astra-platform-ios/`、`Engine/Source/Platform/astra-platform-android/`、`Engine/Source/Platform/astra-platform-web/`
+
+**Steps:**
+
+1. 定义 `PlatformId`、`SdkStatus`、`PlatformCapabilityReport`、`PlatformHost` 和 token DTO。
+2. 每个平台 crate 输出 renderer、decode、audio、filesystem、input、lifecycle 和 permission capability。
+3. 缺 SDK 时报告 `sdk_status: missing`，不把平台完成状态拔高。
+4. 编写 capability report validation 测试。
+
+**Done Evidence:** `cargo test -p astra-platform` 通过；六个平台 crate 在 workspace 中编译。
+
+**Linked Test IDs:** `T-S2-PLATFORM-01`
+
+## S2-TARGET-GATE-01 Package target manifest 与 platform gate
+
+**ID:** `S2-TARGET-GATE-01`
+
+**Goal:** Package build 写入只含单一 packaged Game 的 `target.manifest`，Release Gate 同时校验 Target 和 Platform report。
+
+**Depends On:** `S1-TARGET-01`、`S2-PLATFORM-01`、`S2-GATE-01`
+
+**Target Paths:** `Engine/Source/Runtime/astra-package/src/builder.rs`、`Engine/Source/Developer/astra-release/src/lib.rs`、`Engine/Source/Programs/astra-cli/src/main.rs`
+
+**Steps:**
+
+1. `PackageBuildRequest` 增加 `target_manifest` section。
+2. `astra cook`、`astra package build`、`astra package validate` 接收 `--target`。
+3. `astra package build` 要求 package target 与 cooked target 一致，并过滤掉 Editor/Program descriptor。
+4. `astra package validate` 可读取 `--platform-report` 并阻断缺 SDK 的真实平台完成。
+5. 编写 package section、release report 和 CLI probe 测试。
+
+**Done Evidence:** `cargo test -p astra-package package_roundtrip`、`cargo test -p astra-release release_report` 和 `cargo test -p astra-cli --test target_platform` 通过。
+
+**Linked Test IDs:** `T-S2-TARGET-GATE-01`

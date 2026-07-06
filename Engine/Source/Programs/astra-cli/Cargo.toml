@@ -12,7 +12,15 @@ path = "src/main.rs"
 [dependencies]
 astra-core = { path = "../../Runtime/astra-core" }
 astra-package = { path = "../../Runtime/astra-package" }
+astra-platform = { path = "../../Platform/astra-platform" }
+astra-platform-android = { path = "../../Platform/astra-platform-android" }
+astra-platform-ios = { path = "../../Platform/astra-platform-ios" }
+astra-platform-linux = { path = "../../Platform/astra-platform-linux" }
+astra-platform-macos = { path = "../../Platform/astra-platform-macos" }
+astra-platform-web = { path = "../../Platform/astra-platform-web" }
+astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
 astra-release = { path = "../../Developer/astra-release" }
+astra-target = { path = "../../Platform/astra-target" }
 astra-test = { path = "../../Developer/astra-test" }
 clap.workspace = true
 schemars.workspace = true

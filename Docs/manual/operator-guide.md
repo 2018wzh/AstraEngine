@@ -5,10 +5,12 @@ Operator 负责构建、打包、平台适配、Release Gate、crash bundle 和 
 ## 发布命令
 
 ```bash
-astra cook project.yaml --profile desktop-release
-astra package build target/cooked --out target/game.astrapkg
-astra package validate target/game.astrapkg --profile desktop-release
-astra test run scenarios/full_playthrough.yaml --package target/game.astrapkg --headless
+astra target validate project.yaml --target nativevn-game
+astra platform probe --platform windows --target nativevn-game --report target/platform-windows.yaml
+astra cook project.yaml --profile desktop-release --target nativevn-game --out target/cooked
+astra package build target/cooked --target nativevn-game --out target/game.astrapkg
+astra package validate target/game.astrapkg --profile desktop-release --target nativevn-game --platform-report target/platform-windows.yaml
+astra test run scenarios/full_playthrough.yaml --package target/game.astrapkg --target nativevn-game --headless
 ```
 
 ## 日志命令
@@ -31,12 +33,15 @@ astra test run scenarios/native_smoke.yaml --headless --log-dir target/logs
 
 每个平台模块必须输出 renderer、decode、audio、filesystem、input、save persistence、network 和 AI permission capability。Release Gate 根据 profile 判断是否可发布。
 
+缺少对应 SDK 时，platform report 必须写 `sdk_status: missing`。普通 CI 可以保留 schema 和 CLI 证据，但不能把该平台 release 标成完成。
+
 ## Report Reference
 
 | Report | 用途 |
 | --- | --- |
 | `astra.release_report.v1` | 发布资格 |
 | `astra.scenario_report.v1` | 无头玩家流程 |
+| `astra.target_validation_report.v1` | Editor/Game/Program target |
 | `astra.platform_capability_report.v1` | 六平台能力 |
 | `astra.plugin_report.v1` | 插件加载、卸载和 provider |
 | `astra.emu.local_case_report.v1` | AstraEMU Artemis 和后续 family |

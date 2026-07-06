@@ -1,6 +1,7 @@
 schema: astra.scenario.v1
 id: scenarios.advanced_presentation
 package: target/advancedvn.astrapkg
+target: advanced-vn-game
 profile: advanced-vn
 seed: 42
 actions:

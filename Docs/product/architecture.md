@@ -32,6 +32,12 @@ Text-first source (.astra/.yaml/assets)
 
 RuntimeWorld 是组合 facade，不是全局单例。Editor、CLI、MCP、平台壳和测试框架都通过同一 public API 创建和驱动它。
 
+## Target 与 Platform
+
+Target 描述可执行产品形态：`Game` 用于可发布运行时，`Editor` 用于创作者工具，`Program` 用于 CLI、Manager 和离线工具。`Client`、`Server` 作为后续网络 stage 的 schema 保留值，不参与当前 release gate。
+
+Platform 描述运行宿主能力：Windows、Linux、macOS、iOS、Android、Web 都通过 `PlatformCapabilityReport` 报告 renderer、decode、audio、filesystem、input、lifecycle、permission 和 SDK 状态。Package 同时携带 `target.manifest` 和 `platform.eligibility`；Release Gate 按 target、profile 和 platform report 判定。
+
 ## Core 边界
 
 Core 包含基础类型、diagnostics、stable id、schema、migration、PropertySystem、ServiceRegistry、ExtensionRegistry、EngineModuleSlot 和插件加载策略。Core 不知道 VN、Editor、MCP、AI、Luau、legacy VM 或任何具体平台后端。

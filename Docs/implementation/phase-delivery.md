@@ -6,13 +6,14 @@
 
 **闭环：** native smoke package 在 headless Runtime 中启动、推进、save/load、replay，并通过 plugin descriptor gate。
 
-**Test IDs:** `T-S1-BOOT-01`、`T-S1-SAVE-01`、`T-S1-PLUGIN-01`、`T-S1-TEST-01`
+**Test IDs:** `T-S1-BOOT-01`、`T-S1-SAVE-01`、`T-S1-PLUGIN-01`、`T-S1-TARGET-01`、`T-S1-TEST-01`
 
 **Sample:** `scenarios/native_smoke.yaml`
 
 **Report Schema:** `astra.scenario_report.v1`
 
 ```bash
+cargo run -p astra-cli -- target validate Docs/samples/astra-vn-script/project.yaml --target nativevn-game
 cargo run -p astra-cli -- test run scenarios/native_smoke.yaml --headless --report target/reports/stage1.yaml
 cargo run -p astra-cli -- report explain target/reports/stage1.yaml
 ```
@@ -34,48 +35,51 @@ checks:
   status: pass
 - id: plugin.descriptor_gate
   status: pass
+- id: target.manifest
+  status: pass
 ```
 
 ## Stage 2：Media + Package
 
 **闭环：** cooked package 可读写，headless capture 稳定，平台能力报告覆盖 decode/audio/renderer。
 
-**Test IDs:** `T-S2-PACKAGE-01`、`T-S2-MEDIA-01`、`T-S2-MEDIA-05`、`T-S2-GATE-01`
+**Test IDs:** `T-S2-PACKAGE-01`、`T-S2-MEDIA-01`、`T-S2-MEDIA-05`、`T-S2-PLATFORM-01`、`T-S2-TARGET-GATE-01`、`T-S2-GATE-01`
 
 **Sample:** `Examples/NativeSmoke`
 
 **Report Schema:** `astra.release_report.v1`
 
 ```bash
-astra package build Examples/NativeSmoke --out target/native_smoke.astrapkg
-astra package validate target/native_smoke.astrapkg --profile desktop-release --report target/reports/stage2.yaml
+astra platform probe --platform windows --target native-smoke-game --report target/reports/platform-windows.yaml
+astra package build target/cooked --target native-smoke-game --out target/native_smoke.astrapkg
+astra package validate target/native_smoke.astrapkg --profile desktop-release --target native-smoke-game --platform-report target/reports/platform-windows.yaml --report target/reports/stage2.yaml
 ```
 
-Expected report includes `package.integrity`, `renderer.headless_capture`, `decode.capability`, `audio.headless_meter`.
+Expected report includes `package.integrity`, `target.manifest`, `platform.capability_report`, `renderer.headless_capture`, `decode.capability`, `audio.headless_meter`.
 
 ## Stage 3：AstraVN
 
 **闭环：** `.astra + Luau policy` 编译为 CompiledStory，full playthrough 覆盖 commercial baseline、system UI、save/load 和 replay hash；advanced presentation profile 有独立 opt-in scenario。
 
-**Test IDs:** `T-S3-SCRIPT-01`、`T-S3-LUAU-01`、`T-S3-LUAU-02`、`T-S3-PRESENT-01`、`T-S3-SYSTEM-01`、`T-S3-ADVANCED-01`、`T-S3-SAMPLE-01`
+**Test IDs:** `T-S3-SCRIPT-01`、`T-S3-LUAU-01`、`T-S3-LUAU-02`、`T-S3-PRESENT-01`、`T-S3-SYSTEM-01`、`T-S3-ADVANCED-01`、`T-S3-SAMPLE-01`、`T-S3-GAME-TARGET-01`
 
 **Sample:** `Examples/NativeVN`、`scenarios/full_playthrough.yaml`、`scenarios/advanced_presentation.yaml`
 
 **Report Schema:** `astra.scenario_report.v1` + `astra.release_report.v1`
 
 ```bash
-astra package build Examples/NativeVN --out target/nativevn.astrapkg
-astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --headless --report target/reports/stage3.yaml
-astra test run scenarios/advanced_presentation.yaml --package target/nativevn.astrapkg --headless --report target/reports/stage3-advanced.yaml
+astra package build target/cooked-nativevn --target nativevn-game --out target/nativevn.astrapkg
+astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --target nativevn-game --headless --report target/reports/stage3.yaml
+astra test run scenarios/advanced_presentation.yaml --package target/nativevn.astrapkg --target nativevn-game --headless --report target/reports/stage3-advanced.yaml
 ```
 
-Expected report includes `script.compile`, `luau.policy_lock`, `system_stories.covered`, `vn.system_ui_profile`, `vn.advanced_presentation`, `command.provider_binding` and `vn.replay_hash`.
+Expected report includes `target.manifest`, `script.compile`, `luau.policy_lock`, `system_stories.covered`, `vn.system_ui_profile`, `vn.advanced_presentation`, `command.provider_binding` and `vn.replay_hash`.
 
 ## Stage 4：Editor + AI/MCP
 
 **闭环：** Creator 从 Project Wizard 到 Package/Release Gate 可用；AI/MCP 写入有 audit、diff 和 rollback。
 
-**Test IDs:** `T-S4-EDITOR-01`、`T-S4-PLUGIN-01`、`T-S4-EDITOR-04`、`T-S4-EDITOR-05`、`T-S4-AI-02`、`T-S4-MCP-01`
+**Test IDs:** `T-S4-EDITOR-01`、`T-S4-PLUGIN-01`、`T-S4-EDITOR-04`、`T-S4-EDITOR-05`、`T-S4-EDITOR-TARGET-01`、`T-S4-AI-02`、`T-S4-MCP-01`
 
 **Sample:** `Examples/NativeVN` opened through Project Wizard
 
@@ -83,6 +87,7 @@ Expected report includes `script.compile`, `luau.policy_lock`, `system_stories.c
 
 ```bash
 cargo test -p astra-editor-bridge editor_creator_loop
+cargo test -p astra-editor-bridge editor_target
 cargo test -p astra-editor-bridge plugin_manager
 cargo test -p astra-ai trusted_session_audit
 cargo test -p astra-mcp capability_protocol
@@ -94,7 +99,7 @@ Expected report: `astra.editor_report.v1` with source span links for failed chec
 
 **闭环：** Manager 创建并驱动 RuntimeWorld，`LegacyRuntimeProvider` facade、auto probe、Trusted Luau、文本翻译、FilterGraph preset 和 Artemis 通用 family plugin 通过 gate。其他 family 可以停在 alpha profile，但必须有 probe report。
 
-**Test IDs:** `T-S5-MANAGER-01`、`T-S5-FAMILY-01`、`T-S5-ARTEMIS-01`、`T-S5-GATE-01`
+**Test IDs:** `T-S5-MANAGER-01`、`T-S5-PROGRAM-TARGET-01`、`T-S5-FAMILY-01`、`T-S5-ARTEMIS-01`、`T-S5-GATE-01`
 
 **Sample:** `scenarios/emu/artemis_full_flow.yaml` and local authorized case root
 

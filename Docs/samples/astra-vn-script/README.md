@@ -4,7 +4,7 @@
 
 | 文件 | 内容 |
 | --- | --- |
-| [project.yaml](project.yaml) | 项目入口、策略包、系统页、本地化和发布锁定策略 |
+| [project.yaml](project.yaml) | 项目入口、Game target、策略包、系统页、本地化和发布锁定策略 |
 | [main.astra](main.astra) | 主剧情、text key、choice、timeline、Luau policy command |
 | [system.astra](system.astra) | title/config/gallery/replay/chart system stories |
 | [standard_policy.luau](standard_policy.luau) | 官方标准策略包形态 |

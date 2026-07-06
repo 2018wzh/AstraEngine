@@ -20,6 +20,7 @@
 ```yaml
 schema: astra.scenario.v1
 package: target/nativevn.astrapkg
+target: nativevn-game
 seed: 42
 actions:
   - wait_for: dialogue
