@@ -12,7 +12,7 @@ AstraVN 脚本层采用“Core 语义稳定，Luau 策略可换”的分工。`.
 
 Core 提供完整 VN 权威语义。官方 Luau 策略包提供完整商业 VN 体验，第三方策略包可以替换表现和系统流程，但不能重写存档、回放、已读、backlog 等语义边界。
 
-演出舞台、标准命令和系统页数据模型分别由 [AstraVN Presentation Model](astra-vn-presentation-model.md)、[AstraVN Standard Command Library](astra-vn-standard-commands.md) 和 [AstraVN System UI Profile](astra-vn-system-ui-profile.md) 定义。本页只保留脚本核心契约。
+演出舞台、标准命令和系统页数据模型分别由 [AstraVN Presentation Model](astra-vn-presentation-model.md)、[AstraVN Standard Command Library](astra-vn-standard-commands.md) 和 [AstraVN System UI Profile](astra-vn-system-ui-profile.md) 定义。`CompiledStory` 通过 Runtime `StateMachine` 推进的规则见 [AstraVN StateMachine Playback](../implementation/astra-vn-state-machine.md)。本页只保留脚本核心契约。
 
 ## `.astra` Source
 
@@ -53,6 +53,8 @@ pub struct CompiledStory {
     pub debug_symbols: DebugSymbols,
 }
 ```
+
+运行时不直接执行 `.astra` source。`CompiledStory` 进入 `VnRuntimeState` 和 `VnCommandCursor` 后，由单个故事推进 `StateMachine` 调用 `astra.vn.step` action；角色、stage layer、Timeline track 和系统页都不是独立剧情状态机。
 
 变量分四域：
 

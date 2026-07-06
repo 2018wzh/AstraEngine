@@ -40,13 +40,13 @@ commands:
 | `camera` | `camera target:main zoom:1.1 duration:480` | `CameraState` + `TimelineTask` | 改变 stage camera | keyframe editor、safe area overlay | viewport bounds、budget |
 | `transition` | `transition preset:crossfade duration:300` | `PresentationTimeline` | 场景或 layer transition | preset picker、preview | fallback、capture hash |
 | `shake` | `shake target:camera.main strength:4 duration:180` | `CameraState` | deterministic shake | strength slider、curve picker | seed、skip snap |
-| `movie` | `movie layer:video.opening asset:op01 end:wait` | `VideoLayerState` | 打开 video layer 和 await movie end | movie preview、end marker | decode capability、end token |
-| `voice` | `voice asset:voice.hero.0001 sync:text` | `AudioCommand` + voice fence | 播放 voice 并绑定文本 | waveform preview | voice replay、auto wait |
+| `movie` | `movie layer:video.opening asset:op01 end:wait` | `VideoLayerState` | 打开 video layer；`end:wait` 进入 `VnWaitState::Movie` | movie preview、end marker | decode capability、end token |
+| `voice` | `voice asset:voice.hero.0001 sync:text` | `AudioCommand` + voice fence | 播放 voice 并绑定文本；sync 进入 `VnWaitState::Fence` | waveform preview | voice replay、auto wait |
 | `bgm` | `bgm asset:bgm.room loop:true fade:600` | `AudioCommand` | 播放或切换 BGM bus | bus selector、loop marker | asset/license、loop point |
 | `se` | `se asset:se.door bus:se` | `AudioCommand` | 播放短音效 | bus selector、gain slider | asset/license |
-| `wait` | `wait ms:300` / `wait fence:voice_end` | `AwaitToken` | 挂起到 tick 边界 | fence picker | serializable token |
-| `choice` | `choice key:prologue.where` | `RuntimeEvent::ChoiceOpen` | 进入选择等待 | option list、route graph | reachability、savepoint |
-| `system_page` | `system_page kind:save` | `SystemStoryCall` | 进入系统页 story | system page picker | profile entry exists |
+| `wait` | `wait ms:300` / `wait fence:voice_end` | `AwaitToken` | 进入 `VnWaitState::Fence` 或 timer await | fence picker | serializable token |
+| `choice` | `choice key:prologue.where` | `RuntimeEvent::ChoiceOpen` | 进入 `VnWaitState::Choice`，等待 `choice.selected` payload | option list、route graph | reachability、savepoint |
+| `system_page` | `system_page kind:save` | `SystemStoryCall` | 进入 `VnWaitState::SystemPage`，返回后恢复 cursor | system page picker | profile entry exists |
 
 ## Authoring Example
 
@@ -65,6 +65,8 @@ state prologue #@id state.prologue
 ```
 
 编译后输出稳定 command id、source span 和 IR hash；Editor 修改参数时只能回写 `.astra` 或 policy metadata。
+
+`dialogue` 由 `text` command 产生：Core 写 backlog、read-state 和 voice replay，输出 TextWindow presentation，并进入 `VnWaitState::Dialogue` 等待玩家推进、auto 或 skip 规则。`choice.selected`、`player.advance` 和 `await.completed` 作为 Runtime event payload 进入 `astra.vn.step`，不通过全局 Blackboard 传递。
 
 ## Schema Example
 

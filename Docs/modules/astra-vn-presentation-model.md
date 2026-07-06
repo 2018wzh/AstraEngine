@@ -101,6 +101,8 @@ pub struct TimelineTask {
 
 Timeline 是 Director 的输入，不是第二套剧情状态。每条 track 必须绑定 command id、source span 和 rollback scope。
 
+VN story 只在 `join_policy`、voice sync、movie end 或显式 `wait` 需要阻塞剧情时进入 `VnWaitState`。Director 可以继续执行或取消 timeline task，但不能直接移动 `VnCommandCursor`。
+
 ```yaml
 schema: astra.presentation_timeline.v1
 id: timeline.prologue.hero_enter

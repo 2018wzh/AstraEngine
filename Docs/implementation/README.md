@@ -13,6 +13,7 @@
 | [provider-plugin-api.md](provider-plugin-api.md) | 插件 descriptor、provider trait、权限、load/unload lifecycle |
 | [asset-media-pipeline.md](asset-media-pipeline.md) | Asset import/cook/package、Media command、默认 provider 和 graph validation |
 | [astra-grammar-ir.md](astra-grammar-ir.md) | `.astra` pest grammar、AST、IR、source map、formatter、错误恢复 |
+| [astra-vn-state-machine.md](astra-vn-state-machine.md) | AstraVN command cursor、wait state、StateMachine action 和演出调度 |
 | [runtime-execution.md](runtime-execution.md) | tick 顺序、EventQueue、AwaitToken/Fence、MutationLog、hash/replay |
 | [luau-policy.md](luau-policy.md) | Luau host API、sandbox、typed policy、pesde、lock/vendor cache |
 | [../modules/astra-vn-presentation-model.md](../modules/astra-vn-presentation-model.md) | Stage/Layer/Camera/Sprite/TextWindow/VideoLayer 和 advanced presentation profile |

@@ -56,12 +56,12 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Steps:**
 
-1. 把 CompiledStory command 驱动为 Runtime StateMachine action。
+1. 按 [AstraVN StateMachine Playback](../../implementation/astra-vn-state-machine.md) 把 CompiledStory command 驱动为 Runtime `StateMachine` action。
 2. 实现 project、global、temp、system 四个变量域和写入规则。
-3. 实现 dialogue wait、choice wait、call/return stack 和 route flag。
-4. 编写 dialogue advance、choice branch、variable rollback 和 call/return 测试。
+3. 实现 `VnRuntimeState`、`VnCommandCursor`、dialogue wait、choice wait、call/return stack 和 route flag。
+4. 编写 command cursor、dialogue advance、choice payload、variable rollback 和 call/return 测试。
 
-**Done Evidence:** VN Core 测试证明剧情权威状态不依赖 Luau policy。
+**Done Evidence:** VN Core 测试证明 command cursor、wait state、choice payload 和路线状态不依赖 Luau policy。
 
 **Linked Test IDs:** `T-S3-CORE-01`
 
@@ -164,10 +164,10 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 1. 定义 Stage/Layer/Camera/Sprite/TextWindow/VideoLayer serde 类型和 schema。
 2. 实现 `show`、`hide`、`move`、`camera`、`transition`、`shake`、`movie`、`voice`、`bgm`、`se`、`wait`、`choice`、`system_page` 的 schema、IR 和 release check。
-3. 实现 skip、auto、replay、voice sync、movie end、fallback 和 performance budget。
-4. 编写 provider binding、timeline join/cancel、effect fallback 和 deterministic hash 测试。
+3. 实现 skip、auto、replay、voice sync、movie end、fallback、`VnWaitState` 映射和 performance budget。
+4. 编写 provider binding、timeline join/cancel、voice fence、effect fallback 和 deterministic hash 测试。
 
-**Done Evidence:** 标准命令从 `.astra` 编译到 IR，headless Runtime 输出稳定 PresentationCommand/AudioCommand。
+**Done Evidence:** 标准命令从 `.astra` 编译到 IR，headless Runtime 通过 `astra.vn.step` 输出稳定 PresentationCommand/AudioCommand、Timeline task 和 AwaitToken。
 
 **Linked Test IDs:** `T-S3-PRESENT-01`
 
@@ -225,12 +225,12 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 
 **Steps:**
 
-1. 定义 Graph node metadata、Timeline track metadata 和 command id binding。
+1. 定义 Graph node metadata、Timeline track metadata、wait/fence metadata 和 command id binding。
 2. 实现 metadata -> `.astra` patch 或 policy override 的稳定回写路径。
 3. 校验 metadata 不产生第二套 runtime model。
-4. 编写 graph roundtrip、timeline fence 和 source map identity 测试。
+4. 编写 graph roundtrip、timeline fence、wait state source map 和 source map identity 测试。
 
-**Done Evidence:** Graph/Timeline 修改后仍指向同一 command id 和 source map。
+**Done Evidence:** Graph/Timeline 修改后仍指向同一 command id，wait/fence source map 保持一致。
 
 **Linked Test IDs:** `T-S3-EDIT-01`
 
