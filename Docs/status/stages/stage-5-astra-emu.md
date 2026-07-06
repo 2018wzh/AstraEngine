@@ -1,6 +1,6 @@
 # Stage 5 AstraEMU Work
 
-Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动 AstraEngine `RuntimeWorld`；legacy family 以 in-process plugin 接入，并只向 host 注册 `LegacyRuntimeProvider` facade。Provider session 持有 family 私有 VM、资源解析、媒体状态、诊断和 snapshot section；AstraEngine `StateMachine` 只建模 `Booting`、`Active`、`Awaiting`、`Saving`、`Loading`、`Faulted` 和 `Shutdown` 这些粗粒度生命周期。统一管理、Trusted Luau、文本翻译和滤镜 preset 都位于 Manager/RuntimeWorld 侧，不进入 family VM public API。本页是 planned target 清单，不表示实现已经存在。
+Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动 AstraEngine `RuntimeWorld`；legacy family 以 in-process plugin 接入，并只向 host 注册 `LegacyRuntimeProvider` facade。Provider session 持有 family 私有 VM、资源解析、媒体状态、诊断和 snapshot section；AstraEngine `StateMachine` 只建模 `Booting`、`Active`、`Awaiting`、`Saving`、`Loading`、`Faulted` 和 `Shutdown` 这些粗粒度生命周期。统一管理、Trusted Luau、文本翻译、runtime memory 和滤镜 preset 都位于 Manager/RuntimeWorld 侧，不进入 family VM public API。本页是 planned target 清单，不表示实现已经存在。
 
 ## S5-MANAGER-01 Manager RuntimeWorld bridge
 
@@ -94,9 +94,9 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 **ID:** `S5-TEXT-01`
 
-**Goal:** `TextCaptureEvent` 进入 Manager 文本管线，支持本地 opt-in 全文 dump、`TranslationProvider`、DeepL-style batch fallback 和 LLM-style streaming overlay。
+**Goal:** `TextCaptureEvent` 进入 Manager 文本管线，支持本地 opt-in 全文 dump、`TranslationProvider`、Stage 4 MCP/provider profile、DeepL-style batch fallback 和 LLM-style streaming overlay。
 
-**Depends On:** `S5-MANAGER-01`、`S5-FAMILY-01`、`S4-AI-01`
+**Depends On:** `S5-MANAGER-01`、`S5-FAMILY-01`、`S4-AI-01`、`S4-AI-04`、`S4-MCP-02`
 
 **Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/text_pipeline.rs`、`Engine/Source/Runtime/astra-plugin/src/translation_provider.rs`、`AstraEMU/Tests/text_translation_pipeline.rs` planned target
 
@@ -104,7 +104,7 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 1. 定义 `TextCapturePipeline`：dump sink、translation queue、overlay sink 和 redaction policy。
 2. 默认 report 只保存 text hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才能写全文 dump。
-3. 定义 `TranslationProvider` slot：`translate_batch` 必选，`translate_stream` 可选，provider 声明 language、glossary、context hint 和 rate limit capability。
+3. 定义 `TranslationProvider` slot：`translate_batch` 必选，`translate_stream` 可选，provider 声明 language、glossary、context hint、runtime memory 和 rate limit capability。
 4. 非 streaming provider 通过 batch fallback 一次性更新 overlay；streaming provider 可以逐段更新 overlay。
 5. 翻译 overlay 非权威，不进入 replay hash；session cache 只服务当前 UI。
 

@@ -48,7 +48,7 @@ Runtime 拥有 World、Scene、Actor、Component、StateMachine、EventBus、Sch
 
 ## Module Slot
 
-可替换能力通过 EngineModuleSlot 和 ExtensionRegistry 明确选择，不按加载顺序抢占。默认 slot 包括 Renderer2D、TextLayout、AudioOutput、DecodeProvider、ScriptRuntime、PresentationLibrary、AssetResolver、AIProvider、TranslationProvider、MCPToolProvider、AstraEMU LegacyRuntimeProvider 和可选 EMUCoreBridge。
+可替换能力通过 EngineModuleSlot 和 ExtensionRegistry 明确选择，不按加载顺序抢占。默认 slot 包括 Renderer2D、TextLayout、AudioOutput、DecodeProvider、ScriptRuntime、PresentationLibrary、AssetResolver、AiProvider、TranslationProvider、MCPToolProvider、AstraEMU LegacyRuntimeProvider 和可选 EMUCoreBridge。Runtime 不直接持有 AiProvider；运行时 AI 通过受限 MCP session 消费 typed Intent 和 committed output。
 
 ## 产品边界
 

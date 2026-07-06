@@ -137,9 +137,17 @@ pub trait TranslationProvider: StableProvider {
     fn translate_batch(&self, request: TranslationBatchRequest) -> ProviderResult<TranslationBatchResult>;
     fn translate_stream(&self, request: TranslationStreamRequest) -> ProviderResult<OptionalStreamRef>;
 }
+
+pub trait AiProvider: StableProvider {
+    fn capability(&self) -> ProviderResult<AiCapabilityReport>;
+    fn open_session(&self, request: AiSessionRequest) -> ProviderResult<AiSessionId>;
+    fn invoke(&self, request: AiInvocationRequest) -> ProviderResult<AiInvocationResult>;
+}
 ```
 
-Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AIProvider`、`MCPToolProvider`、`TranslationProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref 和 capability report。
+Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AiProvider`、`MCPToolProvider`、`TranslationProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref 和 capability report。
+
+`AiProvider` 是 Editor 和 MCP host 的后端适配。OpenAI、Ollama、ComfyUI 第一方 provider 以普通插件注册，默认禁用，由项目 manifest 或 release profile 显式绑定。Runtime 不直接接收 `AiProvider` trait object，只通过 `McpAiSession` 获取 typed Intent、tool result 和 committed output。
 
 `TranslationProvider` 是文本翻译专用 slot。`translate_batch` 必须实现；`translate_stream` 只在 provider capability 声明支持时使用。DeepL-style provider 可以只返回 batch 结果，LLM provider 可以 streaming 更新 AstraEMU overlay。翻译结果默认是 UI overlay 状态，不改变 Runtime replay hash。
 

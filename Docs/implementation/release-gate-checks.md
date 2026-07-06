@@ -32,7 +32,14 @@ pub struct ReleaseCheckRecord {
 | vn | `vn.advanced_presentation` | opt-in scenario report | advanced profile missing or nondeterministic | timeline id, provider capability |
 | editor | `editor.source_roundtrip` | editor report | source map identity failure | source_ref, command id |
 | editor | `editor.plugin_manager` | plugin manager report | enablement/dependency/diagnostic jump failure | plugin id, extension id |
+| ai_mcp | `ai.provider_profile` | provider descriptor, project binding | fingerprint, secret handle, network egress, runtime eligibility or model fingerprint missing | provider id, profile id, model fingerprint |
+| ai_mcp | `ai.runtime_provider_startup` | release profile, platform capability | Live AI provider required by profile is unavailable at startup | provider profile, platform id, diagnostic |
 | ai_mcp | `ai.provider_free_replay` | save/replay | provider required during replay | committed output hash |
+| ai_mcp | `ai.runtime_memory_policy` | memory ledger, policy | canon write exceeds policy, ledger missing or vector index treated as authority | namespace, entry hash, policy id |
+| ai_mcp | `ai.debug_trace_redaction` | package/report/debug profile | release artifact contains plaintext prompt, player text, commercial payload or secret | trace id, redaction status |
+| ai_mcp | `ai.player_consent` | runtime profile, save memory | cloud provider reads player memory without first-run consent | consent id, provider profile |
+| ai_mcp | `mcp.context_permission` | MCP audit | read/search/tool call exceeds session scope or Context Pack is not redacted | session id, tool id, source ref |
+| ai_mcp | `mcp.command_allowlist` | MCP command report | undeclared command or arbitrary shell execution | command id, template id |
 | platform | `platform.eligibility` | capability report | profile requirement missing | platform id, capability id |
 | emu | `emu.artemis_full_flow` | local case report | trace/snapshot/redaction failure | trace hash, redaction status |
 | emu | `emu.legacy_runtime_provider` | family plugin report | family bypasses RuntimeWorld or missing provider session binding | family id, provider id, session id |
@@ -69,6 +76,11 @@ checks:
     status: pass
     evidence:
       timeline_hash: hash128:...
+  - id: ai.runtime_memory_policy
+    domain: ai_mcp
+    status: pass
+    evidence:
+      memory_namespace: cast.hero
   - id: plugin.extension_registry
     domain: plugin
     status: pass

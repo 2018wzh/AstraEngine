@@ -17,7 +17,7 @@
 
 ## P2
 
-- Runtime AI committed output、Trusted session audit、MCP tool descriptor。
+- Runtime Director committed output、AI provider profiles、runtime memory、Trusted session audit、MCP Context Pack、command allowlist。
 - AstraEMU Manager RuntimeWorld bridge、`LegacyRuntimeProvider` facade、auto probe、Trusted Luau、文本翻译、FilterGraph preset 和 Artemis full-flow。
 - 移动/Web 真实 SDK probe、launcher 和 windowed/browser smoke。
 

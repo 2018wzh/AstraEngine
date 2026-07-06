@@ -24,6 +24,10 @@
 | [editor-visual-protocol.md](editor-visual-protocol.md) | Graph/Timeline 派生层、Inspector 控件、source round-trip |
 | [editor-workflow.md](editor-workflow.md) | UE 级 creator workflow、面板状态、Qt/Rust bridge |
 | [ai-mcp-runtime.md](ai-mcp-runtime.md) | Runtime AI、Editor Copilot、Content Generation、MCP tool policy |
+| [ai-provider-profiles.md](ai-provider-profiles.md) | OpenAI、Ollama、ComfyUI provider profile 和第一方插件边界 |
+| [runtime-ai-director-memory.md](runtime-ai-director-memory.md) | Runtime Director、角色记忆、Context Pack 和 Intent |
+| [mcp-context-tooling.md](mcp-context-tooling.md) | 外部 AI 工具、MCP context、命令白名单和 audit |
+| [ai-release-gate.md](ai-release-gate.md) | AI/MCP release check、debug trace、玩家同意和 provider-free replay |
 | [platform-host.md](platform-host.md) | 六平台 host trait、capability report、profile gate |
 | [astraemu-legacy-runtime-framework.md](astraemu-legacy-runtime-framework.md) | AstraEMU LegacyRuntimeProvider、session、auto probe、Trusted Luau、文本翻译、filter preset 和 release gate |
 | [astraemu-artemis-core.md](astraemu-artemis-core.md) | Artemis v1 engine-native family plugin、probe、snapshot、report |

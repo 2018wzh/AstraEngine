@@ -33,6 +33,10 @@ IMPLEMENTATION_SPECS = [
     "editor-visual-protocol.md",
     "editor-workflow.md",
     "ai-mcp-runtime.md",
+    "ai-provider-profiles.md",
+    "runtime-ai-director-memory.md",
+    "mcp-context-tooling.md",
+    "ai-release-gate.md",
     "platform-host.md",
     "astraemu-legacy-runtime-framework.md",
     "astraemu-artemis-core.md",
@@ -109,6 +113,9 @@ REQUIRED_RELEASE_CHECK_IDS = [
     "plugin.dependency_graph",
     "emu.legacy_runtime_provider",
     "editor.plugin_manager",
+    "ai.provider_profile",
+    "ai.runtime_memory_policy",
+    "mcp.context_permission",
 ]
 ASTRAEMU_PRIMARY_DOCS = [
     ROOT / "AGENTS.md",

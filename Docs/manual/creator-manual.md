@@ -18,6 +18,8 @@
 
 项目授权后，AI 可以直写 `.astra`、Luau 策略和 Graph/Timeline 派生层。每次写入都必须生成 audit event、patch 或 graph diff、undo checkpoint 和 release check。
 
+AI Control 用来绑定 OpenAI、Ollama、ComfyUI provider profile，查看 MCP session、Context Pack、Review Queue 和本地加密 trace。Memory Inspector 用来管理角色 `Canon`、`Episodic`、`Player` memory 的 namespace、读写范围、压缩归档和玩家同意状态。ComfyUI 生成的图片、视频或音频先进入 draft sidecar，接受后才进入 AssetRegistry 和 Cook。
+
 ## Reference
 
 | 任务 | 入口 | 验收 |
@@ -26,5 +28,6 @@
 | 导入资产 | Content Browser / Import Wizard | sidecar、import audit、cook artifact 都可追踪 |
 | 编辑脚本 | Script Editor + Graph/Timeline | source map identity 保持一致 |
 | 管理插件 | Plugin Manager / Project Settings | dependency graph、enablement、extension point、diagnostic jump 可解释 |
+| 管理 AI | AI Control / Memory Inspector | provider profile、Context Pack、memory policy、Review Queue 和 consent 可解释 |
 | 调试 | PIE + Debugger | diagnostic 能跳到 source_ref |
 | 发布 | Package / Release Gate | `astra.release_report.v1` pass |

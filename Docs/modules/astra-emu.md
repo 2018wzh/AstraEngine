@@ -32,7 +32,7 @@ EMU 用户脚本统一使用 Luau。Trusted Project Profile 可以开启 read-on
 
 ## Text / Translation / Filter
 
-`TextCaptureEvent` 进入 Manager 的 `TextCapturePipeline`。默认 report 只写 hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才能保存全文 dump。翻译通过 `TranslationProvider` slot 接入，DeepL-style provider 走 batch fallback，LLM provider 可以 streaming 更新 overlay。翻译 overlay 非权威，不进入 replay hash。
+`TextCaptureEvent` 进入 Manager 的 `TextCapturePipeline`。默认 report 只写 hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才能保存全文 dump。翻译通过 `TranslationProvider` slot 接入，DeepL-style provider 走 batch fallback，LLM provider 可以通过 MCP session streaming 更新 overlay。翻译 overlay 非权威，不进入 replay hash；术语表和角色上下文读取 Stage 4 runtime memory 的授权 namespace。
 
 滤镜复用 Media `FilterGraph`。AstraEMU profile 可以绑定 final-frame preset 和 per-layer preset；per-layer 只依赖 `PresentationCommand` 的 layer id 或 role。family 不提供 layer metadata 时，只启用 final-frame 并输出 diagnostic。不新增 family 专属 shader/filter API。
 

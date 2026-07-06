@@ -21,7 +21,7 @@
 | Stage 1 EngineCore | `DONE` | `cargo test --workspace` 通过；覆盖 core、runtime、plugin、property、Target manifest、headless scenario |
 | Stage 2 Media + Package | `DONE` | `astra-asset`、`astra-cook`、`astra-package`、`astra-media`、`astra-release`、`astra-platform` 和六个平台 capability crate 已实现；`cargo test -p astra-package package_roundtrip`、`cargo test -p astra-asset sidecar_schema`、`cargo test -p astra-cook import_cook`、`cargo test -p astra-media headless_capture`、`cargo test -p astra-release release_report`、`cargo test -p astra-platform` 和 `cargo test -p astra-cli --test target_platform` 通过 |
 | Stage 3 AstraVN | `SPEC_READY` | `.astra`、Luau、presentation、standard commands、system UI 和 advanced sample 已写入文档；`astra-vn` crate 尚不存在 |
-| Stage 4 Editor + AI/MCP | `SPEC_READY` | Editor workflow、Plugin Manager、AI/MCP gate 已写入文档；`Editor/Source` 尚不存在 |
+| Stage 4 Editor + AI/MCP | `SPEC_READY` | Editor workflow、Plugin Manager、AI provider profile、Runtime Director、memory、MCP context 和 AI/MCP gate 已写入文档；`Editor/Source` 尚不存在 |
 | Stage 5 AstraEMU | `SPEC_READY` | `Docs/contracts/astraemu-ipc.md`、`Docs/implementation/astraemu-legacy-runtime-framework.md` 和 `Docs/emu` 已写清 `LegacyRuntimeProvider` facade、auto probe、Trusted Luau、文本翻译和 FilterGraph preset；`AstraEMU/Source` 尚不存在 |
 | Six platforms | `IN_PROGRESS` | 共享 `astra-platform` 和六个平台 capability crate 已落地；真实平台完成仍要求对应 SDK probe 通过 |
 
@@ -55,8 +55,9 @@
 | 6 | `S3-SCRIPT-01` + `S3-SCRIPT-02` `.astra` parser/compiler | `SPEC_READY` | AstraVN Core 和 Editor visual model 的前置 |
 | 7 | `S3-GAME-TARGET-01` NativeVN Game target | `SPEC_READY` | Game target 需要随 AstraVN sample 和 full playthrough 一起落地 |
 | 8 | `S4-PLUGIN-01` Plugin Manager | `SPEC_READY` | 新插件设计需要 enablement、dependency graph 和 extension diagnostics |
-| 9 | `S4-EDITOR-TARGET-01` AstraEditor Editor target | `SPEC_READY` | Editor target 需要 Qt/QML shell 和 PIE bridge |
-| 10 | `S5-MANAGER-01` + `S5-PROGRAM-TARGET-01` + `S5-FAMILY-01` + `S5-AUTOPROBE-01` + `S5-SCRIPT-01` + `S5-TEXT-01` + `S5-FILTER-01` | `SPEC_READY` | AstraEMU Manager 作为 Program target 驱动 RuntimeWorld 和 family plugin |
+| 9 | `S4-AI-01` 到 `S4-GATE-01` AI/MCP closure | `SPEC_READY` | Runtime Director、provider profile、memory、Context Pack、AI Control 和 release gate 需要一起落地 |
+| 10 | `S4-EDITOR-TARGET-01` AstraEditor Editor target | `SPEC_READY` | Editor target 需要 Qt/QML shell 和 PIE bridge |
+| 11 | `S5-MANAGER-01` + `S5-PROGRAM-TARGET-01` + `S5-FAMILY-01` + `S5-AUTOPROBE-01` + `S5-SCRIPT-01` + `S5-TEXT-01` + `S5-FILTER-01` | `SPEC_READY` | AstraEMU Manager 作为 Program target 驱动 RuntimeWorld、family plugin，并复用 Stage 4 provider、MCP 和 memory |
 
 ## 验证命令
 

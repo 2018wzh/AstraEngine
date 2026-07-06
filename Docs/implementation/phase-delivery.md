@@ -77,9 +77,9 @@ Expected report includes `target.manifest`, `script.compile`, `luau.policy_lock`
 
 ## Stage 4：Editor + AI/MCP
 
-**闭环：** Creator 从 Project Wizard 到 Package/Release Gate 可用；AI/MCP 写入有 audit、diff 和 rollback。
+**闭环：** Creator 从 Project Wizard 到 Package/Release Gate 可用；AI/MCP 写入有 audit、diff 和 rollback。Runtime Director 通过受限 MCP session 调模型，角色记忆、Context Pack、provider profile 和玩家 consent 通过 gate。
 
-**Test IDs:** `T-S4-EDITOR-01`、`T-S4-PLUGIN-01`、`T-S4-EDITOR-04`、`T-S4-EDITOR-05`、`T-S4-EDITOR-TARGET-01`、`T-S4-AI-02`、`T-S4-MCP-01`
+**Test IDs:** `T-S4-EDITOR-01`、`T-S4-PLUGIN-01`、`T-S4-EDITOR-04`、`T-S4-EDITOR-05`、`T-S4-EDITOR-TARGET-01`、`T-S4-AI-01`、`T-S4-AI-02`、`T-S4-AI-03`、`T-S4-AI-04`、`T-S4-MCP-01`、`T-S4-MCP-02`、`T-S4-GATE-01`
 
 **Sample:** `Examples/NativeVN` opened through Project Wizard
 
@@ -89,11 +89,15 @@ Expected report includes `target.manifest`, `script.compile`, `luau.policy_lock`
 cargo test -p astra-editor-bridge editor_creator_loop
 cargo test -p astra-editor-bridge editor_target
 cargo test -p astra-editor-bridge plugin_manager
-cargo test -p astra-ai trusted_session_audit
+cargo test -p astra-ai runtime_ai_replay
+cargo test -p astra-ai provider_profiles
+cargo test -p astra-ai runtime_memory
 cargo test -p astra-mcp capability_protocol
+cargo test -p astra-mcp context_tooling
+cargo test -p astra-release ai_mcp_gate
 ```
 
-Expected report: `astra.editor_report.v1` with source span links for failed checks.
+Expected report: `astra.editor_report.v1` with source span links for failed checks, plus `astra.release_report.v1` checks for `ai.provider_profile`, `ai.runtime_memory_policy`, `mcp.context_permission` and provider-free replay.
 
 ## Stage 5：AstraEMU
 

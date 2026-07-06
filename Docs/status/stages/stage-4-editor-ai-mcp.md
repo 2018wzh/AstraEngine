@@ -128,34 +128,57 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Linked Test IDs:** `T-S4-EDITOR-05`
 
-## S4-AI-01 Runtime AI committed output
+## S4-AI-01 Runtime Director committed output
 
 **ID:** `S4-AI-01`
 
-**Goal:** Runtime AI 输出必须通过 IntentValidator，并固化进 save/replay。
+**Goal:** Runtime Director 通过受限 `McpAiSession` 调用模型，输出 typed Intent，并固化进 save/replay。
 
-**Depends On:** `S1-SAVE-01`、`Docs/contracts/ai-mcp.md`
+**Depends On:** `S1-SAVE-01`、`S4-MCP-01`、`Docs/contracts/ai-mcp.md`
 
 **Target Paths:** `Engine/Source/Developer/astra-ai/src/runtime_ai.rs`、`Engine/Source/Developer/astra-ai/src/intent_validator.rs`、`Engine/Source/Developer/astra-ai/tests/runtime_ai_replay.rs` planned target
 
 **Steps:**
 
-1. 定义 RuntimeAiRequest、Intent、IntentValidator 和 CommittedAiOutput。
-2. 只允许 validator 通过的 intent 进入 Runtime event queue。
-3. 把 committed output 写入 save/replay section。
-4. 编写 provider unavailable replay、invalid intent blocked 和 committed output hash 测试。
+1. 定义 `McpAiSessionScope`、`RuntimeAiRequest`、typed `RuntimeAiIntent`、`IntentValidator` 和 `CommittedAiOutput`。
+2. Runtime 只通过 session 请求模型，不直接持有 provider trait object。
+3. 只允许 validator 通过的 dialogue、choice、presentation beat 和 memory update 进入 Runtime event queue。
+4. 把 committed output 写入 save/replay section。
+5. 编写 provider unavailable replay、invalid intent blocked、startup provider missing blocked 和 committed output hash 测试。
 
-**Done Evidence:** replay 不重新请求 provider，AI output 仍可复现。
+**Done Evidence:** replay 不重新请求 provider；Live AI provider 缺失时启动阻断，不静默换 provider。
 
 **Linked Test IDs:** `T-S4-AI-01`
 
-## S4-AI-02 Editor Copilot、Trusted session 与 Review Queue
+## S4-AI-02 AI provider profiles
 
 **ID:** `S4-AI-02`
 
+**Goal:** OpenAI、Ollama 和 ComfyUI 作为第一方 provider profile 接入 Editor 和 MCP host，默认禁用，显式绑定。
+
+**Depends On:** `S1-PLUGIN-01`、`Docs/implementation/ai-provider-profiles.md`
+
+**Target Paths:** `Engine/Plugins/Providers/astra-ai-openai/`、`Engine/Plugins/Providers/astra-ai-ollama/`、`Engine/Plugins/Providers/astra-ai-comfyui/`、`Engine/Source/Developer/astra-ai/tests/provider_profiles.rs` planned target
+
+**Steps:**
+
+1. 定义 `AiProviderProfile`、`AiCapabilityReport`、`SecretHandle`、data egress 和 runtime eligibility。
+2. OpenAI profile 声明 cloud LLM、embedding、tool call、network egress 和 secret handle。
+3. Ollama profile 声明 local endpoint、LLM、embedding 和无 cloud secret。
+4. ComfyUI profile 声明 workflow host 和 asset draft sidecar，默认 Editor-only。
+5. 编写 fake server、workflow fixture、profile gate 和 real smoke opt-in 测试。
+
+**Done Evidence:** 第一方 provider 通过契约测试；真实服务 smoke 不进入默认 CI。
+
+**Linked Test IDs:** `T-S4-AI-02`
+
+## S4-AI-03 Editor Copilot、Trusted session 与 Review Queue
+
+**ID:** `S4-AI-03`
+
 **Goal:** Editor Copilot 支持 Review Queue 和 Trusted session，所有写入生成 patch、audit event 和 undo checkpoint。
 
-**Depends On:** `S4-EDITOR-05`
+**Depends On:** `S4-EDITOR-05`、`S4-AI-02`
 
 **Target Paths:** `Engine/Source/Developer/astra-ai/src/editor_copilot.rs`、`Engine/Source/Developer/astra-ai/src/trusted_session.rs`、`Engine/Tests/AI/editor_copilot.rs` planned target
 
@@ -163,18 +186,41 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 1. 定义 TrustedSessionScope，包含 project、path range、operation type 和 expiration。
 2. 未授权写入进入 Review Queue，授权写入生成 patch 和 undo checkpoint。
-3. 所有 AI 操作写 audit event，记录 provider、prompt hash、tool call 和 affected paths。
-4. 编写 unauthorized queued、trusted write、undo checkpoint 和 audit event 测试。
+3. 所有 AI 操作写 audit event，记录 provider profile、prompt hash、tool call 和 affected paths。
+4. AI Control 显示 provider binding、MCP session、Context Pack 预览、Review Queue 和加密 trace 入口。
+5. 编写 unauthorized queued、trusted write、undo checkpoint、audit event 和 AI Control render 测试。
 
 **Done Evidence:** Copilot 不能绕过权限、审计和回滚。
 
-**Linked Test IDs:** `T-S4-AI-02`
+**Linked Test IDs:** `T-S4-AI-03`
+
+## S4-AI-04 Runtime memory and archive
+
+**ID:** `S4-AI-04`
+
+**Goal:** Runtime memory 管理角色设定、故事事实、episodic event、玩家偏好和自动压缩归档。
+
+**Depends On:** `S4-AI-01`、`Docs/implementation/runtime-ai-director-memory.md`
+
+**Target Paths:** `Engine/Source/Developer/astra-ai/src/runtime_memory.rs`、`Engine/Source/Developer/astra-ai/tests/runtime_memory.rs` planned target
+
+**Steps:**
+
+1. 定义 `MemoryEntry`、`MemoryAuthority`、`MemoryLayer`、`MemoryNamespace` 和 memory ledger。
+2. `Canon` 默认只读；`Episodic` 和 `Player` 按创作者策略读写。
+3. 实现 working、short-term、long-term、archive 分层和自动压缩归档。
+4. Embedding/vector index 只作为可重建缓存，不参与 save 权威判断。
+5. 编写 canon write denied、episodic append、player memory consent、compaction replay 和 index rebuild 测试。
+
+**Done Evidence:** 角色记忆可回放，自动归档可审计，玩家 memory 的云端读取受首启同意约束。
+
+**Linked Test IDs:** `T-S4-AI-04`
 
 ## S4-MCP-01 MCP tool descriptor 与 capability protocol
 
 **ID:** `S4-MCP-01`
 
-**Goal:** MCP tool 只能通过声明过的 project、Runtime、Editor 和 Release Gate capability 访问能力。
+**Goal:** MCP tool 只能通过声明过的 project、Runtime、Editor、memory 和 Release Gate capability 访问能力。
 
 **Depends On:** `S4-AI-02`、`Docs/contracts/ai-mcp.md`
 
@@ -183,32 +229,54 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 **Steps:**
 
 1. 定义 MCP tool descriptor、permission scope、audit fields 和 result schema。
-2. 把 Runtime、Editor、Package 和 Release Gate 操作映射到 capability check。
-3. 拒绝未授权 path、operation 和 session。
-4. 编写 capability allowed、denied 和 audit propagation 测试。
+2. 把 Runtime、Editor、Package、memory 和 Release Gate 操作映射到 capability check。
+3. 拒绝未授权 path、operation、memory namespace 和 session。
+4. 编写 capability allowed、denied、memory denied 和 audit propagation 测试。
 
 **Done Evidence:** MCP 不能绕过 Editor/CLI 的 release gate 和 permission policy。
 
 **Linked Test IDs:** `T-S4-MCP-01`
 
+## S4-MCP-02 Context Pack and command allowlist
+
+**ID:** `S4-MCP-02`
+
+**Goal:** 外部 AI 工具通过 Bounded Context Pack、read/search tool 和命令白名单获得 Editor 等价能力。
+
+**Depends On:** `S4-MCP-01`、`Docs/implementation/mcp-context-tooling.md`
+
+**Target Paths:** `Engine/Source/Developer/astra-mcp/src/context_pack.rs`、`Engine/Source/Developer/astra-mcp/src/command_allowlist.rs`、`Engine/Tests/MCP/context_tooling.rs` planned target
+
+**Steps:**
+
+1. 定义 `ContextPack`、`context.read`、`context.search`、`memory.read` 和 `memory.search`。
+2. Context Pack 默认脱敏，不返回本地绝对路径、provider secret、商业 payload 或 native handle。
+3. `command.run` 只允许声明式 check、test、package 和 report 命令模板。
+4. 发布运行时默认只启用内部 MCP session；外部 endpoint 需要 profile 和用户同意。
+5. 编写 context read allowed、redaction blocked、command allowlist、runtime external endpoint opt-in 测试。
+
+**Done Evidence:** 外部工具可以自动读写和运行检查，但不能拿到任意 shell 或无界上下文。
+
+**Linked Test IDs:** `T-S4-MCP-02`
+
 ## S4-GATE-01 Provider-free replay 与 audit gate
 
 **ID:** `S4-GATE-01`
 
-**Goal:** Release Gate 覆盖 Runtime AI、Editor Copilot、MCP audit 和 provider-free replay。
+**Goal:** Release Gate 覆盖 provider profile、Runtime Director、memory、MCP audit、debug trace、玩家同意和 provider-free replay。
 
-**Depends On:** `S4-AI-01`、`S4-AI-02`、`S4-MCP-01`
+**Depends On:** `S4-AI-01`、`S4-AI-02`、`S4-AI-04`、`S4-MCP-02`
 
 **Target Paths:** `Engine/Source/Developer/astra-release/src/ai_gate.rs`、`Engine/Source/Developer/astra-release/tests/ai_mcp_gate.rs` planned target
 
 **Steps:**
 
-1. 增加 `ai.provider_free_replay`、`ai.audit_complete`、`mcp.permission_policy` gate check。
-2. 校验 save/replay 中 committed AI output 完整，且不需要 provider。
-3. 校验 Trusted session audit chain 和 Review Queue disposition。
-4. 编写 gate pass、missing audit blocked 和 provider replay blocked 测试。
+1. 增加 `ai.provider_profile`、`ai.runtime_provider_startup`、`ai.provider_free_replay`、`ai.runtime_memory_policy`、`ai.debug_trace_redaction`、`ai.player_consent`、`mcp.context_permission` 和 `mcp.command_allowlist` gate check。
+2. 校验 save/replay 中 committed AI output 完整，且 replay 不需要 provider。
+3. 校验 Trusted session audit chain、Review Queue disposition、memory ledger 和 encrypted debug trace policy。
+4. 编写 gate pass、missing audit blocked、provider startup blocked、memory policy blocked、context permission blocked 和 provider replay blocked 测试。
 
-**Done Evidence:** v0.4 gate 能阻断缺失 audit 或 provider-free replay 失败的 package。
+**Done Evidence:** v0.4 gate 能阻断缺失 audit、Live AI provider 不可用、memory 越权、MCP 越权或 provider-free replay 失败的 package。
 
 **Linked Test IDs:** `T-S4-GATE-01`
 
