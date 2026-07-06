@@ -51,6 +51,22 @@ pub trait Renderer2DProvider: StableProvider {
 
 完整 provider trait 族见 [Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。v1 必须覆盖 Renderer2D、TextLayout、AudioOutput、DecodeProvider、AssetImporter、CookProcessor、LuauPolicyBundle、EditorPanel、AIProvider、MCPToolProvider 和 EMUCoreBridge。
 
+## StateMachine Action ABI
+
+Stage 1 action provider 使用 function pointer 和 postcard payload：
+
+```rust
+pub struct FfiActionRegistration {
+    pub provider_id: RString,
+    pub action_id: RString,
+    pub input_schema: RString,
+    pub output_schema: RString,
+    pub invoke: extern "C" fn(RVec<u8>) -> RVec<u8>,
+}
+```
+
+`invoke` 接收 `ActionCallRequest` bytes，返回 `ActionCallResult` bytes。result 只包含 `ActionTrace` 和可序列化 `ActionEffect` list；host adapter 负责应用 effect。插件不得跨 ABI 接收或保存 RuntimeWorld、Actor 指针、trait object、native handle 或平台文件描述符。
+
 ## Load / Unload Report
 
 ```yaml

@@ -1,4 +1,4 @@
-# ADR 0010: 平台解码优先，Renderer2D provider 可替换
+# ADR 0011: 平台解码优先，Renderer2D provider 可替换
 
 ## Context
 

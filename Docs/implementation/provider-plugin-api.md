@@ -37,6 +37,30 @@ pub struct AstraPluginModule {
 
 插件通过 `abi_stable::export_root_module` 导出 `AstraPluginModuleRef`；host 使用 `libloading` 打开动态库，再通过 `abi_stable` root module header 完成 layout 和版本校验。插件支持 load/unload，不支持 packaged runtime 内热重载。卸载前 Runtime/Editor 必须停止引用 provider，清空 callback，从 `PluginRegistrar` 删除 slot，并写入 unload report。
 
+## StateMachine Action Provider
+
+Stage 1 的 gameplay action provider 走 host adapter，不把 trait object 穿过 ABI：
+
+```rust
+pub struct FfiPluginRegistration {
+    pub providers: RVec<FfiProviderRegistration>,
+    pub actions: RVec<FfiActionRegistration>,
+    pub callbacks: u32,
+}
+
+pub struct FfiActionRegistration {
+    pub provider_id: RString,
+    pub action_id: RString,
+    pub input_schema: RString,
+    pub output_schema: RString,
+    pub invoke: extern "C" fn(RVec<u8>) -> RVec<u8>,
+}
+```
+
+`invoke` 的 request/result 都是 postcard 编码的 serde DTO。插件返回 `ActionTrace` 和 `ActionEffect` list；host adapter 通过 `DeterministicActionContext` 应用 effect。插件不接收 `RuntimeWorld`、Actor 指针、Editor widget、GPU/audio native handle 或 platform file descriptor。
+
+卸载插件时，loader 除了清理 `PluginRegistrar` provider slot，还会调用 `RuntimeWorld::unregister_action_provider(provider_id)` 删除该 provider 注册的 action。
+
 ## Provider Traits
 
 ```rust
@@ -81,7 +105,8 @@ Runtime provider secret、Editor widget、Actor 指针、native GPU/audio handle
 ```bash
 cargo test -p astra-plugin descriptor_gate
 cargo test -p astra-plugin load_unload
+cargo test -p astra-plugin ffi_action_provider
 cargo test -p astra-release plugin_provider_gate
 ```
 
-Expected report: descriptor mismatch、缺失权限、unload 后 callback、未声明 provider slot 都是 blocking diagnostic。
+Expected report: descriptor mismatch、缺失权限、unload 后 callback、未声明 provider slot、action provider 未清理都是 blocking diagnostic。

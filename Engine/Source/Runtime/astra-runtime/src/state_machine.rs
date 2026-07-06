@@ -1,12 +1,11 @@
-use std::{collections::BTreeMap, sync::Arc};
-
-use astra_core::{Diagnostic, SourceRef, StableId};
+use astra_core::{Diagnostic, SourceRef, StableId, StableIdGenerator};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ActorId, AwaitKind, AwaitReplayPolicy, AwaitToken, AwaitTokenId, Blackboard, BlackboardValue,
-    EventPayload, EventSource, PresentationCommand, RuntimeError, RuntimeEvent,
+    ActionInvocation, ActionRegistry, ActionTrace, ActorId, ActorStore, AwaitToken, Blackboard,
+    BlackboardValue, DelayedEventId, DeterministicActionContext, PresentationCommand, RuntimeEvent,
+    ScheduledEvent,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -29,7 +28,8 @@ pub struct TransitionDefinition {
     pub from: StableId,
     pub to: StableId,
     pub guard: GuardExpr,
-    pub action: ActionInvocation,
+    #[serde(default)]
+    pub actions: Vec<ActionInvocation>,
     pub source_ref: Option<SourceRef>,
 }
 
@@ -42,61 +42,6 @@ pub enum GuardExpr {
     And { terms: Vec<GuardExpr> },
     Or { terms: Vec<GuardExpr> },
     Not { term: Box<GuardExpr> },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ActionInvocation {
-    pub action_id: String,
-    #[serde(default)]
-    pub input: BTreeMap<String, BlackboardValue>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ActionDescriptor {
-    pub id: String,
-    pub input_schema: String,
-    pub output_schema: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ActionTrace {
-    pub action_id: String,
-    #[serde(default)]
-    pub payload: BTreeMap<String, BlackboardValue>,
-}
-
-pub struct ActionContext<'a> {
-    pub step: u64,
-    pub id_source: &'a mut dyn FnMut() -> StableId,
-    pub blackboard: &'a mut Blackboard,
-    pub emitted_events: &'a mut Vec<RuntimeEvent>,
-    pub presentation: &'a mut Vec<PresentationCommand>,
-    pub awaits: &'a mut Vec<AwaitToken>,
-}
-
-pub trait RuntimeAction: Send + Sync {
-    fn descriptor(&self) -> ActionDescriptor;
-    fn run(
-        &self,
-        ctx: &mut ActionContext<'_>,
-        input: &BTreeMap<String, BlackboardValue>,
-    ) -> Result<ActionTrace, RuntimeError>;
-}
-
-#[derive(Default, Clone)]
-pub struct ActionRegistry {
-    actions: BTreeMap<String, Arc<dyn RuntimeAction>>,
-}
-
-impl ActionRegistry {
-    pub fn register<A: RuntimeAction + 'static>(&mut self, action: A) {
-        self.actions
-            .insert(action.descriptor().id.clone(), Arc::new(action));
-    }
-
-    pub fn get(&self, id: &str) -> Option<Arc<dyn RuntimeAction>> {
-        self.actions.get(id).cloned()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -133,51 +78,75 @@ impl StateMachineStore {
         &mut self,
         step: u64,
         events: &[RuntimeEvent],
-        actors: &[crate::ActorSnapshot],
+        actors: &mut ActorStore,
         blackboard: &mut Blackboard,
         actions: &ActionRegistry,
-        id_source: &mut dyn FnMut() -> StableId,
-    ) -> Result<StateMachineTickOutput, RuntimeError> {
+        id_source: &mut StableIdGenerator,
+    ) -> StateMachineTickOutput {
         let mut output = StateMachineTickOutput::default();
         for machine in &mut self.machines {
             if machine.completed {
                 continue;
             }
-            for event in events {
-                let Some(transition) = machine
-                    .definition
-                    .transitions
-                    .iter()
-                    .find(|transition| {
-                        transition.from == machine.current_state
-                            && transition.guard.evaluate(event, actors, blackboard)
-                    })
-                    .cloned()
-                else {
-                    continue;
-                };
-                let action = actions.get(&transition.action.action_id).ok_or_else(|| {
-                    RuntimeError::diagnostic(Diagnostic::blocking(
+            let Some((transition, failure_source)) =
+                find_transition(machine, events, actors, blackboard)
+            else {
+                continue;
+            };
+            let mut candidate_actors = actors.clone();
+            let mut candidate_blackboard = blackboard.clone();
+            let mut candidate_id_source = id_source.clone();
+            let mut candidate_output = StateMachineTickOutput::default();
+            let mut failed = None;
+
+            for invocation in &transition.actions {
+                let Some(action) = actions.get(&invocation.action_id) else {
+                    failed = Some(Diagnostic::blocking(
                         "ASTRA_RUNTIME_ACTION_MISSING",
-                        format!("missing action {}", transition.action.action_id),
-                    ))
-                })?;
-                let mut ctx = ActionContext {
-                    step,
-                    id_source,
-                    blackboard,
-                    emitted_events: &mut output.events,
-                    presentation: &mut output.presentation,
-                    awaits: &mut output.awaits,
+                        format!("missing action {}", invocation.action_id),
+                    ));
+                    break;
                 };
-                let trace = action.run(&mut ctx, &transition.action.input)?;
-                self.trace.push(trace.clone());
-                output.trace.push(trace);
-                machine.current_state = transition.to;
-                break;
+                let mut next_id = || candidate_id_source.next_id();
+                let mut ctx = DeterministicActionContext::new(
+                    step,
+                    &mut next_id,
+                    &mut candidate_actors,
+                    &mut candidate_blackboard,
+                    &mut candidate_output.events,
+                    &mut candidate_output.presentation,
+                    &mut candidate_output.awaits,
+                    &mut candidate_output.delayed_events,
+                    &mut candidate_output.delayed_cancellations,
+                );
+                match action.run(&mut ctx, &invocation.input) {
+                    Ok(trace) => candidate_output.trace.push(trace),
+                    Err(err) => {
+                        failed = Some(Diagnostic::blocking(
+                            "ASTRA_RUNTIME_ACTION_FAILED",
+                            format!("{} failed: {err}", invocation.action_id),
+                        ));
+                        break;
+                    }
+                }
             }
+
+            if let Some(mut diagnostic) = failed {
+                if let Some(source) = failure_source {
+                    diagnostic.source = Some(source);
+                }
+                output.diagnostics.push(diagnostic);
+                continue;
+            }
+
+            *actors = candidate_actors;
+            *blackboard = candidate_blackboard;
+            *id_source = candidate_id_source;
+            self.trace.extend(candidate_output.trace.iter().cloned());
+            output.append(candidate_output);
+            machine.current_state = transition.to;
         }
-        Ok(output)
+        output
     }
 
     pub fn snapshots(&self, actor: ActorId) -> Vec<StateMachineSnapshot> {
@@ -198,12 +167,48 @@ impl StateMachineStore {
     }
 }
 
+fn find_transition(
+    machine: &StateMachineInstance,
+    events: &[RuntimeEvent],
+    actors: &ActorStore,
+    blackboard: &Blackboard,
+) -> Option<(TransitionDefinition, Option<SourceRef>)> {
+    for event in events {
+        let actor_snapshots = actors.actor_snapshots();
+        if let Some(transition) = machine.definition.transitions.iter().find(|transition| {
+            transition.from == machine.current_state
+                && transition
+                    .guard
+                    .evaluate(event, &actor_snapshots, blackboard)
+        }) {
+            return Some((transition.clone(), transition.source_ref.clone()));
+        }
+    }
+    None
+}
+
 #[derive(Default)]
 pub struct StateMachineTickOutput {
     pub events: Vec<RuntimeEvent>,
     pub presentation: Vec<PresentationCommand>,
     pub awaits: Vec<AwaitToken>,
+    pub delayed_events: Vec<ScheduledEvent>,
+    pub delayed_cancellations: Vec<DelayedEventId>,
     pub trace: Vec<ActionTrace>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+impl StateMachineTickOutput {
+    fn append(&mut self, mut other: Self) {
+        self.events.append(&mut other.events);
+        self.presentation.append(&mut other.presentation);
+        self.awaits.append(&mut other.awaits);
+        self.delayed_events.append(&mut other.delayed_events);
+        self.delayed_cancellations
+            .append(&mut other.delayed_cancellations);
+        self.trace.append(&mut other.trace);
+        self.diagnostics.append(&mut other.diagnostics);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -236,187 +241,5 @@ impl GuardExpr {
                 .any(|term| term.evaluate(event, actors, blackboard)),
             GuardExpr::Not { term } => !term.evaluate(event, actors, blackboard),
         }
-    }
-}
-
-pub struct SetBlackboardAction;
-
-impl RuntimeAction for SetBlackboardAction {
-    fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            id: "astra.core.set_blackboard".to_string(),
-            input_schema: "astra.action.set_blackboard.v1".to_string(),
-            output_schema: "astra.action_trace.v1".to_string(),
-        }
-    }
-
-    fn run(
-        &self,
-        ctx: &mut ActionContext<'_>,
-        input: &BTreeMap<String, BlackboardValue>,
-    ) -> Result<ActionTrace, RuntimeError> {
-        let Some(BlackboardValue::String(key)) = input.get("key") else {
-            return Err(RuntimeError::message("set_blackboard requires string key"));
-        };
-        let value = input.get("value").cloned().unwrap_or(BlackboardValue::Null);
-        ctx.blackboard.set(key.clone(), value.clone());
-        let mut payload = BTreeMap::new();
-        payload.insert("key".to_string(), BlackboardValue::String(key.clone()));
-        payload.insert("value".to_string(), value);
-        Ok(ActionTrace {
-            action_id: self.descriptor().id,
-            payload,
-        })
-    }
-}
-
-pub struct EmitEventAction;
-
-impl RuntimeAction for EmitEventAction {
-    fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            id: "astra.core.emit_event".to_string(),
-            input_schema: "astra.action.emit_event.v1".to_string(),
-            output_schema: "astra.action_trace.v1".to_string(),
-        }
-    }
-
-    fn run(
-        &self,
-        ctx: &mut ActionContext<'_>,
-        input: &BTreeMap<String, BlackboardValue>,
-    ) -> Result<ActionTrace, RuntimeError> {
-        let Some(BlackboardValue::String(kind)) = input.get("kind") else {
-            return Err(RuntimeError::message("emit_event requires string kind"));
-        };
-        let event = RuntimeEvent {
-            id: crate::EventId((ctx.id_source)()),
-            source: EventSource::StateMachine,
-            step: ctx.step,
-            sequence: 0,
-            payload: EventPayload::new(kind.clone()),
-        };
-        ctx.emitted_events.push(event);
-        Ok(ActionTrace {
-            action_id: self.descriptor().id,
-            payload: input.clone(),
-        })
-    }
-}
-
-pub struct CreateAwaitAction;
-
-impl RuntimeAction for CreateAwaitAction {
-    fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            id: "astra.core.create_await".to_string(),
-            input_schema: "astra.action.create_await.v1".to_string(),
-            output_schema: "astra.action_trace.v1".to_string(),
-        }
-    }
-
-    fn run(
-        &self,
-        ctx: &mut ActionContext<'_>,
-        input: &BTreeMap<String, BlackboardValue>,
-    ) -> Result<ActionTrace, RuntimeError> {
-        let token = AwaitToken {
-            token_id: AwaitTokenId((ctx.id_source)()),
-            kind: AwaitKind::Custom("scenario".to_string()),
-            requested_at_step: ctx.step,
-            deterministic_timeout_step: None,
-            replay_policy: AwaitReplayPolicy::RecordedResult,
-        };
-        ctx.awaits.push(token);
-        Ok(ActionTrace {
-            action_id: self.descriptor().id,
-            payload: input.clone(),
-        })
-    }
-}
-
-pub struct PresentationAction;
-
-impl RuntimeAction for PresentationAction {
-    fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            id: "astra.core.presentation".to_string(),
-            input_schema: "astra.action.presentation.v1".to_string(),
-            output_schema: "astra.action_trace.v1".to_string(),
-        }
-    }
-
-    fn run(
-        &self,
-        ctx: &mut ActionContext<'_>,
-        input: &BTreeMap<String, BlackboardValue>,
-    ) -> Result<ActionTrace, RuntimeError> {
-        let command = match input.get("kind") {
-            Some(BlackboardValue::String(kind)) if kind == "dialogue" => {
-                PresentationCommand::Dialogue {
-                    speaker: get_string(input, "speaker")?,
-                    text: get_string(input, "text")?,
-                }
-            }
-            Some(BlackboardValue::String(kind)) if kind == "choice" => {
-                PresentationCommand::Choice {
-                    prompt: get_string(input, "prompt")?,
-                    options: get_list_strings(input, "options")?,
-                }
-            }
-            Some(BlackboardValue::String(kind)) if kind == "text_event" => {
-                PresentationCommand::TextEvent {
-                    key: get_string(input, "key")?,
-                }
-            }
-            Some(BlackboardValue::String(kind)) if kind == "marker" => {
-                PresentationCommand::Marker {
-                    name: get_string(input, "name")?,
-                }
-            }
-            Some(BlackboardValue::String(kind)) => {
-                let data = input
-                    .iter()
-                    .filter(|(key, _)| key.as_str() != "kind")
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect();
-                PresentationCommand::Custom {
-                    kind: kind.clone(),
-                    data,
-                }
-            }
-            _ => return Err(RuntimeError::message("presentation requires string kind")),
-        };
-        ctx.presentation.push(command);
-        Ok(ActionTrace {
-            action_id: self.descriptor().id,
-            payload: input.clone(),
-        })
-    }
-}
-
-fn get_string(
-    input: &BTreeMap<String, BlackboardValue>,
-    key: &str,
-) -> Result<String, RuntimeError> {
-    match input.get(key) {
-        Some(BlackboardValue::String(value)) => Ok(value.clone()),
-        _ => Err(RuntimeError::message(format!("missing string {key}"))),
-    }
-}
-
-fn get_list_strings(
-    input: &BTreeMap<String, BlackboardValue>,
-    key: &str,
-) -> Result<Vec<String>, RuntimeError> {
-    match input.get(key) {
-        Some(BlackboardValue::List(values)) => values
-            .iter()
-            .map(|value| match value {
-                BlackboardValue::String(value) => Ok(value.clone()),
-                _ => Err(RuntimeError::message(format!("{key} must contain strings"))),
-            })
-            .collect(),
-        _ => Err(RuntimeError::message(format!("missing string list {key}"))),
     }
 }

@@ -13,5 +13,14 @@ fn native_smoke_runs_headless_and_matches_replay_hash() {
         .checks
         .iter()
         .any(|check| check.id == "runtime.determinism" && check.status == ScenarioStatus::Pass));
+    assert!(report
+        .checks
+        .iter()
+        .any(|check| check.id == "plugin.ffi_action_provider"
+            && check.status == ScenarioStatus::Pass));
+    assert!(report
+        .checks
+        .iter()
+        .any(|check| check.id == "runtime.delayed_event" && check.status == ScenarioStatus::Pass));
     assert!(report.hashes.state.to_hex().len() == 32);
 }

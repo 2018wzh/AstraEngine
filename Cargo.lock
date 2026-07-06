@@ -171,7 +171,9 @@ version = "0.1.0"
 dependencies = [
  "abi_stable",
  "astra-core",
+ "astra-runtime",
  "libloading 0.8.9",
+ "postcard",
  "schemars",
  "semver",
  "serde",
@@ -582,6 +584,7 @@ version = "0.1.0"
 dependencies = [
  "abi_stable",
  "astra-plugin",
+ "postcard",
 ]
 
 [[package]]

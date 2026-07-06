@@ -23,6 +23,12 @@ pub struct ScenarioAction {
     #[serde(default)]
     pub launch: Option<BTreeMap<String, ScenarioValue>>,
     #[serde(default)]
+    pub register_fixture_actions: Option<BTreeMap<String, ScenarioValue>>,
+    #[serde(default)]
+    pub add_state_machine: Option<AddStateMachineAction>,
+    #[serde(default)]
+    pub schedule_delayed_event: Option<ScheduleDelayedEventAction>,
+    #[serde(default)]
     pub emit: Option<EmitAction>,
     #[serde(default)]
     pub advance: Option<AdvanceAction>,
@@ -39,11 +45,37 @@ pub struct ScenarioAction {
 impl ScenarioAction {
     pub fn is_replayable(&self) -> bool {
         self.launch.is_some()
+            || self.register_fixture_actions.is_some()
+            || self.add_state_machine.is_some()
+            || self.schedule_delayed_event.is_some()
             || self.emit.is_some()
             || self.advance.is_some()
             || self.choose.is_some()
             || self.replay_from_start.is_some()
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AddStateMachineAction {
+    pub id: String,
+    pub trigger: String,
+    #[serde(default)]
+    pub actions: Vec<ScenarioActionInvocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ScenarioActionInvocation {
+    pub action_id: String,
+    #[serde(default)]
+    pub input: BTreeMap<String, ScenarioValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ScheduleDelayedEventAction {
+    pub due_tick: u64,
+    pub kind: String,
+    #[serde(default)]
+    pub data: BTreeMap<String, ScenarioValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

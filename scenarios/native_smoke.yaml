@@ -3,6 +3,13 @@ stage: stage1-enginecore
 seed: 42
 actions:
   - launch: {}
+  - register_fixture_actions: {}
+  - add_state_machine:
+      id: fixture_machine
+      trigger: fixture.start
+      actions:
+        - action_id: astra.fixture.action.set_flag
+          input: {}
   - emit:
       kind: dialogue
       data:
@@ -17,6 +24,12 @@ actions:
           - library
           - rooftop
   - choose: library
+  - schedule_delayed_event:
+      due_tick: 5
+      kind: timer.native_smoke
+  - emit:
+      kind: fixture.start
+  - advance: { ticks: 3 }
   - save: slot.auto
   - load: slot.auto
   - replay_from_start: {}

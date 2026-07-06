@@ -11,10 +11,10 @@ use thiserror::Error;
 use crate::{
     ActionRegistry, ActorId, ActorRecord, ActorSnapshot, ActorStore, AwaitQueue, AwaitResult,
     Blackboard, BlackboardValue, ComponentId, ComponentRecord, ComponentSnapshot,
-    CreateAwaitAction, EmitEventAction, EventId, EventPayload, EventQueue, EventSource,
-    PresentationAction, PresentationCommand, PresentationRecord, RuntimeEvent, SaveBlob,
-    SaveRequest, SetBlackboardAction, StateMachineDefinition, StateMachineSnapshot,
-    StateMachineStore,
+    CreateAwaitAction, DelayedEventId, DelayedEventQueue, EmitEventAction, EventId, EventPayload,
+    EventQueue, EventSource, PresentationAction, PresentationCommand, PresentationRecord,
+    RuntimeAction, RuntimeEvent, SaveBlob, SaveRequest, ScheduledEvent, SetBlackboardAction,
+    StateMachineDefinition, StateMachineSnapshot, StateMachineStore,
 };
 
 #[derive(Debug, Error)]
@@ -85,6 +85,7 @@ pub struct RuntimeSnapshot {
     pub blackboard: Blackboard,
     pub machines: StateMachineStore,
     pub awaits: AwaitQueue,
+    pub delayed_events: DelayedEventQueue,
     pub events: Vec<RuntimeEvent>,
     pub presentation: Vec<PresentationRecord>,
     pub mounted_modules: BTreeMap<String, String>,
@@ -99,6 +100,7 @@ pub struct RuntimeWorld {
     blackboard: Blackboard,
     events: EventQueue,
     awaits: AwaitQueue,
+    delayed_events: DelayedEventQueue,
     machines: StateMachineStore,
     actions: ActionRegistry,
     presentation: Vec<PresentationRecord>,
@@ -122,6 +124,7 @@ impl RuntimeWorld {
             blackboard: Blackboard::default(),
             events: EventQueue::default(),
             awaits: AwaitQueue::default(),
+            delayed_events: DelayedEventQueue::default(),
             machines: StateMachineStore::default(),
             actions,
             presentation: Vec::new(),
@@ -133,6 +136,18 @@ impl RuntimeWorld {
 
     pub fn mount_module(&mut self, slot: impl Into<String>, provider_id: impl Into<String>) {
         self.mounted_modules.insert(slot.into(), provider_id.into());
+    }
+
+    pub fn register_action<A: RuntimeAction + 'static>(
+        &mut self,
+        provider_id: impl Into<String>,
+        action: A,
+    ) {
+        self.actions.register_with_provider(provider_id, action);
+    }
+
+    pub fn unregister_action_provider(&mut self, provider_id: &str) {
+        self.actions.unregister_provider(provider_id);
     }
 
     pub fn create_actor(&mut self, name: impl Into<String>, tags: Vec<String>) -> ActorId {
@@ -193,6 +208,26 @@ impl RuntimeWorld {
         self.events.push(event);
     }
 
+    pub fn schedule_event(
+        &mut self,
+        due_tick: u64,
+        source: EventSource,
+        payload: EventPayload,
+    ) -> DelayedEventId {
+        let event = ScheduledEvent {
+            id: DelayedEventId(self.next_id()),
+            due_tick,
+            sequence: 0,
+            source,
+            payload,
+        };
+        self.delayed_events.schedule(event)
+    }
+
+    pub fn cancel_delayed_event(&mut self, id: DelayedEventId) -> bool {
+        self.delayed_events.cancel(id)
+    }
+
     pub fn emit_presentation(&mut self, command: PresentationCommand) {
         let sequence = self.presentation.len() as u64;
         self.presentation.push(PresentationRecord {
@@ -237,17 +272,25 @@ impl RuntimeWorld {
                 payload: result.payload,
             });
         }
+        for event in self.delayed_events.drain_due(input.fixed_step) {
+            self.events.push(event);
+        }
         let ready = self.events.drain_ordered_for_step(input.fixed_step);
-        let actor_snapshots = self.actors.actor_snapshots();
-        let mut id_source = || self.id_source.next_id();
         let output = self.machines.tick(
             input.fixed_step,
             &ready,
-            &actor_snapshots,
+            &mut self.actors,
             &mut self.blackboard,
             &self.actions,
-            &mut id_source,
-        )?;
+            &mut self.id_source,
+        );
+        self.diagnostics.extend(output.diagnostics);
+        for id in output.delayed_cancellations {
+            self.delayed_events.cancel(id);
+        }
+        for event in output.delayed_events {
+            self.delayed_events.schedule(event);
+        }
         for event in output.events {
             self.events.push(event);
         }
@@ -286,6 +329,7 @@ impl RuntimeWorld {
         self.blackboard = snapshot.blackboard;
         self.machines = snapshot.machines;
         self.awaits = snapshot.awaits;
+        self.delayed_events = snapshot.delayed_events;
         self.events = EventQueue::default();
         for event in snapshot.events {
             self.events.push(event);
@@ -321,6 +365,7 @@ impl RuntimeWorld {
             blackboard: self.blackboard.clone(),
             machines: self.machines.clone(),
             awaits: self.awaits.clone(),
+            delayed_events: self.delayed_events.clone(),
             events: self.events.trace().to_vec(),
             presentation: self.presentation.clone(),
             mounted_modules: self.mounted_modules.clone(),

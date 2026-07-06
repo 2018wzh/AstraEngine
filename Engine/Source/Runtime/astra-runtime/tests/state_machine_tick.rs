@@ -47,10 +47,10 @@ fn run_once() -> astra_runtime::TickReport {
             guard: GuardExpr::EventIs {
                 kind: "scenario.start".to_string(),
             },
-            action: ActionInvocation {
+            actions: vec![ActionInvocation {
                 action_id: "astra.core.set_blackboard".to_string(),
                 input,
-            },
+            }],
             source_ref: None,
         }],
         initial_state: start,
@@ -92,10 +92,10 @@ fn state_machine_presentation_action_supports_generic_commands() {
             from: start,
             to: done,
             guard: GuardExpr::Always,
-            action: ActionInvocation {
+            actions: vec![ActionInvocation {
                 action_id: "astra.core.presentation".to_string(),
                 input,
-            },
+            }],
             source_ref: None,
         }],
         initial_state: start,
@@ -115,4 +115,175 @@ fn state_machine_presentation_action_supports_generic_commands() {
             key: "line.shown".to_string()
         }
     );
+}
+
+#[test]
+fn state_machine_runs_transition_actions_in_order() {
+    let mut world =
+        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let actor = world.create_actor("system", vec![]);
+    let start = StableId::deterministic_v7(3, 1, 11);
+    let done = StableId::deterministic_v7(3, 2, 11);
+    let first = set_blackboard_input("route", "library");
+    let second = set_blackboard_input("route", "rooftop");
+
+    world.add_state_machine(StateMachineDefinition {
+        id: StableId::deterministic_v7(3, 3, 11),
+        owner: actor,
+        states: vec![
+            StateDefinition {
+                id: start,
+                name: "start".to_string(),
+            },
+            StateDefinition {
+                id: done,
+                name: "done".to_string(),
+            },
+        ],
+        transitions: vec![TransitionDefinition {
+            from: start,
+            to: done,
+            guard: GuardExpr::EventIs {
+                kind: "scenario.start".to_string(),
+            },
+            actions: vec![
+                ActionInvocation {
+                    action_id: "astra.core.set_blackboard".to_string(),
+                    input: first,
+                },
+                ActionInvocation {
+                    action_id: "astra.core.set_blackboard".to_string(),
+                    input: second,
+                },
+            ],
+            source_ref: None,
+        }],
+        initial_state: start,
+    });
+
+    world.emit_event(EventSource::Scenario, EventPayload::new("scenario.start"));
+    world
+        .tick(TickInput {
+            fixed_step: 1,
+            delta_ns: 16_666_667,
+            seed: 11,
+        })
+        .unwrap();
+
+    let snapshot = world.snapshot();
+    assert_eq!(
+        snapshot.blackboard.get("route"),
+        Some(&BlackboardValue::from("rooftop"))
+    );
+    let trace: Vec<_> = snapshot
+        .machines
+        .trace()
+        .iter()
+        .map(|trace| trace.action_id.as_str())
+        .collect();
+    assert_eq!(
+        trace,
+        vec!["astra.core.set_blackboard", "astra.core.set_blackboard"]
+    );
+}
+
+#[test]
+fn action_failure_keeps_machine_state_and_allows_other_machines() {
+    let mut world =
+        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let actor = world.create_actor("system", vec![]);
+    let failed_start = StableId::deterministic_v7(4, 1, 11);
+    let failed_done = StableId::deterministic_v7(4, 2, 11);
+    let other_start = StableId::deterministic_v7(4, 3, 11);
+    let other_done = StableId::deterministic_v7(4, 4, 11);
+
+    world.add_state_machine(StateMachineDefinition {
+        id: StableId::deterministic_v7(4, 5, 11),
+        owner: actor,
+        states: vec![
+            StateDefinition {
+                id: failed_start,
+                name: "start".to_string(),
+            },
+            StateDefinition {
+                id: failed_done,
+                name: "done".to_string(),
+            },
+        ],
+        transitions: vec![TransitionDefinition {
+            from: failed_start,
+            to: failed_done,
+            guard: GuardExpr::EventIs {
+                kind: "scenario.start".to_string(),
+            },
+            actions: vec![ActionInvocation {
+                action_id: "astra.missing.action".to_string(),
+                input: BTreeMap::new(),
+            }],
+            source_ref: None,
+        }],
+        initial_state: failed_start,
+    });
+    world.add_state_machine(StateMachineDefinition {
+        id: StableId::deterministic_v7(4, 6, 11),
+        owner: actor,
+        states: vec![
+            StateDefinition {
+                id: other_start,
+                name: "start".to_string(),
+            },
+            StateDefinition {
+                id: other_done,
+                name: "done".to_string(),
+            },
+        ],
+        transitions: vec![TransitionDefinition {
+            from: other_start,
+            to: other_done,
+            guard: GuardExpr::EventIs {
+                kind: "scenario.start".to_string(),
+            },
+            actions: vec![ActionInvocation {
+                action_id: "astra.core.set_blackboard".to_string(),
+                input: set_blackboard_input("other_machine", "continued"),
+            }],
+            source_ref: None,
+        }],
+        initial_state: other_start,
+    });
+
+    world.emit_event(EventSource::Scenario, EventPayload::new("scenario.start"));
+    let report = world
+        .tick(TickInput {
+            fixed_step: 1,
+            delta_ns: 16_666_667,
+            seed: 11,
+        })
+        .unwrap();
+
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_ACTION_MISSING"));
+    let debug = world.debug_session();
+    let machines = debug.state_machines(actor);
+    assert!(machines
+        .iter()
+        .any(|machine| machine.id == StableId::deterministic_v7(4, 5, 11)
+            && machine.current_state == failed_start));
+    assert!(machines
+        .iter()
+        .any(|machine| machine.id == StableId::deterministic_v7(4, 6, 11)
+            && machine.current_state == other_done));
+    assert_eq!(
+        world.snapshot().blackboard.get("other_machine"),
+        Some(&BlackboardValue::from("continued"))
+    );
+}
+
+fn set_blackboard_input(key: &str, value: &str) -> BTreeMap<String, BlackboardValue> {
+    let mut input = BTreeMap::new();
+    input.insert("key".to_string(), BlackboardValue::from(key));
+    input.insert("value".to_string(), BlackboardValue::from(value));
+    input
 }

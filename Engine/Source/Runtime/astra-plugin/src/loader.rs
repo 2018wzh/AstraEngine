@@ -10,9 +10,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AstraPluginModuleRef, EngineModuleSlot, FfiPluginShutdown, PluginDescriptor, PluginError,
-    PluginGate, PluginRegistrar, RegisteredProvider,
+    install_actions, AstraPluginModuleRef, EngineModuleSlot, FfiPluginShutdown, LoadedFfiAction,
+    PluginDescriptor, PluginError, PluginGate, PluginRegistrar, RegisteredProvider,
 };
+use astra_runtime::RuntimeWorld;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PluginLoadReport {
@@ -30,6 +31,7 @@ pub struct LoadedPlugin {
     _library: Library,
     report: PluginLoadReport,
     registered_providers: Vec<RegisteredProvider>,
+    registered_actions: Vec<LoadedFfiAction>,
 }
 
 impl LoadedPlugin {
@@ -39,6 +41,10 @@ impl LoadedPlugin {
 
     pub fn report(&self) -> &PluginLoadReport {
         &self.report
+    }
+
+    pub fn install_runtime_actions(&self, world: &mut RuntimeWorld) -> Result<(), PluginError> {
+        install_actions(&self.registered_actions, world)
     }
 
     pub fn unload_from(
@@ -52,6 +58,17 @@ impl LoadedPlugin {
         self.report.status = "unloaded".to_string();
         self.report.callbacks_released = shutdown.callbacks_released;
         Ok(self.report)
+    }
+
+    pub fn unload_from_runtime(
+        self,
+        registrar: &mut PluginRegistrar,
+        world: &mut RuntimeWorld,
+    ) -> Result<PluginLoadReport, PluginError> {
+        for action in &self.registered_actions {
+            world.unregister_action_provider(action.provider_id());
+        }
+        self.unload_from(registrar)
     }
 }
 
@@ -92,6 +109,11 @@ impl PluginLoader {
             registered_providers.push(provider.clone());
             registrar.register_provider(provider);
         }
+        let registered_actions = registration
+            .actions
+            .into_iter()
+            .map(LoadedFfiAction::from_registration)
+            .collect();
         Ok(LoadedPlugin {
             descriptor: descriptor.clone(),
             module,
@@ -105,6 +127,7 @@ impl PluginLoader {
                 diagnostics: Vec::new(),
             },
             registered_providers,
+            registered_actions,
         })
     }
 }
