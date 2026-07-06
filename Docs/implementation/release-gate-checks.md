@@ -25,6 +25,7 @@ pub struct ReleaseCheckRecord {
 | plugin | `plugin.extension_registry` | extension registration report | conflict, missing phase, invalid extension point or packaged trim error | extension id, phase, plugin id |
 | plugin | `plugin.dependency_graph` | plugin enablement report | missing required dependency or unresolved version conflict | dependency edge, selected provider |
 | package | `package.integrity` | package container | invalid section/hash/bounds | section table hash |
+| package | `package.cooked_project` | package `compiled.project` section | release profile package lacks cook/project artifact, wrong schema or mismatched package metadata | section id, schema, target, profile |
 | media | `media.decode.capability` | platform report | required codec missing | provider id, codec list |
 | vn | `vn.full_playthrough` | VN scenario | route/system story failure | route id, command id |
 | vn | `vn.commercial_baseline` | VN release profile | dialogue/system flow baseline missing | command coverage, route coverage |
@@ -49,7 +50,7 @@ pub struct ReleaseCheckRecord {
 | emu | `emu.text_redaction` | text pipeline report | report contains full commercial text without local opt-in | text hash, source ref, dump policy |
 | emu | `emu.filter_preset` | filter preset report | preset bypasses FilterGraph validation or leaks native handle | preset id, target layer, validation status |
 
-Web release 使用同一 `platform.capability_report` check。真实浏览器缺 `browser_smoke`、`renderer.webgpu_or_webgl`、`decode.webcodecs`、`audio.webaudio_unlock`、`save.web_storage` 或 `package.web_source` 时，check 必须是 `blocked`，不能降级成 fallback pass。
+`desktop-release` 和 `web-release` 默认要求 `compiled.project` 与 `platform.capability_report`。Release package 必须来自 `astra cook`/project 输入，`PackageBuildRequest::minimal` 这类 fixture package 只能用于 dev/headless 测试，不能冒充发布输入。缺 platform report 时是 blocking；headless/dev profile 可降为 warning。Desktop release 缺 `windowed_smoke`、`renderer.wgpu_surface`、`decode.wmf.audio`、`decode.wmf.video_first_frame`、`audio.wasapi` 或 `save.known_folder_rw` 时必须 blocked。Web release 使用同一 check；真实浏览器缺 `browser_smoke`、`renderer.browser_context`、`decode.browser_media`、`decode.webcodecs_config`、`audio.webaudio_render`、`save.web_storage_rw` 或 `package.web_source_read` 时，check 必须是 `blocked`，不能降级成 fallback pass。
 
 ## Report Schema
 

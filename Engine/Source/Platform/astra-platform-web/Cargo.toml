@@ -11,4 +11,8 @@ astra-platform = { path = "../astra-platform" }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
 wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = ["Document", "Window"] }
+
+[dev-dependencies]
+wasm-bindgen-test.workspace = true

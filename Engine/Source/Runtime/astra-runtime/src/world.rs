@@ -11,7 +11,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     ActionRegistry, ActorId, ActorRecord, ActorSnapshot, ActorStore, AwaitQueue, AwaitResult,
-    Blackboard, BlackboardValue, ComponentId, ComponentRecord, ComponentSnapshot,
+    AwaitToken, Blackboard, BlackboardValue, ComponentId, ComponentRecord, ComponentSnapshot,
     CreateAwaitAction, DelayedEventId, DelayedEventQueue, EmitEventAction, EventId, EventPayload,
     EventQueue, EventSource, PresentationAction, PresentationCommand, PresentationRecord,
     RuntimeAction, RuntimeEvent, SaveBlob, SaveRequest, ScheduledEvent, SetBlackboardAction,
@@ -230,7 +230,10 @@ impl RuntimeWorld {
         detached
     }
 
-    pub fn add_state_machine(&mut self, definition: StateMachineDefinition) {
+    pub fn add_state_machine(
+        &mut self,
+        definition: StateMachineDefinition,
+    ) -> Result<(), RuntimeError> {
         debug!(
             machine_id = ?definition.id,
             owner = ?definition.owner,
@@ -238,7 +241,7 @@ impl RuntimeWorld {
             transition_count = definition.transitions.len(),
             "runtime.state_machine.add"
         );
-        self.machines.add(definition);
+        self.machines.add(definition)
     }
 
     pub fn emit_event(&mut self, source: EventSource, payload: EventPayload) {
@@ -318,6 +321,16 @@ impl RuntimeWorld {
         self.awaits.submit_result(result);
     }
 
+    pub fn insert_await_token(&mut self, token: AwaitToken) {
+        debug!(
+            token_id = ?token.token_id,
+            requested_at_step = token.requested_at_step,
+            timeout_step = ?token.deterministic_timeout_step,
+            "runtime.await.insert"
+        );
+        self.awaits.insert(token);
+    }
+
     pub fn apply_input(&mut self, input: PlayerInput) -> Result<(), RuntimeError> {
         let mut payload = input.payload;
         if payload.kind.is_empty() {
@@ -351,13 +364,21 @@ impl RuntimeWorld {
                 self.diagnostics.push(diagnostic);
             }
         }
-        let await_results = self.awaits.drain_ordered_results(input.fixed_step);
+        let await_drain = self.awaits.drain_ordered_results(input.fixed_step);
+        for diagnostic in &await_drain.diagnostics {
+            warn!(
+                step = input.fixed_step,
+                diagnostic_code = %diagnostic.code,
+                "runtime.diagnostic"
+            );
+        }
+        self.diagnostics.extend(await_drain.diagnostics);
         debug!(
             step = input.fixed_step,
-            count = await_results.len(),
+            count = await_drain.results.len(),
             "runtime.await.drain"
         );
-        for result in await_results {
+        for result in await_drain.results {
             let id = EventId(self.next_id());
             self.events.push(RuntimeEvent {
                 id,

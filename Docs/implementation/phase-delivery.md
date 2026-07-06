@@ -1,6 +1,6 @@
 # Phase Delivery
 
-全系列 v1 按 Stage 1-5 推进。每个 Stage 都要产出可运行闭环、固定命令和 machine-readable report；不能只交付内部库。
+全系列 v1 按 Stage 1-6 推进。每个 Stage 都要产出可运行闭环、固定命令和 machine-readable report；不能只交付内部库。
 
 ## Stage 1：EngineCore
 
@@ -41,9 +41,9 @@ checks:
 
 ## Stage 2：Media + Package
 
-**闭环：** cooked package 可读写，headless capture 稳定，平台能力报告覆盖 decode/audio/renderer。
+**闭环：** cooked package 可读写，headless capture 稳定，strict scenario runner 不忽略未知 VN action，Windows/Web 平台能力报告覆盖 decode/audio/renderer/storage/package source。
 
-**Test IDs:** `T-S2-PACKAGE-01`、`T-S2-MEDIA-01`、`T-S2-MEDIA-05`、`T-S2-PLATFORM-01`、`T-S2-TARGET-GATE-01`、`T-S2-GATE-01`
+**Test IDs:** `T-S2-PACKAGE-01`、`T-S2-MEDIA-01`、`T-S2-MEDIA-05`、`T-S2-RUNTIME-FSM-01`、`T-S2-RUNTIME-AWAIT-01`、`T-S2-SCENARIO-GATE-01`、`T-S2-PLATFORM-01`、`T-S2-TARGET-GATE-01`、`T-S2-GATE-01`、`T-S2-WINDOWS-HOST-01`、`T-S2-WEB-HOST-01`
 
 **Sample:** `Examples/NativeSmoke`
 
@@ -115,6 +115,23 @@ astra emu probe <case-root> --family auto --report target/reports/emu-probe.yaml
 ```
 
 Expected report omits commercial payload and contains `emu.legacy_runtime_provider`、`emu.auto_probe`、trusted script isolation、text redaction、filter preset evidence、trace、TextCaptureEvent、snapshot ref、redaction status and Runtime replay hash.
+
+## Stage 6：Platform Completion
+
+**闭环：** Linux、macOS、iOS 和 Android 分别提供真实 SDK、launcher/window、surface、platform decode、audio、save store、package source、resume 和 release evidence。Stage 6 只处理 Windows/Web 之外的平台完成，不改变 Stage 2 的 Windows/Web 完成边界。
+
+**Test IDs:** `T-S6-LINUX-HOST-01`、`T-S6-MACOS-HOST-01`、`T-S6-IOS-HOST-01`、`T-S6-ANDROID-HOST-01`
+
+**Sample:** `Examples/NativeVN` packaged as one Game target, then validated per platform.
+
+**Report Schema:** `astra.platform_capability_report.v1` + `astra.release_report.v1`
+
+```bash
+astra platform probe --platform linux --target nativevn-game --report target/reports/platform-linux.yaml
+astra package validate target/nativevn.astrapkg --profile desktop-release --target nativevn-game --platform-report target/reports/platform-linux.yaml --report target/reports/stage6-linux.yaml
+```
+
+Expected report includes `platform.capability_report`, required smoke for the selected platform, package source evidence, platform decode evidence, save store evidence and release blocking diagnostics when SDK or smoke evidence is missing.
 
 ## v1 Gate
 

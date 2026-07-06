@@ -8,8 +8,8 @@ iOS 和 Android 使用独立平台模块。移动壳负责原生生命周期、s
 
 | Work ID | Platform | Status | Scope |
 | --- | --- | --- | --- |
-| `S2-IOS-HOST-01` | iOS | `SPEC_READY` | 计划补 Swift/SwiftUI launcher、Metal surface、safe area/touch、AVAudio/AVFoundation、app container save、no-JIT Luau gate 和 foreground/background resume |
-| `S2-ANDROID-HOST-01` | Android | `SPEC_READY` | 计划补 Kotlin/Java launcher、Vulkan/wgpu surface、touch/safe area、AAudio/OpenSL ES、MediaCodec、SAF/package import、activity resume 和 no-JIT Luau gate |
+| `S6-IOS-HOST-01` | iOS | `SPEC_READY` | 计划补 Swift/SwiftUI launcher、Metal surface、safe area/touch、AVAudio/AVFoundation、app container save、no-JIT Luau gate 和 foreground/background resume |
+| `S6-ANDROID-HOST-01` | Android | `SPEC_READY` | 计划补 Kotlin/Java launcher、Vulkan/wgpu surface、touch/safe area、AAudio/OpenSL ES、MediaCodec、SAF/package import、activity resume 和 no-JIT Luau gate |
 
 ## iOS
 

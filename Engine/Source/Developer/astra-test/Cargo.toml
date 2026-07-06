@@ -7,8 +7,10 @@ rust-version.workspace = true
 
 [dependencies]
 astra-core = { path = "../../Runtime/astra-core" }
+astra-package = { path = "../../Runtime/astra-package" }
 astra-plugin = { path = "../../Runtime/astra-plugin" }
 astra-runtime = { path = "../../Runtime/astra-runtime" }
+astra-target = { path = "../../Platform/astra-target" }
 schemars.workspace = true
 semver.workspace = true
 serde.workspace = true

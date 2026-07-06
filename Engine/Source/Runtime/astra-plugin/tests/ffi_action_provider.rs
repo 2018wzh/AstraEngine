@@ -50,33 +50,38 @@ fn ffi_action_provider_registers_executes_and_unloads() {
     let actor = world.create_actor("system", vec![]);
     let start = StableId::deterministic_v7(1, 1, 77);
     let done = StableId::deterministic_v7(1, 2, 77);
-    world.add_state_machine(StateMachineDefinition {
-        id: StableId::deterministic_v7(1, 3, 77),
-        owner: actor,
-        states: vec![
-            StateDefinition {
-                id: start,
-                name: "start".to_string(),
-            },
-            StateDefinition {
-                id: done,
-                name: "done".to_string(),
-            },
-        ],
-        transitions: vec![TransitionDefinition {
-            from: start,
-            to: done,
-            guard: GuardExpr::EventIs {
-                kind: "fixture.start".to_string(),
-            },
-            actions: vec![ActionInvocation {
-                action_id: "astra.fixture.action.set_flag".to_string(),
-                input: BTreeMap::new(),
+    world
+        .add_state_machine(StateMachineDefinition {
+            id: StableId::deterministic_v7(1, 3, 77),
+            owner: actor,
+            states: vec![
+                StateDefinition {
+                    id: start,
+                    name: "start".to_string(),
+                    terminal: false,
+                },
+                StateDefinition {
+                    id: done,
+                    name: "done".to_string(),
+                    terminal: true,
+                },
+            ],
+            transitions: vec![TransitionDefinition {
+                from: start,
+                to: done,
+                guard: GuardExpr::EventIs {
+                    kind: "fixture.start".to_string(),
+                },
+                actions: vec![ActionInvocation {
+                    action_id: "astra.fixture.action.set_flag".to_string(),
+                    input: BTreeMap::new(),
+                }],
+                priority: 0,
+                source_ref: None,
             }],
-            source_ref: None,
-        }],
-        initial_state: start,
-    });
+            initial_state: start,
+        })
+        .unwrap();
 
     world.emit_event(EventSource::Scenario, EventPayload::new("fixture.start"));
     world

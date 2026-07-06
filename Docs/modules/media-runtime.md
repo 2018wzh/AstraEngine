@@ -17,12 +17,12 @@ Media Runtime 执行表现，不保存剧情权威状态。它消费 Presentatio
 
 - Renderer2D：wgpu provider，headless capture provider。
 - TextLayout：cosmic-text/Swash provider。
-- Decode：platform provider 优先，desktop FFmpeg fallback。
+- Decode：platform provider 优先，desktop FFmpeg fallback。Windows WMF provider 已用 CC0 public MP3/MP4 fixture 验证 bounded PCM 和 BGRA 首帧；Web browser media path 用同一 fixture 验证 MP4/WebM/MP3 metadata load。
 - Audio：platform output provider + headless meter provider。
 
 ## 测试
 
-Media tests 覆盖 image/font/text/filter/audio decode、headless capture、AudioGraph bus、FilterGraph typed node validation 和 provider fallback。视频 fallback 通过 optional `ffmpeg-vcpkg` feature 接入；默认 workspace build 不要求本机 FFmpeg。
+Media tests 覆盖 image/font/text/filter/audio decode、headless capture、AudioGraph bus、FilterGraph typed node validation、public media manifest hash、WMF audio/video decode 和 provider fallback。视频 fallback 通过 optional `ffmpeg-vcpkg` feature 接入；默认 workspace build 不要求本机 FFmpeg。
 
 ## Runtime 边界
 

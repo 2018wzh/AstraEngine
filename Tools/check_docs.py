@@ -49,6 +49,7 @@ STAGE_SPECS = [
     ("Stage 3", "stage-3-astra-vn.md", "T-S3-", "Report Schema:", "Sample:"),
     ("Stage 4", "stage-4-editor-ai-mcp.md", "T-S4-", "Report Schema:", "Sample:"),
     ("Stage 5", "stage-5-astra-emu.md", "T-S5-", "Report Schema:", "Sample:"),
+    ("Stage 6", "stage-6-platform-completion.md", "T-S6-", "Report Schema:", "Sample:"),
 ]
 ASTRAVN_POLICY_DOCS = [
     ROOT / "AGENTS.md",
@@ -175,6 +176,26 @@ REQUIRED_RELEASE_DOMAINS = [
     "ai_mcp",
     "platform",
     "emu",
+]
+STAGE2_PRODUCT_EVIDENCE_TERMS = [
+    "Engine/Fixtures/PublicDomainMedia/manifest.json",
+    "decode.wmf.audio",
+    "decode.wmf.video_first_frame",
+    "renderer.wgpu_surface",
+    "audio.wasapi",
+    "save.known_folder_rw",
+    "renderer.browser_context",
+    "decode.browser_media",
+    "decode.webcodecs_config",
+    "audio.webaudio_render",
+    "save.web_storage_rw",
+    "package.web_source_read",
+]
+STAGE2_WEAK_EVIDENCE_PATTERNS = [
+    "Media Foundation startup/shutdown completed",
+    "API presence",
+    "startup/shutdown",
+    "synthetic token",
 ]
 LOCAL_ABS_PATH_RE = re.compile(r"\b[A-Z]:[\\/]")
 
@@ -426,6 +447,64 @@ def check_astraemu_v1_family() -> list[str]:
     return errors
 
 
+def check_stage2_stage6_platform_split() -> list[str]:
+    stage2 = (DOCS / "status" / "stages" / "stage-2-media-package.md").read_text(
+        encoding="utf-8"
+    )
+    stage6 = (
+        DOCS / "status" / "stages" / "stage-6-platform-completion.md"
+    ).read_text(encoding="utf-8")
+    matrix = (DOCS / "status" / "stages" / "stage-test-matrix.md").read_text(
+        encoding="utf-8"
+    )
+    errors: list[str] = []
+    for old_id in [
+        "S2-LINUX-HOST-01",
+        "S2-MACOS-HOST-01",
+        "S2-IOS-HOST-01",
+        "S2-ANDROID-HOST-01",
+    ]:
+        if old_id in stage2:
+            errors.append(f"stage2 still owns non-Windows/Web platform id: {old_id}")
+        if old_id in matrix:
+            errors.append(f"stage matrix still owns non-Windows/Web platform id: {old_id}")
+    for new_id in [
+        "S6-LINUX-HOST-01",
+        "S6-MACOS-HOST-01",
+        "S6-IOS-HOST-01",
+        "S6-ANDROID-HOST-01",
+    ]:
+        if new_id not in stage6:
+            errors.append(f"stage6 missing platform completion id: {new_id}")
+        if new_id not in matrix:
+            errors.append(f"stage matrix missing platform completion id: {new_id}")
+    return errors
+
+
+def check_stage2_product_evidence() -> list[str]:
+    paths = [
+        DOCS / "status" / "implementation-plan.md",
+        DOCS / "status" / "stages" / "stage-2-media-package.md",
+        DOCS / "status" / "stages" / "stage-test-matrix.md",
+        DOCS / "status" / "coverage-matrix.md",
+        DOCS / "platforms" / "desktop.md",
+        DOCS / "platforms" / "web.md",
+        DOCS / "implementation" / "platform-host.md",
+        DOCS / "implementation" / "target-platform.md",
+        DOCS / "implementation" / "release-gate-checks.md",
+    ]
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in paths)
+    errors = [
+        f"Stage 2 DONE missing product evidence term: {term}"
+        for term in STAGE2_PRODUCT_EVIDENCE_TERMS
+        if term not in combined
+    ]
+    for pattern in STAGE2_WEAK_EVIDENCE_PATTERNS:
+        if pattern in combined:
+            errors.append(f"Stage 2 DONE still cites weak evidence: {pattern}")
+    return errors
+
+
 def main() -> int:
     files = iter_markdown_files()
     errors = []
@@ -442,6 +521,8 @@ def main() -> int:
     errors.extend(check_plugin_extension_registry())
     errors.extend(check_astraemu_v1_family())
     errors.extend(check_astraemu_engine_native_architecture())
+    errors.extend(check_stage2_stage6_platform_split())
+    errors.extend(check_stage2_product_evidence())
     if errors:
         for error in errors:
             print(error)

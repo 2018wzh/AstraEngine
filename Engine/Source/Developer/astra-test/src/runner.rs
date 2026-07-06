@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, fs, path::Path, path::PathBuf, process::Command};
 
 use astra_core::{Diagnostic, DiagnosticSeverity, StableId};
+use astra_package::{PackageManifest, PackageReader};
 use astra_plugin::{
     dylib_path, LoadedPlugin, PluginDescriptor, PluginError, PluginGate, PluginLoader,
     PluginRegistrar,
@@ -10,6 +11,7 @@ use astra_runtime::{
     PackageHandle, PresentationCommand, RuntimeConfig, RuntimeWorld, SaveBlob, SaveRequest,
     StateDefinition, StateMachineDefinition, TickInput, TransitionDefinition,
 };
+use astra_target::{validate_manifest, TargetManifest, TargetValidationStatus};
 use semver::Version;
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -35,8 +37,23 @@ pub enum ScenarioError {
 
 pub struct ScenarioRunner;
 
+#[derive(Debug, Clone, Default)]
+pub struct ScenarioRunOptions {
+    pub package: Option<PathBuf>,
+    pub target: Option<String>,
+    pub profile: Option<String>,
+    pub headless: bool,
+}
+
 impl ScenarioRunner {
     pub fn run_file(path: impl AsRef<Path>) -> Result<ScenarioReport, ScenarioError> {
+        Self::run_file_with_options(path, ScenarioRunOptions::default())
+    }
+
+    pub fn run_file_with_options(
+        path: impl AsRef<Path>,
+        options: ScenarioRunOptions,
+    ) -> Result<ScenarioReport, ScenarioError> {
         let path = path.as_ref();
         let text = fs::read_to_string(path)?;
         let scenario: Scenario = serde_yaml::from_str(&text)?;
@@ -47,23 +64,16 @@ impl ScenarioRunner {
             "scenario.load"
         );
         let root = scenario_root(path)?;
-        Self::run_with_root(&scenario, root)
+        Self::run_with_root_and_options(&scenario, root, Some(path), options)
     }
 
     pub fn run(scenario: &Scenario) -> Result<ScenarioReport, ScenarioError> {
-        info!(
-            schema = %scenario.schema,
-            action_count = scenario.actions.len(),
-            assertion_count = scenario.assertions.len(),
-            "scenario.run"
-        );
-        let root = std::env::current_dir()?;
-        Self::run_with_root(scenario, root)
+        Self::run_with_options(scenario, ScenarioRunOptions::default())
     }
 
-    pub fn run_with_root(
+    pub fn run_with_options(
         scenario: &Scenario,
-        workspace_root: PathBuf,
+        options: ScenarioRunOptions,
     ) -> Result<ScenarioReport, ScenarioError> {
         info!(
             schema = %scenario.schema,
@@ -71,7 +81,51 @@ impl ScenarioRunner {
             assertion_count = scenario.assertions.len(),
             "scenario.run"
         );
-        let mut context = RunContext::new(scenario.seed, workspace_root.clone())?;
+        let root = std::env::current_dir()?;
+        Self::run_with_root_and_options(scenario, root, None, options)
+    }
+
+    pub fn run_with_root(
+        scenario: &Scenario,
+        workspace_root: PathBuf,
+    ) -> Result<ScenarioReport, ScenarioError> {
+        Self::run_with_root_and_options(
+            scenario,
+            workspace_root,
+            None,
+            ScenarioRunOptions::default(),
+        )
+    }
+
+    pub fn run_with_root_and_options(
+        scenario: &Scenario,
+        workspace_root: PathBuf,
+        scenario_path: Option<&Path>,
+        options: ScenarioRunOptions,
+    ) -> Result<ScenarioReport, ScenarioError> {
+        info!(
+            schema = %scenario.schema,
+            action_count = scenario.actions.len(),
+            assertion_count = scenario.assertions.len(),
+            "scenario.run"
+        );
+        let package_context =
+            prepare_package_context(scenario, &workspace_root, scenario_path, &options);
+        let mut context = RunContext::new(
+            scenario.seed,
+            workspace_root.clone(),
+            package_context.handle.clone(),
+        )?;
+        context.diagnostics.extend(package_context.diagnostics);
+        for key in scenario.unsupported.keys() {
+            context.diagnostics.push(
+                Diagnostic::blocking(
+                    "ASTRA_SCENARIO_FIELD_UNSUPPORTED",
+                    "scenario contains an unsupported top-level field",
+                )
+                .with_field("field", key),
+            );
+        }
         let mut replayable = Vec::new();
         for action in &scenario.actions {
             context.apply(action)?;
@@ -80,14 +134,15 @@ impl ScenarioRunner {
             }
         }
         let hashes = context.hashes();
-        let replay_hashes = Self::run_replay(scenario.seed, workspace_root, &replayable)?;
+        let replay_hashes = Self::run_replay(
+            scenario.seed,
+            workspace_root,
+            package_context.handle.clone(),
+            &replayable,
+        )?;
         let replay_match = hashes == replay_hashes;
         let mut diagnostics = context.diagnostics.clone();
         let plugin_gate = run_plugin_descriptor_gate(&mut diagnostics);
-        let no_blocking = diagnostics
-            .iter()
-            .all(|diag| diag.severity != DiagnosticSeverity::Blocking);
-
         let mut checks = vec![
             ScenarioCheck {
                 id: "runtime.determinism".to_string(),
@@ -130,19 +185,76 @@ impl ScenarioRunner {
                 },
             });
         }
+        if package_context.package.is_some() {
+            let package_blocked = diagnostics.iter().any(|diagnostic| {
+                diagnostic.code.starts_with("ASTRA_SCENARIO_PACKAGE")
+                    || diagnostic.code.starts_with("ASTRA_SCENARIO_TARGET")
+                    || diagnostic.code.starts_with("ASTRA_SCENARIO_REF")
+                    || diagnostic.code.starts_with("ASTRA_TARGET")
+            });
+            checks.push(ScenarioCheck {
+                id: "package.target_refs".to_string(),
+                status: if package_blocked {
+                    ScenarioStatus::Blocked
+                } else {
+                    ScenarioStatus::Pass
+                },
+            });
+        }
+        if scenario.unsupported.is_empty() {
+            checks.push(ScenarioCheck {
+                id: "scenario.schema".to_string(),
+                status: ScenarioStatus::Pass,
+            });
+        } else {
+            checks.push(ScenarioCheck {
+                id: "scenario.schema".to_string(),
+                status: ScenarioStatus::Blocked,
+            });
+        }
+        let unsupported_actions = context.unsupported_actions.clone();
+        if !unsupported_actions.is_empty() {
+            checks.push(ScenarioCheck {
+                id: "action.unsupported_schema".to_string(),
+                status: ScenarioStatus::Blocked,
+            });
+        }
+        let mut unsupported_assertions = Vec::new();
         for assertion in &scenario.assertions {
+            let keys: Vec<_> = assertion.unsupported_keys().collect();
+            if !keys.is_empty() {
+                for key in &keys {
+                    diagnostics.push(
+                        Diagnostic::blocking(
+                            "ASTRA_SCENARIO_ASSERTION_UNSUPPORTED",
+                            "scenario assertion is not implemented by this runner",
+                        )
+                        .with_field("assertion", key),
+                    );
+                }
+                unsupported_assertions.extend(keys.into_iter().map(str::to_string));
+            }
             if assertion.replay_hash_match == Some(true) && !replay_match {
                 checks.push(ScenarioCheck {
                     id: "assert.replay_hash_match".to_string(),
                     status: ScenarioStatus::Blocked,
                 });
             }
+            let no_blocking = diagnostics
+                .iter()
+                .all(|diag| diag.severity != DiagnosticSeverity::Blocking);
             if assertion.no_blocking_diagnostics == Some(true) && !no_blocking {
                 checks.push(ScenarioCheck {
                     id: "assert.no_blocking_diagnostics".to_string(),
                     status: ScenarioStatus::Blocked,
                 });
             }
+        }
+        if !unsupported_assertions.is_empty() {
+            checks.push(ScenarioCheck {
+                id: "assert.unsupported_schema".to_string(),
+                status: ScenarioStatus::Blocked,
+            });
         }
         let status = if checks
             .iter()
@@ -161,13 +273,22 @@ impl ScenarioRunner {
         );
         Ok(ScenarioReport {
             schema: "astra.scenario_report.v1".to_string(),
-            stage: scenario
-                .stage
-                .clone()
-                .unwrap_or_else(|| "stage1-enginecore".to_string()),
+            stage: scenario.stage.clone().unwrap_or_else(|| {
+                if package_context.package.is_some() {
+                    "stage2-media-package".to_string()
+                } else {
+                    "stage1-enginecore".to_string()
+                }
+            }),
+            package: package_context.package,
+            target: package_context.target,
+            profile: package_context.profile,
             status,
             hashes,
             checks,
+            unsupported_actions,
+            unsupported_assertions,
+            release_gate_checks: package_context.release_gate_checks,
             diagnostics,
         })
     }
@@ -175,10 +296,11 @@ impl ScenarioRunner {
     fn run_replay(
         seed: u64,
         workspace_root: PathBuf,
+        package: PackageHandle,
         actions: &[ScenarioAction],
     ) -> Result<ScenarioHashes, ScenarioError> {
         info!(action_count = actions.len(), "scenario.replay.start");
-        let mut context = RunContext::new(seed, workspace_root)?;
+        let mut context = RunContext::new(seed, workspace_root, package)?;
         for action in actions {
             context.apply(action)?;
         }
@@ -193,6 +315,205 @@ impl ScenarioRunner {
     }
 }
 
+#[derive(Debug, Clone)]
+struct PackageContext {
+    handle: PackageHandle,
+    package: Option<String>,
+    target: Option<String>,
+    profile: Option<String>,
+    diagnostics: Vec<Diagnostic>,
+    release_gate_checks: Vec<String>,
+}
+
+fn prepare_package_context(
+    scenario: &Scenario,
+    workspace_root: &Path,
+    scenario_path: Option<&Path>,
+    options: &ScenarioRunOptions,
+) -> PackageContext {
+    let package = options
+        .package
+        .as_ref()
+        .map(|path| normalize_repo_path(workspace_root, path))
+        .or_else(|| scenario.package.clone());
+    let target = options.target.clone().or_else(|| scenario.target.clone());
+    let profile = options.profile.clone().or_else(|| scenario.profile.clone());
+    let mut context = PackageContext {
+        handle: PackageHandle::default(),
+        package: package.clone(),
+        target: target.clone(),
+        profile,
+        diagnostics: Vec::new(),
+        release_gate_checks: Vec::new(),
+    };
+
+    let Some(package_ref) = package else {
+        if target.is_some() {
+            context.diagnostics.push(Diagnostic::blocking(
+                "ASTRA_SCENARIO_PACKAGE_MISSING",
+                "scenario target was supplied without a package",
+            ));
+        }
+        return context;
+    };
+    if target.is_none() {
+        context.diagnostics.push(Diagnostic::blocking(
+            "ASTRA_SCENARIO_TARGET_MISSING",
+            "scenario package runs must declare a target",
+        ));
+    }
+    context.handle = PackageHandle {
+        package_id: package_ref.clone(),
+    };
+    context
+        .release_gate_checks
+        .push("package.integrity".to_string());
+
+    let package_path = options
+        .package
+        .clone()
+        .unwrap_or_else(|| workspace_root.join(&package_ref));
+    let bytes = match fs::read(&package_path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            context.diagnostics.push(
+                Diagnostic::blocking(
+                    "ASTRA_SCENARIO_PACKAGE_MISSING",
+                    format!("scenario package could not be read: {err}"),
+                )
+                .with_field("package", &package_ref),
+            );
+            return context;
+        }
+    };
+    let reader = match PackageReader::open(&bytes) {
+        Ok(reader) => reader,
+        Err(err) => {
+            context.diagnostics.push(
+                Diagnostic::blocking(
+                    "ASTRA_SCENARIO_PACKAGE_INVALID",
+                    format!("scenario package could not be opened: {err}"),
+                )
+                .with_field("package", &package_ref),
+            );
+            return context;
+        }
+    };
+    if let Ok(manifest) = reader
+        .container()
+        .decode_postcard::<PackageManifest>("package.manifest")
+    {
+        context.handle = PackageHandle {
+            package_id: manifest.package_id,
+        };
+    }
+    validate_package_target(&reader, target.as_deref(), &mut context);
+    validate_package_scenario_ref(&reader, workspace_root, scenario_path, &mut context);
+    context
+}
+
+fn validate_package_target(
+    reader: &PackageReader,
+    target: Option<&str>,
+    context: &mut PackageContext,
+) {
+    let bytes = match reader
+        .container()
+        .read_bounded("target.manifest", 256 * 1024)
+    {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            context.diagnostics.push(Diagnostic::blocking(
+                "ASTRA_SCENARIO_TARGET_MANIFEST",
+                format!("package target manifest could not be read: {err}"),
+            ));
+            return;
+        }
+    };
+    let manifest: TargetManifest = match serde_json::from_slice(&bytes) {
+        Ok(manifest) => manifest,
+        Err(err) => {
+            context.diagnostics.push(Diagnostic::blocking(
+                "ASTRA_SCENARIO_TARGET_MANIFEST_JSON",
+                format!("package target manifest is not valid JSON: {err}"),
+            ));
+            return;
+        }
+    };
+    let report = validate_manifest(&manifest, target);
+    context
+        .release_gate_checks
+        .push("target.manifest".to_string());
+    if report.status == TargetValidationStatus::Blocked {
+        context.diagnostics.extend(report.diagnostics);
+    }
+}
+
+fn validate_package_scenario_ref(
+    reader: &PackageReader,
+    workspace_root: &Path,
+    scenario_path: Option<&Path>,
+    context: &mut PackageContext,
+) {
+    let Some(scenario_path) = scenario_path else {
+        return;
+    };
+    let bytes = match reader.container().read_bounded("scenario.refs", 256 * 1024) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            context.diagnostics.push(Diagnostic::blocking(
+                "ASTRA_SCENARIO_REFS",
+                format!("package scenario refs could not be read: {err}"),
+            ));
+            return;
+        }
+    };
+    let refs: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(refs) => refs,
+        Err(err) => {
+            context.diagnostics.push(Diagnostic::blocking(
+                "ASTRA_SCENARIO_REFS_JSON",
+                format!("package scenario refs are not valid JSON: {err}"),
+            ));
+            return;
+        }
+    };
+    let Some(scenarios) = refs.get("scenarios").and_then(serde_json::Value::as_array) else {
+        context.diagnostics.push(Diagnostic::blocking(
+            "ASTRA_SCENARIO_REFS_EMPTY",
+            "package scenario refs must contain a scenarios array",
+        ));
+        return;
+    };
+    let scenario_ref = normalize_repo_path(workspace_root, scenario_path);
+    let listed = scenarios
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .any(|entry| entry == scenario_ref);
+    context
+        .release_gate_checks
+        .push("scenario.refs".to_string());
+    if !listed {
+        context.diagnostics.push(
+            Diagnostic::blocking(
+                "ASTRA_SCENARIO_REF_MISSING",
+                "scenario file is not listed in package scenario refs",
+            )
+            .with_field("scenario", scenario_ref),
+        );
+    }
+}
+
+fn normalize_repo_path(root: &Path, path: &Path) -> String {
+    if let Ok(relative) = path.strip_prefix(root) {
+        return relative.to_string_lossy().replace('\\', "/");
+    }
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("external-package")
+        .to_string()
+}
+
 struct RunContext {
     world: RuntimeWorld,
     workspace_root: PathBuf,
@@ -201,18 +522,23 @@ struct RunContext {
     step: u64,
     saved: Option<SaveBlob>,
     diagnostics: Vec<Diagnostic>,
+    unsupported_actions: Vec<String>,
     fixture_actions_registered: bool,
     expected_delayed_events: Vec<String>,
 }
 
 impl RunContext {
-    fn new(seed: u64, workspace_root: PathBuf) -> Result<Self, ScenarioError> {
+    fn new(
+        seed: u64,
+        workspace_root: PathBuf,
+        package: PackageHandle,
+    ) -> Result<Self, ScenarioError> {
         let mut world = RuntimeWorld::create(
             RuntimeConfig {
                 seed,
                 required_slots: Vec::new(),
             },
-            PackageHandle::default(),
+            package,
         )?;
         let system_actor = world.create_actor("scenario.system", vec!["scenario".to_string()]);
         Ok(Self {
@@ -223,6 +549,7 @@ impl RunContext {
             step: 0,
             saved: None,
             diagnostics: Vec::new(),
+            unsupported_actions: Vec::new(),
             fixture_actions_registered: false,
             expected_delayed_events: Vec::new(),
         })
@@ -230,11 +557,25 @@ impl RunContext {
 
     fn apply(&mut self, action: &ScenarioAction) -> Result<(), ScenarioError> {
         debug!(action = scenario_action_kind(action), "scenario.action");
+        let unsupported: Vec<_> = action.unsupported_keys().map(str::to_string).collect();
+        if !unsupported.is_empty() {
+            for key in unsupported {
+                self.diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_SCENARIO_ACTION_UNSUPPORTED",
+                        "scenario action is not implemented by this runner",
+                    )
+                    .with_field("action", &key),
+                );
+                self.unsupported_actions.push(key);
+            }
+            return Ok(());
+        }
         if action.register_fixture_actions.is_some() {
             self.register_fixture_actions()?;
         }
         if let Some(add_state_machine) = &action.add_state_machine {
-            self.add_state_machine(add_state_machine);
+            self.add_state_machine(add_state_machine)?;
         }
         if let Some(schedule) = &action.schedule_delayed_event {
             self.schedule_delayed_event(schedule);
@@ -254,7 +595,7 @@ impl RunContext {
             let mut data = BTreeMap::new();
             data.insert(
                 "choice".to_string(),
-                BlackboardValue::String(choice.clone()),
+                BlackboardValue::String(scenario_choice(choice)),
             );
             self.world.emit_event(
                 EventSource::Scenario,
@@ -326,7 +667,10 @@ impl RunContext {
         Ok(())
     }
 
-    fn add_state_machine(&mut self, action: &crate::AddStateMachineAction) {
+    fn add_state_machine(
+        &mut self,
+        action: &crate::AddStateMachineAction,
+    ) -> Result<(), ScenarioError> {
         let start = self.named_id(&format!("{}.start", action.id));
         let done = self.named_id(&format!("{}.done", action.id));
         self.world.add_state_machine(StateMachineDefinition {
@@ -336,10 +680,12 @@ impl RunContext {
                 StateDefinition {
                     id: start,
                     name: "start".to_string(),
+                    terminal: false,
                 },
                 StateDefinition {
                     id: done,
                     name: "done".to_string(),
+                    terminal: true,
                 },
             ],
             transitions: vec![TransitionDefinition {
@@ -356,10 +702,12 @@ impl RunContext {
                         input: convert_map(&invocation.input),
                     })
                     .collect(),
+                priority: 0,
                 source_ref: None,
             }],
             initial_state: start,
-        });
+        })?;
+        Ok(())
     }
 
     fn schedule_delayed_event(&mut self, action: &crate::ScheduleDelayedEventAction) {
@@ -455,7 +803,9 @@ impl RunContext {
 }
 
 fn scenario_action_kind(action: &ScenarioAction) -> &'static str {
-    if action.register_fixture_actions.is_some() {
+    if !action.unsupported.is_empty() {
+        "unsupported"
+    } else if action.register_fixture_actions.is_some() {
         "register_fixture_actions"
     } else if action.add_state_machine.is_some() {
         "add_state_machine"
@@ -506,6 +856,19 @@ fn convert_map(map: &BTreeMap<String, ScenarioValue>) -> BTreeMap<String, Blackb
     map.iter()
         .map(|(key, value)| (key.clone(), BlackboardValue::from(value.clone())))
         .collect()
+}
+
+fn scenario_choice(value: &ScenarioValue) -> String {
+    match value {
+        ScenarioValue::String(value) => value.clone(),
+        ScenarioValue::I64(value) => value.to_string(),
+        ScenarioValue::F64(value) => value.to_string(),
+        ScenarioValue::Bool(value) => value.to_string(),
+        ScenarioValue::Null => "null".to_string(),
+        ScenarioValue::List(_) | ScenarioValue::Map(_) => {
+            serde_json::to_string(value).unwrap_or_else(|_| "complex_choice".to_string())
+        }
+    }
 }
 
 fn string_field(map: &BTreeMap<String, ScenarioValue>, key: &str) -> Option<String> {

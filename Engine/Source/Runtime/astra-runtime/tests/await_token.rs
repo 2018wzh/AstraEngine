@@ -23,6 +23,20 @@ fn run_with_order(order: [u64; 2]) -> astra_runtime::TickReport {
     .unwrap();
     let token_a = AwaitTokenId(StableId::deterministic_v7(1, 1, 13));
     let token_b = AwaitTokenId(StableId::deterministic_v7(1, 2, 13));
+    world.insert_await_token(AwaitToken {
+        token_id: token_a,
+        kind: AwaitKind::Custom("scenario".to_string()),
+        requested_at_step: 0,
+        deterministic_timeout_step: None,
+        replay_policy: AwaitReplayPolicy::RecordedResult,
+    });
+    world.insert_await_token(AwaitToken {
+        token_id: token_b,
+        kind: AwaitKind::Custom("scenario".to_string()),
+        requested_at_step: 0,
+        deterministic_timeout_step: None,
+        replay_policy: AwaitReplayPolicy::RecordedResult,
+    });
     world.submit_await_result(AwaitResult::custom(
         token_for(order[0], token_a, token_b),
         order[0],
@@ -63,4 +77,90 @@ fn await_token_is_serializable() {
     };
     let encoded = postcard::to_allocvec(&token).unwrap();
     assert!(!encoded.is_empty());
+}
+
+#[test]
+fn await_timeout_materializes_deterministic_result() {
+    let mut world =
+        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let token_id = AwaitTokenId(StableId::deterministic_v7(2, 1, 13));
+    world.insert_await_token(AwaitToken {
+        token_id,
+        kind: AwaitKind::PresentationFence,
+        requested_at_step: 1,
+        deterministic_timeout_step: Some(3),
+        replay_policy: AwaitReplayPolicy::DeterministicTimeout,
+    });
+
+    world
+        .tick(TickInput {
+            fixed_step: 2,
+            delta_ns: 16_666_667,
+            seed: 13,
+        })
+        .unwrap();
+    let report = world
+        .tick(TickInput {
+            fixed_step: 3,
+            delta_ns: 16_666_667,
+            seed: 13,
+        })
+        .unwrap();
+
+    assert!(report
+        .diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.code != "ASTRA_AWAIT_TIMEOUT_INVALID"));
+    assert!(world.debug_session().event_trace().iter().any(|event| {
+        event.source == astra_runtime::EventSource::AwaitResult
+            && event.payload.kind == "await.timeout"
+    }));
+    assert!(world.snapshot().awaits.pending().is_empty());
+}
+
+#[test]
+fn unknown_and_duplicate_await_results_are_diagnostic_only() {
+    let mut world =
+        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let token_id = AwaitTokenId(StableId::deterministic_v7(3, 1, 13));
+    world.insert_await_token(AwaitToken {
+        token_id,
+        kind: AwaitKind::Custom("scenario".to_string()),
+        requested_at_step: 0,
+        deterministic_timeout_step: None,
+        replay_policy: AwaitReplayPolicy::RecordedResult,
+    });
+    world.submit_await_result(AwaitResult::custom(token_id, 1, 1, "done"));
+    world.submit_await_result(AwaitResult::custom(token_id, 1, 1, "done-again"));
+    world.submit_await_result(AwaitResult::custom(
+        AwaitTokenId(StableId::deterministic_v7(3, 2, 13)),
+        2,
+        1,
+        "unknown",
+    ));
+
+    let report = world
+        .tick(TickInput {
+            fixed_step: 1,
+            delta_ns: 16_666_667,
+            seed: 13,
+        })
+        .unwrap();
+
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_AWAIT_RESULT_DUPLICATE"));
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_AWAIT_RESULT_UNKNOWN"));
+    let await_events: Vec<_> = world
+        .debug_session()
+        .event_trace()
+        .into_iter()
+        .filter(|event| event.source == astra_runtime::EventSource::AwaitResult)
+        .collect();
+    assert_eq!(await_events.len(), 1);
+    assert_eq!(await_events[0].payload.kind, "await.completed");
 }

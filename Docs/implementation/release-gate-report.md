@@ -27,6 +27,10 @@ checks:
     domain: runtime
     status: pass
     source_ref: null
+  - id: package.cooked_project
+    domain: package
+    status: pass
+    source_ref: null
   - id: luau.policy.snapshot
     domain: luau
     status: blocked
@@ -39,6 +43,7 @@ checks:
 - runtime determinism
 - schema migration
 - package integrity
+- cooked project artifact for release profiles
 - target manifest
 - plugin fingerprint
 - permission policy
@@ -62,12 +67,15 @@ Forbidden evidence: full commercial text, image, audio, video, private absolute 
 ## Commands
 
 ```bash
-astra package validate target/nativevn.astrapkg --profile desktop-release --report target/release_report.yaml
+astra platform probe --platform windows --target nativevn-game --report target/platform-windows.yaml
+astra package validate target/nativevn.astrapkg --profile desktop-release --target nativevn-game --platform-report target/platform-windows.yaml --report target/release_report.yaml
 astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --headless --report target/scenario_report.yaml
 astra report explain target/release_report.yaml
 ```
 
 Expected: report schema validates, blocked checks include source span and diagnostic code.
+
+Release profile packages must include `compiled.project` from `astra cook`; fixture packages without that section produce `ASTRA_PACKAGE_COOKED_PROJECT_MISSING`.
 
 ## Tests
 

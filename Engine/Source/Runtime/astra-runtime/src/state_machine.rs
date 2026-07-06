@@ -1,18 +1,22 @@
-use astra_core::{Diagnostic, SourceRef, StableId, StableIdGenerator};
+use std::collections::{BTreeMap, BTreeSet};
+
+use astra_core::{Diagnostic, DiagnosticSeverity, SourceRef, StableId, StableIdGenerator};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use crate::{
     ActionInvocation, ActionRegistry, ActionTrace, ActorId, ActorStore, AwaitToken, Blackboard,
-    BlackboardValue, DelayedEventId, DeterministicActionContext, PresentationCommand, RuntimeEvent,
-    ScheduledEvent,
+    BlackboardValue, DelayedEventId, DeterministicActionContext, PresentationCommand, RuntimeError,
+    RuntimeEvent, ScheduledEvent,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateDefinition {
     pub id: StableId,
     pub name: String,
+    #[serde(default)]
+    pub terminal: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -31,6 +35,8 @@ pub struct TransitionDefinition {
     pub guard: GuardExpr,
     #[serde(default)]
     pub actions: Vec<ActionInvocation>,
+    #[serde(default)]
+    pub priority: i32,
     pub source_ref: Option<SourceRef>,
 }
 
@@ -54,12 +60,115 @@ pub struct StateMachineInstance {
 
 impl StateMachineInstance {
     pub fn new(definition: StateMachineDefinition) -> Self {
+        let completed = definition
+            .states
+            .iter()
+            .any(|state| state.id == definition.initial_state && state.terminal);
         Self {
             current_state: definition.initial_state,
             definition,
-            completed: false,
+            completed,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StateMachineValidationReport {
+    pub valid: bool,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+pub fn validate_state_machine(definition: &StateMachineDefinition) -> StateMachineValidationReport {
+    let mut diagnostics = Vec::new();
+    if definition.states.is_empty() {
+        diagnostics.push(Diagnostic::blocking(
+            "ASTRA_RUNTIME_STATE_MACHINE_EMPTY",
+            "state machine must define at least one state",
+        ));
+    }
+
+    let mut state_ids = BTreeSet::new();
+    for state in &definition.states {
+        if !state_ids.insert(state.id) {
+            diagnostics.push(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_STATE_DUPLICATE",
+                    "state machine contains duplicate state ids",
+                )
+                .with_field("state", state.id),
+            );
+        }
+    }
+
+    if !state_ids.contains(&definition.initial_state) {
+        diagnostics.push(
+            Diagnostic::blocking(
+                "ASTRA_RUNTIME_INITIAL_STATE_UNKNOWN",
+                "state machine initial state is not declared",
+            )
+            .with_field("state", definition.initial_state),
+        );
+    }
+
+    for transition in &definition.transitions {
+        if !state_ids.contains(&transition.from) {
+            diagnostics.push(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_STATE_UNKNOWN",
+                    "transition source state is not declared",
+                )
+                .with_field("state", transition.from),
+            );
+        }
+        if !state_ids.contains(&transition.to) {
+            diagnostics.push(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_STATE_UNKNOWN",
+                    "transition target state is not declared",
+                )
+                .with_field("state", transition.to),
+            );
+        }
+    }
+
+    let mut transition_keys: BTreeMap<(StableId, i32, String), SourceRef> = BTreeMap::new();
+    for transition in &definition.transitions {
+        let guard_key = guard_conflict_key(&transition.guard);
+        let key = (transition.from, transition.priority, guard_key);
+        if let Some(first_source) = transition_keys.get(&key) {
+            let mut diagnostic = Diagnostic::blocking(
+                "ASTRA_RUNTIME_TRANSITION_CONFLICT",
+                "transitions from the same state share the same guard and priority",
+            )
+            .with_field("state", transition.from)
+            .with_field("priority", transition.priority);
+            diagnostic.source = transition
+                .source_ref
+                .clone()
+                .or_else(|| Some(first_source.clone()));
+            diagnostics.push(diagnostic);
+        } else if let Some(source) = &transition.source_ref {
+            transition_keys.insert(key, source.clone());
+        } else {
+            transition_keys.insert(
+                key,
+                SourceRef {
+                    source: "state_machine".to_string(),
+                    line: 0,
+                    column: 0,
+                    length: 0,
+                },
+            );
+        }
+    }
+
+    let valid = !diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic.severity,
+            DiagnosticSeverity::Blocking | DiagnosticSeverity::Error
+        )
+    });
+    StateMachineValidationReport { valid, diagnostics }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -69,10 +178,34 @@ pub struct StateMachineStore {
 }
 
 impl StateMachineStore {
-    pub fn add(&mut self, definition: StateMachineDefinition) {
+    pub fn add(&mut self, definition: StateMachineDefinition) -> Result<(), RuntimeError> {
+        if self
+            .machines
+            .iter()
+            .any(|machine| machine.definition.id == definition.id)
+        {
+            return Err(RuntimeError::diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_STATE_MACHINE_DUPLICATE",
+                    "state machine id is already registered",
+                )
+                .with_field("machine", definition.id),
+            ));
+        }
+        let report = validate_state_machine(&definition);
+        if !report.valid {
+            let diagnostic = report.diagnostics.into_iter().next().unwrap_or_else(|| {
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_STATE_MACHINE_INVALID",
+                    "state machine validation failed",
+                )
+            });
+            return Err(RuntimeError::diagnostic(diagnostic));
+        }
         self.machines.push(StateMachineInstance::new(definition));
         self.machines
             .sort_by_key(|machine| machine.definition.id.to_string());
+        Ok(())
     }
 
     pub fn tick(
@@ -189,6 +322,9 @@ impl StateMachineStore {
             self.trace.extend(candidate_output.trace.iter().cloned());
             output.append(candidate_output);
             machine.current_state = transition.to;
+            if state_is_terminal(machine, machine.current_state) {
+                machine.completed = true;
+            }
             debug!(
                 step,
                 machine_id = ?machine.definition.id,
@@ -223,18 +359,45 @@ fn find_transition(
     actors: &ActorStore,
     blackboard: &Blackboard,
 ) -> Option<(TransitionDefinition, Option<SourceRef>)> {
-    for event in events {
-        let actor_snapshots = actors.actor_snapshots();
-        if let Some(transition) = machine.definition.transitions.iter().find(|transition| {
-            transition.from == machine.current_state
-                && transition
+    let actor_snapshots = actors.actor_snapshots();
+    let mut best: Option<&TransitionDefinition> = None;
+    for transition in machine
+        .definition
+        .transitions
+        .iter()
+        .filter(|transition| transition.from == machine.current_state)
+    {
+        let matched = match transition.guard {
+            GuardExpr::Always => true,
+            _ => events.iter().any(|event| {
+                transition
                     .guard
                     .evaluate(event, &actor_snapshots, blackboard)
-        }) {
-            return Some((transition.clone(), transition.source_ref.clone()));
+            }),
+        };
+        if matched {
+            match best {
+                Some(current) if transition.priority <= current.priority => {}
+                _ => best = Some(transition),
+            }
         }
     }
-    None
+    best.map(|transition| (transition.clone(), transition.source_ref.clone()))
+}
+
+fn state_is_terminal(machine: &StateMachineInstance, state_id: StableId) -> bool {
+    machine
+        .definition
+        .states
+        .iter()
+        .any(|state| state.id == state_id && state.terminal)
+}
+
+fn guard_conflict_key(guard: &GuardExpr) -> String {
+    match guard {
+        GuardExpr::Always => "always".to_string(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| format!("{other:?}")),
+    }
 }
 
 #[derive(Default)]

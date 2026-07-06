@@ -1,6 +1,6 @@
 # Platform Host Blueprint
 
-平台模块只适配原生能力，不拥有引擎状态。六个 v1 目标平台都必须输出 capability report 并通过 profile gate。当前 Windows 和 Web 的真实 smoke 已落地；Linux、macOS、iOS 和 Android host smoke 是 Stage 2 后续缺口。
+平台模块只适配原生能力，不拥有引擎状态。六个 v1 目标平台都必须输出 capability report 并通过 profile gate。当前 Windows 和 Web 的真实 smoke 已落地；Linux、macOS、iOS 和 Android host completion 移到 Stage 6。
 
 Target 与 Platform 的共同规则见 [Target And Platform Blueprint](target-platform.md)。本页只展开 host adapter。
 
@@ -25,12 +25,12 @@ pub trait PlatformHost {
 | Crate | 职责 |
 | --- | --- |
 | `astra-platform` | `PlatformId`、`SdkStatus`、`PlatformCapabilityReport`、`PlatformHost` trait |
-| `astra-platform-windows` | Windows host adapter、windowed smoke、WMF/WASAPI/DPI/IME capability |
+| `astra-platform-windows` | Windows host adapter、hidden window、wgpu surface、WMF audio/video decode、WASAPI、DPI/IME capability |
 | `astra-platform-linux` | Linux capability crate；window system/audio/font/decode smoke 待实现 |
 | `astra-platform-macos` | macOS capability crate；AppKit/AVFoundation/CoreAudio smoke 待实现 |
 | `astra-platform-ios` | iOS capability crate；launcher、safe area、touch、AVFoundation、no-JIT Luau gate 待实现 |
 | `astra-platform-android` | Android capability crate；launcher、MediaCodec、SAF、audio focus、no-JIT Luau gate 待实现 |
-| `astra-platform-web` | Web host probe；WASM browser、WebGPU/WebGL、WebCodecs、WebAudio、OPFS/IndexedDB、File API/fetch package source smoke |
+| `astra-platform-web` | Web host probe；WASM browser、renderer context、browser media decode、WebCodecs config、WebAudio render、OPFS/IndexedDB、File API/fetch package source smoke |
 
 每个 host crate 可以用平台私有类型实现内部 bridge，但 public report 和 Runtime 入口只传 DTO 或 token。
 
@@ -64,13 +64,29 @@ permissions:
 smoke:
   - id: windowed_smoke
     status: pass
-    summary: winit hidden window created; dpi and ime checked
-  - id: decode.wmf
+    summary: winit hidden window created with active event loop and IME cursor area
+    evidence:
+      - key: width
+        value: "320"
+      - key: height
+        value: "180"
+  - id: renderer.wgpu_surface
     status: pass
-    summary: Media Foundation startup/shutdown completed
+    summary: wgpu surface and compatible adapter were created for the hidden window
+    evidence:
+      - key: format_count
+        value: "8"
+  - id: decode.wmf.video_first_frame
+    status: pass
+    summary: WMF decoded the public MP4 fixture into a CPU first frame
+    evidence:
+      - key: format
+        value: bgra8:first_frame:960x540
+      - key: hash
+        value: sha256:...
 ```
 
-Required smoke 按平台分开定义。Windows 当前要求 `windowed_smoke`、`decode.wmf` 和 `save.known_folder`。Web 当前要求 `browser_smoke`、`renderer.webgpu_or_webgl`、`decode.webcodecs`、`audio.webaudio_unlock`、`save.web_storage` 和 `package.web_source`。Linux 计划要求 `windowed_smoke` 和 `decode.linux_media`；macOS 计划要求 `windowed_smoke` 和 `decode.avfoundation`；iOS 计划要求 `launcher_smoke` 和 `decode.avfoundation`；Android 计划要求 `launcher_smoke` 和 `decode.mediacodec`。
+Required smoke 按平台分开定义。Windows 当前要求 `windowed_smoke`、`renderer.wgpu_surface`、`decode.wmf.audio`、`decode.wmf.video_first_frame`、`audio.wasapi` 和 `save.known_folder_rw`。Web 当前要求 `browser_smoke`、`renderer.browser_context`、`decode.browser_media`、`decode.webcodecs_config`、`audio.webaudio_render`、`save.web_storage_rw` 和 `package.web_source_read`。Linux 计划要求 `windowed_smoke` 和 `decode.linux_media`；macOS 计划要求 `windowed_smoke` 和 `decode.avfoundation`；iOS 计划要求 `launcher_smoke` 和 `decode.avfoundation`；Android 计划要求 `launcher_smoke` 和 `decode.mediacodec`。
 
 ## Checks
 

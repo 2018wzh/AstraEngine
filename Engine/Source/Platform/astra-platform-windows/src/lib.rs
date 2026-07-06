@@ -50,13 +50,23 @@ pub fn probe(target: Option<&str>) -> PlatformCapabilityReport {
 
 #[cfg(target_os = "windows")]
 mod windows_probe {
-    use std::{ffi::c_void, sync::OnceLock};
+    use std::{
+        ffi::c_void,
+        fs,
+        sync::{
+            atomic::{AtomicU64, Ordering},
+            Arc, Mutex, OnceLock,
+        },
+        thread,
+        time::Duration,
+    };
 
-    use astra_platform::{PlatformSmokeCheck, PlatformSmokeStatus};
-    use cpal::traits::HostTrait;
+    use astra_core::Hash256;
+    use astra_media::{DecodeKind, DecodeOutput, DecodeProvider, DecodeRequest};
+    use astra_platform::{PlatformSmokeCheck, PlatformSmokeEvidence, PlatformSmokeStatus};
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use windows::Win32::{
         Foundation::ERROR_DEVICE_NOT_CONNECTED,
-        Media::MediaFoundation::{MFShutdown, MFStartup, MFSTARTUP_FULL, MF_VERSION},
         System::Com::CoTaskMemFree,
         UI::{
             Input::XboxController::{XInputGetState, XINPUT_STATE},
@@ -64,7 +74,6 @@ mod windows_probe {
         },
     };
 
-    static WINDOW_SMOKE: OnceLock<Result<String, String>> = OnceLock::new();
     use winit::{
         application::ApplicationHandler,
         dpi::{LogicalPosition, LogicalSize},
@@ -74,29 +83,69 @@ mod windows_probe {
         window::{Window, WindowAttributes, WindowId},
     };
 
+    static WINDOW_PROBE: OnceLock<Result<WindowProbe, String>> = OnceLock::new();
+
+    #[derive(Clone)]
+    struct WindowProbe {
+        window_summary: String,
+        window_evidence: Vec<PlatformSmokeEvidence>,
+        surface_summary: String,
+        surface_evidence: Vec<PlatformSmokeEvidence>,
+    }
+
     pub fn smoke_checks() -> Vec<PlatformSmokeCheck> {
+        let (window_status, window_summary, window_evidence) = status_tuple(windowed_smoke());
+        let (surface_status, surface_summary, surface_evidence) =
+            status_tuple(wgpu_surface_smoke());
+        let (wmf_audio_status, wmf_audio_summary, wmf_audio_evidence) =
+            status_tuple(wmf_audio_smoke());
+        let (wmf_video_status, wmf_video_summary, wmf_video_evidence) =
+            status_tuple(wmf_video_smoke());
+        let (wasapi_status, wasapi_summary, wasapi_evidence) = status_tuple(wasapi_smoke());
+        let (save_status, save_summary, save_evidence) = status_tuple(known_folder_smoke());
+
         vec![
             smoke(
                 "sdk.windows",
                 PlatformSmokeStatus::Pass,
                 "Windows target SDK is linked",
             ),
-            match windowed_smoke() {
-                Ok(summary) => smoke("windowed_smoke", PlatformSmokeStatus::Pass, summary),
-                Err(err) => smoke("windowed_smoke", PlatformSmokeStatus::Blocked, err),
-            },
-            match wmf_smoke() {
-                Ok(summary) => smoke("decode.wmf", PlatformSmokeStatus::Pass, summary),
-                Err(err) => smoke("decode.wmf", PlatformSmokeStatus::Blocked, err),
-            },
-            match wasapi_smoke() {
-                Ok(summary) => smoke("audio.wasapi", PlatformSmokeStatus::Pass, summary),
-                Err(err) => smoke("audio.wasapi", PlatformSmokeStatus::Warning, err),
-            },
-            match known_folder_smoke() {
-                Ok(summary) => smoke("save.known_folder", PlatformSmokeStatus::Pass, summary),
-                Err(err) => smoke("save.known_folder", PlatformSmokeStatus::Blocked, err),
-            },
+            smoke_with(
+                "windowed_smoke",
+                window_status,
+                window_summary,
+                window_evidence,
+            ),
+            smoke_with(
+                "renderer.wgpu_surface",
+                surface_status,
+                surface_summary,
+                surface_evidence,
+            ),
+            smoke_with(
+                "decode.wmf.audio",
+                wmf_audio_status,
+                wmf_audio_summary,
+                wmf_audio_evidence,
+            ),
+            smoke_with(
+                "decode.wmf.video_first_frame",
+                wmf_video_status,
+                wmf_video_summary,
+                wmf_video_evidence,
+            ),
+            smoke_with(
+                "audio.wasapi",
+                wasapi_status,
+                wasapi_summary,
+                wasapi_evidence,
+            ),
+            smoke_with(
+                "save.known_folder_rw",
+                save_status,
+                save_summary,
+                save_evidence,
+            ),
             match gamepad_smoke() {
                 Ok(summary) => smoke("input.gamepad", PlatformSmokeStatus::Pass, summary),
                 Err(err) => smoke("input.gamepad", PlatformSmokeStatus::Warning, err),
@@ -109,18 +158,50 @@ mod windows_probe {
         status: PlatformSmokeStatus,
         summary: impl Into<String>,
     ) -> PlatformSmokeCheck {
+        smoke_with(id, status, summary, Vec::new())
+    }
+
+    fn smoke_with(
+        id: impl Into<String>,
+        status: PlatformSmokeStatus,
+        summary: impl Into<String>,
+        evidence: Vec<PlatformSmokeEvidence>,
+    ) -> PlatformSmokeCheck {
         PlatformSmokeCheck {
             id: id.into(),
             status,
             summary: summary.into(),
+            evidence,
         }
     }
 
-    fn windowed_smoke() -> Result<String, String> {
-        WINDOW_SMOKE.get_or_init(run_windowed_smoke).clone()
+    fn status_tuple(
+        result: Result<(String, Vec<PlatformSmokeEvidence>), String>,
+    ) -> (PlatformSmokeStatus, String, Vec<PlatformSmokeEvidence>) {
+        match result {
+            Ok((summary, evidence)) => (PlatformSmokeStatus::Pass, summary, evidence),
+            Err(err) => (PlatformSmokeStatus::Blocked, err, Vec::new()),
+        }
     }
 
-    fn run_windowed_smoke() -> Result<String, String> {
+    fn evidence(key: impl Into<String>, value: impl ToString) -> PlatformSmokeEvidence {
+        PlatformSmokeEvidence {
+            key: key.into(),
+            value: value.to_string(),
+        }
+    }
+
+    fn windowed_smoke() -> Result<(String, Vec<PlatformSmokeEvidence>), String> {
+        let probe = WINDOW_PROBE.get_or_init(run_window_probe).clone()?;
+        Ok((probe.window_summary, probe.window_evidence))
+    }
+
+    fn wgpu_surface_smoke() -> Result<(String, Vec<PlatformSmokeEvidence>), String> {
+        let probe = WINDOW_PROBE.get_or_init(run_window_probe).clone()?;
+        Ok((probe.surface_summary, probe.surface_evidence))
+    }
+
+    fn run_window_probe() -> Result<WindowProbe, String> {
         let event_loop = EventLoop::builder()
             .with_any_thread(true)
             .build()
@@ -130,13 +211,13 @@ mod windows_probe {
             .run_app(&mut app)
             .map_err(|err| format!("run event loop: {err}"))?;
         app.result
-            .ok_or_else(|| "windowed smoke did not produce evidence".to_string())?
+            .ok_or_else(|| "windowed probe did not produce evidence".to_string())?
     }
 
     #[derive(Default)]
     struct WindowSmokeApp {
         window: Option<Window>,
-        result: Option<Result<String, String>>,
+        result: Option<Result<WindowProbe, String>>,
     }
 
     impl ApplicationHandler for WindowSmokeApp {
@@ -159,15 +240,27 @@ mod windows_probe {
                         LogicalPosition::new(0.0, 0.0),
                         LogicalSize::new(16.0, 16.0),
                     );
-                    self.window = Some(window);
                     if size.width == 0 || size.height == 0 || scale_factor <= 0.0 {
                         self.result =
                             Some(Err("window smoke produced invalid size or DPI".to_string()));
                     } else {
-                        self.result = Some(Ok(format!(
-                            "winit hidden window created; dpi_scale={scale_factor:.2}; ime enabled; input event loop active"
-                        )));
+                        let surface = probe_wgpu_surface(&window);
+                        self.result = Some(surface.map(|(surface_summary, surface_evidence)| {
+                            WindowProbe {
+                                window_summary: "winit hidden window created with active event loop and IME cursor area".to_string(),
+                                window_evidence: vec![
+                                    evidence("width", size.width),
+                                    evidence("height", size.height),
+                                    evidence("dpi_scale", format!("{scale_factor:.2}")),
+                                    evidence("visible", "false"),
+                                    evidence("ime_cursor_area", "16x16"),
+                                ],
+                                surface_summary,
+                                surface_evidence,
+                            }
+                        }));
                     }
+                    self.window = Some(window);
                 }
                 Err(err) => {
                     self.result = Some(Err(format!("create hidden window: {err}")));
@@ -191,36 +284,238 @@ mod windows_probe {
         }
     }
 
-    fn wmf_smoke() -> Result<String, String> {
-        unsafe {
-            MFStartup(MF_VERSION, MFSTARTUP_FULL)
-                .map_err(|err| format!("Media Foundation startup: {err}"))?;
-            MFShutdown().map_err(|err| format!("Media Foundation shutdown: {err}"))?;
+    fn probe_wgpu_surface(window: &Window) -> Result<(String, Vec<PlatformSmokeEvidence>), String> {
+        let instance = wgpu::Instance::default();
+        let surface = instance
+            .create_surface(window)
+            .map_err(|err| format!("create wgpu surface: {err}"))?;
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+            apply_limit_buckets: false,
+        }))
+        .map_err(|err| format!("request wgpu adapter: {err}"))?;
+        let info = adapter.get_info();
+        let caps = surface.get_capabilities(&adapter);
+        if caps.formats.is_empty() {
+            return Err("wgpu surface reported no supported formats".to_string());
         }
-        Ok("Media Foundation startup/shutdown completed".to_string())
+        Ok((
+            "wgpu surface and compatible adapter were created for the hidden window".to_string(),
+            vec![
+                evidence("backend", format!("{:?}", info.backend)),
+                evidence("adapter_type", format!("{:?}", info.device_type)),
+                evidence("format_count", caps.formats.len()),
+                evidence("present_mode_count", caps.present_modes.len()),
+            ],
+        ))
     }
 
-    fn wasapi_smoke() -> Result<String, String> {
-        let host = cpal::default_host();
-        if host.default_output_device().is_some() {
-            Ok("WASAPI default output device is available".to_string())
-        } else {
-            Err("WASAPI backend loaded, but no default output device was reported".to_string())
-        }
+    fn wmf_audio_smoke() -> Result<(String, Vec<PlatformSmokeEvidence>), String> {
+        decode_media_fixture(
+            DecodeKind::Audio,
+            "mp3",
+            include_bytes!("../../../../Fixtures/PublicDomainMedia/t-rex-roar.mp3"),
+            16_000,
+        )
+        .map(|(format, bytes, hash)| {
+            (
+                "WMF decoded the public MP3 fixture into bounded PCM".to_string(),
+                vec![
+                    evidence("codec", "mp3"),
+                    evidence("format", format),
+                    evidence("bytes", bytes),
+                    evidence("hash", hash),
+                ],
+            )
+        })
     }
 
-    fn known_folder_smoke() -> Result<String, String> {
-        unsafe {
-            let path = SHGetKnownFolderPath(&FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, None)
-                .map_err(|err| format!("known folder lookup: {err}"))?;
-            let present = !path.as_ptr().is_null();
-            CoTaskMemFree(Some(path.as_ptr() as *const c_void));
-            if present {
-                Ok("RoamingAppData known-folder save store is available".to_string())
-            } else {
-                Err("RoamingAppData known-folder lookup returned an empty pointer".to_string())
+    fn wmf_video_smoke() -> Result<(String, Vec<PlatformSmokeEvidence>), String> {
+        decode_media_fixture(
+            DecodeKind::Video,
+            "mp4",
+            include_bytes!("../../../../Fixtures/PublicDomainMedia/flower.mp4"),
+            320 * 180 * 4,
+        )
+        .map(|(format, bytes, hash)| {
+            (
+                "WMF decoded the public MP4 fixture into a CPU first frame".to_string(),
+                vec![
+                    evidence("codec", "mp4"),
+                    evidence("format", format),
+                    evidence("bytes", bytes),
+                    evidence("hash", hash),
+                ],
+            )
+        })
+    }
+
+    fn decode_media_fixture(
+        kind: DecodeKind,
+        codec: &str,
+        bytes: &[u8],
+        min_output_bytes: usize,
+    ) -> Result<(String, usize, String), String> {
+        let provider = astra_media::WindowsMediaFoundationDecodeProvider::probe()
+            .map_err(|err| err.to_string())?;
+        let result = provider
+            .decode(&DecodeRequest {
+                kind,
+                codec: codec.to_string(),
+                bytes: bytes.to_vec(),
+                profile: "desktop-release".to_string(),
+            })
+            .map_err(|err| err.to_string())?;
+        match result.output {
+            DecodeOutput::CpuBuffer {
+                bytes,
+                format,
+                hash,
+            } => {
+                if bytes.len() < min_output_bytes {
+                    return Err(format!(
+                        "decoded output was too small: {} bytes",
+                        bytes.len()
+                    ));
+                }
+                if hash != Hash256::from_sha256(&bytes) {
+                    return Err("decoded output hash did not match bytes".to_string());
+                }
+                Ok((format, bytes.len(), hash.to_string()))
+            }
+            DecodeOutput::MediaSurfaceToken(_) => {
+                Err("WMF smoke requires bounded CPU decode output".to_string())
             }
         }
+    }
+
+    fn wasapi_smoke() -> Result<(String, Vec<PlatformSmokeEvidence>), String> {
+        let host = cpal::default_host();
+        let device = host
+            .default_output_device()
+            .ok_or_else(|| "WASAPI default output device was not reported".to_string())?;
+        let config = device
+            .default_output_config()
+            .map_err(|err| format!("WASAPI default output config: {err}"))?;
+        let stream_config: cpal::StreamConfig = config.clone().into();
+        let frames = Arc::new(AtomicU64::new(0));
+        let stream_errors = Arc::new(Mutex::new(None::<String>));
+        let channels = usize::from(stream_config.channels);
+        let err_sink = Arc::clone(&stream_errors);
+        let err_fn = move |err: cpal::StreamError| {
+            if let Ok(mut slot) = err_sink.lock() {
+                *slot = Some(err.to_string());
+            }
+        };
+        let stream = match config.sample_format() {
+            cpal::SampleFormat::F32 => {
+                let frames = Arc::clone(&frames);
+                device.build_output_stream(
+                    &stream_config,
+                    move |data: &mut [f32], _| fill_f32(data, channels, &frames),
+                    err_fn,
+                    None,
+                )
+            }
+            cpal::SampleFormat::I16 => {
+                let frames = Arc::clone(&frames);
+                device.build_output_stream(
+                    &stream_config,
+                    move |data: &mut [i16], _| fill_i16(data, channels, &frames),
+                    err_fn,
+                    None,
+                )
+            }
+            cpal::SampleFormat::U16 => {
+                let frames = Arc::clone(&frames);
+                device.build_output_stream(
+                    &stream_config,
+                    move |data: &mut [u16], _| fill_u16(data, channels, &frames),
+                    err_fn,
+                    None,
+                )
+            }
+            other => return Err(format!("unsupported WASAPI sample format {other:?}")),
+        }
+        .map_err(|err| format!("build WASAPI output stream: {err}"))?;
+        stream
+            .play()
+            .map_err(|err| format!("start WASAPI output stream: {err}"))?;
+        thread::sleep(Duration::from_millis(120));
+        drop(stream);
+        if let Ok(slot) = stream_errors.lock() {
+            if let Some(err) = slot.as_ref() {
+                return Err(format!("WASAPI stream error: {err}"));
+            }
+        }
+        let rendered_frames = frames.load(Ordering::SeqCst);
+        if rendered_frames == 0 {
+            return Err("WASAPI output callback produced no frames".to_string());
+        }
+        Ok((
+            "WASAPI output stream initialized and rendered a silent buffer".to_string(),
+            vec![
+                evidence("sample_rate", config.sample_rate()),
+                evidence("channels", config.channels()),
+                evidence("sample_format", format!("{:?}", config.sample_format())),
+                evidence("frames", rendered_frames),
+            ],
+        ))
+    }
+
+    fn fill_f32(data: &mut [f32], channels: usize, frames: &AtomicU64) {
+        data.fill(0.0);
+        record_frames(data.len(), channels, frames);
+    }
+
+    fn fill_i16(data: &mut [i16], channels: usize, frames: &AtomicU64) {
+        data.fill(0);
+        record_frames(data.len(), channels, frames);
+    }
+
+    fn fill_u16(data: &mut [u16], channels: usize, frames: &AtomicU64) {
+        data.fill(u16::MAX / 2);
+        record_frames(data.len(), channels, frames);
+    }
+
+    fn record_frames(sample_count: usize, channels: usize, frames: &AtomicU64) {
+        let channels = channels.max(1);
+        frames.fetch_add((sample_count / channels) as u64, Ordering::SeqCst);
+    }
+
+    fn known_folder_smoke() -> Result<(String, Vec<PlatformSmokeEvidence>), String> {
+        let root = unsafe {
+            let path = SHGetKnownFolderPath(&FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, None)
+                .map_err(|err| format!("known folder lookup: {err}"))?;
+            let root = path
+                .to_string()
+                .map_err(|err| format!("known folder path conversion: {err}"))?;
+            CoTaskMemFree(Some(path.as_ptr() as *const c_void));
+            root
+        };
+        if root.is_empty() {
+            return Err("known folder lookup returned an empty path".to_string());
+        }
+        let dir = std::path::PathBuf::from(root).join("AstraEngineProbe");
+        fs::create_dir_all(&dir).map_err(|err| format!("create known-folder probe dir: {err}"))?;
+        let path = dir.join("stage2_known_folder_rw.bin");
+        let bytes = b"astra-stage2-known-folder-rw";
+        fs::write(&path, bytes).map_err(|err| format!("known-folder write: {err}"))?;
+        let read = fs::read(&path).map_err(|err| format!("known-folder read: {err}"))?;
+        fs::remove_file(&path).map_err(|err| format!("known-folder delete: {err}"))?;
+        let _ = fs::remove_dir(&dir);
+        if read != bytes {
+            return Err("known-folder readback did not match written bytes".to_string());
+        }
+        Ok((
+            "RoamingAppData known-folder save store passed write/read/delete".to_string(),
+            vec![
+                evidence("bytes", read.len()),
+                evidence("hash", Hash256::from_sha256(&read)),
+            ],
+        ))
     }
 
     fn gamepad_smoke() -> Result<String, String> {
@@ -251,14 +546,17 @@ mod tests {
         let report = probe(Some("nativevn-game"));
         if cfg!(target_os = "windows") {
             assert_eq!(report.sdk_status, SdkStatus::Present);
-            for required in ["windowed_smoke", "decode.wmf", "save.known_folder"] {
-                assert!(
-                    report
-                        .smoke
-                        .iter()
-                        .any(|check| check.id == required
-                            && check.status == PlatformSmokeStatus::Pass)
-                );
+            for required in [
+                "windowed_smoke",
+                "renderer.wgpu_surface",
+                "decode.wmf.audio",
+                "decode.wmf.video_first_frame",
+                "audio.wasapi",
+                "save.known_folder_rw",
+            ] {
+                assert!(report.smoke.iter().any(|check| check.id == required
+                    && check.status == PlatformSmokeStatus::Pass
+                    && !check.evidence.is_empty()));
             }
             let (status, diagnostics) = validate_capability_report(&report);
             assert!(

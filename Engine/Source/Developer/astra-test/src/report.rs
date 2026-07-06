@@ -6,9 +6,21 @@ use serde::{Deserialize, Serialize};
 pub struct ScenarioReport {
     pub schema: String,
     pub stage: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
     pub status: ScenarioStatus,
     pub hashes: ScenarioHashes,
     pub checks: Vec<ScenarioCheck>,
+    #[serde(default)]
+    pub unsupported_actions: Vec<String>,
+    #[serde(default)]
+    pub unsupported_assertions: Vec<String>,
+    #[serde(default)]
+    pub release_gate_checks: Vec<String>,
     pub diagnostics: Vec<Diagnostic>,
 }
 

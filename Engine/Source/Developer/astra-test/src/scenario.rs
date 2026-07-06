@@ -8,14 +8,24 @@ use serde::{Deserialize, Serialize};
 pub struct Scenario {
     pub schema: String,
     #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
     pub stage: Option<String>,
     #[serde(default)]
     pub package: Option<String>,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub profile: Option<String>,
+    #[serde(default)]
+    pub locale: Option<String>,
     pub seed: u64,
     #[serde(default)]
     pub actions: Vec<ScenarioAction>,
     #[serde(default)]
     pub assertions: Vec<ScenarioAssertion>,
+    #[serde(default, flatten)]
+    pub unsupported: BTreeMap<String, ScenarioValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -33,25 +43,32 @@ pub struct ScenarioAction {
     #[serde(default)]
     pub advance: Option<AdvanceAction>,
     #[serde(default)]
-    pub choose: Option<String>,
+    pub choose: Option<ScenarioValue>,
     #[serde(default)]
     pub save: Option<String>,
     #[serde(default)]
     pub load: Option<String>,
     #[serde(default)]
     pub replay_from_start: Option<BTreeMap<String, ScenarioValue>>,
+    #[serde(default, flatten)]
+    pub unsupported: BTreeMap<String, ScenarioValue>,
 }
 
 impl ScenarioAction {
     pub fn is_replayable(&self) -> bool {
-        self.launch.is_some()
-            || self.register_fixture_actions.is_some()
-            || self.add_state_machine.is_some()
-            || self.schedule_delayed_event.is_some()
-            || self.emit.is_some()
-            || self.advance.is_some()
-            || self.choose.is_some()
-            || self.replay_from_start.is_some()
+        self.unsupported.is_empty()
+            && (self.launch.is_some()
+                || self.register_fixture_actions.is_some()
+                || self.add_state_machine.is_some()
+                || self.schedule_delayed_event.is_some()
+                || self.emit.is_some()
+                || self.advance.is_some()
+                || self.choose.is_some()
+                || self.replay_from_start.is_some())
+    }
+
+    pub fn unsupported_keys(&self) -> impl Iterator<Item = &str> {
+        self.unsupported.keys().map(String::as_str)
     }
 }
 
@@ -95,12 +112,20 @@ fn default_ticks() -> u64 {
     1
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ScenarioAssertion {
     #[serde(default)]
     pub replay_hash_match: Option<bool>,
     #[serde(default)]
     pub no_blocking_diagnostics: Option<bool>,
+    #[serde(default, flatten)]
+    pub unsupported: BTreeMap<String, ScenarioValue>,
+}
+
+impl ScenarioAssertion {
+    pub fn unsupported_keys(&self) -> impl Iterator<Item = &str> {
+        self.unsupported.keys().map(String::as_str)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

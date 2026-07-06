@@ -1,4 +1,4 @@
-use astra_core::StableId;
+use astra_core::{Diagnostic, StableId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +46,14 @@ pub struct AwaitResult {
 pub struct AwaitQueue {
     pending: Vec<AwaitToken>,
     completed: Vec<AwaitResult>,
+    #[serde(default)]
+    diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AwaitDrain {
+    pub results: Vec<AwaitResult>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 impl AwaitQueue {
@@ -54,10 +62,39 @@ impl AwaitQueue {
     }
 
     pub fn submit_result(&mut self, result: AwaitResult) {
+        let known = self
+            .pending
+            .iter()
+            .any(|token| token.token_id == result.token_id);
+        if !known {
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    "ASTRA_AWAIT_RESULT_UNKNOWN",
+                    "await result was submitted for an unknown token",
+                )
+                .with_field("token", result.token_id.0),
+            );
+            return;
+        }
+        if self
+            .completed
+            .iter()
+            .any(|queued| queued.token_id == result.token_id && queued.sequence == result.sequence)
+        {
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    "ASTRA_AWAIT_RESULT_DUPLICATE",
+                    "duplicate await result sequence was ignored",
+                )
+                .with_field("token", result.token_id.0)
+                .with_field("sequence", result.sequence),
+            );
+            return;
+        }
         self.completed.push(result);
     }
 
-    pub fn drain_ordered_results(&mut self, step: u64) -> Vec<AwaitResult> {
+    pub fn drain_ordered_results(&mut self, step: u64) -> AwaitDrain {
         self.completed
             .sort_by_key(|result| (result.token_id, result.sequence));
         let mut ready = Vec::new();
@@ -72,7 +109,26 @@ impl AwaitQueue {
             }
         }
         self.completed = later;
-        ready
+        let mut timeout_tokens = Vec::new();
+        self.pending.retain(|token| {
+            if token
+                .deterministic_timeout_step
+                .is_some_and(|timeout_step| timeout_step <= step)
+            {
+                timeout_tokens.push(token.clone());
+                false
+            } else {
+                true
+            }
+        });
+        timeout_tokens.sort_by_key(|token| token.token_id);
+        for token in timeout_tokens {
+            ready.push(AwaitResult::timeout(token, step));
+        }
+        AwaitDrain {
+            results: ready,
+            diagnostics: self.diagnostics.drain(..).collect(),
+        }
     }
 
     pub fn pending(&self) -> &[AwaitToken] {
@@ -94,6 +150,20 @@ impl AwaitResult {
         Self {
             token_id,
             sequence,
+            completed_at_step: step,
+            payload,
+        }
+    }
+
+    pub fn timeout(token: AwaitToken, step: u64) -> Self {
+        let mut payload = EventPayload::new("await.timeout");
+        payload.data.insert(
+            "kind".to_string(),
+            BlackboardValue::String(format!("{:?}", token.kind)),
+        );
+        Self {
+            token_id: token.token_id,
+            sequence: u64::MAX,
             completed_at_step: step,
             payload,
         }

@@ -90,20 +90,32 @@ pub struct PlatformCapabilityReport {
     pub permissions: Vec<String>,
     pub smoke: Vec<PlatformSmokeCheck>,
 }
+
+pub struct PlatformSmokeCheck {
+    pub id: String,
+    pub status: PlatformSmokeStatus,
+    pub summary: String,
+    pub evidence: Vec<PlatformSmokeEvidence>,
+}
+
+pub struct PlatformSmokeEvidence {
+    pub key: String,
+    pub value: String,
+}
 ```
 
 每个平台有独立 host crate：
 
 | Platform | Crate | SDK 判定 | 必备能力 |
 | --- | --- | --- | --- |
-| Windows | `astra-platform-windows` | host Windows | winit window smoke、WMF、WASAPI、Known Folder save store、IME、gamepad |
+| Windows | `astra-platform-windows` | host Windows | winit hidden window、wgpu surface、WMF audio/video decode、WASAPI stream、Known Folder RW、IME、gamepad |
 | Linux | `astra-platform-linux` | host Linux | planned winit/wgpu、GStreamer or FFmpeg profile、XDG data、IME |
 | macOS | `astra-platform-macos` | host macOS | planned Metal、AVFoundation、CoreAudio、AppKit lifecycle |
 | iOS | `astra-platform-ios` | iOS target or Apple developer env | planned Metal、AVFoundation、safe area、touch、no-JIT Luau |
 | Android | `astra-platform-android` | Android SDK env | planned Vulkan、MediaCodec、SAF、touch、no-JIT Luau |
-| Web | `astra-platform-web` | wasm32 browser environment | WebGPU/WebGL、WebCodecs、WebAudio、OPFS/IndexedDB、File API/fetch package source |
+| Web | `astra-platform-web` | wasm32 browser environment | renderer context、browser media decode、WebCodecs config、WebAudio render、OPFS/IndexedDB、File API/fetch package source |
 
-缺 SDK 的平台必须输出 `sdk_status: missing`，Release Gate 对真实平台完成项判为 blocked。`sdk_status: present` 还必须附带该平台 required smoke：Windows 当前要求 `windowed_smoke`、`decode.wmf` 和 `save.known_folder`；Web 当前要求 `browser_smoke`、`renderer.webgpu_or_webgl`、`decode.webcodecs`、`audio.webaudio_unlock`、`save.web_storage` 和 `package.web_source`。Linux、macOS、iOS 和 Android required smoke 已登记为计划项，代码未实现前不能标为 `DONE`。普通 CI 可以验证 schema、report 和 CLI，不把缺 SDK 或缺 smoke 平台标成已完成。
+缺 SDK 的平台必须输出 `sdk_status: missing`，Release Gate 对真实平台完成项判为 blocked。`sdk_status: present` 还必须附带该平台 required smoke 和 evidence：Windows 当前要求 `windowed_smoke`、`renderer.wgpu_surface`、`decode.wmf.audio`、`decode.wmf.video_first_frame`、`audio.wasapi` 和 `save.known_folder_rw`；Web 当前要求 `browser_smoke`、`renderer.browser_context`、`decode.browser_media`、`decode.webcodecs_config`、`audio.webaudio_render`、`save.web_storage_rw` 和 `package.web_source_read`。Linux、macOS、iOS 和 Android required smoke 移到 Stage 6，代码未实现前不能标为 `DONE`。普通 CI 可以验证 schema、report 和 CLI，不把缺 SDK 或缺 smoke 平台标成已完成。
 
 ## CLI And Gate
 

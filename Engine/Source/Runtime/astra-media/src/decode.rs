@@ -14,6 +14,8 @@ use symphonia::core::{
 use crate::MediaError;
 
 const MAX_DECODED_AUDIO_BYTES: usize = 16 * 1024 * 1024;
+#[cfg(windows)]
+const MAX_DECODED_VIDEO_FRAME_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -511,13 +513,15 @@ mod wmf_decode {
         Win32::{
             Foundation::{RPC_E_CHANGED_MODE, S_FALSE, S_OK},
             Media::MediaFoundation::{
-                IMFAttributes, IMFMediaType, IMFSample, MFAudioFormat_PCM,
+                IMFAttributes, IMFMediaType, IMFSample, MFAudioFormat_PCM, MFCreateAttributes,
                 MFCreateMFByteStreamOnStreamEx, MFCreateMediaType,
                 MFCreateSourceReaderFromByteStream, MFMediaType_Audio, MFMediaType_Video,
                 MFShutdown, MFStartup, MFVideoFormat_RGB32, MFSTARTUP_FULL,
-                MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_MAJOR_TYPE,
-                MF_MT_SUBTYPE, MF_SOURCE_READERF_ENDOFSTREAM, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
-                MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_VERSION,
+                MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_SIZE,
+                MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
+                MF_SOURCE_READERF_ENDOFSTREAM, MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING,
+                MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+                MF_VERSION,
             },
             System::{
                 Com::{
@@ -531,6 +535,7 @@ mod wmf_decode {
 
     use super::{
         DecodeKind, DecodeOutput, DecodeRequest, DecodeResult, MediaError, MAX_DECODED_AUDIO_BYTES,
+        MAX_DECODED_VIDEO_FRAME_BYTES,
     };
 
     pub(super) fn startup() -> Result<WmfSession, MediaError> {
@@ -566,15 +571,15 @@ mod wmf_decode {
         request: &DecodeRequest,
     ) -> Result<DecodeResult, MediaError> {
         let _session = startup()?;
-        let bytes = decode_video_inner(&request.bytes).map_err(decode_error)?;
+        let output = decode_video_inner(&request.bytes).map_err(decode_error)?;
         Ok(DecodeResult {
             provider_id,
             kind: DecodeKind::Video,
             codec: request.codec.clone(),
             output: DecodeOutput::CpuBuffer {
-                hash: Hash256::from_sha256(&bytes),
-                bytes,
-                format: "bgra8:first_frame".to_string(),
+                hash: Hash256::from_sha256(&output.bgra),
+                bytes: output.bgra,
+                format: format!("bgra8:first_frame:{}x{}", output.width, output.height),
             },
             diagnostics: Vec::new(),
         })
@@ -596,6 +601,12 @@ mod wmf_decode {
         sample_rate: u32,
         channels: u32,
         diagnostics: Vec<Diagnostic>,
+    }
+
+    struct VideoOutput {
+        bgra: Vec<u8>,
+        width: u32,
+        height: u32,
     }
 
     pub(super) struct WmfSession {
@@ -690,12 +701,25 @@ mod wmf_decode {
         }
     }
 
-    fn decode_video_inner(bytes: &[u8]) -> windows::core::Result<Vec<u8>> {
+    fn decode_video_inner(bytes: &[u8]) -> windows::core::Result<VideoOutput> {
         unsafe {
             let reader = source_reader_from_bytes(bytes)?;
             let stream_index = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
             let media_type = media_type(&MFMediaType_Video, &MFVideoFormat_RGB32)?;
             reader.SetCurrentMediaType(stream_index, None, &media_type)?;
+            let current_type = reader.GetCurrentMediaType(stream_index)?;
+            let Some((width, height)) = attribute_frame_size(&current_type) else {
+                return Err(wmf_error("video decode did not report a frame size"));
+            };
+            let expected_frame_bytes = width as usize * height as usize * 4;
+            if expected_frame_bytes == 0 {
+                return Err(wmf_error("video decode reported an empty frame size"));
+            }
+            if expected_frame_bytes > MAX_DECODED_VIDEO_FRAME_BYTES {
+                return Err(wmf_error(
+                    "video frame exceeds the bounded CPU buffer limit",
+                ));
+            }
 
             loop {
                 let mut flags = 0;
@@ -716,7 +740,14 @@ mod wmf_decode {
                 };
                 let bytes = sample_bytes(&sample)?;
                 if !bytes.is_empty() {
-                    return Ok(bytes);
+                    if bytes.len() < expected_frame_bytes {
+                        return Err(wmf_error("video decode produced a partial BGRA frame"));
+                    }
+                    return Ok(VideoOutput {
+                        bgra: bytes[..expected_frame_bytes].to_vec(),
+                        width,
+                        height,
+                    });
                 }
             }
             Err(wmf_error("video decode produced no BGRA frame"))
@@ -738,7 +769,13 @@ mod wmf_decode {
         let _ = GlobalUnlock(hglobal);
         let stream = CreateStreamOnHGlobal(hglobal, true)?;
         let byte_stream = MFCreateMFByteStreamOnStreamEx(&stream)?;
-        MFCreateSourceReaderFromByteStream(&byte_stream, Option::<&IMFAttributes>::None)
+        let mut attributes = None;
+        MFCreateAttributes(&mut attributes, 2)?;
+        let attributes =
+            attributes.ok_or_else(|| wmf_error("source reader attributes unavailable"))?;
+        attributes.SetUINT32(&MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, 1)?;
+        attributes.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1)?;
+        MFCreateSourceReaderFromByteStream(&byte_stream, Some(&attributes))
     }
 
     unsafe fn media_type(
@@ -755,6 +792,14 @@ mod wmf_decode {
     unsafe fn attribute_u32(media_type: &IMFMediaType, key: &windows::core::GUID) -> Option<u32> {
         let attrs: IMFAttributes = media_type.cast().ok()?;
         attrs.GetUINT32(key).ok()
+    }
+
+    unsafe fn attribute_frame_size(media_type: &IMFMediaType) -> Option<(u32, u32)> {
+        let attrs: IMFAttributes = media_type.cast().ok()?;
+        let packed = attrs.GetUINT64(&MF_MT_FRAME_SIZE).ok()?;
+        let width = (packed >> 32) as u32;
+        let height = (packed & 0xffff_ffff) as u32;
+        (width > 0 && height > 0).then_some((width, height))
     }
 
     fn wmf_error(message: &'static str) -> WindowsError {

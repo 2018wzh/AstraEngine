@@ -1,0 +1,56 @@
+{
+  "schema": "astra.public_domain_media_fixture_manifest.v1",
+  "license": "CC0-1.0",
+  "source_repository": "https://github.com/mdn/interactive-examples",
+  "source_license": "https://github.com/mdn/interactive-examples/blob/main/LICENSE",
+  "assets": [
+    {
+      "id": "flower_mp4",
+      "file": "flower.mp4",
+      "codec": "mp4",
+      "kind": "video",
+      "license": "CC0-1.0",
+      "source_url": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+      "byte_size": 1128375,
+      "sha256": "sha256:0cd83d944a6ca7822b4a8306cecc60a36e859b041f6702c6a1ad9ead78924451",
+      "expected": {
+        "codec_name": "h264",
+        "width": 960,
+        "height": 540,
+        "duration_seconds": 5.005
+      }
+    },
+    {
+      "id": "flower_webm",
+      "file": "flower.webm",
+      "codec": "webm",
+      "kind": "video",
+      "license": "CC0-1.0",
+      "source_url": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm",
+      "byte_size": 554058,
+      "sha256": "sha256:c6f8a348953395598a9a73b9bab1676436410797bce9f398f4be1531d6e76dda",
+      "expected": {
+        "codec_name": "vp8",
+        "width": 960,
+        "height": 540,
+        "duration_seconds": 5.059
+      }
+    },
+    {
+      "id": "trex_roar_mp3",
+      "file": "t-rex-roar.mp3",
+      "codec": "mp3",
+      "kind": "audio",
+      "license": "CC0-1.0",
+      "source_url": "https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3",
+      "byte_size": 39868,
+      "sha256": "sha256:41191d0727073bf848bcc8f0bd851d71a0b0058e901abb1c1b236ad327bda52e",
+      "expected": {
+        "codec_name": "mp3",
+        "sample_rate": 44100,
+        "channels": 2,
+        "duration_seconds": 2.115918
+      }
+    }
+  ]
+}

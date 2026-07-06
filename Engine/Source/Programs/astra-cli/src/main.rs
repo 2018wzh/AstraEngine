@@ -5,7 +5,7 @@ use astra_package::{PackageBuildRequest, PackageBuilder, SectionPayload};
 use astra_platform::{PlatformCapabilityReport, PlatformId};
 use astra_release::{PackageValidateRequest, ReleaseReport, ReleaseValidator};
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationReport};
-use astra_test::{ScenarioReport, ScenarioRunner};
+use astra_test::{ScenarioReport, ScenarioRunOptions, ScenarioRunner};
 use clap::{Parser, Subcommand, ValueEnum};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -209,11 +209,13 @@ fn main() -> Result<(), CliError> {
             } => {
                 let bytes = fs::read(package)?;
                 let platform_report = read_platform_report(platform_report.as_deref())?;
+                let require_platform_report = release_profile_requires_platform_report(&profile);
                 let release_report = ReleaseValidator.validate_package(PackageValidateRequest {
                     package_bytes: bytes,
                     profile,
                     require_ffmpeg: false,
                     target,
+                    require_platform_report,
                     platform_report,
                 })?;
                 let encoded = encode_release_report(&release_report, format)?;
@@ -249,7 +251,15 @@ fn main() -> Result<(), CliError> {
                 has_report_path = report.is_some(),
                 "cli.test.run"
             );
-            let scenario_report = ScenarioRunner::run_file(scenario)?;
+            let scenario_report = ScenarioRunner::run_file_with_options(
+                scenario,
+                ScenarioRunOptions {
+                    package,
+                    target,
+                    profile: None,
+                    headless,
+                },
+            )?;
             let encoded = encode_report(&scenario_report, format)?;
             if let Some(path) = report {
                 if let Some(parent) = path.parent() {
@@ -429,6 +439,10 @@ fn read_platform_report(
     };
     let text = fs::read_to_string(path)?;
     Ok(Some(serde_yaml::from_str(&text)?))
+}
+
+fn release_profile_requires_platform_report(profile: &str) -> bool {
+    matches!(profile, "desktop-release" | "web-release")
 }
 
 fn probe_platform(platform: PlatformId, target: Option<&str>) -> PlatformCapabilityReport {

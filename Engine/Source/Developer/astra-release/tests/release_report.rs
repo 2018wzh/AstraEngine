@@ -1,6 +1,7 @@
 use astra_package::{PackageBuildRequest, PackageBuilder, SectionPayload};
 use astra_platform::{
-    PlatformCapabilityReport, PlatformId, PlatformSmokeCheck, PlatformSmokeStatus, SdkStatus,
+    PlatformCapabilityReport, PlatformId, PlatformSmokeCheck, PlatformSmokeEvidence,
+    PlatformSmokeStatus, SdkStatus,
 };
 use astra_release::{CheckStatus, PackageValidateRequest, ReleaseDomain, ReleaseValidator};
 
@@ -23,6 +24,7 @@ fn release_report_covers_pass_warning_and_blocked_checks() {
             profile: "desktop-release".to_string(),
             require_ffmpeg: false,
             target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
             platform_report: None,
         })
         .unwrap();
@@ -49,6 +51,7 @@ fn release_report_covers_pass_warning_and_blocked_checks() {
             profile: "desktop-release".to_string(),
             require_ffmpeg: true,
             target: None,
+            require_platform_report: true,
             platform_report: None,
         })
         .unwrap();
@@ -100,6 +103,7 @@ fn release_gate_blocks_plugin_registry_conflict_and_invalid_binding() {
             profile: "desktop-release".to_string(),
             require_ffmpeg: false,
             target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
             platform_report: None,
         })
         .unwrap();
@@ -147,6 +151,7 @@ fn release_gate_blocks_unresolved_plugin_dependency() {
             profile: "desktop-release".to_string(),
             require_ffmpeg: false,
             target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
             platform_report: None,
         })
         .unwrap();
@@ -160,6 +165,190 @@ fn release_gate_blocks_unresolved_plugin_dependency() {
     assert_eq!(
         dependency_check.diagnostic.as_ref().unwrap().code,
         "ASTRA_PLUGIN_DEPENDENCY_UNRESOLVED"
+    );
+}
+
+#[test]
+fn release_profile_blocks_missing_platform_report() {
+    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "desktop-release",
+        vec![SectionPayload::raw(
+            "asset.characters.hero",
+            "astra.cooked_asset.v1",
+            b"hero".to_vec(),
+        )],
+    ))
+    .unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "desktop-release".to_string(),
+            require_ffmpeg: false,
+            target: Some("native-smoke-game".to_string()),
+            require_platform_report: true,
+            platform_report: None,
+        })
+        .unwrap();
+
+    let platform_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "platform.capability_report")
+        .unwrap();
+    assert_eq!(report.status, CheckStatus::Blocked);
+    assert_eq!(platform_check.status, CheckStatus::Blocked);
+    assert_eq!(
+        platform_check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_PLATFORM_REPORT_MISSING"
+    );
+}
+
+#[test]
+fn dev_profile_warns_on_missing_platform_report() {
+    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "dev",
+        vec![SectionPayload::raw(
+            "asset.characters.hero",
+            "astra.cooked_asset.v1",
+            b"hero".to_vec(),
+        )],
+    ))
+    .unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "dev".to_string(),
+            require_ffmpeg: false,
+            target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+
+    let platform_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "platform.capability_report")
+        .unwrap();
+    assert_eq!(platform_check.status, CheckStatus::Warning);
+}
+
+#[test]
+fn release_profile_blocks_fixture_package_without_cooked_project() {
+    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "desktop-release",
+        vec![SectionPayload::raw(
+            "asset.characters.hero",
+            "astra.cooked_asset.v1",
+            b"hero".to_vec(),
+        )],
+    ))
+    .unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "desktop-release".to_string(),
+            require_ffmpeg: false,
+            target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+
+    let cooked_project_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "package.cooked_project")
+        .unwrap();
+    assert_eq!(report.status, CheckStatus::Blocked);
+    assert_eq!(cooked_project_check.status, CheckStatus::Blocked);
+    assert_eq!(
+        cooked_project_check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_PACKAGE_COOKED_PROJECT_MISSING"
+    );
+}
+
+#[test]
+fn release_profile_accepts_cooked_project_input_section() {
+    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "desktop-release",
+        vec![
+            SectionPayload::raw(
+                "asset.characters.hero",
+                "astra.cooked_asset.v1",
+                b"hero".to_vec(),
+            ),
+            cooked_project_section("desktop-release", "native-smoke-game"),
+        ],
+    ))
+    .unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "desktop-release".to_string(),
+            require_ffmpeg: false,
+            target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+
+    let cooked_project_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "package.cooked_project")
+        .unwrap();
+    assert_eq!(cooked_project_check.status, CheckStatus::Pass);
+    assert!(cooked_project_check
+        .evidence
+        .iter()
+        .any(|entry| { entry.key == "section" && entry.value == "compiled.project" }));
+}
+
+#[test]
+fn release_profile_blocks_package_profile_mismatch() {
+    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "dev",
+        vec![
+            SectionPayload::raw(
+                "asset.characters.hero",
+                "astra.cooked_asset.v1",
+                b"hero".to_vec(),
+            ),
+            cooked_project_section("dev", "native-smoke-game"),
+        ],
+    ))
+    .unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "desktop-release".to_string(),
+            require_ffmpeg: false,
+            target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+
+    let cooked_project_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "package.cooked_project")
+        .unwrap();
+    assert_eq!(cooked_project_check.status, CheckStatus::Blocked);
+    assert_eq!(
+        cooked_project_check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_PACKAGE_PROFILE_MISMATCH"
     );
 }
 
@@ -182,6 +371,7 @@ fn release_report_blocks_windows_platform_report_without_required_smoke() {
             profile: "desktop-release".to_string(),
             require_ffmpeg: false,
             target: Some("native-smoke-game".to_string()),
+            require_platform_report: true,
             platform_report: Some(PlatformCapabilityReport::new(
                 PlatformId::Windows,
                 Some("native-smoke-game".to_string()),
@@ -236,8 +426,11 @@ fn release_report_includes_windows_platform_smoke_evidence() {
     )
     .with_smoke(vec![
         smoke("windowed_smoke", PlatformSmokeStatus::Pass),
-        smoke("decode.wmf", PlatformSmokeStatus::Pass),
-        smoke("save.known_folder", PlatformSmokeStatus::Pass),
+        smoke("renderer.wgpu_surface", PlatformSmokeStatus::Pass),
+        smoke("decode.wmf.audio", PlatformSmokeStatus::Pass),
+        smoke("decode.wmf.video_first_frame", PlatformSmokeStatus::Pass),
+        smoke("audio.wasapi", PlatformSmokeStatus::Pass),
+        smoke("save.known_folder_rw", PlatformSmokeStatus::Pass),
     ]);
 
     let report = ReleaseValidator
@@ -246,6 +439,7 @@ fn release_report_includes_windows_platform_smoke_evidence() {
             profile: "desktop-release".to_string(),
             require_ffmpeg: false,
             target: Some("native-smoke-game".to_string()),
+            require_platform_report: true,
             platform_report: Some(platform_report),
         })
         .unwrap();
@@ -259,10 +453,12 @@ fn release_report_includes_windows_platform_smoke_evidence() {
         .evidence
         .iter()
         .any(|entry| { entry.key == "smoke.windowed_smoke.status" && entry.value == "pass" }));
-    assert!(platform_check
-        .evidence
-        .iter()
-        .any(|entry| entry.key == "smoke.decode.wmf.status" && entry.value == "pass"));
+    assert!(platform_check.evidence.iter().any(|entry| entry.key
+        == "smoke.decode.wmf.video_first_frame.status"
+        && entry.value == "pass"));
+    assert!(platform_check.evidence.iter().any(|entry| entry.key
+        == "smoke.decode.wmf.video_first_frame.hash"
+        && entry.value.starts_with("sha256:")));
 }
 
 #[test]
@@ -284,6 +480,7 @@ fn release_report_blocks_web_platform_report_without_required_smoke() {
             profile: "web-release".to_string(),
             require_ffmpeg: false,
             target: Some("nativevn-web".to_string()),
+            require_platform_report: true,
             platform_report: Some(PlatformCapabilityReport::new(
                 PlatformId::Web,
                 Some("nativevn-web".to_string()),
@@ -350,11 +547,12 @@ fn release_report_includes_web_platform_smoke_evidence() {
     )
     .with_smoke(vec![
         smoke("browser_smoke", PlatformSmokeStatus::Pass),
-        smoke("renderer.webgpu_or_webgl", PlatformSmokeStatus::Pass),
-        smoke("decode.webcodecs", PlatformSmokeStatus::Pass),
-        smoke("audio.webaudio_unlock", PlatformSmokeStatus::Pass),
-        smoke("save.web_storage", PlatformSmokeStatus::Pass),
-        smoke("package.web_source", PlatformSmokeStatus::Pass),
+        smoke("renderer.browser_context", PlatformSmokeStatus::Pass),
+        smoke("decode.browser_media", PlatformSmokeStatus::Pass),
+        smoke("decode.webcodecs_config", PlatformSmokeStatus::Pass),
+        smoke("audio.webaudio_render", PlatformSmokeStatus::Pass),
+        smoke("save.web_storage_rw", PlatformSmokeStatus::Pass),
+        smoke("package.web_source_read", PlatformSmokeStatus::Pass),
         smoke("input.browser", PlatformSmokeStatus::Pass),
         smoke("lifecycle.worker_visibility", PlatformSmokeStatus::Pass),
     ]);
@@ -365,6 +563,7 @@ fn release_report_includes_web_platform_smoke_evidence() {
             profile: "web-release".to_string(),
             require_ffmpeg: false,
             target: Some("nativevn-web".to_string()),
+            require_platform_report: true,
             platform_report: Some(platform_report),
         })
         .unwrap();
@@ -378,11 +577,16 @@ fn release_report_includes_web_platform_smoke_evidence() {
     assert!(platform_check
         .evidence
         .iter()
-        .any(|entry| entry.key == "smoke.decode.webcodecs.status" && entry.value == "pass"));
+        .any(|entry| entry.key == "smoke.decode.webcodecs_config.status" && entry.value == "pass"));
     assert!(platform_check
         .evidence
         .iter()
-        .any(|entry| entry.key == "smoke.package.web_source.status" && entry.value == "pass"));
+        .any(|entry| entry.key == "smoke.package.web_source_read.status" && entry.value == "pass"));
+    assert!(platform_check
+        .evidence
+        .iter()
+        .any(|entry| entry.key == "smoke.package.web_source_read.hash"
+            && entry.value.starts_with("sha256:")));
 }
 
 #[test]
@@ -426,6 +630,7 @@ fn release_gate_blocks_package_target_manifests_with_editor_descriptors() {
             profile: "desktop-release".to_string(),
             require_ffmpeg: false,
             target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
             platform_report: None,
         })
         .unwrap();
@@ -447,5 +652,25 @@ fn smoke(id: &str, status: PlatformSmokeStatus) -> PlatformSmokeCheck {
         id: id.to_string(),
         status,
         summary: format!("{id} test evidence"),
+        evidence: vec![PlatformSmokeEvidence {
+            key: "hash".to_string(),
+            value: "sha256:test-evidence".to_string(),
+        }],
     }
+}
+
+fn cooked_project_section(profile: &str, target: &str) -> SectionPayload {
+    SectionPayload::raw(
+        "compiled.project",
+        "astra.cooked_project.v1",
+        serde_json::json!({
+            "schema": "astra.cooked_project.v1",
+            "package_id": "com.example.nativevn",
+            "profile": profile,
+            "target": target,
+            "project_hash": "sha256:synthetic-cook-fixture"
+        })
+        .to_string()
+        .into_bytes(),
+    )
 }

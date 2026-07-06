@@ -17,6 +17,8 @@
 
 ## Scenario Format
 
+下面是 Stage 3 VN scenario 目标形态。当前 Stage 2 runner 会读取 `package`、`target`、`profile` 和 `locale`，但遇到未实现的 VN action/assertion 会输出 blocking diagnostic，不再把它们当作 Stage 1 native smoke 通过。
+
 ```yaml
 schema: astra.scenario.v1
 package: target/nativevn.astrapkg

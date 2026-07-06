@@ -107,6 +107,14 @@ pub struct PlatformSmokeCheck {
     pub id: String,
     pub status: PlatformSmokeStatus,
     pub summary: String,
+    #[serde(default)]
+    pub evidence: Vec<PlatformSmokeEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlatformSmokeEvidence {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -299,7 +307,18 @@ pub fn validate_capability_report(
         let required_checks = required_smoke_checks(report.platform);
         for required in required_checks {
             match report.smoke.iter().find(|check| check.id == *required) {
-                Some(check) if check.status == PlatformSmokeStatus::Pass => {}
+                Some(check) if check.status == PlatformSmokeStatus::Pass => {
+                    if check.evidence.is_empty() {
+                        diagnostics.push(
+                            Diagnostic::blocking(
+                                "ASTRA_PLATFORM_SMOKE_EVIDENCE",
+                                "required platform smoke check must include machine-readable evidence",
+                            )
+                            .with_field("platform", report.platform.as_str())
+                            .with_field("check", &check.id),
+                        );
+                    }
+                }
                 Some(check) => diagnostics.push(
                     Diagnostic::blocking(
                         "ASTRA_PLATFORM_SMOKE",
@@ -380,18 +399,26 @@ pub fn validate_capability_report(
 
 fn required_smoke_checks(platform: PlatformId) -> &'static [&'static str] {
     match platform {
-        PlatformId::Windows => &["windowed_smoke", "decode.wmf", "save.known_folder"],
+        PlatformId::Windows => &[
+            "windowed_smoke",
+            "renderer.wgpu_surface",
+            "decode.wmf.audio",
+            "decode.wmf.video_first_frame",
+            "audio.wasapi",
+            "save.known_folder_rw",
+        ],
         PlatformId::Linux => &["windowed_smoke", "decode.linux_media"],
         PlatformId::Macos => &["windowed_smoke", "decode.avfoundation"],
         PlatformId::Ios => &["launcher_smoke", "decode.avfoundation"],
         PlatformId::Android => &["launcher_smoke", "decode.mediacodec"],
         PlatformId::Web => &[
             "browser_smoke",
-            "renderer.webgpu_or_webgl",
-            "decode.webcodecs",
-            "audio.webaudio_unlock",
-            "save.web_storage",
-            "package.web_source",
+            "renderer.browser_context",
+            "decode.browser_media",
+            "decode.webcodecs_config",
+            "audio.webaudio_render",
+            "save.web_storage_rw",
+            "package.web_source_read",
         ],
     }
 }
@@ -498,11 +525,12 @@ mod tests {
         assert_eq!(status, PlatformValidationStatus::Blocked);
         for required in [
             "browser_smoke",
-            "renderer.webgpu_or_webgl",
-            "decode.webcodecs",
-            "audio.webaudio_unlock",
-            "save.web_storage",
-            "package.web_source",
+            "renderer.browser_context",
+            "decode.browser_media",
+            "decode.webcodecs_config",
+            "audio.webaudio_render",
+            "save.web_storage_rw",
+            "package.web_source_read",
         ] {
             assert!(
                 diagnostics
@@ -512,5 +540,39 @@ mod tests {
                 "missing diagnostic for {required}: {diagnostics:?}"
             );
         }
+    }
+
+    #[test]
+    fn required_smoke_requires_machine_readable_evidence() {
+        let report = PlatformCapabilityReport::new(
+            PlatformId::Windows,
+            Some("nativevn-game".to_string()),
+            SdkStatus::Present,
+            vec!["wgpu".to_string()],
+            vec!["wmf".to_string()],
+            vec!["wasapi".to_string()],
+            vec!["known_folder".to_string()],
+            vec!["keyboard".to_string()],
+            vec!["window".to_string()],
+            vec!["network_profile_gated".to_string()],
+        )
+        .with_smoke(
+            required_smoke_checks(PlatformId::Windows)
+                .iter()
+                .map(|id| PlatformSmokeCheck {
+                    id: (*id).to_string(),
+                    status: PlatformSmokeStatus::Pass,
+                    summary: format!("{id} passed without evidence"),
+                    evidence: Vec::new(),
+                })
+                .collect(),
+        );
+
+        let (status, diagnostics) = validate_capability_report(&report);
+
+        assert_eq!(status, PlatformValidationStatus::Blocked);
+        assert!(diagnostics
+            .iter()
+            .any(|diag| diag.code == "ASTRA_PLATFORM_SMOKE_EVIDENCE"));
     }
 }

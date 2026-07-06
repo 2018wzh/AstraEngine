@@ -69,7 +69,14 @@ fn target_validate_and_platform_probe_emit_machine_readable_reports() {
             .any(|check| { check["id"] == "windowed_smoke" && check["status"] == "pass" }));
         assert!(smoke
             .iter()
-            .any(|check| check["id"] == "decode.wmf" && check["status"] == "pass"));
+            .any(|check| check["id"] == "renderer.wgpu_surface" && check["status"] == "pass"));
+        assert!(smoke.iter().any(|check| {
+            check["id"] == "decode.wmf.video_first_frame"
+                && check["status"] == "pass"
+                && check["evidence"]
+                    .as_array()
+                    .is_some_and(|entries| !entries.is_empty())
+        }));
     } else {
         assert_eq!(platform_report["sdk_status"], "missing");
     }

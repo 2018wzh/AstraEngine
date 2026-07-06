@@ -9,4 +9,4 @@
 | [open-work.md](open-work.md) | 产品级缺口和下一步 |
 | [samples-and-tests.md](samples-and-tests.md) | 样例与测试矩阵 |
 | [release-observability.md](release-observability.md) | Release report、trace、crash bundle 状态 |
-| [stages/README.md](stages/README.md) | Stage 1-5 可执行工作项和测试矩阵 |
+| [stages/README.md](stages/README.md) | Stage 1-6 可执行工作项和测试矩阵 |

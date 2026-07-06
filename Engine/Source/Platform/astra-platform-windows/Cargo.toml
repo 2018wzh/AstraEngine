@@ -6,15 +6,19 @@ version.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+astra-core = { path = "../../Runtime/astra-core" }
+astra-media = { path = "../../Runtime/astra-media" }
 astra-platform = { path = "../astra-platform" }
 cpal.workspace = true
+pollster.workspace = true
+wgpu.workspace = true
 winit.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
     "Win32_Foundation",
-    "Win32_Media_MediaFoundation",
     "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
     "Win32_UI_Input_XboxController",
     "Win32_UI_Shell",
 ] }
