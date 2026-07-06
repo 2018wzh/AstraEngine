@@ -59,9 +59,9 @@ Identity check 失败时进入 Review Queue。Editor 必须显示 conflict，不
 
 ```text
 scan descriptors
-  -> build dependency graph
+  -> read Stage 1/2 dependency graph
   -> validate load phase and permission
-  -> register extension point
+  -> display registered extension point
   -> project enablement
   -> command palette / panel / graph / timeline / inspector visibility
   -> release gate evidence

@@ -5,10 +5,11 @@
 - Stage 2 的 `astra-package`、`astra-asset`、`astra-cook`、`astra-media` 和 `astra-release` 已落地。后续工作不应绕过这些 contract 写私有 package、media 或 release report 格式。
 - Runtime save 已迁移到 `astra-package` 共享 container。后续 save section 扩展应继续使用同一 header、section table、codec 和 footer hash 规则。
 - Release Gate 独立 validator 已实现 Stage 2 package/media/scenario refs、Target manifest、Windows platform smoke 和 Web browser smoke 基线；Linux/macOS/iOS/Android 真实 host smoke 仍是 Stage 2 显式缺口。
-- 当前优先顺序先收敛剩余非 Windows/Web 平台缺口，再转入 Stage 3 `.astra` parser/compiler、AstraVN Core 和 presentation model。
+- 当前优先顺序先收敛剩余非 Windows/Web 平台缺口，再转入 Stage 3 `astra-vn` Rust dylib facade、`.astra` parser/compiler、AstraVN Core 和 presentation model。
 
 ## P1
 
+- `astra-vn` Rust dylib facade，固定 `rlib`/`dylib` 输出形态和 Rust ABI 版本承诺。
 - `.astra` parser/compiler 到 CompiledStory IR。
 - AstraVN presentation model、standard command library、system UI profile 和 advanced presentation opt-in scenario。
 - headless YAML scenario runner 已存在；release report writer 已实现 package validate 基线，后续需要 VN full playthrough domain。

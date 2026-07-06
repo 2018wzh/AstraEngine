@@ -1,0 +1,11 @@
+[package]
+name = "astra-plugin-abi"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+abi_stable.workspace = true
+schemars.workspace = true
+serde.workspace = true

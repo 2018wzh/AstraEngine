@@ -2,10 +2,13 @@ use abi_stable::{
     prefix_type::PrefixTypeTrait,
     std_types::{RString, RVec},
 };
-use astra_plugin::{
-    ActionCallRequest, ActionCallResult, ActionEffect, ActionTrace, AstraPluginModule,
-    AstraPluginModuleRef, BlackboardValue, EventPayload, EventSource, FfiActionRegistration,
-    FfiPluginRegistration, FfiPluginShutdown, FfiProviderRegistration, PresentationCommand,
+use astra_plugin_abi::{
+    AstraPluginModule, AstraPluginModuleRef, FfiActionRegistration, FfiPluginRegistration,
+    FfiPluginShutdown, FfiProviderRegistration,
+};
+use astra_runtime::{
+    ActionCallRequest, ActionCallResult, ActionEffect, ActionTrace, BlackboardValue, EventPayload,
+    EventSource, PresentationCommand,
 };
 use std::collections::BTreeMap;
 use tracing::{debug, warn};
@@ -84,6 +87,8 @@ extern "C" fn register() -> FfiPluginRegistration {
             slot: "presentation".into(),
             provider_id: "astra.fixture.headless_presentation".into(),
             capability: "presentation.headless".into(),
+            phase: "runtime".into(),
+            packaged: true,
         }]),
         actions: RVec::from(vec![FfiActionRegistration {
             provider_id: "astra.fixture.action_provider".into(),

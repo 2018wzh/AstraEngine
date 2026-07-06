@@ -329,6 +329,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-engine"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-package",
+ "astra-plugin",
+ "astra-runtime",
+]
+
+[[package]]
 name = "astra-media"
 version = "0.1.0"
 dependencies = [
@@ -432,6 +442,7 @@ version = "0.1.0"
 dependencies = [
  "abi_stable",
  "astra-core",
+ "astra-plugin-abi",
  "astra-runtime",
  "libloading 0.8.9",
  "postcard",
@@ -441,6 +452,15 @@ dependencies = [
  "serde_yaml",
  "thiserror 1.0.69",
  "tracing",
+]
+
+[[package]]
+name = "astra-plugin-abi"
+version = "0.1.0"
+dependencies = [
+ "abi_stable",
+ "schemars",
+ "serde",
 ]
 
 [[package]]
@@ -1537,7 +1557,8 @@ name = "headless-presentation-provider"
 version = "0.1.0"
 dependencies = [
  "abi_stable",
- "astra-plugin",
+ "astra-plugin-abi",
+ "astra-runtime",
  "postcard",
  "tracing",
 ]

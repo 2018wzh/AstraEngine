@@ -122,12 +122,14 @@ impl ReleaseValidator {
                     "asset.registry",
                     "media.manifest",
                     "provider.policy",
-                    "target.manifest",
                     "scenario.refs",
+                    "target.manifest",
                     "platform.eligibility",
                 ] {
                     checks.push(section_check(&package, section));
                 }
+                checks.push(plugin_extension_registry_check(&package));
+                checks.push(plugin_dependency_graph_check(&package));
                 checks.push(target_manifest_check(&package, request.target.as_deref()));
                 checks.push(media_check(request.require_ffmpeg));
                 checks.push(platform_report_check(request.platform_report.as_ref()));
@@ -190,6 +192,7 @@ fn section_check(package: &PackageReader, section: &str) -> ReleaseCheckRecord {
                 "media.manifest" => ReleaseDomain::Media,
                 "target.manifest" => ReleaseDomain::Target,
                 "platform.eligibility" => ReleaseDomain::Platform,
+                "provider.policy" => ReleaseDomain::Plugin,
                 _ => ReleaseDomain::Package,
             },
             status: CheckStatus::Pass,
@@ -209,6 +212,182 @@ fn section_check(package: &PackageReader, section: &str) -> ReleaseCheckRecord {
             )),
             evidence: vec![evidence("section", section)],
         }
+    }
+}
+
+fn plugin_extension_registry_check(package: &PackageReader) -> ReleaseCheckRecord {
+    let registry = match read_json_section(package, "plugin.extension_registry") {
+        Ok(value) => value,
+        Err((code, message)) => {
+            return plugin_blocked(
+                "plugin.extension_registry",
+                code,
+                message,
+                vec![evidence("section", "plugin.extension_registry")],
+            )
+        }
+    };
+    let provider_policy = match read_json_section(package, "provider.policy") {
+        Ok(value) => value,
+        Err((code, message)) => {
+            return plugin_blocked(
+                "plugin.extension_registry",
+                code,
+                message,
+                vec![evidence("section", "provider.policy")],
+            )
+        }
+    };
+    let providers = registry
+        .get("providers")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let bindings = registry
+        .get("bindings")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let conflicts = registry
+        .get("conflicts")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    if !conflicts.is_empty() {
+        return plugin_blocked(
+            "plugin.extension_registry",
+            "ASTRA_PLUGIN_EXTENSION_CONFLICT",
+            "plugin extension registry contains unresolved conflicts",
+            vec![evidence("conflict_count", conflicts.len())],
+        );
+    }
+
+    for binding in bindings.iter().chain(
+        provider_policy
+            .get("bindings")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten(),
+    ) {
+        let provider_id = binding
+            .get("provider_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let Some(provider) = providers.iter().find(|provider| {
+            provider
+                .get("provider_id")
+                .and_then(serde_json::Value::as_str)
+                == Some(provider_id)
+        }) else {
+            return plugin_blocked(
+                "plugin.extension_registry",
+                "ASTRA_PLUGIN_PROVIDER_BINDING_MISSING",
+                format!("provider binding {provider_id} is not registered"),
+                vec![evidence("provider_id", provider_id)],
+            );
+        };
+        if !provider
+            .get("packaged")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            return plugin_blocked(
+                "plugin.extension_registry",
+                "ASTRA_PLUGIN_PACKAGED_INELIGIBLE",
+                format!("provider binding {provider_id} is not packaged eligible"),
+                vec![evidence("provider_id", provider_id)],
+            );
+        }
+    }
+
+    ReleaseCheckRecord {
+        id: "plugin.extension_registry".to_string(),
+        domain: ReleaseDomain::Plugin,
+        status: CheckStatus::Pass,
+        summary: "plugin extension registry has resolved bindings and no conflicts".to_string(),
+        diagnostic: None,
+        evidence: vec![
+            evidence("provider_count", providers.len()),
+            evidence("binding_count", bindings.len()),
+        ],
+    }
+}
+
+fn plugin_dependency_graph_check(package: &PackageReader) -> ReleaseCheckRecord {
+    let graph = match read_json_section(package, "plugin.dependency_graph") {
+        Ok(value) => value,
+        Err((code, message)) => {
+            return plugin_blocked(
+                "plugin.dependency_graph",
+                code,
+                message,
+                vec![evidence("section", "plugin.dependency_graph")],
+            )
+        }
+    };
+    let dependencies = graph
+        .get("dependencies")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(dependency) = dependencies.iter().find(|dependency| {
+        dependency
+            .get("required")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+            && !dependency
+                .get("resolved")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+    }) {
+        let plugin_id = dependency
+            .get("plugin_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown");
+        return plugin_blocked(
+            "plugin.dependency_graph",
+            "ASTRA_PLUGIN_DEPENDENCY_UNRESOLVED",
+            format!("required plugin dependency {plugin_id} is unresolved"),
+            vec![evidence("plugin_id", plugin_id)],
+        );
+    }
+
+    ReleaseCheckRecord {
+        id: "plugin.dependency_graph".to_string(),
+        domain: ReleaseDomain::Plugin,
+        status: CheckStatus::Pass,
+        summary: "plugin dependency graph has no unresolved required dependencies".to_string(),
+        diagnostic: None,
+        evidence: vec![evidence("dependency_count", dependencies.len())],
+    }
+}
+
+fn read_json_section(
+    package: &PackageReader,
+    section: &str,
+) -> Result<serde_json::Value, (&'static str, String)> {
+    let bytes = package
+        .container()
+        .read_bounded(section, 256 * 1024)
+        .map_err(|err| ("ASTRA_PLUGIN_SECTION_MISSING", err.to_string()))?;
+    serde_json::from_slice(&bytes).map_err(|err| ("ASTRA_PLUGIN_SECTION_JSON", err.to_string()))
+}
+
+fn plugin_blocked(
+    id: impl Into<String>,
+    code: &'static str,
+    summary: impl Into<String>,
+    evidence_values: Vec<ReleaseEvidence>,
+) -> ReleaseCheckRecord {
+    let summary = summary.into();
+    ReleaseCheckRecord {
+        id: id.into(),
+        domain: ReleaseDomain::Plugin,
+        status: CheckStatus::Blocked,
+        diagnostic: Some(Diagnostic::blocking(code, summary.clone())),
+        summary,
+        evidence: evidence_values,
     }
 }
 

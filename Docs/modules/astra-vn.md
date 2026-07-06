@@ -2,6 +2,12 @@
 
 AstraVN 是原生 VN 垂直模块。它使用 EngineCore 的 Runtime、Script、Media、Asset 和 Save/Replay。AstraVN Core 持有 VN 权威语义；Luau 策略和插件只负责表现、系统页和演出扩展。
 
+## Rust Dylib Boundary
+
+`astra-vn` 设计为同时产出 `rlib` 和 Rust ABI `dylib` 的垂直模块 facade。它暴露 `.astra` parser/compiler、CompiledStory、VN Core state、presentation model、system UI profile 和 VN extension id，但不复制 EngineCore runtime。这个 dylib 只承诺同 engine version、rustc fingerprint 和 feature fingerprint 下的 Rust-side 动态链接；跨语言或跨编译器稳定边界仍是 `.astra`、package section 和 Stage 1 plugin ABI。
+
+`astra-vn` public API 不传递 Luau VM handle、renderer/audio native handle、Actor 指针或 Editor widget。需要跨插件暴露的能力必须落到 ExtensionRegistry、provider descriptor、package section 和 release report evidence。
+
 ## Source
 
 `.astra` 是 canonical story source：

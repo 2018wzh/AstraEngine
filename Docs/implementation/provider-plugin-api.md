@@ -1,6 +1,6 @@
 # Provider And Plugin API Blueprint
 
-插件系统提供机制，不替项目做选择。项目 manifest 必须显式绑定 provider；加载顺序不能改变 runtime 行为。
+插件系统提供机制，不替项目做选择。项目 manifest 必须显式绑定 provider；加载顺序不能改变 runtime 行为。Stage 1 的 `astra-plugin-abi` 持有 ABI-safe structs、`LoadPhase`、extension registry DTO 和 dependency graph DTO；`astra-plugin` 只负责 host loader、registry 和 Runtime action adapter。
 
 ## Descriptor
 
@@ -84,7 +84,9 @@ pub struct ExtensionRegistrationReport {
 
 Extension point 覆盖 provider slot、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check 和 legacy family provider。注册必须显式声明 id、phase、capability、permission、packaged eligibility、conflict policy 和 source span。冲突时不使用加载顺序裁决；项目 manifest 或 Plugin Manager 必须选定一个 provider。
 
-Plugin Manager 保存 project enable/disable 状态，构建 dependency graph，解释缺失依赖、版本冲突、权限不足和 packaged 裁剪原因。Release Gate 输出 `plugin.extension_registry` 和 `plugin.dependency_graph` evidence。
+Plugin Manager 保存 project enable/disable 状态，读取 Stage 1/2 的 dependency graph，解释缺失依赖、版本冲突、权限不足和 packaged 裁剪原因。Release Gate 输出 `plugin.extension_registry` 和 `plugin.dependency_graph` evidence。
+
+Stage 1 实现 registry backend 和 explicit provider binding。Stage 2 将 `plugin.extension_registry` 与 `plugin.dependency_graph` 写入 package 并执行 release gate。Stage 4 的 Plugin Manager 只提供 Editor UI、enablement 编辑和 diagnostic jump，不再拥有第二套 provider selection 或 dependency graph 实现。
 
 ## StateMachine Action Provider
 
@@ -145,7 +147,7 @@ pub trait AiProvider: StableProvider {
 }
 ```
 
-Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AiProvider`、`MCPToolProvider`、`TranslationProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref 和 capability report。
+Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AiProvider`、`MCPToolProvider`、`TranslationProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref 和 capability report。Stage 3 的 `astra-vn` Rust dylib facade 负责公开 VN command、presentation command、Luau policy bundle 和 Graph/Timeline metadata extension id；稳定插件边界仍由 `astra-plugin-abi` 承担。
 
 `AiProvider` 是 Editor 和 MCP host 的后端适配。OpenAI、Ollama、ComfyUI 第一方 provider 以普通插件注册，默认禁用，由项目 manifest 或 release profile 显式绑定。Runtime 不直接接收 `AiProvider` trait object，只通过 `McpAiSession` 获取 typed Intent、tool result 和 committed output。
 
@@ -183,6 +185,9 @@ cargo test -p astra-plugin descriptor_gate
 cargo test -p astra-plugin load_unload
 cargo test -p astra-plugin ffi_action_provider
 cargo test -p astra-plugin extension_registry
+cargo test -p astra-engine dylib_facade
+cargo test -p astra-package package_roundtrip
+cargo test -p astra-release release_report
 cargo test -p astra-editor-bridge plugin_manager
 cargo test -p astra-release plugin_provider_gate
 ```

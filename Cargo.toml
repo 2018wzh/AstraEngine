@@ -6,6 +6,8 @@ members = [
     "Engine/Source/Runtime/astra-asset",
     "Engine/Source/Runtime/astra-media",
     "Engine/Source/Runtime/astra-runtime",
+    "Engine/Source/Runtime/astra-engine",
+    "Engine/Source/Runtime/astra-plugin-abi",
     "Engine/Source/Runtime/astra-plugin",
     "Engine/Source/Platform/astra-target",
     "Engine/Source/Platform/astra-platform",

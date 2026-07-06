@@ -2,6 +2,8 @@
 
 Astra 插件采用 Rust-facing `abi_stable` 风格 ABI。目标是给插件作者 Rust 体验，同时让二进制兼容性可检查、可拒绝、可审计。
 
+`astra-plugin-abi` 是插件二进制边界的真源，包含 `AstraPluginModule`、FFI registration、`LoadPhase`、extension registry DTO 和 dependency graph DTO。`astra-plugin` 是 host 侧 loader、registry 和 Runtime action adapter。`astra-engine` 和 planned `astra-vn` 都是 Rust dylib facade，分别 re-export EngineCore 与 VN public API，不扩大插件 ABI。
+
 ## 版本绑定
 
 插件必须声明：
@@ -54,6 +56,8 @@ pub trait Renderer2DProvider: StableProvider {
 ## Extension Registry
 
 插件可以注册 provider slot、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check 和 legacy family provider。每条注册必须声明 `LoadPhase`、依赖、冲突策略、enablement scope、packaged eligibility 和 diagnostic source。Editor 的 Plugin Manager 只能改变 enablement 和 binding，不能绕过 descriptor gate。
+
+Stage 1 host registry 负责 `LoadPhase`、provider binding、conflict report 和 `PluginDependency` dependency graph。Stage 2 package/release gate 写入并校验 `plugin.extension_registry` 和 `plugin.dependency_graph`。Stage 4 Editor Plugin Manager 只显示和修改这些后端产物。
 
 ## StateMachine Action ABI
 

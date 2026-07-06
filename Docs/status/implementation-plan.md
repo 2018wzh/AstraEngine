@@ -36,8 +36,10 @@
 | `S1-RUNTIME-04` | `DONE` | `cargo test -p astra-runtime state_machine_tick` and `cargo test -p astra-runtime delayed_event` |
 | `S1-RUNTIME-03` | `DONE` | `cargo test -p astra-runtime await_token` |
 | `S1-SAVE-01` | `DONE` | `cargo test -p astra-runtime save_replay` |
+| `S1-DYLIB-01` | `DONE` | `cargo test -p astra-engine dylib_facade` |
 | `S1-PLUGIN-01` | `DONE` | `cargo test -p astra-plugin descriptor_gate` and `cargo test -p astra-plugin load_unload` |
 | `S1-PLUGIN-02` | `DONE` | `cargo test -p astra-plugin ffi_action_provider` |
+| `S1-PLUGIN-03` | `DONE` | `cargo test -p astra-plugin extension_registry` |
 | `S1-PROP-01` | `DONE` | `cargo test -p astra-property --test property_metadata` and `cargo test -p astra-property --test expand_smoke` |
 | `S1-TEST-01` | `DONE` | `cargo test -p astra-test native_smoke` |
 | `S1-OBS-01` | `DONE` | `cargo test -p astra-cli --test logging` |
@@ -51,6 +53,7 @@
 | `S2-WINDOWS-HOST-01` | `DONE` | `cargo test -p astra-platform-windows`；Windows probe 输出 windowed smoke、WASAPI、XInput、Known Folder 和 SDK 状态 |
 | `S2-WINDOWS-WMF-01` | `DONE` | `cargo test -p astra-media decode_provider`；WMF audio 输出 bounded PCM CPU buffer，invalid video 返回 `ASTRA_WMF_DECODE` |
 | `S2-WINDOWS-GATE-01` | `DONE` | `cargo test -p astra-release release_report` and `cargo test -p astra-cli --test target_platform`；缺 required Windows smoke 会阻断 release check |
+| `S2-PLUGIN-GATE-01` | `DONE` | `cargo test -p astra-package package_roundtrip` and `cargo test -p astra-release release_report`；package 写入 `plugin.extension_registry` 和 `plugin.dependency_graph`，release gate 阻断 unresolved conflict、missing binding 和 unresolved dependency |
 | `S2-LINUX-HOST-01` | `SPEC_READY` | 计划覆盖 winit/wgpu、IME、gamepad、PipeWire/PulseAudio、XDG data、GStreamer/FFmpeg profile 和 windowed smoke；本轮未实现 |
 | `S2-MACOS-HOST-01` | `SPEC_READY` | 计划覆盖 AppKit/winit lifecycle、Metal/wgpu、IME/gamepad、CoreAudio、App Support、AVFoundation 和 notarization capability；本轮未实现 |
 | `S2-IOS-HOST-01` | `SPEC_READY` | 计划覆盖 Swift/SwiftUI launcher、Metal surface、safe area/touch、AVAudio/AVFoundation、app container save、no-JIT Luau gate 和 resume；本轮未实现 |
@@ -69,12 +72,13 @@
 | 6 | `S2-LINUX-HOST-01` + `S2-MACOS-HOST-01` desktop non-Windows host repair | `SPEC_READY` | 先补 Linux/macOS native smoke，再恢复 desktop 三平台 release 口径 |
 | 7 | `S2-IOS-HOST-01` + `S2-ANDROID-HOST-01` mobile host repair | `SPEC_READY` | launcher、surface、media、save、resume 和 no-JIT gate 需要原生工程接入 |
 | 8 | `S2-WEB-HOST-01` Web host repair | `DONE` | wasm/browser smoke、WebCodecs、WebAudio unlock、storage/package source 和 native-host missing gate 已验收 |
-| 9 | `S3-SCRIPT-01` + `S3-SCRIPT-02` `.astra` parser/compiler | `SPEC_READY` | AstraVN Core 和 Editor visual model 的前置 |
-| 10 | `S3-GAME-TARGET-01` NativeVN Game target | `SPEC_READY` | Game target 需要随 AstraVN sample 和 full playthrough 一起落地 |
-| 11 | `S4-PLUGIN-01` Plugin Manager | `SPEC_READY` | 新插件设计需要 enablement、dependency graph 和 extension diagnostics |
-| 12 | `S4-AI-01` 到 `S4-GATE-01` AI/MCP closure | `SPEC_READY` | Runtime Director、provider profile、memory、Context Pack、AI Control 和 release gate 需要一起落地 |
-| 13 | `S4-EDITOR-TARGET-01` AstraEditor Editor target | `SPEC_READY` | Editor target 需要 Qt/QML shell 和 PIE bridge |
-| 14 | `S5-MANAGER-01` + `S5-PROGRAM-TARGET-01` + `S5-FAMILY-01` + `S5-AUTOPROBE-01` + `S5-SCRIPT-01` + `S5-TEXT-01` + `S5-FILTER-01` | `SPEC_READY` | AstraEMU Manager 作为 Program target 驱动 RuntimeWorld、family plugin，并复用 Stage 4 provider、MCP 和 memory |
+| 9 | `S3-DYLIB-01` AstraVN Rust dylib target | `SPEC_READY` | 先固定 `astra-vn` 的 `rlib`/`dylib` 输出形态和 Rust ABI 承诺，避免后续 VN API 反向污染 EngineCore |
+| 10 | `S3-SCRIPT-01` + `S3-SCRIPT-02` `.astra` parser/compiler | `SPEC_READY` | AstraVN Core 和 Editor visual model 的前置 |
+| 11 | `S3-GAME-TARGET-01` NativeVN Game target | `SPEC_READY` | Game target 需要随 AstraVN sample 和 full playthrough 一起落地 |
+| 12 | `S4-PLUGIN-01` Plugin Manager UI | `SPEC_READY` | Editor 只显示和修改 Stage 1/2 产出的 enablement、dependency graph 和 extension diagnostics |
+| 13 | `S4-AI-01` 到 `S4-GATE-01` AI/MCP closure | `SPEC_READY` | Runtime Director、provider profile、memory、Context Pack、AI Control 和 release gate 需要一起落地 |
+| 14 | `S4-EDITOR-TARGET-01` AstraEditor Editor target | `SPEC_READY` | Editor target 需要 Qt/QML shell 和 PIE bridge |
+| 15 | `S5-MANAGER-01` + `S5-PROGRAM-TARGET-01` + `S5-FAMILY-01` + `S5-AUTOPROBE-01` + `S5-SCRIPT-01` + `S5-TEXT-01` + `S5-FILTER-01` | `SPEC_READY` | AstraEMU Manager 作为 Program target 驱动 RuntimeWorld、family plugin，并复用 Stage 4 provider、MCP 和 memory |
 
 ## 验证命令
 

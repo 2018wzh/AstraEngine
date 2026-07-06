@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tracing::debug;
 
+use astra_plugin_abi::{
+    ExtensionConflict, LoadPhase, PluginDependency, PluginDependencyGraphSnapshot,
+    PluginExtensionRegistrySnapshot, ProviderBinding, ProviderExtensionRecord,
+};
+
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -13,6 +18,8 @@ pub struct RegisteredProvider {
     pub slot: EngineModuleSlot,
     pub provider_id: String,
     pub capability: String,
+    pub phase: LoadPhase,
+    pub packaged: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -21,7 +28,11 @@ pub struct ServiceRegistry {
 }
 
 impl ServiceRegistry {
-    pub fn register(&mut self, id: impl Into<String>, provider: impl Into<String>) {
+    pub fn register_default(&mut self, id: impl Into<String>, provider: impl Into<String>) {
+        self.services.entry(id.into()).or_insert(provider.into());
+    }
+
+    pub fn bind(&mut self, id: impl Into<String>, provider: impl Into<String>) {
         self.services.insert(id.into(), provider.into());
     }
 
@@ -38,15 +49,33 @@ impl ServiceRegistry {
     pub fn get(&self, id: &str) -> Option<&str> {
         self.services.get(id).map(String::as_str)
     }
+
+    pub fn bindings(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.services.iter()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ExtensionRegistry {
     providers: Vec<RegisteredProvider>,
+    conflicts: Vec<ExtensionConflict>,
 }
 
 impl ExtensionRegistry {
-    pub fn register(&mut self, provider: RegisteredProvider) {
+    pub fn register(&mut self, provider: RegisteredProvider, selected_provider: Option<&str>) {
+        if let Some(selected_provider) = selected_provider {
+            if selected_provider != provider.provider_id {
+                let conflict = ExtensionConflict {
+                    slot: provider.slot.0.clone(),
+                    selected_provider: selected_provider.to_string(),
+                    conflicting_provider: provider.provider_id.clone(),
+                    reason: "provider slot already has an explicit binding".to_string(),
+                };
+                if !self.conflicts.contains(&conflict) {
+                    self.conflicts.push(conflict);
+                }
+            }
+        }
         self.providers.push(provider);
         self.providers.sort_by(|a, b| {
             (a.slot.0.as_str(), a.provider_id.as_str())
@@ -57,6 +86,11 @@ impl ExtensionRegistry {
     pub fn unregister(&mut self, slot: &EngineModuleSlot, provider_id: &str) {
         self.providers
             .retain(|provider| &provider.slot != slot || provider.provider_id != provider_id);
+        self.conflicts.retain(|conflict| {
+            conflict.slot != slot.0
+                || (conflict.selected_provider != provider_id
+                    && conflict.conflicting_provider != provider_id)
+        });
     }
 
     pub fn select(&self, slot: &EngineModuleSlot) -> Option<&RegisteredProvider> {
@@ -68,12 +102,17 @@ impl ExtensionRegistry {
     pub fn providers(&self) -> &[RegisteredProvider] {
         &self.providers
     }
+
+    pub fn conflicts(&self) -> &[ExtensionConflict] {
+        &self.conflicts
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PluginRegistrar {
     pub services: ServiceRegistry,
     pub extensions: ExtensionRegistry,
+    dependency_graph: Vec<PluginDependency>,
 }
 
 impl PluginRegistrar {
@@ -85,8 +124,30 @@ impl PluginRegistrar {
             "plugin.provider.register"
         );
         self.services
-            .register(provider.slot.0.clone(), provider.provider_id.clone());
-        self.extensions.register(provider);
+            .register_default(provider.slot.0.clone(), provider.provider_id.clone());
+        let selected_provider = self.services.get(&provider.slot.0).map(str::to_string);
+        self.extensions
+            .register(provider, selected_provider.as_deref());
+    }
+
+    pub fn bind_provider(
+        &mut self,
+        slot: &EngineModuleSlot,
+        provider_id: &str,
+    ) -> Result<(), String> {
+        let exists = self
+            .extensions
+            .providers()
+            .iter()
+            .any(|provider| &provider.slot == slot && provider.provider_id == provider_id);
+        if !exists {
+            return Err(format!(
+                "provider {provider_id} is not registered for slot {}",
+                slot.0
+            ));
+        }
+        self.services.bind(slot.0.clone(), provider_id.to_string());
+        Ok(())
     }
 
     pub fn selected_provider(&self, slot: &EngineModuleSlot) -> Option<&RegisteredProvider> {
@@ -107,5 +168,47 @@ impl PluginRegistrar {
             .unregister(&provider.slot.0, &provider.provider_id);
         self.extensions
             .unregister(&provider.slot, &provider.provider_id);
+    }
+
+    pub fn record_dependency(&mut self, dependency: PluginDependency) {
+        self.dependency_graph.push(dependency);
+    }
+
+    pub fn dependency_graph(&self) -> &[PluginDependency] {
+        &self.dependency_graph
+    }
+
+    pub fn extension_registry_snapshot(&self) -> PluginExtensionRegistrySnapshot {
+        PluginExtensionRegistrySnapshot {
+            schema: "astra.plugin_extension_registry.v1".to_string(),
+            providers: self
+                .extensions
+                .providers()
+                .iter()
+                .map(|provider| ProviderExtensionRecord {
+                    slot: provider.slot.0.clone(),
+                    provider_id: provider.provider_id.clone(),
+                    capability: provider.capability.clone(),
+                    phase: provider.phase,
+                    packaged: provider.packaged,
+                })
+                .collect(),
+            bindings: self
+                .services
+                .bindings()
+                .map(|(slot, provider_id)| ProviderBinding {
+                    slot: slot.clone(),
+                    provider_id: provider_id.clone(),
+                })
+                .collect(),
+            conflicts: self.extensions.conflicts().to_vec(),
+        }
+    }
+
+    pub fn dependency_graph_snapshot(&self) -> PluginDependencyGraphSnapshot {
+        PluginDependencyGraphSnapshot {
+            schema: "astra.plugin_dependency_graph.v1".to_string(),
+            dependencies: self.dependency_graph.clone(),
+        }
     }
 }

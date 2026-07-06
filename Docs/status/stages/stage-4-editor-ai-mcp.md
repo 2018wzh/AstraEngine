@@ -44,24 +44,25 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Linked Test IDs:** `T-S4-EDITOR-02`
 
-## S4-PLUGIN-01 Plugin Manager 与 extension diagnostics
+## S4-PLUGIN-01 Plugin Manager UI 与 extension diagnostics
 
 **ID:** `S4-PLUGIN-01`
 
-**Goal:** Editor 提供 Plugin Manager、Project Settings、Command Palette 和 extension diagnostics，覆盖启用禁用、依赖图、冲突解释和 diagnostic jump。
+**Goal:** Editor 提供 Plugin Manager、Project Settings、Command Palette 和 extension diagnostics UI，读取并修改 Stage 1/2 的 extension registry、dependency graph 和 provider binding。
 
-**Depends On:** `S1-PLUGIN-01`、`Docs/implementation/provider-plugin-api.md`、`S4-EDITOR-01`
+**Depends On:** `S1-PLUGIN-03`、`S2-PLUGIN-GATE-01`、`Docs/implementation/provider-plugin-api.md`、`S4-EDITOR-01`
 
 **Target Paths:** `Editor/Source/Bridge/astra-editor-bridge/src/plugin_manager.rs`、`Editor/Source/App/astra-editor/qml/PluginManager.qml`、`Editor/Tests/plugin_manager.rs` planned target
 
 **Steps:**
 
-1. 读取 `ExtensionRegistrationReport`，显示 load phase、extension point、dependency graph、permission 和 packaged 裁剪。
-2. 支持 project enable/disable、provider binding、conflict resolution 和 command palette visibility。
+1. 读取 Stage 1/2 产出的 `ExtensionRegistrationReport`、`plugin.extension_registry` 和 `plugin.dependency_graph`。
+2. 支持 project enable/disable、provider binding、conflict resolution 和 command palette visibility，并写回 project enablement。
 3. 对 Editor panel、menu command、asset type、graph node、timeline track、Inspector widget 和 release check 提供 diagnostic jump。
-4. 编写 missing dependency、extension conflict、disable impact 和 report evidence 测试。
+4. 不实现第二套 dependency graph、provider selection 或 packaged eligibility 逻辑。
+5. 编写 missing dependency、extension conflict、disable impact 和 report evidence 测试。
 
-**Done Evidence:** Plugin Manager 输出 `editor.plugin_manager`、`plugin.extension_registry` 和 `plugin.dependency_graph` evidence。
+**Done Evidence:** Plugin Manager UI 输出 `editor.plugin_manager` evidence，并显示 Stage 1/2 的 `plugin.extension_registry` 和 `plugin.dependency_graph` evidence。
 
 **Linked Test IDs:** `T-S4-PLUGIN-01`
 

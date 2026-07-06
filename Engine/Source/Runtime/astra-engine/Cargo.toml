@@ -1,0 +1,15 @@
+[package]
+name = "astra-engine"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib", "dylib"]
+
+[dependencies]
+astra-core = { path = "../astra-core" }
+astra-package = { path = "../astra-package" }
+astra-plugin = { path = "../astra-plugin" }
+astra-runtime = { path = "../astra-runtime" }

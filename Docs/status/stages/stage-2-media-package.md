@@ -192,6 +192,28 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **Linked Test IDs:** `T-S2-GATE-01`
 
+## S2-PLUGIN-GATE-01 Plugin registry package and release gate
+
+**ID:** `S2-PLUGIN-GATE-01`
+
+**Goal:** Package 写入 Stage 1 产出的 plugin extension registry 和 dependency graph，Release Gate 校验 provider binding、packaged eligibility、conflict 和依赖闭包。
+
+**Depends On:** `S1-PLUGIN-03`、`S2-PACKAGE-01`、`S2-GATE-01`
+
+**Target Paths:** `Engine/Source/Runtime/astra-package/src/builder.rs`、`Engine/Source/Developer/astra-release/src/lib.rs`、`Engine/Source/Runtime/astra-package/tests/package_roundtrip.rs`、`Engine/Source/Developer/astra-release/tests/release_report.rs`
+
+**Steps:**
+
+1. `PackageBuildRequest` 写入 `plugin.extension_registry` 和 `plugin.dependency_graph` section。
+2. 默认 provider policy 显式绑定 provider，不按加载顺序选择。
+3. Release Gate 校验 registry JSON、provider policy binding、packaged eligibility 和 unresolved conflict。
+4. Release Gate 校验 required dependency 是否 resolved。
+5. 编写 package section、registry pass、conflict blocked、missing binding blocked 和 unresolved dependency blocked 测试。
+
+**Done Evidence:** `cargo test -p astra-package package_roundtrip` 和 `cargo test -p astra-release release_report` 通过；release report 输出 `plugin.extension_registry` 和 `plugin.dependency_graph` evidence。
+
+**Linked Test IDs:** `T-S2-PLUGIN-GATE-01`
+
 ## S2-PLATFORM-01 Platform capability crate 与分层 probe
 
 **ID:** `S2-PLATFORM-01`

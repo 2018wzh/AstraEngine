@@ -132,6 +132,8 @@ fn package_roundtrip_builder_writes_required_runtime_sections() {
         "asset.registry",
         "media.manifest",
         "provider.policy",
+        "plugin.extension_registry",
+        "plugin.dependency_graph",
         "module.fingerprint",
         "target.manifest",
         "release.summary",
@@ -144,4 +146,22 @@ fn package_roundtrip_builder_writes_required_runtime_sections() {
     let policy = package.container().read_section("provider.policy").unwrap();
     let policy: serde_json::Value = serde_json::from_slice(&policy).unwrap();
     assert_eq!(policy["profile"], "desktop-release");
+
+    let registry = package
+        .container()
+        .read_section("plugin.extension_registry")
+        .unwrap();
+    let registry: serde_json::Value = serde_json::from_slice(&registry).unwrap();
+    assert_eq!(registry["schema"], "astra.plugin_extension_registry.v1");
+    assert_eq!(registry["bindings"][0]["slot"], "presentation");
+
+    let dependency_graph = package
+        .container()
+        .read_section("plugin.dependency_graph")
+        .unwrap();
+    let dependency_graph: serde_json::Value = serde_json::from_slice(&dependency_graph).unwrap();
+    assert_eq!(
+        dependency_graph["schema"],
+        "astra.plugin_dependency_graph.v1"
+    );
 }

@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use abi_stable::library::{AbiHeaderRef, ROOT_MODULE_LOADER_NAME_WITH_NUL};
@@ -11,8 +12,9 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use crate::{
-    install_actions, AstraPluginModuleRef, EngineModuleSlot, FfiPluginShutdown, LoadedFfiAction,
-    PluginDescriptor, PluginError, PluginGate, PluginRegistrar, RegisteredProvider,
+    install_actions, AstraPluginModuleRef, EngineModuleSlot, FfiPluginShutdown, LoadPhase,
+    LoadedFfiAction, PluginDescriptor, PluginError, PluginGate, PluginRegistrar,
+    RegisteredProvider,
 };
 use astra_runtime::RuntimeWorld;
 
@@ -121,6 +123,9 @@ impl PluginLoader {
                 slot: EngineModuleSlot(provider.slot.to_string()),
                 provider_id: provider.provider_id.to_string(),
                 capability: provider.capability.to_string(),
+                phase: LoadPhase::from_str(&provider.phase.to_string())
+                    .map_err(PluginError::Load)?,
+                packaged: provider.packaged,
             };
             slots.push(provider.slot.0.clone());
             registered_providers.push(provider.clone());

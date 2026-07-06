@@ -1,6 +1,28 @@
 # Stage 3 AstraVN Work
 
-Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astra` 仍是 canonical story source；AstraVN Core 持有权威语义，Luau policy 只处理表现、系统页和复杂演出。本页是 planned target 清单，不表示实现已经存在。
+Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astra` 仍是 canonical story source；AstraVN Core 持有权威语义，Luau policy 只处理表现、系统页和复杂演出。`astra-vn` 也必须提供 Rust ABI dylib facade，但不新增第二套 runtime，也不承诺 C ABI。本页是 planned target 清单，不表示实现已经存在。
+
+## S3-DYLIB-01 AstraVN Rust dylib target
+
+**ID:** `S3-DYLIB-01`
+
+**Goal:** `astra-vn` 作为 VN 垂直模块 crate，同时产出 `rlib` 和 Rust ABI `dylib`，暴露 `.astra`、VN Core、presentation、system UI 和 VN plugin extension public API。
+
+**Depends On:** `S1-DYLIB-01`、`S3-SCRIPT-02`、`S3-CORE-03`、`S3-PLUGIN-01`、`S3-PRESENT-01`、`S3-SYSTEM-01`
+
+**Target Paths:** `Engine/Source/Runtime/astra-vn/Cargo.toml`、`Engine/Source/Runtime/astra-vn/src/lib.rs`、`Engine/Source/Runtime/astra-vn/tests/vn_dylib_facade.rs` planned target
+
+**Steps:**
+
+1. 在 `astra-vn` crate 中声明 `crate-type = ["rlib", "dylib"]`，并保留普通 workspace `rlib` 使用路径。
+2. 让 facade re-export VN parser/compiler、CompiledStory、VnRuntimeState、presentation model、system UI profile 和 VN extension id，不复制 EngineCore runtime。
+3. 约束 dylib 只用于同 engine version、rustc fingerprint 和 feature fingerprint 下的 Rust-side 动态链接；外部稳定边界仍是 `.astra`、package section 和 Stage 1 plugin ABI。
+4. 禁止通过 dylib public API 暴露 Luau VM handle、renderer/audio native handle、Actor 指针或 Editor widget。
+5. 编写 facade smoke，证明 `astra-vn` public API 能创建 VN runtime state、读取 command manifest、登记 VN extension DTO，并与 `astra-engine` facade 共同链接。
+
+**Done Evidence:** `cargo test -p astra-vn vn_dylib_facade` 通过，且 `Cargo.toml` 明确产出 `rlib` 与 `dylib`。
+
+**Linked Test IDs:** `T-S3-DYLIB-01`
 
 ## S3-SCRIPT-01 `.astra` parser
 
@@ -149,6 +171,27 @@ Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astr
 **Done Evidence:** 标准 policy bundle 可以随 package 固定，release gate 能检查 lock/vendor cache。
 
 **Linked Test IDs:** `T-S3-LUAU-02`
+
+## S3-PLUGIN-01 VN plugin extension points
+
+**ID:** `S3-PLUGIN-01`
+
+**Goal:** AstraVN 把 Luau policy bundle provider、VN command provider、presentation command provider、Graph/Timeline metadata extension 和 VN release check 接入 Stage 1 extension registry。
+
+**Depends On:** `S1-PLUGIN-03`、`S3-LUAU-02`、`S3-PRESENT-01`、`S3-EDIT-01`
+
+**Target Paths:** `Engine/Source/Runtime/astra-vn/src/plugin_extensions.rs`、`Engine/Source/Runtime/astra-vn/tests/vn_plugin_extensions.rs` planned target
+
+**Steps:**
+
+1. 定义 Luau policy bundle provider、VN command provider 和 presentation command provider 的 extension point。
+2. 让 Graph node、timeline track 和 Inspector metadata 只保存 authoring metadata，不产生第二套 runtime model。
+3. 把 provider binding 写入 project manifest，并随 package 进入 `plugin.extension_registry`。
+4. 编写 missing policy provider、command provider conflict、metadata extension roundtrip 和 release check binding 测试。
+
+**Done Evidence:** VN 插件扩展由 Stage 1 registry 和 Stage 2 gate 校验；Stage 3 不让加载顺序改变 VN runtime 行为。
+
+**Linked Test IDs:** `T-S3-PLUGIN-01`
 
 ## S3-PRESENT-01 Presentation model 与标准命令库
 

@@ -23,6 +23,8 @@ pub struct PackageBuildRequest {
     pub asset_registry: Vec<u8>,
     pub media_manifest: Vec<u8>,
     pub provider_policy: Vec<u8>,
+    pub plugin_extension_registry: Vec<u8>,
+    pub plugin_dependency_graph: Vec<u8>,
     pub module_fingerprint: Vec<u8>,
     pub target_manifest: Vec<u8>,
     pub release_summary: Vec<u8>,
@@ -60,7 +62,30 @@ impl PackageBuildRequest {
                 "schema": "astra.provider_policy.v1",
                 "profile": profile,
                 "renderer": "headless",
-                "decode_fallback": "profile_bound"
+                "decode_fallback": "profile_bound",
+                "bindings": [{
+                    "slot": "presentation",
+                    "provider_id": "astra.fixture.headless_presentation"
+                }]
+            })),
+            plugin_extension_registry: json_bytes(serde_json::json!({
+                "schema": "astra.plugin_extension_registry.v1",
+                "providers": [{
+                    "slot": "presentation",
+                    "provider_id": "astra.fixture.headless_presentation",
+                    "capability": "presentation.headless",
+                    "phase": "runtime",
+                    "packaged": true
+                }],
+                "bindings": [{
+                    "slot": "presentation",
+                    "provider_id": "astra.fixture.headless_presentation"
+                }],
+                "conflicts": []
+            })),
+            plugin_dependency_graph: json_bytes(serde_json::json!({
+                "schema": "astra.plugin_dependency_graph.v1",
+                "dependencies": []
             })),
             module_fingerprint: json_bytes(serde_json::json!({
                 "schema": "astra.module_fingerprint.v1",
@@ -134,6 +159,16 @@ impl PackageBuilder {
                 "provider.policy",
                 "astra.provider_policy.v1",
                 request.provider_policy,
+            ))
+            .add_section(SectionPayload::raw(
+                "plugin.extension_registry",
+                "astra.plugin_extension_registry.v1",
+                request.plugin_extension_registry,
+            ))
+            .add_section(SectionPayload::raw(
+                "plugin.dependency_graph",
+                "astra.plugin_dependency_graph.v1",
+                request.plugin_dependency_graph,
             ))
             .add_section(SectionPayload::raw(
                 "module.fingerprint",

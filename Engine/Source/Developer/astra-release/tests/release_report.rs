@@ -36,6 +36,12 @@ fn release_report_covers_pass_warning_and_blocked_checks() {
     assert!(report.checks.iter().any(|check| {
         check.domain == ReleaseDomain::Target && check.status == CheckStatus::Pass
     }));
+    assert!(report.checks.iter().any(|check| {
+        check.id == "plugin.extension_registry" && check.status == CheckStatus::Pass
+    }));
+    assert!(report.checks.iter().any(|check| {
+        check.id == "plugin.dependency_graph" && check.status == CheckStatus::Pass
+    }));
 
     let blocked = ReleaseValidator
         .validate_package(PackageValidateRequest {
@@ -51,6 +57,110 @@ fn release_report_covers_pass_warning_and_blocked_checks() {
         .checks
         .iter()
         .any(|check| check.id == "package.integrity" && check.status == CheckStatus::Blocked));
+}
+
+#[test]
+fn release_gate_blocks_plugin_registry_conflict_and_invalid_binding() {
+    let mut request = PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "desktop-release",
+        vec![SectionPayload::raw(
+            "asset.characters.hero",
+            "astra.cooked_asset.v1",
+            b"hero".to_vec(),
+        )],
+    );
+    request.plugin_extension_registry = serde_json::json!({
+        "schema": "astra.plugin_extension_registry.v1",
+        "providers": [{
+            "slot": "presentation",
+            "provider_id": "astra.provider.first",
+            "capability": "presentation.headless",
+            "phase": "runtime",
+            "packaged": true
+        }],
+        "bindings": [{
+            "slot": "presentation",
+            "provider_id": "astra.provider.missing"
+        }],
+        "conflicts": [{
+            "slot": "presentation",
+            "selected_provider": "astra.provider.first",
+            "conflicting_provider": "astra.provider.second",
+            "reason": "provider slot already has an explicit binding"
+        }]
+    })
+    .to_string()
+    .into_bytes();
+    let blob = PackageBuilder::build(request).unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "desktop-release".to_string(),
+            require_ffmpeg: false,
+            target: Some("native-smoke-game".to_string()),
+            platform_report: None,
+        })
+        .unwrap();
+
+    let plugin_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "plugin.extension_registry")
+        .unwrap();
+    assert_eq!(plugin_check.status, CheckStatus::Blocked);
+    assert_eq!(
+        plugin_check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_PLUGIN_EXTENSION_CONFLICT"
+    );
+}
+
+#[test]
+fn release_gate_blocks_unresolved_plugin_dependency() {
+    let mut request = PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "desktop-release",
+        vec![SectionPayload::raw(
+            "asset.characters.hero",
+            "astra.cooked_asset.v1",
+            b"hero".to_vec(),
+        )],
+    );
+    request.plugin_dependency_graph = serde_json::json!({
+        "schema": "astra.plugin_dependency_graph.v1",
+        "dependencies": [{
+            "plugin_id": "astra.provider.required",
+            "version_req": ">=0.1.0",
+            "required": true,
+            "reason": "runtime provider binding",
+            "resolved": false
+        }]
+    })
+    .to_string()
+    .into_bytes();
+    let blob = PackageBuilder::build(request).unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "desktop-release".to_string(),
+            require_ffmpeg: false,
+            target: Some("native-smoke-game".to_string()),
+            platform_report: None,
+        })
+        .unwrap();
+
+    let dependency_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "plugin.dependency_graph")
+        .unwrap();
+    assert_eq!(dependency_check.status, CheckStatus::Blocked);
+    assert_eq!(
+        dependency_check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_PLUGIN_DEPENDENCY_UNRESOLVED"
+    );
 }
 
 #[test]
