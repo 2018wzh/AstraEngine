@@ -1,3 +1,6 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use astra_asset::{AssetCatalog, VfsBackendKind, VfsManifest, VfsSourceRef, VfsUri};
 use astra_core::{Diagnostic, Hash256};
 use astra_package::{PackageManifest, PackageReader};
 use astra_platform::{PlatformCapabilityReport, PlatformValidationStatus};
@@ -157,7 +160,8 @@ impl ReleaseValidator {
                 });
                 for section in [
                     "schema.registry",
-                    "asset.registry",
+                    "asset.vfs_manifest",
+                    "asset.catalog",
                     "media.manifest",
                     "provider.policy",
                     "scenario.refs",
@@ -168,6 +172,7 @@ impl ReleaseValidator {
                 }
                 checks.push(plugin_extension_registry_check(&package));
                 checks.push(plugin_dependency_graph_check(&package));
+                checks.extend(vfs_checks(&package));
                 checks.push(target_manifest_check(&package, request.target.as_deref()));
                 checks.push(cooked_project_input_check(
                     &package,
@@ -476,6 +481,568 @@ fn plugin_dependency_graph_check(package: &PackageReader) -> ReleaseCheckRecord 
         summary: "plugin dependency graph has no unresolved required dependencies".to_string(),
         diagnostic: None,
         evidence: vec![evidence("dependency_count", dependencies.len())],
+    }
+}
+
+fn vfs_checks(package: &PackageReader) -> Vec<ReleaseCheckRecord> {
+    vec![
+        vfs_uri_format_check(package),
+        vfs_prefix_registry_check(package),
+        vfs_package_mount_check(package),
+        vfs_overlay_mount_check(package),
+        vfs_catalog_check(package),
+    ]
+}
+
+fn vfs_uri_format_check(package: &PackageReader) -> ReleaseCheckRecord {
+    if package.has_section("asset.registry") {
+        return package_blocked(
+            "vfs.uri_format",
+            "ASTRA_VFS_ASSET_REGISTRY_REMOVED",
+            "legacy asset.registry section is not accepted after VFS migration",
+            vec![evidence("section", "asset.registry")],
+        );
+    }
+
+    let manifest = match decode_vfs_manifest(package) {
+        Ok(manifest) => manifest,
+        Err(check) => return (*check).with_id("vfs.uri_format"),
+    };
+    for entry in &manifest.entries {
+        if let Err(err) = VfsUri::parse(entry.uri.as_str()) {
+            return package_blocked(
+                "vfs.uri_format",
+                "ASTRA_VFS_URI_INVALID",
+                format!("VFS entry URI is invalid: {err}"),
+                vec![evidence("vfs_uri", entry.uri.as_str())],
+            );
+        }
+    }
+    for whiteout in &manifest.whiteouts {
+        if let Err(err) = VfsUri::parse(whiteout.uri.as_str()) {
+            return package_blocked(
+                "vfs.uri_format",
+                "ASTRA_VFS_URI_INVALID",
+                format!("VFS whiteout URI is invalid: {err}"),
+                vec![evidence("vfs_uri", whiteout.uri.as_str())],
+            );
+        }
+    }
+
+    ReleaseCheckRecord {
+        id: "vfs.uri_format".to_string(),
+        domain: ReleaseDomain::Package,
+        status: CheckStatus::Pass,
+        summary: "all VFS locators use provider:/path format".to_string(),
+        diagnostic: None,
+        evidence: vec![evidence("entry_count", manifest.entries.len())],
+    }
+}
+
+fn vfs_prefix_registry_check(package: &PackageReader) -> ReleaseCheckRecord {
+    let manifest = match decode_vfs_manifest(package) {
+        Ok(manifest) => manifest,
+        Err(check) => return (*check).with_id("vfs.prefix_registry"),
+    };
+    if let Some(path) = forbidden_vfs_report_field(package, "asset.vfs_manifest") {
+        return package_blocked(
+            "vfs.prefix_registry",
+            "ASTRA_VFS_REPORT_PAYLOAD_LEAK",
+            "asset.vfs_manifest contains a local-root or payload-like field",
+            vec![evidence("field", path)],
+        );
+    }
+    if manifest.prefixes.is_empty() {
+        return package_blocked(
+            "vfs.prefix_registry",
+            "ASTRA_VFS_PREFIX_MISSING",
+            "asset.vfs_manifest must declare at least one prefix",
+            vec![evidence("section", "asset.vfs_manifest")],
+        );
+    }
+    let validation = manifest.validate();
+    if let Some(diagnostic) = validation.first() {
+        return ReleaseCheckRecord {
+            id: "vfs.prefix_registry".to_string(),
+            domain: ReleaseDomain::Package,
+            status: CheckStatus::Blocked,
+            summary: "asset VFS prefix registry is invalid".to_string(),
+            diagnostic: Some(diagnostic.clone()),
+            evidence: vec![evidence("prefix_count", manifest.prefixes.len())],
+        };
+    }
+
+    let providers = match vfs_registered_providers(package) {
+        Ok(providers) => providers,
+        Err(check) => return (*check).with_id("vfs.prefix_registry"),
+    };
+    let mut seen_prefixes = BTreeSet::new();
+    for prefix in &manifest.prefixes {
+        if !seen_prefixes.insert(prefix.prefix.as_str()) {
+            return package_blocked(
+                "vfs.prefix_registry",
+                "ASTRA_VFS_PREFIX_CONFLICT",
+                format!("VFS prefix {} is declared more than once", prefix.prefix),
+                vec![evidence("prefix", &prefix.prefix)],
+            );
+        }
+        let Some(provider) = providers.get(prefix.provider_id.as_str()) else {
+            return package_blocked(
+                "vfs.prefix_registry",
+                "ASTRA_VFS_PROVIDER_MISSING",
+                format!(
+                    "VFS prefix {} provider {} is not registered in vfs_provider slot",
+                    prefix.prefix, prefix.provider_id
+                ),
+                vec![
+                    evidence("prefix", &prefix.prefix),
+                    evidence("provider_id", &prefix.provider_id),
+                ],
+            );
+        };
+        if !provider.packaged {
+            return package_blocked(
+                "vfs.prefix_registry",
+                "ASTRA_VFS_PROVIDER_UNPACKAGED",
+                format!(
+                    "VFS prefix {} provider {} is not packaged eligible",
+                    prefix.prefix, prefix.provider_id
+                ),
+                vec![
+                    evidence("prefix", &prefix.prefix),
+                    evidence("provider_id", &prefix.provider_id),
+                ],
+            );
+        }
+        let required_capability = vfs_backend_capability(prefix.backend);
+        if !provider
+            .capability
+            .as_deref()
+            .is_some_and(|capability| vfs_capability_matches(capability, required_capability))
+        {
+            return package_blocked(
+                "vfs.prefix_registry",
+                "ASTRA_VFS_PROVIDER_CAPABILITY_MISMATCH",
+                format!(
+                    "VFS prefix {} provider {} does not match backend capability {}",
+                    prefix.prefix, prefix.provider_id, required_capability
+                ),
+                vec![
+                    evidence("prefix", &prefix.prefix),
+                    evidence("provider_id", &prefix.provider_id),
+                    evidence("required_capability", required_capability),
+                ],
+            );
+        }
+    }
+
+    ReleaseCheckRecord {
+        id: "vfs.prefix_registry".to_string(),
+        domain: ReleaseDomain::Package,
+        status: CheckStatus::Pass,
+        summary: "VFS prefixes bind to packaged vfs_provider registrations".to_string(),
+        diagnostic: None,
+        evidence: vec![
+            evidence("prefix_count", manifest.prefixes.len()),
+            evidence("provider_count", providers.len()),
+        ],
+    }
+}
+
+fn vfs_package_mount_check(package: &PackageReader) -> ReleaseCheckRecord {
+    let manifest = match decode_vfs_manifest(package) {
+        Ok(manifest) => manifest,
+        Err(check) => return (*check).with_id("vfs.package_mount"),
+    };
+    let layers = manifest
+        .layers
+        .iter()
+        .map(|layer| (layer.layer_id.as_str(), layer))
+        .collect::<BTreeMap<_, _>>();
+    for entry in &manifest.entries {
+        if let Some(layer) = layers.get(entry.layer_id.as_str()) {
+            if !layer.profiles.is_empty()
+                && !layer.profiles.iter().any(|profile| !profile.is_empty())
+            {
+                return package_blocked(
+                    "vfs.package_mount",
+                    "ASTRA_VFS_PROFILE_INVALID",
+                    "VFS layer profile eligibility contains an empty profile",
+                    vec![evidence("layer_id", &entry.layer_id)],
+                );
+            }
+        }
+        if let VfsSourceRef::PackageSection { section_id } = &entry.source {
+            let Some(section) = package.container().section_entry(section_id) else {
+                return package_blocked(
+                    "vfs.package_mount",
+                    "ASTRA_VFS_PACKAGE_SECTION_MISSING",
+                    format!("VFS package entry references missing section {section_id}"),
+                    vec![
+                        evidence("vfs_uri", entry.uri.as_str()),
+                        evidence("section_id", section_id),
+                    ],
+                );
+            };
+            if entry.offset != 0 || entry.size != section.decoded_length {
+                return package_blocked(
+                    "vfs.package_mount",
+                    "ASTRA_VFS_BOUNDS_INVALID",
+                    format!("VFS package entry bounds do not match section {section_id}"),
+                    vec![
+                        evidence("vfs_uri", entry.uri.as_str()),
+                        evidence("section_id", section_id),
+                        evidence("entry_size", entry.size),
+                        evidence("section_size", section.decoded_length),
+                    ],
+                );
+            }
+            if entry.hash != section.hash {
+                return package_blocked(
+                    "vfs.package_mount",
+                    "ASTRA_VFS_HASH_MISMATCH",
+                    format!("VFS package entry hash does not match section {section_id}"),
+                    vec![
+                        evidence("vfs_uri", entry.uri.as_str()),
+                        evidence("section_id", section_id),
+                    ],
+                );
+            }
+        }
+    }
+
+    ReleaseCheckRecord {
+        id: "vfs.package_mount".to_string(),
+        domain: ReleaseDomain::Package,
+        status: CheckStatus::Pass,
+        summary: "package-backed VFS entries match container section bounds and hashes".to_string(),
+        diagnostic: None,
+        evidence: vec![evidence("entry_count", manifest.entries.len())],
+    }
+}
+
+fn vfs_overlay_mount_check(package: &PackageReader) -> ReleaseCheckRecord {
+    let manifest = match decode_vfs_manifest(package) {
+        Ok(manifest) => manifest,
+        Err(check) => return (*check).with_id("vfs.overlay_mount"),
+    };
+    let layer_ids = manifest
+        .layers
+        .iter()
+        .map(|layer| layer.layer_id.as_str())
+        .collect::<BTreeSet<_>>();
+    for whiteout in &manifest.whiteouts {
+        if !layer_ids.contains(whiteout.layer_id.as_str())
+            || whiteout.allowlist_id.trim().is_empty()
+            || whiteout.reason.trim().is_empty()
+        {
+            return package_blocked(
+                "vfs.overlay_mount",
+                "ASTRA_VFS_WHITEOUT_UNAUTHORIZED",
+                "VFS whiteout requires a valid layer, allowlist and reason",
+                vec![
+                    evidence("vfs_uri", whiteout.uri.as_str()),
+                    evidence("layer_id", &whiteout.layer_id),
+                ],
+            );
+        }
+    }
+    ReleaseCheckRecord {
+        id: "vfs.overlay_mount".to_string(),
+        domain: ReleaseDomain::Package,
+        status: CheckStatus::Pass,
+        summary: "VFS overlay layers and whiteouts are explicitly authorized".to_string(),
+        diagnostic: None,
+        evidence: vec![
+            evidence("layer_count", manifest.layers.len()),
+            evidence("whiteout_count", manifest.whiteouts.len()),
+        ],
+    }
+}
+
+fn vfs_catalog_check(package: &PackageReader) -> ReleaseCheckRecord {
+    let manifest = match decode_vfs_manifest(package) {
+        Ok(manifest) => manifest,
+        Err(check) => return (*check).with_id("vfs.catalog"),
+    };
+    let catalog = match decode_asset_catalog(package) {
+        Ok(catalog) => catalog,
+        Err(check) => return (*check).with_id("vfs.catalog"),
+    };
+    if let Some(path) = forbidden_vfs_report_field(package, "asset.catalog") {
+        return package_blocked(
+            "vfs.catalog",
+            "ASTRA_VFS_CATALOG_PAYLOAD_LEAK",
+            "asset.catalog contains a local-root or payload-like field",
+            vec![evidence("field", path)],
+        );
+    }
+    if catalog.schema != "astra.asset_catalog.v1" {
+        return package_blocked(
+            "vfs.catalog",
+            "ASTRA_VFS_CATALOG_SCHEMA",
+            "asset.catalog schema must be astra.asset_catalog.v1",
+            vec![evidence("schema", catalog.schema)],
+        );
+    }
+    let entry_uris = manifest
+        .entries
+        .iter()
+        .map(|entry| entry.uri.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut asset_ids = BTreeSet::new();
+    for asset in &catalog.assets {
+        if asset.asset_id.trim().is_empty() || !asset_ids.insert(asset.asset_id.as_str()) {
+            return package_blocked(
+                "vfs.catalog",
+                "ASTRA_VFS_CATALOG_ASSET_ID",
+                "asset.catalog asset ids must be non-empty and unique",
+                vec![evidence("asset_id", &asset.asset_id)],
+            );
+        }
+        if !entry_uris.contains(asset.uri.as_str()) {
+            return package_blocked(
+                "vfs.catalog",
+                "ASTRA_VFS_CATALOG_URI_MISSING",
+                format!(
+                    "asset.catalog references VFS URI {} without an entry",
+                    asset.uri
+                ),
+                vec![evidence("vfs_uri", asset.uri.as_str())],
+            );
+        }
+    }
+
+    ReleaseCheckRecord {
+        id: "vfs.catalog".to_string(),
+        domain: ReleaseDomain::Package,
+        status: CheckStatus::Pass,
+        summary: "asset catalog references package VFS entries".to_string(),
+        diagnostic: None,
+        evidence: vec![evidence("asset_count", catalog.assets.len())],
+    }
+}
+
+fn decode_vfs_manifest(package: &PackageReader) -> Result<VfsManifest, Box<ReleaseCheckRecord>> {
+    let bytes = package
+        .container()
+        .read_bounded("asset.vfs_manifest", 1024 * 1024)
+        .map_err(|err| {
+            Box::new(package_blocked(
+                "vfs.prefix_registry",
+                "ASTRA_VFS_MANIFEST_MISSING",
+                format!("asset.vfs_manifest section is required: {err}"),
+                vec![evidence("section", "asset.vfs_manifest")],
+            ))
+        })?;
+    serde_json::from_slice(&bytes).map_err(|err| {
+        Box::new(package_blocked(
+            "vfs.prefix_registry",
+            "ASTRA_VFS_MANIFEST_JSON",
+            format!("asset.vfs_manifest is not valid JSON: {err}"),
+            vec![evidence("section", "asset.vfs_manifest")],
+        ))
+    })
+}
+
+fn decode_asset_catalog(package: &PackageReader) -> Result<AssetCatalog, Box<ReleaseCheckRecord>> {
+    let bytes = package
+        .container()
+        .read_bounded("asset.catalog", 1024 * 1024)
+        .map_err(|err| {
+            Box::new(package_blocked(
+                "vfs.catalog",
+                "ASTRA_VFS_CATALOG_MISSING",
+                format!("asset.catalog section is required: {err}"),
+                vec![evidence("section", "asset.catalog")],
+            ))
+        })?;
+    serde_json::from_slice(&bytes).map_err(|err| {
+        Box::new(package_blocked(
+            "vfs.catalog",
+            "ASTRA_VFS_CATALOG_JSON",
+            format!("asset.catalog is not valid JSON: {err}"),
+            vec![evidence("section", "asset.catalog")],
+        ))
+    })
+}
+
+#[derive(Debug, Clone)]
+struct RegisteredVfsProvider {
+    capability: Option<String>,
+    packaged: bool,
+}
+
+fn vfs_registered_providers(
+    package: &PackageReader,
+) -> Result<BTreeMap<String, RegisteredVfsProvider>, Box<ReleaseCheckRecord>> {
+    let registry =
+        read_json_section(package, "plugin.extension_registry").map_err(|(code, message)| {
+            Box::new(plugin_blocked(
+                "vfs.prefix_registry",
+                code,
+                message,
+                vec![evidence("section", "plugin.extension_registry")],
+            ))
+        })?;
+    let mut providers = BTreeMap::new();
+    for provider in registry
+        .get("providers")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if provider.get("slot").and_then(serde_json::Value::as_str) != Some("vfs_provider") {
+            continue;
+        }
+        let Some(provider_id) = provider
+            .get("provider_id")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        providers.insert(
+            provider_id.to_string(),
+            RegisteredVfsProvider {
+                capability: provider
+                    .get("capability")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+                packaged: provider
+                    .get("packaged")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+            },
+        );
+    }
+    Ok(providers)
+}
+
+fn vfs_backend_capability(backend: VfsBackendKind) -> &'static str {
+    match backend {
+        VfsBackendKind::Package => "vfs.backend.package",
+        VfsBackendKind::LocalAuthorized => "vfs.backend.local_authorized",
+        VfsBackendKind::Overlay => "vfs.backend.overlay",
+        VfsBackendKind::Memory => "vfs.backend.memory",
+        VfsBackendKind::LegacyPack => "vfs.backend.legacy_pack",
+    }
+}
+
+fn vfs_capability_matches(actual: &str, required: &str) -> bool {
+    actual == required
+        || (required == "vfs.backend.local_authorized" && actual == "vfs.backend.local")
+        || actual
+            .strip_prefix(required)
+            .is_some_and(|suffix| suffix.starts_with('.'))
+}
+
+fn forbidden_vfs_report_field(package: &PackageReader, section: &str) -> Option<String> {
+    let bytes = package
+        .container()
+        .read_bounded(section, 1024 * 1024)
+        .ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    forbidden_vfs_field_path(&value)
+}
+
+fn forbidden_vfs_field_path(value: &serde_json::Value) -> Option<String> {
+    fn walk(value: &serde_json::Value, path: &mut Vec<String>, found: &mut Option<String>) {
+        if found.is_some() {
+            return;
+        }
+        match value {
+            serde_json::Value::Object(object) => {
+                for (key, child) in object {
+                    path.push(key.clone());
+                    if is_forbidden_vfs_key(key, path, child) {
+                        *found = Some(path.join("."));
+                        return;
+                    }
+                    walk(child, path, found);
+                    path.pop();
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    path.push(index.to_string());
+                    walk(child, path, found);
+                    path.pop();
+                }
+            }
+            serde_json::Value::String(value) if looks_like_host_absolute_path(value) => {
+                *found = Some(path.join("."));
+            }
+            _ => {}
+        }
+    }
+
+    let mut path = Vec::new();
+    let mut found = None;
+    walk(value, &mut path, &mut found);
+    found
+}
+
+fn is_forbidden_vfs_key(key: &str, path: &[String], value: &serde_json::Value) -> bool {
+    if key == "payload" {
+        return !(path.len() == 2
+            && path[0] == "redaction"
+            && path[1] == "payload"
+            && value.as_str() == Some("omitted"));
+    }
+    matches!(
+        key,
+        "root"
+            | "host_root"
+            | "local_root"
+            | "absolute_path"
+            | "text"
+            | "script_text"
+            | "source_text"
+            | "content"
+            | "payload_bytes"
+            | "raw_payload"
+            | "source_payload"
+            | "commercial_text"
+            | "bytecode"
+            | "bytes"
+    )
+}
+
+fn looks_like_host_absolute_path(value: &str) -> bool {
+    let normalized = value.replace('\\', "/");
+    normalized.starts_with('/')
+        || normalized.starts_with("~/")
+        || normalized
+            .as_bytes()
+            .get(1)
+            .is_some_and(|byte| *byte == b':')
+}
+
+fn package_blocked(
+    id: impl Into<String>,
+    code: &'static str,
+    summary: impl Into<String>,
+    evidence_values: Vec<ReleaseEvidence>,
+) -> ReleaseCheckRecord {
+    let summary = summary.into();
+    ReleaseCheckRecord {
+        id: id.into(),
+        domain: ReleaseDomain::Package,
+        status: CheckStatus::Blocked,
+        diagnostic: Some(Diagnostic::blocking(code, summary.clone())),
+        summary,
+        evidence: evidence_values,
+    }
+}
+
+trait ReleaseCheckRecordExt {
+    fn with_id(self, id: &'static str) -> Self;
+}
+
+impl ReleaseCheckRecordExt for ReleaseCheckRecord {
+    fn with_id(mut self, id: &'static str) -> Self {
+        self.id = id.to_string();
+        self
     }
 }
 

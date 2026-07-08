@@ -96,7 +96,7 @@ Session 内可以持有 VM PC、stack、call stack、resource resolver、media s
 
 Legacy archive readers are VFS mount providers. `.astrapkg` keeps case profile、provider binding、reader identity/hash、sanitized scenario refs 和 release report；PFS、XP3、FVP `.bin`、PackFile、Scene.pck、PAC/DAT 和 PAZ 只作为 `legacy_pack` mount source。
 
-Mount report 只写 alias、relative key、pack/entry、offset、size、hash、media kind、coverage 和 diagnostic。Patch、mod、翻译覆盖和调试替换走 `overlay` mount；没有 allowlist 的同 key 多命中必须 blocking。Family reader 不能输出本地 root、payload、完整脚本、bytecode、截图、音频采样或访问控制绕过材料。
+Mount report 只写 `vfs_uri`、prefix、pack/entry、offset、size、hash、media kind、coverage 和 diagnostic。Patch、mod、翻译覆盖和调试替换走 `overlay` mount；没有 allowlist 的同 `VfsUri` 多命中必须 blocking。Family reader 不能输出本地 root、payload、完整脚本、bytecode、截图、音频采样或访问控制绕过材料。
 
 ## Await Bridge
 

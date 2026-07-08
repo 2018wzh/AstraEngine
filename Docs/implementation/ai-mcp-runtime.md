@@ -61,7 +61,7 @@ pub struct TrustedSessionScope {
 
 ## Content Generation
 
-生成图片、音频、视频、文本或脚本草稿时先写 AI draft sidecar。用户接受后才进入 AssetRegistry、`.astra` 或 Luau policy。被拒绝的 draft 不能进入 Cook 或 Package。ComfyUI 这类重媒体 workflow 默认只属于 Editor content pipeline。
+生成图片、音频、视频、文本或脚本草稿时先写 AI draft sidecar。用户接受后才进入 Cook 资产输入、`.astra` 或 Luau policy；package 阶段再写入 `asset.vfs_manifest` 和 `asset.catalog`。被拒绝的 draft 不能进入 Cook 或 Package。ComfyUI 这类重媒体 workflow 默认只属于 Editor content pipeline。
 
 ONNX Runtime local AI 可以在 Shipping Runtime 生成文本、图像或语音，但输出不是 draft sidecar。每个流式 chunk 先通过 IntentValidator 或 artifact validator，再写入 committed output 和 save extra section。正式 replay 使用 save payload；debug/live regeneration 只能作为非权威再生成或差异报告。
 

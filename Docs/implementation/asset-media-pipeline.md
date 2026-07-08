@@ -11,7 +11,7 @@ source asset
   -> cook processor
   -> cooked artifact + dependency key
   -> package section
-  -> runtime asset registry
+  -> asset.vfs_manifest + asset.catalog
 ```
 
 ## Sidecar Schema

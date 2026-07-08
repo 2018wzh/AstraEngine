@@ -18,7 +18,7 @@ Copilot 可解释 diagnostics、生成 patch、批量修复 schema、辅助 rele
 
 ## Content Generation
 
-生成图片、音频、视频、文本或脚本草稿时先创建 AI draft sidecar。Draft 被接受后才进入 AssetRegistry 或 canonical source。Shipping Runtime 中的 ONNX 文本、图像和语音生成不走 draft sidecar；通过 validator 后写入 save extra section，正式 replay 不重跑 provider。
+生成图片、音频、视频、文本或脚本草稿时先创建 AI draft sidecar。Draft 被接受后才进入 Cook 资产输入或 canonical source，package 阶段再写入 VFS manifest/catalog。Shipping Runtime 中的 ONNX 文本、图像和语音生成不走 draft sidecar；通过 validator 后写入 save extra section，正式 replay 不重跑 provider。
 
 ## MCP Context
 

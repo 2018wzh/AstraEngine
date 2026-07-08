@@ -836,21 +836,38 @@ fn tsuinosora_internal_demo_builds_asset_package_and_bundles() {
 
     let package_bytes = fs::read(&package).unwrap();
     let reader = PackageReader::open(&package_bytes).unwrap();
-    let registry: serde_json::Value =
-        serde_json::from_slice(&reader.container().read_section("asset.registry").unwrap())
-            .unwrap();
-    let assets = registry["assets"]
+    assert!(!reader.has_section("asset.registry"));
+    let vfs_manifest: serde_json::Value = serde_json::from_slice(
+        &reader
+            .container()
+            .read_section("asset.vfs_manifest")
+            .unwrap(),
+    )
+    .unwrap();
+    let entries = vfs_manifest["entries"]
         .as_array()
-        .expect("asset registry assets array");
+        .expect("asset VFS manifest entries array");
+    assert!(
+        entries.iter().any(|entry| {
+            entry["vfs_uri"] == "package:/native-assets/backgrounds/bg.png"
+                && entry["source"]["section_id"]
+                    .as_str()
+                    .is_some_and(|section| reader.has_section(section))
+                && entry["hash"].as_str().is_some_and(|hash| hash.starts_with("sha256:"))
+                && entry["size"].as_u64().is_some_and(|bytes| bytes > 0)
+        }),
+        "asset.vfs_manifest should map native-assets/backgrounds/bg.png to a packaged section: {vfs_manifest:#?}"
+    );
+    let catalog: serde_json::Value =
+        serde_json::from_slice(&reader.container().read_section("asset.catalog").unwrap()).unwrap();
+    let assets = catalog["assets"].as_array().expect("asset catalog array");
     assert!(
         assets.iter().any(|asset| {
-            asset["path"] == "native-assets/backgrounds/bg.png"
-                && asset["role"] == "background"
-                && asset["section_id"].as_str().is_some_and(|section| reader.has_section(section))
-                && asset["sha256"].as_str().is_some_and(|hash| hash.starts_with("sha256:"))
-                && asset["byte_size"].as_u64().is_some_and(|bytes| bytes > 0)
+            asset["vfs_uri"] == "package:/native-assets/backgrounds/bg.png"
+                && asset["media_kind"] == "background"
+                && asset["asset_id"].as_str().is_some_and(|id| !id.is_empty())
         }),
-        "asset.registry should map native-assets/backgrounds/bg.png to a packaged asset section: {registry:#?}"
+        "asset.catalog should map native asset metadata to package VFS URI: {catalog:#?}"
     );
 
     for platform in ["windows", "web"] {

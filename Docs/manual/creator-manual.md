@@ -18,7 +18,7 @@
 
 项目授权后，AI 可以直写 `.astra`、Luau 策略和 Graph/Timeline 派生层。每次写入都必须生成 audit event、patch 或 graph diff、undo checkpoint 和 release check。
 
-AI Control 用来绑定 OpenAI、Ollama、ComfyUI 和 ONNX Runtime provider profile，查看 MCP session、Context Pack、Review Queue 和本地加密 trace。Memory Inspector 用来管理角色 `Canon`、`Episodic`、`Player` memory 的 namespace、读写范围、压缩归档和玩家同意状态。ComfyUI 生成的图片、视频或音频先进入 draft sidecar，接受后才进入 AssetRegistry 和 Cook。
+AI Control 用来绑定 OpenAI、Ollama、ComfyUI 和 ONNX Runtime provider profile，查看 MCP session、Context Pack、Review Queue 和本地加密 trace。Memory Inspector 用来管理角色 `Canon`、`Episodic`、`Player` memory 的 namespace、读写范围、压缩归档和玩家同意状态。ComfyUI 生成的图片、视频或音频先进入 draft sidecar，接受后才进入 Cook，并在 package 阶段写入 `asset.vfs_manifest` 和 `asset.catalog`。
 
 需要把本地模型随 Shipping 包发布时，创作者通过 Import/Cook 导入 ModelBundle。模型权重、tokenizer、reduced runtime、custom op sidecar 和 pipeline config 会成为 Asset VFS content entry；项目不能把模型 payload 放进通用 `package_sections`。Package/Release Gate 会检查 license/provenance、redistribution、voice authorization、模型 fingerprint、VFS mount、section encryption、目标平台 EP 和真实运行报告。
 

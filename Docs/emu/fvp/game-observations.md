@@ -27,7 +27,7 @@ The syscall table starts with audio and control calls, then graph/text/input/thr
 
 ## Archive observations
 
-The case uses pack names that map directly to VFS folders. `bgm/001`, `voice/01000010`, `se/001` and `graph_bg/BG001_000` are enough for smoke tests because they cover Ogg, RIFF and `hzc1` resource types without exposing payload bytes.
+The case uses pack names that map directly to VFS prefixes under the FVP namespace. `fvp:/bgm/001`, `fvp:/voice/01000010`, `fvp:/se/001` and `fvp:/graph_bg/BG001_000` are enough for smoke tests because they cover Ogg, RIFF and `hzc1` resource types without exposing payload bytes.
 
 | Pack | SHA-256 prefix | Entry count |
 | --- | --- | ---: |

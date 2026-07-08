@@ -17,9 +17,9 @@ Entry:
 
 `name_offset` 指向 filename table 内的 NUL-terminated string。`data_offset` 是相对整个 `.bin` 文件开头的绝对偏移，不是相对 payload 区。字符串按 case NLS 解码，常见值是 Shift_JIS；汉化样本可能需要 GBK/GB18030 或补丁层覆盖。
 
-## VFS 路径
+## VFS URI
 
-VFS key 使用 `folder/name`。加载 `graph_bg.bin` 后，脚本里的 `graph_bg/BG001_000` 会解析到 `graph_bg` pack 的 `BG001_000` entry。desktop host 还允许 loose file 覆盖：如果 `<game-root>/<folder>/<name>` 存在，优先读 loose file，再读 pack entry。
+FVP family provider 注册 `fvp` prefix，public locator 使用 `fvp:/folder/name`。加载 `graph_bg.bin` 后，脚本里的 `graph_bg/BG001_000` 会解析成 `fvp:/graph_bg/BG001_000`，再命中 `graph_bg.bin` 的 `BG001_000` entry。desktop host 的 loose file 覆盖也走 overlay layer：upper layer 仍使用同一个 `fvp:/graph_bg/BG001_000` URI，不把本地 root 写入 report。
 
 路径规范化规则：
 
@@ -47,21 +47,21 @@ VFS key 使用 `folder/name`。加载 `graph_bg.bin` 后，脚本里的 `graph_b
 
 Concrete lookup examples from the sample:
 
-| VFS path | Pack entry | Offset | Size | Observation |
+| VFS URI | Pack entry | Offset | Size | Observation |
 | --- | --- | ---: | ---: | --- |
-| `bgm/001` | `001` in `bgm.bin` | 1,128 | 2,689,312 | Ogg Vorbis |
-| `voice/01000010` | `01000010` in `voice.bin` | 304,466 | 17,889 | Ogg Vorbis |
-| `se/001` | `001` in `se.bin` | 4,879 | 427,456 | RIFF/WAVE-like payload |
-| `graph/BG001_000` | `BG001_000` in `graph_bg.bin` | 8,437 | 2,852,204 | `hzc1` texture payload |
-| `movie/01.wmv` | loose file | n/a | 111,307,131 | ASF/WMV, not packed |
+| `fvp:/bgm/001` | `001` in `bgm.bin` | 1,128 | 2,689,312 | Ogg Vorbis |
+| `fvp:/voice/01000010` | `01000010` in `voice.bin` | 304,466 | 17,889 | Ogg Vorbis |
+| `fvp:/se/001` | `001` in `se.bin` | 4,879 | 427,456 | RIFF/WAVE-like payload |
+| `fvp:/graph_bg/BG001_000` | `BG001_000` in `graph_bg.bin` | 8,437 | 2,852,204 | `hzc1` texture payload |
+| `fvp:/movie/01.wmv` | loose overlay entry | n/a | 111,307,131 | ASF/WMV, not packed |
 
 ## AstraEMU reader contract
 
-The FVP archive reader should be a family-private service behind the core VFS. It exposes:
+The FVP archive reader should be a family-private service behind the core VFS and register through the single `vfs_provider` slot. It exposes:
 
 - `probe_pack(path) -> PackMetadata` for report and diagnostics.
 - `open_entry(folder, name) -> Read + Seek` for media decoders.
 - `read_small_entry(folder, name, max_bytes)` for scripts, fonts, cursor metadata and test fixtures.
 - `hash_entry(folder, name)` for case reports.
 
-It must not expose host filesystem paths to Manager reports. Reports store pack name, entry name, offset, size, hash prefix and media kind only.
+It must not expose host filesystem paths to Manager reports. Reports store `vfs_uri`, prefix, pack name, entry name, offset, size, hash prefix and media kind only.

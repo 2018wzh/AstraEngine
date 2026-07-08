@@ -22,7 +22,7 @@ Provider metadata 只提供 template、surface id、schema、command id、source
 | Project Settings | project manifest, profile schema | edit profile, bind provider, validate | read-only, dirty, invalid binding, ready |
 | Plugin Manager | ExtensionRegistrationReport, dependency graph | enable, disable, resolve conflict, jump diagnostic | missing dependency, permission denied, trimmed, ready |
 | Command Palette | command registry, menu command extension | search, execute, reveal source | no command, disabled extension, ready |
-| Content Browser | AssetRegistry, import audit | import, reimport, reveal dependency, open sidecar | empty, stale cook, license blocked, ready |
+| Content Browser | `asset.catalog`, import audit | import, reimport, reveal dependency, open sidecar | empty, stale cook, license blocked, ready |
 | Script Editor | `.astra`, source map, diagnostics | edit, format, compile, jump to command id | parse error, conflict, ready |
 | Graph Editor | visual metadata, policy metadata, graph node extension | edit node, bind command, visual diff, save patch | no provider, conflict, ready |
 | Timeline Editor | TimelineIr, Fence, media preview, timeline track extension | scrub, edit clip, fence, preview, commit | missing asset, fence leak, ready |

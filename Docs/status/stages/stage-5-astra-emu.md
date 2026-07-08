@@ -64,8 +64,8 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 
 **Steps:**
 
-1. 为 Artemis PFS、FVP `.bin`、KrKr XP3、BGI PackFile、Siglus Scene.pck、SoftPAL PAC/DAT 和 Minori PAZ 定义 `VfsMountProvider` capability。
-2. Pack reader 输出 entry table hash、relative key、entry id、offset、size、hash、media kind、compression support 和 diagnostic。
+1. 为 Artemis PFS、FVP `.bin`、KrKr XP3、BGI PackFile、Siglus Scene.pck、SoftPAL PAC/DAT 和 Minori PAZ 定义 `vfs_provider` capability 和 legacy prefix，例如 `fvp:/...`。
+2. Pack reader 输出 entry table hash、`VfsUri`、entry id、offset、size、hash、media kind、compression support 和 diagnostic。
 3. Overlay mount 只允许 profile 声明的 key pattern；同 key 多命中没有 allowlist 时 blocking。
 4. `.astrapkg` 保存 case profile、reader identity/hash、release report 和 sanitized scenario refs，不保存商业 payload。
 5. Release Gate 校验 entry bounds、hash、unsupported compression、reader identity、path/payload redaction 和 package/source consistency。

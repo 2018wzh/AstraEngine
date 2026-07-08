@@ -6,8 +6,8 @@
 
 | 顺序 | 文档 | 范围 |
 | --- | --- | --- |
-| 1 | [asset-vfs-migration.md](asset-vfs-migration.md) | 现有 `astra-asset`、`astra-cook`、`astra-package`、asset registry、package section、TsuiNoSora mount/direct-read evidence 对齐到 Asset VFS |
-| 2 | [plugin-runtime-boundary-migration.md](plugin-runtime-boundary-migration.md) | 现有 plugin registry、action provider、VN extension fixture 对齐到 VFS mount provider 与 gameplay runtime provider selection |
+| 1 | [asset-vfs-migration.md](asset-vfs-migration.md) | 现有 `astra-asset`、`astra-cook`、`astra-package`、旧 asset registry writer、package section、TsuiNoSora mount/direct-read evidence 对齐到 Provider URI Asset VFS |
+| 2 | [plugin-runtime-boundary-migration.md](plugin-runtime-boundary-migration.md) | 现有 plugin registry、action provider、VN extension fixture 对齐到单一 `vfs_provider` slot 与 gameplay runtime provider selection |
 | 3 | [astra-vn-module-layout-migration.md](astra-vn-module-layout-migration.md) | 现有 `astra-vn` 从 Runtime 分区迁到 `Engine/Source/Modules/AstraVN/astra-vn` |
 | 4 | [astra-vn-crate-split-migration.md](astra-vn-crate-split-migration.md) | 现有单 crate `astra-vn` 拆成 AstraVN 多功能 crate，`astra-vn` 收缩为 facade |
 | 5 | [game-runtime-provider-migration.md](game-runtime-provider-migration.md) | 现有 AstraVN runtime facade、VN extension manifest、package sections、release checks 对齐到 `NativeVnRuntimeProvider` |
@@ -17,13 +17,13 @@
 
 迁移已有实现：
 
-- `astra-asset` 的 `AssetId`、sidecar、registry 和 path policy。
+- `astra-asset` 的 `AssetId`、sidecar、`VfsUri`、manifest/catalog DTO 和 path policy。
 - `astra-cook` 的 importer/cook artifact、NativeVN asset sidecar 和 cook audit。
-- `astra-package` 的 package/save container、section table、bounded reader 和 project-level `package_sections`。
+- `astra-package` 的 package/save container、section table、bounded reader、`asset.vfs_manifest`、`asset.catalog` 和 project-level `package_sections`。
 - `astra-vn` 的 module layout、facade、VN state/save、VN extension manifest、package sections 和 release checks。
 - Stage 1 plugin registry、StateMachine action provider 和 `vn-extension-provider` fixture。
 - Editor workflow、module、creator manual 和 Stage 4 状态文档中的 runtime provider switching 口径。
-- TsuiNoSora 的脱敏 mount policy、`mount_probes`、route-bound `mount_assets`、NativeVN asset sidecar/cooked asset/package registry 和 player route evidence。
+- TsuiNoSora 的脱敏 mount policy、`mount_probes`、route-bound `mount_assets`、NativeVN asset sidecar/cooked asset/package VFS manifest/catalog 和 player route evidence。
 
 后续新实现：
 

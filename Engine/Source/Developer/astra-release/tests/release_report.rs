@@ -1,5 +1,8 @@
 use astra_core::Hash256;
-use astra_package::{PackageBuildRequest, PackageBuilder, SectionPayload};
+use astra_package::{
+    AstraContainerBuilder, ContainerKind, PackageBuildRequest, PackageBuilder, PackageManifest,
+    SectionPayload, CURRENT_CONTAINER_VERSION,
+};
 use astra_platform::{
     PlatformCapabilityReport, PlatformId, PlatformSmokeCheck, PlatformSmokeEvidence,
     PlatformSmokeStatus, SdkStatus,
@@ -230,6 +233,185 @@ fn release_gate_blocks_unresolved_plugin_dependency() {
     assert_eq!(
         dependency_check.diagnostic.as_ref().unwrap().code,
         "ASTRA_PLUGIN_DEPENDENCY_UNRESOLVED"
+    );
+}
+
+#[test]
+fn vfs_mount_gate_blocks_missing_vfs_manifest() {
+    let manifest = PackageManifest {
+        schema: "astra.package_manifest.v1".to_string(),
+        package_id: "com.example.legacy".to_string(),
+        profile: "desktop-release".to_string(),
+        container_version: CURRENT_CONTAINER_VERSION,
+    };
+    let blob = AstraContainerBuilder::new(ContainerKind::Package)
+        .add_section(
+            SectionPayload::postcard("package.manifest", "astra.package_manifest.v1", &manifest)
+                .unwrap(),
+        )
+        .add_section(SectionPayload::raw(
+            "schema.registry",
+            "astra.schema_registry.v1",
+            b"{\"schema\":\"astra.schema_registry.v1\",\"schemas\":[]}".to_vec(),
+        ))
+        .write()
+        .unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "desktop-release".to_string(),
+            require_ffmpeg: false,
+            target: None,
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+
+    let vfs_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "vfs.prefix_registry")
+        .unwrap();
+    assert_eq!(vfs_check.status, CheckStatus::Blocked);
+    assert_eq!(
+        vfs_check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_VFS_MANIFEST_MISSING"
+    );
+}
+
+#[test]
+fn vfs_mount_gate_blocks_asset_registry_compat_section() {
+    let mut request = PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "desktop-release",
+        vec![SectionPayload::raw(
+            "asset.characters.hero",
+            "astra.cooked_asset.v1",
+            b"hero".to_vec(),
+        )],
+    );
+    request.extra_sections.push(SectionPayload::raw(
+        "asset.registry",
+        "astra.asset_registry.v1",
+        b"{\"schema\":\"astra.asset_registry.v1\",\"assets\":[]}".to_vec(),
+    ));
+    let blob = PackageBuilder::build(request).unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "desktop-release".to_string(),
+            require_ffmpeg: false,
+            target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+
+    let vfs_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "vfs.uri_format")
+        .unwrap();
+    assert_eq!(vfs_check.status, CheckStatus::Blocked);
+    assert_eq!(
+        vfs_check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_VFS_ASSET_REGISTRY_REMOVED"
+    );
+}
+
+#[test]
+fn vfs_mount_gate_blocks_missing_provider_binding_for_prefix() {
+    let mut request = PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "desktop-release",
+        vec![SectionPayload::raw(
+            "asset.characters.hero",
+            "astra.cooked_asset.v1",
+            b"hero".to_vec(),
+        )],
+    );
+    request.plugin_extension_registry = serde_json::json!({
+        "schema": "astra.plugin_extension_registry.v1",
+        "providers": [],
+        "bindings": [],
+        "conflicts": []
+    })
+    .to_string()
+    .into_bytes();
+    let blob = PackageBuilder::build(request).unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "desktop-release".to_string(),
+            require_ffmpeg: false,
+            target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+
+    let vfs_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "vfs.prefix_registry")
+        .unwrap();
+    assert_eq!(vfs_check.status, CheckStatus::Blocked);
+    assert_eq!(
+        vfs_check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_VFS_PROVIDER_MISSING"
+    );
+}
+
+#[test]
+fn plugin_provider_gate_blocks_unpacked_vfs_prefix_provider() {
+    let mut request = PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "desktop-release",
+        vec![SectionPayload::raw(
+            "asset.characters.hero",
+            "astra.cooked_asset.v1",
+            b"hero".to_vec(),
+        )],
+    );
+    request.plugin_extension_registry = serde_json::json!({
+        "schema": "astra.plugin_extension_registry.v1",
+        "providers": [{
+            "slot": "vfs_provider",
+            "provider_id": "astra.vfs.package",
+            "capability": "vfs.backend.package",
+            "phase": "runtime",
+            "packaged": false
+        }],
+        "bindings": [],
+        "conflicts": []
+    })
+    .to_string()
+    .into_bytes();
+    let blob = PackageBuilder::build(request).unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "desktop-release".to_string(),
+            require_ffmpeg: false,
+            target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+
+    let vfs_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "vfs.prefix_registry")
+        .unwrap();
+    assert_eq!(vfs_check.status, CheckStatus::Blocked);
+    assert_eq!(
+        vfs_check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_VFS_PROVIDER_UNPACKAGED"
     );
 }
 

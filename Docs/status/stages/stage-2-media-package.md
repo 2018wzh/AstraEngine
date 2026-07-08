@@ -1,12 +1,12 @@
 # Stage 2 Media + Package Work
 
-Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability 和 release gate。资产、Cook、Package、headless media、release report、Target manifest、严格 scenario runner、flat StateMachine 和 Await/Fence 基础已落地。Stage 2 当前因 VFS contract 重开：`astra-asset` 还要从 AssetId/sidecar/registry 扩展为 package/local authorized/legacy pack/overlay mount 的统一 contract owner。平台完成边界只覆盖 Windows 和 Web；Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。
+Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS 和 release gate。资产、Cook、Package、headless media、release report、Target manifest、严格 scenario runner、flat StateMachine、Await/Fence 基础以及 `asset.vfs_manifest`/`asset.catalog` package VFS slice 已落地。平台完成边界只覆盖 Windows 和 Web；Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是 Stage 2 完成前置。
 
 ## S2-ASSET-01 AssetId、VFS 基础与 sidecar schema
 
 **ID:** `S2-ASSET-01`
 
-**Goal:** `astra-asset` 提供 AssetId、基础 VFS path policy、AssetRegistry 和 asset sidecar schema。完整 mount family 在 `S2-VFS-01` 中跟踪。
+**Goal:** `astra-asset` 提供 AssetId、基础 source path policy 和 asset sidecar schema。package 内资产真源迁到 `S2-VFS-01` 的 `asset.vfs_manifest`/`asset.catalog`。
 
 **Depends On:** `S1-CORE-01`、`Docs/modules/asset-pipeline.md`
 
@@ -70,23 +70,23 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **ID:** `S2-VFS-01`
 
-**Status:** `REOPENED_SPEC`
+**Status:** `DONE`
 
-**Goal:** `astra-asset` 成为 VFS contract owner，统一 package mount、local authorized mount、legacy pack mount 和 overlay mount；`astra-package` 只作为 package-backed mount source。
+**Goal:** `astra-asset` 成为 VFS contract owner，统一 `provider:/path/file` URI、prefix registry、package mount、local authorized capability、legacy pack backend declaration 和 overlay mount；`astra-package` 只作为 package-backed source。
 
 **Depends On:** `S2-ASSET-01`、`S2-PACKAGE-01`、[Asset VFS Contract](../../contracts/asset-vfs.md)、[Asset VFS Blueprint](../../implementation/asset-vfs.md)
 
-**Target Paths:** `Engine/Source/Runtime/astra-asset/src/vfs.rs`、`Engine/Source/Runtime/astra-asset/src/mount.rs`、`Engine/Source/Runtime/astra-asset/tests/vfs_mount.rs`、`Engine/Source/Developer/astra-release/tests/vfs_mount_gate.rs` planned target
+**Target Paths:** `Engine/Source/Runtime/astra-asset/src/vfs.rs`、`Engine/Source/Runtime/astra-asset/tests/vfs_uri.rs`、`Engine/Source/Runtime/astra-package/tests/package_vfs_mount.rs`、`Engine/Source/Runtime/astra-plugin/tests/vfs_provider_registry.rs`、`Engine/Source/Developer/astra-release/tests/release_report.rs`
 
 **Steps:**
 
-1. 定义 `VfsLocator`、`VfsMountDescriptor`、`VfsResolvedEntry`、mount family、relative key normalization 和 redaction report。
-2. 将 package section reader 包装为 package-backed mount，不让 package reader解释 VN、AI、EMU 或 legacy pack 语义。
-3. 定义 `VfsMountProvider` provider slot，用于 legacy pack reader、authorized local source 和 overlay source。
-4. 实现固定 priority 解析、duplicate key diagnostic、bounds/hash validation 和 overlay allowlist。
-5. Release Gate 校验 mount descriptor、reader identity/hash、entry bounds、hash、media kind、payload/path redaction 和 package/source consistency。
+1. 定义 `VfsUri`、`VfsPrefixDescriptor`、`VfsLayerDescriptor`、`VfsManifestEntry`、`VfsWhiteoutEntry`、`VfsManifest`、`AssetCatalog` 和 redaction rule。
+2. 将 package writer 改为写入 `asset.vfs_manifest` 和 `asset.catalog`，并阻断旧 `asset.registry`。
+3. 定义单一 `vfs_provider` slot 约定；同 slot 允许多个 provider，由 manifest prefix 选择 `provider_id`。
+4. 实现固定 priority overlay 解析、whiteout allowlist、local authorized root host capability、bounds/hash validation 和 URI/path normalization。
+5. Release Gate 校验 URI、prefix/provider/capability、package section bounds/hash、overlay whiteout、catalog 引用和 payload/path redaction。
 
-**Done Evidence:** `cargo test -p astra-asset vfs_mount_descriptor`、`cargo test -p astra-package package_vfs_mount`、`cargo test -p astra-release vfs_mount_gate` 和 `astra test run scenarios/vfs/overlay_resolution.yaml --headless` 通过；report 覆盖 `vfs.package_mount`、`vfs.local_authorized_mount`、`vfs.legacy_pack_mount`、`vfs.overlay_mount`、path leak blocking 和 payload leak blocking。
+**Done Evidence:** `cargo test -p astra-asset vfs_uri`、`cargo test -p astra-asset vfs_overlayfs`、`cargo test -p astra-package package_vfs_mount`、`cargo test -p astra-package package_roundtrip`、`cargo test -p astra-plugin vfs_provider_registry`、`cargo test -p astra-release vfs_mount_gate` 和 `cargo test -p astra-cli --test target_platform tsuinosora_synthetic_gate_runs_internal_and_patch_player_routes` 通过；report 覆盖 `vfs.uri_format`、`vfs.prefix_registry`、`vfs.package_mount`、`vfs.overlay_mount`、`vfs.catalog`、旧 `asset.registry` blocking、path leak blocking 和 payload leak blocking。legacy pack reader 实现仍留 Stage 5。
 
 **Linked Test IDs:** `T-S2-VFS-01`
 

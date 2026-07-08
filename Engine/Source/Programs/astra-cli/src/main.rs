@@ -1177,11 +1177,15 @@ fn build_package_from_cooked(
             MigrationPolicy::current(),
         ));
     }
+    let asset_vfs_manifest = asset_vfs_manifest_from_cooked(&manifest, &artifacts)?;
+    let asset_catalog = asset_catalog_from_cooked(&manifest, &artifacts)?;
     let mut request = PackageBuildRequest::minimal(
         manifest.package_id.clone(),
         manifest.profile.clone(),
         artifacts,
     );
+    request.asset_vfs_manifest = asset_vfs_manifest;
+    request.asset_catalog = asset_catalog;
     request.target_manifest = serde_json::to_vec(&package_target_manifest)?;
     request.platform_eligibility = platform_eligibility(&package_target_manifest, target)?;
     if !manifest.scenario_refs.is_empty() {
@@ -1190,30 +1194,165 @@ fn build_package_from_cooked(
             "scenarios": manifest.scenario_refs,
         }))?;
     }
-    request.asset_registry = serde_json::to_vec(&serde_json::json!({
-        "schema": "astra.asset_registry.v1",
-        "package_id": &manifest.package_id,
-        "profile": &manifest.profile,
-        "assets": manifest.artifacts.iter().filter_map(|artifact| {
-            Some(serde_json::json!({
-                "path": artifact.asset_path.as_ref()?,
-                "role": artifact.asset_role.as_ref()?,
-                "section_id": &artifact.section_id,
-                "schema": &artifact.schema,
-                "sha256": artifact.asset_sha256.as_ref()?,
-                "byte_size": artifact.asset_byte_size?,
-                "type": artifact.asset_type.as_ref()?,
-                "asset_id": artifact.asset_id.as_ref()?,
-            }))
-        }).collect::<Vec<_>>(),
-        "cooked_artifacts": manifest.artifacts.iter().map(|artifact| serde_json::json!({
-            "section_id": &artifact.section_id,
-            "schema": &artifact.schema,
-            "hash": &artifact.hash,
-        })).collect::<Vec<_>>()
-    }))?;
     request.release_summary = br#"{"schema":"astra.release_summary.v1","status":"built"}"#.to_vec();
     PackageBuilder::build(request).map_err(|err| err.to_string().into())
+}
+
+fn asset_vfs_manifest_from_cooked(
+    manifest: &CookManifest,
+    sections: &[SectionPayload],
+) -> Result<Vec<u8>, CliError> {
+    let section_by_id = sections
+        .iter()
+        .map(|section| (section.id.as_str(), section))
+        .collect::<BTreeMap<_, _>>();
+    let entries = manifest
+        .artifacts
+        .iter()
+        .map(|artifact| {
+            let section = section_by_id
+                .get(artifact.section_id.as_str())
+                .ok_or_else(|| format!("missing cooked section {}", artifact.section_id))?;
+            Ok(serde_json::json!({
+                "vfs_uri": artifact_vfs_uri(artifact)?,
+                "layer_id": "package.base",
+                "source": {
+                    "kind": "package_section",
+                    "section_id": artifact.section_id
+                },
+                "offset": 0,
+                "size": section.payload.len() as u64,
+                "hash": Hash256::from_sha256(&section.payload).to_string(),
+                "codec": section_codec_name(&section.codec),
+                "media_kind": artifact_media_kind(artifact),
+                "diagnostics": []
+            }))
+        })
+        .collect::<Result<Vec<_>, CliError>>()?;
+    serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.asset_vfs_manifest.v1",
+        "prefixes": [{
+            "prefix": "package",
+            "provider_id": "astra.vfs.package",
+            "backend": "package",
+            "case_policy": "case_sensitive",
+            "mode": "read_only",
+            "redaction": "shipping",
+            "capabilities": ["package.read"]
+        }],
+        "layers": [{
+            "layer_id": "package.base",
+            "prefix": "package",
+            "priority": 0,
+            "source": {
+                "kind": "package_section",
+                "section_id": "package.manifest"
+            },
+            "targets": [manifest.target],
+            "profiles": [manifest.profile]
+        }],
+        "entries": entries,
+        "whiteouts": []
+    }))
+    .map_err(Into::into)
+}
+
+fn asset_catalog_from_cooked(
+    manifest: &CookManifest,
+    sections: &[SectionPayload],
+) -> Result<Vec<u8>, CliError> {
+    let section_ids = sections
+        .iter()
+        .map(|section| section.id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let assets = manifest
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.asset_path.is_some())
+        .map(|artifact| {
+            if !section_ids.contains(artifact.section_id.as_str()) {
+                return Err(format!("missing cooked asset section {}", artifact.section_id).into());
+            }
+            Ok(serde_json::json!({
+                "asset_id": artifact.asset_id.as_deref().unwrap_or(&artifact.section_id),
+                "vfs_uri": artifact_vfs_uri(artifact)?,
+                "media_kind": artifact_media_kind(artifact),
+                "tags": asset_tags_for_artifact(artifact),
+                "bundle_id": manifest.profile,
+                "chunk_id": "base",
+                "profiles": [manifest.profile]
+            }))
+        })
+        .collect::<Result<Vec<_>, CliError>>()?;
+    serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.asset_catalog.v1",
+        "assets": assets
+    }))
+    .map_err(Into::into)
+}
+
+fn artifact_vfs_uri(artifact: &CookedArtifactRef) -> Result<String, CliError> {
+    let path = artifact
+        .asset_path
+        .as_deref()
+        .map(str::to_string)
+        .unwrap_or_else(|| artifact.section_id.replace('.', "/"));
+    Ok(format!("package:/{}", normalize_vfs_path(&path)?))
+}
+
+fn normalize_vfs_path(path: &str) -> Result<String, CliError> {
+    let normalized = path.replace('\\', "/");
+    if normalized.is_empty()
+        || normalized.starts_with('/')
+        || normalized.starts_with("~/")
+        || normalized.contains("://")
+        || normalized
+            .split('/')
+            .next()
+            .is_some_and(|part| part.ends_with(':'))
+    {
+        return Err(format!("invalid VFS path {path}").into());
+    }
+    let mut parts = Vec::new();
+    for part in normalized.split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." || part.contains(':') || part.chars().any(|ch| ch.is_control()) {
+            return Err(format!("invalid VFS path {path}").into());
+        }
+        parts.push(part);
+    }
+    if parts.is_empty() {
+        return Err(format!("invalid VFS path {path}").into());
+    }
+    Ok(parts.join("/"))
+}
+
+fn section_codec_name(codec: &SectionCodec) -> &'static str {
+    match codec {
+        SectionCodec::Postcard => "postcard",
+        SectionCodec::Raw => "raw",
+        SectionCodec::Zstd => "zstd",
+    }
+}
+
+fn artifact_media_kind(artifact: &CookedArtifactRef) -> String {
+    artifact
+        .asset_role
+        .as_deref()
+        .or(artifact.asset_type.as_deref())
+        .unwrap_or("data")
+        .to_string()
+}
+
+fn asset_tags_for_artifact(artifact: &CookedArtifactRef) -> Vec<&str> {
+    artifact
+        .asset_role
+        .as_deref()
+        .into_iter()
+        .chain(artifact.asset_type.as_deref())
+        .collect()
 }
 
 fn build_standalone_bundle(

@@ -27,10 +27,12 @@ pub struct ReleaseCheckRecord {
 | runtime | `runtime_provider.binding` | target manifest, provider descriptor | missing gameplay runtime provider, fingerprint mismatch, profile not supported or provider selected by load order | target id, runtime provider id, profile, descriptor hash |
 | package | `package.integrity` | package container | invalid section/hash/bounds | section table hash |
 | package | `package.cooked_project` | package `compiled.project` section | release profile package lacks cook/project artifact, wrong schema or mismatched package metadata | section id, schema, target, profile |
-| package | `vfs.package_mount` | package section table, VFS mount descriptor | section ref missing, hash mismatch, bounds invalid, codec unsupported or schema mismatch | mount id, section id, hash, offset, size |
-| package | `vfs.local_authorized_mount` | authorized mount descriptor, host capability | alias missing, relative key invalid, permission missing, root leaks into report or source hash mismatch | alias, key count, redaction status |
-| package | `vfs.legacy_pack_mount` | legacy pack reader report | reader identity missing, entry table hash missing, duplicate key, unsupported compression, offset/size out of bounds or media kind unknown | reader id, pack alias, entry count, hash |
-| package | `vfs.overlay_mount` | overlay policy, base mount report | overlay lacks allowlist, priority conflict, base mount missing, source hash mismatch or payload/path leak | overlay id, base mount id, priority, key pattern count |
+| package | `vfs.uri_format` | `asset.vfs_manifest` | `VfsUri` invalid, `asset.registry` present, host path or inline payload detected | `vfs_uri`, section id, diagnostic |
+| package | `vfs.prefix_registry` | prefix registry, `plugin.extension_registry` | prefix missing, provider missing, provider not packaged or capability mismatch | prefix, provider id, backend capability |
+| package | `vfs.package_mount` | package section table, VFS entries | section ref missing, hash mismatch, bounds invalid, codec unsupported or schema mismatch | `vfs_uri`, section id, hash, offset, size |
+| package | `vfs.catalog` | `asset.catalog`, VFS entries | catalog schema invalid, duplicate asset id or catalog URI without VFS entry | asset id, `vfs_uri`, media kind |
+| package | `vfs.overlay_mount` | overlay policy, base mount report | overlay lacks allowlist, priority conflict, base mount missing, source hash mismatch or payload/path leak | `vfs_uri`, layer id, priority, allowlist id |
+| package | `vfs.legacy_pack_mount` | legacy pack reader report | reader identity missing, entry table hash missing, duplicate key, unsupported compression, offset/size out of bounds or media kind unknown | reader id, prefix, entry count, hash |
 | media | `media.decode.capability` | platform report | required codec missing | provider id, codec list |
 | vn | `vn.compiled_story` | package `vn.compiled_story` section | classic/modern profile 缺 section、解码失败、schema 错误或无 story/state | story hash, story count, state count, route node count |
 | vn | `vn.profile_manifest` | package `vn.profile_manifest` section | classic/modern profile 缺 section、未声明 validation profile 或 target 不匹配 | target, profile, profile count |

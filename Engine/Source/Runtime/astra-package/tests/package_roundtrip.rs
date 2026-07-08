@@ -129,7 +129,8 @@ fn package_roundtrip_builder_writes_required_runtime_sections() {
     for section in [
         "package.manifest",
         "schema.registry",
-        "asset.registry",
+        "asset.vfs_manifest",
+        "asset.catalog",
         "media.manifest",
         "provider.policy",
         "plugin.extension_registry",
@@ -143,6 +144,7 @@ fn package_roundtrip_builder_writes_required_runtime_sections() {
     ] {
         assert!(package.has_section(section), "missing {section}");
     }
+    assert!(!package.has_section("asset.registry"));
     let policy = package.container().read_section("provider.policy").unwrap();
     let policy: serde_json::Value = serde_json::from_slice(&policy).unwrap();
     assert_eq!(policy["profile"], "desktop-release");

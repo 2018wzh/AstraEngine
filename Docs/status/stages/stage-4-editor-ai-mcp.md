@@ -213,7 +213,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 1. 让 `ai.model_bundle_manifest` 只引用 VFS locator、package section ref、hash、codec、license/provenance 和 execution provider evidence。
 2. 禁止 Shipping provider 读取 loose model sidecar、runtime binary、tokenizer 或 custom op；开发期下载也必须进入 vendor cache 或 package-backed VFS。
-3. Context Pack 的 read/search tool 只返回脱敏 relative key、hash、section ref 和 source span，不返回本地 root、provider secret 或 payload。
+3. Context Pack 的 read/search tool 只返回脱敏 `VfsUri`、hash、section ref 和 source span，不返回本地 root、provider secret 或 payload。
 4. Generated artifact save section 记录 artifact section ref、chunk hash、validator status 和 replay policy，不重新请求 provider。
 5. Release Gate 增加 `ai.model_bundle_vfs_mount`、`ai.context_pack_redaction` 和 package/source consistency check。
 

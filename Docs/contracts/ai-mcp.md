@@ -34,7 +34,7 @@ ModelBundle 通过 cook/package 成为一等资产。`ai.model_bundle_manifest` 
 
 Editor Copilot 和 Content Generation 通过 AI provider profile 集成 OpenAI、Ollama、ComfyUI、ONNX Runtime 等后端。Trusted session 必须显式授权项目、路径范围、操作类型和时长；每次写入生成 patch、audit event、undo checkpoint 和 release gate provenance。
 
-未受信 session 的输出进入 Review Queue。拒绝的 draft 不进入 AssetRegistry、Cook 或 Package。ComfyUI 这类重媒体 workflow 默认只产生 Editor draft sidecar，发布运行时不现场生成重媒体资产。
+未受信 session 的输出进入 Review Queue。拒绝的 draft 不进入 Cook、`asset.vfs_manifest`、`asset.catalog` 或 Package。ComfyUI 这类重媒体 workflow 默认只产生 Editor draft sidecar，发布运行时不现场生成重媒体资产。
 
 ## MCP Tool Policy
 

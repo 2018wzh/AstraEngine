@@ -49,7 +49,7 @@ pub struct RuntimeStepOutput {
 }
 ```
 
-所有 DTO 只能携带 stable id、hash、section ref、relative key、source span、capability report 和 serde/postcard payload。Luau VM handle、legacy VM object、native renderer/audio handle、Editor widget、local root、provider secret 和商业 payload 不得跨 ABI 或进入 save/replay/report。
+所有 DTO 只能携带 stable id、hash、section ref、`VfsUri`、source span、capability report 和 serde/postcard payload。Luau VM handle、legacy VM object、native renderer/audio handle、Editor widget、local root、provider secret 和商业 payload 不得跨 ABI 或进入 save/replay/report。
 
 ## Editor Metadata
 

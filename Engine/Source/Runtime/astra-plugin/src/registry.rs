@@ -123,8 +123,10 @@ impl PluginRegistrar {
             capability = %provider.capability,
             "plugin.provider.register"
         );
-        self.services
-            .register_default(provider.slot.0.clone(), provider.provider_id.clone());
+        if !is_multi_provider_slot(&provider.slot) {
+            self.services
+                .register_default(provider.slot.0.clone(), provider.provider_id.clone());
+        }
         let selected_provider = self.services.get(&provider.slot.0).map(str::to_string);
         self.extensions
             .register(provider, selected_provider.as_deref());
@@ -211,4 +213,8 @@ impl PluginRegistrar {
             dependencies: self.dependency_graph.clone(),
         }
     }
+}
+
+fn is_multi_provider_slot(slot: &EngineModuleSlot) -> bool {
+    slot.0 == "vfs_provider"
 }

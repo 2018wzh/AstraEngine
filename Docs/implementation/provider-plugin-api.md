@@ -82,7 +82,7 @@ pub struct ExtensionRegistrationReport {
 }
 ```
 
-Extension point 覆盖 provider slot、game runtime provider、VFS mount provider、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check 和 legacy family provider。注册必须显式声明 id、phase、capability、permission、packaged eligibility、conflict policy 和 source span。冲突时不使用加载顺序裁决；项目 manifest 或 Plugin Manager 必须选定一个 provider。
+Extension point 覆盖 provider slot、game runtime provider、VFS provider、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check 和 legacy family provider。注册必须显式声明 id、phase、capability、permission、packaged eligibility、conflict policy 和 source span。冲突时不使用加载顺序裁决；项目 manifest 或 Plugin Manager 必须选定一个 provider。
 
 Plugin Manager 保存 project enable/disable 状态，读取 Stage 1/2 的 dependency graph，解释缺失依赖、版本冲突、权限不足和 packaged 裁剪原因。Release Gate 输出 `plugin.extension_registry` 和 `plugin.dependency_graph` evidence。
 
@@ -146,11 +146,11 @@ pub trait AiProvider: StableProvider {
     fn invoke(&self, request: AiInvocationRequest) -> ProviderResult<AiInvocationResult>;
 }
 
-pub trait VfsMountProvider: StableProvider {
-    fn capability(&self) -> VfsMountCapabilityReport;
+pub trait VfsProvider: StableProvider {
+    fn capability(&self) -> VfsProviderCapabilityReport;
     fn probe(&self, request: VfsProbeRequest) -> ProviderResult<VfsProbeReport>;
     fn open_mount(&self, request: VfsOpenMountRequest) -> ProviderResult<VfsMountHandle>;
-    fn resolve(&self, handle: VfsMountHandle, locator: VfsLocator) -> ProviderResult<VfsResolvedEntry>;
+    fn resolve(&self, handle: VfsMountHandle, uri: VfsUri) -> ProviderResult<VfsResolvedEntry>;
     fn read(&self, handle: VfsMountHandle, entry: VfsResolvedEntry, range: ByteRange) -> ProviderResult<BoundedBytes>;
     fn close_mount(&self, handle: VfsMountHandle) -> ProviderResult<VfsCloseReport>;
 }
@@ -166,7 +166,9 @@ pub trait ProductRuntimeProvider: StableProvider {
 }
 ```
 
-Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AiProvider`、`MCPToolProvider`、`TranslationProvider`、`VfsMountProvider`、`ProductRuntimeProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref、VFS locator 和 capability report。Stage 3 的 AstraVN 功能 crate 负责公开 VN command、presentation command、Luau policy bundle、Graph/Timeline metadata extension id 和 `NativeVnRuntimeProvider` 绑定；`astra-vn` 只作为 Rust dylib facade 和兼容 re-export，稳定插件边界仍由 `astra-plugin-abi` 承担。
+Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AiProvider`、`MCPToolProvider`、`TranslationProvider`、`VfsProvider`、`ProductRuntimeProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref、`VfsUri` 和 capability report。Stage 3 的 AstraVN 功能 crate 负责公开 VN command、presentation command、Luau policy bundle、Graph/Timeline metadata extension id 和 `NativeVnRuntimeProvider` 绑定；`astra-vn` 只作为 Rust dylib facade 和兼容 re-export，稳定插件边界仍由 `astra-plugin-abi` 承担。
+
+VFS backend provider 全部注册到同一个 `vfs_provider` slot。该 slot 允许多个 provider 共存，manifest 的 prefix registry 负责选择 `provider_id`；release gate 只在同一 prefix 缺少明确 provider、provider 未打包、capability mismatch 或依赖 unresolved 时阻断。`game_runtime_provider` 不采用这个多 provider 规则，仍要求目标显式绑定一个玩法 runtime provider。
 
 `AiProvider` 是 Editor 和 MCP host 的后端适配。OpenAI、Ollama、ComfyUI 和 ONNX Runtime 第一方 provider 以普通插件注册，默认禁用，由项目 manifest 或 release profile 显式绑定。Runtime 不直接接收 `AiProvider` trait object，只通过 `McpAiSession` 获取 typed Intent、tool result、generated artifact chunk 和 committed output。
 

@@ -262,7 +262,9 @@ dependencies = [
  "camino",
  "schemars",
  "serde",
+ "serde_json",
  "serde_yaml",
+ "tempfile",
  "thiserror 1.0.69",
  "tracing",
 ]
@@ -526,6 +528,7 @@ dependencies = [
 name = "astra-release"
 version = "0.1.0"
 dependencies = [
+ "astra-asset",
  "astra-core",
  "astra-media",
  "astra-package",

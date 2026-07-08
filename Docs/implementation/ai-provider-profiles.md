@@ -40,7 +40,7 @@ Editor 凭据保存在用户全局 secret store。Runtime save/package 只保存
 | ComfyUI | image/video workflow、asset draft sidecar | 默认 Editor-only | local endpoint 或 user secret | workflow fixture，真实 smoke opt-in |
 | ONNX Runtime | package 内 LLM、embedding、image generation、speech/TTS | 可用于 Runtime MCP session | 无 cloud secret；模型资源走 package/VFS 和可选 section encryption | ModelBundle manifest、VFS/package lookup、真实目标 EP smoke opt-in |
 
-OpenAI、Ollama 和 ONNX Runtime 可以服务 Runtime Director。ComfyUI 默认只生成 Editor draft；作者接受后，资产才进入 AssetRegistry 和 Cook。ONNX Runtime 的 Editor 生成物可以走 draft 流程；Shipping Runtime 生成物必须写入 committed output 和 save section。
+OpenAI、Ollama 和 ONNX Runtime 可以服务 Runtime Director。ComfyUI 默认只生成 Editor draft；作者接受后，资产才进入 Cook，并在 package 阶段写入 VFS manifest/catalog。ONNX Runtime 的 Editor 生成物可以走 draft 流程；Shipping Runtime 生成物必须写入 committed output 和 save section。
 
 ## Packaged ONNX Runtime Provider
 

@@ -19,13 +19,13 @@ Acceptance:
 ## Phase 2: Archive And Media Resolver
 
 - Implement `.bin` reader with bounds checks for metadata overflow, missing filename offsets and out-of-range entries.
-- Support `folder/name` VFS paths and loose file override.
+- Support `fvp:/folder/name` VFS URIs and loose file override through overlay.
 - Return `Read + Seek` streams for media decoders.
 - Classify `hzc1`, `OggS`, `RIFF` and ASF/WMV magic.
 
 Acceptance:
 
-- `bgm/001`, `voice/01000010`, `se/001` and `graph_bg/BG001_000` open through VFS.
+- `fvp:/bgm/001`, `fvp:/voice/01000010`, `fvp:/se/001` and `fvp:/graph_bg/BG001_000` open through VFS.
 - Invalid `../` paths are rejected.
 - Reports store pack/entry/offset/size/hash prefix only.
 
