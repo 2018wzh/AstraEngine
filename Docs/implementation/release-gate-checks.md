@@ -24,8 +24,13 @@ pub struct ReleaseCheckRecord {
 | plugin | `plugin.fingerprint` | plugin descriptor | version or feature mismatch | descriptor hash |
 | plugin | `plugin.extension_registry` | extension registration report | conflict, missing phase, invalid extension point or packaged trim error | extension id, phase, plugin id |
 | plugin | `plugin.dependency_graph` | plugin enablement report | missing required dependency or unresolved version conflict | dependency edge, selected provider |
+| runtime | `runtime_provider.binding` | target manifest, provider descriptor | missing gameplay runtime provider, fingerprint mismatch, profile not supported or provider selected by load order | target id, runtime provider id, profile, descriptor hash |
 | package | `package.integrity` | package container | invalid section/hash/bounds | section table hash |
 | package | `package.cooked_project` | package `compiled.project` section | release profile package lacks cook/project artifact, wrong schema or mismatched package metadata | section id, schema, target, profile |
+| package | `vfs.package_mount` | package section table, VFS mount descriptor | section ref missing, hash mismatch, bounds invalid, codec unsupported or schema mismatch | mount id, section id, hash, offset, size |
+| package | `vfs.local_authorized_mount` | authorized mount descriptor, host capability | alias missing, relative key invalid, permission missing, root leaks into report or source hash mismatch | alias, key count, redaction status |
+| package | `vfs.legacy_pack_mount` | legacy pack reader report | reader identity missing, entry table hash missing, duplicate key, unsupported compression, offset/size out of bounds or media kind unknown | reader id, pack alias, entry count, hash |
+| package | `vfs.overlay_mount` | overlay policy, base mount report | overlay lacks allowlist, priority conflict, base mount missing, source hash mismatch or payload/path leak | overlay id, base mount id, priority, key pattern count |
 | media | `media.decode.capability` | platform report | required codec missing | provider id, codec list |
 | vn | `vn.compiled_story` | package `vn.compiled_story` section | classic/modern profile 缺 section、解码失败、schema 错误或无 story/state | story hash, story count, state count, route node count |
 | vn | `vn.profile_manifest` | package `vn.profile_manifest` section | classic/modern profile 缺 section、未声明 validation profile 或 target 不匹配 | target, profile, profile count |
@@ -40,6 +45,7 @@ pub struct ReleaseCheckRecord {
 | vn | `vn.system_ui_profile` | `classic` / `modern` VN profile | required system page missing or missing policy binding | page count, required count, missing count |
 | vn | `vn.system_ui_profile` | package `vn.system_story_manifest` and `vn.system_ui_profile_manifest` sections | save migration missing, gallery/replay unlock source missing, localization coverage missing, or save/load/config/backlog/gallery/replay/chart/voice/localization missing | page count, required count, unlock source count, localization locale count, save migrator, diagnostic count |
 | vn | `vn.advanced_presentation` | opt-in `vn.advanced_presentation_manifest` 和 scenario report | advanced profile 缺多层 stage、camera、video layer、timeline join/cancel、fallback、voice sync 或 effect budget evidence | story hash, timeline id count, evidence count |
+| vn | `runtime_provider.native_vn` | target manifest, VN provider descriptor, package sections | missing `NativeVnRuntimeProvider`, VN package sections not bound through provider, release checks not declared or replay hash mismatch | provider id, package section count, release check count, replay hash |
 | player | `player.full_playable` | Windows/Web live player automation report | missing input transcript, missing platform host evidence, unchanged or blank visual region, silent required audio meter, direct runtime command path, DOM synthetic click or dump-dom route runner | platform, input event source, focus state, region hash before/after, audio meter summary, route check count |
 | vn | `tsuinosora.reference_evidence` | package `tsuinosora.reference_evidence` section | missing section, schema mismatch, non-pass status, missing reference hash, fixed `Title.png`/`Game.png` hash or dimension mismatch, path leak or payload-like field leak | reference count, section id, diagnostic |
 | vn | `tsuinosora.asset_analysis` | package `tsuinosora.asset_analysis` section | empty asset evidence, quarantine asset, schema mismatch, non-pass status, path leak or payload-like field leak | asset count, quarantine count, diagnostic |
@@ -52,6 +58,7 @@ pub struct ReleaseCheckRecord {
 | ai_mcp | `ai.provider_profile` | provider descriptor, project binding | fingerprint, secret handle, network egress, runtime eligibility or model fingerprint missing | provider id, profile id, model fingerprint |
 | ai_mcp | `ai.model_bundle` | ModelBundle manifest, package section table | manifest missing, payload routed through `package_sections`, section ref/hash/codec/migration missing or license/provenance missing | bundle id, section id, hash, license status |
 | ai_mcp | `ai.onnx_runtime_pack` | runtime vendor cache, package/VFS mount | reduced runtime not locked, release downloads runtime, VFS mount unresolved or custom op sidecar lacks hash/license/platform declaration | runtime fingerprint, VFS mount id, sidecar id |
+| ai_mcp | `ai.model_bundle_vfs_mount` | ModelBundle manifest, Asset VFS report | model, tokenizer, runtime dependency or custom op sidecar reads loose shipping path, VFS locator unresolved or redaction missing | bundle id, mount id, section id, locator hash |
 | ai_mcp | `ai.onnx_execution_provider` | platform capability, target runtime smoke | required primary EP missing, operator coverage incomplete, CPU fallback observed or target run evidence missing | platform id, EP, model fingerprint, operator coverage |
 | ai_mcp | `ai.runtime_provider_startup` | release profile, platform capability | Live AI provider required by profile is unavailable at startup | provider profile, platform id, diagnostic |
 | ai_mcp | `ai.provider_free_replay` | save/replay | provider required during replay | committed output hash |
@@ -60,11 +67,15 @@ pub struct ReleaseCheckRecord {
 | ai_mcp | `ai.debug_trace_redaction` | package/report/debug profile | release artifact contains plaintext prompt, player text, commercial payload or secret | trace id, redaction status |
 | ai_mcp | `ai.player_consent` | runtime profile, save memory | cloud provider reads player memory without first-run consent | consent id, provider profile |
 | ai_mcp | `mcp.context_permission` | MCP audit | read/search/tool call exceeds session scope or Context Pack is not redacted | session id, tool id, source ref |
+| ai_mcp | `ai.context_pack_redaction` | Context Pack report, VFS resolve report | Context Pack contains local root, provider secret, payload body or unbounded source text | context pack id, source count, redaction status |
 | ai_mcp | `mcp.command_allowlist` | MCP command report | undeclared command or arbitrary shell execution | command id, template id |
 | platform | `platform.eligibility` | capability report | profile requirement missing | platform id, capability id |
 | platform | `platform.capability_report` | capability report | missing SDK, missing required smoke, blocked required smoke or invalid schema | platform id, SDK status, smoke id, diagnostic |
 | emu | `emu.artemis_full_flow` | local case report | trace/snapshot/redaction failure | trace hash, redaction status |
+| emu | `emu.game_runtime_provider` | target manifest, `AstraEmuRuntimeProvider` descriptor, local case report | missing provider binding, provider does not create RuntimeWorld, save/replay hash missing or family bypasses provider | provider id, target id, session id, replay hash |
 | emu | `emu.legacy_runtime_provider` | family plugin report | family bypasses RuntimeWorld or missing provider session binding | family id, provider id, session id |
+| emu | `emu.vm_state_machine_trace` | family scheduler/context trace | context ordering unstable, await boundary missing, basic block not bounded, snapshot hash mismatch or fault isolation missing | family id, context count, trace hash, snapshot hash |
+| emu | `emu.legacy_pack_vfs` | legacy pack VFS report | reader identity missing, pack entry out of bounds, hash mismatch, overlay not allowed or local root/payload leaked | family id, pack alias, entry count, redaction status |
 | emu | `emu.auto_probe` | auto probe report | selected family is not reproducible or override reason missing | selected family, priority list, override reason |
 | emu | `emu.trusted_luau_policy` | trusted script report | denied capability mutates runtime or script isolation missing | script id, denied capability, isolation status |
 | emu | `emu.text_redaction` | text pipeline report | report contains full commercial text without local opt-in | text hash, source ref, dump policy |

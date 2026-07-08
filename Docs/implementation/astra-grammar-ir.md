@@ -1,6 +1,6 @@
 # `.astra` Grammar And IR
 
-`.astra` Stage 3 runtime parser 采用轻量 line lexer 与 typed compiler pass，当前语法真源是 `Engine/Source/Runtime/astra-vn/src/parser.rs` 和 `compiler.rs` 中的 serde 类型与 diagnostic 测试。后续 Editor lossless round-trip 可以再引入 CST/parser generator，但不能让 Editor state 混入 runtime IR。
+`.astra` Stage 3 runtime parser 采用轻量 line lexer 与 typed compiler pass。目标语法真源位于 `Engine/Source/Modules/AstraVN/astra-vn-script` 的 serde 类型与 diagnostic 测试；当前单 crate 实现会按迁移计划拆入该 crate。后续 Editor lossless round-trip 可以再引入 CST/parser generator，但不能让 Editor state 混入 runtime IR。
 
 ## Grammar Shape
 

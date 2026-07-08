@@ -82,7 +82,7 @@ pub struct ExtensionRegistrationReport {
 }
 ```
 
-Extension point 覆盖 provider slot、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check 和 legacy family provider。注册必须显式声明 id、phase、capability、permission、packaged eligibility、conflict policy 和 source span。冲突时不使用加载顺序裁决；项目 manifest 或 Plugin Manager 必须选定一个 provider。
+Extension point 覆盖 provider slot、game runtime provider、VFS mount provider、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check 和 legacy family provider。注册必须显式声明 id、phase、capability、permission、packaged eligibility、conflict policy 和 source span。冲突时不使用加载顺序裁决；项目 manifest 或 Plugin Manager 必须选定一个 provider。
 
 Plugin Manager 保存 project enable/disable 状态，读取 Stage 1/2 的 dependency graph，解释缺失依赖、版本冲突、权限不足和 packaged 裁剪原因。Release Gate 输出 `plugin.extension_registry` 和 `plugin.dependency_graph` evidence。
 
@@ -145,9 +145,28 @@ pub trait AiProvider: StableProvider {
     fn open_session(&self, request: AiSessionRequest) -> ProviderResult<AiSessionId>;
     fn invoke(&self, request: AiInvocationRequest) -> ProviderResult<AiInvocationResult>;
 }
+
+pub trait VfsMountProvider: StableProvider {
+    fn capability(&self) -> VfsMountCapabilityReport;
+    fn probe(&self, request: VfsProbeRequest) -> ProviderResult<VfsProbeReport>;
+    fn open_mount(&self, request: VfsOpenMountRequest) -> ProviderResult<VfsMountHandle>;
+    fn resolve(&self, handle: VfsMountHandle, locator: VfsLocator) -> ProviderResult<VfsResolvedEntry>;
+    fn read(&self, handle: VfsMountHandle, entry: VfsResolvedEntry, range: ByteRange) -> ProviderResult<BoundedBytes>;
+    fn close_mount(&self, handle: VfsMountHandle) -> ProviderResult<VfsCloseReport>;
+}
+
+pub trait ProductRuntimeProvider: StableProvider {
+    fn descriptor(&self) -> ProductRuntimeDescriptor;
+    fn prepare(&self, request: RuntimePrepareRequest) -> ProviderResult<RuntimePrepareReport>;
+    fn open(&self, request: RuntimeOpenRequest) -> ProviderResult<GameRuntimeSessionId>;
+    fn step(&self, session: GameRuntimeSessionId, input: RuntimeStepInput) -> ProviderResult<RuntimeStepOutput>;
+    fn save(&self, session: GameRuntimeSessionId, request: RuntimeSaveRequest) -> ProviderResult<RuntimeSaveSections>;
+    fn restore(&self, session: GameRuntimeSessionId, request: RuntimeRestoreRequest) -> ProviderResult<RuntimeRestoreReport>;
+    fn shutdown(&self, session: GameRuntimeSessionId) -> ProviderResult<RuntimeShutdownReport>;
+}
 ```
 
-Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AiProvider`、`MCPToolProvider`、`TranslationProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref 和 capability report。Stage 3 的 `astra-vn` Rust dylib facade 负责公开 VN command、presentation command、Luau policy bundle 和 Graph/Timeline metadata extension id；稳定插件边界仍由 `astra-plugin-abi` 承担。
+Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AiProvider`、`MCPToolProvider`、`TranslationProvider`、`VfsMountProvider`、`ProductRuntimeProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref、VFS locator 和 capability report。Stage 3 的 AstraVN 功能 crate 负责公开 VN command、presentation command、Luau policy bundle、Graph/Timeline metadata extension id 和 `NativeVnRuntimeProvider` 绑定；`astra-vn` 只作为 Rust dylib facade 和兼容 re-export，稳定插件边界仍由 `astra-plugin-abi` 承担。
 
 `AiProvider` 是 Editor 和 MCP host 的后端适配。OpenAI、Ollama、ComfyUI 和 ONNX Runtime 第一方 provider 以普通插件注册，默认禁用，由项目 manifest 或 release profile 显式绑定。Runtime 不直接接收 `AiProvider` trait object，只通过 `McpAiSession` 获取 typed Intent、tool result、generated artifact chunk 和 committed output。
 
@@ -164,7 +183,13 @@ pub struct LegacyFamilyProviderRegistration {
 }
 ```
 
-AstraEMU family plugin 使用普通 extension registry 注册，不拥有私有 loader 通道。family plugin 注册一个 `LegacyRuntimeProvider` facade；archive reader、旧脚本 VM、media bridge 和 snapshot serializer 都留在 provider session 内。Provider 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
+AstraEMU family plugin 使用普通 extension registry 注册，不拥有私有 loader 通道。family plugin 注册一个 `LegacyRuntimeProvider` facade；archive reader、旧脚本 VM、media bridge 和 snapshot serializer 都留在 provider session 内。`LegacyRuntimeProvider` 位于 `AstraEmuRuntimeProvider` 之下，不是新的 gameplay runtime selector。Provider 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
+
+## Game Runtime Provider
+
+`ProductRuntimeProvider` 是 packaged `Game` target 的玩法 runtime selector。NativeVN、AstraEMU 和后续 AstraRPG 都通过这个 slot 显式绑定；AstraVN 不作为所有玩法的基类。Provider 返回的 step output 必须是可序列化 effect list、AwaitToken、presentation/audio command、diagnostic、trace 和 save section ref，由 host adapter 应用到 `DeterministicActionContext`。
+
+`NativeVnRuntimeProvider` 包装现有 AstraVN Core、VN package sections 和 VN release checks。`AstraEmuRuntimeProvider` 包装 Manager/runtime bridge，并在内部选择 family `LegacyRuntimeProvider`。`AstraRpgRuntimeProvider` 只保留同级接入边界，当前不声明已有实现。
 
 ## Permissions
 

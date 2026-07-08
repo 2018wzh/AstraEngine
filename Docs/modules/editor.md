@@ -1,6 +1,6 @@
 # AstraEditor Module
 
-AstraEditor 使用 Qt/QML + Rust core。Editor 是 creator workflow 和 debugger，不是 packaged runtime 的前置条件。
+AstraEditor 使用 Qt/QML + Rust core。Editor 是 creator workflow 和 debugger，不是 packaged runtime 的前置条件。Editor shell 不绑定单一玩法类型，项目必须通过 `ProductRuntimeProvider` 显式选择 AstraVN、AstraEMU 或后续 AstraRPG。
 
 ## V1 面板
 
@@ -19,9 +19,15 @@ AstraEditor 使用 Qt/QML + Rust core。Editor 是 creator workflow 和 debugger
 - Package / Release Gate Panel
 - AI Review Queue / Trusted Session Audit
 
+## Runtime Provider Switching
+
+Project Wizard、Project Settings、Plugin Manager、PIE、Debugger 和 Release Gate 都读取 selected `ProductRuntimeProvider` 的 `RuntimeEditorMetadata`。公共 shell 保持不变；Script、Graph、Timeline、Map、Quest、legacy trace 等玩法面板由 provider metadata 决定。
+
+NativeVN 当前提供 `.astra` Script、VN Graph、Timeline、System UI 和 Luau policy surface。AstraEMU/AstraRPG 仍是 planned peer runtime；Editor 只预留 case profile、legacy pack VFS、family trace、Map、Quest、Battle/Party/Inventory 等接入边界，不把它们写成已实现 UI。
+
 ## Editor Runtime Session
 
-PIE 使用同一 RuntimeWorld public API。Editor 通过 debug session 查看 Actor、Component、StateMachine、EventQueue、AwaitToken、ScriptSnapshot、FilterGraph、AudioGraph 和 ReleaseReport。
+PIE 使用同一 RuntimeWorld public API，并由 selected gameplay runtime provider 打开 Game target session。Editor 通过 debug session 查看 Actor、Component、StateMachine、EventQueue、AwaitToken、ScriptSnapshot、FilterGraph、AudioGraph、RuntimeEditorMetadata 和 ReleaseReport。
 
 ## Plugin Manager
 

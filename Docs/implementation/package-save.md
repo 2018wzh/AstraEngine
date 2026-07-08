@@ -2,6 +2,8 @@
 
 Package and save share one self-describing container implemented by `astra-package`. Rust types are schema source; section payload defaults to `serde` + `postcard`, with `Raw` and `Zstd` available for cooked assets.
 
+`.astrapkg` 是控制面和证据面容器。它保存 target、provider policy、schema、compiled IR、cooked asset、ModelBundle、scenario refs、release summary 和脱敏 report section；legacy pack reader 不能替代 `.astrapkg`，只能作为 Asset VFS 的 `legacy_pack` mount source。
+
 ## Container
 
 ```rust
@@ -80,6 +82,14 @@ AI ModelBundle 是 package 的一等 cook artifact，不使用 project-level `pa
 ModelBundle manifest 只保存 package/VFS section ref，不记录源文件绝对路径。Bundled、on-demand 和 external 模型分发都必须落成 `.astrapkg`、patch package、DLC package 或受控 package source，由 VFS mount 解析；不允许 Shipping provider 直接读取 loose sidecar。
 
 Project-level `package_sections` descriptor 只适合脱敏 report 或 manifest。它不能写入模型权重、tokenizer、runtime binary、custom op、商业文本、截图、音频、影片或任何可复原源数据。
+
+## Package-backed VFS
+
+`astra-package` 暴露 package-backed mount source。VFS 层通过 section id、offset、length、codec、hash 和 schema 读取 package entry；package reader 本身不解释 VN、AI、EMU 或 legacy pack 语义。
+
+VFS mount family 包括 package mount、local authorized mount、legacy pack mount 和 overlay mount。`astra-package` 只实现 package mount；FVP `.bin`、XP3、PFS、Scene.pck、PAC/DAT、PAZ 等旧引擎资源包必须由 `VfsMountProvider` 解析后挂载为 `legacy_pack`，并把 reader identity、entry table hash、entry offset、size、hash、media kind 和 diagnostic 写入 release report。
+
+Package validation report 可以引用 VFS resolve report，但只记录 alias、relative key、section or entry id、offset、size、hash、codec、media kind 和 diagnostic。它不能写本地 root、payload bytes、商业文本、截图、音频、影片、bytecode、provider secret 或 native handle。
 
 ## Save Sections
 

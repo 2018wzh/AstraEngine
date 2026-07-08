@@ -1,14 +1,14 @@
 # Stage Work
 
-本目录把路线图拆成可执行工作项。Stage 1-2 已实现基础闭环；Stage 3-6 记录后续目标、步骤和验收证据。当前代码完成度和下一步顺序见 [implementation-plan](../implementation-plan.md)。
+本目录把路线图拆成可执行工作项。Stage 1 已实现基础闭环；Stage 2 因 VFS contract 重开，Stage 3-5 因 gameplay runtime 和 EmulatorCore 设计对齐继续推进，Stage 6 记录平台补齐目标。当前代码完成度和下一步顺序见 [implementation-plan](../implementation-plan.md)。
 
 | 文档 | 内容 |
 | --- | --- |
 | [stage-1-enginecore.md](stage-1-enginecore.md) | EngineCore、Runtime、Save/Replay、Plugin ABI、Target manifest 和 headless test，已实现 |
-| [stage-2-media-package.md](stage-2-media-package.md) | Asset/Cook/Package、Media provider、Platform capability 和 release report |
-| [stage-3-astra-vn.md](stage-3-astra-vn.md) | `astra-vn` Rust dylib facade、`.astra`、AstraVN Core、Game target、Luau policy、standard commands、system UI、full playthrough 和 Windows/Web live player automation |
+| [stage-2-media-package.md](stage-2-media-package.md) | Asset/Cook/Package、Asset VFS、Media provider、Platform capability 和 release report |
+| [stage-3-astra-vn.md](stage-3-astra-vn.md) | AstraVN module layout、多功能 crate 拆分、facade-only `astra-vn` Rust dylib、`NativeVnRuntimeProvider`、`.astra`、AstraVN Core、Game target、Luau policy、standard commands、system UI、full playthrough 和 Windows/Web live player automation |
 | [stage-4-editor-ai-mcp.md](stage-4-editor-ai-mcp.md) | Editor target、Editor workflow、PIE、Release Gate UI、Runtime AI 和 MCP |
-| [stage-5-astra-emu.md](stage-5-astra-emu.md) | Program target、AstraEMU Manager、LegacyRuntimeProvider facade、auto probe、Trusted Luau、文本翻译和 FilterGraph preset |
+| [stage-5-astra-emu.md](stage-5-astra-emu.md) | Program target、AstraEMU Manager、`AstraEmuRuntimeProvider`、LegacyRuntimeProvider facade、EmulatorCore 状态机映射、legacy pack VFS、auto probe、Trusted Luau、文本翻译和 FilterGraph preset |
 | [stage-6-platform-completion.md](stage-6-platform-completion.md) | Linux、macOS、iOS 和 Android host completion 与 player input automation |
 | [stage-test-matrix.md](stage-test-matrix.md) | Stage 1-6 工作项对应的测试项目 |
 

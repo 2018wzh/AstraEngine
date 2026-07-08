@@ -1,6 +1,6 @@
 # AstraVN StateMachine Playback
 
-本页定义 AstraVN 如何用 EngineCore `StateMachine` 推进 `CompiledStory`。本页是 implementation blueprint；`Engine/Source/Runtime/astra-vn` 仍是后续实现目标，不表示当前 crate 已存在。
+本页定义 AstraVN 如何用 EngineCore `StateMachine` 推进 `CompiledStory`。本页是 implementation blueprint；目标实现位于 `Engine/Source/Modules/AstraVN/` 下的 AstraVN 多 crate，当前单 crate 实现会按迁移计划拆分。
 
 ## Runtime Shape
 

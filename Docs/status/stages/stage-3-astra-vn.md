@@ -1,8 +1,8 @@
 # Stage 3 AstraVN Work
 
-Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astra` 仍是 canonical story source；AstraVN Core 持有权威语义，Luau policy 只处理表现、系统页和复杂演出。`astra-vn` 也必须提供 Rust ABI dylib facade，但不新增第二套 runtime，也不承诺 C ABI。
+Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astra` 仍是 canonical story source；AstraVN Core 持有 VN 权威语义，Luau policy 只处理表现、系统页和复杂演出。当前已实现的是单 crate `astra-vn` slice；重开后的目标是先迁到 `Engine/Source/Modules/AstraVN/`，再拆成多个功能 crate，让 `astra-vn` 只保留 Rust ABI dylib facade 和兼容 re-export。Stage 3 还必须把现有 VN runtime facade、VN extension manifest、package sections 和 release checks 对齐到 `NativeVnRuntimeProvider`；AstraVN 保持 VN 语义，不作为 AstraEMU 或 AstraRPG 的基类。
 
-当前 Stage 3 是 `IN_PROGRESS`，不是 `DONE`。已落地的 slice 包括 `astra-vn` crate、基础 `.astra` parser/compiler、duplicate id / target / reachability blocking diagnostic、`CompiledStory`、Story/Variable/Command manifest、`VnRuntimeState`、call/return stack、route flags、backlog/read-state/voice replay、Runtime save container 中的 `vn.runtime_state`/`vn.policy_state`、save/load、auto/skip/config/unlock system state、`mlua` sandbox、mutation trace、rollback scope/playback、command/query/trace capability 与 serializable snapshot policy、policy bundle manifest/source cache/hash gate、VN extension binding manifest、standard command manifest、commercial baseline manifest feature gate、presentation provider manifest/filter fallback/wait capability gate、movie/voice/timeline await state slice、StageModel/VideoLayer/AudioCommand/Timeline lifecycle slice、headless presentation execution、FilterGraph CPU execution、AdvancedVN opt-in profile、SystemStoryManifest 必需入口和 policy binding、Graph/Timeline metadata validation、NativeVN sample cook/package/full playthrough、Windows/Web standalone bundle、Windows bundle 内 `AstraPlayer.exe --route-scenario` route report、Web browser host route report、bundle 内脱敏 `AstraPlayer.mount_policy.json`、VN package sections、VN Scenario DSL slice、Windows `mount_probes`/route-bound `mount_assets` + `--mount-root` local probe、project-level `package_sections`、`vn.compiled_story` manifest evidence/`vn.profile_manifest`/`vn.policy_bundle`/`vn.extension_bindings`/`vn.standard_commands`/`vn.presentation_provider`/`vn.commercial_baseline`/`vn.system_ui_profile`/`vn.advanced_presentation` release gate，以及 TsuiNoSora 脱敏 inventory、direct-readable extract preflight、Director `imap`/`mmap` resource map preflight 和 free mmap entry 计数、受限 `XFIR` RIFF/RIFX exact wrapper reader、opaque/compressed `XFIR` 与尾随未验证 bytes reader-required 阻断、Director `KEY*`/`CAS*` cast map preflight、Director `Lctx`/`Lnam`/`Lscr` Lingo map preflight 与脱敏 `Lnam` entry count/table hash、从 Director cast map 与 child resource id/FourCC/extracted payload hash 派生 cast source map、cast sidecar source hash mismatch blocking、受限 RIFF/RIFX readable chunk reader、route graph payload/unsafe symbol blocking、可读或短 binary-header wrapped mapped `Lscr` 自动生成脱敏 `tsuinosora.script_source_map.v1` reader sidecar、reader id/hash/output contract evidence、reader sidecar declared source hash mismatch blocking、route line out-of-range blocking、sidecar route source/hash mismatch blocking、合规 sidecar 覆盖 unsupported Lingo bytecode、script source map report bytecode 阻断、route graph report、Asset analysis/conversion/modern profile/stage3 gate helper、NativeVN package input writer、`demo-slice --config` 私有 root 入口、package section payload-like 字段清洗、package section release gate、公开 synthetic internal/patch player route gate、由 demo-slice 生成的 NativeVN project/bundle/player route gate、patch Web direct-read route check 和 Windows `player.patch_mount_asset` check。缺口仍是 Windows/Web live player automation、TsuiNoSora 完整 Director/Shockwave cast parser/source-map reader、真实商业全量 route extraction、真实商业 NativeVN payload 写入和正式 release signoff。
+当前 Stage 3 是 `IN_PROGRESS`，不是 `DONE`。已落地的 slice 仍位于单 crate `astra-vn`，包括基础 `.astra` parser/compiler、duplicate id / target / reachability blocking diagnostic、`CompiledStory`、Story/Variable/Command manifest、`VnRuntimeState`、call/return stack、route flags、backlog/read-state/voice replay、Runtime save container 中的 `vn.runtime_state`/`vn.policy_state`、save/load、auto/skip/config/unlock system state、`mlua` sandbox、mutation trace、rollback scope/playback、command/query/trace capability 与 serializable snapshot policy、policy bundle manifest/source cache/hash gate、VN extension binding manifest、standard command manifest、commercial baseline manifest feature gate、presentation provider manifest/filter fallback/wait capability gate、movie/voice/timeline await state slice、StageModel/VideoLayer/AudioCommand/Timeline lifecycle slice、headless presentation execution、FilterGraph CPU execution、AdvancedVN opt-in profile、SystemStoryManifest 必需入口和 policy binding、Graph/Timeline metadata validation、NativeVN sample cook/package/full playthrough、Windows/Web standalone bundle、Windows bundle 内 `AstraPlayer.exe --route-scenario` route report、Web browser host route report、bundle 内脱敏 `AstraPlayer.mount_policy.json`、VN package sections、VN Scenario DSL slice、Windows `mount_probes`/route-bound `mount_assets` + `--mount-root` local probe、project-level `package_sections`、`vn.compiled_story` manifest evidence/`vn.profile_manifest`/`vn.policy_bundle`/`vn.extension_bindings`/`vn.standard_commands`/`vn.presentation_provider`/`vn.commercial_baseline`/`vn.system_ui_profile`/`vn.advanced_presentation` release gate，以及 TsuiNoSora 脱敏 inventory、direct-readable extract preflight、Director `imap`/`mmap` resource map preflight 和 free mmap entry 计数、受限 `XFIR` RIFF/RIFX exact wrapper reader、opaque/compressed `XFIR` 与尾随未验证 bytes reader-required 阻断、Director `KEY*`/`CAS*` cast map preflight、Director `Lctx`/`Lnam`/`Lscr` Lingo map preflight 与脱敏 `Lnam` entry count/table hash、从 Director cast map 与 child resource id/FourCC/extracted payload hash 派生 cast source map、cast sidecar source hash mismatch blocking、受限 RIFF/RIFX readable chunk reader、route graph payload/unsafe symbol blocking、可读或短 binary-header wrapped mapped `Lscr` 自动生成脱敏 `tsuinosora.script_source_map.v1` reader sidecar、reader id/hash/output contract evidence、reader sidecar declared source hash mismatch blocking、route line out-of-range blocking、sidecar route source/hash mismatch blocking、合规 sidecar 覆盖 unsupported Lingo bytecode、script source map report bytecode 阻断、route graph report、Asset analysis/conversion/modern profile/stage3 gate helper、NativeVN package input writer、`demo-slice --config` 私有 root 入口、package section payload-like 字段清洗、package section release gate、公开 synthetic internal/patch player route gate、由 demo-slice 生成的 NativeVN project/bundle/player route gate、patch Web direct-read route check 和 Windows `player.patch_mount_asset` check。缺口仍是 AstraVN module layout、AstraVN 多 crate 拆分、facade-only dylib、`NativeVnRuntimeProvider`、Windows/Web live player automation、TsuiNoSora 完整 Director/Shockwave cast parser/source-map reader、真实商业全量 route extraction、真实商业 NativeVN payload 写入和正式 release signoff。
 
 补充：`S3-TSUI-INTERNAL-DEMO-01` 的验收口径已提升为 full-resource classic playable bundle：`tsuinosora-internal-game` 必须完成全量 ProjectorRays dump coverage、全量资源转换 coverage、NativeVN `asset_roots`、asset sidecar、cooked asset package section、`asset.registry.assets`、同一 `.astrapkg` 派生 Windows/Web bundle manifest，以及 `player.full_playable` live automation report 校验。当前 repo-side pipeline 已落地 ProjectorRays 本地 dump adapter、脱敏 script source-map、Director reader-required preflight 外部 reader evidence、`demo-config-template`、带 `chunk_fourcc_counts`/`conversion_plan` 的 `tsuinosora.projectorrays_full_dump_report.v1` 和 internal bundle full-resource 前置阻断。私有 acceptance 命令是 `python Tools/TsuiNoSora/tsuinosora_tools.py internal-demo-bundle --config Examples/TsuiNoSora/.local/demo.config.json --repo-root .`；当前私有 dump 覆盖 2527 个 ProjectorRays binary chunk，但 converted resource evidence 为 0，入口返回 `TSUI_INTERNAL_DEMO_FULL_RESOURCE_CONVERSION_BLOCKED`，实际 internal playable bundle 尚未产出，不能作为独立 milestone 标 `DONE`。`modern`、Patch-only 和 Runtime Patch/VFS 插件仍不属于该 milestone，但 full-resource conversion、原体验还原和 100% 可玩是该 milestone 的完成条件。
 
@@ -84,28 +84,102 @@ python Tools/TsuiNoSora/tests/test_asset_analysis.py -k projectorrays
 python Tools/check_docs.py
 ```
 
+## S3-MODULE-LAYOUT-01 AstraVN module layout
+
+**ID:** `S3-MODULE-LAYOUT-01`
+
+**Status:** `REOPENED_SPEC`
+
+**Goal:** 将现有 `astra-vn` 从 Runtime 分区迁到 `Engine/Source/Modules/AstraVN/astra-vn`，保持 package name、public API 和现有测试入口兼容。
+
+**Depends On:** `S3-DYLIB-01`、[AstraVN Module Layout Migration](../../migrations/astra-vn-module-layout-migration.md)
+
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn/`、`Cargo.toml`、`Engine/Source/Developer/astra-test/Cargo.toml`、`Engine/Source/Developer/astra-release/Cargo.toml`、`Engine/Source/Programs/astra-cli/Cargo.toml`
+
+**Steps:**
+
+1. 移动 `astra-vn` crate 到 `Engine/Source/Modules/AstraVN/astra-vn`。
+2. 更新 root workspace member 和下游 `astra-vn` path dependency。
+3. 更新 `astra-vn` 内部对 Runtime、Platform 和 Plugin crate 的相对 path。
+4. 清理实现计划、workspace blueprint、coverage matrix 和 stage test matrix 中的旧目标路径。
+5. 编写路径泄漏检查，确保旧路径只在 migration 文档中作为迁移前路径出现。
+
+**Done Evidence:** `cargo metadata --no-deps`、`cargo test -p astra-vn --test vn_dylib_facade`、`cargo test -p astra-test --test vn_scenario` 和 `python Tools/check_docs.py` 通过；旧 Runtime 路径不再作为目标实现路径出现。
+
+**Linked Test IDs:** `T-S3-MODULE-LAYOUT-01`
+
+## S3-CRATE-SPLIT-01 AstraVN functional crate split
+
+**ID:** `S3-CRATE-SPLIT-01`
+
+**Status:** `REOPENED_SPEC`
+
+**Goal:** 将现有单 crate `astra-vn` 拆成 AstraVN 多功能 crate，并把 `astra-vn` 收缩为 facade、`rlib`/Rust ABI `dylib` 和兼容 re-export。
+
+**Depends On:** `S3-MODULE-LAYOUT-01`、[AstraVN Crate Split Migration](../../migrations/astra-vn-crate-split-migration.md)
+
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-script/`、`Engine/Source/Modules/AstraVN/astra-vn-core/`、`Engine/Source/Modules/AstraVN/astra-vn-policy/`、`Engine/Source/Modules/AstraVN/astra-vn-presentation/`、`Engine/Source/Modules/AstraVN/astra-vn-commands/`、`Engine/Source/Modules/AstraVN/astra-vn-system/`、`Engine/Source/Modules/AstraVN/astra-vn-save/`、`Engine/Source/Modules/AstraVN/astra-vn-package/`、`Engine/Source/Modules/AstraVN/astra-vn-plugin/`、`Engine/Source/Modules/AstraVN/astra-vn-editor/`、`Engine/Source/Modules/AstraVN/astra-vn-runtime-provider/`、`Engine/Source/Modules/AstraVN/astra-vn/`
+
+**Steps:**
+
+1. 建立 sibling crate skeleton，并加入 root workspace。
+2. 按 script、presentation、core、policy、commands、system、save、package、plugin、editor、runtime-provider、facade 顺序搬迁现有模块。
+3. 让 `astra-vn` facade 只保留 `pub use astra_vn_*::*;`、facade 文档和 dylib smoke。
+4. 确认功能 crate 不依赖 `astra-vn` facade；共享 DTO 下沉到更底层 crate。
+5. 保持现有 `astra_vn::*` 消费路径先通过 facade re-export 兼容。
+
+**Done Evidence:** `cargo metadata --no-deps`、各 `astra-vn-*` crate 测试、`cargo test -p astra-vn --test vn_dylib_facade`、`cargo test -p astra-vn --test vn_plugin_extensions`、`cargo test -p astra-release --test release_report release_gate_` 和 `python Tools/check_docs.py` 通过；`astra-vn` 不再承载 parser/runtime/policy/package 业务实现。
+
+**Linked Test IDs:** `T-S3-CRATE-SPLIT-01`
+
 ## S3-DYLIB-01 AstraVN Rust dylib target
 
 **ID:** `S3-DYLIB-01`
 
-**Goal:** `astra-vn` 作为 VN 垂直模块 crate，同时产出 `rlib` 和 Rust ABI `dylib`，暴露 `.astra`、VN Core、presentation、system UI 和 VN plugin extension public API。
+**Status:** `REOPENED_SPEC`
 
-**Depends On:** `S1-DYLIB-01`、`S3-SCRIPT-02`、`S3-CORE-03`、`S3-PLUGIN-01`、`S3-PRESENT-01`、`S3-SYSTEM-01`
+**Goal:** `astra-vn` 作为 facade crate，同时产出 `rlib` 和 Rust ABI `dylib`，re-export AstraVN 子 crate public API，并证明 facade-only 架构仍兼容现有 consumer。
 
-**Target Paths:** `Engine/Source/Runtime/astra-vn/Cargo.toml`、`Engine/Source/Runtime/astra-vn/src/lib.rs`、`Engine/Source/Runtime/astra-vn/tests/vn_dylib_facade.rs`、`Engine/Source/Runtime/astra-vn/tests/vn_plugin_extensions.rs`、`Engine/Plugins/Fixtures/vn-extension-provider`
+**Depends On:** `S1-DYLIB-01`、`S3-CRATE-SPLIT-01`、`S3-SCRIPT-02`、`S3-CORE-03`、`S3-PLUGIN-01`、`S3-PRESENT-01`、`S3-SYSTEM-01`
+
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn/Cargo.toml`、`Engine/Source/Modules/AstraVN/astra-vn/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn/tests/vn_dylib_facade.rs`、`Engine/Source/Modules/AstraVN/astra-vn/tests/vn_plugin_extensions.rs`、`Engine/Plugins/Fixtures/vn-extension-provider`
 
 **Steps:**
 
 1. 在 `astra-vn` crate 中声明 `crate-type = ["rlib", "dylib"]`，并保留普通 workspace `rlib` 使用路径。
-2. 让 facade re-export VN parser/compiler、CompiledStory、VnRuntimeState、presentation model、system UI profile 和 VN extension id，不复制 EngineCore runtime。
+2. 让 facade re-export `astra-vn-script`、`astra-vn-core`、`astra-vn-policy`、`astra-vn-presentation`、`astra-vn-commands`、`astra-vn-system`、`astra-vn-save`、`astra-vn-package`、`astra-vn-plugin`、`astra-vn-editor` 和 `astra-vn-runtime-provider` public API，不复制 EngineCore runtime 或业务实现。
 3. 约束 dylib 只用于同 engine version、rustc fingerprint 和 feature fingerprint 下的 Rust-side 动态链接；外部稳定边界仍是 `.astra`、package section 和 Stage 1 plugin ABI。
 4. 禁止通过 dylib public API 暴露 Luau VM handle、renderer/audio native handle、Actor 指针或 Editor widget。
 5. 编写 facade smoke，证明 `astra-vn` public API 能创建 VN runtime state、读取 command manifest、登记 VN extension DTO，并与 `astra-engine` facade 共同链接。
 6. 编写真实 cdylib provider fixture，证明 VN extension provider 经过 Stage 1 plugin ABI build/load/unload 后可进入 provider registry，并生成可校验 `VnExtensionManifest`。
 
-**Done Evidence:** `cargo test -p astra-vn --test vn_dylib_facade` 和 `cargo test -p astra-vn --test vn_plugin_extensions` 通过；`Cargo.toml` 明确产出 `rlib` 与 `dylib`，`vn-extension-provider` 真实 cdylib fixture 通过 `PluginLoader` 加载、注册 VN policy/command/presentation/editor metadata/release check provider slots，并在 unload 后释放注册项。
+**Done Evidence:** `cargo test -p astra-vn --test vn_dylib_facade` 和 `cargo test -p astra-vn --test vn_plugin_extensions` 通过；`Cargo.toml` 明确产出 `rlib` 与 `dylib`，`astra-vn` 只做 facade re-export，`vn-extension-provider` 真实 cdylib fixture 通过 `PluginLoader` 加载、注册 VN policy/command/presentation/editor metadata/release check provider slots，并在 unload 后释放注册项。
 
 **Linked Test IDs:** `T-S3-DYLIB-01`
+
+## S3-RUNTIME-PROVIDER-01 NativeVN gameplay runtime provider
+
+**ID:** `S3-RUNTIME-PROVIDER-01`
+
+**Status:** `REOPENED_SPEC`
+
+**Goal:** 在 `astra-vn-runtime-provider` 中组合 AstraVN 子 crate，把现有 facade、VN Core、Luau policy、VN extension manifest、package sections 和 release checks 包装为 `NativeVnRuntimeProvider`。
+
+**Depends On:** `S3-CRATE-SPLIT-01`、`S3-DYLIB-01`、`S3-CORE-03`、`S3-PLUGIN-01`、[Game Runtime Provider Contract](../../contracts/game-runtime-provider.md)、[Game Runtime Provider Blueprint](../../implementation/game-runtime-provider.md)
+
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-runtime-provider/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn-package/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn-runtime-provider/tests/game_runtime_provider.rs`、`Engine/Plugins/Fixtures/vn-extension-provider` planned target
+
+**Steps:**
+
+1. 定义 `NativeVnRuntimeProvider` descriptor、prepare/probe/open/step/save/restore/shutdown、package section plan、release checks 和 editor metadata。
+2. 让 project target 显式绑定 `native_vn` runtime provider，不按插件加载顺序选择玩法 runtime。
+3. 把现有 VN command、presentation command、Luau policy bundle、Graph/Timeline metadata 和 release check provider binding 挂到 gameplay runtime provider selection。
+4. 保持 `VnRuntimeState`、`vn.runtime_state`、`vn.policy_state`、VN package sections 和 `vn.*` release gate 的兼容性。
+5. 编写 provider smoke、package/release continuity、missing binding blocking 和 replay hash 测试。
+
+**Done Evidence:** `cargo test -p astra-vn-runtime-provider --test game_runtime_provider`、`cargo test -p astra-vn --test vn_plugin_extensions` 和 `cargo test -p astra-release --test release_report release_gate_` 通过；report 输出 `runtime_provider.native_vn`，且 VN provider 不能被 AstraEMU/AstraRPG 当作基类复用。
+
+**Linked Test IDs:** `T-S3-RUNTIME-PROVIDER-01`
 
 ## S3-SCRIPT-01 `.astra` parser
 
@@ -115,7 +189,7 @@ python Tools/check_docs.py
 
 **Depends On:** `Docs/modules/astra-vn-script.md`
 
-**Target Paths:** `Engine/Source/Runtime/astra-vn/src/parser.rs`、`Engine/Source/Runtime/astra-vn/src/compiler.rs`、`Engine/Source/Runtime/astra-vn/tests/compiler_runtime.rs`、`Engine/Source/Runtime/astra-vn/tests/compiler_diagnostics.rs`、`Engine/Source/Runtime/astra-vn/tests/commercial_baseline.rs`
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-script/src/parser.rs`、`Engine/Source/Modules/AstraVN/astra-vn-script/src/compiler.rs`、`Engine/Source/Modules/AstraVN/astra-vn-script/tests/compiler_runtime.rs`、`Engine/Source/Modules/AstraVN/astra-vn-script/tests/compiler_diagnostics.rs`、`Engine/Source/Modules/AstraVN/astra-vn-package/tests/commercial_baseline.rs`
 
 **Steps:**
 
@@ -136,7 +210,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S3-SCRIPT-01`
 
-**Target Paths:** `Engine/Source/Runtime/astra-vn/src/compiler.rs`、`Engine/Source/Runtime/astra-vn/src/compiled_story.rs` planned target、`Engine/Source/Runtime/astra-vn/tests/compiler_runtime.rs`、`Engine/Source/Runtime/astra-vn/tests/compiler_diagnostics.rs`
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-script/src/compiler.rs`、`Engine/Source/Modules/AstraVN/astra-vn-script/src/compiled_story.rs` planned target、`Engine/Source/Modules/AstraVN/astra-vn-script/tests/compiler_runtime.rs`、`Engine/Source/Modules/AstraVN/astra-vn-script/tests/compiler_diagnostics.rs`
 
 **Steps:**
 
@@ -157,7 +231,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S1-RUNTIME-02`、`S3-SCRIPT-02`
 
-**Target Paths:** `Engine/Source/Runtime/astra-vn/src/runtime.rs`、`Engine/Source/Runtime/astra-vn/src/types.rs`、`Engine/Source/Runtime/astra-vn/tests/compiler_runtime.rs`、`Engine/Source/Runtime/astra-vn/tests/commercial_baseline.rs`、`Engine/Source/Developer/astra-test/tests/vn_scenario.rs`
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-core/src/runtime.rs`、`Engine/Source/Modules/AstraVN/astra-vn-core/src/types.rs`、`Engine/Source/Modules/AstraVN/astra-vn-core/tests/compiler_runtime.rs`、`Engine/Source/Modules/AstraVN/astra-vn-package/tests/commercial_baseline.rs`、`Engine/Source/Developer/astra-test/tests/vn_scenario.rs`
 
 **Steps:**
 
@@ -178,7 +252,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S3-CORE-01`、`S2-MEDIA-02`
 
-**Target Paths:** `Engine/Source/Runtime/astra-vn/src/backlog.rs`、`Engine/Source/Runtime/astra-vn/src/read_state.rs`、`Engine/Source/Runtime/astra-vn/src/voice_replay.rs`、`Engine/Source/Runtime/astra-vn/tests/backlog_read_voice.rs` planned target
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-core/src/backlog.rs`、`Engine/Source/Modules/AstraVN/astra-vn-core/src/read_state.rs`、`Engine/Source/Modules/AstraVN/astra-vn-core/src/voice_replay.rs`、`Engine/Source/Modules/AstraVN/astra-vn-core/tests/backlog_read_voice.rs` planned target
 
 **Steps:**
 
@@ -199,7 +273,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S1-SAVE-01`、`S3-CORE-02`
 
-**Target Paths:** `Engine/Source/Runtime/astra-vn/src/save.rs`、`Engine/Source/Runtime/astra-vn/tests/vn_save_replay.rs` planned target
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-save/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn-save/tests/vn_save_replay.rs` planned target
 
 **Steps:**
 
@@ -220,7 +294,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S3-CORE-01`、`Docs/contracts/script-vn.md`
 
-**Target Paths:** `Engine/Source/Runtime/astra-vn/src/luau.rs`、`Engine/Source/Runtime/astra-vn/tests/luau_sandbox.rs`、`Engine/Source/Runtime/astra-vn/tests/luau_mutation.rs`
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-policy/src/luau.rs`、`Engine/Source/Modules/AstraVN/astra-vn-policy/tests/luau_sandbox.rs`、`Engine/Source/Modules/AstraVN/astra-vn-policy/tests/luau_mutation.rs`
 
 **Steps:**
 
@@ -242,7 +316,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S3-LUAU-01`
 
-**Target Paths:** `Engine/Source/Runtime/astra-vn/src/policy_bundle.rs`、`Engine/Source/Runtime/astra-vn/src/standard_policy.luau`、`Engine/Source/Runtime/astra-vn/tests/policy_bundle.rs`、`Engine/Source/Runtime/astra-vn/tests/commercial_baseline.rs`、`Engine/Source/Developer/astra-release/tests/release_report.rs`
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-policy/src/policy_bundle.rs`、`Engine/Source/Modules/AstraVN/astra-vn-policy/src/standard_policy.luau`、`Engine/Source/Modules/AstraVN/astra-vn-policy/tests/policy_bundle.rs`、`Engine/Source/Modules/AstraVN/astra-vn-package/tests/commercial_baseline.rs`、`Engine/Source/Developer/astra-release/tests/release_report.rs`
 
 **Steps:**
 
@@ -263,7 +337,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S1-PLUGIN-03`、`S3-LUAU-02`、`S3-PRESENT-01`、`S3-EDIT-01`
 
-**Target Paths:** `Engine/Source/Runtime/astra-vn/src/plugin_extensions.rs`、`Engine/Source/Runtime/astra-vn/tests/vn_plugin_extensions.rs` planned target
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-plugin/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn-plugin/tests/vn_plugin_extensions.rs` planned target
 
 **Steps:**
 
@@ -284,7 +358,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S3-SCRIPT-02`、`S2-MEDIA-04`、[AstraVN Presentation Model](../../modules/astra-vn-presentation-model.md)、[AstraVN Standard Command Library](../../modules/astra-vn-standard-commands.md)
 
-**Target Paths:** `Engine/Source/Runtime/astra-vn/src/presentation.rs`、`Engine/Source/Runtime/astra-vn/src/presentation_execution.rs`、`Engine/Source/Runtime/astra-vn/tests/commercial_baseline.rs`、`Engine/Source/Runtime/astra-vn/tests/presentation_model.rs`、`Engine/Source/Runtime/astra-vn/tests/presentation_execution.rs`
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-presentation/src/presentation.rs`、`Engine/Source/Modules/AstraVN/astra-vn-presentation/src/presentation_execution.rs`、`Engine/Source/Modules/AstraVN/astra-vn-package/tests/commercial_baseline.rs`、`Engine/Source/Modules/AstraVN/astra-vn-presentation/tests/presentation_model.rs`、`Engine/Source/Modules/AstraVN/astra-vn-presentation/tests/presentation_execution.rs`
 
 **Steps:**
 
@@ -305,7 +379,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S3-CORE-03`、`S3-LUAU-02`、[AstraVN System UI Profile](../../modules/astra-vn-system-ui-profile.md)
 
-**Target Paths:** `Engine/Source/Runtime/astra-vn/src/system_ui.rs`、`Engine/Source/Runtime/astra-vn/tests/commercial_baseline.rs`、`Engine/Source/Runtime/astra-vn/tests/system_controls.rs`、`Engine/Source/Developer/astra-release/tests/release_report.rs`、`Examples/NativeVN/system.astra`
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-system/src/system_ui.rs`、`Engine/Source/Modules/AstraVN/astra-vn-package/tests/commercial_baseline.rs`、`Engine/Source/Modules/AstraVN/astra-vn-system/tests/system_controls.rs`、`Engine/Source/Developer/astra-release/tests/release_report.rs`、`Examples/NativeVN/system.astra`
 
 **Steps:**
 
@@ -326,7 +400,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S3-PRESENT-01`、`S3-SYSTEM-01`、`S2-MEDIA-04`
 
-**Target Paths:** `Examples/AdvancedVN/`、`scenarios/advanced_presentation.yaml`、`Engine/Source/Runtime/astra-vn/tests/advanced_presentation.rs`、`Engine/Source/Programs/astra-cli/tests/target_platform.rs`
+**Target Paths:** `Examples/AdvancedVN/`、`scenarios/advanced_presentation.yaml`、`Engine/Source/Modules/AstraVN/astra-vn-package/tests/advanced_presentation.rs`、`Engine/Source/Programs/astra-cli/tests/target_platform.rs`
 
 **Steps:**
 
@@ -347,7 +421,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S3-SCRIPT-02`
 
-**Target Paths:** `Engine/Source/Runtime/astra-vn/src/editor_metadata.rs`、`Engine/Source/Runtime/astra-vn/tests/commercial_baseline.rs`
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-editor/src/editor_metadata.rs`、`Engine/Source/Modules/AstraVN/astra-vn-editor/tests/commercial_baseline.rs`
 
 **Steps:**
 

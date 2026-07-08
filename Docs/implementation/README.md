@@ -12,7 +12,9 @@
 | [target-platform.md](target-platform.md) | Editor/Game/Program Target、project.yaml targets、六平台 SDK 分层验收 |
 | [state-machine-action-provider.md](state-machine-action-provider.md) | StateMachine action provider、deterministic context、FFI effect list |
 | [provider-plugin-api.md](provider-plugin-api.md) | 插件 descriptor、provider trait、权限、load/unload lifecycle |
+| [asset-vfs.md](asset-vfs.md) | VFS mount family、package/local/legacy/overlay source、reader provider 和 release gate |
 | [asset-media-pipeline.md](asset-media-pipeline.md) | Asset import/cook/package、Media command、默认 provider 和 graph validation |
+| [game-runtime-provider.md](game-runtime-provider.md) | NativeVN、AstraEMU、AstraRPG 同级 gameplay runtime provider 选择层 |
 | [astra-grammar-ir.md](astra-grammar-ir.md) | `.astra` pest grammar、AST、IR、source map、formatter、错误恢复 |
 | [astra-vn-state-machine.md](astra-vn-state-machine.md) | AstraVN command cursor、wait state、StateMachine action 和演出调度 |
 | [runtime-execution.md](runtime-execution.md) | tick 顺序、EventQueue、AwaitToken/Fence、MutationLog、hash/replay |
@@ -30,6 +32,7 @@
 | [ai-release-gate.md](ai-release-gate.md) | AI/MCP release check、debug trace、玩家同意和 provider-free replay |
 | [platform-host.md](platform-host.md) | 六平台 host trait、capability report、profile gate |
 | [astraemu-legacy-runtime-framework.md](astraemu-legacy-runtime-framework.md) | AstraEMU LegacyRuntimeProvider、session、auto probe、Trusted Luau、文本翻译、filter preset 和 release gate |
+| [emulator-core-state-machine.md](emulator-core-state-machine.md) | EmulatorCore 复用 RuntimeWorld/StateMachine/VFS 的旧 VM 映射、scheduler 和 family 样板 |
 | [astraemu-artemis-core.md](astraemu-artemis-core.md) | Artemis v1 engine-native family plugin、probe、snapshot、report |
 | [release-gate-report.md](release-gate-report.md) | machine-readable report、blocking checks、证据格式 |
 | [release-gate-checks.md](release-gate-checks.md) | release check id、domain、输入、阻断条件和 evidence |
@@ -39,6 +42,7 @@
 - Rust 类型是 schema 真源。实现后由 `serde` + `schemars` 生成 JSON Schema，文档字段名必须跟 Rust 类型一致。
 - 每个 Stage 必须产出可运行命令、machine-readable report 和测试证据。
 - 全系列 v1 必须覆盖 EngineCore、AstraVN、AstraEditor、AstraPlatform、AstraEMU；AstraEMU v1 family 是 Artemis。
+- 玩法类型通过 `ProductRuntimeProvider`/`GameRuntimeProvider` 显式绑定；AstraVN、AstraEMU 和后续 AstraRPG 是同级 provider。
 - AstraVN policy 统一使用 Luau。AstraEMU 研究文档中的 Lua/TJS 是 legacy engine 事实，不作为 AstraVN policy 术语。
 - Stage 依赖单向流动：Stage N 只能依赖前序稳定契约。确需回改契约时，同步 ADR、migration、测试矩阵和 release gate。
 

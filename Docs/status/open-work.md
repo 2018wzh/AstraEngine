@@ -9,7 +9,7 @@
 
 ## P1
 
-- `astra-vn` Rust dylib facade，固定 `rlib`/`dylib` 输出形态和 Rust ABI 版本承诺。
+- AstraVN module layout 与 crate split，固定 facade-only `astra-vn` 的 `rlib`/`dylib` 输出形态和 Rust ABI 版本承诺。
 - `.astra` parser/compiler 到 CompiledStory IR。
 - AstraVN presentation model、standard command library 和 system UI profile 的剩余 migration/localization/replay UI 深化。
 - headless YAML scenario runner 已存在；release report writer 已实现 package validate 基线，后续需要 VN full playthrough domain。

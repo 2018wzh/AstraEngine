@@ -1,0 +1,105 @@
+# Game Runtime Provider Contract
+
+`GameRuntimeProvider` 是 packaged `Game` target 的玩法 runtime 选择层。EngineCore 仍只提供 `RuntimeWorld`、Actor/Component、StateMachine、AwaitToken、Save/Replay、Plugin、Asset/VFS、Media 和 Release Gate；具体玩法由 provider 把产品语义映射成 Runtime action、event、presentation/audio command、package section 和 release check。
+
+这个契约让 AstraVN、AstraEMU 和后续 AstraRPG 成为同级 runtime provider。AstraVN 不作为所有游戏类型的基类；它只实现 VN 语义。AstraEMU 不替换 `RuntimeWorld`；它通过 `AstraEmuRuntimeProvider` 复用 RuntimeWorld，再把旧 VM 交给 family `LegacyRuntimeProvider`。
+
+## Provider Shape
+
+```rust
+pub trait ProductRuntimeProvider: StableProvider {
+    fn descriptor(&self) -> ProductRuntimeDescriptor;
+    fn prepare(&self, request: RuntimePrepareRequest) -> ProviderResult<RuntimePrepareReport>;
+    fn probe(&self, request: RuntimeProbeRequest) -> ProviderResult<RuntimeProbeReport>;
+    fn open(&self, request: RuntimeOpenRequest) -> ProviderResult<GameRuntimeSessionId>;
+    fn step(&self, session: GameRuntimeSessionId, input: RuntimeStepInput) -> ProviderResult<RuntimeStepOutput>;
+    fn save(&self, session: GameRuntimeSessionId, request: RuntimeSaveRequest) -> ProviderResult<RuntimeSaveSections>;
+    fn restore(&self, session: GameRuntimeSessionId, request: RuntimeRestoreRequest) -> ProviderResult<RuntimeRestoreReport>;
+    fn shutdown(&self, session: GameRuntimeSessionId) -> ProviderResult<RuntimeShutdownReport>;
+    fn package_sections(&self, request: RuntimePackageRequest) -> ProviderResult<RuntimePackageSectionPlan>;
+    fn release_checks(&self) -> ProviderResult<Vec<ReleaseCheckDescriptor>>;
+    fn editor_metadata(&self) -> ProviderResult<RuntimeEditorMetadata>;
+}
+```
+
+`ProductRuntimeProvider` 注册到 extension registry。项目 target 必须显式绑定 runtime provider、profile 和 package sections；host 不能按插件加载顺序自动选择。Provider 返回的 effect list 由 host adapter 通过 `DeterministicActionContext` 应用，provider 不能持有或修改 `RuntimeWorld` 内部指针。
+
+## Common DTO
+
+```rust
+pub struct ProductRuntimeDescriptor {
+    pub runtime_id: StableId,
+    pub product_kind: ProductKind,
+    pub provider_id: ProviderId,
+    pub supported_targets: Vec<TargetKind>,
+    pub capabilities: Vec<CapabilityId>,
+    pub package_sections: Vec<SectionSchemaId>,
+    pub release_checks: Vec<ReleaseCheckId>,
+}
+
+pub struct RuntimeStepOutput {
+    pub status: RuntimeSessionStatus,
+    pub effects: Vec<ActionEffect>,
+    pub awaits: Vec<AwaitToken>,
+    pub presentation: Vec<PresentationCommand>,
+    pub audio: Vec<AudioCommand>,
+    pub diagnostics: Vec<Diagnostic>,
+    pub trace: Vec<StateMachineTrace>,
+    pub dirty_save_sections: Vec<SectionId>,
+}
+```
+
+所有 DTO 只能携带 stable id、hash、section ref、relative key、source span、capability report 和 serde/postcard payload。Luau VM handle、legacy VM object、native renderer/audio handle、Editor widget、local root、provider secret 和商业 payload 不得跨 ABI 或进入 save/replay/report。
+
+## Editor Metadata
+
+`editor_metadata()` 只描述 Editor 可以渲染和调用的作者工具面，不传递 UI widget 或 product runtime 内部对象：
+
+```rust
+pub struct RuntimeEditorMetadata {
+    pub runtime_id: StableId,
+    pub product_kind: ProductKind,
+    pub project_templates: Vec<TemplateDescriptor>,
+    pub authoring_surfaces: Vec<AuthoringSurfaceDescriptor>,
+    pub content_capabilities: Vec<ContentCapabilityDescriptor>,
+    pub pie_adapter: Option<PieAdapterDescriptor>,
+    pub debug_views: Vec<DebugViewDescriptor>,
+    pub release_checks: Vec<ReleaseCheckId>,
+    pub source_roundtrip: SourceRoundtripPolicy,
+}
+```
+
+Editor shell 读取 metadata 后决定 Project Wizard 模板、面板可见性、Content Browser 过滤、PIE adapter、Debugger view 和 Release Gate 跳转。AstraVN 暴露 `.astra` Script、VN Graph、Timeline、System UI 和 Luau policy surface；AstraEMU 只暴露 planned case profile/probe、legacy pack VFS browser、family trace、text/translation overlay、Trusted Luau 和 FilterGraph preset；AstraRPG 只保留 planned Map、Quest、Battle/Party/Inventory 和 Behavior Graph 边界。
+
+## Peer Runtimes
+
+| Runtime provider | 产品职责 | 当前边界 |
+| --- | --- | --- |
+| `NativeVnRuntimeProvider` | `.astra` canonical story、VN Core、choice/backlog/save/read-state/voice replay、Luau policy、presentation/system UI、VN package sections 和 VN release checks | 复用现有 `astra-vn` facade；不成为 RPG 或 EMU 的基类 |
+| `AstraEmuRuntimeProvider` | legacy case launch、family selection、old VM step bridge、text capture、Trusted Luau patch/decode、FilterGraph preset、local case report 和 EMU release checks | 内部继续使用 family `LegacyRuntimeProvider`；family plugin 不能替换 Runtime tick、Save container 或 Release Gate |
+| `AstraRpgRuntimeProvider` | map、party、battle、inventory、quest、AI behavior 和 RPG-specific editor metadata | planned peer runtime，只定义接入边界；没有现有实现迁移 |
+
+## Runtime Flow
+
+```text
+project target
+  -> explicit ProductRuntimeProvider binding
+  -> prepare/probe package and VFS mounts
+  -> open GameRuntime session
+  -> RuntimeWorld StateMachine action invokes provider step
+  -> host adapter applies serializable effects
+  -> save/package/release gate consume provider sections and checks
+```
+
+Provider 可以在内部维护 product-specific cursor，但权威 Runtime 结果必须在 fixed tick 边界变成可序列化 effects、await tokens、event queue entries、presentation/audio commands 和 save sections。Replay 读取已保存的 provider output，不重新请求外部 provider 或平台回调。
+
+## Release Gate
+
+每个 gameplay runtime 必须声明：
+
+- provider descriptor、engine/rustc/feature fingerprint 和 packaged eligibility。
+- required package sections、schema version、hash、codec、migration policy 和 redaction policy。
+- scenario runner actions/assertions、route or flow coverage、save/load/replay hash 和 provider-free replay规则。
+- Editor metadata 是否可用，以及 metadata 是否能回到同一 public IR。
+
+缺 explicit binding、provider fingerprint 不匹配、package section 不完整、save section 不能迁移、effect 不可序列化、replay 依赖 live provider 或 report 泄露 payload，都必须 blocking。

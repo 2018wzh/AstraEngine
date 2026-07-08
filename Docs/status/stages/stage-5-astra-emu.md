@@ -1,26 +1,98 @@
 # Stage 5 AstraEMU Work
 
-Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动 AstraEngine `RuntimeWorld`；legacy family 以 in-process plugin 接入，并只向 host 注册 `LegacyRuntimeProvider` facade。Provider session 持有 family 私有 VM、资源解析、媒体状态、诊断和 snapshot section；AstraEngine `StateMachine` 只建模 `Booting`、`Active`、`Awaiting`、`Saving`、`Loading`、`Faulted` 和 `Shutdown` 这些粗粒度生命周期。统一管理、Trusted Luau、文本翻译、runtime memory 和滤镜 preset 都位于 Manager/RuntimeWorld 侧，不进入 family VM public API。本页是 planned target 清单，不表示实现已经存在。
+Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Program target；被启动的 legacy case 通过 `AstraEmuRuntimeProvider` 作为 gameplay runtime session 运行，provider 创建并驱动 AstraEngine `RuntimeWorld`。legacy family 以 in-process plugin 接入，并只向 host 注册 `LegacyRuntimeProvider` facade。Provider session 持有 family 私有 VM、VFS 资源解析、媒体状态、诊断和 snapshot section；AstraEngine `StateMachine` 只建模 `Booting`、`Active`、`Awaiting`、`Saving`、`Loading`、`Faulted` 和 `Shutdown` 这些粗粒度生命周期。统一管理、Trusted Luau、文本翻译、runtime memory 和滤镜 preset 都位于 Manager/RuntimeWorld 侧，不进入 family VM public API。本页是 `REOPENED_SPEC` 清单，不表示实现已经存在。
+
+## S5-GAME-RUNTIME-01 AstraEmuRuntimeProvider gameplay runtime
+
+**ID:** `S5-GAME-RUNTIME-01`
+
+**Status:** `REOPENED_SPEC`
+
+**Goal:** AstraEMU 作为 `AstraEmuRuntimeProvider` 与 `NativeVnRuntimeProvider`、后续 `AstraRpgRuntimeProvider` 同级接入，不直接替换 `RuntimeWorld`。
+
+**Depends On:** `S2-VFS-01`、`S3-RUNTIME-PROVIDER-01`、[Game Runtime Provider Contract](../../contracts/game-runtime-provider.md)、[Game Runtime Provider Blueprint](../../implementation/game-runtime-provider.md)
+
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/runtime_provider.rs`、`AstraEMU/Tests/game_runtime_provider.rs` planned target
+
+**Steps:**
+
+1. 定义 `AstraEmuRuntimeProvider` descriptor、prepare/probe/open/step/save/restore/shutdown、package section plan、release checks 和 editor metadata。
+2. 让 case target 显式绑定 `astra_emu` runtime provider；Manager 只负责 program shell、profile、UI 和 local operator workflow。
+3. `open` 创建 RuntimeWorld lifecycle StateMachine，并选择 family `LegacyRuntimeProvider` session。
+4. `step` 调用 family provider，收集 `LegacyEffect`、AwaitToken、TextCaptureEvent、PresentationCommand、AudioCommand、trace 和 diagnostic。
+5. Release Gate 校验 `emu.game_runtime_provider`、provider fingerprint、package sections、save/replay hash 和 report redaction。
+
+**Done Evidence:** `cargo test -p astra-emu-manager game_runtime_provider` 和 `cargo test -p astra-release emu_gate` 通过；report 输出 `emu.game_runtime_provider`，且 family plugin 仍不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
+
+**Linked Test IDs:** `T-S5-GAME-RUNTIME-01`
+
+## S5-EMUCORE-SM-01 EmulatorCore VM state-machine mapping
+
+**ID:** `S5-EMUCORE-SM-01`
+
+**Status:** `REOPENED_SPEC`
+
+**Goal:** Family 内部把旧 VM 映射为私有 scheduler、context、basic-block 和 action 状态机，公共 Runtime 只接收可序列化 effect 和 snapshot envelope。
+
+**Depends On:** `S5-GAME-RUNTIME-01`、`S5-FAMILY-01`、[EmulatorCore StateMachine Mapping](../../implementation/emulator-core-state-machine.md)
+
+**Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/scheduler.rs`、`AstraEMU/Tests/family_scheduler.rs`、`AstraEMU/Tests/fvp/state_machine_mapping.rs` planned target
+
+**Steps:**
+
+1. 定义 family-private scheduler trace、context id、sequence、budget、wait/yield/fault/terminal 状态和 snapshot cursor。
+2. 多线程、多 fiber 或多 context VM 使用 child state machine，并按固定 `(priority, context_id, sequence)` 推进。
+3. Basic block 执行到 syscall、branch、wait、fault 或预算耗尽时停止，并输出 action trace。
+4. Syscall/action bridge 只输出 `LegacyEffect`、AwaitToken、PresentationCommand、AudioCommand、TextCaptureEvent 和 diagnostic。
+5. 编写 scheduler ordering、await boundary、snapshot/replay hash、fault isolation 和 FVP detailed mapping 测试。
+
+**Done Evidence:** `cargo test -p astra-emu-family-api family_scheduler` 和 `cargo test -p astra-emu-fvp state_machine_mapping` 通过；report 输出 `emu.vm_state_machine_trace`、context coverage、await boundary 和 replay hash。
+
+**Linked Test IDs:** `T-S5-EMUCORE-SM-01`
+
+## S5-LEGACY-VFS-01 Legacy pack VFS mounts
+
+**ID:** `S5-LEGACY-VFS-01`
+
+**Status:** `REOPENED_SPEC`
+
+**Goal:** 所有 family pack reader 复用 Asset VFS，旧引擎 pack 只作为 `legacy_pack` mount source，不能替代 `.astrapkg`。
+
+**Depends On:** `S2-VFS-01`、`S5-GAME-RUNTIME-01`、[Asset VFS Contract](../../contracts/asset-vfs.md)
+
+**Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/vfs.rs`、`AstraEMU/Tests/legacy_pack_vfs.rs` planned target
+
+**Steps:**
+
+1. 为 Artemis PFS、FVP `.bin`、KrKr XP3、BGI PackFile、Siglus Scene.pck、SoftPAL PAC/DAT 和 Minori PAZ 定义 `VfsMountProvider` capability。
+2. Pack reader 输出 entry table hash、relative key、entry id、offset、size、hash、media kind、compression support 和 diagnostic。
+3. Overlay mount 只允许 profile 声明的 key pattern；同 key 多命中没有 allowlist 时 blocking。
+4. `.astrapkg` 保存 case profile、reader identity/hash、release report 和 sanitized scenario refs，不保存商业 payload。
+5. Release Gate 校验 entry bounds、hash、unsupported compression、reader identity、path/payload redaction 和 package/source consistency。
+
+**Done Evidence:** `cargo test -p astra-emu-family-api legacy_pack_vfs` 和 `cargo test -p astra-release emu_gate` 通过；report 输出 `emu.legacy_pack_vfs`，且不写本地 root、payload、完整脚本或 bytecode。
+
+**Linked Test IDs:** `T-S5-LEGACY-VFS-01`
 
 ## S5-MANAGER-01 Manager RuntimeWorld bridge
 
 **ID:** `S5-MANAGER-01`
 
-**Goal:** Manager 能创建 RuntimeWorld，启用 family plugin，打开 `LegacyRuntimeProvider` session，驱动生命周期 StateMachine，并输出 local case report。
+**Goal:** Manager 能启动 `AstraEmuRuntimeProvider`，由 provider 创建 RuntimeWorld、启用 family plugin、打开 `LegacyRuntimeProvider` session、驱动生命周期 StateMachine，并输出 local case report。
 
-**Depends On:** `Docs/contracts/astraemu-ipc.md`、`S1-CORE-01`、`S1-PLUGIN-01`
+**Depends On:** `S5-GAME-RUNTIME-01`、`S5-EMUCORE-SM-01`、`Docs/contracts/astraemu-ipc.md`、`S1-CORE-01`、`S1-PLUGIN-01`
 
 **Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/runtime_world.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/plugin_enablement.rs`、`AstraEMU/Tests/manager_runtime_world.rs` planned target
 
 **Steps:**
 
-1. 定义 case launch request、profile、family selection、`LegacyRuntimeHostCtx` binding 和 report destination。
-2. 创建 RuntimeWorld，加载项目 package 或 synthetic fixture，启用 selected family plugin。
-3. 通过 `LegacyRuntimeProvider::open` 建立 session，并让生命周期 StateMachine 在固定 tick 调用 `step`。
+1. 定义 case launch request、profile、runtime provider binding、family selection、`LegacyRuntimeHostCtx` binding 和 report destination。
+2. 启动 `AstraEmuRuntimeProvider`，加载项目 package 或 synthetic fixture，启用 selected family plugin。
+3. 通过 `AstraEmuRuntimeProvider::open` 建立 RuntimeWorld 和 family session，并让生命周期 StateMachine 在固定 tick 调用 `emu.step`。
 4. 建立 input、overlay、diagnostics、TextCaptureEvent 和 presentation/audio command 采集路径。
 5. 编写 plugin disabled、permission denied、missing provider、session fault 和 report redaction 测试。
 
-**Done Evidence:** Manager 不解析 family 私有 VM 内存，不持有 family 文件系统、renderer/audio handle 或 Actor 指针；所有玩家可见输出都来自 RuntimeWorld event/presentation/audio/report。
+**Done Evidence:** Manager 不解析 family 私有 VM 内存，不持有 family 文件系统、renderer/audio handle 或 Actor 指针；所有玩家可见输出都来自 `AstraEmuRuntimeProvider` 输出到 RuntimeWorld 的 event/presentation/audio/report。
 
 **Linked Test IDs:** `T-S5-MANAGER-01`
 
@@ -30,7 +102,7 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 **Goal:** 定义并实现 `LegacyFamilyPluginDescriptor`、`LegacyRuntimeProvider`、`LegacyRuntimeSessionId`、`LegacyRuntimeHostCtx`、`LegacyStepInput`、`LegacyStepOutput`、`LegacyEffect`、`LegacyWaitRequest` 和 `LegacySnapshotEnvelope`。
 
-**Depends On:** `S5-MANAGER-01`、`Docs/contracts/astraemu-ipc.md`、`Docs/implementation/astraemu-legacy-runtime-framework.md`、`Docs/implementation/provider-plugin-api.md`
+**Depends On:** `S5-GAME-RUNTIME-01`、`S5-EMUCORE-SM-01`、`S5-LEGACY-VFS-01`、`S5-MANAGER-01`、`Docs/contracts/astraemu-ipc.md`、`Docs/implementation/astraemu-legacy-runtime-framework.md`、`Docs/implementation/provider-plugin-api.md`
 
 **Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`AstraEMU/Tests/family_plugin_api.rs` planned target
 
@@ -39,7 +111,7 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 1. 定义 family descriptor、runtime provider id、format capability、permission、failure classification 和 redaction policy。
 2. 定义 lifecycle API：`probe`、`open`、`step`、`save`、`restore`、`shutdown`；`open` 返回 session id，provider 负责区分并行 case。
 3. 定义 provider DTO，所有输入输出都是 stable id、hash、section ref、source span、capability diagnostic 和 postcard payload。
-4. 让 `step` 返回有序 `LegacyEffect`、`LegacyWaitRequest`、snapshot dirty section 和 redaction summary，由 host adapter 应用到 `DeterministicActionContext`。
+4. 让 `step` 返回有序 `LegacyEffect`、`LegacyWaitRequest`、snapshot dirty section、VFS read evidence 和 redaction summary，由 host adapter 应用到 `DeterministicActionContext`。
 5. 编写 provider registration、session lifecycle、effect serialization、snapshot envelope、restore compatibility 和 redaction 测试。
 
 **Done Evidence:** family plugin 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks，family VM state 只存在于 provider session。
@@ -232,10 +304,11 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 **Steps:**
 
-1. 复用 `LegacyRuntimeProvider` facade 和 release report schema。
-2. 实现 pack/media resolver 和 HCB VM execution route。
-3. 把 graph、text、sound、movie、thread syscall 转成 trace/event。
-4. 编写 generated fixture、syscall mapper 和 full-flow scenario 测试。
+1. 复用 `LegacyRuntimeProvider` facade、VFS legacy pack mount 和 release report schema。
+2. 实现 `.bin` pack/media resolver 和 HCB VM execution route。
+3. 把 HCB basic block 映射为 family-private action sequence。
+4. 把 graph、text、sound、movie、thread syscall 转成 trace/event、presentation/audio command、TextCaptureEvent 和 AwaitToken。
+5. 编写 generated fixture、syscall mapper、state-machine mapping 和 full-flow scenario 测试。
 
 **Done Evidence:** FVP report 能说明 syscall coverage，不提交商业脚本或媒体 payload。
 
@@ -288,7 +361,7 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 **ID:** `S5-PROGRAM-TARGET-01`
 
-**Goal:** AstraEMU Manager 以 `Program` target 运行，family plugin 仍通过 `LegacyRuntimeProvider` 注册，不升级成 Game target。
+**Goal:** AstraEMU Manager 以 `Program` target 运行；被启动的 case 通过 `AstraEmuRuntimeProvider` 作为 `Game` runtime session 运行，family plugin 仍通过 `LegacyRuntimeProvider` 注册，不升级成独立 Game target。
 
 **Depends On:** `S1-TARGET-01`、`S5-MANAGER-01`、`S5-FAMILY-01`
 
@@ -298,8 +371,9 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 创建并驱动
 
 1. 定义 `astra-emu-manager` Target，kind 为 `program`，绑定 desktop platforms。
 2. Manager 启动时校验 Program target 和 platform capability。
-3. family plugin descriptor 只进入 plugin registry，不写成独立 Target。
-4. 编写 Manager target validation、family plugin isolation 和 local case report 测试。
+3. `AstraEmuRuntimeProvider` 的 case target 与 Manager Program target 分开校验。
+4. family plugin descriptor 只进入 plugin registry，不写成独立 Target。
+5. 编写 Manager target validation、case runtime provider handoff、family plugin isolation 和 local case report 测试。
 
 **Done Evidence:** Manager report 包含 Program target id，family report 仍只记录 provider id 和 session id。
 

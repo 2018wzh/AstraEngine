@@ -1,12 +1,39 @@
 # AstraVN Module
 
-AstraVN 是原生 VN 垂直模块。它使用 EngineCore 的 Runtime、Script、Media、Asset 和 Save/Replay。AstraVN Core 持有 VN 权威语义；Luau 策略和插件只负责表现、系统页和演出扩展。
+AstraVN 是原生 VN 垂直模块。它使用 EngineCore 的 Runtime、Script、Media、Asset/VFS 和 Save/Replay。AstraVN Core 持有 VN 权威语义；Luau 策略和插件只负责表现、系统页和演出扩展。
+
+代码布局采用 `Engine/Source/Modules/AstraVN/`。`astra-vn` 只作为 facade crate 存在，负责 `rlib`/Rust ABI `dylib` 输出和兼容 re-export；parser、runtime、policy、presentation、system、save、package、plugin、editor metadata 和 runtime provider 都拆到独立功能 crate。
+
+## Gameplay Runtime Provider
+
+AstraVN 作为 `NativeVnRuntimeProvider` 接入 [Game Runtime Provider](../contracts/game-runtime-provider.md)。Provider 位于 `astra-vn-runtime-provider`，组合 `.astra` compiler、VN Core、Luau policy、presentation/system UI、VN package sections 和 VN release checks，把 dialogue、choice、wait、system page 和 presentation step 转成 Runtime effect、AwaitToken、PresentationCommand、AudioCommand、save section 和 release evidence。
+
+`NativeVnRuntimeProvider` 不作为所有玩法类型的基类。AstraEMU 和后续 AstraRPG 通过各自 runtime provider 与 AstraVN 同级接入；它们不能复用 VN Core 来表达非 VN 的权威状态。
 
 ## Rust Dylib Boundary
 
-`astra-vn` 设计为同时产出 `rlib` 和 Rust ABI `dylib` 的垂直模块 facade。它暴露 `.astra` parser/compiler、CompiledStory、VN Core state、presentation model、system UI profile 和 VN extension id，但不复制 EngineCore runtime。这个 dylib 只承诺同 engine version、rustc fingerprint 和 feature fingerprint 下的 Rust-side 动态链接；跨语言或跨编译器稳定边界仍是 `.astra`、package section 和 Stage 1 plugin ABI。
+`astra-vn` 设计为同时产出 `rlib` 和 Rust ABI `dylib` 的 facade。它 re-export AstraVN 子 crate 的 public API，保留现有 `astra_vn::*` 消费路径，但不承载业务实现。这个 dylib 只承诺同 engine version、rustc fingerprint 和 feature fingerprint 下的 Rust-side 动态链接；跨语言或跨编译器稳定边界仍是 `.astra`、package section 和 Stage 1 plugin ABI。
 
 `astra-vn` public API 不传递 Luau VM handle、renderer/audio native handle、Actor 指针或 Editor widget。需要跨插件暴露的能力必须落到 ExtensionRegistry、provider descriptor、package section 和 release report evidence。
+
+## Crate Split
+
+| Crate | 职责 |
+| --- | --- |
+| `astra-vn-script` | `.astra` source、parser、compiler、`CompiledStory`、source map、debug symbol、route graph、story/variable/command manifest |
+| `astra-vn-core` | `VnRuntime`、command cursor、runtime state、choice、call/return、backlog、read-state、voice replay、wait state、system state、replay UI |
+| `astra-vn-policy` | Luau sandbox、policy state、mutation/query/trace、policy bundle manifest、source cache、`standard_policy.luau` |
+| `astra-vn-presentation` | StageModel、layer/camera/video/audio/timeline/fallback、headless presentation execution、presentation provider manifest |
+| `astra-vn-commands` | standard command library、command schema、usage validation、command manifest |
+| `astra-vn-system` | system stories、save/config/backlog/gallery/replay/route chart/localization profile |
+| `astra-vn-save` | `vn.runtime_state`、`vn.policy_state` save sections、save blob、hash、migration glue |
+| `astra-vn-package` | `vn.*` package section plans、profile manifest、commercial baseline、advanced presentation manifest、package evidence |
+| `astra-vn-plugin` | VN extension points、extension manifest、provider slot ids |
+| `astra-vn-editor` | Graph/Timeline authoring metadata、source round-trip metadata、NativeVN `RuntimeEditorMetadata` |
+| `astra-vn-runtime-provider` | `NativeVnRuntimeProvider` composition |
+| `astra-vn` | facade、`rlib`/Rust ABI `dylib`、兼容 re-export |
+
+功能 crate 不允许依赖 `astra-vn` facade。需要共享的 DTO 下沉到更底层 crate，不能通过 facade 回引。
 
 ## Source
 
@@ -43,4 +70,4 @@ Luau policy 用于 message/choice UI、system stories、presentation preset、ti
 
 NativeVN commercial baseline 必须跑通 dialogue、choice、variables、call/return、backlog、auto、skip、read-state、save/load、config、gallery、replay、route chart、voice replay、movie、transition、screen effects、message window、route flags 和 timed delay blocks。缺少任一 system story 入口、Luau policy lock、source map round-trip、command provider binding 或 replay hash 都阻断 VN release profile。
 
-实现细节见 [`.astra` Grammar And IR](../implementation/astra-grammar-ir.md)、[Luau Policy](../implementation/luau-policy.md) 和 [Editor Visual Protocol](../implementation/editor-visual-protocol.md)。
+实现细节见 [Game Runtime Provider Blueprint](../implementation/game-runtime-provider.md)、[`.astra` Grammar And IR](../implementation/astra-grammar-ir.md)、[Luau Policy](../implementation/luau-policy.md) 和 [Editor Visual Protocol](../implementation/editor-visual-protocol.md)。

@@ -41,9 +41,9 @@ checks:
 
 ## Stage 2：Media + Package
 
-**闭环：** cooked package 可读写，headless capture 稳定，strict scenario runner 不忽略未知 VN action，Windows/Web 平台能力报告覆盖 decode/audio/renderer/storage/package source。
+**闭环：** cooked package 可读写，headless capture 稳定，strict scenario runner 不忽略未知 VN action，Windows/Web 平台能力报告覆盖 decode/audio/renderer/storage/package source。Stage 2 当前因 VFS 设计升级重开：已有 AssetId、sidecar、registry、cook、package 和 media evidence 继续保留，但还要补齐 package/local authorized/legacy pack/overlay mount 的统一 contract、reader provider 和 release gate。
 
-**Test IDs:** `T-S2-PACKAGE-01`、`T-S2-MEDIA-01`、`T-S2-MEDIA-05`、`T-S2-RUNTIME-FSM-01`、`T-S2-RUNTIME-AWAIT-01`、`T-S2-SCENARIO-GATE-01`、`T-S2-PLATFORM-01`、`T-S2-TARGET-GATE-01`、`T-S2-GATE-01`、`T-S2-WINDOWS-HOST-01`、`T-S2-WEB-HOST-01`
+**Test IDs:** `T-S2-PACKAGE-01`、`T-S2-VFS-01`、`T-S2-MEDIA-01`、`T-S2-MEDIA-05`、`T-S2-RUNTIME-FSM-01`、`T-S2-RUNTIME-AWAIT-01`、`T-S2-SCENARIO-GATE-01`、`T-S2-PLATFORM-01`、`T-S2-TARGET-GATE-01`、`T-S2-GATE-01`、`T-S2-WINDOWS-HOST-01`、`T-S2-WEB-HOST-01`
 
 **Sample:** `Examples/NativeSmoke`
 
@@ -55,13 +55,13 @@ astra package build target/cooked --target native-smoke-game --out target/native
 astra package validate target/native_smoke.astrapkg --profile desktop-release --target native-smoke-game --platform-report target/reports/platform-windows.yaml --report target/reports/stage2.yaml
 ```
 
-Expected report includes `package.integrity`, `target.manifest`, `platform.capability_report`, `renderer.headless_capture`, `decode.capability`, `audio.headless_meter`.
+Expected report includes `package.integrity`, `target.manifest`, `platform.capability_report`, `renderer.headless_capture`, `decode.capability`, `audio.headless_meter`, `vfs.package_mount`, `vfs.local_authorized_mount`, `vfs.legacy_pack_mount`, `vfs.overlay_mount` and payload/path redaction diagnostics.
 
 ## Stage 3：AstraVN
 
-**闭环：** `.astra + Luau policy` 编译为 CompiledStory，full playthrough 覆盖 commercial baseline、system UI、save/load 和 replay hash；advanced presentation profile 有独立 opt-in scenario。
+**闭环：** `.astra + Luau policy` 编译为 CompiledStory，full playthrough 覆盖 commercial baseline、system UI、save/load 和 replay hash；advanced presentation profile 有独立 opt-in scenario。Stage 3 当前继续 `IN_PROGRESS`，新增闭环是把现有 `astra-vn` facade、VN extension manifest、package sections 和 release checks 对齐到 `NativeVnRuntimeProvider`，并证明 VN 只是同级 gameplay runtime，不是其他玩法的基类。
 
-**Test IDs:** `T-S3-SCRIPT-01`、`T-S3-LUAU-01`、`T-S3-LUAU-02`、`T-S3-PRESENT-01`、`T-S3-SYSTEM-01`、`T-S3-ADVANCED-01`、`T-S3-SAMPLE-01`、`T-S3-GAME-TARGET-01`
+**Test IDs:** `T-S3-SCRIPT-01`、`T-S3-LUAU-01`、`T-S3-LUAU-02`、`T-S3-PRESENT-01`、`T-S3-SYSTEM-01`、`T-S3-ADVANCED-01`、`T-S3-SAMPLE-01`、`T-S3-GAME-TARGET-01`、`T-S3-RUNTIME-PROVIDER-01`
 
 **Sample:** `Examples/NativeVN`、`Examples/AdvancedVN`、`scenarios/full_playthrough.yaml`、`scenarios/advanced_presentation.yaml`
 
@@ -75,13 +75,13 @@ astra package build target/cooked-advancedvn --target advanced-vn-game --out tar
 astra test run scenarios/advanced_presentation.yaml --package target/advancedvn.astrapkg --target advanced-vn-game --profile advanced-vn --headless --report target/reports/stage3-advanced.yaml
 ```
 
-Expected report includes `target.manifest`, `script.compile`, `luau.policy_lock`, `system_stories.covered`, `vn.system_ui_profile`, `vn.advanced_presentation`, `command.provider_binding` and `vn.replay_hash`.
+Expected report includes `target.manifest`, `runtime_provider.native_vn`, `script.compile`, `luau.policy_lock`, `system_stories.covered`, `vn.system_ui_profile`, `vn.advanced_presentation`, `command.provider_binding` and `vn.replay_hash`.
 
 ## Stage 4：Editor + AI/MCP
 
-**闭环：** Creator 从 Project Wizard 到 Package/Release Gate 可用；AI/MCP 写入有 audit、diff 和 rollback。Runtime Director 通过受限 MCP session 调模型，角色记忆、Context Pack、provider profile、ONNX ModelBundle 和玩家 consent 通过 gate。
+**闭环：** Creator 从 Project Wizard 到 Package/Release Gate 可用；AI/MCP 写入有 audit、diff 和 rollback。Runtime Director 通过受限 MCP session 调模型，角色记忆、Context Pack、provider profile、ONNX ModelBundle 和玩家 consent 通过 gate。Stage 4 当前按 `REOPENED_SPEC` 跟随 VFS/GameRuntime 调整：ONNX ModelBundle、Context Pack、generated artifact 和 MCP package access 必须复用 Asset VFS，不允许 loose sidecar 或私有 package source。
 
-**Test IDs:** `T-S4-EDITOR-01`、`T-S4-PLUGIN-01`、`T-S4-EDITOR-04`、`T-S4-EDITOR-05`、`T-S4-EDITOR-TARGET-01`、`T-S4-AI-01`、`T-S4-AI-02`、`T-S4-AI-ONNX`、`T-S4-AI-03`、`T-S4-AI-04`、`T-S4-MCP-01`、`T-S4-MCP-02`、`T-S4-GATE-01`
+**Test IDs:** `T-S4-EDITOR-01`、`T-S4-PLUGIN-01`、`T-S4-EDITOR-04`、`T-S4-EDITOR-05`、`T-S4-EDITOR-TARGET-01`、`T-S4-AI-01`、`T-S4-AI-02`、`T-S4-AI-ONNX`、`T-S4-AI-VFS-01`、`T-S4-AI-03`、`T-S4-AI-04`、`T-S4-MCP-01`、`T-S4-MCP-02`、`T-S4-GATE-01`
 
 **Sample:** `Examples/NativeVN` opened through Project Wizard
 
@@ -100,13 +100,13 @@ cargo test -p astra-mcp context_tooling
 cargo test -p astra-release ai_mcp_gate
 ```
 
-Expected report: `astra.editor_report.v1` with source span links for failed checks, plus `astra.release_report.v1` checks for `ai.provider_profile`, `ai.model_bundle`, `ai.onnx_runtime_pack`, `ai.onnx_execution_provider`, `ai.generated_artifact_save`, `ai.runtime_memory_policy`, `mcp.context_permission` and provider-free replay.
+Expected report: `astra.editor_report.v1` with source span links for failed checks, plus `astra.release_report.v1` checks for `ai.provider_profile`, `ai.model_bundle`, `ai.onnx_runtime_pack`, `ai.onnx_execution_provider`, `ai.model_bundle_vfs_mount`, `ai.generated_artifact_save`, `ai.runtime_memory_policy`, `mcp.context_permission` and provider-free replay.
 
 ## Stage 5：AstraEMU
 
-**闭环：** Manager 创建并驱动 RuntimeWorld，`LegacyRuntimeProvider` facade、auto probe、Trusted Luau、文本翻译、FilterGraph preset 和 Artemis 通用 family plugin 通过 gate。其他 family 可以停在 alpha profile，但必须有 probe report。
+**闭环：** Manager 启动 `AstraEmuRuntimeProvider` gameplay runtime，provider 创建并驱动 RuntimeWorld，再通过 `LegacyRuntimeProvider` family facade、auto probe、Trusted Luau、文本翻译、FilterGraph preset、legacy pack VFS mount 和 Artemis 通用 family plugin 通过 gate。其他 family 可以停在 alpha profile，但必须有 probe report。Stage 5 当前按 `REOPENED_SPEC` 对齐 peer gameplay runtime 与 EmulatorCore 状态机映射。
 
-**Test IDs:** `T-S5-MANAGER-01`、`T-S5-PROGRAM-TARGET-01`、`T-S5-FAMILY-01`、`T-S5-ARTEMIS-01`、`T-S5-GATE-01`
+**Test IDs:** `T-S5-GAME-RUNTIME-01`、`T-S5-EMUCORE-SM-01`、`T-S5-LEGACY-VFS-01`、`T-S5-MANAGER-01`、`T-S5-PROGRAM-TARGET-01`、`T-S5-FAMILY-01`、`T-S5-ARTEMIS-01`、`T-S5-FVP-01`、`T-S5-GATE-01`
 
 **Sample:** `scenarios/emu/artemis_full_flow.yaml` and local authorized case root
 
@@ -117,7 +117,7 @@ astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/r
 astra emu probe <case-root> --family auto --report target/reports/emu-probe.yaml
 ```
 
-Expected report omits commercial payload and contains `emu.legacy_runtime_provider`、`emu.auto_probe`、trusted script isolation、text redaction、filter preset evidence、trace、TextCaptureEvent、snapshot ref、redaction status and Runtime replay hash.
+Expected report omits commercial payload and contains `emu.game_runtime_provider`、`emu.legacy_runtime_provider`、`emu.vm_state_machine_trace`、`emu.legacy_pack_vfs`、`emu.auto_probe`、trusted script isolation、text redaction、filter preset evidence、trace、TextCaptureEvent、snapshot ref、redaction status and Runtime replay hash.
 
 ## Stage 6：Platform Completion
 

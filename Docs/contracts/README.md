@@ -7,6 +7,8 @@
 | Runtime | [runtime.md](runtime.md) |
 | Plugin ABI | [plugin-abi.md](plugin-abi.md) |
 | Data / Save / Package | [data-formats.md](data-formats.md) |
+| Asset VFS | [asset-vfs.md](asset-vfs.md) |
+| Game Runtime Provider | [game-runtime-provider.md](game-runtime-provider.md) |
 | Media | [media.md](media.md) |
 | Script / VN | [script-vn.md](script-vn.md) |
 | AI / MCP | [ai-mcp.md](ai-mcp.md) |

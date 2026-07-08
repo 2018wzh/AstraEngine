@@ -1,6 +1,6 @@
 # Stage 4 Editor + AI/MCP Work
 
-Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 边界；Runtime AI 和 Editor AI 都必须可审计、可回滚，并通过 provider-free replay。本页是 planned target 清单，不表示实现已经存在。
+Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 边界；Runtime AI 和 Editor AI 都必须可审计、可回滚，并通过 provider-free replay。本页是 `REOPENED_SPEC` 清单，不表示实现已经存在。本轮重开后，ONNX ModelBundle、Context Pack、generated artifact 和 MCP package access 必须复用 [Asset VFS](../../contracts/asset-vfs.md)，不能继续以 loose sidecar 或私有 package source 表达。
 
 ## S4-EDITOR-01 Qt/QML shell 与 Project Wizard
 
@@ -15,11 +15,11 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 **Steps:**
 
 1. 建立 Qt/QML shell 和 Rust bridge 进程边界。
-2. 实现 Project Wizard，创建 AstraVN project manifest、source tree 和 sample policy binding。
+2. 实现 Project Wizard，读取 `RuntimeEditorMetadata`，创建 NativeVN project manifest、source tree 和 sample policy binding，并保留 AstraEMU/AstraRPG planned provider 的不可用诊断。
 3. 加载 project 后显示 Content Browser、Graph、Timeline、Inspector 和 Package panel 的空状态。
 4. 编写 wizard create/load smoke test。
 
-**Done Evidence:** Project Wizard 到 project load 的 creator workflow 可重复运行，不写入 EngineCore 私有状态。
+**Done Evidence:** Project Wizard 到 project load 的 creator workflow 可重复运行，不写入 EngineCore 私有状态；runtime provider metadata 决定可见模板和面板。
 
 **Linked Test IDs:** `T-S4-EDITOR-01`
 
@@ -36,9 +36,10 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 **Steps:**
 
 1. 定义 PIE session lifecycle：create、launch、tick、pause、resume、stop。
-2. 把 Editor input 转成 Runtime PlayerInput，不直接操作 Actor 指针。
-3. 暴露 TickReport、diagnostics、scenario cursor 和 presentation hash。
-4. 编写 PIE launch、pause/resume 和 diagnostic forwarding 测试。
+2. PIE launch request 必须携带 Game target id、runtime provider id 和 profile。
+3. 把 Editor input 转成 Runtime PlayerInput，不直接操作 Actor 指针。
+4. 暴露 TickReport、diagnostics、scenario cursor 和 presentation hash。
+5. 编写 PIE launch、pause/resume 和 diagnostic forwarding 测试。
 
 **Done Evidence:** PIE 使用 Runtime API，不依赖 private runtime state。
 
@@ -179,7 +180,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Goal:** `astra-ai-onnx` 作为一方 provider profile 接入 Editor 和 MCP host；模型、ONNX Runtime reduced runtime、Web runtime adapter、tokenizer、pipeline config 和 custom op sidecar 通过 cook/package 成为 ModelBundle，并由 package/VFS section ref 读取。
 
-**Depends On:** `S2-PACKAGE-01`、`S2-ASSET-01`、`S2-PLUGIN-GATE-01`、`S4-AI-01`、`S4-AI-02`、`Docs/implementation/ai-provider-profiles.md`、`Docs/implementation/package-save.md`
+**Depends On:** `S2-PACKAGE-01`、`S2-ASSET-01`、`S2-VFS-01`、`S2-PLUGIN-GATE-01`、`S4-AI-01`、`S4-AI-02`、`Docs/implementation/ai-provider-profiles.md`、`Docs/implementation/package-save.md`、`Docs/implementation/asset-vfs.md`
 
 **Target Paths:** `Engine/Plugins/Providers/astra-ai-onnx/`、`Engine/Source/Developer/astra-ai/src/model_bundle.rs`、`Engine/Source/Developer/astra-ai/tests/onnx_model_bundle.rs` planned target
 
@@ -195,6 +196,30 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 **Done Evidence:** `astra-ai-onnx` 不进入 EngineCore；provider 只通过 `McpAiSession` 和 package/VFS section ref 运行；Shipping local AI gate 能证明模型、runtime、EP、custom op、加密和生成结果 save/replay 都可审计。
 
 **Linked Test IDs:** `T-S4-AI-ONNX`
+
+## S4-AI-VFS-01 AI/MCP VFS evidence alignment
+
+**ID:** `S4-AI-VFS-01`
+
+**Status:** `REOPENED_SPEC`
+
+**Goal:** AI/MCP 的 ModelBundle、Context Pack、generated artifact、tool access 和 package source 全部通过 Asset VFS mount evidence 表达。
+
+**Depends On:** `S2-VFS-01`、`S4-AI-ONNX`、`S4-MCP-02`、[Asset VFS Blueprint](../../implementation/asset-vfs.md)
+
+**Target Paths:** `Engine/Source/Developer/astra-ai/src/model_bundle.rs`、`Engine/Source/Developer/astra-mcp/src/context_pack.rs`、`Engine/Source/Developer/astra-release/tests/ai_mcp_gate.rs` planned target
+
+**Steps:**
+
+1. 让 `ai.model_bundle_manifest` 只引用 VFS locator、package section ref、hash、codec、license/provenance 和 execution provider evidence。
+2. 禁止 Shipping provider 读取 loose model sidecar、runtime binary、tokenizer 或 custom op；开发期下载也必须进入 vendor cache 或 package-backed VFS。
+3. Context Pack 的 read/search tool 只返回脱敏 relative key、hash、section ref 和 source span，不返回本地 root、provider secret 或 payload。
+4. Generated artifact save section 记录 artifact section ref、chunk hash、validator status 和 replay policy，不重新请求 provider。
+5. Release Gate 增加 `ai.model_bundle_vfs_mount`、`ai.context_pack_redaction` 和 package/source consistency check。
+
+**Done Evidence:** `cargo test -p astra-ai onnx_model_bundle`、`cargo test -p astra-mcp context_tooling` 和 `cargo test -p astra-release ai_mcp_gate` 通过；release report 输出 ModelBundle VFS mount、Context Pack redaction 和 provider-free replay evidence。
+
+**Linked Test IDs:** `T-S4-AI-VFS-01`
 
 ## S4-AI-03 Editor Copilot、Trusted session 与 Review Queue
 
@@ -304,6 +329,30 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Linked Test IDs:** `T-S4-GATE-01`
 
+## S4-EDITOR-RUNTIME-PROVIDER-01 Editor runtime provider switching
+
+**ID:** `S4-EDITOR-RUNTIME-PROVIDER-01`
+
+**Status:** `REOPENED_SPEC`
+
+**Goal:** AstraEditor shell 通过 `ProductRuntimeProvider` 切换 Project Wizard、authoring surface、PIE、Debugger 和 Release Gate，不把 AstraVN 写成唯一玩法类型。
+
+**Depends On:** `S3-RUNTIME-PROVIDER-01`、`S4-EDITOR-01`、`S4-PLUGIN-01`、[Game Runtime Provider Contract](../../contracts/game-runtime-provider.md)、[Editor Workflow Blueprint](../../implementation/editor-workflow.md)、[Editor Runtime Provider Migration](../../migrations/editor-runtime-provider-migration.md)
+
+**Target Paths:** `Editor/Source/Bridge/astra-editor-bridge/src/runtime_provider.rs`、`Editor/Source/Bridge/astra-editor-bridge/src/pie.rs`、`Editor/Tests/runtime_provider_switch.rs` planned target
+
+**Steps:**
+
+1. Bridge 增加 `list_runtime_providers`、`read_runtime_editor_metadata` 和 `set_active_editor_target`。
+2. Project Wizard 根据 `RuntimeEditorMetadata.project_templates` 显示 NativeVN 模板，并对 planned AstraEMU/AstraRPG provider 显示不可用诊断。
+3. Panel registry 根据 `authoring_surfaces` 显示 `.astra` Script、VN Graph、Timeline、System UI、Luau policy，隐藏未绑定 runtime 的专属面板。
+4. PIE 和 Release Gate request 必须携带 Game target id、provider id 和 profile；缺 binding 或 provider/profile mismatch 时 blocking。
+5. 编写 provider selection、metadata redaction、PIE handoff、panel visibility 和 release gate handoff 测试。
+
+**Done Evidence:** `cargo test -p astra-editor-bridge runtime_provider_switch` 通过；Editor report 只记录 provider id、surface id、source ref、hash 和 diagnostic，不记录 Editor widget、本地 root 或 payload。
+
+**Linked Test IDs:** `T-S4-EDITOR-RUNTIME-PROVIDER-01`
+
 ## S4-EDITOR-TARGET-01 AstraEditor Editor target
 
 **ID:** `S4-EDITOR-TARGET-01`
@@ -318,7 +367,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 1. 定义 `astra-editor` Target，kind 为 `editor`，绑定 desktop platforms，`packaged` 为 false。
 2. Editor launch 前校验 Target manifest，不允许 Editor target 写入 packaged runtime。
-3. PIE 使用所选 Game target 启动 RuntimeWorld，不复用 Editor target 的 state。
+3. PIE 使用所选 Game target 和 gameplay runtime provider 启动 RuntimeWorld，不复用 Editor target 的 state。
 4. 编写 Editor target launch、PIE target handoff 和 package isolation 测试。
 
 **Done Evidence:** Editor target 不出现在 game package，PIE 能显式选择 Game target。
