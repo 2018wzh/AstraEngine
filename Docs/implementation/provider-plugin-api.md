@@ -149,7 +149,9 @@ pub trait AiProvider: StableProvider {
 
 Provider 族还包括 `TextLayoutProvider`、`AudioOutputProvider`、`LuauPolicyBundleProvider`、`EditorPanelProvider`、`AiProvider`、`MCPToolProvider`、`TranslationProvider`、`LegacyRuntimeProvider` 和可选 `EMUCoreBridgeProvider`。所有 trait 只传 ABI-safe value、stable id、section ref 和 capability report。Stage 3 的 `astra-vn` Rust dylib facade 负责公开 VN command、presentation command、Luau policy bundle 和 Graph/Timeline metadata extension id；稳定插件边界仍由 `astra-plugin-abi` 承担。
 
-`AiProvider` 是 Editor 和 MCP host 的后端适配。OpenAI、Ollama、ComfyUI 第一方 provider 以普通插件注册，默认禁用，由项目 manifest 或 release profile 显式绑定。Runtime 不直接接收 `AiProvider` trait object，只通过 `McpAiSession` 获取 typed Intent、tool result 和 committed output。
+`AiProvider` 是 Editor 和 MCP host 的后端适配。OpenAI、Ollama、ComfyUI 和 ONNX Runtime 第一方 provider 以普通插件注册，默认禁用，由项目 manifest 或 release profile 显式绑定。Runtime 不直接接收 `AiProvider` trait object，只通过 `McpAiSession` 获取 typed Intent、tool result、generated artifact chunk 和 committed output。
+
+`astra-ai-onnx` provider 可以加载 package/VFS 中声明的 ORT custom op sidecar，但 sidecar 不是新的 Engine extension point。它只作为 ONNX Runtime 依赖被 provider 私有加载，必须由 ModelBundle manifest 声明平台、hash、license、加载策略和目标运行证据。sidecar 不能接收 `RuntimeWorld`、Actor 指针、Editor widget、GPU/audio native handle、provider trait object、platform file descriptor 或本地路径；需要 Engine 能力时必须另行实现普通插件/provider 并走 extension registry。
 
 `TranslationProvider` 是文本翻译专用 slot。`translate_batch` 必须实现；`translate_stream` 只在 provider capability 声明支持时使用。DeepL-style provider 可以只返回 batch 结果，LLM provider 可以 streaming 更新 AstraEMU overlay。翻译结果默认是 UI overlay 状态，不改变 Runtime replay hash。
 

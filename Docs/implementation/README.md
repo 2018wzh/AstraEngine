@@ -20,11 +20,11 @@
 | [../modules/astra-vn-presentation-model.md](../modules/astra-vn-presentation-model.md) | Stage/Layer/Camera/Sprite/TextWindow/VideoLayer 和 advanced presentation profile |
 | [../modules/astra-vn-standard-commands.md](../modules/astra-vn-standard-commands.md) | AstraVN 标准命令库、schema、IR、Editor metadata 和 release check |
 | [../modules/astra-vn-system-ui-profile.md](../modules/astra-vn-system-ui-profile.md) | save/load、config、backlog、gallery、replay、route chart、voice replay 和 localization preview |
-| [package-save.md](package-save.md) | serde+postcard section、schema/migrator、package/save/replay 容器 |
+| [package-save.md](package-save.md) | serde+postcard section、schema/migrator、package/save/replay 容器、AI ModelBundle package/VFS section |
 | [editor-visual-protocol.md](editor-visual-protocol.md) | Graph/Timeline 派生层、Inspector 控件、source round-trip |
 | [editor-workflow.md](editor-workflow.md) | UE 级 creator workflow、面板状态、Qt/Rust bridge |
 | [ai-mcp-runtime.md](ai-mcp-runtime.md) | Runtime AI、Editor Copilot、Content Generation、MCP tool policy |
-| [ai-provider-profiles.md](ai-provider-profiles.md) | OpenAI、Ollama、ComfyUI provider profile 和第一方插件边界 |
+| [ai-provider-profiles.md](ai-provider-profiles.md) | OpenAI、Ollama、ComfyUI、ONNX Runtime provider profile 和第一方插件边界 |
 | [runtime-ai-director-memory.md](runtime-ai-director-memory.md) | Runtime Director、角色记忆、Context Pack 和 Intent |
 | [mcp-context-tooling.md](mcp-context-tooling.md) | 外部 AI 工具、MCP context、命令白名单和 audit |
 | [ai-release-gate.md](ai-release-gate.md) | AI/MCP release check、debug trace、玩家同意和 provider-free replay |

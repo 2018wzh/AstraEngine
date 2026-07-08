@@ -173,6 +173,29 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Linked Test IDs:** `T-S4-AI-02`
 
+## S4-AI-ONNX Packaged ONNX Runtime provider and ModelBundle
+
+**ID:** `S4-AI-ONNX`
+
+**Goal:** `astra-ai-onnx` 作为一方 provider profile 接入 Editor 和 MCP host；模型、ONNX Runtime reduced runtime、Web runtime adapter、tokenizer、pipeline config 和 custom op sidecar 通过 cook/package 成为 ModelBundle，并由 package/VFS section ref 读取。
+
+**Depends On:** `S2-PACKAGE-01`、`S2-ASSET-01`、`S2-PLUGIN-GATE-01`、`S4-AI-01`、`S4-AI-02`、`Docs/implementation/ai-provider-profiles.md`、`Docs/implementation/package-save.md`
+
+**Target Paths:** `Engine/Plugins/Providers/astra-ai-onnx/`、`Engine/Source/Developer/astra-ai/src/model_bundle.rs`、`Engine/Source/Developer/astra-ai/tests/onnx_model_bundle.rs` planned target
+
+**Steps:**
+
+1. 定义 `PackagedOnnxRuntime` provider profile、`ai.model_bundle_manifest`、ModelBundle pipeline、VFS mount id、section refs、runtime fingerprint 和 execution provider evidence。
+2. 把模型权重、external data、tokenizer、sampler、scheduler、vocoder、pre/post-process config、reduced runtime、Web runtime adapter 和 custom op sidecar 作为 package/VFS content entry，不使用 project-level `package_sections` 携带 payload。
+3. 复用 `EncryptionDescriptor`、section hash、codec、migration、provider policy 和 package release gate；不设计模型专用容器、模型专用 DRM 或 loose sidecar 读取。
+4. 固定 Shipping local AI 主 EP：Windows `DirectML`、Linux `OpenVINO`、macOS/iOS `CoreML`、Android `QNN`、Web `WebNN`；缺主 EP、operator coverage 不足、CPU fallback 或缺真实目标运行报告时阻断。
+5. 将文本、图像和语音生成 chunk 写入 save extra section，正式 replay 读取 save payload；debug/live regeneration 只作为非权威差异报告。
+6. 编写 ModelBundle manifest roundtrip、package/VFS lookup、encrypted model read failure/pass、vendor cache lock、custom op sidecar declaration、CPU fallback blocked、generated artifact save/replay 和 redaction 测试。
+
+**Done Evidence:** `astra-ai-onnx` 不进入 EngineCore；provider 只通过 `McpAiSession` 和 package/VFS section ref 运行；Shipping local AI gate 能证明模型、runtime、EP、custom op、加密和生成结果 save/replay 都可审计。
+
+**Linked Test IDs:** `T-S4-AI-ONNX`
+
 ## S4-AI-03 Editor Copilot、Trusted session 与 Review Queue
 
 **ID:** `S4-AI-03`
@@ -266,16 +289,16 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Goal:** Release Gate 覆盖 provider profile、Runtime Director、memory、MCP audit、debug trace、玩家同意和 provider-free replay。
 
-**Depends On:** `S4-AI-01`、`S4-AI-02`、`S4-AI-04`、`S4-MCP-02`
+**Depends On:** `S4-AI-01`、`S4-AI-02`、`S4-AI-ONNX`、`S4-AI-04`、`S4-MCP-02`
 
 **Target Paths:** `Engine/Source/Developer/astra-release/src/ai_gate.rs`、`Engine/Source/Developer/astra-release/tests/ai_mcp_gate.rs` planned target
 
 **Steps:**
 
-1. 增加 `ai.provider_profile`、`ai.runtime_provider_startup`、`ai.provider_free_replay`、`ai.runtime_memory_policy`、`ai.debug_trace_redaction`、`ai.player_consent`、`mcp.context_permission` 和 `mcp.command_allowlist` gate check。
+1. 增加 `ai.provider_profile`、`ai.model_bundle`、`ai.onnx_runtime_pack`、`ai.onnx_execution_provider`、`ai.runtime_provider_startup`、`ai.generated_artifact_save`、`ai.provider_free_replay`、`ai.runtime_memory_policy`、`ai.debug_trace_redaction`、`ai.player_consent`、`mcp.context_permission` 和 `mcp.command_allowlist` gate check。
 2. 校验 save/replay 中 committed AI output 完整，且 replay 不需要 provider。
 3. 校验 Trusted session audit chain、Review Queue disposition、memory ledger 和 encrypted debug trace policy。
-4. 编写 gate pass、missing audit blocked、provider startup blocked、memory policy blocked、context permission blocked 和 provider replay blocked 测试。
+4. 编写 gate pass、missing audit blocked、provider startup blocked、ModelBundle blocked、CPU fallback blocked、generated artifact save blocked、memory policy blocked、context permission blocked 和 provider replay blocked 测试。
 
 **Done Evidence:** v0.4 gate 能阻断缺失 audit、Live AI provider 不可用、memory 越权、MCP 越权或 provider-free replay 失败的 package。
 

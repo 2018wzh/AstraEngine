@@ -34,8 +34,12 @@ pub struct ReleaseCheckRecord {
 | editor | `editor.source_roundtrip` | editor report | source map identity failure | source_ref, command id |
 | editor | `editor.plugin_manager` | plugin manager report | enablement/dependency/diagnostic jump failure | plugin id, extension id |
 | ai_mcp | `ai.provider_profile` | provider descriptor, project binding | fingerprint, secret handle, network egress, runtime eligibility or model fingerprint missing | provider id, profile id, model fingerprint |
+| ai_mcp | `ai.model_bundle` | ModelBundle manifest, package section table | manifest missing, payload routed through `package_sections`, section ref/hash/codec/migration missing or license/provenance missing | bundle id, section id, hash, license status |
+| ai_mcp | `ai.onnx_runtime_pack` | runtime vendor cache, package/VFS mount | reduced runtime not locked, release downloads runtime, VFS mount unresolved or custom op sidecar lacks hash/license/platform declaration | runtime fingerprint, VFS mount id, sidecar id |
+| ai_mcp | `ai.onnx_execution_provider` | platform capability, target runtime smoke | required primary EP missing, operator coverage incomplete, CPU fallback observed or target run evidence missing | platform id, EP, model fingerprint, operator coverage |
 | ai_mcp | `ai.runtime_provider_startup` | release profile, platform capability | Live AI provider required by profile is unavailable at startup | provider profile, platform id, diagnostic |
 | ai_mcp | `ai.provider_free_replay` | save/replay | provider required during replay | committed output hash |
+| ai_mcp | `ai.generated_artifact_save` | save section, committed output | generated chunk not written to save extra section, artifact manifest missing mapping or hash/migration/encryption incomplete | artifact section id, chunk hash, validator status |
 | ai_mcp | `ai.runtime_memory_policy` | memory ledger, policy | canon write exceeds policy, ledger missing or vector index treated as authority | namespace, entry hash, policy id |
 | ai_mcp | `ai.debug_trace_redaction` | package/report/debug profile | release artifact contains plaintext prompt, player text, commercial payload or secret | trace id, redaction status |
 | ai_mcp | `ai.player_consent` | runtime profile, save memory | cloud provider reads player memory without first-run consent | consent id, provider profile |
@@ -85,6 +89,15 @@ checks:
     status: pass
     evidence:
       memory_namespace: cast.hero
+  - id: ai.onnx_execution_provider
+    domain: ai_mcp
+    status: blocked
+    diagnostic: ASTRA_AI_ONNX_CPU_FALLBACK
+    evidence:
+      model_bundle: com.example.model.local_director
+      platform: windows
+      required_ep: DirectML
+      observed_ep: CPU
   - id: plugin.extension_registry
     domain: plugin
     status: pass

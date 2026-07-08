@@ -19,7 +19,7 @@
 
 ## P2
 
-- Runtime Director committed output、AI provider profiles、runtime memory、Trusted session audit、MCP Context Pack、command allowlist。
+- Runtime Director committed output、AI provider profiles、Pack/VFS-backed ONNX ModelBundle、runtime memory、Trusted session audit、MCP Context Pack、command allowlist。
 - AstraEMU Manager RuntimeWorld bridge、`LegacyRuntimeProvider` facade、auto probe、Trusted Luau、文本翻译、FilterGraph preset 和 Artemis full-flow。
 - iOS/Android 真实 SDK probe、launcher、platform decode、storage/package source、resume 和 no-JIT gate 已移到 Stage 6。
 

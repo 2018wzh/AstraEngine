@@ -4,7 +4,9 @@ AI/MCP 模块提供 Runtime Director、Editor Copilot、Content Generation、MCP
 
 ## Runtime AI
 
-Runtime 通过受限 `McpAiSession` 调模型，不直接持有 OpenAI、Ollama 或 ComfyUI provider。模型输出只能是 typed Intent 或 MCP tool call，Intent 通过 IntentValidator 后写入 CommittedAiOutput，save/replay 使用固化 payload。
+Runtime 通过受限 `McpAiSession` 调模型，不直接持有 OpenAI、Ollama、ComfyUI 或 ONNX Runtime provider。模型输出只能是 typed Intent、MCP tool call 或 typed generated artifact chunk，Intent 和 artifact 通过 validator 后写入 CommittedAiOutput，save/replay 使用固化 payload。
+
+`astra-ai-onnx` 是一方本地 provider 设计。模型、tokenizer、reduced runtime、custom op sidecar 和 Web runtime adapter 都通过 cook/package 成为 ModelBundle，并由 package/VFS section ref 读取；Runtime provider 不能读取 loose file 或绝对路径。
 
 ## Runtime Memory
 
@@ -16,7 +18,7 @@ Copilot 可解释 diagnostics、生成 patch、批量修复 schema、辅助 rele
 
 ## Content Generation
 
-生成图片、音频、视频、文本或脚本草稿时先创建 AI draft sidecar。Draft 被接受后才进入 AssetRegistry 或 canonical source。
+生成图片、音频、视频、文本或脚本草稿时先创建 AI draft sidecar。Draft 被接受后才进入 AssetRegistry 或 canonical source。Shipping Runtime 中的 ONNX 文本、图像和语音生成不走 draft sidecar；通过 validator 后写入 save extra section，正式 replay 不重跑 provider。
 
 ## MCP Context
 
@@ -24,4 +26,4 @@ Copilot 可解释 diagnostics、生成 patch、批量修复 schema、辅助 rele
 
 ## v1 Gate
 
-AI/MCP v1 同时覆盖创作和运行时：Runtime Director + 角色记忆、provider profile、Editor AI Control、Memory Inspector、Content Generation、MCP tool host、Trusted session、Review Queue、audit、rollback、debug trace redaction、player consent 和 provider-free replay。接口和检查见 [AI And MCP Runtime Blueprint](../implementation/ai-mcp-runtime.md)。
+AI/MCP v1 同时覆盖创作和运行时：Runtime Director + 角色记忆、provider profile、ONNX ModelBundle、Editor AI Control、Memory Inspector、Content Generation、MCP tool host、Trusted session、Review Queue、audit、rollback、debug trace redaction、player consent 和 provider-free replay。接口和检查见 [AI And MCP Runtime Blueprint](../implementation/ai-mcp-runtime.md)。

@@ -64,7 +64,7 @@ targets = [
 | `astra-platform-web` | 2 | Web browser probe、required smoke 和 host adapter | `astra-platform` | browser object crossing public API |
 | `astra-vn` | 3 | `.astra` parser/compiler、VN Core、Luau policy host、presentation/system UI、VN plugin extension bindings、Rust ABI dylib facade | `astra-core`, `astra-runtime`, `astra-package`, `astra-media`, `astra-plugin-abi`, `pest`, `mlua` | platform-native handles, second runtime, C ABI promise |
 | `astra-editor-bridge` | 4 | Qt/Rust bridge、PIE/debug API | `astra-runtime`, `astra-vn`, `astra-release` | packaged runtime dependency |
-| `astra-ai` | 4 | Runtime Director、provider profile、memory ledger、Editor AI audit | `astra-core`, `astra-runtime`, `astra-package` | provider secret in replay |
+| `astra-ai` | 4 | Runtime Director、provider profile、Pack/VFS-backed ONNX ModelBundle、memory ledger、Editor AI audit | `astra-core`, `astra-runtime`, `astra-package` | provider secret in replay |
 | `astra-mcp` | 4 | MCP tool descriptor、Context Pack、permission、audit、command allowlist | `astra-core`, `astra-plugin` | Editor widget in Runtime tools |
 | `astra-emu-manager` | 5 | Manager app, RuntimeWorld bridge, plugin enablement, auto probe, Trusted Luau host, text pipeline, filter preset binding, report | `astra-core`, `astra-runtime`, `astra-plugin`, `astra-media` | family VM internals |
 | `astra-emu-family-api` | 5 | LegacyFamilyPlugin descriptor, LegacyRuntimeProvider session/effect/snapshot DTO | `astra-core`, `astra-runtime`, `astra-package` | Manager UI |

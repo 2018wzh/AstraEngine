@@ -64,6 +64,17 @@ Minimum package sections:
 - `scenario.refs`
 - `platform.eligibility`
 
+AI ModelBundle 是 package 的一等 cook artifact，不使用 project-level `package_sections` 携带模型 payload。后续 ONNX provider 设计新增以下 section 族，状态为 `SPEC_READY`：
+
+- `ai.model_bundle_manifest`：`postcard` 编码 manifest，记录 bundle id、pipeline kind、model family、model fingerprint、license/provenance、fine-tune provenance、redistribution、voice authorization、profile budget、platform targets、VFS mount id、runtime section refs、model section refs 和 custom op sidecar refs。
+- `ai.model_artifact.*`：模型权重、external data、tokenizer、sampler、scheduler、vocoder、pre/post-process config 等 payload section。大型 payload 使用 `Raw` 或 `Zstd`；section table 记录 hash、stored hash、decoded length、codec、migration 和可选 encryption。
+- `ai.onnx_runtime.*`：按 target/profile 锁定的 reduced ONNX Runtime、Web runtime adapter 或 runtime dependency section。开发期可以下载，release package 只能引用 Engine recipe 产出的 vendor cache。
+- `ai.custom_op_sidecar.*`：项目自管 ORT custom op sidecar。每个 sidecar 必须声明平台、hash、license、加载策略和目标运行证据；缺失声明或试图暴露 Engine object/native handle 时阻断。
+
+ModelBundle manifest 只保存 package/VFS section ref，不记录源文件绝对路径。Bundled、on-demand 和 external 模型分发都必须落成 `.astrapkg`、patch package、DLC package 或受控 package source，由 VFS mount 解析；不允许 Shipping provider 直接读取 loose sidecar。
+
+Project-level `package_sections` descriptor 只适合脱敏 report 或 manifest。它不能写入模型权重、tokenizer、runtime binary、custom op、商业文本、截图、音频、影片或任何可复原源数据。
+
 ## Save Sections
 
 Minimum save sections:
@@ -81,6 +92,13 @@ Minimum save sections:
 - `ai.committed_output`
 - `plugin.opaque`
 - `migration.manifest`
+
+ONNX Runtime generated output 复用 Runtime save extra section，不创建独立存档格式：
+
+- `ai.generated_artifact.*`：流式提交后的文本、图像、语音或多模态 chunk。每个 section 记录 content type、model fingerprint、provider profile、validator result、chunk hash、codec、migration 和可选 encryption。
+- `ai.generated_artifact_manifest`：`postcard` 编码索引，记录 committed output 到 artifact section 的映射、VFS/package source、save budget warning 和 replay policy。
+
+正式 replay 读取 save payload，不请求 provider。save 体积超过 AI profile 预算只产生 warning；缺失 section hash、migration、crypto provider 或 committed output 映射时阻断。
 
 ## Migration
 

@@ -24,7 +24,9 @@ manual.md
 
 插件可实现 Renderer2D、TextLayout、AudioOutput、DecodeProvider、AssetImporter、CookProcessor、LuauPolicyBundle、EditorPanel、AiProvider、MCPToolProvider、LegacyFamilyPlugin 或可选 EMUCoreBridge。descriptor、permission、load/unload、provider trait、extension registry 和 report 见 [Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。
 
-AiProvider 只服务 Editor 和 MCP host。OpenAI、Ollama、ComfyUI 这类 provider 必须声明 capability、secret handle、data egress、debug trace policy、runtime eligibility 和真实 smoke opt-in。Runtime 不能直接持有 provider，只能通过 `McpAiSession` 消费 typed Intent 和 committed output。
+AiProvider 只服务 Editor 和 MCP host。OpenAI、Ollama、ComfyUI、ONNX Runtime 这类 provider 必须声明 capability、secret handle、data egress、debug trace policy、runtime eligibility 和真实 smoke opt-in。Runtime 不能直接持有 provider，只能通过 `McpAiSession` 消费 typed Intent、generated artifact chunk 和 committed output。
+
+项目自管 ORT custom op sidecar 时，sidecar 只能作为 ModelBundle 的 package/VFS content entry 被 `astra-ai-onnx` 私有加载。它必须声明平台二进制、hash、license、加载策略和目标运行证据，不能保存或暴露 host object ownership、Actor 指针、RuntimeWorld、Editor widget、GPU/audio native handle、provider trait object 或本地路径。需要访问 Engine 能力时，写普通插件/provider 并走 extension registry。
 
 Plugin Manager 显示启用状态、依赖链、冲突、权限、packaged 裁剪和 diagnostic jump。插件不能依赖加载顺序抢占 provider；项目 manifest 必须显式绑定命令、provider 和 release check。
 
