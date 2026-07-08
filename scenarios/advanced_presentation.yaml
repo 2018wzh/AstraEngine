@@ -1,0 +1,72 @@
+schema: astra.scenario.v1
+id: scenarios.advanced_presentation
+stage: stage3-astra-vn
+package: target/advancedvn.astrapkg
+target: advanced-vn-game
+profile: advanced-vn
+platform: headless
+generated_route_id: route.advanced.library
+seed: 43
+locale: zh-Hans
+actions:
+  - launch: {}
+  - player_input:
+      kind: complete_wait
+      value: timeline.hero.enter.complete
+  - player_input:
+      kind: complete_wait
+      value: movie.light.end
+  - player_input:
+      kind: complete_wait
+      value: voice.hero.0001.end
+  - player_input:
+      kind: advance
+  - player_input:
+      kind: complete_wait
+      value: voice_end
+  - player_input:
+      kind: choose
+      value: choice.library
+  - player_input:
+      kind: advance
+  - player_input:
+      kind: open_system
+      value: config
+  - player_input:
+      kind: open_system
+      value: backlog
+  - player_input:
+      kind: set_auto
+      value: "true"
+  - player_input:
+      kind: set_skip
+      value: read
+  - player_input:
+      kind: set_config
+      key: text_effect_budget
+      value: strict
+  - player_input:
+      kind: save
+      slot: slot.advanced
+  - player_input:
+      kind: load
+      slot: slot.advanced
+  - replay_from_start: {}
+assertions:
+  - coverage:
+      routes: [state.library]
+      backlog_keys: [prologue.hello, library.entry]
+      read_state: [line.hello, line.library]
+      voice_replay: [voice.hero.0001]
+  - check: vn.advanced_presentation
+  - check: timeline.join_cancel
+  - check: presentation.fallback
+  - check: voice.sync
+  - check: renderer.effect_budget
+  - system_state:
+      auto_enabled: true
+      skip_mode: read
+      config:
+        text_effect_budget: strict
+  - replay_hash_match: true
+  - no_blocking_diagnostics: true

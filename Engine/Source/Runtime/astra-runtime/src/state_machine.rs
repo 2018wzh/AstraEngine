@@ -222,7 +222,7 @@ impl StateMachineStore {
             if machine.completed {
                 continue;
             }
-            let Some((transition, failure_source)) =
+            let Some((transition, failure_source, trigger_event)) =
                 find_transition(machine, events, actors, blackboard)
             else {
                 continue;
@@ -273,6 +273,7 @@ impl StateMachineStore {
                     &mut candidate_output.awaits,
                     &mut candidate_output.delayed_events,
                     &mut candidate_output.delayed_cancellations,
+                    trigger_event.clone(),
                 );
                 match action.run(&mut ctx, &invocation.input) {
                     Ok(trace) => {
@@ -358,31 +359,42 @@ fn find_transition(
     events: &[RuntimeEvent],
     actors: &ActorStore,
     blackboard: &Blackboard,
-) -> Option<(TransitionDefinition, Option<SourceRef>)> {
+) -> Option<(
+    TransitionDefinition,
+    Option<SourceRef>,
+    Option<RuntimeEvent>,
+)> {
     let actor_snapshots = actors.actor_snapshots();
-    let mut best: Option<&TransitionDefinition> = None;
+    let mut best: Option<(&TransitionDefinition, Option<RuntimeEvent>)> = None;
     for transition in machine
         .definition
         .transitions
         .iter()
         .filter(|transition| transition.from == machine.current_state)
     {
-        let matched = match transition.guard {
-            GuardExpr::Always => true,
-            _ => events.iter().any(|event| {
+        let trigger_event = match transition.guard {
+            GuardExpr::Always => Some(None),
+            _ => events.iter().find_map(|event| {
                 transition
                     .guard
                     .evaluate(event, &actor_snapshots, blackboard)
+                    .then(|| Some(event.clone()))
             }),
         };
-        if matched {
+        if let Some(trigger_event) = trigger_event {
             match best {
-                Some(current) if transition.priority <= current.priority => {}
-                _ => best = Some(transition),
+                Some((current, _)) if transition.priority <= current.priority => {}
+                _ => best = Some((transition, trigger_event)),
             }
         }
     }
-    best.map(|transition| (transition.clone(), transition.source_ref.clone()))
+    best.map(|(transition, trigger_event)| {
+        (
+            transition.clone(),
+            transition.source_ref.clone(),
+            trigger_event,
+        )
+    })
 }
 
 fn state_is_terminal(machine: &StateMachineInstance, state_id: StableId) -> bool {

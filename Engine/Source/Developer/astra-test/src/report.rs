@@ -12,6 +12,10 @@ pub struct ScenarioReport {
     pub target: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_route_id: Option<String>,
     pub status: ScenarioStatus,
     pub hashes: ScenarioHashes,
     pub checks: Vec<ScenarioCheck>,

@@ -11,6 +11,7 @@ astra-package = { path = "../../Runtime/astra-package" }
 astra-plugin = { path = "../../Runtime/astra-plugin" }
 astra-runtime = { path = "../../Runtime/astra-runtime" }
 astra-target = { path = "../../Platform/astra-target" }
+astra-vn = { path = "../../Runtime/astra-vn" }
 schemars.workspace = true
 semver.workspace = true
 serde.workspace = true
@@ -18,3 +19,6 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

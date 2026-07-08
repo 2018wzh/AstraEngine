@@ -24,6 +24,9 @@ checks:
     status: warning
   - id: vn.system_ui_profile
     status: pass
+  - id: player.full_playable
+    status: blocked
+    diagnostic: player input transcript missing
   - id: emu.legacy_runtime_provider
     status: pass
   - id: ai.model_bundle
@@ -40,11 +43,13 @@ checks:
 
 ## Blocking Domains
 
-Runtime determinism、schema migration、package integrity、cook/project artifact、Target manifest、plugin fingerprint、plugin extension registry、permission policy、AI replay、ONNX ModelBundle、ONNX Runtime pack/VFS、execution provider evidence、Luau sandbox、media decode、VN commercial baseline、system UI profile、advanced presentation opt-in、AstraEMU legacy runtime provider、save/load、headless scenario、platform eligibility 和 manual signoff 都可以阻止发布。
+Runtime determinism、schema migration、package integrity、cook/project artifact、Target manifest、plugin fingerprint、plugin extension registry、permission policy、AI replay、ONNX ModelBundle、ONNX Runtime pack/VFS、execution provider evidence、Luau sandbox、media decode、VN commercial baseline、system UI profile、advanced presentation opt-in、live player automation、AstraEMU legacy runtime provider、save/load、headless scenario、platform eligibility 和 manual signoff 都可以阻止发布。
 
 `desktop-release` 和 `web-release` 的 package 必须由 `astra cook` 产出 `compiled.project` section。Fixture package 或缺少 cook/project metadata 的包只能用于 dev/headless 验证，不能通过 release profile。
 
 AstraEMU 还要检查 auto probe、Trusted Luau policy、text redaction 和 FilterGraph preset。翻译 overlay 是非权威 UI 状态，不改变 replay hash；它的 release gate 只检查 provider 绑定、redaction 和禁用策略。
+
+Stage 3 `player.full_playable` 只接受 Windows/Web 平台原生输入自动化证据。Windows 必须有真实 player window focus、Win32 `SendInput` mouse/keyboard、player event loop receipt、window/renderer region hash 变化、AudioGraph meter 与 WASAPI host evidence。Web 必须有真实 browser page、CDP session、`Input.dispatchMouseEvent`、`Input.dispatchKeyEvent`、canvas/screenshot region hash 变化、WebAudio meter 和 route evidence。缺 `player.input_transcript`、缺视觉区域变化、缺音频 meter、缺 host evidence，或发现 `VnPlayerCommand`、`--route-scenario` 自推进、`--dump-dom` route runner、DOM `element.click()`、直接 JS callback、API 可用性 smoke 冒充输入时，`player.full_playable` 必须 blocked。`input.browser`、`input.gamepad`、`input.touch` 只能作为 capability check，不能作为 playable evidence。
 
 ## Verification Commands
 

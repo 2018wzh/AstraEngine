@@ -1,0 +1,197 @@
+use astra_package::{PackageReader, SectionPayload};
+use astra_vn::{
+    compile_astra_sources, package_sections_for_story, AstraSource, PresentationCommand,
+    SystemPageKind, VnPlayerCommand, VnRunConfig, VnRuntime,
+};
+
+const MAIN: &str = r#"
+story main #@id story.main
+
+state prologue #@id state.prologue
+  scene room #@id scene.room
+    text key:prologue.hello speaker:hero voice:voice.hero.0001 #@id line.hello
+    mutate project.affinity += 1 reason:"greeted hero" #@id var.affinity
+    choice key:prologue.where #@id choice.where
+      option key:choice.library -> library #@id choice.library
+      option key:choice.rooftop -> rooftop #@id choice.rooftop
+
+state library #@id state.library
+  scene library #@id scene.library
+    text key:library.followup speaker:hero voice:voice.hero.0002 #@id line.library
+    jump ending.good #@id jump.good
+
+state rooftop #@id state.rooftop
+  scene rooftop #@id scene.rooftop
+    text key:rooftop.line speaker:hero voice:voice.hero.0003 #@id line.rooftop
+    jump ending.normal #@id jump.normal
+"#;
+
+const SYSTEM: &str = r#"
+story system.title #@id system.title
+  scene title_menu #@id system.title.menu
+    system_page kind:title policy:astra.policy.standard #@id page.title
+    option key:system.start -> story.main:state.prologue #@id system.start
+"#;
+
+#[test]
+fn compiles_route_graph_source_map_and_stable_hash() {
+    let compiled = compile_astra_sources([
+        AstraSource::new("main.astra", MAIN),
+        AstraSource::new("system.astra", SYSTEM),
+    ])
+    .unwrap();
+
+    assert_eq!(compiled.schema, "astra.vn.compiled_story.v1");
+    assert_eq!(compiled.stories.len(), 2);
+    assert_eq!(compiled.route_graph.nodes.len(), 5);
+    assert!(compiled
+        .route_graph
+        .edges
+        .iter()
+        .any(|edge| edge.from == "state.prologue" && edge.to == "state.library"));
+    assert_eq!(compiled.source_map.get("line.hello").unwrap().line, 6);
+    assert_eq!(
+        compiled.debug_symbols.get("choice.library").unwrap(),
+        "option"
+    );
+    assert_eq!(compiled.story_hash.to_hex().len(), 32);
+}
+
+#[test]
+fn compiled_story_exposes_story_variable_and_command_manifests() {
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", MAIN)]).unwrap();
+
+    assert_eq!(compiled.story_manifest.schema, "astra.vn.story_manifest.v1");
+    assert!(compiled
+        .story_manifest
+        .stories
+        .iter()
+        .any(|story| story.id == "story.main"
+            && story.states == ["state.prologue", "state.library", "state.rooftop"]));
+    assert!(compiled
+        .variable_manifest
+        .scopes
+        .get("project")
+        .unwrap()
+        .keys
+        .contains("affinity"));
+    assert!(compiled
+        .command_manifest
+        .commands
+        .iter()
+        .any(|command| command.id == "line.hello"
+            && command.kind == "dialogue"
+            && command.state_id == "state.prologue"
+            && command.scene_id == "scene.room"
+            && command.source.as_ref().unwrap().line == 6));
+}
+
+#[test]
+fn compiled_story_exposes_system_story_manifest() {
+    let compiled = compile_astra_sources([
+        AstraSource::new("main.astra", MAIN),
+        AstraSource::new("system.astra", SYSTEM),
+    ])
+    .unwrap();
+
+    assert_eq!(
+        compiled.system_story_manifest.schema,
+        "astra.vn.system_story_manifest.v1"
+    );
+    let title = compiled
+        .system_story_manifest
+        .entries
+        .get(&SystemPageKind::Title)
+        .unwrap();
+    assert_eq!(title.story_id, "system.title");
+    assert_eq!(title.state_id, "system.title");
+    assert_eq!(title.source_id, "page.title");
+    assert_eq!(title.policy.as_deref(), Some("astra.policy.standard"));
+}
+
+#[test]
+fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", MAIN)]).unwrap();
+    let mut runtime = VnRuntime::new(compiled.clone(), VnRunConfig::classic("zh-Hans")).unwrap();
+
+    let first = runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".to_string(),
+            state_id: "state.prologue".to_string(),
+        })
+        .unwrap();
+    assert!(matches!(
+        first.presentation.first(),
+        Some(PresentationCommand::Dialogue { key, speaker, .. })
+            if key == "prologue.hello" && speaker.as_deref() == Some("hero")
+    ));
+
+    let choice = runtime.apply(VnPlayerCommand::Advance).unwrap();
+    assert!(matches!(
+        choice.presentation.last(),
+        Some(PresentationCommand::Choice { key, options })
+            if key == "prologue.where" && options.len() == 2
+    ));
+
+    let saved_hash = runtime.state_hash();
+    let save = runtime.save_slot("slot.auto").unwrap();
+    let selected = runtime
+        .apply(VnPlayerCommand::Choose {
+            option_id: "choice.library".to_string(),
+        })
+        .unwrap();
+    assert!(selected.coverage.reached.contains("state.library"));
+    let choice_flag = runtime
+        .state()
+        .route_flags
+        .get("choice:choice.where:choice.library:state.library")
+        .unwrap();
+    assert_eq!(choice_flag.source, "choice.where:choice.library");
+    assert_eq!(choice_flag.target, "state.library");
+    assert_eq!(choice_flag.count, 1);
+    assert!(runtime
+        .state()
+        .backlog
+        .iter()
+        .any(|entry| entry.key == "library.followup"));
+    assert!(runtime.state().read_state.contains("line.library"));
+    assert!(runtime.state().voice_replay.contains_key("voice.hero.0002"));
+    let ending = runtime.apply(VnPlayerCommand::Advance).unwrap();
+    assert!(ending.coverage.reached.contains("ending.good"));
+    assert!(runtime
+        .state()
+        .route_flags
+        .contains_key("jump:jump.good:ending.good"));
+
+    let mut loaded = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
+    loaded.load_slot(save).unwrap();
+    assert_eq!(loaded.state_hash(), saved_hash);
+}
+
+#[test]
+fn compiled_story_writes_nativevn_package_sections() {
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", MAIN)]).unwrap();
+    let sections: Vec<SectionPayload> = package_sections_for_story(
+        &compiled,
+        &["classic".to_string(), "modern".to_string()],
+        "nativevn-game",
+    )
+    .unwrap();
+
+    let request =
+        astra_package::PackageBuildRequest::minimal("com.example.nativevn", "classic", sections);
+    let blob = astra_package::PackageBuilder::build(request).unwrap();
+    let reader = PackageReader::open(blob.as_bytes()).unwrap();
+
+    assert!(reader.has_section("vn.compiled_story"));
+    assert!(reader.has_section("vn.profile_manifest"));
+    assert!(reader.has_section("vn.policy_bundle_manifest"));
+    assert!(reader.has_section("vn.policy_bundle_source_cache"));
+    assert!(reader.has_section("vn.extension_manifest"));
+    assert!(reader.has_section("vn.standard_command_manifest"));
+    assert!(reader.has_section("vn.presentation_provider_manifest"));
+    assert!(reader.has_section("vn.commercial_baseline_manifest"));
+    assert!(reader.has_section("vn.system_story_manifest"));
+    assert!(reader.has_section("vn.system_ui_profile_manifest"));
+    assert!(reader.has_section("scenario.refs"));
+}

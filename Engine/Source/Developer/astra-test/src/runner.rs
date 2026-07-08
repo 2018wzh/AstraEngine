@@ -12,13 +12,19 @@ use astra_runtime::{
     StateDefinition, StateMachineDefinition, TickInput, TransitionDefinition,
 };
 use astra_target::{validate_manifest, TargetManifest, TargetValidationStatus};
+use astra_vn::{
+    CompiledStory, PresentationCommand as VnPresentationCommand, SkipMode, SystemPageKind,
+    SystemUnlockKind, VnAdvancedPresentationManifest, VnPlayerCommand, VnRunConfig, VnRuntime,
+    VnSaveBlob,
+};
 use semver::Version;
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
 use crate::{
-    EmitAction, Scenario, ScenarioAction, ScenarioCheck, ScenarioHashes, ScenarioReport,
-    ScenarioStatus, ScenarioValue,
+    EmitAction, PlayerInputAction, PlayerInputKind, Scenario, ScenarioAction, ScenarioCheck,
+    ScenarioHashes, ScenarioReport, ScenarioStatus, ScenarioValue, SystemStateAssertion,
+    VisualReferenceAssertion,
 };
 
 #[derive(Debug, Error)]
@@ -42,6 +48,7 @@ pub struct ScenarioRunOptions {
     pub package: Option<PathBuf>,
     pub target: Option<String>,
     pub profile: Option<String>,
+    pub platform: Option<String>,
     pub headless: bool,
 }
 
@@ -115,6 +122,12 @@ impl ScenarioRunner {
             scenario.seed,
             workspace_root.clone(),
             package_context.handle.clone(),
+            package_context.compiled_story.clone(),
+            package_context
+                .profile
+                .clone()
+                .or_else(|| scenario.profile.clone()),
+            scenario.locale.clone(),
         )?;
         context.diagnostics.extend(package_context.diagnostics);
         for key in scenario.unsupported.keys() {
@@ -125,6 +138,17 @@ impl ScenarioRunner {
                 )
                 .with_field("field", key),
             );
+        }
+        for (alias, value) in &scenario.mount_aliases {
+            if leaks_local_path(value) {
+                context.diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_SCENARIO_MOUNT_ALIAS_PATH_LEAK",
+                        "mount aliases must use sanitized alias values, not local paths",
+                    )
+                    .with_field("alias", alias),
+                );
+            }
         }
         let mut replayable = Vec::new();
         for action in &scenario.actions {
@@ -138,6 +162,12 @@ impl ScenarioRunner {
             scenario.seed,
             workspace_root,
             package_context.handle.clone(),
+            package_context.compiled_story.clone(),
+            package_context
+                .profile
+                .clone()
+                .or_else(|| scenario.profile.clone()),
+            scenario.locale.clone(),
             &replayable,
         )?;
         let replay_match = hashes == replay_hashes;
@@ -201,6 +231,72 @@ impl ScenarioRunner {
                 },
             });
         }
+        if !scenario.mount_aliases.is_empty() {
+            let mount_blocked = diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "ASTRA_SCENARIO_MOUNT_ALIAS_PATH_LEAK");
+            checks.push(ScenarioCheck {
+                id: "mount.aliases".to_string(),
+                status: if mount_blocked {
+                    ScenarioStatus::Blocked
+                } else {
+                    ScenarioStatus::Pass
+                },
+            });
+        }
+        if scenario.generated_route_id.is_some() {
+            checks.push(ScenarioCheck {
+                id: "vn.generated_route_id".to_string(),
+                status: ScenarioStatus::Pass,
+            });
+        }
+        if context.vn_runtime.is_some() {
+            let route_blocked = diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code.starts_with("ASTRA_VN_ROUTE"));
+            checks.push(ScenarioCheck {
+                id: "vn.route_coverage".to_string(),
+                status: if route_blocked {
+                    ScenarioStatus::Blocked
+                } else {
+                    ScenarioStatus::Pass
+                },
+            });
+            let player_blocked = diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code.starts_with("ASTRA_VN_PLAYER"));
+            checks.push(ScenarioCheck {
+                id: "player_route.full".to_string(),
+                status: if player_blocked {
+                    ScenarioStatus::Blocked
+                } else {
+                    ScenarioStatus::Pass
+                },
+            });
+        }
+        if scenario_uses_advanced_profile(scenario, &package_context.profile) {
+            let (status, mut advanced_diagnostics) =
+                advanced_presentation_status(package_context.advanced_presentation.as_ref());
+            diagnostics.append(&mut advanced_diagnostics);
+            checks.push(ScenarioCheck {
+                id: "vn.advanced_presentation".to_string(),
+                status,
+            });
+            for evidence_id in [
+                "timeline.join_cancel",
+                "presentation.fallback",
+                "voice.sync",
+                "renderer.effect_budget",
+            ] {
+                checks.push(ScenarioCheck {
+                    id: evidence_id.to_string(),
+                    status: advanced_evidence_status(
+                        package_context.advanced_presentation.as_ref(),
+                        evidence_id,
+                    ),
+                });
+            }
+        }
         if scenario.unsupported.is_empty() {
             checks.push(ScenarioCheck {
                 id: "scenario.schema".to_string(),
@@ -220,6 +316,7 @@ impl ScenarioRunner {
             });
         }
         let mut unsupported_assertions = Vec::new();
+        let mut no_blocking_requested = false;
         for assertion in &scenario.assertions {
             let keys: Vec<_> = assertion.unsupported_keys().collect();
             if !keys.is_empty() {
@@ -240,13 +337,223 @@ impl ScenarioRunner {
                     status: ScenarioStatus::Blocked,
                 });
             }
-            let no_blocking = diagnostics
-                .iter()
-                .all(|diag| diag.severity != DiagnosticSeverity::Blocking);
-            if assertion.no_blocking_diagnostics == Some(true) && !no_blocking {
+            if assertion.no_blocking_diagnostics == Some(true) {
+                no_blocking_requested = true;
+            }
+            if let Some(check_id) = &assertion.check {
+                let passed = checks
+                    .iter()
+                    .any(|check| check.id == *check_id && check.status == ScenarioStatus::Pass);
+                if !passed {
+                    diagnostics.push(
+                        Diagnostic::blocking(
+                            "ASTRA_SCENARIO_CHECK_ASSERTION",
+                            "scenario check assertion failed",
+                        )
+                        .with_field("check", check_id),
+                    );
+                }
                 checks.push(ScenarioCheck {
-                    id: "assert.no_blocking_diagnostics".to_string(),
-                    status: ScenarioStatus::Blocked,
+                    id: format!("assert.check.{check_id}"),
+                    status: if passed {
+                        ScenarioStatus::Pass
+                    } else {
+                        ScenarioStatus::Blocked
+                    },
+                });
+            }
+            if let Some(route) = &assertion.route_reached {
+                let passed = context.vn_route_reached(route);
+                checks.push(ScenarioCheck {
+                    id: format!("assert.route_reached.{route}"),
+                    status: if passed {
+                        ScenarioStatus::Pass
+                    } else {
+                        diagnostics.push(
+                            Diagnostic::blocking(
+                                "ASTRA_VN_ROUTE_MISSING",
+                                "VN route coverage assertion failed",
+                            )
+                            .with_field("route", route),
+                        );
+                        ScenarioStatus::Blocked
+                    },
+                });
+            }
+            if let Some(key) = &assertion.backlog_has_key {
+                let passed = context.vn_backlog_has_key(key);
+                checks.push(ScenarioCheck {
+                    id: format!("assert.backlog_has_key.{key}"),
+                    status: if passed {
+                        ScenarioStatus::Pass
+                    } else {
+                        diagnostics.push(
+                            Diagnostic::blocking(
+                                "ASTRA_VN_BACKLOG_MISSING",
+                                "VN backlog assertion failed",
+                            )
+                            .with_field("key", key),
+                        );
+                        ScenarioStatus::Blocked
+                    },
+                });
+            }
+            if let Some(key) = &assertion.read_state_has {
+                let passed = context.vn_read_state_has(key);
+                checks.push(ScenarioCheck {
+                    id: format!("assert.read_state_has.{key}"),
+                    status: if passed {
+                        ScenarioStatus::Pass
+                    } else {
+                        diagnostics.push(
+                            Diagnostic::blocking(
+                                "ASTRA_VN_READ_STATE_MISSING",
+                                "VN read-state assertion failed",
+                            )
+                            .with_field("key", key),
+                        );
+                        ScenarioStatus::Blocked
+                    },
+                });
+            }
+            if let Some(voice) = &assertion.voice_replay_available {
+                let passed = context.vn_voice_replay_available(voice);
+                checks.push(ScenarioCheck {
+                    id: format!("assert.voice_replay_available.{voice}"),
+                    status: if passed {
+                        ScenarioStatus::Pass
+                    } else {
+                        diagnostics.push(
+                            Diagnostic::blocking(
+                                "ASTRA_VN_VOICE_REPLAY_MISSING",
+                                "VN voice replay assertion failed",
+                            )
+                            .with_field("voice", voice),
+                        );
+                        ScenarioStatus::Blocked
+                    },
+                });
+            }
+            if let Some(coverage) = &assertion.coverage {
+                let mut passed = true;
+                for route in &coverage.routes {
+                    if !context.vn_route_reached(route) {
+                        passed = false;
+                        diagnostics.push(
+                            Diagnostic::blocking(
+                                "ASTRA_VN_ROUTE_MISSING",
+                                "VN route coverage assertion failed",
+                            )
+                            .with_field("route", route),
+                        );
+                    }
+                }
+                for key in &coverage.backlog_keys {
+                    if !context.vn_backlog_has_key(key) {
+                        passed = false;
+                        diagnostics.push(
+                            Diagnostic::blocking(
+                                "ASTRA_VN_BACKLOG_MISSING",
+                                "VN backlog coverage assertion failed",
+                            )
+                            .with_field("key", key),
+                        );
+                    }
+                }
+                for key in &coverage.read_state {
+                    if !context.vn_read_state_has(key) {
+                        passed = false;
+                        diagnostics.push(
+                            Diagnostic::blocking(
+                                "ASTRA_VN_READ_STATE_MISSING",
+                                "VN read-state coverage assertion failed",
+                            )
+                            .with_field("key", key),
+                        );
+                    }
+                }
+                for voice in &coverage.voice_replay {
+                    if !context.vn_voice_replay_available(voice) {
+                        passed = false;
+                        diagnostics.push(
+                            Diagnostic::blocking(
+                                "ASTRA_VN_VOICE_REPLAY_MISSING",
+                                "VN voice replay coverage assertion failed",
+                            )
+                            .with_field("voice", voice),
+                        );
+                    }
+                }
+                checks.push(ScenarioCheck {
+                    id: "assert.coverage".to_string(),
+                    status: if passed {
+                        ScenarioStatus::Pass
+                    } else {
+                        ScenarioStatus::Blocked
+                    },
+                });
+            }
+            if let Some(hash) = &assertion.hash {
+                let mut passed = true;
+                if let Some(expected) = &hash.state {
+                    passed &= expected == &hashes.state.to_string();
+                }
+                if let Some(expected) = &hash.event {
+                    passed &= expected == &hashes.event.to_string();
+                }
+                if let Some(expected) = &hash.presentation {
+                    passed &= expected == &hashes.presentation.to_string();
+                }
+                if !passed {
+                    diagnostics.push(Diagnostic::blocking(
+                        "ASTRA_SCENARIO_HASH_ASSERTION",
+                        "scenario hash assertion failed",
+                    ));
+                }
+                checks.push(ScenarioCheck {
+                    id: "assert.hash".to_string(),
+                    status: if passed {
+                        ScenarioStatus::Pass
+                    } else {
+                        ScenarioStatus::Blocked
+                    },
+                });
+            }
+            if let Some(visual) = &assertion.visual_reference {
+                let passed = visual_reference_passes(visual, &package_context.visual_references);
+                if !passed {
+                    diagnostics.push(
+                        Diagnostic::blocking(
+                            "ASTRA_SCENARIO_VISUAL_REFERENCE_ASSERTION",
+                            "visual reference assertion failed",
+                        )
+                        .with_field("reference", &visual.id),
+                    );
+                }
+                checks.push(ScenarioCheck {
+                    id: format!("assert.visual_reference.{}", visual.id),
+                    status: if passed {
+                        ScenarioStatus::Pass
+                    } else {
+                        ScenarioStatus::Blocked
+                    },
+                });
+            }
+            if let Some(system_state) = &assertion.system_state {
+                let passed = context.vn_system_state_matches(system_state);
+                if !passed {
+                    diagnostics.push(Diagnostic::blocking(
+                        "ASTRA_VN_SYSTEM_STATE_ASSERTION",
+                        "VN system-state assertion failed",
+                    ));
+                }
+                checks.push(ScenarioCheck {
+                    id: "assert.system_state".to_string(),
+                    status: if passed {
+                        ScenarioStatus::Pass
+                    } else {
+                        ScenarioStatus::Blocked
+                    },
                 });
             }
         }
@@ -254,6 +561,19 @@ impl ScenarioRunner {
             checks.push(ScenarioCheck {
                 id: "assert.unsupported_schema".to_string(),
                 status: ScenarioStatus::Blocked,
+            });
+        }
+        if no_blocking_requested {
+            let no_blocking = diagnostics
+                .iter()
+                .all(|diag| diag.severity != DiagnosticSeverity::Blocking);
+            checks.push(ScenarioCheck {
+                id: "assert.no_blocking_diagnostics".to_string(),
+                status: if no_blocking {
+                    ScenarioStatus::Pass
+                } else {
+                    ScenarioStatus::Blocked
+                },
             });
         }
         let status = if checks
@@ -283,6 +603,11 @@ impl ScenarioRunner {
             package: package_context.package,
             target: package_context.target,
             profile: package_context.profile,
+            platform: options
+                .platform
+                .clone()
+                .or_else(|| scenario.platform.clone()),
+            generated_route_id: scenario.generated_route_id.clone(),
             status,
             hashes,
             checks,
@@ -297,10 +622,20 @@ impl ScenarioRunner {
         seed: u64,
         workspace_root: PathBuf,
         package: PackageHandle,
+        compiled_story: Option<CompiledStory>,
+        profile: Option<String>,
+        locale: Option<String>,
         actions: &[ScenarioAction],
     ) -> Result<ScenarioHashes, ScenarioError> {
         info!(action_count = actions.len(), "scenario.replay.start");
-        let mut context = RunContext::new(seed, workspace_root, package)?;
+        let mut context = RunContext::new(
+            seed,
+            workspace_root,
+            package,
+            compiled_story,
+            profile,
+            locale,
+        )?;
         for action in actions {
             context.apply(action)?;
         }
@@ -323,6 +658,9 @@ struct PackageContext {
     profile: Option<String>,
     diagnostics: Vec<Diagnostic>,
     release_gate_checks: Vec<String>,
+    compiled_story: Option<CompiledStory>,
+    visual_references: BTreeMap<String, VisualReferenceEvidence>,
+    advanced_presentation: Option<VnAdvancedPresentationManifest>,
 }
 
 fn prepare_package_context(
@@ -345,6 +683,9 @@ fn prepare_package_context(
         profile,
         diagnostics: Vec::new(),
         release_gate_checks: Vec::new(),
+        compiled_story: None,
+        visual_references: BTreeMap::new(),
+        advanced_presentation: None,
     };
 
     let Some(package_ref) = package else {
@@ -409,7 +750,44 @@ fn prepare_package_context(
     }
     validate_package_target(&reader, target.as_deref(), &mut context);
     validate_package_scenario_ref(&reader, workspace_root, scenario_path, &mut context);
+    if reader.has_section("vn.compiled_story") {
+        context
+            .release_gate_checks
+            .push("vn.compiled_story".to_string());
+        match reader
+            .container()
+            .decode_postcard::<CompiledStory>("vn.compiled_story")
+        {
+            Ok(compiled) => context.compiled_story = Some(compiled),
+            Err(err) => context.diagnostics.push(Diagnostic::blocking(
+                "ASTRA_VN_COMPILED_STORY",
+                format!("vn.compiled_story could not be decoded: {err}"),
+            )),
+        }
+    }
+    if reader.has_section("vn.advanced_presentation_manifest") {
+        context
+            .release_gate_checks
+            .push("vn.advanced_presentation".to_string());
+        match reader
+            .container()
+            .decode_postcard::<VnAdvancedPresentationManifest>("vn.advanced_presentation_manifest")
+        {
+            Ok(manifest) => context.advanced_presentation = Some(manifest),
+            Err(err) => context.diagnostics.push(Diagnostic::blocking(
+                "ASTRA_VN_ADVANCED_PRESENTATION_MANIFEST",
+                format!("vn.advanced_presentation_manifest could not be decoded: {err}"),
+            )),
+        }
+    }
+    load_visual_reference_evidence(&reader, &mut context);
     context
+}
+
+#[derive(Debug, Clone)]
+struct VisualReferenceEvidence {
+    hash: String,
+    regions: Vec<String>,
 }
 
 fn validate_package_target(
@@ -504,6 +882,69 @@ fn validate_package_scenario_ref(
     }
 }
 
+fn load_visual_reference_evidence(reader: &PackageReader, context: &mut PackageContext) {
+    if !reader.has_section("tsuinosora.reference_evidence") {
+        return;
+    }
+    context
+        .release_gate_checks
+        .push("tsuinosora.reference_evidence".to_string());
+    let bytes = match reader
+        .container()
+        .read_bounded("tsuinosora.reference_evidence", 256 * 1024)
+    {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            context.diagnostics.push(Diagnostic::blocking(
+                "ASTRA_SCENARIO_VISUAL_REFERENCE_READ",
+                format!("visual reference evidence could not be read: {err}"),
+            ));
+            return;
+        }
+    };
+    let value: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(err) => {
+            context.diagnostics.push(Diagnostic::blocking(
+                "ASTRA_SCENARIO_VISUAL_REFERENCE_JSON",
+                format!("visual reference evidence is not valid JSON: {err}"),
+            ));
+            return;
+        }
+    };
+    let Some(references) = value
+        .get("references")
+        .and_then(serde_json::Value::as_array)
+    else {
+        context.diagnostics.push(Diagnostic::blocking(
+            "ASTRA_SCENARIO_VISUAL_REFERENCE_EMPTY",
+            "visual reference evidence must contain a references array",
+        ));
+        return;
+    };
+    for reference in references {
+        let Some(id) = reference.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let hash = reference
+            .get("hash")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let regions = reference
+            .get("regions")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|region| region.get("id").and_then(serde_json::Value::as_str))
+            .map(str::to_string)
+            .collect();
+        context
+            .visual_references
+            .insert(id.to_string(), VisualReferenceEvidence { hash, regions });
+    }
+}
+
 fn normalize_repo_path(root: &Path, path: &Path) -> String {
     if let Ok(relative) = path.strip_prefix(root) {
         return relative.to_string_lossy().replace('\\', "/");
@@ -514,6 +955,76 @@ fn normalize_repo_path(root: &Path, path: &Path) -> String {
         .to_string()
 }
 
+fn leaks_local_path(value: &str) -> bool {
+    value.starts_with('/')
+        || value.starts_with("\\\\")
+        || value
+            .as_bytes()
+            .windows(2)
+            .any(|pair| pair[0].is_ascii_alphabetic() && pair[1] == b':')
+}
+
+fn visual_reference_passes(
+    assertion: &VisualReferenceAssertion,
+    references: &BTreeMap<String, VisualReferenceEvidence>,
+) -> bool {
+    let Some(reference) = references.get(&assertion.id) else {
+        return false;
+    };
+    if reference.hash != assertion.hash {
+        return false;
+    }
+    assertion
+        .regions
+        .iter()
+        .all(|region| reference.regions.contains(region))
+}
+
+fn scenario_uses_advanced_profile(scenario: &Scenario, package_profile: &Option<String>) -> bool {
+    scenario
+        .profile
+        .as_deref()
+        .or(package_profile.as_deref())
+        .is_some_and(VnAdvancedPresentationManifest::profile_requires_advanced)
+        || scenario.assertions.iter().any(|assertion| {
+            assertion
+                .check
+                .as_deref()
+                .is_some_and(|check| check == "vn.advanced_presentation")
+        })
+}
+
+fn advanced_presentation_status(
+    manifest: Option<&VnAdvancedPresentationManifest>,
+) -> (ScenarioStatus, Vec<Diagnostic>) {
+    let Some(manifest) = manifest else {
+        return (
+            ScenarioStatus::Blocked,
+            vec![Diagnostic::blocking(
+                "ASTRA_VN_ADVANCED_PRESENTATION_MANIFEST",
+                "advanced presentation scenario requires vn.advanced_presentation_manifest",
+            )],
+        );
+    };
+    let report = manifest.validate_required();
+    if report.passed {
+        (ScenarioStatus::Pass, Vec::new())
+    } else {
+        (ScenarioStatus::Blocked, report.diagnostics)
+    }
+}
+
+fn advanced_evidence_status(
+    manifest: Option<&VnAdvancedPresentationManifest>,
+    evidence_id: &str,
+) -> ScenarioStatus {
+    if manifest.is_some_and(|manifest| manifest.has_evidence(evidence_id)) {
+        ScenarioStatus::Pass
+    } else {
+        ScenarioStatus::Blocked
+    }
+}
+
 struct RunContext {
     world: RuntimeWorld,
     workspace_root: PathBuf,
@@ -521,6 +1032,8 @@ struct RunContext {
     loaded_plugins: Vec<LoadedPlugin>,
     step: u64,
     saved: Option<SaveBlob>,
+    vn_runtime: Option<VnRuntime>,
+    vn_saved: Option<VnSaveBlob>,
     diagnostics: Vec<Diagnostic>,
     unsupported_actions: Vec<String>,
     fixture_actions_registered: bool,
@@ -532,6 +1045,9 @@ impl RunContext {
         seed: u64,
         workspace_root: PathBuf,
         package: PackageHandle,
+        compiled_story: Option<CompiledStory>,
+        profile: Option<String>,
+        locale: Option<String>,
     ) -> Result<Self, ScenarioError> {
         let mut world = RuntimeWorld::create(
             RuntimeConfig {
@@ -541,6 +1057,18 @@ impl RunContext {
             package,
         )?;
         let system_actor = world.create_actor("scenario.system", vec!["scenario".to_string()]);
+        let vn_runtime = compiled_story
+            .map(|compiled| {
+                VnRuntime::new(
+                    compiled,
+                    VnRunConfig {
+                        profile: profile.unwrap_or_else(|| "classic".to_string()),
+                        locale: locale.unwrap_or_else(|| "und".to_string()),
+                    },
+                )
+            })
+            .transpose()
+            .map_err(|err| ScenarioError::Message(err.to_string()))?;
         Ok(Self {
             world,
             workspace_root,
@@ -548,6 +1076,8 @@ impl RunContext {
             loaded_plugins: Vec::new(),
             step: 0,
             saved: None,
+            vn_runtime,
+            vn_saved: None,
             diagnostics: Vec::new(),
             unsupported_actions: Vec::new(),
             fixture_actions_registered: false,
@@ -581,33 +1111,72 @@ impl RunContext {
             self.schedule_delayed_event(schedule);
         }
         if action.launch.is_some() {
-            self.advance(1)?;
+            if self.vn_runtime.is_some() {
+                self.apply_vn_default_launch()?;
+            } else {
+                self.advance(1)?;
+            }
         }
         if let Some(emit) = &action.emit {
             self.emit(emit);
         }
         if let Some(advance) = action.advance {
             for _ in 0..advance.ticks {
-                self.advance(1)?;
+                if self.vn_runtime.is_some() {
+                    self.apply_vn(VnPlayerCommand::Advance)?;
+                } else {
+                    self.advance(1)?;
+                }
             }
         }
         if let Some(choice) = &action.choose {
-            let mut data = BTreeMap::new();
-            data.insert(
-                "choice".to_string(),
-                BlackboardValue::String(scenario_choice(choice)),
-            );
-            self.world.emit_event(
-                EventSource::Scenario,
-                EventPayload {
-                    kind: "choice.selected".to_string(),
-                    data,
-                },
-            );
-            self.advance(1)?;
+            if self.vn_runtime.is_some() {
+                self.apply_vn(VnPlayerCommand::Choose {
+                    option_id: scenario_choice(choice),
+                })?;
+            } else {
+                let mut data = BTreeMap::new();
+                data.insert(
+                    "choice".to_string(),
+                    BlackboardValue::String(scenario_choice(choice)),
+                );
+                self.world.emit_event(
+                    EventSource::Scenario,
+                    EventPayload {
+                        kind: "choice.selected".to_string(),
+                        data,
+                    },
+                );
+                self.advance(1)?;
+            }
+        }
+        if let Some(player_input) = &action.player_input {
+            self.apply_player_input(player_input)?;
+        }
+        if let Some(page) = &action.open_system {
+            self.apply_vn(VnPlayerCommand::OpenSystem {
+                page: parse_system_page(page),
+            })?;
+        }
+        if let Some(voice) = &action.replay_voice {
+            self.apply_vn(VnPlayerCommand::ReplayVoice {
+                voice: voice.clone(),
+            })?;
         }
         if action.save.is_some() {
             self.saved = Some(self.world.save(SaveRequest::default())?);
+            if let Some(runtime) = &self.vn_runtime {
+                self.vn_saved = Some(
+                    runtime
+                        .save_slot(
+                            action
+                                .save
+                                .clone()
+                                .unwrap_or_else(|| "slot.auto".to_string()),
+                        )
+                        .map_err(|err| ScenarioError::Message(err.to_string()))?,
+                );
+            }
         }
         if action.load.is_some() {
             let save = self
@@ -615,9 +1184,162 @@ impl RunContext {
                 .clone()
                 .ok_or_else(|| ScenarioError::Message("load requested before save".to_string()))?;
             self.world.load(save)?;
+            if let Some(save) = self.vn_saved.clone() {
+                let runtime = self.vn_runtime.as_mut().ok_or_else(|| {
+                    ScenarioError::Message("VN load requested without VN runtime".to_string())
+                })?;
+                runtime
+                    .load_slot(save)
+                    .map_err(|err| ScenarioError::Message(err.to_string()))?;
+            }
         }
         if action.replay_from_start.is_some() {
             self.advance(1)?;
+        }
+        Ok(())
+    }
+
+    fn apply_player_input(&mut self, input: &PlayerInputAction) -> Result<(), ScenarioError> {
+        match input.kind {
+            PlayerInputKind::Advance => {
+                let ticks = input.ticks.unwrap_or(1);
+                for _ in 0..ticks {
+                    if self.vn_runtime.is_some() {
+                        self.apply_vn(VnPlayerCommand::Advance)?;
+                    } else {
+                        self.advance(1)?;
+                    }
+                }
+            }
+            PlayerInputKind::Choose => {
+                let value = input.value.clone().ok_or_else(|| {
+                    ScenarioError::Message("player_input choose requires value".to_string())
+                })?;
+                self.apply_vn(VnPlayerCommand::Choose { option_id: value })?;
+            }
+            PlayerInputKind::OpenSystem => {
+                let value = input.value.clone().ok_or_else(|| {
+                    ScenarioError::Message("player_input open_system requires value".to_string())
+                })?;
+                self.apply_vn(VnPlayerCommand::OpenSystem {
+                    page: parse_system_page(&value),
+                })?;
+            }
+            PlayerInputKind::ReplayVoice => {
+                let value = input.value.clone().ok_or_else(|| {
+                    ScenarioError::Message("player_input replay_voice requires value".to_string())
+                })?;
+                self.apply_vn(VnPlayerCommand::ReplayVoice { voice: value })?;
+            }
+            PlayerInputKind::Save => {
+                self.saved = Some(self.world.save(SaveRequest::default())?);
+                if let Some(runtime) = &self.vn_runtime {
+                    self.vn_saved = Some(
+                        runtime
+                            .save_slot(
+                                input
+                                    .slot
+                                    .clone()
+                                    .unwrap_or_else(|| "slot.auto".to_string()),
+                            )
+                            .map_err(|err| ScenarioError::Message(err.to_string()))?,
+                    );
+                }
+            }
+            PlayerInputKind::Load => {
+                let save = self.saved.clone().ok_or_else(|| {
+                    ScenarioError::Message("player_input load requested before save".to_string())
+                })?;
+                self.world.load(save)?;
+                if let Some(save) = self.vn_saved.clone() {
+                    let runtime = self.vn_runtime.as_mut().ok_or_else(|| {
+                        ScenarioError::Message("VN load requested without VN runtime".to_string())
+                    })?;
+                    runtime
+                        .load_slot(save)
+                        .map_err(|err| ScenarioError::Message(err.to_string()))?;
+                }
+            }
+            PlayerInputKind::SetAuto => {
+                let enabled = input
+                    .value
+                    .as_deref()
+                    .map(|value| matches!(value, "true" | "on" | "enabled" | "1"))
+                    .unwrap_or(true);
+                self.apply_vn(VnPlayerCommand::SetAuto { enabled })?;
+            }
+            PlayerInputKind::SetSkip => {
+                let value = input.value.as_deref().unwrap_or("none");
+                self.apply_vn(VnPlayerCommand::SetSkip {
+                    mode: parse_skip_mode(value),
+                })?;
+            }
+            PlayerInputKind::SetConfig => {
+                let key = input.key.clone().ok_or_else(|| {
+                    ScenarioError::Message("player_input set_config requires key".to_string())
+                })?;
+                let value = input.value.clone().ok_or_else(|| {
+                    ScenarioError::Message("player_input set_config requires value".to_string())
+                })?;
+                self.apply_vn(VnPlayerCommand::SetConfig { key, value })?;
+            }
+            PlayerInputKind::UnlockGallery => {
+                let id = input.value.clone().ok_or_else(|| {
+                    ScenarioError::Message("player_input unlock_gallery requires value".to_string())
+                })?;
+                self.apply_vn(VnPlayerCommand::Unlock {
+                    kind: SystemUnlockKind::Gallery,
+                    id,
+                })?;
+            }
+            PlayerInputKind::UnlockReplay => {
+                let id = input.value.clone().ok_or_else(|| {
+                    ScenarioError::Message("player_input unlock_replay requires value".to_string())
+                })?;
+                self.apply_vn(VnPlayerCommand::Unlock {
+                    kind: SystemUnlockKind::Replay,
+                    id,
+                })?;
+            }
+            PlayerInputKind::CompleteWait => {
+                let fence = input.value.clone().ok_or_else(|| {
+                    ScenarioError::Message("player_input complete_wait requires value".to_string())
+                })?;
+                self.apply_vn(VnPlayerCommand::CompleteWait { fence })?;
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_vn_default_launch(&mut self) -> Result<(), ScenarioError> {
+        let command = self
+            .vn_runtime
+            .as_ref()
+            .and_then(VnRuntime::default_launch_command)
+            .ok_or_else(|| {
+                ScenarioError::Message("VN compiled story has no launch target".to_string())
+            })?;
+        self.apply_vn(command)
+    }
+
+    fn apply_vn(&mut self, command: VnPlayerCommand) -> Result<(), ScenarioError> {
+        let Some(runtime) = self.vn_runtime.as_mut() else {
+            self.diagnostics.push(
+                Diagnostic::blocking(
+                    "ASTRA_SCENARIO_ACTION_UNSUPPORTED",
+                    "VN player action requires a package with vn.compiled_story",
+                )
+                .with_field("action", "vn.player"),
+            );
+            self.unsupported_actions.push("vn.player".to_string());
+            return Ok(());
+        };
+        let output = runtime
+            .apply(command)
+            .map_err(|err| ScenarioError::Message(err.to_string()))?;
+        for command in output.presentation {
+            self.world
+                .emit_presentation(convert_vn_presentation(command));
         }
         Ok(())
     }
@@ -783,6 +1505,63 @@ impl RunContext {
         }
     }
 
+    fn vn_route_reached(&self, route: &str) -> bool {
+        self.vn_runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.state().route_coverage.contains(route))
+    }
+
+    fn vn_backlog_has_key(&self, key: &str) -> bool {
+        self.vn_runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.state().backlog.iter().any(|entry| entry.key == key))
+    }
+
+    fn vn_read_state_has(&self, key: &str) -> bool {
+        self.vn_runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.state().read_state.contains(key))
+    }
+
+    fn vn_voice_replay_available(&self, voice: &str) -> bool {
+        self.vn_runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.state().voice_replay.contains_key(voice))
+    }
+
+    fn vn_system_state_matches(&self, assertion: &SystemStateAssertion) -> bool {
+        let Some(runtime) = self.vn_runtime.as_ref() else {
+            return false;
+        };
+        let system = &runtime.state().system;
+        if let Some(expected) = assertion.auto_enabled {
+            if system.auto_enabled != expected {
+                return false;
+            }
+        }
+        if let Some(expected) = &assertion.skip_mode {
+            if system.skip_mode != parse_skip_mode(expected) {
+                return false;
+            }
+        }
+        for (key, value) in &assertion.config {
+            if system.config.get(key) != Some(value) {
+                return false;
+            }
+        }
+        if !assertion
+            .gallery_unlocks
+            .iter()
+            .all(|id| system.gallery_unlocks.contains(id))
+        {
+            return false;
+        }
+        assertion
+            .replay_unlocks
+            .iter()
+            .all(|id| system.replay_unlocks.contains(id))
+    }
+
     fn fixture_action_ran(&self) -> bool {
         self.world.snapshot().blackboard.get("fixture.action")
             == Some(&BlackboardValue::from("ran"))
@@ -819,6 +1598,12 @@ fn scenario_action_kind(action: &ScenarioAction) -> &'static str {
         "advance"
     } else if action.choose.is_some() {
         "choose"
+    } else if action.player_input.is_some() {
+        "player_input"
+    } else if action.open_system.is_some() {
+        "open_system"
+    } else if action.replay_voice.is_some() {
+        "replay_voice"
     } else if action.save.is_some() {
         "save"
     } else if action.load.is_some() {
@@ -888,6 +1673,69 @@ fn list_field(map: &BTreeMap<String, ScenarioValue>, key: &str) -> Vec<String> {
             })
             .collect(),
         _ => Vec::new(),
+    }
+}
+
+fn parse_system_page(page: &str) -> SystemPageKind {
+    SystemPageKind::parse(page)
+}
+
+fn parse_skip_mode(value: &str) -> SkipMode {
+    match value {
+        "read" => SkipMode::Read,
+        "all" => SkipMode::All,
+        _ => SkipMode::None,
+    }
+}
+
+fn convert_vn_presentation(command: VnPresentationCommand) -> PresentationCommand {
+    match command {
+        VnPresentationCommand::Dialogue {
+            key,
+            speaker,
+            voice,
+            window,
+        } => {
+            let mut data = BTreeMap::new();
+            data.insert("key".to_string(), BlackboardValue::String(key));
+            if let Some(voice) = voice {
+                data.insert("voice".to_string(), BlackboardValue::String(voice));
+            }
+            if let Some(window) = window {
+                data.insert("window".to_string(), BlackboardValue::String(window));
+            }
+            if let Some(speaker) = speaker {
+                data.insert("speaker".to_string(), BlackboardValue::String(speaker));
+            }
+            PresentationCommand::Custom {
+                kind: "vn.dialogue".to_string(),
+                data,
+            }
+        }
+        VnPresentationCommand::Choice { key, options } => PresentationCommand::Choice {
+            prompt: key,
+            options: options.into_iter().map(|option| option.key).collect(),
+        },
+        VnPresentationCommand::SystemPage { page } => PresentationCommand::Custom {
+            kind: "vn.system_page".to_string(),
+            data: [(
+                "page".to_string(),
+                BlackboardValue::String(format!("{page:?}").to_lowercase()),
+            )]
+            .into_iter()
+            .collect(),
+        },
+        VnPresentationCommand::Stage {
+            command,
+            attributes,
+        } => PresentationCommand::Custom {
+            kind: format!("vn.stage.{command}"),
+            data: attributes
+                .into_iter()
+                .map(|(key, value)| (key, BlackboardValue::String(value)))
+                .collect(),
+        },
+        VnPresentationCommand::Marker { id } => PresentationCommand::Marker { name: id },
     }
 }
 

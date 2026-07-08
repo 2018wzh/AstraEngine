@@ -1,0 +1,13 @@
+[package]
+name = "vn-extension-provider"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+abi_stable.workspace = true
+astra-plugin-abi = { path = "../../../Source/Runtime/astra-plugin-abi" }

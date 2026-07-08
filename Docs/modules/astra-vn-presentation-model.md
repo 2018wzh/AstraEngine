@@ -23,6 +23,9 @@ pub struct StageModel {
     pub viewport: ViewportSpec,
     pub safe_area: SafeArea,
     pub layers: Vec<LayerState>,
+    pub video_layers: Vec<VideoLayerState>,
+    pub audio_commands: Vec<AudioCommand>,
+    pub timeline_tasks: Vec<TimelineTaskState>,
     pub input_priority: Vec<InputLayerRef>,
     pub frame_budget: PresentationBudget,
 }
@@ -63,10 +66,29 @@ pub struct VideoLayerState {
     pub loop_mode: LoopMode,
     pub end_behavior: MovieEndBehavior,
     pub fallback_frame: Option<AssetRef>,
+    pub z_order: i16,
+}
+
+pub struct AudioCommand {
+    pub command_id: CommandId,
+    pub bus: AudioBus,
+    pub asset: AssetRef,
+    pub loop_mode: LoopMode,
+    pub fade_ms: u32,
+    pub sync: AudioSync,
+}
+
+pub struct TimelineTaskState {
+    pub task_id: TimelineTaskId,
+    pub timeline: PresentationTimeline,
+    pub status: TimelineTaskStatus,
+    pub cancel_reason: Option<String>,
 }
 ```
 
 这些类型通过 `serde` + `schemars` 生成 JSON Schema。YAML 和 `.astra` 只是作者源；Runtime 只消费 CompiledStory 中的 section。
+
+当前 Stage 3 slice 已有 `VnHeadlessPresentationExecutor`，它把 `StageModel` 转成 deterministic `DrawCommand`，通过 headless CPU renderer 生成 input frame，再可选执行 `CpuFilterExecutor` 的 `FilterGraph`。`VnPresentationExecutionReport` 只记录 renderer/filter provider id、input/output hash、draw/filter count 和 diagnostic，不输出截图 payload、商业文本、音频或影片。
 
 ## PresentationCommand
 
@@ -78,8 +100,10 @@ pub enum PresentationCommand {
     SetSprite(SpriteState),
     SetTextWindow(TextWindowState),
     SetVideo(VideoLayerState),
+    PlayAudio(AudioCommand),
     RunTimeline(PresentationTimeline),
     CancelTimeline { task: TimelineTaskId, reason: CancelReason },
+    CompleteTimeline { task: TimelineTaskId },
 }
 
 pub struct TimelineTask {
@@ -147,7 +171,7 @@ voice sync 由 `TextWindowState.voice_replay`、AudioGraph voice channel 和 Tim
 
 ## Advanced Presentation Profile
 
-项目 opt-in `vn.advanced_presentation` 后，Release Gate 额外检查：
+项目 opt-in `vn.advanced_presentation` 后，Release Gate 额外检查 `vn.advanced_presentation_manifest` 和 scenario report：
 
 - 多层 stage、camera、video layer、shader/filter 和 text effect 同时出现。
 - 每个 timeline task 都有 join/cancel/fallback。
@@ -156,7 +180,7 @@ voice sync 由 `TextWindowState.voice_replay`、AudioGraph voice channel 和 Tim
 - 性能预算以 headless capture、frame budget 和 provider capability report 为证据。
 
 ```bash
-astra test run scenarios/advanced_presentation.yaml --package target/nativevn.astrapkg --headless --report target/reports/advanced-vn.yaml
+astra test run scenarios/advanced_presentation.yaml --package target/advancedvn.astrapkg --target advanced-vn-game --profile advanced-vn --headless --report target/reports/advanced-vn.yaml
 ```
 
 Expected report includes `vn.advanced_presentation`, `timeline.join_cancel`, `presentation.fallback`, `voice.sync` and `renderer.effect_budget`.

@@ -27,10 +27,26 @@ pub struct ReleaseCheckRecord {
 | package | `package.integrity` | package container | invalid section/hash/bounds | section table hash |
 | package | `package.cooked_project` | package `compiled.project` section | release profile package lacks cook/project artifact, wrong schema or mismatched package metadata | section id, schema, target, profile |
 | media | `media.decode.capability` | platform report | required codec missing | provider id, codec list |
+| vn | `vn.compiled_story` | package `vn.compiled_story` section | classic/modern profile 缺 section、解码失败、schema 错误或无 story/state | story hash, story count, state count, route node count |
+| vn | `vn.profile_manifest` | package `vn.profile_manifest` section | classic/modern profile 缺 section、未声明 validation profile 或 target 不匹配 | target, profile, profile count |
 | vn | `vn.full_playthrough` | VN scenario | route/system story failure | route id, command id |
 | vn | `vn.commercial_baseline` | VN release profile | dialogue/system flow baseline missing | command coverage, route coverage |
-| vn | `vn.system_ui_profile` | system story report | save/load/config/backlog/gallery/replay/chart/voice/localization missing | system story id, state hash |
-| vn | `vn.advanced_presentation` | opt-in scenario report | advanced profile missing or nondeterministic | timeline id, provider capability |
+| vn | `vn.compiled_story` | `classic` / `modern` VN profile | missing story, variable or command manifest evidence | story hash, story count, command manifest count, route node count |
+| vn | `vn.policy_bundle` | `classic` / `modern` VN profile | missing standard policy bundle, capability, lock hash, source cache or matching source hash | bundle count, source cache section, diagnostic count |
+| vn | `vn.extension_bindings` | `classic` / `modern` VN profile | missing or duplicate VN provider binding | binding count, diagnostic count |
+| vn | `vn.standard_commands` | `classic` / `modern` VN profile | missing standard command manifest, unknown command usage, missing required attr or movie fallback | command count, checked usage count, diagnostic count |
+| vn | `vn.presentation_provider` | `classic` / `modern` VN profile | missing presentation provider manifest, filter fallback policy or await capability | filter count, fallback count, wait capability count |
+| vn | `vn.commercial_baseline` | `classic` / `modern` VN profile | missing commercial baseline manifest or required feature coverage | story hash, required count, feature count, diagnostic count |
+| vn | `vn.system_ui_profile` | `classic` / `modern` VN profile | required system page missing or missing policy binding | page count, required count, missing count |
+| vn | `vn.system_ui_profile` | package `vn.system_story_manifest` and `vn.system_ui_profile_manifest` sections | save migration missing, gallery/replay unlock source missing, localization coverage missing, or save/load/config/backlog/gallery/replay/chart/voice/localization missing | page count, required count, unlock source count, localization locale count, save migrator, diagnostic count |
+| vn | `vn.advanced_presentation` | opt-in `vn.advanced_presentation_manifest` 和 scenario report | advanced profile 缺多层 stage、camera、video layer、timeline join/cancel、fallback、voice sync 或 effect budget evidence | story hash, timeline id count, evidence count |
+| player | `player.full_playable` | Windows/Web live player automation report | missing input transcript, missing platform host evidence, unchanged or blank visual region, silent required audio meter, direct runtime command path, DOM synthetic click or dump-dom route runner | platform, input event source, focus state, region hash before/after, audio meter summary, route check count |
+| vn | `tsuinosora.reference_evidence` | package `tsuinosora.reference_evidence` section | missing section, schema mismatch, non-pass status, missing reference hash, fixed `Title.png`/`Game.png` hash or dimension mismatch, path leak or payload-like field leak | reference count, section id, diagnostic |
+| vn | `tsuinosora.asset_analysis` | package `tsuinosora.asset_analysis` section | empty asset evidence, quarantine asset, schema mismatch, non-pass status, path leak or payload-like field leak | asset count, quarantine count, diagnostic |
+| vn | `tsuinosora.conversion_manifest` | package `tsuinosora.conversion_manifest` section | route coverage missing, empty converted resource evidence, missing source/native/classification/hash/byte size resource field, schema mismatch, non-pass status, path leak or payload-like field leak | route count, uncovered count, resource count, invalid field, diagnostic |
+| vn | `tsuinosora.mount_policy` | package `tsuinosora.mount_policy` section | selected target mismatch, empty alias list, schema mismatch, non-pass status, path leak or payload-like field leak | target id, alias count, diagnostic |
+| vn | `tsuinosora.modern_profile_report` | `modern` profile package section | missing report, non-reversible feature, missing fallback hash, core-state mutation, schema mismatch, path leak or payload-like field leak | feature count, diagnostic |
+| vn | `tsuinosora.manual_signoff` | formal release profile package section | missing signoff, missing required manual check, wrong check id field, failed signoff item, blocker present, schema mismatch, non-pass status, path leak or payload-like field leak | check count, required check count, failed count, missing required count, blocker count |
 | editor | `editor.source_roundtrip` | editor report | source map identity failure | source_ref, command id |
 | editor | `editor.plugin_manager` | plugin manager report | enablement/dependency/diagnostic jump failure | plugin id, extension id |
 | ai_mcp | `ai.provider_profile` | provider descriptor, project binding | fingerprint, secret handle, network egress, runtime eligibility or model fingerprint missing | provider id, profile id, model fingerprint |
@@ -109,7 +125,9 @@ checks:
 
 ```bash
 astra package validate target/nativevn.astrapkg --profile desktop-release --report target/release_report.yaml
+astra package bundle target/nativevn.astrapkg --profile classic --target nativevn-game --platform windows --out target/bundle/windows --format json
 astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --headless --report target/scenario_report.yaml
+astra test run scenarios/advanced_presentation.yaml --package target/advancedvn.astrapkg --target advanced-vn-game --profile advanced-vn --headless --report target/advanced_report.yaml
 astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/artemis_report.yaml
 cargo test -p astra-release release_report
 ```

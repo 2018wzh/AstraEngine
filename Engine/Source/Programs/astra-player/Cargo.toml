@@ -1,0 +1,19 @@
+[package]
+name = "astra-player"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "astra_player"
+path = "src/lib.rs"
+
+[[bin]]
+name = "astra-player"
+path = "src/main.rs"
+
+[dependencies]
+astra-player-core = { path = "../../Runtime/astra-player-core" }
+serde_json.workspace = true
+serde_yaml.workspace = true

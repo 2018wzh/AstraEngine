@@ -1,6 +1,6 @@
 # `.astra` Grammar And IR
 
-`.astra` parser 采用 `pest`。pest grammar 是第一版语法真源；Editor lossless round-trip 依赖 token span、source map 和后续 CST 层，不在 parser 内混入 Editor state。
+`.astra` Stage 3 runtime parser 采用轻量 line lexer 与 typed compiler pass，当前语法真源是 `Engine/Source/Runtime/astra-vn/src/parser.rs` 和 `compiler.rs` 中的 serde 类型与 diagnostic 测试。后续 Editor lossless round-trip 可以再引入 CST/parser generator，但不能让 Editor state 混入 runtime IR。
 
 ## Grammar Shape
 
@@ -23,7 +23,7 @@ command_id  = { "#@id" ~ ident_path }
 kv          = { ident ~ ":" ~ value }
 ```
 
-Indent handling is a lexer responsibility: the lexer emits `Indent`, `Dedent`, `Newline`, `TokenSpan`. The parser consumes block tokens and never infers indentation from raw spaces.
+Indent handling is a lexer responsibility. 当前 runtime lexer 强制两空格层级、禁止 tab，并为 source map 记录 line/column；后续 CST 层可以显式发出 `Indent`、`Dedent`、`Newline` 和 `TokenSpan`。
 
 ## AST
 
@@ -109,8 +109,8 @@ Formatter rules:
 ## Tests
 
 ```bash
-cargo test -p astra-vn parser_astra
-cargo test -p astra-vn compiled_story
+cargo test -p astra-vn --test compiler_runtime
+cargo test -p astra-vn --test compiler_diagnostics
 ```
 
-Expected: AST snapshot stable, IR hash stable, diagnostics carry file/span/code.
+Expected: CompiledStory IR hash stable, source map/debug symbols stable, grammar and semantic diagnostics carry file/span/code.

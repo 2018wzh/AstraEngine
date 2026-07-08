@@ -1,9 +1,12 @@
+use std::collections::BTreeSet;
+
 use astra_core::{SchemaMigrationRegistry, SchemaVersion};
 use astra_package::{
     AstraContainerBuilder, AstraContainerReader, ContainerBlob, ContainerKind, MigrationPolicy,
     SectionCodec, SectionPayload, CURRENT_CONTAINER_VERSION,
 };
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::{RuntimeError, RuntimeSnapshot};
@@ -42,27 +45,57 @@ pub fn write_runtime_save(
     snapshot: RuntimeSnapshot,
     request: SaveRequest,
 ) -> Result<SaveBlob, RuntimeError> {
+    write_runtime_save_with_sections(snapshot, request, Vec::new())
+}
+
+pub fn write_runtime_save_with_sections(
+    snapshot: RuntimeSnapshot,
+    request: SaveRequest,
+    extra_sections: Vec<SectionPayload>,
+) -> Result<SaveBlob, RuntimeError> {
     let runtime_payload = postcard::to_allocvec(&snapshot)
         .map_err(|err| RuntimeError::message(format!("encode runtime save: {err}")))?;
+    let mut section_ids = BTreeSet::new();
+    section_ids.insert("runtime.world".to_string());
+    section_ids.insert("migration.manifest".to_string());
+
+    let mut migration_entries = vec![MigrationManifestEntry {
+        schema: "runtime.world".to_string(),
+        minimum_supported_version: request.minimum_supported_version,
+        current_version: CURRENT,
+    }];
+    for section in &extra_sections {
+        if !section_ids.insert(section.id.clone()) {
+            return Err(RuntimeError::message(format!(
+                "duplicate save section {}",
+                section.id
+            )));
+        }
+        migration_entries.push(MigrationManifestEntry {
+            schema: section.schema.clone(),
+            minimum_supported_version: section.migration.minimum_supported_version,
+            current_version: section.migration.current_version,
+        });
+    }
     let manifest = MigrationManifest {
-        sections: vec![MigrationManifestEntry {
-            schema: "runtime.world".to_string(),
-            minimum_supported_version: request.minimum_supported_version,
-            current_version: CURRENT,
-        }],
+        sections: migration_entries,
     };
     let manifest_payload = postcard::to_allocvec(&manifest)
         .map_err(|err| RuntimeError::message(format!("encode migration manifest: {err}")))?;
 
-    let blob = AstraContainerBuilder::new(ContainerKind::Save)
-        .add_section(SectionPayload::new(
+    let mut builder =
+        AstraContainerBuilder::new(ContainerKind::Save).add_section(SectionPayload::new(
             "runtime.world",
             "runtime.world",
             CURRENT,
             SectionCodec::Postcard,
             runtime_payload,
             MigrationPolicy::from_minimum(request.minimum_supported_version),
-        ))
+        ));
+    for section in extra_sections {
+        builder = builder.add_section(section);
+    }
+    let blob = builder
         .add_section(SectionPayload::new(
             "migration.manifest",
             "migration.manifest",
@@ -101,4 +134,52 @@ pub fn read_runtime_save(
     reader
         .decode_postcard("runtime.world")
         .map_err(|err| RuntimeError::message(format!("decode runtime.world: {err}")))
+}
+
+pub fn read_runtime_save_section<T: DeserializeOwned>(
+    blob: &SaveBlob,
+    section_id: &str,
+    registry: &SchemaMigrationRegistry,
+) -> Result<T, RuntimeError> {
+    let reader = runtime_save_reader(blob, registry)?;
+    reader
+        .decode_postcard(section_id)
+        .map_err(|err| RuntimeError::message(format!("decode {section_id}: {err}")))
+}
+
+pub fn runtime_save_section_ids(
+    blob: &SaveBlob,
+    registry: &SchemaMigrationRegistry,
+) -> Result<Vec<String>, RuntimeError> {
+    let reader = runtime_save_reader(blob, registry)?;
+    Ok(reader
+        .entries()
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect())
+}
+
+fn runtime_save_reader(
+    blob: &SaveBlob,
+    registry: &SchemaMigrationRegistry,
+) -> Result<AstraContainerReader, RuntimeError> {
+    let container = ContainerBlob::new(blob.0.clone());
+    let reader = AstraContainerReader::new(container.as_bytes())
+        .map_err(|err| RuntimeError::message(err.to_string()))?;
+    if reader.kind() != ContainerKind::Save {
+        return Err(RuntimeError::message("container is not a runtime save"));
+    }
+    let manifest: MigrationManifest = reader
+        .decode_postcard("migration.manifest")
+        .map_err(|err| RuntimeError::message(err.to_string()))?;
+    for entry in manifest.sections {
+        registry
+            .validate_chain(
+                &entry.schema,
+                entry.minimum_supported_version,
+                entry.current_version,
+            )
+            .map_err(|err| RuntimeError::message(err.to_string()))?;
+    }
+    Ok(reader)
 }

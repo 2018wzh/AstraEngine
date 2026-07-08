@@ -83,6 +83,7 @@ impl RuntimeAction for FfiRuntimeAction {
             step: ctx.step(),
             action_id: self.descriptor.id.clone(),
             input: input.clone(),
+            trigger_event: ctx.trigger_event().cloned(),
         };
         let request = postcard::to_allocvec(&request)
             .map_err(|err| RuntimeError::message(format!("encode ffi action request: {err}")))?;

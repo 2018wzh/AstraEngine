@@ -4,11 +4,14 @@ members = [
     "Engine/Source/Runtime/astra-core",
     "Engine/Source/Runtime/astra-package",
     "Engine/Source/Runtime/astra-asset",
+    "Engine/Source/Runtime/astra-media-core",
     "Engine/Source/Runtime/astra-media",
+    "Engine/Source/Runtime/astra-vn",
     "Engine/Source/Runtime/astra-runtime",
     "Engine/Source/Runtime/astra-engine",
     "Engine/Source/Runtime/astra-plugin-abi",
     "Engine/Source/Runtime/astra-plugin",
+    "Engine/Source/Runtime/astra-player-core",
     "Engine/Source/Platform/astra-target",
     "Engine/Source/Platform/astra-platform",
     "Engine/Source/Platform/astra-platform-windows",
@@ -23,7 +26,9 @@ members = [
     "Engine/Source/Developer/astra-property-derive",
     "Engine/Source/Developer/astra-test",
     "Engine/Source/Programs/astra-cli",
+    "Engine/Source/Programs/astra-player",
     "Engine/Plugins/Fixtures/headless-presentation-provider",
+    "Engine/Plugins/Fixtures/vn-extension-provider",
 ]
 
 [workspace.package]
@@ -46,6 +51,7 @@ indexmap = { version = "2", features = ["serde"] }
 js-sys = "0.3"
 kira = "0.12"
 libloading = "0.8"
+mlua = { version = "0.10", features = ["luau", "vendored", "serialize"] }
 miette = { version = "7", features = ["fancy"] }
 postcard = { version = "1", features = ["alloc"] }
 pollster = "0.4"

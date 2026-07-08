@@ -1,0 +1,65 @@
+story main #@id story.main
+
+state prologue #@id state.prologue
+  scene opening #@id scene.opening
+    movie layer:video.opening asset:native-assets/movie/op.webm end:wait fallback:native-assets/movie/op_fallback.png #@id movie.opening
+    voice asset:native-assets/voice/hero0001.ogg sync:text #@id voice.opening
+    text key:prologue.hello speaker:hero voice:voice.hero.0001 #@id line.prologue.hello
+    choice key:prologue.where #@id choice.prologue.where
+      option key:choice.library -> library #@id choice.library
+      option key:choice.rooftop -> rooftop #@id choice.rooftop
+
+state library #@id state.library
+  scene library #@id scene.library
+    bgm asset:native-assets/bgm/library.ogg loop:true #@id bgm.library
+    se asset:native-assets/se/page.ogg #@id se.page
+    wait fence:library.pause #@id wait.library.pause
+    text key:library.followup speaker:hero voice:voice.hero.0002 #@id line.library.followup
+    jump ending.good #@id jump.good
+
+state rooftop #@id state.rooftop
+  scene rooftop #@id scene.rooftop
+    text key:rooftop.followup speaker:hero voice:voice.hero.0003 #@id line.rooftop.followup
+    jump ending.rooftop #@id jump.rooftop
+
+story system #@id story.system
+
+state title #@id state.system.title
+  scene title #@id scene.system.title
+    system_page kind:title policy:astra.policy.standard #@id page.title
+
+state save #@id state.system.save
+  scene save #@id scene.system.save
+    system_page kind:save policy:astra.policy.standard #@id page.save
+
+state load #@id state.system.load
+  scene load #@id scene.system.load
+    system_page kind:load policy:astra.policy.standard #@id page.load
+
+state config #@id state.system.config
+  scene config #@id scene.system.config
+    system_page kind:config policy:astra.policy.standard #@id page.config
+
+state gallery #@id state.system.gallery
+  scene gallery #@id scene.system.gallery
+    system_page kind:gallery policy:astra.policy.standard #@id page.gallery
+
+state replay #@id state.system.replay
+  scene replay #@id scene.system.replay
+    system_page kind:replay policy:astra.policy.standard #@id page.replay
+
+state voice_replay #@id state.system.voice_replay
+  scene voice_replay #@id scene.system.voice_replay
+    system_page kind:voice_replay policy:astra.policy.standard #@id page.voice_replay
+
+state route_chart #@id state.system.route_chart
+  scene route_chart #@id scene.system.route_chart
+    system_page kind:route_chart policy:astra.policy.standard #@id page.route_chart
+
+state backlog #@id state.system.backlog
+  scene backlog #@id scene.system.backlog
+    system_page kind:backlog policy:astra.policy.standard #@id page.backlog
+
+state localization_preview #@id state.system.localization_preview
+  scene localization_preview #@id scene.system.localization_preview
+    system_page kind:localization_preview policy:astra.policy.standard #@id page.localization_preview

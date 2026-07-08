@@ -102,14 +102,13 @@ Release Gate uses only lock/vendor cache.
 
 ## Snapshot
 
-Allowed snapshot values: nil, boolean, number, string, table, stable ref. Function, thread, userdata and native handle block release.
+Allowed runtime snapshot values are nil, boolean, integer, string and object/table values with string or integer keys. Function, thread, userdata, native handle, non-finite number and out-of-range number values block save/replay and package validation.
 
 ## Tests
 
 ```bash
-cargo test -p astra-vn luau_sandbox
-cargo test -p astra-vn policy_lock
-cargo test -p astra-vn luau_snapshot
+cargo test -p astra-vn --test luau_sandbox
+cargo test -p astra-vn --test luau_mutation
 ```
 
-Expected: denied capability returns diagnostic, mutation trace is recorded, invalid snapshot blocks package.
+Expected: denied capability returns diagnostic, mutation trace records previous value and replay metadata, rollback/playback restores deterministic state, command/query/trace capability calls are serialized, and invalid snapshot/command/trace payloads block.

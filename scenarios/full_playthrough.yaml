@@ -1,0 +1,71 @@
+schema: astra.scenario.v1
+stage: stage3-astra-vn
+package: target/nativevn.astrapkg
+target: nativevn-game
+profile: classic
+platform: headless
+generated_route_id: route.library
+seed: 42
+locale: zh-Hans
+actions:
+  - launch: {}
+  - player_input:
+      kind: complete_wait
+      value: movie.opening.end
+  - player_input:
+      kind: complete_wait
+      value: voice.opening.end
+  - player_input:
+      kind: advance
+  - player_input:
+      kind: choose
+      value: choice.library
+  - player_input:
+      kind: complete_wait
+      value: library.pause
+  - player_input:
+      kind: advance
+  - player_input:
+      kind: replay_voice
+      value: voice.hero.0002
+  - player_input:
+      kind: open_system
+      value: route_chart
+  - player_input:
+      kind: save
+      slot: slot.full
+  - player_input:
+      kind: load
+      slot: slot.full
+  - player_input:
+      kind: set_auto
+      value: "true"
+  - player_input:
+      kind: set_skip
+      value: read
+  - player_input:
+      kind: set_config
+      key: text_speed
+      value: instant
+  - player_input:
+      kind: unlock_gallery
+      value: cg.opening
+  - player_input:
+      kind: unlock_replay
+      value: replay.opening
+  - replay_from_start: {}
+assertions:
+  - coverage:
+      routes: [ending.good]
+      backlog_keys: [prologue.hello, library.followup]
+      read_state: [line.prologue.hello, line.library.followup]
+      voice_replay: [voice.hero.0001, voice.hero.0002]
+  - system_state:
+      auto_enabled: true
+      skip_mode: read
+      config:
+        text_speed: instant
+      gallery_unlocks: [cg.opening]
+      replay_unlocks: [replay.opening]
+  - replay_hash_match: true
+  - no_blocking_diagnostics: true

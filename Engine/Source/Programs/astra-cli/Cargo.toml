@@ -10,8 +10,11 @@ name = "astra"
 path = "src/main.rs"
 
 [dependencies]
+astra-asset = { path = "../../Runtime/astra-asset" }
 astra-core = { path = "../../Runtime/astra-core" }
+astra-cook = { path = "../../Developer/astra-cook" }
 astra-package = { path = "../../Runtime/astra-package" }
+astra-player-core = { path = "../../Runtime/astra-player-core" }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-platform-android = { path = "../../Platform/astra-platform-android" }
 astra-platform-ios = { path = "../../Platform/astra-platform-ios" }
@@ -22,6 +25,7 @@ astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
 astra-release = { path = "../../Developer/astra-release" }
 astra-target = { path = "../../Platform/astra-target" }
 astra-test = { path = "../../Developer/astra-test" }
+astra-vn = { path = "../../Runtime/astra-vn" }
 clap.workspace = true
 schemars.workspace = true
 serde.workspace = true

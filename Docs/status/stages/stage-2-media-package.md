@@ -137,7 +137,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **Depends On:** `S2-MEDIA-01`
 
-**Target Paths:** `Engine/Source/Runtime/astra-media/src/filter_graph.rs`、`Engine/Source/Runtime/astra-media/tests/filter_graph.rs`
+**Target Paths:** `Engine/Source/Runtime/astra-media-core/src/filter_graph.rs`、`Engine/Source/Runtime/astra-media/src/filter_graph.rs`、`Engine/Source/Runtime/astra-media/tests/filter_graph.rs`
 
 **Steps:**
 
@@ -146,7 +146,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 3. 校验环路、缺失 target、参数类型错误和 provider ineligible。
 4. 编写 typed validation 和 fallback diagnostic 测试。
 
-**Done Evidence:** `cargo test -p astra-media filter_graph` 覆盖 typed validation 和 fallback diagnostic。
+**Done Evidence:** `cargo test -p astra-media --test filter_graph` 覆盖 typed validation、fallback diagnostic 和 deterministic CPU filter execution。
 
 **Linked Test IDs:** `T-S2-MEDIA-04`
 

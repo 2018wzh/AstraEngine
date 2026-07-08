@@ -1,0 +1,25 @@
+{
+  "schema": "tsuinosora.demo_slice_config.v1",
+  "original_install_root": "Examples/TsuiNoSora/.local/original",
+  "local_work_root": "Examples/TsuiNoSora/.local/work",
+  "title_png": "Examples/TsuiNoSora/Docs/Title.png",
+  "game_png": "Examples/TsuiNoSora/Docs/Game.png",
+  "projectorrays_tool": "Examples/TsuiNoSora/.local/tools/ProjectorRays",
+  "projectorrays_dump_root": "Examples/TsuiNoSora/.local/projectorrays-dump",
+  "projectorrays_full_dump_roots": [
+    {
+      "alias": "root",
+      "path": "Examples/TsuiNoSora/.local/projectorrays-full-root"
+    },
+    {
+      "alias": "data",
+      "path": "Examples/TsuiNoSora/.local/projectorrays-full-data"
+    },
+    {
+      "alias": "casts",
+      "path": "Examples/TsuiNoSora/.local/projectorrays-full-casts"
+    }
+  ],
+  "player_automation_report": "Examples/TsuiNoSora/.local/work/reports/live_player_report.json",
+  "require_full_resource_conversion": true
+}

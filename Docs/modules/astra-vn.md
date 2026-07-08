@@ -33,7 +33,7 @@ v1 必须覆盖对白、选择、变量、call/return、backlog、auto/skip/read
 
 ## Luau 扩展
 
-Luau policy 用于 message/choice UI、system stories、presentation preset、timeline preset、复杂演出和插件组合。Luau command 必须声明 schema、snapshot policy、skip/rollback policy、Editor metadata、performance budget 和 release check。
+Luau policy 用于 message/choice UI、system stories、presentation preset、timeline preset、复杂演出和插件组合。Luau command 必须声明 schema、snapshot policy、skip/rollback policy、Editor metadata、performance budget 和 release check。Snapshot 只能保存可序列化 scalar/object 值；不可序列化 Luau value 必须变成 blocking diagnostic，不能进入 save/replay。
 
 ## Presentation Profiles
 

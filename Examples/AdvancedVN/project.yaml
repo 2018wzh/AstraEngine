@@ -1,0 +1,16 @@
+schema: astra.project.v1
+id: com.example.advancedvn
+runtime: astra-vn
+targets:
+  - id: advanced-vn-game
+    kind: game
+    crate: astra-vn
+    default_profile: advanced-vn
+    platforms: [headless, windows, web]
+    packaged: true
+nativevn:
+  sources:
+    - Scripts
+  profiles: [classic, modern, advanced-vn]
+  scenario_refs:
+    - scenarios/advanced_presentation.yaml

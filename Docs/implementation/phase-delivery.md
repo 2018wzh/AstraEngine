@@ -63,14 +63,16 @@ Expected report includes `package.integrity`, `target.manifest`, `platform.capab
 
 **Test IDs:** `T-S3-SCRIPT-01`、`T-S3-LUAU-01`、`T-S3-LUAU-02`、`T-S3-PRESENT-01`、`T-S3-SYSTEM-01`、`T-S3-ADVANCED-01`、`T-S3-SAMPLE-01`、`T-S3-GAME-TARGET-01`
 
-**Sample:** `Examples/NativeVN`、`scenarios/full_playthrough.yaml`、`scenarios/advanced_presentation.yaml`
+**Sample:** `Examples/NativeVN`、`Examples/AdvancedVN`、`scenarios/full_playthrough.yaml`、`scenarios/advanced_presentation.yaml`
 
 **Report Schema:** `astra.scenario_report.v1` + `astra.release_report.v1`
 
 ```bash
 astra package build target/cooked-nativevn --target nativevn-game --out target/nativevn.astrapkg
 astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --target nativevn-game --headless --report target/reports/stage3.yaml
-astra test run scenarios/advanced_presentation.yaml --package target/nativevn.astrapkg --target nativevn-game --headless --report target/reports/stage3-advanced.yaml
+astra cook Examples/AdvancedVN/project.yaml --profile advanced-vn --target advanced-vn-game --out target/cooked-advancedvn
+astra package build target/cooked-advancedvn --target advanced-vn-game --out target/advancedvn.astrapkg
+astra test run scenarios/advanced_presentation.yaml --package target/advancedvn.astrapkg --target advanced-vn-game --profile advanced-vn --headless --report target/reports/stage3-advanced.yaml
 ```
 
 Expected report includes `target.manifest`, `script.compile`, `luau.policy_lock`, `system_stories.covered`, `vn.system_ui_profile`, `vn.advanced_presentation`, `command.provider_binding` and `vn.replay_hash`.

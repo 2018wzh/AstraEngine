@@ -26,6 +26,32 @@ targets:
 
 每个 YAML schema 必须有 Rust 类型、schema version、migrator 和验证命令。
 
+Stage 3 cook 已支持 project-level `package_sections` descriptor，用于把脱敏 JSON report 或 manifest 作为 `Raw` section 放入 package。descriptor 只允许相对 `path`，可用 `targets` 和 `profiles` 过滤，不允许记录本地绝对路径或商业 payload。TsuiNoSora gate 用它把 `tsuinosora.reference_evidence`、`tsuinosora.asset_analysis`、`tsuinosora.conversion_manifest`、`tsuinosora.mount_policy`、`tsuinosora.modern_profile_report` 和 formal release `tsuinosora.manual_signoff` 接入 package/release gate；`tsuinosora.extract_report.v1`、`tsuinosora.director_resource_map.v1`、`tsuinosora.director_cast_map.v1`、`tsuinosora.director_lingo_map.v1`、`tsuinosora.cast_source_map_report.v1`、`tsuinosora.script_source_map.v1`、`tsuinosora.script_source_map_report.v1`、`tsuinosora.route_graph_report.v1` 和 `tsuinosora.native_asset_rearrange_report.v1` 是本地 gate preflight input/report，只记录 sidecar 抽取预检、Director `imap`/`mmap` resource map、受限 `XFIR` exact wrapper 中的 RIFF/RIFX payload hash/size、Director `KEY*`/`CAS*` cast map、Director `Lctx`/`Lnam`/`Lscr` Lingo map、`Lnam` entry count/table hash、受限 RIFF/RIFX readable chunk 证据、opaque/compressed、declared size mismatch 或尾随未验证 bytes Shockwave blocking diagnostic、cast member/source hash、Director child resource id/FourCC/hash、route id/source line/hash/diagnostic、native-assets source/native path/hash/byte size 和未解析 container 阻断；declared size mismatch 时不记录 resource/tag coverage，不作为发布 package section。
+
+补充：`tsuinosora.director_lingo_map.v1` 还记录 `Lctx` entry count/table hash；`Lctx` 和 `Lnam` 都不得输出原始 table payload 或 name/context 字符串。`Lctx` 未按 32-bit entry 对齐、`Lnam` 未按 null-terminated table 证明边界时必须 blocking。
+
+补充：`tsuinosora.director_cast_map.v1` 遇到同一 `CASt` resource 被多个 `CAS*` library/slot 绑定时必须 blocking，避免不唯一 cast member 继续进入 `tsuinosora.cast_source_map_report.v1`。
+
+补充：`tsuinosora.cast_source_map_report.v1` 必须阻断 `tsuinosora.cast_map.v1` 或外部 `tsuinosora.director_cast_map.v1` sidecar 中的正文、payload 或 bytecode 字段；报告只允许记录字段路径、hash、id 和 diagnostic。
+
+补充：`tsuinosora.director_cast_member_metadata.v1` 只能作为 `CASt` payload 内显式脱敏 metadata 使用，允许字段限于 kind、route id、command id、anchor、bounds 和 metadata hash；读取结果可以进入 `tsuinosora.director_cast_map.v1` 和 `tsuinosora.cast_source_map_report.v1`，但原始 `CASt` payload 不得进入 report。
+
+补充：`tsuinosora.director_cast_member_metadata.v1` 的 anchor 必须是数值 `x`/`y`，bounds 必须是非负数值 `x`/`y`/`width`/`height`；layout 字段不能验证时必须 blocking。
+
+补充：`tsuinosora.director_cast_member_metadata.v1` 的 `kind: character_atlas` 必须携带 parts；part id、pose、expression、layer 和 fallback 必须是 safe symbol，anchor/crop 必须是数值，mouth/eye state compatibility 必须是 boolean。合规 parts 可以进入 `tsuinosora.director_cast_map.v1` 和 `tsuinosora.cast_source_map_report.v1`。
+
+补充：`tsuinosora.route_graph_report.v1` 和 `tsuinosora.script_source_map_report.v1` 必须阻断同一 `route_id` 的 terminal/choice signature 冲突；否则 NativeVN package input 不允许生成 `.astra` story 或 scenario refs。
+
+补充：同一 route 内的 `choices` 必须唯一；重复 choice id 会阻断 route graph/script source-map report，避免生成重复 `player_input choose` 或 `.astra` option key。
+
+补充：script source-map fallback 只适用于 route graph 缺失；如果 `tsuinosora.route_graph.v1` sidecar 存在但校验失败，`tsuinosora.route_graph_report.v1` 的 diagnostic 必须继续阻断 Stage 3 gate。
+
+补充：`tsuinosora.script_source_map.v1` 在覆盖 unsupported `Lscr` bytecode 时，route 只能用 `script_resource_id` 和 `script_payload_sha256` 绑定 `tsuinosora.director_lingo_map.v1` 中的 Lscr resource；缺失、未知 resource 或 hash mismatch 必须 blocking，schema 仍禁止脚本文本、bytecode、payload 和本地路径。
+
+补充：`tsuinosora.nativevn_package_input_report.v1` 会对显式 route 输入执行同样的安全校验；不安全 symbol、非 covered route、重复 choice 或冲突 route signature 必须在写 `.astra` story 和 scenario refs 前阻断。
+
+补充：`tsuinosora.local_gate_report.v1` 不把显式 routes 作为商业 route coverage evidence；`local-gate` 必须从 `tsuinosora.route_graph_report.v1` 或 `tsuinosora.script_source_map_report.v1` 派生 routes 后才允许写 `tsuinosora.nativevn_package_input_report.v1`。
+
 AI ModelBundle source descriptor 也是 YAML，但只作为 cook 输入。Cook 后，Shipping Runtime 只能通过 package/VFS section 读取模型资源：
 
 ```yaml
@@ -56,13 +82,74 @@ Section payload 默认使用 `postcard` + serde。大型媒体 payload 可以使
 
 ## Save
 
-Save 必须包含 Runtime state、Actor/Component、StateMachine、Blackboard、Director、AwaitToken、script snapshot、VN backlog、AudioGraph state、FilterGraph state、committed AI output、plugin opaque sections 和 migration manifest。
+Save 必须包含 Runtime state、Actor/Component、StateMachine、Blackboard、Director、AwaitToken、script snapshot、VN backlog、AudioGraph state、FilterGraph state、committed AI output、plugin opaque sections 和 migration manifest。Stage 3 VN save 通过 Runtime save container 的 extra section 写入 `vn.runtime_state` 和 `vn.policy_state`，不再把 VN slot blob 当作脱离 RuntimeWorld 的旁路存档。
 
 AI Runtime 生成的文本、图像和语音结果是 save 数据，不是 package 数据。流式 chunk 通过 `ai.generated_artifact.*` extra section 固化；manifest 记录 model fingerprint、provider profile、validator result、content type、hash、codec 和可选 encryption。正式 replay 只读 save payload，不重跑 provider。
 
 ## Package
 
-Package 必须包含 cooked assets、compiled `.astra` IR、Luau policy bundle、policy lock/vendor cache、schema registry、provider policy、module fingerprint、target manifest、release report summary、test scenario references 和 platform eligibility。Runtime 不依赖源 YAML 启动。
+Package 必须包含 cooked assets、compiled `.astra` IR、Luau policy bundle、policy lock/source cache、schema registry、provider policy、module fingerprint、target manifest、release report summary、test scenario references 和 platform eligibility。Runtime 不依赖源 YAML 启动。
+
+## Standalone Bundle
+
+Stage 3 的 standalone bundle 由已 cook/package 的 `.astrapkg` 生成，不从源 YAML 直接拼装。`astra.standalone_bundle_manifest.v1` 只记录 target、profile、platform、entrypoint、package hash、scenario refs、Web scenario JSON refs、Web route model 相对路径和相对文件清单；bundle 会复制 `scenario.refs` 中的公开 scenario 到相对路径下，用于 player host route automation。`astra.player_launch_report.v1` 只记录 launch readiness、target/profile/platform、package hash 和 check id/status；`astra.player_route_report.v1` 只记录 target/profile/platform、input surface、package hash、entrypoint、scenario 相对路径、check id/status 和嵌入的脱敏 `astra.scenario_report.v1`。这些 report 都不能记录本地绝对路径、用户名、商业 payload、正文、截图、音频或影片。
+
+`astra.player_route_report.v1` 是已实现的 route/report slice，不能满足 `player.full_playable`。Stage 3 完整可玩 gate 还需要 `astra.player_automation_script.v1`、`astra.player_input_transcript.v1` 和 `astra.player_automation_report.v1`，证明 Windows/Web player 由平台原生输入推进，并在同一次 run 中产出视觉变化、音频 meter、host evidence 和 route evidence。
+
+当前已落地的 bundle slice：
+
+| Schema | Status | Purpose |
+| --- | --- | --- |
+| `astra.standalone_bundle_manifest.v1` | `DONE` | Windows bundle 写入 `AstraPlayer.exe`、`AstraPlayer.config.json`、package 和 scenario refs；Web bundle 写入 `index.html`、`astra-player.js`、`AstraPlayer.config.json`、`AstraPlayer.route_model.json`、package、scenario refs 和 scenario JSON refs；manifest 只使用相对路径和 hash |
+| `astra.player_launch_report.v1` | `IN_PROGRESS` | Windows entrypoint 无参数启动时读取 bundle manifest、校验 package hash 和 target manifest，输出 machine-readable readiness report |
+| `astra.player_route_report.v1` | `DONE` | Windows entrypoint 的 `--route-scenario` 模式读取 bundle config、package 和 scenario refs，直接从 bundle 内执行 route scenario 并输出脱敏 route report；Web browser host 读取 bundle manifest、package hash、route model 和 scenario JSON，在 DOM 中输出同 schema 的脱敏 route report；该 schema 不作为 `player.full_playable` evidence |
+| `astra.player_automation_script.v1` | `SPEC_READY` | 描述 launch、click、key、wait、screenshot sample、audio sample 和期望 route/system UI state；只允许公开 scenario 相对路径、target region id、key 名、等待条件和 check id |
+| `astra.player_input_transcript.v1` | `SPEC_READY` | 记录平台事件来源、坐标、按键、target region、frame hash before/after、focus state、event-loop receipt 和 diagnostic；不得记录本地路径、截图 payload、音频 payload 或 native handle |
+| `astra.player_automation_report.v1` | `SPEC_READY` | 聚合 input transcript、visual report、audio report 和 route report；只记录 hash、region id、check id/status、event source、focus state、meter summary、host evidence 和 diagnostic |
+
+Stage 3 Windows `player.full_playable` required evidence 是 `player.window.focused`、`player.input.sendinput.mouse`、`player.input.sendinput.keyboard`、`player.visual.window_regions`、`player.audio.wasapi_meter` 和 `player.route.full`。Web required evidence 是 `player.browser.cdp_session`、`player.input.cdp_mouse`、`player.input.cdp_keyboard`、`player.visual.canvas_regions`、`player.audio.webaudio_meter` 和 `player.route.full`。缺 input transcript、缺截图区域像素变化、缺音频 meter、缺平台 host evidence，或发现 `VnPlayerCommand`、`--route-scenario` 自推进、`--dump-dom` route runner、DOM `element.click()`、直接 JS callback 或 direct runtime command path 时，`player.full_playable` 必须 blocking。`input.browser`、`input.gamepad` 这类 API 可用性只能作为 capability，不能作为 playable evidence。
+
+Stage 3 已开始落地的 VN package sections：
+
+| Section | Status | Purpose |
+| --- | --- | --- |
+| `vn.compiled_story` | `IN_PROGRESS` | `postcard` 编码的 `CompiledStory`，当前包含 StoryManifest、VariableManifest、CommandManifest、source map、debug symbol 和 route graph；release gate 会在 classic/modern profile 下校验 schema、story/state 和 route graph evidence |
+| `vn.profile_manifest` | `IN_PROGRESS` | `postcard` 编码的 profile/target manifest，当前 release gate 会校验 validation profile 和 selected target |
+| `vn.policy_bundle_manifest` | `DONE` | `postcard` 编码的 `VnPolicyBundleManifest`，release gate 会校验 standard policy bundle、required capabilities、sha256 lock hash、source hash、byte size 和 source cache section |
+| `vn.policy_bundle_source_cache` | `DONE` | `postcard` 编码的 `VnPolicyBundleSourceCache`，包内固定官方 Luau source，release report 只输出 section id、hash/size evidence 和 diagnostic，不输出 Luau source payload |
+| `vn.extension_manifest` | `IN_PROGRESS` | `postcard` 编码的 `VnExtensionManifest`，当前 release gate 会校验 policy bundle、VN command、presentation command、editor metadata 和 release check provider 显式绑定 |
+| `vn.standard_command_manifest` | `IN_PROGRESS` | `postcard` 编码的 `VnStandardCommandManifest`，当前 release gate 会校验 standard command descriptor、compiled presentation command usage、必需属性和 movie fallback |
+| `vn.presentation_provider_manifest` | `IN_PROGRESS` | `postcard` 编码的 `VnPresentationProviderManifest`，当前 release gate 会校验 renderer/filter provider id、shader profile、fallback policy 和 movie/voice/timeline await capability |
+| `vn.commercial_baseline_manifest` | `IN_PROGRESS` | `postcard` 编码的 `VnCommercialBaselineManifest`，当前 release gate 会校验商业 VN 自动化基线 feature coverage，不包含商业 payload |
+| `vn.advanced_presentation_manifest` | `DONE` | `postcard` 编码的 `VnAdvancedPresentationManifest`，仅 advanced opt-in profile 阻断；记录 story hash、timeline id 和 `stage.multi_layer`、`camera.task`、`video.layer`、`timeline.join_cancel`、`presentation.fallback`、`voice.sync`、`renderer.effect_budget` evidence |
+| `vn.system_story_manifest` | `DONE` | `postcard` 编码的 `SystemStoryManifest`，release gate 会校验商业 VN 必需 system page entry 和 policy binding |
+| `vn.system_ui_profile_manifest` | `DONE` | `postcard` 编码的 `VnSystemUiProfileManifest`，记录 save migration、gallery/replay unlock source 和 localization coverage release evidence |
+| `scenario.refs` | `DONE` | package 内 scenario 引用表；Stage 3 VN scenario 已复用该 section |
+| `tsuinosora.reference_evidence` | `IN_PROGRESS` | TsuiNoSora 视觉参考证据 hash、尺寸、区域 id 和布局指标；默认 `Title.png`/`Game.png` 固定尺寸/hash mismatch 会 blocking；release gate 会阻断缺 section、schema mismatch、非 `pass` 状态、路径泄露和 payload-like 字段泄露 |
+| `tsuinosora.asset_analysis` | `IN_PROGRESS` | synthetic fixture 已覆盖脚本引用、container source、use timing、visible bbox、edge padding、颜色分布、重复 hash、reference match、classification count、atlas crop/part 和分类冲突 quarantine；release gate 会阻断空 asset evidence、quarantine、schema/status 错误、路径泄露和 payload-like 字段泄露；真实本地 gate 仍未完成 |
+| `tsuinosora.conversion_manifest` | `IN_PROGRESS` | 本地转换 coverage、source map、converted resource evidence、missing/quarantine/manual review summary；release gate 会阻断 route coverage 缺口、空 converted resource evidence、resource 缺 source/native/classification/hash/byte size、schema/status 错误、路径泄露和 payload-like 字段泄露 |
+| `tsuinosora.mount_policy` | `IN_PROGRESS` | patch target 的本地挂载 alias、hash policy 和 fallback 规则；release gate 会阻断 target 不匹配、alias 为空、schema/status 错误、路径泄露和 payload-like 字段泄露；standalone bundle 会写入脱敏 `AstraPlayer.mount_policy.json`，Windows/Web route report 必须校验 `player.mount_policy` 和 `player.mount_policy_hash`，patch target 还必须校验 `player.patch_direct_read`；Windows patch direct-read 必须有 scenario `mount_probes` 或 route-bound `mount_assets` 加 `--mount-root alias=path` 的本地读取证据，`mount_assets.role` 必须是 Asset analysis 允许分类且不能是 `unknown` 或 `script`，report 只记录 `player.patch_mount_probe`、`player.patch_mount_asset` check 和状态，不记录本地 root；Web player 遇到本地 mount probe/asset scenario 必须 blocking |
+| `tsuinosora.modern_profile_report` | `IN_PROGRESS` | `modern` profile 的增强开关、fallback hash 和 core-state 隔离 evidence；release gate 会阻断缺 section、不可回退增强、schema/status 错误、路径泄露和 payload-like 字段泄露 |
+| `tsuinosora.manual_signoff` | `IN_PROGRESS` | formal release profile 的人工验收摘要，只记录 `check_id`、result、blocker count 和脱敏规则；release gate 会阻断缺 section、缺 required check、错误 check id 字段、失败项、blocker、schema/status 错误、路径泄露和 payload-like 字段泄露 |
+
+Stage 3 已开始落地、但尚未全部写入 release package 的 VN runtime 数据：
+
+| Data type | Status | Purpose |
+| --- | --- | --- |
+| `VnRuntimeState` | `IN_PROGRESS` | 保存 profile、locale、current story/state、command cursor、call stack、pending choice、变量、backlog、read-state、voice replay、route coverage、route flags 和 `VnSystemState` |
+| `VnRuntimeStateSave` | `DONE` | Runtime save section `vn.runtime_state`，保存 `VnRuntimeState` 与 state hash；覆盖 backlog、read-state、voice replay、route flags、变量和 pending wait |
+| `BacklogEntry` / `VnReplayUiState` | `DONE` | 保存 command id、text key、speaker、voice ref、story/state、route position、read flag、layout metadata、voice replay rows 和 replay UI hash |
+| `VnSystemState` | `IN_PROGRESS` | 保存 auto enabled、skip mode、config key/value、gallery unlocks 和 replay unlocks；随 save/load/replay 保持 hash 一致 |
+| `VnPolicyState` | `DONE` | 保存 Luau policy 可见变量、`astra.mutate` mutation trace、previous value、rollback/playback metadata、`astra.command` capability request trace、`astra.query` read-only trace、`astra.trace` diagnostics 和 serializable snapshots；不保存 function、thread、userdata 或 native handle |
+| `VnPolicyStateSave` | `DONE` | Runtime save section `vn.policy_state`，保存 policy state hash、mutation trace、rollback/replay event metadata、command/query/trace records 和 serializable snapshots |
+| `VnPolicyBundleManifest` | `DONE` | 保存 policy bundle id、entry、capabilities、dependencies、lock hash、source hash、byte size 和 source cache section |
+| `VnPolicyBundleSourceCache` | `DONE` | 保存官方 policy source 的包内缓存；release gate 校验 hash/size/entry，report 不输出 source payload |
+| `VnExtensionManifest` | `DONE` | 保存 VN extension point 到 provider 的显式绑定和 required capabilities；已覆盖真实 cdylib provider fixture build/load/unload |
+| `StoryManifest` / `VariableManifest` / `CommandManifest` / `SystemStoryManifest` | `DONE` | 随 `CompiledStory` 输出 story/state、变量域 key、command/source 绑定和 system page entry；完整 grammar 负例仍由 `S3-SCRIPT-01` 跟踪 |
+| `StageModel` | `IN_PROGRESS` | 保存 headless presentation 的 viewport、camera、layer、text window 和 timeline slice，用于 deterministic hash 和布局诊断 |
+| `VnAdvancedPresentationManifest` | `DONE` | 保存 advanced profile 的脱敏 evidence id、story hash 和 timeline id；不保存截图、文本、音频、影片或本地路径 |
+| `SystemStoryManifest` / `VnSystemUiProfileManifest` | `DONE` | 记录 title/save/load/config/gallery/replay/voice replay/route chart/backlog/localization preview 的 system story entry、policy binding、save migration、unlock source policy 和 localization coverage，并可输出 blocking diagnostic |
+| `EditorVisualMetadata` | `IN_PROGRESS` | Graph node 和 Timeline track 只绑定 command id/source map，不形成第二套 runtime model |
 
 ONNX ModelBundle package section 复用同一个 `AstraContainerHeader + SectionTable[] + SectionPayload[] + FooterHash` 容器。`ai.model_bundle_manifest` 保存模型族、pipeline、license/provenance、fine-tune provenance、redistribution、voice authorization、profile budget、platform targets、VFS mount id、section refs、EP policy 和 runtime fingerprint。模型权重、external data、tokenizer、sampler、scheduler、vocoder、reduced ONNX Runtime、Web runtime adapter 和 custom op sidecar 都作为普通 package content section 存放，可用 `Raw`、`Zstd` 和 `EncryptionDescriptor`。
 

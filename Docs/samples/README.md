@@ -4,6 +4,7 @@
 
 | Sample | Scope | Entry |
 | --- | --- | --- |
+| NativeVN Commercial Baseline | Stage 3 可提交样例，覆盖 `.astra` cook、package、release validate 和 full playthrough scenario | [Examples/NativeVN/project.yaml](../../Examples/NativeVN/project.yaml) |
 | AstraVN Script Policy | `.astra`、Core command、Luau policy 和演出边界样例 | [astra-vn-script/README.md](astra-vn-script/README.md) |
 | AstraVN Advanced Presentation | 旗舰演出、Timeline/Fence、system UI 和高级 presentation profile | [astra-vn-advanced/README.md](astra-vn-advanced/README.md) |
 | TsuiNoSora Modernization | 使用用户本地合法数据验证 classic/modern 双 profile 的真实项目压力样例 | [tsuinosora-modernization/README.md](tsuinosora-modernization/README.md) |

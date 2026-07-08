@@ -1,6 +1,6 @@
 # Stage 6 Platform Completion Work
 
-Stage 6 收纳 Stage 2 之外的平台完成项。Windows 和 Web 属于 Stage 2 完成边界；Linux、macOS、iOS 和 Android 保持 `SPEC_READY`，等 AstraVN Core、Editor gate 和平台发布路径稳定后再进入真实 SDK、launcher、surface、media、save 和 resume 验收。本页不把 capability crate 编译通过写成 host 完成。
+Stage 6 收纳 Stage 2 之外的平台完成项。Windows 和 Web 属于 Stage 2 完成边界；Linux、macOS、iOS 和 Android 保持 `SPEC_READY`，等 AstraVN Core、Editor gate 和平台发布路径稳定后再进入真实 SDK、launcher、surface、media、save、resume 和 player input automation 验收。本页不把 capability crate 编译通过写成 host 完成，也不把 API 可用性写成可玩证据。
 
 ## S6-LINUX-HOST-01 Linux host completion
 
@@ -18,6 +18,22 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Windows 和 Web 属于 Stage 2
 
 **Linked Test IDs:** `T-S6-LINUX-HOST-01`
 
+## S6-LINUX-PLAYER-AUTOMATION-01 Linux player automation
+
+**ID:** `S6-LINUX-PLAYER-AUTOMATION-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 补 Linux player live input automation，覆盖真实窗口 focus、原生 mouse/keyboard/IME/gamepad 输入、winit event loop receipt、window/renderer region hash、PipeWire/PulseAudio meter 和 route/system UI evidence。
+
+**Depends On:** `S6-LINUX-HOST-01`、`S3-PLAYER-AUTOMATION-01`
+
+**Target Paths:** `Engine/Source/Platform/astra-platform-linux/`、`Engine/Source/Programs/astra-player/` planned target、`Docs/platforms/desktop.md`
+
+**Planned Gate:** `player.full_playable.linux` 必须读取 Linux host report 和 live input transcript；缺 focus、native input receipt、frame region change、audio meter 或 route evidence 时 blocking。
+
+**Linked Test IDs:** `T-S6-LINUX-PLAYER-AUTOMATION-01`
+
 ## S6-MACOS-HOST-01 macOS host completion
 
 **ID:** `S6-MACOS-HOST-01`
@@ -33,6 +49,22 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Windows 和 Web 属于 Stage 2
 **Planned Gate:** required smoke 暂定 `windowed_smoke` 和 `decode.avfoundation`。release profile 必须读取真实 platform report，不接受环境变量伪造 SDK evidence。
 
 **Linked Test IDs:** `T-S6-MACOS-HOST-01`
+
+## S6-MACOS-PLAYER-AUTOMATION-01 macOS player automation
+
+**ID:** `S6-MACOS-PLAYER-AUTOMATION-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 补 macOS player live input automation，覆盖 AppKit/winit window focus、native mouse/keyboard/IME/gamepad 输入、event-loop receipt、Metal/wgpu frame region hash、CoreAudio meter 和 route/system UI evidence。
+
+**Depends On:** `S6-MACOS-HOST-01`、`S3-PLAYER-AUTOMATION-01`
+
+**Target Paths:** `Engine/Source/Platform/astra-platform-macos/`、`Engine/Source/Programs/astra-player/` planned target、`Docs/platforms/desktop.md`
+
+**Planned Gate:** `player.full_playable.macos` 必须读取 macOS host report 和 live input transcript；缺 native input、frame region change、CoreAudio meter、App Support save evidence 或 route evidence 时 blocking。
+
+**Linked Test IDs:** `T-S6-MACOS-PLAYER-AUTOMATION-01`
 
 ## S6-IOS-HOST-01 iOS host completion
 
@@ -50,6 +82,22 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Windows 和 Web 属于 Stage 2
 
 **Linked Test IDs:** `T-S6-IOS-HOST-01`
 
+## S6-IOS-PLAYER-AUTOMATION-01 iOS player automation
+
+**ID:** `S6-IOS-PLAYER-AUTOMATION-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 补 iOS player live input automation，覆盖设备或模拟器 touch/keyboard 输入、safe area、foreground/background resume、Metal frame region hash、AVAudio meter、package source 和 route/system UI evidence。
+
+**Depends On:** `S6-IOS-HOST-01`、`S3-PLAYER-AUTOMATION-01`
+
+**Target Paths:** `Engine/Source/Platform/astra-platform-ios/`、`Engine/Source/Programs/astra-player/` planned target、`Docs/platforms/mobile.md`
+
+**Planned Gate:** `player.full_playable.ios` 必须使用设备或模拟器证据；缺 touch transcript、safe area evidence、frame region change、AVAudio meter、resume 或 route evidence 时 blocking。
+
+**Linked Test IDs:** `T-S6-IOS-PLAYER-AUTOMATION-01`
+
 ## S6-ANDROID-HOST-01 Android host completion
 
 **ID:** `S6-ANDROID-HOST-01`
@@ -65,3 +113,19 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Windows 和 Web 属于 Stage 2
 **Planned Gate:** required smoke 暂定 `launcher_smoke` 和 `decode.mediacodec`。实现时必须验证 package source、activity lifecycle、save store 和 audio focus。
 
 **Linked Test IDs:** `T-S6-ANDROID-HOST-01`
+
+## S6-ANDROID-PLAYER-AUTOMATION-01 Android player automation
+
+**ID:** `S6-ANDROID-PLAYER-AUTOMATION-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 补 Android player live input automation，覆盖设备或 emulator touch/keyboard 输入、activity lifecycle、Vulkan/wgpu frame region hash、audio focus/meter、SAF/package source 和 route/system UI evidence。
+
+**Depends On:** `S6-ANDROID-HOST-01`、`S3-PLAYER-AUTOMATION-01`
+
+**Target Paths:** `Engine/Source/Platform/astra-platform-android/`、`Engine/Source/Programs/astra-player/` planned target、`Docs/platforms/mobile.md`
+
+**Planned Gate:** `player.full_playable.android` 必须使用设备或 emulator 证据；缺 touch transcript、activity resume、frame region change、audio focus/meter、package source 或 route evidence 时 blocking。
+
+**Linked Test IDs:** `T-S6-ANDROID-PLAYER-AUTOMATION-01`

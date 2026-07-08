@@ -1,6 +1,6 @@
 # AstraVN Script Sample
 
-本目录展示 AstraVN 脚本机制/策略分离的产品级样例。样例只用于文档说明，不表示 parser/runtime 已实现。
+本目录展示 AstraVN 脚本机制/策略分离的产品级样例。当前真实 package/player gate 使用 `Examples/NativeVN`；本目录保留为文档样例，不作为 release evidence。
 
 | 文件 | 内容 |
 | --- | --- |

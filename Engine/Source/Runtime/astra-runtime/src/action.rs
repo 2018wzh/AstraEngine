@@ -37,6 +37,8 @@ pub struct ActionCallRequest {
     pub action_id: String,
     #[serde(default)]
     pub input: BTreeMap<String, BlackboardValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_event: Option<RuntimeEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -108,6 +110,7 @@ pub struct DeterministicActionContext<'a> {
     awaits: &'a mut Vec<AwaitToken>,
     delayed_events: &'a mut Vec<ScheduledEvent>,
     delayed_cancellations: &'a mut Vec<DelayedEventId>,
+    trigger_event: Option<RuntimeEvent>,
 }
 
 impl<'a> DeterministicActionContext<'a> {
@@ -122,6 +125,7 @@ impl<'a> DeterministicActionContext<'a> {
         awaits: &'a mut Vec<AwaitToken>,
         delayed_events: &'a mut Vec<ScheduledEvent>,
         delayed_cancellations: &'a mut Vec<DelayedEventId>,
+        trigger_event: Option<RuntimeEvent>,
     ) -> Self {
         Self {
             step,
@@ -133,11 +137,16 @@ impl<'a> DeterministicActionContext<'a> {
             awaits,
             delayed_events,
             delayed_cancellations,
+            trigger_event,
         }
     }
 
     pub fn step(&self) -> u64 {
         self.step
+    }
+
+    pub fn trigger_event(&self) -> Option<&RuntimeEvent> {
+        self.trigger_event.as_ref()
     }
 
     pub fn next_id(&mut self) -> StableId {
