@@ -13,3 +13,4 @@
 | AstraEditor | [editor.md](editor.md) |
 | AI / MCP | [ai-mcp.md](ai-mcp.md) |
 | AstraEMU | [astra-emu.md](astra-emu.md) |
+| AstraRPG | [astra-rpg.md](astra-rpg.md) |

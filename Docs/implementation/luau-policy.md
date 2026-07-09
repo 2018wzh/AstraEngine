@@ -1,6 +1,6 @@
 # Luau Policy
 
-AstraVN policy runtime is Luau primary. Legacy engine research can still mention Lua/TJS as historical input, but AstraVN, Editor and plugin policy docs use Luau terminology.
+Luau 是 AstraEngine 的 policy runtime 方向。当前已实现主体在 AstraVN；Stage 7 需要先把可复用 sandbox、snapshot、trace、manifest、lock/vendor cache 和 diagnostic 抽成 `astra-policy`，再由 AstraVN、AstraRPG 和 AstraEMU host API 绑定各自 namespace。Legacy engine research can still mention Lua/TJS as historical input, but product policy docs use Luau terminology.
 
 ## Runtime
 
@@ -9,9 +9,15 @@ Use `mlua` with Luau support for host binding. Luau runs in a sandbox:
 - no filesystem, network, process, clipboard or native call by default;
 - no direct access to renderer/audio/platform handles;
 - all host capability enters through `astra.*`;
-- all authoritative writes go through `astra.mutate`.
+- all authoritative writes go through namespace-specific effect/mutation API.
 
-## Host API
+Generic `astra-policy` owns value serialization, capability denial, trace records and package lock/source-cache validation. Product crates own host tables:
+
+- AstraVN uses `astra.command`、`astra.mutate`、`astra.query` and `astra.snapshot`.
+- AstraRPG uses `astra.rpg.*` and `astra.rpg.trpg.*`.
+- AstraEMU trusted policy host remains Manager/provider scoped and must not expose legacy VM internals.
+
+## AstraVN Host API
 
 ```luau
 astra.command.register(name: string, manifest: CommandManifest, handler: function)
@@ -107,8 +113,9 @@ Allowed runtime snapshot values are nil, boolean, integer, string and object/tab
 ## Tests
 
 ```bash
+cargo test -p astra-policy
 cargo test -p astra-vn-policy --test luau_sandbox
 cargo test -p astra-vn-policy --test luau_mutation
 ```
 
-Expected: denied capability returns diagnostic, mutation trace records previous value and replay metadata, rollback/playback restores deterministic state, command/query/trace capability calls are serialized, and invalid snapshot/command/trace payloads block.
+Expected: denied capability returns diagnostic, mutation trace records previous value and replay metadata, rollback/playback restores deterministic state, command/query/trace capability calls are serialized, and invalid snapshot/command/trace payloads block. `cargo test -p astra-policy` is planned until the shared crate exists.

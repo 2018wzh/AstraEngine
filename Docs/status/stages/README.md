@@ -1,6 +1,6 @@
 # Stage Work
 
-本目录把路线图拆成可执行工作项。Stage 1 已实现基础闭环；Stage 2 因 VFS contract 重开，Stage 3-5 因 gameplay runtime 和 EmulatorCore 设计对齐继续推进，Stage 6 记录平台补齐目标。当前代码完成度和下一步顺序见 [implementation-plan](../implementation-plan.md)。
+本目录把路线图拆成可执行工作项。Stage 1 已实现基础闭环；Stage 2 因 VFS contract 重开，Stage 3-5 因 gameplay runtime 和 EmulatorCore 设计对齐继续推进，Stage 6 记录平台补齐目标，Stage 7/8 记录 AstraRPG 与后续 Server/Client protocol。当前代码完成度和下一步顺序见 [implementation-plan](../implementation-plan.md)。
 
 | 文档 | 内容 |
 | --- | --- |
@@ -10,7 +10,9 @@
 | [stage-4-editor-ai-mcp.md](stage-4-editor-ai-mcp.md) | Editor target、Editor workflow、PIE、Release Gate UI、Runtime AI 和 MCP |
 | [stage-5-astra-emu.md](stage-5-astra-emu.md) | Program target、AstraEMU Manager、`AstraEmuRuntimeProvider`、LegacyRuntimeProvider facade、EmulatorCore 状态机映射、legacy pack VFS、auto probe、Trusted Luau、文本翻译和 FilterGraph preset |
 | [stage-6-platform-completion.md](stage-6-platform-completion.md) | Linux、macOS、iOS 和 Android host completion 与 player input automation |
-| [stage-test-matrix.md](stage-test-matrix.md) | Stage 1-6 工作项对应的测试项目 |
+| [stage-7-astra-rpg.md](stage-7-astra-rpg.md) | `AstraRpgRuntimeProvider`、RPG core、AI Town、`rpg.trpg` profile 和 CP2020 local-private adapter |
+| [stage-8-astra-rpg-network.md](stage-8-astra-rpg-network.md) | AstraRPG Server/Client protocol、seat sync、transcript sync 和 network replay gate |
+| [stage-test-matrix.md](stage-test-matrix.md) | Stage 1-8 工作项对应的测试项目 |
 
 ## Work Item 格式
 

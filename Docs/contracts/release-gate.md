@@ -36,6 +36,11 @@ checks:
     diagnostic: ASTRA_AI_ONNX_CPU_FALLBACK
   - id: ai.provider_free_replay
     status: pass
+  - id: rpg.agent_provider_free_replay
+    status: pass
+  - id: rpg.trpg.transcript_redaction
+    status: blocked
+    diagnostic: ASTRA_RPG_TRANSCRIPT_PAYLOAD_LEAK
   - id: scenario.full_playthrough
     status: blocked
     diagnostic: scenario stopped before ending.good
@@ -43,7 +48,7 @@ checks:
 
 ## Blocking Domains
 
-Runtime determinism、schema migration、package integrity、cook/project artifact、Target manifest、plugin fingerprint、plugin extension registry、permission policy、AI replay、ONNX ModelBundle、ONNX Runtime pack/VFS、execution provider evidence、Luau sandbox、media decode、VN commercial baseline、system UI profile、advanced presentation opt-in、live player automation、AstraEMU legacy runtime provider、save/load、headless scenario、platform eligibility 和 manual signoff 都可以阻止发布。
+Runtime determinism、schema migration、package integrity、cook/project artifact、Target manifest、plugin fingerprint、plugin extension registry、permission policy、AI replay、ONNX ModelBundle、ONNX Runtime pack/VFS、execution provider evidence、Luau sandbox、media decode、VN commercial baseline、system UI profile、advanced presentation opt-in、live player automation、AstraEMU legacy runtime provider、AstraRPG provider binding、RPG policy bundle、intent validator、committed agent output、TRPG dice/seat/transcript、CP2020 local-private adapter redaction、save/load、headless scenario、platform eligibility 和 manual signoff 都可以阻止发布。
 
 `desktop-release` 和 `web-release` 的 package 必须由 `astra cook` 产出 `compiled.project` section。Fixture package 或缺少 cook/project metadata 的包只能用于 dev/headless 验证，不能通过 release profile。
 

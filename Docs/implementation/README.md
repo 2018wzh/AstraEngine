@@ -7,7 +7,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [workspace-blueprint.md](workspace-blueprint.md) | Rust workspace、crate、feature、binary、依赖方向 |
-| [phase-delivery.md](phase-delivery.md) | Stage 1-6 的可运行闭环、命令、报告和退出标准 |
+| [phase-delivery.md](phase-delivery.md) | Stage 1-6 v1 闭环，以及 Stage 7/8 AstraRPG planned extension 的命令、报告和退出标准 |
 | [runtime-api.md](runtime-api.md) | RuntimeWorld lifecycle、Actor/Component、StateMachine、Debug API |
 | [target-platform.md](target-platform.md) | Editor/Game/Program Target、project.yaml targets、六平台 SDK 分层验收 |
 | [state-machine-action-provider.md](state-machine-action-provider.md) | StateMachine action provider、deterministic context、FFI effect list |
@@ -15,6 +15,7 @@
 | [asset-vfs.md](asset-vfs.md) | VFS mount family、package/local/legacy/overlay source、reader provider 和 release gate |
 | [asset-media-pipeline.md](asset-media-pipeline.md) | Asset import/cook/package、Media command、默认 provider 和 graph validation |
 | [game-runtime-provider.md](game-runtime-provider.md) | NativeVN、AstraEMU、AstraRPG 同级 gameplay runtime provider 选择层 |
+| [astra-rpg-runtime.md](astra-rpg-runtime.md) | AstraRPG provider、RPG core、`rpg.trpg` profile、AI Town 和 CP2020 local-private adapter |
 | [astra-grammar-ir.md](astra-grammar-ir.md) | `.astra` pest grammar、AST、IR、source map、formatter、错误恢复 |
 | [astra-vn-state-machine.md](astra-vn-state-machine.md) | AstraVN command cursor、wait state、StateMachine action 和演出调度 |
 | [runtime-execution.md](runtime-execution.md) | tick 顺序、EventQueue、AwaitToken/Fence、MutationLog、hash/replay |
@@ -46,8 +47,9 @@
 
 - Rust 类型是 schema 真源。实现后由 `serde` + `schemars` 生成 JSON Schema，文档字段名必须跟 Rust 类型一致。
 - 每个 Stage 必须产出可运行命令、machine-readable report 和测试证据。
-- 全系列 v1 必须覆盖 EngineCore、AstraVN、AstraEditor、AstraPlatform、AstraEMU；AstraEMU v1 family 是 Artemis。
+- 全系列 v1 必须覆盖 EngineCore、AstraVN、AstraEditor、AstraPlatform、AstraEMU；AstraEMU v1 family 是 Artemis。AstraRPG 属于 Stage 7 planned extension，Stage 8 再接 Server/Client protocol。
 - 玩法类型通过 `ProductRuntimeProvider`/`GameRuntimeProvider` 显式绑定；AstraVN、AstraEMU 和后续 AstraRPG 是同级 provider。
+- TRPG 玩法通过 AstraRPG 的 `rpg.trpg` profile 接入，不创建独立顶层 `AstraTRPG` 模块或 provider。
 - AstraVN policy 统一使用 Luau。AstraEMU 研究文档中的 Lua/TJS 是 legacy engine 事实，不作为 AstraVN policy 术语。
 - Stage 依赖单向流动：Stage N 只能依赖前序稳定契约。确需回改契约时，同步 ADR、migration、测试矩阵和 release gate。
 

@@ -2,7 +2,7 @@
 
 本目录只记录已实现代码向新设计对齐的迁移路线。设计页可以覆盖完整未来架构；迁移页不能把尚未存在的 AstraEMU/AstraRPG 代码写成可搬迁对象。
 
-当前落地状态：migration 1/2 已完成 Provider URI Asset VFS、`asset.vfs_manifest`、`asset.catalog`、单一 `vfs_provider` slot 和 gameplay runtime provider selection boundary；migration 3/4/5 已完成 AstraVN module layout、多 crate split 和 `NativeVnRuntimeProvider` DTO+FFI/in-process provider 接入。AstraEMU/AstraRPG 仍只作为后续同级 provider 设计边界出现。
+当前落地状态：migration 1/2 已完成 Provider URI Asset VFS、`asset.vfs_manifest`、`asset.catalog`、单一 `vfs_provider` slot 和 gameplay runtime provider selection boundary；migration 3/4/5 已完成 AstraVN module layout、多 crate split 和 `NativeVnRuntimeProvider` DTO+FFI/in-process provider 接入。AstraEMU/AstraRPG 仍只作为后续 provider 设计边界出现；`rpg.trpg` 是 AstraRPG 内部 profile，不是独立迁移对象。
 
 ## 执行顺序
 
@@ -15,6 +15,7 @@
 | 5 | [game-runtime-provider-migration.md](game-runtime-provider-migration.md) | 现有 AstraVN runtime facade、VN extension manifest、package sections、release checks 对齐到 `NativeVnRuntimeProvider` |
 | 6 | [editor-runtime-provider-migration.md](editor-runtime-provider-migration.md) | 现有 Editor 设计、手册和状态口径对齐到 runtime-provider-aware shell |
 | 7 | [platform-host-migration.md](platform-host-migration.md) | 已完成的 Windows 窗口渲染与音频/解码对齐到 realigned platform-host 统一 Token 抽象 |
+| 8 | [astra-rpg-design-alignment-migration.md](astra-rpg-design-alignment-migration.md) | 现有 VN policy、Runtime effect、runtime provider bridge 和 release/status 口径对齐到未来 AstraRPG 实现前置条件 |
 
 ## 范围边界
 
@@ -33,8 +34,9 @@
 
 - `AstraEmuRuntimeProvider`、AstraEMU Manager、family `LegacyRuntimeProvider` 代码、legacy pack VFS reader 和 EmulatorCore 状态机映射。
 - `AstraRpgRuntimeProvider` 和 RPG 专属 gameplay runtime。
+- `rpg.trpg` profile、ruleset、dice/check/ruling/transcript/seat authority。
 - Stage 4 AI/MCP provider 代码、ONNX provider 代码和 Editor UI。
-- AstraEMU/AstraRPG runtime provider 代码和专属 Editor surface；它们只在设计页和状态页保留 planned peer runtime 边界。
+- AstraEMU/AstraRPG runtime provider 代码和专属 Editor surface；它们只在设计页和状态页保留 planned runtime 边界。
 
 ## 验收命令
 

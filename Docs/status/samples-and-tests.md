@@ -10,6 +10,8 @@
 | AstraVN Script Policy | 机制/策略分离样例 | [script sample](../samples/astra-vn-script/README.md)、Luau policy、Timeline/Fence、choice selected payload、localization、system stories |
 | AstraVN Advanced Presentation | 旗舰演出 opt-in profile | [advanced sample](../samples/astra-vn-advanced/README.md)、多层 stage、camera、video layer、shader/filter、voice fence、timeline join/cancel、system UI、save/load resume from wait、`vn.advanced_presentation` |
 | TsuiNoSora Local Port | 真实项目压力样例 | [modernization sample](../samples/tsuinosora-modernization/README.md)、classic/modern profile、full route、media coverage、release report、manual signoff |
+| AstraRPG AI Town | Stage 7 planned AI autonomous RPG sample | [AI Town sample](../samples/astra-rpg-ai-town/README.md)、20 NPC、intent validator、committed output、memory ledger、save/load/replay、provider-free replay |
+| AstraRPG CP2020 Local Adapter | Stage 7 planned local-private `rpg.trpg` sample | [CP2020 local adapter](../samples/astra-rpg-cp2020-local-adapter/README.md)、sheet schema、deterministic dice、seat authority、transcript redaction、local content manifest/hash gate |
 
 ## AstraEMU Family Samples
 

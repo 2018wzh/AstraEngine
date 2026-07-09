@@ -1,6 +1,6 @@
 # Phase Delivery
 
-全系列 v1 按 Stage 1-6 推进。每个 Stage 都要产出可运行闭环、固定命令和 machine-readable report；不能只交付内部库。
+全系列 v1 按 Stage 1-6 推进。Stage 7/8 是 v1 之后的 AstraRPG 扩展计划，不作为当前 v1 release gate。每个 Stage 都要产出可运行闭环、固定命令和 machine-readable report；不能只交付内部库。
 
 ## Stage 1：EngineCore
 
@@ -136,6 +136,94 @@ astra package validate target/nativevn.astrapkg --profile desktop-release --targ
 
 Expected report includes `platform.capability_report`, required smoke for the selected platform, package source evidence, platform decode evidence, save store evidence and release blocking diagnostics when SDK or smoke evidence is missing.
 
+## Stage 7：AstraRPG + `rpg.trpg` Profile
+
+**闭环：** `AstraRpgRuntimeProvider` 作为新的 gameplay runtime provider 启动 `RpgSession`，通过 `RpgIntent`、`RpgEffect` 和 `CommittedAgentOutput` 驱动 RuntimeWorld；AI Town 20 NPC 一日 headless scenario 通过 save/load/replay hash；`rpg.trpg` profile 提供 ruleset、dice ledger、check/ruling ledger、seat authority 和 transcript redaction；CP2020 只作为 local-private adapter/sample gate，不提交规则正文、表格、商业 payload 或可复原内容。
+
+**Test IDs:** `T-S7-POLICY-01`、`T-S7-RPG-PROVIDER-01`、`T-S7-RPG-CORE-01`、`T-S7-RPG-POLICY-01`、`T-S7-RPG-AI-TOWN-01`、`T-S7-RPG-TRPG-01`、`T-S7-RPG-CP2020-01`、`T-S7-RPG-GATE-01`
+
+**Sample:** `Examples/AstraRPG/AITown`、`Examples/AstraRPG/CP2020LocalAdapter`
+
+**Report Schema:** `astra.scenario_report.v1` + `astra.release_report.v1`
+
+```bash
+cargo test -p astra-policy
+cargo test -p astra-rpg-core
+cargo test -p astra-rpg-runtime-provider
+cargo test -p astra-rpg-policy
+cargo test -p astra-rpg-trpg
+astra test run Examples/AstraRPG/AITown/Content/Scenarios/one_day_headless.yaml --target ai-town-headless --headless --report target/reports/ai-town.yaml
+astra test run Examples/AstraRPG/CP2020LocalAdapter/Content/Scenarios/social_check.yaml --target cp2020-local-headless --headless --report target/reports/cp2020-local.yaml
+cargo test -p astra-release rpg_gate
+```
+
+Expected report:
+
+```yaml
+schema: astra.release_report.v1
+stage: stage7-astra-rpg
+status: pass
+checks:
+- id: rpg.runtime_provider
+  status: pass
+- id: rpg.policy_bundle
+  status: pass
+- id: rpg.intent_validator
+  status: pass
+- id: rpg.provider_free_replay
+  status: pass
+- id: rpg.ai_town.twenty_npc_one_day
+  status: pass
+- id: rpg.trpg.dice_determinism
+  status: pass
+- id: rpg.trpg.seat_authority
+  status: pass
+- id: rpg.trpg.transcript_redaction
+  status: pass
+- id: rpg.cp2020.local_private_adapter
+  status: pass
+```
+
+Stage 7 仍是 `SPEC_READY`。Rust crate、scenario 和 release check 必须在后续迁移中按 [AstraRPG design alignment migration](../migrations/astra-rpg-design-alignment-migration.md) 分步落地。
+
+## Stage 8：AstraRPG Server/Client Protocol
+
+**闭环：** AstraRPG Server/Client protocol 在 Stage 7 provider、save/replay、seat authority 和 transcript redaction 稳定后实现。Server/Client 只同步可序列化协议 envelope、seat state、intent/effect ack、transcript cursor 和 redacted audit，不传递 provider native handle、未提交 AI 输出、商业 payload、本地路径或未授权规则内容。
+
+**Test IDs:** `T-S8-RPG-NET-CONTRACT-01`、`T-S8-RPG-NET-SERVER-01`、`T-S8-RPG-NET-CLIENT-01`、`T-S8-RPG-NET-REPLAY-01`
+
+**Sample:** Stage 7 AI Town and `rpg.trpg` sessions run through local loopback protocol fixtures.
+
+**Report Schema:** `astra.rpg_network_report.v1` + `astra.release_report.v1`
+
+```bash
+cargo test -p astra-rpg-net protocol_schema
+cargo test -p astra-rpg-server server_session
+cargo test -p astra-rpg-client client_session
+cargo test -p astra-release rpg_network_gate
+```
+
+Expected report:
+
+```yaml
+schema: astra.rpg_network_report.v1
+stage: stage8-astra-rpg-network
+status: pass
+checks:
+- id: rpg.net.handshake
+  status: pass
+- id: rpg.net.seat_sync
+  status: pass
+- id: rpg.net.transcript_sync
+  status: pass
+- id: rpg.net.provider_free_replay
+  status: pass
+- id: rpg.net.redacted_audit
+  status: pass
+```
+
+Stage 8 仍是 `SPEC_READY`，只依赖 Stage 7 的稳定 public contract。
+
 ## v1 Gate
 
 全系列 v1 同时要求：
@@ -143,3 +231,4 @@ Expected report includes `platform.capability_report`, required smoke for the se
 - EngineCore、AstraVN、AstraEditor、AstraPlatform、AstraEMU 都有 release profile。
 - Windows、Linux、macOS、iOS、Android、Web 通过对应 profile gate。
 - AstraEMU v1 的可用 family 是 Artemis；其他 family 输出 alpha scaffold report；AstraEMU family 默认 in-process，外部 bridge 只作为普通 extension point。
+- AstraRPG Stage 7 和 AstraRPG Server/Client Stage 8 是 v1 后续扩展，不作为当前 v1 release gate。

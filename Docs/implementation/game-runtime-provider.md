@@ -61,8 +61,8 @@ VN Core 保持 dialogue、choice、backlog、save/load、read-state 和 voice re
 
 ## AstraRPG Provider
 
-`AstraRpgRuntimeProvider` 是后续同级 runtime。设计只预留同一 provider boundary：map、party、battle、inventory、quest、behavior 和 RPG editor metadata 都通过 provider package sections、runtime effects、save sections 和 release checks 接入。当前仓库不把 AstraRPG 写成已有实现，也不把 VN Core 抽成 RPG base class。
+`AstraRpgRuntimeProvider` 是后续同级 runtime。设计只预留同一 provider boundary：map、party、battle、inventory、quest、encounter、AI behavior、committed output 和 RPG editor metadata 都通过 provider package sections、runtime effects、save sections 和 release checks 接入。TRPG 玩法落在 AstraRPG 的 `rpg.trpg` profile/ruleset layer；不创建独立 `AstraTrpgRuntimeProvider`，也不使用顶层 `trpg.*` section。当前仓库不把 AstraRPG 写成已有实现，也不把 VN Core 抽成 RPG base class。
 
 ## Migration Rule
 
-已有 AstraVN facade、VN extension manifest、package sections 和 release checks 先按 module layout 与 crate split 迁移，再由 `astra-vn-runtime-provider` 组合为 `NativeVnRuntimeProvider`。已有 plugin registry/action provider/VN extension fixture 迁移到 provider selection 口径。AstraEMU/AstraRPG 尚无实现代码，迁移文档只写未来建设计划，不列为现有代码搬迁。
+已有 AstraVN facade、VN extension manifest、package sections 和 release checks 先按 module layout 与 crate split 迁移，再由 `astra-vn-runtime-provider` 组合为 `NativeVnRuntimeProvider`。已有 plugin registry/action provider/VN extension fixture 迁移到 provider selection 口径。AstraEMU/AstraRPG 尚无实现代码，迁移文档只写未来建设计划，不列为现有代码搬迁；AstraRPG 的前置迁移见 [AstraRPG Design Alignment Migration](../migrations/astra-rpg-design-alignment-migration.md)。

@@ -71,6 +71,22 @@ pub struct ReleaseCheckRecord {
 | ai_mcp | `mcp.context_permission` | MCP audit | read/search/tool call exceeds session scope or Context Pack is not redacted | session id, tool id, source ref |
 | ai_mcp | `ai.context_pack_redaction` | Context Pack report, VFS resolve report | Context Pack contains local root, provider secret, payload body or unbounded source text | context pack id, source count, redaction status |
 | ai_mcp | `mcp.command_allowlist` | MCP command report | undeclared command or arbitrary shell execution | command id, template id |
+| rpg | `runtime_provider.astra_rpg` | target manifest, provider descriptor, package section plan | missing `AstraRpgRuntimeProvider`, descriptor/fingerprint mismatch, unsupported profile or provider selected by load order | provider id, target id, profile, descriptor hash |
+| rpg | `rpg.policy_bundle` | `rpg.rule_policy_bundle_manifest`, `rpg.rule_policy_lock`, source cache | missing policy manifest, missing lock/source cache, capability mismatch, schema mismatch or source hash mismatch | policy id, lock hash, source cache count, diagnostic |
+| rpg | `rpg.intent_validator` | scenario report, intent ledger, effect report | intent bypasses validator, effect is not serializable, denied requester mutates state or blocking diagnostic missing | intent id, requester, effect count, diagnostic |
+| rpg | `rpg.committed_agent_output` | committed output section, save/replay report | live AI output lacks prompt/output hash, section ref, provider profile or replay source | output id, intent id, prompt hash, output hash |
+| rpg | `rpg.agent_provider_free_replay` | save/replay report, committed output ledger | replay contacts live AI provider or committed output hash missing | provider request count, committed output count, replay hash |
+| rpg | `rpg.save_load_replay` | RPG scenario report | state/event/presentation/provider section hash mismatch after save/load | state hash, provider section hash, event hash |
+| rpg | `rpg.ai_town.agent_count` | AI Town scenario report | fewer than 20 NPC, missing sheet/goal/memory/profile or no committed/rejected intent evidence | actor count, memory ledger count, committed intent count |
+| rpg | `rpg.trpg.ruleset_manifest` | `rpg.trpg.ruleset_manifest`, sheet schema | missing ruleset/profile/schema/migrator/capability or wrong content mode | ruleset id, schema hash, capability count |
+| rpg | `rpg.trpg.dice_determinism` | dice ledger, replay report | missing deterministic seed stream, roll replay token or replay roll mismatch | roll count, seed stream hash, replay token count |
+| rpg | `rpg.trpg.seat_authority` | seat authority, ruling ledger, transcript | GM/player/AI seat commits unauthorized ruling, private data leaks or authority evidence missing | seat id, permission id, ruling count, diagnostic |
+| rpg | `rpg.trpg.transcript_redaction` | transcript section, privacy policy | transcript contains GM-only/private content, rules text, local root, payload body or unredacted provider output | entry count, redaction status, diagnostic |
+| rpg | `rpg.cp2020.local_private_adapter` | adapter manifest, local content report | rulebook text/table/payload committed, local manifest missing, hash mismatch, path leak or content mode not local-private | adapter id, manifest hash, redaction status |
+| rpg_net | `rpg.net.protocol_handshake` | server/client protocol report | version mismatch, unsupported profile, missing capability or unredacted handshake audit | protocol version, session id, capability count |
+| rpg_net | `rpg.net.seat_sync` | server/client transcript report | seat authority differs between server and client or private seat data leaks | seat id, sync cursor, diagnostic |
+| rpg_net | `rpg.net.transcript_sync` | server/client transcript report | action transcript divergence, missing redaction label or payload body in network audit | transcript hash, redaction label count |
+| rpg_net | `rpg.net.provider_free_replay` | network replay report | replay contacts live AI provider or state/event/provider hash diverges | provider request count, replay hash |
 | platform | `platform.eligibility` | capability report | profile requirement missing | platform id, capability id |
 | platform | `platform.capability_report` | capability report | missing SDK, missing required smoke, blocked required smoke or invalid schema | platform id, SDK status, smoke id, diagnostic |
 | emu | `emu.artemis_full_flow` | local case report | trace/snapshot/redaction failure | trace hash, redaction status |

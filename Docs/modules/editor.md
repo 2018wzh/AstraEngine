@@ -23,7 +23,7 @@ AstraEditor 使用 Qt/QML + Rust core。Editor 是 creator workflow 和 debugger
 
 Project Wizard、Project Settings、Plugin Manager、PIE、Debugger 和 Release Gate 都读取 selected `ProductRuntimeProvider` 的 `RuntimeEditorMetadata`。公共 shell 保持不变；Script、Graph、Timeline、Map、Quest、legacy trace 等玩法面板由 provider metadata 决定。
 
-NativeVN 当前提供 `.astra` Script、VN Graph、Timeline、System UI 和 Luau policy surface。AstraEMU/AstraRPG 仍是 planned peer runtime；Editor 只预留 case profile、legacy pack VFS、family trace、Map、Quest、Battle/Party/Inventory 等接入边界，不把它们写成已实现 UI。
+NativeVN 当前提供 `.astra` Script、VN Graph、Timeline、System UI 和 Luau policy surface。AstraEMU 是 planned peer runtime；AstraRPG 是 Stage 7 planned gameplay runtime，`rpg.trpg` 只作为 AstraRPG 内部 profile/ruleset 暴露 metadata。Editor 只预留 case profile、legacy pack VFS、family trace、Map、Quest、Battle/Party/Inventory、TRPG seat/transcript 等接入边界，不把它们写成已实现 UI，也不创建独立 AstraTRPG 顶层模块或 provider。
 
 ## Editor Runtime Session
 
@@ -57,4 +57,3 @@ v1 面板必须覆盖空状态、加载中、错误、可编辑、只读和 rele
 | [editor/script-editor.md](../implementation/editor/script-editor.md) | Script Editor（tree-sitter + ropey，行号 gutter，错误 marker，source map badge）|
 | [editor/ai-copilot.md](../implementation/editor/ai-copilot.md) | AI Copilot（分级写入，Review Queue 五步确认，Trusted session）|
 | [ADR 0013](../adr/0013-cxx-qt-bridge.md) | cxx-qt 作为 Rust↔Qt Bridge 实现的架构决策记录 |
-

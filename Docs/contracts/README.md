@@ -11,6 +11,7 @@
 | Game Runtime Provider | [game-runtime-provider.md](game-runtime-provider.md) |
 | Media | [media.md](media.md) |
 | Script / VN | [script-vn.md](script-vn.md) |
+| AstraRPG / `rpg.trpg` | [rpg-trpg.md](rpg-trpg.md) |
 | AI / MCP | [ai-mcp.md](ai-mcp.md) |
 | AstraEMU Legacy Runtime Provider | [astraemu-ipc.md](astraemu-ipc.md) |
 | Release Gate | [release-gate.md](release-gate.md) |

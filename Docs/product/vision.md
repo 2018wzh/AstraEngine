@@ -10,6 +10,7 @@ AstraEngine 是 Rust + WGPU-first 的 2D/VN-first 高性能游戏引擎。它的
 | 开发者 | 扩展 renderer、audio、text layout、script runtime、presentation library、asset importer、editor panel、AI/MCP tool | 通过稳定插件 ABI 和 schema 接入，不改 EngineCore |
 | 平台维护者 | 让同一 packaged runtime 在桌面、移动、Web 和实验平台运行 | 平台模块只适配 surface、输入、权限、生命周期和平台解码 |
 | 旧 VN 研究者 | 在合法本地数据上实现兼容、现代化、翻译和补丁流程 | AstraEMU 作为独立套件复用引擎能力，不污染 NativeVN |
+| RPG/TRPG 作者 | 构建传统 RPG、AI 自主小镇或桌面规则书式战役 | AstraRPG 通过 provider、ruleset、seat、transcript 和 provider-free replay 接入，不改 EngineCore |
 
 ## 硬目标
 
@@ -17,6 +18,7 @@ AstraEngine 是 Rust + WGPU-first 的 2D/VN-first 高性能游戏引擎。它的
 - Runtime 可脱离 Editor 完成 launch、tick、save、load、replay、diagnostics、profiling 和 release validation。
 - Asset VFS 统一 package、local authorized、legacy pack 和 overlay mount；`.astrapkg` 保留为控制面和证据面容器。
 - 玩法类型通过 gameplay runtime provider 显式绑定；AstraVN、AstraEMU 和后续 AstraRPG 是同级 runtime provider。
+- TRPG 玩法落在 AstraRPG 的 `rpg.trpg` profile/ruleset layer 中；不创建独立顶层 AstraTRPG runtime provider。
 - AstraVN 使用 `.astra` 作为 canonical story source，Luau policy 用于扩展和受控演出策略。
 - Editor 使用 Qt/QML + Rust core，覆盖完整 creator workflow。
 - 插件采用 Rust-facing `abi_stable` 风格 ABI，支持加载/卸载和 provider selection，不支持热重载。
@@ -33,4 +35,4 @@ AstraEngine 是 Rust + WGPU-first 的 2D/VN-first 高性能游戏引擎。它的
 
 ## v1 Definition
 
-v1 不是单个 crate 可编译，而是全系列可发布闭环：EngineCore native smoke、AstraVN commercial baseline、AstraEditor creator workflow、Windows/Linux/macOS/iOS/Android/Web profile gate、AI/MCP audit 和 Artemis full-flow report 都通过 Release Gate。
+v1 不是单个 crate 可编译，而是全系列可发布闭环：EngineCore native smoke、AstraVN commercial baseline、AstraEditor creator workflow、Windows/Linux/macOS/iOS/Android/Web profile gate、AI/MCP audit 和 Artemis full-flow report 都通过 Release Gate。AstraRPG 属于 Stage 7 planned extension；它达到 release gate 前不计入 v1 完成证据。
