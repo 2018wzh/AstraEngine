@@ -33,6 +33,10 @@ fn import_cook_classifies_fresh_stale_and_blocked_artifacts() {
         processor_version: "1.0.0".to_string(),
     };
     let artifact = processor.cook(request.clone()).unwrap();
+    let source_bytes = std::fs::read(&source).unwrap();
+    assert_eq!(artifact.payload, source_bytes);
+    assert_eq!(artifact.to_section().payload, source_bytes);
+    assert_eq!(artifact.payload_hash, artifact.source_hash);
     assert_eq!(
         CookAudit::classify(&request, &artifact),
         ArtifactState::Fresh

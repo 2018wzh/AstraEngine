@@ -64,8 +64,12 @@ pub struct PlayerInputTranscript {
     #[serde(default)]
     pub events: Vec<PlayerInputEvent>,
     #[serde(default)]
+    pub input_consumption: Vec<PlayerInputConsumptionEvidence>,
+    #[serde(default)]
     pub visual_regions: Vec<PlayerVisualRegionEvidence>,
     pub audio_meter: PlayerAudioMeterEvidence,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visual_comparison: Option<PlayerVisualComparisonEvidence>,
     #[serde(default)]
     pub route_coverage: Vec<String>,
 }
@@ -88,6 +92,18 @@ pub struct PlayerInputEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlayerInputConsumptionEvidence {
+    pub input_sequence: u64,
+    pub player_sequence: u64,
+    pub source: String,
+    pub kind: String,
+    pub trace_event: String,
+    pub trace_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PlayerVisualRegionEvidence {
     pub region_id: String,
     pub before_hash: String,
@@ -101,6 +117,13 @@ pub struct PlayerAudioMeterEvidence {
     pub sample_count: u64,
     pub peak_dbfs: f32,
     pub rms_dbfs: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlayerVisualComparisonEvidence {
+    pub report_hash: String,
+    pub checkpoint_count: u32,
+    pub status: PlayerAutomationStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -165,8 +188,14 @@ impl PlayerAutomationValidator {
             schema_check(script, transcript),
             identity_check(script, transcript),
             live_input_surface_check(script.platform, &transcript.events),
+            input_consumption_trace_check(
+                script.platform,
+                &transcript.events,
+                &transcript.input_consumption,
+            ),
             transcript_coverage_check(script, transcript),
             visual_region_check(&transcript.visual_regions),
+            visual_comparison_check(transcript.visual_comparison.as_ref()),
             audio_meter_check(&transcript.audio_meter),
             route_coverage_check(script, transcript),
         ];
@@ -315,6 +344,60 @@ fn live_input_surface_check(
     }
 }
 
+fn input_consumption_trace_check(
+    platform: PlayerPlatform,
+    events: &[PlayerInputEvent],
+    consumption: &[PlayerInputConsumptionEvidence],
+) -> PlayerAutomationCheck {
+    let live_inputs = events
+        .iter()
+        .filter(|event| is_live_input_source(platform, &event.source))
+        .collect::<Vec<_>>();
+    let mut missing = 0usize;
+    let mut invalid = 0usize;
+    let mut consumed_sequences = BTreeSet::new();
+    for evidence in consumption {
+        if evidence.trace_event != "astra.player.input.consumed"
+            || !is_consumption_trace_source(platform, &evidence.source)
+            || !evidence.trace_hash.starts_with("sha256:")
+            || evidence.input_sequence == 0
+            || evidence.player_sequence == 0
+            || evidence.kind.trim().is_empty()
+        {
+            invalid += 1;
+            continue;
+        }
+        consumed_sequences.insert(evidence.input_sequence);
+    }
+    for event in &live_inputs {
+        if !consumed_sequences.contains(&event.sequence) {
+            missing += 1;
+        }
+    }
+
+    if !live_inputs.is_empty() && missing == 0 && invalid == 0 {
+        pass_check(
+            "player.input_consumption_trace",
+            "player host trace proves live input was consumed",
+            vec![
+                evidence("live_input_count", live_inputs.len()),
+                evidence("consumed_trace_count", consumption.len()),
+            ],
+        )
+    } else {
+        blocked_check_with_evidence(
+            "player.input_consumption_trace",
+            "player host trace does not prove live input consumption",
+            "ASTRA_PLAYER_INPUT_CONSUMPTION_TRACE_MISSING",
+            vec![
+                evidence("live_input_count", live_inputs.len()),
+                evidence("missing_consumption_count", missing),
+                evidence("invalid_consumption_count", invalid),
+            ],
+        )
+    }
+}
+
 fn transcript_coverage_check(
     script: &PlayerAutomationScript,
     transcript: &PlayerInputTranscript,
@@ -385,6 +468,37 @@ fn audio_meter_check(meter: &PlayerAudioMeterEvidence) -> PlayerAutomationCheck 
     }
 }
 
+fn visual_comparison_check(
+    comparison: Option<&PlayerVisualComparisonEvidence>,
+) -> PlayerAutomationCheck {
+    let Some(comparison) = comparison else {
+        return blocked_check(
+            "player.visual_comparison",
+            "visual comparison evidence is missing",
+            "ASTRA_PLAYER_VISUAL_COMPARISON_MISSING",
+        );
+    };
+    if comparison.status == PlayerAutomationStatus::Pass
+        && comparison.report_hash.starts_with("sha256:")
+        && comparison.checkpoint_count > 0
+    {
+        pass_check(
+            "player.visual_comparison",
+            "visual comparison report passed required checkpoints",
+            vec![
+                evidence("visual_comparison_report_hash", &comparison.report_hash),
+                evidence("checkpoint_count", comparison.checkpoint_count),
+            ],
+        )
+    } else {
+        blocked_check(
+            "player.visual_comparison",
+            "visual comparison evidence did not pass required checkpoints",
+            "ASTRA_PLAYER_VISUAL_COMPARISON_BLOCKED",
+        )
+    }
+}
+
 fn route_coverage_check(
     script: &PlayerAutomationScript,
     transcript: &PlayerInputTranscript,
@@ -428,6 +542,23 @@ fn expected_routes(script: &PlayerAutomationScript) -> BTreeSet<String> {
         }
     }
     routes
+}
+
+fn is_live_input_source(platform: PlayerPlatform, source: &str) -> bool {
+    match platform {
+        PlayerPlatform::Windows => matches!(
+            source,
+            "sendinput.mouse" | "sendinput.keyboard" | "sendinput.touch"
+        ),
+        PlayerPlatform::Web => matches!(source, "cdp.mouse" | "cdp.keyboard"),
+    }
+}
+
+fn is_consumption_trace_source(platform: PlayerPlatform, source: &str) -> bool {
+    match platform {
+        PlayerPlatform::Windows => source == "player_host.trace",
+        PlayerPlatform::Web => matches!(source, "player_host.trace" | "browser_host.trace"),
+    }
 }
 
 fn is_forbidden_input_source(source: &str) -> bool {

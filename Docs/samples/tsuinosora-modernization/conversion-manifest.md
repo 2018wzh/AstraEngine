@@ -1,6 +1,6 @@
 # Conversion Manifest
 
-本页定义 TsuiNoSora modernization sample 的脱敏 report schema。字段约束转换器、VFS 插件和 release gate。当前仓库已有 `Tools/TsuiNoSora/tsuinosora_tools.py` 的公开 synthetic/local helper slice，能生成 inventory、direct-readable extract preflight、Director `imap`/`mmap` resource map preflight、受限 `XFIR` RIFF/RIFX exact wrapper reader、Director `KEY*`/`CAS*` cast map preflight、Director `Lctx`/`Lnam`/`Lscr` Lingo map preflight、受限 RIFF/RIFX readable chunk report、cast source map report、script source map report、route graph report、visual reference、Asset analysis、conversion、modern profile、mount policy、stage3 gate、local gate 和 NativeVN package input report；公开 synthetic patch Web bundle 已能读取脱敏 mount policy 并输出 `player.patch_direct_read` route check。完整商业 Director/Shockwave cast parser/source-map reader、完整 payload 转换和真实本地 patch direct-read 仍未完成。
+本页定义 TsuiNoSora modernization sample 的脱敏 report schema。字段约束转换器、VFS 插件和 release gate。当前仓库已有 `Tools/TsuiNoSora/tsuinosora_tools.py` 的公开 synthetic/local helper slice，能生成 inventory、direct-readable extract preflight、Director `imap`/`mmap` resource map preflight、受限 `XFIR` RIFF/RIFX exact wrapper reader、Director `KEY*`/`CAS*` cast map preflight、Director `Lctx`/`Lnam`/`Lscr` Lingo map preflight、受限 RIFF/RIFX readable chunk report、cast source map report、script source map report、route graph report、visual reference、visual screenshot capture/comparison、Asset analysis、conversion、modern profile、mount policy、stage3 gate、local gate 和 NativeVN package input report；公开 synthetic patch Web bundle 已能读取脱敏 mount policy 并输出 `player.patch_direct_read` route check。完整商业 Director/Shockwave cast parser/source-map reader、完整 payload 转换和真实本地 patch direct-read 仍未完成。
 
 ## Redaction Rules
 
@@ -68,6 +68,50 @@ resources:
 - report 只能写 hash、尺寸、区域 id、coverage、diagnostic 和 layout metric。
 - 缺文件、PNG 不可读、hash mismatch 或 dimensions mismatch 必须 blocking。
 - 不输出新商业截图、正文、音频、影片帧、本地绝对路径或可复原 payload。
+
+## `tsuinosora.visual_screenshot_capture_report.v1`
+
+用于记录 ignored `.local` 中原版和 Demo 同 checkpoint 截图的脱敏捕获证据。截图文件不进入 repo、package section 或 release report。
+
+允许字段：
+
+- `checkpoint_id`、`route_id`、`required`、`original.path`、`demo.path`、`hash`、`dimensions`、`nonblank`、`regions`、`automation`、`diagnostics`。
+- `automation` 只能记录 `tsuinosora.visual_capture_automation_report.v1` 的 schema、configured、backend、session roles、checkpoint step count、step kinds、automation hash、`execution_status`、captured checkpoint count、screenshot count、same-run capture roles 和 transcript hash；不得写启动命令、工作目录、launch environment、窗口标题、输入文本、本地路径或截图 payload。
+- 路径必须是 `local_work_root` 相对路径；不得记录本地绝对路径、用户名、截图 payload、OCR 文本、音频或影片。
+- checkpoint 必须至少覆盖 title、main menu、first dialogue、background viewport、text window、speaker/name area、choice menu、save/load page、代表性 route CG/scene 和 ending。
+- 缺 checkpoint、缺 `capture_automation`、自动采集未执行或失败、缺截图、路径不安全、PNG 不可读、blank frame、region id 不安全或 region 尺寸为空都必须 blocking。
+
+## `tsuinosora.visual_comparison_report.v1`
+
+用于记录同 checkpoint 原版/Demo 的确定性图像指标和视觉 review 结果。
+
+允许字段：
+
+- `checkpoint_id`、`route_id`、`region_id`、`dimensions`、`original_hash`、`demo_hash`、`mean_delta`、`changed_ratio`、`visual_review.status`、`visual_review.reviewer`、`visual_review.summary_hash`、`diagnostics`。
+- 视觉 review 只能写摘要 hash；不得写商业截图、差异图、OCR 文本、正文、音频、影片或本地绝对路径。
+- required checkpoint 缺 review、review fail、capture report blocked、尺寸不一致、region 越界、关键区域差异超过阈值或 path leak 都必须 blocking。
+
+## `tsuinosora.projectorrays_converted_resources.v1`
+
+用于让私有 full converter 把 ProjectorRays binary chunk 与真实 NativeVN output 建立可验证关系。该 sidecar 位于 ignored `local_work_root/reports/projectorrays_converted_resources.json`，由 `tsuinosora.projectorrays_full_dump_report.v1` 读取并重新校验。
+
+允许字段：
+
+- `source_alias`、`source_relative_path`、`source_sha256`、`chunk_fourcc`、`role`。
+- `native_path`，必须位于 `native-assets/`。
+- `converted_sha256`、`byte_size`、`conversion_method`、`status: converted`。
+
+校验规则：
+
+- `source_alias` 必须匹配 `projectorrays_full_dump_roots`，`source_relative_path` 必须指向该 root 下的 `.bin` chunk。
+- `source_sha256` 必须匹配实际 chunk；`chunk_fourcc` 和 `role` 必须匹配 filename 与 `PROJECTORRAYS_REQUIRED_CHUNK_ROLES`。
+- `native_path` 必须存在于 `local_work_root/native-assets/`，`converted_sha256` 和 `byte_size` 必须匹配实际文件。
+- `conversion_method` 必须命名真实 converter；`hash_only`、`route_only`、`raw_chunk_copy`、`raw_copy` 和空 method 都必须 blocking。
+- 当前 repo-side `projectorrays-convert-resources` 会按 chunk 类型写入真实 converter method：`projectorrays_json_metadata` 用于 paired JSON metadata chunk，输出 asset 只包含 schema、source hash、chunk role、metadata shape count 和 redaction，不复制 `name`、`scriptSrcText`、脚本文本或 raw JSON payload。
+- `conversion_method: projectorrays_stxt_cp932_text` 用于 `STXT` chunk，要求 12-byte big-endian header、精确 text/trailer size 和 CP932 text payload，并只把解码文本写入 ignored `native-assets/`；report 仍不能写正文。
+- `BITD` 通过 bitmap metadata、KEY/CASt binding 和可证明 palette sidecar 转成 RGBA PNG；`Lscr` 通过 source binding 转成 private script asset，empty metadata 只允许生成脱敏 no-op script metadata；`sndH`/`sndS` 通过 KEY-bound Moa PCM 转成 WAV；`ediM` `MACRZ` 只在 MP3 frame 连续覆盖到 EOF 且 header evidence 可验证时转成 MP3；`snd `、`cupt`、`SCRF`、`Cinf`、`VWFI`、`Sord`、`Fmap`、`VWLB`、`FCOL`、`FXmp`、`VERS`、`XTRl`、`VWSC`、`XMED` 等结构型 chunk 转成脱敏 metadata。不能用 metadata shape、hash-only、route-only 或 raw copy 计为 converted。
+- 同一个 source chunk 只能出现一次；重复、未知 source、hash mismatch、缺 native asset 或路径泄露都必须 blocking。
+- report 不得包含 raw ProjectorRays dump 内容、脚本文本、商业素材 payload、截图、音频、影片或本地绝对路径。
 
 ## `tsuinosora.extract_report.v1`
 

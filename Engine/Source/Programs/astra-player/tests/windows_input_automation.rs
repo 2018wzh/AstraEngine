@@ -1,7 +1,8 @@
 use astra_player::{WindowsSendInputHost, WINDOWS_SENDINPUT_KEYBOARD, WINDOWS_SENDINPUT_MOUSE};
 use astra_player_core::{
     PlayerAudioMeterEvidence, PlayerAutomationScript, PlayerAutomationStatus, PlayerAutomationStep,
-    PlayerInputEvent, PlayerInputTranscript, PlayerPlatform, PlayerVisualRegionEvidence,
+    PlayerInputConsumptionEvidence, PlayerInputEvent, PlayerInputTranscript, PlayerPlatform,
+    PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
 };
 
 #[test]
@@ -16,6 +17,7 @@ fn windows_sendinput_transcript_produces_full_playable_report() {
     for id in [
         "player.input_transcript",
         "player.visual_region_hash",
+        "player.visual_comparison",
         "player.audio_meter",
         "player.route_coverage",
     ] {
@@ -72,13 +74,34 @@ fn transcript(sources: Vec<&str>) -> PlayerInputTranscript {
         package_hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
             .to_string(),
         events: sources
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(index, source)| PlayerInputEvent {
                 step_id: format!("step-{index}"),
-                source: source.to_string(),
+                source: (*source).to_string(),
                 kind: "input".to_string(),
                 sequence: (index + 1) as u64,
+                route_id: Some("opening".to_string()),
+            })
+            .collect(),
+        input_consumption: sources
+            .into_iter()
+            .enumerate()
+            .filter(|(_, source)| {
+                matches!(
+                    *source,
+                    WINDOWS_SENDINPUT_MOUSE | WINDOWS_SENDINPUT_KEYBOARD
+                )
+            })
+            .map(|(index, _)| PlayerInputConsumptionEvidence {
+                input_sequence: (index + 1) as u64,
+                player_sequence: (index + 1) as u64,
+                source: "player_host.trace".to_string(),
+                kind: "input".to_string(),
+                trace_event: "astra.player.input.consumed".to_string(),
+                trace_hash:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string(),
                 route_id: Some("opening".to_string()),
             })
             .collect(),
@@ -96,6 +119,12 @@ fn transcript(sources: Vec<&str>) -> PlayerInputTranscript {
             peak_dbfs: -10.0,
             rms_dbfs: -22.0,
         },
+        visual_comparison: Some(PlayerVisualComparisonEvidence {
+            report_hash: "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+                .to_string(),
+            checkpoint_count: 2,
+            status: PlayerAutomationStatus::Pass,
+        }),
         route_coverage: vec!["opening".to_string()],
     }
 }

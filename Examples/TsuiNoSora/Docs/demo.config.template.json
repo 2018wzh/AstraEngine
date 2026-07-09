@@ -20,6 +20,141 @@
       "path": "Examples/TsuiNoSora/.local/projectorrays-full-casts"
     }
   ],
+  "projectorrays_palette_sidecars": [
+    "Examples/TsuiNoSora/.local/palettes/system-win-d5.palette.json"
+  ],
   "player_automation_report": "Examples/TsuiNoSora/.local/work/reports/live_player_report.json",
-  "require_full_resource_conversion": true
+  "player_automation": {
+    "schema": "astra.player_live_automation_config.v1",
+    "backend": "windows_sendinput",
+    "timeout_ms": 60000
+  },
+  "require_full_resource_conversion": true,
+  "require_visual_screenshot_acceptance": true,
+  "visual_capture": {
+    "schema": "tsuinosora.visual_capture_config.v1",
+    "thresholds": {
+      "max_mean_delta": 4.0,
+      "max_changed_ratio": 0.05
+    },
+    "capture_automation": {
+      "schema": "tsuinosora.visual_capture_automation.v1",
+      "backend": "windows_sendinput",
+      "sessions": [
+        {
+          "role": "original",
+          "launch": {
+            "command": [
+              "Examples/TsuiNoSora/.local/original/TsuiNoSora.exe"
+            ],
+            "working_directory": "Examples/TsuiNoSora/.local/original"
+          },
+          "window_match": {
+            "title_contains": "TsuiNoSora",
+            "process_name": "TsuiNoSora.exe"
+          },
+          "startup_timeout_ms": 15000
+        },
+        {
+          "role": "demo",
+          "launch": {
+            "command": [
+              "AstraPlayer.exe"
+            ],
+            "working_directory": "Examples/TsuiNoSora/.local/work/bundles/internal-classic/windows"
+          },
+          "window_match": {
+            "title_contains": "AstraPlayer",
+            "process_name": "AstraPlayer.exe"
+          },
+          "startup_timeout_ms": 60000
+        }
+      ],
+      "input_scripts": [
+        {
+          "checkpoint_id": "title",
+          "steps": [
+            {
+              "kind": "wait",
+              "duration_ms": 1000
+            },
+            {
+              "kind": "capture",
+              "role": "original"
+            },
+            {
+              "kind": "capture",
+              "role": "demo"
+            }
+          ]
+        },
+        {
+          "checkpoint_id": "first_dialogue",
+          "steps": [
+            {
+              "kind": "key",
+              "key": "enter"
+            },
+            {
+              "kind": "wait",
+              "duration_ms": 1000
+            },
+            {
+              "kind": "capture",
+              "role": "original"
+            },
+            {
+              "kind": "capture",
+              "role": "demo"
+            }
+          ]
+        }
+      ]
+    },
+    "checkpoints": [
+      {
+        "checkpoint_id": "title",
+        "route_id": "classic.title",
+        "required": true,
+        "original_screenshot": "screenshots/original/title.png",
+        "demo_screenshot": "screenshots/demo/title.png",
+        "regions": [
+          {
+            "region_id": "full_frame",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "required": true
+          }
+        ]
+      },
+      {
+        "checkpoint_id": "first_dialogue",
+        "route_id": "classic.main",
+        "required": true,
+        "original_screenshot": "screenshots/original/first_dialogue.png",
+        "demo_screenshot": "screenshots/demo/first_dialogue.png",
+        "regions": [
+          {
+            "region_id": "background_viewport",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "required": true
+          },
+          {
+            "region_id": "text_window",
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "required": true
+          }
+        ]
+      }
+    ],
+    "visual_reviews": []
+  }
 }

@@ -258,6 +258,11 @@ nativevn:
   sources:
     - Scripts
   profiles: [classic, modern]
+  display:
+    original_resolution:
+      width: 800
+      height: 600
+    scale_filter: linear
 package_sections:
   - id: tsuinosora.reference_evidence
     schema: tsuinosora.visual_reference_report.v1
@@ -840,6 +845,11 @@ fn tsuinosora_internal_demo_builds_asset_package_and_bundles() {
     let package_bytes = fs::read(&package).unwrap();
     let reader = PackageReader::open(&package_bytes).unwrap();
     assert!(!reader.has_section("asset.registry"));
+    let windows_scenario_ref = tsuinosora_demo_scenario_ref(target, profile, "windows");
+    assert!(
+        reader.has_section(&windows_scenario_ref),
+        "package must include scenario ref section {windows_scenario_ref}"
+    );
     let vfs_manifest: serde_json::Value = serde_json::from_slice(
         &reader
             .container()
@@ -872,6 +882,7 @@ fn tsuinosora_internal_demo_builds_asset_package_and_bundles() {
         }),
         "asset.catalog should map native asset metadata to package VFS URI: {catalog:#?}"
     );
+    fs::remove_dir_all(work_root.join("nativevn").join("scenarios")).unwrap();
 
     for platform in ["windows", "web"] {
         let bundle = case_dir.join(format!("internal-bundle-{platform}"));
@@ -949,6 +960,7 @@ fn nativevn_sample_cooks_packages_validates_and_runs_full_playthrough() {
     let reader = PackageReader::open(&bytes).unwrap();
     for section in [
         "compiled.project",
+        "player.display_config",
         "vn.compiled_story",
         "vn.profile_manifest",
         "vn.standard_command_manifest",
@@ -958,6 +970,17 @@ fn nativevn_sample_cooks_packages_validates_and_runs_full_playthrough() {
     ] {
         assert!(reader.has_section(section), "missing section {section}");
     }
+    let display_config: serde_json::Value = serde_json::from_slice(
+        &reader
+            .container()
+            .read_section("player.display_config")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(display_config["schema"], "astra.player_display_config.v1");
+    assert_eq!(display_config["original_resolution"]["width"], 800);
+    assert_eq!(display_config["original_resolution"]["height"], 600);
+    assert_eq!(display_config["scale_filter"], "linear");
 
     let validate_output = Command::new(env!("CARGO_BIN_EXE_astra"))
         .args([
@@ -1071,6 +1094,15 @@ fn nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes() {
         "stderr={}",
         String::from_utf8_lossy(&package_output.stderr)
     );
+    let package_bytes = fs::read(&package).unwrap();
+    let package_reader = PackageReader::open(&package_bytes).unwrap();
+    let display_config: serde_json::Value = serde_json::from_slice(
+        &package_reader
+            .container()
+            .read_section("player.display_config")
+            .unwrap(),
+    )
+    .unwrap();
 
     for (platform, entrypoint) in [("windows", "AstraPlayer.exe"), ("web", "index.html")] {
         let bundle = case_dir.join(format!("bundle-{platform}"));
@@ -1111,12 +1143,17 @@ fn nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes() {
         assert!(bundle.join("package").join("nativevn.astrapkg").exists());
         assert!(bundle.join(entrypoint).exists());
         assert!(bundle.join("AstraPlayer.config.json").exists());
+        let player_config: serde_json::Value =
+            serde_json::from_slice(&fs::read(bundle.join("AstraPlayer.config.json")).unwrap())
+                .unwrap();
+        assert_eq!(player_config["display"], display_config);
         assert!(bundle
             .join("scenarios")
             .join("full_playthrough.yaml")
             .exists());
         if platform == "windows" {
             let launch_output = Command::new(bundle.join(entrypoint))
+                .arg("--launch-report")
                 .current_dir(&bundle)
                 .output()
                 .unwrap();
@@ -2021,6 +2058,11 @@ nativevn:
   sources:
     - Scripts
   profiles: [classic, modern]
+  display:
+    original_resolution:
+      width: 800
+      height: 600
+    scale_filter: linear
   scenario_refs:
     - scenarios/tsuinosora-internal-game.classic.headless.yaml
     - scenarios/tsuinosora-internal-game.classic.windows.yaml

@@ -27,6 +27,7 @@ astra-target = { path = "../../Platform/astra-target" }
 astra-test = { path = "../../Developer/astra-test" }
 astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
 clap.workspace = true
+image.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -34,3 +35,11 @@ serde_yaml.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }

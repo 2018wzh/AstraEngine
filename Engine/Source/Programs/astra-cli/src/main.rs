@@ -225,7 +225,10 @@ impl From<PlatformArg> for PlatformId {
 
 fn main() -> Result<(), CliError> {
     if should_auto_launch_player() {
-        println!("{}", run_bundled_player(std::env::args_os().skip(1))?);
+        let output = run_bundled_player(std::env::args_os().skip(1))?;
+        if !output.is_empty() {
+            println!("{output}");
+        }
         return Ok(());
     }
     let cli = Cli::parse();
@@ -674,10 +677,174 @@ struct PlayerConfig {
     profile: String,
     platform: String,
     package: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display: Option<PlayerDisplayConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+struct PlayerDisplayConfig {
+    schema: String,
+    original_resolution: PlayerResolution,
+    scale_filter: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    preview_layers: Vec<PlayerDisplayLayer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+struct PlayerResolution {
+    width: u32,
+    height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+struct PlayerDisplayLayer {
+    vfs_uri: String,
+    x: u32,
+    y: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LiveWindowPreviewAsset {
+    vfs_uri: String,
+    section_id: String,
+    hash: String,
+    byte_size: u64,
+}
+
+#[derive(Debug, Clone)]
+struct LiveWindowFrame {
+    width: u32,
+    height: u32,
+    bgra: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+struct PreviewImage {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+impl LiveWindowFrame {
+    fn from_rgba(width: u32, height: u32, rgba: Vec<u8>) -> Self {
+        let mut bgra = Vec::with_capacity(rgba.len());
+        for pixel in rgba.chunks_exact(4) {
+            bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
+        }
+        Self {
+            width,
+            height,
+            bgra,
+        }
+    }
+
+    fn from_rgba_image(image: PreviewImage) -> Self {
+        Self::from_rgba(image.width, image.height, image.rgba)
+    }
 }
 
 fn default_section_codec() -> SectionCodec {
     SectionCodec::Raw
+}
+
+fn project_player_display_config(
+    project: &serde_yaml::Value,
+) -> Result<Option<PlayerDisplayConfig>, CliError> {
+    let Some(display) = project
+        .get("nativevn")
+        .and_then(|nativevn| nativevn.get("display"))
+    else {
+        return Ok(None);
+    };
+    let Some(resolution) = display.get("original_resolution") else {
+        return Err(
+            "nativevn.display.original_resolution is required when display is declared".into(),
+        );
+    };
+    let width = yaml_u32(resolution.get("width"))
+        .ok_or("nativevn.display.original_resolution.width must be a positive integer")?;
+    let height = yaml_u32(resolution.get("height"))
+        .ok_or("nativevn.display.original_resolution.height must be a positive integer")?;
+    if !(1..=16_384).contains(&width) || !(1..=16_384).contains(&height) {
+        return Err("nativevn.display.original_resolution dimensions are out of range".into());
+    }
+    let scale_filter = display
+        .get("scale_filter")
+        .and_then(serde_yaml::Value::as_str)
+        .unwrap_or("linear");
+    if !matches!(scale_filter, "nearest" | "linear") {
+        return Err("nativevn.display.scale_filter must be nearest or linear".into());
+    }
+    let preview_layers = project_display_preview_layers(display)?;
+    Ok(Some(PlayerDisplayConfig {
+        schema: "astra.player_display_config.v1".to_string(),
+        original_resolution: PlayerResolution { width, height },
+        scale_filter: scale_filter.to_string(),
+        preview_layers,
+    }))
+}
+
+fn project_display_preview_layers(
+    display: &serde_yaml::Value,
+) -> Result<Vec<PlayerDisplayLayer>, CliError> {
+    let Some(raw_layers) = display.get("preview_layers") else {
+        return Ok(Vec::new());
+    };
+    let layers = raw_layers
+        .as_sequence()
+        .ok_or("nativevn.display.preview_layers must be a list")?;
+    let mut parsed = Vec::new();
+    for layer in layers {
+        let vfs_uri = layer
+            .get("vfs_uri")
+            .and_then(serde_yaml::Value::as_str)
+            .ok_or("nativevn.display.preview_layers entries require vfs_uri")?;
+        validate_player_display_layer_uri(vfs_uri)?;
+        let x = yaml_non_negative_u32(layer.get("x"))
+            .ok_or("nativevn.display.preview_layers entries require non-negative x")?;
+        let y = yaml_non_negative_u32(layer.get("y"))
+            .ok_or("nativevn.display.preview_layers entries require non-negative y")?;
+        if x > 16_384 || y > 16_384 {
+            return Err("nativevn.display.preview_layers coordinates are out of range".into());
+        }
+        parsed.push(PlayerDisplayLayer {
+            vfs_uri: vfs_uri.to_string(),
+            x,
+            y,
+        });
+    }
+    Ok(parsed)
+}
+
+fn validate_player_display_layer_uri(vfs_uri: &str) -> Result<(), CliError> {
+    if !vfs_uri.starts_with("package:/")
+        || vfs_uri.contains('\\')
+        || vfs_uri.contains("..")
+        || vfs_uri.contains("://")
+        || vfs_uri.trim() != vfs_uri
+    {
+        return Err("player display preview layer vfs_uri must be a package VFS URI".into());
+    }
+    Ok(())
+}
+
+fn yaml_u32(value: Option<&serde_yaml::Value>) -> Option<u32> {
+    let value = value?;
+    if let Some(number) = value.as_u64() {
+        return u32::try_from(number).ok().filter(|number| *number > 0);
+    }
+    value
+        .as_i64()
+        .and_then(|number| u32::try_from(number).ok())
+        .filter(|number| *number > 0)
+}
+
+fn yaml_non_negative_u32(value: Option<&serde_yaml::Value>) -> Option<u32> {
+    let value = value?;
+    if let Some(number) = value.as_u64() {
+        return u32::try_from(number).ok();
+    }
+    value.as_i64().and_then(|number| u32::try_from(number).ok())
 }
 
 fn read_target_manifest(project: &std::path::Path) -> Result<TargetManifest, CliError> {
@@ -744,6 +911,24 @@ fn cook_project(
         asset_type: None,
         asset_id: None,
     }];
+    if let Some(display_config) = project_player_display_config(&project_yaml)? {
+        let display_bytes = serde_json::to_vec_pretty(&display_config)?;
+        let display_path = "player_display_config.json";
+        fs::write(out.join(display_path), &display_bytes)?;
+        artifacts.push(CookedArtifactRef {
+            section_id: "player.display_config".to_string(),
+            schema: "astra.player_display_config.v1".to_string(),
+            path: display_path.to_string(),
+            hash: Hash256::from_sha256(&display_bytes).to_string(),
+            codec: SectionCodec::Raw,
+            asset_path: None,
+            asset_role: None,
+            asset_sha256: None,
+            asset_byte_size: None,
+            asset_type: None,
+            asset_id: None,
+        });
+    }
     if project_uses_nativevn(&project_yaml) {
         artifacts.extend(cook_nativevn_sections(
             &project_yaml,
@@ -762,6 +947,12 @@ fn cook_project(
         &artifacts,
     )?);
     let scenario_refs = scenario_refs_from_project(&project_yaml);
+    artifacts.extend(cook_scenario_ref_sections(
+        &scenario_refs,
+        project_dir,
+        &out,
+        &artifacts,
+    )?);
     let manifest = CookManifest {
         schema: "astra.cook_manifest.v1".to_string(),
         package_id,
@@ -975,6 +1166,89 @@ fn asset_role_for_path(path: &str, asset_type: &str) -> String {
     } else {
         "binary".to_string()
     }
+}
+
+fn cook_scenario_ref_sections(
+    scenario_refs: &[String],
+    project_dir: &std::path::Path,
+    out: &std::path::Path,
+    existing: &[CookedArtifactRef],
+) -> Result<Vec<CookedArtifactRef>, CliError> {
+    if scenario_refs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let section_dir = out.join("sections");
+    fs::create_dir_all(&section_dir)?;
+    let mut artifacts = Vec::new();
+    for (index, scenario_ref) in scenario_refs.iter().enumerate() {
+        if existing
+            .iter()
+            .any(|artifact| artifact.section_id == *scenario_ref)
+            || artifacts
+                .iter()
+                .any(|artifact: &CookedArtifactRef| artifact.section_id == *scenario_ref)
+        {
+            return Err(format!("scenario ref {scenario_ref} is declared more than once").into());
+        }
+        let source_path = resolve_scenario_ref_path(project_dir, scenario_ref)?;
+        let payload = fs::read(source_path)
+            .map_err(|err| format!("scenario ref {scenario_ref} is not readable: {err}"))?;
+        let file_name = format!("scenario_ref_{:04}.bin", index + 1);
+        fs::write(section_dir.join(&file_name), &payload)?;
+        artifacts.push(CookedArtifactRef {
+            section_id: scenario_ref.clone(),
+            schema: scenario_ref_schema(&payload),
+            path: normalize_relative_path(std::path::Path::new("sections").join(file_name)),
+            hash: Hash256::from_sha256(&payload).to_string(),
+            codec: SectionCodec::Raw,
+            asset_path: None,
+            asset_role: None,
+            asset_sha256: None,
+            asset_byte_size: None,
+            asset_type: None,
+            asset_id: None,
+        });
+    }
+    Ok(artifacts)
+}
+
+fn resolve_scenario_ref_path(
+    project_dir: &std::path::Path,
+    scenario_ref: &str,
+) -> Result<PathBuf, CliError> {
+    let relative = validate_project_relative_path(scenario_ref)?;
+    let project_candidate = project_dir.join(&relative);
+    let invocation_candidate = std::path::Path::new(".").join(&relative);
+    let project_exists = project_candidate.is_file();
+    let invocation_exists = invocation_candidate.is_file();
+    match (project_exists, invocation_exists) {
+        (true, true) if project_candidate != invocation_candidate => Err(format!(
+            "scenario ref {scenario_ref} is ambiguous between project root and invocation root"
+        )
+        .into()),
+        (true, _) => Ok(project_candidate),
+        (false, true) => Ok(invocation_candidate),
+        (false, false) => Err(format!(
+            "scenario ref {scenario_ref} is not readable from project root or invocation root"
+        )
+        .into()),
+    }
+}
+
+fn scenario_ref_schema(payload: &[u8]) -> String {
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(payload) {
+        if let Some(schema) = value.get("schema").and_then(serde_json::Value::as_str) {
+            return schema.to_string();
+        }
+    }
+    if let Ok(text) = std::str::from_utf8(payload) {
+        if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(text) {
+            if let Some(schema) = value.get("schema").and_then(serde_yaml::Value::as_str) {
+                return schema.to_string();
+            }
+        }
+    }
+    "astra.scenario.v1".to_string()
 }
 
 fn cook_project_package_sections(
@@ -1390,6 +1664,7 @@ fn build_standalone_bundle(
     {
         return Err(format!("target {target} does not support platform {platform_name}").into());
     }
+    let display_config = package_player_display_config(&reader)?;
 
     fs::create_dir_all(out.join("package"))?;
     let bundled_package = out.join("package").join("nativevn.astrapkg");
@@ -1405,13 +1680,10 @@ fn build_standalone_bundle(
     let mount_policy = bundle_mount_policy(&reader, out, &mut files)?;
     for scenario_ref in &scenario_refs {
         let relative = validate_bundle_relative_path(scenario_ref)?;
-        let source = env::current_dir()?.join(&relative);
-        if !source.is_file() {
-            return Err(
-                format!("scenario ref {scenario_ref} is not available for bundling").into(),
-            );
-        }
-        let scenario_bytes = fs::read(&source)?;
+        let scenario_bytes = reader
+            .container()
+            .read_section(scenario_ref)
+            .map_err(|_| format!("scenario ref {scenario_ref} is not available in package"))?;
         let destination = out.join(&relative);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)?;
@@ -1442,13 +1714,7 @@ fn build_standalone_bundle(
             make_executable(&entrypoint_path)?;
             files.push(bundle_file(entrypoint, "windows_player", &exe_bytes));
 
-            let config = serde_json::to_vec_pretty(&serde_json::json!({
-                "schema": "astra.player_config.v1",
-                "target": target,
-                "profile": profile,
-                "platform": platform_name,
-                "package": "package/nativevn.astrapkg"
-            }))?;
+            let config = player_config_bytes(target, profile, platform_name, &display_config)?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
                 "AstraPlayer.config.json",
@@ -1468,13 +1734,7 @@ fn build_standalone_bundle(
             fs::write(out.join(entrypoint), index)?;
             files.push(bundle_file(entrypoint, "web_entrypoint", index));
 
-            let config = serde_json::to_vec_pretty(&serde_json::json!({
-                "schema": "astra.player_config.v1",
-                "target": target,
-                "profile": profile,
-                "platform": platform_name,
-                "package": "package/nativevn.astrapkg"
-            }))?;
+            let config = player_config_bytes(target, profile, platform_name, &display_config)?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
                 "AstraPlayer.config.json",
@@ -1522,6 +1782,58 @@ fn build_standalone_bundle(
         serde_json::to_vec_pretty(&manifest)?,
     )?;
     Ok(manifest)
+}
+
+fn player_config_bytes(
+    target: &str,
+    profile: &str,
+    platform_name: &str,
+    display_config: &Option<PlayerDisplayConfig>,
+) -> Result<Vec<u8>, CliError> {
+    let mut config = serde_json::json!({
+        "schema": "astra.player_config.v1",
+        "target": target,
+        "profile": profile,
+        "platform": platform_name,
+        "package": "package/nativevn.astrapkg"
+    });
+    if let Some(display) = display_config {
+        config["display"] = serde_json::to_value(display)?;
+    }
+    serde_json::to_vec_pretty(&config).map_err(Into::into)
+}
+
+fn package_player_display_config(
+    reader: &PackageReader,
+) -> Result<Option<PlayerDisplayConfig>, CliError> {
+    if !reader.has_section("player.display_config") {
+        return Ok(None);
+    }
+    let display: PlayerDisplayConfig =
+        serde_json::from_slice(&reader.container().read_section("player.display_config")?)?;
+    validate_player_display_config(&display)?;
+    Ok(Some(display))
+}
+
+fn validate_player_display_config(display: &PlayerDisplayConfig) -> Result<(), CliError> {
+    if display.schema != "astra.player_display_config.v1" {
+        return Err("unsupported player display config schema".into());
+    }
+    if !(1..=16_384).contains(&display.original_resolution.width)
+        || !(1..=16_384).contains(&display.original_resolution.height)
+    {
+        return Err("player display original resolution is out of range".into());
+    }
+    if !matches!(display.scale_filter.as_str(), "nearest" | "linear") {
+        return Err("player display scale_filter must be nearest or linear".into());
+    }
+    for layer in &display.preview_layers {
+        validate_player_display_layer_uri(&layer.vfs_uri)?;
+        if layer.x > 16_384 || layer.y > 16_384 {
+            return Err("player display preview layer coordinates are out of range".into());
+        }
+    }
+    Ok(())
 }
 
 fn scenario_json_ref(scenario_ref: &str) -> Result<String, CliError> {
@@ -2092,11 +2404,605 @@ fn run_bundled_player(args: impl IntoIterator<Item = OsString>) -> Result<String
         })
         .collect::<Result<Vec<String>, CliError>>()?;
     if args.is_empty() {
+        run_bundled_player_live_window()?;
+        return Ok(String::new());
+    }
+    if args == ["--launch-report"] {
         return Ok(serde_json::to_string_pretty(&launch_bundled_player()?)?);
     }
     let args = parse_player_route_args(&args)?;
     let report = run_bundled_player_route(&args.scenario, &args.mount_roots)?;
     encode_player_route_report(&report, args.format)
+}
+
+fn run_bundled_player_live_window() -> Result<(), CliError> {
+    let launch_report = launch_bundled_player()?;
+    if launch_report.status != "ready" {
+        return Err(
+            "bundled player cannot open live window because launch validation failed".into(),
+        );
+    }
+    let config = read_player_config()?;
+    validate_player_display_requirement(&launch_report.target, &config)?;
+    let preview_frame = load_live_window_preview_frame(config.display.as_ref())?;
+    live_window::run(&launch_report, preview_frame, config.display.as_ref())
+}
+
+fn load_live_window_preview_frame(
+    display: Option<&PlayerDisplayConfig>,
+) -> Result<Option<LiveWindowFrame>, CliError> {
+    let manifest = read_standalone_bundle_manifest()?;
+    let package_bytes = fs::read(&manifest.package)?;
+    let reader = PackageReader::open(&package_bytes)?;
+    let catalog: serde_json::Value =
+        serde_json::from_slice(&reader.container().read_section("asset.catalog")?)?;
+    let vfs_manifest: serde_json::Value =
+        serde_json::from_slice(&reader.container().read_section("asset.vfs_manifest")?)?;
+    if let Some(display) = display {
+        if !display.preview_layers.is_empty() {
+            return load_display_preview_frame(&reader, &vfs_manifest, display).map(Some);
+        }
+    }
+    if let Some(candidate) = live_window_preview_candidates(&catalog, &vfs_manifest)?
+        .into_iter()
+        .next()
+    {
+        let image = load_preview_image(&reader, &candidate)?;
+        return Ok(Some(LiveWindowFrame::from_rgba_image(image)));
+    }
+    Ok(None)
+}
+
+fn load_display_preview_frame(
+    reader: &PackageReader,
+    vfs_manifest: &serde_json::Value,
+    display: &PlayerDisplayConfig,
+) -> Result<LiveWindowFrame, CliError> {
+    let entries = preview_asset_entries_by_uri(vfs_manifest)?;
+    let width = display.original_resolution.width;
+    let height = display.original_resolution.height;
+    let mut canvas = vec![0u8; width as usize * height as usize * 4];
+    for layer in &display.preview_layers {
+        let Some(asset) = entries.get(&layer.vfs_uri) else {
+            return Err(format!(
+                "display preview layer {} is missing from VFS manifest",
+                layer.vfs_uri
+            )
+            .into());
+        };
+        let image = load_preview_image(reader, asset)?;
+        composite_rgba_layer(&mut canvas, (width, height), &image, (layer.x, layer.y))?;
+    }
+    Ok(LiveWindowFrame::from_rgba(width, height, canvas))
+}
+
+fn load_preview_image(
+    reader: &PackageReader,
+    asset: &LiveWindowPreviewAsset,
+) -> Result<PreviewImage, CliError> {
+    let section = reader.container().read_section(&asset.section_id)?;
+    let hash = Hash256::from_sha256(&section).to_string();
+    if hash != asset.hash {
+        return Err(format!(
+            "live window preview asset hash mismatch for {}",
+            asset.vfs_uri
+        )
+        .into());
+    }
+    if section.len() as u64 != asset.byte_size {
+        return Err(format!(
+            "live window preview asset byte size mismatch for {}",
+            asset.vfs_uri
+        )
+        .into());
+    }
+    let decoded = image::load_from_memory(&section).map_err(|err| {
+        format!(
+            "live window preview asset {} is not decodable image data: {err}",
+            asset.vfs_uri
+        )
+    })?;
+    let rgba = decoded.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Ok(PreviewImage {
+        width,
+        height,
+        rgba: rgba.into_vec(),
+    })
+}
+
+fn preview_asset_entries_by_uri(
+    vfs_manifest: &serde_json::Value,
+) -> Result<BTreeMap<String, LiveWindowPreviewAsset>, CliError> {
+    let entries = vfs_manifest
+        .get("entries")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("asset.vfs_manifest entries must be an array")?;
+    let mut entry_by_uri = BTreeMap::new();
+    for entry in entries {
+        let Some(vfs_uri) = entry.get("vfs_uri").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(source) = entry.get("source").and_then(serde_json::Value::as_object) else {
+            continue;
+        };
+        if source.get("kind").and_then(serde_json::Value::as_str) != Some("package_section") {
+            continue;
+        }
+        let Some(section_id) = source.get("section_id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(hash) = entry.get("hash").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(byte_size) = entry.get("size").and_then(serde_json::Value::as_u64) else {
+            continue;
+        };
+        entry_by_uri.insert(
+            vfs_uri.to_string(),
+            LiveWindowPreviewAsset {
+                vfs_uri: vfs_uri.to_string(),
+                section_id: section_id.to_string(),
+                hash: hash.to_string(),
+                byte_size,
+            },
+        );
+    }
+    Ok(entry_by_uri)
+}
+
+fn composite_rgba_layer(
+    canvas: &mut [u8],
+    canvas_size: (u32, u32),
+    layer: &PreviewImage,
+    layer_position: (u32, u32),
+) -> Result<(), CliError> {
+    let (canvas_width, canvas_height) = canvas_size;
+    let (layer_x, layer_y) = layer_position;
+    if layer.rgba.len() != layer.width as usize * layer.height as usize * 4
+        || canvas.len() != canvas_width as usize * canvas_height as usize * 4
+    {
+        return Err("preview layer RGBA buffer has invalid dimensions".into());
+    }
+    if layer_x
+        .checked_add(layer.width)
+        .is_none_or(|right| right > canvas_width)
+        || layer_y
+            .checked_add(layer.height)
+            .is_none_or(|bottom| bottom > canvas_height)
+    {
+        return Err("preview layer is outside the original resolution canvas".into());
+    }
+    for y in 0..layer.height {
+        for x in 0..layer.width {
+            let src = (y as usize * layer.width as usize + x as usize) * 4;
+            let dst = ((layer_y + y) as usize * canvas_width as usize + (layer_x + x) as usize) * 4;
+            let alpha = layer.rgba[src + 3] as u32;
+            if alpha == 255 {
+                canvas[dst..dst + 4].copy_from_slice(&layer.rgba[src..src + 4]);
+            } else if alpha > 0 {
+                let inv_alpha = 255 - alpha;
+                for channel in 0..3 {
+                    canvas[dst + channel] = ((layer.rgba[src + channel] as u32 * alpha
+                        + canvas[dst + channel] as u32 * inv_alpha)
+                        / 255) as u8;
+                }
+                canvas[dst + 3] = 255;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn live_window_preview_candidates(
+    catalog: &serde_json::Value,
+    vfs_manifest: &serde_json::Value,
+) -> Result<Vec<LiveWindowPreviewAsset>, CliError> {
+    let entry_by_uri = preview_asset_entries_by_uri(vfs_manifest)?;
+
+    let assets = catalog
+        .get("assets")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("asset.catalog assets must be an array")?;
+    let mut candidates = Vec::new();
+    for asset in assets {
+        let Some(vfs_uri) = asset.get("vfs_uri").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if !is_live_preview_image_uri(vfs_uri) {
+            continue;
+        }
+        let Some(entry) = entry_by_uri.get(vfs_uri) else {
+            return Err(
+                format!("asset catalog entry {vfs_uri} is missing from VFS manifest").into(),
+            );
+        };
+        candidates.push(entry.clone());
+    }
+    candidates.sort_by(|left, right| {
+        live_preview_rank(right)
+            .cmp(&live_preview_rank(left))
+            .then_with(|| right.byte_size.cmp(&left.byte_size))
+            .then_with(|| left.vfs_uri.cmp(&right.vfs_uri))
+    });
+    Ok(candidates)
+}
+
+fn is_live_preview_image_uri(vfs_uri: &str) -> bool {
+    let lower = vfs_uri.to_ascii_lowercase();
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".webp")
+}
+
+fn live_preview_rank(asset: &LiveWindowPreviewAsset) -> u32 {
+    let uri = asset.vfs_uri.to_ascii_lowercase();
+    let mut score = 0;
+    if uri.contains("title") {
+        score += 1_000;
+    }
+    if uri.contains("/menu/") {
+        score += 800;
+    }
+    if uri.contains("background") || uri.contains("/bg") {
+        score += 400;
+    }
+    if uri.ends_with(".png") {
+        score += 100;
+    }
+    score
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_window_preview_candidates_prefer_title_then_menu_assets() {
+        let catalog = serde_json::json!({
+            "schema": "astra.asset_catalog.v1",
+            "assets": [
+                {"vfs_uri": "package:/native-assets/projectorrays/data/MENU/chunks/BITD-444.png"},
+                {"vfs_uri": "package:/native-assets/title/title.png"},
+                {"vfs_uri": "package:/native-assets/projectorrays/data/S/chunks/BITD-1592.png"}
+            ]
+        });
+        let vfs_manifest = serde_json::json!({
+            "schema": "astra.asset_vfs_manifest.v1",
+            "entries": [
+                {
+                    "vfs_uri": "package:/native-assets/projectorrays/data/MENU/chunks/BITD-444.png",
+                    "source": {"kind": "package_section", "section_id": "asset.menu"},
+                    "hash": "sha256:menu",
+                    "size": 590413
+                },
+                {
+                    "vfs_uri": "package:/native-assets/title/title.png",
+                    "source": {"kind": "package_section", "section_id": "asset.title"},
+                    "hash": "sha256:title",
+                    "size": 1024
+                },
+                {
+                    "vfs_uri": "package:/native-assets/projectorrays/data/S/chunks/BITD-1592.png",
+                    "source": {"kind": "package_section", "section_id": "asset.scene"},
+                    "hash": "sha256:scene",
+                    "size": 764301
+                }
+            ]
+        });
+
+        let candidates = live_window_preview_candidates(&catalog, &vfs_manifest).unwrap();
+
+        assert_eq!(candidates[0].section_id, "asset.title");
+        assert_eq!(candidates[1].section_id, "asset.menu");
+        assert_eq!(candidates[2].section_id, "asset.scene");
+    }
+
+    #[test]
+    fn live_window_preview_candidates_require_catalog_entries_in_vfs_manifest() {
+        let catalog = serde_json::json!({
+            "schema": "astra.asset_catalog.v1",
+            "assets": [
+                {"vfs_uri": "package:/native-assets/title/title.png"}
+            ]
+        });
+        let vfs_manifest = serde_json::json!({
+            "schema": "astra.asset_vfs_manifest.v1",
+            "entries": []
+        });
+
+        let err = live_window_preview_candidates(&catalog, &vfs_manifest).unwrap_err();
+
+        assert!(err.to_string().contains("missing from VFS manifest"));
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod live_window {
+    use super::{CliError, LiveWindowFrame, PlayerDisplayConfig, PlayerLaunchReport};
+    use std::{
+        ffi::c_void,
+        ptr,
+        sync::{Mutex, OnceLock},
+    };
+    use windows::{
+        core::{w, PCWSTR},
+        Win32::{
+            Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
+            Graphics::Gdi::{
+                BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, InvalidateRect,
+                SetBkMode, SetStretchBltMode, SetTextColor, StretchDIBits, TextOutW, BITMAPINFO,
+                BITMAPINFOHEADER, BI_RGB, COLORONCOLOR, DIB_RGB_COLORS, HALFTONE, HBRUSH,
+                PAINTSTRUCT, SRCCOPY, TRANSPARENT,
+            },
+            System::LibraryLoader::GetModuleHandleW,
+            UI::WindowsAndMessaging::{
+                AdjustWindowRectEx, CreateWindowExW, DefWindowProcW, DispatchMessageW,
+                GetClientRect, GetMessageW, LoadCursorW, PostQuitMessage, RegisterClassW,
+                ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW,
+                MSG, SW_SHOW, WINDOW_EX_STYLE, WM_DESTROY, WM_KEYUP, WM_LBUTTONUP, WM_PAINT,
+                WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            },
+        },
+    };
+
+    static LIVE_FRAME: OnceLock<LiveWindowFrame> = OnceLock::new();
+    static SCALE_FILTER: OnceLock<String> = OnceLock::new();
+    static LIVE_INPUT_STATE: OnceLock<Mutex<LiveInputState>> = OnceLock::new();
+
+    #[derive(Debug, Default)]
+    struct LiveInputState {
+        consumed_sequence: u64,
+    }
+
+    impl LiveInputState {
+        fn consume(&mut self) -> u64 {
+            self.consumed_sequence += 1;
+            self.consumed_sequence
+        }
+    }
+
+    pub fn run(
+        report: &PlayerLaunchReport,
+        preview_frame: Option<LiveWindowFrame>,
+        display: Option<&PlayerDisplayConfig>,
+    ) -> Result<(), CliError> {
+        if let Some(frame) = preview_frame {
+            let _ = LIVE_FRAME.set(frame);
+        }
+        if let Some(display) = display {
+            let _ = SCALE_FILTER.set(display.scale_filter.clone());
+        }
+        let title = format!(
+            "AstraPlayer - {} {} ({})",
+            report.target, report.profile, report.platform
+        );
+        let title_wide = wide_null(&title);
+        let class_name = w!("AstraPlayerLiveWindow");
+        unsafe {
+            let module = GetModuleHandleW(None)?;
+            let instance = HINSTANCE(module.0);
+            let cursor = LoadCursorW(None, IDC_ARROW)?;
+            let window_class = WNDCLASSW {
+                style: CS_HREDRAW | CS_VREDRAW,
+                lpfnWndProc: Some(window_proc),
+                hInstance: instance,
+                hCursor: cursor,
+                hbrBackground: HBRUSH(ptr::null_mut()),
+                lpszClassName: class_name,
+                ..Default::default()
+            };
+            RegisterClassW(&window_class);
+            let style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+            let (window_width, window_height) = window_size_for_client(display);
+            let hwnd = CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                class_name,
+                PCWSTR(title_wide.as_ptr()),
+                style,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                window_width,
+                window_height,
+                None,
+                None,
+                Some(instance),
+                Some(ptr::null::<c_void>()),
+            )?;
+            let _ = ShowWindow(hwnd, SW_SHOW);
+            message_loop()
+        }
+    }
+
+    fn window_size_for_client(display: Option<&PlayerDisplayConfig>) -> (i32, i32) {
+        let client_width = display
+            .map(|config| config.original_resolution.width as i32)
+            .or_else(|| LIVE_FRAME.get().map(|frame| frame.width as i32))
+            .unwrap_or(960);
+        let client_height = display
+            .map(|config| config.original_resolution.height as i32)
+            .or_else(|| LIVE_FRAME.get().map(|frame| frame.height as i32))
+            .unwrap_or(540);
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: client_width,
+            bottom: client_height,
+        };
+        unsafe {
+            if AdjustWindowRectEx(
+                &mut rect,
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                false,
+                WINDOW_EX_STYLE::default(),
+            )
+            .is_ok()
+            {
+                return (rect.right - rect.left, rect.bottom - rect.top);
+            }
+        }
+        (client_width, client_height)
+    }
+
+    unsafe extern "system" fn window_proc(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        match message {
+            WM_PAINT => {
+                let mut paint = PAINTSTRUCT::default();
+                let hdc = BeginPaint(hwnd, &mut paint);
+                let background = CreateSolidBrush(rgb(0, 0, 0));
+                FillRect(hdc, &paint.rcPaint, background);
+                let _ = DeleteObject(background.into());
+
+                if let Some(frame) = LIVE_FRAME.get() {
+                    paint_frame(hwnd, hdc, frame);
+                } else {
+                    let accent = rgb(0, 196, 204);
+                    SetTextColor(hdc, accent);
+                    SetBkMode(hdc, TRANSPARENT);
+                    let title = wide_text("AstraPlayer");
+                    let subtitle = wide_text("no decodable package image asset");
+                    let _ = TextOutW(hdc, 48, 42, &title);
+                    let _ = TextOutW(hdc, 48, 82, &subtitle);
+                }
+                let _ = EndPaint(hwnd, &paint);
+                LRESULT(0)
+            }
+            WM_KEYUP => consume_input(hwnd, "key_up"),
+            WM_LBUTTONUP => consume_input(hwnd, "pointer_up"),
+            WM_DESTROY => {
+                PostQuitMessage(0);
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, message, wparam, lparam),
+        }
+    }
+
+    unsafe fn consume_input(hwnd: HWND, kind: &str) -> LRESULT {
+        let player_sequence = LIVE_INPUT_STATE
+            .get_or_init(|| Mutex::new(LiveInputState::default()))
+            .lock()
+            .map(|mut state| state.consume())
+            .unwrap_or(0);
+        emit_player_trace(&format!(
+            "level=TRACE event=astra.player.input.consumed source=win32.message kind={kind} player_sequence={player_sequence}"
+        ));
+        let _ = InvalidateRect(Some(hwnd), None, false);
+        LRESULT(0)
+    }
+
+    fn emit_player_trace(line: &str) {
+        tracing::trace!("{line}");
+        if std::env::var_os("ASTRA_PLAYER_TRACE").is_some() {
+            eprintln!("{line}");
+        }
+    }
+
+    unsafe fn paint_frame(
+        hwnd: HWND,
+        hdc: windows::Win32::Graphics::Gdi::HDC,
+        frame: &LiveWindowFrame,
+    ) {
+        let mut client = Default::default();
+        if GetClientRect(hwnd, &mut client).is_err() {
+            return;
+        }
+        let client_width = client.right - client.left;
+        let client_height = client.bottom - client.top;
+        if client_width <= 0 || client_height <= 0 || frame.width == 0 || frame.height == 0 {
+            return;
+        }
+        let stretch_mode = match SCALE_FILTER.get().map(String::as_str) {
+            Some("nearest") => COLORONCOLOR,
+            _ => HALFTONE,
+        };
+        let _ = SetStretchBltMode(hdc, stretch_mode);
+        let frame_aspect = frame.width as f32 / frame.height as f32;
+        let client_aspect = client_width as f32 / client_height as f32;
+        let (draw_width, draw_height) = if client_aspect > frame_aspect {
+            let height = client_height;
+            let width = (height as f32 * frame_aspect).round() as i32;
+            (width, height)
+        } else {
+            let width = client_width;
+            let height = (width as f32 / frame_aspect).round() as i32;
+            (width, height)
+        };
+        let draw_x = (client_width - draw_width) / 2;
+        let draw_y = (client_height - draw_height) / 2;
+        let bitmap_info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: frame.width as i32,
+                biHeight: -(frame.height as i32),
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let _ = StretchDIBits(
+            hdc,
+            draw_x,
+            draw_y,
+            draw_width,
+            draw_height,
+            0,
+            0,
+            frame.width as i32,
+            frame.height as i32,
+            Some(frame.bgra.as_ptr() as *const c_void),
+            &bitmap_info,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        );
+    }
+
+    unsafe fn message_loop() -> Result<(), CliError> {
+        let mut message = MSG::default();
+        loop {
+            let result = GetMessageW(&mut message, None, 0, 0);
+            if result.0 == -1 {
+                return Err("bundled player window message loop failed".into());
+            }
+            if result.0 == 0 {
+                return Ok(());
+            }
+            let _ = TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    }
+
+    fn wide_null(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn wide_text(value: &str) -> Vec<u16> {
+        value.encode_utf16().collect()
+    }
+
+    fn rgb(red: u8, green: u8, blue: u8) -> COLORREF {
+        COLORREF(red as u32 | ((green as u32) << 8) | ((blue as u32) << 16))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+mod live_window {
+    use super::{CliError, LiveWindowFrame, PlayerDisplayConfig, PlayerLaunchReport};
+
+    pub fn run(
+        _report: &PlayerLaunchReport,
+        _preview_frame: Option<LiveWindowFrame>,
+        _display: Option<&PlayerDisplayConfig>,
+    ) -> Result<(), CliError> {
+        Err("bundled live player window is only available on Windows".into())
+    }
 }
 
 struct PlayerRouteArgs {
@@ -2574,6 +3480,20 @@ fn validate_player_config(
         || manifest.package != config.package
     {
         return Err("player config does not match bundle manifest".into());
+    }
+    validate_player_display_requirement(&manifest.target, config)?;
+    Ok(())
+}
+
+fn validate_player_display_requirement(
+    target: &str,
+    config: &PlayerConfig,
+) -> Result<(), CliError> {
+    if target.starts_with("tsuinosora-") && config.display.is_none() {
+        return Err("TsuiNoSora live player requires project display config".into());
+    }
+    if let Some(display) = &config.display {
+        validate_player_display_config(display)?;
     }
     Ok(())
 }

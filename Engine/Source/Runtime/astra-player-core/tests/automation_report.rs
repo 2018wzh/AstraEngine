@@ -1,6 +1,7 @@
 use astra_player_core::{
     PlayerAudioMeterEvidence, PlayerAutomationScript, PlayerAutomationStatus, PlayerAutomationStep,
-    PlayerAutomationValidator, PlayerInputEvent, PlayerInputTranscript, PlayerPlatform,
+    PlayerAutomationValidator, PlayerInputConsumptionEvidence, PlayerInputEvent,
+    PlayerInputTranscript, PlayerPlatform, PlayerVisualComparisonEvidence,
     PlayerVisualRegionEvidence,
 };
 
@@ -16,6 +17,9 @@ fn player_automation_report_passes_for_live_windows_input() {
     assert!(report.full_playable_passed());
     assert!(report.checks.iter().any(|check| {
         check.id == "player.live_input_surface" && check.status == PlayerAutomationStatus::Pass
+    }));
+    assert!(report.checks.iter().any(|check| {
+        check.id == "player.visual_comparison" && check.status == PlayerAutomationStatus::Pass
     }));
 }
 
@@ -34,6 +38,44 @@ fn player_automation_report_blocks_direct_route_scenario_input() {
                 .diagnostic
                 .as_ref()
                 .is_some_and(|diagnostic| diagnostic.code == "ASTRA_PLAYER_FORBIDDEN_INPUT_SURFACE")
+    }));
+    assert!(!report.full_playable_passed());
+}
+
+#[test]
+fn player_automation_report_blocks_missing_visual_comparison() {
+    let script = script(PlayerPlatform::Windows);
+    let mut transcript = transcript(PlayerPlatform::Windows, "sendinput.mouse");
+    transcript.visual_comparison = None;
+
+    let report = PlayerAutomationValidator.validate(&script, &transcript);
+
+    assert_eq!(report.status, PlayerAutomationStatus::Blocked);
+    assert!(report.checks.iter().any(|check| {
+        check.id == "player.visual_comparison"
+            && check.status == PlayerAutomationStatus::Blocked
+            && check.diagnostic.as_ref().is_some_and(|diagnostic| {
+                diagnostic.code == "ASTRA_PLAYER_VISUAL_COMPARISON_MISSING"
+            })
+    }));
+    assert!(!report.full_playable_passed());
+}
+
+#[test]
+fn player_automation_report_blocks_missing_consumed_trace() {
+    let script = script(PlayerPlatform::Windows);
+    let mut transcript = transcript(PlayerPlatform::Windows, "sendinput.mouse");
+    transcript.input_consumption.clear();
+
+    let report = PlayerAutomationValidator.validate(&script, &transcript);
+
+    assert_eq!(report.status, PlayerAutomationStatus::Blocked);
+    assert!(report.checks.iter().any(|check| {
+        check.id == "player.input_consumption_trace"
+            && check.status == PlayerAutomationStatus::Blocked
+            && check.diagnostic.as_ref().is_some_and(|diagnostic| {
+                diagnostic.code == "ASTRA_PLAYER_INPUT_CONSUMPTION_TRACE_MISSING"
+            })
     }));
     assert!(!report.full_playable_passed());
 }
@@ -70,6 +112,16 @@ fn transcript(platform: PlayerPlatform, source: &str) -> PlayerInputTranscript {
             sequence: 1,
             route_id: Some("route.opening".to_string()),
         }],
+        input_consumption: vec![PlayerInputConsumptionEvidence {
+            input_sequence: 1,
+            player_sequence: 1,
+            source: "player_host.trace".to_string(),
+            kind: "pointer_up".to_string(),
+            trace_event: "astra.player.input.consumed".to_string(),
+            trace_hash: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                .to_string(),
+            route_id: Some("route.opening".to_string()),
+        }],
         visual_regions: vec![PlayerVisualRegionEvidence {
             region_id: "stage".to_string(),
             before_hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -84,6 +136,12 @@ fn transcript(platform: PlayerPlatform, source: &str) -> PlayerInputTranscript {
             peak_dbfs: -12.0,
             rms_dbfs: -24.0,
         },
+        visual_comparison: Some(PlayerVisualComparisonEvidence {
+            report_hash: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                .to_string(),
+            checkpoint_count: 1,
+            status: PlayerAutomationStatus::Pass,
+        }),
         route_coverage: vec!["route.opening".to_string()],
     }
 }

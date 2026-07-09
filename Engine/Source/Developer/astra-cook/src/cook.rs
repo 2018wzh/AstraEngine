@@ -71,17 +71,7 @@ impl DefaultCookProcessor {
             &request.processor_version,
             &request.target_profile,
         );
-        let payload = serde_json::json!({
-            "schema": "astra.cooked_asset.v1",
-            "asset_id": request.sidecar.id.to_string(),
-            "asset_type": request.sidecar.asset_type,
-            "target_profile": request.target_profile,
-            "source_hash": source_hash.to_string(),
-            "sidecar_hash": sidecar_hash.to_string(),
-            "cache_key": cache_key.to_string(),
-        })
-        .to_string()
-        .into_bytes();
+        let payload = request.source_bytes.clone();
         Ok(CookArtifact {
             schema: "astra.cook_artifact.v1".to_string(),
             asset_id: request.sidecar.id.to_string(),

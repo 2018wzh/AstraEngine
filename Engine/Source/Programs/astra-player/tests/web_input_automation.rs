@@ -1,7 +1,8 @@
 use astra_player::{WebCdpInputHost, WEB_CDP_KEYBOARD, WEB_CDP_MOUSE};
 use astra_player_core::{
     PlayerAudioMeterEvidence, PlayerAutomationScript, PlayerAutomationStatus, PlayerAutomationStep,
-    PlayerInputEvent, PlayerInputTranscript, PlayerPlatform, PlayerVisualRegionEvidence,
+    PlayerInputConsumptionEvidence, PlayerInputEvent, PlayerInputTranscript, PlayerPlatform,
+    PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
 };
 
 #[test]
@@ -65,13 +66,29 @@ fn transcript(sources: Vec<&str>) -> PlayerInputTranscript {
         package_hash: "sha256:4444444444444444444444444444444444444444444444444444444444444444"
             .to_string(),
         events: sources
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(index, source)| PlayerInputEvent {
                 step_id: format!("step-{index}"),
-                source: source.to_string(),
+                source: (*source).to_string(),
                 kind: "input".to_string(),
                 sequence: (index + 1) as u64,
+                route_id: Some("opening".to_string()),
+            })
+            .collect(),
+        input_consumption: sources
+            .into_iter()
+            .enumerate()
+            .filter(|(_, source)| matches!(*source, WEB_CDP_MOUSE | WEB_CDP_KEYBOARD))
+            .map(|(index, _)| PlayerInputConsumptionEvidence {
+                input_sequence: (index + 1) as u64,
+                player_sequence: (index + 1) as u64,
+                source: "browser_host.trace".to_string(),
+                kind: "input".to_string(),
+                trace_event: "astra.player.input.consumed".to_string(),
+                trace_hash:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string(),
                 route_id: Some("opening".to_string()),
             })
             .collect(),
@@ -89,6 +106,12 @@ fn transcript(sources: Vec<&str>) -> PlayerInputTranscript {
             peak_dbfs: -9.0,
             rms_dbfs: -21.0,
         },
+        visual_comparison: Some(PlayerVisualComparisonEvidence {
+            report_hash: "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+                .to_string(),
+            checkpoint_count: 2,
+            status: PlayerAutomationStatus::Pass,
+        }),
         route_coverage: vec!["opening".to_string()],
     }
 }

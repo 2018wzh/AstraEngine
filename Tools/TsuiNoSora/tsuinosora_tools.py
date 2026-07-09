@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import re
 import shutil
 import struct
@@ -76,8 +77,86 @@ DEMO_SLICE_CONFIG_TEMPLATE = {
         {"alias": "data", "path": "Examples/TsuiNoSora/.local/projectorrays-full-data"},
         {"alias": "casts", "path": "Examples/TsuiNoSora/.local/projectorrays-full-casts"},
     ],
+    "projectorrays_palette_sidecars": ["Examples/TsuiNoSora/.local/palettes/system-win-d5.palette.json"],
     "player_automation_report": "Examples/TsuiNoSora/.local/work/reports/live_player_report.json",
+    "player_automation": {
+        "schema": "astra.player_live_automation_config.v1",
+        "backend": "windows_sendinput",
+        "timeout_ms": 60000,
+    },
     "require_full_resource_conversion": True,
+    "require_visual_screenshot_acceptance": True,
+    "visual_capture": {
+        "schema": "tsuinosora.visual_capture_config.v1",
+        "thresholds": {"max_mean_delta": 4.0, "max_changed_ratio": 0.05},
+        "capture_automation": {
+            "schema": "tsuinosora.visual_capture_automation.v1",
+            "backend": "windows_sendinput",
+            "sessions": [
+                {
+                    "role": "original",
+                    "launch": {
+                        "command": ["Examples/TsuiNoSora/.local/original/TsuiNoSora.exe"],
+                        "working_directory": "Examples/TsuiNoSora/.local/original",
+                    },
+                    "window_match": {"title_contains": "TsuiNoSora", "process_name": "TsuiNoSora.exe"},
+                    "startup_timeout_ms": 15000,
+                },
+                {
+                    "role": "demo",
+                    "launch": {
+                        "command": ["AstraPlayer.exe"],
+                        "working_directory": "Examples/TsuiNoSora/.local/work/bundles/internal-classic/windows",
+                    },
+                    "window_match": {"title_contains": "AstraPlayer", "process_name": "AstraPlayer.exe"},
+                    "startup_timeout_ms": 60000,
+                },
+            ],
+            "input_scripts": [
+                {
+                    "checkpoint_id": "title",
+                    "steps": [
+                        {"kind": "wait", "duration_ms": 1000},
+                        {"kind": "capture", "role": "original"},
+                        {"kind": "capture", "role": "demo"},
+                    ],
+                },
+                {
+                    "checkpoint_id": "first_dialogue",
+                    "steps": [
+                        {"kind": "key", "key": "enter"},
+                        {"kind": "wait", "duration_ms": 1000},
+                        {"kind": "capture", "role": "original"},
+                        {"kind": "capture", "role": "demo"},
+                    ],
+                },
+            ],
+        },
+        "checkpoints": [
+            {
+                "checkpoint_id": "title",
+                "route_id": "classic.title",
+                "required": True,
+                "original_screenshot": "screenshots/original/title.png",
+                "demo_screenshot": "screenshots/demo/title.png",
+                "regions": [
+                    {"region_id": "full_frame", "x": 0, "y": 0, "width": 0, "height": 0, "required": True}
+                ],
+            },
+            {
+                "checkpoint_id": "first_dialogue",
+                "route_id": "classic.main",
+                "required": True,
+                "original_screenshot": "screenshots/original/first_dialogue.png",
+                "demo_screenshot": "screenshots/demo/first_dialogue.png",
+                "regions": [
+                    {"region_id": "background_viewport", "x": 0, "y": 0, "width": 0, "height": 0, "required": True},
+                    {"region_id": "text_window", "x": 0, "y": 0, "width": 0, "height": 0, "required": True},
+                ],
+            },
+        ],
+        "visual_reviews": [],
+    },
 }
 DIRECTOR_CAST_MEMBER_METADATA_SCHEMA = "tsuinosora.director_cast_member_metadata.v1"
 CAST_MEMBER_KINDS = {
@@ -116,6 +195,14 @@ SCRIPT_ROUTE_RE = re.compile(
     r"(?:.*?\bchoices?\s*[:=]?\s*(?P<choices>[A-Za-z0-9_., -]+))?",
     re.IGNORECASE,
 )
+PROJECTORRAYS_SCRIPT_SOURCE_RE = re.compile(
+    r"^(BehaviorScript|MovieScript|CastScript|ParentScript)\s+(\d+)(?:\s+-.*)?$",
+    re.IGNORECASE,
+)
+PROJECTORRAYS_GO_ROUTE_SOURCE_RE = re.compile(
+    r"^(BehaviorScript|MovieScript|CastScript|ParentScript)\s+\d+\s+-\s*GO\[([A-Za-z0-9_]+)\]$",
+    re.IGNORECASE,
+)
 PROJECTORRAYS_REQUIRED_CHUNK_ROLES = {
     "BITD": "bitmap_or_palette_backed_image",
     "CASt": "cast_member_metadata",
@@ -146,6 +233,29 @@ PROJECTORRAYS_REQUIRED_CHUNK_ROLES = {
     "VWSC": "view_score",
     "XTRl": "xtra_list",
     "cupt": "cue_point_table",
+}
+PROJECTORRAYS_JSON_METADATA_CHUNKS = {
+    "CAS_",
+    "CASt",
+    "Cinf",
+    "DRCF",
+    "FCOL",
+    "FXmp",
+    "Fmap",
+    "KEY_",
+    "Lctx",
+    "Lnam",
+    "MCsL",
+    "SCRF",
+    "Sord",
+    "VERS",
+    "VWFI",
+    "VWLB",
+    "VWSC",
+    "XTRl",
+    "cupt",
+    "imap",
+    "mmap",
 }
 SCRIPT_SOURCE_MAP_FORBIDDEN_KEYS = {
     "body",
@@ -297,6 +407,1980 @@ def build_visual_reference_report(
             "commercial_movie",
         ],
     }
+
+
+def build_visual_screenshot_capture_report(
+    work_root: Path | str,
+    visual_capture: dict,
+    automation_runner=None,
+) -> dict:
+    work_root = Path(work_root)
+    diagnostics = []
+    checkpoints = []
+    thresholds = visual_capture.get("thresholds", {}) if isinstance(visual_capture, dict) else {}
+    if not isinstance(visual_capture, dict) or visual_capture.get("schema") != "tsuinosora.visual_capture_config.v1":
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_CONFIG_INVALID",
+                "message": "visual_capture must use schema tsuinosora.visual_capture_config.v1",
+            }
+        )
+        visual_capture = {}
+    raw_checkpoints = visual_capture.get("checkpoints", []) if isinstance(visual_capture, dict) else []
+    if not isinstance(raw_checkpoints, list) or not raw_checkpoints:
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_CHECKPOINTS_MISSING",
+                "message": "visual screenshot acceptance requires at least one checkpoint",
+            }
+        )
+        raw_checkpoints = []
+    automation_execution = _execute_visual_capture_automation(
+        work_root,
+        visual_capture,
+        automation_runner,
+        diagnostics,
+    )
+    for raw in raw_checkpoints:
+        checkpoint, checkpoint_diagnostics = _visual_capture_checkpoint(work_root, raw)
+        diagnostics.extend(checkpoint_diagnostics)
+        checkpoints.append(checkpoint)
+    automation = _visual_capture_automation_record(
+        visual_capture.get("capture_automation") if isinstance(visual_capture, dict) else None,
+        checkpoints,
+        diagnostics,
+        automation_execution,
+    )
+    report = {
+        "schema": "tsuinosora.visual_screenshot_capture_report.v1",
+        "status": "blocked" if diagnostics else "pass",
+        "thresholds": {
+            "max_mean_delta": _float_threshold(thresholds, "max_mean_delta", 4.0),
+            "max_changed_ratio": _float_threshold(thresholds, "max_changed_ratio", 0.05),
+        },
+        "automation": automation,
+        "checkpoints": checkpoints,
+        "diagnostics": _dedupe_diagnostics(diagnostics),
+        "redaction": {
+            "paths": "work_root_relative_only",
+            "payload": "omitted",
+            "commercial_text": "omitted",
+            "screenshots": "omitted",
+            "audio": "omitted",
+            "movie": "omitted",
+        },
+    }
+    if _report_has_path_leak(report):
+        report["status"] = "blocked"
+        report["diagnostics"].append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_REPORT_PATH_LEAK",
+                "message": "visual screenshot capture report contains a local path-like value",
+            }
+        )
+        report["diagnostics"] = _dedupe_diagnostics(report["diagnostics"])
+    _write_json(work_root / "reports" / "visual_screenshot_capture_report.json", report)
+    return report
+
+
+def _execute_visual_capture_automation(
+    work_root: Path,
+    visual_capture: dict,
+    automation_runner,
+    diagnostics: list[dict],
+) -> dict:
+    if not isinstance(visual_capture, dict) or not isinstance(visual_capture.get("capture_automation"), dict):
+        return {
+            "status": "not_configured",
+            "captured_checkpoint_count": 0,
+            "screenshot_count": 0,
+            "transcript_hash": "",
+        }
+    if automation_runner is None:
+        return {
+            "status": "not_run",
+            "captured_checkpoint_count": 0,
+            "screenshot_count": 0,
+            "transcript_hash": "",
+        }
+    try:
+        result = automation_runner(work_root, visual_capture)
+    except Exception:
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_EXECUTION_FAILED",
+                "message": "visual capture automation runner failed before producing sanitized evidence",
+            }
+        )
+        return {
+            "status": "blocked",
+            "captured_checkpoint_count": 0,
+            "screenshot_count": 0,
+            "transcript_hash": "",
+        }
+    return _sanitize_visual_capture_automation_execution(result, visual_capture, diagnostics)
+
+
+def _sanitize_visual_capture_automation_execution(
+    result: object,
+    visual_capture: dict,
+    diagnostics: list[dict],
+) -> dict:
+    if not isinstance(result, dict) or result.get("schema") != "tsuinosora.visual_capture_automation_execution.v1":
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_EXECUTION_INVALID",
+                "message": "visual capture automation runner must return execution evidence schema v1",
+            }
+        )
+        return {
+            "status": "blocked",
+            "captured_checkpoint_count": 0,
+            "screenshot_count": 0,
+            "transcript_hash": "",
+            "capture_roles": [],
+        }
+    status = str(result.get("status", "blocked"))
+    if status not in {"pass", "blocked"}:
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_EXECUTION_STATUS_INVALID",
+                "message": "visual capture automation execution status must be pass or blocked",
+            }
+        )
+        status = "blocked"
+    captured_checkpoint_count = _non_negative_int(result.get("captured_checkpoint_count", 0))
+    screenshot_count = _non_negative_int(result.get("screenshot_count", 0))
+    captures = _visual_capture_execution_captures(result.get("captures"), diagnostics)
+    capture_roles = _visual_capture_execution_role_summary(captures)
+    if status == "pass":
+        coverage_diagnostics = _visual_capture_execution_coverage_diagnostics(visual_capture, capture_roles)
+        if coverage_diagnostics:
+            diagnostics.extend(coverage_diagnostics)
+            status = "blocked"
+    transcript_hash = str(result.get("transcript_hash", ""))
+    if status == "pass" and not _is_sha256(transcript_hash):
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_TRANSCRIPT_HASH_INVALID",
+                "message": "passing visual capture automation requires a transcript sha256",
+            }
+        )
+        status = "blocked"
+        transcript_hash = ""
+    for diagnostic in result.get("diagnostics", []):
+        sanitized = _sanitize_visual_capture_automation_diagnostic(diagnostic)
+        if sanitized:
+            diagnostics.append(sanitized)
+    if status != "pass":
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_EXECUTION_BLOCKED",
+                "message": "visual capture automation did not produce passing live capture evidence",
+            }
+        )
+    return {
+        "status": status,
+        "captured_checkpoint_count": captured_checkpoint_count,
+        "screenshot_count": screenshot_count,
+        "transcript_hash": transcript_hash if status == "pass" else "",
+        "capture_roles": capture_roles,
+    }
+
+
+def _visual_capture_execution_captures(raw: object, diagnostics: list[dict]) -> list[dict]:
+    if not isinstance(raw, list) or not raw:
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_CAPTURES_MISSING",
+                "message": "passing visual capture automation requires per-role capture evidence",
+            }
+        )
+        return []
+    captures = []
+    for item in raw:
+        if not isinstance(item, dict):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_CAPTURE_INVALID",
+                    "message": "visual capture automation capture evidence must be an object",
+                }
+            )
+            continue
+        checkpoint_id = str(item.get("checkpoint_id", ""))
+        role = str(item.get("role", ""))
+        digest = str(item.get("hash", ""))
+        if not _is_safe_symbol(checkpoint_id) or role not in {"original", "demo"} or not _is_sha256(digest):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_CAPTURE_INVALID",
+                    "checkpoint_id": checkpoint_id if _is_safe_symbol(checkpoint_id) else "unknown",
+                    "role": role if role in {"original", "demo"} else "unknown",
+                    "message": "visual capture automation capture evidence must use safe checkpoint id, role and hash",
+                }
+            )
+            continue
+        captures.append({"checkpoint_id": checkpoint_id, "role": role, "hash": digest})
+    return captures
+
+
+def _visual_capture_execution_role_summary(captures: list[dict]) -> list[dict]:
+    roles_by_checkpoint: dict[str, set[str]] = {}
+    for capture in captures:
+        roles_by_checkpoint.setdefault(capture["checkpoint_id"], set()).add(capture["role"])
+    return [
+        {"checkpoint_id": checkpoint_id, "roles": sorted(roles)}
+        for checkpoint_id, roles in sorted(roles_by_checkpoint.items())
+    ]
+
+
+def _visual_capture_execution_coverage_diagnostics(visual_capture: dict, capture_roles: list[dict]) -> list[dict]:
+    roles_by_checkpoint = {
+        str(item.get("checkpoint_id", "")): set(item.get("roles", []))
+        for item in capture_roles
+        if isinstance(item, dict)
+    }
+    diagnostics = []
+    raw_checkpoints = visual_capture.get("checkpoints", []) if isinstance(visual_capture, dict) else []
+    if not isinstance(raw_checkpoints, list):
+        return diagnostics
+    for checkpoint in raw_checkpoints:
+        if not isinstance(checkpoint, dict) or not bool(checkpoint.get("required", True)):
+            continue
+        checkpoint_id = str(checkpoint.get("checkpoint_id", ""))
+        if not _is_safe_symbol(checkpoint_id):
+            continue
+        missing_roles = {"original", "demo"} - roles_by_checkpoint.get(checkpoint_id, set())
+        for role in sorted(missing_roles):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_ROLE_CAPTURE_MISSING",
+                    "checkpoint_id": checkpoint_id,
+                    "role": role,
+                    "message": "required visual checkpoint is missing same-run capture evidence for a role",
+                }
+            )
+    return diagnostics
+
+
+def _sanitize_visual_capture_automation_diagnostic(raw: object) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    code = str(raw.get("code", "TSUI_VISUAL_CAPTURE_AUTOMATION_DIAGNOSTIC"))
+    if not _is_safe_symbol(code):
+        code = "TSUI_VISUAL_CAPTURE_AUTOMATION_DIAGNOSTIC"
+    out = {"code": code}
+    for key in ("checkpoint_id", "route_id", "region_id", "role", "backend", "step_kind", "phase"):
+        value = raw.get(key)
+        if isinstance(value, str) and _is_safe_symbol(value):
+            out[key] = value
+    for key in ("exit_code", "count", "duration_ms"):
+        if key in raw:
+            out[key] = _non_negative_int(raw.get(key))
+    message = str(raw.get("message", "visual capture automation diagnostic"))
+    if _looks_like_local_path(message):
+        message = "visual capture automation reported a blocked condition"
+    out["message"] = message
+    return out
+
+
+def _visual_capture_automation_record(
+    raw: object,
+    checkpoints: list[dict],
+    diagnostics: list[dict],
+    execution: dict | None = None,
+) -> dict:
+    execution = execution or {
+        "status": "not_run",
+        "captured_checkpoint_count": 0,
+        "screenshot_count": 0,
+        "transcript_hash": "",
+        "capture_roles": [],
+    }
+    if raw is None:
+        return {
+            "schema": "tsuinosora.visual_capture_automation_report.v1",
+            "configured": False,
+            "backend": "",
+            "session_roles": [],
+            "checkpoint_scripts": [],
+            "automation_hash": "",
+            "execution_status": "not_configured",
+            "captured_checkpoint_count": 0,
+            "screenshot_count": 0,
+            "transcript_hash": "",
+            "capture_roles": [],
+        }
+    if not isinstance(raw, dict) or raw.get("schema") != "tsuinosora.visual_capture_automation.v1":
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_CONFIG_INVALID",
+                "message": "capture_automation must use schema tsuinosora.visual_capture_automation.v1",
+            }
+        )
+        raw = {}
+    backend = str(raw.get("backend", ""))
+    if backend != "windows_sendinput":
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_BACKEND_INVALID",
+                "message": "capture automation backend must be windows_sendinput for this milestone",
+            }
+        )
+        backend = "unknown"
+    sessions = _visual_capture_automation_sessions(raw.get("sessions"), diagnostics)
+    checkpoint_scripts = _visual_capture_automation_scripts(
+        raw.get("input_scripts"),
+        {str(checkpoint.get("checkpoint_id", "")) for checkpoint in checkpoints},
+        diagnostics,
+    )
+    automation_hash = _sha256_bytes(
+        json.dumps(raw, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    )
+    return {
+        "schema": "tsuinosora.visual_capture_automation_report.v1",
+        "configured": True,
+        "backend": backend,
+        "session_roles": [session["role"] for session in sessions],
+        "checkpoint_scripts": checkpoint_scripts,
+        "automation_hash": automation_hash,
+        "execution_status": str(execution.get("status", "not_run")),
+        "captured_checkpoint_count": _non_negative_int(execution.get("captured_checkpoint_count", 0)),
+        "screenshot_count": _non_negative_int(execution.get("screenshot_count", 0)),
+        "transcript_hash": str(execution.get("transcript_hash", "")),
+        "capture_roles": execution.get("capture_roles", []),
+    }
+
+
+def _visual_capture_automation_sessions(raw: object, diagnostics: list[dict]) -> list[dict]:
+    if not isinstance(raw, list) or not raw:
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_SESSIONS_MISSING",
+                "message": "capture automation requires original and demo sessions",
+            }
+        )
+        return []
+    sessions = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_SESSION_INVALID",
+                    "message": "capture automation session must be an object",
+                }
+            )
+            continue
+        role = str(item.get("role", ""))
+        if role not in {"original", "demo"}:
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_SESSION_ROLE_INVALID",
+                    "role": role or "unknown",
+                    "message": "capture automation session role must be original or demo",
+                }
+            )
+            continue
+        if role in seen:
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_SESSION_DUPLICATE",
+                    "role": role,
+                    "message": "capture automation session role is duplicated",
+                }
+            )
+            continue
+        seen.add(role)
+        launch = item.get("launch")
+        if not isinstance(launch, dict):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_LAUNCH_INVALID",
+                    "role": role,
+                    "message": "capture automation launch command must be a non-empty string list",
+                }
+            )
+            launch = {}
+        elif not _string_list(launch.get("command")):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_LAUNCH_INVALID",
+                    "role": role,
+                    "message": "capture automation launch command must be a non-empty string list",
+                }
+            )
+        if launch.get("working_directory") is not None and not isinstance(launch.get("working_directory"), str):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_LAUNCH_INVALID",
+                    "role": role,
+                    "message": "capture automation working_directory must be a string when present",
+                }
+            )
+        environment = launch.get("environment") if isinstance(launch, dict) else None
+        if environment is not None and (
+            not isinstance(environment, dict)
+            or any(not isinstance(key, str) or not isinstance(value, str) for key, value in environment.items())
+        ):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_LAUNCH_ENVIRONMENT_INVALID",
+                    "role": role,
+                    "message": "capture automation launch environment must be a string map when present",
+                }
+            )
+        window_match = item.get("window_match")
+        if not isinstance(window_match, dict) or not any(
+            isinstance(window_match.get(key), str)
+            for key in ("title_contains", "process_name", "class_name")
+        ):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_WINDOW_MATCH_INVALID",
+                    "role": role,
+                    "message": "capture automation window_match must identify a title, process or class",
+                }
+            )
+        sessions.append({"role": role})
+    missing_roles = {"original", "demo"} - seen
+    for role in sorted(missing_roles):
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_SESSION_MISSING",
+                "role": role,
+                "message": "capture automation requires both original and demo sessions",
+            }
+        )
+    return sessions
+
+
+def _visual_capture_automation_scripts(
+    raw: object,
+    checkpoint_ids: set[str],
+    diagnostics: list[dict],
+) -> list[dict]:
+    if not isinstance(raw, list) or not raw:
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_INPUT_SCRIPTS_MISSING",
+                "message": "capture automation requires checkpoint input scripts",
+            }
+        )
+        return []
+    scripts = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_INPUT_SCRIPT_INVALID",
+                    "message": "capture automation input script must be an object",
+                }
+            )
+            continue
+        checkpoint_id = str(item.get("checkpoint_id", ""))
+        if not _is_safe_symbol(checkpoint_id) or checkpoint_id not in checkpoint_ids:
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_CHECKPOINT_INVALID",
+                    "checkpoint_id": checkpoint_id or "unknown",
+                    "message": "capture automation input script must target a declared checkpoint",
+                }
+            )
+            continue
+        if checkpoint_id in seen:
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_CHECKPOINT_DUPLICATE",
+                    "checkpoint_id": checkpoint_id,
+                    "message": "capture automation input script checkpoint is duplicated",
+                }
+            )
+            continue
+        seen.add(checkpoint_id)
+        steps = item.get("steps")
+        if not isinstance(steps, list) or not steps:
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_STEPS_MISSING",
+                    "checkpoint_id": checkpoint_id,
+                    "message": "capture automation input script requires at least one step",
+                }
+            )
+            steps = []
+        step_kinds = []
+        for step in steps:
+            if not isinstance(step, dict):
+                diagnostics.append(
+                    {
+                        "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_STEP_INVALID",
+                        "checkpoint_id": checkpoint_id,
+                        "message": "capture automation step must be an object",
+                    }
+                )
+                continue
+            kind = str(step.get("kind", ""))
+            if kind not in {"wait", "focus", "key", "mouse", "capture"}:
+                diagnostics.append(
+                    {
+                        "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_STEP_KIND_INVALID",
+                        "checkpoint_id": checkpoint_id,
+                        "message": "capture automation step kind is not allowed",
+                    }
+                )
+                continue
+            step_kinds.append(kind)
+        scripts.append(
+            {
+                "checkpoint_id": checkpoint_id,
+                "step_count": len(step_kinds),
+                "step_kinds": step_kinds,
+            }
+        )
+    for checkpoint_id in sorted(checkpoint_ids - seen):
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_CHECKPOINT_MISSING",
+                "checkpoint_id": checkpoint_id,
+                "message": "capture automation must provide an input script for every visual checkpoint",
+            }
+        )
+    return scripts
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    strings = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            return []
+        strings.append(item)
+    return strings
+
+
+def _visual_capture_launch_environment(base_env: dict[str, str], launch: object) -> dict[str, str]:
+    merged = dict(base_env)
+    if not isinstance(launch, dict):
+        return merged
+    raw = launch.get("environment")
+    if not isinstance(raw, dict):
+        return merged
+    for key, value in raw.items():
+        if isinstance(key, str) and key and isinstance(value, str):
+            merged[key] = value
+    return merged
+
+
+def _resolve_visual_capture_launch_command(command: list[str], cwd_arg: str | None) -> list[str]:
+    resolved = list(command)
+    if not resolved:
+        return resolved
+    executable = Path(resolved[0])
+    if executable.is_absolute():
+        return resolved
+    candidates: list[Path] = []
+    if cwd_arg:
+        candidates.append(Path(cwd_arg) / executable)
+    candidates.append(executable)
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                resolved[0] = str(candidate.resolve())
+                return resolved
+        except OSError:
+            continue
+    return resolved
+
+
+def _visual_capture_project_resolution(work_root: Path) -> tuple[int, int] | None:
+    project = work_root / "nativevn" / "project.yaml"
+    if not project.is_file():
+        return None
+    try:
+        text = project.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(
+        r"original_resolution:\s*\n\s*width:\s*(\d+)\s*\n\s*height:\s*(\d+)",
+        text,
+    )
+    if not match:
+        return None
+    width = int(match.group(1))
+    height = int(match.group(2))
+    if 0 < width <= 16384 and 0 < height <= 16384:
+        return (width, height)
+    return None
+
+
+def _visual_capture_project_scale_filter(work_root: Path) -> str:
+    project = work_root / "nativevn" / "project.yaml"
+    if not project.is_file():
+        return "linear"
+    try:
+        text = project.read_text(encoding="utf-8")
+    except OSError:
+        return "linear"
+    match = re.search(r"scale_filter:\s*([A-Za-z0-9_-]+)", text)
+    value = match.group(1) if match else "linear"
+    return value if value in {"nearest", "linear"} else "linear"
+
+
+def _normalize_visual_capture_image(image: dict, resolution: tuple[int, int] | None, scale_filter: str) -> dict:
+    if not resolution:
+        return image
+    target_width, target_height = resolution
+    width = int(image.get("width", 0))
+    height = int(image.get("height", 0))
+    rgba = image.get("rgba", b"")
+    if width == target_width and height == target_height:
+        return image
+    if width <= 0 or height <= 0 or len(rgba) != width * height * 4:
+        return image
+    crop = _visual_nonblank_bbox(rgba, width, height)
+    if crop is None:
+        return image
+    x, y, crop_width, crop_height = crop
+    if crop_width >= target_width and crop_height >= target_height and (
+        crop_width - target_width <= 4 and crop_height - target_height <= 4
+    ):
+        x += (crop_width - target_width) // 2
+        y += (crop_height - target_height) // 2
+        crop_width = target_width
+        crop_height = target_height
+    cropped = _rgba_crop_bytes(rgba, width, height, x, y, crop_width, crop_height)
+    if crop_width != target_width or crop_height != target_height:
+        cropped = _resize_rgba_bytes(cropped, crop_width, crop_height, target_width, target_height, scale_filter)
+    return {"width": target_width, "height": target_height, "rgba": cropped}
+
+
+def _visual_nonblank_bbox(rgba: bytes, width: int, height: int) -> tuple[int, int, int, int] | None:
+    min_x = width
+    min_y = height
+    max_x = -1
+    max_y = -1
+    for y in range(height):
+        row = y * width * 4
+        for x in range(width):
+            offset = row + x * 4
+            r, g, b, a = rgba[offset : offset + 4]
+            if a and (r > 8 or g > 8 or b > 8):
+                min_x = min(min_x, x)
+                min_y = min(min_y, y)
+                max_x = max(max_x, x)
+                max_y = max(max_y, y)
+    if max_x < min_x or max_y < min_y:
+        return None
+    return (min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
+
+
+def _rgba_crop_bytes(rgba: bytes, width: int, height: int, x: int, y: int, crop_width: int, crop_height: int) -> bytes:
+    if x < 0 or y < 0 or crop_width <= 0 or crop_height <= 0 or x + crop_width > width or y + crop_height > height:
+        return rgba
+    out = bytearray()
+    stride = width * 4
+    row_len = crop_width * 4
+    for row in range(y, y + crop_height):
+        start = row * stride + x * 4
+        out.extend(rgba[start : start + row_len])
+    return bytes(out)
+
+
+def _resize_rgba_bytes(
+    rgba: bytes,
+    width: int,
+    height: int,
+    target_width: int,
+    target_height: int,
+    scale_filter: str,
+) -> bytes:
+    if scale_filter == "nearest":
+        return _resize_rgba_nearest(rgba, width, height, target_width, target_height)
+    return _resize_rgba_linear(rgba, width, height, target_width, target_height)
+
+
+def _resize_rgba_nearest(rgba: bytes, width: int, height: int, target_width: int, target_height: int) -> bytes:
+    out = bytearray(target_width * target_height * 4)
+    for y in range(target_height):
+        src_y = min(height - 1, int((y + 0.5) * height / target_height))
+        for x in range(target_width):
+            src_x = min(width - 1, int((x + 0.5) * width / target_width))
+            src = (src_y * width + src_x) * 4
+            dst = (y * target_width + x) * 4
+            out[dst : dst + 4] = rgba[src : src + 4]
+    return bytes(out)
+
+
+def _resize_rgba_linear(rgba: bytes, width: int, height: int, target_width: int, target_height: int) -> bytes:
+    if target_width == 1:
+        x_scale = 0.0
+    else:
+        x_scale = (width - 1) / (target_width - 1)
+    if target_height == 1:
+        y_scale = 0.0
+    else:
+        y_scale = (height - 1) / (target_height - 1)
+    out = bytearray(target_width * target_height * 4)
+    for y in range(target_height):
+        src_y = y * y_scale
+        y0 = int(src_y)
+        y1 = min(height - 1, y0 + 1)
+        wy = src_y - y0
+        for x in range(target_width):
+            src_x = x * x_scale
+            x0 = int(src_x)
+            x1 = min(width - 1, x0 + 1)
+            wx = src_x - x0
+            dst = (y * target_width + x) * 4
+            for channel in range(4):
+                p00 = rgba[(y0 * width + x0) * 4 + channel]
+                p10 = rgba[(y0 * width + x1) * 4 + channel]
+                p01 = rgba[(y1 * width + x0) * 4 + channel]
+                p11 = rgba[(y1 * width + x1) * 4 + channel]
+                top = p00 * (1.0 - wx) + p10 * wx
+                bottom = p01 * (1.0 - wx) + p11 * wx
+                out[dst + channel] = round(top * (1.0 - wy) + bottom * wy)
+    return bytes(out)
+
+
+def run_visual_capture_automation(work_root: Path | str, visual_capture: dict) -> dict:
+    work_root = Path(work_root)
+    automation = visual_capture.get("capture_automation") if isinstance(visual_capture, dict) else None
+    if not isinstance(automation, dict):
+        return _visual_capture_automation_execution_report(
+            "blocked",
+            [],
+            [
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_CONFIG_INVALID",
+                    "message": "capture automation config is missing",
+                }
+            ],
+        )
+    backend = str(automation.get("backend", ""))
+    if backend != "windows_sendinput":
+        return _visual_capture_automation_execution_report(
+            "blocked",
+            [{"event": "backend_rejected", "backend": _safe_identifier(backend)}],
+            [
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_BACKEND_INVALID",
+                    "backend": backend if _is_safe_symbol(backend) else "unknown",
+                    "message": "capture automation backend must be windows_sendinput",
+                }
+            ],
+        )
+    if sys.platform != "win32":
+        return _visual_capture_automation_execution_report(
+            "blocked",
+            [{"event": "backend_unavailable", "backend": "windows_sendinput"}],
+            [
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_BACKEND_UNAVAILABLE",
+                    "backend": "windows_sendinput",
+                    "message": "windows_sendinput visual capture requires a Windows desktop session",
+                }
+            ],
+        )
+    return _WindowsSendInputVisualCaptureRunner(work_root, visual_capture).run()
+
+
+def _visual_capture_automation_execution_report(
+    status: str,
+    transcript: list[dict],
+    diagnostics: list[dict],
+    captured_checkpoint_count: int = 0,
+    screenshot_count: int = 0,
+) -> dict:
+    captures = [
+        {
+            "checkpoint_id": event["checkpoint_id"],
+            "role": event["role"],
+            "hash": event["hash"],
+        }
+        for event in transcript
+        if event.get("event") == "capture"
+        and _is_safe_symbol(str(event.get("checkpoint_id", "")))
+        and event.get("role") in {"original", "demo"}
+        and _is_sha256(str(event.get("hash", "")))
+    ]
+    return {
+        "schema": "tsuinosora.visual_capture_automation_execution.v1",
+        "status": status if status in {"pass", "blocked"} else "blocked",
+        "captured_checkpoint_count": _non_negative_int(captured_checkpoint_count),
+        "screenshot_count": _non_negative_int(screenshot_count),
+        "transcript_hash": _sha256_bytes(
+            json.dumps(transcript, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        ),
+        "captures": captures,
+        "diagnostics": _dedupe_diagnostics(diagnostics),
+    }
+
+
+class _WindowsSendInputVisualCaptureRunner:
+    def __init__(self, work_root: Path, visual_capture: dict):
+        self.work_root = work_root
+        self.visual_capture = visual_capture if isinstance(visual_capture, dict) else {}
+        self.automation = self.visual_capture.get("capture_automation", {})
+        self.api = _WindowsVisualCaptureApi()
+        self.output_resolution = _visual_capture_project_resolution(work_root)
+        self.scale_filter = _visual_capture_project_scale_filter(work_root)
+        self.sessions: dict[str, dict] = {}
+        self.transcript: list[dict] = []
+        self.diagnostics: list[dict] = []
+        self.captured_checkpoints: set[str] = set()
+        self.screenshot_count = 0
+
+    def run(self) -> dict:
+        try:
+            self._launch_sessions()
+            if not self.diagnostics:
+                self._run_scripts()
+        finally:
+            self._terminate_sessions()
+        return _visual_capture_automation_execution_report(
+            "blocked" if self.diagnostics else "pass",
+            self.transcript,
+            self.diagnostics,
+            len(self.captured_checkpoints),
+            self.screenshot_count,
+        )
+
+    def _launch_sessions(self) -> None:
+        sessions = self.automation.get("sessions", [])
+        if not isinstance(sessions, list) or not sessions:
+            self._diagnostic(
+                "TSUI_VISUAL_CAPTURE_AUTOMATION_SESSIONS_MISSING",
+                "capture automation requires sessions",
+            )
+            return
+        for raw in sessions:
+            if not isinstance(raw, dict):
+                self._diagnostic(
+                    "TSUI_VISUAL_CAPTURE_AUTOMATION_SESSION_INVALID",
+                    "capture automation session must be an object",
+                )
+                continue
+            role = str(raw.get("role", ""))
+            if role not in {"original", "demo"}:
+                self._diagnostic(
+                    "TSUI_VISUAL_CAPTURE_AUTOMATION_SESSION_ROLE_INVALID",
+                    "capture automation session role is invalid",
+                    role=role if _is_safe_symbol(role) else "unknown",
+                )
+                continue
+            launch = raw.get("launch", {})
+            command = _string_list(launch.get("command") if isinstance(launch, dict) else None)
+            if not command:
+                self._diagnostic(
+                    "TSUI_VISUAL_CAPTURE_AUTOMATION_LAUNCH_INVALID",
+                    "capture automation launch command is missing",
+                    role=role,
+                )
+                continue
+            cwd = launch.get("working_directory") if isinstance(launch, dict) else None
+            cwd_arg = str(cwd) if isinstance(cwd, str) and cwd else None
+            try:
+                process = subprocess.Popen(
+                    _resolve_visual_capture_launch_command(command, cwd_arg),
+                    cwd=cwd_arg,
+                    env=_visual_capture_launch_environment(os.environ, launch),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except (OSError, ValueError):
+                self._diagnostic(
+                    "TSUI_VISUAL_CAPTURE_AUTOMATION_LAUNCH_FAILED",
+                    "capture automation could not launch a session",
+                    role=role,
+                )
+                continue
+            self.sessions[role] = {
+                "role": role,
+                "process": process,
+                "window_match": raw.get("window_match", {}),
+                "startup_timeout_ms": _non_negative_int(raw.get("startup_timeout_ms", 15000)) or 15000,
+                "hwnd": 0,
+            }
+            self.transcript.append({"event": "launch", "role": role})
+        for role in ("original", "demo"):
+            if role not in self.sessions:
+                self._diagnostic(
+                    "TSUI_VISUAL_CAPTURE_AUTOMATION_SESSION_MISSING",
+                    "capture automation requires both original and demo sessions",
+                    role=role,
+                )
+        for session in list(self.sessions.values()):
+            self._wait_for_window(session)
+
+    def _wait_for_window(self, session: dict) -> None:
+        import time
+
+        timeout_ms = _non_negative_int(session.get("startup_timeout_ms", 15000)) or 15000
+        deadline = time.monotonic() + timeout_ms / 1000.0
+        process = session.get("process")
+        pid = int(getattr(process, "pid", 0))
+        while time.monotonic() < deadline:
+            hwnd = self.api.find_window(session.get("window_match", {}), pid)
+            if hwnd:
+                session["hwnd"] = hwnd
+                self.transcript.append({"event": "window_ready", "role": session["role"]})
+                return
+            if process is not None and process.poll() is not None:
+                self._diagnostic(
+                    "TSUI_VISUAL_CAPTURE_AUTOMATION_PROCESS_EXITED",
+                    "capture automation session exited before its window was available",
+                    role=session["role"],
+                    exit_code=max(int(process.returncode or 0), 0),
+                )
+                return
+            time.sleep(0.05)
+        self._diagnostic(
+            "TSUI_VISUAL_CAPTURE_AUTOMATION_WINDOW_MISSING",
+            "capture automation could not find the requested window",
+            role=session["role"],
+        )
+
+    def _run_scripts(self) -> None:
+        scripts = self.automation.get("input_scripts", [])
+        if not isinstance(scripts, list) or not scripts:
+            self._diagnostic(
+                "TSUI_VISUAL_CAPTURE_AUTOMATION_INPUT_SCRIPTS_MISSING",
+                "capture automation requires checkpoint input scripts",
+            )
+            return
+        checkpoints = self._checkpoints_by_id()
+        for script in scripts:
+            if not isinstance(script, dict):
+                self._diagnostic(
+                    "TSUI_VISUAL_CAPTURE_AUTOMATION_INPUT_SCRIPT_INVALID",
+                    "capture automation input script must be an object",
+                )
+                continue
+            checkpoint_id = str(script.get("checkpoint_id", ""))
+            if checkpoint_id not in checkpoints:
+                self._diagnostic(
+                    "TSUI_VISUAL_CAPTURE_AUTOMATION_CHECKPOINT_INVALID",
+                    "capture automation input script targets an unknown checkpoint",
+                    checkpoint_id=checkpoint_id if _is_safe_symbol(checkpoint_id) else "unknown",
+                )
+                continue
+            steps = script.get("steps", [])
+            if not isinstance(steps, list) or not steps:
+                self._diagnostic(
+                    "TSUI_VISUAL_CAPTURE_AUTOMATION_STEPS_MISSING",
+                    "capture automation input script requires steps",
+                    checkpoint_id=checkpoint_id,
+                )
+                continue
+            for step in steps:
+                if not isinstance(step, dict):
+                    self._diagnostic(
+                        "TSUI_VISUAL_CAPTURE_AUTOMATION_STEP_INVALID",
+                        "capture automation step must be an object",
+                        checkpoint_id=checkpoint_id,
+                    )
+                    continue
+                self._run_step(checkpoint_id, checkpoints[checkpoint_id], step)
+
+    def _run_step(self, checkpoint_id: str, checkpoint: dict, step: dict) -> None:
+        import time
+
+        kind = str(step.get("kind", ""))
+        if kind == "wait":
+            duration_ms = min(_non_negative_int(step.get("duration_ms", 0)), 30000)
+            time.sleep(duration_ms / 1000.0)
+            self.transcript.append({"event": "wait", "checkpoint_id": checkpoint_id, "duration_ms": duration_ms})
+            return
+        if kind == "focus":
+            for role in self._step_roles(step):
+                self._focus_role(role, checkpoint_id)
+            return
+        if kind == "key":
+            key = str(step.get("key", ""))
+            for role in self._step_roles(step):
+                if self._focus_role(role, checkpoint_id) and self.api.send_key(key):
+                    self.transcript.append({"event": "key", "checkpoint_id": checkpoint_id, "role": role, "key": _safe_identifier(key)})
+                else:
+                    self._diagnostic(
+                        "TSUI_VISUAL_CAPTURE_AUTOMATION_KEY_FAILED",
+                        "capture automation could not send a keyboard input",
+                        checkpoint_id=checkpoint_id,
+                        role=role,
+                        step_kind="key",
+                    )
+            return
+        if kind == "mouse":
+            for role in self._step_roles(step):
+                if self._focus_role(role, checkpoint_id) and self._send_mouse(role, checkpoint_id, step):
+                    button = str(step.get("button", "left"))
+                    self.transcript.append(
+                        {
+                            "event": "mouse",
+                            "checkpoint_id": checkpoint_id,
+                            "role": role,
+                            "button": _safe_identifier(button),
+                        }
+                    )
+                else:
+                    self._diagnostic(
+                        "TSUI_VISUAL_CAPTURE_AUTOMATION_MOUSE_FAILED",
+                        "capture automation could not send a mouse input",
+                        checkpoint_id=checkpoint_id,
+                        role=role,
+                        step_kind="mouse",
+                    )
+            return
+        if kind == "capture":
+            for role in self._step_roles(step):
+                self._capture_role(role, checkpoint_id, checkpoint)
+            return
+        self._diagnostic(
+            "TSUI_VISUAL_CAPTURE_AUTOMATION_STEP_KIND_INVALID",
+            "capture automation step kind is invalid",
+            checkpoint_id=checkpoint_id,
+            step_kind=kind if _is_safe_symbol(kind) else "unknown",
+        )
+
+    def _step_roles(self, step: dict) -> list[str]:
+        role = step.get("role")
+        if isinstance(role, str) and role in self.sessions:
+            return [role]
+        if isinstance(role, str) and role:
+            return []
+        return [role for role in ("original", "demo") if role in self.sessions]
+
+    def _focus_role(self, role: str, checkpoint_id: str) -> bool:
+        session = self.sessions.get(role)
+        hwnd = int(session.get("hwnd", 0)) if session else 0
+        if not hwnd:
+            self._diagnostic(
+                "TSUI_VISUAL_CAPTURE_AUTOMATION_WINDOW_MISSING",
+                "capture automation session window is unavailable",
+                checkpoint_id=checkpoint_id,
+                role=role,
+            )
+            return False
+        if not self.api.focus_window(hwnd):
+            self._diagnostic(
+                "TSUI_VISUAL_CAPTURE_AUTOMATION_FOCUS_FAILED",
+                "capture automation could not focus the requested window",
+                checkpoint_id=checkpoint_id,
+                role=role,
+            )
+            return False
+        self.transcript.append({"event": "focus", "checkpoint_id": checkpoint_id, "role": role})
+        return True
+
+    def _send_mouse(self, role: str, checkpoint_id: str, step: dict) -> bool:
+        session = self.sessions.get(role)
+        hwnd = int(session.get("hwnd", 0)) if session else 0
+        if not hwnd:
+            return False
+        point = self.api.client_point(hwnd, _non_negative_int(step.get("x", 0)), _non_negative_int(step.get("y", 0)))
+        if point is None:
+            point = self.api.client_center(hwnd)
+        if point is None:
+            return False
+        button = str(step.get("button", "left"))
+        if button not in {"left", "right", "middle"}:
+            self._diagnostic(
+                "TSUI_VISUAL_CAPTURE_AUTOMATION_MOUSE_BUTTON_INVALID",
+                "capture automation mouse button is invalid",
+                checkpoint_id=checkpoint_id,
+                role=role,
+                step_kind="mouse",
+            )
+            return False
+        return self.api.send_mouse_click(point[0], point[1], button)
+
+    def _capture_role(self, role: str, checkpoint_id: str, checkpoint: dict) -> None:
+        session = self.sessions.get(role)
+        hwnd = int(session.get("hwnd", 0)) if session else 0
+        rel = _safe_work_relative_path(checkpoint.get(f"{role}_screenshot", ""))
+        if not hwnd or not rel:
+            self._diagnostic(
+                "TSUI_VISUAL_CAPTURE_AUTOMATION_CAPTURE_TARGET_INVALID",
+                "capture automation screenshot target is invalid",
+                checkpoint_id=checkpoint_id,
+                role=role,
+                step_kind="capture",
+            )
+            return
+        image = self.api.capture_client_rgba(hwnd)
+        if image is None:
+            self._diagnostic(
+                "TSUI_VISUAL_CAPTURE_AUTOMATION_CAPTURE_FAILED",
+                "capture automation could not capture the requested window",
+                checkpoint_id=checkpoint_id,
+                role=role,
+                step_kind="capture",
+            )
+            return
+        image = _normalize_visual_capture_image(image, self.output_resolution, self.scale_filter)
+        output_path = self.work_root / rel
+        try:
+            _write_rgba_png(output_path, image["width"], image["height"], image["rgba"])
+        except (OSError, ValueError):
+            self._diagnostic(
+                "TSUI_VISUAL_CAPTURE_AUTOMATION_CAPTURE_WRITE_FAILED",
+                "capture automation could not write a screenshot",
+                checkpoint_id=checkpoint_id,
+                role=role,
+                step_kind="capture",
+            )
+            return
+        self.screenshot_count += 1
+        self.captured_checkpoints.add(checkpoint_id)
+        self.transcript.append(
+            {
+                "event": "capture",
+                "checkpoint_id": checkpoint_id,
+                "role": role,
+                "width": image["width"],
+                "height": image["height"],
+                "hash": _sha256(output_path),
+            }
+        )
+
+    def _checkpoints_by_id(self) -> dict[str, dict]:
+        checkpoints = {}
+        raw = self.visual_capture.get("checkpoints", [])
+        if not isinstance(raw, list):
+            return checkpoints
+        for checkpoint in raw:
+            if not isinstance(checkpoint, dict):
+                continue
+            checkpoint_id = str(checkpoint.get("checkpoint_id", ""))
+            if _is_safe_symbol(checkpoint_id):
+                checkpoints[checkpoint_id] = checkpoint
+        return checkpoints
+
+    def _terminate_sessions(self) -> None:
+        for session in self.sessions.values():
+            process = session.get("process")
+            if process is not None and process.poll() is None:
+                try:
+                    process.terminate()
+                except OSError:
+                    pass
+
+    def _diagnostic(self, code: str, message: str, **fields) -> None:
+        diagnostic = {"code": code, "message": message}
+        for key, value in fields.items():
+            if key in {"checkpoint_id", "route_id", "region_id", "role", "backend", "step_kind", "phase"}:
+                if isinstance(value, str) and _is_safe_symbol(value):
+                    diagnostic[key] = value
+            elif key in {"exit_code", "count", "duration_ms"}:
+                diagnostic[key] = _non_negative_int(value)
+        self.diagnostics.append(diagnostic)
+
+
+class _WindowsVisualCaptureApi:
+    def __init__(self):
+        import ctypes
+        from ctypes import wintypes
+
+        self.ctypes = ctypes
+        self.wintypes = wintypes
+        self.user32 = ctypes.WinDLL("user32", use_last_error=True)
+        self.gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
+        self.kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.SW_RESTORE = 9
+        self.INPUT_KEYBOARD = 1
+        self.INPUT_MOUSE = 0
+        self.KEYEVENTF_KEYUP = 0x0002
+        self.MOUSEEVENTF_LEFTDOWN = 0x0002
+        self.MOUSEEVENTF_LEFTUP = 0x0004
+        self.MOUSEEVENTF_RIGHTDOWN = 0x0008
+        self.MOUSEEVENTF_RIGHTUP = 0x0010
+        self.MOUSEEVENTF_MIDDLEDOWN = 0x0020
+        self.MOUSEEVENTF_MIDDLEUP = 0x0040
+        self.PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        self.DIB_RGB_COLORS = 0
+        self.SRCCOPY = 0x00CC0020
+        self.POINT = self._point_struct()
+        self.RECT = self._rect_struct()
+        self.BITMAPINFO = self._bitmap_info_struct()
+        self.INPUT = self._input_struct()
+        self._configure_api()
+
+    def _configure_api(self) -> None:
+        ctypes = self.ctypes
+        wintypes = self.wintypes
+        self.user32.EnumWindows.argtypes = [ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM), wintypes.LPARAM]
+        self.user32.EnumWindows.restype = wintypes.BOOL
+        self.user32.IsWindowVisible.argtypes = [wintypes.HWND]
+        self.user32.IsWindowVisible.restype = wintypes.BOOL
+        self.user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+        self.user32.GetWindowTextLengthW.restype = ctypes.c_int
+        self.user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        self.user32.GetWindowTextW.restype = ctypes.c_int
+        self.user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        self.user32.GetClassNameW.restype = ctypes.c_int
+        self.user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        self.user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        self.user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        self.user32.ShowWindow.restype = wintypes.BOOL
+        self.user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        self.user32.SetForegroundWindow.restype = wintypes.BOOL
+        self.user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(self.RECT)]
+        self.user32.GetClientRect.restype = wintypes.BOOL
+        self.user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(self.POINT)]
+        self.user32.ClientToScreen.restype = wintypes.BOOL
+        self.user32.GetDC.argtypes = [wintypes.HWND]
+        self.user32.GetDC.restype = wintypes.HDC
+        self.user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+        self.user32.ReleaseDC.restype = ctypes.c_int
+        self.user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+        self.user32.SetCursorPos.restype = wintypes.BOOL
+        self.user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(self.INPUT), ctypes.c_int]
+        self.user32.SendInput.restype = wintypes.UINT
+        self.kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self.kernel32.OpenProcess.restype = wintypes.HANDLE
+        self.kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.kernel32.CloseHandle.restype = wintypes.BOOL
+        self.kernel32.QueryFullProcessImageNameW.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.LPWSTR,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        self.kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+        self.gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
+        self.gdi32.CreateCompatibleDC.restype = wintypes.HDC
+        self.gdi32.CreateCompatibleBitmap.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+        self.gdi32.CreateCompatibleBitmap.restype = wintypes.HBITMAP
+        self.gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+        self.gdi32.SelectObject.restype = wintypes.HGDIOBJ
+        self.gdi32.BitBlt.argtypes = [
+            wintypes.HDC,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.HDC,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.DWORD,
+        ]
+        self.gdi32.BitBlt.restype = wintypes.BOOL
+        self.gdi32.GetDIBits.argtypes = [
+            wintypes.HDC,
+            wintypes.HBITMAP,
+            wintypes.UINT,
+            wintypes.UINT,
+            wintypes.LPVOID,
+            ctypes.POINTER(self.BITMAPINFO),
+            wintypes.UINT,
+        ]
+        self.gdi32.GetDIBits.restype = ctypes.c_int
+        self.gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+        self.gdi32.DeleteObject.restype = wintypes.BOOL
+        self.gdi32.DeleteDC.argtypes = [wintypes.HDC]
+        self.gdi32.DeleteDC.restype = wintypes.BOOL
+
+    def _point_struct(self):
+        class POINT(self.ctypes.Structure):
+            _fields_ = [("x", self.ctypes.c_long), ("y", self.ctypes.c_long)]
+
+        return POINT
+
+    def _rect_struct(self):
+        class RECT(self.ctypes.Structure):
+            _fields_ = [
+                ("left", self.ctypes.c_long),
+                ("top", self.ctypes.c_long),
+                ("right", self.ctypes.c_long),
+                ("bottom", self.ctypes.c_long),
+            ]
+
+        return RECT
+
+    def _bitmap_info_struct(self):
+        ctypes = self.ctypes
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [
+                ("biSize", ctypes.c_uint32),
+                ("biWidth", ctypes.c_int32),
+                ("biHeight", ctypes.c_int32),
+                ("biPlanes", ctypes.c_uint16),
+                ("biBitCount", ctypes.c_uint16),
+                ("biCompression", ctypes.c_uint32),
+                ("biSizeImage", ctypes.c_uint32),
+                ("biXPelsPerMeter", ctypes.c_int32),
+                ("biYPelsPerMeter", ctypes.c_int32),
+                ("biClrUsed", ctypes.c_uint32),
+                ("biClrImportant", ctypes.c_uint32),
+            ]
+
+        class BITMAPINFO(ctypes.Structure):
+            _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", ctypes.c_uint32 * 3)]
+
+        return BITMAPINFO
+
+    def _input_struct(self):
+        ctypes = self.ctypes
+        wintypes = self.wintypes
+
+        class MOUSEINPUT(ctypes.Structure):
+            _fields_ = [
+                ("dx", wintypes.LONG),
+                ("dy", wintypes.LONG),
+                ("mouseData", wintypes.DWORD),
+                ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ctypes.c_size_t),
+            ]
+
+        class KEYBDINPUT(ctypes.Structure):
+            _fields_ = [
+                ("wVk", wintypes.WORD),
+                ("wScan", wintypes.WORD),
+                ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ctypes.c_size_t),
+            ]
+
+        class INPUT_UNION(ctypes.Union):
+            _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT)]
+
+        class INPUT(ctypes.Structure):
+            _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
+
+        self.MOUSEINPUT = MOUSEINPUT
+        self.KEYBDINPUT = KEYBDINPUT
+        return INPUT
+
+    def find_window(self, match: object, pid_hint: int = 0) -> int:
+        ctypes = self.ctypes
+        wintypes = self.wintypes
+        match = match if isinstance(match, dict) else {}
+        title_contains = str(match.get("title_contains", "")).lower()
+        class_name = str(match.get("class_name", "")).lower()
+        process_name = str(match.get("process_name", "")).lower()
+        found = {"hwnd": 0}
+
+        callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        def callback(hwnd, _lparam):
+            if found["hwnd"] or not self.user32.IsWindowVisible(hwnd):
+                return True
+            title = self._window_text(hwnd).lower()
+            cls = self._window_class(hwnd).lower()
+            pid = self._window_pid(hwnd)
+            if title_contains and title_contains not in title:
+                return True
+            if class_name and class_name not in cls:
+                return True
+            if process_name:
+                actual_process_name = self._process_name(pid).lower()
+                if actual_process_name != process_name and (not pid_hint or pid != pid_hint):
+                    return True
+            elif pid_hint and pid != pid_hint:
+                return True
+            found["hwnd"] = int(hwnd)
+            return False
+
+        self.user32.EnumWindows(callback_type(callback), 0)
+        return found["hwnd"]
+
+    def _window_text(self, hwnd: int) -> str:
+        length = self.user32.GetWindowTextLengthW(hwnd)
+        buffer = self.ctypes.create_unicode_buffer(length + 1)
+        self.user32.GetWindowTextW(hwnd, buffer, length + 1)
+        return buffer.value
+
+    def _window_class(self, hwnd: int) -> str:
+        buffer = self.ctypes.create_unicode_buffer(256)
+        self.user32.GetClassNameW(hwnd, buffer, 256)
+        return buffer.value
+
+    def _window_pid(self, hwnd: int) -> int:
+        pid = self.wintypes.DWORD(0)
+        self.user32.GetWindowThreadProcessId(hwnd, self.ctypes.byref(pid))
+        return int(pid.value)
+
+    def _process_name(self, pid: int) -> str:
+        handle = self.kernel32.OpenProcess(self.PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return ""
+        try:
+            size = self.wintypes.DWORD(32768)
+            buffer = self.ctypes.create_unicode_buffer(size.value)
+            if not self.kernel32.QueryFullProcessImageNameW(handle, 0, buffer, self.ctypes.byref(size)):
+                return ""
+            return Path(buffer.value).name
+        finally:
+            self.kernel32.CloseHandle(handle)
+
+    def focus_window(self, hwnd: int) -> bool:
+        self.user32.ShowWindow(hwnd, self.SW_RESTORE)
+        return bool(self.user32.SetForegroundWindow(hwnd))
+
+    def send_key(self, key: str) -> bool:
+        vk = self._vk_for_key(key)
+        if vk is None:
+            return False
+        return self._send_keyboard(vk, 0) and self._send_keyboard(vk, self.KEYEVENTF_KEYUP)
+
+    def _send_keyboard(self, vk: int, flags: int) -> bool:
+        inp = self.INPUT()
+        inp.type = self.INPUT_KEYBOARD
+        inp.union.ki = self.KEYBDINPUT(vk, 0, flags, 0, 0)
+        sent = self.user32.SendInput(1, self.ctypes.byref(inp), self.ctypes.sizeof(self.INPUT))
+        return sent == 1
+
+    def send_mouse_click(self, x: int, y: int, button: str) -> bool:
+        if not self.user32.SetCursorPos(x, y):
+            return False
+        down, up = {
+            "left": (self.MOUSEEVENTF_LEFTDOWN, self.MOUSEEVENTF_LEFTUP),
+            "right": (self.MOUSEEVENTF_RIGHTDOWN, self.MOUSEEVENTF_RIGHTUP),
+            "middle": (self.MOUSEEVENTF_MIDDLEDOWN, self.MOUSEEVENTF_MIDDLEUP),
+        }[button]
+        return self._send_mouse(down) and self._send_mouse(up)
+
+    def _send_mouse(self, flags: int) -> bool:
+        inp = self.INPUT()
+        inp.type = self.INPUT_MOUSE
+        inp.union.mi = self.MOUSEINPUT(0, 0, 0, flags, 0, 0)
+        sent = self.user32.SendInput(1, self.ctypes.byref(inp), self.ctypes.sizeof(self.INPUT))
+        return sent == 1
+
+    def client_point(self, hwnd: int, x: int, y: int) -> tuple[int, int] | None:
+        point = self.POINT(x, y)
+        if not self.user32.ClientToScreen(hwnd, self.ctypes.byref(point)):
+            return None
+        return int(point.x), int(point.y)
+
+    def client_center(self, hwnd: int) -> tuple[int, int] | None:
+        rect = self.RECT()
+        if not self.user32.GetClientRect(hwnd, self.ctypes.byref(rect)):
+            return None
+        return self.client_point(hwnd, max((rect.right - rect.left) // 2, 0), max((rect.bottom - rect.top) // 2, 0))
+
+    def capture_client_rgba(self, hwnd: int) -> dict | None:
+        rect = self.RECT()
+        if not self.user32.GetClientRect(hwnd, self.ctypes.byref(rect)):
+            return None
+        width = max(int(rect.right - rect.left), 0)
+        height = max(int(rect.bottom - rect.top), 0)
+        if width <= 0 or height <= 0:
+            return None
+        window_dc = self.user32.GetDC(hwnd)
+        memory_dc = self.gdi32.CreateCompatibleDC(window_dc)
+        bitmap = self.gdi32.CreateCompatibleBitmap(window_dc, width, height)
+        old_object = self.gdi32.SelectObject(memory_dc, bitmap)
+        try:
+            if not self.gdi32.BitBlt(memory_dc, 0, 0, width, height, window_dc, 0, 0, self.SRCCOPY):
+                return None
+            bmi = self.BITMAPINFO()
+            bmi.bmiHeader.biSize = self.ctypes.sizeof(bmi.bmiHeader)
+            bmi.bmiHeader.biWidth = width
+            bmi.bmiHeader.biHeight = -height
+            bmi.bmiHeader.biPlanes = 1
+            bmi.bmiHeader.biBitCount = 32
+            bmi.bmiHeader.biCompression = 0
+            buffer = self.ctypes.create_string_buffer(width * height * 4)
+            if self.gdi32.GetDIBits(memory_dc, bitmap, 0, height, buffer, self.ctypes.byref(bmi), self.DIB_RGB_COLORS) == 0:
+                return None
+            rgba = bytearray()
+            bgra = buffer.raw
+            for offset in range(0, len(bgra), 4):
+                b, g, r, _a = bgra[offset : offset + 4]
+                rgba.extend((r, g, b, 255))
+            return {"width": width, "height": height, "rgba": bytes(rgba)}
+        finally:
+            if old_object:
+                self.gdi32.SelectObject(memory_dc, old_object)
+            if bitmap:
+                self.gdi32.DeleteObject(bitmap)
+            if memory_dc:
+                self.gdi32.DeleteDC(memory_dc)
+            if window_dc:
+                self.user32.ReleaseDC(hwnd, window_dc)
+
+    def _vk_for_key(self, key: str) -> int | None:
+        normalized = str(key).strip().lower()
+        named = {
+            "enter": 0x0D,
+            "return": 0x0D,
+            "space": 0x20,
+            "escape": 0x1B,
+            "esc": 0x1B,
+            "tab": 0x09,
+            "backspace": 0x08,
+            "left": 0x25,
+            "up": 0x26,
+            "right": 0x27,
+            "down": 0x28,
+            "page_up": 0x21,
+            "page_down": 0x22,
+            "home": 0x24,
+            "end": 0x23,
+        }
+        if normalized in named:
+            return named[normalized]
+        if len(normalized) == 1 and "a" <= normalized <= "z":
+            return ord(normalized.upper())
+        if len(normalized) == 1 and "0" <= normalized <= "9":
+            return ord(normalized)
+        if re.fullmatch(r"f([1-9]|1[0-2])", normalized):
+            return 0x70 + int(normalized[1:]) - 1
+        return None
+
+
+def build_visual_comparison_report(work_root: Path | str, capture_report: dict, visual_reviews: list[dict]) -> dict:
+    work_root = Path(work_root)
+    diagnostics = []
+    checkpoints = []
+    if not isinstance(capture_report, dict):
+        capture_report = {}
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_COMPARISON_CAPTURE_REPORT_INVALID",
+                "message": "visual comparison requires a screenshot capture report",
+            }
+        )
+    thresholds = capture_report.get("thresholds", {}) if isinstance(capture_report, dict) else {}
+    max_mean_delta = _float_threshold(thresholds, "max_mean_delta", 4.0)
+    max_changed_ratio = _float_threshold(thresholds, "max_changed_ratio", 0.05)
+    review_by_checkpoint = _visual_reviews_by_checkpoint(visual_reviews, diagnostics)
+    if capture_report.get("schema") != "tsuinosora.visual_screenshot_capture_report.v1":
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_COMPARISON_CAPTURE_REPORT_INVALID",
+                "message": "visual comparison requires a screenshot capture report",
+            }
+        )
+    if capture_report.get("status") != "pass":
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_COMPARISON_CAPTURE_BLOCKED",
+                "message": "visual comparison requires passing screenshot capture evidence",
+            }
+        )
+        diagnostics.extend(capture_report.get("diagnostics", []))
+    for checkpoint in capture_report.get("checkpoints", []):
+        checkpoint_id = str(checkpoint.get("checkpoint_id", "unknown"))
+        route_id = str(checkpoint.get("route_id", "unknown"))
+        required = bool(checkpoint.get("required", True))
+        review = review_by_checkpoint.get(checkpoint_id)
+        checkpoint_record = {
+            "checkpoint_id": checkpoint_id,
+            "route_id": route_id,
+            "required": required,
+            "regions": [],
+            "visual_review": _visual_review_record(review),
+        }
+        if required and not review:
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_COMPARISON_REVIEW_MISSING",
+                    "checkpoint_id": checkpoint_id,
+                    "message": "required visual checkpoint is missing vision review evidence",
+                }
+            )
+        elif required and review.get("status") != "pass":
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_COMPARISON_REVIEW_BLOCKED",
+                    "checkpoint_id": checkpoint_id,
+                    "message": "vision review did not pass for a required checkpoint",
+                }
+            )
+        original_path = _safe_work_relative_path(checkpoint.get("original", {}).get("path", ""))
+        demo_path = _safe_work_relative_path(checkpoint.get("demo", {}).get("path", ""))
+        original_image = _read_visual_comparison_image(work_root, original_path, checkpoint_id, "original", diagnostics)
+        demo_image = _read_visual_comparison_image(work_root, demo_path, checkpoint_id, "demo", diagnostics)
+        if original_image and demo_image and original_image["dimensions"] != demo_image["dimensions"]:
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_COMPARISON_DIMENSION_MISMATCH",
+                    "checkpoint_id": checkpoint_id,
+                    "message": "original and demo screenshots have different dimensions",
+                }
+            )
+        if original_image and demo_image:
+            for region in checkpoint.get("regions", []):
+                region_record, region_diagnostics = _compare_visual_region(
+                    checkpoint_id,
+                    original_image,
+                    demo_image,
+                    region,
+                    max_mean_delta,
+                    max_changed_ratio,
+                )
+                checkpoint_record["regions"].append(region_record)
+                diagnostics.extend(region_diagnostics)
+        checkpoints.append(checkpoint_record)
+    report = {
+        "schema": "tsuinosora.visual_comparison_report.v1",
+        "status": "blocked" if diagnostics else "pass",
+        "thresholds": {
+            "max_mean_delta": max_mean_delta,
+            "max_changed_ratio": max_changed_ratio,
+        },
+        "checkpoints": checkpoints,
+        "diagnostics": _dedupe_diagnostics(diagnostics),
+        "redaction": {
+            "paths": "work_root_relative_only",
+            "payload": "omitted",
+            "commercial_text": "omitted",
+            "screenshots": "omitted",
+            "audio": "omitted",
+            "movie": "omitted",
+        },
+    }
+    if _report_has_path_leak(report):
+        report["status"] = "blocked"
+        report["diagnostics"].append(
+            {
+                "code": "TSUI_VISUAL_COMPARISON_REPORT_PATH_LEAK",
+                "message": "visual comparison report contains a local path-like value",
+            }
+        )
+        report["diagnostics"] = _dedupe_diagnostics(report["diagnostics"])
+    _write_json(work_root / "reports" / "visual_comparison_report.json", report)
+    return report
+
+
+def _read_visual_comparison_image(
+    work_root: Path,
+    relative_path: str,
+    checkpoint_id: str,
+    role: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    if not relative_path:
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_COMPARISON_SCREENSHOT_PATH_INVALID",
+                "checkpoint_id": checkpoint_id,
+                "role": role,
+                "message": "visual comparison screenshot path must be work-root relative",
+            }
+        )
+        return None
+    path = work_root / relative_path
+    if not path.is_file():
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_COMPARISON_SCREENSHOT_MISSING",
+                "checkpoint_id": checkpoint_id,
+                "role": role,
+                "message": "visual comparison screenshot is missing",
+            }
+        )
+        return None
+    try:
+        return _read_png_rgba(path)
+    except (OSError, ValueError, zlib.error, struct.error):
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_COMPARISON_SCREENSHOT_INVALID",
+                "checkpoint_id": checkpoint_id,
+                "role": role,
+                "message": "visual comparison screenshot must be a readable PNG",
+            }
+        )
+        return None
+
+
+def _visual_capture_checkpoint(work_root: Path, raw: dict) -> tuple[dict, list[dict]]:
+    diagnostics = []
+    if not isinstance(raw, dict):
+        raw = {}
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_CHECKPOINT_INVALID",
+                "message": "visual checkpoint must be an object",
+            }
+        )
+    checkpoint_id = str(raw.get("checkpoint_id", "unknown"))
+    route_id = str(raw.get("route_id", "unknown"))
+    required = bool(raw.get("required", True))
+    if not _is_safe_symbol(checkpoint_id):
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_CHECKPOINT_ID_INVALID",
+                "checkpoint_id": checkpoint_id or "unknown",
+                "message": "visual checkpoint id must be a safe symbol",
+            }
+        )
+        checkpoint_id = "unknown"
+    if not _is_safe_symbol(route_id):
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_ROUTE_ID_INVALID",
+                "checkpoint_id": checkpoint_id,
+                "message": "visual checkpoint route id must be a safe symbol",
+            }
+        )
+        route_id = "unknown"
+    original = _visual_capture_image(work_root, raw.get("original_screenshot", ""), checkpoint_id, "original", diagnostics)
+    demo = _visual_capture_image(work_root, raw.get("demo_screenshot", ""), checkpoint_id, "demo", diagnostics)
+    regions = []
+    raw_regions = raw.get("regions", [])
+    if not isinstance(raw_regions, list) or not raw_regions:
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_REGIONS_MISSING",
+                "checkpoint_id": checkpoint_id,
+                "message": "visual checkpoint requires at least one region",
+            }
+        )
+        raw_regions = []
+    for region in raw_regions:
+        regions.append(_visual_region_record(region, checkpoint_id, diagnostics, original.get("dimensions", {})))
+    return (
+        {
+            "checkpoint_id": checkpoint_id,
+            "route_id": route_id,
+            "required": required,
+            "original": original,
+            "demo": demo,
+            "regions": regions,
+        },
+        diagnostics,
+    )
+
+
+def _visual_capture_image(work_root: Path, value: object, checkpoint_id: str, role: str, diagnostics: list[dict]) -> dict:
+    rel = str(value).strip() if isinstance(value, str) else ""
+    entry = {
+        "path": rel if _is_safe_report_relative_path(rel) else "",
+        "hash": "",
+        "dimensions": {"width": 0, "height": 0},
+        "nonblank": False,
+    }
+    if not rel or not _is_safe_report_relative_path(rel):
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_PATH_INVALID",
+                "checkpoint_id": checkpoint_id,
+                "role": role,
+                "message": "visual screenshot path must be work-root relative",
+            }
+        )
+        return entry
+    path = work_root / rel
+    if not path.is_file():
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_SCREENSHOT_MISSING",
+                "checkpoint_id": checkpoint_id,
+                "role": role,
+                "path": rel,
+                "message": "visual screenshot file is missing",
+            }
+        )
+        return entry
+    try:
+        image = _read_png_rgba(path)
+    except (OSError, ValueError, zlib.error, struct.error):
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_PNG_INVALID",
+                "checkpoint_id": checkpoint_id,
+                "role": role,
+                "path": rel,
+                "message": "visual screenshot must be a readable PNG",
+            }
+        )
+        return entry
+    entry["hash"] = _sha256(path)
+    entry["dimensions"] = image["dimensions"]
+    entry["nonblank"] = _rgba_nonblank(image["pixels"])
+    if not entry["nonblank"]:
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_BLANK",
+                "checkpoint_id": checkpoint_id,
+                "role": role,
+                "path": rel,
+                "message": "visual screenshot is blank or fully transparent",
+            }
+        )
+    return entry
+
+
+def _visual_region_record(region: object, checkpoint_id: str, diagnostics: list[dict], dimensions: dict) -> dict:
+    if not isinstance(region, dict):
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_REGION_INVALID",
+                "checkpoint_id": checkpoint_id,
+                "message": "visual region must be an object",
+            }
+        )
+        region = {}
+    region_id = str(region.get("region_id", "unknown"))
+    if not _is_safe_symbol(region_id):
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_REGION_ID_INVALID",
+                "checkpoint_id": checkpoint_id,
+                "message": "visual region id must be a safe symbol",
+            }
+        )
+        region_id = "unknown"
+    x = _non_negative_int(region.get("x", 0))
+    y = _non_negative_int(region.get("y", 0))
+    width = _non_negative_int(region.get("width", 0))
+    height = _non_negative_int(region.get("height", 0))
+    if width == 0:
+        width = max(_non_negative_int(dimensions.get("width", 0)) - x, 0)
+    if height == 0:
+        height = max(_non_negative_int(dimensions.get("height", 0)) - y, 0)
+    if width == 0 or height == 0:
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_CAPTURE_REGION_EMPTY",
+                "checkpoint_id": checkpoint_id,
+                "region_id": region_id,
+                "message": "visual region must have positive dimensions",
+            }
+        )
+    return {
+        "region_id": region_id,
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+        "required": bool(region.get("required", True)),
+    }
+
+
+def _visual_reviews_by_checkpoint(visual_reviews: list[dict], diagnostics: list[dict]) -> dict[str, dict]:
+    reviews = {}
+    if not isinstance(visual_reviews, list):
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_COMPARISON_REVIEW_INVALID",
+                "message": "visual_reviews must be a list",
+            }
+        )
+        return reviews
+    for raw in visual_reviews:
+        if not isinstance(raw, dict):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_COMPARISON_REVIEW_INVALID",
+                    "message": "visual review entries must be objects",
+                }
+            )
+            continue
+        checkpoint_id = str(raw.get("checkpoint_id", ""))
+        status = str(raw.get("status", ""))
+        reviewer = str(raw.get("reviewer", ""))
+        summary_hash = str(raw.get("summary_hash", ""))
+        if not _is_safe_symbol(checkpoint_id) or status not in {"pass", "blocked"} or not _is_safe_symbol(reviewer):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_COMPARISON_REVIEW_INVALID",
+                    "checkpoint_id": checkpoint_id or "unknown",
+                    "message": "visual review must use safe checkpoint id, reviewer and status",
+                }
+            )
+            continue
+        if not _is_sha256(summary_hash):
+            diagnostics.append(
+                {
+                    "code": "TSUI_VISUAL_COMPARISON_REVIEW_HASH_INVALID",
+                    "checkpoint_id": checkpoint_id,
+                    "message": "visual review summary must be represented by a sha256 hash",
+                }
+            )
+            continue
+        reviews[checkpoint_id] = {
+            "checkpoint_id": checkpoint_id,
+            "status": status,
+            "reviewer": reviewer,
+            "summary_hash": summary_hash,
+        }
+    return reviews
+
+
+def _visual_review_record(review: dict | None) -> dict:
+    if not review:
+        return {"status": "missing"}
+    return {
+        "status": review.get("status", "missing"),
+        "reviewer": review.get("reviewer", "unknown"),
+        "summary_hash": review.get("summary_hash", ""),
+    }
+
+
+def _compare_visual_region(
+    checkpoint_id: str,
+    original_image: dict,
+    demo_image: dict,
+    region: dict,
+    max_mean_delta: float,
+    max_changed_ratio: float,
+) -> tuple[dict, list[dict]]:
+    diagnostics = []
+    region_id = str(region.get("region_id", "unknown"))
+    x = int(region.get("x", 0))
+    y = int(region.get("y", 0))
+    width = int(region.get("width", 0))
+    height = int(region.get("height", 0))
+    required = bool(region.get("required", True))
+    original_crop = _rgba_region(original_image, x, y, width, height)
+    demo_crop = _rgba_region(demo_image, x, y, width, height)
+    if original_crop is None or demo_crop is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_COMPARISON_REGION_BOUNDS",
+                "checkpoint_id": checkpoint_id,
+                "region_id": region_id,
+                "message": "visual comparison region is outside screenshot bounds",
+            }
+        )
+        return (
+            {
+                "region_id": region_id,
+                "status": "blocked",
+                "mean_delta": 0.0,
+                "changed_ratio": 1.0,
+                "original_hash": "",
+                "demo_hash": "",
+                "width": width,
+                "height": height,
+            },
+            diagnostics,
+        )
+    mean_delta, changed_ratio = _rgba_delta_metrics(original_crop, demo_crop)
+    status = "pass" if mean_delta <= max_mean_delta and changed_ratio <= max_changed_ratio else "blocked"
+    if required and status != "pass":
+        diagnostics.append(
+            {
+                "code": "TSUI_VISUAL_COMPARISON_REGION_DIFF",
+                "checkpoint_id": checkpoint_id,
+                "region_id": region_id,
+                "mean_delta": round(mean_delta, 4),
+                "changed_ratio": round(changed_ratio, 4),
+                "message": "visual region differs beyond acceptance thresholds",
+            }
+        )
+    return (
+        {
+            "region_id": region_id,
+            "status": status,
+            "mean_delta": round(mean_delta, 4),
+            "changed_ratio": round(changed_ratio, 4),
+            "original_hash": _sha256_bytes(original_crop),
+            "demo_hash": _sha256_bytes(demo_crop),
+            "width": width,
+            "height": height,
+        },
+        diagnostics,
+    )
 
 
 def extract_readable_assets(
@@ -4280,6 +6364,252 @@ def _external_reader_satisfies_director_preflight(report: dict | None) -> bool:
     )
 
 
+def _projectorrays_converted_resources_available(work_root: Path | str) -> bool:
+    report = _read_projectorrays_converted_resources_report(Path(work_root))
+    return bool(
+        isinstance(report, dict)
+        and report.get("status") == "pass"
+        and isinstance(report.get("resources"), list)
+        and len(report.get("resources", [])) > 0
+    )
+
+
+def _read_projectorrays_converted_resources_report(work_root: Path) -> dict | None:
+    path = work_root / "reports" / "projectorrays_converted_resources.json"
+    try:
+        report = _read_json(path)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(report, dict) or report.get("schema") != "tsuinosora.projectorrays_converted_resources.v1":
+        return None
+    return report
+
+
+def _projectorrays_converted_asset_reports(
+    work_root: Path,
+    reference_report: dict | None,
+    external_reader_report: dict | None,
+) -> tuple[dict | None, dict | None, dict | None, list[dict]]:
+    if not _external_reader_satisfies_director_preflight(external_reader_report):
+        return None, None, None, []
+    report = _read_projectorrays_converted_resources_report(work_root)
+    if report is None:
+        return None, None, None, []
+    diagnostics = []
+    if report.get("status") != "pass":
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_ASSETS_BLOCKED",
+                "message": "ProjectorRays converted native asset evidence must pass before it can feed Stage 3",
+            }
+        )
+        return None, None, None, diagnostics
+    raw_resources = report.get("resources", [])
+    if not isinstance(raw_resources, list) or not raw_resources:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_ASSETS_MISSING",
+                "message": "ProjectorRays converted native asset evidence must include at least one resource",
+            }
+        )
+        return None, None, None, diagnostics
+    assets = []
+    native_resources = []
+    members = []
+    for index, raw in enumerate(raw_resources):
+        if not isinstance(raw, dict):
+            diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERTED_ASSET_INVALID",
+                    "index": index,
+                    "message": "ProjectorRays converted native asset entry must be an object",
+                }
+            )
+            continue
+        native_path = str(raw.get("native_path", "")).strip()
+        source_alias = str(raw.get("source_alias", "")).strip()
+        source_relative_path = str(raw.get("source_relative_path", "")).strip()
+        source_sha256 = str(raw.get("source_sha256", "")).strip()
+        converted_sha256 = str(raw.get("converted_sha256", "")).strip()
+        byte_size = _positive_int(raw.get("byte_size", 0))
+        role = str(raw.get("role", "")).strip()
+        chunk_fourcc = str(raw.get("chunk_fourcc", "")).strip()
+        source_key = f"{source_alias}/{source_relative_path}"
+        if (
+            not _is_safe_report_relative_path(native_path)
+            or not native_path.startswith("native-assets/")
+            or not _is_safe_symbol(source_alias)
+            or not _is_safe_report_relative_path(source_relative_path)
+            or not _is_sanitized_sha256(source_sha256)
+            or not _is_sanitized_sha256(converted_sha256)
+            or byte_size <= 0
+            or not _is_safe_report_relative_path(source_key)
+        ):
+            diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERTED_ASSET_EVIDENCE_INVALID",
+                    "index": index,
+                    "message": "ProjectorRays converted native asset evidence must use safe relative paths, hashes and byte size",
+                }
+            )
+            continue
+        native_file = work_root / native_path
+        if not native_file.is_file():
+            diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERTED_ASSET_MISSING",
+                    "index": index,
+                    "native_path": native_path,
+                    "message": "ProjectorRays converted native asset file is missing",
+                }
+            )
+            continue
+        if _sha256(native_file) != converted_sha256 or native_file.stat().st_size != byte_size:
+            diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERTED_ASSET_HASH_MISMATCH",
+                    "index": index,
+                    "native_path": native_path,
+                    "message": "ProjectorRays converted native asset hash or byte size does not match the file",
+                }
+            )
+            continue
+        asset = _projectorrays_asset_analysis_record(native_file, work_root, raw)
+        asset["relative_path"] = native_path
+        asset["sha256"] = converted_sha256
+        asset["projectorrays_source"] = source_key
+        asset["source_sha256"] = source_sha256
+        asset["role"] = role
+        asset["chunk_fourcc"] = chunk_fourcc
+        classification = str(asset.get("classification", "script")).strip()
+        if classification not in CAST_MEMBER_KINDS:
+            classification = "script"
+            asset["classification"] = classification
+            asset["confidence"] = max(float(asset.get("confidence", 0.0)), 0.95)
+        assets.append(asset)
+        native_resources.append(
+            {
+                "source": source_key,
+                "native_path": native_path,
+                "classification": classification,
+                "source_hash": source_sha256,
+                "converted_hash": converted_sha256,
+                "byte_size": byte_size,
+                "coverage_status": "converted",
+                "role": role,
+                "chunk_fourcc": chunk_fourcc,
+            }
+        )
+        members.append(
+            {
+                "member_id": f"projectorrays.{index + 1:04d}",
+                "kind": classification,
+                "source": source_key,
+                "source_hash": source_sha256,
+                "route_ids": [],
+                "command_ids": [],
+            }
+        )
+    if diagnostics:
+        return None, None, None, diagnostics
+    asset_analysis = {
+        "schema": "tsuinosora.asset_analysis.v1",
+        "status": "pass",
+        "reference_hashes": _reference_hashes(reference_report),
+        "classification_counts": _classification_counts(assets),
+        "duplicate_hashes": _duplicate_hash_groups(assets),
+        "assets": assets,
+        "quarantine": [],
+        "diagnostics": [],
+        "redaction": {
+            "paths": "report_relative_only",
+            "payload": "omitted",
+            "commercial_text": "omitted",
+            "screenshots": "omitted",
+            "audio": "omitted",
+            "movie": "omitted",
+        },
+    }
+    native_asset_report = {
+        "schema": "tsuinosora.native_asset_rearrange_report.v1",
+        "status": "pass",
+        "output_root": "local_work_root/native-assets",
+        "converted_assets": len(native_resources),
+        "resources": native_resources,
+        "diagnostics": [],
+        "redaction": {
+            "paths": "report_relative_only",
+            "payload": "omitted",
+            "commercial_text": "omitted",
+            "screenshots": "omitted",
+            "audio": "omitted",
+            "movie": "omitted",
+        },
+    }
+    converted_report_path = work_root / "reports" / "projectorrays_converted_resources.json"
+    cast_source_map_report = {
+        "schema": "tsuinosora.cast_source_map_report.v1",
+        "status": "pass",
+        "source_count": 1,
+        "member_count": len(members),
+        "sources": [
+            {
+                "source": "reports/projectorrays_converted_resources.json",
+                "sha256": _sha256(converted_report_path),
+                "member_count": len(members),
+                "source_schema": "tsuinosora.projectorrays_converted_resources.v1",
+            }
+        ],
+        "members": members,
+        "diagnostics": [],
+        "redaction": {
+            "paths": "report_relative_only",
+            "payload": "omitted",
+            "commercial_text": "omitted",
+            "bytecode": "omitted",
+        },
+    }
+    generated = {"asset": asset_analysis, "native": native_asset_report, "cast": cast_source_map_report}
+    if _report_has_path_leak(generated):
+        return None, None, None, [
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_ASSET_REPORT_PATH_LEAK",
+                "message": "ProjectorRays converted native asset reports contain a local path-like value",
+            }
+        ]
+    return asset_analysis, native_asset_report, cast_source_map_report, []
+
+
+def _projectorrays_asset_analysis_record(native_file: Path, work_root: Path, resource: dict) -> dict:
+    suffix = native_file.suffix.lower()
+    role = str(resource.get("role", "script")).strip()
+    chunk_fourcc = str(resource.get("chunk_fourcc", "")).strip()
+    if suffix in IMAGE_EXTS:
+        classification = "cg"
+    elif suffix in AUDIO_EXTS:
+        classification = "audio"
+    elif suffix in MOVIE_EXTS:
+        classification = "movie"
+    elif suffix in FONT_EXTS:
+        classification = "font"
+    elif chunk_fourcc in {"Lscr", "STXT", "SCRF"} or "script" in role:
+        classification = "script"
+    else:
+        classification = "script"
+    asset = {
+        "classification": classification,
+        "confidence": 0.95,
+    }
+    width = _positive_int(resource.get("width", 0))
+    height = _positive_int(resource.get("height", 0))
+    if width and height:
+        asset["dimensions"] = {"width": width, "height": height}
+    bits_per_pixel = _positive_int(resource.get("bits_per_pixel", 0))
+    if bits_per_pixel:
+        asset["bits_per_pixel"] = bits_per_pixel
+    return asset
+
+
 def build_stage3_gate_report(
     original_root: Path | str,
     work_root: Path | str,
@@ -4350,7 +6680,17 @@ def build_stage3_gate_report(
                 )
             )
 
-    if unpacked_root and unpacked_root.is_dir():
+    (
+        projectorrays_asset_analysis,
+        projectorrays_native_asset_report,
+        projectorrays_cast_source_map_report,
+        projectorrays_asset_diagnostics,
+    ) = _projectorrays_converted_asset_reports(work_root, reference_report, external_reader_report)
+    diagnostics.extend(projectorrays_asset_diagnostics)
+
+    if projectorrays_asset_analysis:
+        asset_analysis = projectorrays_asset_analysis
+    elif unpacked_root and unpacked_root.is_dir():
         asset_analysis = analyze_assets(unpacked_root, reference_report)
     else:
         asset_analysis = _blocked_asset_analysis(
@@ -4360,14 +6700,19 @@ def build_stage3_gate_report(
         )
     _write_json(reports_root / "asset_analysis.json", asset_analysis)
 
-    if unpacked_root and unpacked_root.is_dir():
+    if projectorrays_native_asset_report:
+        native_asset_report = projectorrays_native_asset_report
+    elif unpacked_root and unpacked_root.is_dir():
         native_asset_report = rearrange_native_assets(unpacked_root, work_root, asset_analysis)
     else:
         native_asset_report = rearrange_native_assets(work_root / "missing-unpacked", work_root, asset_analysis)
     _write_json(reports_root / "native_asset_rearrange_report.json", native_asset_report)
 
     cast_source_map_report = None
-    if unpacked_root and unpacked_root.is_dir():
+    if projectorrays_cast_source_map_report:
+        cast_source_map_report = projectorrays_cast_source_map_report
+        _write_json(reports_root / "cast_source_map_report.json", cast_source_map_report)
+    elif unpacked_root and unpacked_root.is_dir():
         cast_source_map_report = build_cast_source_map_report(unpacked_root)
         _write_json(reports_root / "cast_source_map_report.json", cast_source_map_report)
         if cast_source_map_report.get("status") != "pass":
@@ -4668,13 +7013,21 @@ def run_demo_slice_gate(config_path: Path | str) -> dict:
                     }
                 )
     if not diagnostics:
+        configured_unpacked_root = Path(str(config["unpacked_root"])) if config.get("unpacked_root") else None
+        if (
+            configured_unpacked_root is None
+            and work_root is not None
+            and _external_reader_satisfies_director_preflight(projectorrays_report)
+            and _projectorrays_converted_resources_available(work_root)
+        ):
+            configured_unpacked_root = work_root / "unpacked"
         local_report = run_local_gate(
             original_root=Path(str(config["original_install_root"])),
             work_root=Path(str(config["local_work_root"])),
             title_png=Path(str(config.get("title_png", "Examples/TsuiNoSora/Docs/Title.png"))),
             game_png=Path(str(config.get("game_png", "Examples/TsuiNoSora/Docs/Game.png"))),
             remake_root=Path(str(config["remake_install_root"])) if config.get("remake_install_root") else None,
-            unpacked_root=Path(str(config["unpacked_root"])) if config.get("unpacked_root") else None,
+            unpacked_root=configured_unpacked_root,
             routes=[],
             modern_features=list(config.get("modern_features", [])),
             targets=INTERNAL_DEMO_STAGE3_TARGETS,
@@ -4770,6 +7123,7 @@ def build_projectorrays_full_dump_report(work_root: Path | str, dump_roots: list
     json_chunk_count = 0
     script_file_count = 0
     movie_file_count = 0
+    binary_chunks: dict[tuple[str, str], dict] = {}
 
     for alias, root in dump_roots:
         if not _is_safe_symbol(alias):
@@ -4806,6 +7160,14 @@ def build_projectorrays_full_dump_report(work_root: Path | str, dump_roots: list
             if ext == ".bin":
                 binary_chunk_count += 1
                 chunk_fourcc = _projectorrays_chunk_fourcc(path)
+                relative_path = _rel(path, root)
+                binary_chunks[(alias, relative_path)] = {
+                    "source_alias": alias,
+                    "source_relative_path": relative_path,
+                    "chunk_fourcc": chunk_fourcc,
+                    "source_sha256": _sha256(path),
+                    "byte_size": size,
+                }
                 chunk_fourcc_counts[chunk_fourcc] = chunk_fourcc_counts.get(chunk_fourcc, 0) + 1
                 root_fourcc_counts[chunk_fourcc] = root_fourcc_counts.get(chunk_fourcc, 0) + 1
                 with path.open("rb") as handle:
@@ -4848,8 +7210,15 @@ def build_projectorrays_full_dump_report(work_root: Path | str, dump_roots: list
                 "message": "ProjectorRays full dump report requires at least one readable dump root",
             }
         )
-    converted_resource_count = 0
-    resource_coverage_status = "pass" if binary_chunk_count == converted_resource_count else "blocked"
+    converted_resources, converted_counts, converted_diagnostics = _projectorrays_converted_resource_evidence(
+        work_root,
+        binary_chunks,
+    )
+    diagnostics.extend(converted_diagnostics)
+    converted_resource_count = len(converted_resources)
+    resource_coverage_status = (
+        "pass" if binary_chunk_count == converted_resource_count and not converted_diagnostics else "blocked"
+    )
     if resource_coverage_status != "pass":
         diagnostics.append(
             {
@@ -4864,8 +7233,8 @@ def build_projectorrays_full_dump_report(work_root: Path | str, dump_roots: list
             "chunk_fourcc": fourcc,
             "role": PROJECTORRAYS_REQUIRED_CHUNK_ROLES.get(fourcc, "director_chunk"),
             "required": count,
-            "converted": 0,
-            "status": "pending_converter",
+            "converted": converted_counts.get(fourcc, 0),
+            "status": "converted" if converted_counts.get(fourcc, 0) == count else "pending_converter",
         }
         for fourcc, count in sorted(chunk_fourcc_counts.items())
     ]
@@ -4886,6 +7255,7 @@ def build_projectorrays_full_dump_report(work_root: Path | str, dump_roots: list
         "chunk_fourcc_counts": dict(sorted(chunk_fourcc_counts.items())),
         "member_type_counts": dict(sorted(member_type_counts.items())),
         "binary_signature_counts": dict(sorted(binary_signature_counts.items())),
+        "converted_resources": converted_resources,
         "resource_coverage": {
             "status": resource_coverage_status,
             "required": binary_chunk_count,
@@ -4915,12 +7285,2847 @@ def build_projectorrays_full_dump_report(work_root: Path | str, dump_roots: list
     return report
 
 
+def convert_projectorrays_resources(
+    work_root: Path | str,
+    dump_roots: list[tuple[str, Path]],
+    palette_sidecars: list[Path] | None = None,
+) -> dict:
+    work_root = Path(work_root)
+    diagnostics = []
+    resources = []
+    scanned_binary_count = 0
+    palette_index = _load_projectorrays_palette_sidecars(palette_sidecars or [], diagnostics)
+    for alias, root in dump_roots:
+        if not _is_safe_symbol(alias):
+            diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERT_ALIAS_INVALID",
+                    "alias": alias or "unknown",
+                    "message": "ProjectorRays conversion root alias must be a safe symbol",
+                }
+            )
+            continue
+        if not root.is_dir():
+            diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERT_ROOT_MISSING",
+                    "alias": alias,
+                    "message": "ProjectorRays conversion root is missing or inaccessible",
+                }
+            )
+            continue
+        script_index = _build_projectorrays_script_source_index(root)
+        bitd_index = _build_projectorrays_bitd_bitmap_index(root)
+        sound_index = _build_projectorrays_sound_index(root)
+        embedded_media_index = _build_projectorrays_embedded_media_index(root)
+        for source in sorted(path for path in root.rglob("*.bin") if path.is_file()):
+            scanned_binary_count += 1
+            resource = _convert_projectorrays_binary_chunk(
+                work_root,
+                alias,
+                root,
+                source,
+                diagnostics,
+                script_index,
+                bitd_index,
+                sound_index,
+                embedded_media_index,
+                palette_index,
+            )
+            if resource:
+                resources.append(resource)
+    report = {
+        "schema": "tsuinosora.projectorrays_converted_resources.v1",
+        "status": "pass" if scanned_binary_count == len(resources) and not diagnostics else "blocked",
+        "scanned_binary_count": scanned_binary_count,
+        "converted_count": len(resources),
+        "resources": resources,
+        "diagnostics": _dedupe_diagnostics(diagnostics),
+        "redaction": {
+            "paths": "work_root_relative_or_dump_relative_only",
+            "payload": "omitted",
+            "commercial_text": "omitted",
+            "screenshots": "omitted",
+            "audio": "omitted",
+            "movie": "omitted",
+        },
+    }
+    if _report_has_path_leak(report):
+        report["status"] = "blocked"
+        report["diagnostics"].append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_REPORT_PATH_LEAK",
+                "message": "ProjectorRays converted resource report contains a local path-like value",
+            }
+        )
+        report["diagnostics"] = _dedupe_diagnostics(report["diagnostics"])
+    _write_json(work_root / "reports" / "projectorrays_converted_resources.json", report)
+    return report
+
+
+def _projectorrays_conversion_summary(report: dict) -> dict:
+    converted_by_chunk: dict[str, int] = {}
+    diagnostic_by_code: dict[str, int] = {}
+    diagnostic_by_chunk: dict[str, int] = {}
+    for resource in report.get("resources", []):
+        if isinstance(resource, dict):
+            chunk = str(resource.get("chunk_fourcc", "unknown"))
+            converted_by_chunk[chunk] = converted_by_chunk.get(chunk, 0) + 1
+    for diagnostic in report.get("diagnostics", []):
+        if isinstance(diagnostic, dict):
+            code = str(diagnostic.get("code", "unknown"))
+            chunk = str(diagnostic.get("chunk_fourcc", "unknown"))
+            diagnostic_by_code[code] = diagnostic_by_code.get(code, 0) + 1
+            diagnostic_by_chunk[chunk] = diagnostic_by_chunk.get(chunk, 0) + 1
+    return {
+        "schema": "tsuinosora.projectorrays_converted_resources.summary.v1",
+        "status": report.get("status", "blocked"),
+        "scanned_binary_count": report.get("scanned_binary_count", 0),
+        "converted_count": report.get("converted_count", 0),
+        "diagnostic_count": len(report.get("diagnostics", [])),
+        "converted_by_chunk": dict(sorted(converted_by_chunk.items())),
+        "diagnostics_by_code": dict(sorted(diagnostic_by_code.items())),
+        "diagnostics_by_chunk": dict(sorted(diagnostic_by_chunk.items())),
+    }
+
+
+def _load_projectorrays_palette_sidecars(paths: list[Path], diagnostics: list[dict]) -> dict[int, dict]:
+    palette_index: dict[int, dict] = {}
+    for ordinal, path in enumerate(paths, start=1):
+        sidecar_id = f"palette_sidecar_{ordinal}"
+        try:
+            value = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_PALETTE_SIDECAR_INVALID",
+                    "sidecar": sidecar_id,
+                    "message": "ProjectorRays palette sidecar must be readable JSON",
+                }
+            )
+            continue
+        if not isinstance(value, dict) or value.get("schema") != "tsuinosora.projectorrays_palette_sidecar.v1":
+            diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_PALETTE_SIDECAR_SCHEMA_INVALID",
+                    "sidecar": sidecar_id,
+                    "message": "ProjectorRays palette sidecar schema is missing or unsupported",
+                }
+            )
+            continue
+        palettes = value.get("palettes")
+        if not isinstance(palettes, list) or not palettes:
+            diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_PALETTE_SIDECAR_EMPTY",
+                    "sidecar": sidecar_id,
+                    "message": "ProjectorRays palette sidecar must contain at least one palette entry",
+                }
+            )
+            continue
+        sidecar_hash = _sha256(Path(path))
+        for index, palette in enumerate(palettes):
+            entry_id = f"{sidecar_id}:{index}"
+            parsed = _parse_projectorrays_palette_entry(palette, sidecar_hash)
+            if parsed is None:
+                diagnostics.append(
+                    {
+                        "code": "TSUI_PROJECTORRAYS_PALETTE_ENTRY_INVALID",
+                        "sidecar": sidecar_id,
+                        "entry": index,
+                        "message": "ProjectorRays palette entry must declare safe id, clut ids and 256 RGB colors",
+                    }
+                )
+                continue
+            key = parsed["stored_clut_id"]
+            if key in palette_index:
+                diagnostics.append(
+                    {
+                        "code": "TSUI_PROJECTORRAYS_PALETTE_ENTRY_DUPLICATE",
+                        "sidecar": sidecar_id,
+                        "entry": index,
+                        "stored_clut_id": key,
+                        "message": "ProjectorRays palette sidecars must not declare the same stored clut id twice",
+                    }
+                )
+                continue
+            parsed["entry_id"] = entry_id
+            palette_index[key] = parsed
+    return palette_index
+
+
+def _parse_projectorrays_palette_entry(value: object, sidecar_hash: str) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    palette_id = value.get("id")
+    stored_clut_id = value.get("stored_clut_id")
+    director_palette_id = value.get("director_palette_id")
+    colors = value.get("colors")
+    if not isinstance(palette_id, str) or not _is_safe_symbol(palette_id):
+        return None
+    if not isinstance(stored_clut_id, int) or not isinstance(director_palette_id, int):
+        return None
+    if not isinstance(colors, list) or len(colors) != 256:
+        return None
+    parsed_colors: list[tuple[int, int, int]] = []
+    for color in colors:
+        if (
+            not isinstance(color, list)
+            or len(color) != 3
+            or any(not isinstance(channel, int) or channel < 0 or channel > 255 for channel in color)
+        ):
+            return None
+        parsed_colors.append((color[0], color[1], color[2]))
+    return {
+        "id": palette_id,
+        "stored_clut_id": stored_clut_id,
+        "director_palette_id": director_palette_id,
+        "colors": tuple(parsed_colors),
+        "sidecar_sha256": sidecar_hash,
+    }
+
+
+def _convert_projectorrays_binary_chunk(
+    work_root: Path,
+    alias: str,
+    root: Path,
+    source: Path,
+    diagnostics: list[dict],
+    script_index: dict[tuple[tuple[str, ...], int, str], list[dict]],
+    bitd_index: dict[tuple[tuple[str, ...], int], dict],
+    sound_index: dict[str, dict],
+    embedded_media_index: dict[str, dict],
+    palette_index: dict[int, dict],
+) -> dict | None:
+    source_relative_path = _rel(source, root)
+    chunk_fourcc = _projectorrays_chunk_fourcc(source)
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES.get(chunk_fourcc, "director_chunk")
+    paired_json = source.with_suffix(".json")
+    if chunk_fourcc == "BITD":
+        return _convert_projectorrays_bitd_chunk(
+            work_root,
+            alias,
+            source,
+            source_relative_path,
+            bitd_index,
+            palette_index,
+            diagnostics,
+        )
+    if chunk_fourcc == "STXT":
+        return _convert_projectorrays_stxt_chunk(work_root, alias, source, source_relative_path, diagnostics)
+    if chunk_fourcc == "Lscr":
+        return _convert_projectorrays_lscr_chunk(
+            work_root,
+            alias,
+            source,
+            source_relative_path,
+            paired_json,
+            script_index,
+            diagnostics,
+        )
+    if chunk_fourcc == "snd ":
+        return _convert_projectorrays_empty_sound_placeholder_chunk(
+            work_root,
+            alias,
+            source,
+            source_relative_path,
+            diagnostics,
+        )
+    if chunk_fourcc == "cupt":
+        return _convert_projectorrays_cupt_chunk(work_root, alias, source, source_relative_path, diagnostics)
+    if chunk_fourcc == "SCRF":
+        return _convert_projectorrays_scrf_chunk(work_root, alias, source, source_relative_path)
+    if chunk_fourcc in {"Cinf", "VWFI"}:
+        return _convert_projectorrays_info_entry_chunk(
+            work_root,
+            alias,
+            source,
+            source_relative_path,
+            chunk_fourcc,
+            diagnostics,
+        )
+    if chunk_fourcc == "Sord":
+        return _convert_projectorrays_sord_chunk(work_root, alias, source, source_relative_path, diagnostics)
+    if chunk_fourcc == "Fmap":
+        return _convert_projectorrays_fmap_chunk(work_root, alias, source, source_relative_path, diagnostics)
+    if chunk_fourcc == "VWLB":
+        return _convert_projectorrays_vwlb_chunk(work_root, alias, source, source_relative_path, diagnostics)
+    if chunk_fourcc == "FCOL":
+        return _convert_projectorrays_fcol_chunk(work_root, alias, source, source_relative_path, diagnostics)
+    if chunk_fourcc == "FXmp":
+        return _convert_projectorrays_fxmp_chunk(work_root, alias, source, source_relative_path, diagnostics)
+    if chunk_fourcc == "VERS":
+        return _convert_projectorrays_vers_chunk(work_root, alias, source, source_relative_path, diagnostics)
+    if chunk_fourcc == "XTRl":
+        return _convert_projectorrays_xtrl_chunk(work_root, alias, source, source_relative_path, diagnostics)
+    if chunk_fourcc == "sndH":
+        return _convert_projectorrays_sndh_chunk(work_root, alias, source, source_relative_path, sound_index, diagnostics)
+    if chunk_fourcc == "sndS":
+        return _convert_projectorrays_snds_chunk(work_root, alias, source, source_relative_path, sound_index, diagnostics)
+    if chunk_fourcc == "VWSC":
+        return _convert_projectorrays_vwsc_chunk(work_root, alias, source, source_relative_path, diagnostics)
+    if chunk_fourcc == "XMED":
+        return _convert_projectorrays_xmed_chunk(work_root, alias, source, source_relative_path, diagnostics)
+    if chunk_fourcc == "ediM":
+        return _convert_projectorrays_edim_chunk(
+            work_root,
+            alias,
+            source,
+            source_relative_path,
+            embedded_media_index,
+            diagnostics,
+        )
+    if chunk_fourcc not in PROJECTORRAYS_JSON_METADATA_CHUNKS or not paired_json.is_file():
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_UNSUPPORTED_CHUNK",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": chunk_fourcc,
+                "role": role,
+                "message": "ProjectorRays chunk requires a dedicated converter before it can be counted as converted",
+            }
+        )
+        return None
+    try:
+        metadata_text = paired_json.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_JSON_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": chunk_fourcc,
+                "message": "ProjectorRays paired metadata JSON could not be parsed",
+            }
+        )
+        return None
+    metadata_shape = _projectorrays_metadata_shape_from_text(metadata_text)
+    if metadata_shape is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_JSON_SHAPE_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": chunk_fourcc,
+                "message": "ProjectorRays paired metadata JSON must be an object",
+            }
+        )
+        return None
+    native_path = _projectorrays_native_metadata_path(alias, source_relative_path)
+    native_file = work_root / native_path
+    native_payload = {
+        "schema": "tsuinosora.projectorrays_converted_chunk.v1",
+        "source_alias": alias,
+        "source_relative_path": source_relative_path,
+        "source_sha256": _sha256(source),
+        "chunk_fourcc": chunk_fourcc,
+        "role": role,
+        "conversion_method": "projectorrays_json_metadata",
+        "metadata_shape": metadata_shape,
+        "redaction": {
+            "paths": "dump_relative_only",
+            "payload": "omitted",
+            "commercial_text": "omitted",
+            "script_text": "omitted",
+            "names": "omitted",
+        },
+    }
+    _write_json(native_file, native_payload)
+    return {
+        "source_alias": alias,
+        "source_relative_path": source_relative_path,
+        "source_sha256": _sha256(source),
+        "chunk_fourcc": chunk_fourcc,
+        "role": role,
+        "native_path": native_path,
+        "converted_sha256": _sha256(native_file),
+        "byte_size": native_file.stat().st_size,
+        "conversion_method": "projectorrays_json_metadata",
+        "status": "converted",
+    }
+
+
+def _convert_projectorrays_stxt_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    payload = source.read_bytes()
+    decoded = _decode_projectorrays_stxt(payload)
+    if decoded is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_STXT_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "STXT",
+                "role": PROJECTORRAYS_REQUIRED_CHUNK_ROLES["STXT"],
+                "message": "ProjectorRays STXT chunk did not match the expected header or CP932 text payload",
+            }
+        )
+        return None
+    native_path = _projectorrays_native_text_path(alias, source_relative_path)
+    native_file = work_root / native_path
+    native_file.parent.mkdir(parents=True, exist_ok=True)
+    native_file.write_text(decoded, encoding="utf-8")
+    return {
+        "source_alias": alias,
+        "source_relative_path": source_relative_path,
+        "source_sha256": _sha256(source),
+        "chunk_fourcc": "STXT",
+        "role": PROJECTORRAYS_REQUIRED_CHUNK_ROLES["STXT"],
+        "native_path": native_path,
+        "converted_sha256": _sha256(native_file),
+        "byte_size": native_file.stat().st_size,
+        "conversion_method": "projectorrays_stxt_cp932_text",
+        "status": "converted",
+    }
+
+
+def _decode_projectorrays_stxt(payload: bytes) -> str | None:
+    if len(payload) < 12:
+        return None
+    header_size = int.from_bytes(payload[0:4], "big")
+    text_size = int.from_bytes(payload[4:8], "big")
+    trailer_size = int.from_bytes(payload[8:12], "big")
+    if header_size != 12 or text_size < 0 or trailer_size < 0:
+        return None
+    if len(payload) != header_size + text_size + trailer_size:
+        return None
+    text_payload = payload[header_size : header_size + text_size]
+    try:
+        decoded = text_payload.decode("cp932")
+    except UnicodeDecodeError:
+        return None
+    return decoded.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _write_projectorrays_metadata_asset(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    chunk_fourcc: str,
+    method: str,
+    metadata: dict,
+) -> dict:
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES.get(chunk_fourcc, "director_chunk")
+    native_path = _projectorrays_native_metadata_path(alias, source_relative_path)
+    native_file = work_root / native_path
+    native_payload = {
+        "schema": "tsuinosora.projectorrays_converted_chunk.v1",
+        "source_alias": alias,
+        "source_relative_path": source_relative_path,
+        "source_sha256": _sha256(source),
+        "chunk_fourcc": chunk_fourcc,
+        "role": role,
+        "conversion_method": method,
+        **metadata,
+    }
+    _write_json(native_file, native_payload)
+    return {
+        "source_alias": alias,
+        "source_relative_path": source_relative_path,
+        "source_sha256": _sha256(source),
+        "chunk_fourcc": chunk_fourcc,
+        "role": role,
+        "native_path": native_path,
+        "converted_sha256": _sha256(native_file),
+        "byte_size": native_file.stat().st_size,
+        "conversion_method": method,
+        "status": "converted",
+    }
+
+
+def _convert_projectorrays_empty_sound_placeholder_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["snd "]
+    if source.stat().st_size != 0:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_SOUND_PAYLOAD_UNPROVEN",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "snd ",
+                "role": role,
+                "message": "ProjectorRays snd chunk contains bytes and requires a proven audio decoder before conversion",
+            }
+        )
+        return None
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "snd ",
+        "projectorrays_empty_sound_placeholder",
+        {
+            "empty_placeholder": True,
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "audio": "omitted",
+                "commercial_text": "omitted",
+            },
+        },
+    )
+
+
+def _convert_projectorrays_cupt_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["cupt"]
+    payload = source.read_bytes()
+    cue_point_count = int.from_bytes(payload[0:4], "big") if len(payload) >= 4 else None
+    if len(payload) != 4 or cue_point_count != 0:
+        diagnostic = {
+            "code": "TSUI_PROJECTORRAYS_CONVERT_CUPT_UNPROVEN",
+            "source_alias": alias,
+            "source_relative_path": source_relative_path,
+            "chunk_fourcc": "cupt",
+            "role": role,
+            "byte_size": len(payload),
+            "message": "ProjectorRays cupt conversion currently only accepts a proven empty cue-point table",
+        }
+        if cue_point_count is not None:
+            diagnostic["cue_point_count"] = cue_point_count
+        diagnostics.append(diagnostic)
+        return None
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "cupt",
+        "projectorrays_cue_point_table",
+        {
+            "cue_point_count": cue_point_count,
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "audio": "omitted",
+                "names": "omitted",
+                "commercial_text": "omitted",
+            },
+        },
+    )
+
+
+def _convert_projectorrays_scrf_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+) -> dict:
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "SCRF",
+        "projectorrays_scrf_reference_skipped",
+        {
+            "reference_policy": "skipped_by_director_runtime",
+            "source_byte_size": source.stat().st_size,
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "commercial_text": "omitted",
+                "names": "omitted",
+            },
+        },
+    )
+
+
+def _convert_projectorrays_info_entry_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    chunk_fourcc: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    parsed = _parse_projectorrays_info_entry_table(source.read_bytes())
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES[chunk_fourcc]
+    if parsed is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_INFO_TABLE_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": chunk_fourcc,
+                "role": role,
+                "message": "ProjectorRays info-entry table did not match the supported Director layout",
+            }
+        )
+        return None
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        chunk_fourcc,
+        "projectorrays_info_entry_table",
+        {
+            "table_offset": parsed["table_offset"],
+            "entry_count": parsed["entry_count"],
+            "entry_lengths": parsed["entry_lengths"],
+            "entry_hashes": parsed["entry_hashes"],
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "commercial_text": "omitted",
+                "script_text": "omitted",
+                "names": "omitted",
+            },
+        },
+    )
+
+
+def _parse_projectorrays_info_entry_table(payload: bytes) -> dict | None:
+    if len(payload) < 6:
+        return None
+    table_offset = int.from_bytes(payload[0:4], "big")
+    if table_offset < 4 or table_offset + 2 > len(payload):
+        return None
+    entry_count = int.from_bytes(payload[table_offset : table_offset + 2], "big")
+    offsets_start = table_offset + 2
+    offsets_end = offsets_start + (entry_count + 1) * 4
+    if offsets_end > len(payload):
+        return None
+    offsets = [
+        int.from_bytes(payload[offsets_start + index * 4 : offsets_start + (index + 1) * 4], "big")
+        for index in range(entry_count + 1)
+    ]
+    if offsets[0] != 0 or any(right < left for left, right in zip(offsets, offsets[1:])):
+        return None
+    data = payload[offsets_end:]
+    if offsets[-1] != len(data):
+        return None
+    entry_lengths = []
+    entry_hashes = []
+    for left, right in zip(offsets, offsets[1:]):
+        entry = data[left:right]
+        entry_lengths.append(len(entry))
+        entry_hashes.append(_sha256_bytes(entry))
+    return {
+        "table_offset": table_offset,
+        "entry_count": entry_count,
+        "entry_lengths": entry_lengths,
+        "entry_hashes": entry_hashes,
+    }
+
+
+def _convert_projectorrays_sord_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    parsed = _parse_projectorrays_sord_table(source.read_bytes())
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["Sord"]
+    if parsed is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_SORD_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "Sord",
+                "role": role,
+                "message": "ProjectorRays Sord score-order table did not match the supported Director layout",
+            }
+        )
+        return None
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "Sord",
+        "projectorrays_score_order_table",
+        {
+            "entry_count": parsed["entry_count"],
+            "entry_size": parsed["entry_size"],
+            "referenced_members": parsed["referenced_members"],
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "commercial_text": "omitted",
+                "names": "omitted",
+            },
+        },
+    )
+
+
+def _parse_projectorrays_sord_table(payload: bytes) -> dict | None:
+    if len(payload) < 20:
+        return None
+    entry_count_a = int.from_bytes(payload[8:12], "big")
+    entry_count_b = int.from_bytes(payload[12:16], "big")
+    header_size = int.from_bytes(payload[16:18], "big")
+    entry_size = int.from_bytes(payload[18:20], "big")
+    if header_size != 20 or entry_count_a != entry_count_b or entry_size not in {2, 4}:
+        return None
+    if len(payload) != header_size + entry_count_a * entry_size:
+        return None
+    referenced_members = []
+    offset = header_size
+    for _ in range(entry_count_a):
+        if entry_size == 4:
+            cast_library_id = int.from_bytes(payload[offset : offset + 2], "big")
+            member_id = int.from_bytes(payload[offset + 2 : offset + 4], "big")
+            offset += 4
+        else:
+            cast_library_id = "default"
+            member_id = int.from_bytes(payload[offset : offset + 2], "big")
+            offset += 2
+        referenced_members.append({"cast_library_id": cast_library_id, "member_id": member_id})
+    return {
+        "entry_count": entry_count_a,
+        "entry_size": entry_size,
+        "referenced_members": referenced_members,
+    }
+
+
+def _convert_projectorrays_fmap_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    parsed = _parse_projectorrays_fmap(source.read_bytes())
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["Fmap"]
+    if parsed is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_FMAP_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "Fmap",
+                "role": role,
+                "message": "ProjectorRays Fmap chunk did not match the supported Director font-map layout",
+            }
+        )
+        return None
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "Fmap",
+        "projectorrays_font_map_v4",
+        {
+            "font_entry_count": parsed["font_entry_count"],
+            "font_entries": parsed["font_entries"],
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "commercial_text": "omitted",
+                "font_names": "omitted",
+            },
+        },
+    )
+
+
+def _parse_projectorrays_fmap(payload: bytes) -> dict | None:
+    if len(payload) < 36:
+        return None
+    map_length = int.from_bytes(payload[0:4], "big")
+    names_length = int.from_bytes(payload[4:8], "big")
+    body_start = 8
+    names_start = body_start + map_length
+    if map_length < 28 or names_length < 0 or names_start + names_length != len(payload):
+        return None
+    entries_used = int.from_bytes(payload[16:20], "big")
+    entries_total = int.from_bytes(payload[20:24], "big")
+    entries_start = 36
+    entries_end = entries_start + entries_used * 8
+    if entries_used > entries_total or entries_end > names_start:
+        return None
+    font_entries = []
+    for index in range(entries_used):
+        offset = entries_start + index * 8
+        name_offset = int.from_bytes(payload[offset : offset + 4], "big")
+        platform_id = int.from_bytes(payload[offset + 4 : offset + 6], "big")
+        font_id = int.from_bytes(payload[offset + 6 : offset + 8], "big")
+        name_header = names_start + name_offset
+        if name_header + 4 > len(payload):
+            return None
+        name_length = int.from_bytes(payload[name_header : name_header + 4], "big")
+        name_start = name_header + 4
+        name_end = name_start + name_length
+        if name_end > names_start + names_length:
+            return None
+        font_entries.append(
+            {
+                "platform_id": platform_id,
+                "font_id": font_id,
+                "name_length": name_length,
+                "name_hash": _sha256_bytes(payload[name_start:name_end]),
+            }
+        )
+    return {"font_entry_count": entries_used, "font_entries": font_entries}
+
+
+def _convert_projectorrays_vwlb_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    parsed = _parse_projectorrays_vwlb(source.read_bytes())
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["VWLB"]
+    if parsed is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_VWLB_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "VWLB",
+                "role": role,
+                "message": "ProjectorRays VWLB chunk did not match the supported Director label-table layout",
+            }
+        )
+        return None
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "VWLB",
+        "projectorrays_score_label_table",
+        {
+            "label_count": parsed["label_count"],
+            "labels": parsed["labels"],
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "commercial_text": "omitted",
+                "label_text": "omitted",
+                "comments": "omitted",
+            },
+        },
+    )
+
+
+def _parse_projectorrays_vwlb(payload: bytes) -> dict | None:
+    if len(payload) < 6:
+        return None
+    table_count = int.from_bytes(payload[0:2], "big") + 1
+    table_end = table_count * 4 + 2
+    if table_count < 1 or table_end > len(payload):
+        return None
+    pairs = []
+    offset = 2
+    for _ in range(table_count):
+        frame = int.from_bytes(payload[offset : offset + 2], "big")
+        label_offset = int.from_bytes(payload[offset + 2 : offset + 4], "big") + table_end
+        if label_offset > len(payload):
+            return None
+        pairs.append((frame, label_offset))
+        offset += 4
+    labels = []
+    for (frame, start), (_, end) in zip(pairs, pairs[1:]):
+        if end < start:
+            return None
+        segment = payload[start:end]
+        labels.append({"frame": frame, "byte_size": len(segment), "label_hash": _sha256_bytes(segment)})
+    return {"label_count": len(labels), "labels": labels}
+
+
+def _convert_projectorrays_fcol_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    payload = source.read_bytes()
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["FCOL"]
+    if len(payload) == 0 or len(payload) % 2 != 0:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_FCOL_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "FCOL",
+                "role": role,
+                "message": "ProjectorRays FCOL color table must contain an even number of 16-bit words",
+            }
+        )
+        return None
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "FCOL",
+        "projectorrays_fixed_color_table",
+        {
+            "word_count": len(payload) // 2,
+            "table_hash": _sha256_bytes(payload),
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "colors": "omitted",
+                "commercial_text": "omitted",
+            },
+        },
+    )
+
+
+def _convert_projectorrays_fxmp_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    payload = source.read_bytes()
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["FXmp"]
+    try:
+        decoded = payload.decode("cp932")
+    except UnicodeDecodeError:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_FXMP_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "FXmp",
+                "role": role,
+                "message": "ProjectorRays FXmp text map must be decodable before redacted metadata conversion",
+            }
+        )
+        return None
+    normalized = decoded.replace("\r\n", "\n").replace("\r", "\n")
+    line_count = len([line for line in normalized.split("\n") if line])
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "FXmp",
+        "projectorrays_fxmp_text_map_metadata",
+        {
+            "line_count": line_count,
+            "map_hash": _sha256_bytes(payload),
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "commercial_text": "omitted",
+                "font_names": "omitted",
+                "font_map_lines": "omitted",
+            },
+        },
+    )
+
+
+def _convert_projectorrays_vers_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    parsed = _parse_projectorrays_vers(source.read_bytes())
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["VERS"]
+    if parsed is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_VERS_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "VERS",
+                "role": role,
+                "message": "ProjectorRays VERS chunk did not match the supported fixed-width version table layout",
+            }
+        )
+        return None
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "VERS",
+        "projectorrays_version_table",
+        {
+            "table_version": parsed["table_version"],
+            "entry_count": parsed["entry_count"],
+            "entries": parsed["entries"],
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "commercial_text": "omitted",
+            },
+        },
+    )
+
+
+def _parse_projectorrays_vers(payload: bytes) -> dict | None:
+    if len(payload) < 4:
+        return None
+    table_version = int.from_bytes(payload[0:2], "big")
+    entry_count = int.from_bytes(payload[2:4], "big")
+    if len(payload) != 4 + entry_count * 8:
+        return None
+    entries = []
+    offset = 4
+    for _ in range(entry_count):
+        entries.append(
+            {
+                "director_version": int.from_bytes(payload[offset : offset + 2], "big"),
+                "minor": int.from_bytes(payload[offset + 2 : offset + 4], "big"),
+                "major": int.from_bytes(payload[offset + 4 : offset + 6], "big"),
+                "build": int.from_bytes(payload[offset + 6 : offset + 8], "big"),
+            }
+        )
+        offset += 8
+    return {"table_version": table_version, "entry_count": entry_count, "entries": entries}
+
+
+def _convert_projectorrays_xtrl_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    parsed = _parse_projectorrays_xtrl(source.read_bytes())
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["XTRl"]
+    if parsed is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_XTRL_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "XTRl",
+                "role": role,
+                "message": "ProjectorRays XTRl chunk did not match the supported length-prefixed Xtra list layout",
+            }
+        )
+        return None
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "XTRl",
+        "projectorrays_xtra_list_metadata",
+        {
+            "format_version": parsed["format_version"],
+            "declared_entry_count": parsed["declared_entry_count"],
+            "record_count": parsed["record_count"],
+            "record_sizes": parsed["record_sizes"],
+            "record_hashes": parsed["record_hashes"],
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "commercial_text": "omitted",
+                "xtra_names": "omitted",
+            },
+        },
+    )
+
+
+def _parse_projectorrays_xtrl(payload: bytes) -> dict | None:
+    if len(payload) < 8:
+        return None
+    format_version = int.from_bytes(payload[0:4], "big")
+    declared_entry_count = int.from_bytes(payload[4:8], "big")
+    if declared_entry_count <= 0:
+        return None
+    offset = 8
+    record_sizes = []
+    record_hashes = []
+    for _ in range(declared_entry_count):
+        if offset + 4 > len(payload):
+            return None
+        record_size = int.from_bytes(payload[offset : offset + 4], "big")
+        record_start = offset + 4
+        record_end = record_start + record_size
+        if record_size <= 0 or record_end > len(payload):
+            return None
+        record = payload[record_start:record_end]
+        record_sizes.append(record_size)
+        record_hashes.append(_sha256_bytes(record))
+        offset = record_end
+    if offset != len(payload):
+        return None
+    return {
+        "format_version": format_version,
+        "declared_entry_count": declared_entry_count,
+        "record_count": len(record_sizes),
+        "record_sizes": record_sizes,
+        "record_hashes": record_hashes,
+    }
+
+
+def _convert_projectorrays_sndh_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    sound_index: dict[str, dict],
+    diagnostics: list[dict],
+) -> dict | None:
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["sndH"]
+    binding = sound_index.get(source_relative_path)
+    if not binding or binding.get("status") != "matched":
+        diagnostics.append(_projectorrays_sound_binding_diagnostic(alias, source_relative_path, "sndH", role))
+        return None
+    header = _parse_projectorrays_moa_sound_header(source.read_bytes())
+    if header is None:
+        diagnostics.append(_projectorrays_sound_header_diagnostic(alias, source_relative_path, "sndH", role))
+        return None
+    sample_path = binding["sample_path"]
+    sample_size = sample_path.stat().st_size
+    if sample_size != header["sample_byte_size"]:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_SOUND_SAMPLE_SIZE_MISMATCH",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "sndH",
+                "role": role,
+                "declared_byte_size": header["sample_byte_size"],
+                "actual_byte_size": sample_size,
+                "message": "ProjectorRays sndH declared sample size must match the bound sndS chunk",
+            }
+        )
+        return None
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "sndH",
+        "projectorrays_moa_sound_header",
+        {
+            "parent_resource_id": binding["parent_resource_id"],
+            "sample_resource_id": binding["sample_resource_id"],
+            "sample_source_relative_path": binding["sample_relative_path"],
+            "sample_source_sha256": _sha256(sample_path),
+            "sample_byte_size": sample_size,
+            "sample_rate": header["sample_rate"],
+            "bits_per_sample": header["bits_per_sample"],
+            "bytes_per_sample": header["bytes_per_sample"],
+            "channel_count": header["channel_count"],
+            "bytes_per_frame": header["bytes_per_frame"],
+            "frame_count": header["frame_count"],
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "audio": "omitted",
+                "commercial_text": "omitted",
+            },
+        },
+    )
+
+
+def _convert_projectorrays_snds_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    sound_index: dict[str, dict],
+    diagnostics: list[dict],
+) -> dict | None:
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["sndS"]
+    binding = sound_index.get(source_relative_path)
+    if not binding or binding.get("status") != "matched":
+        diagnostics.append(_projectorrays_sound_binding_diagnostic(alias, source_relative_path, "sndS", role))
+        return None
+    header_path = binding["header_path"]
+    header = _parse_projectorrays_moa_sound_header(header_path.read_bytes())
+    if header is None:
+        diagnostics.append(_projectorrays_sound_header_diagnostic(alias, source_relative_path, "sndS", role))
+        return None
+    sample = source.read_bytes()
+    if len(sample) != header["sample_byte_size"]:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_SOUND_SAMPLE_SIZE_MISMATCH",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "sndS",
+                "role": role,
+                "declared_byte_size": header["sample_byte_size"],
+                "actual_byte_size": len(sample),
+                "message": "ProjectorRays sndS byte size must match the bound sndH declaration",
+            }
+        )
+        return None
+    wav = _projectorrays_moa_pcm_to_wav(sample, header)
+    if wav is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_SOUND_PCM_UNSUPPORTED",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "sndS",
+                "role": role,
+                "message": "ProjectorRays sndS PCM payload did not match the supported WAV conversion layout",
+            }
+        )
+        return None
+    native_path = _projectorrays_native_audio_path(alias, source_relative_path)
+    native_file = work_root / native_path
+    native_file.parent.mkdir(parents=True, exist_ok=True)
+    native_file.write_bytes(wav)
+    return {
+        "source_alias": alias,
+        "source_relative_path": source_relative_path,
+        "source_sha256": _sha256(source),
+        "chunk_fourcc": "sndS",
+        "role": role,
+        "native_path": native_path,
+        "converted_sha256": _sha256(native_file),
+        "byte_size": native_file.stat().st_size,
+        "conversion_method": "projectorrays_moa_pcm_wav",
+        "parent_resource_id": binding["parent_resource_id"],
+        "header_resource_id": binding["header_resource_id"],
+        "header_source_sha256": _sha256(header_path),
+        "sample_rate": header["sample_rate"],
+        "bits_per_sample": header["bits_per_sample"],
+        "channel_count": header["channel_count"],
+        "frame_count": header["frame_count"],
+        "status": "converted",
+    }
+
+
+def _projectorrays_sound_binding_diagnostic(alias: str, source_relative_path: str, chunk_fourcc: str, role: str) -> dict:
+    return {
+        "code": "TSUI_PROJECTORRAYS_CONVERT_SOUND_BINDING_MISSING",
+        "source_alias": alias,
+        "source_relative_path": source_relative_path,
+        "chunk_fourcc": chunk_fourcc,
+        "role": role,
+        "message": "ProjectorRays sound chunk must be bound through KEY_ to a matching sndH/sndS pair",
+    }
+
+
+def _projectorrays_sound_header_diagnostic(alias: str, source_relative_path: str, chunk_fourcc: str, role: str) -> dict:
+    return {
+        "code": "TSUI_PROJECTORRAYS_CONVERT_SOUND_HEADER_INVALID",
+        "source_alias": alias,
+        "source_relative_path": source_relative_path,
+        "chunk_fourcc": chunk_fourcc,
+        "role": role,
+        "message": "ProjectorRays sndH chunk did not match the supported Moa PCM header layout",
+    }
+
+
+def _parse_projectorrays_moa_sound_header(payload: bytes) -> dict | None:
+    if len(payload) != 100:
+        return None
+    fields = [int.from_bytes(payload[index : index + 4], "big", signed=True) for index in range(0, 52, 4)]
+    compression_type = payload[52:68]
+    bits_per_sample = int.from_bytes(payload[68:72], "big", signed=True)
+    bytes_per_sample = int.from_bytes(payload[72:76], "big", signed=True)
+    channel_count = int.from_bytes(payload[76:80], "big", signed=True)
+    bytes_per_frame = int.from_bytes(payload[80:84], "big", signed=True)
+    sound_header_type = payload[84:100]
+    sample_byte_size = fields[1]
+    playback_end = fields[8]
+    frame_count = fields[10]
+    sample_rate = fields[11]
+    byte_rate = fields[12]
+    if any(value != 0 for value in compression_type):
+        return None
+    if bits_per_sample not in {8, 16} or channel_count not in {1, 2}:
+        return None
+    if bytes_per_sample != max(1, bits_per_sample // 8):
+        return None
+    if bytes_per_frame != bytes_per_sample * channel_count:
+        return None
+    if sample_byte_size <= 0 or sample_byte_size % bytes_per_frame != 0:
+        return None
+    if playback_end not in {0, sample_byte_size}:
+        return None
+    if frame_count not in {0, sample_byte_size // bytes_per_frame}:
+        return None
+    if sample_rate <= 0 or byte_rate != sample_rate * bytes_per_frame:
+        return None
+    return {
+        "sample_byte_size": sample_byte_size,
+        "sample_rate": sample_rate,
+        "byte_rate": byte_rate,
+        "bits_per_sample": bits_per_sample,
+        "bytes_per_sample": bytes_per_sample,
+        "channel_count": channel_count,
+        "bytes_per_frame": bytes_per_frame,
+        "frame_count": sample_byte_size // bytes_per_frame,
+        "sound_header_type_hash": _sha256_bytes(sound_header_type),
+    }
+
+
+def _projectorrays_moa_pcm_to_wav(sample: bytes, header: dict) -> bytes | None:
+    bits_per_sample = header["bits_per_sample"]
+    channel_count = header["channel_count"]
+    sample_rate = header["sample_rate"]
+    bytes_per_frame = header["bytes_per_frame"]
+    if len(sample) % bytes_per_frame != 0:
+        return None
+    if bits_per_sample == 16:
+        if len(sample) % 2 != 0:
+            return None
+        pcm = bytearray()
+        for index in range(0, len(sample), 2):
+            pcm.extend((sample[index + 1], sample[index]))
+        pcm_data = bytes(pcm)
+    elif bits_per_sample == 8:
+        pcm_data = sample
+    else:
+        return None
+    byte_rate = sample_rate * bytes_per_frame
+    data_size = len(pcm_data)
+    fmt_chunk = (
+        (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")
+        + channel_count.to_bytes(2, "little")
+        + sample_rate.to_bytes(4, "little")
+        + byte_rate.to_bytes(4, "little")
+        + bytes_per_frame.to_bytes(2, "little")
+        + bits_per_sample.to_bytes(2, "little")
+    )
+    return (
+        b"RIFF"
+        + (36 + data_size).to_bytes(4, "little")
+        + b"WAVE"
+        + b"fmt "
+        + fmt_chunk
+        + b"data"
+        + data_size.to_bytes(4, "little")
+        + pcm_data
+    )
+
+
+def _convert_projectorrays_vwsc_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    parsed = _parse_projectorrays_vwsc(source.read_bytes())
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["VWSC"]
+    if parsed is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_VWSC_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "VWSC",
+                "role": role,
+                "message": "ProjectorRays VWSC chunk did not match the supported Director 6 score metadata layout",
+            }
+        )
+        return None
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "VWSC",
+        "projectorrays_vwsc_score_metadata",
+        {
+            "score_version_marker": parsed["score_version_marker"],
+            "detail_entry_count": parsed["detail_entry_count"],
+            "index_entry_count": parsed["index_entry_count"],
+            "max_detail_byte_size": parsed["max_detail_byte_size"],
+            "frame_data_offset": parsed["frame_data_offset"],
+            "zero_size_detail_count": parsed["zero_size_detail_count"],
+            "score_header": parsed["score_header"],
+            "index_hash": parsed["index_hash"],
+            "detail_section_hash": parsed["detail_section_hash"],
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "commercial_text": "omitted",
+                "frame_bytes": "omitted",
+                "sprite_detail_bytes": "omitted",
+            },
+        },
+    )
+
+
+def _parse_projectorrays_vwsc(payload: bytes) -> dict | None:
+    if len(payload) < 36:
+        return None
+    frames_stream_size = int.from_bytes(payload[0:4], "big")
+    score_version_marker = int.from_bytes(payload[4:8], "big", signed=True)
+    list_start = int.from_bytes(payload[8:12], "big")
+    if frames_stream_size != len(payload) or score_version_marker != -3:
+        return None
+    if list_start < 12 or list_start + 12 > len(payload):
+        return None
+    detail_entry_count = int.from_bytes(payload[list_start : list_start + 4], "big")
+    index_entry_count = int.from_bytes(payload[list_start + 4 : list_start + 8], "big")
+    max_detail_byte_size = int.from_bytes(payload[list_start + 8 : list_start + 12], "big")
+    if detail_entry_count <= 0 or index_entry_count < detail_entry_count:
+        return None
+    index_start = list_start + 12
+    index_end = index_start + index_entry_count * 4
+    if index_end > len(payload):
+        return None
+    offsets = [
+        int.from_bytes(payload[index_start + index * 4 : index_start + (index + 1) * 4], "big")
+        for index in range(index_entry_count)
+    ]
+    frame_data_offset = index_end
+    detail_section = payload[frame_data_offset:]
+    if any(offset < 0 or offset > len(detail_section) for offset in offsets):
+        return None
+    if offsets[0] != 0:
+        return None
+    zero_size_detail_count = 0
+    for left, right in zip(offsets, offsets[1:]):
+        if right < left:
+            return None
+        if right == left:
+            zero_size_detail_count += 1
+    header_offset = frame_data_offset + offsets[0]
+    if header_offset + 20 > len(payload):
+        return None
+    score_header = {
+        "frames_stream_size": int.from_bytes(payload[header_offset : header_offset + 4], "big"),
+        "frame1_offset": int.from_bytes(payload[header_offset + 4 : header_offset + 8], "big"),
+        "num_frames": int.from_bytes(payload[header_offset + 8 : header_offset + 12], "big"),
+        "frames_version": int.from_bytes(payload[header_offset + 12 : header_offset + 14], "big"),
+        "sprite_record_size": int.from_bytes(payload[header_offset + 14 : header_offset + 16], "big"),
+        "num_channels": int.from_bytes(payload[header_offset + 16 : header_offset + 18], "big"),
+        "displayed_or_reserved_channels": int.from_bytes(payload[header_offset + 18 : header_offset + 20], "big"),
+    }
+    if score_header["frames_stream_size"] <= 0 or score_header["num_frames"] <= 0:
+        return None
+    return {
+        "score_version_marker": score_version_marker,
+        "detail_entry_count": detail_entry_count,
+        "index_entry_count": index_entry_count,
+        "max_detail_byte_size": max_detail_byte_size,
+        "frame_data_offset": frame_data_offset,
+        "zero_size_detail_count": zero_size_detail_count,
+        "score_header": score_header,
+        "index_hash": _sha256_bytes(payload[index_start:index_end]),
+        "detail_section_hash": _sha256_bytes(detail_section),
+    }
+
+
+def _convert_projectorrays_xmed_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    diagnostics: list[dict],
+) -> dict | None:
+    payload = source.read_bytes()
+    marker = _projectorrays_xmed_marker(payload)
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["XMED"]
+    if marker is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_XMED_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "XMED",
+                "role": role,
+                "message": "ProjectorRays XMED chunk did not expose a supported metadata marker",
+            }
+        )
+        return None
+    printable_count = sum(1 for value in payload if value in (9, 10, 13) or 32 <= value <= 126)
+    return _write_projectorrays_metadata_asset(
+        work_root,
+        alias,
+        source,
+        source_relative_path,
+        "XMED",
+        "projectorrays_xmed_metadata",
+        {
+            "format_marker": marker,
+            "byte_size": len(payload),
+            "printable_byte_count": printable_count,
+            "metadata_hash": _sha256_bytes(payload),
+            "redaction": {
+                "paths": "dump_relative_only",
+                "payload": "omitted",
+                "commercial_text": "omitted",
+                "xtra_names": "omitted",
+                "media_bytes": "omitted",
+            },
+        },
+    )
+
+
+def _projectorrays_xmed_marker(payload: bytes) -> str | None:
+    if payload.startswith(b"PFR1"):
+        return "PFR1"
+    if payload.startswith(b"FFFF0000"):
+        return "FFFF0000"
+    return None
+
+
+def _convert_projectorrays_edim_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    embedded_media_index: dict[str, dict],
+    diagnostics: list[dict],
+) -> dict | None:
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["ediM"]
+    binding = embedded_media_index.get(source_relative_path)
+    if not binding or binding.get("status") == "missing":
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_EDIM_BINDING_MISSING",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "ediM",
+                "role": role,
+                "message": "ProjectorRays ediM chunk did not resolve to a same-scope sound cast parent",
+            }
+        )
+        return None
+    if binding.get("status") == "ambiguous":
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_EDIM_BINDING_AMBIGUOUS",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "ediM",
+                "role": role,
+                "candidate_count": binding.get("candidate_count", 2),
+                "message": "ProjectorRays ediM binding must resolve to exactly one same-scope sound cast parent",
+            }
+        )
+        return None
+    media = source.read_bytes()
+    parsed = _parse_projectorrays_edim_macrz_header(media)
+    if parsed is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_EDIM_CONTAINER_UNSUPPORTED",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "ediM",
+                "role": role,
+                "parent_resource_id": binding["parent_resource_id"],
+                "parent_member_type": binding["parent_member_type"],
+                "message": "ProjectorRays ediM chunk did not expose a supported embedded media container signature",
+            }
+        )
+        return None
+    stream = _projectorrays_edim_macrz_mp3_stream(media, parsed)
+    if stream is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_EDIM_MACRZ_MP3_STREAM_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "ediM",
+                "role": role,
+                "parent_resource_id": binding["parent_resource_id"],
+                "parent_member_type": binding["parent_member_type"],
+                "codec_marker": parsed["codec_marker"],
+                "byte_size": parsed["byte_size"],
+                "macrz_signature_offset": parsed["macrz_signature_offset"],
+                "header_u32_words": parsed["header_u32_words"],
+                "header_u16_words": parsed["header_u16_words"],
+                "macrz_guid_sha256": parsed["macrz_guid_sha256"],
+                "macrz_body_byte_size": parsed["macrz_body_byte_size"],
+                "message": "ProjectorRays ediM MACRZ media did not contain a verified contiguous MP3 stream",
+            }
+        )
+        return None
+    native_path = _projectorrays_native_audio_path(alias, source_relative_path, ".mp3")
+    native_file = work_root / native_path
+    native_file.parent.mkdir(parents=True, exist_ok=True)
+    stream_bytes = media[stream["offset"] :]
+    native_file.write_bytes(stream_bytes)
+    return {
+        "source_alias": alias,
+        "source_relative_path": source_relative_path,
+        "source_sha256": _sha256(source),
+        "chunk_fourcc": "ediM",
+        "role": role,
+        "native_path": native_path,
+        "converted_sha256": _sha256(native_file),
+        "byte_size": native_file.stat().st_size,
+        "conversion_method": "projectorrays_edim_macrz_mp3_extract",
+        "parent_resource_id": binding["parent_resource_id"],
+        "parent_member_type": binding["parent_member_type"],
+        "codec_marker": parsed["codec_marker"],
+        "macrz_signature_offset": parsed["macrz_signature_offset"],
+        "macrz_guid_sha256": parsed["macrz_guid_sha256"],
+        "media_codec": "mp3",
+        "media_stream_offset": stream["offset"],
+        "media_stream_byte_size": len(stream_bytes),
+        "media_stream_sha256": _sha256_bytes(stream_bytes),
+        "frame_count": stream["frame_count"],
+        "sample_rate": stream["sample_rate"],
+        "bitrate_kbps": stream["bitrate_kbps"],
+        "channel_count": stream["channel_count"],
+        "mpeg_version": stream["mpeg_version"],
+        "mpeg_layer": stream["mpeg_layer"],
+        "status": "converted",
+    }
+
+
+def _projectorrays_edim_macrz_mp3_stream(payload: bytes, parsed: dict) -> dict | None:
+    expected_sample_rate = _projectorrays_header_u32(parsed, 2)
+    expected_bit_rate = _projectorrays_header_u32(parsed, 3)
+    expected_channel_count = _projectorrays_header_u16(parsed, 1)
+    scan_start = int(parsed["macrz_signature_offset"]) + len("MACRZ") + 16
+    scan_end = min(len(payload) - 4, scan_start + 4096)
+    for offset in range(scan_start, scan_end):
+        if _parse_mp3_frame_header(payload, offset) is None:
+            continue
+        chain = _parse_contiguous_mp3_frames(payload, offset)
+        if chain is None:
+            continue
+        if expected_sample_rate and chain["sample_rate"] != expected_sample_rate:
+            continue
+        if expected_bit_rate and chain["bitrate_kbps"] * 1000 != expected_bit_rate:
+            continue
+        if expected_channel_count and chain["channel_count"] != expected_channel_count:
+            continue
+        return chain
+    return None
+
+
+def _projectorrays_header_u32(parsed: dict, index: int) -> int | None:
+    words = parsed.get("header_u32_words")
+    if not isinstance(words, list) or index >= len(words):
+        return None
+    value = words[index]
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _projectorrays_header_u16(parsed: dict, index: int) -> int | None:
+    words = parsed.get("header_u16_words")
+    if not isinstance(words, list) or index >= len(words):
+        return None
+    value = words[index]
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _parse_contiguous_mp3_frames(payload: bytes, offset: int) -> dict | None:
+    cursor = offset
+    frame_count = 0
+    first: dict | None = None
+    while cursor + 4 <= len(payload):
+        frame = _parse_mp3_frame_header(payload, cursor)
+        if frame is None or cursor + frame["frame_length"] > len(payload):
+            return None
+        if first is None:
+            first = frame
+        elif (
+            frame["mpeg_version"] != first["mpeg_version"]
+            or frame["mpeg_layer"] != first["mpeg_layer"]
+            or frame["sample_rate"] != first["sample_rate"]
+            or frame["bitrate_kbps"] != first["bitrate_kbps"]
+            or frame["channel_count"] != first["channel_count"]
+        ):
+            return None
+        frame_count += 1
+        cursor += frame["frame_length"]
+    if first is None or cursor != len(payload) or frame_count < 2:
+        return None
+    return {
+        "offset": offset,
+        "frame_count": frame_count,
+        "sample_rate": first["sample_rate"],
+        "bitrate_kbps": first["bitrate_kbps"],
+        "channel_count": first["channel_count"],
+        "mpeg_version": first["mpeg_version"],
+        "mpeg_layer": first["mpeg_layer"],
+    }
+
+
+def _parse_mp3_frame_header(payload: bytes, offset: int) -> dict | None:
+    if offset < 0 or offset + 4 > len(payload):
+        return None
+    word = int.from_bytes(payload[offset : offset + 4], "big")
+    if (word & 0xFFE00000) != 0xFFE00000:
+        return None
+    version_bits = (word >> 19) & 0x03
+    layer_bits = (word >> 17) & 0x03
+    bit_rate_index = (word >> 12) & 0x0F
+    sample_rate_index = (word >> 10) & 0x03
+    padding = (word >> 9) & 0x01
+    if version_bits == 0x01 or layer_bits == 0 or bit_rate_index in {0, 0x0F} or sample_rate_index == 0x03:
+        return None
+    mpeg_version = {0x03: "mpeg1", 0x02: "mpeg2", 0x00: "mpeg25"}[version_bits]
+    mpeg_layer = {0x03: "layer1", 0x02: "layer2", 0x01: "layer3"}[layer_bits]
+    sample_rate = {
+        "mpeg1": [44100, 48000, 32000],
+        "mpeg2": [22050, 24000, 16000],
+        "mpeg25": [11025, 12000, 8000],
+    }[mpeg_version][sample_rate_index]
+    bit_rate = _mp3_bit_rate_kbps(mpeg_version, mpeg_layer, bit_rate_index)
+    if bit_rate is None:
+        return None
+    if mpeg_layer == "layer1":
+        frame_length = ((12000 * bit_rate) // sample_rate + padding) * 4
+    elif mpeg_layer == "layer3" and mpeg_version != "mpeg1":
+        frame_length = (72000 * bit_rate) // sample_rate + padding
+    else:
+        frame_length = (144000 * bit_rate) // sample_rate + padding
+    if frame_length < 4:
+        return None
+    channel_mode = (word >> 6) & 0x03
+    return {
+        "mpeg_version": mpeg_version,
+        "mpeg_layer": mpeg_layer,
+        "bitrate_kbps": bit_rate,
+        "sample_rate": sample_rate,
+        "frame_length": frame_length,
+        "channel_count": 1 if channel_mode == 0x03 else 2,
+    }
+
+
+def _mp3_bit_rate_kbps(mpeg_version: str, mpeg_layer: str, index: int) -> int | None:
+    tables = {
+        ("mpeg1", "layer1"): [None, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, None],
+        ("mpeg1", "layer2"): [None, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, None],
+        ("mpeg1", "layer3"): [None, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, None],
+        ("mpeg2", "layer1"): [None, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256, None],
+        ("mpeg2", "layer2"): [None, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, None],
+        ("mpeg2", "layer3"): [None, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, None],
+        ("mpeg25", "layer1"): [None, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256, None],
+        ("mpeg25", "layer2"): [None, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, None],
+        ("mpeg25", "layer3"): [None, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, None],
+    }
+    table = tables.get((mpeg_version, mpeg_layer))
+    if table is None or index >= len(table):
+        return None
+    return table[index]
+
+
+def _parse_projectorrays_edim_macrz_header(payload: bytes) -> dict | None:
+    marker = b"MACRZ"
+    signature_offset = payload.find(marker)
+    if signature_offset < 0 or signature_offset < 4 or signature_offset + len(marker) > len(payload):
+        return None
+    header_u16_start = max(signature_offset - 4, 0)
+    aligned_u32_end = header_u16_start - (header_u16_start % 4)
+    header_u32_words = [
+        int.from_bytes(payload[offset : offset + 4], "big")
+        for offset in range(0, aligned_u32_end, 4)
+    ]
+    header_u16_words = [
+        int.from_bytes(payload[offset : offset + 2], "big")
+        for offset in range(aligned_u32_end, signature_offset, 2)
+        if offset + 2 <= signature_offset
+    ]
+    guid_start = signature_offset + len(marker)
+    guid_end = min(guid_start + 16, len(payload))
+    return {
+        "codec_marker": "MACRZ",
+        "byte_size": len(payload),
+        "macrz_signature_offset": signature_offset,
+        "header_u32_words": header_u32_words,
+        "header_u16_words": header_u16_words,
+        "macrz_guid_sha256": _sha256_bytes(payload[guid_start:guid_end]),
+        "macrz_body_byte_size": len(payload) - signature_offset,
+    }
+
+
+def _convert_projectorrays_lscr_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    paired_json: Path,
+    script_index: dict[tuple[tuple[str, ...], int, str], list[dict]],
+    diagnostics: list[dict],
+) -> dict | None:
+    metadata = _read_projectorrays_lscr_metadata(paired_json)
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["Lscr"]
+    if metadata is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_LSCR_METADATA_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "Lscr",
+                "role": role,
+                "message": "ProjectorRays Lscr metadata JSON is required before a decompiled script can be bound",
+            }
+        )
+        return None
+    cast_id = metadata.get("castID")
+    if not isinstance(cast_id, int) or cast_id <= 0:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_LSCR_CAST_BINDING_MISSING",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "Lscr",
+                "role": role,
+                "message": "ProjectorRays Lscr metadata must expose a positive castID before script source binding",
+            }
+        )
+        return None
+    cast_member_id = cast_id & 0xFFFF
+    cast_library_id = (cast_id >> 16) & 0xFFFF
+    if cast_member_id <= 0:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_LSCR_CAST_BINDING_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "Lscr",
+                "role": role,
+                "message": "ProjectorRays Lscr castID did not contain a valid cast member id",
+            }
+        )
+        return None
+    script_number = metadata.get("scriptNumber")
+    script_number = script_number if isinstance(script_number, int) and script_number >= 0 else None
+    lookup = _find_projectorrays_lscr_script_source(
+        script_index,
+        source_relative_path,
+        cast_member_id,
+        script_number,
+    )
+    if lookup["status"] == "ambiguous":
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_LSCR_SOURCE_AMBIGUOUS",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "Lscr",
+                "role": role,
+                "cast_library_id": cast_library_id,
+                "cast_member_id": cast_member_id,
+                "candidate_count": lookup["candidate_count"],
+                "message": "ProjectorRays Lscr script source binding must resolve to exactly one same-scope source",
+            }
+        )
+        return None
+    if lookup["status"] == "missing":
+        if _projectorrays_lscr_metadata_is_empty(metadata):
+            return _convert_projectorrays_empty_lscr_metadata(
+                work_root,
+                alias,
+                source,
+                source_relative_path,
+                role,
+                cast_library_id,
+                cast_member_id,
+                script_number,
+                metadata,
+            )
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_LSCR_SOURCE_MISSING",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "Lscr",
+                "role": role,
+                "cast_library_id": cast_library_id,
+                "cast_member_id": cast_member_id,
+                "message": "ProjectorRays Lscr metadata did not resolve to a same-scope decompiled script source",
+            }
+        )
+        return None
+    script_record = lookup["script"]
+    if script_record["path"].stat().st_size <= 0:
+        if _projectorrays_lscr_metadata_is_empty(metadata):
+            return _convert_projectorrays_empty_lscr_metadata(
+                work_root,
+                alias,
+                source,
+                source_relative_path,
+                role,
+                cast_library_id,
+                cast_member_id,
+                script_number,
+                metadata,
+            )
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_LSCR_SOURCE_EMPTY",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "Lscr",
+                "role": role,
+                "cast_library_id": cast_library_id,
+                "cast_member_id": cast_member_id,
+                "message": "ProjectorRays Lscr decompiled script source must be non-empty before conversion",
+            }
+        )
+        return None
+    native_path = _projectorrays_native_lscr_script_path(alias, source_relative_path, script_record["extension"])
+    native_file = work_root / native_path
+    native_file.parent.mkdir(parents=True, exist_ok=True)
+    native_file.write_bytes(script_record["path"].read_bytes())
+    method = (
+        "projectorrays_lscr_decompiled_script"
+        if script_record["extension"] == ".ls"
+        else "projectorrays_lscr_assembly_listing"
+    )
+    return {
+        "source_alias": alias,
+        "source_relative_path": source_relative_path,
+        "source_sha256": _sha256(source),
+        "chunk_fourcc": "Lscr",
+        "role": role,
+        "native_path": native_path,
+        "converted_sha256": _sha256(native_file),
+        "byte_size": native_file.stat().st_size,
+        "conversion_method": method,
+        "cast_library_id": cast_library_id,
+        "cast_member_id": cast_member_id,
+        "script_number": script_number if script_number is not None else "unknown",
+        "script_source_sha256": _sha256(script_record["path"]),
+        "script_source_kind": script_record["kind"],
+        "script_source_binding": lookup["binding"],
+        "metadata_source": metadata.get("_metadata_source", "projectorrays_json"),
+        "status": "converted",
+    }
+
+
+def _projectorrays_lscr_metadata_is_empty(metadata: dict) -> bool:
+    count_fields = ("handlersCount", "literalsCount", "globalsCount", "propertiesCount")
+    if any(not isinstance(metadata.get(field), int) or metadata.get(field) != 0 for field in count_fields):
+        return False
+    list_fields = ("handlers", "literals", "globalNameIDs", "propertyNameIDs")
+    for field in list_fields:
+        value = metadata.get(field)
+        if value is not None and (not isinstance(value, list) or len(value) != 0):
+            return False
+    return True
+
+
+def _convert_projectorrays_empty_lscr_metadata(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    role: str,
+    cast_library_id: int,
+    cast_member_id: int,
+    script_number: int | None,
+    metadata: dict,
+) -> dict:
+    native_path = _projectorrays_native_metadata_path(alias, source_relative_path)
+    native_file = work_root / native_path
+    native_payload = {
+        "schema": "tsuinosora.projectorrays_empty_lscr_metadata.v1",
+        "source_sha256": _sha256(source),
+        "chunk_fourcc": "Lscr",
+        "cast_library_id": cast_library_id,
+        "cast_member_id": cast_member_id,
+        "script_number": script_number if script_number is not None else "unknown",
+        "script_flags": metadata.get("scriptFlags", "unknown"),
+        "handler_count": 0,
+        "literal_count": 0,
+        "global_count": 0,
+        "property_count": 0,
+        "redaction": {"payload": "omitted"},
+    }
+    _write_json(native_file, native_payload)
+    return {
+        "source_alias": alias,
+        "source_relative_path": source_relative_path,
+        "source_sha256": _sha256(source),
+        "chunk_fourcc": "Lscr",
+        "role": role,
+        "native_path": native_path,
+        "converted_sha256": _sha256(native_file),
+        "byte_size": native_file.stat().st_size,
+        "conversion_method": "projectorrays_lscr_empty_script_metadata",
+        "cast_library_id": cast_library_id,
+        "cast_member_id": cast_member_id,
+        "script_number": script_number if script_number is not None else "unknown",
+        "handler_count": 0,
+        "literal_count": 0,
+        "global_count": 0,
+        "property_count": 0,
+        "script_source_binding": "empty_script_metadata",
+        "metadata_source": metadata.get("_metadata_source", "projectorrays_json"),
+        "status": "converted",
+    }
+
+
+def _read_projectorrays_lscr_metadata(path: Path) -> dict | None:
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return None
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return _recover_projectorrays_lscr_numeric_metadata(text)
+    if isinstance(value, dict):
+        value["_metadata_source"] = "projectorrays_json"
+        return value
+    return None
+
+
+def _recover_projectorrays_lscr_numeric_metadata(text: str) -> dict | None:
+    values = {}
+    for field in ("scriptNumber", "castID"):
+        matches = re.findall(rf'"{field}"\s*:\s*(-?\d+)', text)
+        if len(matches) != 1:
+            return None
+        values[field] = int(matches[0])
+    if values["scriptNumber"] < 0 or values["castID"] <= 0:
+        return None
+    return {
+        "scriptNumber": values["scriptNumber"],
+        "castID": values["castID"],
+        "_metadata_source": "projectorrays_json_numeric_recovery",
+    }
+
+
+def _build_projectorrays_script_source_index(root: Path) -> dict[tuple[tuple[str, ...], int, str], list[dict]]:
+    index: dict[tuple[tuple[str, ...], int, str], list[dict]] = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in {".ls", ".lasm"}:
+            continue
+        match = PROJECTORRAYS_SCRIPT_SOURCE_RE.match(path.stem)
+        if not match:
+            continue
+        member_id = int(match.group(2))
+        relative_path = _rel(path, root)
+        scope = _projectorrays_script_scope(relative_path)
+        record = {
+            "path": path,
+            "member_id": member_id,
+            "extension": path.suffix.lower(),
+            "kind": match.group(1).lower(),
+            "scope": scope,
+        }
+        index.setdefault((scope, member_id, path.suffix.lower()), []).append(record)
+    return index
+
+
+def _find_projectorrays_lscr_script_source(
+    script_index: dict[tuple[tuple[str, ...], int, str], list[dict]],
+    source_relative_path: str,
+    cast_member_id: int,
+    script_number: int | None,
+) -> dict:
+    scope = _projectorrays_chunk_scope(source_relative_path)
+    for binding, member_id in (("cast_member", cast_member_id), ("script_number", script_number)):
+        if member_id is None or member_id <= 0:
+            continue
+        for extension in (".ls", ".lasm"):
+            candidates = script_index.get((scope, member_id, extension), [])
+            if len(candidates) == 1:
+                return {"status": "matched", "script": candidates[0], "binding": binding}
+            if len(candidates) > 1:
+                return {"status": "ambiguous", "candidate_count": len(candidates), "binding": binding}
+    return {"status": "missing", "candidate_count": 0}
+
+
+def _projectorrays_chunk_scope(source_relative_path: str) -> tuple[str, ...]:
+    parts = source_relative_path.replace("\\", "/").split("/")
+    if "chunks" in parts:
+        return tuple(parts[: parts.index("chunks")])
+    return tuple(parts[:-1])
+
+
+def _projectorrays_script_scope(source_relative_path: str) -> tuple[str, ...]:
+    parts = source_relative_path.replace("\\", "/").split("/")
+    if "casts" in parts:
+        return tuple(parts[: parts.index("casts")])
+    return tuple(parts[:-1])
+
+
+def _convert_projectorrays_bitd_chunk(
+    work_root: Path,
+    alias: str,
+    source: Path,
+    source_relative_path: str,
+    bitd_index: dict[tuple[tuple[str, ...], int], dict],
+    palette_index: dict[int, dict],
+    diagnostics: list[dict],
+) -> dict | None:
+    role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["BITD"]
+    resource_id = _projectorrays_chunk_resource_id(source)
+    scope = _projectorrays_chunk_scope(source_relative_path)
+    binding = bitd_index.get((scope, resource_id)) if resource_id is not None else None
+    if binding is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_BITD_BINDING_MISSING",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "BITD",
+                "role": role,
+                "message": "ProjectorRays BITD chunk did not resolve to a same-scope bitmap CASt parent",
+            }
+        )
+        return None
+    if binding.get("status") == "ambiguous":
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_BITD_BINDING_AMBIGUOUS",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "BITD",
+                "role": role,
+                "candidate_count": binding.get("candidate_count", 0),
+                "message": "ProjectorRays BITD binding must resolve to exactly one bitmap CASt parent",
+            }
+        )
+        return None
+    if binding.get("status") != "matched":
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_BITD_CAST_METADATA_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "BITD",
+                "role": role,
+                "message": "ProjectorRays BITD parent CASt metadata is not a supported bitmap member",
+            }
+        )
+        return None
+    metadata = binding["metadata"]
+    bpp = metadata["bits_per_pixel"]
+    palette = None
+    if bpp == 8:
+        stored_clut_id = metadata.get("stored_clut_id")
+        palette = palette_index.get(stored_clut_id) if isinstance(stored_clut_id, int) else None
+        if palette is None:
+            diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERT_BITD_PALETTE_REQUIRED",
+                    "source_alias": alias,
+                    "source_relative_path": source_relative_path,
+                    "chunk_fourcc": "BITD",
+                    "role": role,
+                    "bits_per_pixel": bpp,
+                    "stored_clut_id": stored_clut_id if isinstance(stored_clut_id, int) else "unknown",
+                    "message": "ProjectorRays BITD 8bpp image conversion requires proven palette binding",
+                }
+            )
+            return None
+    image = _decode_projectorrays_bitd_rgba(source.read_bytes(), metadata, palette)
+    if image is None:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_BITD_DECODE_FAILED",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "BITD",
+                "role": role,
+                "bits_per_pixel": bpp,
+                "message": "ProjectorRays BITD image payload could not be decoded with the supported Director bitmap codec",
+            }
+        )
+        return None
+    native_path = _projectorrays_native_bitd_image_path(alias, source_relative_path)
+    native_file = work_root / native_path
+    _write_rgba_png(native_file, image["width"], image["height"], image["rgba"])
+    record = {
+        "source_alias": alias,
+        "source_relative_path": source_relative_path,
+        "source_sha256": _sha256(source),
+        "chunk_fourcc": "BITD",
+        "role": role,
+        "native_path": native_path,
+        "converted_sha256": _sha256(native_file),
+        "byte_size": native_file.stat().st_size,
+        "conversion_method": "projectorrays_bitd_palette_png" if palette else "projectorrays_bitd_rgba_png",
+        "cast_resource_id": metadata["cast_resource_id"],
+        "cast_source_sha256": metadata["cast_source_sha256"],
+        "width": metadata["width"],
+        "height": metadata["height"],
+        "pitch": metadata["pitch"],
+        "bits_per_pixel": bpp,
+        "status": "converted",
+    }
+    if palette:
+        record.update(
+            {
+                "palette_id": palette["id"],
+                "stored_clut_id": palette["stored_clut_id"],
+                "director_palette_id": palette["director_palette_id"],
+                "palette_sidecar_sha256": palette["sidecar_sha256"],
+                "palette_color_count": 256,
+            }
+        )
+    return record
+
+
+def _build_projectorrays_bitd_bitmap_index(root: Path) -> dict[tuple[tuple[str, ...], int], dict]:
+    index: dict[tuple[tuple[str, ...], int], dict] = {}
+    for key_path in sorted(root.rglob("KEY_-*.bin")):
+        scope = _projectorrays_chunk_scope(_rel(key_path, root))
+        version = _projectorrays_director_version_for_scope(root, scope)
+        for child_id, parent_id, child_tag in _parse_projectorrays_key_table(key_path):
+            if child_tag != "BITD":
+                continue
+            key = (scope, child_id)
+            cast_path = _projectorrays_chunk_path_for_scope(root, scope, "CASt", parent_id)
+            if cast_path is None or version is None:
+                record = {"status": "missing"}
+            else:
+                metadata = _parse_projectorrays_bitmap_cast_metadata(cast_path, version)
+                if metadata is None:
+                    record = {"status": "missing"}
+                else:
+                    metadata["cast_resource_id"] = parent_id
+                    metadata["cast_source_sha256"] = _sha256(cast_path)
+                    record = {"status": "matched", "metadata": metadata}
+            if key in index:
+                current = index[key]
+                if current.get("status") == "ambiguous":
+                    current["candidate_count"] = int(current.get("candidate_count", 2)) + 1
+                else:
+                    index[key] = {"status": "ambiguous", "candidate_count": 2}
+            else:
+                index[key] = record
+    return index
+
+
+def _build_projectorrays_sound_index(root: Path) -> dict[str, dict]:
+    groups: dict[tuple[tuple[str, ...], int], dict] = {}
+    for key_path in sorted(root.rglob("KEY_-*.bin")):
+        scope = _projectorrays_chunk_scope(_rel(key_path, root))
+        for child_id, parent_id, child_tag in _parse_projectorrays_key_table(key_path):
+            if child_tag not in {"sndH", "sndS"}:
+                continue
+            child_path = _projectorrays_chunk_path_for_scope(root, scope, child_tag, child_id)
+            if child_path is None:
+                continue
+            group = groups.setdefault((scope, parent_id), {"parent_resource_id": parent_id})
+            group[child_tag] = {
+                "path": child_path,
+                "resource_id": child_id,
+                "relative_path": _rel(child_path, root),
+            }
+    index: dict[str, dict] = {}
+    for group in groups.values():
+        header = group.get("sndH")
+        sample = group.get("sndS")
+        if not header or not sample:
+            for child in (header, sample):
+                if child:
+                    index[child["relative_path"]] = {"status": "missing_pair"}
+            continue
+        record = {
+            "status": "matched",
+            "parent_resource_id": group["parent_resource_id"],
+            "header_path": header["path"],
+            "header_resource_id": header["resource_id"],
+            "header_relative_path": header["relative_path"],
+            "sample_path": sample["path"],
+            "sample_resource_id": sample["resource_id"],
+            "sample_relative_path": sample["relative_path"],
+        }
+        index[header["relative_path"]] = record
+        index[sample["relative_path"]] = record
+    return index
+
+
+def _build_projectorrays_embedded_media_index(root: Path) -> dict[str, dict]:
+    index: dict[str, dict] = {}
+    for key_path in sorted(root.rglob("KEY_-*.bin")):
+        scope = _projectorrays_chunk_scope(_rel(key_path, root))
+        for child_id, parent_id, child_tag in _parse_projectorrays_key_table(key_path):
+            if child_tag != "ediM":
+                continue
+            child_path = _projectorrays_chunk_path_for_scope(root, scope, "ediM", child_id)
+            parent_path = _projectorrays_chunk_path_for_scope(root, scope, "CASt", parent_id)
+            if child_path is None:
+                continue
+            child_relative_path = _rel(child_path, root)
+            parent_member_type = _parse_projectorrays_cast_member_type(parent_path) if parent_path else None
+            if parent_member_type is None:
+                record = {"status": "missing"}
+            else:
+                record = {
+                    "status": "matched",
+                    "parent_resource_id": parent_id,
+                    "parent_member_type": parent_member_type,
+                }
+            if child_relative_path in index:
+                current = index[child_relative_path]
+                if current.get("status") == "ambiguous":
+                    current["candidate_count"] = int(current.get("candidate_count", 2)) + 1
+                else:
+                    index[child_relative_path] = {"status": "ambiguous", "candidate_count": 2}
+            else:
+                index[child_relative_path] = record
+    return index
+
+
+def _parse_projectorrays_cast_member_type(path: Path) -> int | None:
+    payload = path.read_bytes()
+    if len(payload) < 4:
+        return None
+    member_type = int.from_bytes(payload[0:4], "big")
+    return member_type if member_type > 0 else None
+
+
+def _parse_projectorrays_key_table(path: Path) -> list[tuple[int, int, str]]:
+    payload = path.read_bytes()
+    if len(payload) < 12:
+        return []
+    entry_size = int.from_bytes(payload[0:2], "little")
+    entry_size2 = int.from_bytes(payload[2:4], "little")
+    used_count = int.from_bytes(payload[8:12], "little")
+    if entry_size != 12 or entry_size2 != 12:
+        return []
+    rows = []
+    offset = 12
+    for _ in range(min(used_count, (len(payload) - 12) // 12)):
+        child_id = int.from_bytes(payload[offset : offset + 4], "little")
+        parent_id = int.from_bytes(payload[offset + 4 : offset + 8], "little")
+        tag_int = int.from_bytes(payload[offset + 8 : offset + 12], "little")
+        child_tag = tag_int.to_bytes(4, "big").decode("latin1")
+        rows.append((child_id, parent_id, child_tag))
+        offset += 12
+    return rows
+
+
+def _projectorrays_director_version_for_scope(root: Path, scope: tuple[str, ...]) -> int | None:
+    chunk_dir = root.joinpath(*scope, "chunks")
+    if not chunk_dir.is_dir():
+        return None
+    for path in sorted(chunk_dir.glob("DRCF-*.json")):
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if isinstance(value, dict) and isinstance(value.get("directorVersion"), int):
+            return value["directorVersion"]
+    return None
+
+
+def _projectorrays_chunk_path_for_scope(root: Path, scope: tuple[str, ...], fourcc: str, resource_id: int) -> Path | None:
+    path = root.joinpath(*scope, "chunks", f"{fourcc}-{resource_id}.bin")
+    return path if path.is_file() else None
+
+
+def _parse_projectorrays_bitmap_cast_metadata(path: Path, director_version: int) -> dict | None:
+    payload = path.read_bytes()
+    if len(payload) < 12:
+        return None
+    member_type = int.from_bytes(payload[0:4], "big")
+    info_len = int.from_bytes(payload[4:8], "big")
+    specific_len = int.from_bytes(payload[8:12], "big")
+    if member_type != 1:
+        return None
+    specific_offset = 12 + info_len
+    specific = payload[specific_offset : specific_offset + specific_len]
+    if len(specific) != specific_len:
+        return None
+    if director_version < 0x4C2 or director_version >= 0x781:
+        return None
+    if len(specific) < 23:
+        return None
+    pitch_raw = int.from_bytes(specific[0:2], "big")
+    top = int.from_bytes(specific[2:4], "big", signed=True)
+    left = int.from_bytes(specific[4:6], "big", signed=True)
+    bottom = int.from_bytes(specific[6:8], "big", signed=True)
+    right = int.from_bytes(specific[8:10], "big", signed=True)
+    width = right - left
+    height = bottom - top
+    pitch = pitch_raw & 0x3FFF if pitch_raw & 0x8000 else pitch_raw
+    if width <= 0 or height <= 0 or pitch <= 0:
+        return None
+    bits_per_pixel = 1
+    clut_cast_lib = None
+    stored_clut_id = None
+    director_palette_id = None
+    if pitch_raw & 0x8000:
+        if len(specific) < 28:
+            return None
+        bits_per_pixel = specific[23]
+        clut_cast_lib = int.from_bytes(specific[24:26], "big", signed=True)
+        stored_clut_id = int.from_bytes(specific[26:28], "big", signed=True)
+        if stored_clut_id <= 0:
+            director_palette_id = stored_clut_id - 1
+    if bits_per_pixel not in {1, 8, 16, 32}:
+        return None
+    min_pitch = (width * bits_per_pixel + 7) // 8
+    if pitch < min_pitch:
+        return None
+    return {
+        "width": width,
+        "height": height,
+        "pitch": pitch,
+        "bits_per_pixel": bits_per_pixel,
+        "clut_cast_lib": clut_cast_lib,
+        "stored_clut_id": stored_clut_id,
+        "director_palette_id": director_palette_id,
+    }
+
+
+def _decode_projectorrays_bitd_rgba(payload: bytes, metadata: dict, palette: dict | None = None) -> dict | None:
+    width = metadata["width"]
+    height = metadata["height"]
+    pitch = metadata["pitch"]
+    bits_per_pixel = metadata["bits_per_pixel"]
+    if bits_per_pixel not in {1, 8, 16, 32}:
+        return None
+    if bits_per_pixel == 8 and palette is None:
+        return None
+    bytes_needed = pitch * height
+    skip_compression = len(payload) == bytes_needed
+    if skip_compression:
+        pixels = bytearray(payload)
+    else:
+        pixels = _decode_projectorrays_packbits(payload)
+        if pixels is None:
+            return None
+    if len(pixels) < bytes_needed:
+        pixels.extend(b"\x00" * (bytes_needed - len(pixels)))
+    rgba = bytearray(width * height * 4)
+    for y in range(height):
+        for x in range(width):
+            out = (y * width + x) * 4
+            if bits_per_pixel == 1:
+                source = y * pitch + (x >> 3)
+                bit = 7 - (x & 7)
+                color = 0xFF if pixels[source] & (1 << bit) else 0x00
+                rgba[out : out + 4] = bytes((color, color, color, 0xFF))
+            elif bits_per_pixel == 8:
+                source = y * pitch + x
+                red, green, blue = palette["colors"][pixels[source]]
+                rgba[out : out + 4] = bytes((red, green, blue, 0xFF))
+            elif bits_per_pixel == 16:
+                if skip_compression:
+                    source = y * pitch + x * 2
+                    color = (pixels[source] << 8) | pixels[source + 1]
+                else:
+                    line = y * width * 2
+                    color = (pixels[line + x] << 8) | pixels[line + width + x]
+                rgba[out : out + 4] = _rgb555_to_rgba(color)
+            elif bits_per_pixel == 32:
+                if skip_compression:
+                    source = y * pitch + x * 4
+                    red = pixels[source + 1]
+                    green = pixels[source + 2]
+                    blue = pixels[source + 3]
+                else:
+                    line = y * width * 4
+                    red = pixels[line + width + x]
+                    green = pixels[line + 2 * width + x]
+                    blue = pixels[line + 3 * width + x]
+                rgba[out : out + 4] = bytes((red, green, blue, 0xFF))
+    return {"width": width, "height": height, "rgba": bytes(rgba)}
+
+
+def _decode_projectorrays_packbits(payload: bytes) -> bytearray | None:
+    decoded = bytearray()
+    offset = 0
+    while offset < len(payload):
+        value = payload[offset]
+        offset += 1
+        if value & 0x80:
+            run_len = ((value ^ 0xFF) & 0xFF) + 2
+            if offset >= len(payload):
+                return None
+            decoded.extend([payload[offset]] * run_len)
+            offset += 1
+        else:
+            run_len = value + 1
+            if offset + run_len > len(payload):
+                return None
+            decoded.extend(payload[offset : offset + run_len])
+            offset += run_len
+    return decoded
+
+
+def _rgb555_to_rgba(color: int) -> bytes:
+    red = ((color >> 10) & 0x1F) * 255 // 31
+    green = ((color >> 5) & 0x1F) * 255 // 31
+    blue = (color & 0x1F) * 255 // 31
+    return bytes((red, green, blue, 0xFF))
+
+
+def _write_rgba_png(path: Path, width: int, height: int, rgba: bytes) -> None:
+    if width <= 0 or height <= 0 or len(rgba) != width * height * 4:
+        raise ValueError("invalid RGBA PNG payload dimensions")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = bytearray()
+    stride = width * 4
+    for y in range(height):
+        raw.append(0)
+        raw.extend(rgba[y * stride : (y + 1) * stride])
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (
+            len(data).to_bytes(4, "big")
+            + kind
+            + data
+            + (zlib.crc32(kind + data) & 0xFFFFFFFF).to_bytes(4, "big")
+        )
+
+    ihdr = (
+        width.to_bytes(4, "big")
+        + height.to_bytes(4, "big")
+        + bytes([8, 6, 0, 0, 0])
+    )
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(bytes(raw))) + chunk(b"IEND", b""))
+
+
+def _projectorrays_native_metadata_path(alias: str, source_relative_path: str) -> str:
+    parts = source_relative_path.replace("\\", "/").split("/")
+    parts[-1] = Path(parts[-1]).with_suffix(".json").name
+    safe_parts = [_ascii_path_segment(part) for part in parts]
+    return "/".join(["native-assets", "projectorrays", _ascii_path_segment(alias), *safe_parts])
+
+
+def _projectorrays_native_text_path(alias: str, source_relative_path: str) -> str:
+    parts = source_relative_path.replace("\\", "/").split("/")
+    parts[-1] = Path(parts[-1]).with_suffix(".txt").name
+    safe_parts = [_ascii_path_segment(part) for part in parts]
+    return "/".join(["native-assets", "projectorrays", _ascii_path_segment(alias), *safe_parts])
+
+
+def _projectorrays_native_lscr_script_path(alias: str, source_relative_path: str, extension: str) -> str:
+    parts = source_relative_path.replace("\\", "/").split("/")
+    suffix = extension if extension in {".ls", ".lasm"} else ".ls"
+    parts[-1] = Path(parts[-1]).with_suffix(suffix).name
+    safe_parts = [_ascii_path_segment(part) for part in parts]
+    return "/".join(["native-assets", "projectorrays", _ascii_path_segment(alias), *safe_parts])
+
+
+def _projectorrays_native_bitd_image_path(alias: str, source_relative_path: str) -> str:
+    parts = source_relative_path.replace("\\", "/").split("/")
+    parts[-1] = Path(parts[-1]).with_suffix(".png").name
+    safe_parts = [_ascii_path_segment(part) for part in parts]
+    return "/".join(["native-assets", "projectorrays", _ascii_path_segment(alias), *safe_parts])
+
+
+def _projectorrays_native_audio_path(alias: str, source_relative_path: str, extension: str = ".wav") -> str:
+    parts = source_relative_path.replace("\\", "/").split("/")
+    suffix = extension if extension in AUDIO_EXTS else ".wav"
+    parts[-1] = Path(parts[-1]).with_suffix(suffix).name
+    safe_parts = [_ascii_path_segment(part) for part in parts]
+    return "/".join(["native-assets", "projectorrays", _ascii_path_segment(alias), *safe_parts])
+
+
+def _projectorrays_metadata_shape_from_text(text: str) -> dict | None:
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return _malformed_projectorrays_json_shape(text)
+    if not isinstance(value, dict):
+        return None
+    shape = _projectorrays_metadata_shape(value)
+    shape["parse_status"] = "valid_json"
+    return shape
+
+
+def _malformed_projectorrays_json_shape(text: str) -> dict:
+    return {
+        "parse_status": "malformed_json",
+        "byte_size": len(text.encode("utf-8")),
+        "quoted_key_count": len(re.findall(r'"[A-Za-z0-9_.-]+"\s*:', text)),
+        "number_token_count": len(re.findall(r"(?<![A-Za-z0-9_.-])-?\d+(?![A-Za-z0-9_.-])", text)),
+        "object_marker_count": text.count("{"),
+        "array_marker_count": text.count("["),
+    }
+
+
+def _projectorrays_metadata_shape(value: dict) -> dict:
+    counts = _json_shape_counts(value)
+    member_type = value.get("type")
+    if not isinstance(member_type, int):
+        member_type = None
+    info = value.get("info")
+    member = value.get("member")
+    return {
+        "top_level_field_count": len(value),
+        "numeric_value_count": counts["number"],
+        "boolean_value_count": counts["boolean"],
+        "string_value_count": counts["string"],
+        "array_value_count": counts["array"],
+        "object_value_count": counts["object"],
+        "member_type": member_type,
+        "info_field_count": len(info) if isinstance(info, dict) else 0,
+        "member_field_count": len(member) if isinstance(member, dict) else 0,
+    }
+
+
+def _json_shape_counts(value: object) -> dict[str, int]:
+    counts = {"number": 0, "boolean": 0, "string": 0, "array": 0, "object": 0}
+
+    def visit(item: object) -> None:
+        if isinstance(item, bool):
+            counts["boolean"] += 1
+        elif isinstance(item, (int, float)):
+            counts["number"] += 1
+        elif isinstance(item, str):
+            counts["string"] += 1
+        elif isinstance(item, list):
+            counts["array"] += 1
+            for child in item:
+                visit(child)
+        elif isinstance(item, dict):
+            counts["object"] += 1
+            for child in item.values():
+                visit(child)
+
+    visit(value)
+    return counts
+
+
+def _ascii_path_segment(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._")
+    return cleaned or "chunk"
+
+
+def _projectorrays_converted_resource_evidence(
+    work_root: Path,
+    binary_chunks: dict[tuple[str, str], dict],
+) -> tuple[list[dict], dict[str, int], list[dict]]:
+    evidence_path = work_root / "reports" / "projectorrays_converted_resources.json"
+    if not evidence_path.exists():
+        return [], {}, []
+    diagnostics = []
+    try:
+        evidence = _read_json(evidence_path)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return (
+            [],
+            {},
+            [
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERTED_EVIDENCE_INVALID",
+                    "message": "ProjectorRays converted resource evidence must be valid JSON",
+                }
+            ],
+        )
+    if not isinstance(evidence, dict) or evidence.get("schema") != "tsuinosora.projectorrays_converted_resources.v1":
+        return (
+            [],
+            {},
+            [
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERTED_SCHEMA_INVALID",
+                    "message": "ProjectorRays converted resource evidence schema is invalid",
+                }
+            ],
+        )
+    raw_resources = evidence.get("resources", [])
+    if not isinstance(raw_resources, list):
+        return (
+            [],
+            {},
+            [
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERTED_RESOURCES_INVALID",
+                    "message": "ProjectorRays converted resource evidence resources must be a list",
+                }
+            ],
+        )
+    converted = []
+    converted_counts: dict[str, int] = {}
+    seen_sources = set()
+    for index, raw in enumerate(raw_resources):
+        record = _validate_projectorrays_converted_resource(work_root, binary_chunks, raw, index, diagnostics)
+        if not record:
+            continue
+        source_key = (record["source_alias"], record["source_relative_path"])
+        if source_key in seen_sources:
+            diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERTED_SOURCE_DUPLICATE",
+                    "index": index,
+                    "message": "ProjectorRays converted resource evidence must not duplicate a source chunk",
+                }
+            )
+            continue
+        seen_sources.add(source_key)
+        converted.append(record)
+        fourcc = record["chunk_fourcc"]
+        converted_counts[fourcc] = converted_counts.get(fourcc, 0) + 1
+    return converted, converted_counts, _dedupe_diagnostics(diagnostics)
+
+
+def _validate_projectorrays_converted_resource(
+    work_root: Path,
+    binary_chunks: dict[tuple[str, str], dict],
+    raw: object,
+    index: int,
+    diagnostics: list[dict],
+) -> dict | None:
+    if not isinstance(raw, dict):
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_RESOURCE_INVALID",
+                "index": index,
+                "message": "ProjectorRays converted resource evidence entries must be objects",
+            }
+        )
+        return None
+    source_alias = str(raw.get("source_alias", "")).strip()
+    source_relative_path = str(raw.get("source_relative_path", "")).strip()
+    source_key = (source_alias, source_relative_path)
+    source = binary_chunks.get(source_key)
+    raw_chunk_fourcc = raw.get("chunk_fourcc", "")
+    chunk_fourcc = raw_chunk_fourcc if isinstance(raw_chunk_fourcc, str) else str(raw_chunk_fourcc)
+    role = str(raw.get("role", "")).strip()
+    native_path = str(raw.get("native_path", "")).strip()
+    source_sha256 = str(raw.get("source_sha256", "")).strip()
+    converted_sha256 = str(raw.get("converted_sha256", "")).strip()
+    conversion_method = str(raw.get("conversion_method", "")).strip()
+    byte_size = _positive_int(raw.get("byte_size", 0))
+    entry_diagnostics = []
+    if not _is_safe_symbol(source_alias) or not _is_safe_report_relative_path(source_relative_path):
+        entry_diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_SOURCE_INVALID",
+                "index": index,
+                "message": "converted resource evidence must reference a dump-root relative source chunk",
+            }
+        )
+    elif not source:
+        entry_diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_SOURCE_MISSING",
+                "index": index,
+                "source_alias": source_alias,
+                "source_relative_path": source_relative_path,
+                "message": "converted resource evidence references an unknown ProjectorRays binary chunk",
+            }
+        )
+    if source and chunk_fourcc != source["chunk_fourcc"]:
+        entry_diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_CHUNK_FOURCC_MISMATCH",
+                "index": index,
+                "source_alias": source_alias,
+                "source_relative_path": source_relative_path,
+                "message": "converted resource evidence chunk fourcc does not match the source chunk",
+            }
+        )
+    expected_role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES.get(chunk_fourcc, "director_chunk")
+    if role != expected_role:
+        entry_diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_ROLE_MISMATCH",
+                "index": index,
+                "message": "converted resource evidence role does not match the chunk role",
+            }
+        )
+    if not _is_sanitized_sha256(source_sha256) or (source and source_sha256 != source["source_sha256"]):
+        entry_diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_SOURCE_HASH_MISMATCH",
+                "index": index,
+                "message": "converted resource evidence source hash does not match the source chunk",
+            }
+        )
+    if not _is_safe_report_relative_path(native_path) or not native_path.startswith("native-assets/"):
+        entry_diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_NATIVE_PATH_INVALID",
+                "index": index,
+                "message": "converted resource evidence native path must be under native-assets",
+            }
+        )
+        native_file = None
+    else:
+        native_file = work_root / native_path
+    if native_file is not None and not native_file.is_file():
+        entry_diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_NATIVE_MISSING",
+                "index": index,
+                "native_path": native_path,
+                "message": "converted resource evidence native asset is missing",
+            }
+        )
+    if native_file is not None and native_file.is_file():
+        native_hash = _sha256(native_file)
+        native_size = native_file.stat().st_size
+        if not _is_sanitized_sha256(converted_sha256) or converted_sha256 != native_hash:
+            entry_diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERTED_HASH_MISMATCH",
+                    "index": index,
+                    "native_path": native_path,
+                    "message": "converted resource evidence hash does not match the native asset",
+                }
+            )
+        if byte_size <= 0 or byte_size != native_size:
+            entry_diagnostics.append(
+                {
+                    "code": "TSUI_PROJECTORRAYS_CONVERTED_BYTE_SIZE_MISMATCH",
+                    "index": index,
+                    "native_path": native_path,
+                    "message": "converted resource evidence byte size does not match the native asset",
+                }
+            )
+    forbidden_methods = {"", "hash_only", "route_only", "raw_chunk_copy", "raw_copy", "none"}
+    if not _is_safe_symbol(conversion_method) or conversion_method in forbidden_methods:
+        entry_diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_METHOD_INVALID",
+                "index": index,
+                "message": "converted resource evidence must name a real converter method and cannot be raw chunk copy",
+            }
+        )
+    if raw.get("status") != "converted":
+        entry_diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERTED_STATUS_INVALID",
+                "index": index,
+                "message": "converted resource evidence status must be converted",
+            }
+        )
+    diagnostics.extend(entry_diagnostics)
+    if entry_diagnostics or not source:
+        return None
+    return {
+        "source_alias": source_alias,
+        "source_relative_path": source_relative_path,
+        "source_sha256": source_sha256,
+        "chunk_fourcc": chunk_fourcc,
+        "role": role,
+        "native_path": native_path,
+        "converted_sha256": converted_sha256,
+        "byte_size": byte_size,
+        "conversion_method": conversion_method,
+        "status": "converted",
+    }
+
+
 def _projectorrays_chunk_fourcc(path: Path) -> str:
     name = path.stem
     if "-" not in name:
         return "unknown"
     fourcc = name.rsplit("-", 1)[0]
     return fourcc if _is_safe_projectorrays_fourcc(fourcc) else "unknown"
+
+
+def _projectorrays_chunk_resource_id(path: Path) -> int | None:
+    name = path.stem
+    if "-" not in name:
+        return None
+    raw_id = name.rsplit("-", 1)[1]
+    return int(raw_id) if raw_id.isdigit() else None
 
 
 def _is_safe_projectorrays_fourcc(value: str) -> bool:
@@ -4947,6 +10152,7 @@ def run_internal_demo_bundle(
     astra_bin: Path | str | None = None,
     player_automation_report: Path | str | None = None,
     command_runner=None,
+    visual_automation_runner=None,
 ) -> dict:
     config_path = Path(config_path)
     repo_root = Path(repo_root)
@@ -4955,6 +10161,8 @@ def run_internal_demo_bundle(
     diagnostics = list(config_diagnostics)
     demo_report = None
     full_dump_report = None
+    visual_capture_report = None
+    visual_comparison_report = None
     files: list[dict] = []
     command_reports: list[dict] = []
     bundle_manifests: dict[str, str] = {}
@@ -5050,7 +10258,7 @@ def run_internal_demo_bundle(
                     "--format",
                     "json",
                 ],
-                nativevn_root,
+                repo_root,
             ),
             (
                 "bundle.web",
@@ -5070,7 +10278,7 @@ def run_internal_demo_bundle(
                     "--format",
                     "json",
                 ],
-                nativevn_root,
+                repo_root,
             ),
         ]:
             result = _run_bundle_command(phase, command, cwd, command_runner)
@@ -5113,9 +10321,119 @@ def run_internal_demo_bundle(
                             }
                         )
 
+        if not diagnostics and bool(config.get("require_visual_screenshot_acceptance", True)):
+            visual_config = config.get("visual_capture")
+            if not isinstance(visual_config, dict):
+                diagnostics.append(
+                    {
+                        "code": "TSUI_INTERNAL_DEMO_VISUAL_CAPTURE_REQUIRED",
+                        "message": "internal playable demo requires visual screenshot capture config",
+                    }
+                )
+            else:
+                visual_capture_report = build_visual_screenshot_capture_report(
+                    work_root,
+                    visual_config,
+                    automation_runner=visual_automation_runner or run_visual_capture_automation,
+                )
+                visual_comparison_report = build_visual_comparison_report(
+                    work_root,
+                    visual_capture_report,
+                    visual_config.get("visual_reviews", []),
+                )
+                if visual_capture_report.get("status") != "pass":
+                    diagnostics.append(
+                        {
+                            "code": "TSUI_INTERNAL_DEMO_VISUAL_CAPTURE_BLOCKED",
+                            "message": "internal playable demo requires passing visual screenshot capture evidence",
+                        }
+                    )
+                    diagnostics.extend(visual_capture_report.get("diagnostics", []))
+                if visual_comparison_report.get("status") != "pass":
+                    diagnostics.append(
+                        {
+                            "code": "TSUI_INTERNAL_DEMO_VISUAL_COMPARISON_BLOCKED",
+                            "message": "internal playable demo requires passing visual comparison evidence",
+                        }
+                    )
+                    diagnostics.extend(visual_comparison_report.get("diagnostics", []))
+                if not visual_capture_report.get("automation", {}).get("configured"):
+                    diagnostics.append(
+                        {
+                            "code": "TSUI_INTERNAL_DEMO_VISUAL_AUTOMATION_REQUIRED",
+                            "message": "internal playable demo requires automated original/demo screenshot capture intent",
+                        }
+                    )
+                elif visual_capture_report.get("automation", {}).get("execution_status") != "pass":
+                    diagnostics.append(
+                        {
+                            "code": "TSUI_INTERNAL_DEMO_VISUAL_AUTOMATION_BLOCKED",
+                            "message": "internal playable demo requires passing automated original/demo screenshot capture execution",
+                        }
+                    )
+                for path, role in [
+                    (work_root / "reports" / "visual_screenshot_capture_report.json", "visual_screenshot_capture_report"),
+                    (work_root / "reports" / "visual_comparison_report.json", "visual_comparison_report"),
+                ]:
+                    record = _bundle_file_record(work_root, path, role)
+                    if record:
+                        files.append(record)
+
         player_report_path = Path(str(player_automation_report)) if player_automation_report else None
         if not player_report_path and isinstance(config, dict) and config.get("player_automation_report"):
             player_report_path = Path(str(config["player_automation_report"]))
+        player_script_path = work_root / "reports" / "live_player_script.json"
+        player_transcript_path = work_root / "reports" / "live_player_transcript.json"
+        player_trace_path = work_root / "reports" / "live_player_trace.log"
+        player_automation_config = config.get("player_automation") if isinstance(config, dict) else None
+        if not diagnostics and isinstance(player_automation_config, dict):
+            if not player_report_path:
+                diagnostics.append(
+                    {
+                        "code": "TSUI_INTERNAL_DEMO_PLAYER_EVIDENCE_REQUIRED",
+                        "message": "player automation requires player_automation_report output path",
+                    }
+                )
+            else:
+                timeout_ms = _non_negative_int(player_automation_config.get("timeout_ms", 60000)) or 60000
+                result = _run_bundle_command(
+                    "player.windows_live_automation",
+                    [
+                        "cargo",
+                        "run",
+                        "-p",
+                        "astra-player",
+                        "--",
+                        "--windows-bundle",
+                        str(windows_bundle),
+                        "--visual-comparison-report",
+                        str(work_root / "reports" / "visual_comparison_report.json"),
+                        "--output-report",
+                        str(player_report_path),
+                        "--output-script",
+                        str(player_script_path),
+                        "--output-transcript",
+                        str(player_transcript_path),
+                        "--output-trace-log",
+                        str(player_trace_path),
+                        "--timeout-ms",
+                        str(timeout_ms),
+                    ],
+                    repo_root,
+                    command_runner,
+                )
+                command_reports.append(result["record"])
+                if result["status"] != "pass":
+                    diagnostics.append(result["diagnostic"])
+                for path, role in [
+                    (player_report_path, "player_automation_report"),
+                    (player_script_path, "player_automation_script"),
+                    (player_transcript_path, "player_input_transcript"),
+                    (player_trace_path, "player_trace_log"),
+                ]:
+                    record = _bundle_file_record(work_root, path, role)
+                    if record:
+                        files.append(record)
         if not diagnostics and player_report_path:
             if not player_report_path.is_file():
                 diagnostics.append(
@@ -5175,6 +10493,8 @@ def run_internal_demo_bundle(
         "status": "pass" if not diagnostics else "blocked",
         "full_dump": "reports/projectorrays_full_dump_report.json" if full_dump_report else "",
         "demo_slice": "reports/demo_slice_report.json" if demo_report else "",
+        "visual_capture": "reports/visual_screenshot_capture_report.json" if visual_capture_report else "",
+        "visual_comparison": "reports/visual_comparison_report.json" if visual_comparison_report else "",
         "package": package_rel if work_root else "",
         "bundles": bundle_manifests,
         "release_report": release_report_rel,
@@ -5220,6 +10540,8 @@ def _run_bundle_command(phase: str, command: list[str], cwd: Path, command_runne
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
     returncode = int(getattr(completed, "returncode", 1))
@@ -5308,6 +10630,13 @@ def import_projectorrays_reader(config_path: Path | str) -> dict:
                 route["line"] = line_no
                 route["source_hash"] = ""
                 source_routes.append(route)
+            if not source_routes:
+                derived_route = _projectorrays_route_from_script_identity(path)
+                if derived_route:
+                    derived_route["source"] = manifest_rel
+                    derived_route["line"] = len(source_records) + 1
+                    derived_route["source_hash"] = ""
+                    source_routes.append(derived_route)
             source_records.append(
                 {
                     "dump_source": rel,
@@ -5391,6 +10720,24 @@ def import_projectorrays_reader(config_path: Path | str) -> dict:
     if work_root:
         _write_json(work_root / "reports" / "projectorrays_reader_report.json", report)
     return report
+
+
+def _projectorrays_route_from_script_identity(path: Path) -> dict | None:
+    match = PROJECTORRAYS_GO_ROUTE_SOURCE_RE.match(path.stem)
+    if not match:
+        return None
+    token = _safe_identifier(match.group(2)).strip("_")
+    if not token:
+        return None
+    route_id = f"classic.{token.lower()}"
+    if not _is_safe_symbol(route_id):
+        return None
+    return {
+        "route_id": route_id,
+        "coverage": "covered",
+        "terminal": f"ending.{_safe_identifier(route_id)}",
+        "choices": [],
+    }
 
 
 def _read_projectorrays_reader_config(config_path: Path) -> tuple[dict, list[dict]]:
@@ -5604,6 +10951,53 @@ def _demo_slice_config_diagnostics(config: dict | list) -> list[dict]:
                 "message": "require_full_resource_conversion must be a boolean",
             }
         )
+    if "require_visual_screenshot_acceptance" in config and not isinstance(
+        config.get("require_visual_screenshot_acceptance"), bool
+    ):
+        diagnostics.append(
+            {
+                "code": "TSUI_DEMO_SLICE_CONFIG_VISUAL_ACCEPTANCE_INVALID",
+                "message": "require_visual_screenshot_acceptance must be a boolean",
+            }
+        )
+    if "visual_capture" in config and not isinstance(config.get("visual_capture"), dict):
+        diagnostics.append(
+            {
+                "code": "TSUI_DEMO_SLICE_CONFIG_VISUAL_CAPTURE_INVALID",
+                "message": "visual_capture must be a sanitized object",
+            }
+        )
+    if "player_automation" in config:
+        player_automation = config.get("player_automation")
+        if not isinstance(player_automation, dict):
+            diagnostics.append(
+                {
+                    "code": "TSUI_DEMO_SLICE_CONFIG_PLAYER_AUTOMATION_INVALID",
+                    "message": "player_automation must be a sanitized object",
+                }
+            )
+        else:
+            if player_automation.get("schema") != "astra.player_live_automation_config.v1":
+                diagnostics.append(
+                    {
+                        "code": "TSUI_DEMO_SLICE_CONFIG_PLAYER_AUTOMATION_SCHEMA_INVALID",
+                        "message": "player_automation must use schema astra.player_live_automation_config.v1",
+                    }
+                )
+            if player_automation.get("backend") != "windows_sendinput":
+                diagnostics.append(
+                    {
+                        "code": "TSUI_DEMO_SLICE_CONFIG_PLAYER_AUTOMATION_BACKEND_INVALID",
+                        "message": "player_automation backend must be windows_sendinput for this milestone",
+                    }
+                )
+            if "timeout_ms" in player_automation and not isinstance(player_automation.get("timeout_ms"), int):
+                diagnostics.append(
+                    {
+                        "code": "TSUI_DEMO_SLICE_CONFIG_PLAYER_AUTOMATION_TIMEOUT_INVALID",
+                        "message": "player_automation timeout_ms must be an integer",
+                    }
+                )
     if "projectorrays_full_dump_roots" in config:
         roots = config.get("projectorrays_full_dump_roots")
         if not isinstance(roots, list):
@@ -6108,6 +11502,95 @@ def read_png(path: Path) -> dict:
         "alpha_mask": alpha_mask,
         "color_distribution": _color_distribution(histogram, visible_count),
     }
+
+
+def _read_png_rgba(path: Path) -> dict:
+    data = path.read_bytes()
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("not a PNG file")
+    offset = 8
+    width = height = color_type = None
+    idat = bytearray()
+    while offset < len(data):
+        length = struct.unpack(">I", data[offset : offset + 4])[0]
+        kind = data[offset + 4 : offset + 8]
+        payload = data[offset + 8 : offset + 8 + length]
+        offset += 12 + length
+        if kind == b"IHDR":
+            width, height, bit_depth, color_type, compression, filter_method, interlace = struct.unpack(
+                ">IIBBBBB", payload
+            )
+            if bit_depth != 8 or compression != 0 or filter_method != 0 or interlace != 0:
+                raise ValueError("unsupported PNG encoding")
+            if color_type not in (2, 6):
+                raise ValueError("unsupported PNG color type")
+        elif kind == b"IDAT":
+            idat.extend(payload)
+        elif kind == b"IEND":
+            break
+    if width is None or height is None or color_type is None:
+        raise ValueError("missing PNG IHDR")
+    channels = 4 if color_type == 6 else 3
+    raw = zlib.decompress(bytes(idat))
+    stride = width * channels
+    rows = []
+    previous = [0] * stride
+    cursor = 0
+    for _ in range(height):
+        filter_type = raw[cursor]
+        cursor += 1
+        encoded = list(raw[cursor : cursor + stride])
+        cursor += stride
+        row = _unfilter(encoded, previous, channels, filter_type)
+        rows.append(row)
+        previous = row
+    pixels = bytearray()
+    for row in rows:
+        for x in range(width):
+            pixels.extend(row[x * channels : x * channels + 3])
+            pixels.append(row[x * channels + 3] if channels == 4 else 255)
+    return {"dimensions": {"width": width, "height": height}, "width": width, "height": height, "pixels": bytes(pixels)}
+
+
+def _rgba_nonblank(pixels: bytes) -> bool:
+    for offset in range(0, len(pixels), 4):
+        r, g, b, a = pixels[offset : offset + 4]
+        if a > 0 and (r != 0 or g != 0 or b != 0):
+            return True
+    return False
+
+
+def _rgba_region(image: dict, x: int, y: int, width: int, height: int) -> bytes | None:
+    if x < 0 or y < 0 or width <= 0 or height <= 0:
+        return None
+    image_width = int(image["width"])
+    image_height = int(image["height"])
+    if x + width > image_width or y + height > image_height:
+        return None
+    source = image["pixels"]
+    out = bytearray()
+    for row in range(y, y + height):
+        start = (row * image_width + x) * 4
+        out.extend(source[start : start + width * 4])
+    return bytes(out)
+
+
+def _rgba_delta_metrics(original: bytes, demo: bytes) -> tuple[float, float]:
+    if len(original) != len(demo) or not original:
+        return 255.0, 1.0
+    total_delta = 0
+    changed = 0
+    pixels = len(original) // 4
+    for offset in range(0, len(original), 4):
+        pixel_changed = False
+        for channel in range(3):
+            delta = abs(original[offset + channel] - demo[offset + channel])
+            total_delta += delta
+            if delta > 8:
+                pixel_changed = True
+        if pixel_changed:
+            changed += 1
+    return total_delta / max(pixels * 3, 1), changed / max(pixels, 1)
 
 
 def _unfilter(row: list[int], previous: list[int], bpp: int, filter_type: int) -> list[int]:
@@ -7271,7 +12754,7 @@ def _render_nativevn_story(routes: list[dict]) -> str:
                 f"  scene {state} #@id scene.{state}",
                 f"    bgm asset:native-assets/bgm/{route_id}.ogg loop:true #@id bgm.{route_id}",
                 f"    se asset:native-assets/se/page.ogg #@id se.{route_id}",
-                "    wait fence:voice.opening.end #@id wait.route_pause",
+                f"    wait fence:voice.opening.end #@id wait.{route_id}.route_pause",
                 f"    text key:tsui.{route_id}.line speaker:narrator voice:voice.narrator.0001 #@id line.{route_id}.line",
                 f"    jump {terminal} #@id jump.{route_id}",
             ]
@@ -7341,6 +12824,24 @@ def _render_nativevn_project(section_specs: list[dict], scenario_refs: list[str]
         "  sources:",
         "    - Scripts",
         "  profiles: [classic, modern]",
+        "  display:",
+        "    original_resolution:",
+        "      width: 800",
+        "      height: 600",
+        "    scale_filter: linear",
+        "    preview_layers:",
+        "      - vfs_uri: package:/native-assets/projectorrays/data/MENU/chunks/BITD-444.png",
+        "        x: 0",
+        "        y: 0",
+        "      - vfs_uri: package:/native-assets/projectorrays/data/MENU/chunks/BITD-449.png",
+        "        x: 564",
+        "        y: 344",
+        "      - vfs_uri: package:/native-assets/projectorrays/data/MENU/chunks/BITD-454.png",
+        "        x: 564",
+        "        y: 432",
+        "      - vfs_uri: package:/native-assets/projectorrays/data/MENU/chunks/BITD-455.png",
+        "        x: 564",
+        "        y: 520",
         "  asset_roots:",
         "    - native-assets",
         "  scenario_refs:",
@@ -7405,6 +12906,13 @@ def main(argv: list[str] | None = None) -> int:
     refs = sub.add_parser("reference-report")
     refs.add_argument("--title", required=True)
     refs.add_argument("--game", required=True)
+    visual_capture = sub.add_parser("visual-capture")
+    visual_capture.add_argument("--work-root", required=True)
+    visual_capture.add_argument("--config", required=True)
+    visual_comparison = sub.add_parser("visual-comparison")
+    visual_comparison.add_argument("--work-root", required=True)
+    visual_comparison.add_argument("--capture-report", required=True)
+    visual_comparison.add_argument("--visual-reviews", required=True)
     conversion = sub.add_parser("conversion-report")
     conversion.add_argument("--inventory", required=True)
     conversion.add_argument("--asset-analysis", required=True)
@@ -7449,6 +12957,11 @@ def main(argv: list[str] | None = None) -> int:
     projectorrays_full = sub.add_parser("projectorrays-full-dump")
     projectorrays_full.add_argument("--work-root", required=True)
     projectorrays_full.add_argument("--dump-root", action="append", default=[])
+    projectorrays_convert = sub.add_parser("projectorrays-convert-resources")
+    projectorrays_convert.add_argument("--work-root", required=True)
+    projectorrays_convert.add_argument("--dump-root", action="append", default=[])
+    projectorrays_convert.add_argument("--palette-sidecar", action="append", default=[])
+    projectorrays_convert.add_argument("--summary", action="store_true")
     internal_bundle = sub.add_parser("internal-demo-bundle")
     internal_bundle.add_argument("--config", required=True)
     internal_bundle.add_argument("--repo-root", default=".")
@@ -7487,6 +13000,18 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.game),
             expected_hashes=expected_hashes,
             expected_dimensions=expected_dimensions,
+        )
+    elif args.command == "visual-capture":
+        report = build_visual_screenshot_capture_report(
+            Path(args.work_root),
+            _read_json(Path(args.config)),
+            automation_runner=run_visual_capture_automation,
+        )
+    elif args.command == "visual-comparison":
+        report = build_visual_comparison_report(
+            Path(args.work_root),
+            _read_json(Path(args.capture_report)),
+            _read_json(Path(args.visual_reviews)),
         )
     elif args.command == "conversion-report":
         report = build_conversion_report(
@@ -7550,6 +13075,14 @@ def main(argv: list[str] | None = None) -> int:
             work_root=Path(args.work_root),
             dump_roots=[_split_alias_path(item) for item in args.dump_root],
         )
+    elif args.command == "projectorrays-convert-resources":
+        report = convert_projectorrays_resources(
+            work_root=Path(args.work_root),
+            dump_roots=[_split_alias_path(item) for item in args.dump_root],
+            palette_sidecars=[Path(item) for item in args.palette_sidecar],
+        )
+        if args.summary:
+            report = _projectorrays_conversion_summary(report)
     else:
         report = run_internal_demo_bundle(
             config_path=Path(args.config),
@@ -7576,6 +13109,36 @@ def _split_alias(value: str) -> tuple[str, str]:
 def _split_alias_path(value: str) -> tuple[str, Path]:
     name, path = _split_alias(value)
     return name, Path(path)
+
+
+def _float_threshold(value: dict, key: str, default: float) -> float:
+    if not isinstance(value, dict):
+        return default
+    raw = value.get(key, default)
+    try:
+        result = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return result if result >= 0.0 else default
+
+
+def _non_negative_int(value: object) -> int:
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(result, 0)
+
+
+def _safe_work_relative_path(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    value = value.strip()
+    return value if _is_safe_report_relative_path(value) else ""
+
+
+def _is_sha256(value: str) -> bool:
+    return bool(re.fullmatch(r"sha256:[0-9a-f]{64}", value))
 
 
 if __name__ == "__main__":

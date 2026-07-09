@@ -23,7 +23,10 @@ from tsuinosora_tools import (  # noqa: E402
     build_script_source_map_report,
     build_stage3_gate_report,
     build_projectorrays_full_dump_report,
+    build_visual_comparison_report,
     build_visual_reference_report,
+    build_visual_screenshot_capture_report,
+    convert_projectorrays_resources,
     demo_slice_config_template,
     extract_readable_assets,
     import_projectorrays_reader,
@@ -32,6 +35,10 @@ from tsuinosora_tools import (  # noqa: E402
     run_local_gate,
     write_demo_slice_config_template,
     write_nativevn_package_input,
+    _render_nativevn_story,
+    _normalize_visual_capture_image,
+    _resolve_visual_capture_launch_command,
+    _visual_capture_launch_environment,
 )
 
 
@@ -43,6 +50,14 @@ class AssetAnalysisTests(unittest.TestCase):
         self.assertEqual(template["schema"], "tsuinosora.demo_slice_config.v1")
         self.assertEqual(template["local_work_root"], "Examples/TsuiNoSora/.local/work")
         self.assertTrue(template["require_full_resource_conversion"])
+        self.assertTrue(template["require_visual_screenshot_acceptance"])
+        self.assertEqual(template["visual_capture"]["schema"], "tsuinosora.visual_capture_config.v1")
+        self.assertEqual(
+            template["visual_capture"]["capture_automation"]["schema"],
+            "tsuinosora.visual_capture_automation.v1",
+        )
+        self.assertEqual(template["visual_capture"]["capture_automation"]["backend"], "windows_sendinput")
+        self.assertGreaterEqual(len(template["visual_capture"]["checkpoints"]), 2)
         self.assertEqual(len(template["projectorrays_full_dump_roots"]), 3)
         self.assertEqual(
             template["player_automation_report"],
@@ -101,6 +116,1300 @@ class AssetAnalysisTests(unittest.TestCase):
             )
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
+    def test_projectorrays_full_dump_counts_verified_converted_resource_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            native = work / "native-assets" / "images" / "bitd-1.png"
+            dump.mkdir()
+            source = dump / "BITD-1.bin"
+            source.write_bytes(b"\x82\x00\x82\x00payload")
+            native.parent.mkdir(parents=True)
+            native.write_bytes(make_png(4, 4, fill=(10, 20, 30, 255)))
+            (work / "reports").mkdir(parents=True)
+            (work / "reports" / "projectorrays_converted_resources.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "tsuinosora.projectorrays_converted_resources.v1",
+                        "resources": [
+                            {
+                                "source_alias": "data",
+                                "source_relative_path": "BITD-1.bin",
+                                "source_sha256": sha256_file(source),
+                                "chunk_fourcc": "BITD",
+                                "role": "bitmap_or_palette_backed_image",
+                                "native_path": "native-assets/images/bitd-1.png",
+                                "converted_sha256": sha256_file(native),
+                                "byte_size": native.stat().st_size,
+                                "conversion_method": "projectorrays_bitd_to_png",
+                                "status": "converted",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_projectorrays_full_dump_report(work, [("data", dump)])
+            encoded = json.dumps(report, sort_keys=True)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["resource_coverage"], {"status": "pass", "required": 1, "converted": 1})
+            self.assertEqual(report["counts"]["converted_resource_count"], 1)
+            self.assertEqual(report["conversion_plan"][0]["status"], "converted")
+            self.assertEqual(report["converted_resources"][0]["native_path"], "native-assets/images/bitd-1.png")
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+            self.assertNotIn("commercial text", encoded)
+
+    def test_projectorrays_full_dump_rejects_raw_copy_and_hash_mismatch_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            native = work / "native-assets" / "images" / "bitd-1.bin"
+            dump.mkdir()
+            source = dump / "BITD-1.bin"
+            source.write_bytes(b"\x82\x00\x82\x00payload")
+            native.parent.mkdir(parents=True)
+            native.write_bytes(source.read_bytes())
+            (work / "reports").mkdir(parents=True)
+            (work / "reports" / "projectorrays_converted_resources.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "tsuinosora.projectorrays_converted_resources.v1",
+                        "resources": [
+                            {
+                                "source_alias": "data",
+                                "source_relative_path": "BITD-1.bin",
+                                "source_sha256": "sha256:" + ("0" * 64),
+                                "chunk_fourcc": "BITD",
+                                "role": "bitmap_or_palette_backed_image",
+                                "native_path": "native-assets/images/bitd-1.bin",
+                                "converted_sha256": sha256_file(native),
+                                "byte_size": native.stat().st_size,
+                                "conversion_method": "raw_chunk_copy",
+                                "status": "converted",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_projectorrays_full_dump_report(work, [("data", dump)])
+            codes = {diagnostic["code"] for diagnostic in report["diagnostics"]}
+            encoded = json.dumps(report, sort_keys=True)
+
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["resource_coverage"]["converted"], 0)
+            self.assertIn("TSUI_PROJECTORRAYS_CONVERTED_SOURCE_HASH_MISMATCH", codes)
+            self.assertIn("TSUI_PROJECTORRAYS_CONVERTED_METHOD_INVALID", codes)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_writes_sanitized_metadata_evidence_for_json_backed_chunk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "READY" / "chunks"
+            chunks.mkdir(parents=True)
+            source = chunks / "CASt-1.bin"
+            source.write_bytes(b"\x00\x00\x00\x03\x00\x00\x00\x27metadata")
+            (chunks / "CASt-1.json").write_text(
+                json.dumps(
+                    {
+                        "type": 3,
+                        "infoLen": 41,
+                        "specificDataLen": 28,
+                        "info": {
+                            "dataOffset": 20,
+                            "scriptSrcText": "commercial text must not leak",
+                            "name": "HeroName",
+                        },
+                        "member": {"width": 640, "height": 480},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "READY" / "chunks" / "CASt-1.json"
+            native_text = native.read_text(encoding="utf-8")
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["schema"], "tsuinosora.projectorrays_converted_resources.v1")
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 1)
+            self.assertEqual(conversion["resources"][0]["source_relative_path"], "READY/chunks/CASt-1.bin")
+            self.assertEqual(conversion["resources"][0]["native_path"], "native-assets/projectorrays/data/READY/chunks/CASt-1.json")
+            self.assertEqual(full_dump["resource_coverage"], {"status": "pass", "required": 1, "converted": 1})
+            self.assertTrue(native.exists())
+            self.assertNotIn("HeroName", native_text)
+            self.assertNotIn("commercial text", native_text)
+            self.assertNotIn("scriptSrcText", native_text)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_accepts_malformed_json_as_redacted_metadata_shape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            source = dump / "CASt-1.bin"
+            source.write_bytes(b"\x00\x00\x00\x01metadata")
+            (dump / "CASt-1.json").write_text(
+                '{\n  "type": 1,\n  "info": {"name": "private", "path": "bad\\escape"}\n}\n',
+                encoding="utf-8",
+            )
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "CASt-1.json"
+            native_text = native.read_text(encoding="utf-8")
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 1)
+            self.assertIn('"parse_status": "malformed_json"', native_text)
+            self.assertNotIn("private", native_text)
+            self.assertNotIn("bad\\escape", native_text)
+            self.assertNotIn("private", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_blocks_unconverted_binary_without_json_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            (dump / "BITD-1.bin").write_bytes(b"\x82\x00\x82\x00payload")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            codes = {diagnostic["code"] for diagnostic in conversion["diagnostics"]}
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "blocked")
+            self.assertEqual(conversion["converted_count"], 0)
+            self.assertIn("TSUI_PROJECTORRAYS_CONVERT_BITD_BINDING_MISSING", codes)
+            self.assertEqual(full_dump["resource_coverage"]["converted"], 0)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_decodes_stxt_to_private_text_asset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            body = "private fixture text".encode("cp932")
+            trailer = b"\x00" * 22
+            source = dump / "STXT-7.bin"
+            source.write_bytes(
+                (12).to_bytes(4, "big")
+                + len(body).to_bytes(4, "big")
+                + len(trailer).to_bytes(4, "big")
+                + body
+                + trailer
+            )
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "STXT-7.txt"
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 1)
+            self.assertEqual(conversion["resources"][0]["chunk_fourcc"], "STXT")
+            self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_stxt_cp932_text")
+            self.assertEqual(full_dump["resource_coverage"], {"status": "pass", "required": 1, "converted": 1})
+            self.assertEqual(native.read_text(encoding="utf-8"), "private fixture text")
+            self.assertNotIn("private fixture text", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_blocks_malformed_stxt_header(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            (dump / "STXT-7.bin").write_bytes(b"\x00\x00\x00\x0c\x00\x00\x00\xff\x00\x00\x00\x16short")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            codes = {diagnostic["code"] for diagnostic in conversion["diagnostics"]}
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "blocked")
+            self.assertIn("TSUI_PROJECTORRAYS_CONVERT_STXT_INVALID", codes)
+            self.assertFalse((work / "native-assets").exists())
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_converts_empty_snd_placeholder_to_metadata_asset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            source = dump / "snd -7.bin"
+            source.write_bytes(b"")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "snd_-7.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 1)
+            self.assertEqual(conversion["resources"][0]["chunk_fourcc"], "snd ")
+            self.assertEqual(
+                conversion["resources"][0]["conversion_method"],
+                "projectorrays_empty_sound_placeholder",
+            )
+            self.assertEqual(full_dump["resource_coverage"], {"status": "pass", "required": 1, "converted": 1})
+            self.assertEqual(native_payload["empty_placeholder"], True)
+            self.assertEqual(native_payload["redaction"]["audio"], "omitted")
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_converts_zero_cupt_to_cue_metadata_asset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            source = dump / "cupt-9.bin"
+            source.write_bytes((0).to_bytes(4, "big"))
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "cupt-9.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 1)
+            self.assertEqual(conversion["resources"][0]["chunk_fourcc"], "cupt")
+            self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_cue_point_table")
+            self.assertEqual(full_dump["resource_coverage"], {"status": "pass", "required": 1, "converted": 1})
+            self.assertEqual(native_payload["cue_point_count"], 0)
+            self.assertEqual(native_payload["redaction"]["names"], "omitted")
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_blocks_unproven_cupt_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            (dump / "cupt-9.bin").write_bytes((1).to_bytes(4, "big") + b"\x00\x00")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            codes = {diagnostic["code"] for diagnostic in conversion["diagnostics"]}
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "blocked")
+            self.assertEqual(conversion["converted_count"], 0)
+            self.assertIn("TSUI_PROJECTORRAYS_CONVERT_CUPT_UNPROVEN", codes)
+            self.assertFalse((work / "native-assets").exists())
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_records_scrf_skipped_reference_without_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            (dump / "SCRF-3.bin").write_bytes(b"secret reference payload")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "SCRF-3.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True) + native.read_text(encoding="utf-8")
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["resources"][0]["chunk_fourcc"], "SCRF")
+            self.assertEqual(
+                conversion["resources"][0]["conversion_method"],
+                "projectorrays_scrf_reference_skipped",
+            )
+            self.assertEqual(full_dump["resource_coverage"], {"status": "pass", "required": 1, "converted": 1})
+            self.assertEqual(native_payload["reference_policy"], "skipped_by_director_runtime")
+            self.assertNotIn("secret reference payload", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_parses_info_entry_table_without_payload_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            table = (
+                (4).to_bytes(4, "big")
+                + (2).to_bytes(2, "big")
+                + (0).to_bytes(4, "big")
+                + (3).to_bytes(4, "big")
+                + (7).to_bytes(4, "big")
+                + b"onefour"
+            )
+            (dump / "Cinf-5.bin").write_bytes(table)
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "Cinf-5.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True) + native.read_text(encoding="utf-8")
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["resources"][0]["chunk_fourcc"], "Cinf")
+            self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_info_entry_table")
+            self.assertEqual(full_dump["resource_coverage"], {"status": "pass", "required": 1, "converted": 1})
+            self.assertEqual(native_payload["entry_count"], 2)
+            self.assertEqual(native_payload["entry_lengths"], [3, 4])
+            self.assertNotIn("onefour", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_blocks_malformed_info_entry_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            (dump / "VWFI-5.bin").write_bytes((99).to_bytes(4, "big") + b"short")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            codes = {diagnostic["code"] for diagnostic in conversion["diagnostics"]}
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "blocked")
+            self.assertIn("TSUI_PROJECTORRAYS_CONVERT_INFO_TABLE_INVALID", codes)
+            self.assertFalse((work / "native-assets").exists())
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_parses_sord_score_order_members(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            header = (
+                (0).to_bytes(4, "big")
+                + (0).to_bytes(4, "big")
+                + (2).to_bytes(4, "big")
+                + (2).to_bytes(4, "big")
+                + (20).to_bytes(2, "big")
+                + (4).to_bytes(2, "big")
+            )
+            (dump / "Sord-8.bin").write_bytes(
+                header
+                + (1).to_bytes(2, "big")
+                + (42).to_bytes(2, "big")
+                + (2).to_bytes(2, "big")
+                + (7).to_bytes(2, "big")
+            )
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "Sord-8.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["resources"][0]["chunk_fourcc"], "Sord")
+            self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_score_order_table")
+            self.assertEqual(full_dump["resource_coverage"], {"status": "pass", "required": 1, "converted": 1})
+            self.assertEqual(native_payload["entry_count"], 2)
+            self.assertEqual(
+                native_payload["referenced_members"],
+                [
+                    {"cast_library_id": 1, "member_id": 42},
+                    {"cast_library_id": 2, "member_id": 7},
+                ],
+            )
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_parses_fmap_without_font_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            name = b"PrivateFont"
+            names = len(name).to_bytes(4, "big") + name
+            map_body = (
+                (0).to_bytes(4, "big")
+                + (0).to_bytes(4, "big")
+                + (1).to_bytes(4, "big")
+                + (1).to_bytes(4, "big")
+                + (0).to_bytes(4, "big")
+                + (0).to_bytes(4, "big")
+                + (0).to_bytes(4, "big")
+                + (0).to_bytes(4, "big")
+                + (1).to_bytes(2, "big")
+                + (7).to_bytes(2, "big")
+            )
+            (dump / "Fmap-2.bin").write_bytes(len(map_body).to_bytes(4, "big") + len(names).to_bytes(4, "big") + map_body + names)
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "Fmap-2.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True) + native.read_text(encoding="utf-8")
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_font_map_v4")
+            self.assertEqual(native_payload["font_entry_count"], 1)
+            self.assertEqual(native_payload["font_entries"][0]["font_id"], 7)
+            self.assertEqual(native_payload["font_entries"][0]["name_length"], len(name))
+            self.assertNotIn("PrivateFont", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_parses_vwlb_without_label_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            labels = b"alpha\rbeta\r"
+            header = (
+                (2).to_bytes(2, "big")
+                + (1).to_bytes(2, "big")
+                + (0).to_bytes(2, "big")
+                + (12).to_bytes(2, "big")
+                + (6).to_bytes(2, "big")
+                + (24).to_bytes(2, "big")
+                + len(labels).to_bytes(2, "big")
+            )
+            (dump / "VWLB-4.bin").write_bytes(header + labels)
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "VWLB-4.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True) + native.read_text(encoding="utf-8")
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_score_label_table")
+            self.assertEqual(native_payload["label_count"], 2)
+            self.assertEqual(native_payload["labels"][0]["frame"], 1)
+            self.assertEqual(native_payload["labels"][1]["frame"], 12)
+            self.assertNotIn("alpha", encoded)
+            self.assertNotIn("beta", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_records_fcol_color_table_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            (dump / "FCOL-6.bin").write_bytes(b"\x00\x01" * 28)
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "FCOL-6.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True) + native.read_text(encoding="utf-8")
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_fixed_color_table")
+            self.assertEqual(native_payload["word_count"], 28)
+            self.assertNotIn("0001" * 4, encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_records_fxmp_text_map_without_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            (dump / "FXmp-6.bin").write_bytes(b"Mac: PrivateFont -> Win: PrivateFont\r\n")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "FXmp-6.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True) + native.read_text(encoding="utf-8")
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_fxmp_text_map_metadata")
+            self.assertEqual(native_payload["line_count"], 1)
+            self.assertNotIn("PrivateFont", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_parses_vers_numeric_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            (dump / "VERS-6.bin").write_bytes(
+                (2).to_bytes(2, "big")
+                + (2).to_bytes(2, "big")
+                + (7).to_bytes(2, "big")
+                + (0).to_bytes(2, "big")
+                + (2).to_bytes(2, "big")
+                + (85).to_bytes(2, "big")
+                + (7).to_bytes(2, "big")
+                + (0).to_bytes(2, "big")
+                + (1).to_bytes(2, "big")
+                + (34).to_bytes(2, "big")
+            )
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "VERS-6.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_version_table")
+            self.assertEqual(native_payload["entry_count"], 2)
+            self.assertEqual(native_payload["entries"][0]["director_version"], 7)
+            self.assertEqual(native_payload["entries"][0]["major"], 2)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_records_xtrl_without_xtra_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            private_name = b"PRIVATE.X32"
+            record = (len(private_name) + 1).to_bytes(4, "big") + private_name + b"\x00"
+            (dump / "XTRl-6.bin").write_bytes((3).to_bytes(4, "big") + (1).to_bytes(4, "big") + record)
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "XTRl-6.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True) + native.read_text(encoding="utf-8")
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_xtra_list_metadata")
+            self.assertEqual(native_payload["declared_entry_count"], 1)
+            self.assertEqual(native_payload["record_count"], 1)
+            self.assertNotIn("PRIVATE.X32", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_converts_moa_sound_pair_to_wav_asset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "AUDIO" / "chunks"
+            chunks.mkdir(parents=True)
+            key = chunks / "KEY_-3.bin"
+            key.write_bytes(
+                (12).to_bytes(2, "little")
+                + (12).to_bytes(2, "little")
+                + (0).to_bytes(4, "little")
+                + (2).to_bytes(4, "little")
+                + (10).to_bytes(4, "little")
+                + (200).to_bytes(4, "little")
+                + int.from_bytes(b"sndH", "big").to_bytes(4, "little")
+                + (11).to_bytes(4, "little")
+                + (200).to_bytes(4, "little")
+                + int.from_bytes(b"sndS", "big").to_bytes(4, "little")
+            )
+            (chunks / "KEY_-3.json").write_text("{}", encoding="utf-8")
+            header_fields = [0, 4, 0, 0, 0, 0, 0, 0, 4, 2, 2, 22050, 44100]
+            (chunks / "sndH-10.bin").write_bytes(
+                b"".join(value.to_bytes(4, "big", signed=True) for value in header_fields)
+                + (b"\x00" * 16)
+                + (16).to_bytes(4, "big", signed=True)
+                + (2).to_bytes(4, "big", signed=True)
+                + (1).to_bytes(4, "big", signed=True)
+                + (2).to_bytes(4, "big", signed=True)
+                + (b"\x00" * 16)
+            )
+            (chunks / "sndS-11.bin").write_bytes(b"\x00\x01\xff\xfe")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            header_native = work / "native-assets" / "projectorrays" / "data" / "AUDIO" / "chunks" / "sndH-10.json"
+            wav_native = work / "native-assets" / "projectorrays" / "data" / "AUDIO" / "chunks" / "sndS-11.wav"
+            header_payload = json.loads(header_native.read_text(encoding="utf-8"))
+            wav = wav_native.read_bytes()
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 3)
+            self.assertEqual(full_dump["resource_coverage"], {"status": "pass", "required": 3, "converted": 3})
+            self.assertEqual(header_payload["sample_resource_id"], 11)
+            self.assertEqual(header_payload["sample_rate"], 22050)
+            self.assertEqual(wav[:4], b"RIFF")
+            self.assertEqual(wav[8:12], b"WAVE")
+            self.assertEqual(int.from_bytes(wav[24:28], "little"), 22050)
+            self.assertEqual(wav[-4:], b"\x01\x00\xfe\xff")
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_blocks_unbound_snds_sample(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            (dump / "sndS-11.bin").write_bytes(b"\x00\x01\xff\xfe")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            codes = {diagnostic["code"] for diagnostic in conversion["diagnostics"]}
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "blocked")
+            self.assertIn("TSUI_PROJECTORRAYS_CONVERT_SOUND_BINDING_MISSING", codes)
+            self.assertFalse((work / "native-assets").exists())
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_extracts_bound_edim_macrz_mp3_stream(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "AUDIO" / "chunks"
+            chunks.mkdir(parents=True)
+            (chunks / "KEY_-3.bin").write_bytes(
+                (12).to_bytes(2, "little")
+                + (12).to_bytes(2, "little")
+                + (0).to_bytes(4, "little")
+                + (1).to_bytes(4, "little")
+                + (21).to_bytes(4, "little")
+                + (200).to_bytes(4, "little")
+                + int.from_bytes(b"ediM", "big").to_bytes(4, "little")
+            )
+            (chunks / "KEY_-3.json").write_text("{}", encoding="utf-8")
+            (chunks / "CASt-200.bin").write_bytes(
+                (6).to_bytes(4, "big") + (0).to_bytes(4, "big") + (0).to_bytes(4, "big")
+            )
+            (chunks / "CASt-200.json").write_text(
+                json.dumps({"type": 6, "info": {"name": "private sound name"}, "member": {}}),
+                encoding="utf-8",
+            )
+            frame = bytes.fromhex("fff38054") + bytes(204)
+            header_words = [320, 3, 22050, 64000, 1500, 16, 0, 0]
+            (chunks / "ediM-21.bin").write_bytes(
+                b"".join(value.to_bytes(4, "big") for value in header_words)
+                + (2).to_bytes(2, "big")
+                + (2).to_bytes(2, "big")
+                + b"MACRZ"
+                + bytes(range(16))
+                + b"Copyright Macromedia Inc 1996-1997"
+                + bytes(233)
+                + frame
+                + frame
+                + frame
+            )
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            resource = next(item for item in conversion["resources"] if item["chunk_fourcc"] == "ediM")
+            native = work / "native-assets" / "projectorrays" / "data" / "AUDIO" / "chunks" / "ediM-21.mp3"
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 3)
+            self.assertEqual(full_dump["resource_coverage"], {"status": "pass", "required": 3, "converted": 3})
+            self.assertEqual(resource["chunk_fourcc"], "ediM")
+            self.assertEqual(resource["conversion_method"], "projectorrays_edim_macrz_mp3_extract")
+            self.assertEqual(resource["native_path"], "native-assets/projectorrays/data/AUDIO/chunks/ediM-21.mp3")
+            self.assertEqual(resource["media_codec"], "mp3")
+            self.assertEqual(resource["media_stream_offset"], 324)
+            self.assertEqual(resource["frame_count"], 3)
+            self.assertEqual(resource["sample_rate"], 22050)
+            self.assertEqual(resource["bitrate_kbps"], 64)
+            self.assertEqual(resource["channel_count"], 2)
+            self.assertEqual(native.read_bytes(), frame + frame + frame)
+            self.assertNotIn("private sound name", encoded)
+            self.assertNotIn("Copyright Macromedia", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_blocks_bound_edim_macrz_without_verified_mp3_stream(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "AUDIO" / "chunks"
+            chunks.mkdir(parents=True)
+            (chunks / "KEY_-3.bin").write_bytes(
+                (12).to_bytes(2, "little")
+                + (12).to_bytes(2, "little")
+                + (0).to_bytes(4, "little")
+                + (1).to_bytes(4, "little")
+                + (21).to_bytes(4, "little")
+                + (200).to_bytes(4, "little")
+                + int.from_bytes(b"ediM", "big").to_bytes(4, "little")
+            )
+            (chunks / "KEY_-3.json").write_text("{}", encoding="utf-8")
+            (chunks / "CASt-200.bin").write_bytes(
+                (6).to_bytes(4, "big") + (0).to_bytes(4, "big") + (0).to_bytes(4, "big")
+            )
+            (chunks / "CASt-200.json").write_text(
+                json.dumps({"type": 6, "info": {"name": "private sound name"}, "member": {}}),
+                encoding="utf-8",
+            )
+            header_words = [320, 3, 22050, 64000, 1500, 16, 0, 0]
+            (chunks / "ediM-21.bin").write_bytes(
+                b"".join(value.to_bytes(4, "big") for value in header_words)
+                + (2).to_bytes(2, "big")
+                + (2).to_bytes(2, "big")
+                + b"MACRZ"
+                + bytes(range(16))
+                + b"private-audio-payload"
+            )
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            diagnostics = conversion["diagnostics"]
+            codes = {diagnostic["code"] for diagnostic in diagnostics}
+            diagnostic = next(
+                (
+                    item
+                    for item in diagnostics
+                    if item["code"] == "TSUI_PROJECTORRAYS_CONVERT_EDIM_MACRZ_MP3_STREAM_INVALID"
+                ),
+                None,
+            )
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "blocked")
+            self.assertIn("TSUI_PROJECTORRAYS_CONVERT_EDIM_MACRZ_MP3_STREAM_INVALID", codes)
+            self.assertNotIn("TSUI_PROJECTORRAYS_CONVERT_UNSUPPORTED_CHUNK", codes)
+            self.assertIsNotNone(diagnostic)
+            self.assertEqual(diagnostic["parent_resource_id"], 200)
+            self.assertEqual(diagnostic["parent_member_type"], 6)
+            self.assertEqual(diagnostic["codec_marker"], "MACRZ")
+            self.assertEqual(diagnostic["macrz_signature_offset"], 36)
+            self.assertEqual(diagnostic["header_u32_words"], header_words)
+            self.assertNotIn("private sound name", encoded)
+            self.assertNotIn("private-audio-payload", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_parses_vwsc_score_metadata_without_frame_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            detail0 = (
+                (24).to_bytes(4, "big")
+                + (20).to_bytes(4, "big")
+                + (3).to_bytes(4, "big")
+                + (13).to_bytes(2, "big")
+                + (48).to_bytes(2, "big")
+                + (120).to_bytes(2, "big")
+                + (0).to_bytes(2, "big")
+                + b"HEAD"
+            )
+            detail1 = b"private-frame-data"
+            payload = (
+                (0).to_bytes(4, "big")
+                + (-3).to_bytes(4, "big", signed=True)
+                + (12).to_bytes(4, "big")
+                + (2).to_bytes(4, "big")
+                + (2).to_bytes(4, "big")
+                + len(detail1).to_bytes(4, "big")
+                + (0).to_bytes(4, "big")
+                + len(detail0).to_bytes(4, "big")
+                + detail0
+                + detail1
+            )
+            payload = len(payload).to_bytes(4, "big") + payload[4:]
+            (dump / "VWSC-6.bin").write_bytes(payload)
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "VWSC-6.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True) + native.read_text(encoding="utf-8")
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_vwsc_score_metadata")
+            self.assertEqual(native_payload["detail_entry_count"], 2)
+            self.assertEqual(native_payload["score_header"]["num_frames"], 3)
+            self.assertNotIn("private-frame-data", encoded)
+            self.assertNotIn("HEAD", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_records_xmed_metadata_without_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            dump.mkdir()
+            (dump / "XMED-9.bin").write_bytes(b"FFFF000000060004private-xtra-name")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "XMED-9.json"
+            native_payload = json.loads(native.read_text(encoding="utf-8"))
+            encoded = json.dumps(conversion, sort_keys=True) + native.read_text(encoding="utf-8")
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_xmed_metadata")
+            self.assertEqual(native_payload["format_marker"], "FFFF0000")
+            self.assertNotIn("private-xtra-name", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_maps_lscr_cast_member_to_private_script_asset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "MOVIE" / "chunks"
+            scripts = dump / "MOVIE" / "casts" / "Internal"
+            chunks.mkdir(parents=True)
+            scripts.mkdir(parents=True)
+            source = chunks / "Lscr-100.bin"
+            source.write_bytes(b"\x01\x02\x03\x04")
+            (chunks / "Lscr-100.json").write_text(
+                json.dumps({"scriptNumber": 7, "castID": (1 << 16) + 42}),
+                encoding="utf-8",
+            )
+            (scripts / "BehaviorScript 42 - private_name.ls").write_text(
+                "private script text",
+                encoding="utf-8",
+            )
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "MOVIE" / "chunks" / "Lscr-100.ls"
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 1)
+            self.assertEqual(conversion["resources"][0]["chunk_fourcc"], "Lscr")
+            self.assertEqual(
+                conversion["resources"][0]["conversion_method"],
+                "projectorrays_lscr_decompiled_script",
+            )
+            self.assertEqual(conversion["resources"][0]["cast_member_id"], 42)
+            self.assertEqual(conversion["resources"][0]["script_number"], 7)
+            self.assertEqual(full_dump["resource_coverage"], {"status": "pass", "required": 1, "converted": 1})
+            self.assertEqual(native.read_text(encoding="utf-8"), "private script text")
+            self.assertNotIn("private script text", encoded)
+            self.assertNotIn("private_name", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_maps_lscr_source_without_display_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "MOVIE" / "chunks"
+            scripts = dump / "MOVIE" / "casts" / "Internal"
+            chunks.mkdir(parents=True)
+            scripts.mkdir(parents=True)
+            source = chunks / "Lscr-100.bin"
+            source.write_bytes(b"\x01\x02\x03\x04")
+            (chunks / "Lscr-100.json").write_text(
+                json.dumps({"scriptNumber": 7, "castID": (1 << 16) + 42}),
+                encoding="utf-8",
+            )
+            (scripts / "BehaviorScript 42.ls").write_text("private script text", encoding="utf-8")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "MOVIE" / "chunks" / "Lscr-100.ls"
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 1)
+            self.assertEqual(conversion["resources"][0]["cast_member_id"], 42)
+            self.assertEqual(native.read_text(encoding="utf-8"), "private script text")
+            self.assertNotIn("private script text", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_falls_back_to_lscr_script_number_binding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "MENU" / "chunks"
+            scripts = dump / "MENU" / "casts" / "Internal"
+            chunks.mkdir(parents=True)
+            scripts.mkdir(parents=True)
+            source = chunks / "Lscr-421.bin"
+            source.write_bytes(b"\x01\x02\x03\x04")
+            (chunks / "Lscr-421.json").write_text(
+                json.dumps({"scriptNumber": 21, "castID": (1 << 16) + 87}),
+                encoding="utf-8",
+            )
+            (scripts / "BehaviorScript 21 - private_menu_action.ls").write_text(
+                "private script text",
+                encoding="utf-8",
+            )
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 1)
+            resource = conversion["resources"][0]
+            self.assertEqual(resource["chunk_fourcc"], "Lscr")
+            self.assertEqual(resource["cast_member_id"], 87)
+            self.assertEqual(resource["script_number"], 21)
+            self.assertEqual(resource["script_source_binding"], "script_number")
+            self.assertNotIn("private script text", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_maps_lscr_cast_and_parent_script_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "MENU" / "chunks"
+            menu_scripts = dump / "MENU" / "casts" / "Internal"
+            global_chunks = dump / "GLOBALS" / "chunks"
+            global_scripts = dump / "GLOBALS" / "casts" / "External"
+            chunks.mkdir(parents=True)
+            menu_scripts.mkdir(parents=True)
+            global_chunks.mkdir(parents=True)
+            global_scripts.mkdir(parents=True)
+            (chunks / "Lscr-409.bin").write_bytes(b"\x01\x02\x03\x04")
+            (chunks / "Lscr-409.json").write_text(
+                json.dumps({"scriptNumber": 9, "castID": (1 << 16) + 61}),
+                encoding="utf-8",
+            )
+            (menu_scripts / "CastScript 61 - private_menu_cast.ls").write_text(
+                "private cast script text",
+                encoding="utf-8",
+            )
+            (global_chunks / "Lscr-232.bin").write_bytes(b"\x05\x06\x07\x08")
+            (global_chunks / "Lscr-232.json").write_text(
+                json.dumps({"scriptNumber": 32, "castID": (1 << 16) + 25}),
+                encoding="utf-8",
+            )
+            (global_scripts / "ParentScript 25 - private_parent.ls").write_text(
+                "private parent script text",
+                encoding="utf-8",
+            )
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            kinds = {resource["script_source_kind"] for resource in conversion["resources"]}
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 2)
+            self.assertEqual(kinds, {"castscript", "parentscript"})
+            self.assertNotIn("private cast script text", encoded)
+            self.assertNotIn("private parent script text", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_recovers_lscr_numeric_metadata_from_malformed_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "MOVIE" / "chunks"
+            scripts = dump / "MOVIE" / "casts" / "Internal"
+            chunks.mkdir(parents=True)
+            scripts.mkdir(parents=True)
+            (chunks / "Lscr-500.bin").write_bytes(b"\x01\x02\x03\x04")
+            (chunks / "Lscr-500.json").write_text(
+                '{"scriptNumber": 7, "castID": 65578, "scriptText": "private\\qscript"}',
+                encoding="utf-8",
+            )
+            (scripts / "BehaviorScript 42 - private_behavior.ls").write_text(
+                "private script text",
+                encoding="utf-8",
+            )
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 1)
+            resource = conversion["resources"][0]
+            self.assertEqual(resource["cast_member_id"], 42)
+            self.assertEqual(resource["script_number"], 7)
+            self.assertEqual(resource["metadata_source"], "projectorrays_json_numeric_recovery")
+            self.assertNotIn("private\\qscript", encoded)
+            self.assertNotIn("private script text", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_blocks_ambiguous_lscr_script_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "MOVIE" / "chunks"
+            internal = dump / "MOVIE" / "casts" / "Internal"
+            external = dump / "MOVIE" / "casts" / "External"
+            chunks.mkdir(parents=True)
+            internal.mkdir(parents=True)
+            external.mkdir(parents=True)
+            (chunks / "Lscr-100.bin").write_bytes(b"\x01\x02\x03\x04")
+            (chunks / "Lscr-100.json").write_text(
+                json.dumps({"scriptNumber": 7, "castID": (1 << 16) + 42}),
+                encoding="utf-8",
+            )
+            (internal / "BehaviorScript 42 - a.ls").write_text("secret_alpha_payload", encoding="utf-8")
+            (external / "BehaviorScript 42 - b.ls").write_text("secret_beta_payload", encoding="utf-8")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            codes = {diagnostic["code"] for diagnostic in conversion["diagnostics"]}
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "blocked")
+            self.assertEqual(conversion["converted_count"], 0)
+            self.assertIn("TSUI_PROJECTORRAYS_CONVERT_LSCR_SOURCE_AMBIGUOUS", codes)
+            self.assertFalse((work / "native-assets").exists())
+            self.assertNotIn("secret_alpha_payload", encoded)
+            self.assertNotIn("secret_beta_payload", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_blocks_empty_lscr_script_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "MOVIE" / "chunks"
+            scripts = dump / "MOVIE" / "casts" / "Internal"
+            chunks.mkdir(parents=True)
+            scripts.mkdir(parents=True)
+            (chunks / "Lscr-100.bin").write_bytes(b"\x01\x02\x03\x04")
+            (chunks / "Lscr-100.json").write_text(
+                json.dumps({"scriptNumber": 7, "castID": (1 << 16) + 42}),
+                encoding="utf-8",
+            )
+            (scripts / "BehaviorScript 42 - empty.ls").write_text("", encoding="utf-8")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            codes = {diagnostic["code"] for diagnostic in conversion["diagnostics"]}
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "blocked")
+            self.assertEqual(conversion["converted_count"], 0)
+            self.assertIn("TSUI_PROJECTORRAYS_CONVERT_LSCR_SOURCE_EMPTY", codes)
+            self.assertFalse((work / "native-assets").exists())
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_converts_empty_lscr_metadata_without_source_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "MOVIE" / "chunks"
+            chunks.mkdir(parents=True)
+            (chunks / "Lscr-100.bin").write_bytes(b"\x00" * 92)
+            (chunks / "Lscr-100.json").write_text(
+                json.dumps(
+                    {
+                        "scriptNumber": 47,
+                        "castID": (1 << 16) + 2,
+                        "scriptFlags": 0,
+                        "handlersCount": 0,
+                        "literalsCount": 0,
+                        "globalsCount": 0,
+                        "propertiesCount": 0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 1)
+            lingo = next(item for item in conversion["resources"] if item["chunk_fourcc"] == "Lscr")
+            self.assertEqual(lingo["conversion_method"], "projectorrays_lscr_empty_script_metadata")
+            self.assertEqual(lingo["script_source_binding"], "empty_script_metadata")
+            self.assertEqual(lingo["handler_count"], 0)
+            self.assertEqual(lingo["literal_count"], 0)
+            self.assertTrue((work / lingo["native_path"]).is_file())
+            self.assertEqual(full_dump["resource_coverage"], {"status": "pass", "required": 1, "converted": 1})
+            self.assertNotIn("script_text", encoded)
+            self.assertNotIn("source_text", encoded)
+            self.assertNotIn('"bytecode":', encoded)
+            self.assertNotIn("raw_payload", encoded)
+            self.assertNotIn("source_payload", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_decodes_bitd_32bpp_to_png_asset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "MOVIE" / "chunks"
+            chunks.mkdir(parents=True)
+            key = chunks / "KEY_-3.bin"
+            key.write_bytes(
+                (12).to_bytes(2, "little")
+                + (12).to_bytes(2, "little")
+                + (1).to_bytes(4, "little")
+                + (1).to_bytes(4, "little")
+                + (200).to_bytes(4, "little")
+                + (100).to_bytes(4, "little")
+                + int.from_bytes(b"BITD", "big").to_bytes(4, "little")
+            )
+            (chunks / "KEY_-3.json").write_text("{}", encoding="utf-8")
+            (chunks / "DRCF-9.bin").write_bytes(b"director config")
+            (chunks / "DRCF-9.json").write_text(json.dumps({"directorVersion": 1406}), encoding="utf-8")
+            spec = (
+                (0x8008).to_bytes(2, "big")
+                + (0).to_bytes(2, "big", signed=True)
+                + (0).to_bytes(2, "big", signed=True)
+                + (1).to_bytes(2, "big", signed=True)
+                + (2).to_bytes(2, "big", signed=True)
+                + b"\x00\x00"
+                + (0).to_bytes(2, "big")
+                + (0).to_bytes(2, "big", signed=True)
+                + (0).to_bytes(2, "big", signed=True)
+                + (0).to_bytes(2, "big")
+                + (0).to_bytes(2, "big")
+                + b"\x00"
+                + b"\x20"
+                + (-1).to_bytes(2, "big", signed=True)
+                + (-1).to_bytes(2, "big", signed=True)
+            )
+            (chunks / "CASt-100.bin").write_bytes(
+                (1).to_bytes(4, "big") + (0).to_bytes(4, "big") + len(spec).to_bytes(4, "big") + spec
+            )
+            (chunks / "CASt-100.json").write_text(json.dumps({"type": 1, "info": {}, "member": {}}), encoding="utf-8")
+            source = chunks / "BITD-200.bin"
+            source.write_bytes(bytes([0, 10, 20, 30, 0, 40, 50, 60]))
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            full_dump = build_projectorrays_full_dump_report(work, [("data", dump)])
+            native = work / "native-assets" / "projectorrays" / "data" / "MOVIE" / "chunks" / "BITD-200.png"
+            png = native.read_bytes()
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            self.assertEqual(conversion["converted_count"], 4)
+            bitd = next(item for item in conversion["resources"] if item["chunk_fourcc"] == "BITD")
+            self.assertEqual(bitd["conversion_method"], "projectorrays_bitd_rgba_png")
+            self.assertEqual(bitd["width"], 2)
+            self.assertEqual(bitd["height"], 1)
+            self.assertEqual(bitd["bits_per_pixel"], 32)
+            self.assertEqual(full_dump["resource_coverage"], {"status": "pass", "required": 4, "converted": 4})
+            self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
+            self.assertEqual(int.from_bytes(png[16:20], "big"), 2)
+            self.assertEqual(int.from_bytes(png[20:24], "big"), 1)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_blocks_bitd_palette_backed_without_palette(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "MOVIE" / "chunks"
+            chunks.mkdir(parents=True)
+            (chunks / "KEY_-3.bin").write_bytes(
+                (12).to_bytes(2, "little")
+                + (12).to_bytes(2, "little")
+                + (1).to_bytes(4, "little")
+                + (1).to_bytes(4, "little")
+                + (200).to_bytes(4, "little")
+                + (100).to_bytes(4, "little")
+                + int.from_bytes(b"BITD", "big").to_bytes(4, "little")
+            )
+            (chunks / "KEY_-3.json").write_text("{}", encoding="utf-8")
+            (chunks / "DRCF-9.bin").write_bytes(b"director config")
+            (chunks / "DRCF-9.json").write_text(json.dumps({"directorVersion": 1406}), encoding="utf-8")
+            spec = (
+                (0x8002).to_bytes(2, "big")
+                + (0).to_bytes(2, "big", signed=True)
+                + (0).to_bytes(2, "big", signed=True)
+                + (1).to_bytes(2, "big", signed=True)
+                + (2).to_bytes(2, "big", signed=True)
+                + b"\x00\x00"
+                + (0).to_bytes(2, "big")
+                + (0).to_bytes(2, "big", signed=True)
+                + (0).to_bytes(2, "big", signed=True)
+                + (0).to_bytes(2, "big")
+                + (0).to_bytes(2, "big")
+                + b"\x00"
+                + b"\x08"
+                + (-1).to_bytes(2, "big", signed=True)
+                + (-1).to_bytes(2, "big", signed=True)
+            )
+            (chunks / "CASt-100.bin").write_bytes(
+                (1).to_bytes(4, "big") + (0).to_bytes(4, "big") + len(spec).to_bytes(4, "big") + spec
+            )
+            (chunks / "CASt-100.json").write_text(json.dumps({"type": 1, "info": {}, "member": {}}), encoding="utf-8")
+            (chunks / "BITD-200.bin").write_bytes(b"\x00\x01")
+
+            conversion = convert_projectorrays_resources(work, [("data", dump)])
+            codes = {diagnostic["code"] for diagnostic in conversion["diagnostics"]}
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "blocked")
+            self.assertIn("TSUI_PROJECTORRAYS_CONVERT_BITD_PALETTE_REQUIRED", codes)
+            self.assertFalse((work / "native-assets" / "projectorrays" / "data" / "MOVIE" / "chunks" / "BITD-200.png").exists())
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_converter_decodes_8bpp_bitd_with_palette_sidecar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump = root / "full-dump"
+            work = root / "work"
+            chunks = dump / "MOVIE" / "chunks"
+            chunks.mkdir(parents=True)
+            (chunks / "KEY_-3.bin").write_bytes(
+                (12).to_bytes(2, "little")
+                + (12).to_bytes(2, "little")
+                + (1).to_bytes(4, "little")
+                + (1).to_bytes(4, "little")
+                + (200).to_bytes(4, "little")
+                + (100).to_bytes(4, "little")
+                + int.from_bytes(b"BITD", "big").to_bytes(4, "little")
+            )
+            (chunks / "KEY_-3.json").write_text("{}", encoding="utf-8")
+            (chunks / "DRCF-9.bin").write_bytes(b"director config")
+            (chunks / "DRCF-9.json").write_text(json.dumps({"directorVersion": 1406}), encoding="utf-8")
+            spec = (
+                (0x8002).to_bytes(2, "big")
+                + (0).to_bytes(2, "big", signed=True)
+                + (0).to_bytes(2, "big", signed=True)
+                + (1).to_bytes(2, "big", signed=True)
+                + (2).to_bytes(2, "big", signed=True)
+                + b"\x00\x00"
+                + (0).to_bytes(2, "big")
+                + (0).to_bytes(2, "big", signed=True)
+                + (0).to_bytes(2, "big", signed=True)
+                + (0).to_bytes(2, "big")
+                + (0).to_bytes(2, "big")
+                + b"\x00"
+                + b"\x08"
+                + (-1).to_bytes(2, "big", signed=True)
+                + (-101).to_bytes(2, "big", signed=True)
+            )
+            (chunks / "CASt-100.bin").write_bytes(
+                (1).to_bytes(4, "big") + (0).to_bytes(4, "big") + len(spec).to_bytes(4, "big") + spec
+            )
+            (chunks / "CASt-100.json").write_text(json.dumps({"type": 1, "info": {}, "member": {}}), encoding="utf-8")
+            (chunks / "BITD-200.bin").write_bytes(b"\x01\x01\x02")
+            palette = [[0, 0, 0] for _ in range(256)]
+            palette[1] = [255, 0, 0]
+            palette[2] = [0, 255, 0]
+            palette_sidecar = root / "palette.json"
+            palette_sidecar.write_text(
+                json.dumps(
+                    {
+                        "schema": "tsuinosora.projectorrays_palette_sidecar.v1",
+                        "palettes": [
+                            {
+                                "id": "synthetic_system_win_d5",
+                                "stored_clut_id": -101,
+                                "director_palette_id": -102,
+                                "colors": palette,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            conversion = convert_projectorrays_resources(
+                work,
+                [("data", dump)],
+                palette_sidecars=[palette_sidecar],
+            )
+            native = work / "native-assets" / "projectorrays" / "data" / "MOVIE" / "chunks" / "BITD-200.png"
+            encoded = json.dumps(conversion, sort_keys=True)
+
+            self.assertEqual(conversion["status"], "pass")
+            bitd = next(item for item in conversion["resources"] if item["chunk_fourcc"] == "BITD")
+            self.assertEqual(bitd["conversion_method"], "projectorrays_bitd_palette_png")
+            self.assertEqual(bitd["palette_id"], "synthetic_system_win_d5")
+            self.assertEqual(bitd["stored_clut_id"], -101)
+            self.assertEqual(native.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+            self.assertNotIn("colors", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
     def test_projectorrays_reader_import_writes_sanitized_sidecar_without_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -145,6 +1454,49 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertEqual(script_report["status"], "pass")
             self.assertEqual(script_report["routes"][0]["route_id"], "classic.main")
             self.assertNotIn("commercial text omitted", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_projectorrays_reader_derives_routes_from_go_script_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tool = root / "tools" / "projectorrays"
+            dump = root / "projectorrays-dump"
+            work = root / "work"
+            script_dir = dump / "K" / "casts" / "Internal"
+            tool.parent.mkdir()
+            script_dir.mkdir(parents=True)
+            tool.write_bytes(b"projectorrays fixture")
+            (script_dir / "BehaviorScript 105 - GO[1321].ls").write_text(
+                "put \"commercial route script omitted\"\n",
+                encoding="utf-8",
+            )
+            config = root / "reader.config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "schema": "tsuinosora.projectorrays_reader_config.v1",
+                        "projectorrays_tool": str(tool),
+                        "dump_root": str(dump),
+                        "local_work_root": str(work),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = import_projectorrays_reader(config)
+            source_map = json.loads(
+                (work / "unpacked" / "projectorrays_script_source_map.json").read_text(encoding="utf-8")
+            )
+            script_report = build_script_source_map_report(work / "unpacked")
+            encoded = json.dumps({"reader": report, "source_map": source_map, "script": script_report}, sort_keys=True)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["route_count"], 1)
+            self.assertEqual(source_map["routes"][0]["route_id"], "classic.1321")
+            self.assertEqual(script_report["status"], "pass")
+            self.assertEqual(script_report["routes"][0]["terminal"], "ending.classic_1321")
+            self.assertEqual(script_report["routes"][0]["choices"], [])
+            self.assertNotIn("commercial route script omitted", encoded)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
     def test_inventory_uses_alias_and_relative_paths_only(self):
@@ -2043,6 +3395,299 @@ class AssetAnalysisTests(unittest.TestCase):
                 {diag["code"] for diag in report["diagnostics"]},
             )
 
+    def test_visual_screenshot_capture_and_comparison_pass_with_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            (work / "screenshots" / "original").mkdir(parents=True)
+            (work / "screenshots" / "demo").mkdir(parents=True)
+            (work / "screenshots" / "original" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 30, 255))
+            )
+            (work / "screenshots" / "demo" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 31, 255))
+            )
+
+            capture = build_visual_screenshot_capture_report(work, visual_capture_config("title"))
+            comparison = build_visual_comparison_report(work, capture, visual_reviews("title"))
+            encoded = json.dumps(comparison, sort_keys=True)
+
+            self.assertEqual(capture["schema"], "tsuinosora.visual_screenshot_capture_report.v1")
+            self.assertEqual(capture["status"], "pass")
+            self.assertEqual(capture["checkpoints"][0]["original"]["path"], "screenshots/original/title.png")
+            self.assertTrue(capture["checkpoints"][0]["original"]["nonblank"])
+            self.assertEqual(comparison["schema"], "tsuinosora.visual_comparison_report.v1")
+            self.assertEqual(comparison["status"], "pass")
+            self.assertEqual(comparison["checkpoints"][0]["regions"][0]["status"], "pass")
+            self.assertEqual(comparison["checkpoints"][0]["visual_review"]["status"], "pass")
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+            self.assertNotIn("commercial text", encoded)
+
+    def test_visual_capture_records_sanitized_windows_automation_intent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            (work / "screenshots" / "original").mkdir(parents=True)
+            (work / "screenshots" / "demo").mkdir(parents=True)
+            (work / "screenshots" / "original" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 30, 255))
+            )
+            (work / "screenshots" / "demo" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 31, 255))
+            )
+            config = visual_capture_config("title")
+            config["capture_automation"] = visual_capture_automation_config(root, "title")
+
+            capture = build_visual_screenshot_capture_report(work, config)
+            encoded = json.dumps(capture, sort_keys=True)
+
+            self.assertEqual(capture["status"], "pass")
+            self.assertEqual(capture["automation"]["schema"], "tsuinosora.visual_capture_automation_report.v1")
+            self.assertTrue(capture["automation"]["configured"])
+            self.assertEqual(capture["automation"]["backend"], "windows_sendinput")
+            self.assertEqual(capture["automation"]["session_roles"], ["original", "demo"])
+            self.assertEqual(capture["automation"]["checkpoint_scripts"][0]["checkpoint_id"], "title")
+            self.assertEqual(capture["automation"]["checkpoint_scripts"][0]["step_count"], 3)
+            self.assertTrue(capture["automation"]["automation_hash"].startswith("sha256:"))
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+            self.assertNotIn("private-title", encoded)
+            self.assertNotIn("original.exe", encoded)
+
+    def test_visual_capture_runner_writes_screenshots_before_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            config = visual_capture_config("title")
+            config["capture_automation"] = visual_capture_automation_config(root, "title")
+            runner = FakeVisualCaptureRunner()
+
+            capture = build_visual_screenshot_capture_report(work, config, automation_runner=runner)
+            encoded = json.dumps(capture, sort_keys=True)
+
+            self.assertEqual(capture["status"], "pass")
+            self.assertEqual(runner.calls, [("windows_sendinput", "title")])
+            self.assertTrue((work / "screenshots" / "original" / "title.png").is_file())
+            self.assertTrue((work / "screenshots" / "demo" / "title.png").is_file())
+            self.assertEqual(capture["automation"]["execution_status"], "pass")
+            self.assertEqual(capture["automation"]["captured_checkpoint_count"], 1)
+            self.assertEqual(capture["automation"]["screenshot_count"], 2)
+            self.assertTrue(capture["checkpoints"][0]["original"]["nonblank"])
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_visual_capture_runner_requires_both_roles_per_required_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            (work / "screenshots" / "original").mkdir(parents=True)
+            (work / "screenshots" / "demo").mkdir(parents=True)
+            (work / "screenshots" / "original" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 30, 255))
+            )
+            (work / "screenshots" / "demo" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 31, 255))
+            )
+            config = visual_capture_config("title")
+            config["capture_automation"] = visual_capture_automation_config(root, "title")
+
+            capture = build_visual_screenshot_capture_report(
+                work,
+                config,
+                automation_runner=OriginalOnlyVisualCaptureRunner(),
+            )
+            codes = {diagnostic["code"] for diagnostic in capture["diagnostics"]}
+            encoded = json.dumps(capture, sort_keys=True)
+
+            self.assertEqual(capture["status"], "blocked")
+            self.assertEqual(capture["automation"]["execution_status"], "blocked")
+            self.assertIn("TSUI_VISUAL_CAPTURE_AUTOMATION_ROLE_CAPTURE_MISSING", codes)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_visual_capture_launch_environment_merges_private_values_without_report_leak(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            (work / "screenshots" / "original").mkdir(parents=True)
+            (work / "screenshots" / "demo").mkdir(parents=True)
+            (work / "screenshots" / "original" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 30, 255))
+            )
+            (work / "screenshots" / "demo" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 31, 255))
+            )
+            config = visual_capture_config("title")
+            config["capture_automation"] = visual_capture_automation_config(root, "title")
+            config["capture_automation"]["sessions"][0]["launch"]["environment"] = {
+                "__COMPAT_LAYER": "RunAsInvoker",
+                "PRIVATE_ROOT": str(root / "private"),
+            }
+
+            merged = _visual_capture_launch_environment(
+                {"BASE": "1"},
+                config["capture_automation"]["sessions"][0]["launch"],
+            )
+            capture = build_visual_screenshot_capture_report(work, config)
+            encoded = json.dumps(capture, sort_keys=True)
+
+            self.assertEqual(merged["BASE"], "1")
+            self.assertEqual(merged["__COMPAT_LAYER"], "RunAsInvoker")
+            self.assertIn("PRIVATE_ROOT", merged)
+            self.assertNotIn("PRIVATE_ROOT", encoded)
+            self.assertNotIn("RunAsInvoker", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_visual_capture_launch_command_resolves_executable_inside_working_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bundle = root / "bundle"
+            bundle.mkdir()
+            exe = bundle / "AstraPlayer.exe"
+            exe.write_bytes(b"fixture")
+
+            command = _resolve_visual_capture_launch_command(
+                ["AstraPlayer.exe", "--launch-report"],
+                str(bundle),
+            )
+
+            self.assertEqual(Path(command[0]), exe.resolve())
+            self.assertEqual(command[1:], ["--launch-report"])
+
+    def test_visual_capture_normalizes_letterboxed_capture_to_original_resolution(self):
+        width, height = 12, 10
+        rgba = bytearray([0, 0, 0, 255] * width * height)
+        for y in range(2, 8):
+            for x in range(2, 10):
+                offset = (y * width + x) * 4
+                rgba[offset : offset + 4] = bytes([10, 200, 120, 255])
+
+        normalized = _normalize_visual_capture_image(
+            {"width": width, "height": height, "rgba": bytes(rgba)},
+            (8, 6),
+            "linear",
+        )
+
+        self.assertEqual(normalized["width"], 8)
+        self.assertEqual(normalized["height"], 6)
+        self.assertEqual(normalized["rgba"], bytes([10, 200, 120, 255] * 8 * 6))
+
+    def test_visual_comparison_blocks_missing_review_and_large_region_delta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            (work / "screenshots" / "original").mkdir(parents=True)
+            (work / "screenshots" / "demo").mkdir(parents=True)
+            (work / "screenshots" / "original" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 30, 255))
+            )
+            (work / "screenshots" / "demo" / "title.png").write_bytes(
+                make_png(8, 8, fill=(240, 10, 10, 255))
+            )
+
+            capture = build_visual_screenshot_capture_report(work, visual_capture_config("title"))
+            comparison = build_visual_comparison_report(work, capture, [])
+            codes = {diagnostic["code"] for diagnostic in comparison["diagnostics"]}
+            encoded = json.dumps(comparison, sort_keys=True)
+
+            self.assertEqual(comparison["status"], "blocked")
+            self.assertIn("TSUI_VISUAL_COMPARISON_REVIEW_MISSING", codes)
+            self.assertIn("TSUI_VISUAL_COMPARISON_REGION_DIFF", codes)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_visual_comparison_blocks_external_capture_missing_screenshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "work"
+            capture = {
+                "schema": "tsuinosora.visual_screenshot_capture_report.v1",
+                "status": "pass",
+                "thresholds": {"max_mean_delta": 2.0, "max_changed_ratio": 0.05},
+                "checkpoints": [
+                    {
+                        "checkpoint_id": "title",
+                        "route_id": "classic.main",
+                        "required": True,
+                        "original": {"path": "screenshots/original/missing.png"},
+                        "demo": {"path": "screenshots/demo/missing.png"},
+                        "regions": [{"region_id": "full_frame", "x": 0, "y": 0, "width": 8, "height": 8}],
+                    }
+                ],
+            }
+
+            comparison = build_visual_comparison_report(work, capture, visual_reviews("title"))
+            codes = {diagnostic["code"] for diagnostic in comparison["diagnostics"]}
+            encoded = json.dumps(comparison, sort_keys=True)
+
+            self.assertEqual(comparison["status"], "blocked")
+            self.assertIn("TSUI_VISUAL_COMPARISON_SCREENSHOT_MISSING", codes)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_visual_capture_blocks_missing_blank_and_unsafe_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            (work / "screenshots" / "original").mkdir(parents=True)
+            (work / "screenshots" / "demo").mkdir(parents=True)
+            (work / "screenshots" / "original" / "title.png").write_bytes(
+                make_png(8, 8, fill=(0, 0, 0, 255))
+            )
+            (work / "screenshots" / "demo" / "title.png").write_bytes(
+                make_png(8, 8, fill=(0, 0, 0, 0))
+            )
+            config = visual_capture_config("title")
+            config["checkpoints"].append(
+                {
+                    "checkpoint_id": "bad.path",
+                    "route_id": "classic.main",
+                    "required": True,
+                    "original_screenshot": "../outside.png",
+                    "demo_screenshot": "screenshots/demo/missing.png",
+                    "regions": [{"region_id": "full_frame", "x": 0, "y": 0, "width": 8, "height": 8}],
+                }
+            )
+
+            report = build_visual_screenshot_capture_report(work, config)
+            codes = {diagnostic["code"] for diagnostic in report["diagnostics"]}
+            encoded = json.dumps(report, sort_keys=True)
+
+            self.assertEqual(report["status"], "blocked")
+            self.assertIn("TSUI_VISUAL_CAPTURE_BLANK", codes)
+            self.assertIn("TSUI_VISUAL_CAPTURE_PATH_INVALID", codes)
+            self.assertIn("TSUI_VISUAL_CAPTURE_SCREENSHOT_MISSING", codes)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_visual_capture_blocks_invalid_automation_intent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            (work / "screenshots" / "original").mkdir(parents=True)
+            (work / "screenshots" / "demo").mkdir(parents=True)
+            (work / "screenshots" / "original" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 30, 255))
+            )
+            (work / "screenshots" / "demo" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 31, 255))
+            )
+            config = visual_capture_config("title")
+            config["capture_automation"] = {
+                "schema": "tsuinosora.visual_capture_automation.v1",
+                "backend": "windows_sendinput",
+                "sessions": [
+                    {
+                        "role": "original",
+                        "launch": {"command": ["original"]},
+                        "window_match": {"process_name": "original"},
+                    }
+                ],
+                "input_scripts": [],
+            }
+
+            report = build_visual_screenshot_capture_report(work, config)
+            codes = {diagnostic["code"] for diagnostic in report["diagnostics"]}
+            encoded = json.dumps(report, sort_keys=True)
+
+            self.assertEqual(report["status"], "blocked")
+            self.assertIn("TSUI_VISUAL_CAPTURE_AUTOMATION_SESSION_MISSING", codes)
+            self.assertIn("TSUI_VISUAL_CAPTURE_AUTOMATION_INPUT_SCRIPTS_MISSING", codes)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
     def test_conversion_report_blocks_quarantine_and_uses_aliases_only(self):
         inventory = {
             "schema": "tsuinosora.source_inventory.v1",
@@ -3053,6 +4698,103 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertTrue((work / "unpacked" / "projectorrays_script_source_map.json").exists())
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
+    def test_demo_slice_gate_uses_projectorrays_converted_assets_without_readable_extract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            title = root / "Title.png"
+            game = root / "Game.png"
+            original = root / "original"
+            dump = root / "projectorrays-dump"
+            tool = root / "tools" / "projectorrays"
+            work = root / "work"
+            native = work / "native-assets" / "projectorrays" / "data" / "BITD-1.png"
+            config = root / "demo.config.json"
+            (original / "DATA").mkdir(parents=True)
+            dump.mkdir()
+            tool.parent.mkdir()
+            native.parent.mkdir(parents=True)
+            title.write_bytes(make_png(16, 9, fill=(10, 20, 30, 255)))
+            game.write_bytes(make_png(16, 9, fill=(30, 20, 10, 255)))
+            tool.write_bytes(b"projectorrays fixture")
+            (original / "READY.dxr").write_bytes(b"XFIR" + b"\x00" * 20)
+            (dump / "BehaviorScript 105 - GO[1321].ls").write_text(
+                "put \"commercial route script omitted\"\n",
+                encoding="utf-8",
+            )
+            native.write_bytes(make_png(8, 8, fill=(40, 80, 120, 255)))
+            (work / "reports").mkdir(parents=True)
+            (work / "reports" / "projectorrays_converted_resources.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "tsuinosora.projectorrays_converted_resources.v1",
+                        "status": "pass",
+                        "resources": [
+                            {
+                                "source_alias": "data",
+                                "source_relative_path": "BITD-1.bin",
+                                "source_sha256": "sha256:" + ("1" * 64),
+                                "chunk_fourcc": "BITD",
+                                "role": "bitmap_or_palette_backed_image",
+                                "native_path": "native-assets/projectorrays/data/BITD-1.png",
+                                "converted_sha256": sha256_file(native),
+                                "byte_size": native.stat().st_size,
+                                "conversion_method": "projectorrays_bitd_to_png",
+                                "status": "converted",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config.write_text(
+                json.dumps(
+                    {
+                        "schema": "tsuinosora.demo_slice_config.v1",
+                        "original_install_root": str(original),
+                        "local_work_root": str(work),
+                        "title_png": str(title),
+                        "game_png": str(game),
+                        "projectorrays_tool": str(tool),
+                        "projectorrays_dump_root": str(dump),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = run_demo_slice_gate(config)
+            asset_report = json.loads((work / "reports" / "asset_analysis.json").read_text(encoding="utf-8"))
+            native_report = json.loads(
+                (work / "reports" / "native_asset_rearrange_report.json").read_text(encoding="utf-8")
+            )
+            encoded = json.dumps(report, sort_keys=True)
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["route_count"], 1)
+            self.assertEqual(asset_report["status"], "pass")
+            self.assertEqual(asset_report["assets"][0]["relative_path"], "native-assets/projectorrays/data/BITD-1.png")
+            self.assertEqual(native_report["status"], "pass")
+            self.assertEqual(native_report["converted_assets"], 1)
+            self.assertNotIn("TSUI_EXTRACT_DIRECTOR_XFIR_READER_REQUIRED", {d["code"] for d in report["diagnostics"]})
+            self.assertNotIn("commercial route script omitted", encoded)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_nativevn_story_uses_unique_route_wait_ids(self):
+        story = _render_nativevn_story(
+            [
+                {"route_id": "classic.a", "terminal": "ending.a", "coverage": "covered"},
+                {"route_id": "classic.b", "terminal": "ending.b", "coverage": "covered"},
+            ]
+        )
+        ids = [
+            line.split("#@id ", 1)[1].split()[0]
+            for line in story.splitlines()
+            if "#@id " in line
+        ]
+
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertIn("wait.classic_a.route_pause", ids)
+        self.assertIn("wait.classic_b.route_pause", ids)
+
     def test_internal_demo_bundle_builds_artifacts_but_blocks_without_live_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, config, work = self._write_internal_demo_bundle_fixture(tmp)
@@ -3072,6 +4814,7 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertIn("web", report["bundles"])
             self.assertTrue(any(file["role"] == "package" for file in report["files"]))
             self.assertTrue(any(diag["code"] == "TSUI_INTERNAL_DEMO_PLAYER_EVIDENCE_REQUIRED" for diag in report["diagnostics"]))
+            self.assertTrue(all(cwd == root for phase, _, cwd in runner.calls if phase.startswith("bundle.")))
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
             self.assertNotIn("validate.player_full_playable", [phase for phase, _, _ in runner.calls])
 
@@ -3111,6 +4854,94 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertEqual(report["release_report"], "reports/internal_demo_release_report.json")
             self.assertTrue(any(file["role"] == "release_report" for file in report["files"]))
             self.assertIn("validate.player_full_playable", [phase for phase, _, _ in runner.calls])
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_internal_demo_bundle_blocks_when_visual_acceptance_required_without_capture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, config, work = self._write_internal_demo_bundle_fixture(tmp)
+            value = json.loads(config.read_text(encoding="utf-8"))
+            value["require_visual_screenshot_acceptance"] = True
+            config.write_text(json.dumps(value), encoding="utf-8")
+
+            report = run_internal_demo_bundle(
+                config_path=config,
+                repo_root=root,
+                astra_bin=root / "astra",
+                command_runner=FakeAstraRunner(work),
+            )
+            codes = {diagnostic["code"] for diagnostic in report["diagnostics"]}
+            encoded = json.dumps(report, sort_keys=True)
+
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["visual_comparison"], "")
+            self.assertIn("TSUI_INTERNAL_DEMO_VISUAL_CAPTURE_REQUIRED", codes)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_internal_demo_bundle_requires_automated_visual_capture_intent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, config, work = self._write_internal_demo_bundle_fixture(tmp)
+            (work / "screenshots" / "original").mkdir(parents=True)
+            (work / "screenshots" / "demo").mkdir(parents=True)
+            (work / "screenshots" / "original" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 30, 255))
+            )
+            (work / "screenshots" / "demo" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 31, 255))
+            )
+            value = json.loads(config.read_text(encoding="utf-8"))
+            value["require_visual_screenshot_acceptance"] = True
+            value["visual_capture"] = visual_capture_config("title")
+            value["visual_capture"]["visual_reviews"] = visual_reviews("title")
+            config.write_text(json.dumps(value), encoding="utf-8")
+
+            report = run_internal_demo_bundle(
+                config_path=config,
+                repo_root=root,
+                astra_bin=root / "astra",
+                command_runner=FakeAstraRunner(work),
+            )
+            codes = {diagnostic["code"] for diagnostic in report["diagnostics"]}
+            encoded = json.dumps(report, sort_keys=True)
+
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["visual_capture"], "reports/visual_screenshot_capture_report.json")
+            self.assertIn("TSUI_INTERNAL_DEMO_VISUAL_AUTOMATION_REQUIRED", codes)
+            self.assertNotIn("TSUI_INTERNAL_DEMO_PLAYER_EVIDENCE_REQUIRED", codes)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
+    def test_internal_demo_bundle_blocks_failed_visual_capture_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, config, work = self._write_internal_demo_bundle_fixture(tmp)
+            (work / "screenshots" / "original").mkdir(parents=True)
+            (work / "screenshots" / "demo").mkdir(parents=True)
+            (work / "screenshots" / "original" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 30, 255))
+            )
+            (work / "screenshots" / "demo" / "title.png").write_bytes(
+                make_png(8, 8, fill=(10, 20, 31, 255))
+            )
+            value = json.loads(config.read_text(encoding="utf-8"))
+            value["require_visual_screenshot_acceptance"] = True
+            value["visual_capture"] = visual_capture_config("title")
+            value["visual_capture"]["capture_automation"] = visual_capture_automation_config(root, "title")
+            value["visual_capture"]["visual_reviews"] = visual_reviews("title")
+            config.write_text(json.dumps(value), encoding="utf-8")
+
+            report = run_internal_demo_bundle(
+                config_path=config,
+                repo_root=root,
+                astra_bin=root / "astra",
+                command_runner=FakeAstraRunner(work),
+                visual_automation_runner=BlockedVisualCaptureRunner(),
+            )
+            codes = {diagnostic["code"] for diagnostic in report["diagnostics"]}
+            encoded = json.dumps(report, sort_keys=True)
+            capture = json.loads((work / "reports" / "visual_screenshot_capture_report.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(capture["automation"]["execution_status"], "blocked")
+            self.assertIn("TSUI_INTERNAL_DEMO_VISUAL_AUTOMATION_BLOCKED", codes)
+            self.assertNotIn("TSUI_INTERNAL_DEMO_VISUAL_AUTOMATION_REQUIRED", codes)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
     def test_demo_slice_config_blocks_non_string_player_report_path(self):
@@ -3153,6 +4984,60 @@ class AssetAnalysisTests(unittest.TestCase):
             )
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
+    def test_internal_demo_bundle_accepts_verified_full_resource_conversion_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, config, work = self._write_internal_demo_bundle_fixture(tmp)
+            full_dump = root / "full-dump"
+            native = work / "native-assets" / "images" / "bitd-1.png"
+            full_dump.mkdir()
+            source = full_dump / "BITD-1.bin"
+            source.write_bytes(b"\x82\x00\x82\x00payload")
+            native.parent.mkdir(parents=True)
+            native.write_bytes(make_png(4, 4, fill=(10, 20, 30, 255)))
+            (work / "reports").mkdir(parents=True, exist_ok=True)
+            (work / "reports" / "projectorrays_converted_resources.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "tsuinosora.projectorrays_converted_resources.v1",
+                        "resources": [
+                            {
+                                "source_alias": "data",
+                                "source_relative_path": "BITD-1.bin",
+                                "source_sha256": sha256_file(source),
+                                "chunk_fourcc": "BITD",
+                                "role": "bitmap_or_palette_backed_image",
+                                "native_path": "native-assets/images/bitd-1.png",
+                                "converted_sha256": sha256_file(native),
+                                "byte_size": native.stat().st_size,
+                                "conversion_method": "projectorrays_bitd_to_png",
+                                "status": "converted",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            value = json.loads(config.read_text(encoding="utf-8"))
+            value["require_full_resource_conversion"] = True
+            value["projectorrays_full_dump_roots"] = [{"alias": "data", "path": str(full_dump)}]
+            config.write_text(json.dumps(value), encoding="utf-8")
+
+            report = run_internal_demo_bundle(
+                config_path=config,
+                repo_root=root,
+                astra_bin=root / "astra",
+                command_runner=FakeAstraRunner(work),
+            )
+            codes = {diagnostic["code"] for diagnostic in report["diagnostics"]}
+            encoded = json.dumps(report, sort_keys=True)
+
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["full_dump"], "reports/projectorrays_full_dump_report.json")
+            self.assertIn("TSUI_INTERNAL_DEMO_PLAYER_EVIDENCE_REQUIRED", codes)
+            self.assertNotIn("TSUI_INTERNAL_DEMO_FULL_RESOURCE_CONVERSION_BLOCKED", codes)
+            self.assertIn("windows", report["bundles"])
+            self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
+
     def _write_internal_demo_bundle_fixture(self, tmp: str) -> tuple[Path, Path, Path]:
         root = Path(tmp)
         title = root / "Title.png"
@@ -3191,12 +5076,13 @@ class AssetAnalysisTests(unittest.TestCase):
                     "schema": "tsuinosora.demo_slice_config.v1",
                     "original_install_root": str(original),
                     "local_work_root": str(work),
-                    "unpacked_root": str(unpacked),
-                    "title_png": str(title),
-                    "game_png": str(game),
-                    "modern_features": [
-                        {
-                            "feature_id": "remake_overlay.hero",
+                        "unpacked_root": str(unpacked),
+                        "title_png": str(title),
+                        "game_png": str(game),
+                        "require_visual_screenshot_acceptance": False,
+                        "modern_features": [
+                            {
+                                "feature_id": "remake_overlay.hero",
                             "feature_kind": "portrait_overlay",
                             "input_hash": "sha256:input",
                             "output_hash": "sha256:output",
@@ -3494,6 +5380,13 @@ class AssetAnalysisTests(unittest.TestCase):
                 self.assertTrue(entry["sha256"].startswith("sha256:"))
                 self.assertGreater(entry["byte_size"], 0)
             self.assertIn("tsuinosora-internal-game", project)
+            self.assertIn("original_resolution:", project)
+            self.assertIn("width: 800", project)
+            self.assertIn("height: 600", project)
+            self.assertIn("scale_filter: linear", project)
+            self.assertIn("preview_layers:", project)
+            self.assertIn("package:/native-assets/projectorrays/data/MENU/chunks/BITD-444.png", project)
+            self.assertIn("package:/native-assets/projectorrays/data/MENU/chunks/BITD-449.png", project)
             self.assertIn("asset_roots:", project)
             self.assertIn("native-assets", project)
             self.assertIn("package_sections:", project)
@@ -3784,6 +5677,88 @@ def make_png(width, height, fill=(0, 0, 0, 0), rects=None):
     )
 
 
+def visual_capture_config(checkpoint_id):
+    return {
+        "schema": "tsuinosora.visual_capture_config.v1",
+        "thresholds": {"max_mean_delta": 2.0, "max_changed_ratio": 0.05},
+        "checkpoints": [
+            {
+                "checkpoint_id": checkpoint_id,
+                "route_id": "classic.main",
+                "required": True,
+                "original_screenshot": f"screenshots/original/{checkpoint_id}.png",
+                "demo_screenshot": f"screenshots/demo/{checkpoint_id}.png",
+                "regions": [
+                    {
+                        "region_id": "full_frame",
+                        "x": 0,
+                        "y": 0,
+                        "width": 8,
+                        "height": 8,
+                        "required": True,
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def visual_capture_automation_config(root, checkpoint_id):
+    return {
+        "schema": "tsuinosora.visual_capture_automation.v1",
+        "backend": "windows_sendinput",
+        "sessions": [
+            {
+                "role": "original",
+                "launch": {
+                    "command": [str(Path(root) / "private" / "original.exe")],
+                    "working_directory": str(Path(root) / "private"),
+                },
+                "window_match": {"title_contains": "private-title", "process_name": "original.exe"},
+                "startup_timeout_ms": 15000,
+            },
+            {
+                "role": "demo",
+                "launch": {
+                    "command": [str(Path(root) / "bundle" / "AstraPlayer.exe")],
+                    "working_directory": str(Path(root) / "bundle"),
+                },
+                "window_match": {"title_contains": "private-title", "process_name": "AstraPlayer.exe"},
+                "startup_timeout_ms": 15000,
+            },
+        ],
+        "input_scripts": [
+            {
+                "checkpoint_id": checkpoint_id,
+                "steps": [
+                    {"kind": "wait", "duration_ms": 50},
+                    {"kind": "key", "key": "enter"},
+                    {"kind": "capture", "role": "original"},
+                ],
+            }
+        ],
+    }
+
+
+def visual_reviews(checkpoint_id, status="pass"):
+    return [
+        {
+            "checkpoint_id": checkpoint_id,
+            "status": status,
+            "reviewer": "vision",
+            "summary_hash": "sha256:" + ("7" * 64),
+        }
+    ]
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
 def make_riff_container(chunks):
     import struct
 
@@ -3988,6 +5963,74 @@ class FakeAstraRunner:
                 encoding="utf-8",
             )
         return subprocess.CompletedProcess(command, 0, stdout="{}", stderr="")
+
+
+class FakeVisualCaptureRunner:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, work_root, visual_capture):
+        checkpoints = visual_capture.get("checkpoints", [])
+        backend = visual_capture.get("capture_automation", {}).get("backend", "")
+        checkpoint_id = checkpoints[0]["checkpoint_id"]
+        self.calls.append((backend, checkpoint_id))
+        original = Path(work_root) / checkpoints[0]["original_screenshot"]
+        demo = Path(work_root) / checkpoints[0]["demo_screenshot"]
+        original.parent.mkdir(parents=True, exist_ok=True)
+        demo.parent.mkdir(parents=True, exist_ok=True)
+        original.write_bytes(make_png(8, 8, fill=(10, 20, 30, 255)))
+        demo.write_bytes(make_png(8, 8, fill=(10, 20, 31, 255)))
+        return {
+            "schema": "tsuinosora.visual_capture_automation_execution.v1",
+            "status": "pass",
+            "captured_checkpoint_count": 1,
+            "screenshot_count": 2,
+            "captures": [
+                {"checkpoint_id": checkpoint_id, "role": "original", "hash": sha256_file(original)},
+                {"checkpoint_id": checkpoint_id, "role": "demo", "hash": sha256_file(demo)},
+            ],
+            "transcript_hash": "sha256:" + ("8" * 64),
+            "diagnostics": [],
+        }
+
+
+class OriginalOnlyVisualCaptureRunner:
+    def __call__(self, work_root, visual_capture):
+        checkpoints = visual_capture.get("checkpoints", [])
+        checkpoint_id = checkpoints[0]["checkpoint_id"]
+        return {
+            "schema": "tsuinosora.visual_capture_automation_execution.v1",
+            "status": "pass",
+            "captured_checkpoint_count": 1,
+            "screenshot_count": 1,
+            "captures": [
+                {
+                    "checkpoint_id": checkpoint_id,
+                    "role": "original",
+                    "hash": "sha256:" + ("1" * 64),
+                }
+            ],
+            "transcript_hash": "sha256:" + ("8" * 64),
+            "diagnostics": [],
+        }
+
+
+class BlockedVisualCaptureRunner:
+    def __call__(self, work_root, visual_capture):
+        return {
+            "schema": "tsuinosora.visual_capture_automation_execution.v1",
+            "status": "blocked",
+            "captured_checkpoint_count": 0,
+            "screenshot_count": 0,
+            "transcript_hash": "sha256:" + ("9" * 64),
+            "diagnostics": [
+                {
+                    "code": "TSUI_VISUAL_CAPTURE_AUTOMATION_WINDOW_MISSING",
+                    "role": "original",
+                    "message": "synthetic visual capture window was unavailable",
+                }
+            ],
+        }
 
 
 def sha256_file(path: Path) -> str:
