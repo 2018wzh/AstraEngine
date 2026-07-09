@@ -33,6 +33,8 @@ pub struct TargetDescriptor {
     #[serde(default, rename = "crate", skip_serializing_if = "Option::is_none")]
     pub crate_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_profile: Option<String>,
@@ -49,6 +51,7 @@ impl TargetDescriptor {
             id: format!("{}-game", normalize_id(&project_id)),
             kind: TargetKind::Game,
             crate_name: Some("astra-runtime".to_string()),
+            runtime_provider: Some("native_vn".to_string()),
             binary: None,
             default_profile: Some("desktop-release".to_string()),
             platforms: vec![
@@ -68,6 +71,8 @@ impl TargetDescriptor {
 pub struct TargetManifest {
     pub schema: String,
     pub targets: Vec<TargetDescriptor>,
+    #[serde(default, skip)]
+    pub legacy_runtime_field: bool,
 }
 
 impl TargetManifest {
@@ -75,7 +80,13 @@ impl TargetManifest {
         Self {
             schema: TARGET_MANIFEST_SCHEMA.to_string(),
             targets,
+            legacy_runtime_field: false,
         }
+    }
+
+    pub fn with_legacy_runtime_field(mut self, legacy_runtime_field: bool) -> Self {
+        self.legacy_runtime_field = legacy_runtime_field;
+        self
     }
 
     pub fn from_project_yaml(text: &str) -> Result<Self, TargetError> {
@@ -85,17 +96,19 @@ impl TargetManifest {
     }
 
     pub fn from_project_value(value: &serde_yaml::Value) -> Result<Self, TargetError> {
+        let legacy_runtime_field = value.get("runtime").is_some();
         if let Some(targets) = value.get("targets") {
             let targets: Vec<TargetDescriptor> = serde_yaml::from_value(targets.clone())
                 .map_err(|err| TargetError::Parse(err.to_string()))?;
-            return Ok(Self::new(targets));
+            return Ok(Self::new(targets).with_legacy_runtime_field(legacy_runtime_field));
         }
 
         let project_id = value
             .get("id")
             .and_then(serde_yaml::Value::as_str)
             .unwrap_or("com.example.astra");
-        Ok(Self::new(vec![TargetDescriptor::default_game(project_id)]))
+        Ok(Self::new(vec![TargetDescriptor::default_game(project_id)])
+            .with_legacy_runtime_field(legacy_runtime_field))
     }
 
     pub fn find(&self, id: &str) -> Option<&TargetDescriptor> {
@@ -131,6 +144,12 @@ pub fn validate_manifest(
         diagnostics.push(Diagnostic::blocking(
             "ASTRA_TARGET_SCHEMA",
             "target manifest schema must be astra.target_manifest.v1",
+        ));
+    }
+    if manifest.legacy_runtime_field {
+        diagnostics.push(Diagnostic::blocking(
+            "ASTRA_TARGET_LEGACY_RUNTIME_FIELD",
+            "top-level runtime is removed; game targets must declare runtime_provider",
         ));
     }
     if manifest.targets.is_empty() {
@@ -223,6 +242,15 @@ fn validate_target(target: &TargetDescriptor, diagnostics: &mut Vec<Diagnostic>)
                     .with_field("target", &target.id),
                 );
             }
+            if target.runtime_provider.as_deref().is_none_or(str::is_empty) {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_TARGET_RUNTIME_PROVIDER",
+                        "game target needs an explicit runtime_provider",
+                    )
+                    .with_field("target", &target.id),
+                );
+            }
             if target.platforms.is_empty() {
                 diagnostics.push(
                     Diagnostic::blocking("ASTRA_TARGET_PLATFORMS", "game target needs platforms")
@@ -292,6 +320,7 @@ targets:
   - id: nativevn-game
     kind: game
     crate: astra-vn
+    runtime_provider: native_vn
     default_profile: desktop-release
     platforms: [windows, linux, macos, ios, android, web]
     packaged: true
@@ -315,6 +344,7 @@ targets:
             id: "bad".to_string(),
             kind: TargetKind::Game,
             crate_name: None,
+            runtime_provider: None,
             binary: None,
             default_profile: None,
             platforms: Vec::new(),
@@ -326,5 +356,34 @@ targets:
             .diagnostics
             .iter()
             .any(|diag| diag.code == "ASTRA_TARGET_NOT_FOUND"));
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "ASTRA_TARGET_RUNTIME_PROVIDER"));
+    }
+
+    #[test]
+    fn blocks_legacy_top_level_runtime_field_for_game_targets() {
+        let manifest = TargetManifest::from_project_yaml(
+            r#"
+schema: astra.project.v1
+id: com.example.nativevn
+runtime: astra-vn
+targets:
+  - id: nativevn-game
+    kind: game
+    crate: astra-vn
+    default_profile: desktop-release
+    platforms: [windows]
+    packaged: true
+"#,
+        )
+        .unwrap();
+        let report = validate_manifest(&manifest, Some("nativevn-game"));
+        assert_eq!(report.status, TargetValidationStatus::Blocked);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "ASTRA_TARGET_LEGACY_RUNTIME_FIELD"));
     }
 }

@@ -53,6 +53,12 @@ fn release_report_covers_pass_warning_and_blocked_checks() {
     assert!(report.checks.iter().any(|check| {
         check.id == "plugin.dependency_graph" && check.status == CheckStatus::Pass
     }));
+    assert!(report.checks.iter().any(|check| {
+        check.id == "runtime_provider.binding" && check.status == CheckStatus::Pass
+    }));
+    assert!(report.checks.iter().any(|check| {
+        check.id == "runtime_provider.native_vn" && check.status == CheckStatus::Pass
+    }));
 
     let blocked = ReleaseValidator
         .validate_package(PackageValidateRequest {
@@ -185,6 +191,57 @@ fn release_gate_blocks_plugin_registry_conflict_and_invalid_binding() {
     assert_eq!(
         plugin_check.diagnostic.as_ref().unwrap().code,
         "ASTRA_PLUGIN_EXTENSION_CONFLICT"
+    );
+}
+
+#[test]
+fn runtime_provider_gate_blocks_missing_nativevn_binding() {
+    let mut request = PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "desktop-release",
+        vec![SectionPayload::raw(
+            "asset.characters.hero",
+            "astra.cooked_asset.v1",
+            b"hero".to_vec(),
+        )],
+    );
+    request.provider_policy = serde_json::json!({
+        "schema": "astra.provider_policy.v1",
+        "profile": "desktop-release",
+        "bindings": []
+    })
+    .to_string()
+    .into_bytes();
+    request.plugin_extension_registry = serde_json::json!({
+        "schema": "astra.plugin_extension_registry.v1",
+        "providers": [],
+        "bindings": [],
+        "conflicts": []
+    })
+    .to_string()
+    .into_bytes();
+    let blob = PackageBuilder::build(request).unwrap();
+
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "desktop-release".to_string(),
+            require_ffmpeg: false,
+            target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+
+    let binding = report
+        .checks
+        .iter()
+        .find(|check| check.id == "runtime_provider.binding")
+        .unwrap();
+    assert_eq!(binding.status, CheckStatus::Blocked);
+    assert_eq!(
+        binding.diagnostic.as_ref().unwrap().code,
+        "ASTRA_RUNTIME_PROVIDER_BINDING_MISSING"
     );
 }
 

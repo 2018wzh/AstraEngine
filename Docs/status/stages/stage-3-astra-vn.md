@@ -1,8 +1,8 @@
 # Stage 3 AstraVN Work
 
-Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astra` 仍是 canonical story source；AstraVN Core 持有 VN 权威语义，Luau policy 只处理表现、系统页和复杂演出。当前已实现的是单 crate `astra-vn` slice；重开后的目标是先迁到 `Engine/Source/Modules/AstraVN/`，再拆成多个功能 crate，让 `astra-vn` 只保留 Rust ABI dylib facade 和兼容 re-export。Stage 3 还必须把现有 VN runtime facade、VN extension manifest、package sections 和 release checks 对齐到 `NativeVnRuntimeProvider`；AstraVN 保持 VN 语义，不作为 AstraEMU 或 AstraRPG 的基类。
+Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astra` 仍是 canonical story source；AstraVN Core 持有 VN 权威语义，Luau policy 只处理表现、系统页和复杂演出。AstraVN 已迁到 `Engine/Source/Modules/AstraVN/` 并拆成多个功能 crate；`astra-vn` 只保留 Rust ABI dylib facade 和兼容 re-export。`NativeVnRuntimeProvider` 已作为同级 gameplay runtime provider 接入，AstraVN 仍保持 VN 语义，不作为 AstraEMU 或 AstraRPG 的基类。
 
-当前 Stage 3 是 `IN_PROGRESS`，不是 `DONE`。已落地的 slice 仍位于单 crate `astra-vn`，包括基础 `.astra` parser/compiler、duplicate id / target / reachability blocking diagnostic、`CompiledStory`、Story/Variable/Command manifest、`VnRuntimeState`、call/return stack、route flags、backlog/read-state/voice replay、Runtime save container 中的 `vn.runtime_state`/`vn.policy_state`、save/load、auto/skip/config/unlock system state、`mlua` sandbox、mutation trace、rollback scope/playback、command/query/trace capability 与 serializable snapshot policy、policy bundle manifest/source cache/hash gate、VN extension binding manifest、standard command manifest、commercial baseline manifest feature gate、presentation provider manifest/filter fallback/wait capability gate、movie/voice/timeline await state slice、StageModel/VideoLayer/AudioCommand/Timeline lifecycle slice、headless presentation execution、FilterGraph CPU execution、AdvancedVN opt-in profile、SystemStoryManifest 必需入口和 policy binding、Graph/Timeline metadata validation、NativeVN sample cook/package/full playthrough、Windows/Web standalone bundle、Windows bundle 内 `AstraPlayer.exe --route-scenario` route report、Web browser host route report、bundle 内脱敏 `AstraPlayer.mount_policy.json`、VN package sections、VN Scenario DSL slice、Windows `mount_probes`/route-bound `mount_assets` + `--mount-root` local probe、project-level `package_sections`、`vn.compiled_story` manifest evidence/`vn.profile_manifest`/`vn.policy_bundle`/`vn.extension_bindings`/`vn.standard_commands`/`vn.presentation_provider`/`vn.commercial_baseline`/`vn.system_ui_profile`/`vn.advanced_presentation` release gate，以及 TsuiNoSora 脱敏 inventory、direct-readable extract preflight、Director `imap`/`mmap` resource map preflight 和 free mmap entry 计数、受限 `XFIR` RIFF/RIFX exact wrapper reader、opaque/compressed `XFIR` 与尾随未验证 bytes reader-required 阻断、Director `KEY*`/`CAS*` cast map preflight、Director `Lctx`/`Lnam`/`Lscr` Lingo map preflight 与脱敏 `Lnam` entry count/table hash、从 Director cast map 与 child resource id/FourCC/extracted payload hash 派生 cast source map、cast sidecar source hash mismatch blocking、受限 RIFF/RIFX readable chunk reader、route graph payload/unsafe symbol blocking、可读或短 binary-header wrapped mapped `Lscr` 自动生成脱敏 `tsuinosora.script_source_map.v1` reader sidecar、reader id/hash/output contract evidence、reader sidecar declared source hash mismatch blocking、route line out-of-range blocking、sidecar route source/hash mismatch blocking、合规 sidecar 覆盖 unsupported Lingo bytecode、script source map report bytecode 阻断、route graph report、Asset analysis/conversion/modern profile/stage3 gate helper、NativeVN package input writer、`demo-slice --config` 私有 root 入口、package section payload-like 字段清洗、package section release gate、公开 synthetic internal/patch player route gate、由 demo-slice 生成的 NativeVN project/bundle/player route gate、patch Web direct-read route check 和 Windows `player.patch_mount_asset` check。缺口仍是 AstraVN module layout、AstraVN 多 crate 拆分、facade-only dylib、`NativeVnRuntimeProvider`、Windows/Web live player automation、TsuiNoSora 完整 Director/Shockwave cast parser/source-map reader、真实商业全量 route extraction、真实商业 NativeVN payload 写入和正式 release signoff。
+当前 Stage 3 是 `IN_PROGRESS`，不是 `DONE`。已落地的 slice 包括基础 `.astra` parser/compiler、duplicate id / target / reachability blocking diagnostic、`CompiledStory`、Story/Variable/Command manifest、`VnRuntimeState`、call/return stack、route flags、backlog/read-state/voice replay、Runtime save container 中的 `vn.runtime_state`/`vn.policy_state`、save/load、auto/skip/config/unlock system state、`mlua` sandbox、mutation trace、rollback scope/playback、command/query/trace capability 与 serializable snapshot policy、policy bundle manifest/source cache/hash gate、VN extension binding manifest、standard command manifest、commercial baseline manifest feature gate、presentation provider manifest/filter fallback/wait capability gate、movie/voice/timeline await state slice、StageModel/VideoLayer/AudioCommand/Timeline lifecycle slice、headless presentation execution、FilterGraph CPU execution、AdvancedVN opt-in profile、SystemStoryManifest 必需入口和 policy binding、Graph/Timeline metadata validation、NativeVN sample cook/package/full playthrough、Windows/Web standalone bundle、Windows bundle 内 `AstraPlayer.exe --route-scenario` route report、Web browser host route report、bundle 内脱敏 `AstraPlayer.mount_policy.json`、VN package sections、VN Scenario DSL slice、Windows `mount_probes`/route-bound `mount_assets` + `--mount-root` local probe、project-level `package_sections`、`vn.compiled_story` manifest evidence/`vn.profile_manifest`/`vn.policy_bundle`/`vn.extension_bindings`/`vn.standard_commands`/`vn.presentation_provider`/`vn.commercial_baseline`/`vn.system_ui_profile`/`vn.advanced_presentation` release gate，以及 `runtime_provider.binding`、`runtime_provider.native_vn`、provider DTO+FFI smoke、target-level `runtime_provider: native_vn`、`provider.policy` runtime evidence 和 selected-provider scenario runner path。缺口仍是 Windows/Web live player automation、TsuiNoSora 完整 Director/Shockwave cast parser/source-map reader、真实商业全量 route extraction、真实商业 NativeVN payload 写入和正式 release signoff。
 
 补充：`S3-TSUI-INTERNAL-DEMO-01` 的验收口径已提升为 full-resource classic playable bundle：`tsuinosora-internal-game` 必须完成全量 ProjectorRays dump coverage、全量资源转换 coverage、NativeVN `asset_roots`、asset sidecar、cooked asset package section、`asset.vfs_manifest`/`asset.catalog` package VFS evidence、同一 `.astrapkg` 派生 Windows/Web bundle manifest，以及 `player.full_playable` live automation report 校验。当前 repo-side pipeline 已落地 ProjectorRays 本地 dump adapter、脱敏 script source-map、Director reader-required preflight 外部 reader evidence、`demo-config-template`、带 `chunk_fourcc_counts`/`conversion_plan` 的 `tsuinosora.projectorrays_full_dump_report.v1` 和 internal bundle full-resource 前置阻断。私有 acceptance 命令是 `python Tools/TsuiNoSora/tsuinosora_tools.py internal-demo-bundle --config Examples/TsuiNoSora/.local/demo.config.json --repo-root .`；当前私有 dump 覆盖 2527 个 ProjectorRays binary chunk，但 converted resource evidence 为 0，入口返回 `TSUI_INTERNAL_DEMO_FULL_RESOURCE_CONVERSION_BLOCKED`，实际 internal playable bundle 尚未产出，不能作为独立 milestone 标 `DONE`。`modern`、Patch-only 和 Runtime Patch/VFS 插件仍不属于该 milestone，但 full-resource conversion、原体验还原和 100% 可玩是该 milestone 的完成条件。
 
@@ -53,17 +53,20 @@ NativeVN package input 会把 route graph/source map 的 sanitized choice id 保
 当前 evidence：
 
 ```bash
-cargo test -p astra-vn
-cargo test -p astra-vn --test compiler_diagnostics
+cargo test -p astra-vn-script
+cargo test -p astra-vn-script --test compiler_diagnostics
 cargo test -p astra-vn --test vn_dylib_facade
-cargo test -p astra-vn --test commercial_baseline
-cargo test -p astra-vn --test luau_mutation
-cargo test -p astra-vn --test policy_bundle
-cargo test -p astra-vn --test presentation_model
-cargo test -p astra-vn --test presentation_execution
-cargo test -p astra-vn --test advanced_presentation
+cargo test -p astra-vn-plugin --test vn_plugin_extensions
+cargo test -p astra-vn-package --test commercial_baseline
+cargo test -p astra-vn-policy --test luau_mutation
+cargo test -p astra-vn-policy --test policy_bundle
+cargo test -p astra-vn-presentation --test presentation_model
+cargo test -p astra-vn-presentation --test presentation_execution
+cargo test -p astra-vn-package --test advanced_presentation
 cargo test -p astra-media --test filter_graph
-cargo test -p astra-vn --test system_controls
+cargo test -p astra-vn-system --test system_controls
+cargo test -p astra-vn-runtime-provider --test game_runtime_provider
+cargo test -p astra-vn-runtime-provider --test runtime_provider_ffi
 cargo test -p astra-runtime --test trigger_event
 cargo test -p astra-test --test vn_scenario
 cargo test -p astra-cli --test target_platform advanced_vn_sample_runs_opt_in_presentation_gate
@@ -88,7 +91,7 @@ python Tools/check_docs.py
 
 **ID:** `S3-MODULE-LAYOUT-01`
 
-**Status:** `REOPENED_SPEC`
+**Status:** `DONE`
 
 **Goal:** 将现有 `astra-vn` 从 Runtime 分区迁到 `Engine/Source/Modules/AstraVN/astra-vn`，保持 package name、public API 和现有测试入口兼容。
 
@@ -112,7 +115,7 @@ python Tools/check_docs.py
 
 **ID:** `S3-CRATE-SPLIT-01`
 
-**Status:** `REOPENED_SPEC`
+**Status:** `DONE`
 
 **Goal:** 将现有单 crate `astra-vn` 拆成 AstraVN 多功能 crate，并把 `astra-vn` 收缩为 facade、`rlib`/Rust ABI `dylib` 和兼容 re-export。
 
@@ -128,7 +131,7 @@ python Tools/check_docs.py
 4. 确认功能 crate 不依赖 `astra-vn` facade；共享 DTO 下沉到更底层 crate。
 5. 保持现有 `astra_vn::*` 消费路径先通过 facade re-export 兼容。
 
-**Done Evidence:** `cargo metadata --no-deps`、各 `astra-vn-*` crate 测试、`cargo test -p astra-vn --test vn_dylib_facade`、`cargo test -p astra-vn --test vn_plugin_extensions`、`cargo test -p astra-release --test release_report release_gate_` 和 `python Tools/check_docs.py` 通过；`astra-vn` 不再承载 parser/runtime/policy/package 业务实现。
+**Done Evidence:** `cargo metadata --no-deps`、各 `astra-vn-*` crate 测试、`cargo test -p astra-vn --test vn_dylib_facade`、`cargo test -p astra-vn-plugin --test vn_plugin_extensions`、`cargo test -p astra-release --test release_report release_gate_` 和 `python Tools/check_docs.py` 通过；`astra-vn` 不再承载 parser/runtime/policy/package 业务实现。
 
 **Linked Test IDs:** `T-S3-CRATE-SPLIT-01`
 
@@ -136,13 +139,13 @@ python Tools/check_docs.py
 
 **ID:** `S3-DYLIB-01`
 
-**Status:** `REOPENED_SPEC`
+**Status:** `DONE`
 
 **Goal:** `astra-vn` 作为 facade crate，同时产出 `rlib` 和 Rust ABI `dylib`，re-export AstraVN 子 crate public API，并证明 facade-only 架构仍兼容现有 consumer。
 
 **Depends On:** `S1-DYLIB-01`、`S3-CRATE-SPLIT-01`、`S3-SCRIPT-02`、`S3-CORE-03`、`S3-PLUGIN-01`、`S3-PRESENT-01`、`S3-SYSTEM-01`
 
-**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn/Cargo.toml`、`Engine/Source/Modules/AstraVN/astra-vn/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn/tests/vn_dylib_facade.rs`、`Engine/Source/Modules/AstraVN/astra-vn/tests/vn_plugin_extensions.rs`、`Engine/Plugins/Fixtures/vn-extension-provider`
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn/Cargo.toml`、`Engine/Source/Modules/AstraVN/astra-vn/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn/tests/vn_dylib_facade.rs`、`Engine/Source/Modules/AstraVN/astra-vn-plugin/tests/vn_plugin_extensions.rs`、`Engine/Plugins/Fixtures/vn-extension-provider`
 
 **Steps:**
 
@@ -153,7 +156,7 @@ python Tools/check_docs.py
 5. 编写 facade smoke，证明 `astra-vn` public API 能创建 VN runtime state、读取 command manifest、登记 VN extension DTO，并与 `astra-engine` facade 共同链接。
 6. 编写真实 cdylib provider fixture，证明 VN extension provider 经过 Stage 1 plugin ABI build/load/unload 后可进入 provider registry，并生成可校验 `VnExtensionManifest`。
 
-**Done Evidence:** `cargo test -p astra-vn --test vn_dylib_facade` 和 `cargo test -p astra-vn --test vn_plugin_extensions` 通过；`Cargo.toml` 明确产出 `rlib` 与 `dylib`，`astra-vn` 只做 facade re-export，`vn-extension-provider` 真实 cdylib fixture 通过 `PluginLoader` 加载、注册 VN policy/command/presentation/editor metadata/release check provider slots，并在 unload 后释放注册项。
+**Done Evidence:** `cargo test -p astra-vn --test vn_dylib_facade` 和 `cargo test -p astra-vn-plugin --test vn_plugin_extensions` 通过；`Cargo.toml` 明确产出 `rlib` 与 `dylib`，`astra-vn` 只做 facade re-export，`vn-extension-provider` 真实 cdylib fixture 通过 `PluginLoader` 加载、注册 VN policy/command/presentation/editor metadata/release check provider slots，并在 unload 后释放注册项。
 
 **Linked Test IDs:** `T-S3-DYLIB-01`
 
@@ -161,13 +164,13 @@ python Tools/check_docs.py
 
 **ID:** `S3-RUNTIME-PROVIDER-01`
 
-**Status:** `REOPENED_SPEC`
+**Status:** `DONE`
 
 **Goal:** 在 `astra-vn-runtime-provider` 中组合 AstraVN 子 crate，把现有 facade、VN Core、Luau policy、VN extension manifest、package sections 和 release checks 包装为 `NativeVnRuntimeProvider`。
 
 **Depends On:** `S3-CRATE-SPLIT-01`、`S3-DYLIB-01`、`S3-CORE-03`、`S3-PLUGIN-01`、[Game Runtime Provider Contract](../../contracts/game-runtime-provider.md)、[Game Runtime Provider Blueprint](../../implementation/game-runtime-provider.md)
 
-**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-runtime-provider/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn-package/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn-runtime-provider/tests/game_runtime_provider.rs`、`Engine/Plugins/Fixtures/vn-extension-provider` planned target
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-runtime-provider/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn-runtime-provider/tests/game_runtime_provider.rs`、`Engine/Source/Modules/AstraVN/astra-vn-runtime-provider/tests/runtime_provider_ffi.rs`、`Engine/Source/Runtime/astra-plugin-abi/src/lib.rs`、`Engine/Source/Developer/astra-test/src/runner.rs`、`Engine/Source/Developer/astra-release/src/lib.rs`
 
 **Steps:**
 
@@ -177,7 +180,7 @@ python Tools/check_docs.py
 4. 保持 `VnRuntimeState`、`vn.runtime_state`、`vn.policy_state`、VN package sections 和 `vn.*` release gate 的兼容性。
 5. 编写 provider smoke、package/release continuity、missing binding blocking 和 replay hash 测试。
 
-**Done Evidence:** `cargo test -p astra-vn-runtime-provider --test game_runtime_provider`、`cargo test -p astra-vn --test vn_plugin_extensions` 和 `cargo test -p astra-release --test release_report release_gate_` 通过；report 输出 `runtime_provider.native_vn`，且 VN provider 不能被 AstraEMU/AstraRPG 当作基类复用。
+**Done Evidence:** `cargo test -p astra-plugin-abi runtime_provider_abi`、`cargo test -p astra-plugin runtime_provider_registry`、`cargo test -p astra-vn-runtime-provider --test game_runtime_provider`、`cargo test -p astra-vn-runtime-provider --test runtime_provider_ffi`、`cargo test -p astra-test --test vn_scenario`、`cargo test -p astra-release --test release_report runtime_provider` 和 `cargo test -p astra-cli --test target_platform nativevn_sample_cooks_packages_validates_and_runs_full_playthrough` 通过；report 输出 `runtime_provider.native_vn`，且 VN provider 不能被 AstraEMU/AstraRPG 当作基类复用。
 
 **Linked Test IDs:** `T-S3-RUNTIME-PROVIDER-01`
 
@@ -198,7 +201,7 @@ python Tools/check_docs.py
 3. 保留 source map 所需的 byte range、line/column 和 expanded command id。
 4. 编写有效 sample、quote/arrow/indent/source id/duplicate attr/orphan option/缺 key/未知 system page、重复 command id、重复 source id、缺失 jump/choice target 和诊断定位测试。
 
-**Done Evidence:** `cargo test -p astra-vn --test compiler_runtime`、`cargo test -p astra-vn --test compiler_diagnostics` 和 `cargo test -p astra-vn --test commercial_baseline` 通过；parser 能解析 `.astra` story/state/scene/text/choice/system page option/jump/call/return/mutate，并对 quote、arrow、indent、empty source id、duplicate attr、orphan option、缺 key、未知 system page、重复 id、重复 text key、非法变量域、缺失 route target 和 unreachable main state 输出 blocking diagnostic 与 source span。
+**Done Evidence:** `cargo test -p astra-vn-script --test compiler_runtime`、`cargo test -p astra-vn-script --test compiler_diagnostics` 和 `cargo test -p astra-vn-package --test commercial_baseline` 通过；parser 能解析 `.astra` story/state/scene/text/choice/system page option/jump/call/return/mutate，并对 quote、arrow、indent、empty source id、duplicate attr、orphan option、缺 key、未知 system page、重复 id、重复 text key、非法变量域、缺失 route target 和 unreachable main state 输出 blocking diagnostic 与 source span。
 
 **Linked Test IDs:** `T-S3-SCRIPT-01`
 
@@ -210,7 +213,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S3-SCRIPT-01`
 
-**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-script/src/compiler.rs`、`Engine/Source/Modules/AstraVN/astra-vn-script/src/compiled_story.rs` planned target、`Engine/Source/Modules/AstraVN/astra-vn-script/tests/compiler_runtime.rs`、`Engine/Source/Modules/AstraVN/astra-vn-script/tests/compiler_diagnostics.rs`
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-script/src/compiler.rs`、`Engine/Source/Modules/AstraVN/astra-vn-script/src/types.rs`、`Engine/Source/Modules/AstraVN/astra-vn-script/tests/compiler_runtime.rs`、`Engine/Source/Modules/AstraVN/astra-vn-script/tests/compiler_diagnostics.rs`
 
 **Steps:**
 
@@ -219,7 +222,7 @@ python Tools/check_docs.py
 3. 校验 unreachable main state、重复 id、未定义 route target、重复 key、非法变量域和未定义 system story。
 4. 编写 IR snapshot、source map lookup 和 reachability diagnostic 测试。
 
-**Done Evidence:** `cargo test -p astra-vn --test compiler_runtime` 和 `cargo test -p astra-vn --test compiler_diagnostics` 通过；`CompiledStory` 直接包含 Story/Variable/Command/System manifest、route graph、source map、debug symbols 和 stable hash，package section 使用 compiler 输出中的 `system_story_manifest`，diagnostic 可定位源文件。
+**Done Evidence:** `cargo test -p astra-vn-script --test compiler_runtime` 和 `cargo test -p astra-vn-script --test compiler_diagnostics` 通过；`CompiledStory` 直接包含 Story/Variable/Command/System manifest、route graph、source map、debug symbols 和 stable hash，package section 使用 compiler 输出中的 `system_story_manifest`，diagnostic 可定位源文件。
 
 **Linked Test IDs:** `T-S3-SCRIPT-02`
 
@@ -240,7 +243,7 @@ python Tools/check_docs.py
 3. 实现 `VnRuntimeState`、`VnCommandCursor`、dialogue wait、choice wait、call/return stack 和 route flag。
 4. 编写 command cursor、dialogue advance、choice payload、variable rollback 和 call/return 测试。
 
-**Done Evidence:** `cargo test -p astra-vn --test compiler_runtime`、`cargo test -p astra-vn --test commercial_baseline`、`cargo test -p astra-vn --test system_controls`、`cargo test -p astra-runtime --test trigger_event` 和 `cargo test -p astra-test --test vn_scenario` 证明 command cursor、dialogue wait、choice payload、variables、call/return stack、skip-read、route coverage、route flags 和 trigger event 不依赖 Luau policy。
+**Done Evidence:** `cargo test -p astra-vn-core --test compiler_runtime`、`cargo test -p astra-vn-package --test commercial_baseline`、`cargo test -p astra-vn-system --test system_controls`、`cargo test -p astra-runtime --test trigger_event` 和 `cargo test -p astra-test --test vn_scenario` 证明 command cursor、dialogue wait、choice payload、variables、call/return stack、skip-read、route coverage、route flags 和 trigger event 不依赖 Luau policy。
 
 **Linked Test IDs:** `T-S3-CORE-01`
 
@@ -252,7 +255,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S3-CORE-01`、`S2-MEDIA-02`
 
-**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-core/src/backlog.rs`、`Engine/Source/Modules/AstraVN/astra-vn-core/src/read_state.rs`、`Engine/Source/Modules/AstraVN/astra-vn-core/src/voice_replay.rs`、`Engine/Source/Modules/AstraVN/astra-vn-core/tests/backlog_read_voice.rs` planned target
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-core/src/runtime.rs`、`Engine/Source/Modules/AstraVN/astra-vn-core/tests/compiler_runtime.rs`、`Engine/Source/Modules/AstraVN/astra-vn-system/tests/system_controls.rs`、`Engine/Source/Modules/AstraVN/astra-vn-save/tests/vn_save_container.rs`
 
 **Steps:**
 
@@ -261,7 +264,7 @@ python Tools/check_docs.py
 3. 确认 Luau policy 只能请求展示，不能改写 Core backlog/read-state。
 4. 编写 backlog append、skip read-only、voice replay available 和 replay hash 测试。
 
-**Done Evidence:** `cargo test -p astra-vn --test compiler_runtime`、`cargo test -p astra-vn --test system_controls` 和 `cargo test -p astra-vn --test vn_save_container` 通过；Core 维护 rich backlog、read-state 和 voice replay，skip-read 只跳过已读 dialogue，`VnReplayUiState` 输出 replay UI snapshot/hash，并随 save/load 保持一致。
+**Done Evidence:** `cargo test -p astra-vn-core --test compiler_runtime`、`cargo test -p astra-vn-system --test system_controls` 和 `cargo test -p astra-vn-save --test vn_save_container` 通过；Core 维护 rich backlog、read-state 和 voice replay，skip-read 只跳过已读 dialogue，`VnReplayUiState` 输出 replay UI snapshot/hash，并随 save/load 保持一致。
 
 **Linked Test IDs:** `T-S3-CORE-02`
 
@@ -273,7 +276,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S1-SAVE-01`、`S3-CORE-02`
 
-**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-save/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn-save/tests/vn_save_replay.rs` planned target
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-save/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn-save/tests/vn_save_container.rs`
 
 **Steps:**
 
@@ -282,7 +285,7 @@ python Tools/check_docs.py
 3. 处理 Luau policy snapshot ref，但不保存 function、thread、userdata 或 native handle。
 4. 编写 save-load-resume、replay-from-start 和 invalid snapshot 测试。
 
-**Done Evidence:** `cargo test -p astra-vn --test compiler_runtime`、`cargo test -p astra-vn --test vn_save_container` 和 `cargo test -p astra-test --test vn_scenario` 通过；VN state 与 Luau policy state 会进入同一个 Runtime save container，`vn.runtime_state` 覆盖 backlog、read-state、voice replay、route flags、变量和 pending wait，`vn.policy_state` 覆盖 serializable snapshot、mutation trace、rollback scope 和 replay event metadata，scenario replay hash 保持一致。
+**Done Evidence:** `cargo test -p astra-vn-core --test compiler_runtime`、`cargo test -p astra-vn-save --test vn_save_container` 和 `cargo test -p astra-test --test vn_scenario` 通过；VN state 与 Luau policy state 会进入同一个 Runtime save container，`vn.runtime_state` 覆盖 backlog、read-state、voice replay、route flags、变量和 pending wait，`vn.policy_state` 覆盖 serializable snapshot、mutation trace、rollback scope 和 replay event metadata，scenario replay hash 保持一致。
 
 **Linked Test IDs:** `T-S3-CORE-03`
 
@@ -304,7 +307,7 @@ python Tools/check_docs.py
 4. 拒绝不可序列化 snapshot、command payload 和 trace fields。
 5. 编写 sandbox denied、mutation recorded、rollback/playback、command/query/trace recorded、direct table write ignored 和 payload blocked 测试。
 
-**Done Evidence:** `cargo test -p astra-vn --test luau_sandbox` 和 `cargo test -p astra-vn --test luau_mutation` 通过；`mlua` sandbox 禁用 fs/network/module escape，`astra.var`、`astra.mutate.set_var`、`astra.snapshot`、`astra.command`、`astra.query` 和 `astra.trace` 只产生可序列化 state/trace，mutation trace 记录 previous value、dirty scope、rollback scope 和 replay event，rollback/playback 能恢复或重放 policy state，不可序列化 snapshot/command/trace payload 会输出 blocking diagnostic，direct table write 不会改变 Runtime/Core 权威语义。
+**Done Evidence:** `cargo test -p astra-vn-policy --test luau_sandbox` 和 `cargo test -p astra-vn-policy --test luau_mutation` 通过；`mlua` sandbox 禁用 fs/network/module escape，`astra.var`、`astra.mutate.set_var`、`astra.snapshot`、`astra.command`、`astra.query` 和 `astra.trace` 只产生可序列化 state/trace，mutation trace 记录 previous value、dirty scope、rollback scope 和 replay event，rollback/playback 能恢复或重放 policy state，不可序列化 snapshot/command/trace payload 会输出 blocking diagnostic，direct table write 不会改变 Runtime/Core 权威语义。
 
 **Linked Test IDs:** `T-S3-LUAU-01`
 
@@ -325,7 +328,7 @@ python Tools/check_docs.py
 3. 让 policy command 提供 schema、role、performance budget、trace 和 snapshot evidence，包内只记录 source hash、byte size 和相对 entry。
 4. 编写 source cache hash/size、缺 cache、hash mismatch、system story reachability、missing entry 和 policy lock 测试。
 
-**Done Evidence:** `cargo test -p astra-vn --test policy_bundle` 和 `cargo test -p astra-release --test release_report release_gate_` 通过；标准 policy bundle 随 package 写入 `vn.policy_bundle_manifest` 和 `vn.policy_bundle_source_cache`，release gate 会校验 required capabilities、lock hash、source hash、byte size、source cache section 和缺失/篡改阻断，不在 report 输出 Luau source payload。
+**Done Evidence:** `cargo test -p astra-vn-policy --test policy_bundle` 和 `cargo test -p astra-release --test release_report release_gate_` 通过；标准 policy bundle 随 package 写入 `vn.policy_bundle_manifest` 和 `vn.policy_bundle_source_cache`，release gate 会校验 required capabilities、lock hash、source hash、byte size、source cache section 和缺失/篡改阻断，不在 report 输出 Luau source payload。
 
 **Linked Test IDs:** `T-S3-LUAU-02`
 
@@ -337,7 +340,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S1-PLUGIN-03`、`S3-LUAU-02`、`S3-PRESENT-01`、`S3-EDIT-01`
 
-**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-plugin/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn-plugin/tests/vn_plugin_extensions.rs` planned target
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-plugin/src/lib.rs`、`Engine/Source/Modules/AstraVN/astra-vn-plugin/tests/vn_plugin_extensions.rs`
 
 **Steps:**
 
@@ -346,7 +349,7 @@ python Tools/check_docs.py
 3. 把 provider binding 写入 project manifest，并随 package 进入 `plugin.extension_registry`。
 4. 编写 missing policy provider、command provider conflict、metadata extension roundtrip 和 release check binding 测试。
 
-**Done Evidence:** `cargo test -p astra-vn --test vn_plugin_extensions` 和 `cargo test -p astra-release --test release_report release_gate_` 通过；VN 插件扩展由 Stage 1 registry 和 Stage 2 gate 校验，Luau policy bundle、VN command、presentation command、Graph/Timeline metadata 和 release check provider 必须显式绑定，加载顺序不能改变 VN runtime 行为。
+**Done Evidence:** `cargo test -p astra-vn-plugin --test vn_plugin_extensions` 和 `cargo test -p astra-release --test release_report release_gate_` 通过；VN 插件扩展由 Stage 1 registry 和 Stage 2 gate 校验，Luau policy bundle、VN command、presentation command、Graph/Timeline metadata 和 release check provider 必须显式绑定，加载顺序不能改变 VN runtime 行为。
 
 **Linked Test IDs:** `T-S3-PLUGIN-01`
 
@@ -367,7 +370,7 @@ python Tools/check_docs.py
 3. 实现 skip、auto、replay、voice sync、movie end、fallback、`VnWaitState` 映射和 performance budget；当前已有 serializable `VnWaitState`、movie/voice/timeline wait capability 和 real player `complete_wait` slice。
 4. 编写 provider binding、timeline join/cancel、voice fence、effect fallback 和 deterministic hash 测试；当前已有 `VnPresentationProviderManifest`、filter fallback policy gate、`CpuFilterExecutor`、`VnHeadlessPresentationExecutor`、`VnAdvancedPresentationManifest` 和 advanced presentation scenario evidence。
 
-**Done Evidence:** `cargo test -p astra-media --test filter_graph`、`cargo test -p astra-vn --test presentation_execution`、`cargo test -p astra-vn --test presentation_model`、`cargo test -p astra-vn --test advanced_presentation`、`cargo test -p astra-vn --test await_gates`、`cargo test -p astra-vn --test standard_command_manifest`、`cargo test -p astra-release --test release_report release_gate_` 和 `cargo test -p astra-test --test vn_scenario` 通过；标准命令从 `.astra` 编译到 IR，headless Runtime 输出稳定 PresentationCommand/AudioCommand、Timeline task、FilterGraph CPU execution、fallback policy、movie/voice/timeline wait 和 serializable `VnWaitState`。
+**Done Evidence:** `cargo test -p astra-media --test filter_graph`、`cargo test -p astra-vn-presentation --test presentation_execution`、`cargo test -p astra-vn-presentation --test presentation_model`、`cargo test -p astra-vn-package --test advanced_presentation`、`cargo test -p astra-vn-presentation --test await_gates`、`cargo test -p astra-vn-commands --test standard_command_manifest`、`cargo test -p astra-release --test release_report release_gate_` 和 `cargo test -p astra-test --test vn_scenario` 通过；标准命令从 `.astra` 编译到 IR，headless Runtime 输出稳定 PresentationCommand/AudioCommand、Timeline task、FilterGraph CPU execution、fallback policy、movie/voice/timeline wait 和 serializable `VnWaitState`。
 
 **Linked Test IDs:** `T-S3-PRESENT-01`
 
@@ -388,7 +391,7 @@ python Tools/check_docs.py
 3. 实现 system page reachability、return-to-savepoint、migration、gallery/replay unlock source 和 font fallback 检查。
 4. 编写 save/load、config invalid key、backlog voice replay、gallery unlock、route chart 和 localization preview 测试。
 
-**Done Evidence:** `cargo test -p astra-vn --test commercial_baseline`、`cargo test -p astra-vn --test system_controls`、`cargo test -p astra-release --test release_report release_gate_` 和 `cargo test -p astra-test --test vn_scenario` 通过；`vn.system_ui_profile` 会阻断缺入口、缺 policy、缺 `vn.system_ui_profile_manifest`、schema 无 migrator、gallery/replay unlock source 缺失和 localization coverage 缺口，并在通过时输出 page count、unlock source count、localization locale count 和 save migrator evidence。
+**Done Evidence:** `cargo test -p astra-vn-package --test commercial_baseline`、`cargo test -p astra-vn-system --test system_controls`、`cargo test -p astra-release --test release_report release_gate_` 和 `cargo test -p astra-test --test vn_scenario` 通过；`vn.system_ui_profile` 会阻断缺入口、缺 policy、缺 `vn.system_ui_profile_manifest`、schema 无 migrator、gallery/replay unlock source 缺失和 localization coverage 缺口，并在通过时输出 page count、unlock source count、localization locale count 和 save migrator evidence。
 
 **Linked Test IDs:** `T-S3-SYSTEM-01`
 
@@ -409,7 +412,7 @@ python Tools/check_docs.py
 3. 编写 full scenario，穿过 system UI、save/load、replay 和 release gate。
 4. 接入 `vn.advanced_presentation`、`presentation.fallback`、`renderer.effect_budget` 和 `timeline.join_cancel` evidence。
 
-**Done Evidence:** `cargo test -p astra-vn --test advanced_presentation` 和 `cargo test -p astra-cli --test target_platform advanced_vn_sample_runs_opt_in_presentation_gate` 通过；AdvancedVN 执行真实 cook、package、release validate 和 scenario，报告包含 `vn.advanced_presentation`、`timeline.join_cancel`、`presentation.fallback`、`voice.sync`、`renderer.effect_budget`、save/load、replay hash 和 player route evidence。项目未 opt-in 时该 profile 不阻断普通商业 VN 发布。
+**Done Evidence:** `cargo test -p astra-vn-package --test advanced_presentation` 和 `cargo test -p astra-cli --test target_platform advanced_vn_sample_runs_opt_in_presentation_gate` 通过；AdvancedVN 执行真实 cook、package、release validate 和 scenario，报告包含 `vn.advanced_presentation`、`timeline.join_cancel`、`presentation.fallback`、`voice.sync`、`renderer.effect_budget`、save/load、replay hash 和 player route evidence。项目未 opt-in 时该 profile 不阻断普通商业 VN 发布。
 
 **Linked Test IDs:** `T-S3-ADVANCED-01`
 
@@ -421,7 +424,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S3-SCRIPT-02`
 
-**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-editor/src/editor_metadata.rs`、`Engine/Source/Modules/AstraVN/astra-vn-editor/tests/commercial_baseline.rs`
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-editor/src/editor_metadata.rs`、`Engine/Source/Modules/AstraVN/astra-vn-editor/tests/editor_metadata.rs`
 
 **Steps:**
 
@@ -430,7 +433,7 @@ python Tools/check_docs.py
 3. 校验 metadata 不产生第二套 runtime model。
 4. 编写 graph roundtrip、timeline fence、wait state source map 和 source map identity 测试。
 
-**Done Evidence:** `cargo test -p astra-vn --test commercial_baseline` 通过；Graph/Timeline 修改后仍指向同一 command id，缺 command 会阻断，patch manifest 只输出 source map 已知 command id，wait/fence source map 保持一致。
+**Done Evidence:** `cargo test -p astra-vn-editor --test editor_metadata` 通过；Graph/Timeline 修改后仍指向同一 command id，缺 command 会阻断，patch manifest 只输出 source map 已知 command id，wait/fence source map 保持一致。
 
 **Linked Test IDs:** `T-S3-EDIT-01`
 

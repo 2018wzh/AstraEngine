@@ -133,12 +133,12 @@ fn package_build_writes_only_the_selected_game_target() {
         r#"
 schema: astra.project.v1
 id: com.example.multi
-runtime: astra-vn
 targets:
   - id: sample-game
     kind: game
     crate: astra-vn
     default_profile: desktop-release
+    runtime_provider: native_vn
     platforms: [windows, linux]
     packaged: true
   - id: sample-editor
@@ -239,18 +239,19 @@ fn package_build_includes_target_filtered_tsuinosora_sections() {
         r#"
 schema: astra.project.v1
 id: com.example.tsuinosora.stage3
-runtime: astra-vn
 targets:
   - id: tsuinosora-internal-game
     kind: game
     crate: astra-vn
     default_profile: classic
+    runtime_provider: native_vn
     platforms: [headless, windows, web]
     packaged: true
   - id: tsuinosora-patch-game
     kind: game
     crate: astra-vn
     default_profile: classic
+    runtime_provider: native_vn
     platforms: [headless, windows, web]
     packaged: true
 nativevn:
@@ -650,7 +651,9 @@ fn tsuinosora_synthetic_gate_runs_internal_and_patch_player_routes() {
                             .unwrap()
                             .iter()
                             .any(|check| {
-                                check["id"] == "player.patch_direct_read"
+                                (check["id"] == "player.patch_direct_read"
+                                    || check["id"] == "player.mount_policy"
+                                    || check["id"] == "player.mount_policy_hash")
                                     && check["status"] == "blocked"
                             }));
                     }
@@ -1999,18 +2002,19 @@ fn write_tsuinosora_synthetic_project(project: &Path) {
         r#"
 schema: astra.project.v1
 id: com.example.tsuinosora.stage3
-runtime: astra-vn
 targets:
   - id: tsuinosora-internal-game
     kind: game
     crate: astra-vn
     default_profile: classic
+    runtime_provider: native_vn
     platforms: [headless, windows, web]
     packaged: true
   - id: tsuinosora-patch-game
     kind: game
     crate: astra-vn
     default_profile: classic
+    runtime_provider: native_vn
     platforms: [headless, windows, web]
     packaged: true
 nativevn:

@@ -1,0 +1,29 @@
+[package]
+name = "astra-vn-runtime-provider"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+abi_stable.workspace = true
+astra-core = { path = "../../../Runtime/astra-core" }
+astra-package = { path = "../../../Runtime/astra-package" }
+astra-plugin-abi = { path = "../../../Runtime/astra-plugin-abi" }
+astra-runtime = { path = "../../../Runtime/astra-runtime" }
+astra-target = { path = "../../../Platform/astra-target" }
+astra-vn-commands = { path = "../astra-vn-commands" }
+astra-vn-core = { path = "../astra-vn-core" }
+astra-vn-editor = { path = "../astra-vn-editor" }
+astra-vn-package = { path = "../astra-vn-package" }
+astra-vn-plugin = { path = "../astra-vn-plugin" }
+astra-vn-policy = { path = "../astra-vn-policy" }
+astra-vn-presentation = { path = "../astra-vn-presentation" }
+astra-vn-save = { path = "../astra-vn-save" }
+astra-vn-script = { path = "../astra-vn-script" }
+astra-vn-system = { path = "../astra-vn-system" }
+postcard.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

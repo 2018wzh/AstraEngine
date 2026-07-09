@@ -172,6 +172,11 @@ impl ReleaseValidator {
                 }
                 checks.push(plugin_extension_registry_check(&package));
                 checks.push(plugin_dependency_graph_check(&package));
+                checks.extend(runtime_provider_checks(
+                    &package,
+                    request.target.as_deref(),
+                    &request.profile,
+                ));
                 checks.extend(vfs_checks(&package));
                 checks.push(target_manifest_check(&package, request.target.as_deref()));
                 checks.push(cooked_project_input_check(
@@ -482,6 +487,261 @@ fn plugin_dependency_graph_check(package: &PackageReader) -> ReleaseCheckRecord 
         diagnostic: None,
         evidence: vec![evidence("dependency_count", dependencies.len())],
     }
+}
+
+fn runtime_provider_checks(
+    package: &PackageReader,
+    selected_target: Option<&str>,
+    profile: &str,
+) -> Vec<ReleaseCheckRecord> {
+    vec![
+        runtime_provider_binding_check(package, selected_target, profile),
+        runtime_provider_native_vn_check(package),
+    ]
+}
+
+fn runtime_provider_binding_check(
+    package: &PackageReader,
+    selected_target: Option<&str>,
+    profile: &str,
+) -> ReleaseCheckRecord {
+    let provider_policy = match read_json_section(package, "provider.policy") {
+        Ok(value) => value,
+        Err((code, message)) => {
+            return runtime_blocked(
+                "runtime_provider.binding",
+                code,
+                message,
+                vec![evidence("section", "provider.policy")],
+            )
+        }
+    };
+    let registry = match read_json_section(package, "plugin.extension_registry") {
+        Ok(value) => value,
+        Err((code, message)) => {
+            return runtime_blocked(
+                "runtime_provider.binding",
+                code,
+                message,
+                vec![evidence("section", "plugin.extension_registry")],
+            )
+        }
+    };
+    let target_manifest = match package
+        .container()
+        .read_bounded("target.manifest", 256 * 1024)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<TargetManifest>(&bytes).ok())
+    {
+        Some(manifest) => manifest,
+        None => {
+            return runtime_blocked(
+                "runtime_provider.binding",
+                "ASTRA_RUNTIME_PROVIDER_TARGET_MANIFEST",
+                "runtime provider binding requires a valid target manifest",
+                vec![evidence("section", "target.manifest")],
+            )
+        }
+    };
+    let Some(target) = select_game_target(&target_manifest, selected_target) else {
+        return runtime_blocked(
+            "runtime_provider.binding",
+            "ASTRA_RUNTIME_PROVIDER_TARGET_MISSING",
+            "runtime provider binding requires one selected game target",
+            vec![evidence("selected_target", selected_target.unwrap_or(""))],
+        );
+    };
+    let runtime_provider = target.runtime_provider.as_deref().unwrap_or_default();
+    if runtime_provider != "native_vn" {
+        return runtime_blocked(
+            "runtime_provider.binding",
+            "ASTRA_RUNTIME_PROVIDER_BINDING_MISSING",
+            "selected game target must bind native_vn runtime provider",
+            vec![
+                evidence("target", &target.id),
+                evidence("runtime_provider", runtime_provider),
+            ],
+        );
+    }
+    let bindings = provider_policy
+        .get("bindings")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let has_policy_binding = bindings.iter().any(|binding| {
+        binding.get("slot").and_then(serde_json::Value::as_str) == Some("game_runtime_provider")
+            && binding
+                .get("provider_id")
+                .and_then(serde_json::Value::as_str)
+                == Some("astra.runtime.native_vn")
+    });
+    if !has_policy_binding {
+        return runtime_blocked(
+            "runtime_provider.binding",
+            "ASTRA_RUNTIME_PROVIDER_BINDING_MISSING",
+            "provider.policy must bind game_runtime_provider to astra.runtime.native_vn",
+            vec![evidence("target", &target.id), evidence("profile", profile)],
+        );
+    }
+    let providers = registry
+        .get("providers")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let Some(provider) = providers.iter().find(|provider| {
+        provider.get("slot").and_then(serde_json::Value::as_str) == Some("game_runtime_provider")
+            && provider
+                .get("provider_id")
+                .and_then(serde_json::Value::as_str)
+                == Some("astra.runtime.native_vn")
+    }) else {
+        return runtime_blocked(
+            "runtime_provider.binding",
+            "ASTRA_RUNTIME_PROVIDER_REGISTRY_MISSING",
+            "plugin registry must register astra.runtime.native_vn for game_runtime_provider",
+            vec![evidence("provider_id", "astra.runtime.native_vn")],
+        );
+    };
+    if !provider
+        .get("packaged")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return runtime_blocked(
+            "runtime_provider.binding",
+            "ASTRA_RUNTIME_PROVIDER_UNPACKAGED",
+            "runtime provider must be packaged eligible",
+            vec![evidence("provider_id", "astra.runtime.native_vn")],
+        );
+    }
+
+    ReleaseCheckRecord {
+        id: "runtime_provider.binding".to_string(),
+        domain: ReleaseDomain::Runtime,
+        status: CheckStatus::Pass,
+        summary: "target manifest, provider policy and plugin registry bind NativeVN runtime"
+            .to_string(),
+        diagnostic: None,
+        evidence: vec![
+            evidence("target", &target.id),
+            evidence("runtime_provider", "native_vn"),
+            evidence("provider_id", "astra.runtime.native_vn"),
+        ],
+    }
+}
+
+fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckRecord {
+    let provider_policy = match read_json_section(package, "provider.policy") {
+        Ok(value) => value,
+        Err((code, message)) => {
+            return runtime_blocked(
+                "runtime_provider.native_vn",
+                code,
+                message,
+                vec![evidence("section", "provider.policy")],
+            )
+        }
+    };
+    let Some(descriptor) = provider_policy.get("runtime_provider") else {
+        return runtime_blocked(
+            "runtime_provider.native_vn",
+            "ASTRA_RUNTIME_PROVIDER_DESCRIPTOR_MISSING",
+            "provider.policy must include NativeVN runtime provider descriptor",
+            vec![evidence("provider_id", "astra.runtime.native_vn")],
+        );
+    };
+    let runtime_id = descriptor
+        .get("runtime_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let provider_id = descriptor
+        .get("provider_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if runtime_id != "native_vn" || provider_id != "astra.runtime.native_vn" {
+        return runtime_blocked(
+            "runtime_provider.native_vn",
+            "ASTRA_RUNTIME_PROVIDER_DESCRIPTOR",
+            "NativeVN runtime provider descriptor id does not match target binding",
+            vec![
+                evidence("runtime_id", runtime_id),
+                evidence("provider_id", provider_id),
+            ],
+        );
+    }
+    let package_sections = descriptor
+        .get("package_sections")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let required_sections = [
+        "vn.compiled_story",
+        "vn.profile_manifest",
+        "vn.policy_bundle_manifest",
+        "vn.extension_manifest",
+        "vn.standard_command_manifest",
+        "vn.presentation_provider_manifest",
+        "vn.commercial_baseline_manifest",
+        "vn.system_story_manifest",
+        "vn.system_ui_profile_manifest",
+    ];
+    for section in required_sections {
+        if !package_sections.iter().any(|value| value == section) {
+            return runtime_blocked(
+                "runtime_provider.native_vn",
+                "ASTRA_RUNTIME_PROVIDER_SECTION_DECLARATION",
+                format!("NativeVN runtime provider descriptor must declare {section}"),
+                vec![evidence("section", section)],
+            );
+        }
+    }
+    let release_checks = descriptor
+        .get("release_checks")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if !release_checks
+        .iter()
+        .any(|value| value == "runtime_provider.native_vn")
+    {
+        return runtime_blocked(
+            "runtime_provider.native_vn",
+            "ASTRA_RUNTIME_PROVIDER_RELEASE_CHECK",
+            "NativeVN runtime provider descriptor must declare runtime_provider.native_vn",
+            vec![evidence("provider_id", "astra.runtime.native_vn")],
+        );
+    }
+
+    ReleaseCheckRecord {
+        id: "runtime_provider.native_vn".to_string(),
+        domain: ReleaseDomain::Runtime,
+        status: CheckStatus::Pass,
+        summary: "NativeVN runtime provider descriptor declares package and release continuity"
+            .to_string(),
+        diagnostic: None,
+        evidence: vec![
+            evidence("runtime_id", runtime_id),
+            evidence("provider_id", provider_id),
+            evidence("package_section_count", package_sections.len()),
+            evidence("release_check_count", release_checks.len()),
+        ],
+    }
+}
+
+fn select_game_target<'a>(
+    manifest: &'a TargetManifest,
+    selected_target: Option<&str>,
+) -> Option<&'a astra_target::TargetDescriptor> {
+    if let Some(selected) = selected_target {
+        return manifest
+            .targets
+            .iter()
+            .find(|target| target.id == selected && target.kind == TargetKind::Game);
+    }
+    manifest
+        .targets
+        .iter()
+        .find(|target| target.kind == TargetKind::Game)
 }
 
 fn vfs_checks(package: &PackageReader) -> Vec<ReleaseCheckRecord> {
@@ -1067,6 +1327,23 @@ fn plugin_blocked(
     ReleaseCheckRecord {
         id: id.into(),
         domain: ReleaseDomain::Plugin,
+        status: CheckStatus::Blocked,
+        diagnostic: Some(Diagnostic::blocking(code, summary.clone())),
+        summary,
+        evidence: evidence_values,
+    }
+}
+
+fn runtime_blocked(
+    id: impl Into<String>,
+    code: &'static str,
+    summary: impl Into<String>,
+    evidence_values: Vec<ReleaseEvidence>,
+) -> ReleaseCheckRecord {
+    let summary = summary.into();
+    ReleaseCheckRecord {
+        id: id.into(),
+        domain: ReleaseDomain::Runtime,
         status: CheckStatus::Blocked,
         diagnostic: Some(Diagnostic::blocking(code, summary.clone())),
         summary,

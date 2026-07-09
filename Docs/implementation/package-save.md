@@ -139,7 +139,7 @@ Package validation report includes section table hash, schema registry hash, pol
 ```bash
 cargo test -p astra-package package_roundtrip
 cargo test -p astra-runtime save_replay
-cargo test -p astra-vn --test vn_save_container
+cargo test -p astra-vn-save --test vn_save_container
 astra package validate target/nativevn.astrapkg --profile desktop-release --target nativevn-game
 ```
 

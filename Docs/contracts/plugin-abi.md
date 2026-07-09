@@ -2,7 +2,7 @@
 
 Astra 插件采用 Rust-facing `abi_stable` 风格 ABI。目标是给插件作者 Rust 体验，同时让二进制兼容性可检查、可拒绝、可审计。
 
-`astra-plugin-abi` 是插件二进制边界的真源，包含 `AstraPluginModule`、FFI registration、`LoadPhase`、extension registry DTO 和 dependency graph DTO。`astra-plugin` 是 host 侧 loader、registry 和 Runtime action adapter。`astra-engine` 和 planned `astra-vn` 都是 Rust dylib facade，分别 re-export EngineCore 与 VN public API，不扩大插件 ABI。
+`astra-plugin-abi` 是插件二进制边界的真源，包含 `AstraPluginModule`、FFI registration、`LoadPhase`、extension registry DTO、dependency graph DTO 和 runtime provider DTO+FFI entrypoints。`astra-plugin` 是 host 侧 loader、registry 和 Runtime action adapter。`astra-engine` 和 `astra-vn` 都是 Rust dylib facade，分别 re-export EngineCore 与 VN public API，不扩大插件 ABI。
 
 ## 版本绑定
 
@@ -51,11 +51,43 @@ pub trait Renderer2DProvider: StableProvider {
 }
 ```
 
-完整 provider trait 族见 [Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。v1 必须覆盖 Renderer2D、TextLayout、AudioOutput、DecodeProvider、AssetImporter、CookProcessor、LuauPolicyBundle、EditorPanel、AiProvider、MCPToolProvider、LegacyFamilyPlugin 和可选 EMUCoreBridge。AiProvider 只服务 Editor 和 MCP host，Runtime 通过 `McpAiSession` 消费固化后的 Intent 和 output。
+完整 provider trait 族见 [Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。v1 必须覆盖 Renderer2D、TextLayout、AudioOutput、DecodeProvider、AssetImporter、CookProcessor、LuauPolicyBundle、EditorPanel、AiProvider、MCPToolProvider、GameRuntimeProvider、LegacyFamilyPlugin 和可选 EMUCoreBridge。AiProvider 只服务 Editor 和 MCP host，Runtime 通过 `McpAiSession` 消费固化后的 Intent 和 output。
+
+## Game Runtime Provider ABI
+
+`ProductRuntimeProvider` 是 Rust 侧设计 trait；跨插件 ABI 不传 trait object。插件通过 `FfiRuntimeProviderRegistration` 注册 ABI-safe entrypoints，并继续把 provider 记录写入现有 `providers` slot snapshot，让 package/release gate 复用同一 registry：
+
+```rust
+pub struct FfiRuntimeProviderRegistration {
+    pub provider_id: RString,
+    pub runtime_id: RString,
+    pub descriptor_json: RString,
+    pub descriptor_schema: RString,
+    pub capability: RString,
+    pub phase: LoadPhase,
+    pub packaged: bool,
+    pub prepare: FfiRuntimeProviderInvoke,
+    pub probe: FfiRuntimeProviderInvoke,
+    pub open: FfiRuntimeProviderInvoke,
+    pub step: FfiRuntimeProviderInvoke,
+    pub save: FfiRuntimeProviderInvoke,
+    pub restore: FfiRuntimeProviderInvoke,
+    pub shutdown: FfiRuntimeProviderInvoke,
+    pub package_sections: FfiRuntimeProviderInvoke,
+    pub release_checks: FfiRuntimeProviderInvoke,
+    pub editor_metadata: FfiRuntimeProviderInvoke,
+}
+```
+
+每个 entrypoint 接收 bounded `RVec<u8>` payload，内容为 serde JSON 或 postcard encoded runtime provider DTO，返回 `FfiRuntimeProviderResult { ok, payload, diagnostics }`。`FfiPluginRegistration.runtime_providers` 可以包含多个 runtime provider registration，但 `game_runtime_provider` slot 在 target 绑定时仍要求单 provider 显式选择。`vfs_provider` 的多 provider 同 slot 规则不适用于 gameplay runtime。
+
+当前常量包括 `GAME_RUNTIME_PROVIDER_SLOT = "game_runtime_provider"`、`NATIVE_VN_RUNTIME_ID = "native_vn"` 和 `NATIVE_VN_PROVIDER_ID = "astra.runtime.native_vn"`。NativeVN 的完整 gameplay 本轮通过 in-process provider 执行，FFI adapter 提供 ABI shape 注册、调用和卸载 smoke；外部 dylib gameplay 完整加载不作为本阶段完成边界。
+
+FFI 边界只传 stable id、string id、section ref、hash、diagnostic 和 bounded payload。Luau VM handle、RuntimeWorld 指针、Editor widget、本地 root、provider secret、商业文本、音频、图像或 bytecode payload 都不得跨 ABI。
 
 ## Extension Registry
 
-插件可以注册 provider slot、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check 和 legacy family provider。每条注册必须声明 `LoadPhase`、依赖、冲突策略、enablement scope、packaged eligibility 和 diagnostic source。Editor 的 Plugin Manager 只能改变 enablement 和 binding，不能绕过 descriptor gate。
+插件可以注册 provider slot、asset type、importer、cook processor、Editor panel、menu command、graph node、timeline track、Inspector widget、release check、game runtime provider 和 legacy family provider。每条注册必须声明 `LoadPhase`、依赖、冲突策略、enablement scope、packaged eligibility 和 diagnostic source。Editor 的 Plugin Manager 只能改变 enablement 和 binding，不能绕过 descriptor gate。
 
 Stage 1 host registry 负责 `LoadPhase`、provider binding、conflict report 和 `PluginDependency` dependency graph。Stage 2 package/release gate 写入并校验 `plugin.extension_registry` 和 `plugin.dependency_graph`。Stage 4 Editor Plugin Manager 只显示和修改这些后端产物。
 

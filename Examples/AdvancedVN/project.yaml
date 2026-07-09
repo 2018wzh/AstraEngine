@@ -1,11 +1,11 @@
 schema: astra.project.v1
 id: com.example.advancedvn
-runtime: astra-vn
 targets:
   - id: advanced-vn-game
     kind: game
     crate: astra-vn
     default_profile: advanced-vn
+    runtime_provider: native_vn
     platforms: [headless, windows, web]
     packaged: true
 nativevn:

@@ -90,6 +90,7 @@ extern "C" fn register() -> FfiPluginRegistration {
             phase: "runtime".into(),
             packaged: true,
         }]),
+        runtime_providers: RVec::new(),
         actions: RVec::from(vec![FfiActionRegistration {
             provider_id: "astra.fixture.action_provider".into(),
             action_id: "astra.fixture.action.set_flag".into(),

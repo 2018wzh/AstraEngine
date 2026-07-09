@@ -1,0 +1,16 @@
+[package]
+name = "astra-vn-policy"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+astra-core = { path = "../../../Runtime/astra-core" }
+astra-vn-script = { path = "../astra-vn-script" }
+mlua.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

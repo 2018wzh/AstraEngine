@@ -20,6 +20,8 @@ targets:
 
 Provider selection 读取 extension registry 和 provider policy。缺 provider、provider fingerprint 不匹配、capability 不足、package section 缺失或 profile 不允许时，release gate 和 runtime launch 都必须阻断。Editor 可以显示可选 provider，但不能绕过 manifest binding。
 
+Package evidence 复用 `provider.policy`，不新增 `runtime.provider_manifest` section。Plugin loader 读取 `FfiPluginRegistration.runtime_providers` 后，仍把 runtime provider 写入现有 provider registry snapshot；release gate 用 `provider.policy` 的 selected runtime provider descriptor/binding、`plugin.extension_registry` 的 `game_runtime_provider` slot 和 target manifest 的 `runtime_provider` 三方交叉校验。
+
 ## RuntimeWorld Integration
 
 `RuntimeWorld` 不直接知道 VN、EMU 或 RPG。Game runtime provider 通过一个 StateMachine action bridge 被调用：
@@ -37,7 +39,7 @@ Provider 输出只能是可序列化 effect list、await token、presentation/au
 
 ## NativeVN Provider
 
-`NativeVnRuntimeProvider` 包装现有 AstraVN Core：
+`NativeVnRuntimeProvider` 已位于 `astra-vn-runtime-provider`，包装 AstraVN 功能 crate：
 
 - `prepare` 编译 `.astra`、policy bundle、system story、command manifest 和 presentation profile。
 - `probe` 校验 package sections、target/profile、scenario refs 和 player route model。
@@ -48,6 +50,8 @@ Provider 输出只能是可序列化 effect list、await token、presentation/au
 - `release_checks` 继续声明 `vn.commercial_baseline`、`vn.system_ui_profile`、`vn.advanced_presentation`、`player.full_playable` 等 check。
 
 VN Core 保持 dialogue、choice、backlog、save/load、read-state 和 voice replay 的权威语义。Luau policy 和 plugin command 只扩展表现、系统页和高级演出策略。
+
+当前实现用 in-process provider 跑 NativeVN scenario，并提供 `FfiRuntimeProviderRegistration` adapter smoke。外部 dylib gameplay 完整动态加载留给后续插件分发工作；本阶段完成边界是 DTO/FFI shape、注册、调用、卸载、target binding、package/release continuity 和 provider-free replay evidence。
 
 ## AstraEMU Provider
 

@@ -49,4 +49,46 @@ fn package_vfs_mount_writes_vfs_manifest_and_catalog_without_asset_registry() {
         catalog["assets"][0]["vfs_uri"],
         "package:/asset/background/opening"
     );
+
+    let provider_policy: serde_json::Value =
+        serde_json::from_slice(&package.container().read_section("provider.policy").unwrap())
+            .unwrap();
+    assert_eq!(
+        provider_policy["runtime_provider"]["runtime_id"],
+        "native_vn"
+    );
+    assert_eq!(
+        provider_policy["runtime_provider"]["provider_id"],
+        "astra.runtime.native_vn"
+    );
+    assert!(provider_policy["runtime_provider"]["package_sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|section| section == "vn.compiled_story"));
+
+    let registry: serde_json::Value = serde_json::from_slice(
+        &package
+            .container()
+            .read_section("plugin.extension_registry")
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(registry["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|provider| {
+            provider["slot"] == "game_runtime_provider"
+                && provider["provider_id"] == "astra.runtime.native_vn"
+                && provider["packaged"] == true
+        }));
+    assert!(registry["bindings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|binding| {
+            binding["slot"] == "game_runtime_provider"
+                && binding["provider_id"] == "astra.runtime.native_vn"
+        }));
 }

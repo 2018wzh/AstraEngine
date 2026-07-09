@@ -42,6 +42,7 @@ fn vn_scenario_runs_full_player_route_from_package() {
             "kind": "game",
             "crate": "astra-vn",
             "default_profile": "classic",
+            "runtime_provider": "native_vn",
             "platforms": ["windows", "web"],
             "packaged": true
         }]
@@ -110,6 +111,9 @@ assertions:
         .checks
         .iter()
         .any(|check| check.id == "player_route.full"));
+    assert!(report.checks.iter().any(|check| {
+        check.id == "runtime_provider.native_vn" && check.status == ScenarioStatus::Pass
+    }));
 }
 
 #[test]
@@ -130,6 +134,7 @@ fn vn_scenario_completes_movie_await_through_real_player_input() {
             "kind": "game",
             "crate": "astra-vn",
             "default_profile": "classic",
+            "runtime_provider": "native_vn",
             "platforms": ["windows", "web"],
             "packaged": true
         }]
@@ -223,6 +228,7 @@ fn vn_scenario_supports_stage3_player_input_coverage_visual_and_hash_assertions(
             "kind": "game",
             "crate": "astra-vn",
             "default_profile": "classic",
+            "runtime_provider": "native_vn",
             "platforms": ["windows", "web"],
             "packaged": true
         }]

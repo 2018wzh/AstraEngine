@@ -7,6 +7,13 @@ use abi_stable::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub const GAME_RUNTIME_PROVIDER_SLOT: &str = "game_runtime_provider";
+pub const NATIVE_VN_RUNTIME_ID: &str = "native_vn";
+pub const NATIVE_VN_PROVIDER_ID: &str = "astra.runtime.native_vn";
+pub const PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA: &str = "astra.product_runtime_descriptor.v1";
+pub const RUNTIME_PROVIDER_BINDING_SCHEMA: &str = "astra.runtime_provider_binding.v1";
+pub const RUNTIME_EDITOR_METADATA_SCHEMA: &str = "astra.runtime_editor_metadata.v1";
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LoadPhase {
@@ -113,6 +120,165 @@ pub struct PluginDependencyGraphSnapshot {
     pub dependencies: Vec<PluginDependency>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ProductRuntimeDescriptor {
+    pub runtime_id: String,
+    pub product_kind: String,
+    pub provider_id: String,
+    pub supported_targets: Vec<String>,
+    pub capabilities: Vec<String>,
+    pub package_sections: Vec<String>,
+    pub release_checks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeProviderBinding {
+    pub schema: String,
+    pub target_id: String,
+    pub runtime_id: String,
+    pub provider_id: String,
+    pub profile: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimePrepareRequest {
+    pub target_id: String,
+    pub profile: String,
+    pub package_hash: String,
+    pub section_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimePrepareReport {
+    pub runtime_id: String,
+    pub provider_id: String,
+    pub status: String,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeProbeRequest {
+    pub target_id: String,
+    pub profile: String,
+    pub platform: Option<String>,
+    pub section_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeProbeReport {
+    pub runtime_id: String,
+    pub provider_id: String,
+    pub status: String,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeOpenRequest {
+    pub target_id: String,
+    pub profile: String,
+    pub seed: u64,
+    pub package_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GameRuntimeSessionId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeOpenReport {
+    pub session_id: GameRuntimeSessionId,
+    pub runtime_id: String,
+    pub provider_id: String,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeStepInput {
+    pub session_id: GameRuntimeSessionId,
+    pub fixed_step: u64,
+    pub action: String,
+    #[serde(default)]
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeStepOutput {
+    pub session_id: GameRuntimeSessionId,
+    pub status: String,
+    #[serde(default)]
+    pub effects: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub presentation: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub diagnostics: Vec<String>,
+    #[serde(default)]
+    pub dirty_save_sections: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeSaveRequest {
+    pub session_id: GameRuntimeSessionId,
+    pub slot: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeSaveSections {
+    pub session_id: GameRuntimeSessionId,
+    pub sections: Vec<RuntimeSectionRef>,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeRestoreRequest {
+    pub session_id: GameRuntimeSessionId,
+    pub sections: Vec<RuntimeSectionRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeRestoreReport {
+    pub session_id: GameRuntimeSessionId,
+    pub status: String,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeShutdownReport {
+    pub session_id: GameRuntimeSessionId,
+    pub status: String,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimePackageSectionPlan {
+    pub runtime_id: String,
+    pub provider_id: String,
+    pub sections: Vec<RuntimeSectionRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeSectionRef {
+    pub section_id: String,
+    pub schema: String,
+    pub hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ReleaseCheckDescriptor {
+    pub id: String,
+    pub domain: String,
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeEditorMetadata {
+    pub schema: String,
+    pub runtime_id: String,
+    pub product_kind: String,
+    pub project_templates: Vec<String>,
+    pub authoring_surfaces: Vec<String>,
+    pub debug_views: Vec<String>,
+    pub release_checks: Vec<String>,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, StableAbi)]
 pub struct FfiProviderRegistration {
@@ -124,6 +290,47 @@ pub struct FfiProviderRegistration {
 }
 
 pub type FfiActionInvoke = extern "C" fn(RVec<u8>) -> RVec<u8>;
+pub type FfiRuntimeProviderInvoke = extern "C" fn(RVec<u8>) -> FfiRuntimeProviderResult;
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiRuntimeProviderResult {
+    pub ok: bool,
+    pub payload: RVec<u8>,
+    pub diagnostics: RVec<RString>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiRuntimeProviderRegistration {
+    pub provider_id: RString,
+    pub runtime_id: RString,
+    pub capability: RString,
+    pub phase: RString,
+    pub packaged: bool,
+    pub descriptor_schema: RString,
+    pub descriptor_json: RVec<u8>,
+    #[sabi(unsafe_opaque_field)]
+    pub prepare: FfiRuntimeProviderInvoke,
+    #[sabi(unsafe_opaque_field)]
+    pub probe: FfiRuntimeProviderInvoke,
+    #[sabi(unsafe_opaque_field)]
+    pub open: FfiRuntimeProviderInvoke,
+    #[sabi(unsafe_opaque_field)]
+    pub step: FfiRuntimeProviderInvoke,
+    #[sabi(unsafe_opaque_field)]
+    pub save: FfiRuntimeProviderInvoke,
+    #[sabi(unsafe_opaque_field)]
+    pub restore: FfiRuntimeProviderInvoke,
+    #[sabi(unsafe_opaque_field)]
+    pub shutdown: FfiRuntimeProviderInvoke,
+    #[sabi(unsafe_opaque_field)]
+    pub package_sections: FfiRuntimeProviderInvoke,
+    #[sabi(unsafe_opaque_field)]
+    pub release_checks: FfiRuntimeProviderInvoke,
+    #[sabi(unsafe_opaque_field)]
+    pub editor_metadata: FfiRuntimeProviderInvoke,
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, StableAbi)]
@@ -140,6 +347,7 @@ pub struct FfiActionRegistration {
 #[derive(Debug, Clone, StableAbi)]
 pub struct FfiPluginRegistration {
     pub providers: RVec<FfiProviderRegistration>,
+    pub runtime_providers: RVec<FfiRuntimeProviderRegistration>,
     pub actions: RVec<FfiActionRegistration>,
     pub callbacks: u32,
 }
@@ -170,4 +378,65 @@ impl RootModule for AstraPluginModuleRef {
     const BASE_NAME: &'static str = "astra_plugin_module";
     const NAME: &'static str = "astra-plugin";
     const VERSION_STRINGS: VersionStrings = abi_stable::package_version_strings!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    extern "C" fn ok_runtime_provider_call(_payload: RVec<u8>) -> FfiRuntimeProviderResult {
+        FfiRuntimeProviderResult {
+            ok: true,
+            payload: RVec::from(Vec::<u8>::new()),
+            diagnostics: RVec::new(),
+        }
+    }
+
+    #[test]
+    fn runtime_provider_abi_registers_descriptor_and_entrypoints() {
+        let descriptor = ProductRuntimeDescriptor {
+            runtime_id: NATIVE_VN_RUNTIME_ID.to_string(),
+            product_kind: "visual_novel".to_string(),
+            provider_id: NATIVE_VN_PROVIDER_ID.to_string(),
+            supported_targets: vec!["game".to_string()],
+            capabilities: vec!["runtime.native_vn".to_string()],
+            package_sections: vec!["vn.compiled_story".to_string()],
+            release_checks: vec!["runtime_provider.native_vn".to_string()],
+        };
+        let descriptor_json = serde_json::to_vec(&descriptor).unwrap();
+        let registration = FfiRuntimeProviderRegistration {
+            provider_id: RString::from(NATIVE_VN_PROVIDER_ID),
+            runtime_id: RString::from(NATIVE_VN_RUNTIME_ID),
+            capability: RString::from("runtime.native_vn"),
+            phase: RString::from("runtime"),
+            packaged: true,
+            descriptor_schema: RString::from("astra.product_runtime_descriptor.v1"),
+            descriptor_json: RVec::from(descriptor_json),
+            prepare: ok_runtime_provider_call,
+            probe: ok_runtime_provider_call,
+            open: ok_runtime_provider_call,
+            step: ok_runtime_provider_call,
+            save: ok_runtime_provider_call,
+            restore: ok_runtime_provider_call,
+            shutdown: ok_runtime_provider_call,
+            package_sections: ok_runtime_provider_call,
+            release_checks: ok_runtime_provider_call,
+            editor_metadata: ok_runtime_provider_call,
+        };
+
+        let plugin = FfiPluginRegistration {
+            providers: RVec::new(),
+            runtime_providers: RVec::from(vec![registration.clone()]),
+            actions: RVec::new(),
+            callbacks: 0,
+        };
+
+        assert_eq!(GAME_RUNTIME_PROVIDER_SLOT, "game_runtime_provider");
+        assert_eq!(plugin.runtime_providers.len(), 1);
+        assert_eq!(registration.provider_id.as_str(), NATIVE_VN_PROVIDER_ID);
+        assert!(registration.packaged);
+        let roundtrip: ProductRuntimeDescriptor =
+            serde_json::from_slice(registration.descriptor_json.as_slice()).unwrap();
+        assert_eq!(roundtrip.runtime_id, NATIVE_VN_RUNTIME_ID);
+    }
 }

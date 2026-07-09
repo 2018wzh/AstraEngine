@@ -503,6 +503,7 @@ dependencies = [
  "abi_stable",
  "schemars",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -579,9 +580,11 @@ dependencies = [
  "astra-core",
  "astra-package",
  "astra-plugin",
+ "astra-plugin-abi",
  "astra-runtime",
  "astra-target",
  "astra-vn",
+ "astra-vn-runtime-provider",
  "schemars",
  "semver",
  "serde",
@@ -596,26 +599,177 @@ dependencies = [
 name = "astra-vn"
 version = "0.1.0"
 dependencies = [
- "astra-core",
- "astra-media-core",
  "astra-package",
  "astra-plugin",
- "astra-runtime",
- "astra-target",
- "blake3",
- "camino",
- "hex",
- "indexmap",
- "miette",
- "mlua",
+ "astra-vn-commands",
+ "astra-vn-core",
+ "astra-vn-editor",
+ "astra-vn-package",
+ "astra-vn-plugin",
+ "astra-vn-policy",
+ "astra-vn-presentation",
+ "astra-vn-runtime-provider",
+ "astra-vn-save",
+ "astra-vn-script",
+ "astra-vn-system",
+ "semver",
+ "tempfile",
+]
+
+[[package]]
+name = "astra-vn-commands"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-vn-script",
+ "schemars",
+ "serde",
+]
+
+[[package]]
+name = "astra-vn-core"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-vn-presentation",
+ "astra-vn-script",
  "postcard",
+ "schemars",
+ "serde",
+]
+
+[[package]]
+name = "astra-vn-editor"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-vn-script",
+ "schemars",
+ "serde",
+]
+
+[[package]]
+name = "astra-vn-package"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-package",
+ "astra-vn-commands",
+ "astra-vn-plugin",
+ "astra-vn-policy",
+ "astra-vn-presentation",
+ "astra-vn-script",
+ "astra-vn-system",
+ "postcard",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "astra-vn-plugin"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-plugin",
  "schemars",
  "semver",
  "serde",
+]
+
+[[package]]
+name = "astra-vn-policy"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-vn-script",
+ "mlua",
+ "schemars",
+ "serde",
  "serde_json",
- "tempfile",
  "thiserror 1.0.69",
  "tracing",
+]
+
+[[package]]
+name = "astra-vn-presentation"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-media-core",
+ "astra-vn-script",
+ "postcard",
+ "schemars",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "astra-vn-runtime-provider"
+version = "0.1.0"
+dependencies = [
+ "abi_stable",
+ "astra-core",
+ "astra-package",
+ "astra-plugin-abi",
+ "astra-runtime",
+ "astra-target",
+ "astra-vn-commands",
+ "astra-vn-core",
+ "astra-vn-editor",
+ "astra-vn-package",
+ "astra-vn-plugin",
+ "astra-vn-policy",
+ "astra-vn-presentation",
+ "astra-vn-save",
+ "astra-vn-script",
+ "astra-vn-system",
+ "postcard",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "astra-vn-save"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-package",
+ "astra-runtime",
+ "astra-vn-core",
+ "astra-vn-policy",
+ "postcard",
+ "schemars",
+ "serde",
+]
+
+[[package]]
+name = "astra-vn-script"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "blake3",
+ "hex",
+ "indexmap",
+ "miette",
+ "postcard",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "astra-vn-system"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-vn-script",
+ "schemars",
+ "serde",
 ]
 
 [[package]]

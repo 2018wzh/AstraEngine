@@ -6,6 +6,13 @@ fn test_run_writes_report_to_stdout_and_json_logs_to_stderr() {
         .ancestors()
         .nth(4)
         .unwrap();
+    let fixture_status = Command::new("cargo")
+        .args(["build", "-p", "headless-presentation-provider"])
+        .current_dir(root)
+        .status()
+        .unwrap();
+    assert!(fixture_status.success());
+
     let output = Command::new(env!("CARGO_BIN_EXE_astra"))
         .args([
             "test",

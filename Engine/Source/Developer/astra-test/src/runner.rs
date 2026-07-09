@@ -6,6 +6,7 @@ use astra_plugin::{
     dylib_path, LoadedPlugin, PluginDescriptor, PluginError, PluginGate, PluginLoader,
     PluginRegistrar,
 };
+use astra_plugin_abi::{GameRuntimeSessionId, RuntimeOpenRequest};
 use astra_runtime::{
     ActionInvocation, ActorId, BlackboardValue, EventPayload, EventSource, GuardExpr,
     PackageHandle, PresentationCommand, RuntimeConfig, RuntimeWorld, SaveBlob, SaveRequest,
@@ -14,9 +15,9 @@ use astra_runtime::{
 use astra_target::{validate_manifest, TargetManifest, TargetValidationStatus};
 use astra_vn::{
     CompiledStory, PresentationCommand as VnPresentationCommand, SkipMode, SystemPageKind,
-    SystemUnlockKind, VnAdvancedPresentationManifest, VnPlayerCommand, VnRunConfig, VnRuntime,
-    VnSaveBlob,
+    SystemUnlockKind, VnAdvancedPresentationManifest, VnPlayerCommand, VnRunConfig, VnSaveBlob,
 };
+use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 use semver::Version;
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -123,6 +124,7 @@ impl ScenarioRunner {
             workspace_root.clone(),
             package_context.handle.clone(),
             package_context.compiled_story.clone(),
+            package_context.target.clone(),
             package_context
                 .profile
                 .clone()
@@ -158,18 +160,19 @@ impl ScenarioRunner {
             }
         }
         let hashes = context.hashes();
-        let replay_hashes = Self::run_replay(
-            scenario.seed,
+        let replay_hashes = Self::run_replay(ReplayRequest {
+            seed: scenario.seed,
             workspace_root,
-            package_context.handle.clone(),
-            package_context.compiled_story.clone(),
-            package_context
+            package: package_context.handle.clone(),
+            compiled_story: package_context.compiled_story.clone(),
+            target_id: package_context.target.clone(),
+            profile: package_context
                 .profile
                 .clone()
                 .or_else(|| scenario.profile.clone()),
-            scenario.locale.clone(),
-            &replayable,
-        )?;
+            locale: scenario.locale.clone(),
+            actions: &replayable,
+        })?;
         let replay_match = hashes == replay_hashes;
         let mut diagnostics = context.diagnostics.clone();
         let plugin_gate = run_plugin_descriptor_gate(&mut diagnostics);
@@ -231,6 +234,21 @@ impl ScenarioRunner {
                 },
             });
         }
+        if package_context.compiled_story.is_some() {
+            let status = if package_context.native_vn_runtime_provider_bound {
+                ScenarioStatus::Pass
+            } else {
+                ScenarioStatus::Blocked
+            };
+            checks.push(ScenarioCheck {
+                id: "runtime_provider.binding".to_string(),
+                status: status.clone(),
+            });
+            checks.push(ScenarioCheck {
+                id: "runtime_provider.native_vn".to_string(),
+                status,
+            });
+        }
         if !scenario.mount_aliases.is_empty() {
             let mount_blocked = diagnostics
                 .iter()
@@ -250,7 +268,7 @@ impl ScenarioRunner {
                 status: ScenarioStatus::Pass,
             });
         }
-        if context.vn_runtime.is_some() {
+        if context.has_vn_runtime() {
             let route_blocked = diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.code.starts_with("ASTRA_VN_ROUTE"));
@@ -618,25 +636,21 @@ impl ScenarioRunner {
         })
     }
 
-    fn run_replay(
-        seed: u64,
-        workspace_root: PathBuf,
-        package: PackageHandle,
-        compiled_story: Option<CompiledStory>,
-        profile: Option<String>,
-        locale: Option<String>,
-        actions: &[ScenarioAction],
-    ) -> Result<ScenarioHashes, ScenarioError> {
-        info!(action_count = actions.len(), "scenario.replay.start");
+    fn run_replay(request: ReplayRequest<'_>) -> Result<ScenarioHashes, ScenarioError> {
+        info!(
+            action_count = request.actions.len(),
+            "scenario.replay.start"
+        );
         let mut context = RunContext::new(
-            seed,
-            workspace_root,
-            package,
-            compiled_story,
-            profile,
-            locale,
+            request.seed,
+            request.workspace_root,
+            request.package,
+            request.compiled_story,
+            request.target_id,
+            request.profile,
+            request.locale,
         )?;
-        for action in actions {
+        for action in request.actions {
             context.apply(action)?;
         }
         let hashes = context.hashes();
@@ -650,6 +664,17 @@ impl ScenarioRunner {
     }
 }
 
+struct ReplayRequest<'a> {
+    seed: u64,
+    workspace_root: PathBuf,
+    package: PackageHandle,
+    compiled_story: Option<CompiledStory>,
+    target_id: Option<String>,
+    profile: Option<String>,
+    locale: Option<String>,
+    actions: &'a [ScenarioAction],
+}
+
 #[derive(Debug, Clone)]
 struct PackageContext {
     handle: PackageHandle,
@@ -659,6 +684,7 @@ struct PackageContext {
     diagnostics: Vec<Diagnostic>,
     release_gate_checks: Vec<String>,
     compiled_story: Option<CompiledStory>,
+    native_vn_runtime_provider_bound: bool,
     visual_references: BTreeMap<String, VisualReferenceEvidence>,
     advanced_presentation: Option<VnAdvancedPresentationManifest>,
 }
@@ -684,6 +710,7 @@ fn prepare_package_context(
         diagnostics: Vec::new(),
         release_gate_checks: Vec::new(),
         compiled_story: None,
+        native_vn_runtime_provider_bound: false,
         visual_references: BTreeMap::new(),
         advanced_presentation: None,
     };
@@ -749,6 +776,7 @@ fn prepare_package_context(
         };
     }
     validate_package_target(&reader, target.as_deref(), &mut context);
+    validate_package_runtime_provider(&reader, &mut context);
     validate_package_scenario_ref(&reader, workspace_root, scenario_path, &mut context);
     if reader.has_section("vn.compiled_story") {
         context
@@ -825,6 +853,103 @@ fn validate_package_target(
     if report.status == TargetValidationStatus::Blocked {
         context.diagnostics.extend(report.diagnostics);
     }
+}
+
+fn validate_package_runtime_provider(reader: &PackageReader, context: &mut PackageContext) {
+    context
+        .release_gate_checks
+        .push("runtime_provider.binding".to_string());
+    context
+        .release_gate_checks
+        .push("runtime_provider.native_vn".to_string());
+    let provider_policy = match read_json_section(reader, "provider.policy") {
+        Ok(value) => value,
+        Err(diagnostic) => {
+            context.diagnostics.push(diagnostic);
+            return;
+        }
+    };
+    let registry = match read_json_section(reader, "plugin.extension_registry") {
+        Ok(value) => value,
+        Err(diagnostic) => {
+            context.diagnostics.push(diagnostic);
+            return;
+        }
+    };
+
+    let descriptor_ok = provider_policy
+        .get("runtime_provider")
+        .is_some_and(|descriptor| {
+            descriptor
+                .get("runtime_id")
+                .and_then(serde_json::Value::as_str)
+                == Some("native_vn")
+                && descriptor
+                    .get("provider_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("astra.runtime.native_vn")
+        });
+    let policy_binding_ok = provider_policy
+        .get("bindings")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|bindings| {
+            bindings.iter().any(|binding| {
+                binding.get("slot").and_then(serde_json::Value::as_str)
+                    == Some("game_runtime_provider")
+                    && binding
+                        .get("provider_id")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("astra.runtime.native_vn")
+            })
+        });
+    let registry_provider_ok = registry
+        .get("providers")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|providers| {
+            providers.iter().any(|provider| {
+                provider.get("slot").and_then(serde_json::Value::as_str)
+                    == Some("game_runtime_provider")
+                    && provider
+                        .get("provider_id")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("astra.runtime.native_vn")
+                    && provider
+                        .get("packaged")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+            })
+        });
+    if descriptor_ok && policy_binding_ok && registry_provider_ok {
+        context.native_vn_runtime_provider_bound = true;
+    } else {
+        context.diagnostics.push(Diagnostic::blocking(
+            "ASTRA_SCENARIO_RUNTIME_PROVIDER",
+            "package must bind native_vn through provider.policy and plugin.extension_registry",
+        ));
+    }
+}
+
+fn read_json_section(
+    reader: &PackageReader,
+    section_id: &str,
+) -> Result<serde_json::Value, Diagnostic> {
+    let bytes = reader
+        .container()
+        .read_bounded(section_id, 256 * 1024)
+        .map_err(|err| {
+            Diagnostic::blocking(
+                "ASTRA_SCENARIO_RUNTIME_PROVIDER_SECTION",
+                format!("runtime provider section {section_id} could not be read: {err}"),
+            )
+            .with_field("section", section_id)
+        })?;
+    serde_json::from_slice(&bytes).map_err(|err| {
+        Diagnostic::blocking(
+            "ASTRA_SCENARIO_RUNTIME_PROVIDER_JSON",
+            format!("runtime provider section {section_id} is not valid JSON: {err}"),
+        )
+        .with_field("section", section_id)
+    })
 }
 
 fn validate_package_scenario_ref(
@@ -1032,7 +1157,8 @@ struct RunContext {
     loaded_plugins: Vec<LoadedPlugin>,
     step: u64,
     saved: Option<SaveBlob>,
-    vn_runtime: Option<VnRuntime>,
+    vn_provider: Option<NativeVnRuntimeProvider>,
+    vn_session: Option<GameRuntimeSessionId>,
     vn_saved: Option<VnSaveBlob>,
     diagnostics: Vec<Diagnostic>,
     unsupported_actions: Vec<String>,
@@ -1046,9 +1172,11 @@ impl RunContext {
         workspace_root: PathBuf,
         package: PackageHandle,
         compiled_story: Option<CompiledStory>,
+        target_id: Option<String>,
         profile: Option<String>,
         locale: Option<String>,
     ) -> Result<Self, ScenarioError> {
+        let package_id = package.package_id.clone();
         let mut world = RuntimeWorld::create(
             RuntimeConfig {
                 seed,
@@ -1057,18 +1185,28 @@ impl RunContext {
             package,
         )?;
         let system_actor = world.create_actor("scenario.system", vec!["scenario".to_string()]);
-        let vn_runtime = compiled_story
-            .map(|compiled| {
-                VnRuntime::new(
+        let (vn_provider, vn_session) = if let Some(compiled) = compiled_story {
+            let profile = profile.unwrap_or_else(|| "classic".to_string());
+            let mut provider = NativeVnRuntimeProvider::default();
+            let open = provider
+                .open_compiled_story(
                     compiled,
                     VnRunConfig {
-                        profile: profile.unwrap_or_else(|| "classic".to_string()),
+                        profile: profile.clone(),
                         locale: locale.unwrap_or_else(|| "und".to_string()),
                     },
+                    RuntimeOpenRequest {
+                        target_id: target_id.unwrap_or_else(|| "nativevn-game".to_string()),
+                        profile,
+                        seed,
+                        package_hash: package_id,
+                    },
                 )
-            })
-            .transpose()
-            .map_err(|err| ScenarioError::Message(err.to_string()))?;
+                .map_err(|err| ScenarioError::Message(err.to_string()))?;
+            (Some(provider), Some(open.session_id))
+        } else {
+            (None, None)
+        };
         Ok(Self {
             world,
             workspace_root,
@@ -1076,7 +1214,8 @@ impl RunContext {
             loaded_plugins: Vec::new(),
             step: 0,
             saved: None,
-            vn_runtime,
+            vn_provider,
+            vn_session,
             vn_saved: None,
             diagnostics: Vec::new(),
             unsupported_actions: Vec::new(),
@@ -1111,7 +1250,7 @@ impl RunContext {
             self.schedule_delayed_event(schedule);
         }
         if action.launch.is_some() {
-            if self.vn_runtime.is_some() {
+            if self.has_vn_runtime() {
                 self.apply_vn_default_launch()?;
             } else {
                 self.advance(1)?;
@@ -1122,7 +1261,7 @@ impl RunContext {
         }
         if let Some(advance) = action.advance {
             for _ in 0..advance.ticks {
-                if self.vn_runtime.is_some() {
+                if self.has_vn_runtime() {
                     self.apply_vn(VnPlayerCommand::Advance)?;
                 } else {
                     self.advance(1)?;
@@ -1130,7 +1269,7 @@ impl RunContext {
             }
         }
         if let Some(choice) = &action.choose {
-            if self.vn_runtime.is_some() {
+            if self.has_vn_runtime() {
                 self.apply_vn(VnPlayerCommand::Choose {
                     option_id: scenario_choice(choice),
                 })?;
@@ -1165,18 +1304,12 @@ impl RunContext {
         }
         if action.save.is_some() {
             self.saved = Some(self.world.save(SaveRequest::default())?);
-            if let Some(runtime) = &self.vn_runtime {
-                self.vn_saved = Some(
-                    runtime
-                        .save_slot(
-                            action
-                                .save
-                                .clone()
-                                .unwrap_or_else(|| "slot.auto".to_string()),
-                        )
-                        .map_err(|err| ScenarioError::Message(err.to_string()))?,
-                );
-            }
+            self.save_vn_slot(
+                action
+                    .save
+                    .clone()
+                    .unwrap_or_else(|| "slot.auto".to_string()),
+            )?;
         }
         if action.load.is_some() {
             let save = self
@@ -1185,12 +1318,7 @@ impl RunContext {
                 .ok_or_else(|| ScenarioError::Message("load requested before save".to_string()))?;
             self.world.load(save)?;
             if let Some(save) = self.vn_saved.clone() {
-                let runtime = self.vn_runtime.as_mut().ok_or_else(|| {
-                    ScenarioError::Message("VN load requested without VN runtime".to_string())
-                })?;
-                runtime
-                    .load_slot(save)
-                    .map_err(|err| ScenarioError::Message(err.to_string()))?;
+                self.load_vn_slot(save)?;
             }
         }
         if action.replay_from_start.is_some() {
@@ -1204,7 +1332,7 @@ impl RunContext {
             PlayerInputKind::Advance => {
                 let ticks = input.ticks.unwrap_or(1);
                 for _ in 0..ticks {
-                    if self.vn_runtime.is_some() {
+                    if self.has_vn_runtime() {
                         self.apply_vn(VnPlayerCommand::Advance)?;
                     } else {
                         self.advance(1)?;
@@ -1233,18 +1361,12 @@ impl RunContext {
             }
             PlayerInputKind::Save => {
                 self.saved = Some(self.world.save(SaveRequest::default())?);
-                if let Some(runtime) = &self.vn_runtime {
-                    self.vn_saved = Some(
-                        runtime
-                            .save_slot(
-                                input
-                                    .slot
-                                    .clone()
-                                    .unwrap_or_else(|| "slot.auto".to_string()),
-                            )
-                            .map_err(|err| ScenarioError::Message(err.to_string()))?,
-                    );
-                }
+                self.save_vn_slot(
+                    input
+                        .slot
+                        .clone()
+                        .unwrap_or_else(|| "slot.auto".to_string()),
+                )?;
             }
             PlayerInputKind::Load => {
                 let save = self.saved.clone().ok_or_else(|| {
@@ -1252,12 +1374,7 @@ impl RunContext {
                 })?;
                 self.world.load(save)?;
                 if let Some(save) = self.vn_saved.clone() {
-                    let runtime = self.vn_runtime.as_mut().ok_or_else(|| {
-                        ScenarioError::Message("VN load requested without VN runtime".to_string())
-                    })?;
-                    runtime
-                        .load_slot(save)
-                        .map_err(|err| ScenarioError::Message(err.to_string()))?;
+                    self.load_vn_slot(save)?;
                 }
             }
             PlayerInputKind::SetAuto => {
@@ -1312,18 +1429,18 @@ impl RunContext {
     }
 
     fn apply_vn_default_launch(&mut self) -> Result<(), ScenarioError> {
+        let session = self.vn_session()?;
         let command = self
-            .vn_runtime
+            .vn_provider
             .as_ref()
-            .and_then(VnRuntime::default_launch_command)
-            .ok_or_else(|| {
-                ScenarioError::Message("VN compiled story has no launch target".to_string())
-            })?;
+            .ok_or_else(|| ScenarioError::Message("VN provider is not open".to_string()))?
+            .default_launch_command(session)
+            .map_err(|err| ScenarioError::Message(err.to_string()))?;
         self.apply_vn(command)
     }
 
     fn apply_vn(&mut self, command: VnPlayerCommand) -> Result<(), ScenarioError> {
-        let Some(runtime) = self.vn_runtime.as_mut() else {
+        if !self.has_vn_runtime() {
             self.diagnostics.push(
                 Diagnostic::blocking(
                     "ASTRA_SCENARIO_ACTION_UNSUPPORTED",
@@ -1334,14 +1451,54 @@ impl RunContext {
             self.unsupported_actions.push("vn.player".to_string());
             return Ok(());
         };
-        let output = runtime
-            .apply(command)
+        let session = self.vn_session()?.clone();
+        let output = self
+            .vn_provider
+            .as_mut()
+            .ok_or_else(|| ScenarioError::Message("VN provider is not open".to_string()))?
+            .apply_command(session, command)
             .map_err(|err| ScenarioError::Message(err.to_string()))?;
         for command in output.presentation {
+            let command = serde_json::from_value::<VnPresentationCommand>(command)
+                .map_err(|err| ScenarioError::Message(err.to_string()))?;
             self.world
                 .emit_presentation(convert_vn_presentation(command));
         }
         Ok(())
+    }
+
+    fn has_vn_runtime(&self) -> bool {
+        self.vn_provider.is_some() && self.vn_session.is_some()
+    }
+
+    fn vn_session(&self) -> Result<&GameRuntimeSessionId, ScenarioError> {
+        self.vn_session.as_ref().ok_or_else(|| {
+            ScenarioError::Message("VN runtime provider session is not open".to_string())
+        })
+    }
+
+    fn save_vn_slot(&mut self, slot: String) -> Result<(), ScenarioError> {
+        if !self.has_vn_runtime() {
+            return Ok(());
+        }
+        let session = self.vn_session()?.clone();
+        let save = self
+            .vn_provider
+            .as_ref()
+            .ok_or_else(|| ScenarioError::Message("VN provider is not open".to_string()))?
+            .save_slot(&session, slot)
+            .map_err(|err| ScenarioError::Message(err.to_string()))?;
+        self.vn_saved = Some(save);
+        Ok(())
+    }
+
+    fn load_vn_slot(&mut self, save: VnSaveBlob) -> Result<(), ScenarioError> {
+        let session = self.vn_session()?.clone();
+        self.vn_provider
+            .as_mut()
+            .ok_or_else(|| ScenarioError::Message("VN provider is not open".to_string()))?
+            .load_slot(&session, save)
+            .map_err(|err| ScenarioError::Message(err.to_string()))
     }
 
     fn register_fixture_actions(&mut self) -> Result<(), ScenarioError> {
@@ -1506,34 +1663,30 @@ impl RunContext {
     }
 
     fn vn_route_reached(&self, route: &str) -> bool {
-        self.vn_runtime
-            .as_ref()
-            .is_some_and(|runtime| runtime.state().route_coverage.contains(route))
+        self.vn_state()
+            .is_some_and(|state| state.route_coverage.contains(route))
     }
 
     fn vn_backlog_has_key(&self, key: &str) -> bool {
-        self.vn_runtime
-            .as_ref()
-            .is_some_and(|runtime| runtime.state().backlog.iter().any(|entry| entry.key == key))
+        self.vn_state()
+            .is_some_and(|state| state.backlog.iter().any(|entry| entry.key == key))
     }
 
     fn vn_read_state_has(&self, key: &str) -> bool {
-        self.vn_runtime
-            .as_ref()
-            .is_some_and(|runtime| runtime.state().read_state.contains(key))
+        self.vn_state()
+            .is_some_and(|state| state.read_state.contains(key))
     }
 
     fn vn_voice_replay_available(&self, voice: &str) -> bool {
-        self.vn_runtime
-            .as_ref()
-            .is_some_and(|runtime| runtime.state().voice_replay.contains_key(voice))
+        self.vn_state()
+            .is_some_and(|state| state.voice_replay.contains_key(voice))
     }
 
     fn vn_system_state_matches(&self, assertion: &SystemStateAssertion) -> bool {
-        let Some(runtime) = self.vn_runtime.as_ref() else {
+        let Some(state) = self.vn_state() else {
             return false;
         };
-        let system = &runtime.state().system;
+        let system = &state.system;
         if let Some(expected) = assertion.auto_enabled {
             if system.auto_enabled != expected {
                 return false;
@@ -1560,6 +1713,12 @@ impl RunContext {
             .replay_unlocks
             .iter()
             .all(|id| system.replay_unlocks.contains(id))
+    }
+
+    fn vn_state(&self) -> Option<&astra_vn::VnRuntimeState> {
+        let provider = self.vn_provider.as_ref()?;
+        let session = self.vn_session.as_ref()?;
+        provider.state(session).ok()
     }
 
     fn fixture_action_ran(&self) -> bool {

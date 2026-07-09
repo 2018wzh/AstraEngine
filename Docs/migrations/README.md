@@ -2,6 +2,8 @@
 
 本目录只记录已实现代码向新设计对齐的迁移路线。设计页可以覆盖完整未来架构；迁移页不能把尚未存在的 AstraEMU/AstraRPG 代码写成可搬迁对象。
 
+当前落地状态：migration 1/2 已完成 Provider URI Asset VFS、`asset.vfs_manifest`、`asset.catalog`、单一 `vfs_provider` slot 和 gameplay runtime provider selection boundary；migration 3/4/5 已完成 AstraVN module layout、多 crate split 和 `NativeVnRuntimeProvider` DTO+FFI/in-process provider 接入。AstraEMU/AstraRPG 仍只作为后续同级 provider 设计边界出现。
+
 ## 执行顺序
 
 | 顺序 | 文档 | 范围 |
@@ -20,7 +22,7 @@
 - `astra-asset` 的 `AssetId`、sidecar、`VfsUri`、manifest/catalog DTO 和 path policy。
 - `astra-cook` 的 importer/cook artifact、NativeVN asset sidecar 和 cook audit。
 - `astra-package` 的 package/save container、section table、bounded reader、`asset.vfs_manifest`、`asset.catalog` 和 project-level `package_sections`。
-- `astra-vn` 的 module layout、facade、VN state/save、VN extension manifest、package sections 和 release checks。
+- `astra-vn` 的 module layout、facade、VN state/save、VN extension manifest、package sections、release checks 和 `NativeVnRuntimeProvider`。
 - Stage 1 plugin registry、StateMachine action provider 和 `vn-extension-provider` fixture。
 - Editor workflow、module、creator manual 和 Stage 4 状态文档中的 runtime provider switching 口径。
 - TsuiNoSora 的脱敏 mount policy、`mount_probes`、route-bound `mount_assets`、NativeVN asset sidecar/cooked asset/package VFS manifest/catalog 和 player route evidence。
@@ -38,4 +40,4 @@
 python Tools/check_docs.py
 ```
 
-代码迁移完成后，再按对应阶段追加 Rust 测试、release gate 和 scenario 验收。文档迁移不能把未跑过的命令写成 `DONE` evidence。
+代码迁移完成后，再按对应阶段追加 Rust 测试、release gate 和 scenario 验收。文档迁移不能把未跑过的命令写成 `DONE` evidence；已完成项的证据以 `Docs/status/implementation-plan.md`、stage page、coverage matrix 和 stage test matrix 为准。

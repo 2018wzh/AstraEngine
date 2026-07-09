@@ -62,9 +62,39 @@ impl PackageBuildRequest {
                 "profile": profile,
                 "renderer": "headless",
                 "decode_fallback": "profile_bound",
+                "runtime_provider": {
+                    "schema": "astra.product_runtime_descriptor.v1",
+                    "runtime_id": "native_vn",
+                    "product_kind": "visual_novel",
+                    "provider_id": "astra.runtime.native_vn",
+                    "supported_targets": ["game"],
+                    "capabilities": ["runtime.native_vn"],
+                    "package_sections": [
+                        "vn.compiled_story",
+                        "vn.profile_manifest",
+                        "vn.policy_bundle_manifest",
+                        "vn.extension_manifest",
+                        "vn.standard_command_manifest",
+                        "vn.presentation_provider_manifest",
+                        "vn.commercial_baseline_manifest",
+                        "vn.system_story_manifest",
+                        "vn.system_ui_profile_manifest",
+                        "vn.advanced_presentation_manifest"
+                    ],
+                    "release_checks": [
+                        "runtime_provider.native_vn",
+                        "vn.commercial_baseline",
+                        "vn.system_ui_profile",
+                        "vn.advanced_presentation",
+                        "player.full_playable"
+                    ]
+                },
                 "bindings": [{
                     "slot": "presentation",
                     "provider_id": "astra.fixture.headless_presentation"
+                }, {
+                    "slot": "game_runtime_provider",
+                    "provider_id": "astra.runtime.native_vn"
                 }]
             })),
             plugin_extension_registry: json_bytes(serde_json::json!({
@@ -81,10 +111,19 @@ impl PackageBuildRequest {
                     "capability": "vfs.backend.package",
                     "phase": "runtime",
                     "packaged": true
+                }, {
+                    "slot": "game_runtime_provider",
+                    "provider_id": "astra.runtime.native_vn",
+                    "capability": "runtime.native_vn",
+                    "phase": "runtime",
+                    "packaged": true
                 }],
                 "bindings": [{
                     "slot": "presentation",
                     "provider_id": "astra.fixture.headless_presentation"
+                }, {
+                    "slot": "game_runtime_provider",
+                    "provider_id": "astra.runtime.native_vn"
                 }],
                 "conflicts": []
             })),
@@ -102,6 +141,7 @@ impl PackageBuildRequest {
                     "id": "native-smoke-game",
                     "kind": "game",
                     "crate": "astra-runtime",
+                    "runtime_provider": "native_vn",
                     "default_profile": "desktop-release",
                     "platforms": ["windows", "linux", "macos", "ios", "android", "web"],
                     "packaged": true

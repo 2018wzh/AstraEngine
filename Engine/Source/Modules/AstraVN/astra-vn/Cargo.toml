@@ -1,0 +1,28 @@
+[package]
+name = "astra-vn"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib", "dylib"]
+
+[dependencies]
+astra-vn-commands = { path = "../astra-vn-commands" }
+astra-vn-core = { path = "../astra-vn-core" }
+astra-vn-editor = { path = "../astra-vn-editor" }
+astra-vn-package = { path = "../astra-vn-package" }
+astra-vn-plugin = { path = "../astra-vn-plugin" }
+astra-vn-policy = { path = "../astra-vn-policy" }
+astra-vn-presentation = { path = "../astra-vn-presentation" }
+astra-vn-runtime-provider = { path = "../astra-vn-runtime-provider" }
+astra-vn-save = { path = "../astra-vn-save" }
+astra-vn-script = { path = "../astra-vn-script" }
+astra-vn-system = { path = "../astra-vn-system" }
+
+[dev-dependencies]
+astra-package = { path = "../../../Runtime/astra-package" }
+astra-plugin = { path = "../../../Runtime/astra-plugin" }
+semver.workspace = true
+tempfile.workspace = true

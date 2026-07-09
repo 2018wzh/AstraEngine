@@ -1,12 +1,12 @@
 schema: astra.project.v1
 id: com.example.astra_vn_script_sample
-runtime: astra-vn
 
 targets:
   - id: nativevn-game
     kind: game
     crate: astra-vn
     default_profile: desktop-release
+    runtime_provider: native_vn
     platforms: [windows, linux, macos, ios, android, web]
     packaged: true
 

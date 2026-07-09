@@ -9,3 +9,4 @@ rust-version.workspace = true
 abi_stable.workspace = true
 schemars.workspace = true
 serde.workspace = true
+serde_json.workspace = true

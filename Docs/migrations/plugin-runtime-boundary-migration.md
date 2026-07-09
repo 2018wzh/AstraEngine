@@ -47,7 +47,7 @@ cargo test -p astra-plugin vfs_provider_registry
 cargo test -p astra-plugin runtime_provider_registry
 cargo test -p astra-package package_roundtrip
 cargo test -p astra-release release_report
-cargo test -p astra-vn --test vn_plugin_extensions
+cargo test -p astra-vn-plugin --test vn_plugin_extensions
 ```
 
 `astra-release plugin_provider_gate` 仍是后续专门 gate 名；当前 VFS prefix/provider binding 已由 `cargo test -p astra-release vfs_mount_gate` 覆盖。

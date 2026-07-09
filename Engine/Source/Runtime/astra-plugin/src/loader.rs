@@ -16,6 +16,7 @@ use crate::{
     LoadedFfiAction, PluginDescriptor, PluginError, PluginGate, PluginRegistrar,
     RegisteredProvider,
 };
+use astra_plugin_abi::GAME_RUNTIME_PROVIDER_SLOT;
 use astra_runtime::RuntimeWorld;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -121,6 +122,19 @@ impl PluginLoader {
         for provider in registration.providers {
             let provider = RegisteredProvider {
                 slot: EngineModuleSlot(provider.slot.to_string()),
+                provider_id: provider.provider_id.to_string(),
+                capability: provider.capability.to_string(),
+                phase: LoadPhase::from_str(&provider.phase.to_string())
+                    .map_err(PluginError::Load)?,
+                packaged: provider.packaged,
+            };
+            slots.push(provider.slot.0.clone());
+            registered_providers.push(provider.clone());
+            registrar.register_provider(provider);
+        }
+        for provider in registration.runtime_providers {
+            let provider = RegisteredProvider {
+                slot: EngineModuleSlot(GAME_RUNTIME_PROVIDER_SLOT.to_string()),
                 provider_id: provider.provider_id.to_string(),
                 capability: provider.capability.to_string(),
                 phase: LoadPhase::from_str(&provider.phase.to_string())

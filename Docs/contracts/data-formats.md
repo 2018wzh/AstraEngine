@@ -9,7 +9,6 @@ Astra 源数据 text-first，运行时数据 binary-first。YAML 适合人写，
 ```yaml
 schema: astra.project.v1
 id: com.example.nativevn
-runtime_provider: native_vn
 engine_modules:
   renderer2d: astra.renderer.wgpu
   text_layout: astra.text.cosmic

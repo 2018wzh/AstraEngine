@@ -5,6 +5,7 @@ targets:
     kind: game
     crate: astra-vn
     default_profile: advanced-vn
+    runtime_provider: native_vn
     platforms: [windows, linux, macos, ios, android, web]
     packaged: true
 profiles:

@@ -1,0 +1,15 @@
+[package]
+name = "astra-vn-plugin"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+astra-core = { path = "../../../Runtime/astra-core" }
+schemars.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+astra-plugin = { path = "../../../Runtime/astra-plugin" }
+semver.workspace = true

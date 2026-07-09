@@ -107,8 +107,8 @@ Allowed runtime snapshot values are nil, boolean, integer, string and object/tab
 ## Tests
 
 ```bash
-cargo test -p astra-vn --test luau_sandbox
-cargo test -p astra-vn --test luau_mutation
+cargo test -p astra-vn-policy --test luau_sandbox
+cargo test -p astra-vn-policy --test luau_mutation
 ```
 
 Expected: denied capability returns diagnostic, mutation trace records previous value and replay metadata, rollback/playback restores deterministic state, command/query/trace capability calls are serialized, and invalid snapshot/command/trace payloads block.

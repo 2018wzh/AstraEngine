@@ -1,11 +1,11 @@
 schema: astra.project.v1
 id: com.example.nativevn
-runtime: astra-vn
 targets:
   - id: nativevn-game
     kind: game
     crate: astra-vn
     default_profile: classic
+    runtime_provider: native_vn
     platforms: [headless, windows, web]
     packaged: true
 nativevn:

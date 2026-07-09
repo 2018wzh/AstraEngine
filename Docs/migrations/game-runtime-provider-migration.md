@@ -2,9 +2,9 @@
 
 本计划只迁移已经存在的 AstraVN runtime facade、VN extension manifest、package sections 和 release checks，使它们对齐 [Game Runtime Provider Contract](../contracts/game-runtime-provider.md)。执行前先完成 [AstraVN Module Layout Migration](astra-vn-module-layout-migration.md) 和 [AstraVN Crate Split Migration](astra-vn-crate-split-migration.md)。AstraEMU/AstraRPG 代码尚未存在，不列为迁移对象。
 
-## 现有实现入口
+## 迁移前实现入口
 
-- `Engine/Source/Runtime/astra-vn/src/lib.rs`：当前 Rust ABI dylib facade 和兼容 re-export。
+- `Engine/Source/Runtime/astra-vn/src/lib.rs`：迁移前 Rust ABI dylib facade 和兼容 re-export。
 - `Engine/Source/Runtime/astra-vn/src/parser.rs`、`compiler.rs`、`types.rs`：`.astra` parser/compiler、CompiledStory、source map、debug symbol、route graph 和 VN state 类型。
 - `Engine/Source/Runtime/astra-vn/src/runtime.rs`、`save_container.rs`、`system_ui.rs`：VN runtime cursor、choice/backlog/read-state/voice replay、wait state、system state 和 save section。
 - `Engine/Source/Runtime/astra-vn/src/luau.rs`、`policy_bundle.rs`、`standard_policy.luau`：Luau policy host、policy state、policy bundle manifest 和 source cache。
@@ -15,7 +15,7 @@
 - `Engine/Source/Programs/astra-cli`：NativeVN cook/package/bundle/test route flow。
 - `Engine/Source/Runtime/astra-player-core` 和 `Engine/Source/Programs/astra-player`：live automation script/input transcript/report validation。
 
-前置的 module layout 和 crate split 迁移完成后，目标实现入口变为 `Engine/Source/Modules/AstraVN/astra-vn-runtime-provider`，并组合 `astra-vn-script`、`astra-vn-core`、`astra-vn-policy`、`astra-vn-presentation`、`astra-vn-commands`、`astra-vn-system`、`astra-vn-save`、`astra-vn-package`、`astra-vn-plugin` 和 `astra-vn-editor`。这些目标 crate 尚未在当前代码中作为可迁移实现存在。
+前置的 module layout 和 crate split 迁移完成后，目标实现入口变为 `Engine/Source/Modules/AstraVN/astra-vn-runtime-provider`，并组合 `astra-vn-script`、`astra-vn-core`、`astra-vn-policy`、`astra-vn-presentation`、`astra-vn-commands`、`astra-vn-system`、`astra-vn-save`、`astra-vn-package`、`astra-vn-plugin` 和 `astra-vn-editor`。`astra-plugin-abi` 提供 runtime provider DTO+FFI entrypoints；`astra-test`、`astra-package` 和 `astra-release` 通过 target-level `runtime_provider: native_vn`、`provider.policy` 和 `plugin.extension_registry` 选择并校验 provider。
 
 ## 目标设计
 
@@ -44,7 +44,7 @@ VN Core 继续持有 dialogue、choice、backlog、read-state、save/load 和 vo
 5. 迁移 scenario runner。
    `astra test run` 通过 selected gameplay runtime provider 推进 VN action/assertion；未知 provider、未知 action、缺 package 或 target mismatch 继续 blocking。
 6. 迁移 release gate。
-   增加 `runtime_provider.native_vn` check，校验 provider descriptor、package section continuity、release check declaration、save/load/replay hash 和 player report profile/target match。
+   增加 `runtime_provider.binding` 和 `runtime_provider.native_vn` check，校验 target binding、`provider.policy`、plugin registry、provider descriptor、package section continuity、release check declaration、save/load/replay hash 和 player report profile/target match。
 7. 保持 facade 兼容。
    `astra-vn` 只作为 Rust ABI dylib facade 和兼容 re-export；跨插件稳定边界仍是 `.astra`、package section 和 Stage 1 plugin ABI。功能 crate 不得依赖 `astra-vn` facade。
 
@@ -53,19 +53,15 @@ VN Core 继续持有 dialogue、choice、backlog、read-state、save/load 和 vo
 ```bash
 python Tools/check_docs.py
 cargo test -p astra-vn --test vn_dylib_facade
-cargo test -p astra-vn --test vn_plugin_extensions
-cargo test -p astra-vn --test vn_save_container
-cargo test -p astra-vn-runtime-provider
-cargo test -p astra-test --test vn_scenario
-cargo test -p astra-release --test release_report release_gate_
-cargo test -p astra-cli --test target_platform nativevn_sample_cooks_packages_validates_and_runs_full_playthrough
-```
-
-新增 provider 代码后再补：
-
-```bash
+cargo test -p astra-vn-plugin --test vn_plugin_extensions
+cargo test -p astra-vn-save --test vn_save_container
+cargo test -p astra-plugin-abi runtime_provider_abi
+cargo test -p astra-plugin runtime_provider_registry
 cargo test -p astra-vn-runtime-provider --test game_runtime_provider
-cargo test -p astra-release --test release_report runtime_provider_native_vn
+cargo test -p astra-vn-runtime-provider --test runtime_provider_ffi
+cargo test -p astra-test --test vn_scenario
+cargo test -p astra-release --test release_report runtime_provider
+cargo test -p astra-cli --test target_platform nativevn_sample_cooks_packages_validates_and_runs_full_playthrough
 ```
 
 ## 不得修改项

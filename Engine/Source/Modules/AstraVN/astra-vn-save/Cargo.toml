@@ -1,0 +1,16 @@
+[package]
+name = "astra-vn-save"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+astra-core = { path = "../../../Runtime/astra-core" }
+astra-package = { path = "../../../Runtime/astra-package" }
+astra-runtime = { path = "../../../Runtime/astra-runtime" }
+astra-vn-core = { path = "../astra-vn-core" }
+astra-vn-policy = { path = "../astra-vn-policy" }
+postcard.workspace = true
+schemars.workspace = true
+serde.workspace = true

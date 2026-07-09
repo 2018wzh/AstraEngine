@@ -2,13 +2,13 @@
 
 本计划只迁移已经存在的 `astra-vn` 代码路径和依赖声明，把 AstraVN 从 Runtime 分区移到 `Engine/Source/Modules/AstraVN/`。它不拆分代码逻辑；拆分步骤见 [AstraVN Crate Split Migration](astra-vn-crate-split-migration.md)。
 
-## 现有实现入口
+## 迁移前实现入口
 
-- `Engine/Source/Runtime/astra-vn`：当前单 crate，包含 `.astra` parser/compiler、VN Core、Luau policy、presentation、system UI、save/package、Editor metadata、plugin extension 和 Rust dylib facade。
+- `Engine/Source/Runtime/astra-vn`：迁移前单 crate，包含 `.astra` parser/compiler、VN Core、Luau policy、presentation、system UI、save/package、Editor metadata、plugin extension 和 Rust dylib facade。
 - `Engine/Source/Developer/astra-test`：通过 `astra-vn` 运行 VN scenario。
 - `Engine/Source/Developer/astra-release`：通过 `astra-vn` 校验 `vn.*`、`tsuinosora.*` 和 `player.full_playable` gate。
 - `Engine/Source/Programs/astra-cli`：通过 `astra-vn` 执行 NativeVN cook/package/bundle/test route flow。
-- 根 `Cargo.toml`：当前 workspace member 仍指向 `Engine/Source/Runtime/astra-vn`。
+- 根 `Cargo.toml`：迁移前 workspace member 指向 `Engine/Source/Runtime/astra-vn`。
 
 ## 目标设计
 
@@ -43,13 +43,13 @@ python Tools/check_docs.py
 rg -n "Engine/Source/Runtime/astra-vn" Docs Cargo.toml Engine -g "*.md" -g "*.toml"
 cargo metadata --no-deps
 cargo test -p astra-vn --test vn_dylib_facade
-cargo test -p astra-vn --test vn_plugin_extensions
+cargo test -p astra-vn-plugin --test vn_plugin_extensions
 cargo test -p astra-test --test vn_scenario
 cargo test -p astra-release --test release_report release_gate_
 cargo test -p astra-cli --test target_platform nativevn_sample_cooks_packages_validates_and_runs_full_playthrough
 ```
 
-文档准备阶段允许根 `Cargo.toml` 继续命中迁移前路径，因为真实搬迁尚未执行。代码搬迁完成后，`rg` 命令只允许本文件、[AstraVN Crate Split Migration](astra-vn-crate-split-migration.md) 和 [Game Runtime Provider Migration](game-runtime-provider-migration.md) 命中迁移前路径；其他命中必须改链。
+代码搬迁完成后，`rg` 命令只允许本文件、[AstraVN Crate Split Migration](astra-vn-crate-split-migration.md) 和 [Game Runtime Provider Migration](game-runtime-provider-migration.md) 命中迁移前路径；其他命中必须改链。
 
 ## 不得修改项
 

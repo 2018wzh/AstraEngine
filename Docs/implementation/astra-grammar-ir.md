@@ -109,8 +109,8 @@ Formatter rules:
 ## Tests
 
 ```bash
-cargo test -p astra-vn --test compiler_runtime
-cargo test -p astra-vn --test compiler_diagnostics
+cargo test -p astra-vn-script --test compiler_runtime
+cargo test -p astra-vn-script --test compiler_diagnostics
 ```
 
 Expected: CompiledStory IR hash stable, source map/debug symbols stable, grammar and semantic diagnostics carry file/span/code.

@@ -1,0 +1,15 @@
+[package]
+name = "astra-vn-presentation"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+astra-core = { path = "../../../Runtime/astra-core" }
+astra-media-core = { path = "../../../Runtime/astra-media-core" }
+astra-vn-script = { path = "../astra-vn-script" }
+postcard.workspace = true
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true

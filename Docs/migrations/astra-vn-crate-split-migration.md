@@ -11,7 +11,7 @@
 - `Engine/Source/Runtime/astra-vn/src/presentation.rs`、`presentation_execution.rs`、`presentation_provider.rs`、`standard_commands.rs`：演出模型、headless execution、presentation provider 和标准命令。
 - `Engine/Source/Runtime/astra-vn/src/system_ui.rs`、`save_container.rs`、`package.rs`、`commercial_baseline.rs`、`advanced_presentation.rs`：系统 UI、save/package section 和 VN release evidence。
 - `Engine/Source/Runtime/astra-vn/src/plugin_extensions.rs`、`editor_metadata.rs`：VN extension slots 和 Graph/Timeline metadata。
-- `Engine/Source/Runtime/astra-vn/src/lib.rs`：当前 monolithic facade。
+- `Engine/Source/Runtime/astra-vn/src/lib.rs`：迁移前 monolithic facade。
 
 ## 目标 crate graph
 
@@ -84,7 +84,7 @@ cargo test -p astra-vn-plugin
 cargo test -p astra-vn-editor
 cargo test -p astra-vn-runtime-provider
 cargo test -p astra-vn --test vn_dylib_facade
-cargo test -p astra-vn --test vn_plugin_extensions
+cargo test -p astra-vn-plugin --test vn_plugin_extensions
 cargo test -p astra-test --test vn_scenario
 cargo test -p astra-release --test release_report release_gate_
 cargo test -p astra-cli --test target_platform nativevn_sample_cooks_packages_validates_and_runs_full_playthrough
@@ -96,4 +96,4 @@ cargo test -p astra-cli --test target_platform nativevn_sample_cooks_packages_va
 - 不让功能 crate 依赖 `astra-vn` facade。
 - 不把 heavy decode/text/media provider 依赖拖入 `astra-vn` facade。
 - 不把 Luau VM handle、renderer/audio native handle、Actor 指针、Editor widget、本地 root、商业 payload 或未脱敏脚本文本写入 public DTO、save、package 或 report。
-- 不把拆分本身标为玩法 runtime 已完成；`NativeVnRuntimeProvider` 仍由 `S3-RUNTIME-PROVIDER-01` 单独验收。
+- 不把拆分本身标为玩法 runtime 已完成；`NativeVnRuntimeProvider` 由 `S3-RUNTIME-PROVIDER-01` 单独验收。

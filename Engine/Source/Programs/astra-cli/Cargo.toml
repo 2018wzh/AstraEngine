@@ -25,7 +25,7 @@ astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
 astra-release = { path = "../../Developer/astra-release" }
 astra-target = { path = "../../Platform/astra-target" }
 astra-test = { path = "../../Developer/astra-test" }
-astra-vn = { path = "../../Runtime/astra-vn" }
+astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
 clap.workspace = true
 schemars.workspace = true
 serde.workspace = true

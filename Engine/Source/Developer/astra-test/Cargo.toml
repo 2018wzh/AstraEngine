@@ -9,9 +9,11 @@ rust-version.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }
 astra-package = { path = "../../Runtime/astra-package" }
 astra-plugin = { path = "../../Runtime/astra-plugin" }
+astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi" }
 astra-runtime = { path = "../../Runtime/astra-runtime" }
 astra-target = { path = "../../Platform/astra-target" }
-astra-vn = { path = "../../Runtime/astra-vn" }
+astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
+astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }
 schemars.workspace = true
 semver.workspace = true
 serde.workspace = true
