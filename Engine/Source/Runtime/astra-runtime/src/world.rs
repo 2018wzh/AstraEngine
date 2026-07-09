@@ -14,8 +14,8 @@ use crate::{
     AwaitToken, Blackboard, BlackboardValue, ComponentId, ComponentRecord, ComponentSnapshot,
     CreateAwaitAction, DelayedEventId, DelayedEventQueue, EmitEventAction, EventId, EventPayload,
     EventQueue, EventSource, PresentationAction, PresentationCommand, PresentationRecord,
-    RuntimeAction, RuntimeEvent, SaveBlob, SaveRequest, ScheduledEvent, SetBlackboardAction,
-    StateMachineDefinition, StateMachineSnapshot, StateMachineStore,
+    RuntimeAction, RuntimeEvent, RuntimeReplayTranscript, SaveBlob, SaveRequest, ScheduledEvent,
+    SetBlackboardAction, StateMachineDefinition, StateMachineSnapshot, StateMachineStore,
 };
 
 #[derive(Debug, Error)]
@@ -82,12 +82,13 @@ pub struct PlayerInput {
 pub struct RuntimeSnapshot {
     pub config: RuntimeConfig,
     pub package: PackageHandle,
+    pub id_source: StableIdGenerator,
     pub actors: ActorStore,
     pub blackboard: Blackboard,
     pub machines: StateMachineStore,
     pub awaits: AwaitQueue,
     pub delayed_events: DelayedEventQueue,
-    pub events: Vec<RuntimeEvent>,
+    pub events: EventQueue,
     pub presentation: Vec<PresentationRecord>,
     pub mounted_modules: BTreeMap<String, String>,
     pub step: u64,
@@ -259,6 +260,17 @@ impl RuntimeWorld {
             step = event.step,
             kind = %kind,
             "runtime.event.emit"
+        );
+        self.events.push(event);
+    }
+
+    pub fn enqueue_event(&mut self, event: RuntimeEvent) {
+        debug!(
+            event_id = ?event.id,
+            source = ?event.source,
+            step = event.step,
+            kind = %event.payload.kind,
+            "runtime.event.enqueue"
         );
         self.events.push(event);
     }
@@ -475,20 +487,7 @@ impl RuntimeWorld {
     ) -> Result<LoadReport, RuntimeError> {
         debug!("runtime.load.with_registry");
         let snapshot = crate::save::read_runtime_save(&save, registry)?;
-        self.config = snapshot.config;
-        self.package = snapshot.package;
-        self.actors = snapshot.actors;
-        self.blackboard = snapshot.blackboard;
-        self.machines = snapshot.machines;
-        self.awaits = snapshot.awaits;
-        self.delayed_events = snapshot.delayed_events;
-        self.events = EventQueue::default();
-        for event in snapshot.events {
-            self.events.push(event);
-        }
-        self.presentation = snapshot.presentation;
-        self.mounted_modules = snapshot.mounted_modules;
-        self.step = snapshot.step;
+        self.restore_snapshot(snapshot);
         let report = LoadReport {
             state_hash: self.state_hash(),
         };
@@ -496,10 +495,58 @@ impl RuntimeWorld {
         Ok(report)
     }
 
-    pub fn replay(&mut self, replay: ReplayInput) -> Result<ReplayReport, RuntimeError> {
-        info!(input_count = replay.inputs.len(), "runtime.replay.start");
-        for input in replay.inputs {
-            self.tick(input)?;
+    fn restore_snapshot(&mut self, snapshot: RuntimeSnapshot) {
+        self.config = snapshot.config;
+        self.package = snapshot.package;
+        self.id_source = snapshot.id_source;
+        self.actors = snapshot.actors;
+        self.blackboard = snapshot.blackboard;
+        self.machines = snapshot.machines;
+        self.awaits = snapshot.awaits;
+        self.delayed_events = snapshot.delayed_events;
+        self.events = snapshot.events;
+        self.presentation = snapshot.presentation;
+        self.mounted_modules = snapshot.mounted_modules;
+        self.step = snapshot.step;
+    }
+
+    pub fn replay(
+        &mut self,
+        replay: RuntimeReplayTranscript,
+    ) -> Result<ReplayReport, RuntimeError> {
+        if replay.schema != "astra.runtime_replay_transcript.v1" {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_REPLAY_SCHEMA",
+                "runtime replay transcript schema is invalid",
+            )));
+        }
+        info!(input_count = replay.ticks.len(), "runtime.replay.start");
+        self.restore_snapshot(replay.checkpoint);
+        for entry in replay.ticks {
+            for input in entry.player_inputs {
+                self.apply_input(input)?;
+            }
+            for result in entry.await_results {
+                self.submit_await_result(result);
+            }
+            for output in entry.provider_outputs {
+                for event in output.events {
+                    self.enqueue_event(event);
+                }
+            }
+            let report = self.tick(entry.tick)?;
+            let actual = crate::ReplayHashCheckpoint::from(&report);
+            if actual != entry.expected {
+                return Err(RuntimeError::diagnostic(
+                    Diagnostic::blocking(
+                        "ASTRA_RUNTIME_REPLAY_HASH_MISMATCH",
+                        "runtime replay hash checkpoint does not match the transcript",
+                    )
+                    .with_field("step", report.step.to_string())
+                    .with_field("expected_state_hash", entry.expected.state_hash.to_string())
+                    .with_field("actual_state_hash", report.state_hash.to_string()),
+                ));
+            }
         }
         let report = ReplayReport {
             state_hash: self.state_hash(),
@@ -523,12 +570,13 @@ impl RuntimeWorld {
         RuntimeSnapshot {
             config: self.config.clone(),
             package: self.package.clone(),
+            id_source: self.id_source.clone(),
             actors: self.actors.clone(),
             blackboard: self.blackboard.clone(),
             machines: self.machines.clone(),
             awaits: self.awaits.clone(),
             delayed_events: self.delayed_events.clone(),
-            events: self.events.trace().to_vec(),
+            events: self.events.clone(),
             presentation: self.presentation.clone(),
             mounted_modules: self.mounted_modules.clone(),
             step: self.step,
@@ -574,11 +622,6 @@ fn presentation_kind(command: &PresentationCommand) -> &str {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LoadReport {
     pub state_hash: Hash128,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ReplayInput {
-    pub inputs: Vec<TickInput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

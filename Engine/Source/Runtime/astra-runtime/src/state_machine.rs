@@ -218,98 +218,149 @@ impl StateMachineStore {
         id_source: &mut StableIdGenerator,
     ) -> StateMachineTickOutput {
         let mut output = StateMachineTickOutput::default();
-        for machine in &mut self.machines {
-            if machine.completed {
+        for machine_index in 0..self.machines.len() {
+            if self.machines[machine_index].completed {
                 continue;
             }
-            let Some((transition, failure_source, trigger_event)) =
-                find_transition(machine, events, actors, blackboard)
-            else {
-                continue;
-            };
-            debug!(
-                step,
-                machine_id = ?machine.definition.id,
-                from_state = ?transition.from,
-                to_state = ?transition.to,
-                action_count = transition.actions.len(),
-                "state_machine.transition.match"
-            );
+            let mut candidate_machine = self.machines[machine_index].clone();
             let mut candidate_actors = actors.clone();
             let mut candidate_blackboard = blackboard.clone();
             let mut candidate_id_source = id_source.clone();
             let mut candidate_output = StateMachineTickOutput::default();
+            let mut available_events = events.to_vec();
+            let mut visited = BTreeSet::new();
+            let mut microsteps = 0_u32;
             let mut failed = None;
-
-            for invocation in &transition.actions {
-                debug!(
-                    step,
-                    machine_id = ?machine.definition.id,
-                    action_id = %invocation.action_id,
-                    "state_machine.action.start"
+            loop {
+                if candidate_machine.completed {
+                    break;
+                }
+                let fingerprint = machine_fingerprint(
+                    &candidate_machine,
+                    &candidate_actors,
+                    &candidate_blackboard,
+                    &candidate_id_source,
+                    &available_events,
                 );
-                let Some(action) = actions.get(&invocation.action_id) else {
+                if !visited.insert(fingerprint) {
                     failed = Some(Diagnostic::blocking(
-                        "ASTRA_RUNTIME_ACTION_MISSING",
-                        format!("missing action {}", invocation.action_id),
+                        "ASTRA_RUNTIME_STATE_MACHINE_CYCLE",
+                        "state machine repeated the same deterministic microstep state",
                     ));
-                    warn!(
-                        step,
-                        machine_id = ?machine.definition.id,
-                        action_id = %invocation.action_id,
-                        diagnostic_code = "ASTRA_RUNTIME_ACTION_MISSING",
-                        "state_machine.action.missing"
+                    break;
+                }
+                if microsteps >= 1024 {
+                    failed = Some(
+                        Diagnostic::blocking(
+                            "ASTRA_RUNTIME_STATE_MACHINE_BUDGET",
+                            "state machine exceeded the microstep budget",
+                        )
+                        .with_field("max_microsteps", 1024_u32),
                     );
                     break;
+                }
+                let Some((transition, failure_source, trigger_event_index)) = find_transition(
+                    &candidate_machine,
+                    &available_events,
+                    &candidate_actors,
+                    &candidate_blackboard,
+                ) else {
+                    break;
                 };
-                let mut next_id = || candidate_id_source.next_id();
-                let mut ctx = DeterministicActionContext::new(
+                let trigger_event =
+                    trigger_event_index.and_then(|index| available_events.get(index).cloned());
+                debug!(
                     step,
-                    &mut next_id,
-                    &mut candidate_actors,
-                    &mut candidate_blackboard,
-                    &mut candidate_output.events,
-                    &mut candidate_output.presentation,
-                    &mut candidate_output.awaits,
-                    &mut candidate_output.delayed_events,
-                    &mut candidate_output.delayed_cancellations,
-                    trigger_event.clone(),
+                    machine_id = ?candidate_machine.definition.id,
+                    from_state = ?transition.from,
+                    to_state = ?transition.to,
+                    microstep = microsteps,
+                    action_count = transition.actions.len(),
+                    "state_machine.transition.match"
                 );
-                match action.run(&mut ctx, &invocation.input) {
-                    Ok(trace) => {
-                        debug!(
-                            step,
-                            machine_id = ?machine.definition.id,
-                            action_id = %trace.action_id,
-                            "state_machine.action.end"
-                        );
-                        candidate_output.trace.push(trace);
-                    }
-                    Err(err) => {
-                        failed = Some(Diagnostic::blocking(
-                            "ASTRA_RUNTIME_ACTION_FAILED",
-                            format!("{} failed: {err}", invocation.action_id),
+                let mut transition_failed = None;
+                for invocation in &transition.actions {
+                    debug!(
+                        step,
+                        machine_id = ?candidate_machine.definition.id,
+                        action_id = %invocation.action_id,
+                        "state_machine.action.start"
+                    );
+                    let Some(action) = actions.get(&invocation.action_id) else {
+                        transition_failed = Some(Diagnostic::blocking(
+                            "ASTRA_RUNTIME_ACTION_MISSING",
+                            format!("missing action {}", invocation.action_id),
                         ));
                         warn!(
                             step,
-                            machine_id = ?machine.definition.id,
+                            machine_id = ?candidate_machine.definition.id,
                             action_id = %invocation.action_id,
-                            diagnostic_code = "ASTRA_RUNTIME_ACTION_FAILED",
-                            "state_machine.action.failed"
+                            diagnostic_code = "ASTRA_RUNTIME_ACTION_MISSING",
+                            "state_machine.action.missing"
                         );
                         break;
+                    };
+                    let mut next_id = || candidate_id_source.next_id();
+                    let mut ctx = DeterministicActionContext::new(
+                        step,
+                        &mut next_id,
+                        &mut candidate_actors,
+                        &mut candidate_blackboard,
+                        &mut candidate_output.events,
+                        &mut candidate_output.presentation,
+                        &mut candidate_output.awaits,
+                        &mut candidate_output.delayed_events,
+                        &mut candidate_output.delayed_cancellations,
+                        trigger_event.clone(),
+                    );
+                    match action.run(&mut ctx, &invocation.input) {
+                        Ok(trace) => {
+                            debug!(
+                                step,
+                                machine_id = ?candidate_machine.definition.id,
+                                action_id = %trace.action_id,
+                                "state_machine.action.end"
+                            );
+                            candidate_output.trace.push(trace);
+                        }
+                        Err(err) => {
+                            transition_failed = Some(Diagnostic::blocking(
+                                "ASTRA_RUNTIME_ACTION_FAILED",
+                                format!("{} failed: {err}", invocation.action_id),
+                            ));
+                            warn!(
+                                step,
+                                machine_id = ?candidate_machine.definition.id,
+                                action_id = %invocation.action_id,
+                                diagnostic_code = "ASTRA_RUNTIME_ACTION_FAILED",
+                                "state_machine.action.failed"
+                            );
+                            break;
+                        }
                     }
                 }
+                if let Some(mut diagnostic) = transition_failed {
+                    if let Some(source) = failure_source {
+                        diagnostic.source = Some(source);
+                    }
+                    failed = Some(diagnostic);
+                    break;
+                }
+                if let Some(index) = trigger_event_index {
+                    available_events.remove(index);
+                }
+                candidate_machine.current_state = transition.to;
+                if state_is_terminal(&candidate_machine, candidate_machine.current_state) {
+                    candidate_machine.completed = true;
+                }
+                microsteps += 1;
             }
 
-            if let Some(mut diagnostic) = failed {
-                if let Some(source) = failure_source {
-                    diagnostic.source = Some(source);
-                }
+            if let Some(diagnostic) = failed {
                 debug!(
                     step,
-                    machine_id = ?machine.definition.id,
-                    current_state = ?machine.current_state,
+                    machine_id = ?candidate_machine.definition.id,
+                    current_state = ?candidate_machine.current_state,
                     diagnostic_code = %diagnostic.code,
                     "state_machine.transition.rollback"
                 );
@@ -322,14 +373,12 @@ impl StateMachineStore {
             *id_source = candidate_id_source;
             self.trace.extend(candidate_output.trace.iter().cloned());
             output.append(candidate_output);
-            machine.current_state = transition.to;
-            if state_is_terminal(machine, machine.current_state) {
-                machine.completed = true;
-            }
+            self.machines[machine_index] = candidate_machine;
             debug!(
                 step,
-                machine_id = ?machine.definition.id,
-                current_state = ?machine.current_state,
+                machine_id = ?self.machines[machine_index].definition.id,
+                current_state = ?self.machines[machine_index].current_state,
+                microsteps,
                 "state_machine.transition.commit"
             );
         }
@@ -359,42 +408,62 @@ fn find_transition(
     events: &[RuntimeEvent],
     actors: &ActorStore,
     blackboard: &Blackboard,
-) -> Option<(
-    TransitionDefinition,
-    Option<SourceRef>,
-    Option<RuntimeEvent>,
-)> {
+) -> Option<(TransitionDefinition, Option<SourceRef>, Option<usize>)> {
     let actor_snapshots = actors.actor_snapshots();
-    let mut best: Option<(&TransitionDefinition, Option<RuntimeEvent>)> = None;
+    let mut best: Option<(&TransitionDefinition, Option<usize>)> = None;
     for transition in machine
         .definition
         .transitions
         .iter()
         .filter(|transition| transition.from == machine.current_state)
     {
-        let trigger_event = match transition.guard {
+        let trigger_event_index = match transition.guard {
             GuardExpr::Always => Some(None),
-            _ => events.iter().find_map(|event| {
+            _ if !transition.guard.depends_on_event() => transition
+                .guard
+                .evaluate(None, &actor_snapshots, blackboard)
+                .then_some(None),
+            _ => events.iter().enumerate().find_map(|(index, event)| {
                 transition
                     .guard
-                    .evaluate(event, &actor_snapshots, blackboard)
-                    .then(|| Some(event.clone()))
+                    .evaluate(Some(event), &actor_snapshots, blackboard)
+                    .then_some(Some(index))
             }),
         };
-        if let Some(trigger_event) = trigger_event {
+        if let Some(trigger_event_index) = trigger_event_index {
             match best {
                 Some((current, _)) if transition.priority <= current.priority => {}
-                _ => best = Some((transition, trigger_event)),
+                _ => best = Some((transition, trigger_event_index)),
             }
         }
     }
-    best.map(|(transition, trigger_event)| {
+    best.map(|(transition, trigger_event_index)| {
         (
             transition.clone(),
             transition.source_ref.clone(),
-            trigger_event,
+            trigger_event_index,
         )
     })
+}
+
+fn machine_fingerprint(
+    machine: &StateMachineInstance,
+    actors: &ActorStore,
+    blackboard: &Blackboard,
+    id_source: &StableIdGenerator,
+    events: &[RuntimeEvent],
+) -> astra_core::Hash128 {
+    astra_core::Hash128::from_blake3(
+        &postcard::to_allocvec(&(
+            machine.current_state,
+            machine.completed,
+            actors,
+            blackboard,
+            id_source,
+            events,
+        ))
+        .expect("state machine candidate must serialize for cycle detection"),
+    )
 }
 
 fn state_is_terminal(machine: &StateMachineInstance, state_id: StableId) -> bool {
@@ -447,13 +516,13 @@ pub struct StateMachineSnapshot {
 impl GuardExpr {
     fn evaluate(
         &self,
-        event: &RuntimeEvent,
+        event: Option<&RuntimeEvent>,
         actors: &[crate::ActorSnapshot],
         blackboard: &Blackboard,
     ) -> bool {
         match self {
             GuardExpr::Always => true,
-            GuardExpr::EventIs { kind } => event.payload.kind == *kind,
+            GuardExpr::EventIs { kind } => event.is_some_and(|event| event.payload.kind == *kind),
             GuardExpr::BlackboardEquals { key, value } => blackboard.get(key) == Some(value),
             GuardExpr::HasActorTag { actor, tag } => actors
                 .iter()
@@ -465,6 +534,19 @@ impl GuardExpr {
                 .iter()
                 .any(|term| term.evaluate(event, actors, blackboard)),
             GuardExpr::Not { term } => !term.evaluate(event, actors, blackboard),
+        }
+    }
+
+    fn depends_on_event(&self) -> bool {
+        match self {
+            GuardExpr::EventIs { .. } => true,
+            GuardExpr::And { terms } | GuardExpr::Or { terms } => {
+                terms.iter().any(GuardExpr::depends_on_event)
+            }
+            GuardExpr::Not { term } => term.depends_on_event(),
+            GuardExpr::Always
+            | GuardExpr::BlackboardEquals { .. }
+            | GuardExpr::HasActorTag { .. } => false,
         }
     }
 }

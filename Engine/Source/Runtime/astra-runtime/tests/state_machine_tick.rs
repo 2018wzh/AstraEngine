@@ -433,6 +433,137 @@ fn terminal_state_marks_machine_completed_and_blocks_future_ticks() {
     assert_eq!(trace, vec!["astra.core.set_blackboard"]);
 }
 
+#[test]
+fn state_machine_runs_transitions_until_it_reaches_a_stable_state() {
+    let mut world =
+        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let actor = world.create_actor("stable", vec![]);
+    let start = StableId::deterministic_v7(7, 1, 11);
+    let middle = StableId::deterministic_v7(7, 2, 11);
+    let done = StableId::deterministic_v7(7, 3, 11);
+    world
+        .add_state_machine(StateMachineDefinition {
+            id: StableId::deterministic_v7(7, 4, 11),
+            owner: actor,
+            states: vec![
+                StateDefinition {
+                    id: start,
+                    name: "start".to_string(),
+                    terminal: false,
+                },
+                StateDefinition {
+                    id: middle,
+                    name: "middle".to_string(),
+                    terminal: false,
+                },
+                StateDefinition {
+                    id: done,
+                    name: "done".to_string(),
+                    terminal: true,
+                },
+            ],
+            transitions: vec![
+                TransitionDefinition {
+                    from: start,
+                    to: middle,
+                    guard: GuardExpr::Always,
+                    actions: vec![],
+                    priority: 0,
+                    source_ref: None,
+                },
+                TransitionDefinition {
+                    from: middle,
+                    to: done,
+                    guard: GuardExpr::Always,
+                    actions: vec![],
+                    priority: 0,
+                    source_ref: None,
+                },
+            ],
+            initial_state: start,
+        })
+        .unwrap();
+
+    world
+        .tick(TickInput {
+            fixed_step: 1,
+            delta_ns: 16_666_667,
+            seed: 0,
+        })
+        .unwrap();
+
+    let machine = world.debug_session().state_machines(actor).remove(0);
+    assert_eq!(machine.current_state, done);
+    assert!(machine.completed);
+}
+
+#[test]
+fn state_machine_cycle_blocks_without_committing_partial_progress() {
+    let mut world =
+        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let actor = world.create_actor("cycle", vec![]);
+    let left = StableId::deterministic_v7(8, 1, 11);
+    let right = StableId::deterministic_v7(8, 2, 11);
+    world
+        .add_state_machine(StateMachineDefinition {
+            id: StableId::deterministic_v7(8, 3, 11),
+            owner: actor,
+            states: vec![
+                StateDefinition {
+                    id: left,
+                    name: "left".to_string(),
+                    terminal: false,
+                },
+                StateDefinition {
+                    id: right,
+                    name: "right".to_string(),
+                    terminal: false,
+                },
+            ],
+            transitions: vec![
+                TransitionDefinition {
+                    from: left,
+                    to: right,
+                    guard: GuardExpr::Always,
+                    actions: vec![ActionInvocation {
+                        action_id: "astra.core.set_blackboard".to_string(),
+                        input: set_blackboard_input("cycle", "partial"),
+                    }],
+                    priority: 0,
+                    source_ref: None,
+                },
+                TransitionDefinition {
+                    from: right,
+                    to: left,
+                    guard: GuardExpr::Always,
+                    actions: vec![],
+                    priority: 0,
+                    source_ref: None,
+                },
+            ],
+            initial_state: left,
+        })
+        .unwrap();
+
+    let report = world
+        .tick(TickInput {
+            fixed_step: 1,
+            delta_ns: 16_666_667,
+            seed: 0,
+        })
+        .unwrap();
+
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_STATE_MACHINE_CYCLE"));
+    assert_eq!(
+        world.debug_session().state_machines(actor)[0].current_state,
+        left
+    );
+    assert_eq!(world.snapshot().blackboard.get("cycle"), None);
+}
+
 fn set_blackboard_input(key: &str, value: &str) -> BTreeMap<String, BlackboardValue> {
     let mut input = BTreeMap::new();
     input.insert("key".to_string(), BlackboardValue::from(key));

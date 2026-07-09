@@ -81,7 +81,7 @@ impl<'de> Deserialize<'de> for StableId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct StableIdGenerator {
     seed: u64,
     step: u64,

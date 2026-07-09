@@ -1,5 +1,9 @@
-use astra_core::{SchemaMigrationRegistry, SchemaVersion};
-use astra_runtime::{PackageHandle, RuntimeConfig, RuntimeWorld, SaveRequest, TickInput};
+use astra_core::{SchemaMigrationRegistry, SchemaVersion, StableId};
+use astra_runtime::{
+    EventId, EventPayload, EventSource, PackageHandle, PlayerInput, ReplayHashCheckpoint,
+    ReplayTick, RuntimeConfig, RuntimeEvent, RuntimeReplayTranscript, RuntimeWorld, SaveRequest,
+    TickInput,
+};
 
 #[test]
 fn save_replay_loads_hash_and_blocks_missing_migrator() {
@@ -64,4 +68,119 @@ fn save_load_rejects_footer_hash_mismatch() {
     let mut loaded =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
     assert!(loaded.load(save).is_err());
+}
+
+#[test]
+fn save_load_continues_the_stable_id_sequence() {
+    let config = RuntimeConfig {
+        seed: 23,
+        required_slots: vec![],
+    };
+    let mut uninterrupted = RuntimeWorld::create(config.clone(), PackageHandle::default()).unwrap();
+    uninterrupted.create_actor("before-save", vec![]);
+    uninterrupted
+        .tick(TickInput {
+            fixed_step: 7,
+            delta_ns: 16_666_667,
+            seed: config.seed,
+        })
+        .unwrap();
+    let save = uninterrupted.save(SaveRequest::default()).unwrap();
+    let expected = uninterrupted.create_actor("after-save", vec![]);
+
+    let mut restored = RuntimeWorld::create(config, PackageHandle::default()).unwrap();
+    restored.load(save).unwrap();
+    let actual = restored.create_actor("after-save", vec![]);
+
+    assert_eq!(actual, expected);
+    assert_eq!(restored.state_hash(), uninterrupted.state_hash());
+}
+
+#[test]
+fn save_load_preserves_pending_events_trace_and_sequence() {
+    let config = RuntimeConfig {
+        seed: 29,
+        required_slots: vec![],
+    };
+    let mut world = RuntimeWorld::create(config.clone(), PackageHandle::default()).unwrap();
+    world.enqueue_event(RuntimeEvent {
+        id: EventId(StableId::deterministic_v7(2, 77, config.seed)),
+        source: EventSource::Runtime,
+        step: 2,
+        sequence: 77,
+        payload: EventPayload::new("future.event"),
+    });
+    world
+        .tick(TickInput {
+            fixed_step: 1,
+            delta_ns: 16_666_667,
+            seed: config.seed,
+        })
+        .unwrap();
+    let save = world.save(SaveRequest::default()).unwrap();
+
+    let mut restored = RuntimeWorld::create(config, PackageHandle::default()).unwrap();
+    restored.load(save).unwrap();
+    assert_eq!(restored.event_hash(), world.event_hash());
+    restored.enqueue_event(RuntimeEvent {
+        id: EventId(StableId::deterministic_v7(2, 78, 29)),
+        source: EventSource::Runtime,
+        step: 2,
+        sequence: 99,
+        payload: EventPayload::new("second.event"),
+    });
+
+    restored
+        .tick(TickInput {
+            fixed_step: 2,
+            delta_ns: 16_666_667,
+            seed: 29,
+        })
+        .unwrap();
+    let trace = restored.debug_session().event_trace();
+    assert_eq!(trace.len(), 2);
+    assert_eq!(trace[0].payload.kind, "future.event");
+    assert_eq!(trace[0].sequence, 0);
+    assert_eq!(trace[1].payload.kind, "second.event");
+    assert_eq!(trace[1].sequence, 1);
+}
+
+#[test]
+fn replay_consumes_checkpoint_and_ordered_player_input_transcript() {
+    let config = RuntimeConfig {
+        seed: 31,
+        required_slots: vec![],
+    };
+    let mut recorded = RuntimeWorld::create(config, PackageHandle::default()).unwrap();
+    let checkpoint = recorded.snapshot();
+    let player_input = PlayerInput {
+        kind: "player.advance".to_string(),
+        payload: EventPayload::new("player.advance"),
+    };
+    recorded.apply_input(player_input.clone()).unwrap();
+    let tick = TickInput {
+        fixed_step: 1,
+        delta_ns: 16_666_667,
+        seed: 31,
+    };
+    let expected = recorded.tick(tick).unwrap();
+
+    let transcript = RuntimeReplayTranscript {
+        schema: "astra.runtime_replay_transcript.v1".to_string(),
+        checkpoint,
+        ticks: vec![ReplayTick {
+            tick,
+            player_inputs: vec![player_input],
+            await_results: vec![],
+            provider_outputs: vec![],
+            expected: ReplayHashCheckpoint::from(&expected),
+        }],
+    };
+    let mut replayed =
+        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let report = replayed.replay(transcript).unwrap();
+
+    assert_eq!(report.state_hash, expected.state_hash);
+    assert_eq!(report.event_hash, expected.event_hash);
+    assert_eq!(report.presentation_hash, expected.presentation_hash);
 }
