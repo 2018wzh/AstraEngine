@@ -1,8 +1,9 @@
 use astra_core::StableId;
 use astra_runtime::{
-    validate_state_machine, ActionInvocation, BlackboardValue, EventPayload, EventSource,
-    GuardExpr, PackageHandle, PresentationCommand, RuntimeConfig, RuntimeWorld, StateDefinition,
-    StateMachineDefinition, StateMachineValidationReport, TickInput, TransitionDefinition,
+    validate_state_machine, ActionInvocation, ActionRegistry, BlackboardValue, EventPayload,
+    EventSource, GuardExpr, PackageHandle, PresentationCommand, RuntimeConfig, RuntimeWorld,
+    SetBlackboardAction, StateDefinition, StateMachineDefinition, StateMachineValidationReport,
+    TickInput, TransitionDefinition,
 };
 use std::collections::BTreeMap;
 
@@ -562,6 +563,18 @@ fn state_machine_cycle_blocks_without_committing_partial_progress() {
         left
     );
     assert_eq!(world.snapshot().blackboard.get("cycle"), None);
+}
+
+#[test]
+fn action_registry_rejects_duplicate_action_ids() {
+    let mut registry = ActionRegistry::default();
+    registry.register(SetBlackboardAction).unwrap();
+
+    let error = registry
+        .register_with_provider("astra.other", SetBlackboardAction)
+        .unwrap_err();
+
+    assert!(error.to_string().contains("ASTRA_RUNTIME_ACTION_CONFLICT"));
 }
 
 fn set_blackboard_input(key: &str, value: &str) -> BTreeMap<String, BlackboardValue> {

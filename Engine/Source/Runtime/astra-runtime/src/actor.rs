@@ -1,9 +1,10 @@
-use astra_core::{SchemaId, SchemaVersion, StableId};
+use astra_core::{Hash256, SchemaId, SchemaVersion, StableId};
 use indexmap::IndexMap;
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::BlackboardValue;
+use crate::RuntimeError;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
@@ -27,9 +28,7 @@ pub struct ActorSnapshot {
 pub struct ComponentSnapshot {
     pub component_id: ComponentId,
     pub actor_id: ActorId,
-    pub schema: SchemaId,
-    pub version: SchemaVersion,
-    pub data: BlackboardValue,
+    pub payload: RuntimeComponentPayload,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -44,9 +43,53 @@ pub struct ActorRecord {
 pub struct ComponentRecord {
     pub component_id: ComponentId,
     pub actor_id: ActorId,
+    pub payload: RuntimeComponentPayload,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimePayloadCodec {
+    Postcard,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeComponentPayload {
     pub schema: SchemaId,
     pub version: SchemaVersion,
-    pub data: BlackboardValue,
+    pub codec: RuntimePayloadCodec,
+    pub hash: Hash256,
+    pub bytes: Vec<u8>,
+}
+
+impl RuntimeComponentPayload {
+    pub fn postcard<T: Serialize>(
+        schema: impl Into<SchemaId>,
+        version: SchemaVersion,
+        value: &T,
+    ) -> Result<Self, RuntimeError> {
+        let bytes = postcard::to_allocvec(value)
+            .map_err(|err| RuntimeError::message(format!("encode runtime component: {err}")))?;
+        Ok(Self {
+            schema: schema.into(),
+            version,
+            codec: RuntimePayloadCodec::Postcard,
+            hash: Hash256::from_sha256(&bytes),
+            bytes,
+        })
+    }
+
+    pub fn decode<T: DeserializeOwned>(&self) -> Result<T, RuntimeError> {
+        if Hash256::from_sha256(&self.bytes) != self.hash {
+            return Err(RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_HASH",
+                "runtime component payload hash does not match its bytes",
+            )));
+        }
+        match self.codec {
+            RuntimePayloadCodec::Postcard => postcard::from_bytes(&self.bytes)
+                .map_err(|err| RuntimeError::message(format!("decode runtime component: {err}"))),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -93,6 +136,10 @@ impl ActorStore {
         self.components.get(&component_id)
     }
 
+    pub fn component_mut(&mut self, component_id: ComponentId) -> Option<&mut ComponentRecord> {
+        self.components.get_mut(&component_id)
+    }
+
     pub fn actor_snapshots(&self) -> Vec<ActorSnapshot> {
         let mut actors: Vec<_> = self
             .actors
@@ -116,9 +163,7 @@ impl ActorStore {
             .map(|component| ComponentSnapshot {
                 component_id: component.component_id,
                 actor_id: component.actor_id,
-                schema: component.schema.clone(),
-                version: component.version,
-                data: component.data.clone(),
+                payload: component.payload.clone(),
             })
             .collect();
         components.sort_by_key(|component| component.component_id);

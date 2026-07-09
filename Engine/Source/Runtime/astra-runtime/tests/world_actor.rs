@@ -1,7 +1,15 @@
-use astra_core::StableId;
+use astra_core::{SchemaVersion, StableId};
 use astra_runtime::{
-    ActorId, BlackboardValue, PackageHandle, RuntimeConfig, RuntimeWorld, SaveRequest, TickInput,
+    ActorId, PackageHandle, RuntimeComponentPayload, RuntimeConfig, RuntimeWorld, SaveRequest,
+    TickInput,
 };
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct TestComponent {
+    status: String,
+    count: u32,
+}
 
 #[test]
 fn world_actor_creates_component_and_stable_snapshot_hash() {
@@ -15,11 +23,14 @@ fn world_actor_creates_component_and_stable_snapshot_hash() {
     .unwrap();
     world.mount_module("presentation", "astra.fixture.headless_presentation");
     let actor = world.create_actor("hero", vec!["player".to_string()]);
-    world
+    let component = world
         .attach_component(
             actor,
             "astra.test.component",
-            BlackboardValue::from("ready"),
+            &TestComponent {
+                status: "ready".to_string(),
+                count: 1,
+            },
         )
         .unwrap();
     let report = world
@@ -34,8 +45,34 @@ fn world_actor_creates_component_and_stable_snapshot_hash() {
     assert_eq!(debug.actors().len(), 1);
     assert_eq!(debug.components(actor).len(), 1);
     assert_eq!(report.state_hash, world.state_hash());
+    assert_eq!(
+        world.read_component::<TestComponent>(component).unwrap(),
+        TestComponent {
+            status: "ready".to_string(),
+            count: 1,
+        }
+    );
+    world
+        .replace_component(
+            component,
+            &TestComponent {
+                status: "running".to_string(),
+                count: 2,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        world
+            .read_component::<TestComponent>(component)
+            .unwrap()
+            .count,
+        2
+    );
+    let mutations = world.debug_session().mutation_trace();
+    assert_eq!(mutations.len(), 1);
+    assert_eq!(mutations[0].component_id, component);
+    assert_ne!(mutations[0].before_hash, mutations[0].after_hash);
 
-    let component = debug.components(actor)[0].component_id;
     assert!(world.detach_component(component));
     assert_eq!(world.debug_session().components(actor).len(), 0);
     assert!(world.remove_actor(actor));
@@ -51,11 +88,24 @@ fn world_actor_rejects_component_for_missing_actor() {
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
     let missing = ActorId(StableId::deterministic_v7(1, 2, 3));
     let err = world
-        .attach_component(
-            missing,
-            "astra.test.component",
-            BlackboardValue::from("orphan"),
-        )
+        .attach_component(missing, "astra.test.component", &"orphan")
         .unwrap_err();
     assert!(err.to_string().contains("ASTRA_RUNTIME_ACTOR_MISSING"));
+}
+
+#[test]
+fn component_payload_rejects_hash_mismatch() {
+    let mut payload = RuntimeComponentPayload::postcard(
+        "astra.test.component",
+        SchemaVersion::default(),
+        &TestComponent {
+            status: "ready".to_string(),
+            count: 1,
+        },
+    )
+    .unwrap();
+    payload.bytes[0] ^= 0x01;
+
+    let error = payload.decode::<TestComponent>().unwrap_err();
+    assert!(error.to_string().contains("ASTRA_RUNTIME_COMPONENT_HASH"));
 }

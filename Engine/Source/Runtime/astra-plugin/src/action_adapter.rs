@@ -33,19 +33,21 @@ impl LoadedFfiAction {
         &self.provider_id
     }
 
-    pub fn install(&self, world: &mut RuntimeWorld) {
+    pub fn install(&self, world: &mut RuntimeWorld) -> Result<(), PluginError> {
         debug!(
             provider_id = %self.provider_id,
             action_id = %self.descriptor.id,
             "plugin.action.register"
         );
-        world.register_action(
-            self.provider_id.clone(),
-            FfiRuntimeAction {
-                descriptor: self.descriptor.clone(),
-                invoke: self.invoke,
-            },
-        );
+        world
+            .register_action(
+                self.provider_id.clone(),
+                FfiRuntimeAction {
+                    descriptor: self.descriptor.clone(),
+                    invoke: self.invoke,
+                },
+            )
+            .map_err(|err| PluginError::Load(err.to_string()))
     }
 }
 
@@ -54,7 +56,7 @@ pub fn install_actions(
     world: &mut RuntimeWorld,
 ) -> Result<(), PluginError> {
     for action in actions {
-        action.install(world);
+        action.install(world)?;
     }
     Ok(())
 }

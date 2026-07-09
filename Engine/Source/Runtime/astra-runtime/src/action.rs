@@ -2,12 +2,14 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use astra_core::{Diagnostic, SchemaVersion, StableId};
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     ActorId, ActorRecord, ActorStore, AwaitKind, AwaitReplayPolicy, AwaitToken, AwaitTokenId,
     Blackboard, BlackboardValue, ComponentId, ComponentRecord, DelayedEventId, EventId,
-    EventPayload, EventSource, PresentationCommand, RuntimeError, RuntimeEvent, ScheduledEvent,
+    EventPayload, EventSource, PresentationCommand, RuntimeComponentPayload, RuntimeError,
+    RuntimeEvent, RuntimeMutationRecord, ScheduledEvent,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -110,6 +112,8 @@ pub struct DeterministicActionContext<'a> {
     awaits: &'a mut Vec<AwaitToken>,
     delayed_events: &'a mut Vec<ScheduledEvent>,
     delayed_cancellations: &'a mut Vec<DelayedEventId>,
+    mutations: &'a mut Vec<RuntimeMutationRecord>,
+    source: String,
     trigger_event: Option<RuntimeEvent>,
 }
 
@@ -125,6 +129,8 @@ impl<'a> DeterministicActionContext<'a> {
         awaits: &'a mut Vec<AwaitToken>,
         delayed_events: &'a mut Vec<ScheduledEvent>,
         delayed_cancellations: &'a mut Vec<DelayedEventId>,
+        mutations: &'a mut Vec<RuntimeMutationRecord>,
+        source: String,
         trigger_event: Option<RuntimeEvent>,
     ) -> Self {
         Self {
@@ -137,6 +143,8 @@ impl<'a> DeterministicActionContext<'a> {
             awaits,
             delayed_events,
             delayed_cancellations,
+            mutations,
+            source,
             trigger_event,
         }
     }
@@ -182,9 +190,11 @@ impl<'a> DeterministicActionContext<'a> {
         if self.actors.attach_component(ComponentRecord {
             component_id,
             actor_id,
-            schema: schema.into(),
-            version: SchemaVersion::default(),
-            data,
+            payload: RuntimeComponentPayload::postcard(
+                schema.into(),
+                SchemaVersion::default(),
+                &data,
+            )?,
         }) {
             Ok(component_id)
         } else {
@@ -201,6 +211,50 @@ impl<'a> DeterministicActionContext<'a> {
 
     pub fn detach_component(&mut self, component_id: ComponentId) -> bool {
         self.actors.detach_component(component_id).is_some()
+    }
+
+    pub fn read_component<T: DeserializeOwned>(
+        &self,
+        component_id: ComponentId,
+    ) -> Result<T, RuntimeError> {
+        let component = self.actors.component(component_id).ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_MISSING",
+                "runtime component does not exist",
+            ))
+        })?;
+        component.payload.decode()
+    }
+
+    pub fn replace_component<T: Serialize>(
+        &mut self,
+        component_id: ComponentId,
+        data: &T,
+    ) -> Result<(), RuntimeError> {
+        let component = self.actors.component_mut(component_id).ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_MISSING",
+                "runtime component does not exist",
+            ))
+        })?;
+        let before_hash = component.payload.hash;
+        let schema = component.payload.schema.clone();
+        let payload = RuntimeComponentPayload::postcard(
+            component.payload.schema.clone(),
+            component.payload.version,
+            data,
+        )?;
+        let after_hash = payload.hash;
+        component.payload = payload;
+        self.mutations.push(RuntimeMutationRecord {
+            step: self.step,
+            component_id,
+            schema,
+            before_hash,
+            after_hash,
+            source: self.source.clone(),
+        });
+        Ok(())
     }
 
     pub fn emit_event(&mut self, source: EventSource, payload: EventPayload) {
@@ -322,23 +376,45 @@ pub struct ActionRegistry {
 }
 
 impl ActionRegistry {
-    pub fn register<A: RuntimeAction + 'static>(&mut self, action: A) {
-        self.register_with_provider("astra.core", action);
+    pub fn register<A: RuntimeAction + 'static>(&mut self, action: A) -> Result<(), RuntimeError> {
+        self.register_with_provider("astra.core", action)
     }
 
     pub fn register_with_provider<A: RuntimeAction + 'static>(
         &mut self,
         provider_id: impl Into<String>,
         action: A,
-    ) {
+    ) -> Result<(), RuntimeError> {
         let provider_id = provider_id.into();
+        let descriptor = action.descriptor();
+        if descriptor.id.trim().is_empty()
+            || descriptor.input_schema.trim().is_empty()
+            || descriptor.output_schema.trim().is_empty()
+        {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_ACTION_DESCRIPTOR",
+                "action descriptor requires non-empty id and schemas",
+            )));
+        }
+        if let Some(existing) = self.actions.get(&descriptor.id) {
+            return Err(RuntimeError::diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_ACTION_CONFLICT",
+                    "action id is already registered",
+                )
+                .with_field("action_id", &descriptor.id)
+                .with_field("selected_provider", &existing.provider_id)
+                .with_field("conflicting_provider", &provider_id),
+            ));
+        }
         self.actions.insert(
-            action.descriptor().id.clone(),
+            descriptor.id,
             RegisteredAction {
                 provider_id,
                 action: Arc::new(action),
             },
         );
+        Ok(())
     }
 
     pub fn unregister_provider(&mut self, provider_id: &str) {

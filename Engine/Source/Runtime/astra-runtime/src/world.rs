@@ -5,17 +5,19 @@ use astra_core::{
     StableIdGenerator,
 };
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
 use crate::{
     ActionRegistry, ActorId, ActorRecord, ActorSnapshot, ActorStore, AwaitQueue, AwaitResult,
-    AwaitToken, Blackboard, BlackboardValue, ComponentId, ComponentRecord, ComponentSnapshot,
-    CreateAwaitAction, DelayedEventId, DelayedEventQueue, EmitEventAction, EventId, EventPayload,
-    EventQueue, EventSource, PresentationAction, PresentationCommand, PresentationRecord,
-    RuntimeAction, RuntimeEvent, RuntimeReplayTranscript, SaveBlob, SaveRequest, ScheduledEvent,
-    SetBlackboardAction, StateMachineDefinition, StateMachineSnapshot, StateMachineStore,
+    AwaitToken, Blackboard, ComponentId, ComponentRecord, ComponentSnapshot, CreateAwaitAction,
+    DelayedEventId, DelayedEventQueue, EmitEventAction, EventId, EventPayload, EventQueue,
+    EventSource, PresentationAction, PresentationCommand, PresentationRecord, RuntimeAction,
+    RuntimeComponentPayload, RuntimeEvent, RuntimeMutationRecord, RuntimeReplayTranscript,
+    SaveBlob, SaveRequest, ScheduledEvent, SetBlackboardAction, StateMachineDefinition,
+    StateMachineSnapshot, StateMachineStore,
 };
 
 #[derive(Debug, Error)]
@@ -90,6 +92,7 @@ pub struct RuntimeSnapshot {
     pub delayed_events: DelayedEventQueue,
     pub events: EventQueue,
     pub presentation: Vec<PresentationRecord>,
+    pub mutations: Vec<RuntimeMutationRecord>,
     pub mounted_modules: BTreeMap<String, String>,
     pub step: u64,
 }
@@ -106,6 +109,7 @@ pub struct RuntimeWorld {
     machines: StateMachineStore,
     actions: ActionRegistry,
     presentation: Vec<PresentationRecord>,
+    mutations: Vec<RuntimeMutationRecord>,
     diagnostics: Vec<Diagnostic>,
     mounted_modules: BTreeMap<String, String>,
     step: u64,
@@ -114,10 +118,10 @@ pub struct RuntimeWorld {
 impl RuntimeWorld {
     pub fn create(config: RuntimeConfig, package: PackageHandle) -> Result<Self, RuntimeError> {
         let mut actions = ActionRegistry::default();
-        actions.register(SetBlackboardAction);
-        actions.register(EmitEventAction);
-        actions.register(CreateAwaitAction);
-        actions.register(PresentationAction);
+        actions.register(SetBlackboardAction)?;
+        actions.register(EmitEventAction)?;
+        actions.register(CreateAwaitAction)?;
+        actions.register(PresentationAction)?;
         info!(
             seed = config.seed,
             required_slot_count = config.required_slots.len(),
@@ -137,6 +141,7 @@ impl RuntimeWorld {
             machines: StateMachineStore::default(),
             actions,
             presentation: Vec::new(),
+            mutations: Vec::new(),
             diagnostics: Vec::new(),
             mounted_modules: BTreeMap::new(),
             step: 0,
@@ -154,7 +159,7 @@ impl RuntimeWorld {
         &mut self,
         provider_id: impl Into<String>,
         action: A,
-    ) {
+    ) -> Result<(), RuntimeError> {
         let provider_id = provider_id.into();
         let action_id = action.descriptor().id;
         info!(
@@ -162,7 +167,7 @@ impl RuntimeWorld {
             action_id = %action_id,
             "runtime.action.register"
         );
-        self.actions.register_with_provider(provider_id, action);
+        self.actions.register_with_provider(provider_id, action)
     }
 
     pub fn unregister_action_provider(&mut self, provider_id: &str) {
@@ -182,20 +187,20 @@ impl RuntimeWorld {
         actor_id
     }
 
-    pub fn attach_component(
+    pub fn attach_component<T: Serialize>(
         &mut self,
         actor_id: ActorId,
         schema: impl Into<SchemaId>,
-        data: BlackboardValue,
+        data: &T,
     ) -> Result<ComponentId, RuntimeError> {
         let component_id = ComponentId(self.next_id());
         let schema = schema.into();
+        let payload =
+            RuntimeComponentPayload::postcard(schema.clone(), SchemaVersion::default(), data)?;
         let attached = self.actors.attach_component(ComponentRecord {
             component_id,
             actor_id,
-            schema: schema.clone(),
-            version: SchemaVersion::default(),
-            data,
+            payload,
         });
         if attached {
             debug!(
@@ -217,6 +222,50 @@ impl RuntimeWorld {
             );
             Err(RuntimeError::diagnostic(diagnostic))
         }
+    }
+
+    pub fn read_component<T: DeserializeOwned>(
+        &self,
+        component_id: ComponentId,
+    ) -> Result<T, RuntimeError> {
+        let component = self.actors.component(component_id).ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_MISSING",
+                "runtime component does not exist",
+            ))
+        })?;
+        component.payload.decode()
+    }
+
+    pub fn replace_component<T: Serialize>(
+        &mut self,
+        component_id: ComponentId,
+        data: &T,
+    ) -> Result<(), RuntimeError> {
+        let component = self.actors.component_mut(component_id).ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_MISSING",
+                "runtime component does not exist",
+            ))
+        })?;
+        let before_hash = component.payload.hash;
+        let schema = component.payload.schema.clone();
+        let payload = RuntimeComponentPayload::postcard(
+            component.payload.schema.clone(),
+            component.payload.version,
+            data,
+        )?;
+        let after_hash = payload.hash;
+        component.payload = payload;
+        self.mutations.push(RuntimeMutationRecord {
+            step: self.step,
+            component_id,
+            schema,
+            before_hash,
+            after_hash,
+            source: "runtime.api".to_string(),
+        });
+        Ok(())
     }
 
     pub fn remove_actor(&mut self, actor_id: ActorId) -> bool {
@@ -447,6 +496,7 @@ impl RuntimeWorld {
         for command in output.presentation {
             self.emit_presentation(command);
         }
+        self.mutations.extend(output.mutations);
         let report = TickReport {
             step: input.fixed_step,
             state_hash: self.state_hash(),
@@ -506,6 +556,7 @@ impl RuntimeWorld {
         self.delayed_events = snapshot.delayed_events;
         self.events = snapshot.events;
         self.presentation = snapshot.presentation;
+        self.mutations = snapshot.mutations;
         self.mounted_modules = snapshot.mounted_modules;
         self.step = snapshot.step;
     }
@@ -578,6 +629,7 @@ impl RuntimeWorld {
             delayed_events: self.delayed_events.clone(),
             events: self.events.clone(),
             presentation: self.presentation.clone(),
+            mutations: self.mutations.clone(),
             mounted_modules: self.mounted_modules.clone(),
             step: self.step,
         }
@@ -654,5 +706,9 @@ impl RuntimeDebugSession<'_> {
 
     pub fn presentation_trace(&self) -> Vec<PresentationRecord> {
         self.world.presentation.clone()
+    }
+
+    pub fn mutation_trace(&self) -> Vec<RuntimeMutationRecord> {
+        self.world.mutations.clone()
     }
 }
