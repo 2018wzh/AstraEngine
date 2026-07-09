@@ -2,7 +2,7 @@
 
 Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astra` 仍是 canonical story source；AstraVN Core 持有 VN 权威语义，Luau policy 只处理表现、系统页和复杂演出。AstraVN 已迁到 `Engine/Source/Modules/AstraVN/` 并拆成多个功能 crate；`astra-vn` 只保留 Rust ABI dylib facade 和兼容 re-export。`NativeVnRuntimeProvider` 已作为同级 gameplay runtime provider 接入，AstraVN 仍保持 VN 语义，不作为 AstraEMU 或 AstraRPG 的基类。
 
-当前 Stage 3 是 `IN_PROGRESS`，不是 `DONE`。已落地的 slice 包括基础 `.astra` parser/compiler、duplicate id / target / reachability blocking diagnostic、`CompiledStory`、Story/Variable/Command manifest、`VnRuntimeState`、call/return stack、route flags、backlog/read-state/voice replay、Runtime save container 中的 `vn.runtime_state`/`vn.policy_state`、save/load、auto/skip/config/unlock system state、`mlua` sandbox、mutation trace、rollback scope/playback、command/query/trace capability 与 serializable snapshot policy、policy bundle manifest/source cache/hash gate、VN extension binding manifest、standard command manifest、commercial baseline manifest feature gate、presentation provider manifest/filter fallback/wait capability gate、movie/voice/timeline await state slice、StageModel/VideoLayer/AudioCommand/Timeline lifecycle slice、headless presentation execution、FilterGraph CPU execution、AdvancedVN opt-in profile、SystemStoryManifest 必需入口和 policy binding、Graph/Timeline metadata validation、NativeVN sample cook/package/full playthrough、Windows/Web standalone bundle、Windows bundle 内 `AstraPlayer.exe --route-scenario` route report、Web browser host route report、bundle 内脱敏 `AstraPlayer.mount_policy.json`、VN package sections、VN Scenario DSL slice、Windows `mount_probes`/route-bound `mount_assets` + `--mount-root` local probe、project-level `package_sections`、`vn.compiled_story` manifest evidence/`vn.profile_manifest`/`vn.policy_bundle`/`vn.extension_bindings`/`vn.standard_commands`/`vn.presentation_provider`/`vn.commercial_baseline`/`vn.system_ui_profile`/`vn.advanced_presentation` release gate，以及 `runtime_provider.binding`、`runtime_provider.native_vn`、provider DTO+FFI smoke、target-level `runtime_provider: native_vn`、`provider.policy` runtime evidence 和 selected-provider scenario runner path。缺口仍是 Web live player automation、TsuiNoSora full-playable Windows route playback、完整 Director/Shockwave cast parser/source-map reader、真实商业全量 route extraction、真实商业 NativeVN payload 写入和正式 release signoff。
+当前 Stage 3 是 `IN_PROGRESS`，不是 `DONE`。已落地的 slice 包括基础 `.astra` line parser/compiler、duplicate id / target / reachability blocking diagnostic、`CompiledStory`、Story/Variable/Command manifest、`VnRuntimeState`、call/return stack、route flags、backlog/read-state/voice replay、Runtime save container 中的 `vn.runtime_state`/`vn.policy_state`、save/load、auto/skip/config/unlock system state、`mlua` sandbox、mutation trace、rollback scope/playback、command/query/trace capability 与 serializable snapshot policy、policy bundle manifest/source cache/hash gate、VN extension binding manifest、standard command manifest、commercial baseline manifest feature gate、presentation provider manifest/filter fallback/wait capability gate、movie/voice/timeline await state slice、StageModel/VideoLayer/AudioCommand/Timeline lifecycle slice、headless presentation execution、FilterGraph CPU execution、AdvancedVN opt-in profile、SystemStoryManifest 必需入口和 policy binding、Graph/Timeline metadata validation、NativeVN sample cook/package/full playthrough、Windows/Web standalone bundle、Windows bundle 内 `AstraPlayer.exe --route-scenario` route report、Web browser host route report、bundle 内脱敏 `AstraPlayer.mount_policy.json`、VN package sections、VN Scenario DSL slice、Windows `mount_probes`/route-bound `mount_assets` + `--mount-root` local probe、project-level `package_sections`、`vn.compiled_story` manifest evidence/`vn.profile_manifest`/`vn.policy_bundle`/`vn.extension_bindings`/`vn.standard_commands`/`vn.presentation_provider`/`vn.commercial_baseline`/`vn.system_ui_profile`/`vn.advanced_presentation` release gate，以及 `runtime_provider.binding`、`runtime_provider.native_vn`、provider DTO+FFI smoke、target-level `runtime_provider: native_vn`、`provider.policy` runtime evidence 和 selected-provider scenario runner path。`S3-SCRIPT-01` 与 `S3-SCRIPT-02` 因 compiler frontend 标准化重开，新增缺口是 Lexer、TokenStream、Lossless CST、Typed AST、Semantic Passes、Command Registry、token-level source map、formatter/LSP adapter 和 release conformance。其他缺口仍是 Web live player automation、TsuiNoSora full-playable Windows route playback、完整 Director/Shockwave cast parser/source-map reader、真实商业全量 route extraction、真实商业 NativeVN payload 写入和正式 release signoff。
 
 补充：`S3-TSUI-INTERNAL-DEMO-01` 的验收口径已提升为 full-resource classic playable bundle：`tsuinosora-internal-game` 必须完成全量 ProjectorRays dump coverage、全量资源转换 coverage、NativeVN `asset_roots`、asset sidecar、cooked asset package section、`asset.vfs_manifest`/`asset.catalog` package VFS evidence、同一 `.astrapkg` 派生 Windows/Web bundle manifest、`player.full_playable` live automation report 校验，以及原版/Demo 同 checkpoint 视觉截图对比。当前 repo-side pipeline 已落地 ProjectorRays 本地 dump adapter、脱敏 script source-map、Director reader-required preflight 外部 reader evidence、`demo-config-template`、带 `chunk_fourcc_counts`/`conversion_plan` 的 `tsuinosora.projectorrays_full_dump_report.v1`、`tsuinosora.projectorrays_converted_resources.v1` sidecar 校验、JSON-backed metadata chunk converter、`STXT` text converter、`Lscr` cast-member/source-number/CastScript/ParentScript source 映射和 malformed JSON numeric recovery、empty `Lscr` no-op metadata converter、`BITD` 1/16/32bpp PNG converter、8bpp `BITD` palette sidecar converter、KEY-bound `sndH`/`sndS` WAV converter、KEY-bound `ediM` `MACRZ` verified MP3 converter、score/metadata chunk 脱敏 converter、ProjectorRays `GO[...]` route identity 派生、ProjectorRays converted asset bridge、`tsuinosora.visual_screenshot_capture_report.v1`、`tsuinosora.visual_comparison_report.v1`、`capture_automation` 自动截图 intent/execution 脱敏记录、scenario refs package section、同 package Windows/Web bundle manifest、bundle 内原始分辨率 display config、Windows live window、`astra-player` Windows `SendInput` automation runner、player host consumed `TRACE` log 捕获、visual comparison hash 绑定、package WAV meter 和 release `player.full_playable` 校验。私有 acceptance 命令是 `python Tools/TsuiNoSora/tsuinosora_tools.py internal-demo-bundle --config Examples/TsuiNoSora/.local/demo.config.json --repo-root .`；当前私有 dump 覆盖 2527 个 ProjectorRays binary chunk，2527 个 chunk 均有 converted evidence，`demo-slice` 可生成 28 条脱敏 route 的 NativeVN project/package input，`internal-demo-bundle` 已从同一个 `.astrapkg` 产出 Windows/Web bundle manifest，并能采集原版/Demo 同 checkpoint 截图且通过 title 视觉 comparison；最近一次 Windows live automation 中 28 次 `SendInput` 都被 player host consumed trace 证明。验收仍因 Windows live player 在真实输入后没有产生可见状态变化、automation transcript 未覆盖 28 条 full classic route、缺 required manual signoff 而 blocking，不能作为独立 milestone 标 `DONE`。`modern`、Patch-only 和 Runtime Patch/VFS 插件仍不属于该 milestone，但 full-resource conversion、原体验还原和 100% 可玩是该 milestone 的完成条件。
 
@@ -190,7 +190,9 @@ python Tools/check_docs.py
 
 **ID:** `S3-SCRIPT-01`
 
-**Goal:** 解析 `.astra` 缩进块、story、state、scene、stage、text、choice、call/return 和 command id。
+**Status:** `REOPENED_SPEC`
+
+**Goal:** 把现有 line parser 迁到标准 frontend parser，覆盖 `.astra` 缩进块、story、state、scene、stage、text、choice、call/return、command id、lossless trivia 和 token/attribute span。
 
 **Depends On:** `Docs/modules/astra-vn-script.md`
 
@@ -198,12 +200,12 @@ python Tools/check_docs.py
 
 **Steps:**
 
-1. 定义 lexer、indent block parser、source span 和 parse diagnostic。
-2. 支持 command id、text key、speaker、voice、choice option 和 jump target。
-3. 保留 source map 所需的 byte range、line/column 和 expanded command id。
-4. 编写有效 sample、quote/arrow/indent/source id/duplicate attr/orphan option/缺 key/未知 system page、重复 command id、重复 source id、缺失 jump/choice target 和诊断定位测试。
+1. 保留 `compile_astra_sources` 兼容入口，新增标准 Lexer、TokenStream、Lossless CST 和 Typed AST adapter。
+2. 支持 command id、text key、speaker、voice、choice option、jump target、comment、blank line 和 source id token span。
+3. 保留 source map 所需的 byte range、line/column、attribute span 和 expanded command id。
+4. 编写有效 sample、quote/arrow/indent/source id/duplicate attr/orphan option/缺 key/未知 system page、重复 command id、重复 source id、缺失 jump/choice target、trivia round-trip 和诊断定位测试。
 
-**Done Evidence:** `cargo test -p astra-vn-script --test compiler_runtime`、`cargo test -p astra-vn-script --test compiler_diagnostics` 和 `cargo test -p astra-vn-package --test commercial_baseline` 通过；parser 能解析 `.astra` story/state/scene/text/choice/system page option/jump/call/return/mutate，并对 quote、arrow、indent、empty source id、duplicate attr、orphan option、缺 key、未知 system page、重复 id、重复 text key、非法变量域、缺失 route target 和 unreachable main state 输出 blocking diagnostic 与 source span。
+**Baseline Evidence:** `cargo test -p astra-vn-script --test compiler_runtime`、`cargo test -p astra-vn-script --test compiler_diagnostics` 和 `cargo test -p astra-vn-package --test commercial_baseline` 通过；现有 parser 能解析 `.astra` story/state/scene/text/choice/system page option/jump/call/return/mutate，并对 quote、arrow、indent、empty source id、duplicate attr、orphan option、缺 key、未知 system page、重复 id、重复 text key、非法变量域、缺失 route target 和 unreachable main state 输出 blocking diagnostic 与 source span。该 evidence 只证明 line parser baseline，不能关闭 frontend 标准化。
 
 **Linked Test IDs:** `T-S3-SCRIPT-01`
 
@@ -211,7 +213,9 @@ python Tools/check_docs.py
 
 **ID:** `S3-SCRIPT-02`
 
-**Goal:** 编译 AST 到 CompiledStory IR、StoryManifest、VariableManifest、CommandManifest、SystemStoryManifest、SourceMap 和 DebugSymbols。
+**Status:** `REOPENED_SPEC`
+
+**Goal:** 用显式 semantic passes 从 Typed AST lowering 到 `CompiledStory` IR、StoryManifest、VariableManifest、CommandManifest、SystemStoryManifest、SourceMap、DebugSymbols 和 release conformance evidence。
 
 **Depends On:** `S3-SCRIPT-01`
 
@@ -219,12 +223,12 @@ python Tools/check_docs.py
 
 **Steps:**
 
-1. 定义 CompiledStory 结构，与 script contract 字段保持一致。
-2. 实现 command id 稳定排序、route graph、text key manifest、system story manifest 和 debug symbol 输出。
-3. 校验 unreachable main state、重复 id、未定义 route target、重复 key、非法变量域和未定义 system story。
-4. 编写 IR snapshot、source map lookup 和 reachability diagnostic 测试。
+1. 以当前 `CompiledStory` Rust schema 为 baseline，文档中的 `luau_manifest`、`timeline_ir`、`text_effect_ir`、token span 和 command source map 先作为 migration target。
+2. 拆分 `lower::symbols`、`lower::routes`、`lower::variables`、`lower::commands`、`lower::system_stories` 和 `lower::compiled_story`。
+3. 通过 `CommandRegistry` 校验 Core、standard presentation 和 extension command，release profile 遇到 unknown command 必须 blocking。
+4. 编写 IR snapshot、semantic pass equivalence、source map lookup、command registry、formatter semantic hash、LSP diagnostic adapter 和 reachability diagnostic 测试。
 
-**Done Evidence:** `cargo test -p astra-vn-script --test compiler_runtime` 和 `cargo test -p astra-vn-script --test compiler_diagnostics` 通过；`CompiledStory` 直接包含 Story/Variable/Command/System manifest、route graph、source map、debug symbols 和 stable hash，package section 使用 compiler 输出中的 `system_story_manifest`，diagnostic 可定位源文件。
+**Baseline Evidence:** `cargo test -p astra-vn-script --test compiler_runtime` 和 `cargo test -p astra-vn-script --test compiler_diagnostics` 通过；当前 `CompiledStory` 直接包含 Story/Variable/Command/System manifest、route graph、source map、debug symbols 和 stable hash，package section 使用 compiler 输出中的 `system_story_manifest`，diagnostic 可定位源文件。该 evidence 只证明当前 compiler baseline，不能关闭 semantic pass、command registry 和 source map 升级。
 
 **Linked Test IDs:** `T-S3-SCRIPT-02`
 

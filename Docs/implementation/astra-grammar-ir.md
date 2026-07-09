@@ -1,8 +1,38 @@
 # `.astra` Grammar And IR
 
-`.astra` Stage 3 runtime parser 采用轻量 line lexer 与 typed compiler pass。目标语法真源位于 `Engine/Source/Modules/AstraVN/astra-vn-script` 的 serde 类型与 diagnostic 测试；当前单 crate 实现会按迁移计划拆入该 crate。后续 Editor lossless round-trip 可以再引入 CST/parser generator，但不能让 Editor state 混入 runtime IR。
+`.astra` 是 AstraVN 的 canonical story source。Stage 3 当前已有 line-based parser/compiler baseline，可以输出 `CompiledStory`、manifest、route graph、source map 和 debug symbols。新的标准化目标不是把脚本编译成本机代码，而是把编译器前端工程化，让 Editor、formatter、LSP、package、release gate 和 player evidence 共享同一套语法与语义证据。
+
+目标管线：
+
+```text
+SourceFile
+  -> Lexer
+  -> TokenStream
+  -> Lossless CST
+  -> Typed AST
+  -> Semantic Passes
+  -> CompiledStory
+  -> Manifests / RouteGraph / SourceMap / DebugSymbols / StableHash
+  -> Runtime StateMachine
+```
+
+Runtime 只消费 `CompiledStory`。Editor 不维护第二套 runtime model；Graph、Timeline 和 Luau metadata 只能回写 source 或 lowering 到同一 IR。
+
+## Current Baseline
+
+当前 `astra-vn-script` 暴露 `compile_astra_sources`，内部以 `ParsedLine` 和 `CompileBuilder` 形成 baseline：
+
+```rust
+pub fn compile_astra_sources<I>(sources: I) -> Result<CompiledStory, VnError>
+where
+    I: IntoIterator<Item = AstraSource>;
+```
+
+Baseline 已覆盖 story、state、scene、text、choice、option、jump、call、return、mutate、system page、wait、presentation command、route target、main reachability、text key duplicate、source id duplicate 和基础 source map。它仍不是最终 frontend：它不保留完整 trivia、comment、blank line、token byte range、attribute span、lossless CST、error recovery 或 macro expansion stack。
 
 ## Grammar Shape
+
+目标 grammar 仍采用缩进块和具名命令：
 
 ```pest
 file        = { SOI ~ item* ~ EOI }
@@ -23,94 +53,204 @@ command_id  = { "#@id" ~ ident_path }
 kv          = { ident ~ ":" ~ value }
 ```
 
-Indent handling is a lexer responsibility. 当前 runtime lexer 强制两空格层级、禁止 tab，并为 source map 记录 line/column；后续 CST 层可以显式发出 `Indent`、`Dedent`、`Newline` 和 `TokenSpan`。
+Indent handling is a lexer responsibility. The target lexer emits `Indent`、`Dedent`、`Newline`、`TokenSpan` and blocking diagnostics for tabs, odd indent, unclosed quote, missing arrow target, duplicate attrs and empty source id.
 
-## AST
+## Syntax Model
+
+Planned syntax modules:
+
+```text
+syntax/
+  token.rs
+  lexer.rs
+  cst.rs
+  ast.rs
+  span.rs
+  diagnostic.rs
+  parse.rs
+```
+
+Core token kinds include:
+
+```rust
+pub enum SyntaxKind {
+    StoryKw,
+    StateKw,
+    SceneKw,
+    TextKw,
+    ChoiceKw,
+    OptionKw,
+    JumpKw,
+    CallKw,
+    ReturnKw,
+    MutateKw,
+    SystemPageKw,
+    Ident,
+    String,
+    Colon,
+    Arrow,
+    SourceIdMarker,
+    Newline,
+    Indent,
+    Dedent,
+    Comment,
+    Error,
+}
+```
+
+Lossless CST preserves trivia and original layout. Typed AST extracts author-facing names and spans without resolving assets, variables, policy provider or route reachability.
 
 ```rust
 pub struct AstFile {
+    pub source: SourceFileId,
     pub stories: Vec<AstStory>,
-    pub diagnostics: Vec<Diagnostic>,
+    pub diagnostics: Vec<ScriptDiagnostic>,
 }
 
 pub struct AstCommand {
-    pub id: StableId,
     pub kind: AstCommandKind,
+    pub id: Option<StableId>,
     pub args: Vec<AstArg>,
+    pub attrs: Vec<AstAttr>,
+    pub children: Vec<AstCommand>,
     pub span: SourceSpan,
-}
-
-pub enum AstCommandKind {
-    Text,
-    Choice,
-    Option,
-    Stage,
-    Timeline,
-    Task,
-    Command,
-    Mutate,
-    SystemPage,
 }
 ```
 
-AST preserves author-facing names and spans. It does not resolve assets, variables, policy provider or route reachability.
+## Semantic Passes
+
+Semantic lowering is split into explicit passes:
+
+```text
+lower::symbols
+lower::routes
+lower::variables
+lower::commands
+lower::system_stories
+lower::compiled_story
+```
+
+`symbols` collects story/state/scene/command ids and duplicate diagnostics. `routes` resolves jump、call、choice、terminal target and route graph. `variables` validates scopes and builds variable manifest. `commands` resolves Core、standard presentation and extension commands through `CommandRegistry`. `system_stories` validates required pages and policy binding. `compiled_story` assembles manifests, source map, debug symbols and stable hash.
 
 ## IR
 
+Current implemented `CompiledStory` fields are:
+
 ```rust
 pub struct CompiledStory {
+    pub schema: String,
+    pub story_hash: Hash128,
     pub story_manifest: StoryManifest,
-    pub system_manifest: SystemStoryManifest,
     pub variable_manifest: VariableManifest,
     pub command_manifest: CommandManifest,
-    pub luau_manifest: LuauPolicyManifest,
-    pub timeline_ir: TimelineIr,
-    pub text_effect_ir: TextEffectIr,
-    pub source_map: SourceMap,
-    pub debug_symbols: DebugSymbols,
+    pub system_story_manifest: SystemStoryManifest,
+    pub stories: Vec<Story>,
+    pub states: BTreeMap<String, State>,
+    pub route_graph: RouteGraph,
+    pub source_map: BTreeMap<String, SourceRef>,
+    pub debug_symbols: BTreeMap<String, String>,
 }
 ```
+
+Migration targets include `luau_manifest`、`timeline_ir`、`text_effect_ir`、token/attribute spans、macro expansion stack and `CommandSourceMap`. These fields are not implemented evidence until Rust schema, package writer, release gate and tests use them.
 
 IR rules:
 
 - `StableId` order is lexical by source file, byte range, then command id string.
-- Every executable command has one `CommandSourceRef`.
-- Text uses key-first localization; inline primary text is an authoring convenience only if project profile allows extraction.
+- Every executable command has one source ref today, and a token-level `CommandSourceMap` after migration.
+- Text uses key-first localization; inline text extraction must be profile-gated.
 - Route graph records every state, jump, call, return and choice edge.
-- Policy provider is resolved from project manifest bindings, not from load order.
+- Policy and command providers resolve from project manifest bindings, not load order.
 
-## Diagnostics
+## Command Registry
 
-Parser diagnostics must include:
+`CommandRegistry` is the planned source of truth for command names, provider ids, attributes, children, Editor metadata and release checks.
 
 ```rust
-pub struct ScriptDiagnostic {
-    pub code: &'static str,
-    pub severity: DiagnosticSeverity,
-    pub file: SourceFileId,
-    pub span: SourceSpan,
-    pub message: String,
-    pub related: Vec<SourceSpan>,
+pub struct CommandRegistry {
+    providers: BTreeMap<String, CommandProvider>,
+    commands: BTreeMap<String, CommandSchema>,
+}
+
+pub struct CommandSchema {
+    pub name: String,
+    pub schema: String,
+    pub provider_id: String,
+    pub required_attrs: BTreeSet<String>,
+    pub allowed_attrs: BTreeSet<String>,
+    pub child_policy: ChildPolicy,
+    pub release_checks: Vec<String>,
 }
 ```
 
-Minimum codes: `ASTRA_PARSE_INDENT`, `ASTRA_DUPLICATE_ID`, `ASTRA_UNKNOWN_TARGET`, `ASTRA_UNKNOWN_TEXT_KEY`, `ASTRA_UNBOUND_POLICY`, `ASTRA_ILLEGAL_VARIABLE_SCOPE`.
+Unknown commands are profile-bound. Development profile may warn; release profile blocks if the command has no explicit Core, standard or extension provider binding.
 
-## Formatter
+## Source Map
+
+The target `SourceSpan` uses byte range and line/column range:
+
+```rust
+pub struct SourceSpan {
+    pub file_id: SourceFileId,
+    pub byte_start: u32,
+    pub byte_end: u32,
+    pub line_start: u32,
+    pub column_start: u32,
+    pub line_end: u32,
+    pub column_end: u32,
+}
+```
+
+`CommandSourceMap` records command span, keyword span, id span, attr spans, arg spans and macro expansion stack. Reports and package sections store hashes, ids and spans only; they must not store source text payload.
+
+## Formatter And LSP
 
 Formatter rules:
 
 - Two-space indent.
 - Preserve `#@id` on the same line as the command.
+- Preserve comments and blank lines.
 - Preserve blank lines between scenes and states.
 - Sort key/value args only when the command schema marks them unordered.
 - Never rewrite localized text tables from `.astra` formatting.
+- Format then parse/compile must keep the same semantic hash.
+
+Initial LSP adapter targets diagnostics, document symbols, hover command schema, go-to-definition for state targets, references for route edges, formatter and semantic tokens.
+
+## Expression Bytecode
+
+Complex `if`、`when` or mutate expressions must first lower to portable bytecode:
+
+```rust
+pub enum ExprOp {
+    ConstI64(i64),
+    ConstBool(bool),
+    LoadVar { scope: String, key: String },
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Eq,
+    Ne,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+    And,
+    Or,
+    Not,
+}
+```
+
+Cranelift can only be a later optional JIT for this bytecode after profiling. Package data, replay hash and release reports must remain portable and independent from JIT availability.
 
 ## Tests
+
+Baseline tests remain:
 
 ```bash
 cargo test -p astra-vn-script --test compiler_runtime
 cargo test -p astra-vn-script --test compiler_diagnostics
 ```
 
-Expected: CompiledStory IR hash stable, source map/debug symbols stable, grammar and semantic diagnostics carry file/span/code.
+Frontend migration adds tests for lexer spans, CST/AST round-trip, semantic pass equivalence, command registry release blocking, source map spans, formatter stability, LSP diagnostics and expression interpreter equivalence before `S3-SCRIPT-01` or `S3-SCRIPT-02` can return to `DONE`.

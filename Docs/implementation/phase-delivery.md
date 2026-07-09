@@ -59,9 +59,9 @@ Expected report includes `package.integrity`, `target.manifest`, `platform.capab
 
 ## Stage 3：AstraVN
 
-**闭环：** `.astra + Luau policy` 编译为 CompiledStory，full playthrough 覆盖 commercial baseline、system UI、save/load 和 replay hash；advanced presentation profile 有独立 opt-in scenario。Stage 3 当前继续 `IN_PROGRESS`，新增闭环是把现有 `astra-vn` facade、VN extension manifest、package sections 和 release checks 对齐到 `NativeVnRuntimeProvider`，并证明 VN 只是同级 gameplay runtime，不是其他玩法的基类。
+**闭环：** `.astra + Luau policy` 编译为 CompiledStory，full playthrough 覆盖 commercial baseline、system UI、save/load 和 replay hash；advanced presentation profile 有独立 opt-in scenario。Stage 3 当前继续 `IN_PROGRESS`。现有 `.astra` line parser/compiler 是可运行 baseline，但 `S3-SCRIPT-01` 和 `S3-SCRIPT-02` 因 frontend 标准化重开：v1 需要 Lexer、TokenStream、Lossless CST、Typed AST、Semantic Passes、Command Registry、token-level source map、formatter/LSP adapter 和 release conformance。Runtime provider 闭环仍要求现有 `astra-vn` facade、VN extension manifest、package sections 和 release checks 对齐到 `NativeVnRuntimeProvider`，并证明 VN 只是同级 gameplay runtime，不是其他玩法的基类。
 
-**Test IDs:** `T-S3-SCRIPT-01`、`T-S3-LUAU-01`、`T-S3-LUAU-02`、`T-S3-PRESENT-01`、`T-S3-SYSTEM-01`、`T-S3-ADVANCED-01`、`T-S3-SAMPLE-01`、`T-S3-GAME-TARGET-01`、`T-S3-RUNTIME-PROVIDER-01`
+**Test IDs:** `T-S3-SCRIPT-01`、`T-S3-SCRIPT-02`、`T-S3-LUAU-01`、`T-S3-LUAU-02`、`T-S3-PRESENT-01`、`T-S3-SYSTEM-01`、`T-S3-ADVANCED-01`、`T-S3-SAMPLE-01`、`T-S3-GAME-TARGET-01`、`T-S3-RUNTIME-PROVIDER-01`
 
 **Sample:** `Examples/NativeVN`、`Examples/AdvancedVN`、`scenarios/full_playthrough.yaml`、`scenarios/advanced_presentation.yaml`
 
@@ -75,7 +75,7 @@ astra package build target/cooked-advancedvn --target advanced-vn-game --out tar
 astra test run scenarios/advanced_presentation.yaml --package target/advancedvn.astrapkg --target advanced-vn-game --profile advanced-vn --headless --report target/reports/stage3-advanced.yaml
 ```
 
-Expected report includes `target.manifest`, `runtime_provider.native_vn`, `script.compile`, `luau.policy_lock`, `system_stories.covered`, `vn.system_ui_profile`, `vn.advanced_presentation`, `command.provider_binding` and `vn.replay_hash`.
+Expected report includes `target.manifest`, `runtime_provider.native_vn`, `script.compile`, `script.frontend_conformance`, `luau.policy_lock`, `system_stories.covered`, `vn.system_ui_profile`, `vn.advanced_presentation`, `command.provider_binding` and `vn.replay_hash`.
 
 ## Stage 4：Editor + AI/MCP
 
