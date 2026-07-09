@@ -335,6 +335,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-editor-bridge"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-plugin",
+ "astra-plugin-abi",
+ "astra-property",
+ "astra-release",
+ "astra-vn-editor",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "astra-engine"
 version = "0.1.0"
 dependencies = [

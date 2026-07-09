@@ -25,6 +25,11 @@
 | [package-save.md](package-save.md) | serde+postcard section、schema/migrator、package/save/replay 容器、AI ModelBundle package/VFS section |
 | [editor-visual-protocol.md](editor-visual-protocol.md) | Graph/Timeline 派生层、Inspector 控件、source round-trip |
 | [editor-workflow.md](editor-workflow.md) | UE 级 creator workflow、面板状态、Qt/Rust bridge |
+| [editor/README.md](editor/README.md) | AstraEditor 前端设计总索引（cxx-qt、Dock、Graph、Script、AI Copilot；Stage 4 完整设计稿） |
+| [editor/shell.md](editor/shell.md) | cxx-qt bridge、Dock 布局、设计系统、PIE Viewport、Inspector、Content Browser、Plugin Manager、i18n、快捷键 |
+| [editor/graph.md](editor/graph.md) | Graph Editor（NodeEditor-Qt）、Timeline Editor、FilterGraph/AudioGraph Editor、source round-trip |
+| [editor/script-editor.md](editor/script-editor.md) | Script Editor（tree-sitter + ropey）、语法高亮、source map badge、查找/替换、astra-lsp 规划 |
+| [editor/ai-copilot.md](editor/ai-copilot.md) | AI Copilot（inline hint + Review Queue）、Trusted session、MCP、AI provider 配置、AI gate |
 | [ai-mcp-runtime.md](ai-mcp-runtime.md) | Runtime AI、Editor Copilot、Content Generation、MCP tool policy |
 | [ai-provider-profiles.md](ai-provider-profiles.md) | OpenAI、Ollama、ComfyUI、ONNX Runtime provider profile 和第一方插件边界 |
 | [runtime-ai-director-memory.md](runtime-ai-director-memory.md) | Runtime Director、角色记忆、Context Pack 和 Intent |

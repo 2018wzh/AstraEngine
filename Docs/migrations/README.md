@@ -14,6 +14,7 @@
 | 4 | [astra-vn-crate-split-migration.md](astra-vn-crate-split-migration.md) | 现有单 crate `astra-vn` 拆成 AstraVN 多功能 crate，`astra-vn` 收缩为 facade |
 | 5 | [game-runtime-provider-migration.md](game-runtime-provider-migration.md) | 现有 AstraVN runtime facade、VN extension manifest、package sections、release checks 对齐到 `NativeVnRuntimeProvider` |
 | 6 | [editor-runtime-provider-migration.md](editor-runtime-provider-migration.md) | 现有 Editor 设计、手册和状态口径对齐到 runtime-provider-aware shell |
+| 7 | [platform-host-migration.md](platform-host-migration.md) | 已完成的 Windows 窗口渲染与音频/解码对齐到 realigned platform-host 统一 Token 抽象 |
 
 ## 范围边界
 
@@ -23,6 +24,7 @@
 - `astra-cook` 的 importer/cook artifact、NativeVN asset sidecar 和 cook audit。
 - `astra-package` 的 package/save container、section table、bounded reader、`asset.vfs_manifest`、`asset.catalog` 和 project-level `package_sections`。
 - `astra-vn` 的 module layout、facade、VN state/save、VN extension manifest、package sections、release checks 和 `NativeVnRuntimeProvider`。
+- `astra-platform` 与 `astra-platform-windows` 中已实现的 WMF 解码、WASAPI 声音输出、wgpu surface 绑定流程，对齐到 `PlatformHost::create_surface` 封装。
 - Stage 1 plugin registry、StateMachine action provider 和 `vn-extension-provider` fixture。
 - Editor workflow、module、creator manual 和 Stage 4 状态文档中的 runtime provider switching 口径。
 - TsuiNoSora 的脱敏 mount policy、`mount_probes`、route-bound `mount_assets`、NativeVN asset sidecar/cooked asset/package VFS manifest/catalog 和 player route evidence。

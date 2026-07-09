@@ -18,7 +18,7 @@ pub trait PlatformHost {
 }
 ```
 
-`SurfaceToken`、`AudioOutputToken`、`SaveStoreToken` 是平台私有 token。Runtime public API 不暴露 native handle。
+`SurfaceToken`、`AudioOutputToken`、`SaveStoreToken` 是平台私有 token。Runtime public API 及 Engine 核心（EngineCore）内部模块一律不得暴露或直接接收任何原生句柄（如 HWND、NSView、wl_surface 指针等），所有句柄均收束在 `AstraPlatform` 适配器内部隐式解析与处理。
 
 ## Crate Split
 

@@ -1,0 +1,19 @@
+[package]
+name = "astra-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+astra-core = { path = "../../Runtime/astra-core" }
+astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi" }
+astra-plugin = { path = "../../Runtime/astra-plugin" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+schemars = { workspace = true }
+
+[dev-dependencies]
