@@ -74,7 +74,7 @@ AudioCommand::SetVolume { group: "voice", raw: 8000 }
 
 ## Movie
 
-本地样本有 loose `movie/opening.mpg` 以及 localized `movie_cn`、`movie_tc`。`em.pac` 还包含少量 `.MPG`。`sena-rs` 另有 `na_wmv_player` crate 处理 ASF/WMV2/WMA，这是可参考的 decoder 实验，不是 SoftPAL core 对特定 DLL 的依赖。
+本地样本有 loose `movie/opening.mpg` 以及 localized `movie_cn`、`movie_tc`。`em.pac` 还包含少量 `.MPG`。`sena-rs` 另有 `na_wmv_player` crate 处理 ASF/Windows Media Video 8/WMA，这是可参考的 decoder 实验，不是 SoftPAL core 对特定 DLL 的依赖。
 
 AstraEMU policy：
 

@@ -312,6 +312,7 @@ impl StateMachineStore {
                         &mut candidate_output.delayed_events,
                         &mut candidate_output.delayed_cancellations,
                         &mut candidate_output.mutations,
+                        &mut candidate_output.effects,
                         invocation.action_id.clone(),
                         trigger_event.clone(),
                     );
@@ -492,6 +493,7 @@ pub struct StateMachineTickOutput {
     pub delayed_cancellations: Vec<DelayedEventId>,
     pub trace: Vec<ActionTrace>,
     pub mutations: Vec<crate::RuntimeMutationRecord>,
+    pub effects: Vec<crate::SerializedEffectEnvelope>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -505,6 +507,7 @@ impl StateMachineTickOutput {
             .append(&mut other.delayed_cancellations);
         self.trace.append(&mut other.trace);
         self.mutations.append(&mut other.mutations);
+        self.effects.append(&mut other.effects);
         self.diagnostics.append(&mut other.diagnostics);
     }
 }

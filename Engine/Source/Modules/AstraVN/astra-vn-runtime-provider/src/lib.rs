@@ -1,17 +1,29 @@
 //! Native AstraVN gameplay runtime provider and ABI-safe FFI adapter.
 
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use abi_stable::std_types::{RString, RVec};
-use astra_core::Hash256;
+use astra_core::{Hash128, Hash256, SchemaVersion};
 use astra_plugin_abi::{
     FfiRuntimeProviderRegistration, FfiRuntimeProviderResult, GameRuntimeSessionId,
     ProductRuntimeDescriptor, ReleaseCheckDescriptor, RuntimeEditorMetadata, RuntimeOpenReport,
     RuntimeOpenRequest, RuntimePackageSectionPlan, RuntimePrepareReport, RuntimePrepareRequest,
-    RuntimeProbeReport, RuntimeProbeRequest, RuntimeRestoreReport, RuntimeRestoreRequest,
-    RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionRef, RuntimeShutdownReport,
-    RuntimeStepInput, RuntimeStepOutput, GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID,
-    NATIVE_VN_RUNTIME_ID, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA, RUNTIME_EDITOR_METADATA_SCHEMA,
+    RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderCall, RuntimeProviderCreateRequest,
+    RuntimeProviderDestroyRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
+    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec,
+    RuntimeSectionPayload, RuntimeSectionRef, RuntimeShutdownReport, RuntimeStepInput,
+    RuntimeStepOutput, GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID,
+    PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA, RUNTIME_EDITOR_METADATA_SCHEMA,
+};
+use astra_runtime::{
+    ActionDescriptor, ActionInvocation, ActionTrace, BlackboardValue, ComponentId,
+    DeterministicActionContext, EventPayload, GuardExpr, PackageHandle, PlayerInput,
+    PresentationCommand as RuntimePresentationCommand, RuntimeAction, RuntimeConfig, RuntimeError,
+    RuntimeSnapshot, RuntimeWorld, StateDefinition, StateMachineDefinition, TickInput,
+    TransitionDefinition,
 };
 use astra_vn_core::{
     CompiledStory as CoreCompiledStory, VnError as CoreVnError,
@@ -27,14 +39,32 @@ pub use astra_vn_editor::*;
 pub use astra_vn_package::*;
 pub use astra_vn_save::*;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct NativeVnRuntimeProvider {
-    sessions: BTreeMap<String, CoreVnRuntime>,
+    sessions: BTreeMap<String, NativeVnSession>,
+}
+
+struct NativeVnSession {
+    world: RuntimeWorld,
+    vn_component: ComponentId,
+    policy_component: ComponentId,
+    compiled: Arc<CoreCompiledStory>,
+    output: Arc<Mutex<Option<VnStepOutput>>>,
+}
+
+struct VnStepAction {
+    component: ComponentId,
+    compiled: Arc<CoreCompiledStory>,
+    output: Arc<Mutex<Option<VnStepOutput>>>,
 }
 
 impl NativeVnRuntimeProvider {
     pub fn slot() -> &'static str {
         GAME_RUNTIME_PROVIDER_SLOT
+    }
+
+    pub fn session_count(&self) -> usize {
+        self.sessions.len()
     }
 
     pub fn descriptor() -> ProductRuntimeDescriptor {
@@ -95,8 +125,83 @@ impl NativeVnRuntimeProvider {
             "{}:{}:{}",
             NATIVE_VN_RUNTIME_ID, request.target_id, request.seed
         ));
-        let runtime = CoreVnRuntime::new(compiled, config)?;
-        self.sessions.insert(session_id.0.clone(), runtime);
+        if self.sessions.contains_key(&session_id.0) {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_SESSION_DUPLICATE",
+                "runtime session id is already open",
+            ));
+        }
+        let initial_runtime = CoreVnRuntime::new(compiled.clone(), config)?;
+        let mut world = RuntimeWorld::create(
+            RuntimeConfig {
+                seed: request.seed,
+                required_slots: Vec::new(),
+            },
+            PackageHandle {
+                package_id: request.package_hash.clone(),
+            },
+        )
+        .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let owner = world.create_actor("astra.vn.runtime", vec!["gameplay_runtime".to_string()]);
+        let vn_component = world
+            .attach_component(owner, "astra.vn.runtime_state.v1", initial_runtime.state())
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let policy_component = world
+            .attach_component(owner, "astra.vn.policy_state.v1", &VnPolicyState::default())
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let compiled = Arc::new(compiled);
+        let output = Arc::new(Mutex::new(None));
+        world
+            .register_action(
+                NATIVE_VN_PROVIDER_ID,
+                VnStepAction {
+                    component: vn_component,
+                    compiled: Arc::clone(&compiled),
+                    output: Arc::clone(&output),
+                },
+            )
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let running = astra_core::StableId::deterministic_v7(0, 1, request.seed);
+        world
+            .add_state_machine(StateMachineDefinition {
+                id: astra_core::StableId::deterministic_v7(0, 2, request.seed),
+                owner,
+                states: vec![StateDefinition {
+                    id: running,
+                    name: "vn.running".to_string(),
+                    terminal: false,
+                }],
+                transitions: vec![TransitionDefinition {
+                    from: running,
+                    to: running,
+                    guard: GuardExpr::Or {
+                        terms: vn_runtime_event_kinds()
+                            .into_iter()
+                            .map(|kind| GuardExpr::EventIs {
+                                kind: kind.to_string(),
+                            })
+                            .collect(),
+                    },
+                    actions: vec![ActionInvocation {
+                        action_id: "astra.vn.step".to_string(),
+                        input: BTreeMap::new(),
+                    }],
+                    priority: 0,
+                    source_ref: None,
+                }],
+                initial_state: running,
+            })
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        self.sessions.insert(
+            session_id.0.clone(),
+            NativeVnSession {
+                world,
+                vn_component,
+                policy_component,
+                compiled,
+                output,
+            },
+        );
         Ok(RuntimeOpenReport {
             session_id,
             runtime_id: NATIVE_VN_RUNTIME_ID.to_string(),
@@ -107,10 +212,14 @@ impl NativeVnRuntimeProvider {
 
     pub fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, CoreVnError> {
         let command = {
-            let runtime = self.session(&input.session_id)?;
-            runtime_command_from_input(runtime, &input)?
+            let session = self.session(&input.session_id)?;
+            let state = session
+                .world
+                .read_component::<VnRuntimeState>(session.vn_component)
+                .map_err(|err| CoreVnError::message(err.to_string()))?;
+            runtime_command_from_input(&session.compiled, &state, &input)?
         };
-        self.apply_command(input.session_id, command)
+        self.apply_command_at_step(input.session_id, command, input.fixed_step)
     }
 
     pub fn apply_command(
@@ -118,7 +227,89 @@ impl NativeVnRuntimeProvider {
         session_id: GameRuntimeSessionId,
         command: CoreVnPlayerCommand,
     ) -> Result<RuntimeStepOutput, CoreVnError> {
-        let output = self.session_mut(&session_id)?.apply(command)?;
+        let step = self.session(&session_id)?.world.snapshot().step + 1;
+        self.apply_command_at_step(session_id, command, step)
+    }
+
+    fn apply_command_at_step(
+        &mut self,
+        session_id: GameRuntimeSessionId,
+        command: CoreVnPlayerCommand,
+        fixed_step: u64,
+    ) -> Result<RuntimeStepOutput, CoreVnError> {
+        let session = self.session_mut(&session_id)?;
+        *session
+            .output
+            .lock()
+            .map_err(|_| CoreVnError::message("VN step output lock is poisoned"))? = None;
+        let event_kind = vn_event_kind(&command).to_string();
+        let command_bytes = postcard::to_allocvec(&command)?;
+        let state = session
+            .world
+            .read_component::<VnRuntimeState>(session.vn_component)
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        if command_resolves_wait(&command, state.pending_wait.as_ref().map(|wait| wait.kind)) {
+            let await_id = state
+                .pending_wait
+                .as_ref()
+                .and_then(|wait| wait.await_id.as_deref())
+                .ok_or_else(|| {
+                    CoreVnError::diagnostic(
+                        "ASTRA_NATIVE_VN_AWAIT_ID_MISSING",
+                        "VN wait does not reference its Runtime AwaitToken",
+                    )
+                })?;
+            let token_id = astra_runtime::AwaitTokenId(
+                astra_core::StableId::parse(await_id)
+                    .map_err(|err| CoreVnError::message(err.to_string()))?,
+            );
+            session
+                .world
+                .submit_await_result(astra_runtime::AwaitResult {
+                    token_id,
+                    sequence: fixed_step,
+                    completed_at_step: fixed_step,
+                    payload: EventPayload::new("await.resolved"),
+                });
+        }
+        session
+            .world
+            .apply_input(PlayerInput {
+                kind: event_kind.clone(),
+                payload: EventPayload {
+                    kind: event_kind,
+                    data: [("command".to_string(), BlackboardValue::Bytes(command_bytes))]
+                        .into_iter()
+                        .collect(),
+                },
+            })
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let seed = session.world.snapshot().config.seed;
+        let tick = session
+            .world
+            .tick(TickInput {
+                fixed_step,
+                delta_ns: 16_666_667,
+                seed,
+            })
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        if let Some(diagnostic) = tick.diagnostics.first() {
+            return Err(CoreVnError::diagnostic(
+                diagnostic.code.clone(),
+                diagnostic.message.clone(),
+            ));
+        }
+        let output = session
+            .output
+            .lock()
+            .map_err(|_| CoreVnError::message("VN step output lock is poisoned"))?
+            .take()
+            .ok_or_else(|| {
+                CoreVnError::diagnostic(
+                    "ASTRA_NATIVE_VN_STEP_OUTPUT_MISSING",
+                    "astra.vn.step did not produce an output",
+                )
+            })?;
         let presentation = output
             .presentation
             .iter()
@@ -137,6 +328,9 @@ impl NativeVnRuntimeProvider {
                 "coverage_reached": output.coverage.reached,
                 "state_hash_before_advance": output.state_hash_before_advance.to_string(),
                 "state_hash_after_advance": output.state_hash_after_advance.to_string(),
+                "runtime_state_hash": tick.state_hash.to_string(),
+                "runtime_event_hash": tick.event_hash.to_string(),
+                "runtime_presentation_hash": tick.presentation_hash.to_string(),
             })],
             presentation,
             diagnostics: Vec::new(),
@@ -148,7 +342,12 @@ impl NativeVnRuntimeProvider {
         &self,
         session_id: &GameRuntimeSessionId,
     ) -> Result<CoreVnPlayerCommand, CoreVnError> {
-        self.session(session_id)?
+        let session = self.session(session_id)?;
+        let state = session
+            .world
+            .read_component::<VnRuntimeState>(session.vn_component)
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        CoreVnRuntime::from_state((*session.compiled).clone(), state)?
             .default_launch_command()
             .ok_or_else(|| {
                 CoreVnError::diagnostic(
@@ -158,8 +357,19 @@ impl NativeVnRuntimeProvider {
             })
     }
 
-    pub fn state(&self, session_id: &GameRuntimeSessionId) -> Result<&VnRuntimeState, CoreVnError> {
-        Ok(self.session(session_id)?.state())
+    pub fn state(&self, session_id: &GameRuntimeSessionId) -> Result<VnRuntimeState, CoreVnError> {
+        let session = self.session(session_id)?;
+        session
+            .world
+            .read_component(session.vn_component)
+            .map_err(|err| CoreVnError::message(err.to_string()))
+    }
+
+    pub fn runtime_snapshot(
+        &self,
+        session_id: &GameRuntimeSessionId,
+    ) -> Result<RuntimeSnapshot, CoreVnError> {
+        Ok(self.session(session_id)?.world.snapshot())
     }
 
     pub fn save_slot(
@@ -167,7 +377,14 @@ impl NativeVnRuntimeProvider {
         session_id: &GameRuntimeSessionId,
         slot: impl Into<String>,
     ) -> Result<VnSaveBlob, CoreVnError> {
-        self.session(session_id)?.save_slot(slot)
+        let state = self.state(session_id)?;
+        let state_hash = Hash128::from_blake3(&postcard::to_allocvec(&state)?);
+        Ok(VnSaveBlob {
+            schema: "astra.vn.save_slot.v1".to_string(),
+            slot: slot.into(),
+            state_hash,
+            state,
+        })
     }
 
     pub fn load_slot(
@@ -175,36 +392,109 @@ impl NativeVnRuntimeProvider {
         session_id: &GameRuntimeSessionId,
         save: VnSaveBlob,
     ) -> Result<(), CoreVnError> {
-        self.session_mut(session_id)?.load_slot(save)
+        if save.schema != "astra.vn.save_slot.v1" {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_VN_SAVE_SCHEMA",
+                "AstraVN save slot schema is invalid",
+            ));
+        }
+        let session = self.session_mut(session_id)?;
+        session
+            .world
+            .replace_component(session.vn_component, &save.state)
+            .map_err(|err| CoreVnError::message(err.to_string()))
     }
 
     pub fn save(&self, request: RuntimeSaveRequest) -> Result<RuntimeSaveSections, CoreVnError> {
-        let runtime = self.session(&request.session_id)?;
-        let state_payload = postcard::to_allocvec(runtime.state())?;
+        let session = self.session(&request.session_id)?;
+        let runtime = session
+            .world
+            .read_component::<VnRuntimeState>(session.vn_component)
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let runtime_state = VnRuntimeStateSave {
+            schema: "astra.vn.runtime_state_save.v1".to_string(),
+            state_hash: Hash128::from_blake3(&postcard::to_allocvec(&runtime)?),
+            state: runtime,
+        };
+        let state_payload = postcard::to_allocvec(&runtime_state)?;
+        let policy = session
+            .world
+            .read_component::<VnPolicyState>(session.policy_component)
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let policy_state = VnPolicyStateSave {
+            schema: "astra.vn.policy_state_save.v1".to_string(),
+            state_hash: Hash128::from_blake3(&postcard::to_allocvec(&policy)?),
+            state: policy,
+        };
+        let policy_payload = postcard::to_allocvec(&policy_state)?;
         Ok(RuntimeSaveSections {
             session_id: request.session_id,
             sections: vec![
-                RuntimeSectionRef {
+                RuntimeSectionPayload {
                     section_id: VN_RUNTIME_SECTION_ID.to_string(),
                     schema: "astra.vn.runtime_state_save.v1".to_string(),
-                    hash: Hash256::from_sha256(&state_payload).to_string(),
+                    version: SchemaVersion::default(),
+                    codec: RuntimeSectionCodec::Postcard,
+                    hash: Hash256::from_sha256(&state_payload),
+                    bytes: state_payload,
                 },
-                RuntimeSectionRef {
+                RuntimeSectionPayload {
                     section_id: VN_POLICY_SECTION_ID.to_string(),
                     schema: "astra.vn.policy_state_save.v1".to_string(),
-                    hash: "sha256:deferred-policy-state".to_string(),
+                    version: SchemaVersion::default(),
+                    codec: RuntimeSectionCodec::Postcard,
+                    hash: Hash256::from_sha256(&policy_payload),
+                    bytes: policy_payload,
                 },
             ],
             diagnostics: Vec::new(),
         })
     }
 
-    pub fn restore(&self, request: RuntimeRestoreRequest) -> RuntimeRestoreReport {
-        RuntimeRestoreReport {
+    pub fn restore(
+        &mut self,
+        request: RuntimeRestoreRequest,
+    ) -> Result<RuntimeRestoreReport, CoreVnError> {
+        let runtime_section = required_restore_section(
+            &request.sections,
+            VN_RUNTIME_SECTION_ID,
+            "astra.vn.runtime_state_save.v1",
+        )?;
+        let policy_section = required_restore_section(
+            &request.sections,
+            VN_POLICY_SECTION_ID,
+            "astra.vn.policy_state_save.v1",
+        )?;
+        let runtime_save: VnRuntimeStateSave = postcard::from_bytes(&runtime_section.bytes)?;
+        let policy_save: VnPolicyStateSave = postcard::from_bytes(&policy_section.bytes)?;
+        let runtime_hash = Hash128::from_blake3(&postcard::to_allocvec(&runtime_save.state)?);
+        if runtime_hash != runtime_save.state_hash {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_RUNTIME_STATE_HASH",
+                "VN runtime state hash does not match the restored state",
+            ));
+        }
+        let policy_hash = Hash128::from_blake3(&postcard::to_allocvec(&policy_save.state)?);
+        if policy_hash != policy_save.state_hash {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_POLICY_STATE_HASH",
+                "VN policy state hash does not match the restored state",
+            ));
+        }
+        let session = self.session_mut(&request.session_id)?;
+        session
+            .world
+            .replace_component(session.vn_component, &runtime_save.state)
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        session
+            .world
+            .replace_component(session.policy_component, &policy_save.state)
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        Ok(RuntimeRestoreReport {
             session_id: request.session_id,
             status: "restored".to_string(),
             diagnostics: Vec::new(),
-        }
+        })
     }
 
     pub fn shutdown(
@@ -233,7 +523,6 @@ impl NativeVnRuntimeProvider {
                 .map(|section_id| RuntimeSectionRef {
                     section_id,
                     schema: "astra.vn.package_section.v1".to_string(),
-                    hash: "sha256:package-build-assigned".to_string(),
                 })
                 .collect(),
         }
@@ -285,6 +574,8 @@ impl NativeVnRuntimeProvider {
             packaged: true,
             descriptor_schema: RString::from(PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA),
             descriptor_json: RVec::from(serde_json::to_vec(&Self::descriptor()).unwrap()),
+            create_instance: ffi_create_instance,
+            destroy_instance: ffi_destroy_instance,
             prepare: ffi_prepare,
             probe: ffi_probe,
             open: ffi_open,
@@ -298,7 +589,7 @@ impl NativeVnRuntimeProvider {
         }
     }
 
-    fn session(&self, session_id: &GameRuntimeSessionId) -> Result<&CoreVnRuntime, CoreVnError> {
+    fn session(&self, session_id: &GameRuntimeSessionId) -> Result<&NativeVnSession, CoreVnError> {
         self.sessions.get(&session_id.0).ok_or_else(|| {
             CoreVnError::diagnostic(
                 "ASTRA_NATIVE_VN_SESSION_MISSING",
@@ -310,7 +601,7 @@ impl NativeVnRuntimeProvider {
     fn session_mut(
         &mut self,
         session_id: &GameRuntimeSessionId,
-    ) -> Result<&mut CoreVnRuntime, CoreVnError> {
+    ) -> Result<&mut NativeVnSession, CoreVnError> {
         self.sessions.get_mut(&session_id.0).ok_or_else(|| {
             CoreVnError::diagnostic(
                 "ASTRA_NATIVE_VN_SESSION_MISSING",
@@ -321,16 +612,19 @@ impl NativeVnRuntimeProvider {
 }
 
 fn runtime_command_from_input(
-    runtime: &CoreVnRuntime,
+    compiled: &CoreCompiledStory,
+    state: &VnRuntimeState,
     input: &RuntimeStepInput,
 ) -> Result<CoreVnPlayerCommand, CoreVnError> {
     match input.action.as_str() {
-        "launch_default" => runtime.default_launch_command().ok_or_else(|| {
-            CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_LAUNCH_MISSING",
-                "compiled story has no launchable state",
-            )
-        }),
+        "launch_default" => CoreVnRuntime::from_state(compiled.clone(), state.clone())?
+            .default_launch_command()
+            .ok_or_else(|| {
+                CoreVnError::diagnostic(
+                    "ASTRA_NATIVE_VN_LAUNCH_MISSING",
+                    "compiled story has no launchable state",
+                )
+            }),
         "advance" => Ok(CoreVnPlayerCommand::Advance),
         "choose" => Ok(CoreVnPlayerCommand::Choose {
             option_id: required_payload_string(&input.payload, "option_id")?,
@@ -338,11 +632,238 @@ fn runtime_command_from_input(
         "complete_wait" => Ok(CoreVnPlayerCommand::CompleteWait {
             fence: required_payload_string(&input.payload, "fence")?,
         }),
+        "system_return" => Ok(CoreVnPlayerCommand::ReturnSystem),
         other => Err(CoreVnError::diagnostic(
             "ASTRA_NATIVE_VN_ACTION_UNKNOWN",
             format!("runtime action {other} is not supported"),
         )),
     }
+}
+
+impl RuntimeAction for VnStepAction {
+    fn descriptor(&self) -> ActionDescriptor {
+        ActionDescriptor {
+            id: "astra.vn.step".to_string(),
+            input_schema: "astra.vn.step_action_input.v1".to_string(),
+            output_schema: "astra.vn.step_output.v1".to_string(),
+        }
+    }
+
+    fn run(
+        &self,
+        ctx: &mut DeterministicActionContext<'_>,
+        input: &BTreeMap<String, BlackboardValue>,
+    ) -> Result<ActionTrace, RuntimeError> {
+        let event = ctx.trigger_event().ok_or_else(|| {
+            RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
+                "ASTRA_VN_STEP_TRIGGER_MISSING",
+                "astra.vn.step requires a trigger event",
+            ))
+        })?;
+        let event_kind = event.payload.kind.clone();
+        let command_bytes = match event.payload.data.get("command") {
+            Some(BlackboardValue::Bytes(bytes)) => bytes.clone(),
+            _ => {
+                return Err(RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
+                    "ASTRA_VN_STEP_COMMAND_MISSING",
+                    "astra.vn.step trigger does not contain a serialized command",
+                )))
+            }
+        };
+        let command: CoreVnPlayerCommand = postcard::from_bytes(&command_bytes)
+            .map_err(|err| RuntimeError::message(format!("decode VN step command: {err}")))?;
+        let previous_state = ctx.read_component::<VnRuntimeState>(self.component)?;
+        let previous_wait = previous_state.pending_wait.clone();
+        let (mut state, mut output) =
+            astra_vn_core::reduce_vn_step(&self.compiled, &previous_state, command)
+                .map_err(|err| RuntimeError::message(err.to_string()))?;
+        if state.pending_wait != previous_wait {
+            if let Some(wait) = state.pending_wait.as_mut() {
+                let token = ctx.create_await(astra_runtime::AwaitKind::Custom(format!(
+                    "vn.{:?}",
+                    wait.kind
+                )));
+                wait.await_id = Some(token.token_id.0.to_string());
+                output.wait = Some(wait.clone());
+                output.awaits.push(token.token_id.0.to_string());
+                ctx.push_await(token)?;
+            }
+        }
+        ctx.replace_component(self.component, &state)?;
+        for event in &output.events {
+            ctx.emit_event(
+                astra_runtime::EventSource::StateMachine,
+                EventPayload {
+                    kind: event.kind.clone(),
+                    data: [("id".to_string(), BlackboardValue::String(event.id.clone()))]
+                        .into_iter()
+                        .collect(),
+                },
+            );
+        }
+        for command in &output.presentation {
+            ctx.emit_presentation(runtime_presentation(command));
+        }
+        for command in &output.audio {
+            ctx.emit_serialized_effect("audio", "astra.vn.audio_command.v1", command)?;
+        }
+        for task in &output.timeline_tasks {
+            ctx.emit_serialized_effect("timeline", "astra.vn.timeline_task.v1", task)?;
+        }
+        let mut trace_payload = input.clone();
+        trace_payload.insert(
+            "event_kind".to_string(),
+            BlackboardValue::String(event_kind),
+        );
+        trace_payload.insert(
+            "state_hash_before".to_string(),
+            BlackboardValue::String(output.state_hash_before_advance.to_string()),
+        );
+        trace_payload.insert(
+            "state_hash_after".to_string(),
+            BlackboardValue::String(output.state_hash_after_advance.to_string()),
+        );
+        *self
+            .output
+            .lock()
+            .map_err(|_| RuntimeError::message("VN step output lock is poisoned"))? = Some(output);
+        Ok(ActionTrace {
+            action_id: self.descriptor().id,
+            payload: trace_payload,
+        })
+    }
+}
+
+fn runtime_presentation(command: &PresentationCommand) -> RuntimePresentationCommand {
+    match command {
+        PresentationCommand::Dialogue {
+            key,
+            speaker,
+            voice,
+            window,
+        } => RuntimePresentationCommand::Custom {
+            kind: "vn.dialogue".to_string(),
+            data: [
+                ("key".to_string(), BlackboardValue::String(key.clone())),
+                (
+                    "speaker".to_string(),
+                    speaker
+                        .clone()
+                        .map(BlackboardValue::String)
+                        .unwrap_or(BlackboardValue::Null),
+                ),
+                (
+                    "voice".to_string(),
+                    voice
+                        .clone()
+                        .map(BlackboardValue::String)
+                        .unwrap_or(BlackboardValue::Null),
+                ),
+                (
+                    "window".to_string(),
+                    window
+                        .clone()
+                        .map(BlackboardValue::String)
+                        .unwrap_or(BlackboardValue::Null),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+        PresentationCommand::Choice { key, options } => RuntimePresentationCommand::Custom {
+            kind: "vn.choice".to_string(),
+            data: [
+                ("key".to_string(), BlackboardValue::String(key.clone())),
+                (
+                    "options".to_string(),
+                    BlackboardValue::List(
+                        options
+                            .iter()
+                            .map(|option| BlackboardValue::String(option.id.clone()))
+                            .collect(),
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+        PresentationCommand::SystemPage { page } => RuntimePresentationCommand::Custom {
+            kind: "vn.system_page".to_string(),
+            data: [(
+                "page".to_string(),
+                BlackboardValue::String(format!("{page:?}")),
+            )]
+            .into_iter()
+            .collect(),
+        },
+        PresentationCommand::Stage {
+            command,
+            attributes,
+        } => RuntimePresentationCommand::Custom {
+            kind: format!("vn.stage.{command}"),
+            data: attributes
+                .iter()
+                .map(|(key, value)| (key.clone(), BlackboardValue::String(value.clone())))
+                .collect(),
+        },
+        PresentationCommand::Marker { id } => {
+            RuntimePresentationCommand::Marker { name: id.clone() }
+        }
+    }
+}
+
+fn vn_event_kind(command: &CoreVnPlayerCommand) -> &'static str {
+    match command {
+        CoreVnPlayerCommand::Launch { .. } => "vn.launch",
+        CoreVnPlayerCommand::Advance => "player.advance",
+        CoreVnPlayerCommand::Choose { .. } => "choice.selected",
+        CoreVnPlayerCommand::OpenSystem { .. } => "system.open",
+        CoreVnPlayerCommand::ReturnSystem => "system.return",
+        CoreVnPlayerCommand::ReplayVoice { .. } => "voice.replay",
+        CoreVnPlayerCommand::SetAuto { .. } => "system.auto",
+        CoreVnPlayerCommand::SetSkip { .. } => "system.skip",
+        CoreVnPlayerCommand::SetConfig { .. } => "system.config",
+        CoreVnPlayerCommand::Unlock { .. } => "system.unlock",
+        CoreVnPlayerCommand::CompleteWait { .. } => "await.completed",
+    }
+}
+
+fn vn_runtime_event_kinds() -> [&'static str; 11] {
+    [
+        "vn.launch",
+        "player.advance",
+        "choice.selected",
+        "system.open",
+        "system.return",
+        "voice.replay",
+        "system.auto",
+        "system.skip",
+        "system.config",
+        "system.unlock",
+        "await.completed",
+    ]
+}
+
+fn command_resolves_wait(command: &CoreVnPlayerCommand, wait: Option<VnWaitKind>) -> bool {
+    matches!(
+        (command, wait),
+        (CoreVnPlayerCommand::Advance, Some(VnWaitKind::Dialogue))
+            | (CoreVnPlayerCommand::Choose { .. }, Some(VnWaitKind::Choice))
+            | (
+                CoreVnPlayerCommand::ReturnSystem,
+                Some(VnWaitKind::SystemPage)
+            )
+            | (
+                CoreVnPlayerCommand::CompleteWait { .. },
+                Some(
+                    VnWaitKind::Fence
+                        | VnWaitKind::Timer
+                        | VnWaitKind::TimelineComplete
+                        | VnWaitKind::MovieEnd
+                        | VnWaitKind::VoiceEnd
+                )
+            )
+    )
 }
 
 fn required_payload_string(payload: &serde_json::Value, key: &str) -> Result<String, CoreVnError> {
@@ -356,6 +877,41 @@ fn required_payload_string(payload: &serde_json::Value, key: &str) -> Result<Str
                 format!("runtime action payload is missing {key}"),
             )
         })
+}
+
+fn required_restore_section<'a>(
+    sections: &'a [RuntimeSectionPayload],
+    section_id: &str,
+    schema: &str,
+) -> Result<&'a RuntimeSectionPayload, CoreVnError> {
+    let mut matches = sections
+        .iter()
+        .filter(|section| section.section_id == section_id);
+    let section = matches.next().ok_or_else(|| {
+        CoreVnError::diagnostic(
+            "ASTRA_NATIVE_VN_RESTORE_SECTION_MISSING",
+            format!("restore section {section_id} is missing"),
+        )
+    })?;
+    if matches.next().is_some() {
+        return Err(CoreVnError::diagnostic(
+            "ASTRA_NATIVE_VN_RESTORE_SECTION_DUPLICATE",
+            format!("restore section {section_id} is duplicated"),
+        ));
+    }
+    if section.schema != schema || section.codec != RuntimeSectionCodec::Postcard {
+        return Err(CoreVnError::diagnostic(
+            "ASTRA_NATIVE_VN_RESTORE_SECTION_SCHEMA",
+            format!("restore section {section_id} has an incompatible schema or codec"),
+        ));
+    }
+    if !section.validate_hash() {
+        return Err(CoreVnError::diagnostic(
+            "ASTRA_NATIVE_VN_RESTORE_SECTION_HASH",
+            format!("restore section {section_id} failed hash validation"),
+        ));
+    }
+    Ok(section)
 }
 
 fn native_vn_package_sections() -> Vec<String> {
@@ -394,6 +950,52 @@ extern "C" fn ffi_prepare(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     })
 }
 
+static FFI_INSTANCES: OnceLock<Mutex<BTreeMap<String, NativeVnRuntimeProvider>>> = OnceLock::new();
+
+fn ffi_instances() -> &'static Mutex<BTreeMap<String, NativeVnRuntimeProvider>> {
+    FFI_INSTANCES.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+extern "C" fn ffi_create_instance(payload: RVec<u8>) -> FfiRuntimeProviderResult {
+    ffi_json_result(payload, |request: RuntimeProviderCreateRequest| {
+        let mut instances = ffi_instances()
+            .lock()
+            .map_err(|_| "provider instance registry lock is poisoned".to_string())?;
+        if instances.contains_key(&request.instance_id.0) {
+            return Err("provider instance id is already active".to_string());
+        }
+        instances.insert(
+            request.instance_id.0.clone(),
+            NativeVnRuntimeProvider::default(),
+        );
+        Ok(RuntimeProviderInstanceReport {
+            instance_id: request.instance_id,
+            status: "created".to_string(),
+            diagnostics: Vec::new(),
+        })
+    })
+}
+
+extern "C" fn ffi_destroy_instance(payload: RVec<u8>) -> FfiRuntimeProviderResult {
+    ffi_json_result(payload, |request: RuntimeProviderDestroyRequest| {
+        let mut instances = ffi_instances()
+            .lock()
+            .map_err(|_| "provider instance registry lock is poisoned".to_string())?;
+        let instance = instances
+            .get(&request.instance_id.0)
+            .ok_or_else(|| "provider instance is not active".to_string())?;
+        if instance.session_count() != 0 {
+            return Err("provider instance still has active sessions".to_string());
+        }
+        instances.remove(&request.instance_id.0);
+        Ok(RuntimeProviderInstanceReport {
+            instance_id: request.instance_id,
+            status: "destroyed".to_string(),
+            diagnostics: Vec::new(),
+        })
+    })
+}
+
 extern "C" fn ffi_probe(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_json(payload, |request: RuntimeProbeRequest| {
         NativeVnRuntimeProvider::default().probe(request)
@@ -401,53 +1003,38 @@ extern "C" fn ffi_probe(payload: RVec<u8>) -> FfiRuntimeProviderResult {
 }
 
 extern "C" fn ffi_open(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json(payload, |request: RuntimeOpenRequest| RuntimeOpenReport {
-        session_id: GameRuntimeSessionId(format!(
-            "{}:{}:{}",
-            NATIVE_VN_RUNTIME_ID, request.target_id, request.seed
-        )),
-        runtime_id: NATIVE_VN_RUNTIME_ID.to_string(),
-        provider_id: NATIVE_VN_PROVIDER_ID.to_string(),
-        diagnostics: Vec::new(),
+    ffi_instance_json(payload, |provider, request: RuntimeOpenRequest| {
+        let compiled_section = required_restore_section(
+            &request.sections,
+            "vn.compiled_story",
+            "astra.vn.compiled_story.v1",
+        )?;
+        let compiled: CoreCompiledStory = postcard::from_bytes(&compiled_section.bytes)?;
+        let config = VnRunConfig {
+            profile: request.profile.clone(),
+            locale: request.locale.clone(),
+        };
+        provider.open_compiled_story(compiled, config, request)
     })
 }
 
 extern "C" fn ffi_step(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json(payload, |request: RuntimeStepInput| RuntimeStepOutput {
-        session_id: request.session_id,
-        status: "ffi_shape_only".to_string(),
-        effects: Vec::new(),
-        presentation: Vec::new(),
-        diagnostics: vec!["ASTRA_NATIVE_VN_FFI_SESSION_NOT_BOUND".to_string()],
-        dirty_save_sections: Vec::new(),
-    })
+    ffi_instance_json(payload, NativeVnRuntimeProvider::step)
 }
 
 extern "C" fn ffi_save(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json(payload, |request: RuntimeSaveRequest| RuntimeSaveSections {
-        session_id: request.session_id,
-        sections: Vec::new(),
-        diagnostics: vec!["ASTRA_NATIVE_VN_FFI_SESSION_NOT_BOUND".to_string()],
+    ffi_instance_json(payload, |provider, request: RuntimeSaveRequest| {
+        provider.save(request)
     })
 }
 
 extern "C" fn ffi_restore(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json(payload, |request: RuntimeRestoreRequest| {
-        RuntimeRestoreReport {
-            session_id: request.session_id,
-            status: "ffi_shape_only".to_string(),
-            diagnostics: Vec::new(),
-        }
-    })
+    ffi_instance_json(payload, NativeVnRuntimeProvider::restore)
 }
 
 extern "C" fn ffi_shutdown(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json(payload, |session_id: GameRuntimeSessionId| {
-        RuntimeShutdownReport {
-            session_id,
-            status: "ffi_shape_only".to_string(),
-            diagnostics: Vec::new(),
-        }
+    ffi_instance_json(payload, |provider, session_id: GameRuntimeSessionId| {
+        provider.shutdown(session_id)
     })
 }
 
@@ -472,6 +1059,51 @@ where
         Ok(request) => ffi_json_value(f(request)),
         Err(err) => ffi_error("ASTRA_NATIVE_VN_FFI_DECODE", err.to_string()),
     }
+}
+
+fn ffi_json_result<T, U, E>(
+    payload: RVec<u8>,
+    f: impl FnOnce(T) -> Result<U, E>,
+) -> FfiRuntimeProviderResult
+where
+    T: serde::de::DeserializeOwned,
+    U: serde::Serialize,
+    E: std::fmt::Display,
+{
+    match serde_json::from_slice::<T>(payload.as_slice()) {
+        Ok(request) => match f(request) {
+            Ok(value) => ffi_json_value(value),
+            Err(err) => ffi_error("ASTRA_NATIVE_VN_FFI_CALL", err.to_string()),
+        },
+        Err(err) => ffi_error("ASTRA_NATIVE_VN_FFI_DECODE", err.to_string()),
+    }
+}
+
+fn ffi_instance_json<T, U>(
+    payload: RVec<u8>,
+    f: impl FnOnce(&mut NativeVnRuntimeProvider, T) -> Result<U, CoreVnError>,
+) -> FfiRuntimeProviderResult
+where
+    T: serde::de::DeserializeOwned,
+    U: serde::Serialize,
+{
+    ffi_json_result(payload, |call: RuntimeProviderCall| {
+        let request = serde_json::from_slice::<T>(&call.payload)
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let mut instances = ffi_instances().lock().map_err(|_| {
+            CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_FFI_INSTANCE_LOCK",
+                "provider instance registry lock is poisoned",
+            )
+        })?;
+        let provider = instances.get_mut(&call.instance_id.0).ok_or_else(|| {
+            CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_FFI_INSTANCE_MISSING",
+                "provider instance is not active",
+            )
+        })?;
+        f(provider, request)
+    })
 }
 
 fn ffi_json_value(value: impl serde::Serialize) -> FfiRuntimeProviderResult {

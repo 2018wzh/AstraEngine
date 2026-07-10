@@ -59,7 +59,7 @@ Expected report includes `package.integrity`, `target.manifest`, `platform.capab
 
 ## Stage 3：AstraVN
 
-**闭环：** `.astra + Luau policy` 编译为 CompiledStory，full playthrough 覆盖 commercial baseline、system UI、save/load 和 replay hash；advanced presentation profile 有独立 opt-in scenario。Stage 3 当前继续 `IN_PROGRESS`。现有 `.astra` line parser/compiler 是可运行 baseline，但 `S3-SCRIPT-01` 和 `S3-SCRIPT-02` 因 frontend 标准化重开：v1 需要 Lexer、TokenStream、Lossless CST、Typed AST、Semantic Passes、Command Registry、token-level source map、formatter/LSP adapter 和 release conformance。Runtime provider 闭环仍要求现有 `astra-vn` facade、VN extension manifest、package sections 和 release checks 对齐到 `NativeVnRuntimeProvider`，并证明 VN 只是同级 gameplay runtime，不是其他玩法的基类。
+**闭环：** `.astra + Luau policy` 编译为 CompiledStory，full playthrough 覆盖 commercial baseline、system UI、save/load 和 replay hash；advanced presentation profile 有独立 opt-in scenario。NativeVN 已由 RuntimeWorld `astra.vn.step` action 驱动，FFI instance/session lifecycle 和 package-bound behavior release evidence 已闭合。Stage 3 当前继续 `IN_PROGRESS`：现有 parser/compiler 已校验 canonical 缩进与 option 归属，但 `S3-SCRIPT-01` 和 `S3-SCRIPT-02` 仍需 Lexer、TokenStream、Lossless CST、Typed AST、Semantic Passes、Command Registry、token-level source map、formatter/LSP adapter 和 release conformance；Web live player 与 TsuiNoSora 正式 gate 也未完成。
 
 **Test IDs:** `T-S3-SCRIPT-01`、`T-S3-SCRIPT-02`、`T-S3-LUAU-01`、`T-S3-LUAU-02`、`T-S3-PRESENT-01`、`T-S3-SYSTEM-01`、`T-S3-ADVANCED-01`、`T-S3-SAMPLE-01`、`T-S3-GAME-TARGET-01`、`T-S3-RUNTIME-PROVIDER-01`
 

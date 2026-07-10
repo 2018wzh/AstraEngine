@@ -57,20 +57,43 @@ pub struct AwaitDrain {
 }
 
 impl AwaitQueue {
-    pub fn insert(&mut self, token: AwaitToken) {
+    pub fn insert(&mut self, token: AwaitToken) -> Result<(), Diagnostic> {
+        token.validate()?;
+        if self
+            .pending
+            .iter()
+            .any(|pending| pending.token_id == token.token_id)
+        {
+            return Err(Diagnostic::blocking(
+                "ASTRA_AWAIT_TOKEN_CONFLICT",
+                "await token id is already pending",
+            )
+            .with_field("token", token.token_id.0));
+        }
         self.pending.push(token);
+        Ok(())
     }
 
     pub fn submit_result(&mut self, result: AwaitResult) {
-        let known = self
+        let token = self
             .pending
             .iter()
-            .any(|token| token.token_id == result.token_id);
-        if !known {
+            .find(|token| token.token_id == result.token_id);
+        let Some(token) = token else {
             self.diagnostics.push(
                 Diagnostic::warning(
                     "ASTRA_AWAIT_RESULT_UNKNOWN",
                     "await result was submitted for an unknown token",
+                )
+                .with_field("token", result.token_id.0),
+            );
+            return;
+        };
+        if token.replay_policy == AwaitReplayPolicy::DeterministicTimeout {
+            self.diagnostics.push(
+                Diagnostic::blocking(
+                    "ASTRA_AWAIT_RESULT_POLICY",
+                    "deterministic-timeout await tokens reject submitted results",
                 )
                 .with_field("token", result.token_id.0),
             );
@@ -111,9 +134,10 @@ impl AwaitQueue {
         self.completed = later;
         let mut timeout_tokens = Vec::new();
         self.pending.retain(|token| {
-            if token
-                .deterministic_timeout_step
-                .is_some_and(|timeout_step| timeout_step <= step)
+            if token.replay_policy == AwaitReplayPolicy::DeterministicTimeout
+                && token
+                    .deterministic_timeout_step
+                    .is_some_and(|timeout_step| timeout_step <= step)
             {
                 timeout_tokens.push(token.clone());
                 false
@@ -133,6 +157,40 @@ impl AwaitQueue {
 
     pub fn pending(&self) -> &[AwaitToken] {
         &self.pending
+    }
+}
+
+impl AwaitToken {
+    pub fn validate(&self) -> Result<(), Diagnostic> {
+        match self.replay_policy {
+            AwaitReplayPolicy::RecordedResult if self.deterministic_timeout_step.is_some() => {
+                Err(Diagnostic::blocking(
+                    "ASTRA_AWAIT_REPLAY_POLICY",
+                    "recorded-result await token cannot declare a deterministic timeout",
+                )
+                .with_field("token", self.token_id.0))
+            }
+            AwaitReplayPolicy::DeterministicTimeout => {
+                let Some(timeout_step) = self.deterministic_timeout_step else {
+                    return Err(Diagnostic::blocking(
+                        "ASTRA_AWAIT_REPLAY_POLICY",
+                        "deterministic-timeout await token requires a timeout step",
+                    )
+                    .with_field("token", self.token_id.0));
+                };
+                if timeout_step < self.requested_at_step {
+                    return Err(Diagnostic::blocking(
+                        "ASTRA_AWAIT_REPLAY_POLICY",
+                        "await timeout step precedes the request step",
+                    )
+                    .with_field("token", self.token_id.0)
+                    .with_field("requested_at_step", self.requested_at_step)
+                    .with_field("timeout_step", timeout_step));
+                }
+                Ok(())
+            }
+            AwaitReplayPolicy::RecordedResult => Ok(()),
+        }
     }
 }
 

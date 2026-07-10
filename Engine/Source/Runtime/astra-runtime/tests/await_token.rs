@@ -23,20 +23,24 @@ fn run_with_order(order: [u64; 2]) -> astra_runtime::TickReport {
     .unwrap();
     let token_a = AwaitTokenId(StableId::deterministic_v7(1, 1, 13));
     let token_b = AwaitTokenId(StableId::deterministic_v7(1, 2, 13));
-    world.insert_await_token(AwaitToken {
-        token_id: token_a,
-        kind: AwaitKind::Custom("scenario".to_string()),
-        requested_at_step: 0,
-        deterministic_timeout_step: None,
-        replay_policy: AwaitReplayPolicy::RecordedResult,
-    });
-    world.insert_await_token(AwaitToken {
-        token_id: token_b,
-        kind: AwaitKind::Custom("scenario".to_string()),
-        requested_at_step: 0,
-        deterministic_timeout_step: None,
-        replay_policy: AwaitReplayPolicy::RecordedResult,
-    });
+    world
+        .insert_await_token(AwaitToken {
+            token_id: token_a,
+            kind: AwaitKind::Custom("scenario".to_string()),
+            requested_at_step: 0,
+            deterministic_timeout_step: None,
+            replay_policy: AwaitReplayPolicy::RecordedResult,
+        })
+        .unwrap();
+    world
+        .insert_await_token(AwaitToken {
+            token_id: token_b,
+            kind: AwaitKind::Custom("scenario".to_string()),
+            requested_at_step: 0,
+            deterministic_timeout_step: None,
+            replay_policy: AwaitReplayPolicy::RecordedResult,
+        })
+        .unwrap();
     world.submit_await_result(AwaitResult::custom(
         token_for(order[0], token_a, token_b),
         order[0],
@@ -84,13 +88,15 @@ fn await_timeout_materializes_deterministic_result() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
     let token_id = AwaitTokenId(StableId::deterministic_v7(2, 1, 13));
-    world.insert_await_token(AwaitToken {
-        token_id,
-        kind: AwaitKind::PresentationFence,
-        requested_at_step: 1,
-        deterministic_timeout_step: Some(3),
-        replay_policy: AwaitReplayPolicy::DeterministicTimeout,
-    });
+    world
+        .insert_await_token(AwaitToken {
+            token_id,
+            kind: AwaitKind::PresentationFence,
+            requested_at_step: 1,
+            deterministic_timeout_step: Some(3),
+            replay_policy: AwaitReplayPolicy::DeterministicTimeout,
+        })
+        .unwrap();
 
     world
         .tick(TickInput {
@@ -123,13 +129,15 @@ fn unknown_and_duplicate_await_results_are_diagnostic_only() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
     let token_id = AwaitTokenId(StableId::deterministic_v7(3, 1, 13));
-    world.insert_await_token(AwaitToken {
-        token_id,
-        kind: AwaitKind::Custom("scenario".to_string()),
-        requested_at_step: 0,
-        deterministic_timeout_step: None,
-        replay_policy: AwaitReplayPolicy::RecordedResult,
-    });
+    world
+        .insert_await_token(AwaitToken {
+            token_id,
+            kind: AwaitKind::Custom("scenario".to_string()),
+            requested_at_step: 0,
+            deterministic_timeout_step: None,
+            replay_policy: AwaitReplayPolicy::RecordedResult,
+        })
+        .unwrap();
     world.submit_await_result(AwaitResult::custom(token_id, 1, 1, "done"));
     world.submit_await_result(AwaitResult::custom(token_id, 1, 1, "done-again"));
     world.submit_await_result(AwaitResult::custom(
@@ -163,4 +171,45 @@ fn unknown_and_duplicate_await_results_are_diagnostic_only() {
         .collect();
     assert_eq!(await_events.len(), 1);
     assert_eq!(await_events[0].payload.kind, "await.completed");
+}
+
+#[test]
+fn await_replay_policy_rejects_invalid_tokens_and_live_timeout_results() {
+    let mut world =
+        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let invalid_recorded = AwaitTokenId(StableId::deterministic_v7(4, 1, 13));
+    let error = world
+        .insert_await_token(AwaitToken {
+            token_id: invalid_recorded,
+            kind: AwaitKind::Timer,
+            requested_at_step: 0,
+            deterministic_timeout_step: Some(2),
+            replay_policy: AwaitReplayPolicy::RecordedResult,
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("ASTRA_AWAIT_REPLAY_POLICY"));
+
+    let timeout_token = AwaitTokenId(StableId::deterministic_v7(4, 2, 13));
+    world
+        .insert_await_token(AwaitToken {
+            token_id: timeout_token,
+            kind: AwaitKind::Timer,
+            requested_at_step: 0,
+            deterministic_timeout_step: Some(2),
+            replay_policy: AwaitReplayPolicy::DeterministicTimeout,
+        })
+        .unwrap();
+    world.submit_await_result(AwaitResult::custom(timeout_token, 1, 1, "live"));
+    let report = world
+        .tick(TickInput {
+            fixed_step: 1,
+            delta_ns: 16_666_667,
+            seed: 13,
+        })
+        .unwrap();
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_AWAIT_RESULT_POLICY"));
+    assert!(world.debug_session().event_trace().is_empty());
 }

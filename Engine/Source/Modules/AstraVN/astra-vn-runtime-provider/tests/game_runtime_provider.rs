@@ -10,6 +10,7 @@ const STORY: &str = r#"
 story main #@id story.main
 state prologue #@id state.prologue
   scene room #@id scene.room
+    voice asset:voice.hero.0001 end:continue #@id voice.hello
     text key:line.hello speaker:hero #@id line.hello
     choice key:choice.next #@id choice.next
       option key:choice.library -> library #@id choice.library
@@ -45,8 +46,10 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
             RuntimeOpenRequest {
                 target_id: "nativevn-game".to_string(),
                 profile: "classic".to_string(),
+                locale: "zh-Hans".to_string(),
                 seed: 7,
                 package_hash: "sha256:fixture".to_string(),
+                sections: vec![],
             },
         )
         .unwrap();
@@ -67,6 +70,36 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
             .and_then(|key| key.as_str())
             == Some("line.hello")
     }));
+    let runtime = provider.runtime_snapshot(&open.session_id).unwrap();
+    assert!(runtime
+        .machines
+        .trace()
+        .iter()
+        .any(|trace| trace.action_id == "astra.vn.step"));
+    assert!(runtime
+        .mutations
+        .iter()
+        .any(|mutation| mutation.source == "astra.vn.step"));
+    assert!(runtime
+        .events
+        .pending()
+        .iter()
+        .any(|event| event.payload.kind == "vn.route.reached"));
+    assert!(runtime
+        .effects
+        .iter()
+        .any(|effect| effect.envelope.domain == "audio" && effect.envelope.validate_hash()));
+    assert_eq!(runtime.awaits.pending().len(), 1);
+    let await_id = runtime.awaits.pending()[0].token_id.0.to_string();
+    assert_eq!(
+        provider
+            .state(&open.session_id)
+            .unwrap()
+            .pending_wait
+            .as_ref()
+            .and_then(|wait| wait.await_id.as_deref()),
+        Some(await_id.as_str())
+    );
 
     let choice = provider
         .step(RuntimeStepInput {
@@ -101,8 +134,32 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
         })
         .unwrap();
     assert!(save.sections.iter().any(|section| {
-        section.section_id == "vn.runtime_state" && section.hash.starts_with("sha256:")
+        section.section_id == "vn.runtime_state"
+            && section.hash.to_string().starts_with("sha256:")
+            && !section.bytes.is_empty()
     }));
+    let saved_hash = astra_core::Hash128::from_blake3(
+        &postcard::to_allocvec(&provider.state(&open.session_id).unwrap()).unwrap(),
+    );
+    provider
+        .step(RuntimeStepInput {
+            session_id: open.session_id.clone(),
+            fixed_step: 3,
+            action: "advance".to_string(),
+            payload: serde_json::json!({}),
+        })
+        .unwrap();
+    let restore = provider
+        .restore(astra_plugin_abi::RuntimeRestoreRequest {
+            session_id: open.session_id.clone(),
+            sections: save.sections,
+        })
+        .unwrap();
+    assert_eq!(restore.status, "restored");
+    let restored_hash = astra_core::Hash128::from_blake3(
+        &postcard::to_allocvec(&provider.state(&open.session_id).unwrap()).unwrap(),
+    );
+    assert_eq!(restored_hash, saved_hash);
 
     let shutdown = provider.shutdown(open.session_id).unwrap();
     assert_eq!(shutdown.status, "shutdown");

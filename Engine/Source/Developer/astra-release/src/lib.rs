@@ -5,12 +5,15 @@ use astra_core::{Diagnostic, Hash256};
 use astra_package::{PackageManifest, PackageReader};
 use astra_platform::{PlatformCapabilityReport, PlatformValidationStatus};
 use astra_player_core::{PlayerAutomationReport, PlayerAutomationStatus};
+use astra_plugin_abi::{
+    RuntimeOpenRequest, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeStepInput,
+};
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
 use astra_vn::{
-    CompiledStory, SystemStoryManifest, SystemStoryValidationStatus,
+    CompiledStory, NativeVnRuntimeProvider, SystemStoryManifest, SystemStoryValidationStatus,
     VnAdvancedPresentationManifest, VnCommercialBaselineManifest, VnExtensionManifest,
     VnPolicyBundleManifest, VnPolicyBundleSourceCache, VnPresentationProviderManifest,
-    VnProfileManifest, VnStandardCommandManifest, VnSystemUiProfileManifest,
+    VnProfileManifest, VnRunConfig, VnStandardCommandManifest, VnSystemUiProfileManifest,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -712,20 +715,137 @@ fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckReco
         );
     }
 
+    let behavioral_evidence = match native_vn_behavioral_evidence(package) {
+        Ok(evidence) => evidence,
+        Err((code, message)) => {
+            return runtime_blocked(
+                "runtime_provider.native_vn",
+                code,
+                message,
+                vec![evidence("provider_id", provider_id)],
+            )
+        }
+    };
+    let mut release_evidence = vec![
+        evidence("runtime_id", runtime_id),
+        evidence("provider_id", provider_id),
+        evidence("package_section_count", package_sections.len()),
+        evidence("release_check_count", release_checks.len()),
+    ];
+    release_evidence.extend(behavioral_evidence);
+
     ReleaseCheckRecord {
         id: "runtime_provider.native_vn".to_string(),
         domain: ReleaseDomain::Runtime,
         status: CheckStatus::Pass,
-        summary: "NativeVN runtime provider descriptor declares package and release continuity"
+        summary: "NativeVN runtime provider completed package-bound lifecycle conformance"
             .to_string(),
         diagnostic: None,
-        evidence: vec![
-            evidence("runtime_id", runtime_id),
-            evidence("provider_id", provider_id),
-            evidence("package_section_count", package_sections.len()),
-            evidence("release_check_count", release_checks.len()),
-        ],
+        evidence: release_evidence,
     }
+}
+
+fn native_vn_behavioral_evidence(
+    package: &PackageReader,
+) -> Result<Vec<ReleaseEvidence>, (&'static str, String)> {
+    let compiled = package
+        .container()
+        .decode_postcard::<CompiledStory>("vn.compiled_story")
+        .map_err(|err| {
+            (
+                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PACKAGE",
+                format!("decode vn.compiled_story for provider conformance: {err}"),
+            )
+        })?;
+    let mut provider = NativeVnRuntimeProvider::default();
+    let open = provider
+        .open_compiled_story(
+            compiled.clone(),
+            VnRunConfig::classic("und"),
+            RuntimeOpenRequest {
+                target_id: "release.conformance".to_string(),
+                profile: "classic".to_string(),
+                locale: "und".to_string(),
+                seed: 0xA57A,
+                package_hash: compiled.story_hash.to_string(),
+                sections: Vec::new(),
+            },
+        )
+        .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_OPEN", err.to_string()))?;
+    provider
+        .step(RuntimeStepInput {
+            session_id: open.session_id.clone(),
+            fixed_step: 0,
+            action: "launch_default".to_string(),
+            payload: serde_json::json!({}),
+        })
+        .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STEP", err.to_string()))?;
+    let before_state = provider
+        .state(&open.session_id)
+        .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE", err.to_string()))?;
+    let before_hash = astra_core::Hash128::from_blake3(
+        &postcard::to_allocvec(&before_state)
+            .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE", err.to_string()))?,
+    );
+    let runtime_snapshot = provider
+        .runtime_snapshot(&open.session_id)
+        .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE", err.to_string()))?;
+    let save = provider
+        .save(RuntimeSaveRequest {
+            session_id: open.session_id.clone(),
+            slot: "release.conformance".to_string(),
+        })
+        .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_SAVE", err.to_string()))?;
+    let save_section_count = save.sections.len();
+    provider
+        .restore(RuntimeRestoreRequest {
+            session_id: open.session_id.clone(),
+            sections: save.sections,
+        })
+        .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_RESTORE", err.to_string()))?;
+    let restored_state = provider
+        .state(&open.session_id)
+        .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE", err.to_string()))?;
+    let restored_hash = astra_core::Hash128::from_blake3(
+        &postcard::to_allocvec(&restored_state)
+            .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE", err.to_string()))?,
+    );
+    if before_hash != restored_hash {
+        return Err((
+            "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_RESTORE_HASH",
+            "provider restore did not reproduce the saved VN state hash".to_string(),
+        ));
+    }
+    let event_bytes = postcard::to_allocvec(runtime_snapshot.events.trace()).map_err(|err| {
+        (
+            "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_EVENT_HASH",
+            err.to_string(),
+        )
+    })?;
+    let presentation_bytes =
+        postcard::to_allocvec(&(runtime_snapshot.presentation, runtime_snapshot.effects)).map_err(
+            |err| {
+                (
+                    "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PRESENTATION_HASH",
+                    err.to_string(),
+                )
+            },
+        )?;
+    provider
+        .shutdown(open.session_id)
+        .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_SHUTDOWN", err.to_string()))?;
+    Ok(vec![
+        evidence("behavior_state_hash", before_hash),
+        evidence(
+            "behavior_event_hash",
+            astra_core::Hash128::from_blake3(&event_bytes),
+        ),
+        evidence(
+            "behavior_presentation_hash",
+            astra_core::Hash128::from_blake3(&presentation_bytes),
+        ),
+        evidence("behavior_save_section_count", save_section_count),
+    ])
 }
 
 fn select_game_target<'a>(

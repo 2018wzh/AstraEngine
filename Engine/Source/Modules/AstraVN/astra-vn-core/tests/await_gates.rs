@@ -28,11 +28,11 @@ fn movie_end_wait_blocks_cursor_and_resumes_from_serializable_fence() {
     let wait = runtime.state().pending_wait.as_ref().unwrap();
     assert_eq!(wait.kind, VnWaitKind::MovieEnd);
     assert_eq!(wait.fence, "movie.opening.end");
-    assert_eq!(runtime.state().command_cursor, 1);
+    assert_eq!(runtime.state().cursor.as_ref().unwrap().ordinal, 1);
 
     let still_blocked = runtime.apply(VnPlayerCommand::Advance).unwrap();
     assert!(still_blocked.presentation.is_empty());
-    assert_eq!(runtime.state().command_cursor, 1);
+    assert_eq!(runtime.state().cursor.as_ref().unwrap().ordinal, 1);
 
     let save = runtime.save_slot("wait").unwrap();
     assert_eq!(
@@ -46,7 +46,10 @@ fn movie_end_wait_blocks_cursor_and_resumes_from_serializable_fence() {
         })
         .unwrap();
 
-    assert!(runtime.state().pending_wait.is_none());
+    assert_eq!(
+        runtime.state().pending_wait.as_ref().map(|wait| wait.kind),
+        Some(VnWaitKind::Dialogue)
+    );
     assert_eq!(runtime.state().backlog[0].key, "opening.after_movie");
     assert_eq!(output.presentation.len(), 1);
 }

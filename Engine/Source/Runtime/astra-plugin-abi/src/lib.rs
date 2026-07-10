@@ -4,6 +4,7 @@ use abi_stable::{
     std_types::{RString, RVec},
     StableAbi,
 };
+use astra_core::{Hash256, SchemaVersion};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -176,8 +177,36 @@ pub struct RuntimeProbeReport {
 pub struct RuntimeOpenRequest {
     pub target_id: String,
     pub profile: String,
+    pub locale: String,
     pub seed: u64,
     pub package_hash: String,
+    pub sections: Vec<RuntimeSectionPayload>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+pub struct ProviderInstanceId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeProviderCreateRequest {
+    pub instance_id: ProviderInstanceId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeProviderDestroyRequest {
+    pub instance_id: ProviderInstanceId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeProviderInstanceReport {
+    pub instance_id: ProviderInstanceId,
+    pub status: String,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeProviderCall {
+    pub instance_id: ProviderInstanceId,
+    pub payload: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -223,14 +252,14 @@ pub struct RuntimeSaveRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeSaveSections {
     pub session_id: GameRuntimeSessionId,
-    pub sections: Vec<RuntimeSectionRef>,
+    pub sections: Vec<RuntimeSectionPayload>,
     pub diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeRestoreRequest {
     pub session_id: GameRuntimeSessionId,
-    pub sections: Vec<RuntimeSectionRef>,
+    pub sections: Vec<RuntimeSectionPayload>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -258,7 +287,30 @@ pub struct RuntimePackageSectionPlan {
 pub struct RuntimeSectionRef {
     pub section_id: String,
     pub schema: String,
-    pub hash: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeSectionCodec {
+    Postcard,
+    Raw,
+    Zstd,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeSectionPayload {
+    pub section_id: String,
+    pub schema: String,
+    pub version: SchemaVersion,
+    pub codec: RuntimeSectionCodec,
+    pub hash: Hash256,
+    pub bytes: Vec<u8>,
+}
+
+impl RuntimeSectionPayload {
+    pub fn validate_hash(&self) -> bool {
+        Hash256::from_sha256(&self.bytes) == self.hash
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -310,6 +362,10 @@ pub struct FfiRuntimeProviderRegistration {
     pub packaged: bool,
     pub descriptor_schema: RString,
     pub descriptor_json: RVec<u8>,
+    #[sabi(unsafe_opaque_field)]
+    pub create_instance: FfiRuntimeProviderInvoke,
+    #[sabi(unsafe_opaque_field)]
+    pub destroy_instance: FfiRuntimeProviderInvoke,
     #[sabi(unsafe_opaque_field)]
     pub prepare: FfiRuntimeProviderInvoke,
     #[sabi(unsafe_opaque_field)]
@@ -412,6 +468,8 @@ mod tests {
             packaged: true,
             descriptor_schema: RString::from("astra.product_runtime_descriptor.v1"),
             descriptor_json: RVec::from(descriptor_json),
+            create_instance: ok_runtime_provider_call,
+            destroy_instance: ok_runtime_provider_call,
             prepare: ok_runtime_provider_call,
             probe: ok_runtime_provider_call,
             open: ok_runtime_provider_call,

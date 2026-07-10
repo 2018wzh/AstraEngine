@@ -17,6 +17,7 @@ where
     let lines = parse_sources(sources)?;
     let mut builder = CompileBuilder::default();
     for line in &lines {
+        builder.validate_structure(line)?;
         builder.record_source(line)?;
         match line.keyword.as_str() {
             "story" => builder.start_story(line)?,
@@ -54,6 +55,44 @@ struct CompileBuilder {
 }
 
 impl CompileBuilder {
+    fn validate_structure(&self, line: &ParsedLine) -> Result<(), VnError> {
+        let valid = match line.keyword.as_str() {
+            "story" | "state" => line.indent == 0,
+            "scene" => line.indent == 2,
+            "option" => {
+                let last_command = self.current_scene().and_then(|scene| scene.commands.last());
+                (line.indent == 6 && matches!(last_command, Some(CompiledCommand::Choice { .. })))
+                    || (line.indent == 4
+                        && matches!(last_command, Some(CompiledCommand::SystemPage { .. })))
+            }
+            _ if self.current_scene.is_none() => true,
+            _ => line.indent == 4,
+        };
+        if valid {
+            return Ok(());
+        }
+        let expected = match line.keyword.as_str() {
+            "story" | "state" => "0",
+            "scene" => "2",
+            "option" => "6 below choice, or 4 immediately after system_page",
+            _ => "4",
+        };
+        Err(VnError::Diagnostic(
+            Diagnostic::blocking(
+                if line.keyword == "option" {
+                    "ASTRA_VN_OPTION_CONTEXT"
+                } else {
+                    "ASTRA_VN_STRUCTURE_INDENT"
+                },
+                "source indentation does not match the canonical story structure",
+            )
+            .with_source(line.source_ref())
+            .with_field("keyword", &line.keyword)
+            .with_field("indent", line.indent)
+            .with_field("expected_indent", expected),
+        ))
+    }
+
     fn record_source(&mut self, line: &ParsedLine) -> Result<(), VnError> {
         let id = line.stable_id();
         if let Some(first) = self.source_map.get(&id) {
@@ -200,11 +239,7 @@ impl CompileBuilder {
             target: required_attr(line, "target")?,
         };
         let commands = &mut self.current_scene_mut()?.commands;
-        if let Some(CompiledCommand::Choice { options, .. }) = commands
-            .iter_mut()
-            .rev()
-            .find(|command| matches!(command, CompiledCommand::Choice { .. }))
-        {
+        if let Some(CompiledCommand::Choice { options, .. }) = commands.last_mut() {
             options.push(option);
             Ok(())
         } else if matches!(commands.last(), Some(CompiledCommand::SystemPage { .. })) {
@@ -291,11 +326,25 @@ impl CompileBuilder {
             Some("-=") => MutationOp::Sub,
             _ => MutationOp::Set,
         };
-        let value = line
-            .args
-            .get(2)
-            .and_then(|value| value.parse::<i64>().ok())
-            .unwrap_or(0);
+        let raw_value = line.args.get(2).ok_or_else(|| {
+            VnError::Diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_VN_MUTATE_VALUE",
+                    "mutate command requires an integer value",
+                )
+                .with_source(line.source_ref()),
+            )
+        })?;
+        let value = raw_value.parse::<i64>().map_err(|_| {
+            VnError::Diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_VN_MUTATE_VALUE",
+                    "mutate value must be a valid integer",
+                )
+                .with_source(line.source_ref())
+                .with_field("value", raw_value),
+            )
+        })?;
         self.current_scene_mut()?
             .commands
             .push(CompiledCommand::Mutate {
@@ -335,9 +384,6 @@ impl CompileBuilder {
     }
 
     fn push_presentation(&mut self, line: &ParsedLine) -> Result<(), VnError> {
-        if self.current_scene.is_none() {
-            return Ok(());
-        }
         self.current_scene_mut()?
             .commands
             .push(CompiledCommand::Presentation {
@@ -685,6 +731,16 @@ impl CompileBuilder {
             .ok_or_else(|| {
                 VnError::diagnostic("ASTRA_VN_SCENE_CONTEXT", "current scene is missing")
             })
+    }
+
+    fn current_scene(&self) -> Option<&Scene> {
+        let state_id = self.current_state.as_ref()?;
+        let scene_id = self.current_scene.as_ref()?;
+        self.states
+            .get(state_id)?
+            .scenes
+            .iter()
+            .find(|scene| &scene.id == scene_id)
     }
 }
 

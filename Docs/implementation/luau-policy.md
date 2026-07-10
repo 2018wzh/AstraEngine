@@ -17,6 +17,10 @@ Generic `astra-policy` owns value serialization, capability denial, trace record
 - AstraRPG uses `astra.rpg.*` and `astra.rpg.trpg.*`.
 - AstraEMU trusted policy host remains Manager/provider scoped and must not expose legacy VM internals.
 
+当前 AstraVN host 每次执行都接收 `PolicyQueryContext` 和 `PolicyExecutionBudget`。Query context 提供 text、asset、backlog、savepoint 与 layout 的确定性快照；缺 key 时返回 blocking diagnostic，不构造合成结果。Query trace 保存 API、参数和 result hash，Replay 使用记录结果。
+
+Execution budget 同时限制 Luau interrupt count、memory bytes、输出记录数量和 snapshot depth。无限循环、内存超限、输出洪泛或过深 snapshot 都会停止执行并返回 diagnostic。
+
 ## AstraVN Host API
 
 ```luau
@@ -40,6 +44,8 @@ astra.query.layout(target: string): table
 astra.trace.event(kind: string, fields: table)
 astra.trace.performance_scope(name: string)
 ```
+
+旧的 `astra.var.set` 已禁止作为权威写入入口，调用会返回 `ASTRA_VN_LUAU_AUTHORITY_API`。`astra.mutate.set_var` 只生成可序列化 mutation request/trace；host 必须在 Runtime action 事务中应用权威状态变化。直接修改 Luau table 仍只影响本次策略私有值。
 
 Every host function returns either a value or a structured diagnostic table:
 
@@ -118,4 +124,4 @@ cargo test -p astra-vn-policy --test luau_sandbox
 cargo test -p astra-vn-policy --test luau_mutation
 ```
 
-Expected: denied capability returns diagnostic, mutation trace records previous value and replay metadata, rollback/playback restores deterministic state, command/query/trace capability calls are serialized, and invalid snapshot/command/trace payloads block. `cargo test -p astra-policy` is planned until the shared crate exists.
+Expected: denied capability returns diagnostic；query reads injected backing state and records result hash；removed authority API and execution budget violations block；mutation trace records previous value and replay metadata；rollback/playback restores deterministic state；invalid snapshot/command/trace payloads block. `cargo test -p astra-policy` is planned until the shared crate exists.

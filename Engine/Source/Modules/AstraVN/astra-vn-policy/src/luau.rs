@@ -1,7 +1,11 @@
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::BTreeMap,
+    rc::Rc,
+};
 
-use astra_core::Diagnostic;
-use mlua::Lua;
+use astra_core::{Diagnostic, Hash128};
+use mlua::{Lua, VmState};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -109,6 +113,7 @@ pub struct PolicyQueryTraceEntry {
     pub api: String,
     pub target: String,
     pub args: BTreeMap<String, PolicySnapshotValue>,
+    pub result_hash: Hash128,
     pub replay_event: String,
 }
 
@@ -130,6 +135,46 @@ pub enum PolicySnapshotValue {
     Object(BTreeMap<String, PolicySnapshotValue>),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PolicyQueryContext {
+    pub text: BTreeMap<String, PolicySnapshotValue>,
+    pub assets: BTreeMap<String, PolicySnapshotValue>,
+    pub backlog: PolicySnapshotValue,
+    pub savepoint: PolicySnapshotValue,
+    pub layouts: BTreeMap<String, PolicySnapshotValue>,
+}
+
+impl Default for PolicyQueryContext {
+    fn default() -> Self {
+        Self {
+            text: BTreeMap::new(),
+            assets: BTreeMap::new(),
+            backlog: PolicySnapshotValue::Nil,
+            savepoint: PolicySnapshotValue::Nil,
+            layouts: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PolicyExecutionBudget {
+    pub interrupt_limit: u64,
+    pub memory_bytes: usize,
+    pub output_limit: usize,
+    pub snapshot_depth: usize,
+}
+
+impl Default for PolicyExecutionBudget {
+    fn default() -> Self {
+        Self {
+            interrupt_limit: 100_000,
+            memory_bytes: 16 * 1024 * 1024,
+            output_limit: 4096,
+            snapshot_depth: 8,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct LuauPolicy;
 
@@ -139,13 +184,48 @@ impl LuauPolicy {
     }
 
     pub fn eval_bool(&mut self, source: &str, state: &mut VnPolicyState) -> Result<bool, VnError> {
+        self.eval_bool_with_context(
+            source,
+            state,
+            &PolicyQueryContext::default(),
+            PolicyExecutionBudget::default(),
+        )
+    }
+
+    pub fn eval_bool_with_context(
+        &mut self,
+        source: &str,
+        state: &mut VnPolicyState,
+        queries: &PolicyQueryContext,
+        budget: PolicyExecutionBudget,
+    ) -> Result<bool, VnError> {
         let lua = Lua::new();
+        lua.set_memory_limit(budget.memory_bytes)
+            .map_err(sandbox_error)?;
+        let interrupts = Rc::new(Cell::new(0_u64));
+        let interrupt_counter = Rc::clone(&interrupts);
+        lua.set_interrupt(move |_| {
+            let count = interrupt_counter.get().saturating_add(1);
+            interrupt_counter.set(count);
+            if count > budget.interrupt_limit {
+                return Err(mlua::Error::runtime(
+                    "ASTRA_VN_LUAU_INSTRUCTION_BUDGET: policy exceeded interrupt budget",
+                ));
+            }
+            Ok(VmState::Continue)
+        });
         let globals = lua.globals();
         for name in [
             "io", "os", "debug", "package", "require", "loadfile", "dofile",
         ] {
             globals.set(name, mlua::Value::Nil).map_err(sandbox_error)?;
         }
+
+        let initial_output_count = state.command_trace.len()
+            + state.query_trace.len()
+            + state.trace_events.len()
+            + state.mutation_trace.len()
+            + state.snapshots.len();
 
         let variables = Rc::new(RefCell::new(state.variables.clone()));
         let mutation_trace = Rc::new(RefCell::new(state.mutation_trace.clone()));
@@ -171,7 +251,7 @@ impl LuauPolicy {
                             &command_register_trace,
                             "astra.command.register",
                             name,
-                            policy_snapshot_from_lua(manifest, 0)?,
+                            policy_snapshot_from_lua(manifest, 0, budget.snapshot_depth)?,
                         );
                         Ok(())
                     },
@@ -206,7 +286,7 @@ impl LuauPolicy {
                         &command_emit_trace,
                         "astra.command.emit",
                         name,
-                        policy_snapshot_from_lua(payload, 0)?,
+                        policy_snapshot_from_lua(payload, 0, budget.snapshot_depth)?,
                     );
                     Ok(())
                 })
@@ -223,7 +303,7 @@ impl LuauPolicy {
                         &command_enqueue_trace,
                         "astra.command.enqueue",
                         name,
-                        policy_snapshot_from_lua(payload, 0)?,
+                        policy_snapshot_from_lua(payload, 0, budget.snapshot_depth)?,
                     );
                     Ok(())
                 })
@@ -248,16 +328,12 @@ impl LuauPolicy {
         )
         .map_err(sandbox_error)?;
 
-        let set_vars = Rc::clone(&variables);
         var.set(
             "set",
-            lua.create_function_mut(move |_, (scope, key, value): (String, String, i64)| {
-                set_vars
-                    .borrow_mut()
-                    .entry(scope)
-                    .or_default()
-                    .insert(key, value);
-                Ok(())
+            lua.create_function(|_, _: (String, String, i64)| {
+                Err::<(), _>(mlua::Error::runtime(
+                    "ASTRA_VN_LUAU_AUTHORITY_API: astra.var.set was removed; use astra.mutate.set_var",
+                ))
             })
             .map_err(sandbox_error)?,
         )
@@ -295,10 +371,17 @@ impl LuauPolicy {
         astra.set("mutate", mutate).map_err(sandbox_error)?;
 
         let query_text_trace = Rc::clone(&query_trace);
+        let query_text_values = queries.text.clone();
         query
             .set(
                 "text",
                 lua.create_function(move |lua, (key, locale): (String, String)| {
+                    let lookup = format!("{locale}:{key}");
+                    let value = query_text_values.get(&lookup).cloned().ok_or_else(|| {
+                        mlua::Error::runtime(format!(
+                            "ASTRA_VN_POLICY_QUERY_MISSING: text {lookup}"
+                        ))
+                    })?;
                     record_policy_query(
                         &query_text_trace,
                         "astra.query.text",
@@ -312,21 +395,23 @@ impl LuauPolicy {
                         ]
                         .into_iter()
                         .collect(),
+                        &value,
                     );
-                    let result = lua.create_table()?;
-                    result.set("key", key)?;
-                    result.set("locale", locale)?;
-                    Ok(result)
+                    policy_snapshot_to_lua(lua, &value)
                 })
                 .map_err(sandbox_error)?,
             )
             .map_err(sandbox_error)?;
 
         let query_asset_trace = Rc::clone(&query_trace);
+        let query_asset_values = queries.assets.clone();
         query
             .set(
                 "asset",
                 lua.create_function(move |lua, id: String| {
+                    let value = query_asset_values.get(&id).cloned().ok_or_else(|| {
+                        mlua::Error::runtime(format!("ASTRA_VN_POLICY_QUERY_MISSING: asset {id}"))
+                    })?;
                     record_policy_query(
                         &query_asset_trace,
                         "astra.query.asset",
@@ -334,58 +419,73 @@ impl LuauPolicy {
                         [("id".to_string(), PolicySnapshotValue::String(id.clone()))]
                             .into_iter()
                             .collect(),
+                        &value,
                     );
-                    let result = lua.create_table()?;
-                    result.set("id", id)?;
-                    Ok(result)
+                    policy_snapshot_to_lua(lua, &value)
                 })
                 .map_err(sandbox_error)?,
             )
             .map_err(sandbox_error)?;
 
         let query_backlog_trace = Rc::clone(&query_trace);
+        let query_backlog_value = queries.backlog.clone();
         query
             .set(
                 "backlog",
                 lua.create_function(move |lua, ()| {
+                    if query_backlog_value == PolicySnapshotValue::Nil {
+                        return Err(mlua::Error::runtime(
+                            "ASTRA_VN_POLICY_QUERY_MISSING: backlog",
+                        ));
+                    }
                     record_policy_query(
                         &query_backlog_trace,
                         "astra.query.backlog",
                         "backlog".to_string(),
                         BTreeMap::new(),
+                        &query_backlog_value,
                     );
-                    let result = lua.create_table()?;
-                    result.set("count", 0)?;
-                    Ok(result)
+                    policy_snapshot_to_lua(lua, &query_backlog_value)
                 })
                 .map_err(sandbox_error)?,
             )
             .map_err(sandbox_error)?;
 
         let query_savepoint_trace = Rc::clone(&query_trace);
+        let query_savepoint_value = queries.savepoint.clone();
         query
             .set(
                 "savepoint",
                 lua.create_function(move |lua, ()| {
+                    if query_savepoint_value == PolicySnapshotValue::Nil {
+                        return Err(mlua::Error::runtime(
+                            "ASTRA_VN_POLICY_QUERY_MISSING: savepoint",
+                        ));
+                    }
                     record_policy_query(
                         &query_savepoint_trace,
                         "astra.query.savepoint",
                         "savepoint".to_string(),
                         BTreeMap::new(),
+                        &query_savepoint_value,
                     );
-                    let result = lua.create_table()?;
-                    result.set("available", true)?;
-                    Ok(result)
+                    policy_snapshot_to_lua(lua, &query_savepoint_value)
                 })
                 .map_err(sandbox_error)?,
             )
             .map_err(sandbox_error)?;
 
         let query_layout_trace = Rc::clone(&query_trace);
+        let query_layout_values = queries.layouts.clone();
         query
             .set(
                 "layout",
                 lua.create_function(move |lua, target: String| {
+                    let value = query_layout_values.get(&target).cloned().ok_or_else(|| {
+                        mlua::Error::runtime(format!(
+                            "ASTRA_VN_POLICY_QUERY_MISSING: layout {target}"
+                        ))
+                    })?;
                     record_policy_query(
                         &query_layout_trace,
                         "astra.query.layout",
@@ -396,10 +496,9 @@ impl LuauPolicy {
                         )]
                         .into_iter()
                         .collect(),
+                        &value,
                     );
-                    let result = lua.create_table()?;
-                    result.set("target", target)?;
-                    Ok(result)
+                    policy_snapshot_to_lua(lua, &value)
                 })
                 .map_err(sandbox_error)?,
             )
@@ -416,7 +515,7 @@ impl LuauPolicy {
                         &trace_event_log,
                         "astra.trace.event",
                         kind,
-                        policy_snapshot_from_lua(fields, 0)?,
+                        policy_snapshot_from_lua(fields, 0, budget.snapshot_depth)?,
                     );
                     Ok(())
                 })
@@ -448,7 +547,7 @@ impl LuauPolicy {
             .set(
                 "set",
                 lua.create_function_mut(move |_, (key, value): (String, mlua::Value)| {
-                    let value = policy_snapshot_from_lua(value, 0)?;
+                    let value = policy_snapshot_from_lua(value, 0, budget.snapshot_depth)?;
                     snapshot_set.borrow_mut().insert(key, value);
                     Ok(())
                 })
@@ -473,6 +572,18 @@ impl LuauPolicy {
         astra.set("snapshot", snapshot).map_err(sandbox_error)?;
         globals.set("astra", astra).map_err(sandbox_error)?;
         let result = lua.load(source).eval::<bool>().map_err(sandbox_error)?;
+        let output_count = command_trace.borrow().len()
+            + query_trace.borrow().len()
+            + trace_events.borrow().len()
+            + mutation_trace.borrow().len()
+            + snapshots.borrow().len()
+            - initial_output_count;
+        if output_count > budget.output_limit {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_LUAU_OUTPUT_BUDGET",
+                "Luau policy exceeded its recorded output budget",
+            ));
+        }
         state.variables = variables.borrow().clone();
         state.mutation_trace = mutation_trace.borrow().clone();
         state.command_trace = command_trace.borrow().clone();
@@ -502,11 +613,15 @@ fn record_policy_query(
     api: &str,
     target: String,
     args: BTreeMap<String, PolicySnapshotValue>,
+    result: &PolicySnapshotValue,
 ) {
     query_trace.borrow_mut().push(PolicyQueryTraceEntry {
         api: api.to_string(),
         target,
         args,
+        result_hash: Hash128::from_blake3(
+            &postcard::to_allocvec(result).expect("policy query result must serialize"),
+        ),
         replay_event: "vn.policy.query".to_string(),
     });
 }
@@ -527,6 +642,21 @@ fn record_policy_trace(
 
 fn sandbox_error(err: mlua::Error) -> VnError {
     let message = err.to_string();
+    for (marker, code) in [
+        ("ASTRA_VN_LUAU_AUTHORITY_API", "ASTRA_VN_LUAU_AUTHORITY_API"),
+        (
+            "ASTRA_VN_LUAU_INSTRUCTION_BUDGET",
+            "ASTRA_VN_LUAU_INSTRUCTION_BUDGET",
+        ),
+        (
+            "ASTRA_VN_POLICY_QUERY_MISSING",
+            "ASTRA_VN_POLICY_QUERY_MISSING",
+        ),
+    ] {
+        if message.contains(marker) {
+            return VnError::Diagnostic(Diagnostic::blocking(code, message));
+        }
+    }
     if message.contains("ASTRA_VN_LUAU_SNAPSHOT_UNSERIALIZABLE") {
         return VnError::Diagnostic(Diagnostic::blocking(
             "ASTRA_VN_LUAU_SNAPSHOT_UNSERIALIZABLE",
@@ -536,8 +666,12 @@ fn sandbox_error(err: mlua::Error) -> VnError {
     VnError::Luau(err.to_string())
 }
 
-fn policy_snapshot_from_lua(value: mlua::Value, depth: usize) -> mlua::Result<PolicySnapshotValue> {
-    if depth > 8 {
+fn policy_snapshot_from_lua(
+    value: mlua::Value,
+    depth: usize,
+    max_depth: usize,
+) -> mlua::Result<PolicySnapshotValue> {
+    if depth > max_depth {
         return Err(snapshot_error(
             "snapshot nesting exceeds the supported depth",
         ));
@@ -561,7 +695,7 @@ fn policy_snapshot_from_lua(value: mlua::Value, depth: usize) -> mlua::Result<Po
                 let (key, value) = pair?;
                 values.insert(
                     policy_snapshot_key_from_lua(key)?,
-                    policy_snapshot_from_lua(value, depth + 1)?,
+                    policy_snapshot_from_lua(value, depth + 1, max_depth)?,
                 );
             }
             Ok(PolicySnapshotValue::Object(values))

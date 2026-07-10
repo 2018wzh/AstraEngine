@@ -12,7 +12,7 @@
 | `crates/pal-decompiler` | `SCRIPT.SRC` + `POINT.DAT` + `FILE.DAT` + `TEXT.DAT` + `MEM.DAT` 的本地分析工具 |
 | `crates/pal-pac-unpacker` | PAC metadata listing 和本地 unpack 工具；AstraEngine 文档只使用 list-only 信息 |
 | `crates/pal-assets` | ResourceManager 验证 CLI，支持 paths、loaded PAC list 和单资源 preview |
-| `crates/na_wmv_player` | ASF/WMV2/WMA decoder 试验实现，供 movie path 参考 |
+| `crates/na_wmv_player` | ASF/Windows Media Video 8/WMA decoder 试验实现，供 movie path 参考 |
 | `platform/*` | `sena-rs` 的桌面、移动、Web launcher；AstraEMU 不继承这些 UI 壳 |
 
 `sena-rs` README 明确说明它是 SoftPAL engine 的跨平台 Rust 实现，目标样本是 Koikake。运行入口是 `pal-vm` 的 `sena` binary，默认 `Nls::ShiftJis`，也支持 `gbk` 和 `utf-8`。

@@ -1187,19 +1187,22 @@ impl RunContext {
         let system_actor = world.create_actor("scenario.system", vec!["scenario".to_string()]);
         let (vn_provider, vn_session) = if let Some(compiled) = compiled_story {
             let profile = profile.unwrap_or_else(|| "classic".to_string());
+            let locale = locale.unwrap_or_else(|| "und".to_string());
             let mut provider = NativeVnRuntimeProvider::default();
             let open = provider
                 .open_compiled_story(
                     compiled,
                     VnRunConfig {
                         profile: profile.clone(),
-                        locale: locale.unwrap_or_else(|| "und".to_string()),
+                        locale: locale.clone(),
                     },
                     RuntimeOpenRequest {
                         target_id: target_id.unwrap_or_else(|| "nativevn-game".to_string()),
                         profile,
+                        locale,
                         seed,
                         package_hash: package_id,
+                        sections: vec![],
                     },
                 )
                 .map_err(|err| ScenarioError::Message(err.to_string()))?;
@@ -1715,7 +1718,7 @@ impl RunContext {
             .all(|id| system.replay_unlocks.contains(id))
     }
 
-    fn vn_state(&self) -> Option<&astra_vn::VnRuntimeState> {
+    fn vn_state(&self) -> Option<astra_vn::VnRuntimeState> {
         let provider = self.vn_provider.as_ref()?;
         let session = self.vn_session.as_ref()?;
         provider.state(session).ok()

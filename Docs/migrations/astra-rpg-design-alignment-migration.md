@@ -8,7 +8,7 @@
 
 - `astra-vn-policy` 中可复用的 Luau sandbox、snapshot、trace、manifest、lock/source cache 和 diagnostic 机制。
 - `astra-runtime` 中 Actor/Component 和 `ActionEffect` 对组件 patch/replace 的缺口。
-- Stage 1/3 已有 plugin/runtime provider registry、`ProductRuntimeProvider` DTO+FFI shape 和 NativeVN provider 调用路径。
+- Stage 1/3 已有 plugin/runtime provider registry、`ProductRuntimeProvider` DTO、真实 FFI instance/session lifecycle 和 NativeVN RuntimeWorld action 调用路径。
 - Release Gate、stage-test matrix、coverage matrix 和 docs status 的 planned target 口径。
 
 新增实现，不属于已有代码搬迁：

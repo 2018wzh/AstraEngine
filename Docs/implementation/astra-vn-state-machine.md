@@ -1,6 +1,6 @@
 # AstraVN StateMachine Playback
 
-本页定义 AstraVN 如何用 EngineCore `StateMachine` 推进 `CompiledStory`。本页是 implementation blueprint；目标实现位于 `Engine/Source/Modules/AstraVN/` 下的 AstraVN 多 crate，当前单 crate 实现会按迁移计划拆分。
+本页定义 AstraVN 如何用 EngineCore `StateMachine` 推进 `CompiledStory`。实现位于 `astra-vn-core` 和 `astra-vn-runtime-provider`；`astra-vn` 只保留 facade 与 re-export。
 
 ## Runtime Shape
 
@@ -20,62 +20,68 @@ Runtime `StateMachine` 保持 flat FSM。VN 的路线、call/return、system sto
 
 状态机只负责 fixed tick 边界上的剧情推进。Director、Renderer2D、AudioGraph 和 FilterGraph 只消费可序列化 command，并用 `AwaitResult` 或 diagnostic 回到 Runtime。
 
-## Planned Types
+## Runtime Types
 
-Rust 类型是 schema 真源；下面字段是 Stage 3 实现必须保留的语义边界。
+Rust 类型是 schema 真源。当前 `VnRuntimeState` 使用结构化 cursor、call stack 和独立 system stack；不再保存互相分离的 story/state/usize cursor。
 
 ```rust
 pub struct VnRuntimeState {
-    pub instance_id: VnInstanceId,
-    pub story_id: StoryId,
-    pub cursor: VnCommandCursor,
-    pub wait: Option<VnWaitState>,
+    pub schema: String,
+    pub instance_id: String,
+    pub profile: String,
+    pub locale: String,
+    pub cursor: Option<VnCommandCursor>,
     pub call_stack: Vec<VnCallFrame>,
-    pub system_stack: Vec<VnCallFrame>,
-    pub route_flags: RouteFlagSet,
-    pub variables: VnVariableStore,
-    pub backlog: BacklogState,
-    pub read_state: ReadState,
-    pub voice_replay: VoiceReplayIndex,
+    pub system_stack: Vec<VnSystemFrame>,
+    pub system: VnSystemState,
+    pub pending_choice: Option<PendingChoice>,
+    pub variables: BTreeMap<String, BTreeMap<String, i64>>,
+    pub backlog: Vec<BacklogEntry>,
+    pub read_state: BTreeSet<String>,
+    pub voice_replay: BTreeMap<String, VoiceReplayEntry>,
+    pub route_coverage: BTreeSet<String>,
+    pub route_flags: BTreeMap<String, VnRouteFlag>,
+    pub pending_wait: Option<VnWaitState>,
 }
 
 pub struct VnCommandCursor {
-    pub state_id: StateId,
-    pub scene_id: SceneId,
-    pub command_id: CommandId,
-    pub ordinal: u32,
+    pub story_id: String,
+    pub state_id: String,
+    pub scene_id: String,
+    pub command_id: String,
+    pub ordinal: usize,
 }
 
-pub enum VnWaitState {
-    Dialogue { command_id: CommandId, await_id: AwaitTokenId },
-    Choice { command_id: CommandId, await_id: AwaitTokenId },
-    Fence { command_id: CommandId, fence_id: FenceId },
-    Movie { command_id: CommandId, await_id: AwaitTokenId },
-    SystemPage { command_id: CommandId, return_to: VnCommandCursor },
+pub struct VnWaitState {
+    pub kind: VnWaitKind,
+    pub fence: String,
+    pub command_id: String,
+    pub await_id: Option<String>,
 }
 
 pub struct VnCallFrame {
     pub return_to: VnCommandCursor,
-    pub source_command_id: CommandId,
+    pub source_command_id: String,
+    pub reason: String,
 }
 
 pub struct VnStepOutput {
-    pub next_cursor: VnCommandCursor,
+    pub next_cursor: Option<VnCommandCursor>,
     pub wait: Option<VnWaitState>,
-    pub events: Vec<RuntimeEvent>,
+    pub events: Vec<VnEvent>,
     pub presentation: Vec<PresentationCommand>,
-    pub audio: Vec<AudioCommand>,
-    pub awaits: Vec<AwaitToken>,
-    pub timeline_tasks: Vec<PresentationTimeline>,
+    pub audio: Vec<VnAudioCommand>,
+    pub awaits: Vec<String>,
+    pub timeline_tasks: Vec<VnTimelineTask>,
     pub mutations: Vec<VnMutationRecord>,
 }
 ```
 
-`VnRuntimeState` 进入 save section 和 replay hash。Luau snapshot 只能保存策略私有的可序列化值，不能保存 function、thread、userdata、native handle 或 coroutine state。
+`VnRuntimeState` 作为 typed component 进入 Runtime snapshot 和 `vn.runtime_state` save section。Provider 把 `VnStepOutput.awaits` 映射成 Runtime `AwaitToken`，把 audio/timeline DTO 写成 hash-validated `SerializedEffectEnvelope`。Luau snapshot 只能保存策略私有的可序列化值，不能保存 function、thread、userdata、native handle 或 coroutine state。
 
 ## Step Action
 
-`astra.vn.step` 是 Stage 3 的主 action。它读取 `VnRuntimeState`、`CompiledStory` 和触发事件，在同一个 tick 内连续执行非等待 command；遇到 dialogue、choice、wait、movie end、system page 或 timeline fence 时提交 `VnWaitState` 并停止。
+`astra.vn.step` 是 Stage 3 的主 action。NativeVN session 创建一个 RuntimeWorld、VN Actor、VN/policy typed component 和自循环 flat StateMachine。Action 从 trigger event 解码 `VnPlayerCommand`，调用无隐藏 session 状态的 reducer，再通过 `DeterministicActionContext` 替换 VN component、写 mutation record、发 RuntimeEvent/PresentationCommand/AwaitToken 和 audio/timeline effect。
 
 ```text
 StateMachine state: vn.running
@@ -93,21 +99,21 @@ actions:
 - `jump`、`call`、`return` 只修改 `VnCommandCursor` 和 `VnCallFrame`，不改 EngineCore 状态机结构。
 - `system_page` push `system_stack`，返回时恢复 `return_to`。
 
-任一 action failure 由 EngineCore 回滚候选 mutation，当前 Runtime `StateMachine` 不迁移。VN Core 需要把 command id、source ref 和 wait kind 放进 diagnostic，方便 PIE 和 Release Gate 定位。
+任一 action failure 由 EngineCore 回滚该 machine 在本 tick 的全部候选 mutation，当前 Runtime `StateMachine` 不迁移。run-to-quiescence 的循环或 microstep 超限也按同一事务边界阻断。VN Core 把 command id、source ref 和 wait kind 放进 diagnostic，供 PIE 和 Release Gate 定位。
 
 ## Trigger Event
 
-VN step action 需要读取触发事件 payload。Stage 1 的 action context 只暴露 mutation 入口，因此 Stage 3 需要给 `DeterministicActionContext` 增加只读接口：
+VN step action 通过 `DeterministicActionContext` 的只读 trigger event 接口读取 payload：
 
 ```rust
 impl DeterministicActionContext<'_> {
-    pub fn trigger_event(&self) -> &RuntimeEvent;
+    pub fn trigger_event(&self) -> Option<&RuntimeEvent>;
 }
 
 pub struct ActionCallRequest {
     pub step: u64,
     pub action_id: String,
-    pub trigger_event: RuntimeEvent,
+    pub trigger_event: Option<RuntimeEvent>,
     pub input: BTreeMap<String, BlackboardValue>,
 }
 ```

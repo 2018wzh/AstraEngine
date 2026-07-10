@@ -380,13 +380,14 @@ impl VnRunConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct VnRuntimeState {
     pub schema: String,
+    pub instance_id: String,
     pub profile: String,
     pub locale: String,
-    pub current_story: Option<String>,
-    pub current_state: Option<String>,
-    pub command_cursor: usize,
+    pub cursor: Option<VnCommandCursor>,
     #[serde(default)]
     pub call_stack: Vec<VnCallFrame>,
+    #[serde(default)]
+    pub system_stack: Vec<VnSystemFrame>,
     #[serde(default)]
     pub system: VnSystemState,
     #[serde(default)]
@@ -486,10 +487,26 @@ pub enum SystemUnlockKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnCallFrame {
+    pub return_to: VnCommandCursor,
+    pub source_command_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VnSystemFrame {
+    pub return_to: VnCommandCursor,
+    pub return_wait: Option<VnWaitState>,
+    pub return_choice: Option<PendingChoice>,
+    pub page: SystemPageKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VnCommandCursor {
     pub story_id: String,
     pub state_id: String,
-    pub command_cursor: usize,
-    pub reason: String,
+    pub scene_id: String,
+    pub command_id: String,
+    pub ordinal: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -547,6 +564,8 @@ pub struct VnWaitState {
     pub kind: VnWaitKind,
     pub fence: String,
     pub command_id: String,
+    #[serde(default)]
+    pub await_id: Option<String>,
 }
 
 impl VnWaitState {
@@ -556,6 +575,7 @@ impl VnWaitState {
             kind,
             fence: fence.into(),
             command_id: command_id.into(),
+            await_id: None,
         }
     }
 }
@@ -565,6 +585,9 @@ impl VnWaitState {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum VnWaitKind {
+    Dialogue,
+    Choice,
+    SystemPage,
     Fence,
     Timer,
     TimelineComplete,
@@ -580,10 +603,45 @@ pub struct VnCoverage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct VnStepOutput {
     pub schema: String,
+    pub next_cursor: Option<VnCommandCursor>,
+    pub wait: Option<VnWaitState>,
+    pub awaits: Vec<String>,
+    pub events: Vec<VnEvent>,
     pub presentation: Vec<PresentationCommand>,
+    pub audio: Vec<VnAudioCommand>,
+    pub timeline_tasks: Vec<VnTimelineTask>,
+    pub mutations: Vec<VnMutationRecord>,
     pub coverage: VnCoverage,
     pub state_hash_before_advance: Hash128,
     pub state_hash_after_advance: Hash128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VnEvent {
+    pub kind: String,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VnAudioCommand {
+    pub command_id: String,
+    pub command: String,
+    pub attributes: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VnTimelineTask {
+    pub command_id: String,
+    pub command: String,
+    pub attributes: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VnMutationRecord {
+    pub scope: String,
+    pub key: String,
+    pub before: Option<i64>,
+    pub after: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -592,6 +650,7 @@ pub enum VnPlayerCommand {
     Advance,
     Choose { option_id: String },
     OpenSystem { page: SystemPageKind },
+    ReturnSystem,
     ReplayVoice { voice: String },
     SetAuto { enabled: bool },
     SetSkip { mode: SkipMode },

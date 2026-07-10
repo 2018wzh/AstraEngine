@@ -2,7 +2,7 @@
 
 本目录只记录已实现代码向新设计对齐的迁移路线。设计页可以覆盖完整未来架构；迁移页不能把尚未存在的 AstraEMU/AstraRPG 代码写成可搬迁对象。
 
-当前落地状态：migration 1/2 已完成 Provider URI Asset VFS、`asset.vfs_manifest`、`asset.catalog`、单一 `vfs_provider` slot 和 gameplay runtime provider selection boundary；migration 3/4/5 已完成 AstraVN module layout、多 crate split 和 `NativeVnRuntimeProvider` DTO+FFI/in-process provider 接入。migration 6 是新重开的 AstraVN script frontend 对齐路线，当前只写计划，不迁移代码。AstraEMU/AstraRPG 仍只作为后续 provider 设计边界出现；`rpg.trpg` 是 AstraRPG 内部 profile，不是独立迁移对象。
+当前落地状态：migration 1/2 已完成 Provider URI Asset VFS、`asset.vfs_manifest`、`asset.catalog`、单一 `vfs_provider` slot 和 gameplay runtime provider selection boundary；migration 3/4/5 已完成 AstraVN module layout、多 crate split、RuntimeWorld `astra.vn.step` action 和真实 FFI instance/session lifecycle。migration 6 已完成 canonical 缩进归属、detached option、非法 mutate 与 scene 外 command blocker，Lossless CST、Typed AST、semantic pass、token span、formatter/LSP 和 release conformance 仍在重开范围。AstraEMU/AstraRPG 仍只作为后续 provider 设计边界出现；`rpg.trpg` 是 AstraRPG 内部 profile，不是独立迁移对象。
 
 ## 执行顺序
 
@@ -13,7 +13,7 @@
 | 3 | [astra-vn-module-layout-migration.md](astra-vn-module-layout-migration.md) | 现有 `astra-vn` 从 Runtime 分区迁到 `Engine/Source/Modules/AstraVN/astra-vn` |
 | 4 | [astra-vn-crate-split-migration.md](astra-vn-crate-split-migration.md) | 现有单 crate `astra-vn` 拆成 AstraVN 多功能 crate，`astra-vn` 收缩为 facade |
 | 5 | [game-runtime-provider-migration.md](game-runtime-provider-migration.md) | 现有 AstraVN runtime facade、VN extension manifest、package sections、release checks 对齐到 `NativeVnRuntimeProvider` |
-| 6 | [vn-script-frontend-migration.md](vn-script-frontend-migration.md) | 现有 `astra-vn-script` line parser/compiler baseline 对齐到 Lexer、Lossless CST、Typed AST、Semantic Passes、Command Registry、token-level source map、formatter/LSP 和 release conformance |
+| 6 | [vn-script-frontend-migration.md](vn-script-frontend-migration.md) | 已加固 canonical 缩进和 option 归属；继续迁移到 Lexer、Lossless CST、Typed AST、Semantic Passes、Command Registry、token-level source map、formatter/LSP 和 release conformance |
 | 7 | [editor-runtime-provider-migration.md](editor-runtime-provider-migration.md) | 现有 Editor 设计、手册和状态口径对齐到 runtime-provider-aware shell |
 | 8 | [platform-host-migration.md](platform-host-migration.md) | 已完成的 Windows 窗口渲染与音频/解码对齐到 realigned platform-host 统一 Token 抽象 |
 | 9 | [astra-rpg-design-alignment-migration.md](astra-rpg-design-alignment-migration.md) | 现有 VN policy、Runtime effect、runtime provider bridge 和 release/status 口径对齐到未来 AstraRPG 实现前置条件 |
@@ -26,7 +26,7 @@
 - `astra-cook` 的 importer/cook artifact、NativeVN asset sidecar 和 cook audit。
 - `astra-package` 的 package/save container、section table、bounded reader、`asset.vfs_manifest`、`asset.catalog` 和 project-level `package_sections`。
 - `astra-vn` 的 module layout、facade、VN state/save、VN extension manifest、package sections、release checks 和 `NativeVnRuntimeProvider`。
-- `astra-vn-script` 的 current line parser/compiler baseline、`CompiledStory`、route graph、source map、debug symbols、command manifest 和 diagnostics，逐步对齐到 frontend 标准。
+- `astra-vn-script` 当前的结构缩进 parser/compiler、`CompiledStory`、route graph、source map、debug symbols、command manifest 和 diagnostics，逐步对齐到 lossless frontend 标准。
 - `astra-platform` 与 `astra-platform-windows` 中已实现的 WMF 解码、WASAPI 声音输出、wgpu surface 绑定流程，对齐到 `PlatformHost::create_surface` 封装。
 - Stage 1 plugin registry、StateMachine action provider 和 `vn-extension-provider` fixture。
 - Editor workflow、module、creator manual 和 Stage 4 状态文档中的 runtime provider switching 口径。

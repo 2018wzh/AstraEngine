@@ -15,6 +15,11 @@ state library #@id state.library
   scene library #@id scene.library
     text key:library.followup speaker:hero voice:voice.hero.0002 #@id line.library
     jump ending.good #@id jump.good
+
+story system.route_chart #@id story.system.route_chart
+state route_chart #@id state.system.route_chart
+  scene route_chart #@id scene.system.route_chart
+    system_page kind:route_chart policy:astra.policy.standard #@id page.route_chart
 "#;
 
 const MOVIE_WAIT_STORY: &str = r#"

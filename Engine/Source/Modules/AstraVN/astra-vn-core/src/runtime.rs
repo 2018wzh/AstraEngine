@@ -5,9 +5,9 @@ use astra_core::Hash128;
 use crate::{
     resolve_target, BacklogEntry, BacklogLayoutMetadata, ChoiceOption, CompiledCommand,
     CompiledStory, MutationOp, PendingChoice, PresentationCommand, SkipMode, SystemUnlockKind,
-    VnCallFrame, VnCoverage, VnError, VnPlayerCommand, VnReplayUiState, VnRouteFlag,
-    VnRouteFlagKind, VnRunConfig, VnRuntimeState, VnSaveBlob, VnStepOutput, VnWaitKind,
-    VnWaitState, VoiceReplayEntry,
+    VnCallFrame, VnCommandCursor, VnCoverage, VnError, VnPlayerCommand, VnReplayUiState,
+    VnRouteFlag, VnRouteFlagKind, VnRunConfig, VnRuntimeState, VnSaveBlob, VnStepOutput,
+    VnSystemFrame, VnWaitKind, VnWaitState, VoiceReplayEntry,
 };
 
 #[derive(Debug, Clone)]
@@ -22,12 +22,12 @@ impl VnRuntime {
             compiled,
             state: VnRuntimeState {
                 schema: "astra.vn.runtime_state.v1".to_string(),
+                instance_id: "vn.default".to_string(),
                 profile: config.profile,
                 locale: config.locale,
-                current_story: None,
-                current_state: None,
-                command_cursor: 0,
+                cursor: None,
                 call_stack: Vec::new(),
+                system_stack: Vec::new(),
                 system: Default::default(),
                 pending_choice: None,
                 variables: Default::default(),
@@ -39,6 +39,16 @@ impl VnRuntime {
                 pending_wait: None,
             },
         })
+    }
+
+    pub fn from_state(compiled: CompiledStory, state: VnRuntimeState) -> Result<Self, VnError> {
+        if state.schema != "astra.vn.runtime_state.v1" {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_RUNTIME_STATE_SCHEMA",
+                "VN runtime state schema is invalid",
+            ));
+        }
+        Ok(Self { compiled, state })
     }
 
     pub fn state(&self) -> &VnRuntimeState {
@@ -83,15 +93,15 @@ impl VnRuntime {
     }
 
     pub fn apply(&mut self, command: VnPlayerCommand) -> Result<VnStepOutput, VnError> {
+        let before_state = self.state.clone();
         let before = self.state_hash();
         let mut presentation = Vec::new();
         let mut reached = BTreeSet::new();
         match command {
             VnPlayerCommand::Launch { story_id, state_id } => {
-                self.state.current_story = Some(story_id);
-                self.state.current_state = Some(state_id.clone());
-                self.state.command_cursor = 0;
+                self.state.cursor = Some(self.cursor_for(&story_id, &state_id, 0)?);
                 self.state.call_stack.clear();
+                self.state.system_stack.clear();
                 self.state.pending_choice = None;
                 self.state.pending_wait = None;
                 self.state.route_coverage.insert(state_id.clone());
@@ -100,8 +110,13 @@ impl VnRuntime {
                 self.run_until_blocked(&mut presentation, &mut reached)?;
             }
             VnPlayerCommand::Advance => {
-                if self.state.pending_wait.is_none() {
-                    self.run_until_blocked(&mut presentation, &mut reached)?;
+                match self.state.pending_wait.as_ref().map(|wait| wait.kind) {
+                    Some(VnWaitKind::Dialogue) => {
+                        self.state.pending_wait = None;
+                        self.run_until_blocked(&mut presentation, &mut reached)?;
+                    }
+                    None => self.run_until_blocked(&mut presentation, &mut reached)?,
+                    Some(_) => {}
                 }
             }
             VnPlayerCommand::Choose { option_id } => {
@@ -109,7 +124,18 @@ impl VnRuntime {
                 self.run_until_blocked(&mut presentation, &mut reached)?;
             }
             VnPlayerCommand::OpenSystem { page } => {
-                presentation.push(PresentationCommand::SystemPage { page });
+                self.open_system_story(page, &mut presentation, &mut reached)?;
+            }
+            VnPlayerCommand::ReturnSystem => {
+                let frame = self.state.system_stack.pop().ok_or_else(|| {
+                    VnError::diagnostic(
+                        "ASTRA_VN_SYSTEM_STACK",
+                        "system.return was supplied without an open system story",
+                    )
+                })?;
+                self.state.cursor = Some(frame.return_to);
+                self.state.pending_wait = frame.return_wait;
+                self.state.pending_choice = frame.return_choice;
             }
             VnPlayerCommand::ReplayVoice { voice } => {
                 if !self.state.voice_replay.contains_key(&voice) {
@@ -160,9 +186,27 @@ impl VnRuntime {
                 self.run_until_blocked(&mut presentation, &mut reached)?;
             }
         }
+        let events = reached
+            .iter()
+            .cloned()
+            .map(|id| crate::VnEvent {
+                kind: "vn.route.reached".to_string(),
+                id,
+            })
+            .collect();
+        let audio = presentation.iter().filter_map(vn_audio_command).collect();
+        let timeline_tasks = presentation.iter().filter_map(vn_timeline_task).collect();
+        let mutations = variable_mutations(&before_state, &self.state);
         Ok(VnStepOutput {
             schema: "astra.vn.step_output.v1".to_string(),
+            next_cursor: self.state.cursor.clone(),
+            wait: self.state.pending_wait.clone(),
+            awaits: Vec::new(),
+            events,
             presentation,
+            audio,
+            timeline_tasks,
+            mutations,
             coverage: VnCoverage { reached },
             state_hash_before_advance: before,
             state_hash_after_advance: self.state_hash(),
@@ -198,10 +242,11 @@ impl VnRuntime {
             if self.state.pending_wait.is_some() {
                 return Ok(());
             }
-            let Some(state_id) = self.state.current_state.clone() else {
+            let Some(cursor) = self.state.cursor.clone() else {
                 return Ok(());
             };
-            let Some(command) = self.command_at_cursor(&state_id).cloned() else {
+            let state_id = cursor.state_id.clone();
+            let Some(command) = self.command_at_cursor(&cursor).cloned() else {
                 return Ok(());
             };
             match command {
@@ -213,12 +258,12 @@ impl VnRuntime {
                     window,
                 } => {
                     if self.should_skip_dialogue(&id) {
-                        self.state.command_cursor += 1;
+                        self.advance_cursor()?;
                         continue;
                     }
-                    let story_id = self.state.current_story.clone().unwrap_or_default();
-                    let route_position = self.state.command_cursor;
-                    self.state.command_cursor += 1;
+                    let story_id = cursor.story_id.clone();
+                    let route_position = cursor.ordinal;
+                    self.advance_cursor()?;
                     self.state.backlog.push(BacklogEntry {
                         command_id: id.clone(),
                         key: key.clone(),
@@ -232,7 +277,7 @@ impl VnRuntime {
                             window: window.clone(),
                         },
                     });
-                    self.state.read_state.insert(id);
+                    self.state.read_state.insert(id.clone());
                     if let Some(voice_id) = &voice {
                         self.state.voice_replay.insert(
                             voice_id.clone(),
@@ -249,44 +294,48 @@ impl VnRuntime {
                         voice,
                         window,
                     });
+                    self.state.pending_wait = Some(VnWaitState::new(
+                        VnWaitKind::Dialogue,
+                        format!("dialogue:{id}"),
+                        id,
+                    ));
                     return Ok(());
                 }
                 CompiledCommand::Choice { id, key, options } => {
-                    self.state.command_cursor += 1;
+                    self.advance_cursor()?;
                     self.state.pending_choice = Some(PendingChoice {
-                        choice_id: id,
+                        choice_id: id.clone(),
                         key: key.clone(),
                         options: options.clone(),
                     });
                     presentation.push(PresentationCommand::Choice { key, options });
+                    self.state.pending_wait = Some(VnWaitState::new(
+                        VnWaitKind::Choice,
+                        format!("choice:{id}"),
+                        id,
+                    ));
                     return Ok(());
                 }
                 CompiledCommand::Jump { id, target } => {
-                    self.state.command_cursor += 1;
+                    self.advance_cursor()?;
                     let target = self.resolve_runtime_target(&target);
                     self.record_route_flag(VnRouteFlagKind::Jump, &id, &target);
                     self.reach(&target, reached);
                     if self.compiled.states.contains_key(&target) {
-                        self.state.current_state = Some(target);
-                        self.state.command_cursor = 0;
+                        let story_id = self.story_for_state(&target)?;
+                        self.state.cursor = Some(self.cursor_for(&story_id, &target, 0)?);
                     } else {
                         return Ok(());
                     }
                 }
                 CompiledCommand::Call { id, target } => {
-                    let Some(story_id) = self.state.current_story.clone() else {
-                        return Err(VnError::diagnostic(
+                    self.advance_cursor()?;
+                    let return_to = self.state.cursor.clone().ok_or_else(|| {
+                        VnError::diagnostic(
                             "ASTRA_VN_CALL_CONTEXT",
-                            "call command requires a current story",
-                        ));
-                    };
-                    self.state.command_cursor += 1;
-                    let Some(state_id) = self.state.current_state.clone() else {
-                        return Err(VnError::diagnostic(
-                            "ASTRA_VN_CALL_CONTEXT",
-                            "call command requires a current state",
-                        ));
-                    };
+                            "call command requires a return cursor",
+                        )
+                    })?;
                     let target = self.resolve_runtime_target(&target);
                     if !self.compiled.states.contains_key(&target) {
                         return Err(VnError::diagnostic(
@@ -296,27 +345,24 @@ impl VnRuntime {
                     }
                     self.record_route_flag(VnRouteFlagKind::Call, &id, &target);
                     self.state.call_stack.push(VnCallFrame {
-                        story_id,
-                        state_id,
-                        command_cursor: self.state.command_cursor,
+                        return_to,
+                        source_command_id: id.clone(),
                         reason: id,
                     });
                     self.reach(&target, reached);
-                    self.state.current_state = Some(target);
-                    self.state.command_cursor = 0;
+                    let story_id = self.story_for_state(&target)?;
+                    self.state.cursor = Some(self.cursor_for(&story_id, &target, 0)?);
                 }
                 CompiledCommand::Return { id } => {
-                    self.state.command_cursor += 1;
+                    self.advance_cursor()?;
                     let frame = self.state.call_stack.pop().ok_or_else(|| {
                         VnError::diagnostic(
                             "ASTRA_VN_RETURN_STACK",
                             format!("return command {id} has no call frame"),
                         )
                     })?;
-                    self.state.current_story = Some(frame.story_id);
-                    self.record_route_flag(VnRouteFlagKind::Return, &id, &frame.state_id);
-                    self.state.current_state = Some(frame.state_id);
-                    self.state.command_cursor = frame.command_cursor;
+                    self.record_route_flag(VnRouteFlagKind::Return, &id, &frame.return_to.state_id);
+                    self.state.cursor = Some(frame.return_to);
                 }
                 CompiledCommand::Mutate {
                     scope,
@@ -325,7 +371,7 @@ impl VnRuntime {
                     value,
                     ..
                 } => {
-                    self.state.command_cursor += 1;
+                    self.advance_cursor()?;
                     let entry = self
                         .state
                         .variables
@@ -339,13 +385,32 @@ impl VnRuntime {
                         MutationOp::Sub => *entry -= value,
                     }
                 }
-                CompiledCommand::SystemPage { page, .. } => {
-                    self.state.command_cursor += 1;
-                    presentation.push(PresentationCommand::SystemPage { page });
+                CompiledCommand::SystemPage { id, page, .. } => {
+                    let entry = self
+                        .compiled
+                        .system_story_manifest
+                        .entries
+                        .get(&page)
+                        .cloned();
+                    if entry
+                        .as_ref()
+                        .is_some_and(|entry| entry.state_id != state_id)
+                    {
+                        self.advance_cursor()?;
+                        self.open_system_story(page, presentation, reached)?;
+                    } else {
+                        self.advance_cursor()?;
+                        presentation.push(PresentationCommand::SystemPage { page });
+                        self.state.pending_wait = Some(VnWaitState::new(
+                            VnWaitKind::SystemPage,
+                            format!("system:{id}"),
+                            id,
+                        ));
+                    }
                     return Ok(());
                 }
                 CompiledCommand::Presentation { id, command } => {
-                    self.state.command_cursor += 1;
+                    self.advance_cursor()?;
                     let wait = wait_state_from_presentation(&id, &command);
                     presentation.push(command);
                     if let Some(wait) = wait {
@@ -354,7 +419,7 @@ impl VnRuntime {
                     }
                 }
                 CompiledCommand::Wait { id, fence } => {
-                    self.state.command_cursor += 1;
+                    self.advance_cursor()?;
                     self.state.pending_wait = Some(VnWaitState::new(VnWaitKind::Fence, fence, id));
                     return Ok(());
                 }
@@ -369,6 +434,12 @@ impl VnRuntime {
                 "choice input was supplied without a pending choice",
             )
         })?;
+        if self.state.pending_wait.as_ref().map(|wait| wait.kind) != Some(VnWaitKind::Choice) {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_CHOICE_WAIT_MISSING",
+                "choice input requires a matching choice wait",
+            ));
+        }
         let option: ChoiceOption = pending
             .options
             .into_iter()
@@ -381,6 +452,7 @@ impl VnRuntime {
             })?;
         let target = self.resolve_runtime_target(&option.target);
         self.state.pending_choice = None;
+        self.state.pending_wait = None;
         self.record_route_flag(
             VnRouteFlagKind::Choice,
             format!("{}:{}", pending.choice_id, option.id),
@@ -388,20 +460,121 @@ impl VnRuntime {
         );
         self.reach(&target, reached);
         if self.compiled.states.contains_key(&target) {
-            self.state.current_state = Some(target);
-            self.state.command_cursor = 0;
+            let story_id = self.story_for_state(&target)?;
+            self.state.cursor = Some(self.cursor_for(&story_id, &target, 0)?);
         }
         Ok(())
     }
 
-    fn command_at_cursor(&self, state_id: &str) -> Option<&CompiledCommand> {
+    fn command_at_cursor(&self, cursor: &VnCommandCursor) -> Option<&CompiledCommand> {
         self.compiled
             .states
-            .get(state_id)?
+            .get(&cursor.state_id)?
             .scenes
             .iter()
             .flat_map(|scene| &scene.commands)
-            .nth(self.state.command_cursor)
+            .nth(cursor.ordinal)
+    }
+
+    fn cursor_for(
+        &self,
+        story_id: &str,
+        state_id: &str,
+        ordinal: usize,
+    ) -> Result<VnCommandCursor, VnError> {
+        let state = self.compiled.states.get(state_id).ok_or_else(|| {
+            VnError::diagnostic(
+                "ASTRA_VN_CURSOR_STATE",
+                format!("cursor state {state_id} is not compiled"),
+            )
+        })?;
+        let command = state
+            .scenes
+            .iter()
+            .flat_map(|scene| {
+                scene
+                    .commands
+                    .iter()
+                    .map(move |command| (scene.id.as_str(), command))
+            })
+            .nth(ordinal);
+        let (scene_id, command_id) = command
+            .map(|(scene_id, command)| (scene_id.to_string(), compiled_command_id(command)))
+            .unwrap_or_else(|| {
+                (
+                    state
+                        .scenes
+                        .last()
+                        .map(|scene| scene.id.clone())
+                        .unwrap_or_else(|| "astra.vn.scene.none".to_string()),
+                    "astra.vn.cursor.end".to_string(),
+                )
+            });
+        Ok(VnCommandCursor {
+            story_id: story_id.to_string(),
+            state_id: state_id.to_string(),
+            scene_id,
+            command_id,
+            ordinal,
+        })
+    }
+
+    fn advance_cursor(&mut self) -> Result<(), VnError> {
+        let cursor = self.state.cursor.clone().ok_or_else(|| {
+            VnError::diagnostic("ASTRA_VN_CURSOR_MISSING", "VN command cursor is not set")
+        })?;
+        self.state.cursor =
+            Some(self.cursor_for(&cursor.story_id, &cursor.state_id, cursor.ordinal + 1)?);
+        Ok(())
+    }
+
+    fn story_for_state(&self, state_id: &str) -> Result<String, VnError> {
+        self.compiled
+            .stories
+            .iter()
+            .find(|story| story.states.iter().any(|state| state == state_id))
+            .map(|story| story.id.clone())
+            .ok_or_else(|| {
+                VnError::diagnostic(
+                    "ASTRA_VN_CURSOR_STORY",
+                    format!("state {state_id} has no owning story"),
+                )
+            })
+    }
+
+    fn open_system_story(
+        &mut self,
+        page: crate::SystemPageKind,
+        presentation: &mut Vec<PresentationCommand>,
+        reached: &mut BTreeSet<String>,
+    ) -> Result<(), VnError> {
+        let entry = self
+            .compiled
+            .system_story_manifest
+            .entries
+            .get(&page)
+            .cloned()
+            .ok_or_else(|| {
+                VnError::diagnostic(
+                    "ASTRA_VN_SYSTEM_ENTRY_MISSING",
+                    format!("system page {page:?} has no compiled story entry"),
+                )
+            })?;
+        let return_to = self.state.cursor.clone().ok_or_else(|| {
+            VnError::diagnostic(
+                "ASTRA_VN_SYSTEM_RETURN_CURSOR",
+                "system story requires a return cursor",
+            )
+        })?;
+        self.state.system_stack.push(VnSystemFrame {
+            return_to,
+            return_wait: self.state.pending_wait.take(),
+            return_choice: self.state.pending_choice.take(),
+            page,
+        });
+        self.state.cursor = Some(self.cursor_for(&entry.story_id, &entry.state_id, 0)?);
+        self.reach(&entry.state_id, reached);
+        self.run_until_blocked(presentation, reached)
     }
 
     fn resolve_runtime_target(&self, target: &str) -> String {
@@ -436,6 +609,122 @@ impl VnRuntime {
             SkipMode::All => true,
         }
     }
+}
+
+pub fn reduce_vn_step(
+    compiled: &CompiledStory,
+    state: &VnRuntimeState,
+    command: VnPlayerCommand,
+) -> Result<(VnRuntimeState, VnStepOutput), VnError> {
+    let mut runtime = VnRuntime::from_state(compiled.clone(), state.clone())?;
+    let output = runtime.apply(command)?;
+    Ok((runtime.state, output))
+}
+
+fn compiled_command_id(command: &CompiledCommand) -> String {
+    match command {
+        CompiledCommand::Dialogue { id, .. }
+        | CompiledCommand::Choice { id, .. }
+        | CompiledCommand::Jump { id, .. }
+        | CompiledCommand::Call { id, .. }
+        | CompiledCommand::Return { id }
+        | CompiledCommand::Mutate { id, .. }
+        | CompiledCommand::SystemPage { id, .. }
+        | CompiledCommand::Presentation { id, .. }
+        | CompiledCommand::Wait { id, .. } => id.clone(),
+    }
+}
+
+fn vn_audio_command(command: &PresentationCommand) -> Option<crate::VnAudioCommand> {
+    let PresentationCommand::Stage {
+        command,
+        attributes,
+    } = command
+    else {
+        return None;
+    };
+    if !matches!(command.as_str(), "voice" | "bgm" | "se" | "audio") {
+        return None;
+    }
+    Some(crate::VnAudioCommand {
+        command_id: attributes
+            .get("id")
+            .cloned()
+            .unwrap_or_else(|| format!("audio:{command}")),
+        command: command.clone(),
+        attributes: attributes.clone(),
+    })
+}
+
+fn vn_timeline_task(command: &PresentationCommand) -> Option<crate::VnTimelineTask> {
+    let PresentationCommand::Stage {
+        command,
+        attributes,
+    } = command
+    else {
+        return None;
+    };
+    if !matches!(command.as_str(), "timeline" | "task") {
+        return None;
+    }
+    Some(crate::VnTimelineTask {
+        command_id: attributes
+            .get("id")
+            .cloned()
+            .unwrap_or_else(|| format!("timeline:{command}")),
+        command: command.clone(),
+        attributes: attributes.clone(),
+    })
+}
+
+fn variable_mutations(
+    before: &VnRuntimeState,
+    after: &VnRuntimeState,
+) -> Vec<crate::VnMutationRecord> {
+    let scopes = before
+        .variables
+        .keys()
+        .chain(after.variables.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut mutations = Vec::new();
+    for scope in scopes {
+        let keys = before
+            .variables
+            .get(&scope)
+            .into_iter()
+            .flat_map(|values| values.keys())
+            .chain(
+                after
+                    .variables
+                    .get(&scope)
+                    .into_iter()
+                    .flat_map(|values| values.keys()),
+            )
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        for key in keys {
+            let previous = before
+                .variables
+                .get(&scope)
+                .and_then(|values| values.get(&key))
+                .copied();
+            let current = after
+                .variables
+                .get(&scope)
+                .and_then(|values| values.get(&key))
+                .copied();
+            if previous != current {
+                mutations.push(crate::VnMutationRecord {
+                    scope: scope.clone(),
+                    key,
+                    before: previous,
+                    after: current,
+                });
+            }
+        }
+    }
+    mutations
 }
 
 fn route_flag_kind_id(kind: VnRouteFlagKind) -> &'static str {

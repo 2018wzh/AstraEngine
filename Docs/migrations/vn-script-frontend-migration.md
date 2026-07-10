@@ -1,19 +1,19 @@
 # AstraVN Script Frontend Migration
 
-本迁移页只写当前 `astra-vn-script` baseline 迁到新设计的路线，不执行迁移。设计依据见 [ADR 0013](../adr/0013-astravn-script-frontend-standardization.md)、[AstraVN Script Spec](../modules/astra-vn-script.md) 和 [`.astra` Grammar And IR](../implementation/astra-grammar-ir.md)。
+本迁移页记录当前 `astra-vn-script` baseline 到 lossless frontend 的实施路线。Canonical 缩进归属、detached option blocker、非法 mutate 与 scene 外 command blocker已经落地；Lexer/CST/AST 等剩余步骤按本页继续推进。设计依据见 [ADR 0013](../adr/0013-astravn-script-frontend-standardization.md)、[AstraVN Script Spec](../modules/astra-vn-script.md) 和 [`.astra` Grammar And IR](../implementation/astra-grammar-ir.md)。
 
 ## 当前 baseline
 
-当前实现已经能把 `.astra` 编译成 `CompiledStory`，并覆盖 story/state/scene/text/choice/option/jump/call/return/mutate/system page、route graph、Story/Variable/Command/System manifest、source map、debug symbols 和 stable hash。该 baseline 仍由 `compile_astra_sources` 兼容入口承载。
+当前实现已经能把 `.astra` 编译成 `CompiledStory`，并覆盖 story/state/scene/text/choice/option/jump/call/return/mutate/system page、route graph、Story/Variable/Command/System manifest、source map、debug symbols 和 stable hash。缩进会决定 story/state/scene/command 与 choice option 归属，option 不能跨越其他 command 反向绑定。该 baseline 仍由 `compile_astra_sources` 兼容入口承载。
 
 需要迁移的短板：
 
 - parser 以 line 为单位，不能保留完整 trivia、comment、blank line 和 token byte range。
-- indent 已记录，但还没有 lossless CST 和 block tree 作为 Editor/formatter/LSP 的共同基础。
+- indent 已参与 canonical 结构校验，但还没有 lossless CST 和 block tree 作为 Editor/formatter/LSP 的共同基础。
 - `CompileBuilder` 同时承担上下文推进、校验、manifest、route graph 和 IR assemble，pass 边界不够清晰。
 - unknown command 仍可能进入 presentation command；release profile 需要显式 command provider binding。
 - source map 仍是 line/column/keyword length 粗粒度，不能支持 attribute span、macro expansion stack 和精确 diagnostic。
-- Luau policy 需要继续收紧 authority write，避免任何绕过 `astra.mutate.*` 的权威状态写入。
+- frontend 仍需把 source span 和 command provider validation 从 builder 中拆成独立 pass。
 
 ## 迁移顺序
 

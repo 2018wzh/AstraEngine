@@ -20,7 +20,7 @@ CBG image header：
 | `0x2D` | `0x01` | byte | xor。 |
 | `0x2E` | `0x02` | `u16le` | version。 |
 
-CBG v1/v2 的输出统一为 RGBA。已知组合包括 `(version=1, bpp=8/16/24/32)` 与 `(version=2, bpp=8/24/32)`。v2 使用 DCT table、Huffman tree、block offset 和 64 项 block fill order；implementation 可以先只暴露 decoder diagnostic，再逐步覆盖全组合。
+CBG version 1 和 version 2 的输出统一为 RGBA。已知组合包括 `(version=1, bpp=8/16/24/32)` 与 `(version=2, bpp=8/24/32)`。Version 2 使用 DCT table、Huffman tree、block offset 和 64 项 block fill order；implementation 可以先只暴露 decoder diagnostic，再逐步覆盖全组合。
 
 ## Raw BGI image
 

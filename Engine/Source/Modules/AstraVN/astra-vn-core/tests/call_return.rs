@@ -30,14 +30,22 @@ fn runtime_supports_call_return_stack_and_resume_cursor() {
         .unwrap();
     runtime.apply(VnPlayerCommand::Advance).unwrap();
     assert_eq!(
-        runtime.state().current_state.as_deref(),
+        runtime
+            .state()
+            .cursor
+            .as_ref()
+            .map(|cursor| cursor.state_id.as_str()),
         Some("state.common")
     );
     assert_eq!(runtime.state().call_stack.len(), 1);
 
     runtime.apply(VnPlayerCommand::Advance).unwrap();
     assert_eq!(
-        runtime.state().current_state.as_deref(),
+        runtime
+            .state()
+            .cursor
+            .as_ref()
+            .map(|cursor| cursor.state_id.as_str()),
         Some("state.prologue")
     );
     assert!(runtime.state().call_stack.is_empty());

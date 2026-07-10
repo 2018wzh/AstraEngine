@@ -507,6 +507,7 @@ name = "astra-plugin-abi"
 version = "0.1.0"
 dependencies = [
  "abi_stable",
+ "astra-core",
  "schemars",
  "serde",
  "serde_json",
@@ -541,8 +542,10 @@ dependencies = [
  "astra-package",
  "astra-platform",
  "astra-player-core",
+ "astra-plugin-abi",
  "astra-target",
  "astra-vn",
+ "postcard",
  "schemars",
  "serde",
  "serde_json",
@@ -690,6 +693,7 @@ dependencies = [
  "astra-core",
  "astra-vn-script",
  "mlua",
+ "postcard",
  "schemars",
  "serde",
  "serde_json",

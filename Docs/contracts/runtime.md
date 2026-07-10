@@ -22,12 +22,13 @@ impl RuntimeWorld {
     pub fn create(config: RuntimeConfig, package: PackageHandle) -> Result<Self, RuntimeError>;
     pub fn tick(&mut self, input: TickInput) -> Result<TickReport, RuntimeError>;
     pub fn apply_input(&mut self, input: PlayerInput) -> Result<(), RuntimeError>;
-    pub fn register_action<A: RuntimeAction + 'static>(&mut self, provider_id: impl Into<String>, action: A);
+    pub fn register_action<A: RuntimeAction + 'static>(&mut self, provider_id: impl Into<String>, action: A) -> Result<(), RuntimeError>;
     pub fn unregister_action_provider(&mut self, provider_id: &str);
     pub fn schedule_event(&mut self, due_tick: u64, source: EventSource, payload: EventPayload) -> DelayedEventId;
     pub fn cancel_delayed_event(&mut self, id: DelayedEventId) -> bool;
     pub fn save(&self, request: SaveRequest) -> Result<SaveBlob, RuntimeError>;
     pub fn load(&mut self, save: SaveBlob) -> Result<LoadReport, RuntimeError>;
+    pub fn replay(&mut self, transcript: RuntimeReplayTranscript) -> Result<ReplayReport, RuntimeError>;
     pub fn debug_session(&self) -> RuntimeDebugSession<'_>;
 }
 ```
@@ -69,10 +70,18 @@ Tokio task 完成后只提交 `AwaitResult`。Runtime 在固定 tick 边界按 `
 
 - Guard 只读取 event payload、Actor snapshot、Blackboard、Director state。
 - Transition 使用 `actions: Vec<ActionInvocation>`，同一个 transition 内按顺序执行。
-- Action 只通过 `DeterministicActionContext` 改 Actor/Component、Blackboard、EventQueue、AwaitToken、PresentationCommand 和 delayed event queue。
+- 同一 machine 在单个 fixed tick 内连续执行 transition，直到稳定态、terminal state 或出现 blocking diagnostic。循环和 microstep 超限会回滚该 machine 在本 tick 的全部候选变更。
+- Action 只通过 `DeterministicActionContext` 改 Actor/Component、Blackboard、EventQueue、AwaitToken、PresentationCommand、序列化 effect 和 delayed event queue。
 - Runtime action provider 可以被注册和卸载；插件 action 由 host-side adapter 执行，插件不拿 `RuntimeWorld`、Actor 指针或 native handle。
+- `ActionRegistry` 拒绝空 descriptor、重复 action id 和 provider 冲突，不按后注册覆盖前注册。
 - 状态机定义分双轨：引擎系统用 Rust code-first；项目 gameplay/VN 可以用 YAML/Graph 定义并 Cook 成 IR。
-- Save 保存 StateMachine、Blackboard、AwaitQueue、Event trace 和 DelayedEventQueue，不保存 ECS entity、native handle 或 Future 内部状态。
+- Save 保存 `StableIdGenerator`、Actor/Component payload、StateMachine、Blackboard、AwaitQueue、完整 EventQueue、DelayedEventQueue、MutationLog 和序列化 effect trace，不保存 ECS entity、native handle 或 Future 内部状态。
+
+## Replay Transcript
+
+`RuntimeReplayTranscript` 从一个完整 `RuntimeSnapshot` checkpoint 开始。每个 `ReplayTick` 记录 ordered player input、AwaitResult、provider output 和 hash checkpoint。Recorded provider output 携带原始 payload/hash、RuntimeEvent、PresentationCommand、AwaitToken 和 `SerializedEffectEnvelope`；Runtime 校验 descriptor、tick、payload hash 和 effect hash 后再原子应用，不调用 live provider。
+
+`AwaitReplayPolicy::RecordedResult` 只接受 transcript 或 host 提交的记录结果，不能声明 deterministic timeout。`AwaitReplayPolicy::DeterministicTimeout` 必须声明合法 timeout step，并拒绝外部 completion result。
 
 ## Delayed Event
 

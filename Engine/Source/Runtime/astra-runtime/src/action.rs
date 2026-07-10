@@ -9,7 +9,7 @@ use crate::{
     ActorId, ActorRecord, ActorStore, AwaitKind, AwaitReplayPolicy, AwaitToken, AwaitTokenId,
     Blackboard, BlackboardValue, ComponentId, ComponentRecord, DelayedEventId, EventId,
     EventPayload, EventSource, PresentationCommand, RuntimeComponentPayload, RuntimeError,
-    RuntimeEvent, RuntimeMutationRecord, ScheduledEvent,
+    RuntimeEvent, RuntimeMutationRecord, ScheduledEvent, SerializedEffectEnvelope,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -113,6 +113,7 @@ pub struct DeterministicActionContext<'a> {
     delayed_events: &'a mut Vec<ScheduledEvent>,
     delayed_cancellations: &'a mut Vec<DelayedEventId>,
     mutations: &'a mut Vec<RuntimeMutationRecord>,
+    effects: &'a mut Vec<SerializedEffectEnvelope>,
     source: String,
     trigger_event: Option<RuntimeEvent>,
 }
@@ -130,6 +131,7 @@ impl<'a> DeterministicActionContext<'a> {
         delayed_events: &'a mut Vec<ScheduledEvent>,
         delayed_cancellations: &'a mut Vec<DelayedEventId>,
         mutations: &'a mut Vec<RuntimeMutationRecord>,
+        effects: &'a mut Vec<SerializedEffectEnvelope>,
         source: String,
         trigger_event: Option<RuntimeEvent>,
     ) -> Self {
@@ -144,6 +146,7 @@ impl<'a> DeterministicActionContext<'a> {
             delayed_events,
             delayed_cancellations,
             mutations,
+            effects,
             source,
             trigger_event,
         }
@@ -272,8 +275,21 @@ impl<'a> DeterministicActionContext<'a> {
         self.presentation.push(command);
     }
 
-    pub fn push_await(&mut self, token: AwaitToken) {
+    pub fn emit_serialized_effect<T: Serialize>(
+        &mut self,
+        domain: impl Into<String>,
+        schema: impl Into<String>,
+        value: &T,
+    ) -> Result<(), RuntimeError> {
+        self.effects
+            .push(SerializedEffectEnvelope::postcard(domain, schema, value)?);
+        Ok(())
+    }
+
+    pub fn push_await(&mut self, token: AwaitToken) -> Result<(), RuntimeError> {
+        token.validate().map_err(RuntimeError::diagnostic)?;
         self.awaits.push(token);
+        Ok(())
     }
 
     pub fn create_await(&mut self, kind: AwaitKind) -> AwaitToken {
@@ -341,7 +357,7 @@ impl<'a> DeterministicActionContext<'a> {
             }
             ActionEffect::EmitEvent { source, payload } => self.emit_event(source, payload),
             ActionEffect::Presentation { command } => self.emit_presentation(command),
-            ActionEffect::Await { token } => self.push_await(token),
+            ActionEffect::Await { token } => self.push_await(token)?,
             ActionEffect::ScheduleDelayedEvent {
                 due_tick,
                 source,
@@ -502,7 +518,7 @@ impl RuntimeAction for CreateAwaitAction {
         input: &BTreeMap<String, BlackboardValue>,
     ) -> Result<ActionTrace, RuntimeError> {
         let token = ctx.create_await(AwaitKind::Custom("scenario".to_string()));
-        ctx.push_await(token);
+        ctx.push_await(token)?;
         Ok(ActionTrace {
             action_id: self.descriptor().id,
             payload: input.clone(),

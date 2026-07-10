@@ -1,8 +1,9 @@
-use astra_core::{SchemaMigrationRegistry, SchemaVersion, StableId};
+use astra_core::{Hash256, SchemaMigrationRegistry, SchemaVersion, StableId};
 use astra_runtime::{
-    EventId, EventPayload, EventSource, PackageHandle, PlayerInput, ReplayHashCheckpoint,
+    AwaitKind, AwaitReplayPolicy, AwaitToken, AwaitTokenId, EventId, EventPayload, EventSource,
+    PackageHandle, PlayerInput, PresentationCommand, ProviderReplayOutput, ReplayHashCheckpoint,
     ReplayTick, RuntimeConfig, RuntimeEvent, RuntimeReplayTranscript, RuntimeWorld, SaveRequest,
-    TickInput,
+    SerializedEffectEnvelope, TickInput,
 };
 
 #[test]
@@ -183,4 +184,95 @@ fn replay_consumes_checkpoint_and_ordered_player_input_transcript() {
     assert_eq!(report.state_hash, expected.state_hash);
     assert_eq!(report.event_hash, expected.event_hash);
     assert_eq!(report.presentation_hash, expected.presentation_hash);
+}
+
+#[test]
+fn replay_applies_hash_validated_provider_output_without_a_live_provider() {
+    let config = RuntimeConfig {
+        seed: 37,
+        required_slots: vec![],
+    };
+    let mut recorded = RuntimeWorld::create(config, PackageHandle::default()).unwrap();
+    let checkpoint = recorded.snapshot();
+    let payload = postcard::to_allocvec(&"recorded-provider-output").unwrap();
+    let output = ProviderReplayOutput {
+        provider_id: "test.provider".to_string(),
+        session_id: "session-1".to_string(),
+        schema: "test.provider.output.v1".to_string(),
+        payload_hash: Hash256::from_sha256(&payload),
+        payload,
+        events: vec![RuntimeEvent {
+            id: EventId(StableId::deterministic_v7(1, 1, 37)),
+            source: EventSource::Runtime,
+            step: 1,
+            sequence: 0,
+            payload: EventPayload::new("provider.recorded"),
+        }],
+        presentation: vec![PresentationCommand::Marker {
+            name: "provider-frame".to_string(),
+        }],
+        awaits: vec![AwaitToken {
+            token_id: AwaitTokenId(StableId::deterministic_v7(1, 2, 37)),
+            kind: AwaitKind::Custom("provider".to_string()),
+            requested_at_step: 1,
+            deterministic_timeout_step: None,
+            replay_policy: AwaitReplayPolicy::RecordedResult,
+        }],
+        effects: vec![SerializedEffectEnvelope::postcard(
+            "audio",
+            "test.audio_command.v1",
+            &"play",
+        )
+        .unwrap()],
+    };
+    recorded
+        .apply_recorded_provider_output(1, output.clone())
+        .unwrap();
+    let tick = TickInput {
+        fixed_step: 1,
+        delta_ns: 16_666_667,
+        seed: 37,
+    };
+    let expected = recorded.tick(tick).unwrap();
+
+    let transcript = RuntimeReplayTranscript {
+        schema: "astra.runtime_replay_transcript.v1".to_string(),
+        checkpoint,
+        ticks: vec![ReplayTick {
+            tick,
+            player_inputs: vec![],
+            await_results: vec![],
+            provider_outputs: vec![output],
+            expected: ReplayHashCheckpoint::from(&expected),
+        }],
+    };
+    let mut replayed =
+        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let report = replayed.replay(transcript).unwrap();
+
+    assert_eq!(report.state_hash, expected.state_hash);
+    assert_eq!(replayed.snapshot().effects.len(), 1);
+    assert_eq!(replayed.snapshot().awaits.pending().len(), 1);
+}
+
+#[test]
+fn replay_blocks_provider_output_payload_hash_mismatch() {
+    let mut world =
+        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let output = ProviderReplayOutput {
+        provider_id: "test.provider".to_string(),
+        session_id: "session-1".to_string(),
+        schema: "test.provider.output.v1".to_string(),
+        payload_hash: Hash256::from_sha256(b"expected"),
+        payload: b"tampered".to_vec(),
+        events: vec![],
+        presentation: vec![],
+        awaits: vec![],
+        effects: vec![],
+    };
+
+    let error = world.apply_recorded_provider_output(1, output).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_RUNTIME_PROVIDER_OUTPUT_HASH"));
 }

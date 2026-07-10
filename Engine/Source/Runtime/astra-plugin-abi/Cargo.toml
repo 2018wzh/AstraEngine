@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 abi_stable.workspace = true
+astra-core = { path = "../astra-core" }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use astra_core::{
-    Diagnostic, Hash128, SchemaId, SchemaMigrationRegistry, SchemaVersion, StableId,
+    Diagnostic, Hash128, Hash256, SchemaId, SchemaMigrationRegistry, SchemaVersion, StableId,
     StableIdGenerator,
 };
 use schemars::JsonSchema;
@@ -14,10 +14,10 @@ use crate::{
     ActionRegistry, ActorId, ActorRecord, ActorSnapshot, ActorStore, AwaitQueue, AwaitResult,
     AwaitToken, Blackboard, ComponentId, ComponentRecord, ComponentSnapshot, CreateAwaitAction,
     DelayedEventId, DelayedEventQueue, EmitEventAction, EventId, EventPayload, EventQueue,
-    EventSource, PresentationAction, PresentationCommand, PresentationRecord, RuntimeAction,
-    RuntimeComponentPayload, RuntimeEvent, RuntimeMutationRecord, RuntimeReplayTranscript,
-    SaveBlob, SaveRequest, ScheduledEvent, SetBlackboardAction, StateMachineDefinition,
-    StateMachineSnapshot, StateMachineStore,
+    EventSource, PresentationAction, PresentationCommand, PresentationRecord, ProviderReplayOutput,
+    RuntimeAction, RuntimeComponentPayload, RuntimeEffectRecord, RuntimeEvent,
+    RuntimeMutationRecord, RuntimeReplayTranscript, SaveBlob, SaveRequest, ScheduledEvent,
+    SetBlackboardAction, StateMachineDefinition, StateMachineSnapshot, StateMachineStore,
 };
 
 #[derive(Debug, Error)]
@@ -93,6 +93,7 @@ pub struct RuntimeSnapshot {
     pub events: EventQueue,
     pub presentation: Vec<PresentationRecord>,
     pub mutations: Vec<RuntimeMutationRecord>,
+    pub effects: Vec<RuntimeEffectRecord>,
     pub mounted_modules: BTreeMap<String, String>,
     pub step: u64,
 }
@@ -110,6 +111,7 @@ pub struct RuntimeWorld {
     actions: ActionRegistry,
     presentation: Vec<PresentationRecord>,
     mutations: Vec<RuntimeMutationRecord>,
+    effects: Vec<RuntimeEffectRecord>,
     diagnostics: Vec<Diagnostic>,
     mounted_modules: BTreeMap<String, String>,
     step: u64,
@@ -142,6 +144,7 @@ impl RuntimeWorld {
             actions,
             presentation: Vec::new(),
             mutations: Vec::new(),
+            effects: Vec::new(),
             diagnostics: Vec::new(),
             mounted_modules: BTreeMap::new(),
             step: 0,
@@ -382,14 +385,82 @@ impl RuntimeWorld {
         self.awaits.submit_result(result);
     }
 
-    pub fn insert_await_token(&mut self, token: AwaitToken) {
+    pub fn insert_await_token(&mut self, token: AwaitToken) -> Result<(), RuntimeError> {
         debug!(
             token_id = ?token.token_id,
             requested_at_step = token.requested_at_step,
             timeout_step = ?token.deterministic_timeout_step,
             "runtime.await.insert"
         );
-        self.awaits.insert(token);
+        self.awaits.insert(token).map_err(RuntimeError::diagnostic)
+    }
+
+    pub fn apply_recorded_provider_output(
+        &mut self,
+        step: u64,
+        output: ProviderReplayOutput,
+    ) -> Result<(), RuntimeError> {
+        if output.provider_id.trim().is_empty()
+            || output.session_id.trim().is_empty()
+            || output.schema.trim().is_empty()
+        {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_PROVIDER_OUTPUT_DESCRIPTOR",
+                "recorded provider output requires provider, session and schema ids",
+            )));
+        }
+        if Hash256::from_sha256(&output.payload) != output.payload_hash {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_PROVIDER_OUTPUT_HASH",
+                "recorded provider output payload hash does not match its bytes",
+            )));
+        }
+        if let Some(event) = output.events.iter().find(|event| event.step != step) {
+            return Err(RuntimeError::diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_PROVIDER_OUTPUT_EVENT_STEP",
+                    "recorded provider output event must target the transcript tick",
+                )
+                .with_field("provider_id", &output.provider_id)
+                .with_field("event_step", event.step)
+                .with_field("transcript_step", step),
+            ));
+        }
+        if let Some(effect) = output.effects.iter().find(|effect| {
+            effect.domain.trim().is_empty()
+                || effect.schema.trim().is_empty()
+                || !effect.validate_hash()
+        }) {
+            return Err(RuntimeError::diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_PROVIDER_OUTPUT_EFFECT",
+                    "recorded provider effect descriptor or payload hash is invalid",
+                )
+                .with_field("provider_id", &output.provider_id)
+                .with_field("effect_schema", &effect.schema),
+            ));
+        }
+
+        let mut awaits = self.awaits.clone();
+        for token in output.awaits {
+            awaits.insert(token).map_err(RuntimeError::diagnostic)?;
+        }
+        for event in output.events {
+            self.enqueue_event(event);
+        }
+        for command in output.presentation {
+            self.emit_presentation(command);
+        }
+        for envelope in output.effects {
+            let sequence = self.effects.len() as u64;
+            self.effects.push(RuntimeEffectRecord {
+                step,
+                sequence,
+                envelope,
+            });
+        }
+        self.awaits = awaits;
+        Ok(())
     }
 
     pub fn apply_input(&mut self, input: PlayerInput) -> Result<(), RuntimeError> {
@@ -491,12 +562,22 @@ impl RuntimeWorld {
             self.events.push(event);
         }
         for await_token in output.awaits {
-            self.awaits.insert(await_token);
+            self.awaits
+                .insert(await_token)
+                .map_err(RuntimeError::diagnostic)?;
         }
         for command in output.presentation {
             self.emit_presentation(command);
         }
         self.mutations.extend(output.mutations);
+        for envelope in output.effects {
+            let sequence = self.effects.len() as u64;
+            self.effects.push(RuntimeEffectRecord {
+                step: input.fixed_step,
+                sequence,
+                envelope,
+            });
+        }
         let report = TickReport {
             step: input.fixed_step,
             state_hash: self.state_hash(),
@@ -557,6 +638,7 @@ impl RuntimeWorld {
         self.events = snapshot.events;
         self.presentation = snapshot.presentation;
         self.mutations = snapshot.mutations;
+        self.effects = snapshot.effects;
         self.mounted_modules = snapshot.mounted_modules;
         self.step = snapshot.step;
     }
@@ -577,13 +659,11 @@ impl RuntimeWorld {
             for input in entry.player_inputs {
                 self.apply_input(input)?;
             }
+            for output in entry.provider_outputs {
+                self.apply_recorded_provider_output(entry.tick.fixed_step, output)?;
+            }
             for result in entry.await_results {
                 self.submit_await_result(result);
-            }
-            for output in entry.provider_outputs {
-                for event in output.events {
-                    self.enqueue_event(event);
-                }
             }
             let report = self.tick(entry.tick)?;
             let actual = crate::ReplayHashCheckpoint::from(&report);
@@ -630,6 +710,7 @@ impl RuntimeWorld {
             events: self.events.clone(),
             presentation: self.presentation.clone(),
             mutations: self.mutations.clone(),
+            effects: self.effects.clone(),
             mounted_modules: self.mounted_modules.clone(),
             step: self.step,
         }
@@ -651,7 +732,7 @@ impl RuntimeWorld {
 
     pub fn presentation_hash(&self) -> Hash128 {
         Hash128::from_blake3(
-            &postcard::to_allocvec(&self.presentation)
+            &postcard::to_allocvec(&(&self.presentation, &self.effects))
                 .expect("runtime presentation trace must serialize for presentation hash"),
         )
     }
@@ -710,5 +791,9 @@ impl RuntimeDebugSession<'_> {
 
     pub fn mutation_trace(&self) -> Vec<RuntimeMutationRecord> {
         self.world.mutations.clone()
+    }
+
+    pub fn effect_trace(&self) -> Vec<RuntimeEffectRecord> {
+        self.world.effects.clone()
     }
 }

@@ -1,4 +1,6 @@
-use astra_vn_policy::{LuauPolicy, PolicySnapshotValue, VnPolicyState};
+use astra_vn_policy::{
+    LuauPolicy, PolicyExecutionBudget, PolicyQueryContext, PolicySnapshotValue, VnPolicyState,
+};
 
 #[test]
 fn luau_policy_records_authorized_mutation_trace() {
@@ -84,8 +86,41 @@ fn luau_policy_records_command_query_and_trace_capabilities() {
     let mut policy = LuauPolicy::new().unwrap();
     let mut state = VnPolicyState::default();
 
+    let object = |values: &[(&str, PolicySnapshotValue)]| {
+        PolicySnapshotValue::Object(
+            values
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), value.clone()))
+                .collect(),
+        )
+    };
+    let queries = PolicyQueryContext {
+        text: [(
+            "zh-Hans:line.001".to_string(),
+            object(&[
+                ("key", PolicySnapshotValue::String("line.001".to_string())),
+                ("locale", PolicySnapshotValue::String("zh-Hans".to_string())),
+            ]),
+        )]
+        .into_iter()
+        .collect(),
+        assets: [(
+            "bg.school".to_string(),
+            object(&[("id", PolicySnapshotValue::String("bg.school".to_string()))]),
+        )]
+        .into_iter()
+        .collect(),
+        backlog: object(&[("count", PolicySnapshotValue::Integer(0))]),
+        savepoint: object(&[("available", PolicySnapshotValue::Bool(true))]),
+        layouts: [(
+            "message".to_string(),
+            object(&[("target", PolicySnapshotValue::String("message".to_string()))]),
+        )]
+        .into_iter()
+        .collect(),
+    };
     let result = policy
-        .eval_bool(
+        .eval_bool_with_context(
             r#"
             astra.command.register("show.hero", { schema = "astra.command.show.v1" }, function() return true end)
             astra.command.emit("show.hero", { layer = "hero", x = 320 })
@@ -106,6 +141,8 @@ fn luau_policy_records_command_query_and_trace_capabilities() {
                 and layout.target == "message"
             "#,
             &mut state,
+            &queries,
+            PolicyExecutionBudget::default(),
         )
         .unwrap();
 

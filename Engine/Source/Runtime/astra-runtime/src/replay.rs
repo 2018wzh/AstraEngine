@@ -2,7 +2,10 @@ use astra_core::{Hash128, Hash256};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{AwaitResult, PlayerInput, RuntimeEvent, RuntimeSnapshot, TickInput, TickReport};
+use crate::{
+    AwaitResult, AwaitToken, PlayerInput, PresentationCommand, RuntimeEvent, RuntimeSnapshot,
+    SerializedEffectEnvelope, TickInput, TickReport,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeReplayTranscript {
@@ -29,8 +32,15 @@ pub struct ProviderReplayOutput {
     pub session_id: String,
     pub schema: String,
     pub payload_hash: Hash256,
+    pub payload: Vec<u8>,
     #[serde(default)]
     pub events: Vec<RuntimeEvent>,
+    #[serde(default)]
+    pub presentation: Vec<PresentationCommand>,
+    #[serde(default)]
+    pub awaits: Vec<AwaitToken>,
+    #[serde(default)]
+    pub effects: Vec<SerializedEffectEnvelope>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

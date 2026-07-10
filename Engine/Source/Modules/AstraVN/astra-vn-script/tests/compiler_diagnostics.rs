@@ -192,3 +192,79 @@ state prologue #@id state.prologue
 
     assert_eq!(err.code(), "ASTRA_VN_TEXT_KEY_DUPLICATE");
 }
+
+#[test]
+fn invalid_mutation_number_blocks_compile() {
+    let err = compile_astra_sources([AstraSource::new(
+        "bad_number.astra",
+        r#"
+story main #@id story.main
+state prologue #@id state.prologue
+  scene room #@id scene.room
+    mutate project.affinity += many #@id var.bad_number
+"#,
+    )])
+    .unwrap_err();
+
+    assert_eq!(err.code(), "ASTRA_VN_MUTATE_VALUE");
+}
+
+#[test]
+fn presentation_command_outside_scene_blocks_compile() {
+    let err = compile_astra_sources([AstraSource::new(
+        "outside_scene.astra",
+        r#"
+story main #@id story.main
+voice asset:voice.hero.0001 #@id voice.outside
+"#,
+    )])
+    .unwrap_err();
+
+    assert_eq!(err.code(), "ASTRA_VN_SCENE_CONTEXT");
+}
+
+#[test]
+fn option_cannot_bind_across_an_intervening_command() {
+    let err = compile_astra_sources([AstraSource::new(
+        "detached_option.astra",
+        r#"
+story main #@id story.main
+state prologue #@id state.prologue
+  scene room #@id scene.room
+    choice key:route.pick #@id choice.route
+    text key:route.after #@id line.after
+      option key:route.left -> left #@id option.left
+"#,
+    )])
+    .unwrap_err();
+
+    assert_eq!(err.code(), "ASTRA_VN_OPTION_CONTEXT");
+}
+
+#[test]
+fn structural_indentation_is_part_of_the_canonical_ast() {
+    let command_error = compile_astra_sources([AstraSource::new(
+        "bad_command_indent.astra",
+        r#"
+story main #@id story.main
+state prologue #@id state.prologue
+  scene room #@id scene.room
+  text key:route.bad #@id line.bad
+"#,
+    )])
+    .unwrap_err();
+    assert_eq!(command_error.code(), "ASTRA_VN_STRUCTURE_INDENT");
+
+    let option_error = compile_astra_sources([AstraSource::new(
+        "bad_option_indent.astra",
+        r#"
+story main #@id story.main
+state prologue #@id state.prologue
+  scene room #@id scene.room
+    choice key:route.pick #@id choice.route
+    option key:route.left -> left #@id option.left
+"#,
+    )])
+    .unwrap_err();
+    assert_eq!(option_error.code(), "ASTRA_VN_OPTION_CONTEXT");
+}

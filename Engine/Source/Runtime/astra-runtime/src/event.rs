@@ -80,4 +80,8 @@ impl EventQueue {
     pub fn trace(&self) -> &[RuntimeEvent] {
         &self.trace
     }
+
+    pub fn pending(&self) -> &[RuntimeEvent] {
+        &self.queued
+    }
 }

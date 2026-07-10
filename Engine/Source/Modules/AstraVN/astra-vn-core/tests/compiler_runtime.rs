@@ -1,6 +1,6 @@
 use astra_vn_core::{
-    compile_astra_sources, AstraSource, PresentationCommand, SystemPageKind, VnPlayerCommand,
-    VnRunConfig, VnRuntime,
+    compile_astra_sources, reduce_vn_step, AstraSource, PresentationCommand, SystemPageKind,
+    VnPlayerCommand, VnRunConfig, VnRuntime, VnWaitKind,
 };
 
 const MAIN: &str = r#"
@@ -124,6 +124,10 @@ fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
         Some(PresentationCommand::Dialogue { key, speaker, .. })
             if key == "prologue.hello" && speaker.as_deref() == Some("hero")
     ));
+    assert_eq!(
+        runtime.state().pending_wait.as_ref().map(|wait| wait.kind),
+        Some(VnWaitKind::Dialogue)
+    );
 
     let choice = runtime.apply(VnPlayerCommand::Advance).unwrap();
     assert!(matches!(
@@ -131,6 +135,10 @@ fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
         Some(PresentationCommand::Choice { key, options })
             if key == "prologue.where" && options.len() == 2
     ));
+    assert_eq!(
+        runtime.state().pending_wait.as_ref().map(|wait| wait.kind),
+        Some(VnWaitKind::Choice)
+    );
 
     let saved_hash = runtime.state_hash();
     let save = runtime.save_slot("slot.auto").unwrap();
@@ -165,4 +173,72 @@ fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
     let mut loaded = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
     loaded.load_slot(save).unwrap();
     assert_eq!(loaded.state_hash(), saved_hash);
+}
+
+#[test]
+fn reducer_advances_from_an_explicit_runtime_state_without_hidden_session_state() {
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", MAIN)]).unwrap();
+    let mut runtime = VnRuntime::new(compiled.clone(), VnRunConfig::classic("zh-Hans")).unwrap();
+    runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".to_string(),
+            state_id: "state.prologue".to_string(),
+        })
+        .unwrap();
+
+    let (state, output) =
+        reduce_vn_step(&compiled, runtime.state(), VnPlayerCommand::Advance).unwrap();
+
+    assert!(matches!(
+        output.presentation.last(),
+        Some(PresentationCommand::Choice { .. })
+    ));
+    assert!(state.pending_choice.is_some());
+    assert_eq!(runtime.state().pending_choice, None);
+}
+
+#[test]
+fn system_story_uses_a_separate_stack_and_explicit_return() {
+    let compiled = compile_astra_sources([
+        AstraSource::new("main.astra", MAIN),
+        AstraSource::new("system.astra", SYSTEM),
+    ])
+    .unwrap();
+    let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
+    runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".to_string(),
+            state_id: "state.prologue".to_string(),
+        })
+        .unwrap();
+    let return_to = runtime.state().cursor.clone().unwrap();
+
+    let opened = runtime
+        .apply(VnPlayerCommand::OpenSystem {
+            page: SystemPageKind::Title,
+        })
+        .unwrap();
+    assert_eq!(runtime.state().system_stack.len(), 1);
+    assert_eq!(
+        runtime.state().cursor.as_ref().unwrap().state_id,
+        "system.title"
+    );
+    assert_eq!(
+        runtime.state().pending_wait.as_ref().map(|wait| wait.kind),
+        Some(VnWaitKind::SystemPage)
+    );
+    assert!(matches!(
+        opened.presentation.last(),
+        Some(PresentationCommand::SystemPage {
+            page: SystemPageKind::Title
+        })
+    ));
+
+    runtime.apply(VnPlayerCommand::ReturnSystem).unwrap();
+    assert_eq!(runtime.state().system_stack.len(), 0);
+    assert_eq!(runtime.state().cursor.as_ref(), Some(&return_to));
+    assert_eq!(
+        runtime.state().pending_wait.as_ref().map(|wait| wait.kind),
+        Some(VnWaitKind::Dialogue)
+    );
 }

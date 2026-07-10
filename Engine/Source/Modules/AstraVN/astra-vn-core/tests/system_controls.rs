@@ -40,7 +40,7 @@ fn skip_read_advances_past_read_dialogue_but_stops_at_unread_dialogue() {
         line_b.presentation.first(),
         Some(PresentationCommand::Dialogue { key, .. }) if key == "line.b"
     ));
-    assert_eq!(runtime.state().command_cursor, 2);
+    assert_eq!(runtime.state().cursor.as_ref().unwrap().ordinal, 2);
 }
 
 #[test]

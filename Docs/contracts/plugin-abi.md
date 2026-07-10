@@ -81,7 +81,7 @@ pub struct FfiRuntimeProviderRegistration {
 
 每个 entrypoint 接收 bounded `RVec<u8>` payload，内容为 serde JSON 或 postcard encoded runtime provider DTO，返回 `FfiRuntimeProviderResult { ok, payload, diagnostics }`。`FfiPluginRegistration.runtime_providers` 可以包含多个 runtime provider registration，但 `game_runtime_provider` slot 在 target 绑定时仍要求单 provider 显式选择。`vfs_provider` 的多 provider 同 slot 规则不适用于 gameplay runtime。
 
-当前常量包括 `GAME_RUNTIME_PROVIDER_SLOT = "game_runtime_provider"`、`NATIVE_VN_RUNTIME_ID = "native_vn"` 和 `NATIVE_VN_PROVIDER_ID = "astra.runtime.native_vn"`。NativeVN 的完整 gameplay 本轮通过 in-process provider 执行，FFI adapter 提供 ABI shape 注册、调用和卸载 smoke；外部 dylib gameplay 完整加载不作为本阶段完成边界。
+当前常量包括 `GAME_RUNTIME_PROVIDER_SLOT = "game_runtime_provider"`、`NATIVE_VN_RUNTIME_ID = "native_vn"` 和 `NATIVE_VN_PROVIDER_ID = "astra.runtime.native_vn"`。NativeVN FFI adapter 提供真实 provider instance create/destroy 与 session open/step/save/restore/shutdown；请求和返回只携带 bounded serialized DTO。外部 dylib 的分发、签名和跨版本加载不作为本阶段完成边界。
 
 FFI 边界只传 stable id、string id、section ref、hash、diagnostic 和 bounded payload。Luau VM handle、RuntimeWorld 指针、Editor widget、本地 root、provider secret、商业文本、音频、图像或 bytecode payload 都不得跨 ABI。
 

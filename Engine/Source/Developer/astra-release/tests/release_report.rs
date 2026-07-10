@@ -57,7 +57,7 @@ fn release_report_covers_pass_warning_and_blocked_checks() {
         check.id == "runtime_provider.binding" && check.status == CheckStatus::Pass
     }));
     assert!(report.checks.iter().any(|check| {
-        check.id == "runtime_provider.native_vn" && check.status == CheckStatus::Pass
+        check.id == "runtime_provider.native_vn" && check.status == CheckStatus::Blocked
     }));
 
     let blocked = ReleaseValidator
@@ -1050,6 +1050,14 @@ fn release_gate_accepts_nativevn_sections_for_classic_profile() {
         .checks
         .iter()
         .any(|check| check.id == "vn.commercial_baseline" && check.status == CheckStatus::Pass));
+    assert!(report.checks.iter().any(|check| {
+        check.id == "runtime_provider.native_vn"
+            && check.status == CheckStatus::Pass
+            && check
+                .evidence
+                .iter()
+                .any(|evidence| evidence.key == "behavior_state_hash")
+    }));
 }
 
 #[test]
