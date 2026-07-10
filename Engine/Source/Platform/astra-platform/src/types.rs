@@ -77,6 +77,7 @@ pub enum PlatformErrorCode {
     InvalidHandle,
     StaleHandle,
     InvalidState,
+    AlreadyInUse,
     QueueClosed,
     QueueOverflow,
     PermissionDenied,

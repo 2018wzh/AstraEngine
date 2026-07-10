@@ -483,6 +483,9 @@ pub enum PlatformEventKind {
     ContextLost {
         provider: String,
     },
+    ContextRestored {
+        provider: String,
+    },
 }
 
 #[derive(Clone)]

@@ -137,3 +137,20 @@ fn capability_report_v2_separates_declared_available_and_selected() {
     assert_eq!(report.renderer.selected.as_deref(), Some("wgpu_hardware"));
     assert!(report.profile_hash.starts_with("sha256:"));
 }
+
+#[test]
+fn instance_conflict_has_a_stable_platform_error_code() {
+    let value = serde_json::to_value(PlatformErrorCode::AlreadyInUse).unwrap();
+    assert_eq!(value, serde_json::json!("already_in_use"));
+}
+
+#[test]
+fn context_restore_is_a_typed_lifecycle_event() {
+    let event = astra_platform::PlatformEventKind::ContextRestored {
+        provider: "webgpu".to_string(),
+    };
+    assert!(matches!(
+        event,
+        astra_platform::PlatformEventKind::ContextRestored { provider } if provider == "webgpu"
+    ));
+}
