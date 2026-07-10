@@ -4,6 +4,197 @@ use astra_core::{Diagnostic, Hash256};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Logical resource identity used only inside the Player command stream. It is
+/// deliberately unrelated to platform handles and may safely cross runtime
+/// provider boundaries.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+pub struct PlayerHostResourceId(pub u64);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayerPackageSource {
+    Bundled {
+        relative_path: String,
+        expected_hash: String,
+    },
+    UserAuthorized {
+        expected_hash: String,
+    },
+    HttpsRange {
+        url: String,
+        expected_hash: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayerDecodeKind {
+    Audio,
+    Video,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayerHostCommand {
+    OpenPackage {
+        sequence: u64,
+        source: PlayerPackageSource,
+        package: PlayerHostResourceId,
+    },
+    ReadPackageRange {
+        sequence: u64,
+        package: PlayerHostResourceId,
+        offset: u64,
+        length: u32,
+    },
+    ClosePackage {
+        sequence: u64,
+        package: PlayerHostResourceId,
+    },
+    BeginSave {
+        sequence: u64,
+        slot: String,
+        transaction: PlayerHostResourceId,
+    },
+    WriteSave {
+        sequence: u64,
+        transaction: PlayerHostResourceId,
+        bytes: Vec<u8>,
+    },
+    CommitSave {
+        sequence: u64,
+        transaction: PlayerHostResourceId,
+    },
+    AbortSave {
+        sequence: u64,
+        transaction: PlayerHostResourceId,
+    },
+    ReadSave {
+        sequence: u64,
+        slot: String,
+    },
+    OpenAudio {
+        sequence: u64,
+        output: PlayerHostResourceId,
+        sample_rate: u32,
+        channels: u16,
+        max_buffered_frames: u32,
+    },
+    SubmitAudio {
+        sequence: u64,
+        output: PlayerHostResourceId,
+        packet_sequence: u64,
+        channels: u16,
+        samples: Vec<f32>,
+    },
+    DrainAudio {
+        sequence: u64,
+        output: PlayerHostResourceId,
+    },
+    CloseAudio {
+        sequence: u64,
+        output: PlayerHostResourceId,
+    },
+    OpenDecode {
+        sequence: u64,
+        session: PlayerHostResourceId,
+        kind: PlayerDecodeKind,
+    },
+    Decode {
+        sequence: u64,
+        session: PlayerHostResourceId,
+        kind: PlayerDecodeKind,
+        codec: String,
+        description: Vec<u8>,
+        sample_rate: Option<u32>,
+        channels: Option<u16>,
+        coded_width: Option<u32>,
+        coded_height: Option<u32>,
+        keyframe: bool,
+        bytes: Vec<u8>,
+    },
+    CloseDecode {
+        sequence: u64,
+        session: PlayerHostResourceId,
+    },
+    PresentRgba {
+        sequence: u64,
+        surface: PlayerHostResourceId,
+        width: u32,
+        height: u32,
+        rgba8: Vec<u8>,
+    },
+    CaptureSurface {
+        sequence: u64,
+        surface: PlayerHostResourceId,
+    },
+}
+
+impl PlayerHostCommand {
+    pub fn sequence(&self) -> u64 {
+        match self {
+            Self::OpenPackage { sequence, .. }
+            | Self::ReadPackageRange { sequence, .. }
+            | Self::ClosePackage { sequence, .. }
+            | Self::BeginSave { sequence, .. }
+            | Self::WriteSave { sequence, .. }
+            | Self::CommitSave { sequence, .. }
+            | Self::AbortSave { sequence, .. }
+            | Self::ReadSave { sequence, .. }
+            | Self::OpenAudio { sequence, .. }
+            | Self::SubmitAudio { sequence, .. }
+            | Self::DrainAudio { sequence, .. }
+            | Self::CloseAudio { sequence, .. }
+            | Self::OpenDecode { sequence, .. }
+            | Self::Decode { sequence, .. }
+            | Self::CloseDecode { sequence, .. }
+            | Self::PresentRgba { sequence, .. }
+            | Self::CaptureSurface { sequence, .. } => *sequence,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlayerHostCommandBatch {
+    pub commands: Vec<PlayerHostCommand>,
+}
+
+impl PlayerHostCommandBatch {
+    pub fn new(commands: Vec<PlayerHostCommand>) -> Result<Self, PlayerHostCommandError> {
+        let mut previous = 0_u64;
+        for command in &commands {
+            let sequence = command.sequence();
+            if sequence == 0 || sequence <= previous {
+                return Err(PlayerHostCommandError::SequenceNotStrictlyIncreasing);
+            }
+            previous = sequence;
+        }
+        Ok(Self { commands })
+    }
+}
+
+pub trait PlayerHostCommandSource {
+    fn take_host_commands(&mut self) -> Result<PlayerHostCommandBatch, PlayerHostCommandError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerHostCommandError {
+    SequenceNotStrictlyIncreasing,
+}
+
+impl std::fmt::Display for PlayerHostCommandError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SequenceNotStrictlyIncreasing => {
+                formatter.write_str("player host command sequence is not strictly increasing")
+            }
+        }
+    }
+}
+impl std::error::Error for PlayerHostCommandError {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PlayerAutomationScript {
     pub schema: String,
