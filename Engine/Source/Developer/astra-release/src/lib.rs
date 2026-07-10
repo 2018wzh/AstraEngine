@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use astra_asset::{AssetCatalog, VfsBackendKind, VfsManifest, VfsSourceRef, VfsUri};
 use astra_core::{Diagnostic, Hash256};
 use astra_package::{PackageManifest, PackageReader};
-use astra_platform::{PlatformCapabilityReport, PlatformValidationStatus};
+use astra_platform::{
+    PlatformCapabilityReport, PlatformHostConformanceReport, PlatformValidationStatus,
+};
 use astra_player_core::{PlayerAutomationReport, PlayerAutomationStatus};
 use astra_plugin_abi::{
     RuntimeOpenRequest, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeStepInput,
@@ -112,6 +114,40 @@ pub struct ReleaseEvidence {
 pub struct ReleaseValidator;
 
 impl ReleaseValidator {
+    pub fn validate_package_with_platform_evidence(
+        &self,
+        request: PackageValidateRequest,
+        conformance_report: Option<PlatformHostConformanceReport>,
+        player_report: Option<PlayerAutomationReport>,
+    ) -> Result<ReleaseReport, ReleaseError> {
+        let capability_report = request.platform_report.clone();
+        let require_platform_report = request.require_platform_report;
+        let target = request.target.clone();
+        let profile = request.profile.clone();
+        let mut report = self.validate_package(request)?;
+        report.checks.push(platform_conformance_check(
+            capability_report.as_ref(),
+            conformance_report.as_ref(),
+            &report.package_hash,
+            require_platform_report,
+        ));
+        if let Some(player_report) = player_report {
+            report.checks.push(player_full_playable_check(
+                &player_report,
+                &report.package_hash,
+                &profile,
+                target.as_deref(),
+            ));
+            report.checks.push(platform_evidence_continuity_check(
+                capability_report.as_ref(),
+                conformance_report.as_ref(),
+                &player_report,
+            ));
+        }
+        report.status = release_status(&report.checks);
+        Ok(report)
+    }
+
     pub fn validate_package_with_player_report(
         &self,
         request: PackageValidateRequest,
@@ -209,6 +245,11 @@ impl ReleaseValidator {
                     request.platform_report.as_ref(),
                     request.require_platform_report,
                 ));
+                checks.push(platform_profile_binding_check(
+                    &package,
+                    request.platform_report.as_ref(),
+                    request.require_platform_report,
+                ));
                 checks.push(ReleaseCheckRecord {
                     id: "scenario.refs".to_string(),
                     domain: ReleaseDomain::Scenario,
@@ -272,6 +313,115 @@ impl ReleaseValidator {
             ),
         }
         Ok(report)
+    }
+}
+
+fn platform_conformance_check(
+    capability: Option<&PlatformCapabilityReport>,
+    conformance: Option<&PlatformHostConformanceReport>,
+    package_hash: &str,
+    required: bool,
+) -> ReleaseCheckRecord {
+    let (Some(capability), Some(conformance)) = (capability, conformance) else {
+        return ReleaseCheckRecord {
+            id: "platform.host_conformance".to_string(),
+            domain: ReleaseDomain::Platform,
+            status: if required {
+                CheckStatus::Blocked
+            } else {
+                CheckStatus::Warning
+            },
+            summary: "platform host conformance report was not supplied".to_string(),
+            diagnostic: Some(if required {
+                Diagnostic::blocking(
+                    "ASTRA_PLATFORM_CONFORMANCE_MISSING",
+                    "a host conformance report is required for this release profile",
+                )
+            } else {
+                Diagnostic::warning(
+                    "ASTRA_PLATFORM_CONFORMANCE_MISSING",
+                    "host conformance evidence is pending",
+                )
+            }),
+            evidence: Vec::new(),
+        };
+    };
+    let (validation, diagnostics) =
+        astra_platform::validate_conformance_report(capability, conformance);
+    let package_matches = conformance.package_hash == package_hash;
+    let status = if validation == PlatformValidationStatus::Pass && package_matches {
+        CheckStatus::Pass
+    } else {
+        CheckStatus::Blocked
+    };
+    ReleaseCheckRecord {
+        id: "platform.host_conformance".to_string(),
+        domain: ReleaseDomain::Platform,
+        status,
+        summary: "host conformance evidence is bound to the release identity".to_string(),
+        diagnostic: if status == CheckStatus::Pass {
+            None
+        } else {
+            Some(diagnostics.first().cloned().unwrap_or_else(|| {
+                Diagnostic::blocking(
+                    "ASTRA_PLATFORM_CONFORMANCE_PACKAGE_IDENTITY",
+                    "host conformance package hash does not match the release package",
+                )
+            }))
+        },
+        evidence: vec![
+            evidence("profile_hash", &conformance.profile_hash),
+            evidence("package_hash", &conformance.package_hash),
+            evidence("build_fingerprint", &conformance.build_fingerprint),
+            evidence("session_id", &conformance.session_id),
+            evidence("check_count", conformance.checks.len()),
+        ],
+    }
+}
+
+fn platform_evidence_continuity_check(
+    capability: Option<&PlatformCapabilityReport>,
+    conformance: Option<&PlatformHostConformanceReport>,
+    player: &PlayerAutomationReport,
+) -> ReleaseCheckRecord {
+    let player_evidence = |key: &str| {
+        player
+            .checks
+            .iter()
+            .flat_map(|check| &check.evidence)
+            .find(|entry| entry.key == key)
+            .map(|entry| entry.value.as_str())
+    };
+    let matches = capability
+        .zip(conformance)
+        .is_some_and(|(capability, conformance)| {
+            conformance.profile_hash == capability.profile_hash
+                && conformance.build_fingerprint == capability.build_fingerprint
+                && conformance.package_hash == player.package_hash
+                && player_evidence("profile_hash") == Some(conformance.profile_hash.as_str())
+                && player_evidence("build_fingerprint")
+                    == Some(conformance.build_fingerprint.as_str())
+                && player_evidence("session_id") == Some(conformance.session_id.as_str())
+        });
+    ReleaseCheckRecord {
+        id: "platform.evidence_continuity".to_string(),
+        domain: ReleaseDomain::Platform,
+        status: if matches {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Blocked
+        },
+        summary: "capability, host conformance and player automation identities are continuous"
+            .to_string(),
+        diagnostic: (!matches).then(|| {
+            Diagnostic::blocking(
+                "ASTRA_PLATFORM_EVIDENCE_CONTINUITY",
+                "platform reports do not share profile, package, build and session identity",
+            )
+        }),
+        evidence: player_evidence("session_id")
+            .map(|session_id| vec![evidence("session_id", session_id)])
+            .unwrap_or_default(),
     }
 }
 
@@ -3323,23 +3473,33 @@ fn platform_report_check(
     let (status, diagnostics) = astra_platform::validate_capability_report(report);
     let mut evidence_values = vec![
         evidence("platform", report.platform),
+        evidence("target", &report.target),
+        evidence("profile_id", &report.profile_id),
+        evidence("profile_hash", &report.profile_hash),
+        evidence("build_fingerprint", &report.build_fingerprint),
         evidence(
             "sdk_status",
             format!("{:?}", report.sdk_status).to_lowercase(),
         ),
-        evidence("smoke_count", report.smoke.len()),
     ];
-    for check in &report.smoke {
+    for (domain, selection) in [
+        ("renderer", &report.renderer),
+        ("decode", &report.decode),
+        ("audio", &report.audio),
+        ("save", &report.save),
+    ] {
         evidence_values.push(evidence(
-            format!("smoke.{}.status", check.id),
-            format!("{:?}", check.status).to_lowercase(),
+            format!("provider.{domain}.declared"),
+            selection.declared.join(","),
         ));
-        for entry in &check.evidence {
-            evidence_values.push(evidence(
-                format!("smoke.{}.{}", check.id, entry.key),
-                &entry.value,
-            ));
-        }
+        evidence_values.push(evidence(
+            format!("provider.{domain}.available"),
+            selection.available.join(","),
+        ));
+        evidence_values.push(evidence(
+            format!("provider.{domain}.selected"),
+            selection.selected.as_deref().unwrap_or_default(),
+        ));
     }
 
     ReleaseCheckRecord {
@@ -3350,9 +3510,110 @@ fn platform_report_check(
             PlatformValidationStatus::Warning => CheckStatus::Warning,
             PlatformValidationStatus::Blocked => CheckStatus::Blocked,
         },
-        summary: "platform capability report matches the requested native SDK state".to_string(),
+        summary: "platform capability report binds declared, available and selected providers"
+            .to_string(),
         diagnostic: diagnostics.first().cloned(),
         evidence: evidence_values,
+    }
+}
+
+fn platform_profile_binding_check(
+    package: &PackageReader,
+    capability: Option<&PlatformCapabilityReport>,
+    required: bool,
+) -> ReleaseCheckRecord {
+    let blocked = |code: &'static str, summary: &'static str| ReleaseCheckRecord {
+        id: "platform.profile_binding".to_string(),
+        domain: ReleaseDomain::Platform,
+        status: if required {
+            CheckStatus::Blocked
+        } else {
+            CheckStatus::Warning
+        },
+        summary: summary.to_string(),
+        diagnostic: Some(if required {
+            Diagnostic::blocking(code, summary)
+        } else {
+            Diagnostic::warning(code, summary)
+        }),
+        evidence: Vec::new(),
+    };
+    if !package.has_section("platform.profiles") {
+        return blocked(
+            "ASTRA_PLATFORM_PROFILE_SECTION_MISSING",
+            "package does not contain cooked platform profiles",
+        );
+    }
+    let Some(capability) = capability else {
+        return blocked(
+            "ASTRA_PLATFORM_PROFILE_CAPABILITY_MISSING",
+            "platform profile binding requires a capability report",
+        );
+    };
+    let value = match read_json_section(package, "platform.profiles") {
+        Ok(value) => value,
+        Err(_) => {
+            return blocked(
+                "ASTRA_PLATFORM_PROFILE_SECTION_INVALID",
+                "cooked platform profile section is invalid",
+            )
+        }
+    };
+    if value.get("schema").and_then(serde_json::Value::as_str) != Some("astra.platform_profiles.v1")
+    {
+        return blocked(
+            "ASTRA_PLATFORM_PROFILE_SECTION_INVALID",
+            "cooked platform profile section schema is unsupported",
+        );
+    }
+    let profiles: Vec<astra_platform::PlatformHostProfile> = match value
+        .get("profiles")
+        .cloned()
+        .and_then(|profiles| serde_json::from_value(profiles).ok())
+    {
+        Some(profiles) => profiles,
+        None => {
+            return blocked(
+                "ASTRA_PLATFORM_PROFILE_SECTION_INVALID",
+                "cooked platform profile list is invalid",
+            )
+        }
+    };
+    let matched = profiles.iter().find(|profile| {
+        profile.platform == capability.platform
+            && profile.target == capability.target
+            && profile.id == capability.profile_id
+            && profile.hash().ok().as_deref() == Some(capability.profile_hash.as_str())
+    });
+    let Some(profile) = matched else {
+        return blocked(
+            "ASTRA_PLATFORM_PROFILE_IDENTITY",
+            "capability report does not match a cooked platform profile",
+        );
+    };
+    if let Err(error) = astra_platform::validate_host_profile(profile) {
+        return ReleaseCheckRecord {
+            id: "platform.profile_binding".to_string(),
+            domain: ReleaseDomain::Platform,
+            status: CheckStatus::Blocked,
+            summary: "cooked platform profile violates release policy".to_string(),
+            diagnostic: Some(Diagnostic::blocking(
+                "ASTRA_PLATFORM_PROFILE_POLICY",
+                error.to_string(),
+            )),
+            evidence: Vec::new(),
+        };
+    }
+    ReleaseCheckRecord {
+        id: "platform.profile_binding".to_string(),
+        domain: ReleaseDomain::Platform,
+        status: CheckStatus::Pass,
+        summary: "capability report matches the cooked platform profile".to_string(),
+        diagnostic: None,
+        evidence: vec![
+            evidence("profile_id", &capability.profile_id),
+            evidence("profile_hash", &capability.profile_hash),
+        ],
     }
 }
 

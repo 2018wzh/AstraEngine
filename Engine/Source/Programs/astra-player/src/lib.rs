@@ -1,10 +1,9 @@
 use astra_core::Hash256;
-use astra_package::PackageReader;
 pub use astra_player_core::{
     PlayerAudioMeterEvidence, PlayerAutomationReport, PlayerAutomationScript,
     PlayerAutomationStatus, PlayerAutomationStep, PlayerAutomationValidator,
     PlayerInputConsumptionEvidence, PlayerInputEvent, PlayerInputTranscript, PlayerPlatform,
-    PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
+    PlayerPlatformEvidenceIdentity, PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
 };
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
@@ -19,6 +18,7 @@ pub type PlayerAutomationError = Box<dyn std::error::Error + Send + Sync>;
 pub struct WindowsLiveAutomationRequest {
     pub bundle_dir: PathBuf,
     pub visual_comparison_report: PathBuf,
+    pub host_conformance_report: PathBuf,
     pub timeout_ms: u64,
     pub trace_log: Option<PathBuf>,
 }
@@ -96,7 +96,8 @@ impl WindowsSendInputHost {
             request.trace_log.as_ref(),
             &expected_routes,
         )?;
-        let audio_meter = package_audio_meter(&bundle.package_path)?;
+        let (audio_meter, platform_identity) =
+            host_audio_meter(&request.host_conformance_report, &package_hash)?;
         let comparison = visual_comparison_evidence(&request.visual_comparison_report)?;
         let transcript = PlayerInputTranscript {
             schema: "astra.player_input_transcript.v1".to_string(),
@@ -111,7 +112,11 @@ impl WindowsSendInputHost {
             visual_comparison: Some(comparison),
             route_coverage: live.route_coverage,
         };
-        let report = self.build_report(&script, &transcript);
+        let report = PlayerAutomationValidator.validate_with_platform_identity(
+            &script,
+            &transcript,
+            &platform_identity,
+        );
         Ok(WindowsLiveAutomationRun {
             script,
             transcript,
@@ -140,6 +145,7 @@ impl WebCdpInputHost {
 #[derive(Debug, Clone)]
 struct BundleContext {
     bundle_dir: PathBuf,
+    #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
     entrypoint: String,
     target: String,
     profile: String,
@@ -172,6 +178,7 @@ impl BundleContext {
             .collect::<Vec<_>>();
         Ok(Self {
             bundle_dir: bundle_dir.clone(),
+            #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
             entrypoint,
             target,
             profile,
@@ -215,123 +222,57 @@ fn windows_live_input(
     trace_log: Option<&PathBuf>,
     expected_routes: &[String],
 ) -> Result<LiveInputRun, PlayerAutomationError> {
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
     {
         windows_live_input_impl(bundle, timeout_ms, trace_log, expected_routes)
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(all(target_os = "windows", feature = "platform-test-driver")))]
     {
         let _ = (bundle, timeout_ms, trace_log, expected_routes);
         Err("windows live automation requires Windows".into())
     }
 }
 
-fn package_audio_meter(
-    package_path: &PathBuf,
-) -> Result<PlayerAudioMeterEvidence, PlayerAutomationError> {
-    let package_bytes = fs::read(package_path)?;
-    let reader = PackageReader::open(&package_bytes)?;
-    let vfs_manifest: serde_json::Value =
-        serde_json::from_slice(&reader.container().read_section("asset.vfs_manifest")?)?;
-    let entries = vfs_manifest
-        .get("entries")
-        .and_then(serde_json::Value::as_array)
-        .ok_or("asset.vfs_manifest entries must be an array")?;
-    for entry in entries {
-        let Some(vfs_uri) = entry.get("vfs_uri").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        if !vfs_uri.to_ascii_lowercase().ends_with(".wav") {
-            continue;
-        }
-        let Some(source) = entry.get("source").and_then(serde_json::Value::as_object) else {
-            continue;
-        };
-        if source.get("kind").and_then(serde_json::Value::as_str) != Some("package_section") {
-            continue;
-        }
-        let Some(section_id) = source.get("section_id").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let section = reader.container().read_section(section_id)?;
-        if let Some(expected_hash) = entry.get("hash").and_then(serde_json::Value::as_str) {
-            if Hash256::from_sha256(&section).to_string() != expected_hash {
-                return Err("audio asset hash mismatch in package VFS manifest".into());
-            }
-        }
-        if let Some(expected_size) = entry.get("size").and_then(serde_json::Value::as_u64) {
-            if section.len() as u64 != expected_size {
-                return Err("audio asset byte size mismatch in package VFS manifest".into());
-            }
-        }
-        if let Some(meter) = audio_meter_from_wav_bytes(&section) {
-            return Ok(meter);
-        }
+fn host_audio_meter(
+    report_path: &PathBuf,
+    package_hash: &str,
+) -> Result<(PlayerAudioMeterEvidence, PlayerPlatformEvidenceIdentity), PlayerAutomationError> {
+    let report: astra_platform::PlatformHostConformanceReport =
+        serde_json::from_slice(&fs::read(report_path)?)?;
+    if report.schema != astra_platform::PLATFORM_HOST_CONFORMANCE_REPORT_SCHEMA
+        || report.status != astra_platform::ConformanceStatus::Pass
+        || report.package_hash != package_hash
+    {
+        return Err("host conformance report does not match the bundle package".into());
     }
-    Ok(PlayerAudioMeterEvidence {
-        sample_count: 0,
-        peak_dbfs: -120.0,
-        rms_dbfs: -120.0,
-    })
-}
-
-pub fn audio_meter_from_wav_bytes(bytes: &[u8]) -> Option<PlayerAudioMeterEvidence> {
-    if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
-        return None;
-    }
-    let mut offset = 12usize;
-    let mut audio_format = 0u16;
-    let mut channels = 0u16;
-    let mut bits_per_sample = 0u16;
-    let mut data = None;
-    while offset.checked_add(8)? <= bytes.len() {
-        let id = &bytes[offset..offset + 4];
-        let size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().ok()?) as usize;
-        let start = offset + 8;
-        let end = start.checked_add(size)?;
-        if end > bytes.len() {
-            return None;
-        }
-        if id == b"fmt " && size >= 16 {
-            audio_format = u16::from_le_bytes(bytes[start..start + 2].try_into().ok()?);
-            channels = u16::from_le_bytes(bytes[start + 2..start + 4].try_into().ok()?);
-            bits_per_sample = u16::from_le_bytes(bytes[start + 14..start + 16].try_into().ok()?);
-        } else if id == b"data" {
-            data = Some(&bytes[start..end]);
-        }
-        offset = end + (size % 2);
-    }
-    let data = data?;
-    if audio_format != 1 || channels == 0 || !matches!(bits_per_sample, 8 | 16) {
-        return None;
-    }
-    let bytes_per_sample = (bits_per_sample / 8) as usize;
-    if bytes_per_sample == 0 || data.len() < bytes_per_sample {
-        return None;
-    }
-    let mut peak = 0.0f64;
-    let mut square_sum = 0.0f64;
-    let mut samples = 0u64;
-    for sample in data.chunks_exact(bytes_per_sample) {
-        let normalized = if bits_per_sample == 8 {
-            (sample[0] as f64 - 128.0) / 128.0
-        } else {
-            i16::from_le_bytes([sample[0], sample[1]]) as f64 / 32768.0
-        };
-        let absolute = normalized.abs();
-        peak = peak.max(absolute);
-        square_sum += normalized * normalized;
-        samples += 1;
-    }
-    if samples == 0 {
-        return None;
-    }
-    let rms = (square_sum / samples as f64).sqrt();
-    Some(PlayerAudioMeterEvidence {
-        sample_count: samples,
-        peak_dbfs: dbfs(peak),
-        rms_dbfs: dbfs(rms),
-    })
+    let check = report
+        .checks
+        .iter()
+        .find(|check| {
+            check.id == "audio.output_meter"
+                && check.status == astra_platform::ConformanceStatus::Pass
+        })
+        .ok_or("host conformance report is missing passing audio.output_meter evidence")?;
+    let value = |key: &str| {
+        check
+            .evidence
+            .iter()
+            .find(|entry| entry.key == key)
+            .map(|entry| entry.value.as_str())
+            .ok_or_else(|| format!("audio.output_meter is missing {key} evidence"))
+    };
+    Ok((
+        PlayerAudioMeterEvidence {
+            sample_count: value("sample_count")?.parse()?,
+            peak_dbfs: value("peak_dbfs")?.parse()?,
+            rms_dbfs: value("rms_dbfs")?.parse()?,
+        },
+        PlayerPlatformEvidenceIdentity {
+            profile_hash: report.profile_hash,
+            build_fingerprint: report.build_fingerprint,
+            session_id: report.session_id,
+        },
+    ))
 }
 
 fn visual_comparison_evidence(
@@ -372,12 +313,9 @@ fn sha256_file(path: &PathBuf) -> Result<String, PlayerAutomationError> {
     Ok(Hash256::from_sha256(&fs::read(path)?).to_string())
 }
 
+#[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 fn sha256_bytes(bytes: &[u8]) -> String {
     Hash256::from_sha256(bytes).to_string()
-}
-
-fn dbfs(value: f64) -> f32 {
-    (20.0 * value.max(0.000_000_001).log10()) as f32
 }
 
 fn is_safe_relative_ref(value: &str) -> bool {
@@ -391,7 +329,7 @@ fn is_safe_relative_ref(value: &str) -> bool {
             .any(|part| part.is_empty() || part == "." || part == ".." || part.ends_with(':'))
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 fn windows_live_input_impl(
     bundle: &BundleContext,
     timeout_ms: u64,
@@ -401,42 +339,20 @@ fn windows_live_input_impl(
     windows_live::run(bundle, timeout_ms, trace_log, expected_routes)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 mod windows_live {
     use super::{
         sha256_bytes, BundleContext, LiveInputRun, PlayerAutomationError,
         PlayerInputConsumptionEvidence, PlayerInputEvent, PlayerVisualRegionEvidence,
         WINDOWS_SENDINPUT_KEYBOARD, WINDOWS_SENDINPUT_MOUSE,
     };
+    use astra_platform_windows::WindowsTestDriver;
     use std::{
-        ffi::c_void,
         fs,
         path::PathBuf,
         process::{Command, Stdio},
         thread,
-        time::{Duration, Instant},
-    };
-    use windows::{
-        core::BOOL,
-        Win32::{
-            Foundation::{HWND, LPARAM, RECT},
-            Graphics::Gdi::{
-                BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-                GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
-                DIB_RGB_COLORS, SRCCOPY,
-            },
-            UI::{
-                Input::KeyboardAndMouse::{
-                    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-                    KEYEVENTF_KEYUP, VIRTUAL_KEY,
-                },
-                WindowsAndMessaging::{
-                    EnumWindows, GetClientRect, GetWindowTextLengthW, GetWindowTextW,
-                    GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow, ShowWindow,
-                    SW_RESTORE,
-                },
-            },
-        },
+        time::Duration,
     };
 
     pub fn run(
@@ -463,19 +379,22 @@ mod windows_live {
             "level=TRACE event=astra.player.bundle.launch role=bundle_entrypoint".to_string(),
         );
         let result = (|| {
-            let hwnd = wait_for_window(child.id(), timeout_ms)?;
+            let window = WindowsTestDriver::wait_for_process_window(
+                child.id(),
+                Duration::from_millis(timeout_ms.max(1)),
+            )?;
             trace_line(
                 &mut trace_lines,
                 "level=TRACE event=astra.player.window.found title=astra_player".to_string(),
             );
-            focus_window(hwnd)?;
+            window.focus()?;
             trace_line(
                 &mut trace_lines,
                 "level=TRACE event=astra.player.window.focus requested=true".to_string(),
             );
             thread::sleep(Duration::from_millis(150));
-            let before = capture_client_rgba(hwnd)?;
-            let before_hash = sha256_bytes(&before.rgba);
+            let before = window.capture_rgba()?;
+            let before_hash = sha256_bytes(&before.rgba8);
             trace_line(
                 &mut trace_lines,
                 format!(
@@ -509,11 +428,11 @@ mod windows_live {
                         "level=TRACE event=astra.player.input.sent source=sendinput.keyboard kind=key input_sequence={input_sequence}"
                     ),
                 );
-                send_key(0x20)?;
+                window.send_key(0x20)?;
                 thread::sleep(Duration::from_millis(160));
-                let after = capture_client_rgba(hwnd)?;
-                let previous_hash = sha256_bytes(&previous.rgba);
-                let after_hash = sha256_bytes(&after.rgba);
+                let after = window.capture_rgba()?;
+                let previous_hash = sha256_bytes(&previous.rgba8);
+                let after_hash = sha256_bytes(&after.rgba8);
                 let changed = previous_hash != after_hash;
                 trace_line(
                     &mut trace_lines,
@@ -601,13 +520,6 @@ mod windows_live {
     }
 
     #[derive(Debug, Clone)]
-    struct CapturedFrame {
-        width: u32,
-        height: u32,
-        rgba: Vec<u8>,
-    }
-
-    #[derive(Debug, Clone)]
     struct ConsumedInputTrace {
         player_sequence: u64,
         kind: String,
@@ -664,167 +576,5 @@ mod windows_live {
         let prefix = format!("{key}=");
         line.split_whitespace()
             .find_map(|token| token.strip_prefix(&prefix))
-    }
-
-    fn wait_for_window(pid: u32, timeout_ms: u64) -> Result<HWND, PlayerAutomationError> {
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(1));
-        while Instant::now() < deadline {
-            if let Some(hwnd) = find_window_for_pid(pid) {
-                return Ok(hwnd);
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-        Err("windows live automation could not find the player window".into())
-    }
-
-    fn find_window_for_pid(pid: u32) -> Option<HWND> {
-        struct Search {
-            pid: u32,
-            hwnd: HWND,
-        }
-        unsafe extern "system" fn callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
-            let search = &mut *(lparam.0 as *mut Search);
-            if !search.hwnd.0.is_null() {
-                return BOOL(0);
-            }
-            if !IsWindowVisible(hwnd).as_bool() {
-                return BOOL(1);
-            }
-            let mut window_pid = 0u32;
-            GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
-            if window_pid != search.pid {
-                return BOOL(1);
-            }
-            let len = GetWindowTextLengthW(hwnd);
-            let mut buffer = vec![0u16; len as usize + 1];
-            let read = GetWindowTextW(hwnd, &mut buffer);
-            let title = String::from_utf16_lossy(&buffer[..read as usize]);
-            if !title.contains("AstraPlayer") {
-                return BOOL(1);
-            }
-            search.hwnd = hwnd;
-            BOOL(0)
-        }
-        let mut search = Search {
-            pid,
-            hwnd: HWND::default(),
-        };
-        unsafe {
-            let _ = EnumWindows(Some(callback), LPARAM(&mut search as *mut Search as isize));
-        }
-        (!search.hwnd.0.is_null()).then_some(search.hwnd)
-    }
-
-    fn focus_window(hwnd: HWND) -> Result<(), PlayerAutomationError> {
-        unsafe {
-            let _ = ShowWindow(hwnd, SW_RESTORE);
-            let _ = SetForegroundWindow(hwnd);
-        }
-        Ok(())
-    }
-
-    fn send_key(vk: u16) -> Result<(), PlayerAutomationError> {
-        send_keyboard(vk, KEYBD_EVENT_FLAGS::default())?;
-        send_keyboard(vk, KEYEVENTF_KEYUP)?;
-        Ok(())
-    }
-
-    fn send_keyboard(vk: u16, flags: KEYBD_EVENT_FLAGS) -> Result<(), PlayerAutomationError> {
-        let input = INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VIRTUAL_KEY(vk),
-                    wScan: Default::default(),
-                    dwFlags: flags,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        };
-        let sent = unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
-        if sent != 1 {
-            return Err("windows live automation could not send keyboard input".into());
-        }
-        Ok(())
-    }
-
-    fn capture_client_rgba(hwnd: HWND) -> Result<CapturedFrame, PlayerAutomationError> {
-        let mut rect = RECT::default();
-        unsafe {
-            GetClientRect(hwnd, &mut rect).map_err(|err| {
-                format!("windows live automation could not query client rect: {err:?}")
-            })?;
-            let width = (rect.right - rect.left).max(0);
-            let height = (rect.bottom - rect.top).max(0);
-            if width <= 0 || height <= 0 {
-                return Err("windows live automation window has an empty client area".into());
-            }
-            let window_dc = GetDC(Some(hwnd));
-            if window_dc.0.is_null() {
-                return Err("windows live automation could not acquire window DC".into());
-            }
-            let memory_dc = CreateCompatibleDC(Some(window_dc));
-            let bitmap = CreateCompatibleBitmap(window_dc, width, height);
-            let old_object = SelectObject(memory_dc, bitmap.into());
-            let result = (|| {
-                if BitBlt(
-                    memory_dc,
-                    0,
-                    0,
-                    width,
-                    height,
-                    Some(window_dc),
-                    0,
-                    0,
-                    SRCCOPY,
-                )
-                .is_err()
-                {
-                    return Err("windows live automation could not capture window pixels".into());
-                }
-                let mut info = BITMAPINFO {
-                    bmiHeader: BITMAPINFOHEADER {
-                        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                        biWidth: width,
-                        biHeight: -height,
-                        biPlanes: 1,
-                        biBitCount: 32,
-                        biCompression: BI_RGB.0,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                };
-                let mut bgra = vec![0u8; width as usize * height as usize * 4];
-                let lines = GetDIBits(
-                    memory_dc,
-                    bitmap,
-                    0,
-                    height as u32,
-                    Some(bgra.as_mut_ptr() as *mut c_void),
-                    &mut info,
-                    DIB_RGB_COLORS,
-                );
-                if lines == 0 {
-                    return Err("windows live automation could not read captured pixels".into());
-                }
-                let mut rgba = Vec::with_capacity(bgra.len());
-                for pixel in bgra.chunks_exact(4) {
-                    rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
-                }
-                Ok(CapturedFrame {
-                    width: width as u32,
-                    height: height as u32,
-                    rgba,
-                })
-            })();
-            if !old_object.0.is_null() {
-                let _ = SelectObject(memory_dc, old_object);
-            }
-            let _ = DeleteObject(bitmap.into());
-            let _ = DeleteDC(memory_dc);
-            let _ = ReleaseDC(Some(hwnd), window_dc);
-            result
-        }
     }
 }

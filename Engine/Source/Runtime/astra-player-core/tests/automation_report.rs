@@ -1,8 +1,8 @@
 use astra_player_core::{
     PlayerAudioMeterEvidence, PlayerAutomationScript, PlayerAutomationStatus, PlayerAutomationStep,
     PlayerAutomationValidator, PlayerInputConsumptionEvidence, PlayerInputEvent,
-    PlayerInputTranscript, PlayerPlatform, PlayerVisualComparisonEvidence,
-    PlayerVisualRegionEvidence,
+    PlayerInputTranscript, PlayerPlatform, PlayerPlatformEvidenceIdentity,
+    PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
 };
 
 #[test]
@@ -21,6 +21,31 @@ fn player_automation_report_passes_for_live_windows_input() {
     assert!(report.checks.iter().any(|check| {
         check.id == "player.visual_comparison" && check.status == PlayerAutomationStatus::Pass
     }));
+}
+
+#[test]
+fn player_automation_report_binds_platform_identity_to_full_playable() {
+    let report = PlayerAutomationValidator.validate_with_platform_identity(
+        &script(PlayerPlatform::Windows),
+        &transcript(PlayerPlatform::Windows, "sendinput.mouse"),
+        &PlayerPlatformEvidenceIdentity {
+            profile_hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                .to_string(),
+            build_fingerprint:
+                "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                    .to_string(),
+            session_id: "session.windows.1".to_string(),
+        },
+    );
+    let full = report
+        .checks
+        .iter()
+        .find(|check| check.id == "player.full_playable")
+        .unwrap();
+    assert!(full
+        .evidence
+        .iter()
+        .any(|entry| entry.key == "session_id" && entry.value == "session.windows.1"));
 }
 
 #[test]

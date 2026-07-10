@@ -61,6 +61,12 @@ async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
                 sequence: 1,
                 kind: DecodeKind::Video,
                 codec: "mp4".to_string(),
+                description: Vec::new(),
+                sample_rate: None,
+                channels: None,
+                coded_width: None,
+                coded_height: None,
+                keyframe: true,
                 bytes: include_bytes!("../../../../Fixtures/PublicDomainMedia/flower.mp4").to_vec(),
             },
         )

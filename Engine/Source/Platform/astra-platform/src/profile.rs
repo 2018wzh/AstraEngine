@@ -169,6 +169,54 @@ pub fn validate_host_profile(profile: &PlatformHostProfile) -> Result<(), Platfo
             .with_field("field", field));
         }
     }
+    validate_release_provider_policy(profile)?;
+    let mut source_kinds = BTreeSet::new();
+    let mut origins = BTreeSet::new();
+    for source in &profile.package_sources {
+        let kind = match source {
+            PackageSourcePolicy::Bundled => "bundled",
+            PackageSourcePolicy::UserAuthorized => "user_authorized",
+            PackageSourcePolicy::HttpsRange { allowed_origins } => {
+                if allowed_origins.is_empty() {
+                    return Err(PlatformError::new(
+                        PlatformErrorCode::InvalidProfile,
+                        "profile.validate",
+                        "HTTPS range policy requires an origin allowlist",
+                    ));
+                }
+                for origin in allowed_origins {
+                    let parsed = url::Url::parse(origin).map_err(|_| invalid_origin())?;
+                    if parsed.scheme() != "https"
+                        || parsed.host_str().is_none()
+                        || !parsed.username().is_empty()
+                        || parsed.password().is_some()
+                        || !matches!(parsed.path(), "" | "/")
+                        || parsed.query().is_some()
+                        || parsed.fragment().is_some()
+                        || parsed.origin().ascii_serialization() != origin.trim_end_matches('/')
+                        || !origins.insert(origin.trim_end_matches('/').to_string())
+                    {
+                        return Err(invalid_origin());
+                    }
+                }
+                "https_range"
+            }
+        };
+        if !source_kinds.insert(kind) {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidProfile,
+                "profile.validate",
+                "package source policy contains a duplicate source kind",
+            ));
+        }
+    }
+    if !source_kinds.contains("bundled") {
+        return Err(PlatformError::new(
+            PlatformErrorCode::InvalidProfile,
+            "profile.validate",
+            "release platform profile must allow bundled package sources",
+        ));
+    }
     if profile.limits.command_queue_capacity == 0
         || profile.limits.event_queue_capacity == 0
         || profile.limits.max_frame_bytes == 0
@@ -182,6 +230,50 @@ pub fn validate_host_profile(profile: &PlatformHostProfile) -> Result<(), Platfo
         ));
     }
     Ok(())
+}
+
+fn validate_release_provider_policy(profile: &PlatformHostProfile) -> Result<(), PlatformError> {
+    let expected = match profile.platform {
+        PlatformId::Windows => ["wgpu_hardware", "wmf", "wasapi", "saved_games"],
+        PlatformId::Web => ["webgpu", "webcodecs", "webaudio", "opfs"],
+        PlatformId::Linux | PlatformId::Macos | PlatformId::Ios | PlatformId::Android => {
+            return Ok(())
+        }
+    };
+    for ((field, policy), required) in [
+        ("renderer", &profile.renderer),
+        ("decode", &profile.decode),
+        ("audio", &profile.audio),
+        ("save", &profile.save),
+    ]
+    .into_iter()
+    .zip(expected)
+    {
+        if policy.allow_software || policy.providers.as_slice() != [required] {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidProfile,
+                "profile.validate",
+                "release provider policy declares an unsupported fallback",
+            )
+            .with_field("field", field));
+        }
+    }
+    if profile.platform == PlatformId::Web && profile.id != "web-release-chrome" {
+        return Err(PlatformError::new(
+            PlatformErrorCode::InvalidProfile,
+            "profile.validate",
+            "Migration 8 Web profile only supports Chrome",
+        ));
+    }
+    Ok(())
+}
+
+fn invalid_origin() -> PlatformError {
+    PlatformError::new(
+        PlatformErrorCode::InvalidProfile,
+        "profile.validate",
+        "HTTPS range origin must be a unique canonical HTTPS origin",
+    )
 }
 
 fn is_safe_identifier(value: &str) -> bool {

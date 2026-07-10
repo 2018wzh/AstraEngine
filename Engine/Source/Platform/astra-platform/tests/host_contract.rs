@@ -50,6 +50,26 @@ fn release_profiles_lock_selected_providers_without_hidden_fallbacks() {
 }
 
 #[test]
+fn release_profile_rejects_undeclared_fallback_and_invalid_https_origin() {
+    let mut web = PlatformHostProfile::web_release("nativevn-web", "com.example.game");
+    web.renderer.providers.push("webgl".to_string());
+    assert_eq!(
+        validate_host_profile(&web).unwrap_err().code,
+        PlatformErrorCode::InvalidProfile
+    );
+
+    let mut web = PlatformHostProfile::web_release("nativevn-web", "com.example.game");
+    web.package_sources
+        .push(astra_platform::PackageSourcePolicy::HttpsRange {
+            allowed_origins: vec!["http://insecure.example/path".to_string()],
+        });
+    assert_eq!(
+        validate_host_profile(&web).unwrap_err().code,
+        PlatformErrorCode::InvalidProfile
+    );
+}
+
+#[test]
 fn capability_report_v2_separates_declared_available_and_selected() {
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let report = PlatformCapabilityReport::from_profile(

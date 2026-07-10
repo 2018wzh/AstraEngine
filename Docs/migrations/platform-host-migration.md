@@ -1,111 +1,29 @@
-# Platform Host Realignment Migration
+# Migration 8：Windows/Web Platform Host 产品化迁移
 
-本计划记录已完成的 `Stage 2` Windows 平台实现（wgpu Surface 创建、WASAPI 声音输出、WMF 视频解码、以及 Windows Gate 校验）向 `AstraPlatform` 统一不透明 Token 与 `PlatformHost` 接口收束的迁移路线。
+**状态：`IN_PROGRESS`**
 
-**本迁移不仅适用于 AstraEditor，同样强制约束 AstraEngine 核心（EngineCore）与所有公共 Runtime 模块（包括 `astra-runtime`、`astra-media-core` 等）。**
+Migration 8 重新打开原先由 capability smoke 标记完成的平台工作。Windows 与 Web 只有在同一最终 commit、同一 cooked package 和同一次验收 run 中，同时取得 capability v2、host conformance 与 Player automation 连续证据后才能恢复 `DONE`。Linux、macOS、iOS、Android 仍属于 Stage 6。
 
-设计页可以覆盖完整未来架构；本迁移页仅针对已有实现的重构对齐。
+## 已落地
 
-## 现有实现入口
+- `astra-platform` 已改为轻量 contract crate，公开异步 `PlatformHostFactory`、`PlatformHostClient`、事件流及 `{slot, generation}` typed handle；stale handle、重复释放、乱序 completion、队列溢出和 shutdown resource leak 都是显式错误。
+- `astra-platform-general` 提供资源表、有序 completion、atomic save transaction 与 hash-bound package range reader。
+- Windows backend 已由 winit 主线程持有窗口和 event loop，接入 hardware-only wgpu present/readback、typed input、WASAPI callback meter、WMF decode、Saved Games transaction 和 package range read；`SendInput` 只存在于 `platform-test-driver` feature。
+- Web backend 已完成 canvas/DOM event 与 WebGPU present/readback；独立 `astra-player-web` WASM crate 会校验 package 和 `platform.profiles` section 后启动 host。
+- Linux、macOS、iOS、Android factory 只返回稳定 `PLATFORM_NOT_IMPLEMENTED`，不会再用 capability report 模拟 host。
+- capability report 已升级为 `astra.platform_capability_report.v2`，区分 declared、available、selected；release validator 已支持 `astra.platform_host_conformance_report.v1` 与 Player report identity continuity。
+- Bundle CLI 要求显式传入已构建的 Windows Player、Crash Reporter、Web WASM、loader 和 AudioWorklet artifact；不再复制当前 CLI，也不再生成 JavaScript route model/runner。
+- `project.yaml.platform_profiles` 以 `PlatformHostProfile` 强类型读取，Cook 后写入 `platform.profiles` 自描述 package section。
 
-- `Engine/Source/Runtime/astra-platform-windows/`：包含 Windows host adapter 的主入口、winit 隐藏窗口句柄获取、WASAPI `audio.wasapi` 实现、以及 WMF 视频解码 `decode.wmf.video_first_frame` 逻辑。
-- `Engine/Source/Runtime/astra-runtime/`：公共 Runtime 模块，其原有部分测试与运行逻辑中直接调用了平台的窗口和音频底层抽象。
-- `Docs/platforms/desktop.md`：记录已完成 of `S2-WINDOWS-HOST-01`、`S2-WINDOWS-WMF-01`、`S2-WINDOWS-GATE-01` 验收规范与证据口径。
-- `Docs/implementation/platform-host.md`：定义 `PlatformHost` trait 职责。
-- `Editor/Source/Bridge/astra-editor-bridge/src/pie.rs`（Stage 4 设计）：PIE Viewport 原有直接操作底层 `HWND` / `RawWindowHandle` 的嵌入方式。
+## 尚未完成
 
-## 目标设计
+- WebCodecs encoded audio/video chunk decode、OPFS commit/reload/abort、File/fetch allowlist source、visibility/focus/resize/input lifecycle 和 AudioWorklet bounded queue 已接入；真实用户手势后的 WebAudio 正向 conformance、WebGPU device/context loss recovery 与完整 Player runtime route 尚未闭合。
+- Windows 用户授权文件 source、HTTPS allowlist range、gamepad axis 和 Player runtime 对全部 host service 的产品接线尚未闭合。
+- Windows `SendInput`、focus 与 GDI capture 已迁入 `platform-test-driver` feature，生产 Player 不链接注入 API；Web CDP driver 与真实 Player runtime route 仍待闭合。被旧 JS route runner 支撑的测试已停止作为验收证据。
+- 正式 Python acceptance runner、同 run evidence manifest、Windows/Chrome 完整路线与最终 workspace gate 尚未通过。
 
-为防止底层原生句柄（如 `HWND`、`NSView*`、`XID` 等）与平台特定行为在核心层泄露，整个引擎与编辑器集成必须符合以下对齐原则：
+因此 `migration8`、`S2-PLATFORM-01`、`S2-WINDOWS-HOST-01`、`S2-WINDOWS-GATE-01` 和 `S2-WEB-HOST-01` 当前均为 `IN_PROGRESS`。
 
-1. **底层句柄完全封装**：
-   `astra-editor-bridge`、AstraEngine 核心库及所有公共 Runtime 模块一律只传递不透明的 `win_id`（`u64` 整数）与通用的 `SurfaceRequest`。
-2. **Surface 凭证由 Token 表达**：
-   `PlatformHost::create_surface` 返回的 `SurfaceToken` 承载平台相关的 Surface 凭证。核心引擎（EngineCore）与编辑器只持有该 Token，不接触任何 `win32` 或 `raw-window-handle` 特有的 C 结构体或指针。
-3. **Wayland 等环境自动透明降级**：
-   是否降级为离屏 Texture 共享，完全在 `astra-platform-linux` 等底层实现中根据 QPA / windowing 协议类型自动检测和处理，返回 `SurfaceToken::TextureShared`。核心 Runtime 仅根据 SurfaceToken 类型选择渲染流程，不参与任何低层窗口系统的环境检测与判定。
+## 验收边界
 
----
-
-## 分步迁移
-
-### 1. 重构 `PlatformHost` 接口定义 (`astra-platform`)
-
-修改 `astra-platform` 的 `PlatformHost` 声明以接收通用 `SurfaceRequest` 并输出不透明 `SurfaceToken`：
-
-```rust
-// Engine/Source/Runtime/astra-platform/src/lib.rs
-pub struct SurfaceRequest {
-    pub window_handle: u64,          // 平台不透明窗口句柄
-    pub size_width:    u32,
-    pub size_height:   u32,
-    pub allow_fallback: bool,        // 是否允许 texture 共享降级
-}
-
-pub enum SurfaceToken {
-    /// 原生子窗口嵌入（Windows HWND, macOS NSView, Linux X11）
-    NativeEmbed,
-    /// 降级离屏渲染，输出 GPU 共享材质句柄 (例如 Wayland 模式下)
-    TextureShared {
-        texture_id: u64,
-    },
-}
-```
-
-### 2. 重构 Windows host 实现 (`astra-platform-windows`)
-
-更新 `astra-platform-windows` 中的 `PlatformHost` 实现，将原有的 raw handle 映射收拢在 Rust 内部：
-
-```rust
-// Engine/Source/Runtime/astra-platform-windows/src/lib.rs
-impl PlatformHost for WindowsPlatformHost {
-    fn create_surface(&mut self, request: SurfaceRequest) -> PlatformResult<SurfaceToken> {
-        // 1. 在平台实现内部，安全地将 u64 的 window_handle 转换为 Windows HWND
-        let hwnd = request.window_handle as HWND;
-        
-        // 2. 利用 raw_window_handle 将 HWND 转换为 wgpu 兼容句柄（不泄漏到外部）
-        let raw_handle = build_win32_handle(hwnd);
-        
-        // 3. 构建 wgpu Surface 并存入内部上下文，返回不透明 SurfaceToken::NativeEmbed
-        self.bind_surface_to_viewport(raw_handle, request.size_width, request.size_height)?;
-        Ok(SurfaceToken::NativeEmbed)
-    }
-}
-```
-
-### 3. 重构 EngineCore 渲染绑定管线 (`astra-runtime` / `astra-media-core`)
-
-- 修改核心 Runtime 中 wgpu Surface 的初始化逻辑，使其仅接受由 `PlatformHost::create_surface` 返回的 `SurfaceToken`。
-- 对于 `SurfaceToken::NativeEmbed`，Runtime 模块通过内部转换（仅存在于 `astra-platform` 实现层）执行标准的 Present 链；对于 `SurfaceToken::TextureShared`，Runtime 降级到 FBO 离屏渲染并将纹理句柄回传，不参与任何原生的平台窗口交互。
-
-### 4. 重构已完成的 Windows Headless/Smoke 测试证据
-
-原有的 Windows Required Gate 依赖隐藏窗口的 `renderer.wgpu_surface` 创建证明。需重构测试证据生成方式：
-- 隐藏窗口的 winId 同样通过 `create_surface` 请求进行关联，由 Windows platform 适配器内部捕获并输出 `PlatformCapabilityReport` 中的 evidence 键值。
-- 测试代码中剔除直接暴露 `HWND` 的 debug断言，改为断言 `SurfaceToken` 返回为 `NativeEmbed` 且 status 为 `pass`。
-
-### 5. 重构编译与 CI matrix 对齐
-
-更新 `github workflows` 配置文件，在三平台 matrix 下执行测试时，`astra-platform-windows` 仅在 Windows runner 下激活。Linux 与 macOS runner 独立运行其各自的 capability report 模板检查。
-
----
-
-## 验收命令
-
-```bash
-# 执行文档健康检查
-python Tools/check_docs.py
-
-# 平台抽象 Realignment 单元测试
-cargo test -p astra-platform windows_surface_token_create
-cargo test -p astra-platform-windows wasapi_output_token
-cargo test -p astra-runtime runtime_surface_token_binding
-```
-
----
-
-## 不得修改项
-
-- **禁止泄漏句柄**：`astra-platform` 的 API 绝对不能以 `raw_window_handle::RawWindowHandle`、`*mut c_void` 或底层窗口 ID 直接作为公共接口参数暴露给外部或公共核心 Crate。
-- **禁止在核心引擎中进行平台分支检测**：公共 Runtime 模块（`astra-runtime`、`astra-media-core`）绝对不能包含针对特定窗口系统（如 X11 vs Wayland，或 Windows vs Linux）的环境检测代码，所有降级或平台切换行为必须在 `AstraPlatform` 的适配器底层完全隐藏。
-- **保持 Save/Decode 不变**：WASAPI 音频和 WMF 视频解码已完成部分的业务数据流无需调整，仅限制其系统依赖句柄的生命周期与 `PlatformHost` 对齐。
+普通 CI 负责 contract、负向门禁、单元测试和 wasm 编译。正式 evidence 必须拒绝 dirty worktree，并绑定 commit、build fingerprint、profile hash、package hash、session id、selected provider 和 check count。静态 WAV meter、接口存在性、hidden-window smoke、route report、DOM synthetic click、`--dump-dom` 或文件存在检查均不能通过 `player.full_playable` 或 Migration 8。

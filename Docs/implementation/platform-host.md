@@ -1,101 +1,52 @@
 # Platform Host Blueprint
 
-平台模块只适配原生能力，不拥有引擎状态。六个 v1 目标平台都必须输出 capability report 并通过 profile gate。当前 Windows 和 Web 的真实 smoke 已落地；Linux、macOS、iOS 和 Android host completion 移到 Stage 6。
+平台模块只适配原生能力，不拥有 Runtime 权威状态。Migration 8 当前只产品化 Windows 与 Chrome Web；Linux、macOS、iOS、Android 在 Stage 6 前使用显式 `Unavailable` factory。
 
-Target 与 Platform 的共同规则见 [Target And Platform Blueprint](target-platform.md)。本页只展开 host adapter。
+Target 绑定见 [Target And Platform Blueprint](target-platform.md)，当前迁移状态见 [Migration 8](../migrations/platform-host-migration.md)。
 
-## Host Trait
+## Contract
 
 ```rust
-pub trait PlatformHost {
-    fn descriptor(&self) -> PlatformDescriptor;
-    fn create_surface(&mut self, request: SurfaceRequest) -> PlatformResult<SurfaceToken>;
-    fn poll_input(&mut self) -> PlatformResult<Vec<PlayerInput>>;
-    fn audio_output(&mut self) -> PlatformResult<AudioOutputToken>;
-    fn decode_provider(&mut self) -> PlatformResult<ProviderId>;
-    fn save_store(&mut self) -> PlatformResult<SaveStoreToken>;
-    fn capability_report(&self) -> PlatformCapabilityReport;
+pub trait PlatformHostFactory {
+    fn start(&self, profile: PlatformHostProfile) -> HostStartFuture;
+}
+
+pub struct PlatformHostSession {
+    pub client: PlatformHostClient,
+    pub events: PlatformEventStream,
+    pub profile: PlatformHostProfile,
 }
 ```
 
-`SurfaceToken`、`AudioOutputToken`、`SaveStoreToken` 是平台私有 token。Runtime public API 及 Engine 核心（EngineCore）内部模块一律不得暴露或直接接收任何原生句柄（如 HWND、NSView、wl_surface 指针等），所有句柄均收束在 `AstraPlatform` 适配器内部隐式解析与处理。
+`PlatformHostClient` 通过 Future 提交 window/surface/present/capture、audio、decode、save transaction、package range 和 shutdown 命令。OS/browser event loop 在本地主线程 executor 持有 `!Send` 资源，Tokio 只负责编排。
+
+所有资源使用不可序列化的 `{slot, generation}` typed handle：`WindowHandle`、`SurfaceHandle`、`AudioOutputHandle`、`DecodeSessionHandle`、`MediaFrameHandle`、`SaveTransactionHandle` 与 `PackageSourceHandle`。stale handle、重复 close、越界 range、乱序 completion、队列溢出和 shutdown leak 必须显式报错。
 
 ## Crate Split
 
 | Crate | 职责 |
 | --- | --- |
-| `astra-platform` | `PlatformId`、`SdkStatus`、`PlatformCapabilityReport`、`PlatformHost` trait |
-| `astra-platform-windows` | Windows host adapter、hidden window、wgpu surface、WMF audio/video decode、WASAPI、DPI/IME capability |
-| `astra-platform-linux` | Linux capability crate；window system/audio/font/decode smoke 待实现 |
-| `astra-platform-macos` | macOS capability crate；AppKit/AVFoundation/CoreAudio smoke 待实现 |
-| `astra-platform-ios` | iOS capability crate；launcher、safe area、touch、AVFoundation、no-JIT Luau gate 待实现 |
-| `astra-platform-android` | Android capability crate；launcher、MediaCodec、SAF、audio focus、no-JIT Luau gate 待实现 |
-| `astra-platform-web` | Web host probe；WASM browser、renderer context、browser media decode、WebCodecs config、WebAudio render、OPFS/IndexedDB、File API/fetch package source smoke |
+| `astra-platform` | profile、typed handle、async command/event contract、capability v2、conformance schema |
+| `astra-platform-general` | generational resource table、ordered completion、atomic save、hash-bound package range 和共用 policy |
+| `astra-platform-windows` | winit event loop、hardware wgpu、WASAPI、WMF、Saved Games、Windows package source；test injection 仅在 `platform-test-driver` |
+| `astra-platform-web` | canvas/DOM、WebGPU、WebAudio、WebCodecs、OPFS、fetch/File source |
+| `astra-player-web` | 独立 WASM Player，读取 config、package 和 cooked platform profile |
+| 其余平台 crate | Stage 6 `PLATFORM_NOT_IMPLEMENTED` factory |
 
-每个 host crate 可以用平台私有类型实现内部 bridge，但 public report 和 Runtime 入口只传 DTO 或 token。
+## Platform Profiles
 
-## Platform Matrix
+`project.yaml.platform_profiles` 直接反序列化为 `PlatformHostProfile`。Cook 校验 profile key、target、package、provider policy 和 package source policy，并写入 `platform.profiles` / `astra.platform_profiles.v1` package section。Player 不接受 CLI 覆盖发布策略。
 
-| Platform | Shell | Render | Decode | Save | Required Gate |
-| --- | --- | --- | --- | --- | --- |
-| Windows | winit | wgpu | WMF, FFmpeg fallback | user data dir | desktop-release |
-| Linux | winit | wgpu | GStreamer/FFmpeg profile | XDG data | desktop-release |
-| macOS | winit/AppKit bridge | wgpu | AVFoundation | app support | desktop-release |
-| iOS | Swift/SwiftUI launcher | wgpu/Metal | AVFoundation | app container | mobile-release |
-| Android | Kotlin launcher | wgpu/Vulkan | MediaCodec | app storage + SAF import | mobile-release |
-| Web | WASM host | WebGPU/WebGL profile | WebCodecs | OPFS/IndexedDB | web-release |
+Windows release 要求 `wgpu_hardware`、`wmf`、`wasapi`、`saved_games`。Web release 只支持 Chrome，固定要求 `webgpu`、`webcodecs`、`webaudio`、`opfs`，不配置 fallback。
 
-## Capability Report
+## Reports And Gate
 
-```yaml
-schema: astra.platform_capability_report.v1
-platform: windows
-renderer:
-  backend: wgpu
-  headless: true
-decode:
-  video: [wmf, ffmpeg]
-audio:
-  output: wasapi
-filesystem:
-  package_sources: [file, http_range]
-permissions:
-  network_runtime_ai: profile_gated
-smoke:
-  - id: windowed_smoke
-    status: pass
-    summary: winit hidden window created with active event loop and IME cursor area
-    evidence:
-      - key: width
-        value: "320"
-      - key: height
-        value: "180"
-  - id: renderer.wgpu_surface
-    status: pass
-    summary: wgpu surface and compatible adapter were created for the hidden window
-    evidence:
-      - key: format_count
-        value: "8"
-  - id: decode.wmf.video_first_frame
-    status: pass
-    summary: WMF decoded the public MP4 fixture into a CPU first frame
-    evidence:
-      - key: format
-        value: bgra8:first_frame:960x540
-      - key: hash
-        value: sha256:...
-```
+`astra.platform_capability_report.v2` 对 renderer/decode/audio/save 分别记录 `declared`、`available` 和 `selected`。普通 probe 不执行真实设备验收，因此不能仅凭接口存在性把 provider 写入 available。
 
-Required smoke 按平台分开定义。Windows 当前要求 `windowed_smoke`、`renderer.wgpu_surface`、`decode.wmf.audio`、`decode.wmf.video_first_frame`、`audio.wasapi` 和 `save.known_folder_rw`。Web 当前要求 `browser_smoke`、`renderer.browser_context`、`decode.browser_media`、`decode.webcodecs_config`、`audio.webaudio_render`、`save.web_storage_rw` 和 `package.web_source_read`。Linux 计划要求 `windowed_smoke` 和 `decode.linux_media`；macOS 计划要求 `windowed_smoke` 和 `decode.avfoundation`；iOS 计划要求 `launcher_smoke` 和 `decode.avfoundation`；Android 计划要求 `launcher_smoke` 和 `decode.mediacodec`。
+`astra.platform_host_conformance_report.v1` 绑定 platform、target、profile hash、package hash、build fingerprint、session id 和资源生命周期 checks。Release Gate 还要求 Player automation report 在 profile/package/build/session identity 上连续匹配。
 
-## Checks
+Windows required checks：`host.lifecycle`、`window.create_destroy`、`surface.present_readback`、`input.native_consumption`、`audio.output_meter`、`decode.platform`、`save.atomic_reopen`、`package.hash_range`、`resource.zero_leaks`。
 
-```bash
-astra platform probe --platform windows --report target/platform-windows.yaml
-astra package validate target/nativevn.astrapkg --profile desktop-release
-astra test run scenarios/platform_smoke.yaml --headless --report target/platform-smoke.yaml
-```
+Web required checks：`host.lifecycle`、`window.canvas`、`surface.webgpu_present_readback`、`input.dom_consumption`、`audio.webaudio_meter`、`decode.webcodecs`、`save.opfs_atomic_reopen`、`package.hash_range`、`resource.zero_leaks`。
 
-Expected report: launch、resize、input、audio、decode、save persistence、package import、provider-free replay 按平台 profile 通过。
-
-普通 CI 只要求 schema、Target validation 和 capability report 可生成。真实平台完成需要 `sdk_status: present` 加对应平台 required smoke 通过；`sdk_status: missing` 或缺 required smoke 会阻断该平台的 DONE 证据。
+静态 WAV meter、接口存在性、hidden-window smoke、文件存在、route report、DOM synthetic click 和 `--dump-dom` 只能作诊断，不能通过 `player.full_playable`。

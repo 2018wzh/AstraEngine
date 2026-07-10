@@ -16,6 +16,7 @@ fn main() -> Result<(), PlayerCliError> {
     let mut transcript = None;
     let mut windows_bundle = None;
     let mut visual_comparison_report = None;
+    let mut host_conformance_report = None;
     let mut output_report = None;
     let mut output_script = None;
     let mut output_transcript = None;
@@ -56,6 +57,7 @@ fn main() -> Result<(), PlayerCliError> {
             "--visual-comparison-report" => {
                 visual_comparison_report = args.next().map(PathBuf::from)
             }
+            "--host-conformance-report" => host_conformance_report = args.next().map(PathBuf::from),
             "--output-report" => output_report = args.next().map(PathBuf::from),
             "--output-script" => output_script = args.next().map(PathBuf::from),
             "--output-transcript" => output_transcript = args.next().map(PathBuf::from),
@@ -83,15 +85,17 @@ fn main() -> Result<(), PlayerCliError> {
     tracing::info!(event = "player.host.start", "AstraPlayer host started");
     if show_help {
         println!(
-            "Usage:\n  astra-player --script <automation.json> --transcript <transcript.json>\n  astra-player --windows-bundle <dir> --visual-comparison-report <report.json> [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--output-trace-log <trace.log>] [--timeout-ms <ms>] [--log-filter <filter>] [--log-format compact|json] [--log-dir <dir>]"
+            "Usage:\n  astra-player --script <automation.json> --transcript <transcript.json>\n  astra-player --windows-bundle <dir> --visual-comparison-report <report.json> --host-conformance-report <report.json> [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--output-trace-log <trace.log>] [--timeout-ms <ms>] [--log-filter <filter>] [--log-format compact|json] [--log-dir <dir>]"
         );
         return Ok(());
     }
     if let Some(bundle_dir) = windows_bundle {
         let comparison = visual_comparison_report.ok_or("missing --visual-comparison-report")?;
+        let conformance = host_conformance_report.ok_or("missing --host-conformance-report")?;
         let run = WindowsSendInputHost.run_live_bundle(WindowsLiveAutomationRequest {
             bundle_dir,
             visual_comparison_report: comparison,
+            host_conformance_report: conformance,
             timeout_ms,
             trace_log: output_trace_log,
         })?;
@@ -112,6 +116,10 @@ fn main() -> Result<(), PlayerCliError> {
         return Ok(());
     }
 
+    if script.is_none() && transcript.is_none() {
+        return run_bundled_game();
+    }
+
     let script_path = script.ok_or("missing --script")?;
     let transcript_path = transcript.ok_or("missing --transcript")?;
     let script: PlayerAutomationScript = serde_json::from_slice(&fs::read(script_path)?)?;
@@ -122,6 +130,158 @@ fn main() -> Result<(), PlayerCliError> {
     };
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn run_bundled_game() -> Result<(), PlayerCliError> {
+    use astra_core::Hash256;
+    use astra_package::{PackageManifest, PackageReader};
+    use astra_platform::{
+        InputState, PackageSourceRequest, PlatformEventKind, PlatformHostFactory,
+        PlatformHostProfile, PlatformId, SurfaceRequest, WindowRequest,
+    };
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct Config {
+        schema: String,
+        target: String,
+        profile: String,
+        platform: String,
+        package: String,
+    }
+    #[derive(Deserialize)]
+    struct Profiles {
+        schema: String,
+        profiles: Vec<PlatformHostProfile>,
+    }
+
+    let config: Config = serde_json::from_slice(&fs::read("AstraPlayer.config.json")?)?;
+    if config.schema != "astra.player_config.v2" || config.platform != "windows" {
+        return Err("invalid Windows Player config".into());
+    }
+    let package_bytes = fs::read(&config.package)?;
+    let package_hash = Hash256::from_sha256(&package_bytes).to_string();
+    let package = PackageReader::open(&package_bytes)?;
+    let manifest: PackageManifest = package.container().decode_postcard("package.manifest")?;
+    if manifest.profile != config.profile {
+        return Err("Player config/package profile mismatch".into());
+    }
+    let profiles: Profiles =
+        serde_json::from_slice(&package.container().read_section("platform.profiles")?)?;
+    if profiles.schema != "astra.platform_profiles.v1" {
+        return Err("unsupported platform profile section".into());
+    }
+    let profile = profiles
+        .profiles
+        .into_iter()
+        .find(|profile| {
+            profile.platform == PlatformId::Windows
+                && profile.target == config.target
+                && profile.package_id == manifest.package_id
+        })
+        .ok_or("package does not contain a matching Windows profile")?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        let mut session = astra_platform_windows::factory().start(profile).await?;
+        let source = session
+            .client
+            .open_package(PackageSourceRequest::Bundled {
+                relative_path: config.package.clone(),
+                expected_hash: package_hash.clone(),
+            })
+            .await?;
+        let _container_header = session.client.read_package_range(source, 0, 16).await?;
+        session.client.close_package(source).await?;
+
+        let width = 1280;
+        let height = 720;
+        let window = session
+            .client
+            .create_window(WindowRequest {
+                title: manifest.package_id,
+                width,
+                height,
+                visible: true,
+            })
+            .await?;
+        let surface = session
+            .client
+            .create_surface(SurfaceRequest {
+                window,
+                width,
+                height,
+            })
+            .await?;
+        let mut sequence = 1;
+        present_player_frame(
+            &session.client,
+            surface,
+            sequence,
+            width,
+            height,
+            [16, 18, 24, 255],
+        )
+        .await?;
+        loop {
+            let event = session.events.recv().await?;
+            match event.kind {
+                PlatformEventKind::WindowClosed { window: closed } if closed == window => break,
+                PlatformEventKind::Keyboard {
+                    window: input_window,
+                    state: InputState::Pressed,
+                    ..
+                } if input_window == window => {
+                    sequence += 1;
+                    let accent = (sequence % 192) as u8 + 32;
+                    present_player_frame(
+                        &session.client,
+                        surface,
+                        sequence,
+                        width,
+                        height,
+                        [accent, 32, 96, 255],
+                    )
+                    .await?;
+                }
+                _ => {}
+            }
+        }
+        session.client.destroy_surface(surface).await?;
+        session.client.destroy_window(window).await?;
+        session.client.shutdown().await?;
+        Ok::<(), astra_platform::PlatformError>(())
+    })?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+async fn present_player_frame(
+    client: &astra_platform::PlatformHostClient,
+    surface: astra_platform::SurfaceHandle,
+    sequence: u64,
+    width: u32,
+    height: u32,
+    color: [u8; 4],
+) -> Result<(), astra_platform::PlatformError> {
+    client
+        .present_rgba(
+            surface,
+            astra_platform::RgbaFrame {
+                sequence,
+                width,
+                height,
+                rgba8: color.repeat((width * height) as usize),
+            },
+        )
+        .await
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_bundled_game() -> Result<(), PlayerCliError> {
+    Err("native AstraPlayer bundle host is only implemented for Windows in Migration 8".into())
 }
 
 fn parse_usize_arg(

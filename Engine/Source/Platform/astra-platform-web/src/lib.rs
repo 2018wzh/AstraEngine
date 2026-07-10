@@ -1,4 +1,6 @@
 mod factory;
+#[cfg(target_arch = "wasm32")]
+mod services;
 
 pub use factory::*;
 
@@ -14,16 +16,21 @@ pub fn probe(target: Option<&str>) -> PlatformCapabilityReport {
     {
         let profile =
             PlatformHostProfile::web_release(target.unwrap_or("nativevn-web"), "com.astra.probe");
-        PlatformCapabilityReport::from_profile(
+        let mut report = PlatformCapabilityReport::from_profile(
             &profile,
             build_fingerprint(
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION"),
                 ["wasm32", "webgpu"],
             ),
-            ["webgpu", "webcodecs", "webaudio", "opfs"],
+            std::iter::empty::<&str>(),
         )
-        .expect("built-in Web profile is valid")
+        .expect("built-in Web profile is valid");
+        report.diagnostics.push(astra_core::Diagnostic::blocking(
+            "ASTRA_PLATFORM_RUNTIME_PROBE_REQUIRED",
+            "provider availability requires a live browser conformance run",
+        ));
+        report
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

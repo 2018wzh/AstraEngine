@@ -62,15 +62,15 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 
 | Work ID | Status | Evidence |
 | --- | --- | --- |
-| `S2-PLATFORM-01` | `DONE` | `cargo test -p astra-platform`；共享 report schema、SDK 分层和 required smoke validation 已落地 |
-| `S2-WINDOWS-HOST-01` | `DONE` | `cargo test -p astra-platform-windows`；Windows probe 输出 hidden window、`renderer.wgpu_surface`、`audio.wasapi`、`save.known_folder_rw`、XInput 和 SDK 状态 |
+| `S2-PLATFORM-01` | `IN_PROGRESS` | Migration 8 已落地 async typed-handle contract、`astra-platform-general`、capability v2 与 conformance schema；Windows/Web 同 commit 真实验收尚未闭合，不能恢复 `DONE` |
+| `S2-WINDOWS-HOST-01` | `IN_PROGRESS` | `cargo test -p astra-platform-windows --features platform-test-driver` 已覆盖 real window、hardware wgpu present/readback、WASAPI callback、WMF、Saved Games、package range 与 SendInput→host event；正式 conformance/Player continuity 尚未闭合 |
 | `S2-WINDOWS-WMF-01` | `DONE` | `cargo test -p astra-media decode_provider`；public media manifest 校验固定 sha256，WMF `decode.wmf.audio` 输出 MP3 bounded PCM CPU buffer，`decode.wmf.video_first_frame` 输出 MP4 BGRA 首帧，invalid video 返回 `ASTRA_WMF_DECODE` |
 | `S2-WINDOWS-GATE-01` | `DONE` | `cargo test -p astra-release release_report` and `cargo test -p astra-cli --test target_platform`；缺 required Windows smoke 会阻断 release check |
 | `S2-PLUGIN-GATE-01` | `DONE` | `cargo test -p astra-package package_roundtrip` and `cargo test -p astra-release release_report`；package 写入 `plugin.extension_registry` 和 `plugin.dependency_graph`，release gate 阻断 unresolved conflict、missing binding 和 unresolved dependency |
 | `S2-RUNTIME-FSM-01` | `DONE` | `cargo test -p astra-runtime --test state_machine_tick`；flat FSM validation、terminal/completed、priority conflict diagnostic 和 Always tick trigger 已落地 |
 | `S2-RUNTIME-AWAIT-01` | `DONE` | `cargo test -p astra-runtime --test await_token`；Await timeout materialization、unknown/duplicate result diagnostic 和 pending token serialization 已落地 |
 | `S2-SCENARIO-GATE-01` | `DONE` | `cargo test -p astra-test --test native_smoke`；unknown VN action/assertion blocked、declared package missing blocked、Stage 1 native smoke pass |
-| `S2-WEB-HOST-01` | `DONE` | `cargo test -p astra-platform-web`、`cargo test -p astra-platform-web --target wasm32-unknown-unknown --no-run`、`wasm-pack test --headless --chrome Engine/Source/Platform/astra-platform-web`、`cargo test -p astra-media decode_provider --target wasm32-unknown-unknown --no-run`、`cargo test -p astra-release release_report` 和 `cargo test -p astra-cli --test target_platform`；Web required smoke 覆盖 `renderer.browser_context`、`decode.browser_media`、`decode.webcodecs_config`、`audio.webaudio_render`、`save.web_storage_rw` 和 `package.web_source_read` |
+| `S2-WEB-HOST-01` | `IN_PROGRESS` | Chrome canvas/WebGPU、WebCodecs、OPFS、File/fetch、typed lifecycle/input 与 AudioWorklet queue 已落地，独立 `astra-player-web` 已读取 package profile 并呈现；用户手势 audio meter、device/context loss 和正式 Player evidence 尚未闭合 |
 | `S2-VFS-01` | `DONE` | `cargo test -p astra-asset vfs_uri`、`cargo test -p astra-asset vfs_overlayfs`、`cargo test -p astra-package package_vfs_mount`、`cargo test -p astra-plugin vfs_provider_registry`、`cargo test -p astra-release vfs_mount_gate` 和 `cargo test -p astra-cli --test target_platform tsuinosora_synthetic_gate_runs_internal_and_patch_player_routes` 覆盖 `provider:/path/file` URI、prefix registry、package-backed VFS manifest、独立 `asset.catalog`、旧 `asset.registry` blocking、多 `vfs_provider` 同 slot、overlay whiteout、local root 不序列化和 TsuiNoSora package asset VFS continuity；legacy pack reader 实现仍留 Stage 5 |
 
 ## Stage 3 进行中项
@@ -142,7 +142,7 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | 2 | `S2-ASSET-01` + `S2-ASSET-02` asset/import/cook | `DONE` | `astra-asset` 和 `astra-cook` 提供 sidecar、registry、metadata import、DDC key 和 cook audit |
 | 3 | `S2-GATE-01` release report | `DONE` | `astra-release` 和 `astra package validate` 输出 `astra.release_report.v1`；release profile 缺 `compiled.project` cook/project artifact 时阻断 |
 | 4 | `S2-MEDIA-01` 到 `S2-MEDIA-05` media providers | `DONE` | `astra-media` 提供 headless renderer、TextLayout、AudioGraph、FilterGraph、DecodeProvider 和 optional native feature gates |
-| 5 | `S2-WINDOWS-HOST-01` + `S2-WINDOWS-WMF-01` + `S2-WINDOWS-GATE-01` Windows platform repair | `DONE` | Windows host probe、WMF DecodeProvider 和 release gate evidence 已落地 |
+| 5 | `S2-WINDOWS-HOST-01` + `S2-WINDOWS-WMF-01` + `S2-WINDOWS-GATE-01` Windows platform repair | `IN_PROGRESS` | Windows real host 已接入 winit/wgpu/WASAPI/WMF/Saved Games/package range；Player 全服务接线和同 run conformance/automation evidence 尚未完成 |
 | 6 | `S3-MODULE-LAYOUT-01` AstraVN module layout | `DONE` | AstraVN 已迁到 `Engine/Source/Modules/AstraVN/`，workspace/path dependency 已改链 |
 | 7 | `S3-CRATE-SPLIT-01` AstraVN functional crate split | `DONE` | AstraVN 功能 crate 已拆出，`astra-vn` 只作为 facade、`rlib`/Rust ABI `dylib` 和兼容 re-export |
 | 8 | `S3-DYLIB-01` AstraVN Rust dylib target | `DONE` | facade-only dylib smoke 和 VN extension fixture 已通过 |

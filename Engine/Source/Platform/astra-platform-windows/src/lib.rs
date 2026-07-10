@@ -20,16 +20,21 @@ pub fn probe(target: Option<&str>) -> PlatformCapabilityReport {
             target.unwrap_or("nativevn-game"),
             "com.astra.probe",
         );
-        PlatformCapabilityReport::from_profile(
+        let mut report = PlatformCapabilityReport::from_profile(
             &profile,
             build_fingerprint(
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION"),
                 ["windows-host"],
             ),
-            ["wgpu_hardware", "wmf", "wasapi", "saved_games"],
+            std::iter::empty::<&str>(),
         )
-        .expect("built-in Windows profile is valid")
+        .expect("built-in Windows profile is valid");
+        report.diagnostics.push(astra_core::Diagnostic::blocking(
+            "ASTRA_PLATFORM_RUNTIME_PROBE_REQUIRED",
+            "provider availability requires a live host conformance run",
+        ));
+        report
     }
     #[cfg(not(target_os = "windows"))]
     {

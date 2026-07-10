@@ -43,6 +43,7 @@ async fn async_client_roundtrips_typed_commands_and_ordered_events() {
             2,
             PlatformEventKind::WindowFocused {
                 window: WindowHandle::from_parts(1, 1).unwrap(),
+                focused: true,
             },
         ))
         .unwrap();

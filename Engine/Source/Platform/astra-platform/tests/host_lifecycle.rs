@@ -134,6 +134,12 @@ async fn client_exposes_explicit_present_close_and_storage_lifecycle() {
                         sequence: 1,
                         kind: DecodeKind::Video,
                         codec: "mp4".to_string(),
+                        description: Vec::new(),
+                        sample_rate: None,
+                        channels: None,
+                        coded_width: None,
+                        coded_height: None,
+                        keyframe: true,
                         bytes: vec![1, 2, 3],
                     },
                 )

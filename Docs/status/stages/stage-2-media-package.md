@@ -314,6 +314,8 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **ID:** `S2-PLATFORM-01`
 
+**Status:** `IN_PROGRESS`
+
 **Goal:** `Engine/Source/Platform` 提供共享 `PlatformHost` contract、六个平台 capability crate 和平台 smoke report schema。真实 host 完成按平台分开验收，不再把六个平台 capability crate 编译通过等同于六平台完成。
 
 **Depends On:** `S1-TARGET-01`、`Docs/implementation/platform-host.md`
@@ -322,13 +324,13 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **Steps:**
 
-1. 定义 `PlatformId`、`SdkStatus`、`PlatformCapabilityReport`、`PlatformHost` 和 token DTO。
-2. 每个平台 crate 输出 renderer、decode、audio、filesystem、input、lifecycle、permission capability 和 smoke evidence。
-3. 缺 SDK 时报告 `sdk_status: missing`，不把平台完成状态拔高。
-4. `sdk_status: present` 时必须提供该平台 required smoke；缺 smoke 由 Release Gate 阻断。
-5. 编写 capability report validation 测试。
+1. 定义 async `PlatformHostFactory`、`PlatformHostClient`、typed generational handle 与有序 event stream。
+2. capability v2 分离 declared、available、selected；只有 live conformance run 能声明 available/selected。
+3. host conformance 绑定 build/profile/package/session identity 和完整资源生命周期。
+4. 缺 SDK、缺 provider、stale handle、队列溢出、device loss 和 shutdown leak 都显式阻断。
+5. Linux、macOS、iOS、Android factory 返回 `PLATFORM_NOT_IMPLEMENTED`，保持 Stage 6。
 
-**Done Evidence:** `cargo test -p astra-platform` 通过；共享 report schema、SDK 分层和 required smoke validation 已落地。六个平台 capability crate 仍在 workspace 中编译，Windows 和 Web 有真实 smoke evidence。
+**Current Evidence:** `cargo test -p astra-platform -p astra-platform-general` 覆盖 contract 和负向门禁。Migration 8 仍等待 Windows/Chrome 同 commit 的完整 conformance 与 Player automation evidence。
 
 **Linked Test IDs:** `T-S2-PLATFORM-01`
 
@@ -336,7 +338,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **ID:** `S2-WINDOWS-HOST-01`
 
-**Status:** `DONE`
+**Status:** `IN_PROGRESS`
 
 **Goal:** Windows probe 输出真实 SDK、短生命周期 hidden window、wgpu surface + adapter、DPI、IME、input pipe、gamepad capability、WMF audio/video fixture decode、WASAPI stream、known-folder write/read/delete 和 SDK 状态。
 
@@ -354,7 +356,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 6. 使用 Windows Known Folder API 验证 RoamingAppData save store 的 write/read/delete；报告只写能力状态，不写本地路径。
 7. `PlatformCapabilityReport.smoke` 只保存 DTO 状态和 machine-readable evidence，不暴露 native handle。
 
-**Done Evidence:** `cargo test -p astra-platform-windows` 通过；`astra platform probe --platform windows --target nativevn-game --format json` 输出 `windowed_smoke`、`renderer.wgpu_surface`、`decode.wmf.audio`、`decode.wmf.video_first_frame`、`audio.wasapi` 和 `save.known_folder_rw`，每项包含 evidence。
+**Current Evidence:** `cargo test -p astra-platform-windows --features platform-test-driver` 覆盖真实窗口、hardware wgpu present/readback、SendInput typed event、WASAPI callback meter、WMF fixture、atomic save 与 hash-bound package range。用户授权文件、HTTPS range、gamepad axis、Player 全服务接线和正式 conformance report 仍未闭合。
 
 **Linked Test IDs:** `T-S2-WINDOWS-HOST-01`
 
@@ -362,7 +364,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **ID:** `S2-WINDOWS-WMF-01`
 
-**Status:** `DONE`
+**Status:** `IN_PROGRESS`
 
 **Goal:** Windows Media Foundation provider 作为一拍式 `DecodeProvider`，audio 输出 bounded PCM CPU buffer，video 输出首帧 BGRA CPU buffer；无法 decode 时返回 blocking diagnostic。
 
@@ -400,7 +402,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 3. `astra platform probe` JSON 输出 smoke evidence；CLI 测试断言 Windows smoke 为 `pass`。
 4. Release report 缺 required smoke 时输出 blocking check。
 
-**Done Evidence:** `cargo test -p astra-release release_report` 和 `cargo test -p astra-cli --test target_platform` 通过。
+**Current Evidence:** Release Gate 已读取 capability v2 和 host conformance，并校验 profile/package/build/session continuity。正式 Windows Player automation report 尚未在同 run 闭合，因此保持 `IN_PROGRESS`。
 
 **Linked Test IDs:** `T-S2-WINDOWS-GATE-01`
 
@@ -408,7 +410,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **ID:** `S2-WEB-HOST-01`
 
-**Status:** `DONE`
+**Status:** `IN_PROGRESS`
 
 **Goal:** 补 wasm browser host、真实 renderer context、browser media decode、WebCodecs config probe、WebAudio offline render、IndexedDB/OPFS evidence、Blob/File/fetch package source、worker/visibility resume 和 browser smoke。
 
@@ -423,7 +425,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 5. `uuid` workspace 依赖不启用随机生成 feature，保证 `astra-core` 和 Web platform crate 可在 `wasm32-unknown-unknown` 编译。
 6. browser smoke test 使用 `wasm-bindgen-test`，真实浏览器执行命令见 [Web Platform](../../platforms/web.md)；没有 browser platform report 或缺 required evidence 时 Web release 仍阻断。
 
-**Done Evidence:** `cargo test -p astra-platform-web`、`cargo test -p astra-platform-web --target wasm32-unknown-unknown --no-run`、`wasm-pack test --headless --chrome Engine/Source/Platform/astra-platform-web`、`cargo test -p astra-media decode_provider --target wasm32-unknown-unknown --no-run`、`cargo test -p astra-release release_report` 和 `cargo test -p astra-cli --test target_platform` 通过。真实浏览器缺 required smoke 时，release gate 仍会阻断 Web release。
+**Current Evidence:** Chrome 中 canvas/WebGPU present/readback、WebCodecs VP8 encode→decode、OPFS commit/reload/abort 和无用户手势 WebAudio fail-fast 已真实通过；File/fetch allowlist、typed input/lifecycle 与 AudioWorklet queue 已接入，`astra-player-web` 已校验 package/cooked profile 并呈现。用户手势 audio meter、device/context loss 与完整 Player route 尚未闭合，因此保持 `IN_PROGRESS`。
 
 **Linked Test IDs:** `T-S2-WEB-HOST-01`
 

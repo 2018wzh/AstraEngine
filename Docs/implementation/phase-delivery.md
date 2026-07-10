@@ -127,14 +127,14 @@ Expected report omits commercial payload and contains `emu.game_runtime_provider
 
 **Sample:** `Examples/NativeVN` packaged as one Game target, then validated per platform.
 
-**Report Schema:** `astra.platform_capability_report.v1` + `astra.release_report.v1`
+**Report Schema:** `astra.platform_capability_report.v2` + `astra.platform_host_conformance_report.v1` + `astra.release_report.v1`
 
 ```bash
 astra platform probe --platform linux --target nativevn-game --report target/reports/platform-linux.yaml
 astra package validate target/nativevn.astrapkg --profile desktop-release --target nativevn-game --platform-report target/reports/platform-linux.yaml --report target/reports/stage6-linux.yaml
 ```
 
-Expected report includes `platform.capability_report`, required smoke for the selected platform, package source evidence, platform decode evidence, save store evidence and release blocking diagnostics when SDK or smoke evidence is missing.
+Expected report includes `platform.capability_report`、`platform.host_conformance`、`platform.evidence_continuity`、package source/decode/save/resource lifecycle evidence；缺 provider、缺 conformance 或 identity 断裂必须 blocking。
 
 ## Stage 7：AstraRPG + `rpg.trpg` Profile
 

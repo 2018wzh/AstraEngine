@@ -88,7 +88,9 @@ pub struct ReleaseCheckRecord {
 | rpg_net | `rpg.net.transcript_sync` | server/client transcript report | action transcript divergence, missing redaction label or payload body in network audit | transcript hash, redaction label count |
 | rpg_net | `rpg.net.provider_free_replay` | network replay report | replay contacts live AI provider or state/event/provider hash diverges | provider request count, replay hash |
 | platform | `platform.eligibility` | capability report | profile requirement missing | platform id, capability id |
-| platform | `platform.capability_report` | capability report | missing SDK, missing required smoke, blocked required smoke or invalid schema | platform id, SDK status, smoke id, diagnostic |
+| platform | `platform.capability_report` | capability v2 | missing SDK/provider, invalid selected provider or invalid profile/build identity | platform、profile/build hash、declared/available/selected、diagnostic |
+| platform | `platform.host_conformance` | host conformance v1 | missing report/check、package mismatch、resource leak、device/context loss | profile/package/build/session hash、check count |
+| platform | `platform.evidence_continuity` | capability + conformance + Player automation | platform/profile/package/build/session identity discontinuity | session id、diagnostic |
 | emu | `emu.artemis_full_flow` | local case report | trace/snapshot/redaction failure | trace hash, redaction status |
 | emu | `emu.game_runtime_provider` | target manifest, `AstraEmuRuntimeProvider` descriptor, local case report | missing provider binding, provider does not create RuntimeWorld, save/replay hash missing or family bypasses provider | provider id, target id, session id, replay hash |
 | emu | `emu.legacy_runtime_provider` | family plugin report | family bypasses RuntimeWorld or missing provider session binding | family id, provider id, session id |

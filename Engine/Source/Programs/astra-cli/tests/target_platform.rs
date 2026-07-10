@@ -67,24 +67,17 @@ fn target_validate_and_platform_probe_emit_machine_readable_reports() {
         serde_json::from_slice(&platform_output.stdout).unwrap();
     assert_eq!(
         platform_report["schema"],
-        "astra.platform_capability_report.v1"
+        "astra.platform_capability_report.v2"
     );
     assert_eq!(platform_report["platform"], "windows");
     if cfg!(windows) {
-        let smoke = platform_report["smoke"].as_array().unwrap();
-        assert!(smoke
+        assert_eq!(platform_report["sdk_status"], "present");
+        assert!(platform_report["renderer"]["selected"].is_null());
+        assert!(platform_report["diagnostics"]
+            .as_array()
+            .unwrap()
             .iter()
-            .any(|check| { check["id"] == "windowed_smoke" && check["status"] == "pass" }));
-        assert!(smoke
-            .iter()
-            .any(|check| check["id"] == "renderer.wgpu_surface" && check["status"] == "pass"));
-        assert!(smoke.iter().any(|check| {
-            check["id"] == "decode.wmf.video_first_frame"
-                && check["status"] == "pass"
-                && check["evidence"]
-                    .as_array()
-                    .is_some_and(|entries| !entries.is_empty())
-        }));
+            .any(|diagnostic| { diagnostic["code"] == "ASTRA_PLATFORM_RUNTIME_PROBE_REQUIRED" }));
     } else {
         assert_eq!(platform_report["sdk_status"], "missing");
     }
@@ -115,8 +108,114 @@ fn target_validate_and_platform_probe_emit_machine_readable_reports() {
         assert_eq!(web_report["sdk_status"], "present");
     } else {
         assert_eq!(web_report["sdk_status"], "missing");
-        assert!(web_report["smoke"].as_array().unwrap().is_empty());
+        assert!(web_report["renderer"]["available"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
+}
+
+#[test]
+fn web_bundle_requires_explicit_wasm_loader_and_worklet_without_route_runner() {
+    let root = workspace_root();
+    let case_dir = unique_case_dir(root, "web-explicit-artifacts");
+    let cooked = case_dir.join("cooked");
+    let package = case_dir.join("game.astrapkg");
+    run_astra(
+        root,
+        [
+            "cook",
+            "Examples/NativeVN/project.yaml",
+            "--profile",
+            "classic",
+            "--target",
+            "nativevn-game",
+            "--out",
+            cooked.to_str().unwrap(),
+        ],
+    );
+    run_astra(
+        root,
+        [
+            "package",
+            "build",
+            cooked.to_str().unwrap(),
+            "--target",
+            "nativevn-game",
+            "--out",
+            package.to_str().unwrap(),
+        ],
+    );
+    let missing_dir = case_dir.join("missing");
+    let missing = Command::new(env!("CARGO_BIN_EXE_astra"))
+        .args([
+            "package",
+            "bundle",
+            package.to_str().unwrap(),
+            "--target",
+            "nativevn-game",
+            "--profile",
+            "classic",
+            "--platform",
+            "web",
+            "--out",
+            missing_dir.to_str().unwrap(),
+        ])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("--web-player-wasm"));
+
+    let wasm = case_dir.join("astra_player_web_bg.wasm");
+    let loader = case_dir.join("astra-player-loader.js");
+    let worklet = case_dir.join("astra-audio-worklet.js");
+    fs::write(&wasm, b"wasm-artifact").unwrap();
+    fs::write(&loader, b"export default async function init() {}").unwrap();
+    fs::write(&worklet, b"registerProcessor('astra-audio', class extends AudioWorkletProcessor { process() { return true; } });").unwrap();
+    let bundle = case_dir.join("bundle");
+    let output = Command::new(env!("CARGO_BIN_EXE_astra"))
+        .args([
+            "package",
+            "bundle",
+            package.to_str().unwrap(),
+            "--target",
+            "nativevn-game",
+            "--profile",
+            "classic",
+            "--platform",
+            "web",
+            "--out",
+            bundle.to_str().unwrap(),
+            "--web-player-wasm",
+            wasm.to_str().unwrap(),
+            "--web-player-loader",
+            loader.to_str().unwrap(),
+            "--web-audio-worklet",
+            worklet.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let manifest: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let roles = manifest["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|file| file["role"].as_str())
+        .collect::<Vec<_>>();
+    assert!(roles.contains(&"web_player_wasm"));
+    assert!(roles.contains(&"web_player_loader"));
+    assert!(roles.contains(&"web_audio_worklet"));
+    assert!(!bundle.join("AstraPlayer.route_model.json").exists());
+    assert!(!bundle.join("astra-player.js").exists());
 }
 
 #[test]
@@ -385,6 +484,7 @@ package_sections:
 }
 
 #[test]
+#[ignore = "superseded by Tools/run_platform_host_acceptance.py real-host evidence"]
 fn tsuinosora_synthetic_gate_runs_internal_and_patch_player_routes() {
     let root = workspace_root();
     let case_dir = unique_case_dir(root, "tsuinosora-player-gate");
@@ -709,6 +809,7 @@ fn tsuinosora_synthetic_gate_runs_internal_and_patch_player_routes() {
 }
 
 #[test]
+#[ignore = "superseded by Tools/run_platform_host_acceptance.py real-host evidence"]
 fn tsuinosora_demo_slice_generates_playable_nativevn_and_player_routes() {
     let root = workspace_root();
     let case_dir = unique_case_dir(root, "tsuinosora-demo-slice");
@@ -804,6 +905,7 @@ fn tsuinosora_demo_slice_generates_playable_nativevn_and_player_routes() {
 }
 
 #[test]
+#[ignore = "superseded by Tools/run_platform_host_acceptance.py real-host evidence"]
 fn tsuinosora_internal_demo_builds_asset_package_and_bundles() {
     let root = workspace_root();
     let case_dir = unique_case_dir(root, "tsuinosora-internal-assets");
@@ -1048,6 +1150,7 @@ fn nativevn_sample_cooks_packages_validates_and_runs_full_playthrough() {
 }
 
 #[test]
+#[ignore = "superseded by Tools/run_platform_host_acceptance.py real-host evidence"]
 fn nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes() {
     let root = workspace_root();
     let case_dir = unique_case_dir(root, "nativevn-player-bundles");

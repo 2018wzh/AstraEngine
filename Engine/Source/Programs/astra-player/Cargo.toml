@@ -5,6 +5,10 @@ license.workspace = true
 version.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+platform-test-driver = ["astra-platform-windows/platform-test-driver"]
+
 [lib]
 name = "astra_player"
 path = "src/lib.rs"
@@ -18,19 +22,15 @@ tracing.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }
 astra-observability = { path = "../../Developer/astra-observability" }
 astra-package = { path = "../../Runtime/astra-package" }
+astra-platform = { path = "../../Platform/astra-platform" }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
+tokio.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_System_Threading",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_WindowsAndMessaging",
-] }
+astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
 
 [dev-dependencies]
 tempfile.workspace = true

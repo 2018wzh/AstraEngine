@@ -4,8 +4,8 @@ use astra_package::{
     SectionPayload, CURRENT_CONTAINER_VERSION,
 };
 use astra_platform::{
-    PlatformCapabilityReport, PlatformId, PlatformSmokeCheck, PlatformSmokeEvidence,
-    PlatformSmokeStatus, SdkStatus,
+    ConformanceCheck, ConformanceStatus, PlatformCapabilityReport, PlatformHostConformanceReport,
+    PlatformHostProfile, PlatformId, PLATFORM_HOST_CONFORMANCE_REPORT_SCHEMA,
 };
 use astra_player_core::{
     PlayerAutomationCheck, PlayerAutomationEvidence, PlayerAutomationReport,
@@ -134,6 +134,69 @@ fn release_gate_accepts_player_full_playable_only_with_matching_live_report() {
         .find(|check| check.id == "player.full_playable")
         .unwrap();
     assert_eq!(blocked_check.status, CheckStatus::Blocked);
+}
+
+#[test]
+fn release_gate_requires_capability_conformance_player_identity_continuity() {
+    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+        "com.example.nativevn",
+        "classic",
+        Vec::new(),
+    ))
+    .unwrap();
+    let package_bytes = blob.into_bytes();
+    let package_hash = Hash256::from_sha256(&package_bytes).to_string();
+    let capability = platform_capability(
+        PlatformId::Windows,
+        "tsuinosora-internal-game",
+        &["wgpu_hardware", "wmf", "wasapi", "saved_games"],
+    );
+    let session_id = "session.windows.release";
+    let checks = astra_platform::required_conformance_checks(PlatformId::Windows)
+        .iter()
+        .map(|id| ConformanceCheck::pass(*id, [("hash", &package_hash)]))
+        .collect();
+    let conformance = PlatformHostConformanceReport {
+        schema: PLATFORM_HOST_CONFORMANCE_REPORT_SCHEMA.to_string(),
+        status: ConformanceStatus::Pass,
+        platform: PlatformId::Windows,
+        target: capability.target.clone(),
+        profile_hash: capability.profile_hash.clone(),
+        package_hash: package_hash.clone(),
+        build_fingerprint: capability.build_fingerprint.clone(),
+        session_id: session_id.to_string(),
+        checks,
+        diagnostics: Vec::new(),
+    };
+    let mut player = player_report(&package_hash, "classic", "tsuinosora-internal-game");
+    let full = player
+        .checks
+        .iter_mut()
+        .find(|check| check.id == "player.full_playable")
+        .unwrap();
+    full.evidence.extend([
+        PlayerAutomationEvidence {
+            key: "profile_hash".to_string(),
+            value: capability.profile_hash.clone(),
+        },
+        PlayerAutomationEvidence {
+            key: "build_fingerprint".to_string(),
+            value: capability.build_fingerprint.clone(),
+        },
+        PlayerAutomationEvidence {
+            key: "session_id".to_string(),
+            value: session_id.to_string(),
+        },
+    ]);
+    let mut request = package_request(package_bytes);
+    request.platform_report = Some(capability);
+    request.require_platform_report = true;
+    let report = ReleaseValidator
+        .validate_package_with_platform_evidence(request, Some(conformance), Some(player))
+        .unwrap();
+    assert!(report.checks.iter().any(|check| {
+        check.id == "platform.evidence_continuity" && check.status == CheckStatus::Pass
+    }));
 }
 
 #[test]
@@ -657,7 +720,7 @@ fn release_profile_blocks_package_profile_mismatch() {
 }
 
 #[test]
-fn release_report_blocks_windows_platform_report_without_required_smoke() {
+fn release_report_blocks_windows_platform_report_without_required_provider() {
     let blob = PackageBuilder::build(PackageBuildRequest::minimal(
         "com.example.nativevn",
         "desktop-release",
@@ -676,17 +739,10 @@ fn release_report_blocks_windows_platform_report_without_required_smoke() {
             require_ffmpeg: false,
             target: Some("native-smoke-game".to_string()),
             require_platform_report: true,
-            platform_report: Some(PlatformCapabilityReport::new(
+            platform_report: Some(platform_capability(
                 PlatformId::Windows,
-                Some("native-smoke-game".to_string()),
-                SdkStatus::Present,
-                vec!["wgpu".to_string()],
-                vec!["wmf".to_string()],
-                vec!["wasapi".to_string()],
-                vec!["known_folder".to_string()],
-                vec!["keyboard".to_string()],
-                vec!["window".to_string()],
-                vec!["network_runtime_ai_profile_gated".to_string()],
+                "native-smoke-game",
+                &["wgpu_hardware", "wmf", "wasapi"],
             )),
         })
         .unwrap();
@@ -700,12 +756,12 @@ fn release_report_blocks_windows_platform_report_without_required_smoke() {
     assert_eq!(platform_check.status, CheckStatus::Blocked);
     assert_eq!(
         platform_check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_PLATFORM_SMOKE_MISSING"
+        "ASTRA_PLATFORM_PROVIDER_UNAVAILABLE"
     );
 }
 
 #[test]
-fn release_report_includes_windows_platform_smoke_evidence() {
+fn release_report_includes_windows_platform_provider_evidence() {
     let blob = PackageBuilder::build(PackageBuildRequest::minimal(
         "com.example.nativevn",
         "desktop-release",
@@ -716,26 +772,11 @@ fn release_report_includes_windows_platform_smoke_evidence() {
         )],
     ))
     .unwrap();
-    let platform_report = PlatformCapabilityReport::new(
+    let platform_report = platform_capability(
         PlatformId::Windows,
-        Some("native-smoke-game".to_string()),
-        SdkStatus::Present,
-        vec!["winit_window".to_string()],
-        vec!["wmf".to_string()],
-        vec!["wasapi".to_string()],
-        vec!["known_folder".to_string()],
-        vec!["keyboard".to_string()],
-        vec!["window".to_string()],
-        vec!["network_runtime_ai_profile_gated".to_string()],
-    )
-    .with_smoke(vec![
-        smoke("windowed_smoke", PlatformSmokeStatus::Pass),
-        smoke("renderer.wgpu_surface", PlatformSmokeStatus::Pass),
-        smoke("decode.wmf.audio", PlatformSmokeStatus::Pass),
-        smoke("decode.wmf.video_first_frame", PlatformSmokeStatus::Pass),
-        smoke("audio.wasapi", PlatformSmokeStatus::Pass),
-        smoke("save.known_folder_rw", PlatformSmokeStatus::Pass),
-    ]);
+        "native-smoke-game",
+        &["wgpu_hardware", "wmf", "wasapi", "saved_games"],
+    );
 
     let report = ReleaseValidator
         .validate_package(PackageValidateRequest {
@@ -756,17 +797,19 @@ fn release_report_includes_windows_platform_smoke_evidence() {
     assert!(platform_check
         .evidence
         .iter()
-        .any(|entry| { entry.key == "smoke.windowed_smoke.status" && entry.value == "pass" }));
-    assert!(platform_check.evidence.iter().any(|entry| entry.key
-        == "smoke.decode.wmf.video_first_frame.status"
-        && entry.value == "pass"));
-    assert!(platform_check.evidence.iter().any(|entry| entry.key
-        == "smoke.decode.wmf.video_first_frame.hash"
-        && entry.value.starts_with("sha256:")));
+        .any(|entry| entry.key == "provider.renderer.selected" && entry.value == "wgpu_hardware"));
+    assert!(platform_check
+        .evidence
+        .iter()
+        .any(|entry| entry.key == "provider.decode.selected" && entry.value == "wmf"));
+    assert!(platform_check
+        .evidence
+        .iter()
+        .any(|entry| entry.key == "build_fingerprint" && entry.value.starts_with("sha256:")));
 }
 
 #[test]
-fn release_report_blocks_web_platform_report_without_required_smoke() {
+fn release_report_blocks_web_platform_report_without_required_provider() {
     let blob = PackageBuilder::build(PackageBuildRequest::minimal(
         "com.example.nativevn",
         "web-release",
@@ -785,17 +828,10 @@ fn release_report_blocks_web_platform_report_without_required_smoke() {
             require_ffmpeg: false,
             target: Some("nativevn-web".to_string()),
             require_platform_report: true,
-            platform_report: Some(PlatformCapabilityReport::new(
+            platform_report: Some(platform_capability(
                 PlatformId::Web,
-                Some("nativevn-web".to_string()),
-                SdkStatus::Present,
-                vec!["webgpu".to_string(), "webgl_fallback".to_string()],
-                vec!["webcodecs".to_string()],
-                vec!["webaudio".to_string()],
-                vec!["opfs".to_string(), "indexeddb".to_string()],
-                vec!["keyboard".to_string(), "touch".to_string()],
-                vec!["browser_launch".to_string()],
-                vec!["browser_sandbox".to_string()],
+                "nativevn-web",
+                &["webgpu", "webcodecs", "webaudio"],
             )),
         })
         .unwrap();
@@ -808,12 +844,12 @@ fn release_report_blocks_web_platform_report_without_required_smoke() {
     assert_eq!(platform_check.status, CheckStatus::Blocked);
     assert_eq!(
         platform_check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_PLATFORM_SMOKE_MISSING"
+        "ASTRA_PLATFORM_PROVIDER_UNAVAILABLE"
     );
 }
 
 #[test]
-fn release_report_includes_web_platform_smoke_evidence() {
+fn release_report_includes_web_platform_provider_evidence() {
     let blob = PackageBuilder::build(PackageBuildRequest::minimal(
         "com.example.nativevn",
         "web-release",
@@ -824,42 +860,11 @@ fn release_report_includes_web_platform_smoke_evidence() {
         )],
     ))
     .unwrap();
-    let platform_report = PlatformCapabilityReport::new(
+    let platform_report = platform_capability(
         PlatformId::Web,
-        Some("nativevn-web".to_string()),
-        SdkStatus::Present,
-        vec!["webgpu".to_string(), "webgl_fallback".to_string()],
-        vec!["webcodecs".to_string()],
-        vec!["webaudio".to_string()],
-        vec![
-            "opfs".to_string(),
-            "indexeddb".to_string(),
-            "file_api".to_string(),
-            "http_range".to_string(),
-        ],
-        vec![
-            "keyboard".to_string(),
-            "mouse".to_string(),
-            "touch".to_string(),
-        ],
-        vec![
-            "browser_launch".to_string(),
-            "visibility_resume".to_string(),
-            "worker".to_string(),
-        ],
-        vec!["browser_sandbox".to_string()],
-    )
-    .with_smoke(vec![
-        smoke("browser_smoke", PlatformSmokeStatus::Pass),
-        smoke("renderer.browser_context", PlatformSmokeStatus::Pass),
-        smoke("decode.browser_media", PlatformSmokeStatus::Pass),
-        smoke("decode.webcodecs_config", PlatformSmokeStatus::Pass),
-        smoke("audio.webaudio_render", PlatformSmokeStatus::Pass),
-        smoke("save.web_storage_rw", PlatformSmokeStatus::Pass),
-        smoke("package.web_source_read", PlatformSmokeStatus::Pass),
-        smoke("input.browser", PlatformSmokeStatus::Pass),
-        smoke("lifecycle.worker_visibility", PlatformSmokeStatus::Pass),
-    ]);
+        "nativevn-web",
+        &["webgpu", "webcodecs", "webaudio", "opfs"],
+    );
 
     let report = ReleaseValidator
         .validate_package(PackageValidateRequest {
@@ -881,16 +886,15 @@ fn release_report_includes_web_platform_smoke_evidence() {
     assert!(platform_check
         .evidence
         .iter()
-        .any(|entry| entry.key == "smoke.decode.webcodecs_config.status" && entry.value == "pass"));
+        .any(|entry| entry.key == "provider.decode.selected" && entry.value == "webcodecs"));
     assert!(platform_check
         .evidence
         .iter()
-        .any(|entry| entry.key == "smoke.package.web_source_read.status" && entry.value == "pass"));
+        .any(|entry| entry.key == "provider.save.selected" && entry.value == "opfs"));
     assert!(platform_check
         .evidence
         .iter()
-        .any(|entry| entry.key == "smoke.package.web_source_read.hash"
-            && entry.value.starts_with("sha256:")));
+        .any(|entry| entry.key == "profile_hash" && entry.value.starts_with("sha256:")));
 }
 
 #[test]
@@ -2612,16 +2616,22 @@ state localization_preview #@id state.system.localization_preview
 "#
 }
 
-fn smoke(id: &str, status: PlatformSmokeStatus) -> PlatformSmokeCheck {
-    PlatformSmokeCheck {
-        id: id.to_string(),
-        status,
-        summary: format!("{id} test evidence"),
-        evidence: vec![PlatformSmokeEvidence {
-            key: "hash".to_string(),
-            value: "sha256:test-evidence".to_string(),
-        }],
-    }
+fn platform_capability(
+    platform: PlatformId,
+    target: &str,
+    available: &[&str],
+) -> PlatformCapabilityReport {
+    let profile = match platform {
+        PlatformId::Windows => PlatformHostProfile::windows_release(target, "com.example.nativevn"),
+        PlatformId::Web => PlatformHostProfile::web_release(target, "com.example.nativevn"),
+        _ => unreachable!("release fixture only covers migrated platforms"),
+    };
+    PlatformCapabilityReport::from_profile(
+        &profile,
+        Hash256::from_sha256(b"release-test-build").to_string(),
+        available.iter().copied(),
+    )
+    .unwrap()
 }
 
 fn cooked_project_section(profile: &str, target: &str) -> SectionPayload {

@@ -40,6 +40,7 @@ members = [
     "Engine/Source/Developer/astra-observability",
     "Engine/Source/Programs/astra-cli",
     "Engine/Source/Programs/astra-player",
+    "Engine/Source/Programs/astra-player-web",
     "Engine/Source/Programs/astra-crash-reporter",
     "Engine/Plugins/Fixtures/headless-presentation-provider",
     "Engine/Plugins/Fixtures/vn-extension-provider",
@@ -88,6 +89,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"]
 file-rotate = "0.8"
 time = { version = "0.3", features = ["formatting"] }
 uuid = { version = "1", features = ["serde"] }
+url = "2"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 wasm-bindgen-test = "0.3"

@@ -32,4 +32,4 @@ wasm-pack test --headless --chrome Engine/Source/Platform/astra-platform-web
 
 ## Capability
 
-Web capability report 必须写明 WebGPU/WebGL profile、WebCodecs availability、OPFS/IndexedDB persistence、File API/fetch package source、audio state、worker support 和 network permission。Required smoke 是 `browser_smoke`、`renderer.browser_context`、`decode.browser_media`、`decode.webcodecs_config`、`audio.webaudio_render`、`save.web_storage_rw` 和 `package.web_source_read`。字段以 [Platform Host Blueprint](../implementation/platform-host.md) 为准。
+Web release profile 固定要求 WebGPU、WebCodecs、WebAudio 与 OPFS，不声明 WebGL、IndexedDB 或媒体 fallback。capability v2 只有在 Chrome live conformance 中才能把 provider 写入 `available`/`selected`；当前 canvas/WebGPU present/readback、WebCodecs VP8 encode→decode、OPFS commit/reload/abort、File/fetch allowlist source、visibility/focus/resize/input mapping 与 AudioWorklet bounded queue 已落地。真实用户手势后的 AudioWorklet output meter、device/context loss recovery 和完整 Player route 仍是 blocker。字段以 [Platform Host Blueprint](../implementation/platform-host.md) 为准。

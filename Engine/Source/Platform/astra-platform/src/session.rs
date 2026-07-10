@@ -101,12 +101,10 @@ pub struct AudioPacket {
 
 impl AudioPacket {
     pub fn frame_count(&self) -> usize {
-        let channels = usize::from(self.channels);
-        if channels == 0 {
-            0
-        } else {
-            self.samples.len() / channels
-        }
+        self.samples
+            .len()
+            .checked_div(usize::from(self.channels))
+            .unwrap_or(0)
     }
 }
 
@@ -128,6 +126,12 @@ pub struct PlatformDecodeRequest {
     pub sequence: u64,
     pub kind: DecodeKind,
     pub codec: String,
+    pub description: Vec<u8>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u16>,
+    pub coded_width: Option<u32>,
+    pub coded_height: Option<u32>,
+    pub keyframe: bool,
     pub bytes: Vec<u8>,
 }
 
@@ -302,6 +306,40 @@ impl HostCommand {
         };
         sent.map_err(|_| queue_closed("command.reply"))
     }
+
+    pub fn reply_error(self, error: PlatformError) -> Result<(), PlatformError> {
+        macro_rules! send_error {
+            ($reply:expr) => {
+                $reply
+                    .send(Err(error))
+                    .map_err(|_| queue_closed("command.reply"))
+            };
+        }
+        match self {
+            Self::CreateWindow { reply, .. } => send_error!(reply),
+            Self::CreateSurface { reply, .. } => send_error!(reply),
+            Self::CaptureSurface { reply, .. } => send_error!(reply),
+            Self::PresentRgba { reply, .. } => send_error!(reply),
+            Self::DestroySurface { reply, .. } => send_error!(reply),
+            Self::DestroyWindow { reply, .. } => send_error!(reply),
+            Self::OpenAudioOutput { reply, .. } => send_error!(reply),
+            Self::SubmitAudio { reply, .. } => send_error!(reply),
+            Self::DrainAudio { reply, .. } => send_error!(reply),
+            Self::CloseAudio { reply, .. } => send_error!(reply),
+            Self::OpenDecode { reply, .. } => send_error!(reply),
+            Self::Decode { reply, .. } => send_error!(reply),
+            Self::CloseDecode { reply, .. } => send_error!(reply),
+            Self::BeginSave { reply, .. } => send_error!(reply),
+            Self::WriteSave { reply, .. } => send_error!(reply),
+            Self::CommitSave { reply, .. } => send_error!(reply),
+            Self::AbortSave { reply, .. } => send_error!(reply),
+            Self::ReadSave { reply, .. } => send_error!(reply),
+            Self::OpenPackage { reply, .. } => send_error!(reply),
+            Self::ReadPackageRange { reply, .. } => send_error!(reply),
+            Self::ClosePackage { reply, .. } => send_error!(reply),
+            Self::Shutdown { reply } => send_error!(reply),
+        }
+    }
 }
 
 impl std::fmt::Debug for HostCommand {
@@ -355,6 +393,7 @@ pub enum PlatformEventKind {
     Suspended,
     WindowFocused {
         window: WindowHandle,
+        focused: bool,
     },
     WindowClosed {
         window: WindowHandle,

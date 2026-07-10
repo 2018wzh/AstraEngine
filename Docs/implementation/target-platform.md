@@ -1,132 +1,41 @@
 # Target And Platform Blueprint
 
-Target 是可执行产品形态，Platform 是运行宿主能力。二者共同决定 package、profile、SDK、Release Gate 和测试入口；Runtime、Editor、CLI、AstraEMU 都不能私自解释平台。
+Target 描述“构建和发布哪个产品入口”，Platform 描述该入口依赖的原生 host 能力。Target manifest 不包含 native handle、设备对象或平台 fallback 实现。
 
-## Target Model
+## Target Manifest
 
-`astra-target` 是 Target schema 真源：
+`project.yaml.targets` 是 Target 真源，Cook 后写入 `target.manifest` / `astra.target_manifest.v1`。发布 package 只能包含一个选定 Game target；Editor 与 Program target 不得混入 Game package。
 
-```rust
-pub enum TargetKind {
-    Editor,
-    Game,
-    Program,
-    Client,
-    Server,
-}
+每个 target 至少声明 id、kind、默认 profile、platforms 与 packaged。CLI 在 Cook、Package、Bundle 与 Validate 阶段持续校验同一 target/profile identity。
 
-pub struct TargetDescriptor {
-    pub id: String,
-    pub kind: TargetKind,
-    pub crate_name: Option<String>,
-    pub binary: Option<String>,
-    pub runtime_provider: Option<String>,
-    pub default_profile: Option<String>,
-    pub platforms: Vec<String>,
-    pub packaged: bool,
-}
-```
+## Platform Profiles
 
-v1 实现 `Editor`、`Game` 和 `Program`。`Client`、`Server` 是保留 schema 值，进入 manifest 会产生 warning，不作为当前 release gate 的通过条件。
+`project.yaml.platform_profiles` 是强类型 `PlatformHostProfile` map。map key 必须等于 profile id；profile 的 target、package id 与 platform 必须和选定 Target 一致。Cook 后写入 `platform.profiles` / `astra.platform_profiles.v1`。Player 从 package 读取发布策略，不接受 CLI 覆盖 provider 或 fallback。
 
-`project.yaml` 直接声明 Target：
+Windows release provider：`wgpu_hardware`、`wmf`、`wasapi`、`saved_games`。
 
-```yaml
-schema: astra.project.v1
-id: com.example.nativevn
-targets:
-  - id: nativevn-game
-    kind: game
-    crate: astra-vn
-    runtime_provider: native_vn
-    default_profile: desktop-release
-    platforms: [windows, linux, macos, ios, android, web]
-    packaged: true
-```
+Web release provider：`webgpu`、`webcodecs`、`webaudio`、`opfs`。本轮仅声明 Chrome，不提供 WebGL、IndexedDB、media element 或 software decode fallback。
 
-Cook 读取 `targets` 并写入 `cook_manifest.yaml`，用于记录构建时可选的 Editor、Game 和 Program target。Package build 只能打包已经 cook 过的同一个 target，并把 `target.manifest` section 收敛成一个已选择的 packaged `Game` target；Editor 和 Program descriptor 不进入 `.astrapkg`。缺失 Target 时，兼容路径会从 project id 生成一个 Game target；产品级样例必须显式写出 Target。
+## Capability And Conformance
 
-## Target Rules
+`astra.platform_capability_report.v2` 记录 platform、target、profile id/hash、build fingerprint、SDK 状态，以及 renderer/decode/audio/save 的 declared、available、selected。普通 toolchain probe 不能把接口存在性或编译成功当作 available。
 
-| Kind | 可打包 | 必填 | 禁止 |
-| --- | --- | --- | --- |
-| `Game` | yes | `runtime_provider`、`default_profile`、`platforms` | Editor UI、platform native handle、Developer-only crate |
-| `Editor` | no | `binary`、desktop platforms | packaged runtime dependency |
-| `Program` | no | `binary` | creator-only state 写入 package |
-| `Client` / `Server` | no | 无当前 release gate | 当前 Stage 标为完成 |
+`astra.platform_host_conformance_report.v1` 记录 platform、target、profile hash、package hash、build fingerprint、session id、required check 和脱敏 evidence。Release Gate 要求 capability、conformance 与 Player automation 在 platform/profile/package/build/session identity 上连续匹配。
 
-`astra target validate <project> --target <id>` 输出 `astra.target_validation_report.v1`。Game target 必须在 target descriptor 内显式声明 `runtime_provider`；旧顶层 `runtime: astra-vn` 会被判为 blocking，不会被自动迁移。Release Gate 读取 package 内的 `target.manifest`，使用 `target.manifest` check 阻断缺失、重复 id、不是单一 packaged Game、Game 不可打包或选择了不存在的 Target。
-
-## Platform Model
-
-`astra-platform` 是平台 host schema 真源：
-
-```rust
-pub enum PlatformId {
-    Windows,
-    Linux,
-    Macos,
-    Ios,
-    Android,
-    Web,
-}
-
-pub enum SdkStatus {
-    Present,
-    Missing,
-    Unknown,
-}
-
-pub struct PlatformCapabilityReport {
-    pub schema: String,
-    pub platform: PlatformId,
-    pub target: Option<String>,
-    pub sdk_status: SdkStatus,
-    pub renderer: Vec<String>,
-    pub decode: Vec<String>,
-    pub audio: Vec<String>,
-    pub filesystem: Vec<String>,
-    pub input: Vec<String>,
-    pub lifecycle: Vec<String>,
-    pub permissions: Vec<String>,
-    pub smoke: Vec<PlatformSmokeCheck>,
-}
-
-pub struct PlatformSmokeCheck {
-    pub id: String,
-    pub status: PlatformSmokeStatus,
-    pub summary: String,
-    pub evidence: Vec<PlatformSmokeEvidence>,
-}
-
-pub struct PlatformSmokeEvidence {
-    pub key: String,
-    pub value: String,
-}
-```
-
-每个平台有独立 host crate：
-
-| Platform | Crate | SDK 判定 | 必备能力 |
-| --- | --- | --- | --- |
-| Windows | `astra-platform-windows` | host Windows | winit hidden window、wgpu surface、WMF audio/video decode、WASAPI stream、Known Folder RW、IME、gamepad |
-| Linux | `astra-platform-linux` | host Linux | planned winit/wgpu、GStreamer or FFmpeg profile、XDG data、IME |
-| macOS | `astra-platform-macos` | host macOS | planned Metal、AVFoundation、CoreAudio、AppKit lifecycle |
-| iOS | `astra-platform-ios` | iOS target or Apple developer env | planned Metal、AVFoundation、safe area、touch、no-JIT Luau |
-| Android | `astra-platform-android` | Android SDK env | planned Vulkan、MediaCodec、SAF、touch、no-JIT Luau |
-| Web | `astra-platform-web` | wasm32 browser environment | renderer context、browser media decode、WebCodecs config、WebAudio render、OPFS/IndexedDB、File API/fetch package source |
-
-缺 SDK 的平台必须输出 `sdk_status: missing`，Release Gate 对真实平台完成项判为 blocked。`sdk_status: present` 还必须附带该平台 required smoke 和 evidence：Windows 当前要求 `windowed_smoke`、`renderer.wgpu_surface`、`decode.wmf.audio`、`decode.wmf.video_first_frame`、`audio.wasapi` 和 `save.known_folder_rw`；Web 当前要求 `browser_smoke`、`renderer.browser_context`、`decode.browser_media`、`decode.webcodecs_config`、`audio.webaudio_render`、`save.web_storage_rw` 和 `package.web_source_read`。Linux、macOS、iOS 和 Android required smoke 移到 Stage 6，代码未实现前不能标为 `DONE`。普通 CI 可以验证 schema、report 和 CLI，不把缺 SDK 或缺 smoke 平台标成已完成。
+Linux、macOS、iOS、Android factory 当前固定返回 `PLATFORM_NOT_IMPLEMENTED`，不生成伪 renderer/audio/decode/save availability。
 
 ## CLI And Gate
 
 ```bash
-astra target list project.yaml
 astra target validate project.yaml --target nativevn-game --format json
-astra platform probe --platform windows --target nativevn-game --format json
 astra cook project.yaml --profile desktop-release --target nativevn-game --out target/cooked
 astra package build target/cooked --target nativevn-game --out target/nativevn.astrapkg
-astra package validate target/nativevn.astrapkg --profile desktop-release --target nativevn-game --platform-report target/platform-windows.yaml
+astra package validate target/nativevn.astrapkg \
+  --profile desktop-release \
+  --target nativevn-game \
+  --platform-report target/platform-capability.json \
+  --platform-conformance-report target/platform-conformance.json \
+  --player-automation-report target/player-automation.json
 ```
 
-Report 输出只包含 schema、target id、platform id、capability、SDK 状态和 diagnostic code，不记录本地绝对路径、payload body、secret 或 native handle。
+正式报告只记录 schema、稳定 id、hash、provider、状态、计数和 diagnostic，不记录本地绝对路径、用户名、商业 payload、secret 或 native handle。普通 CI 负责 schema、负向门禁、单元测试与 wasm 编译；Windows/Chrome `DONE` 需要同一最终 commit 的真实验收。

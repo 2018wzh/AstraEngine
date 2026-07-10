@@ -35,16 +35,30 @@ mod browser {
     use std::collections::BTreeMap;
 
     use astra_platform::{
-        host_channel, CapturedFrame, HostCommand, PlatformBackendChannels, PlatformError,
-        PlatformErrorCode, PlatformEventKind, PlatformHostProfile, PlatformHostSession, RgbaFrame,
-        SurfaceHandle, WindowHandle,
+        host_channel, AudioOutputHandle, CapturedFrame, DecodeSessionHandle, HostCommand,
+        PackageSourceHandle, PlatformBackendChannels, PlatformError, PlatformErrorCode,
+        PlatformEventKind, PlatformHostProfile, PlatformHostSession, RgbaFrame,
+        SaveTransactionHandle, SurfaceHandle, WindowHandle,
     };
     use astra_platform_general::ResourceTable;
     use wasm_bindgen::{closure::Closure, JsCast};
     use wasm_bindgen_futures::spawn_local;
-    use web_sys::{Event, HtmlCanvasElement, KeyboardEvent, PointerEvent, WheelEvent};
+    use web_sys::{
+        CompositionEvent, Event, EventTarget, HtmlCanvasElement, KeyboardEvent, PointerEvent,
+        TouchEvent, WheelEvent,
+    };
+
+    use crate::services::{
+        commit_save, read_save, PackageBytes, SaveTransaction, WebAudioOutput, WebDecodeSession,
+    };
 
     pub async fn start(profile: PlatformHostProfile) -> Result<PlatformHostSession, PlatformError> {
+        tracing::info!(
+            event = "platform.web.host.start",
+            profile = %profile.id,
+            target = %profile.target,
+            "Web platform host startup began"
+        );
         if profile.platform != astra_platform::PlatformId::Web {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidProfile,
@@ -58,7 +72,8 @@ mod browser {
             profile.limits.event_queue_capacity,
         )?;
         backend.event_emitter().emit(PlatformEventKind::Resumed)?;
-        spawn_local(run_backend(backend));
+        let lifecycle = BrowserLifecycle::bind(backend.event_emitter())?;
+        spawn_local(run_backend(backend, profile.clone(), lifecycle));
         Ok(PlatformHostSession {
             client,
             events,
@@ -66,10 +81,18 @@ mod browser {
         })
     }
 
-    async fn run_backend(mut backend: PlatformBackendChannels) {
+    async fn run_backend(
+        mut backend: PlatformBackendChannels,
+        profile: PlatformHostProfile,
+        _lifecycle: BrowserLifecycle,
+    ) {
         let emitter = backend.event_emitter();
         let mut windows = ResourceTable::<CanvasResource, WindowHandle>::new("window");
         let mut surfaces = ResourceTable::<SurfaceResource, SurfaceHandle>::new("surface");
+        let mut saves = ResourceTable::<SaveTransaction, SaveTransactionHandle>::new("save");
+        let mut packages = ResourceTable::<PackageBytes, PackageSourceHandle>::new("package");
+        let mut audio = ResourceTable::<WebAudioOutput, AudioOutputHandle>::new("audio");
+        let mut decoders = ResourceTable::<WebDecodeSession, DecodeSessionHandle>::new("decode");
         while let Some(command) = backend.next_command().await {
             match command {
                 HostCommand::CreateWindow { request, reply } => {
@@ -125,29 +148,166 @@ mod browser {
                 HostCommand::DestroyWindow { window, reply } => {
                     let _ = reply.send(windows.remove(window).map(|_| ()));
                 }
+                HostCommand::OpenAudioOutput { request, reply } => {
+                    let result = WebAudioOutput::open(request)
+                        .await
+                        .and_then(|output| audio.insert(output));
+                    let _ = reply.send(result);
+                }
+                HostCommand::SubmitAudio {
+                    output,
+                    packet,
+                    reply,
+                } => {
+                    let result = audio.get_mut(output).and_then(|audio| audio.submit(packet));
+                    let _ = reply.send(result);
+                }
+                HostCommand::DrainAudio { output, reply } => {
+                    let result = match audio.get(output) {
+                        Ok(audio) => audio.drain().await,
+                        Err(error) => Err(error),
+                    };
+                    let _ = reply.send(result);
+                }
+                HostCommand::CloseAudio { output, reply } => {
+                    let result = match audio.remove(output) {
+                        Ok(audio) => audio.close().await,
+                        Err(error) => Err(error),
+                    };
+                    let _ = reply.send(result);
+                }
+                HostCommand::OpenDecode { kind, reply } => {
+                    let _ = reply.send(decoders.insert(WebDecodeSession::new(kind)));
+                }
+                HostCommand::Decode {
+                    session,
+                    request,
+                    reply,
+                } => {
+                    let result = match decoders.get_mut(session) {
+                        Ok(decoder) => decoder.decode(request).await,
+                        Err(error) => Err(error),
+                    };
+                    let _ = reply.send(result);
+                }
+                HostCommand::CloseDecode { session, reply } => {
+                    let _ = reply.send(decoders.remove(session).map(|_| ()));
+                }
+                HostCommand::BeginSave { slot, reply } => {
+                    let _ = reply.send(saves.insert(SaveTransaction {
+                        slot,
+                        bytes: Vec::new(),
+                    }));
+                }
+                HostCommand::WriteSave {
+                    transaction,
+                    bytes,
+                    reply,
+                } => {
+                    let result = saves
+                        .get_mut(transaction)
+                        .map(|save| save.bytes.extend(bytes));
+                    let _ = reply.send(result);
+                }
+                HostCommand::CommitSave { transaction, reply } => {
+                    let result = match saves.remove(transaction) {
+                        Ok(save) => commit_save(&profile.package_id, &save).await,
+                        Err(error) => Err(error),
+                    };
+                    let _ = reply.send(result);
+                }
+                HostCommand::AbortSave { transaction, reply } => {
+                    let _ = reply.send(saves.remove(transaction).map(|_| ()));
+                }
+                HostCommand::ReadSave { slot, reply } => {
+                    let _ = reply.send(read_save(&profile.package_id, &slot).await);
+                }
+                HostCommand::OpenPackage { source, reply } => {
+                    let result = PackageBytes::open(source, &profile.package_sources)
+                        .await
+                        .and_then(|source| packages.insert(source));
+                    let _ = reply.send(result);
+                }
+                HostCommand::ReadPackageRange {
+                    source,
+                    offset,
+                    length,
+                    reply,
+                } => {
+                    let result = packages
+                        .get(source)
+                        .and_then(|source| source.read_range(offset, length));
+                    let _ = reply.send(result);
+                }
+                HostCommand::ClosePackage { source, reply } => {
+                    let _ = reply.send(packages.remove(source).map(|_| ()));
+                }
                 HostCommand::Shutdown { reply } => {
-                    let result = surfaces.ensure_empty().and_then(|_| windows.ensure_empty());
+                    let result = surfaces
+                        .ensure_empty()
+                        .and_then(|_| windows.ensure_empty())
+                        .and_then(|_| saves.ensure_empty())
+                        .and_then(|_| packages.ensure_empty())
+                        .and_then(|_| audio.ensure_empty())
+                        .and_then(|_| decoders.ensure_empty());
                     let exit = result.is_ok();
                     let _ = reply.send(result);
                     if exit {
+                        tracing::info!(
+                            event = "platform.web.host.shutdown",
+                            "Web platform host shut down without live resources"
+                        );
                         break;
                     }
-                }
-                other => {
-                    let operation = other.operation();
-                    let _ = other.reply_unit(Err(PlatformError::new(
-                        PlatformErrorCode::ProviderUnavailable,
-                        operation,
-                        "Web host service is not initialized",
-                    )));
                 }
             }
         }
     }
 
+    struct BrowserLifecycle {
+        target: EventTarget,
+        visibility: Closure<dyn FnMut(Event)>,
+    }
+
+    impl BrowserLifecycle {
+        fn bind(emitter: astra_platform::PlatformEventEmitter) -> Result<Self, PlatformError> {
+            let document = web_sys::window()
+                .and_then(|window| window.document())
+                .ok_or_else(|| web_error("lifecycle.bind"))?;
+            let target: EventTarget = document.clone().into();
+            let visibility = Closure::wrap(Box::new(move |_| {
+                let event = if document.hidden() {
+                    PlatformEventKind::Suspended
+                } else {
+                    PlatformEventKind::Resumed
+                };
+                let _ = emitter.emit(event);
+            }) as Box<dyn FnMut(Event)>);
+            target
+                .add_event_listener_with_callback(
+                    "visibilitychange",
+                    visibility.as_ref().unchecked_ref(),
+                )
+                .map_err(|_| web_error("lifecycle.bind"))?;
+            Ok(Self { target, visibility })
+        }
+    }
+
+    impl Drop for BrowserLifecycle {
+        fn drop(&mut self) {
+            let _ = self.target.remove_event_listener_with_callback(
+                "visibilitychange",
+                self.visibility.as_ref().unchecked_ref(),
+            );
+        }
+    }
+
+    type GlobalListener = (EventTarget, &'static str, Closure<dyn FnMut(Event)>);
+
     struct CanvasResource {
         canvas: HtmlCanvasElement,
         listeners: BTreeMap<&'static str, Closure<dyn FnMut(Event)>>,
+        global_listeners: Vec<GlobalListener>,
     }
 
     impl CanvasResource {
@@ -187,6 +347,7 @@ mod browser {
             Ok(Self {
                 canvas,
                 listeners: BTreeMap::new(),
+                global_listeners: Vec::new(),
             })
         }
 
@@ -235,14 +396,123 @@ mod browser {
                     }
                 }
             })?;
-            self.add_listener("wheel", move |event| {
-                if let Ok(event) = event.dyn_into::<WheelEvent>() {
-                    let _ = emitter.emit(PlatformEventKind::MouseWheel {
+            self.add_listener("pointerdown", {
+                let emitter = emitter.clone();
+                move |event| {
+                    if let Ok(event) = event.dyn_into::<PointerEvent>() {
+                        let _ = emitter.emit(PlatformEventKind::PointerButton {
+                            window,
+                            button: pointer_button(event.button()),
+                            state: astra_platform::InputState::Pressed,
+                        });
+                    }
+                }
+            })?;
+            self.add_listener("pointerup", {
+                let emitter = emitter.clone();
+                move |event| {
+                    if let Ok(event) = event.dyn_into::<PointerEvent>() {
+                        let _ = emitter.emit(PlatformEventKind::PointerButton {
+                            window,
+                            button: pointer_button(event.button()),
+                            state: astra_platform::InputState::Released,
+                        });
+                    }
+                }
+            })?;
+            self.add_listener("focus", {
+                let emitter = emitter.clone();
+                move |_| {
+                    let _ = emitter.emit(PlatformEventKind::WindowFocused {
                         window,
-                        delta_x: event.delta_x() as f32,
-                        delta_y: event.delta_y() as f32,
+                        focused: true,
                     });
                 }
+            })?;
+            self.add_listener("blur", {
+                let emitter = emitter.clone();
+                move |_| {
+                    let _ = emitter.emit(PlatformEventKind::WindowFocused {
+                        window,
+                        focused: false,
+                    });
+                }
+            })?;
+            self.add_listener("compositionupdate", {
+                let emitter = emitter.clone();
+                move |event| {
+                    if let Ok(event) = event.dyn_into::<CompositionEvent>() {
+                        let _ = emitter.emit(PlatformEventKind::ImePreedit {
+                            window,
+                            text: event.data().unwrap_or_default(),
+                            cursor: None,
+                        });
+                    }
+                }
+            })?;
+            self.add_listener("compositionend", {
+                let emitter = emitter.clone();
+                move |event| {
+                    if let Ok(event) = event.dyn_into::<CompositionEvent>() {
+                        let _ = emitter.emit(PlatformEventKind::ImeCommit {
+                            window,
+                            text: event.data().unwrap_or_default(),
+                        });
+                    }
+                }
+            })?;
+            for (name, phase) in [
+                ("touchstart", astra_platform::TouchPhase::Started),
+                ("touchmove", astra_platform::TouchPhase::Moved),
+                ("touchend", astra_platform::TouchPhase::Ended),
+                ("touchcancel", astra_platform::TouchPhase::Cancelled),
+            ] {
+                let emitter = emitter.clone();
+                self.add_listener(name, move |event| {
+                    if let Ok(event) = event.dyn_into::<TouchEvent>() {
+                        let touches = event.changed_touches();
+                        for index in 0..touches.length() {
+                            if let Some(touch) = touches.item(index) {
+                                let _ = emitter.emit(PlatformEventKind::Touch {
+                                    window,
+                                    id: touch.identifier() as u64,
+                                    x: f64::from(touch.client_x()),
+                                    y: f64::from(touch.client_y()),
+                                    phase,
+                                });
+                            }
+                        }
+                    }
+                })?;
+            }
+            self.add_listener("wheel", {
+                let emitter = emitter.clone();
+                move |event| {
+                    if let Ok(event) = event.dyn_into::<WheelEvent>() {
+                        let _ = emitter.emit(PlatformEventKind::MouseWheel {
+                            window,
+                            delta_x: event.delta_x() as f32,
+                            delta_y: event.delta_y() as f32,
+                        });
+                    }
+                }
+            })?;
+            let browser_window = web_sys::window().ok_or_else(|| web_error("input.bind"))?;
+            let canvas = self.canvas.clone();
+            self.add_global_listener(browser_window.into(), "resize", move |_| {
+                let width = u32::try_from(canvas.client_width().max(1)).unwrap_or(1);
+                let height = u32::try_from(canvas.client_height().max(1)).unwrap_or(1);
+                canvas.set_width(width);
+                canvas.set_height(height);
+                let scale_factor = web_sys::window()
+                    .map(|window| window.device_pixel_ratio())
+                    .unwrap_or(1.0);
+                let _ = emitter.emit(PlatformEventKind::WindowResized {
+                    window,
+                    width,
+                    height,
+                    scale_factor,
+                });
             })?;
             Ok(())
         }
@@ -259,6 +529,20 @@ mod browser {
             self.listeners.insert(name, callback);
             Ok(())
         }
+
+        fn add_global_listener(
+            &mut self,
+            target: EventTarget,
+            name: &'static str,
+            callback: impl FnMut(Event) + 'static,
+        ) -> Result<(), PlatformError> {
+            let callback = Closure::wrap(Box::new(callback) as Box<dyn FnMut(Event)>);
+            target
+                .add_event_listener_with_callback(name, callback.as_ref().unchecked_ref())
+                .map_err(|_| web_error("input.bind"))?;
+            self.global_listeners.push((target, name, callback));
+            Ok(())
+        }
     }
 
     impl Drop for CanvasResource {
@@ -268,7 +552,22 @@ mod browser {
                     .canvas
                     .remove_event_listener_with_callback(name, callback.as_ref().unchecked_ref());
             }
+            for (target, name, callback) in &self.global_listeners {
+                let _ = target
+                    .remove_event_listener_with_callback(name, callback.as_ref().unchecked_ref());
+            }
             self.canvas.remove();
+        }
+    }
+
+    fn pointer_button(button: i16) -> astra_platform::PointerButton {
+        match button {
+            0 => astra_platform::PointerButton::Primary,
+            1 => astra_platform::PointerButton::Middle,
+            2 => astra_platform::PointerButton::Secondary,
+            3 => astra_platform::PointerButton::Back,
+            4 => astra_platform::PointerButton::Forward,
+            other => astra_platform::PointerButton::Other(other.max(0) as u16),
         }
     }
 

@@ -1,55 +1,36 @@
 use std::{
     collections::BTreeMap,
-    env,
-    ffi::OsString,
-    fs,
+    env, fs,
     path::{Component, Path, PathBuf},
-    time::Duration,
 };
 
 use astra_asset::AssetSidecar;
 use astra_cook::{CookRequest, DefaultCookProcessor};
 use astra_core::Hash256;
 use astra_observability::{
-    init_host, install_windows_crash_reporter, ConsoleFormat, CrashReportingMode,
-    HostObservabilityConfig, ObservabilityGuard, WindowsCrashReporterConfig,
-    WindowsCrashReporterGuard,
+    init_host, ConsoleFormat, CrashReportingMode, HostObservabilityConfig, ObservabilityGuard,
 };
 use astra_package::{
     MigrationPolicy, PackageBuildRequest, PackageBuilder, PackageManifest, PackageReader,
     SectionCodec, SectionPayload, CURRENT_CONTAINER_VERSION,
 };
-use astra_platform::{PlatformCapabilityReport, PlatformId};
+use astra_platform::{
+    validate_host_profile, PlatformCapabilityReport, PlatformHostConformanceReport,
+    PlatformHostProfile, PlatformId,
+};
 use astra_player_core::PlayerAutomationReport;
 use astra_release::{PackageValidateRequest, ReleaseReport, ReleaseValidator};
 use astra_target::{
     validate_manifest, TargetKind, TargetManifest, TargetValidationReport, TargetValidationStatus,
 };
-use astra_test::{
-    MountAsset, MountProbe, Scenario, ScenarioReport, ScenarioRunOptions, ScenarioRunner,
-    ScenarioStatus,
-};
-use astra_vn::{compile_astra_sources, package_sections_for_story, AstraSource, CompiledStory};
+use astra_test::{ScenarioReport, ScenarioRunOptions, ScenarioRunner};
+use astra_vn::{compile_astra_sources, package_sections_for_story, AstraSource};
 use clap::{Parser, Subcommand, ValueEnum};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 type CliError = Box<dyn std::error::Error + Send + Sync>;
-const MOUNT_ASSET_ROLES: &[&str] = &[
-    "background",
-    "character_sprite",
-    "character_atlas",
-    "cg",
-    "ui",
-    "text_window",
-    "button",
-    "audio",
-    "voice",
-    "movie",
-    "font",
-];
-
 #[derive(Parser)]
 #[command(name = "astra")]
 #[command(about = "AstraEngine Stage 1 command line")]
@@ -122,6 +103,16 @@ enum PackageCommand {
         profile: String,
         #[arg(long, value_enum)]
         platform: PlatformArg,
+        #[arg(long)]
+        windows_player: Option<PathBuf>,
+        #[arg(long)]
+        crash_reporter: Option<PathBuf>,
+        #[arg(long)]
+        web_player_wasm: Option<PathBuf>,
+        #[arg(long)]
+        web_player_loader: Option<PathBuf>,
+        #[arg(long)]
+        web_audio_worklet: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = ReportFormat::Yaml)]
         format: ReportFormat,
     },
@@ -133,6 +124,8 @@ enum PackageCommand {
         target: Option<String>,
         #[arg(long)]
         platform_report: Option<PathBuf>,
+        #[arg(long)]
+        platform_conformance_report: Option<PathBuf>,
         #[arg(long)]
         report: Option<PathBuf>,
         #[arg(long)]
@@ -234,18 +227,6 @@ impl From<PlatformArg> for PlatformId {
 }
 
 fn main() -> Result<(), CliError> {
-    if should_auto_launch_player() {
-        let (_observability, _crash_reporter) = init_bundled_player_observability()?;
-        tracing::info!(
-            event = "player.host.start",
-            "bundled AstraPlayer host started"
-        );
-        let output = run_bundled_player(std::env::args_os().skip(1))?;
-        if !output.is_empty() {
-            println!("{output}");
-        }
-        return Ok(());
-    }
     let cli = Cli::parse();
     let _log_guard = init_logging(&cli)?;
     match cli.command {
@@ -277,10 +258,28 @@ fn main() -> Result<(), CliError> {
                 target,
                 profile,
                 platform,
+                windows_player,
+                crash_reporter,
+                web_player_wasm,
+                web_player_loader,
+                web_audio_worklet,
                 format,
             } => {
-                let manifest =
-                    build_standalone_bundle(&package, &out, &target, &profile, platform.into())?;
+                let artifacts = BundleArtifactInputs {
+                    windows_player,
+                    crash_reporter,
+                    web_player_wasm,
+                    web_player_loader,
+                    web_audio_worklet,
+                };
+                let manifest = build_standalone_bundle(
+                    &package,
+                    &out,
+                    &target,
+                    &profile,
+                    platform.into(),
+                    &artifacts,
+                )?;
                 println!("{}", encode_bundle_manifest(&manifest, format)?);
             }
             PackageCommand::Validate {
@@ -288,16 +287,19 @@ fn main() -> Result<(), CliError> {
                 profile,
                 target,
                 platform_report,
+                platform_conformance_report,
                 report,
                 player_automation_report,
                 format,
             } => {
                 let bytes = fs::read(package)?;
                 let platform_report = read_platform_report(platform_report.as_deref())?;
+                let platform_conformance_report =
+                    read_platform_conformance_report(platform_conformance_report.as_deref())?;
                 let player_report =
                     read_player_automation_report(player_automation_report.as_deref())?;
                 let require_platform_report = release_profile_requires_platform_report(&profile);
-                let release_report = ReleaseValidator.validate_package_with_player_report(
+                let release_report = ReleaseValidator.validate_package_with_platform_evidence(
                     PackageValidateRequest {
                         package_bytes: bytes,
                         profile,
@@ -306,6 +308,7 @@ fn main() -> Result<(), CliError> {
                         require_platform_report,
                         platform_report,
                     },
+                    platform_conformance_report,
                     player_report,
                 )?;
                 let encoded = encode_release_report(&release_report, format)?;
@@ -442,84 +445,6 @@ fn init_logging(cli: &Cli) -> Result<ObservabilityGuard, CliError> {
     Ok(init_host(config)?)
 }
 
-fn init_bundled_player_observability(
-) -> Result<(ObservabilityGuard, Option<WindowsCrashReporterGuard>), CliError> {
-    let manifest = read_standalone_bundle_manifest()?;
-    let config = read_player_config()?;
-    validate_player_config(&manifest, &config)?;
-    if manifest.platform != "windows" {
-        return Err("native bundled player observability requires the Windows platform".into());
-    }
-    let diagnostics_root = astra_platform_windows::diagnostics_root(&config.target)
-        .map_err(|_| "Windows diagnostics root is unavailable")?;
-    let log_relative = config
-        .observability
-        .log_dir
-        .as_deref()
-        .ok_or("Windows player config is missing log_dir")?;
-    let crash_relative = config
-        .observability
-        .crash_dir
-        .as_deref()
-        .ok_or("Windows player config is missing crash_dir")?;
-    let log_dir = diagnostics_root.join(validate_bundle_relative_path(log_relative)?);
-    let crash_dir = diagnostics_root.join(validate_bundle_relative_path(crash_relative)?);
-    let mut host = HostObservabilityConfig::for_cli(&config.observability.filter);
-    host.role = astra_observability::HostRole::Player;
-    host.console_format = match config.observability.console_format.as_str() {
-        "compact" => ConsoleFormat::Compact,
-        "json" => ConsoleFormat::Json,
-        _ => return Err("unsupported player console log format".into()),
-    };
-    host.log_dir = Some(log_dir.clone());
-    host.crash_dir = Some(crash_dir.clone());
-    host.crash_reporting = match config.observability.crash_reporting.as_str() {
-        "required" => CrashReportingMode::Required,
-        "optional" => CrashReportingMode::Optional,
-        "disabled" => CrashReportingMode::Disabled,
-        _ => return Err("unsupported player crash reporting mode".into()),
-    };
-    let observability = init_host(host)?;
-    let reporter_relative = manifest
-        .observability
-        .crash_reporter
-        .as_deref()
-        .ok_or("Windows bundle manifest is missing crash reporter")?;
-    let reporter_entry = manifest
-        .files
-        .iter()
-        .find(|entry| entry.role == "windows_crash_reporter" && entry.path == reporter_relative)
-        .ok_or("Windows bundle manifest has no crash reporter evidence")?;
-    let reporter_path =
-        std::env::current_dir()?.join(validate_bundle_relative_path(reporter_relative)?);
-    let reporter_bytes =
-        fs::read(&reporter_path).map_err(|_| "Windows crash reporter file is missing")?;
-    if reporter_entry.hash != Hash256::from_sha256(&reporter_bytes).to_string()
-        || reporter_entry.byte_size != reporter_bytes.len() as u64
-    {
-        return Err("Windows crash reporter hash or byte size mismatch".into());
-    }
-    let crash_reporter = install_windows_crash_reporter(WindowsCrashReporterConfig {
-        reporter_path,
-        crash_dir,
-        log_file: Some(log_dir.join("astra.jsonl")),
-        session_id: observability.session_id().to_string(),
-        mode: host_crash_mode(&config.observability.crash_reporting)?,
-        handshake_timeout: Duration::from_secs(5),
-        completion_timeout: Duration::from_secs(15),
-    })?;
-    Ok((observability, crash_reporter))
-}
-
-fn host_crash_mode(value: &str) -> Result<CrashReportingMode, CliError> {
-    match value {
-        "required" => Ok(CrashReportingMode::Required),
-        "optional" => Ok(CrashReportingMode::Optional),
-        "disabled" => Ok(CrashReportingMode::Disabled),
-        _ => Err("unsupported player crash reporting mode".into()),
-    }
-}
-
 fn encode_report(report: &ScenarioReport, format: ReportFormat) -> Result<String, CliError> {
     Ok(match format {
         ReportFormat::Json => serde_json::to_string_pretty(report)?,
@@ -592,6 +517,16 @@ fn explain_report(text: &str) -> Result<String, CliError> {
 fn read_platform_report(
     path: Option<&std::path::Path>,
 ) -> Result<Option<PlatformCapabilityReport>, CliError> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let text = fs::read_to_string(path)?;
+    Ok(Some(serde_yaml::from_str(&text)?))
+}
+
+fn read_platform_conformance_report(
+    path: Option<&std::path::Path>,
+) -> Result<Option<PlatformHostConformanceReport>, CliError> {
     let Some(path) = path else {
         return Ok(None);
     };
@@ -680,6 +615,12 @@ struct ProjectPackageSection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+struct CookedPlatformProfiles {
+    schema: String,
+    profiles: Vec<PlatformHostProfile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 struct StandaloneBundleManifest {
     schema: String,
     target: String,
@@ -689,15 +630,20 @@ struct StandaloneBundleManifest {
     package_hash: String,
     package: String,
     scenario_refs: Vec<String>,
-    #[serde(default)]
-    scenario_json_refs: BTreeMap<String, String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    web_route_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mount_policy: Option<String>,
     observability: BundleObservabilityEvidence,
     checks: Vec<PlayerLaunchCheck>,
     files: Vec<StandaloneBundleFile>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct BundleArtifactInputs {
+    windows_player: Option<PathBuf>,
+    crash_reporter: Option<PathBuf>,
+    web_player_wasm: Option<PathBuf>,
+    web_player_loader: Option<PathBuf>,
+    web_audio_worklet: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -717,59 +663,9 @@ struct StandaloneBundleFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-struct PlayerLaunchReport {
-    schema: String,
-    status: String,
-    target: String,
-    profile: String,
-    platform: String,
-    package_hash: String,
-    entrypoint: String,
-    checks: Vec<PlayerLaunchCheck>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-struct PlayerRouteReport {
-    schema: String,
-    status: String,
-    target: String,
-    profile: String,
-    platform: String,
-    input_surface: String,
-    package_hash: String,
-    entrypoint: String,
-    scenario: String,
-    checks: Vec<PlayerLaunchCheck>,
-    scenario_report: ScenarioReport,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 struct PlayerLaunchCheck {
     id: String,
     status: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-struct PlayerConfig {
-    schema: String,
-    target: String,
-    profile: String,
-    platform: String,
-    package: String,
-    observability: PlayerObservabilityConfig,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    display: Option<PlayerDisplayConfig>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-struct PlayerObservabilityConfig {
-    filter: String,
-    console_format: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    log_dir: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    crash_dir: Option<String>,
-    crash_reporting: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -792,46 +688,6 @@ struct PlayerDisplayLayer {
     vfs_uri: String,
     x: u32,
     y: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct LiveWindowPreviewAsset {
-    vfs_uri: String,
-    section_id: String,
-    hash: String,
-    byte_size: u64,
-}
-
-#[derive(Debug, Clone)]
-struct LiveWindowFrame {
-    width: u32,
-    height: u32,
-    bgra: Vec<u8>,
-}
-
-#[derive(Debug, Clone)]
-struct PreviewImage {
-    width: u32,
-    height: u32,
-    rgba: Vec<u8>,
-}
-
-impl LiveWindowFrame {
-    fn from_rgba(width: u32, height: u32, rgba: Vec<u8>) -> Self {
-        let mut bgra = Vec::with_capacity(rgba.len());
-        for pixel in rgba.chunks_exact(4) {
-            bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
-        }
-        Self {
-            width,
-            height,
-            bgra,
-        }
-    }
-
-    fn from_rgba_image(image: PreviewImage) -> Self {
-        Self::from_rgba(image.width, image.height, image.rgba)
-    }
 }
 
 fn default_section_codec() -> SectionCodec {
@@ -974,6 +830,9 @@ fn cook_project(
     ) {
         return Err(format!("target validation failed: {target}").into());
     }
+    let target_descriptor = target_manifest
+        .find(target)
+        .ok_or_else(|| format!("target {target} is not defined"))?;
     let package_id = project_yaml
         .get("id")
         .and_then(serde_yaml::Value::as_str)
@@ -1009,6 +868,29 @@ fn cook_project(
         asset_type: None,
         asset_id: None,
     }];
+    if let Some(platform_profiles) = cook_platform_profiles(
+        &project_yaml,
+        &package_id,
+        target,
+        &target_descriptor.platforms,
+    )? {
+        let profile_bytes = serde_json::to_vec_pretty(&platform_profiles)?;
+        let profile_path = "platform_profiles.json";
+        fs::write(out.join(profile_path), &profile_bytes)?;
+        artifacts.push(CookedArtifactRef {
+            section_id: "platform.profiles".to_string(),
+            schema: "astra.platform_profiles.v1".to_string(),
+            path: profile_path.to_string(),
+            hash: Hash256::from_sha256(&profile_bytes).to_string(),
+            codec: SectionCodec::Raw,
+            asset_path: None,
+            asset_role: None,
+            asset_sha256: None,
+            asset_byte_size: None,
+            asset_type: None,
+            asset_id: None,
+        });
+    }
     if let Some(display_config) = project_player_display_config(&project_yaml)? {
         let display_bytes = serde_json::to_vec_pretty(&display_config)?;
         let display_path = "player_display_config.json";
@@ -1075,6 +957,45 @@ fn cook_project(
         "cook run completed"
     );
     Ok(manifest)
+}
+
+fn cook_platform_profiles(
+    project: &serde_yaml::Value,
+    package_id: &str,
+    target: &str,
+    target_platforms: &[String],
+) -> Result<Option<CookedPlatformProfiles>, CliError> {
+    let Some(value) = project.get("platform_profiles") else {
+        return Ok(None);
+    };
+    let profiles: BTreeMap<String, PlatformHostProfile> = serde_yaml::from_value(value.clone())?;
+    let mut selected = Vec::new();
+    for (id, profile) in profiles {
+        if profile.id != id {
+            return Err(format!("platform profile key {id} does not match profile id").into());
+        }
+        if profile.target != target || profile.package_id != package_id {
+            return Err(
+                format!("platform profile {id} is not bound to the cooked target/package").into(),
+            );
+        }
+        if !target_platforms
+            .iter()
+            .any(|platform| platform == profile.platform.as_str())
+        {
+            return Err(format!("platform profile {id} is not declared by target {target}").into());
+        }
+        validate_host_profile(&profile)?;
+        selected.push(profile);
+    }
+    selected.sort_by(|left, right| left.id.cmp(&right.id));
+    if selected.is_empty() {
+        return Err("platform_profiles must contain at least one selected profile".into());
+    }
+    Ok(Some(CookedPlatformProfiles {
+        schema: "astra.platform_profiles.v1".to_string(),
+        profiles: selected,
+    }))
 }
 
 fn read_cook_manifest(cooked: &std::path::Path) -> Result<CookManifest, CliError> {
@@ -1742,12 +1663,16 @@ fn build_standalone_bundle(
     target: &str,
     profile: &str,
     platform: PlatformId,
+    artifacts: &BundleArtifactInputs,
 ) -> Result<StandaloneBundleManifest, CliError> {
     let platform_name = platform_id_name(platform);
     let package_bytes = fs::read(package)?;
     let reader = PackageReader::open(&package_bytes)?;
     let package_manifest: PackageManifest =
         reader.container().decode_postcard("package.manifest")?;
+    if !reader.has_section("platform.profiles") {
+        return Err("standalone bundle requires cooked platform.profiles".into());
+    }
     if package_manifest.profile != profile {
         return Err(format!(
             "bundle profile {profile} does not match package profile {}",
@@ -1777,8 +1702,6 @@ fn build_standalone_bundle(
     let bundled_package = out.join("package").join("nativevn.astrapkg");
     fs::write(&bundled_package, &package_bytes)?;
     let scenario_refs = package_scenario_refs(&reader);
-    let mut scenario_json_refs = BTreeMap::new();
-    let mut web_route_model = None;
     let mut files = vec![bundle_file(
         "package/nativevn.astrapkg",
         "package",
@@ -1799,36 +1722,26 @@ fn build_standalone_bundle(
         }
         fs::write(&destination, &scenario_bytes)?;
         files.push(bundle_file(scenario_ref, "scenario_ref", &scenario_bytes));
-        if platform == PlatformId::Web {
-            let scenario: Scenario = serde_yaml::from_slice(&scenario_bytes)?;
-            let json_ref = scenario_json_ref(scenario_ref)?;
-            let json_bytes = serde_json::to_vec_pretty(&scenario)?;
-            let destination = out.join(&json_ref);
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::write(&destination, &json_bytes)?;
-            files.push(bundle_file(&json_ref, "scenario_ref_json", &json_bytes));
-            scenario_json_refs.insert(scenario_ref.clone(), json_ref);
-        }
     }
 
     let entrypoint = match platform {
         PlatformId::Windows => {
             let entrypoint = "AstraPlayer.exe";
-            let current_exe = std::env::current_exe()?;
-            let exe_bytes = fs::read(&current_exe)?;
+            let player_source = artifacts.windows_player.as_deref().ok_or(
+                "Windows bundle requires --windows-player pointing to a built AstraPlayer.exe",
+            )?;
+            let exe_bytes = fs::read(player_source)?;
             let entrypoint_path = out.join(entrypoint);
             fs::write(&entrypoint_path, &exe_bytes)?;
             make_executable(&entrypoint_path)?;
             files.push(bundle_file(entrypoint, "windows_player", &exe_bytes));
 
             let reporter_name = "AstraCrashReporter.exe";
-            let reporter_source = current_exe.with_file_name(reporter_name);
-            let reporter_bytes = fs::read(&reporter_source).map_err(|_| {
-                "Windows release bundle requires the built AstraCrashReporter.exe sibling"
-            })?;
-            let reporter_self_test = std::process::Command::new(&reporter_source)
+            let reporter_source = artifacts.crash_reporter.as_deref().ok_or(
+                "Windows bundle requires --crash-reporter pointing to a built AstraCrashReporter.exe",
+            )?;
+            let reporter_bytes = fs::read(reporter_source)?;
+            let reporter_self_test = std::process::Command::new(reporter_source)
                 .arg("--self-test")
                 .output()?;
             if !reporter_self_test.status.success() {
@@ -1877,7 +1790,7 @@ fn build_standalone_bundle(
             let index = br#"<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>AstraVN Player</title></head>
-<body><main id="astra-root" data-package="package/nativevn.astrapkg" data-astra-status="booting"></main><script src="astra-player.js"></script></body>
+<body><canvas id="astra-player"></canvas><script type="module" src="astra-player-loader.js"></script></body>
 </html>
 "#;
             fs::write(out.join(entrypoint), index)?;
@@ -1895,20 +1808,31 @@ fn build_standalone_bundle(
                 &config,
             ));
 
-            let compiled: CompiledStory =
-                reader.container().decode_postcard("vn.compiled_story")?;
-            let route_model = serde_json::to_vec_pretty(&compiled)?;
-            fs::write(out.join("AstraPlayer.route_model.json"), &route_model)?;
-            files.push(bundle_file(
-                "AstraPlayer.route_model.json",
-                "web_route_model",
-                &route_model,
-            ));
-            web_route_model = Some("AstraPlayer.route_model.json".to_string());
-
-            let script = web_player_script();
-            fs::write(out.join("astra-player.js"), script)?;
-            files.push(bundle_file("astra-player.js", "web_player", script));
+            for (source, destination, role, missing) in [
+                (
+                    artifacts.web_player_wasm.as_deref(),
+                    "astra_player_web_bg.wasm",
+                    "web_player_wasm",
+                    "Web bundle requires --web-player-wasm",
+                ),
+                (
+                    artifacts.web_player_loader.as_deref(),
+                    "astra-player-loader.js",
+                    "web_player_loader",
+                    "Web bundle requires --web-player-loader",
+                ),
+                (
+                    artifacts.web_audio_worklet.as_deref(),
+                    "astra-audio-worklet.js",
+                    "web_audio_worklet",
+                    "Web bundle requires --web-audio-worklet",
+                ),
+            ] {
+                let source = source.ok_or(missing)?;
+                let bytes = fs::read(source)?;
+                fs::write(out.join(destination), &bytes)?;
+                files.push(bundle_file(destination, role, &bytes));
+            }
             entrypoint.to_string()
         }
         PlatformId::Linux | PlatformId::Macos | PlatformId::Ios | PlatformId::Android => {
@@ -1925,8 +1849,6 @@ fn build_standalone_bundle(
         package_hash: Hash256::from_sha256(&package_bytes).to_string(),
         package: "package/nativevn.astrapkg".to_string(),
         scenario_refs,
-        scenario_json_refs,
-        web_route_model,
         mount_policy,
         observability: BundleObservabilityEvidence {
             log_schema: astra_observability::LOG_EVENT_SCHEMA.to_string(),
@@ -2015,18 +1937,6 @@ fn validate_player_display_config(display: &PlayerDisplayConfig) -> Result<(), C
     Ok(())
 }
 
-fn scenario_json_ref(scenario_ref: &str) -> Result<String, CliError> {
-    let relative = validate_bundle_relative_path(scenario_ref)?;
-    let file_name = relative
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(str::to_string)
-        .ok_or("scenario ref must have a file name")?;
-    let mut json_ref = relative;
-    json_ref.set_file_name(format!("{file_name}.json"));
-    Ok(normalize_relative_path(&json_ref))
-}
-
 fn bundle_mount_policy(
     reader: &PackageReader,
     out: &Path,
@@ -2048,1561 +1958,6 @@ fn bundle_mount_policy(
     Ok(Some(path.to_string()))
 }
 
-fn web_player_script() -> &'static [u8] {
-    br#"const astraLogSession = globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : `web-${Date.now()}`;
-const astraLogRing = [];
-let astraLogBytes = 0;
-globalThis.__astraLogRing = astraLogRing;
-
-function astraLog(level, event, fields = {}) {
-  const record = {
-    schema: "astra.log_event.v1",
-    timestamp: new Date().toISOString(),
-    level,
-    target: "astra_web_player",
-    event,
-    session_id: astraLogSession,
-    process_role: "player",
-    thread: "browser_main",
-    fields
-  };
-  const encoded = JSON.stringify(record);
-  astraLogRing.push(encoded);
-  astraLogBytes += encoded.length;
-  while (astraLogRing.length > 4096 || astraLogBytes > 4 * 1024 * 1024) {
-    astraLogBytes -= astraLogRing.shift().length;
-  }
-  (level === "ERROR" ? console.error : level === "WARN" ? console.warn : console.info)(encoded);
-}
-
-globalThis.addEventListener("error", () => astraLog("ERROR", "player.web.unhandled_error", { diagnostic_code: "ASTRA_WEB_UNHANDLED_ERROR" }));
-globalThis.addEventListener("unhandledrejection", () => astraLog("ERROR", "player.web.unhandled_rejection", { diagnostic_code: "ASTRA_WEB_UNHANDLED_REJECTION" }));
-
-async function astraBoot() {
-  astraLog("INFO", "player.web.boot.start");
-  const root = document.getElementById("astra-root");
-  try {
-    const manifest = await fetchJson("bundle_manifest.json");
-    const config = await fetchJson("AstraPlayer.config.json");
-    const route = new URLSearchParams(window.location.search).get("route");
-    const packageBytes = await fetchBytes(manifest.package);
-    const packageHash = await sha256(packageBytes);
-    const launch = launchReport(manifest, config, packageHash);
-    root.dataset.astraStatus = launch.status;
-    root.dataset.astraTarget = manifest.target;
-    root.dataset.astraProfile = manifest.profile;
-    root.dataset.astraPlatform = manifest.platform;
-    if (route) {
-      const scenarioPath = manifest.scenario_json_refs && manifest.scenario_json_refs[route];
-      if (!scenarioPath) throw new Error("route scenario is not listed in bundle scenario refs");
-      const model = await fetchJson(manifest.web_route_model);
-      const scenario = await fetchJson(scenarioPath);
-      const mountPolicyBytes = manifest.mount_policy ? await fetchBytes(manifest.mount_policy) : null;
-      const mountPolicy = mountPolicyBytes ? JSON.parse(new TextDecoder().decode(mountPolicyBytes)) : null;
-      const mountPolicyHash = mountPolicyBytes ? await sha256(mountPolicyBytes) : "";
-      const report = await runRoute(manifest, config, launch, model, scenario, route, mountPolicy, mountPolicyHash, mountPolicyBytes ? mountPolicyBytes.length : 0);
-      root.dataset.astraStatus = report.status;
-      appendReport(report);
-    } else {
-      appendReport(launch);
-    }
-    astraLog("INFO", "player.web.boot.complete", { status: root.dataset.astraStatus });
-  } catch (error) {
-    const report = {
-      schema: "astra.player_route_report.v1",
-      status: "blocked",
-      target: root.dataset.astraTarget || "",
-      profile: root.dataset.astraProfile || "",
-      platform: root.dataset.astraPlatform || "web",
-      input_surface: "web_player",
-      package_hash: "",
-      entrypoint: "index.html",
-      scenario: new URLSearchParams(window.location.search).get("route") || "",
-      checks: [{ id: "player.web.exception", status: "blocked" }],
-      diagnostics: [{ code: "ASTRA_WEB_PLAYER_EXCEPTION", severity: "blocking", message: String(error && error.message || error) }]
-    };
-    root.dataset.astraStatus = "blocked";
-    appendReport(report);
-  }
-}
-
-async function fetchJson(path) {
-  const response = await fetch(path, { cache: "no-store" });
-  if (!response.ok) throw new Error("fetch failed: " + path);
-  return await response.json();
-}
-
-async function fetchBytes(path) {
-  const response = await fetch(path, { cache: "no-store" });
-  if (!response.ok) throw new Error("fetch failed: " + path);
-  return new Uint8Array(await response.arrayBuffer());
-}
-
-async function sha256(bytes) {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return "sha256:" + hex(new Uint8Array(digest));
-}
-
-async function hash128(value) {
-  const encoded = new TextEncoder().encode(stableJson(value));
-  const digest = await crypto.subtle.digest("SHA-256", encoded);
-  return "hash128:" + hex(new Uint8Array(digest).slice(0, 16));
-}
-
-function hex(bytes) {
-  return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function stableJson(value) {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return "[" + value.map(stableJson).join(",") + "]";
-  return "{" + Object.keys(value).sort().map((key) => JSON.stringify(key) + ":" + stableJson(value[key])).join(",") + "}";
-}
-
-function launchReport(manifest, config, packageHash) {
-  const checks = [
-    { id: "package.hash", status: packageHash === manifest.package_hash ? "pass" : "blocked" },
-    { id: "target.manifest", status: manifest.target && manifest.profile && manifest.platform === "web" ? "pass" : "blocked" },
-    { id: "player.web.host", status: "pass" },
-    { id: "player.input_surface", status: "pass" }
-  ];
-  if (config.schema !== "astra.player_config.v2" || manifest.schema !== "astra.standalone_bundle_manifest.v2" || config.target !== manifest.target || config.profile !== manifest.profile || config.platform !== manifest.platform || config.package !== manifest.package || !config.observability) {
-    checks.push({ id: "player.config", status: "blocked" });
-  } else {
-    checks.push({ id: "player.config", status: "pass" });
-  }
-  return {
-    schema: "astra.player_launch_report.v1",
-    status: checks.every((check) => check.status === "pass") ? "ready" : "blocked",
-    target: manifest.target,
-    profile: manifest.profile,
-    platform: manifest.platform,
-    package_hash: packageHash,
-    entrypoint: manifest.entrypoint,
-    checks
-  };
-}
-
-async function runRoute(manifest, config, launch, model, scenario, scenarioRef, mountPolicy, mountPolicyHash, mountPolicyByteSize) {
-  const run = runScenario(model, scenario, false);
-  let replayMatch = false;
-  if (run.replayActions.length > 0) {
-    const replay = runScenario(model, { ...scenario, actions: run.replayActions }, true);
-    replayMatch = stableJson(run.state) === stableJson(replay.state);
-  }
-  const diagnostics = run.diagnostics.slice();
-  const assertionChecks = checkAssertions(scenario, run, replayMatch, diagnostics);
-  const hashes = {
-    state: await hash128(run.state),
-    event: await hash128(run.events),
-    presentation: await hash128(run.presentation)
-  };
-  const scenarioChecks = [
-    { id: "runtime.determinism", status: replayMatch ? "pass" : "blocked" },
-    { id: "save.load.replay", status: run.saved ? "pass" : "blocked" },
-    { id: "package.target_refs", status: "pass" },
-    { id: "vn.route_coverage", status: diagnostics.some((diagnostic) => diagnostic.code.startsWith("ASTRA_VN_ROUTE")) ? "blocked" : "pass" },
-    { id: "player_route.full", status: diagnostics.some((diagnostic) => diagnostic.code.startsWith("ASTRA_VN_PLAYER")) ? "blocked" : "pass" },
-    { id: "scenario.schema", status: "pass" },
-    ...assertionChecks
-  ];
-  const scenarioStatus = scenarioChecks.every((check) => check.status === "pass") && diagnostics.length === 0 ? "pass" : "blocked";
-  const scenarioReport = {
-    schema: "astra.scenario_report.v1",
-    stage: scenario.stage || "stage3-astra-vn",
-    package: scenario.package || manifest.package,
-    target: config.target,
-    profile: config.profile,
-    platform: config.platform,
-    generated_route_id: scenario.generated_route_id || null,
-    status: scenarioStatus,
-    hashes,
-    checks: scenarioChecks,
-    unsupported_actions: [],
-    unsupported_assertions: [],
-    release_gate_checks: [],
-    diagnostics
-  };
-  const checks = [
-    ...launch.checks,
-    { id: "player.bundle.ready", status: launch.status === "ready" ? "pass" : "blocked" },
-    { id: "player.input_surface", status: "pass" },
-    { id: "player.route.full", status: scenarioStatus === "pass" ? "pass" : "blocked" },
-    { id: "player.web.dom_report", status: "pass" },
-    ...mountPolicyChecks(manifest, scenario, mountPolicy, mountPolicyHash, mountPolicyByteSize)
-  ];
-  return {
-    schema: "astra.player_route_report.v1",
-    status: checks.every((check) => check.status === "pass") ? "pass" : "blocked",
-    target: manifest.target,
-    profile: manifest.profile,
-    platform: manifest.platform,
-    input_surface: "web_player",
-    package_hash: launch.package_hash,
-    entrypoint: manifest.entrypoint,
-    scenario: scenarioRef,
-    checks,
-    scenario_report: scenarioReport
-  };
-}
-
-function mountPolicyChecks(manifest, scenario, mountPolicy, mountPolicyHash, mountPolicyByteSize) {
-  if (!String(manifest.target || "").startsWith("tsuinosora-")) return [];
-  const policyOk = mountPolicyMatches(mountPolicy, manifest.target, scenario);
-  const hashOk = bundleFileHashMatches(manifest, manifest.mount_policy, "mount_policy", mountPolicyHash, mountPolicyByteSize);
-  const hasMountProbes = Array.isArray(scenario.mount_probes) && scenario.mount_probes.length > 0;
-  const hasMountAssets = Array.isArray(scenario.mount_assets) && scenario.mount_assets.length > 0;
-  const probeOk = !hasMountProbes;
-  const assetOk = !hasMountAssets;
-  const checks = [
-    { id: "player.mount_policy", status: policyOk ? "pass" : "blocked" },
-    { id: "player.mount_policy_hash", status: hashOk ? "pass" : "blocked" }
-  ];
-  if (manifest.target === "tsuinosora-patch-game") {
-    if (hasMountProbes) checks.push({ id: "player.patch_mount_probe", status: "blocked" });
-    if (hasMountAssets) checks.push({ id: "player.patch_mount_asset", status: "blocked" });
-    const directReadOk = policyOk && hashOk && probeOk && assetOk && manifest.mount_policy === "AstraPlayer.mount_policy.json" && Object.keys(scenario.mount_aliases || {}).length > 0;
-    checks.push({ id: "player.patch_direct_read", status: directReadOk ? "pass" : "blocked" });
-  }
-  return checks;
-}
-
-function bundleFileHashMatches(manifest, path, role, hash, byteSize) {
-  if (!path || !hash) return false;
-  return Array.isArray(manifest.files) && manifest.files.some((entry) =>
-    entry.path === path && entry.role === role && entry.hash === hash && entry.byte_size === byteSize
-  );
-}
-
-function mountPolicyMatches(policy, target, scenario) {
-  if (!policy || hasLocalPathLike(policy)) return false;
-  if (policy.schema !== "tsuinosora.mount_policy.v1" || policy.target !== target || policy.status !== "pass") return false;
-  if (!Array.isArray(policy.aliases) || policy.aliases.length === 0) return false;
-  for (const [alias, value] of Object.entries(scenario.mount_aliases || {})) {
-    const found = policy.aliases.some((entry) => entry.alias === alias && entry.value === value && entry.hash_policy === "manifest_required" && entry.fallback === "blocking");
-    if (!found) return false;
-  }
-  return true;
-}
-
-function hasLocalPathLike(value) {
-  if (typeof value === "string") {
-    return value.startsWith("/") || value.startsWith("\\\\") || /[A-Za-z]:/.test(value) || value.split(/[\\/]/).includes("..");
-  }
-  if (Array.isArray(value)) return value.some(hasLocalPathLike);
-  if (value && typeof value === "object") return Object.values(value).some(hasLocalPathLike);
-  return false;
-}
-
-function runScenario(model, scenario, replayMode) {
-  const player = createPlayer(model, scenario.locale || "zh-Hans");
-  const replayActions = [];
-  for (const action of scenario.actions || []) {
-    if (present(action.replay_from_start)) continue;
-    if (!replayMode) replayActions.push(action);
-    applyScenarioAction(player, action);
-  }
-  return { ...player, replayActions };
-}
-
-function createPlayer(model, locale) {
-  return {
-    model,
-    state: {
-      profile: "classic",
-      locale,
-      current_story: null,
-      current_state: null,
-      command_cursor: 0,
-      call_stack: [],
-      pending_choice: null,
-      pending_wait: null,
-      variables: {},
-      backlog: [],
-      read_state: [],
-      voice_replay: {},
-      route_coverage: [],
-      system: { auto_enabled: false, skip_mode: "none", config: {}, gallery_unlocks: [], replay_unlocks: [] }
-    },
-    saved: null,
-    saves: {},
-    events: [],
-    presentation: [],
-    diagnostics: []
-  };
-}
-
-function applyScenarioAction(player, action) {
-  if (present(action.launch)) return launch(player);
-  if (present(action.player_input)) return playerInput(player, action.player_input);
-  if (present(action.open_system)) {
-    player.presentation.push({ SystemPage: { page: action.open_system } });
-    return;
-  }
-  if (present(action.save)) {
-    player.saves[action.save] = clone(player.state);
-    player.saved = action.save;
-    return;
-  }
-  if (present(action.load)) {
-    if (player.saves[action.load]) player.state = clone(player.saves[action.load]);
-    else diagnostic(player, "ASTRA_VN_PLAYER_LOAD_MISSING", "save slot is not available");
-  }
-}
-
-function playerInput(player, input) {
-  switch (input.kind) {
-    case "advance": return runUntilBlocked(player);
-    case "choose": return choose(player, input.value || "");
-    case "complete_wait": return completeWait(player, input.value || "");
-    case "replay_voice":
-      if (!player.state.voice_replay[input.value || ""]) diagnostic(player, "ASTRA_VN_PLAYER_VOICE_REPLAY_MISSING", "voice replay entry is not available");
-      return;
-    case "open_system":
-      player.presentation.push({ SystemPage: { page: input.value || "" } });
-      return;
-    case "save":
-      player.saves[input.slot || "default"] = clone(player.state);
-      player.saved = input.slot || "default";
-      return;
-    case "load":
-      if (player.saves[input.slot || "default"]) player.state = clone(player.saves[input.slot || "default"]);
-      else diagnostic(player, "ASTRA_VN_PLAYER_LOAD_MISSING", "save slot is not available");
-      return;
-    case "set_auto":
-      player.state.system.auto_enabled = String(input.value).toLowerCase() === "true";
-      return;
-    case "set_skip":
-      player.state.system.skip_mode = input.value || "none";
-      return;
-    case "set_config":
-      player.state.system.config[input.key || ""] = input.value || "";
-      return;
-    case "unlock_gallery":
-      addUnique(player.state.system.gallery_unlocks, input.value || "");
-      return;
-    case "unlock_replay":
-      addUnique(player.state.system.replay_unlocks, input.value || "");
-      return;
-    default:
-      diagnostic(player, "ASTRA_VN_PLAYER_INPUT_UNSUPPORTED", "unsupported player input: " + input.kind);
-  }
-}
-
-function launch(player) {
-  const story = (player.model.stories || []).find((candidate) => candidate.id === "story.main") || (player.model.stories || [])[0];
-  const stateId = (story.states || []).find((candidate) => candidate === "state.prologue") || (story.states || [])[0];
-  player.state.current_story = story.id;
-  player.state.current_state = stateId;
-  player.state.command_cursor = 0;
-  player.state.call_stack = [];
-  player.state.pending_choice = null;
-  player.state.pending_wait = null;
-  reach(player, stateId);
-  runUntilBlocked(player);
-}
-
-function runUntilBlocked(player) {
-  while (!player.state.pending_wait) {
-    const command = commandAtCursor(player);
-    if (!command) return;
-    const [variant, value] = enumVariant(command);
-    switch (variant) {
-      case "Dialogue":
-        if (player.state.system.skip_mode === "read" && player.state.read_state.includes(value.id)) {
-          player.state.command_cursor += 1;
-          break;
-        }
-        player.state.command_cursor += 1;
-        player.state.backlog.push({ command_id: value.id, key: value.key, speaker: value.speaker || null, voice: value.voice || null, state_id: player.state.current_state, read: true });
-        addUnique(player.state.read_state, value.id);
-        if (value.voice) player.state.voice_replay[value.voice] = { voice: value.voice, line_key: value.key, speaker: value.speaker || null };
-        player.presentation.push({ Dialogue: { key: value.key, speaker: value.speaker || null, voice: value.voice || null } });
-        return;
-      case "Choice":
-        player.state.command_cursor += 1;
-        player.state.pending_choice = { choice_id: value.id, key: value.key, options: value.options || [] };
-        player.presentation.push({ Choice: { key: value.key, options: value.options || [] } });
-        return;
-      case "Jump":
-        player.state.command_cursor += 1;
-        transition(player, value.target);
-        break;
-      case "Call":
-        player.state.command_cursor += 1;
-        player.state.call_stack.push({ story_id: player.state.current_story, state_id: player.state.current_state, command_cursor: player.state.command_cursor });
-        transition(player, value.target);
-        break;
-      case "Return": {
-        player.state.command_cursor += 1;
-        const frame = player.state.call_stack.pop();
-        if (!frame) return diagnostic(player, "ASTRA_VN_RETURN_STACK", "return command has no call frame");
-        player.state.current_story = frame.story_id;
-        player.state.current_state = frame.state_id;
-        player.state.command_cursor = frame.command_cursor;
-        break;
-      }
-      case "Mutate":
-        player.state.command_cursor += 1;
-        mutate(player, value);
-        break;
-      case "SystemPage":
-        player.state.command_cursor += 1;
-        player.presentation.push({ SystemPage: { page: value.page } });
-        return;
-      case "Presentation": {
-        player.state.command_cursor += 1;
-        player.presentation.push(value.command);
-        const wait = waitFromPresentation(value.id, value.command);
-        if (wait) {
-          player.state.pending_wait = wait;
-          return;
-        }
-        break;
-      }
-      case "Wait":
-        player.state.command_cursor += 1;
-        player.state.pending_wait = { fence: value.fence, command_id: value.id };
-        return;
-      default:
-        diagnostic(player, "ASTRA_VN_PLAYER_COMMAND_UNSUPPORTED", "unsupported command: " + variant);
-        return;
-    }
-  }
-}
-
-function choose(player, optionId) {
-  const pending = player.state.pending_choice;
-  if (!pending) return diagnostic(player, "ASTRA_VN_CHOICE_MISSING", "choice input was supplied without a pending choice");
-  const option = pending.options.find((candidate) => candidate.id === optionId || candidate.key === optionId);
-  if (!option) return diagnostic(player, "ASTRA_VN_CHOICE_OPTION", "choice option is not available");
-  player.state.pending_choice = null;
-  transition(player, option.target);
-  runUntilBlocked(player);
-}
-
-function completeWait(player, fence) {
-  if (!player.state.pending_wait) return diagnostic(player, "ASTRA_VN_WAIT_MISSING", "await completion was supplied without a pending wait state");
-  if (player.state.pending_wait.fence !== fence) return diagnostic(player, "ASTRA_VN_WAIT_FENCE", "await completion fence does not match pending fence");
-  player.state.pending_wait = null;
-  runUntilBlocked(player);
-}
-
-function commandAtCursor(player) {
-  const state = player.model.states[player.state.current_state];
-  if (!state) return null;
-  const commands = [];
-  for (const scene of state.scenes || []) commands.push(...(scene.commands || []));
-  return commands[player.state.command_cursor] || null;
-}
-
-function transition(player, target) {
-  const stateIds = Object.keys(player.model.states || {});
-  let resolved = target;
-  if (!player.model.states[resolved]) {
-    const suffix = target.startsWith("state.") ? target : "state." + target;
-    resolved = stateIds.find((id) => id === suffix || id.endsWith("." + target)) || target;
-  }
-  reach(player, resolved);
-  if (player.model.states[resolved]) {
-    player.state.current_state = resolved;
-    player.state.command_cursor = 0;
-  }
-}
-
-function waitFromPresentation(id, command) {
-  const [variant, value] = enumVariant(command);
-  if (variant !== "Stage") return null;
-  const attrs = value.attributes || {};
-  if (value.command === "movie" && (attrs.end === "wait" || attrs.wait_for === "end")) return { fence: attrs.fence || id + ".end", command_id: id };
-  if (value.command === "voice" && (attrs.sync === "text" || attrs.sync === "fence" || attrs.wait === "true")) return { fence: attrs.fence || id + ".end", command_id: id };
-  if (value.command === "timeline" && (attrs.join === "wait" || attrs.join === "block")) return { fence: attrs.fence || id + ".complete", command_id: id };
-  return null;
-}
-
-function mutate(player, value) {
-  const scope = value.scope || "global";
-  player.state.variables[scope] = player.state.variables[scope] || {};
-  const current = player.state.variables[scope][value.key] || 0;
-  if (value.op === "Set") player.state.variables[scope][value.key] = value.value || 0;
-  else if (value.op === "Add") player.state.variables[scope][value.key] = current + (value.value || 0);
-  else if (value.op === "Sub") player.state.variables[scope][value.key] = current - (value.value || 0);
-}
-
-function checkAssertions(scenario, run, replayMatch, diagnostics) {
-  const checks = [];
-  for (const assertion of scenario.assertions || []) {
-    if (assertion.coverage) {
-      for (const route of assertion.coverage.routes || []) if (!run.state.route_coverage.includes(route)) diagnostic(run, "ASTRA_VN_ROUTE_COVERAGE_MISSING", "route coverage is missing: " + route);
-      for (const key of assertion.coverage.backlog_keys || []) if (!run.state.backlog.some((entry) => entry.key === key)) diagnostic(run, "ASTRA_VN_BACKLOG_COVERAGE_MISSING", "backlog key is missing: " + key);
-      for (const key of assertion.coverage.read_state || []) if (!run.state.read_state.includes(key)) diagnostic(run, "ASTRA_VN_READ_STATE_MISSING", "read state is missing: " + key);
-      for (const key of assertion.coverage.voice_replay || []) if (!run.state.voice_replay[key]) diagnostic(run, "ASTRA_VN_VOICE_REPLAY_MISSING", "voice replay is missing: " + key);
-      checks.push({ id: "assert.coverage", status: "pass" });
-    }
-    if (assertion.system_state) {
-      const system = assertion.system_state;
-      if (system.auto_enabled !== undefined && run.state.system.auto_enabled !== system.auto_enabled) diagnostic(run, "ASTRA_VN_SYSTEM_AUTO", "auto state mismatch");
-      if (system.skip_mode !== undefined && run.state.system.skip_mode !== system.skip_mode) diagnostic(run, "ASTRA_VN_SYSTEM_SKIP", "skip mode mismatch");
-      for (const [key, value] of Object.entries(system.config || {})) if (run.state.system.config[key] !== value) diagnostic(run, "ASTRA_VN_SYSTEM_CONFIG", "config mismatch: " + key);
-      for (const key of system.gallery_unlocks || []) if (!run.state.system.gallery_unlocks.includes(key)) diagnostic(run, "ASTRA_VN_SYSTEM_GALLERY", "gallery unlock is missing: " + key);
-      for (const key of system.replay_unlocks || []) if (!run.state.system.replay_unlocks.includes(key)) diagnostic(run, "ASTRA_VN_SYSTEM_REPLAY", "replay unlock is missing: " + key);
-      checks.push({ id: "assert.system_state", status: "pass" });
-    }
-    if (assertion.replay_hash_match === true) checks.push({ id: "assert.replay_hash_match", status: replayMatch ? "pass" : "blocked" });
-    if (assertion.no_blocking_diagnostics === true) checks.push({ id: "assert.no_blocking_diagnostics", status: diagnostics.length === 0 ? "pass" : "blocked" });
-  }
-  return checks;
-}
-
-function enumVariant(value) {
-  const key = Object.keys(value)[0];
-  return [key, value[key]];
-}
-
-function reach(player, stateId) {
-  addUnique(player.state.route_coverage, stateId);
-}
-
-function addUnique(list, value) {
-  if (value && !list.includes(value)) list.push(value);
-}
-
-function diagnostic(player, code, message) {
-  player.diagnostics.push({ code, severity: "blocking", message });
-}
-
-function clone(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
-function appendReport(report) {
-  const old = document.getElementById("astra-route-report");
-  if (old) old.remove();
-  const node = document.createElement("script");
-  node.type = "application/json";
-  node.id = "astra-route-report";
-  node.textContent = JSON.stringify(report);
-  document.body.appendChild(node);
-}
-
-function present(value) {
-  return value !== undefined && value !== null;
-}
-
-astraBoot().catch((error) => {
-  const root = document.getElementById("astra-root");
-  root.dataset.astraStatus = "blocked";
-  astraLog("ERROR", "player.web.boot.failed", { diagnostic_code: "ASTRA_WEB_PLAYER_EXCEPTION" });
-});
-"#
-}
-
-fn should_auto_launch_player() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|path| path.file_stem().map(|stem| stem.to_owned()))
-        .and_then(|stem| stem.to_str().map(str::to_string))
-        .is_some_and(|stem| stem.eq_ignore_ascii_case("AstraPlayer"))
-}
-
-fn run_bundled_player(args: impl IntoIterator<Item = OsString>) -> Result<String, CliError> {
-    let args = args
-        .into_iter()
-        .map(|arg| {
-            arg.into_string()
-                .map_err(|_| "player arguments must be valid UTF-8".into())
-        })
-        .collect::<Result<Vec<String>, CliError>>()?;
-    if args.is_empty() {
-        run_bundled_player_live_window()?;
-        return Ok(String::new());
-    }
-    if args == ["--launch-report"] {
-        return Ok(serde_json::to_string_pretty(&launch_bundled_player()?)?);
-    }
-    let args = parse_player_route_args(&args)?;
-    let report = run_bundled_player_route(&args.scenario, &args.mount_roots)?;
-    encode_player_route_report(&report, args.format)
-}
-
-fn run_bundled_player_live_window() -> Result<(), CliError> {
-    let launch_report = launch_bundled_player()?;
-    if launch_report.status != "ready" {
-        return Err(
-            "bundled player cannot open live window because launch validation failed".into(),
-        );
-    }
-    let config = read_player_config()?;
-    validate_player_display_requirement(&launch_report.target, &config)?;
-    let preview_frame = load_live_window_preview_frame(config.display.as_ref())?;
-    live_window::run(&launch_report, preview_frame, config.display.as_ref())
-}
-
-fn load_live_window_preview_frame(
-    display: Option<&PlayerDisplayConfig>,
-) -> Result<Option<LiveWindowFrame>, CliError> {
-    let manifest = read_standalone_bundle_manifest()?;
-    let package_bytes = fs::read(&manifest.package)?;
-    let reader = PackageReader::open(&package_bytes)?;
-    let catalog: serde_json::Value =
-        serde_json::from_slice(&reader.container().read_section("asset.catalog")?)?;
-    let vfs_manifest: serde_json::Value =
-        serde_json::from_slice(&reader.container().read_section("asset.vfs_manifest")?)?;
-    if let Some(display) = display {
-        if !display.preview_layers.is_empty() {
-            return load_display_preview_frame(&reader, &vfs_manifest, display).map(Some);
-        }
-    }
-    if let Some(candidate) = live_window_preview_candidates(&catalog, &vfs_manifest)?
-        .into_iter()
-        .next()
-    {
-        let image = load_preview_image(&reader, &candidate)?;
-        return Ok(Some(LiveWindowFrame::from_rgba_image(image)));
-    }
-    Ok(None)
-}
-
-fn load_display_preview_frame(
-    reader: &PackageReader,
-    vfs_manifest: &serde_json::Value,
-    display: &PlayerDisplayConfig,
-) -> Result<LiveWindowFrame, CliError> {
-    let entries = preview_asset_entries_by_uri(vfs_manifest)?;
-    let width = display.original_resolution.width;
-    let height = display.original_resolution.height;
-    let mut canvas = vec![0u8; width as usize * height as usize * 4];
-    for layer in &display.preview_layers {
-        let Some(asset) = entries.get(&layer.vfs_uri) else {
-            return Err(format!(
-                "display preview layer {} is missing from VFS manifest",
-                layer.vfs_uri
-            )
-            .into());
-        };
-        let image = load_preview_image(reader, asset)?;
-        composite_rgba_layer(&mut canvas, (width, height), &image, (layer.x, layer.y))?;
-    }
-    Ok(LiveWindowFrame::from_rgba(width, height, canvas))
-}
-
-fn load_preview_image(
-    reader: &PackageReader,
-    asset: &LiveWindowPreviewAsset,
-) -> Result<PreviewImage, CliError> {
-    let section = reader.container().read_section(&asset.section_id)?;
-    let hash = Hash256::from_sha256(&section).to_string();
-    if hash != asset.hash {
-        return Err(format!(
-            "live window preview asset hash mismatch for {}",
-            asset.vfs_uri
-        )
-        .into());
-    }
-    if section.len() as u64 != asset.byte_size {
-        return Err(format!(
-            "live window preview asset byte size mismatch for {}",
-            asset.vfs_uri
-        )
-        .into());
-    }
-    let decoded = image::load_from_memory(&section).map_err(|err| {
-        format!(
-            "live window preview asset {} is not decodable image data: {err}",
-            asset.vfs_uri
-        )
-    })?;
-    let rgba = decoded.to_rgba8();
-    let (width, height) = rgba.dimensions();
-    Ok(PreviewImage {
-        width,
-        height,
-        rgba: rgba.into_vec(),
-    })
-}
-
-fn preview_asset_entries_by_uri(
-    vfs_manifest: &serde_json::Value,
-) -> Result<BTreeMap<String, LiveWindowPreviewAsset>, CliError> {
-    let entries = vfs_manifest
-        .get("entries")
-        .and_then(serde_json::Value::as_array)
-        .ok_or("asset.vfs_manifest entries must be an array")?;
-    let mut entry_by_uri = BTreeMap::new();
-    for entry in entries {
-        let Some(vfs_uri) = entry.get("vfs_uri").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let Some(source) = entry.get("source").and_then(serde_json::Value::as_object) else {
-            continue;
-        };
-        if source.get("kind").and_then(serde_json::Value::as_str) != Some("package_section") {
-            continue;
-        }
-        let Some(section_id) = source.get("section_id").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let Some(hash) = entry.get("hash").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let Some(byte_size) = entry.get("size").and_then(serde_json::Value::as_u64) else {
-            continue;
-        };
-        entry_by_uri.insert(
-            vfs_uri.to_string(),
-            LiveWindowPreviewAsset {
-                vfs_uri: vfs_uri.to_string(),
-                section_id: section_id.to_string(),
-                hash: hash.to_string(),
-                byte_size,
-            },
-        );
-    }
-    Ok(entry_by_uri)
-}
-
-fn composite_rgba_layer(
-    canvas: &mut [u8],
-    canvas_size: (u32, u32),
-    layer: &PreviewImage,
-    layer_position: (u32, u32),
-) -> Result<(), CliError> {
-    let (canvas_width, canvas_height) = canvas_size;
-    let (layer_x, layer_y) = layer_position;
-    if layer.rgba.len() != layer.width as usize * layer.height as usize * 4
-        || canvas.len() != canvas_width as usize * canvas_height as usize * 4
-    {
-        return Err("preview layer RGBA buffer has invalid dimensions".into());
-    }
-    if layer_x
-        .checked_add(layer.width)
-        .is_none_or(|right| right > canvas_width)
-        || layer_y
-            .checked_add(layer.height)
-            .is_none_or(|bottom| bottom > canvas_height)
-    {
-        return Err("preview layer is outside the original resolution canvas".into());
-    }
-    for y in 0..layer.height {
-        for x in 0..layer.width {
-            let src = (y as usize * layer.width as usize + x as usize) * 4;
-            let dst = ((layer_y + y) as usize * canvas_width as usize + (layer_x + x) as usize) * 4;
-            let alpha = layer.rgba[src + 3] as u32;
-            if alpha == 255 {
-                canvas[dst..dst + 4].copy_from_slice(&layer.rgba[src..src + 4]);
-            } else if alpha > 0 {
-                let inv_alpha = 255 - alpha;
-                for channel in 0..3 {
-                    canvas[dst + channel] = ((layer.rgba[src + channel] as u32 * alpha
-                        + canvas[dst + channel] as u32 * inv_alpha)
-                        / 255) as u8;
-                }
-                canvas[dst + 3] = 255;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn live_window_preview_candidates(
-    catalog: &serde_json::Value,
-    vfs_manifest: &serde_json::Value,
-) -> Result<Vec<LiveWindowPreviewAsset>, CliError> {
-    let entry_by_uri = preview_asset_entries_by_uri(vfs_manifest)?;
-
-    let assets = catalog
-        .get("assets")
-        .and_then(serde_json::Value::as_array)
-        .ok_or("asset.catalog assets must be an array")?;
-    let mut candidates = Vec::new();
-    for asset in assets {
-        let Some(vfs_uri) = asset.get("vfs_uri").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        if !is_live_preview_image_uri(vfs_uri) {
-            continue;
-        }
-        let Some(entry) = entry_by_uri.get(vfs_uri) else {
-            return Err(
-                format!("asset catalog entry {vfs_uri} is missing from VFS manifest").into(),
-            );
-        };
-        candidates.push(entry.clone());
-    }
-    candidates.sort_by(|left, right| {
-        live_preview_rank(right)
-            .cmp(&live_preview_rank(left))
-            .then_with(|| right.byte_size.cmp(&left.byte_size))
-            .then_with(|| left.vfs_uri.cmp(&right.vfs_uri))
-    });
-    Ok(candidates)
-}
-
-fn is_live_preview_image_uri(vfs_uri: &str) -> bool {
-    let lower = vfs_uri.to_ascii_lowercase();
-    lower.ends_with(".png")
-        || lower.ends_with(".jpg")
-        || lower.ends_with(".jpeg")
-        || lower.ends_with(".webp")
-}
-
-fn live_preview_rank(asset: &LiveWindowPreviewAsset) -> u32 {
-    let uri = asset.vfs_uri.to_ascii_lowercase();
-    let mut score = 0;
-    if uri.contains("title") {
-        score += 1_000;
-    }
-    if uri.contains("/menu/") {
-        score += 800;
-    }
-    if uri.contains("background") || uri.contains("/bg") {
-        score += 400;
-    }
-    if uri.ends_with(".png") {
-        score += 100;
-    }
-    score
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn live_window_preview_candidates_prefer_title_then_menu_assets() {
-        let catalog = serde_json::json!({
-            "schema": "astra.asset_catalog.v1",
-            "assets": [
-                {"vfs_uri": "package:/native-assets/projectorrays/data/MENU/chunks/BITD-444.png"},
-                {"vfs_uri": "package:/native-assets/title/title.png"},
-                {"vfs_uri": "package:/native-assets/projectorrays/data/S/chunks/BITD-1592.png"}
-            ]
-        });
-        let vfs_manifest = serde_json::json!({
-            "schema": "astra.asset_vfs_manifest.v1",
-            "entries": [
-                {
-                    "vfs_uri": "package:/native-assets/projectorrays/data/MENU/chunks/BITD-444.png",
-                    "source": {"kind": "package_section", "section_id": "asset.menu"},
-                    "hash": "sha256:menu",
-                    "size": 590413
-                },
-                {
-                    "vfs_uri": "package:/native-assets/title/title.png",
-                    "source": {"kind": "package_section", "section_id": "asset.title"},
-                    "hash": "sha256:title",
-                    "size": 1024
-                },
-                {
-                    "vfs_uri": "package:/native-assets/projectorrays/data/S/chunks/BITD-1592.png",
-                    "source": {"kind": "package_section", "section_id": "asset.scene"},
-                    "hash": "sha256:scene",
-                    "size": 764301
-                }
-            ]
-        });
-
-        let candidates = live_window_preview_candidates(&catalog, &vfs_manifest).unwrap();
-
-        assert_eq!(candidates[0].section_id, "asset.title");
-        assert_eq!(candidates[1].section_id, "asset.menu");
-        assert_eq!(candidates[2].section_id, "asset.scene");
-    }
-
-    #[test]
-    fn live_window_preview_candidates_require_catalog_entries_in_vfs_manifest() {
-        let catalog = serde_json::json!({
-            "schema": "astra.asset_catalog.v1",
-            "assets": [
-                {"vfs_uri": "package:/native-assets/title/title.png"}
-            ]
-        });
-        let vfs_manifest = serde_json::json!({
-            "schema": "astra.asset_vfs_manifest.v1",
-            "entries": []
-        });
-
-        let err = live_window_preview_candidates(&catalog, &vfs_manifest).unwrap_err();
-
-        assert!(err.to_string().contains("missing from VFS manifest"));
-    }
-}
-
-#[cfg(target_os = "windows")]
-mod live_window {
-    use super::{CliError, LiveWindowFrame, PlayerDisplayConfig, PlayerLaunchReport};
-    use std::{
-        ffi::c_void,
-        ptr,
-        sync::{Mutex, OnceLock},
-    };
-    use windows::{
-        core::{w, PCWSTR},
-        Win32::{
-            Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
-            Graphics::Gdi::{
-                BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, InvalidateRect,
-                SetBkMode, SetStretchBltMode, SetTextColor, StretchDIBits, TextOutW, BITMAPINFO,
-                BITMAPINFOHEADER, BI_RGB, COLORONCOLOR, DIB_RGB_COLORS, HALFTONE, HBRUSH,
-                PAINTSTRUCT, SRCCOPY, TRANSPARENT,
-            },
-            System::LibraryLoader::GetModuleHandleW,
-            UI::WindowsAndMessaging::{
-                AdjustWindowRectEx, CreateWindowExW, DefWindowProcW, DispatchMessageW,
-                GetClientRect, GetMessageW, LoadCursorW, PostQuitMessage, RegisterClassW,
-                ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW,
-                MSG, SW_SHOW, WINDOW_EX_STYLE, WM_DESTROY, WM_KEYUP, WM_LBUTTONUP, WM_PAINT,
-                WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
-            },
-        },
-    };
-
-    static LIVE_FRAME: OnceLock<LiveWindowFrame> = OnceLock::new();
-    static SCALE_FILTER: OnceLock<String> = OnceLock::new();
-    static LIVE_INPUT_STATE: OnceLock<Mutex<LiveInputState>> = OnceLock::new();
-
-    #[derive(Debug, Default)]
-    struct LiveInputState {
-        consumed_sequence: u64,
-    }
-
-    impl LiveInputState {
-        fn consume(&mut self) -> u64 {
-            self.consumed_sequence += 1;
-            self.consumed_sequence
-        }
-    }
-
-    pub fn run(
-        report: &PlayerLaunchReport,
-        preview_frame: Option<LiveWindowFrame>,
-        display: Option<&PlayerDisplayConfig>,
-    ) -> Result<(), CliError> {
-        if let Some(frame) = preview_frame {
-            let _ = LIVE_FRAME.set(frame);
-        }
-        if let Some(display) = display {
-            let _ = SCALE_FILTER.set(display.scale_filter.clone());
-        }
-        let title = format!(
-            "AstraPlayer - {} {} ({})",
-            report.target, report.profile, report.platform
-        );
-        let title_wide = wide_null(&title);
-        let class_name = w!("AstraPlayerLiveWindow");
-        unsafe {
-            let module = GetModuleHandleW(None)?;
-            let instance = HINSTANCE(module.0);
-            let cursor = LoadCursorW(None, IDC_ARROW)?;
-            let window_class = WNDCLASSW {
-                style: CS_HREDRAW | CS_VREDRAW,
-                lpfnWndProc: Some(window_proc),
-                hInstance: instance,
-                hCursor: cursor,
-                hbrBackground: HBRUSH(ptr::null_mut()),
-                lpszClassName: class_name,
-                ..Default::default()
-            };
-            RegisterClassW(&window_class);
-            let style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
-            let (window_width, window_height) = window_size_for_client(display);
-            let hwnd = CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
-                class_name,
-                PCWSTR(title_wide.as_ptr()),
-                style,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                window_width,
-                window_height,
-                None,
-                None,
-                Some(instance),
-                Some(ptr::null::<c_void>()),
-            )?;
-            let _ = ShowWindow(hwnd, SW_SHOW);
-            message_loop()
-        }
-    }
-
-    fn window_size_for_client(display: Option<&PlayerDisplayConfig>) -> (i32, i32) {
-        let client_width = display
-            .map(|config| config.original_resolution.width as i32)
-            .or_else(|| LIVE_FRAME.get().map(|frame| frame.width as i32))
-            .unwrap_or(960);
-        let client_height = display
-            .map(|config| config.original_resolution.height as i32)
-            .or_else(|| LIVE_FRAME.get().map(|frame| frame.height as i32))
-            .unwrap_or(540);
-        let mut rect = RECT {
-            left: 0,
-            top: 0,
-            right: client_width,
-            bottom: client_height,
-        };
-        unsafe {
-            if AdjustWindowRectEx(
-                &mut rect,
-                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-                false,
-                WINDOW_EX_STYLE::default(),
-            )
-            .is_ok()
-            {
-                return (rect.right - rect.left, rect.bottom - rect.top);
-            }
-        }
-        (client_width, client_height)
-    }
-
-    unsafe extern "system" fn window_proc(
-        hwnd: HWND,
-        message: u32,
-        wparam: WPARAM,
-        lparam: LPARAM,
-    ) -> LRESULT {
-        match message {
-            WM_PAINT => {
-                let mut paint = PAINTSTRUCT::default();
-                let hdc = BeginPaint(hwnd, &mut paint);
-                let background = CreateSolidBrush(rgb(0, 0, 0));
-                FillRect(hdc, &paint.rcPaint, background);
-                let _ = DeleteObject(background.into());
-
-                if let Some(frame) = LIVE_FRAME.get() {
-                    paint_frame(hwnd, hdc, frame);
-                } else {
-                    let accent = rgb(0, 196, 204);
-                    SetTextColor(hdc, accent);
-                    SetBkMode(hdc, TRANSPARENT);
-                    let title = wide_text("AstraPlayer");
-                    let subtitle = wide_text("no decodable package image asset");
-                    let _ = TextOutW(hdc, 48, 42, &title);
-                    let _ = TextOutW(hdc, 48, 82, &subtitle);
-                }
-                let _ = EndPaint(hwnd, &paint);
-                LRESULT(0)
-            }
-            WM_KEYUP => consume_input(hwnd, "key_up"),
-            WM_LBUTTONUP => consume_input(hwnd, "pointer_up"),
-            WM_DESTROY => {
-                PostQuitMessage(0);
-                LRESULT(0)
-            }
-            _ => DefWindowProcW(hwnd, message, wparam, lparam),
-        }
-    }
-
-    unsafe fn consume_input(hwnd: HWND, kind: &str) -> LRESULT {
-        let player_sequence = LIVE_INPUT_STATE
-            .get_or_init(|| Mutex::new(LiveInputState::default()))
-            .lock()
-            .map(|mut state| state.consume())
-            .unwrap_or(0);
-        emit_player_trace(&format!(
-            "level=TRACE event=astra.player.input.consumed source=win32.message kind={kind} player_sequence={player_sequence}"
-        ));
-        let _ = InvalidateRect(Some(hwnd), None, false);
-        LRESULT(0)
-    }
-
-    fn emit_player_trace(line: &str) {
-        tracing::trace!("{line}");
-        if std::env::var_os("ASTRA_PLAYER_TRACE").is_some() {
-            eprintln!("{line}");
-        }
-    }
-
-    unsafe fn paint_frame(
-        hwnd: HWND,
-        hdc: windows::Win32::Graphics::Gdi::HDC,
-        frame: &LiveWindowFrame,
-    ) {
-        let mut client = Default::default();
-        if GetClientRect(hwnd, &mut client).is_err() {
-            return;
-        }
-        let client_width = client.right - client.left;
-        let client_height = client.bottom - client.top;
-        if client_width <= 0 || client_height <= 0 || frame.width == 0 || frame.height == 0 {
-            return;
-        }
-        let stretch_mode = match SCALE_FILTER.get().map(String::as_str) {
-            Some("nearest") => COLORONCOLOR,
-            _ => HALFTONE,
-        };
-        let _ = SetStretchBltMode(hdc, stretch_mode);
-        let frame_aspect = frame.width as f32 / frame.height as f32;
-        let client_aspect = client_width as f32 / client_height as f32;
-        let (draw_width, draw_height) = if client_aspect > frame_aspect {
-            let height = client_height;
-            let width = (height as f32 * frame_aspect).round() as i32;
-            (width, height)
-        } else {
-            let width = client_width;
-            let height = (width as f32 / frame_aspect).round() as i32;
-            (width, height)
-        };
-        let draw_x = (client_width - draw_width) / 2;
-        let draw_y = (client_height - draw_height) / 2;
-        let bitmap_info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: frame.width as i32,
-                biHeight: -(frame.height as i32),
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let _ = StretchDIBits(
-            hdc,
-            draw_x,
-            draw_y,
-            draw_width,
-            draw_height,
-            0,
-            0,
-            frame.width as i32,
-            frame.height as i32,
-            Some(frame.bgra.as_ptr() as *const c_void),
-            &bitmap_info,
-            DIB_RGB_COLORS,
-            SRCCOPY,
-        );
-    }
-
-    unsafe fn message_loop() -> Result<(), CliError> {
-        let mut message = MSG::default();
-        loop {
-            let result = GetMessageW(&mut message, None, 0, 0);
-            if result.0 == -1 {
-                return Err("bundled player window message loop failed".into());
-            }
-            if result.0 == 0 {
-                return Ok(());
-            }
-            let _ = TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-    }
-
-    fn wide_null(value: &str) -> Vec<u16> {
-        value.encode_utf16().chain(std::iter::once(0)).collect()
-    }
-
-    fn wide_text(value: &str) -> Vec<u16> {
-        value.encode_utf16().collect()
-    }
-
-    fn rgb(red: u8, green: u8, blue: u8) -> COLORREF {
-        COLORREF(red as u32 | ((green as u32) << 8) | ((blue as u32) << 16))
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-mod live_window {
-    use super::{CliError, LiveWindowFrame, PlayerDisplayConfig, PlayerLaunchReport};
-
-    pub fn run(
-        _report: &PlayerLaunchReport,
-        _preview_frame: Option<LiveWindowFrame>,
-        _display: Option<&PlayerDisplayConfig>,
-    ) -> Result<(), CliError> {
-        Err("bundled live player window is only available on Windows".into())
-    }
-}
-
-struct PlayerRouteArgs {
-    scenario: PathBuf,
-    format: ReportFormat,
-    mount_roots: BTreeMap<String, PathBuf>,
-}
-
-fn parse_player_route_args(args: &[String]) -> Result<PlayerRouteArgs, CliError> {
-    let mut scenario = None;
-    let mut format = ReportFormat::Json;
-    let mut mount_roots = BTreeMap::new();
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "--route-scenario" => {
-                index += 1;
-                let value = args
-                    .get(index)
-                    .ok_or("--route-scenario requires a scenario path")?;
-                scenario = Some(validate_bundle_relative_path(value)?);
-            }
-            "--format" => {
-                index += 1;
-                let value = args.get(index).ok_or("--format requires json or yaml")?;
-                format = match value.as_str() {
-                    "json" => ReportFormat::Json,
-                    "yaml" => ReportFormat::Yaml,
-                    _ => return Err("--format requires json or yaml".into()),
-                };
-            }
-            "--mount-root" => {
-                index += 1;
-                let value = args.get(index).ok_or("--mount-root requires alias=path")?;
-                let (alias, root) = parse_mount_root_arg(value)?;
-                mount_roots.insert(alias, root);
-            }
-            "--help" | "-h" => {
-                return Err(
-                    "AstraPlayer supports --route-scenario <path> [--format json|yaml] [--mount-root alias=path]".into(),
-                );
-            }
-            other => return Err(format!("unsupported player argument: {other}").into()),
-        }
-        index += 1;
-    }
-    let scenario = scenario.ok_or("--route-scenario is required for route mode")?;
-    Ok(PlayerRouteArgs {
-        scenario,
-        format,
-        mount_roots,
-    })
-}
-
-fn parse_mount_root_arg(value: &str) -> Result<(String, PathBuf), CliError> {
-    let (alias, root) = value
-        .split_once('=')
-        .ok_or("--mount-root requires alias=path")?;
-    if !is_safe_mount_alias(alias) || root.trim().is_empty() {
-        return Err("--mount-root requires a safe alias and non-empty path".into());
-    }
-    Ok((alias.to_string(), PathBuf::from(root)))
-}
-
-fn is_safe_mount_alias(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.')
-}
-
-fn encode_player_route_report(
-    report: &PlayerRouteReport,
-    format: ReportFormat,
-) -> Result<String, CliError> {
-    match format {
-        ReportFormat::Json => Ok(serde_json::to_string_pretty(report)?),
-        ReportFormat::Yaml => Ok(serde_yaml::to_string(report)?),
-    }
-}
-
-fn run_bundled_player_route(
-    scenario: &Path,
-    mount_roots: &BTreeMap<String, PathBuf>,
-) -> Result<PlayerRouteReport, CliError> {
-    let manifest = read_standalone_bundle_manifest()?;
-    let config = read_player_config()?;
-    validate_player_config(&manifest, &config)?;
-    let scenario_ref = normalize_relative_path(scenario);
-    if !manifest
-        .scenario_refs
-        .iter()
-        .any(|candidate| candidate == &scenario_ref)
-    {
-        return Err(
-            format!("scenario {scenario_ref} is not listed in bundle scenario refs").into(),
-        );
-    }
-    let launch_report = launch_bundled_player()?;
-    let scenario_text = fs::read_to_string(scenario)?;
-    let scenario_model: Scenario = serde_yaml::from_str(&scenario_text)?;
-    let scenario_report = ScenarioRunner::run_file_with_options(
-        scenario,
-        ScenarioRunOptions {
-            package: Some(PathBuf::from(&config.package)),
-            target: Some(config.target.clone()),
-            profile: Some(config.profile.clone()),
-            platform: Some(config.platform.clone()),
-            headless: false,
-        },
-    )?;
-
-    let scenario_route_pass = scenario_report.status == ScenarioStatus::Pass
-        && scenario_report
-            .checks
-            .iter()
-            .any(|check| check.id == "player_route.full" && check.status == ScenarioStatus::Pass);
-    let mut checks = launch_report.checks.clone();
-    checks.push(PlayerLaunchCheck {
-        id: "player.bundle.ready".to_string(),
-        status: if launch_report.status == "ready" {
-            "pass".to_string()
-        } else {
-            "blocked".to_string()
-        },
-    });
-    checks.push(PlayerLaunchCheck {
-        id: "player.input_surface".to_string(),
-        status: input_surface_for_platform(&manifest.platform)
-            .map(|_| "pass".to_string())
-            .unwrap_or_else(|| "blocked".to_string()),
-    });
-    checks.push(PlayerLaunchCheck {
-        id: "player.route.full".to_string(),
-        status: if scenario_route_pass {
-            "pass".to_string()
-        } else {
-            "blocked".to_string()
-        },
-    });
-    checks.extend(mount_policy_player_checks(
-        &manifest,
-        &scenario_model,
-        mount_roots,
-    )?);
-    let status = if checks.iter().all(|check| check.status == "pass") {
-        "pass"
-    } else {
-        "blocked"
-    };
-
-    Ok(PlayerRouteReport {
-        schema: "astra.player_route_report.v1".to_string(),
-        status: status.to_string(),
-        target: manifest.target,
-        profile: manifest.profile,
-        platform: manifest.platform.clone(),
-        input_surface: input_surface_for_platform(&manifest.platform)
-            .unwrap_or("unknown_player")
-            .to_string(),
-        package_hash: launch_report.package_hash,
-        entrypoint: manifest.entrypoint,
-        scenario: scenario_ref,
-        checks,
-        scenario_report,
-    })
-}
-
-fn input_surface_for_platform(platform: &str) -> Option<&'static str> {
-    match platform {
-        "windows" => Some("windows_player"),
-        "web" => Some("web_player"),
-        _ => None,
-    }
-}
-
-fn mount_policy_player_checks(
-    manifest: &StandaloneBundleManifest,
-    scenario: &Scenario,
-    mount_roots: &BTreeMap<String, PathBuf>,
-) -> Result<Vec<PlayerLaunchCheck>, CliError> {
-    if !manifest.target.starts_with("tsuinosora-") {
-        return Ok(Vec::new());
-    }
-    let mut checks = Vec::new();
-    let Some(policy_path) = &manifest.mount_policy else {
-        return Ok(vec![PlayerLaunchCheck {
-            id: "player.mount_policy".to_string(),
-            status: "blocked".to_string(),
-        }]);
-    };
-    let relative = validate_bundle_relative_path(policy_path)?;
-    let bytes = fs::read(relative)?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-    let policy_ok = mount_policy_matches(&value, &manifest.target, scenario);
-    let hash_ok = bundle_file_hash_matches(manifest, policy_path, "mount_policy", &bytes);
-    checks.push(PlayerLaunchCheck {
-        id: "player.mount_policy".to_string(),
-        status: if policy_ok { "pass" } else { "blocked" }.to_string(),
-    });
-    checks.push(PlayerLaunchCheck {
-        id: "player.mount_policy_hash".to_string(),
-        status: if hash_ok { "pass" } else { "blocked" }.to_string(),
-    });
-    if manifest.target == "tsuinosora-patch-game" {
-        let probe_ok = if scenario.mount_probes.is_empty() {
-            true
-        } else {
-            mount_probes_match(scenario, mount_roots)?
-        };
-        let asset_ok = if scenario.mount_assets.is_empty() {
-            true
-        } else {
-            mount_assets_match(scenario, mount_roots)?
-        };
-        if !scenario.mount_probes.is_empty() {
-            checks.push(PlayerLaunchCheck {
-                id: "player.patch_mount_probe".to_string(),
-                status: if probe_ok { "pass" } else { "blocked" }.to_string(),
-            });
-        }
-        if !scenario.mount_assets.is_empty() {
-            checks.push(PlayerLaunchCheck {
-                id: "player.patch_mount_asset".to_string(),
-                status: if asset_ok { "pass" } else { "blocked" }.to_string(),
-            });
-        }
-        let has_local_read_evidence =
-            !scenario.mount_probes.is_empty() || !scenario.mount_assets.is_empty();
-        let local_read_evidence_required = manifest.platform == "windows";
-        let direct_read_ok = policy_ok
-            && hash_ok
-            && probe_ok
-            && asset_ok
-            && (!local_read_evidence_required || has_local_read_evidence)
-            && manifest
-                .mount_policy
-                .as_deref()
-                .is_some_and(|path| path == "AstraPlayer.mount_policy.json")
-            && !scenario.mount_aliases.is_empty();
-        checks.push(PlayerLaunchCheck {
-            id: "player.patch_direct_read".to_string(),
-            status: if direct_read_ok { "pass" } else { "blocked" }.to_string(),
-        });
-    }
-    Ok(checks)
-}
-
-fn mount_probes_match(
-    scenario: &Scenario,
-    mount_roots: &BTreeMap<String, PathBuf>,
-) -> Result<bool, CliError> {
-    for probe in &scenario.mount_probes {
-        if !mount_probe_matches(probe, scenario, mount_roots)? {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-fn mount_probe_matches(
-    probe: &MountProbe,
-    scenario: &Scenario,
-    mount_roots: &BTreeMap<String, PathBuf>,
-) -> Result<bool, CliError> {
-    if !scenario.mount_aliases.contains_key(&probe.alias) || !is_safe_mount_alias(&probe.alias) {
-        return Ok(false);
-    }
-    if !probe.sha256.starts_with("sha256:") || probe.sha256.len() != 71 {
-        return Ok(false);
-    }
-    let Some(root) = mount_roots.get(&probe.alias) else {
-        return Ok(false);
-    };
-    if !root.is_dir() {
-        return Ok(false);
-    }
-    let relative = validate_bundle_relative_path(&probe.path)?;
-    let path = root.join(relative);
-    if !path.is_file() {
-        return Ok(false);
-    }
-    let bytes = fs::read(path)?;
-    Ok(Hash256::from_sha256(&bytes).to_string() == probe.sha256)
-}
-
-fn mount_assets_match(
-    scenario: &Scenario,
-    mount_roots: &BTreeMap<String, PathBuf>,
-) -> Result<bool, CliError> {
-    for asset in &scenario.mount_assets {
-        if !mount_asset_matches(asset, scenario, mount_roots)? {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-fn mount_asset_matches(
-    asset: &MountAsset,
-    scenario: &Scenario,
-    mount_roots: &BTreeMap<String, PathBuf>,
-) -> Result<bool, CliError> {
-    if !scenario.mount_aliases.contains_key(&asset.alias) || !is_safe_mount_alias(&asset.alias) {
-        return Ok(false);
-    }
-    if !is_safe_mount_role(&asset.role)
-        || asset.route_id.trim().is_empty()
-        || !asset.sha256.starts_with("sha256:")
-        || asset.sha256.len() != 71
-    {
-        return Ok(false);
-    }
-    if scenario
-        .generated_route_id
-        .as_ref()
-        .is_some_and(|route_id| route_id != &asset.route_id)
-    {
-        return Ok(false);
-    }
-    let Some(root) = mount_roots.get(&asset.alias) else {
-        return Ok(false);
-    };
-    if !root.is_dir() {
-        return Ok(false);
-    }
-    let relative = validate_bundle_relative_path(&asset.path)?;
-    let path = root.join(relative);
-    if !path.is_file() {
-        return Ok(false);
-    }
-    let bytes = fs::read(path)?;
-    Ok(Hash256::from_sha256(&bytes).to_string() == asset.sha256)
-}
-
-fn is_safe_mount_role(value: &str) -> bool {
-    MOUNT_ASSET_ROLES.contains(&value)
-}
-
-fn bundle_file_hash_matches(
-    manifest: &StandaloneBundleManifest,
-    path: &str,
-    role: &str,
-    bytes: &[u8],
-) -> bool {
-    let hash = Hash256::from_sha256(bytes).to_string();
-    manifest.files.iter().any(|file| {
-        file.path == path
-            && file.role == role
-            && file.hash == hash
-            && file.byte_size == bytes.len() as u64
-    })
-}
-
-fn mount_policy_matches(value: &serde_json::Value, target: &str, scenario: &Scenario) -> bool {
-    if json_has_local_path_like(value) {
-        return false;
-    }
-    if value.get("schema").and_then(serde_json::Value::as_str) != Some("tsuinosora.mount_policy.v1")
-    {
-        return false;
-    }
-    if value.get("target").and_then(serde_json::Value::as_str) != Some(target) {
-        return false;
-    }
-    if value.get("status").and_then(serde_json::Value::as_str) != Some("pass") {
-        return false;
-    }
-    let Some(aliases) = value.get("aliases").and_then(serde_json::Value::as_array) else {
-        return false;
-    };
-    if aliases.is_empty() {
-        return false;
-    }
-    for (alias, expected_value) in &scenario.mount_aliases {
-        let found = aliases.iter().any(|entry| {
-            entry.get("alias").and_then(serde_json::Value::as_str) == Some(alias.as_str())
-                && entry.get("value").and_then(serde_json::Value::as_str)
-                    == Some(expected_value.as_str())
-                && entry.get("hash_policy").and_then(serde_json::Value::as_str)
-                    == Some("manifest_required")
-                && entry.get("fallback").and_then(serde_json::Value::as_str) == Some("blocking")
-        });
-        if !found {
-            return false;
-        }
-    }
-    true
-}
-
 fn json_has_local_path_like(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::String(text) => looks_like_local_path(text),
@@ -3620,109 +1975,6 @@ fn looks_like_local_path(value: &str) -> bool {
             .windows(2)
             .any(|pair| pair[0].is_ascii_alphabetic() && pair[1] == b':')
         || value.split(['/', '\\']).any(|part| part == "..")
-}
-
-fn launch_bundled_player() -> Result<PlayerLaunchReport, CliError> {
-    let manifest = read_standalone_bundle_manifest()?;
-    let package_bytes = fs::read(&manifest.package)?;
-    let package_hash = Hash256::from_sha256(&package_bytes).to_string();
-    let mut checks = Vec::new();
-    let package_status = if package_hash == manifest.package_hash {
-        "pass"
-    } else {
-        "blocked"
-    };
-    checks.push(PlayerLaunchCheck {
-        id: "package.hash".to_string(),
-        status: package_status.to_string(),
-    });
-
-    let reader = PackageReader::open(&package_bytes)?;
-    let target_manifest: TargetManifest =
-        serde_json::from_slice(&reader.container().read_section("target.manifest")?)?;
-    let target_report = validate_manifest(&target_manifest, Some(&manifest.target));
-    let target_status = if matches!(target_report.status, TargetValidationStatus::Pass) {
-        "pass"
-    } else {
-        "blocked"
-    };
-    checks.push(PlayerLaunchCheck {
-        id: "target.manifest".to_string(),
-        status: target_status.to_string(),
-    });
-    let status = if checks.iter().all(|check| check.status == "pass") {
-        "ready"
-    } else {
-        "blocked"
-    };
-    Ok(PlayerLaunchReport {
-        schema: "astra.player_launch_report.v1".to_string(),
-        status: status.to_string(),
-        target: manifest.target,
-        profile: manifest.profile,
-        platform: manifest.platform,
-        package_hash,
-        entrypoint: manifest.entrypoint,
-        checks,
-    })
-}
-
-fn read_standalone_bundle_manifest() -> Result<StandaloneBundleManifest, CliError> {
-    let manifest_text = fs::read_to_string("bundle_manifest.json")?;
-    let value: serde_json::Value = serde_json::from_str(&manifest_text)?;
-    if value.get("schema").and_then(serde_json::Value::as_str)
-        != Some("astra.standalone_bundle_manifest.v2")
-    {
-        return Err("unsupported standalone bundle manifest schema; rebuild the bundle".into());
-    }
-    Ok(serde_json::from_value(value)?)
-}
-
-fn read_player_config() -> Result<PlayerConfig, CliError> {
-    let config_text = fs::read_to_string("AstraPlayer.config.json")?;
-    let value: serde_json::Value = serde_json::from_str(&config_text)?;
-    if value.get("schema").and_then(serde_json::Value::as_str) != Some("astra.player_config.v2") {
-        return Err("unsupported player config schema; rebuild the bundle".into());
-    }
-    Ok(serde_json::from_value(value)?)
-}
-
-fn validate_player_config(
-    manifest: &StandaloneBundleManifest,
-    config: &PlayerConfig,
-) -> Result<(), CliError> {
-    debug_assert_eq!(config.schema, "astra.player_config.v2");
-    for relative in [
-        config.observability.log_dir.as_deref(),
-        config.observability.crash_dir.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        validate_bundle_relative_path(relative)?;
-    }
-    if manifest.target != config.target
-        || manifest.profile != config.profile
-        || manifest.platform != config.platform
-        || manifest.package != config.package
-    {
-        return Err("player config does not match bundle manifest".into());
-    }
-    validate_player_display_requirement(&manifest.target, config)?;
-    Ok(())
-}
-
-fn validate_player_display_requirement(
-    target: &str,
-    config: &PlayerConfig,
-) -> Result<(), CliError> {
-    if target.starts_with("tsuinosora-") && config.display.is_none() {
-        return Err("TsuiNoSora live player requires project display config".into());
-    }
-    if let Some(display) = &config.display {
-        validate_player_display_config(display)?;
-    }
-    Ok(())
 }
 
 fn package_scenario_refs(reader: &PackageReader) -> Vec<String> {

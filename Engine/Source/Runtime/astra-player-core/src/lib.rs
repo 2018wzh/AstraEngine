@@ -174,6 +174,13 @@ pub struct PlayerAutomationEvidence {
     pub value: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlayerPlatformEvidenceIdentity {
+    pub profile_hash: String,
+    pub build_fingerprint: String,
+    pub session_id: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PlayerAutomationValidator;
 
@@ -182,6 +189,24 @@ impl PlayerAutomationValidator {
         &self,
         script: &PlayerAutomationScript,
         transcript: &PlayerInputTranscript,
+    ) -> PlayerAutomationReport {
+        self.validate_internal(script, transcript, None)
+    }
+
+    pub fn validate_with_platform_identity(
+        &self,
+        script: &PlayerAutomationScript,
+        transcript: &PlayerInputTranscript,
+        identity: &PlayerPlatformEvidenceIdentity,
+    ) -> PlayerAutomationReport {
+        self.validate_internal(script, transcript, Some(identity))
+    }
+
+    fn validate_internal(
+        &self,
+        script: &PlayerAutomationScript,
+        transcript: &PlayerInputTranscript,
+        identity: Option<&PlayerPlatformEvidenceIdentity>,
     ) -> PlayerAutomationReport {
         tracing::info!(
             event = "player.automation.validate.start",
@@ -206,17 +231,28 @@ impl PlayerAutomationValidator {
             audio_meter_check(&transcript.audio_meter),
             route_coverage_check(script, transcript),
         ];
+        if let Some(identity) = identity {
+            checks.push(platform_identity_check(identity));
+        }
         let full_playable = if checks
             .iter()
             .all(|check| check.status == PlayerAutomationStatus::Pass)
         {
+            let mut full_evidence = vec![
+                evidence("transcript_hash", &transcript_hash),
+                evidence("route_count", transcript.route_coverage.len()),
+            ];
+            if let Some(identity) = identity {
+                full_evidence.extend([
+                    evidence("profile_hash", &identity.profile_hash),
+                    evidence("build_fingerprint", &identity.build_fingerprint),
+                    evidence("session_id", &identity.session_id),
+                ]);
+            }
             pass_check(
                 "player.full_playable",
                 "live player automation covered route, visual and audio evidence",
-                vec![
-                    evidence("transcript_hash", &transcript_hash),
-                    evidence("route_count", transcript.route_coverage.len()),
-                ],
+                full_evidence,
             )
         } else {
             blocked_check(
@@ -262,6 +298,29 @@ impl PlayerAutomationValidator {
             ),
         }
         report
+    }
+}
+
+fn platform_identity_check(identity: &PlayerPlatformEvidenceIdentity) -> PlayerAutomationCheck {
+    if identity.profile_hash.starts_with("sha256:")
+        && identity.build_fingerprint.starts_with("sha256:")
+        && !identity.session_id.is_empty()
+    {
+        pass_check(
+            "player.platform_identity",
+            "player evidence is bound to the host session",
+            vec![
+                evidence("profile_hash", &identity.profile_hash),
+                evidence("build_fingerprint", &identity.build_fingerprint),
+                evidence("session_id", &identity.session_id),
+            ],
+        )
+    } else {
+        blocked_check(
+            "player.platform_identity",
+            "player platform identity is incomplete",
+            "ASTRA_PLAYER_PLATFORM_IDENTITY",
+        )
     }
 }
 

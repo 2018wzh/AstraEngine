@@ -68,7 +68,8 @@ targets = [
 | `astra-platform-macos` | 2 | macOS capability probe 和 host adapter | `astra-platform` | AppKit object crossing public API |
 | `astra-platform-ios` | 2 | iOS capability probe 和 host adapter | `astra-platform` | JIT requirement、UIKit object crossing public API |
 | `astra-platform-android` | 2 | Android capability probe 和 host adapter | `astra-platform` | JVM object crossing public API |
-| `astra-platform-web` | 2 | Web browser probe、required smoke 和 host adapter | `astra-platform` | browser object crossing public API |
+| `astra-platform-web` | 2 | canvas/DOM、WebGPU、WebAudio、WebCodecs、OPFS 与 fetch/File host adapter | `astra-platform`、`astra-platform-general` | browser object crossing public API |
+| `astra-player-web` | 2 | 独立 WASM Player；读取 config、package 与 cooked platform profile，创建 canvas/WebGPU surface | `astra-package`、`astra-platform-web` | JavaScript route/runtime implementation；完整 VN runtime 接线仍为 Migration 8 blocker |
 | `astra-vn-script` | 3 implemented | `.astra` source、parser/compiler、`CompiledStory`、source map、debug symbol、route graph、story/variable/command manifest | `astra-core`, `serde`, `schemars`, `miette` | RuntimeWorld, Luau, Editor UI |
 | `astra-vn-presentation` | 3 implemented | StageModel、layer/camera/video/audio/timeline/fallback、headless presentation execution、presentation provider manifest | `astra-core`, `astra-media-core`, `serde`, `schemars` | decode/text/audio native provider, VN policy VM |
 | `astra-vn-core` | 3 implemented | `VnRuntime`、command cursor、runtime state、choice、call/return、backlog、read-state、voice replay、wait state、system state、replay UI | `astra-core`, `astra-runtime`, `astra-vn-script`, `astra-vn-presentation`, `postcard`, `serde` | Luau VM handle, Editor UI, package writer |

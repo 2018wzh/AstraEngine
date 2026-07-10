@@ -460,7 +460,9 @@ mod windows {
             };
             let kind =
                 match event {
-                    WindowEvent::Focused(true) => Some(PlatformEventKind::WindowFocused { window }),
+                    WindowEvent::Focused(focused) => {
+                        Some(PlatformEventKind::WindowFocused { window, focused })
+                    }
                     WindowEvent::CloseRequested => Some(PlatformEventKind::WindowClosed { window }),
                     WindowEvent::Resized(size) => self.windows.get(window).ok().map(|native| {
                         PlatformEventKind::WindowResized {

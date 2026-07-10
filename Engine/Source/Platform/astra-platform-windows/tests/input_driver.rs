@@ -30,6 +30,9 @@ async fn sendinput_driver_reaches_the_platform_host_event_stream() {
     )
     .unwrap();
     native.focus().unwrap();
+    let captured = native.capture_rgba().unwrap();
+    assert_eq!((captured.width, captured.height), (320, 180));
+    assert_eq!(captured.rgba8.len(), 320 * 180 * 4);
     native.send_key(0x20).unwrap();
 
     let event = tokio::time::timeout(Duration::from_secs(2), async {
