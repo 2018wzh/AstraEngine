@@ -105,13 +105,14 @@ mod windows {
         }
         let command_capacity = profile.limits.command_queue_capacity;
         let event_capacity = profile.limits.event_queue_capacity;
+        let instance_guard = SingleInstanceGuard::acquire(&profile)?;
         let (client, backend, events) =
             host_channel(profile.clone(), command_capacity, event_capacity)?;
         let (ready_tx, ready_rx) = std_mpsc::sync_channel(1);
         let backend_profile = profile.clone();
         thread::Builder::new()
             .name("astra-platform-windows".to_string())
-            .spawn(move || run_backend(backend, ready_tx, backend_profile, roots))
+            .spawn(move || run_backend(backend, ready_tx, backend_profile, roots, instance_guard))
             .map_err(|_| {
                 PlatformError::new(
                     PlatformErrorCode::InvalidState,
@@ -138,6 +139,7 @@ mod windows {
         ready: std_mpsc::SyncSender<Result<(), PlatformError>>,
         profile: PlatformHostProfile,
         roots: Option<super::HostRoots>,
+        _instance_guard: SingleInstanceGuard,
     ) {
         let roots = match roots.or_else(default_roots) {
             Some(roots) => roots,
@@ -199,6 +201,58 @@ mod windows {
                 error = %error,
                 "Windows platform event loop failed"
             );
+        }
+    }
+
+    struct SingleInstanceGuard(windows::Win32::Foundation::HANDLE);
+
+    unsafe impl Send for SingleInstanceGuard {}
+
+    impl SingleInstanceGuard {
+        fn acquire(profile: &PlatformHostProfile) -> Result<Self, PlatformError> {
+            use astra_core::Hash256;
+            use windows::{
+                core::PCWSTR,
+                Win32::{
+                    Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS},
+                    System::Threading::CreateMutexW,
+                },
+            };
+
+            let identity = format!("{}\n{}\n{}", profile.package_id, profile.target, profile.id);
+            let hash = Hash256::from_sha256(identity.as_bytes()).to_string();
+            let name = format!(
+                "Local\\AstraEngine.Player.{}",
+                hash.trim_start_matches("sha256:")
+            );
+            let wide = name
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let handle =
+                unsafe { CreateMutexW(None, true, PCWSTR(wide.as_ptr())) }.map_err(|_| {
+                    host_error(
+                        "host.instance.acquire",
+                        "single-instance mutex could not be created",
+                    )
+                })?;
+            if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+                let _ = unsafe { CloseHandle(handle) };
+                return Err(PlatformError::new(
+                    PlatformErrorCode::AlreadyInUse,
+                    "host.instance.acquire",
+                    "the same game target and profile is already running",
+                ));
+            }
+            Ok(Self(handle))
+        }
+    }
+
+    impl Drop for SingleInstanceGuard {
+        fn drop(&mut self) {
+            use windows::Win32::{Foundation::CloseHandle, System::Threading::ReleaseMutex};
+            let _ = unsafe { ReleaseMutex(self.0) };
+            let _ = unsafe { CloseHandle(self.0) };
         }
     }
 
