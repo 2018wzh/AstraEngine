@@ -230,7 +230,7 @@ mod windows {
                 .chain(std::iter::once(0))
                 .collect::<Vec<_>>();
             let handle =
-                unsafe { CreateMutexW(None, true, PCWSTR(wide.as_ptr())) }.map_err(|_| {
+                unsafe { CreateMutexW(None, false, PCWSTR(wide.as_ptr())) }.map_err(|_| {
                     host_error(
                         "host.instance.acquire",
                         "single-instance mutex could not be created",
@@ -250,8 +250,7 @@ mod windows {
 
     impl Drop for SingleInstanceGuard {
         fn drop(&mut self) {
-            use windows::Win32::{Foundation::CloseHandle, System::Threading::ReleaseMutex};
-            let _ = unsafe { ReleaseMutex(self.0) };
+            use windows::Win32::Foundation::CloseHandle;
             let _ = unsafe { CloseHandle(self.0) };
         }
     }
@@ -399,6 +398,22 @@ mod windows {
                             .surfaces
                             .get_mut(surface)
                             .and_then(|surface| surface.present(frame));
+                        if result
+                            .as_ref()
+                            .is_err_and(|error| error.code == PlatformErrorCode::ContextLost)
+                        {
+                            let recovered = self
+                                .surfaces
+                                .get_mut(surface)
+                                .and_then(|surface| surface.reconfigure_after_loss())
+                                .is_ok();
+                            for event in astra_platform_general::wgpu_recovery_events(
+                                "wgpu_hardware",
+                                recovered,
+                            ) {
+                                self.emit(event);
+                            }
+                        }
                         let _ = reply.send(result);
                     }
                     HostCommand::CaptureSurface { surface, reply } => {

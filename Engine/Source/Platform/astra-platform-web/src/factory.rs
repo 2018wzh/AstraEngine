@@ -139,6 +139,20 @@ mod browser {
                         Ok(surface) => surface.present(frame),
                         Err(error) => Err(error),
                     };
+                    if result
+                        .as_ref()
+                        .is_err_and(|error| error.code == PlatformErrorCode::ContextLost)
+                    {
+                        let recovered = surfaces
+                            .get_mut(surface)
+                            .and_then(|surface| surface.reconfigure_after_loss())
+                            .is_ok();
+                        for event in
+                            astra_platform_general::wgpu_recovery_events("webgpu", recovered)
+                        {
+                            let _ = emitter.emit(event);
+                        }
+                    }
                     let _ = reply.send(result);
                 }
                 HostCommand::CaptureSurface { surface, reply } => {

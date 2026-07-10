@@ -1,4 +1,6 @@
-use astra_platform::{CapturedFrame, PlatformError, PlatformErrorCode, RgbaFrame};
+use astra_platform::{
+    CapturedFrame, PlatformError, PlatformErrorCode, PlatformEventKind, RgbaFrame,
+};
 
 /// Shared hardware-only WGPU presentation path. Backends own event loops and
 /// surface creation; this core owns adapter policy, RGBA upload, presentation,
@@ -264,12 +266,35 @@ impl WgpuPresentationCore {
         })
     }
 
+    pub fn reconfigure_after_loss(&mut self) -> Result<(), PlatformError> {
+        if self.config.width == 0 || self.config.height == 0 {
+            return Err(invalid(
+                "surface.reconfigure",
+                "surface dimensions must be non-zero",
+            ));
+        }
+        self.surface.configure(&self.device, &self.config);
+        Ok(())
+    }
+
     pub fn poll(&self, poll_type: wgpu::PollType) -> Result<(), PlatformError> {
         self.device
             .poll(poll_type)
             .map(|_| ())
             .map_err(|_| unavailable("surface.capture", "GPU readback poll failed"))
     }
+}
+
+pub fn wgpu_recovery_events(provider: &str, recovered: bool) -> Vec<PlatformEventKind> {
+    let mut events = vec![PlatformEventKind::ContextLost {
+        provider: provider.to_string(),
+    }];
+    if recovered {
+        events.push(PlatformEventKind::ContextRestored {
+            provider: provider.to_string(),
+        });
+    }
+    events
 }
 
 impl WgpuReadback {
