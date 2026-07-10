@@ -8,12 +8,29 @@ rust-version.workspace = true
 [dependencies]
 tracing.workspace = true
 astra-platform = { path = "../astra-platform" }
+astra-platform-general = { path = "../astra-platform-general" }
+tokio.workspace = true
+wgpu.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys = { workspace = true, features = ["Document", "Window"] }
+web-sys = { workspace = true, features = [
+    "Document",
+    "CssStyleDeclaration",
+    "Element",
+    "Event",
+    "EventTarget",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "KeyboardEvent",
+    "MouseEvent",
+    "Node",
+    "PointerEvent",
+    "WheelEvent",
+    "Window",
+] }
 
 [dev-dependencies]
 wasm-bindgen-test.workspace = true

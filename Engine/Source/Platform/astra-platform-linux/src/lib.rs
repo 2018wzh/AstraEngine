@@ -1,42 +1,24 @@
-use astra_platform::{PlatformCapabilityReport, PlatformId, ReportBackedPlatformHost, SdkStatus};
+use astra_platform::{
+    build_fingerprint, PlatformCapabilityReport, PlatformId, SdkStatus, UnavailablePlatformFactory,
+};
 
-pub fn host(target: Option<&str>) -> ReportBackedPlatformHost {
-    ReportBackedPlatformHost::new(probe(target))
+pub fn factory() -> UnavailablePlatformFactory {
+    UnavailablePlatformFactory::new(PlatformId::Linux)
 }
 
 pub fn probe(target: Option<&str>) -> PlatformCapabilityReport {
-    tracing::info!(
-        event = "platform.probe.start",
-        platform = "linux",
-        has_target = target.is_some(),
-        "platform capability probe started"
-    );
-    PlatformCapabilityReport::new(
+    PlatformCapabilityReport::unavailable(
         PlatformId::Linux,
-        target.map(str::to_string),
+        target,
         if cfg!(target_os = "linux") {
             SdkStatus::Present
         } else {
             SdkStatus::Missing
         },
-        vec!["wgpu".to_string(), "headless".to_string()],
-        vec![
-            "gstreamer_profile".to_string(),
-            "ffmpeg_profile".to_string(),
-        ],
-        vec!["pipewire".to_string(), "pulseaudio".to_string()],
-        vec!["xdg_data".to_string(), "file_package".to_string()],
-        vec![
-            "keyboard".to_string(),
-            "mouse".to_string(),
-            "ime".to_string(),
-            "gamepad".to_string(),
-        ],
-        vec![
-            "window".to_string(),
-            "resize".to_string(),
-            "crash_bundle".to_string(),
-        ],
-        vec!["network_runtime_ai_profile_gated".to_string()],
+        build_fingerprint(
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION"),
+            ["unavailable"],
+        ),
     )
 }

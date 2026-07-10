@@ -1,0 +1,1136 @@
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
+
+use tokio::sync::{mpsc, oneshot};
+
+use crate::{
+    validate_host_profile, AudioOutputHandle, DecodeSessionHandle, MediaFrameHandle,
+    PackageSourceHandle, PackageSourcePolicy, PlatformError, PlatformErrorCode,
+    PlatformHostProfile, SaveTransactionHandle, SurfaceHandle, WindowHandle,
+};
+
+pub type HostStartFuture =
+    Pin<Box<dyn Future<Output = Result<PlatformHostSession, PlatformError>> + 'static>>;
+
+pub trait PlatformHostFactory {
+    fn start(&self, profile: PlatformHostProfile) -> HostStartFuture;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct UnavailablePlatformFactory {
+    platform: crate::PlatformId,
+}
+
+impl UnavailablePlatformFactory {
+    pub fn new(platform: crate::PlatformId) -> Self {
+        Self { platform }
+    }
+}
+
+impl PlatformHostFactory for UnavailablePlatformFactory {
+    fn start(&self, profile: PlatformHostProfile) -> HostStartFuture {
+        let platform = self.platform;
+        Box::pin(async move {
+            if profile.platform != platform {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::InvalidProfile,
+                    "host.start",
+                    "platform profile does not match the requested factory",
+                )
+                .with_field("platform", platform.as_str()));
+            }
+            Err(PlatformError::new(
+                PlatformErrorCode::PlatformNotImplemented,
+                "host.start",
+                "platform host is not implemented in this release",
+            )
+            .with_field("platform", platform.as_str()))
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowRequest {
+    pub title: String,
+    pub width: u32,
+    pub height: u32,
+    pub visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfaceRequest {
+    pub window: WindowHandle,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapturedFrame {
+    pub width: u32,
+    pub height: u32,
+    pub rgba8: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RgbaFrame {
+    pub sequence: u64,
+    pub width: u32,
+    pub height: u32,
+    pub rgba8: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioOutputRequest {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub max_buffered_frames: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioPacket {
+    pub sequence: u64,
+    pub channels: u16,
+    pub samples: Vec<f32>,
+}
+
+impl AudioPacket {
+    pub fn frame_count(&self) -> usize {
+        let channels = usize::from(self.channels);
+        if channels == 0 {
+            0
+        } else {
+            self.samples.len() / channels
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioMeter {
+    pub sample_count: u64,
+    pub peak_dbfs: f32,
+    pub rms_dbfs: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecodeKind {
+    Audio,
+    Video,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlatformDecodeRequest {
+    pub sequence: u64,
+    pub kind: DecodeKind,
+    pub codec: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecodeOutput {
+    CpuBuffer {
+        format: String,
+        bytes: Vec<u8>,
+        hash: String,
+    },
+    MediaFrame(MediaFrameHandle),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackageSourceRequest {
+    Bundled {
+        relative_path: String,
+        expected_hash: String,
+    },
+    UserAuthorized {
+        expected_hash: String,
+    },
+    HttpsRange {
+        url: String,
+        expected_hash: String,
+    },
+}
+
+pub enum HostCommand {
+    CreateWindow {
+        request: WindowRequest,
+        reply: oneshot::Sender<Result<WindowHandle, PlatformError>>,
+    },
+    CreateSurface {
+        request: SurfaceRequest,
+        reply: oneshot::Sender<Result<SurfaceHandle, PlatformError>>,
+    },
+    CaptureSurface {
+        surface: SurfaceHandle,
+        reply: oneshot::Sender<Result<CapturedFrame, PlatformError>>,
+    },
+    PresentRgba {
+        surface: SurfaceHandle,
+        frame: RgbaFrame,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    DestroySurface {
+        surface: SurfaceHandle,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    DestroyWindow {
+        window: WindowHandle,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    OpenAudioOutput {
+        request: AudioOutputRequest,
+        reply: oneshot::Sender<Result<AudioOutputHandle, PlatformError>>,
+    },
+    SubmitAudio {
+        output: AudioOutputHandle,
+        packet: AudioPacket,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    DrainAudio {
+        output: AudioOutputHandle,
+        reply: oneshot::Sender<Result<AudioMeter, PlatformError>>,
+    },
+    CloseAudio {
+        output: AudioOutputHandle,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    OpenDecode {
+        kind: DecodeKind,
+        reply: oneshot::Sender<Result<DecodeSessionHandle, PlatformError>>,
+    },
+    Decode {
+        session: DecodeSessionHandle,
+        request: PlatformDecodeRequest,
+        reply: oneshot::Sender<Result<DecodeOutput, PlatformError>>,
+    },
+    CloseDecode {
+        session: DecodeSessionHandle,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    BeginSave {
+        slot: String,
+        reply: oneshot::Sender<Result<SaveTransactionHandle, PlatformError>>,
+    },
+    WriteSave {
+        transaction: SaveTransactionHandle,
+        bytes: Vec<u8>,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    CommitSave {
+        transaction: SaveTransactionHandle,
+        reply: oneshot::Sender<Result<String, PlatformError>>,
+    },
+    AbortSave {
+        transaction: SaveTransactionHandle,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    ReadSave {
+        slot: String,
+        reply: oneshot::Sender<Result<Vec<u8>, PlatformError>>,
+    },
+    OpenPackage {
+        source: PackageSourceRequest,
+        reply: oneshot::Sender<Result<PackageSourceHandle, PlatformError>>,
+    },
+    ReadPackageRange {
+        source: PackageSourceHandle,
+        offset: u64,
+        length: usize,
+        reply: oneshot::Sender<Result<Vec<u8>, PlatformError>>,
+    },
+    ClosePackage {
+        source: PackageSourceHandle,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    Shutdown {
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+}
+
+impl HostCommand {
+    pub fn operation(&self) -> &'static str {
+        match self {
+            Self::CreateWindow { .. } => "window.create",
+            Self::CreateSurface { .. } => "surface.create",
+            Self::CaptureSurface { .. } => "surface.capture",
+            Self::PresentRgba { .. } => "surface.present_rgba",
+            Self::DestroySurface { .. } => "surface.destroy",
+            Self::DestroyWindow { .. } => "window.destroy",
+            Self::OpenAudioOutput { .. } => "audio.open",
+            Self::SubmitAudio { .. } => "audio.submit",
+            Self::DrainAudio { .. } => "audio.drain",
+            Self::CloseAudio { .. } => "audio.close",
+            Self::OpenDecode { .. } => "decode.open",
+            Self::Decode { .. } => "decode.submit",
+            Self::CloseDecode { .. } => "decode.close",
+            Self::BeginSave { .. } => "save.begin",
+            Self::WriteSave { .. } => "save.write",
+            Self::CommitSave { .. } => "save.commit",
+            Self::AbortSave { .. } => "save.abort",
+            Self::ReadSave { .. } => "save.read",
+            Self::OpenPackage { .. } => "package.open",
+            Self::ReadPackageRange { .. } => "package.read_range",
+            Self::ClosePackage { .. } => "package.close",
+            Self::Shutdown { .. } => "host.shutdown",
+        }
+    }
+
+    pub fn reply_unit(self, result: Result<(), PlatformError>) -> Result<(), PlatformError> {
+        let sent = match self {
+            Self::PresentRgba { reply, .. }
+            | Self::DestroySurface { reply, .. }
+            | Self::DestroyWindow { reply, .. }
+            | Self::SubmitAudio { reply, .. }
+            | Self::CloseAudio { reply, .. }
+            | Self::CloseDecode { reply, .. }
+            | Self::WriteSave { reply, .. }
+            | Self::AbortSave { reply, .. }
+            | Self::ClosePackage { reply, .. }
+            | Self::Shutdown { reply } => reply.send(result),
+            other => {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    other.operation(),
+                    "host command does not have a unit reply",
+                ));
+            }
+        };
+        sent.map_err(|_| queue_closed("command.reply"))
+    }
+}
+
+impl std::fmt::Debug for HostCommand {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HostCommand")
+            .field("operation", &self.operation())
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlatformEvent {
+    pub sequence: u64,
+    pub kind: PlatformEventKind,
+}
+
+impl PlatformEvent {
+    pub fn new(sequence: u64, kind: PlatformEventKind) -> Self {
+        Self { sequence, kind }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputState {
+    Pressed,
+    Released,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PointerButton {
+    Primary,
+    Secondary,
+    Middle,
+    Back,
+    Forward,
+    Other(u16),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TouchPhase {
+    Started,
+    Moved,
+    Ended,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlatformEventKind {
+    Resumed,
+    Suspended,
+    WindowFocused {
+        window: WindowHandle,
+    },
+    WindowClosed {
+        window: WindowHandle,
+    },
+    WindowResized {
+        window: WindowHandle,
+        width: u32,
+        height: u32,
+        scale_factor: f64,
+    },
+    Keyboard {
+        window: WindowHandle,
+        physical_key: String,
+        logical_key: Option<String>,
+        state: InputState,
+        repeat: bool,
+    },
+    ImePreedit {
+        window: WindowHandle,
+        text: String,
+        cursor: Option<(usize, usize)>,
+    },
+    ImeCommit {
+        window: WindowHandle,
+        text: String,
+    },
+    PointerMoved {
+        window: WindowHandle,
+        x: f64,
+        y: f64,
+    },
+    PointerButton {
+        window: WindowHandle,
+        button: PointerButton,
+        state: InputState,
+    },
+    MouseWheel {
+        window: WindowHandle,
+        delta_x: f32,
+        delta_y: f32,
+    },
+    Touch {
+        window: WindowHandle,
+        id: u64,
+        x: f64,
+        y: f64,
+        phase: TouchPhase,
+    },
+    Gamepad {
+        device_id: u32,
+        control: String,
+        value: f32,
+    },
+    DeviceLost {
+        provider: String,
+    },
+    ContextLost {
+        provider: String,
+    },
+}
+
+#[derive(Clone)]
+pub struct PlatformHostClient {
+    command_tx: mpsc::Sender<HostCommand>,
+    shutdown: Arc<AtomicBool>,
+    profile: Arc<PlatformHostProfile>,
+}
+
+impl PlatformHostClient {
+    pub async fn create_window(
+        &self,
+        request: WindowRequest,
+    ) -> Result<WindowHandle, PlatformError> {
+        if request.width == 0 || request.height == 0 || request.title.trim().is_empty() {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.create",
+                "window title and dimensions must be valid",
+            ));
+        }
+        self.ensure_running("window.create")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::CreateWindow { request, reply })?;
+        response.await.map_err(|_| queue_closed("window.create"))?
+    }
+
+    pub async fn create_surface(
+        &self,
+        request: SurfaceRequest,
+    ) -> Result<SurfaceHandle, PlatformError> {
+        if request.width == 0 || request.height == 0 {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "surface.create",
+                "surface dimensions must be non-zero",
+            ));
+        }
+        self.ensure_running("surface.create")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::CreateSurface { request, reply })?;
+        response.await.map_err(|_| queue_closed("surface.create"))?
+    }
+
+    pub async fn capture_surface(
+        &self,
+        surface: SurfaceHandle,
+    ) -> Result<CapturedFrame, PlatformError> {
+        self.ensure_running("surface.capture")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::CaptureSurface { surface, reply })?;
+        let frame = response
+            .await
+            .map_err(|_| queue_closed("surface.capture"))??;
+        validate_rgba_frame(
+            frame.width,
+            frame.height,
+            &frame.rgba8,
+            self.profile.limits.max_frame_bytes,
+        )?;
+        Ok(frame)
+    }
+
+    pub async fn present_rgba(
+        &self,
+        surface: SurfaceHandle,
+        frame: RgbaFrame,
+    ) -> Result<(), PlatformError> {
+        if frame.sequence == 0 {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "surface.present_rgba",
+                "presented frame sequence must be non-zero",
+            ));
+        }
+        validate_rgba_frame(
+            frame.width,
+            frame.height,
+            &frame.rgba8,
+            self.profile.limits.max_frame_bytes,
+        )?;
+        self.ensure_running("surface.present_rgba")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::PresentRgba {
+            surface,
+            frame,
+            reply,
+        })?;
+        response
+            .await
+            .map_err(|_| queue_closed("surface.present_rgba"))?
+    }
+
+    pub async fn destroy_surface(&self, surface: SurfaceHandle) -> Result<(), PlatformError> {
+        let (reply, response) = oneshot::channel();
+        self.send_unit(
+            HostCommand::DestroySurface { surface, reply },
+            response,
+            "surface.destroy",
+        )
+        .await
+    }
+
+    pub async fn destroy_window(&self, window: WindowHandle) -> Result<(), PlatformError> {
+        let (reply, response) = oneshot::channel();
+        self.send_unit(
+            HostCommand::DestroyWindow { window, reply },
+            response,
+            "window.destroy",
+        )
+        .await
+    }
+
+    pub async fn open_audio_output(
+        &self,
+        request: AudioOutputRequest,
+    ) -> Result<AudioOutputHandle, PlatformError> {
+        if request.sample_rate == 0
+            || request.channels == 0
+            || request.max_buffered_frames == 0
+            || request.max_buffered_frames > self.profile.limits.max_audio_frames
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "audio.open",
+                "audio output descriptor is invalid or exceeds profile limits",
+            ));
+        }
+        self.ensure_running("audio.open")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::OpenAudioOutput { request, reply })?;
+        response.await.map_err(|_| queue_closed("audio.open"))?
+    }
+
+    pub async fn submit_audio(
+        &self,
+        output: AudioOutputHandle,
+        packet: AudioPacket,
+    ) -> Result<(), PlatformError> {
+        if packet.sequence == 0
+            || packet.channels == 0
+            || packet.samples.is_empty()
+            || packet.samples.len() % usize::from(packet.channels) != 0
+            || packet.frame_count() > self.profile.limits.max_audio_frames
+            || packet.samples.iter().any(|sample| !sample.is_finite())
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "audio.submit",
+                "audio packet is invalid or exceeds profile limits",
+            ));
+        }
+        self.ensure_running("audio.submit")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::SubmitAudio {
+            output,
+            packet,
+            reply,
+        })?;
+        response.await.map_err(|_| queue_closed("audio.submit"))?
+    }
+
+    pub async fn drain_audio(
+        &self,
+        output: AudioOutputHandle,
+    ) -> Result<AudioMeter, PlatformError> {
+        self.ensure_running("audio.drain")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::DrainAudio { output, reply })?;
+        let meter = response.await.map_err(|_| queue_closed("audio.drain"))??;
+        if !meter.peak_dbfs.is_finite() || !meter.rms_dbfs.is_finite() {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "audio.drain",
+                "audio meter contains non-finite values",
+            ));
+        }
+        Ok(meter)
+    }
+
+    pub async fn close_audio(&self, output: AudioOutputHandle) -> Result<(), PlatformError> {
+        let (reply, response) = oneshot::channel();
+        self.send_unit(
+            HostCommand::CloseAudio { output, reply },
+            response,
+            "audio.close",
+        )
+        .await
+    }
+
+    pub async fn open_decode(
+        &self,
+        kind: DecodeKind,
+    ) -> Result<DecodeSessionHandle, PlatformError> {
+        self.ensure_running("decode.open")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::OpenDecode { kind, reply })?;
+        response.await.map_err(|_| queue_closed("decode.open"))?
+    }
+
+    pub async fn decode(
+        &self,
+        session: DecodeSessionHandle,
+        request: PlatformDecodeRequest,
+    ) -> Result<DecodeOutput, PlatformError> {
+        if request.sequence == 0
+            || request.codec.is_empty()
+            || request.bytes.is_empty()
+            || request.bytes.len() > self.profile.limits.max_frame_bytes
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "decode.submit",
+                "decode request is invalid or exceeds profile limits",
+            ));
+        }
+        self.ensure_running("decode.submit")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::Decode {
+            session,
+            request,
+            reply,
+        })?;
+        response.await.map_err(|_| queue_closed("decode.submit"))?
+    }
+
+    pub async fn close_decode(&self, session: DecodeSessionHandle) -> Result<(), PlatformError> {
+        let (reply, response) = oneshot::channel();
+        self.send_unit(
+            HostCommand::CloseDecode { session, reply },
+            response,
+            "decode.close",
+        )
+        .await
+    }
+
+    pub async fn begin_save(
+        &self,
+        slot: impl Into<String>,
+    ) -> Result<SaveTransactionHandle, PlatformError> {
+        let slot = slot.into();
+        if !is_safe_slot(&slot) {
+            return Err(PlatformError::new(
+                PlatformErrorCode::PermissionDenied,
+                "save.begin",
+                "save slot must be a safe relative symbol",
+            ));
+        }
+        self.ensure_running("save.begin")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::BeginSave { slot, reply })?;
+        response.await.map_err(|_| queue_closed("save.begin"))?
+    }
+
+    pub async fn write_save(
+        &self,
+        transaction: SaveTransactionHandle,
+        bytes: Vec<u8>,
+    ) -> Result<(), PlatformError> {
+        if bytes.is_empty() || bytes.len() > self.profile.limits.max_frame_bytes {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "save.write",
+                "save payload is empty or exceeds profile limits",
+            ));
+        }
+        let (reply, response) = oneshot::channel();
+        self.send_unit(
+            HostCommand::WriteSave {
+                transaction,
+                bytes,
+                reply,
+            },
+            response,
+            "save.write",
+        )
+        .await
+    }
+
+    pub async fn commit_save(
+        &self,
+        transaction: SaveTransactionHandle,
+    ) -> Result<String, PlatformError> {
+        self.ensure_running("save.commit")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::CommitSave { transaction, reply })?;
+        let hash = response.await.map_err(|_| queue_closed("save.commit"))??;
+        if !hash.starts_with("sha256:") {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "save.commit",
+                "save commit did not return a sha256 identity",
+            ));
+        }
+        Ok(hash)
+    }
+
+    pub async fn abort_save(
+        &self,
+        transaction: SaveTransactionHandle,
+    ) -> Result<(), PlatformError> {
+        let (reply, response) = oneshot::channel();
+        self.send_unit(
+            HostCommand::AbortSave { transaction, reply },
+            response,
+            "save.abort",
+        )
+        .await
+    }
+
+    pub async fn read_save(&self, slot: impl Into<String>) -> Result<Vec<u8>, PlatformError> {
+        let slot = slot.into();
+        if !is_safe_slot(&slot) {
+            return Err(PlatformError::new(
+                PlatformErrorCode::PermissionDenied,
+                "save.read",
+                "save slot must be a safe relative symbol",
+            ));
+        }
+        self.ensure_running("save.read")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::ReadSave { slot, reply })?;
+        let bytes = response.await.map_err(|_| queue_closed("save.read"))??;
+        if bytes.is_empty() || bytes.len() > self.profile.limits.max_frame_bytes {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "save.read",
+                "save backend returned invalid payload length",
+            ));
+        }
+        Ok(bytes)
+    }
+
+    pub async fn open_package(
+        &self,
+        source: PackageSourceRequest,
+    ) -> Result<PackageSourceHandle, PlatformError> {
+        validate_package_source(&self.profile, &source)?;
+        self.ensure_running("package.open")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::OpenPackage { source, reply })?;
+        response.await.map_err(|_| queue_closed("package.open"))?
+    }
+
+    pub async fn read_package_range(
+        &self,
+        source: PackageSourceHandle,
+        offset: u64,
+        length: usize,
+    ) -> Result<Vec<u8>, PlatformError> {
+        if length == 0 || length > self.profile.limits.max_package_read_bytes {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "package.read_range",
+                "package range length is invalid or exceeds profile limits",
+            ));
+        }
+        self.ensure_running("package.read_range")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::ReadPackageRange {
+            source,
+            offset,
+            length,
+            reply,
+        })?;
+        let bytes = response
+            .await
+            .map_err(|_| queue_closed("package.read_range"))??;
+        if bytes.len() > length {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "package.read_range",
+                "package backend returned more bytes than requested",
+            ));
+        }
+        Ok(bytes)
+    }
+
+    pub async fn close_package(&self, source: PackageSourceHandle) -> Result<(), PlatformError> {
+        let (reply, response) = oneshot::channel();
+        self.send_unit(
+            HostCommand::ClosePackage { source, reply },
+            response,
+            "package.close",
+        )
+        .await
+    }
+
+    pub async fn shutdown(&self) -> Result<(), PlatformError> {
+        if self
+            .shutdown
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "host.shutdown",
+                "platform host has already been shut down",
+            ));
+        }
+        let (reply, response) = oneshot::channel();
+        if let Err(error) = self.try_send(HostCommand::Shutdown { reply }) {
+            self.shutdown.store(false, Ordering::Release);
+            return Err(error);
+        }
+        match response.await {
+            Ok(result) => result,
+            Err(_) => {
+                self.shutdown.store(false, Ordering::Release);
+                Err(queue_closed("host.shutdown"))
+            }
+        }
+    }
+
+    fn ensure_running(&self, operation: &'static str) -> Result<(), PlatformError> {
+        if self.shutdown.load(Ordering::Acquire) {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                operation,
+                "platform host is shutting down",
+            ));
+        }
+        Ok(())
+    }
+
+    fn try_send(&self, command: HostCommand) -> Result<(), PlatformError> {
+        let operation = command.operation();
+        self.command_tx
+            .try_send(command)
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => PlatformError::new(
+                    PlatformErrorCode::QueueOverflow,
+                    operation,
+                    "platform command queue is full",
+                ),
+                mpsc::error::TrySendError::Closed(_) => queue_closed(operation),
+            })
+    }
+
+    async fn send_unit(
+        &self,
+        command: HostCommand,
+        response: oneshot::Receiver<Result<(), PlatformError>>,
+        operation: &'static str,
+    ) -> Result<(), PlatformError> {
+        self.ensure_running(operation)?;
+        self.try_send(command)?;
+        response.await.map_err(|_| queue_closed(operation))?
+    }
+}
+
+pub struct PlatformEventStream {
+    event_rx: mpsc::Receiver<PlatformEvent>,
+    last_sequence: u64,
+}
+
+impl PlatformEventStream {
+    pub async fn recv(&mut self) -> Result<PlatformEvent, PlatformError> {
+        let event = self
+            .event_rx
+            .recv()
+            .await
+            .ok_or_else(|| queue_closed("event.recv"))?;
+        if event.sequence <= self.last_sequence {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "event.recv",
+                "platform event sequence is not strictly increasing",
+            ));
+        }
+        self.last_sequence = event.sequence;
+        Ok(event)
+    }
+}
+
+pub struct PlatformBackendChannels {
+    command_rx: mpsc::Receiver<HostCommand>,
+    event_tx: mpsc::Sender<PlatformEvent>,
+    last_event_sequence: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl PlatformBackendChannels {
+    pub async fn next_command(&mut self) -> Option<HostCommand> {
+        self.command_rx.recv().await
+    }
+
+    pub fn try_next_command(&mut self) -> Result<Option<HostCommand>, PlatformError> {
+        match self.command_rx.try_recv() {
+            Ok(command) => Ok(Some(command)),
+            Err(mpsc::error::TryRecvError::Empty) => Ok(None),
+            Err(mpsc::error::TryRecvError::Disconnected) => Err(queue_closed("command.recv")),
+        }
+    }
+
+    pub fn emit_event(&mut self, event: PlatformEvent) -> Result<(), PlatformError> {
+        let mut previous = self.last_event_sequence.load(Ordering::Acquire);
+        loop {
+            if event.sequence <= previous {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    "event.emit",
+                    "platform event sequence is not strictly increasing",
+                ));
+            }
+            match self.last_event_sequence.compare_exchange(
+                previous,
+                event.sequence,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(actual) => previous = actual,
+            }
+        }
+        self.event_tx
+            .try_send(event.clone())
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => PlatformError::new(
+                    PlatformErrorCode::QueueOverflow,
+                    "event.emit",
+                    "platform event queue is full",
+                ),
+                mpsc::error::TrySendError::Closed(_) => queue_closed("event.emit"),
+            })?;
+        Ok(())
+    }
+
+    pub fn event_emitter(&self) -> PlatformEventEmitter {
+        PlatformEventEmitter {
+            event_tx: self.event_tx.clone(),
+            last_event_sequence: Arc::clone(&self.last_event_sequence),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct PlatformEventEmitter {
+    event_tx: mpsc::Sender<PlatformEvent>,
+    last_event_sequence: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl PlatformEventEmitter {
+    pub fn emit(&self, kind: PlatformEventKind) -> Result<u64, PlatformError> {
+        let sequence = self.last_event_sequence.fetch_add(1, Ordering::AcqRel) + 1;
+        self.event_tx
+            .try_send(PlatformEvent::new(sequence, kind))
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => PlatformError::new(
+                    PlatformErrorCode::QueueOverflow,
+                    "event.emit",
+                    "platform event queue is full",
+                ),
+                mpsc::error::TrySendError::Closed(_) => queue_closed("event.emit"),
+            })?;
+        Ok(sequence)
+    }
+}
+
+pub struct PlatformHostSession {
+    pub client: PlatformHostClient,
+    pub events: PlatformEventStream,
+    pub profile: PlatformHostProfile,
+}
+
+pub fn host_channel(
+    profile: PlatformHostProfile,
+    command_capacity: usize,
+    event_capacity: usize,
+) -> Result<
+    (
+        PlatformHostClient,
+        PlatformBackendChannels,
+        PlatformEventStream,
+    ),
+    PlatformError,
+> {
+    validate_host_profile(&profile)?;
+    if command_capacity == 0 || event_capacity == 0 {
+        return Err(PlatformError::new(
+            PlatformErrorCode::InvalidProfile,
+            "host.channel",
+            "platform channel capacity must be non-zero",
+        ));
+    }
+    let (command_tx, command_rx) = mpsc::channel(command_capacity);
+    let (event_tx, event_rx) = mpsc::channel(event_capacity);
+    Ok((
+        PlatformHostClient {
+            command_tx,
+            shutdown: Arc::new(AtomicBool::new(false)),
+            profile: Arc::new(profile),
+        },
+        PlatformBackendChannels {
+            command_rx,
+            event_tx,
+            last_event_sequence: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        },
+        PlatformEventStream {
+            event_rx,
+            last_sequence: 0,
+        },
+    ))
+}
+
+fn queue_closed(operation: &'static str) -> PlatformError {
+    PlatformError::new(
+        PlatformErrorCode::QueueClosed,
+        operation,
+        "platform host queue is closed",
+    )
+}
+
+fn validate_rgba_frame(
+    width: u32,
+    height: u32,
+    rgba8: &[u8],
+    max_bytes: usize,
+) -> Result<(), PlatformError> {
+    let expected = usize::try_from(width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(4));
+    if width == 0 || height == 0 || expected != Some(rgba8.len()) || rgba8.len() > max_bytes {
+        return Err(PlatformError::new(
+            PlatformErrorCode::IntegrityMismatch,
+            "surface.frame.validate",
+            "RGBA frame dimensions and byte length do not match",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_package_source(
+    profile: &PlatformHostProfile,
+    source: &PackageSourceRequest,
+) -> Result<(), PlatformError> {
+    let (allowed, expected_hash) = match source {
+        PackageSourceRequest::Bundled {
+            relative_path,
+            expected_hash,
+        } => (
+            profile
+                .package_sources
+                .iter()
+                .any(|policy| matches!(policy, PackageSourcePolicy::Bundled))
+                && is_safe_relative_path(relative_path),
+            expected_hash,
+        ),
+        PackageSourceRequest::UserAuthorized { expected_hash } => (
+            profile
+                .package_sources
+                .iter()
+                .any(|policy| matches!(policy, PackageSourcePolicy::UserAuthorized)),
+            expected_hash,
+        ),
+        PackageSourceRequest::HttpsRange { url, expected_hash } => {
+            let origin = https_origin(url);
+            let allowed = origin.as_ref().is_some_and(|origin| {
+                profile.package_sources.iter().any(|policy| match policy {
+                    PackageSourcePolicy::HttpsRange { allowed_origins } => {
+                        allowed_origins.iter().any(|allowed| allowed == origin)
+                    }
+                    _ => false,
+                })
+            });
+            (allowed, expected_hash)
+        }
+    };
+    if !allowed {
+        return Err(PlatformError::new(
+            PlatformErrorCode::PermissionDenied,
+            "package.open",
+            "package source is not allowed by the platform profile",
+        ));
+    }
+    if !expected_hash.starts_with("sha256:") || expected_hash.len() <= "sha256:".len() {
+        return Err(PlatformError::new(
+            PlatformErrorCode::IntegrityMismatch,
+            "package.open",
+            "package source requires a sha256 identity",
+        ));
+    }
+    Ok(())
+}
+
+fn is_safe_slot(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+}
+
+fn is_safe_relative_path(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with('/')
+        && !value.starts_with('\\')
+        && !value.contains('\\')
+        && !value.contains("://")
+        && !value
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == ".." || part.ends_with(':'))
+}
+
+fn https_origin(value: &str) -> Option<String> {
+    let rest = value.strip_prefix("https://")?;
+    let authority = rest.split('/').next()?;
+    if authority.is_empty()
+        || authority.contains('@')
+        || authority.contains('\\')
+        || authority.chars().any(char::is_whitespace)
+    {
+        return None;
+    }
+    Some(format!("https://{}", authority.to_ascii_lowercase()))
+}

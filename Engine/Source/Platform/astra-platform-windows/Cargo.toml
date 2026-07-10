@@ -5,13 +5,19 @@ license.workspace = true
 version.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+platform-test-driver = []
+
 [dependencies]
 tracing.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }
 astra-media = { path = "../../Runtime/astra-media" }
 astra-platform = { path = "../astra-platform" }
+astra-platform-general = { path = "../astra-platform-general" }
 cpal.workspace = true
 pollster.workspace = true
+tokio.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 
@@ -21,5 +27,10 @@ windows = { workspace = true, features = [
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_UI_Input_XboxController",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
+
+[dev-dependencies]
+tempfile.workspace = true

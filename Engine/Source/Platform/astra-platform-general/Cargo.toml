@@ -1,15 +1,12 @@
 [package]
-name = "astra-platform"
+name = "astra-platform-general"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-tracing.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }
-schemars.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-tokio.workspace = true
+astra-platform = { path = "../astra-platform" }
+tempfile.workspace = true
+tracing.workspace = true

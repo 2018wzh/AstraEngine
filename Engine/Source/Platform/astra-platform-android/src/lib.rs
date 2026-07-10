@@ -1,19 +1,15 @@
-use astra_platform::{PlatformCapabilityReport, PlatformId, ReportBackedPlatformHost, SdkStatus};
+use astra_platform::{
+    build_fingerprint, PlatformCapabilityReport, PlatformId, SdkStatus, UnavailablePlatformFactory,
+};
 
-pub fn host(target: Option<&str>) -> ReportBackedPlatformHost {
-    ReportBackedPlatformHost::new(probe(target))
+pub fn factory() -> UnavailablePlatformFactory {
+    UnavailablePlatformFactory::new(PlatformId::Android)
 }
 
 pub fn probe(target: Option<&str>) -> PlatformCapabilityReport {
-    tracing::info!(
-        event = "platform.probe.start",
-        platform = "android",
-        has_target = target.is_some(),
-        "platform capability probe started"
-    );
-    PlatformCapabilityReport::new(
+    PlatformCapabilityReport::unavailable(
         PlatformId::Android,
-        target.map(str::to_string),
+        target,
         if cfg!(target_os = "android")
             || std::env::var_os("ANDROID_HOME").is_some()
             || std::env::var_os("ANDROID_SDK_ROOT").is_some()
@@ -22,26 +18,10 @@ pub fn probe(target: Option<&str>) -> PlatformCapabilityReport {
         } else {
             SdkStatus::Missing
         },
-        vec!["wgpu_vulkan".to_string()],
-        vec!["mediacodec".to_string()],
-        vec!["aaudio".to_string(), "opensl_es".to_string()],
-        vec![
-            "app_storage".to_string(),
-            "storage_access_framework".to_string(),
-        ],
-        vec![
-            "touch".to_string(),
-            "safe_area".to_string(),
-            "gamepad".to_string(),
-        ],
-        vec![
-            "activity_resume".to_string(),
-            "background_resume".to_string(),
-            "rotation".to_string(),
-        ],
-        vec![
-            "network_runtime_ai_profile_gated".to_string(),
-            "luau_no_jit".to_string(),
-        ],
+        build_fingerprint(
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION"),
+            ["unavailable"],
+        ),
     )
 }
