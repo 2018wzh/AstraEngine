@@ -37,8 +37,8 @@ mod browser {
     use astra_platform::{
         host_channel, AudioOutputHandle, CapturedFrame, DecodeSessionHandle, HostCommand,
         PackageSourceHandle, PlatformBackendChannels, PlatformError, PlatformErrorCode,
-        PlatformEventKind, PlatformHostProfile, PlatformHostSession, RgbaFrame,
-        SaveTransactionHandle, SurfaceHandle, WindowHandle,
+        PlatformEventKind, PlatformHostProfile, PlatformHostSession, SaveTransactionHandle,
+        SurfaceHandle, WindowHandle,
     };
     use astra_platform_general::ResourceTable;
     use wasm_bindgen::{closure::Closure, JsCast};
@@ -113,13 +113,11 @@ mod browser {
                 }
                 HostCommand::CreateSurface { request, reply } => {
                     let result = match windows.get(request.window) {
-                        Ok(window) => SurfaceResource::new(
-                            window.canvas.clone(),
-                            request.width,
-                            request.height,
-                        )
-                        .await
-                        .and_then(|surface| surfaces.insert(surface)),
+                        Ok(window) => {
+                            create_surface(window.canvas.clone(), request.width, request.height)
+                                .await
+                                .and_then(|surface| surfaces.insert(surface))
+                        }
                         Err(error) => Err(error),
                     };
                     let _ = reply.send(result);
@@ -137,7 +135,7 @@ mod browser {
                 }
                 HostCommand::CaptureSurface { surface, reply } => {
                     let result = match surfaces.get_mut(surface) {
-                        Ok(surface) => surface.capture().await,
+                        Ok(surface) => capture_surface(surface).await,
                         Err(error) => Err(error),
                     };
                     let _ = reply.send(result);
@@ -699,7 +697,37 @@ mod browser {
         }
     }
 
-    struct SurfaceResource {
+    type SurfaceResource = astra_platform_general::WgpuPresentationCore;
+
+    async fn create_surface(
+        canvas: HtmlCanvasElement,
+        width: u32,
+        height: u32,
+    ) -> Result<SurfaceResource, PlatformError> {
+        let instance = wgpu::Instance::default();
+        let surface = instance
+            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+            .map_err(|_| web_error("surface.create"))?;
+        SurfaceResource::new(instance, surface, width, height, true).await
+    }
+
+    async fn capture_surface(
+        surface: &mut SurfaceResource,
+    ) -> Result<CapturedFrame, PlatformError> {
+        let readback = surface.begin_capture()?;
+        let (mapped_tx, mapped_rx) = tokio::sync::oneshot::channel();
+        readback.map_async(move |result| {
+            let _ = mapped_tx.send(result);
+        });
+        mapped_rx
+            .await
+            .map_err(|_| web_error("surface.capture"))?
+            .map_err(|_| web_error("surface.capture"))?;
+        readback.finish()
+    }
+
+    #[cfg(any())]
+    struct LegacySurfaceResource {
         _instance: wgpu::Instance,
         surface: wgpu::Surface<'static>,
         _adapter: wgpu::Adapter,
@@ -712,7 +740,8 @@ mod browser {
         last_upload: Option<UploadFrame>,
     }
 
-    impl SurfaceResource {
+    #[cfg(any())]
+    impl LegacySurfaceResource {
         async fn new(
             canvas: HtmlCanvasElement,
             width: u32,
@@ -934,12 +963,14 @@ mod browser {
         }
     }
 
+    #[cfg(any())]
     struct UploadFrame {
         texture: wgpu::Texture,
         width: u32,
         height: u32,
     }
 
+    #[cfg(any())]
     fn create_pipeline(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
@@ -1011,6 +1042,7 @@ mod browser {
         )
     }
 
+    #[cfg(any())]
     const FRAME_SHADER: &str = r#"
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {

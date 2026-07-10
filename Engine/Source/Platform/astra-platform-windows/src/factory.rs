@@ -72,8 +72,8 @@ mod windows {
         CapturedFrame, DecodeKind, DecodeOutput, DecodeSessionHandle, HostCommand, InputState,
         PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels, PlatformDecodeRequest,
         PlatformError, PlatformErrorCode, PlatformEvent, PlatformEventKind, PlatformHostProfile,
-        PlatformHostSession, PointerButton, RgbaFrame, SaveTransactionHandle, SurfaceHandle,
-        TouchPhase, WindowHandle,
+        PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle, TouchPhase,
+        WindowHandle,
     };
     use astra_platform_general::{
         AtomicSaveStore, FilePackageSource, ResourceTable, SaveTransaction, VerifiedPackageCache,
@@ -308,7 +308,7 @@ mod windows {
                             .get(request.window)
                             .cloned()
                             .and_then(|window| {
-                                SurfaceResource::new(window, request.width, request.height)
+                                create_surface(window, request.width, request.height)
                             })
                             .and_then(|surface| self.surfaces.insert(surface));
                         let _ = reply.send(result);
@@ -325,10 +325,7 @@ mod windows {
                         let _ = reply.send(result);
                     }
                     HostCommand::CaptureSurface { surface, reply } => {
-                        let result = self
-                            .surfaces
-                            .get_mut(surface)
-                            .and_then(SurfaceResource::capture);
+                        let result = self.surfaces.get_mut(surface).and_then(capture_surface);
                         let _ = reply.send(result);
                     }
                     HostCommand::DestroySurface { surface, reply } => {
@@ -749,7 +746,36 @@ mod windows {
         }
     }
 
-    struct SurfaceResource {
+    type SurfaceResource = astra_platform_general::WgpuPresentationCore;
+
+    fn create_surface(
+        window: Arc<Window>,
+        width: u32,
+        height: u32,
+    ) -> Result<SurfaceResource, PlatformError> {
+        let instance = wgpu::Instance::default();
+        let surface = instance
+            .create_surface(window)
+            .map_err(|_| host_error("surface.create", "wgpu surface creation failed"))?;
+        pollster::block_on(SurfaceResource::new(instance, surface, width, height, true))
+    }
+
+    fn capture_surface(surface: &mut SurfaceResource) -> Result<CapturedFrame, PlatformError> {
+        let readback = surface.begin_capture()?;
+        let (mapped_tx, mapped_rx) = std_mpsc::sync_channel(1);
+        readback.map_async(move |result| {
+            let _ = mapped_tx.send(result);
+        });
+        surface.poll(wgpu::PollType::wait_indefinitely())?;
+        mapped_rx
+            .recv()
+            .map_err(|_| host_error("surface.capture", "GPU readback callback was lost"))?
+            .map_err(|_| host_error("surface.capture", "GPU readback mapping failed"))?;
+        readback.finish()
+    }
+
+    #[cfg(any())]
+    struct LegacySurfaceResource {
         _instance: wgpu::Instance,
         surface: wgpu::Surface<'static>,
         _adapter: wgpu::Adapter,
@@ -762,7 +788,8 @@ mod windows {
         last_upload: Option<UploadFrame>,
     }
 
-    impl SurfaceResource {
+    #[cfg(any())]
+    impl LegacySurfaceResource {
         fn new(window: Arc<Window>, width: u32, height: u32) -> Result<Self, PlatformError> {
             let instance = wgpu::Instance::default();
             let surface = instance
@@ -1075,6 +1102,7 @@ mod windows {
         }
     }
 
+    #[cfg(any())]
     struct UploadFrame {
         texture: wgpu::Texture,
         width: u32,
@@ -1412,6 +1440,7 @@ mod windows {
         }
     }
 
+    #[cfg(any())]
     const FRAME_SHADER: &str = r#"
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {

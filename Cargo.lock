@@ -470,6 +470,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "wgpu",
 ]
 
 [[package]]
