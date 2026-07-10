@@ -299,6 +299,19 @@ pub enum PlayerHostCommandExecutionError<E> {
     Sink(E),
 }
 
+impl<E: std::fmt::Display> std::fmt::Display for PlayerHostCommandExecutionError<E> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SequenceNotStrictlyIncreasing => {
+                formatter.write_str("Player host command sequence is not strictly increasing")
+            }
+            Self::Sink(error) => write!(formatter, "Player host command failed: {error}"),
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for PlayerHostCommandExecutionError<E> {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerHostCommandError {
     SequenceNotStrictlyIncreasing,

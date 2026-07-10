@@ -1,0 +1,14 @@
+[package]
+name = "astra-player-vn"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+astra-core = { path = "../../Runtime/astra-core" }
+astra-media-core = { path = "../../Runtime/astra-media-core" }
+astra-player-core = { path = "../../Runtime/astra-player-core" }
+astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
+serde_json.workspace = true
+thiserror.workspace = true

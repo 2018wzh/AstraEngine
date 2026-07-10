@@ -547,6 +547,8 @@ dependencies = [
  "astra-platform",
  "astra-platform-windows",
  "astra-player-core",
+ "astra-player-vn",
+ "astra-vn-core",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -569,6 +571,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-player-vn"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-media-core",
+ "astra-player-core",
+ "astra-vn-core",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "astra-player-web"
 version = "0.1.0"
 dependencies = [
@@ -576,6 +590,9 @@ dependencies = [
  "astra-package",
  "astra-platform",
  "astra-platform-web",
+ "astra-player-core",
+ "astra-player-vn",
+ "astra-vn-core",
  "js-sys",
  "serde",
  "serde_json",

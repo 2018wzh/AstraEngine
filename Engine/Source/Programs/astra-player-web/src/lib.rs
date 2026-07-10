@@ -116,9 +116,12 @@ pub fn validate_package(
 mod browser {
     use super::*;
     use astra_platform::{
-        PlatformEventKind, PlatformHostClient, PlatformHostFactory, RgbaFrame, SurfaceHandle,
-        SurfaceRequest, WindowHandle, WindowRequest,
+        InputState, PlatformEventKind, PlatformHostClient, PlatformHostFactory, PointerButton,
+        SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest,
     };
+    use astra_player_core::{PlatformCommandSink, PlayerHostCommandExecutor, PlayerHostResourceId};
+    use astra_player_vn::NativeVnHostCommandSource;
+    use astra_vn_core::{CompiledStory, VnRunConfig};
     use std::cell::RefCell;
     use wasm_bindgen::prelude::*;
     use wasm_bindgen_futures::{spawn_local, JsFuture};
@@ -173,23 +176,32 @@ mod browser {
             })
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-        let hash = astra_core::Hash256::from_sha256(&package_bytes);
-        let color = [
-            hash.as_bytes()[0],
-            hash.as_bytes()[1],
-            hash.as_bytes()[2],
-            255,
-        ];
-        session
-            .client
-            .present_rgba(
-                surface,
-                RgbaFrame {
-                    sequence: 1,
-                    width: 1280,
-                    height: 720,
-                    rgba8: color.repeat(1280 * 720),
-                },
+        let package = astra_package::PackageReader::open(&package_bytes)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        let compiled: CompiledStory = package
+            .container()
+            .decode_postcard("vn.compiled_story")
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        let logical_surface = PlayerHostResourceId(1);
+        let mut sink = PlatformCommandSink::new(session.client.clone());
+        sink.bind_surface(logical_surface, surface)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        let mut executor = PlayerHostCommandExecutor::new(sink);
+        let mut vn = NativeVnHostCommandSource::new(
+            compiled,
+            VnRunConfig {
+                profile: config.profile.clone(),
+                locale: "zh-Hans".to_string(),
+            },
+            1280,
+            720,
+            logical_surface,
+        )
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        executor
+            .execute_batch(
+                vn.launch()
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?,
             )
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
@@ -197,12 +209,48 @@ mod browser {
         let mut events = session.events;
         spawn_local(async move {
             while let Ok(event) = events.recv().await {
-                if matches!(event.kind, PlatformEventKind::WindowClosed { .. }) {
-                    let _ = client.destroy_surface(surface).await;
-                    let _ = client.destroy_window(window).await;
-                    let _ = client.shutdown().await;
-                    PLAYER.with(|player| *player.borrow_mut() = None);
-                    break;
+                match event.kind {
+                    PlatformEventKind::WindowClosed { .. } => {
+                        let _ = client.destroy_surface(surface).await;
+                        let _ = client.destroy_window(window).await;
+                        let _ = client.shutdown().await;
+                        PLAYER.with(|player| *player.borrow_mut() = None);
+                        break;
+                    }
+                    PlatformEventKind::Keyboard {
+                        state: InputState::Pressed,
+                        ..
+                    }
+                    | PlatformEventKind::PointerButton {
+                        button: PointerButton::Primary,
+                        state: InputState::Pressed,
+                        ..
+                    } => {
+                        let batch = match vn.primary_input() {
+                            Ok(batch) => batch,
+                            Err(error) => {
+                                tracing::error!(
+                                    event = "player.web.runtime.input_failed",
+                                    diagnostic_code = "ASTRA_PLAYER_RUNTIME_INPUT",
+                                    operation = "player.runtime.input",
+                                    error = %error,
+                                    "Web Player runtime input failed"
+                                );
+                                break;
+                            }
+                        };
+                        if let Err(error) = executor.execute_batch(batch).await {
+                            tracing::error!(
+                                event = "player.web.host_command.failed",
+                                diagnostic_code = "ASTRA_PLAYER_HOST_COMMAND",
+                                operation = "player.host.execute",
+                                error = %error,
+                                "Web Player host command failed"
+                            );
+                            break;
+                        }
+                    }
+                    _ => {}
                 }
             }
         });

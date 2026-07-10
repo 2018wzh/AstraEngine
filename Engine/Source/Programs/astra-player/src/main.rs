@@ -140,6 +140,11 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         InputState, PackageSourceRequest, PlatformEventKind, PlatformHostFactory, PlatformId,
         SurfaceRequest, WindowRequest,
     };
+    use astra_player::{
+        NativeVnHostCommandSource, PlatformCommandSink, PlayerHostCommandExecutor,
+        PlayerHostResourceId,
+    };
+    use astra_vn_core::{CompiledStory, VnRunConfig};
     use serde::Deserialize;
 
     #[derive(Deserialize)]
@@ -164,6 +169,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     let package_hash = Hash256::from_sha256(&package_bytes).to_string();
     let package = PackageReader::open(&package_bytes)?;
     let manifest: PackageManifest = package.container().decode_postcard("package.manifest")?;
+    let compiled_story: CompiledStory = package.container().decode_postcard("vn.compiled_story")?;
     if manifest.profile != config.profile {
         return Err("Player config/package profile mismatch".into());
     }
@@ -221,16 +227,43 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                 height,
             })
             .await?;
-        let mut sequence = 1;
-        present_player_frame(
-            &session.client,
-            surface,
-            sequence,
+        let logical_surface = PlayerHostResourceId(1);
+        let mut sink = PlatformCommandSink::new(session.client.clone());
+        sink.bind_surface(logical_surface, surface)?;
+        let mut executor = PlayerHostCommandExecutor::new(sink);
+        let mut vn = NativeVnHostCommandSource::new(
+            compiled_story,
+            VnRunConfig {
+                profile: config.profile,
+                locale: "zh-Hans".to_string(),
+            },
             width,
             height,
-            [16, 18, 24, 255],
+            logical_surface,
         )
-        .await?;
+        .map_err(|error| {
+            astra_platform::PlatformError::new(
+                astra_platform::PlatformErrorCode::InvalidState,
+                "player.runtime.open",
+                error.to_string(),
+            )
+        })?;
+        executor
+            .execute_batch(vn.launch().map_err(|error| {
+                astra_platform::PlatformError::new(
+                    astra_platform::PlatformErrorCode::InvalidState,
+                    "player.runtime.launch",
+                    error.to_string(),
+                )
+            })?)
+            .await
+            .map_err(|error| {
+                astra_platform::PlatformError::new(
+                    astra_platform::PlatformErrorCode::InvalidState,
+                    "player.host.execute",
+                    error.to_string(),
+                )
+            })?;
         loop {
             let event = session.events.recv().await?;
             match event.kind {
@@ -240,17 +273,20 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                     state: InputState::Pressed,
                     ..
                 } if input_window == window => {
-                    sequence += 1;
-                    let accent = (sequence % 192) as u8 + 32;
-                    present_player_frame(
-                        &session.client,
-                        surface,
-                        sequence,
-                        width,
-                        height,
-                        [accent, 32, 96, 255],
-                    )
-                    .await?;
+                    let batch = vn.primary_input().map_err(|error| {
+                        astra_platform::PlatformError::new(
+                            astra_platform::PlatformErrorCode::InvalidState,
+                            "player.runtime.input",
+                            error.to_string(),
+                        )
+                    })?;
+                    executor.execute_batch(batch).await.map_err(|error| {
+                        astra_platform::PlatformError::new(
+                            astra_platform::PlatformErrorCode::InvalidState,
+                            "player.host.execute",
+                            error.to_string(),
+                        )
+                    })?;
                 }
                 _ => {}
             }
@@ -261,28 +297,6 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         Ok::<(), astra_platform::PlatformError>(())
     })?;
     Ok(())
-}
-
-#[cfg(target_os = "windows")]
-async fn present_player_frame(
-    client: &astra_platform::PlatformHostClient,
-    surface: astra_platform::SurfaceHandle,
-    sequence: u64,
-    width: u32,
-    height: u32,
-    color: [u8; 4],
-) -> Result<(), astra_platform::PlatformError> {
-    client
-        .present_rgba(
-            surface,
-            astra_platform::RgbaFrame {
-                sequence,
-                width,
-                height,
-                rgba8: color.repeat((width * height) as usize),
-            },
-        )
-        .await
 }
 
 #[cfg(not(target_os = "windows"))]

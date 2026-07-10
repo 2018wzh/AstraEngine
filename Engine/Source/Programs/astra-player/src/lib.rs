@@ -1,11 +1,14 @@
 use astra_core::Hash256;
 pub use astra_player_core::{
-    PlayerAudioMeterEvidence, PlayerAutomationReport, PlayerAutomationScript,
+    PlatformCommandSink, PlayerAudioMeterEvidence, PlayerAutomationReport, PlayerAutomationScript,
     PlayerAutomationStatus, PlayerAutomationStep, PlayerAutomationValidator,
-    PlayerInputConsumptionEvidence, PlayerInputEvent, PlayerInputTranscript, PlayerPlatform,
-    PlayerPlatformEvidenceIdentity, PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
+    PlayerHostCommandExecutor, PlayerHostResourceId, PlayerInputConsumptionEvidence,
+    PlayerInputEvent, PlayerInputTranscript, PlayerPlatform, PlayerPlatformEvidenceIdentity,
+    PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
 };
 use std::{collections::BTreeSet, fs, path::PathBuf};
+
+pub use astra_player_vn::*;
 
 pub const WINDOWS_SENDINPUT_MOUSE: &str = "sendinput.mouse";
 pub const WINDOWS_SENDINPUT_KEYBOARD: &str = "sendinput.keyboard";

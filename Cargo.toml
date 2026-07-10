@@ -40,6 +40,7 @@ members = [
     "Engine/Source/Developer/astra-observability",
     "Engine/Source/Programs/astra-cli",
     "Engine/Source/Programs/astra-player",
+    "Engine/Source/Programs/astra-player-vn",
     "Engine/Source/Programs/astra-player-web",
     "Engine/Source/Programs/astra-crash-reporter",
     "Engine/Plugins/Fixtures/headless-presentation-provider",
