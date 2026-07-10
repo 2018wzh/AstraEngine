@@ -4,6 +4,9 @@ use astra_core::{Diagnostic, Hash256};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+mod platform_sink;
+pub use platform_sink::*;
+
 /// Logical resource identity used only inside the Player command stream. It is
 /// deliberately unrelated to platform handles and may safely cross runtime
 /// provider boundaries.
@@ -104,6 +107,7 @@ pub enum PlayerHostCommand {
     },
     Decode {
         sequence: u64,
+        request_sequence: u64,
         session: PlayerHostResourceId,
         kind: PlayerDecodeKind,
         codec: String,

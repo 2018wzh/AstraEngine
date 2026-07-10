@@ -560,6 +560,7 @@ name = "astra-player-core"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-platform",
  "schemars",
  "serde",
  "serde_json",
