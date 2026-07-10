@@ -221,9 +221,14 @@ mod browser {
                     let _ = reply.send(read_save(&profile.package_id, &slot).await);
                 }
                 HostCommand::OpenPackage { source, reply } => {
-                    let result = PackageBytes::open(source, &profile.package_sources)
-                        .await
-                        .and_then(|source| packages.insert(source));
+                    let result = PackageBytes::open(
+                        source,
+                        &profile.package_sources,
+                        &profile.package_id,
+                        &profile.package_cache,
+                    )
+                    .await
+                    .and_then(|source| packages.insert(source));
                     let _ = reply.send(result);
                 }
                 HostCommand::ReadPackageRange {

@@ -1,7 +1,8 @@
 use astra_core::Hash256;
 use astra_platform::{
-    AudioMeter, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput, PackageSourcePolicy,
-    PackageSourceRequest, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
+    AudioMeter, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput, PackageCachePolicy,
+    PackageSourcePolicy, PackageSourceRequest, PlatformDecodeRequest, PlatformError,
+    PlatformErrorCode,
 };
 use js_sys::{Function, Promise, Reflect, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};
@@ -284,6 +285,8 @@ impl PackageBytes {
     pub async fn open(
         source: PackageSourceRequest,
         policies: &[PackageSourcePolicy],
+        package_id: &str,
+        cache_policy: &PackageCachePolicy,
     ) -> Result<Self, PlatformError> {
         let (bytes, expected_hash) = match source {
             PackageSourceRequest::Bundled {
@@ -303,6 +306,12 @@ impl PackageBytes {
             }
             PackageSourceRequest::HttpsRange { url, expected_hash } => {
                 let parsed = Url::new(&url).map_err(|_| invalid_origin())?;
+                if parsed.protocol() != "https:"
+                    || !parsed.username().is_empty()
+                    || !parsed.password().is_empty()
+                {
+                    return Err(invalid_origin());
+                }
                 let origin = parsed.origin();
                 let allowed = policies.iter().any(|policy| match policy {
                     PackageSourcePolicy::HttpsRange { allowed_origins } => {
@@ -313,7 +322,11 @@ impl PackageBytes {
                 if !allowed {
                     return Err(invalid_origin());
                 }
-                (fetch_bytes(&url).await?, expected_hash)
+                (
+                    fetch_https_verified(&url, &origin, &expected_hash, package_id, cache_policy)
+                        .await?,
+                    expected_hash,
+                )
             }
         };
         if Hash256::from_sha256(&bytes).to_string() != expected_hash {
@@ -392,6 +405,145 @@ async fn fetch_bytes(path: &str) -> Result<Vec<u8>, PlatformError> {
     Ok(Uint8Array::new(&buffer).to_vec())
 }
 
+async fn fetch_https_verified(
+    url: &str,
+    origin: &str,
+    expected_hash: &str,
+    package_id: &str,
+    policy: &PackageCachePolicy,
+) -> Result<Vec<u8>, PlatformError> {
+    if let Some(bytes) = read_verified_cache(package_id, expected_hash).await? {
+        if Hash256::from_sha256(&bytes).to_string() == expected_hash {
+            return Ok(bytes);
+        }
+        return Err(PlatformError::new(
+            PlatformErrorCode::IntegrityMismatch,
+            "package.https.open",
+            "verified OPFS cache entry hash does not match its identity",
+        ));
+    }
+    let window = web_sys::window().ok_or_else(|| js_error("package.https.open"))?;
+    let response = JsFuture::from(window.fetch_with_str(url))
+        .await
+        .map_err(|_| js_error("package.https.open"))?
+        .dyn_into::<Response>()
+        .map_err(|_| js_error("package.https.open"))?;
+    if response.redirected() || response.status() != 200 {
+        return Err(PlatformError::new(
+            PlatformErrorCode::Io,
+            "package.https.open",
+            "HTTPS package response must be an unredirected complete response",
+        ));
+    }
+    let final_url = Url::new(&response.url()).map_err(|_| invalid_origin())?;
+    if final_url.protocol() != "https:" || final_url.origin() != origin {
+        return Err(invalid_origin());
+    }
+    if response
+        .headers()
+        .get("content-encoding")
+        .map_err(|_| js_error("package.https.open"))?
+        .is_some_and(|value| !value.eq_ignore_ascii_case("identity"))
+    {
+        return Err(PlatformError::new(
+            PlatformErrorCode::IntegrityMismatch,
+            "package.https.open",
+            "HTTPS package response uses unsupported content encoding",
+        ));
+    }
+    let declared_length = response
+        .headers()
+        .get("content-length")
+        .map_err(|_| js_error("package.https.open"))?
+        .ok_or_else(|| {
+            PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "package.https.open",
+                "HTTPS package response must declare content length",
+            )
+        })?
+        .parse::<u64>()
+        .map_err(|_| js_error("package.https.open"))?;
+    if declared_length > policy.max_entry_bytes {
+        return Err(PlatformError::new(
+            PlatformErrorCode::InvalidState,
+            "package.https.open",
+            "HTTPS package exceeds cache entry limit",
+        ));
+    }
+    let buffer = JsFuture::from(
+        response
+            .array_buffer()
+            .map_err(|_| js_error("package.https.open"))?,
+    )
+    .await
+    .map_err(|_| js_error("package.https.open"))?;
+    let bytes = Uint8Array::new(&buffer).to_vec();
+    if u64::try_from(bytes.len()).map_err(|_| js_error("package.https.open"))? != declared_length {
+        return Err(PlatformError::new(
+            PlatformErrorCode::IntegrityMismatch,
+            "package.https.open",
+            "HTTPS package response is truncated",
+        ));
+    }
+    if Hash256::from_sha256(&bytes).to_string() != expected_hash {
+        return Err(PlatformError::new(
+            PlatformErrorCode::IntegrityMismatch,
+            "package.https.open",
+            "HTTPS package hash does not match its declared identity",
+        ));
+    }
+    write_verified_cache(package_id, expected_hash, &bytes).await?;
+    Ok(bytes)
+}
+
+async fn read_verified_cache(
+    package_id: &str,
+    expected_hash: &str,
+) -> Result<Option<Vec<u8>>, PlatformError> {
+    let key = expected_hash
+        .strip_prefix("sha256:")
+        .ok_or_else(cache_error)?;
+    let function = Function::new_with_args(
+        "packageId, key",
+        "return (async () => { const root = await navigator.storage.getDirectory(); try { const app = await root.getDirectoryHandle(packageId); const cache = await app.getDirectoryHandle('packages'); const file = await cache.getFileHandle(key); return new Uint8Array(await (await file.getFile()).arrayBuffer()); } catch (error) { if (error && error.name === 'NotFoundError') return null; throw error; } })();",
+    );
+    let value = await_promise(function.call2(
+        &JsValue::NULL,
+        &JsValue::from_str(package_id),
+        &JsValue::from_str(key),
+    ))
+    .await?;
+    if value.is_null() {
+        Ok(None)
+    } else {
+        Ok(Some(Uint8Array::new(&value).to_vec()))
+    }
+}
+
+async fn write_verified_cache(
+    package_id: &str,
+    expected_hash: &str,
+    bytes: &[u8],
+) -> Result<(), PlatformError> {
+    let key = expected_hash
+        .strip_prefix("sha256:")
+        .ok_or_else(cache_error)?;
+    let data = Uint8Array::from(bytes);
+    let function = Function::new_with_args(
+        "packageId, key, bytes",
+        "return (async () => { const root = await navigator.storage.getDirectory(); const app = await root.getDirectoryHandle(packageId, {create: true}); const cache = await app.getDirectoryHandle('packages', {create: true}); const file = await cache.getFileHandle(key, {create: true}); const writer = await file.createWritable({keepExistingData: false}); try { await writer.write(bytes); await writer.close(); } catch (error) { try { await writer.abort(); } catch (_) {} throw error; } })();",
+    );
+    await_promise(function.call3(
+        &JsValue::NULL,
+        &JsValue::from_str(package_id),
+        &JsValue::from_str(key),
+        data.as_ref(),
+    ))
+    .await?;
+    Ok(())
+}
+
 async fn pick_file() -> Result<Vec<u8>, PlatformError> {
     let file = rfd::AsyncFileDialog::new()
         .add_filter("Astra package", &["astrapkg"])
@@ -453,6 +605,14 @@ fn range_error() -> PlatformError {
         PlatformErrorCode::InvalidState,
         "package.read_range",
         "package range is outside the validated source",
+    )
+}
+
+fn cache_error() -> PlatformError {
+    PlatformError::new(
+        PlatformErrorCode::IntegrityMismatch,
+        "package.https.cache",
+        "verified package cache identity is invalid",
     )
 }
 
