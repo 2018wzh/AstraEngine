@@ -46,6 +46,12 @@ impl NativeVnHostCommandSource {
             format: RenderTargetFormat::Rgba8Srgb,
             profile: "player".to_string(),
         })?;
+        tracing::info!(
+            event = "player.vn.runtime.open",
+            width,
+            height,
+            "opened AstraVN Player command source"
+        );
         Ok(Self {
             runtime,
             renderer,
@@ -124,6 +130,13 @@ impl NativeVnHostCommandSource {
             .command_sequence
             .checked_add(1)
             .ok_or(NativeVnHostError::SequenceOverflow)?;
+        tracing::trace!(
+            event = "player.vn.runtime.command.emit",
+            sequence = self.command_sequence,
+            presentation_count = output.presentation.len(),
+            frame_hash = %frame.hash,
+            "emitted AstraVN Player host command"
+        );
         Ok(PlayerHostCommandBatch::new(vec![
             PlayerHostCommand::PresentRgba {
                 sequence: self.command_sequence,

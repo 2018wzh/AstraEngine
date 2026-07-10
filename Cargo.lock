@@ -580,6 +580,7 @@ dependencies = [
  "astra-vn-core",
  "serde_json",
  "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]

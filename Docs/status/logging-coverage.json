@@ -40,6 +40,7 @@
     "astra-observability": { "status": "not_applicable", "reason": "pure sink infrastructure where self-logging would recurse" },
     "astra-cli": { "status": "instrumented", "reason": "CLI host and toolchain orchestration" },
     "astra-player": { "status": "instrumented", "reason": "player host and live automation" },
+    "astra-player-vn": { "status": "instrumented", "reason": "AstraVN Player command source lifecycle" },
     "astra-player-web": { "status": "instrumented", "reason": "Web Player package and host lifecycle" },
     "astra-crash-reporter": { "status": "instrumented", "reason": "Windows crash reporter handshake and dump lifecycle" },
     "headless-presentation-provider": { "status": "instrumented", "reason": "fixture provider lifecycle" },

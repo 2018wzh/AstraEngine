@@ -12,3 +12,4 @@ astra-player-core = { path = "../../Runtime/astra-player-core" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
 serde_json.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
