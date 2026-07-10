@@ -5,6 +5,7 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
 };
 
 use astra_platform::{PackageCachePolicy, PlatformError, PlatformErrorCode};
@@ -54,6 +55,15 @@ pub struct VerifiedPackageStaging<'a> {
     staging: tempfile::NamedTempFile,
     hasher: Sha256,
     written: u64,
+}
+
+/// A verified cache entry that keeps an in-process lease for its complete host
+/// lifetime.  Eviction observes that lease, so a live package handle cannot be
+/// unlinked by an unrelated cache write.
+pub struct CachedPackageSource {
+    source: FilePackageSource,
+    root: PathBuf,
+    key: String,
 }
 
 impl VerifiedPackageCache {
@@ -139,12 +149,20 @@ impl VerifiedPackageCache {
         })
     }
 
-    pub fn open_source(&mut self, expected_hash: &str) -> Result<FilePackageSource, PlatformError> {
+    pub fn open_source(
+        &mut self,
+        expected_hash: &str,
+    ) -> Result<CachedPackageSource, PlatformError> {
         let key = cache_key(expected_hash)?;
         let path = self.path_for(&key);
         let source = FilePackageSource::open(&path, expected_hash)?;
-        self.record_access(key, source.len())?;
-        Ok(source)
+        self.record_access(key.clone(), source.len())?;
+        acquire_lease(&self.root, &key)?;
+        Ok(CachedPackageSource {
+            source,
+            root: self.root.clone(),
+            key,
+        })
     }
 
     pub fn contains(&mut self, expected_hash: &str) -> Result<bool, PlatformError> {
@@ -178,7 +196,7 @@ impl VerifiedPackageCache {
                 .index
                 .entries
                 .iter()
-                .filter(|(key, _)| Some(key.as_str()) != keep)
+                .filter(|(key, _)| Some(key.as_str()) != keep && !is_leased(&self.root, key))
                 .min_by_key(|(_, entry)| entry.last_access)
                 .map(|(key, _)| key.clone())
                 .ok_or_else(|| {
@@ -237,6 +255,80 @@ impl VerifiedPackageCache {
             .map_err(|_| io_error("package.cache.index"))?;
         Ok(())
     }
+}
+
+impl CachedPackageSource {
+    pub fn len(&self) -> u64 {
+        self.source.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.source.is_empty()
+    }
+
+    pub fn read_range(&mut self, offset: u64, length: usize) -> Result<Vec<u8>, PlatformError> {
+        self.source.read_range(offset, length)
+    }
+}
+
+impl Drop for CachedPackageSource {
+    fn drop(&mut self) {
+        if let Ok(mut leases) = lease_table().lock() {
+            let lease_key = LeaseKey::new(&self.root, &self.key);
+            if let Some(count) = leases.get_mut(&lease_key) {
+                *count -= 1;
+                if *count == 0 {
+                    leases.remove(&lease_key);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
+struct LeaseKey {
+    root: PathBuf,
+    key: String,
+}
+
+impl LeaseKey {
+    fn new(root: &Path, key: &str) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            key: key.to_string(),
+        }
+    }
+}
+
+fn lease_table() -> &'static Mutex<BTreeMap<LeaseKey, usize>> {
+    static TABLE: OnceLock<Mutex<BTreeMap<LeaseKey, usize>>> = OnceLock::new();
+    TABLE.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn acquire_lease(root: &Path, key: &str) -> Result<(), PlatformError> {
+    let mut leases = lease_table().lock().map_err(|_| {
+        PlatformError::new(
+            PlatformErrorCode::InvalidState,
+            "package.cache.lease",
+            "verified package cache lease table is unavailable",
+        )
+    })?;
+    let count = leases.entry(LeaseKey::new(root, key)).or_default();
+    *count = count.checked_add(1).ok_or_else(|| {
+        PlatformError::new(
+            PlatformErrorCode::InvalidState,
+            "package.cache.lease",
+            "verified package cache lease counter overflowed",
+        )
+    })?;
+    Ok(())
+}
+
+fn is_leased(root: &Path, key: &str) -> bool {
+    lease_table()
+        .lock()
+        .map(|leases| leases.contains_key(&LeaseKey::new(root, key)))
+        .unwrap_or(true)
 }
 
 impl VerifiedPackageStaging<'_> {

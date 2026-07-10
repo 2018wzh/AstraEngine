@@ -76,7 +76,8 @@ mod windows {
         WindowHandle,
     };
     use astra_platform_general::{
-        AtomicSaveStore, FilePackageSource, ResourceTable, SaveTransaction, VerifiedPackageCache,
+        AtomicSaveStore, CachedPackageSource, FilePackageSource, ResourceTable, SaveTransaction,
+        VerifiedPackageCache,
     };
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use tokio::sync::oneshot;
@@ -181,10 +182,12 @@ mod windows {
             ready,
             save_store,
             package_cache,
-            profile.package_sources.clone(),
-            profile.package_id.clone(),
-            profile.package_cache.clone(),
-            roots.bundle_root,
+            PackageHostConfig {
+                source_policies: profile.package_sources.clone(),
+                package_id: profile.package_id.clone(),
+                cache_policy: profile.package_cache.clone(),
+                bundle_root: roots.bundle_root,
+            },
         ) {
             Ok(app) => app,
             Err(_) => return,
@@ -217,10 +220,17 @@ mod windows {
         pending_package_opens: usize,
         save_transactions: ResourceTable<SaveTransaction, SaveTransactionHandle>,
         bundle_root: std::path::PathBuf,
-        package_sources: ResourceTable<FilePackageSource, PackageSourceHandle>,
+        package_sources: ResourceTable<PackageSourceResource, PackageSourceHandle>,
         event_sequence: u64,
         gamepads: gilrs::Gilrs,
         gamepad_mapper: astra_platform_general::GamepadMapper,
+    }
+
+    struct PackageHostConfig {
+        source_policies: Vec<astra_platform::PackageSourcePolicy>,
+        package_id: String,
+        cache_policy: astra_platform::PackageCachePolicy,
+        bundle_root: std::path::PathBuf,
     }
 
     impl WindowsHostApp {
@@ -229,10 +239,7 @@ mod windows {
             ready: std_mpsc::SyncSender<Result<(), PlatformError>>,
             save_store: AtomicSaveStore,
             package_cache: VerifiedPackageCache,
-            package_source_policies: Vec<astra_platform::PackageSourcePolicy>,
-            package_id: String,
-            package_cache_policy: astra_platform::PackageCachePolicy,
-            bundle_root: std::path::PathBuf,
+            package: PackageHostConfig,
         ) -> Result<Self, PlatformError> {
             let gamepads = gilrs::Gilrs::new().map_err(|_| {
                 let error = host_error(
@@ -254,14 +261,14 @@ mod windows {
                 decode_sessions: ResourceTable::new("decode_session"),
                 save_store,
                 package_cache,
-                package_source_policies,
-                package_id,
-                package_cache_policy,
+                package_source_policies: package.source_policies,
+                package_id: package.package_id,
+                package_cache_policy: package.cache_policy,
                 package_completion_tx,
                 package_completion_rx,
                 pending_package_opens: 0,
                 save_transactions: ResourceTable::new("save_transaction"),
-                bundle_root,
+                bundle_root: package.bundle_root,
                 package_sources: ResourceTable::new("package_source"),
                 event_sequence: 0,
                 gamepads,
@@ -445,10 +452,16 @@ mod windows {
                                 self.bundle_root.join(relative_path),
                                 &expected_hash,
                             )
-                            .and_then(|source| self.package_sources.insert(source)),
+                            .and_then(|source| {
+                                self.package_sources
+                                    .insert(PackageSourceResource::Bundled(source))
+                            }),
                             PackageSourceRequest::UserAuthorized { expected_hash } => self
                                 .open_user_authorized_package(&expected_hash)
-                                .and_then(|source| self.package_sources.insert(source)),
+                                .and_then(|source| {
+                                    self.package_sources
+                                        .insert(PackageSourceResource::Cached(source))
+                                }),
                             PackageSourceRequest::HttpsRange { url, expected_hash } => {
                                 self.start_https_package_open(url, expected_hash, reply);
                                 continue;
@@ -505,7 +518,7 @@ mod windows {
         fn open_user_authorized_package(
             &mut self,
             expected_hash: &str,
-        ) -> Result<FilePackageSource, PlatformError> {
+        ) -> Result<CachedPackageSource, PlatformError> {
             let file = pollster::block_on(
                 rfd::AsyncFileDialog::new()
                     .add_filter("Astra package", &["astrapkg"])
@@ -555,9 +568,10 @@ mod windows {
         fn process_package_completions(&mut self) {
             while let Ok(completion) = self.package_completion_rx.try_recv() {
                 self.pending_package_opens = self.pending_package_opens.saturating_sub(1);
-                let result = completion
-                    .result
-                    .and_then(|source| self.package_sources.insert(source));
+                let result = completion.result.and_then(|source| {
+                    self.package_sources
+                        .insert(PackageSourceResource::Cached(source))
+                });
                 let _ = completion.reply.send(result);
             }
         }
@@ -667,7 +681,21 @@ mod windows {
 
     struct PackageCompletion {
         reply: oneshot::Sender<Result<PackageSourceHandle, PlatformError>>,
-        result: Result<FilePackageSource, PlatformError>,
+        result: Result<CachedPackageSource, PlatformError>,
+    }
+
+    enum PackageSourceResource {
+        Bundled(FilePackageSource),
+        Cached(CachedPackageSource),
+    }
+
+    impl PackageSourceResource {
+        fn read_range(&mut self, offset: u64, length: usize) -> Result<Vec<u8>, PlatformError> {
+            match self {
+                Self::Bundled(source) => source.read_range(offset, length),
+                Self::Cached(source) => source.read_range(offset, length),
+            }
+        }
     }
 
     impl WindowsHostApp {
