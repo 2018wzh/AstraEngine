@@ -5,6 +5,12 @@ pub fn host(target: Option<&str>) -> ReportBackedPlatformHost {
 }
 
 pub fn probe(target: Option<&str>) -> PlatformCapabilityReport {
+    tracing::info!(
+        event = "platform.probe.start",
+        platform = "ios",
+        has_target = target.is_some(),
+        "platform capability probe started"
+    );
     PlatformCapabilityReport::new(
         PlatformId::Ios,
         target.map(str::to_string),

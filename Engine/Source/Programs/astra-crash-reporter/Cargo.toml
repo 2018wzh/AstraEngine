@@ -1,0 +1,31 @@
+[package]
+name = "astra-crash-reporter"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "AstraCrashReporter"
+path = "src/main.rs"
+
+[dependencies]
+astra-core = { path = "../../Runtime/astra-core" }
+astra-observability = { path = "../../Developer/astra-observability" }
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tracing.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Kernel",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -76,6 +76,10 @@ impl VnSystemUiProfileManifest {
     }
 
     pub fn validate(&self) -> SystemUiProfileValidationReport {
+        tracing::debug!(
+            event = "vn.system_ui.validate.start",
+            "AstraVN system UI profile validation started"
+        );
         let mut diagnostics = Vec::new();
         if self.schema != "astra.vn.system_ui_profile_manifest.v1" {
             diagnostics.push(Diagnostic::blocking(

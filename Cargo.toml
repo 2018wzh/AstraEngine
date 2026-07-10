@@ -36,8 +36,10 @@ members = [
     "Engine/Source/Developer/astra-property",
     "Engine/Source/Developer/astra-property-derive",
     "Engine/Source/Developer/astra-test",
+    "Engine/Source/Developer/astra-observability",
     "Engine/Source/Programs/astra-cli",
     "Engine/Source/Programs/astra-player",
+    "Engine/Source/Programs/astra-crash-reporter",
     "Engine/Plugins/Fixtures/headless-presentation-provider",
     "Engine/Plugins/Fixtures/vn-extension-provider",
 ]
@@ -81,6 +83,8 @@ thiserror = "1"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+file-rotate = "0.8"
+time = { version = "0.3", features = ["formatting"] }
 uuid = { version = "1", features = ["serde"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

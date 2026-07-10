@@ -29,6 +29,11 @@ packaged: true
 }
 
 extern "C" fn register() -> FfiPluginRegistration {
+    tracing::info!(
+        event = "fixture.vn_extension.register",
+        provider_count = 5,
+        "VN extension fixture registered"
+    );
     FfiPluginRegistration {
         providers: RVec::from(vec![
             provider(
@@ -64,6 +69,10 @@ extern "C" fn register() -> FfiPluginRegistration {
 }
 
 extern "C" fn shutdown() -> FfiPluginShutdown {
+    tracing::info!(
+        event = "fixture.vn_extension.shutdown",
+        "VN extension fixture shut down"
+    );
     FfiPluginShutdown {
         callbacks_released: true,
     }

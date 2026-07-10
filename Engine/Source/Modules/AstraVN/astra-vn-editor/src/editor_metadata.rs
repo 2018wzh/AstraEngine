@@ -43,6 +43,11 @@ pub struct EditorMetadataPatchManifest {
 
 impl EditorVisualMetadata {
     pub fn validate_against(&self, compiled: &CompiledStory) -> EditorMetadataValidationReport {
+        tracing::debug!(
+            event = "vn.editor_metadata.validate.start",
+            state_count = compiled.states.len(),
+            "AstraVN editor metadata validation started"
+        );
         let mut diagnostics = Vec::new();
         for command_id in self.command_ids() {
             if !compiled.source_map.contains_key(&command_id) {

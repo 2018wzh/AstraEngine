@@ -26,6 +26,10 @@ pub struct VnExtensionValidationReport {
 
 impl VnExtensionManifest {
     pub fn standard() -> Self {
+        tracing::info!(
+            event = "vn.plugin.extensions.create",
+            "AstraVN standard extension bindings created"
+        );
         Self {
             schema: "astra.vn.extension_manifest.v1".to_string(),
             bindings: vec![
@@ -65,6 +69,11 @@ impl VnExtensionManifest {
     }
 
     pub fn validate_required(&self) -> VnExtensionValidationReport {
+        tracing::debug!(
+            event = "vn.plugin.extensions.validate.start",
+            binding_count = self.bindings.len(),
+            "AstraVN extension validation started"
+        );
         let mut diagnostics = Vec::new();
         if self.schema != "astra.vn.extension_manifest.v1" {
             diagnostics.push(Diagnostic::blocking(

@@ -14,6 +14,7 @@ pub fn compile_astra_sources<I>(sources: I) -> Result<CompiledStory, VnError>
 where
     I: IntoIterator<Item = AstraSource>,
 {
+    tracing::info!(event = "vn.compile.start", "AstraVN compilation started");
     let lines = parse_sources(sources)?;
     let mut builder = CompileBuilder::default();
     for line in &lines {
@@ -40,7 +41,15 @@ where
             _ => builder.push_presentation(line)?,
         }
     }
-    builder.finish()
+    let compiled = builder.finish()?;
+    tracing::info!(
+        event = "vn.compile.complete",
+        story_count = compiled.stories.len(),
+        state_count = compiled.states.len(),
+        source_entry_count = compiled.source_map.len(),
+        "AstraVN compilation completed"
+    );
+    Ok(compiled)
 }
 
 #[derive(Default)]

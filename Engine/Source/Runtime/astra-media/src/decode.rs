@@ -116,6 +116,13 @@ pub struct DecodeProviderRegistry {
 
 impl DecodeProviderRegistry {
     pub fn register(&mut self, provider: Box<dyn DecodeProvider>) {
+        let capability = provider.capability();
+        tracing::info!(
+            event = "media.decode.provider.register",
+            provider_id = %capability.provider_id,
+            codec_count = capability.codecs.len(),
+            "media decode provider registered"
+        );
         self.providers.push(provider);
     }
 
@@ -124,6 +131,14 @@ impl DecodeProviderRegistry {
         request: &DecodeRequest,
         policy: &DecodePolicy,
     ) -> Result<DecodeCapability, MediaError> {
+        tracing::debug!(
+            event = "media.decode.select.start",
+            codec = %request.codec,
+            profile = %policy.profile,
+            provider_count = self.providers.len(),
+            fallback_enabled = policy.fallback_enabled,
+            "media decode provider selection started"
+        );
         let mut candidates: Vec<_> = self
             .providers
             .iter()
@@ -147,10 +162,35 @@ impl DecodeProviderRegistry {
                 (false, ProviderPriority::Fallback) => 1,
             },
         );
-        candidates
-            .into_iter()
-            .next()
-            .ok_or_else(|| MediaError::message("no eligible decode provider"))
+        match candidates.into_iter().next() {
+            Some(capability) => {
+                if capability.priority == ProviderPriority::Fallback {
+                    tracing::warn!(
+                        event = "media.decode.select.fallback",
+                        provider_id = %capability.provider_id,
+                        codec = %request.codec,
+                        "media decode fallback selected"
+                    );
+                } else {
+                    tracing::info!(
+                        event = "media.decode.select.complete",
+                        provider_id = %capability.provider_id,
+                        codec = %request.codec,
+                        "media decode provider selected"
+                    );
+                }
+                Ok(capability)
+            }
+            None => {
+                tracing::error!(
+                    event = "media.decode.select.failed",
+                    codec = %request.codec,
+                    profile = %policy.profile,
+                    "no eligible media decode provider"
+                );
+                Err(MediaError::message("no eligible decode provider"))
+            }
+        }
     }
 }
 

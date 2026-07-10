@@ -6,4 +6,5 @@ version.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+tracing.workspace = true
 astra-platform = { path = "../astra-platform" }

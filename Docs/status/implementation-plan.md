@@ -50,6 +50,14 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | `S1-OBS-01` | `DONE` | `cargo test -p astra-cli --test logging` |
 | `S1-TARGET-01` | `DONE` | `cargo test -p astra-target` and `cargo test -p astra-cli --test target_platform` |
 
+## 跨 Stage 可观测性
+
+| Work ID | Status | Evidence |
+| --- | --- | --- |
+| `OBS-CORE-01` | `DONE` | `cargo test -p astra-observability`、`cargo test -p astra-cli --test logging`、`cargo test -p astra-player` 和 `cargo test --workspace` 通过；覆盖 `astra.log_event.v1`、五级语义、reload、span/session、限额 file/ring、queue saturation、critical mirror、fatal bundle、隐私清洗与日志开关前后 deterministic hash 一致 |
+| `OBS-COVERAGE-01` | `DONE` | `python Tools/check_observability.py` 通过，当前 41 个 workspace crate 均为 `instrumented` 或有明确 `not_applicable` 原因；`python Tools/check_docs.py`、`cargo clippy --workspace --all-targets -- -D warnings` 和 `cargo test --workspace` 通过 |
+| `OBS-CRASH-WIN-01` | `DONE` | `cargo test -p astra-crash-reporter -- --test-threads=1` 和 `cargo test -p astra-cli --test target_platform nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes -- --exact` 通过；真实 `MDMP`、进程外 panic/SEH request、hash/size/manifest、v2 bundle role/hash/self-test、required 启动握手与 tamper blocker 已验证 |
+
 ## Stage 2 平台修复项
 
 | Work ID | Status | Evidence |

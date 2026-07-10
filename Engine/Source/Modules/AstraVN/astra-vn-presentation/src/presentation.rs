@@ -36,6 +36,12 @@ impl StageModel {
     }
 
     pub fn apply(&mut self, command: StandardPresentationCommand) {
+        tracing::trace!(
+            event = "vn.presentation.command.apply",
+            layer_count = self.layers.len(),
+            timeline_count = self.timelines.len(),
+            "AstraVN presentation command applied"
+        );
         match command {
             StandardPresentationCommand::SetCamera(camera) => self.camera = camera,
             StandardPresentationCommand::ShowLayer {

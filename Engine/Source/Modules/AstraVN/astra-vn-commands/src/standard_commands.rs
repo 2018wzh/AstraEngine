@@ -15,6 +15,10 @@ pub struct VnStandardCommandManifest {
 
 impl VnStandardCommandManifest {
     pub fn standard() -> Self {
+        tracing::info!(
+            event = "vn.commands.registry.create",
+            "AstraVN standard command registry created"
+        );
         Self {
             schema: "astra.vn.standard_command_manifest.v1".to_string(),
             provider_id: "astra.vn.standard_commands".to_string(),
@@ -44,6 +48,12 @@ impl VnStandardCommandManifest {
     }
 
     pub fn validate_usage(&self, compiled: &CompiledStory) -> VnStandardCommandValidationReport {
+        tracing::debug!(
+            event = "vn.commands.validate.start",
+            command_count = self.commands.len(),
+            state_count = compiled.states.len(),
+            "AstraVN command validation started"
+        );
         let mut diagnostics = Vec::new();
         if self.schema != "astra.vn.standard_command_manifest.v1" {
             diagnostics.push(Diagnostic::blocking(

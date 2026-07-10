@@ -6,6 +6,7 @@ version.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+tracing.workspace = true
 abi_stable.workspace = true
 astra-core = { path = "../../../Runtime/astra-core" }
 astra-package = { path = "../../../Runtime/astra-package" }

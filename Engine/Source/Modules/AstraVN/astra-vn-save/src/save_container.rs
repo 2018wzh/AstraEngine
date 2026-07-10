@@ -26,6 +26,11 @@ pub struct VnPolicyStateSave {
 pub fn runtime_state_save_section(
     state: &VnRuntimeState,
 ) -> Result<SectionPayload, ContainerError> {
+    tracing::debug!(
+        event = "vn.save.runtime_state.encode",
+        state_hash = %vn_runtime_state_hash(state),
+        "AstraVN runtime state save section encoded"
+    );
     let save = VnRuntimeStateSave {
         schema: "astra.vn.runtime_state_save.v1".to_string(),
         state_hash: vn_runtime_state_hash(state),
@@ -39,6 +44,11 @@ pub fn runtime_state_save_section(
 }
 
 pub fn policy_state_save_section(state: &VnPolicyState) -> Result<SectionPayload, ContainerError> {
+    tracing::debug!(
+        event = "vn.save.policy_state.encode",
+        state_hash = %vn_policy_state_hash(state),
+        "AstraVN policy state save section encoded"
+    );
     let save = VnPolicyStateSave {
         schema: "astra.vn.policy_state_save.v1".to_string(),
         state_hash: vn_policy_state_hash(state),

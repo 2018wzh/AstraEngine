@@ -54,8 +54,21 @@ impl DefaultCookProcessor {
     }
 
     pub fn cook(&self, request: CookRequest) -> Result<CookArtifact, CookError> {
+        tracing::info!(
+            event = "cook.asset.start",
+            asset_id = %request.sidecar.id,
+            profile = %request.target_profile,
+            source_byte_size = request.source_bytes.len(),
+            "asset cook started"
+        );
         let diagnostics = validate_cook_request(&request, &self.processor_id);
         if !diagnostics.is_empty() {
+            tracing::error!(
+                event = "cook.asset.blocked",
+                asset_id = %request.sidecar.id,
+                diagnostic_count = diagnostics.len(),
+                "asset cook blocked"
+            );
             return Err(CookError::Diagnostics(diagnostics));
         }
         let sidecar_yaml = request
@@ -72,7 +85,7 @@ impl DefaultCookProcessor {
             &request.target_profile,
         );
         let payload = request.source_bytes.clone();
-        Ok(CookArtifact {
+        let artifact = CookArtifact {
             schema: "astra.cook_artifact.v1".to_string(),
             asset_id: request.sidecar.id.to_string(),
             section_id: section_id_for(&request.sidecar),
@@ -84,7 +97,15 @@ impl DefaultCookProcessor {
             cache_key,
             payload_hash: Hash256::from_sha256(&payload),
             payload,
-        })
+        };
+        tracing::info!(
+            event = "cook.asset.complete",
+            asset_id = %artifact.asset_id,
+            cache_key = %artifact.cache_key,
+            payload_hash = %artifact.payload_hash,
+            "asset cook completed"
+        );
+        Ok(artifact)
     }
 }
 

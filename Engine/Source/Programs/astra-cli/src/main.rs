@@ -4,11 +4,17 @@ use std::{
     ffi::OsString,
     fs,
     path::{Component, Path, PathBuf},
+    time::Duration,
 };
 
 use astra_asset::AssetSidecar;
 use astra_cook::{CookRequest, DefaultCookProcessor};
 use astra_core::Hash256;
+use astra_observability::{
+    init_host, install_windows_crash_reporter, ConsoleFormat, CrashReportingMode,
+    HostObservabilityConfig, ObservabilityGuard, WindowsCrashReporterConfig,
+    WindowsCrashReporterGuard,
+};
 use astra_package::{
     MigrationPolicy, PackageBuildRequest, PackageBuilder, PackageManifest, PackageReader,
     SectionCodec, SectionPayload, CURRENT_CONTAINER_VERSION,
@@ -28,8 +34,6 @@ use clap::{Parser, Subcommand, ValueEnum};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{fmt::writer::MakeWriterExt, EnvFilter};
 
 type CliError = Box<dyn std::error::Error + Send + Sync>;
 const MOUNT_ASSET_ROLES: &[&str] = &[
@@ -56,6 +60,12 @@ struct Cli {
     log_format: LogFormat,
     #[arg(long, global = true)]
     log_dir: Option<PathBuf>,
+    #[arg(long, global = true, default_value_t = astra_observability::DEFAULT_MAX_FILE_BYTES)]
+    log_max_file_bytes: usize,
+    #[arg(long, global = true, default_value_t = astra_observability::DEFAULT_MAX_ARCHIVES)]
+    log_max_archives: usize,
+    #[arg(long, global = true)]
+    crash_dir: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -225,6 +235,11 @@ impl From<PlatformArg> for PlatformId {
 
 fn main() -> Result<(), CliError> {
     if should_auto_launch_player() {
+        let (_observability, _crash_reporter) = init_bundled_player_observability()?;
+        tracing::info!(
+            event = "player.host.start",
+            "bundled AstraPlayer host started"
+        );
         let output = run_bundled_player(std::env::args_os().skip(1))?;
         if !output.is_empty() {
             println!("{output}");
@@ -404,51 +419,105 @@ fn main() -> Result<(), CliError> {
     Ok(())
 }
 
-fn init_logging(cli: &Cli) -> Result<Option<WorkerGuard>, CliError> {
+fn init_logging(cli: &Cli) -> Result<ObservabilityGuard, CliError> {
     let filter = cli
         .log_filter
         .clone()
         .or_else(|| env::var("ASTRA_LOG").ok())
         .unwrap_or_else(|| "info".to_string());
-    let filter = EnvFilter::try_new(filter)?;
+    let mut config = HostObservabilityConfig::for_cli(filter);
+    config.console_format = match cli.log_format {
+        LogFormat::Compact => ConsoleFormat::Compact,
+        LogFormat::Json => ConsoleFormat::Json,
+    };
+    config.log_dir = cli.log_dir.clone();
+    config.max_file_bytes = cli.log_max_file_bytes;
+    config.max_archives = cli.log_max_archives;
+    config.crash_dir = cli.crash_dir.clone();
+    config.crash_reporting = if cli.crash_dir.is_some() {
+        CrashReportingMode::Required
+    } else {
+        CrashReportingMode::Disabled
+    };
+    Ok(init_host(config)?)
+}
 
-    if let Some(dir) = &cli.log_dir {
-        fs::create_dir_all(dir)?;
-        let file = tracing_appender::rolling::daily(dir, "astra.log");
-        let (file, guard) = tracing_appender::non_blocking(file);
-        let writer = std::io::stderr.and(file);
-        match cli.log_format {
-            LogFormat::Compact => tracing_subscriber::fmt()
-                .with_env_filter(filter)
-                .with_writer(writer)
-                .with_ansi(false)
-                .compact()
-                .try_init()?,
-            LogFormat::Json => tracing_subscriber::fmt()
-                .with_env_filter(filter)
-                .with_writer(writer)
-                .with_ansi(false)
-                .json()
-                .try_init()?,
-        }
-        return Ok(Some(guard));
+fn init_bundled_player_observability(
+) -> Result<(ObservabilityGuard, Option<WindowsCrashReporterGuard>), CliError> {
+    let manifest = read_standalone_bundle_manifest()?;
+    let config = read_player_config()?;
+    validate_player_config(&manifest, &config)?;
+    if manifest.platform != "windows" {
+        return Err("native bundled player observability requires the Windows platform".into());
     }
+    let diagnostics_root = astra_platform_windows::diagnostics_root(&config.target)
+        .map_err(|_| "Windows diagnostics root is unavailable")?;
+    let log_relative = config
+        .observability
+        .log_dir
+        .as_deref()
+        .ok_or("Windows player config is missing log_dir")?;
+    let crash_relative = config
+        .observability
+        .crash_dir
+        .as_deref()
+        .ok_or("Windows player config is missing crash_dir")?;
+    let log_dir = diagnostics_root.join(validate_bundle_relative_path(log_relative)?);
+    let crash_dir = diagnostics_root.join(validate_bundle_relative_path(crash_relative)?);
+    let mut host = HostObservabilityConfig::for_cli(&config.observability.filter);
+    host.role = astra_observability::HostRole::Player;
+    host.console_format = match config.observability.console_format.as_str() {
+        "compact" => ConsoleFormat::Compact,
+        "json" => ConsoleFormat::Json,
+        _ => return Err("unsupported player console log format".into()),
+    };
+    host.log_dir = Some(log_dir.clone());
+    host.crash_dir = Some(crash_dir.clone());
+    host.crash_reporting = match config.observability.crash_reporting.as_str() {
+        "required" => CrashReportingMode::Required,
+        "optional" => CrashReportingMode::Optional,
+        "disabled" => CrashReportingMode::Disabled,
+        _ => return Err("unsupported player crash reporting mode".into()),
+    };
+    let observability = init_host(host)?;
+    let reporter_relative = manifest
+        .observability
+        .crash_reporter
+        .as_deref()
+        .ok_or("Windows bundle manifest is missing crash reporter")?;
+    let reporter_entry = manifest
+        .files
+        .iter()
+        .find(|entry| entry.role == "windows_crash_reporter" && entry.path == reporter_relative)
+        .ok_or("Windows bundle manifest has no crash reporter evidence")?;
+    let reporter_path =
+        std::env::current_dir()?.join(validate_bundle_relative_path(reporter_relative)?);
+    let reporter_bytes =
+        fs::read(&reporter_path).map_err(|_| "Windows crash reporter file is missing")?;
+    if reporter_entry.hash != Hash256::from_sha256(&reporter_bytes).to_string()
+        || reporter_entry.byte_size != reporter_bytes.len() as u64
+    {
+        return Err("Windows crash reporter hash or byte size mismatch".into());
+    }
+    let crash_reporter = install_windows_crash_reporter(WindowsCrashReporterConfig {
+        reporter_path,
+        crash_dir,
+        log_file: Some(log_dir.join("astra.jsonl")),
+        session_id: observability.session_id().to_string(),
+        mode: host_crash_mode(&config.observability.crash_reporting)?,
+        handshake_timeout: Duration::from_secs(5),
+        completion_timeout: Duration::from_secs(15),
+    })?;
+    Ok((observability, crash_reporter))
+}
 
-    match cli.log_format {
-        LogFormat::Compact => tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_writer(std::io::stderr)
-            .with_ansi(false)
-            .compact()
-            .try_init()?,
-        LogFormat::Json => tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_writer(std::io::stderr)
-            .with_ansi(false)
-            .json()
-            .try_init()?,
+fn host_crash_mode(value: &str) -> Result<CrashReportingMode, CliError> {
+    match value {
+        "required" => Ok(CrashReportingMode::Required),
+        "optional" => Ok(CrashReportingMode::Optional),
+        "disabled" => Ok(CrashReportingMode::Disabled),
+        _ => Err("unsupported player crash reporting mode".into()),
     }
-    Ok(None)
 }
 
 fn encode_report(report: &ScenarioReport, format: ReportFormat) -> Result<String, CliError> {
@@ -626,7 +695,17 @@ struct StandaloneBundleManifest {
     web_route_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mount_policy: Option<String>,
+    observability: BundleObservabilityEvidence,
+    checks: Vec<PlayerLaunchCheck>,
     files: Vec<StandaloneBundleFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+struct BundleObservabilityEvidence {
+    log_schema: String,
+    crash_reporting: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    crash_reporter: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -677,8 +756,20 @@ struct PlayerConfig {
     profile: String,
     platform: String,
     package: String,
+    observability: PlayerObservabilityConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     display: Option<PlayerDisplayConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+struct PlayerObservabilityConfig {
+    filter: String,
+    console_format: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    log_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    crash_dir: Option<String>,
+    crash_reporting: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -858,6 +949,13 @@ fn cook_project(
     target: Option<&str>,
     out: PathBuf,
 ) -> Result<CookManifest, CliError> {
+    tracing::info!(
+        target: "astra_cook",
+        event = "cook.run.start",
+        profile,
+        has_target = target.is_some(),
+        "cook run started"
+    );
     let project_text = fs::read_to_string(&project)?;
     let project_yaml: serde_yaml::Value = serde_yaml::from_str(&project_text)?;
     let target_manifest = TargetManifest::from_project_value(&project_yaml)?;
@@ -967,6 +1065,15 @@ fn cook_project(
         out.join("cook_manifest.yaml"),
         serde_yaml::to_string(&manifest)?,
     )?;
+    tracing::info!(
+        target: "astra_cook",
+        event = "cook.run.complete",
+        profile,
+        target = %manifest.target,
+        artifact_count = manifest.artifacts.len(),
+        scenario_count = manifest.scenario_refs.len(),
+        "cook run completed"
+    );
     Ok(manifest)
 }
 
@@ -1678,6 +1785,8 @@ fn build_standalone_bundle(
         &package_bytes,
     )];
     let mount_policy = bundle_mount_policy(&reader, out, &mut files)?;
+    let mut bundle_checks = Vec::new();
+    let mut crash_reporter_ref = None;
     for scenario_ref in &scenario_refs {
         let relative = validate_bundle_relative_path(scenario_ref)?;
         let scenario_bytes = reader
@@ -1714,6 +1823,46 @@ fn build_standalone_bundle(
             make_executable(&entrypoint_path)?;
             files.push(bundle_file(entrypoint, "windows_player", &exe_bytes));
 
+            let reporter_name = "AstraCrashReporter.exe";
+            let reporter_source = current_exe.with_file_name(reporter_name);
+            let reporter_bytes = fs::read(&reporter_source).map_err(|_| {
+                "Windows release bundle requires the built AstraCrashReporter.exe sibling"
+            })?;
+            let reporter_self_test = std::process::Command::new(&reporter_source)
+                .arg("--self-test")
+                .output()?;
+            if !reporter_self_test.status.success() {
+                return Err("AstraCrashReporter self-test failed".into());
+            }
+            let reporter_report: serde_json::Value =
+                serde_json::from_slice(&reporter_self_test.stdout)?;
+            if reporter_report
+                .get("schema")
+                .and_then(serde_json::Value::as_str)
+                != Some("astra.crash_reporter_self_test.v1")
+                || reporter_report
+                    .get("status")
+                    .and_then(serde_json::Value::as_str)
+                    != Some("pass")
+            {
+                return Err("AstraCrashReporter self-test output is invalid".into());
+            }
+            fs::write(out.join(reporter_name), &reporter_bytes)?;
+            files.push(bundle_file(
+                reporter_name,
+                "windows_crash_reporter",
+                &reporter_bytes,
+            ));
+            crash_reporter_ref = Some(reporter_name.to_string());
+            bundle_checks.push(PlayerLaunchCheck {
+                id: "crash_reporter.packaged".to_string(),
+                status: "pass".to_string(),
+            });
+            bundle_checks.push(PlayerLaunchCheck {
+                id: "crash_reporter.self_test".to_string(),
+                status: "pass".to_string(),
+            });
+
             let config = player_config_bytes(target, profile, platform_name, &display_config)?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
@@ -1733,6 +1882,10 @@ fn build_standalone_bundle(
 "#;
             fs::write(out.join(entrypoint), index)?;
             files.push(bundle_file(entrypoint, "web_entrypoint", index));
+            bundle_checks.push(PlayerLaunchCheck {
+                id: "crash_reporter.not_applicable".to_string(),
+                status: "pass".to_string(),
+            });
 
             let config = player_config_bytes(target, profile, platform_name, &display_config)?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
@@ -1764,7 +1917,7 @@ fn build_standalone_bundle(
     };
 
     let manifest = StandaloneBundleManifest {
-        schema: "astra.standalone_bundle_manifest.v1".to_string(),
+        schema: "astra.standalone_bundle_manifest.v2".to_string(),
         target: target.to_string(),
         profile: profile.to_string(),
         platform: platform_name.to_string(),
@@ -1775,6 +1928,16 @@ fn build_standalone_bundle(
         scenario_json_refs,
         web_route_model,
         mount_policy,
+        observability: BundleObservabilityEvidence {
+            log_schema: astra_observability::LOG_EVENT_SCHEMA.to_string(),
+            crash_reporting: if platform == PlatformId::Windows {
+                "required".to_string()
+            } else {
+                "disabled".to_string()
+            },
+            crash_reporter: crash_reporter_ref,
+        },
+        checks: bundle_checks,
         files,
     };
     fs::write(
@@ -1790,12 +1953,28 @@ fn player_config_bytes(
     platform_name: &str,
     display_config: &Option<PlayerDisplayConfig>,
 ) -> Result<Vec<u8>, CliError> {
+    let observability = if platform_name == "windows" {
+        serde_json::json!({
+            "filter": "warn",
+            "console_format": "compact",
+            "log_dir": "Saved/Logs",
+            "crash_dir": "Saved/Crashes",
+            "crash_reporting": "required"
+        })
+    } else {
+        serde_json::json!({
+            "filter": "info",
+            "console_format": "json",
+            "crash_reporting": "disabled"
+        })
+    };
     let mut config = serde_json::json!({
-        "schema": "astra.player_config.v1",
+        "schema": "astra.player_config.v2",
         "target": target,
         "profile": profile,
         "platform": platform_name,
-        "package": "package/nativevn.astrapkg"
+        "package": "package/nativevn.astrapkg",
+        "observability": observability
     });
     if let Some(display) = display_config {
         config["display"] = serde_json::to_value(display)?;
@@ -1870,7 +2049,37 @@ fn bundle_mount_policy(
 }
 
 fn web_player_script() -> &'static [u8] {
-    br#"async function astraBoot() {
+    br#"const astraLogSession = globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : `web-${Date.now()}`;
+const astraLogRing = [];
+let astraLogBytes = 0;
+globalThis.__astraLogRing = astraLogRing;
+
+function astraLog(level, event, fields = {}) {
+  const record = {
+    schema: "astra.log_event.v1",
+    timestamp: new Date().toISOString(),
+    level,
+    target: "astra_web_player",
+    event,
+    session_id: astraLogSession,
+    process_role: "player",
+    thread: "browser_main",
+    fields
+  };
+  const encoded = JSON.stringify(record);
+  astraLogRing.push(encoded);
+  astraLogBytes += encoded.length;
+  while (astraLogRing.length > 4096 || astraLogBytes > 4 * 1024 * 1024) {
+    astraLogBytes -= astraLogRing.shift().length;
+  }
+  (level === "ERROR" ? console.error : level === "WARN" ? console.warn : console.info)(encoded);
+}
+
+globalThis.addEventListener("error", () => astraLog("ERROR", "player.web.unhandled_error", { diagnostic_code: "ASTRA_WEB_UNHANDLED_ERROR" }));
+globalThis.addEventListener("unhandledrejection", () => astraLog("ERROR", "player.web.unhandled_rejection", { diagnostic_code: "ASTRA_WEB_UNHANDLED_REJECTION" }));
+
+async function astraBoot() {
+  astraLog("INFO", "player.web.boot.start");
   const root = document.getElementById("astra-root");
   try {
     const manifest = await fetchJson("bundle_manifest.json");
@@ -1897,6 +2106,7 @@ fn web_player_script() -> &'static [u8] {
     } else {
       appendReport(launch);
     }
+    astraLog("INFO", "player.web.boot.complete", { status: root.dataset.astraStatus });
   } catch (error) {
     const report = {
       schema: "astra.player_route_report.v1",
@@ -1956,7 +2166,7 @@ function launchReport(manifest, config, packageHash) {
     { id: "player.web.host", status: "pass" },
     { id: "player.input_surface", status: "pass" }
   ];
-  if (config.schema !== "astra.player_config.v1" || config.target !== manifest.target || config.profile !== manifest.profile || config.platform !== manifest.platform || config.package !== manifest.package) {
+  if (config.schema !== "astra.player_config.v2" || manifest.schema !== "astra.standalone_bundle_manifest.v2" || config.target !== manifest.target || config.profile !== manifest.profile || config.platform !== manifest.platform || config.package !== manifest.package || !config.observability) {
     checks.push({ id: "player.config", status: "blocked" });
   } else {
     checks.push({ id: "player.config", status: "pass" });
@@ -2382,7 +2592,7 @@ function present(value) {
 astraBoot().catch((error) => {
   const root = document.getElementById("astra-root");
   root.dataset.astraStatus = "blocked";
-  console.error(error);
+  astraLog("ERROR", "player.web.boot.failed", { diagnostic_code: "ASTRA_WEB_PLAYER_EXCEPTION" });
 });
 "#
 }
@@ -3459,20 +3669,37 @@ fn launch_bundled_player() -> Result<PlayerLaunchReport, CliError> {
 
 fn read_standalone_bundle_manifest() -> Result<StandaloneBundleManifest, CliError> {
     let manifest_text = fs::read_to_string("bundle_manifest.json")?;
-    Ok(serde_json::from_str(&manifest_text)?)
+    let value: serde_json::Value = serde_json::from_str(&manifest_text)?;
+    if value.get("schema").and_then(serde_json::Value::as_str)
+        != Some("astra.standalone_bundle_manifest.v2")
+    {
+        return Err("unsupported standalone bundle manifest schema; rebuild the bundle".into());
+    }
+    Ok(serde_json::from_value(value)?)
 }
 
 fn read_player_config() -> Result<PlayerConfig, CliError> {
     let config_text = fs::read_to_string("AstraPlayer.config.json")?;
-    Ok(serde_json::from_str(&config_text)?)
+    let value: serde_json::Value = serde_json::from_str(&config_text)?;
+    if value.get("schema").and_then(serde_json::Value::as_str) != Some("astra.player_config.v2") {
+        return Err("unsupported player config schema; rebuild the bundle".into());
+    }
+    Ok(serde_json::from_value(value)?)
 }
 
 fn validate_player_config(
     manifest: &StandaloneBundleManifest,
     config: &PlayerConfig,
 ) -> Result<(), CliError> {
-    if config.schema != "astra.player_config.v1" {
-        return Err("unsupported player config schema".into());
+    debug_assert_eq!(config.schema, "astra.player_config.v2");
+    for relative in [
+        config.observability.log_dir.as_deref(),
+        config.observability.crash_dir.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        validate_bundle_relative_path(relative)?;
     }
     if manifest.target != config.target
         || manifest.profile != config.profile

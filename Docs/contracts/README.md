@@ -4,6 +4,7 @@
 
 | Contract | 文件 |
 | --- | --- |
+| Logging / Crash Observability | [logging-observability.md](logging-observability.md) |
 | Runtime | [runtime.md](runtime.md) |
 | Plugin ABI | [plugin-abi.md](plugin-abi.md) |
 | Data / Save / Package | [data-formats.md](data-formats.md) |

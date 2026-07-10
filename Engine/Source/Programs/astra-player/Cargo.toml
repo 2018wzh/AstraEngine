@@ -14,7 +14,9 @@ name = "astra-player"
 path = "src/main.rs"
 
 [dependencies]
+tracing.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }
+astra-observability = { path = "../../Developer/astra-observability" }
 astra-package = { path = "../../Runtime/astra-package" }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
 serde.workspace = true
@@ -29,3 +31,6 @@ windows = { workspace = true, features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[dev-dependencies]
+tempfile.workspace = true

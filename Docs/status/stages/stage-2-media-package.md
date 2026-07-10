@@ -448,3 +448,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 **Done Evidence:** `cargo test -p astra-package package_roundtrip`、`cargo test -p astra-release release_report` 和 `cargo test -p astra-cli --test target_platform` 通过；platform report 现在包含 required smoke evidence，缺失项会阻断 release check。
 
 **Linked Test IDs:** `T-S2-TARGET-GATE-01`
+
+## 跨 Stage Observability follow-up
+
+Asset/Package/Cook/Release、Media/Platform 生命周期与 failure/fallback 边界纳入 `OBS-CORE-01`。Windows shipping bundle 的 reporter role/hash/self-test、启动握手和 tamper blocker 由 `OBS-CRASH-WIN-01` 跟踪；它不改变 Stage 2 已完成边界。

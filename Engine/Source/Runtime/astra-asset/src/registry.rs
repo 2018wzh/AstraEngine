@@ -18,6 +18,12 @@ pub struct AssetRegistry {
 
 impl AssetRegistry {
     pub fn insert(&mut self, sidecar: AssetSidecar) -> Result<(), AssetError> {
+        tracing::debug!(
+            event = "asset.registry.insert.start",
+            asset_id = %sidecar.id,
+            existing_count = self.assets.len(),
+            "asset registry insert started"
+        );
         let mut diagnostics = sidecar.validate();
         if self.assets.contains_key(&sidecar.id) {
             diagnostics.push(
@@ -26,10 +32,21 @@ impl AssetRegistry {
             );
         }
         if !diagnostics.is_empty() {
+            tracing::error!(
+                event = "asset.registry.insert.blocked",
+                asset_id = %sidecar.id,
+                diagnostic_count = diagnostics.len(),
+                "asset registry insert blocked"
+            );
             return Err(AssetError::Diagnostics(diagnostics));
         }
         self.assets
             .insert(sidecar.id.clone(), AssetRecord { sidecar });
+        tracing::info!(
+            event = "asset.registry.insert.complete",
+            asset_count = self.assets.len(),
+            "asset registry insert completed"
+        );
         Ok(())
     }
 

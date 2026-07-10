@@ -9,5 +9,6 @@ rust-version.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
+tracing.workspace = true
 abi_stable.workspace = true
 astra-plugin-abi = { path = "../../../Source/Runtime/astra-plugin-abi" }

@@ -21,13 +21,15 @@ astra test run scenarios/full_playthrough.yaml --package target/game.astrapkg --
 astra test run scenarios/native_smoke.yaml --headless --format json --log-format json --log-filter astra_runtime=debug,astra_test=debug,astra_plugin=debug
 ```
 
-需要落盘时显式传入相对目录：
+需要落盘时显式传入相对目录；未传目录不会创建日志文件：
 
 ```bash
-astra test run scenarios/native_smoke.yaml --headless --log-dir target/logs
+astra test run scenarios/native_smoke.yaml --headless --log-dir target/logs --log-max-file-bytes 16777216 --log-max-archives 8 --crash-dir target/crashes
 ```
 
-日志只用于排障，不参与 replay、hash、save 或 release 判定。
+日志只用于排障，不参与 replay、hash、save 或 release 判定。JSON file/ring 使用 `astra.log_event.v1`；低级别异步写入发生背压时，critical path 会写 `observability.queue.saturated` 和累计 `dropped_count`。禁止把商业正文、payload、secret、绝对路径或未筛选的对象 dump 写进日志。
+
+Windows shipping Player 默认使用平台 writable `Saved/Logs` 与 `Saved/Crashes`，默认级别为 WARN。bundle 内的 crash reporter 必须通过 manifest hash、自检和启动握手；helper 缺失或被篡改会阻断启动。crash bundle 最多保留 10 份，按敏感本地产物处理，不要提交、打包或上传。Web 只有 console/ring/error tail，没有本地文件或 minidump。
 
 ## 平台能力报告
 

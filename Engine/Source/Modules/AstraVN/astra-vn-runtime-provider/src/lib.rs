@@ -80,6 +80,11 @@ impl NativeVnRuntimeProvider {
     }
 
     pub fn prepare(&self, request: RuntimePrepareRequest) -> RuntimePrepareReport {
+        tracing::info!(
+            event = "vn.provider.prepare.start",
+            section_count = request.section_ids.len(),
+            "AstraVN runtime provider preparation started"
+        );
         let mut diagnostics = Vec::new();
         if request
             .section_ids
@@ -121,6 +126,12 @@ impl NativeVnRuntimeProvider {
         config: VnRunConfig,
         request: RuntimeOpenRequest,
     ) -> Result<RuntimeOpenReport, CoreVnError> {
+        tracing::info!(
+            event = "vn.provider.session.open.start",
+            target_id = %request.target_id,
+            seed = request.seed,
+            "AstraVN runtime session open started"
+        );
         let session_id = GameRuntimeSessionId(format!(
             "{}:{}:{}",
             NATIVE_VN_RUNTIME_ID, request.target_id, request.seed
@@ -211,6 +222,11 @@ impl NativeVnRuntimeProvider {
     }
 
     pub fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, CoreVnError> {
+        tracing::trace!(
+            event = "vn.provider.session.step",
+            fixed_step = input.fixed_step,
+            "AstraVN runtime session step started"
+        );
         let command = {
             let session = self.session(&input.session_id)?;
             let state = session

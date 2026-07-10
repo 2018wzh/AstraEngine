@@ -68,6 +68,13 @@ pub struct AudioGraph {
 
 impl AudioGraph {
     pub fn apply(&mut self, command: AudioCommand) -> Result<(), MediaError> {
+        tracing::trace!(
+            event = "media.audio_graph.command.apply",
+            tick = self.tick,
+            voice_count = self.voices.len(),
+            fade_count = self.fades.len(),
+            "audio graph command applied"
+        );
         match command {
             AudioCommand::SetBusGain { bus, gain } => {
                 self.buses.insert(bus.clone(), AudioBus { id: bus, gain });

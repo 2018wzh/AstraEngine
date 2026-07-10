@@ -32,6 +32,12 @@ pub async fn browser_smoke_probe_async(target: Option<&str>) -> Option<PlatformC
 }
 
 pub fn probe(target: Option<&str>) -> PlatformCapabilityReport {
+    tracing::info!(
+        event = "platform.probe.start",
+        platform = "web",
+        has_target = target.is_some(),
+        "platform capability probe started"
+    );
     PlatformCapabilityReport::new(
         PlatformId::Web,
         target.map(str::to_string),

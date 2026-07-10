@@ -12,6 +12,13 @@ pub fn package_sections_for_story(
     profiles: &[String],
     target: &str,
 ) -> Result<Vec<SectionPayload>, ContainerError> {
+    tracing::info!(
+        event = "vn.package.build.start",
+        profile_count = profiles.len(),
+        state_count = compiled.states.len(),
+        target,
+        "AstraVN package section build started"
+    );
     let manifest = VnProfileManifest {
         schema: "astra.vn.profile_manifest.v1".to_string(),
         target: target.to_string(),
@@ -85,5 +92,11 @@ pub fn package_sections_for_story(
             &VnAdvancedPresentationManifest::from_compiled(compiled, "advanced-vn"),
         )?);
     }
+    tracing::info!(
+        event = "vn.package.build.complete",
+        section_count = sections.len(),
+        target,
+        "AstraVN package section build completed"
+    );
     Ok(sections)
 }

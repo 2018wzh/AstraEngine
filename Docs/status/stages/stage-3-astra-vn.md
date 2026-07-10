@@ -506,3 +506,7 @@ python Tools/check_docs.py
 **Current Evidence:** `cargo test -p astra-player-core`、`cargo test -p astra-player --test windows_input_automation`、`cargo test -p astra-player --test web_input_automation` 和 `cargo test -p astra-release release_gate_accepts_player_full_playable_only_with_matching_live_report` 通过；release gate 只有在显式传入匹配 package hash/profile/target 的 `astra.player_automation_report.v1` 时才让 `player.full_playable` pass，Windows transcript 只接受 `sendinput.*`，Web transcript 只接受 `cdp.*`，并要求 live input 有 player host consumed trace；visual comparison evidence 缺失会 blocking，direct `route_scenario`、DOM click、JS callback 和 direct `VnPlayerCommand` 会 blocking。Windows runner 已能启动 bundle live window、执行 `SendInput`、捕获 player host `TRACE` consumed log、采集 client region hash、绑定视觉 comparison report hash，并从 package WAV section 生成 audio meter；当前私有 TsuiNoSora acceptance 的 report 已证明 28 次 `SendInput` 被窗口消费，但仍因输入后画面未变化和 full route coverage 缺失而 blocking。Web browser host run、真实 VN state 推进和同次 full route evidence 仍是下一步 acceptance。
 
 **Linked Test IDs:** `T-S3-PLAYER-AUTOMATION-01`
+
+## 跨 Stage Observability follow-up
+
+AstraVN compiler/core/policy/presentation/provider、Player input/route/automation 已纳入 `OBS-CORE-01` 的 category/span/session 日志。该日志只用于定位 `S3-PLAYER-AUTOMATION-01`，不能替代同 run 视觉、音频、host 和 route evidence，也不会改变 Stage 3 的 `IN_PROGRESS` 状态。

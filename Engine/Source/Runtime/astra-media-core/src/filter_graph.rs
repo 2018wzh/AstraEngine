@@ -69,6 +69,11 @@ pub struct FilterValidator;
 
 impl FilterValidator {
     pub fn validate(&self, graph: &FilterGraph) -> FilterValidationReport {
+        tracing::debug!(
+            event = "media.filter.validate.start",
+            node_count = graph.nodes.len(),
+            "filter graph validation started"
+        );
         let mut diagnostics = Vec::new();
         if graph.schema != "astra.filter_graph.v1" {
             diagnostics.push(Diagnostic::blocking(
@@ -106,6 +111,28 @@ impl FilterValidator {
                 ));
             }
         }
+        if diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Blocking)
+        {
+            tracing::error!(
+                event = "media.filter.validate.blocked",
+                diagnostic_count = diagnostics.len(),
+                "filter graph validation blocked"
+            );
+        } else if !diagnostics.is_empty() {
+            tracing::warn!(
+                event = "media.filter.validate.warning",
+                diagnostic_count = diagnostics.len(),
+                "filter graph validation completed with warnings"
+            );
+        } else {
+            tracing::info!(
+                event = "media.filter.validate.complete",
+                node_count = graph.nodes.len(),
+                "filter graph validation completed"
+            );
+        }
         FilterValidationReport { diagnostics }
     }
 }
@@ -135,6 +162,12 @@ impl CpuFilterExecutor {
         graph: &FilterGraph,
         mut frame: CpuFrame,
     ) -> Result<(CpuFrame, FilterExecutionReport), MediaError> {
+        tracing::trace!(
+            event = "media.filter.execute.start",
+            node_count = graph.nodes.len(),
+            input_hash = %frame.hash,
+            "CPU filter execution started"
+        );
         let validation = FilterValidator.validate(graph);
         if !validation.blocking_diagnostics().is_empty() {
             return Err(MediaError::Diagnostics(validation.diagnostics));
@@ -194,6 +227,13 @@ impl CpuFilterExecutor {
             executed_nodes,
             diagnostics: validation.diagnostics,
         };
+        tracing::info!(
+            event = "media.filter.execute.complete",
+            node_count = report.executed_nodes.len(),
+            input_hash = %report.input_hash,
+            output_hash = %report.output_hash,
+            "CPU filter execution completed"
+        );
         Ok((frame, report))
     }
 }

@@ -139,6 +139,12 @@ pub fn validate_manifest(
     manifest: &TargetManifest,
     selected: Option<&str>,
 ) -> TargetValidationReport {
+    tracing::debug!(
+        event = "target.validate.start",
+        target_count = manifest.targets.len(),
+        has_selected_target = selected.is_some(),
+        "target validation started"
+    );
     let mut diagnostics = Vec::new();
     if manifest.schema != TARGET_MANIFEST_SCHEMA {
         diagnostics.push(Diagnostic::blocking(
@@ -195,13 +201,37 @@ pub fn validate_manifest(
         TargetValidationStatus::Pass
     };
 
-    TargetValidationReport {
+    let report = TargetValidationReport {
         schema: TARGET_VALIDATION_SCHEMA.to_string(),
         status,
         selected_target: selected.map(str::to_string),
         target_count: manifest.targets.len(),
         diagnostics,
+    };
+    match report.status {
+        TargetValidationStatus::Pass => tracing::info!(
+            event = "target.validate.complete",
+            status = "pass",
+            target_count = report.target_count,
+            diagnostic_count = report.diagnostics.len(),
+            "target validation completed"
+        ),
+        TargetValidationStatus::Warning => tracing::warn!(
+            event = "target.validate.complete",
+            status = "warning",
+            target_count = report.target_count,
+            diagnostic_count = report.diagnostics.len(),
+            "target validation completed with warnings"
+        ),
+        TargetValidationStatus::Blocked => tracing::error!(
+            event = "target.validate.complete",
+            status = "blocked",
+            target_count = report.target_count,
+            diagnostic_count = report.diagnostics.len(),
+            "target validation blocked"
+        ),
     }
+    report
 }
 
 fn validate_target(target: &TargetDescriptor, diagnostics: &mut Vec<Diagnostic>) {

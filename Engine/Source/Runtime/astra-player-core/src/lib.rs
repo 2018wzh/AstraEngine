@@ -183,6 +183,13 @@ impl PlayerAutomationValidator {
         script: &PlayerAutomationScript,
         transcript: &PlayerInputTranscript,
     ) -> PlayerAutomationReport {
+        tracing::info!(
+            event = "player.automation.validate.start",
+            platform = ?script.platform,
+            expected_route_count = script.expected_routes.len(),
+            input_event_count = transcript.events.len(),
+            "player automation validation started"
+        );
         let transcript_hash = transcript.hash().to_string();
         let mut checks = vec![
             schema_check(script, transcript),
@@ -227,7 +234,7 @@ impl PlayerAutomationValidator {
         } else {
             PlayerAutomationStatus::Pass
         };
-        PlayerAutomationReport {
+        let report = PlayerAutomationReport {
             schema: "astra.player_automation_report.v1".to_string(),
             status,
             target: script.target.clone(),
@@ -237,7 +244,24 @@ impl PlayerAutomationValidator {
             transcript_hash,
             route_coverage: transcript.route_coverage.clone(),
             checks,
+        };
+        match report.status {
+            PlayerAutomationStatus::Pass => tracing::info!(
+                event = "player.automation.validate.complete",
+                status = "pass",
+                check_count = report.checks.len(),
+                route_count = report.route_coverage.len(),
+                "player automation validation completed"
+            ),
+            PlayerAutomationStatus::Blocked => tracing::error!(
+                event = "player.automation.validate.complete",
+                status = "blocked",
+                check_count = report.checks.len(),
+                route_count = report.route_coverage.len(),
+                "player automation validation blocked"
+            ),
         }
+        report
     }
 }
 

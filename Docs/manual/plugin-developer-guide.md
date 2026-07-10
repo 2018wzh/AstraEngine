@@ -18,6 +18,8 @@ manual.md
 
 插件不得跨 ABI 保存 host object ownership、Actor 指针、GPU/audio native handle、Editor widget 或 unload 后 callback。需要 runtime state 时，注册 save section 和 migrator。
 
+插件只发 `tracing` span/event，不安装 subscriber 或自建日志文件。事件使用稳定 plugin/provider category 和 `event` 字段：load/unload、provider register/session lifecycle 用 `INFO`，选择和映射用 `DEBUG`，高频调用用 `TRACE`，允许继续的明确 fallback 用 `WARN`，最终拒绝加载或 ABI/provider 操作失败由 host 边界记录一次 `ERROR`。字段只能包含 plugin/provider/action id、fingerprint hash、状态、计数和 diagnostic code；不得记录 payload、secret、native handle、绝对路径或完整 descriptor `Debug` 输出。
+
 复杂演出插件采用 Rust 机制、Luau 策略。Rust 侧提供高性能 node/provider/host API；Luau 侧决定时序、参数、fallback、预设和可视化元数据。
 
 ## Extension Reference

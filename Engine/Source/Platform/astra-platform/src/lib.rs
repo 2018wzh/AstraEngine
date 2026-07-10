@@ -287,6 +287,12 @@ pub enum PlatformValidationStatus {
 pub fn validate_capability_report(
     report: &PlatformCapabilityReport,
 ) -> (PlatformValidationStatus, Vec<Diagnostic>) {
+    tracing::debug!(
+        event = "platform.validate.start",
+        platform = %report.platform,
+        smoke_count = report.smoke.len(),
+        "platform capability validation started"
+    );
     let mut diagnostics = Vec::new();
     if report.schema != PLATFORM_REPORT_SCHEMA {
         diagnostics.push(Diagnostic::blocking(
@@ -394,6 +400,29 @@ pub fn validate_capability_report(
     } else {
         PlatformValidationStatus::Pass
     };
+    match status {
+        PlatformValidationStatus::Pass => tracing::info!(
+            event = "platform.validate.complete",
+            platform = %report.platform,
+            status = "pass",
+            diagnostic_count = diagnostics.len(),
+            "platform capability validation completed"
+        ),
+        PlatformValidationStatus::Warning => tracing::warn!(
+            event = "platform.validate.complete",
+            platform = %report.platform,
+            status = "warning",
+            diagnostic_count = diagnostics.len(),
+            "platform capability validation completed with warnings"
+        ),
+        PlatformValidationStatus::Blocked => tracing::error!(
+            event = "platform.validate.complete",
+            platform = %report.platform,
+            status = "blocked",
+            diagnostic_count = diagnostics.len(),
+            "platform capability validation blocked"
+        ),
+    }
     (status, diagnostics)
 }
 

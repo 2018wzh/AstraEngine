@@ -18,6 +18,13 @@ pub struct VnRuntime {
 
 impl VnRuntime {
     pub fn new(compiled: CompiledStory, config: VnRunConfig) -> Result<Self, VnError> {
+        tracing::info!(
+            event = "vn.runtime.create",
+            profile = %config.profile,
+            locale = %config.locale,
+            state_count = compiled.states.len(),
+            "AstraVN runtime created"
+        );
         Ok(Self {
             compiled,
             state: VnRuntimeState {
@@ -93,8 +100,13 @@ impl VnRuntime {
     }
 
     pub fn apply(&mut self, command: VnPlayerCommand) -> Result<VnStepOutput, VnError> {
-        let before_state = self.state.clone();
         let before = self.state_hash();
+        tracing::trace!(
+            event = "vn.runtime.command.start",
+            before_state_hash = %before,
+            "AstraVN player command started"
+        );
+        let before_state = self.state.clone();
         let mut presentation = Vec::new();
         let mut reached = BTreeSet::new();
         match command {

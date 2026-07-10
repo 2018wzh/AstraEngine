@@ -180,10 +180,19 @@ pub struct LuauPolicy;
 
 impl LuauPolicy {
     pub fn new() -> Result<Self, VnError> {
+        tracing::info!(
+            event = "vn.policy.runtime.create",
+            "AstraVN Luau policy runtime created"
+        );
         Ok(Self)
     }
 
     pub fn eval_bool(&mut self, source: &str, state: &mut VnPolicyState) -> Result<bool, VnError> {
+        tracing::trace!(
+            event = "vn.policy.eval_bool.start",
+            source_byte_size = source.len(),
+            "AstraVN policy boolean evaluation started"
+        );
         self.eval_bool_with_context(
             source,
             state,

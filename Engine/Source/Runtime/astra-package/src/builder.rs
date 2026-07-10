@@ -263,6 +263,13 @@ pub struct PackageBuilder;
 
 impl PackageBuilder {
     pub fn build(request: PackageBuildRequest) -> Result<ContainerBlob, ContainerError> {
+        tracing::info!(
+            event = "package.build.start",
+            profile = %request.profile,
+            cooked_asset_count = request.cooked_assets.len(),
+            extra_section_count = request.extra_sections.len(),
+            "package build started"
+        );
         let manifest = PackageManifest {
             schema: "astra.package_manifest.v1".to_string(),
             package_id: request.package_id,
@@ -341,6 +348,23 @@ impl PackageBuilder {
         for section in request.extra_sections {
             builder = builder.add_section(section);
         }
-        builder.write()
+        match builder.write() {
+            Ok(blob) => {
+                tracing::info!(
+                    event = "package.build.complete",
+                    byte_size = blob.as_bytes().len(),
+                    "package build completed"
+                );
+                Ok(blob)
+            }
+            Err(error) => {
+                tracing::error!(
+                    event = "package.build.failed",
+                    error_kind = "container_write",
+                    "package build failed"
+                );
+                Err(error)
+            }
+        }
     }
 }

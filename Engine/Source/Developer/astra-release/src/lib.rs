@@ -136,6 +136,13 @@ impl ReleaseValidator {
         &self,
         request: PackageValidateRequest,
     ) -> Result<ReleaseReport, ReleaseError> {
+        tracing::info!(
+            event = "release.validate.start",
+            profile = %request.profile,
+            package_byte_size = request.package_bytes.len(),
+            has_target = request.target.is_some(),
+            "release validation started"
+        );
         let package_hash = Hash256::from_sha256(&request.package_bytes).to_string();
         let mut checks = Vec::new();
         let mut package_id = "unknown".to_string();
@@ -233,14 +240,38 @@ impl ReleaseValidator {
 
         let status = release_status(&checks);
 
-        Ok(ReleaseReport {
+        let report = ReleaseReport {
             schema: "astra.release_report.v1".to_string(),
             package_id,
             profile: request.profile,
             status,
             package_hash,
             checks,
-        })
+        };
+        match report.status {
+            CheckStatus::Pass => tracing::info!(
+                event = "release.validate.complete",
+                status = "pass",
+                check_count = report.checks.len(),
+                package_hash = %report.package_hash,
+                "release validation completed"
+            ),
+            CheckStatus::Warning => tracing::warn!(
+                event = "release.validate.complete",
+                status = "warning",
+                check_count = report.checks.len(),
+                package_hash = %report.package_hash,
+                "release validation completed with warnings"
+            ),
+            CheckStatus::Blocked => tracing::error!(
+                event = "release.validate.complete",
+                status = "blocked",
+                check_count = report.checks.len(),
+                package_hash = %report.package_hash,
+                "release validation blocked"
+            ),
+        }
+        Ok(report)
     }
 }
 

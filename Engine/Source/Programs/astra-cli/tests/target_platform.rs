@@ -1131,7 +1131,7 @@ fn nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes() {
             String::from_utf8_lossy(&bundle_output.stderr)
         );
         let manifest: serde_json::Value = serde_json::from_slice(&bundle_output.stdout).unwrap();
-        assert_eq!(manifest["schema"], "astra.standalone_bundle_manifest.v1");
+        assert_eq!(manifest["schema"], "astra.standalone_bundle_manifest.v2");
         assert_eq!(manifest["target"], "nativevn-game");
         assert_eq!(manifest["profile"], "classic");
         assert_eq!(manifest["platform"], platform);
@@ -1147,6 +1147,19 @@ fn nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes() {
             serde_json::from_slice(&fs::read(bundle.join("AstraPlayer.config.json")).unwrap())
                 .unwrap();
         assert_eq!(player_config["display"], display_config);
+        assert_eq!(player_config["schema"], "astra.player_config.v2");
+        assert_eq!(
+            manifest["observability"]["log_schema"],
+            "astra.log_event.v1"
+        );
+        if platform == "windows" {
+            assert_eq!(manifest["observability"]["crash_reporting"], "required");
+            assert!(bundle.join("AstraCrashReporter.exe").exists());
+            assert_eq!(player_config["observability"]["log_dir"], "Saved/Logs");
+            assert_eq!(player_config["observability"]["crash_dir"], "Saved/Crashes");
+        } else {
+            assert_eq!(manifest["observability"]["crash_reporting"], "disabled");
+        }
         assert!(bundle
             .join("scenarios")
             .join("full_playthrough.yaml")
@@ -1208,6 +1221,38 @@ fn nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes() {
                 .iter()
                 .any(|check| { check["id"] == "player.route.full" && check["status"] == "pass" }));
             assert!(!String::from_utf8_lossy(&route_output.stdout).contains(root.to_str().unwrap()));
+
+            let config_path = bundle.join("AstraPlayer.config.json");
+            let original_config = fs::read(&config_path).unwrap();
+            let mut legacy_config: serde_json::Value =
+                serde_json::from_slice(&original_config).unwrap();
+            legacy_config["schema"] =
+                serde_json::Value::String("astra.player_config.v1".to_string());
+            fs::write(
+                &config_path,
+                serde_json::to_vec_pretty(&legacy_config).unwrap(),
+            )
+            .unwrap();
+            let legacy = Command::new(bundle.join(entrypoint))
+                .arg("--launch-report")
+                .current_dir(&bundle)
+                .output()
+                .unwrap();
+            assert!(!legacy.status.success());
+            assert!(String::from_utf8_lossy(&legacy.stderr)
+                .contains("unsupported player config schema; rebuild the bundle"));
+            fs::write(&config_path, original_config).unwrap();
+
+            fs::write(bundle.join("AstraCrashReporter.exe"), b"tampered").unwrap();
+            let tampered = Command::new(bundle.join(entrypoint))
+                .arg("--launch-report")
+                .current_dir(&bundle)
+                .output()
+                .unwrap();
+            assert!(!tampered.status.success());
+            assert!(String::from_utf8_lossy(&tampered.stderr)
+                .contains("crash reporter hash or byte size mismatch"));
+            assert!(!String::from_utf8_lossy(&tampered.stderr).contains(root.to_str().unwrap()));
         } else {
             assert!(bundle.join("AstraPlayer.route_model.json").exists());
             assert!(bundle
@@ -1868,7 +1913,7 @@ fn bundle_tsuinosora_demo_package(
         ],
     );
     let manifest: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(manifest["schema"], "astra.standalone_bundle_manifest.v1");
+    assert_eq!(manifest["schema"], "astra.standalone_bundle_manifest.v2");
     assert_eq!(manifest["target"], target);
     assert_eq!(manifest["profile"], profile);
     assert_eq!(manifest["platform"], platform);
