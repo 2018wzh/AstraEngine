@@ -1,8 +1,8 @@
 #![cfg(target_arch = "wasm32")]
 
 use astra_platform::{
-    AudioOutputRequest, DecodeKind, DecodeOutput, PlatformDecodeRequest, PlatformHostFactory,
-    PlatformHostProfile, RgbaFrame, SurfaceRequest, WindowRequest,
+    AudioOutputRequest, DecodeKind, DecodeOutput, PlatformDecodeRequest, PlatformErrorCode,
+    PlatformHostFactory, PlatformHostProfile, RgbaFrame, SurfaceRequest, WindowRequest,
 };
 use js_sys::{Function, Promise, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};
@@ -10,6 +10,21 @@ use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_test::wasm_bindgen_test;
 
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+#[wasm_bindgen_test(async)]
+async fn same_game_profile_rejects_a_second_browser_host() {
+    let profile = PlatformHostProfile::web_release("nativevn-web", "com.example.web-single");
+    let first = astra_platform_web::factory()
+        .start(profile.clone())
+        .await
+        .unwrap();
+    let error = match astra_platform_web::factory().start(profile).await {
+        Ok(_) => panic!("second browser host unexpectedly started"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, PlatformErrorCode::AlreadyInUse);
+    first.client.shutdown().await.unwrap();
+}
 
 #[wasm_bindgen_test(async)]
 async fn browser_host_owns_canvas_webgpu_present_and_readback() {

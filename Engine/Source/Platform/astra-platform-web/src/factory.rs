@@ -41,8 +41,9 @@ mod browser {
         SurfaceHandle, WindowHandle,
     };
     use astra_platform_general::ResourceTable;
-    use wasm_bindgen::{closure::Closure, JsCast};
-    use wasm_bindgen_futures::spawn_local;
+    use js_sys::{Function, Promise, Reflect};
+    use wasm_bindgen::{closure::Closure, JsCast, JsValue};
+    use wasm_bindgen_futures::{spawn_local, JsFuture};
     use web_sys::{
         CompositionEvent, Event, EventTarget, HtmlCanvasElement, KeyboardEvent, PointerEvent,
         TouchEvent, WheelEvent,
@@ -66,6 +67,7 @@ mod browser {
                 "Web factory requires a Web profile",
             ));
         }
+        let instance_lock = WebInstanceLock::acquire(&profile).await?;
         let (client, backend, events) = host_channel(
             profile.clone(),
             profile.limits.command_queue_capacity,
@@ -73,7 +75,12 @@ mod browser {
         )?;
         backend.event_emitter().emit(PlatformEventKind::Resumed)?;
         let lifecycle = BrowserLifecycle::bind(backend.event_emitter())?;
-        spawn_local(run_backend(backend, profile.clone(), lifecycle));
+        spawn_local(run_backend(
+            backend,
+            profile.clone(),
+            lifecycle,
+            instance_lock,
+        ));
         Ok(PlatformHostSession {
             client,
             events,
@@ -85,6 +92,7 @@ mod browser {
         mut backend: PlatformBackendChannels,
         profile: PlatformHostProfile,
         _lifecycle: BrowserLifecycle,
+        _instance_lock: WebInstanceLock,
     ) {
         let emitter = backend.event_emitter();
         let mut windows = ResourceTable::<CanvasResource, WindowHandle>::new("window");
@@ -264,6 +272,48 @@ mod browser {
                     }
                 }
             }
+        }
+    }
+
+    struct WebInstanceLock {
+        release: Function,
+    }
+
+    impl WebInstanceLock {
+        async fn acquire(profile: &PlatformHostProfile) -> Result<Self, PlatformError> {
+            let identity = format!("{}\n{}\n{}", profile.package_id, profile.target, profile.id);
+            let hash = astra_core::Hash256::from_sha256(identity.as_bytes()).to_string();
+            let name = format!("astra-player-{}", hash.trim_start_matches("sha256:"));
+            let acquire = Function::new_with_args(
+                "name",
+                "return new Promise((resolve, reject) => { if (!navigator.locks) { reject(new Error('Web Locks unavailable')); return; } let release; const held = new Promise(done => { release = done; }); navigator.locks.request(name, {mode: 'exclusive', ifAvailable: true}, lock => { if (!lock) { resolve(null); return; } resolve({release}); return held; }).catch(reject); });",
+            );
+            let promise: Promise = acquire
+                .call1(&JsValue::NULL, &JsValue::from_str(&name))
+                .map_err(|_| web_error("host.instance.acquire"))?
+                .dyn_into()
+                .map_err(|_| web_error("host.instance.acquire"))?;
+            let value = JsFuture::from(promise)
+                .await
+                .map_err(|_| web_error("host.instance.acquire"))?;
+            if value.is_null() {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::AlreadyInUse,
+                    "host.instance.acquire",
+                    "the same game target and profile is already running",
+                ));
+            }
+            let release = Reflect::get(&value, &JsValue::from_str("release"))
+                .map_err(|_| web_error("host.instance.acquire"))?
+                .dyn_into::<Function>()
+                .map_err(|_| web_error("host.instance.acquire"))?;
+            Ok(Self { release })
+        }
+    }
+
+    impl Drop for WebInstanceLock {
+        fn drop(&mut self) {
+            let _ = self.release.call0(&JsValue::NULL);
         }
     }
 
