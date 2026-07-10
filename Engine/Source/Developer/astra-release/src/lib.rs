@@ -3559,8 +3559,10 @@ fn platform_profile_binding_check(
             )
         }
     };
-    if value.get("schema").and_then(serde_json::Value::as_str) != Some("astra.platform_profiles.v1")
-    {
+    if !matches!(
+        value.get("schema").and_then(serde_json::Value::as_str),
+        Some("astra.platform_profiles.v1" | "astra.platform_profiles.v2")
+    ) {
         return blocked(
             "ASTRA_PLATFORM_PROFILE_SECTION_INVALID",
             "cooked platform profile section schema is unsupported",
@@ -3569,8 +3571,14 @@ fn platform_profile_binding_check(
     let profiles: Vec<astra_platform::PlatformHostProfile> = match value
         .get("profiles")
         .cloned()
-        .and_then(|profiles| serde_json::from_value(profiles).ok())
-    {
+        .and_then(|profiles| serde_json::from_value::<Vec<serde_json::Value>>(profiles).ok())
+        .and_then(|profiles| {
+            profiles
+                .into_iter()
+                .map(astra_platform::migrate_host_profile_json)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()
+        }) {
         Some(profiles) => profiles,
         None => {
             return blocked(

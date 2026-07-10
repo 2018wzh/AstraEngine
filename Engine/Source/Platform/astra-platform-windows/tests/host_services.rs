@@ -4,6 +4,7 @@ use astra_platform::{
     AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput, PlatformDecodeRequest,
     PlatformHostFactory, PlatformHostProfile,
 };
+use cpal::traits::{DeviceTrait, HostTrait};
 
 #[tokio::test]
 async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
@@ -13,19 +14,29 @@ async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
         .await
         .expect("start Windows host");
 
+    let native_host = cpal::default_host();
+    let native_device = native_host
+        .default_output_device()
+        .expect("WASAPI default output device");
+    let native_format = native_device
+        .default_output_config()
+        .expect("WASAPI default output format");
+    let sample_rate = native_format.sample_rate();
+    let channels = native_format.channels();
     let audio = session
         .client
         .open_audio_output(AudioOutputRequest {
-            sample_rate: 48_000,
-            channels: 2,
+            sample_rate,
+            channels,
             max_buffered_frames: 4_800,
         })
         .await
         .expect("open WASAPI output");
     let mut samples = Vec::with_capacity(960);
     for frame in 0..480 {
-        let sample = ((frame as f32 / 48_000.0) * 440.0 * std::f32::consts::TAU).sin() * 0.2;
-        samples.extend_from_slice(&[sample, sample]);
+        let sample =
+            ((frame as f32 / sample_rate as f32) * 440.0 * std::f32::consts::TAU).sin() * 0.2;
+        samples.extend(std::iter::repeat_n(sample, usize::from(channels)));
     }
     session
         .client
@@ -33,7 +44,7 @@ async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
             audio,
             AudioPacket {
                 sequence: 1,
-                channels: 2,
+                channels,
                 samples,
             },
         )

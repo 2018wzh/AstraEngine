@@ -1,6 +1,7 @@
 use astra_package::{PackageManifest, PackageReader};
 use astra_platform::{
-    validate_host_profile, PlatformError, PlatformErrorCode, PlatformHostProfile,
+    migrate_host_profile_json, validate_host_profile, PlatformError, PlatformErrorCode,
+    PlatformHostProfile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +17,7 @@ pub struct WebPlayerConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct CookedPlatformProfiles {
     schema: String,
-    profiles: Vec<PlatformHostProfile>,
+    profiles: Vec<serde_json::Value>,
 }
 
 pub fn validate_package(
@@ -72,7 +73,10 @@ pub fn validate_package(
                 format!("platform profile section is invalid: {error}"),
             )
         })?;
-    if profiles.schema != "astra.platform_profiles.v1" {
+    if !matches!(
+        profiles.schema.as_str(),
+        "astra.platform_profiles.v1" | "astra.platform_profiles.v2"
+    ) {
         return Err(PlatformError::new(
             PlatformErrorCode::InvalidProfile,
             "web_player.package",
@@ -81,6 +85,16 @@ pub fn validate_package(
     }
     let profile = profiles
         .profiles
+        .into_iter()
+        .map(migrate_host_profile_json)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            PlatformError::new(
+                PlatformErrorCode::InvalidProfile,
+                "web_player.package",
+                format!("platform profile migration failed: {error}"),
+            )
+        })?
         .into_iter()
         .find(|profile| {
             profile.platform == astra_platform::PlatformId::Web

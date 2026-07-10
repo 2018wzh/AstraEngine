@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{PlatformError, PlatformErrorCode, PlatformId};
 
-pub const PLATFORM_HOST_PROFILE_SCHEMA: &str = "astra.platform_host_profile.v1";
+pub const PLATFORM_HOST_PROFILE_SCHEMA_V1: &str = "astra.platform_host_profile.v1";
+pub const PLATFORM_HOST_PROFILE_SCHEMA: &str = "astra.platform_host_profile.v2";
+pub const DEFAULT_MAX_PACKAGE_CACHE_ENTRY_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+pub const DEFAULT_MAX_PACKAGE_CACHE_TOTAL_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProviderPolicy {
@@ -53,6 +56,21 @@ impl Default for HostLimits {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PackageCachePolicy {
+    pub max_entry_bytes: u64,
+    pub max_total_bytes: u64,
+}
+
+impl Default for PackageCachePolicy {
+    fn default() -> Self {
+        Self {
+            max_entry_bytes: DEFAULT_MAX_PACKAGE_CACHE_ENTRY_BYTES,
+            max_total_bytes: DEFAULT_MAX_PACKAGE_CACHE_TOTAL_BYTES,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PlatformHostProfile {
     pub schema: String,
     pub id: String,
@@ -65,6 +83,22 @@ pub struct PlatformHostProfile {
     pub save: ProviderPolicy,
     pub package_sources: Vec<PackageSourcePolicy>,
     pub limits: HostLimits,
+    pub package_cache: PackageCachePolicy,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlatformHostProfileV1 {
+    schema: String,
+    id: String,
+    platform: PlatformId,
+    target: String,
+    package_id: String,
+    renderer: ProviderPolicy,
+    decode: ProviderPolicy,
+    audio: ProviderPolicy,
+    save: ProviderPolicy,
+    package_sources: Vec<PackageSourcePolicy>,
+    limits: HostLimits,
 }
 
 impl PlatformHostProfile {
@@ -84,6 +118,7 @@ impl PlatformHostProfile {
                 PackageSourcePolicy::UserAuthorized,
             ],
             limits: HostLimits::default(),
+            package_cache: PackageCachePolicy::default(),
         }
     }
 
@@ -103,6 +138,7 @@ impl PlatformHostProfile {
                 PackageSourcePolicy::UserAuthorized,
             ],
             limits: HostLimits::default(),
+            package_cache: PackageCachePolicy::default(),
         }
     }
 
@@ -116,6 +152,47 @@ impl PlatformHostProfile {
             .with_field("serde_error", error.to_string())
         })?;
         Ok(astra_core::Hash256::from_sha256(&bytes).to_string())
+    }
+}
+
+pub fn migrate_host_profile_json(
+    value: serde_json::Value,
+) -> Result<PlatformHostProfile, PlatformError> {
+    let schema = value
+        .get("schema")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| invalid_profile_migration("profile schema is missing"))?;
+    match schema {
+        PLATFORM_HOST_PROFILE_SCHEMA => serde_json::from_value(value).map_err(|_| {
+            invalid_profile_migration("v2 platform host profile could not be decoded")
+        }),
+        PLATFORM_HOST_PROFILE_SCHEMA_V1 => {
+            let profile: PlatformHostProfileV1 = serde_json::from_value(value).map_err(|_| {
+                invalid_profile_migration("v1 platform host profile could not be decoded")
+            })?;
+            if profile.schema != PLATFORM_HOST_PROFILE_SCHEMA_V1 {
+                return Err(invalid_profile_migration(
+                    "v1 platform host profile schema is invalid",
+                ));
+            }
+            Ok(PlatformHostProfile {
+                schema: PLATFORM_HOST_PROFILE_SCHEMA.to_string(),
+                id: profile.id,
+                platform: profile.platform,
+                target: profile.target,
+                package_id: profile.package_id,
+                renderer: profile.renderer,
+                decode: profile.decode,
+                audio: profile.audio,
+                save: profile.save,
+                package_sources: profile.package_sources,
+                limits: profile.limits,
+                package_cache: PackageCachePolicy::default(),
+            })
+        }
+        _ => Err(invalid_profile_migration(
+            "platform host profile schema is unsupported",
+        )),
     }
 }
 
@@ -229,7 +306,25 @@ pub fn validate_host_profile(profile: &PlatformHostProfile) -> Result<(), Platfo
             "platform host limits must be non-zero",
         ));
     }
+    if profile.package_cache.max_entry_bytes == 0
+        || profile.package_cache.max_total_bytes == 0
+        || profile.package_cache.max_entry_bytes > profile.package_cache.max_total_bytes
+    {
+        return Err(PlatformError::new(
+            PlatformErrorCode::InvalidProfile,
+            "profile.validate",
+            "package cache limits are invalid",
+        ));
+    }
     Ok(())
+}
+
+fn invalid_profile_migration(message: &'static str) -> PlatformError {
+    PlatformError::new(
+        PlatformErrorCode::InvalidProfile,
+        "profile.migrate",
+        message,
+    )
 }
 
 fn validate_release_provider_policy(profile: &PlatformHostProfile) -> Result<(), PlatformError> {

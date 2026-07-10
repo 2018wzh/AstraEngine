@@ -1,7 +1,7 @@
 use astra_platform::{
-    validate_host_profile, AudioOutputHandle, DecodeSessionHandle, MediaFrameHandle,
-    PackageSourceHandle, PlatformCapabilityReport, PlatformErrorCode, PlatformHostProfile,
-    PlatformId, SaveTransactionHandle, SurfaceHandle, WindowHandle,
+    migrate_host_profile_json, validate_host_profile, AudioOutputHandle, DecodeSessionHandle,
+    MediaFrameHandle, PackageSourceHandle, PlatformCapabilityReport, PlatformErrorCode,
+    PlatformHostProfile, PlatformId, SaveTransactionHandle, SurfaceHandle, WindowHandle,
     PLATFORM_CAPABILITY_REPORT_SCHEMA, PLATFORM_HOST_PROFILE_SCHEMA,
 };
 
@@ -37,6 +37,14 @@ fn release_profiles_lock_selected_providers_without_hidden_fallbacks() {
     assert_eq!(windows.decode.providers, ["wmf"]);
     assert_eq!(windows.audio.providers, ["wasapi"]);
     assert_eq!(windows.save.providers, ["saved_games"]);
+    assert_eq!(
+        windows.package_cache.max_entry_bytes,
+        16 * 1024 * 1024 * 1024
+    );
+    assert_eq!(
+        windows.package_cache.max_total_bytes,
+        64 * 1024 * 1024 * 1024
+    );
     assert!(!windows.renderer.allow_software);
     assert!(validate_host_profile(&windows).is_ok());
 
@@ -47,6 +55,50 @@ fn release_profiles_lock_selected_providers_without_hidden_fallbacks() {
     assert_eq!(web.audio.providers, ["webaudio"]);
     assert_eq!(web.save.providers, ["opfs"]);
     assert!(validate_host_profile(&web).is_ok());
+}
+
+#[test]
+fn v1_profile_migrates_to_v2_with_explicit_cache_limits() {
+    let profile = migrate_host_profile_json(serde_json::json!({
+        "schema": "astra.platform_host_profile.v1",
+        "id": "windows-release",
+        "platform": "windows",
+        "target": "nativevn-game",
+        "package_id": "com.example.game",
+        "renderer": { "providers": ["wgpu_hardware"], "allow_software": false },
+        "decode": { "providers": ["wmf"], "allow_software": false },
+        "audio": { "providers": ["wasapi"], "allow_software": false },
+        "save": { "providers": ["saved_games"], "allow_software": false },
+        "package_sources": [{ "kind": "bundled" }],
+        "limits": {
+            "command_queue_capacity": 256,
+            "event_queue_capacity": 1024,
+            "max_frame_bytes": 1024,
+            "max_audio_frames": 1024,
+            "max_package_read_bytes": 1024
+        }
+    }))
+    .expect("v1 profile migration");
+
+    assert_eq!(profile.schema, PLATFORM_HOST_PROFILE_SCHEMA);
+    assert_eq!(
+        profile.package_cache.max_entry_bytes,
+        16 * 1024 * 1024 * 1024
+    );
+    assert_eq!(
+        profile.package_cache.max_total_bytes,
+        64 * 1024 * 1024 * 1024
+    );
+}
+
+#[test]
+fn profile_rejects_invalid_cache_limits() {
+    let mut profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
+    profile.package_cache.max_total_bytes = profile.package_cache.max_entry_bytes - 1;
+    assert_eq!(
+        validate_host_profile(&profile).unwrap_err().code,
+        PlatformErrorCode::InvalidProfile
+    );
 }
 
 #[test]

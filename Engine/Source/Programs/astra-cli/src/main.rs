@@ -15,8 +15,8 @@ use astra_package::{
     SectionCodec, SectionPayload, CURRENT_CONTAINER_VERSION,
 };
 use astra_platform::{
-    validate_host_profile, PlatformCapabilityReport, PlatformHostConformanceReport,
-    PlatformHostProfile, PlatformId,
+    migrate_host_profile_json, validate_host_profile, PlatformCapabilityReport,
+    PlatformHostConformanceReport, PlatformHostProfile, PlatformId,
 };
 use astra_player_core::PlayerAutomationReport;
 use astra_release::{PackageValidateRequest, ReleaseReport, ReleaseValidator};
@@ -879,7 +879,7 @@ fn cook_project(
         fs::write(out.join(profile_path), &profile_bytes)?;
         artifacts.push(CookedArtifactRef {
             section_id: "platform.profiles".to_string(),
-            schema: "astra.platform_profiles.v1".to_string(),
+            schema: "astra.platform_profiles.v2".to_string(),
             path: profile_path.to_string(),
             hash: Hash256::from_sha256(&profile_bytes).to_string(),
             codec: SectionCodec::Raw,
@@ -968,9 +968,11 @@ fn cook_platform_profiles(
     let Some(value) = project.get("platform_profiles") else {
         return Ok(None);
     };
-    let profiles: BTreeMap<String, PlatformHostProfile> = serde_yaml::from_value(value.clone())?;
+    let raw_profiles: BTreeMap<String, serde_json::Value> =
+        serde_json::from_value(serde_json::to_value(value.clone())?)?;
     let mut selected = Vec::new();
-    for (id, profile) in profiles {
+    for (id, raw_profile) in raw_profiles {
+        let profile = migrate_host_profile_json(raw_profile)?;
         if profile.id != id {
             return Err(format!("platform profile key {id} does not match profile id").into());
         }
@@ -993,7 +995,7 @@ fn cook_platform_profiles(
         return Err("platform_profiles must contain at least one selected profile".into());
     }
     Ok(Some(CookedPlatformProfiles {
-        schema: "astra.platform_profiles.v1".to_string(),
+        schema: "astra.platform_profiles.v2".to_string(),
         profiles: selected,
     }))
 }

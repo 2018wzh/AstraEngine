@@ -137,8 +137,8 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     use astra_core::Hash256;
     use astra_package::{PackageManifest, PackageReader};
     use astra_platform::{
-        InputState, PackageSourceRequest, PlatformEventKind, PlatformHostFactory,
-        PlatformHostProfile, PlatformId, SurfaceRequest, WindowRequest,
+        InputState, PackageSourceRequest, PlatformEventKind, PlatformHostFactory, PlatformId,
+        SurfaceRequest, WindowRequest,
     };
     use serde::Deserialize;
 
@@ -153,7 +153,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     #[derive(Deserialize)]
     struct Profiles {
         schema: String,
-        profiles: Vec<PlatformHostProfile>,
+        profiles: Vec<serde_json::Value>,
     }
 
     let config: Config = serde_json::from_slice(&fs::read("AstraPlayer.config.json")?)?;
@@ -169,11 +169,17 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     }
     let profiles: Profiles =
         serde_json::from_slice(&package.container().read_section("platform.profiles")?)?;
-    if profiles.schema != "astra.platform_profiles.v1" {
+    if !matches!(
+        profiles.schema.as_str(),
+        "astra.platform_profiles.v1" | "astra.platform_profiles.v2"
+    ) {
         return Err("unsupported platform profile section".into());
     }
     let profile = profiles
         .profiles
+        .into_iter()
+        .map(astra_platform::migrate_host_profile_json)
+        .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .find(|profile| {
             profile.platform == PlatformId::Windows

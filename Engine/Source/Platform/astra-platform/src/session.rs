@@ -387,6 +387,30 @@ pub enum TouchPhase {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GamepadControl {
+    South,
+    East,
+    West,
+    North,
+    DpadUp,
+    DpadDown,
+    DpadLeft,
+    DpadRight,
+    LeftShoulder,
+    RightShoulder,
+    LeftTrigger,
+    RightTrigger,
+    LeftStickX,
+    LeftStickY,
+    RightStickX,
+    RightStickY,
+    LeftStickButton,
+    RightStickButton,
+    Start,
+    Select,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlatformEventKind {
     Resumed,
@@ -442,9 +466,15 @@ pub enum PlatformEventKind {
         y: f64,
         phase: TouchPhase,
     },
-    Gamepad {
+    GamepadConnected {
         device_id: u32,
-        control: String,
+    },
+    GamepadDisconnected {
+        device_id: u32,
+    },
+    GamepadInput {
+        device_id: u32,
+        control: GamepadControl,
         value: f32,
     },
     DeviceLost {

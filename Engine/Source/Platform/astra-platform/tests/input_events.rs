@@ -1,5 +1,6 @@
 use astra_platform::{
-    InputState, PlatformEvent, PlatformEventKind, PointerButton, TouchPhase, WindowHandle,
+    GamepadControl, InputState, PlatformEvent, PlatformEventKind, PointerButton, TouchPhase,
+    WindowHandle,
 };
 
 #[test]
@@ -51,12 +52,13 @@ fn platform_events_are_typed_and_do_not_carry_native_handles() {
     );
     let gamepad = PlatformEvent::new(
         6,
-        PlatformEventKind::Gamepad {
+        PlatformEventKind::GamepadInput {
             device_id: 0,
-            control: "button_a".to_string(),
+            control: GamepadControl::South,
             value: 1.0,
         },
     );
+    let connected = PlatformEvent::new(7, PlatformEventKind::GamepadConnected { device_id: 0 });
 
     assert_eq!(keyboard.sequence, 1);
     assert!(matches!(ime.kind, PlatformEventKind::ImeCommit { .. }));
@@ -74,6 +76,13 @@ fn platform_events_are_typed_and_do_not_carry_native_handles() {
     ));
     assert!(matches!(
         gamepad.kind,
-        PlatformEventKind::Gamepad { device_id: 0, .. }
+        PlatformEventKind::GamepadInput {
+            control: GamepadControl::South,
+            ..
+        }
+    ));
+    assert!(matches!(
+        connected.kind,
+        PlatformEventKind::GamepadConnected { device_id: 0 }
     ));
 }

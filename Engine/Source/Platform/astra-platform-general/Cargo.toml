@@ -10,3 +10,4 @@ astra-core = { path = "../../Runtime/astra-core" }
 astra-platform = { path = "../astra-platform" }
 tempfile.workspace = true
 tracing.workspace = true
+rtrb.workspace = true

@@ -57,8 +57,11 @@ impl PlatformHostFactory for WindowsPlatformFactory {
 #[cfg(target_os = "windows")]
 mod windows {
     use std::{
-        collections::{BTreeMap, VecDeque},
-        sync::{mpsc as std_mpsc, Arc, Mutex},
+        collections::BTreeMap,
+        sync::{
+            atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+            mpsc as std_mpsc, Arc,
+        },
         thread,
         time::{Duration, Instant},
     };
@@ -163,7 +166,10 @@ mod windows {
             }
         };
         event_loop.set_control_flow(ControlFlow::Wait);
-        let mut app = WindowsHostApp::new(backend, ready, save_store, roots.bundle_root);
+        let mut app = match WindowsHostApp::new(backend, ready, save_store, roots.bundle_root) {
+            Ok(app) => app,
+            Err(_) => return,
+        };
         if let Err(error) = event_loop.run_app(&mut app) {
             tracing::error!(
                 event = "platform.windows.event_loop.failed",
@@ -187,7 +193,8 @@ mod windows {
         bundle_root: std::path::PathBuf,
         package_sources: ResourceTable<FilePackageSource, PackageSourceHandle>,
         event_sequence: u64,
-        last_gamepad: Option<windows::Win32::UI::Input::XboxController::XINPUT_STATE>,
+        gamepads: gilrs::Gilrs,
+        gamepad_mapper: astra_platform_general::GamepadMapper,
     }
 
     impl WindowsHostApp {
@@ -196,8 +203,17 @@ mod windows {
             ready: std_mpsc::SyncSender<Result<(), PlatformError>>,
             save_store: AtomicSaveStore,
             bundle_root: std::path::PathBuf,
-        ) -> Self {
-            Self {
+        ) -> Result<Self, PlatformError> {
+            let gamepads = gilrs::Gilrs::new().map_err(|_| {
+                let error = host_error(
+                    "input.gamepad.open",
+                    "Windows Gaming Input initialization failed",
+                );
+                let _ = ready.send(Err(error.clone()));
+                error
+            })?;
+            let gamepad_mapper = astra_platform_general::GamepadMapper::new(0.2)?;
+            Ok(Self {
                 backend,
                 ready: Some(ready),
                 windows: ResourceTable::new("window"),
@@ -210,8 +226,9 @@ mod windows {
                 bundle_root,
                 package_sources: ResourceTable::new("package_source"),
                 event_sequence: 0,
-                last_gamepad: None,
-            }
+                gamepads,
+                gamepad_mapper,
+            })
         }
 
         fn next_sequence(&mut self) -> u64 {
@@ -541,58 +558,103 @@ mod windows {
 
     impl WindowsHostApp {
         fn poll_gamepad(&mut self) {
-            use windows::Win32::{
-                Foundation::ERROR_DEVICE_NOT_CONNECTED,
-                UI::Input::XboxController::{
-                    XInputGetState, XINPUT_GAMEPAD_A, XINPUT_GAMEPAD_B, XINPUT_GAMEPAD_BACK,
-                    XINPUT_GAMEPAD_DPAD_DOWN, XINPUT_GAMEPAD_DPAD_LEFT, XINPUT_GAMEPAD_DPAD_RIGHT,
-                    XINPUT_GAMEPAD_DPAD_UP, XINPUT_GAMEPAD_LEFT_SHOULDER,
-                    XINPUT_GAMEPAD_LEFT_THUMB, XINPUT_GAMEPAD_RIGHT_SHOULDER,
-                    XINPUT_GAMEPAD_RIGHT_THUMB, XINPUT_GAMEPAD_START, XINPUT_GAMEPAD_X,
-                    XINPUT_GAMEPAD_Y, XINPUT_STATE,
-                },
-            };
-            let mut state = XINPUT_STATE::default();
-            let result = unsafe { XInputGetState(0, &mut state) };
-            if result == ERROR_DEVICE_NOT_CONNECTED.0 {
-                self.last_gamepad = None;
-                return;
-            }
-            if result != 0 {
-                return;
-            }
-            let previous_buttons = self
-                .last_gamepad
-                .replace(state)
-                .map(|value| value.Gamepad.wButtons)
-                .unwrap_or_default();
-            let current_buttons = state.Gamepad.wButtons;
-            for (mask, control) in [
-                (XINPUT_GAMEPAD_A, "button_a"),
-                (XINPUT_GAMEPAD_B, "button_b"),
-                (XINPUT_GAMEPAD_X, "button_x"),
-                (XINPUT_GAMEPAD_Y, "button_y"),
-                (XINPUT_GAMEPAD_DPAD_UP, "dpad_up"),
-                (XINPUT_GAMEPAD_DPAD_DOWN, "dpad_down"),
-                (XINPUT_GAMEPAD_DPAD_LEFT, "dpad_left"),
-                (XINPUT_GAMEPAD_DPAD_RIGHT, "dpad_right"),
-                (XINPUT_GAMEPAD_LEFT_SHOULDER, "left_shoulder"),
-                (XINPUT_GAMEPAD_RIGHT_SHOULDER, "right_shoulder"),
-                (XINPUT_GAMEPAD_LEFT_THUMB, "left_thumb"),
-                (XINPUT_GAMEPAD_RIGHT_THUMB, "right_thumb"),
-                (XINPUT_GAMEPAD_START, "start"),
-                (XINPUT_GAMEPAD_BACK, "back"),
-            ] {
-                let was_pressed = previous_buttons.0 & mask.0 != 0;
-                let is_pressed = current_buttons.0 & mask.0 != 0;
-                if was_pressed != is_pressed {
-                    self.emit(PlatformEventKind::Gamepad {
-                        device_id: 0,
-                        control: control.to_string(),
-                        value: if is_pressed { 1.0 } else { 0.0 },
-                    });
+            while let Some(event) = self.gamepads.next_event() {
+                let Some(event) = raw_gamepad_event(event) else {
+                    continue;
+                };
+                match self.gamepad_mapper.apply_checked(event) {
+                    Ok(events) => {
+                        for event in events {
+                            self.emit(event);
+                        }
+                    }
+                    Err(error) => tracing::warn!(
+                        event = "platform.windows.gamepad.invalid_event",
+                        diagnostic_code = ?error.code,
+                        operation = %error.operation,
+                        "Windows Gaming Input event was rejected"
+                    ),
                 }
             }
+        }
+    }
+
+    fn raw_gamepad_event(event: gilrs::Event) -> Option<astra_platform_general::RawGamepadEvent> {
+        use astra_platform::GamepadControl;
+        use astra_platform_general::RawGamepadEvent;
+        use gilrs::{Axis, Button, EventType};
+
+        let raw_device_id = u32::try_from(usize::from(event.id)).ok()?;
+        let map_button = |button| match button {
+            Button::South => Some(GamepadControl::South),
+            Button::East => Some(GamepadControl::East),
+            Button::West => Some(GamepadControl::West),
+            Button::North => Some(GamepadControl::North),
+            Button::DPadUp => Some(GamepadControl::DpadUp),
+            Button::DPadDown => Some(GamepadControl::DpadDown),
+            Button::DPadLeft => Some(GamepadControl::DpadLeft),
+            Button::DPadRight => Some(GamepadControl::DpadRight),
+            Button::LeftTrigger => Some(GamepadControl::LeftShoulder),
+            Button::RightTrigger => Some(GamepadControl::RightShoulder),
+            Button::LeftTrigger2 => Some(GamepadControl::LeftTrigger),
+            Button::RightTrigger2 => Some(GamepadControl::RightTrigger),
+            Button::LeftThumb => Some(GamepadControl::LeftStickButton),
+            Button::RightThumb => Some(GamepadControl::RightStickButton),
+            Button::Start => Some(GamepadControl::Start),
+            Button::Select => Some(GamepadControl::Select),
+            _ => None,
+        };
+        let map_axis = |axis| match axis {
+            Axis::LeftStickX => Some(GamepadControl::LeftStickX),
+            Axis::LeftStickY => Some(GamepadControl::LeftStickY),
+            Axis::RightStickX => Some(GamepadControl::RightStickX),
+            Axis::RightStickY => Some(GamepadControl::RightStickY),
+            _ => None,
+        };
+        match event.event {
+            EventType::Connected => Some(RawGamepadEvent::Connected { raw_device_id }),
+            EventType::Disconnected => Some(RawGamepadEvent::Disconnected { raw_device_id }),
+            EventType::ButtonPressed(button, _) | EventType::ButtonRepeated(button, _) => {
+                map_button(button).map(|control| RawGamepadEvent::Button {
+                    raw_device_id,
+                    control,
+                    pressed: true,
+                })
+            }
+            EventType::ButtonReleased(button, _) => {
+                map_button(button).map(|control| RawGamepadEvent::Button {
+                    raw_device_id,
+                    control,
+                    pressed: false,
+                })
+            }
+            EventType::ButtonChanged(button, value, _) => map_button(button).map(|control| {
+                if matches!(
+                    control,
+                    GamepadControl::LeftTrigger | GamepadControl::RightTrigger
+                ) {
+                    RawGamepadEvent::Axis {
+                        raw_device_id,
+                        control,
+                        value,
+                    }
+                } else {
+                    RawGamepadEvent::Button {
+                        raw_device_id,
+                        control,
+                        pressed: value >= 0.5,
+                    }
+                }
+            }),
+            EventType::AxisChanged(axis_value, value, _) => {
+                map_axis(axis_value).map(|control| RawGamepadEvent::Axis {
+                    raw_device_id,
+                    control,
+                    value,
+                })
+            }
+            EventType::Dropped | EventType::ForceFeedbackEffectCompleted => None,
+            _ => None,
         }
     }
 
@@ -957,12 +1019,12 @@ mod windows {
 
     struct AudioResource {
         _stream: cpal::Stream,
-        queue: Arc<Mutex<VecDeque<f32>>>,
-        meter: Arc<Mutex<MeterState>>,
-        stream_error: Arc<Mutex<Option<String>>>,
+        producer: astra_platform_general::NativeAudioProducer,
+        meter: Arc<CallbackMeter>,
+        stream_error: Arc<AtomicBool>,
         channels: u16,
-        capacity_samples: usize,
         next_sequence: u64,
+        submitted_samples: u64,
     }
 
     impl AudioResource {
@@ -983,41 +1045,41 @@ mod windows {
                 ));
             }
             let config: cpal::StreamConfig = supported.clone().into();
-            let queue = Arc::new(Mutex::new(VecDeque::with_capacity(
-                request.max_buffered_frames * usize::from(request.channels),
-            )));
-            let meter = Arc::new(Mutex::new(MeterState::default()));
-            let stream_error = Arc::new(Mutex::new(None));
+            let capacity = request.max_buffered_frames * usize::from(request.channels);
+            let (producer, consumer, _queue_telemetry) =
+                astra_platform_general::NativeAudioQueue::new(capacity)?;
+            let meter = Arc::new(CallbackMeter::default());
+            let stream_error = Arc::new(AtomicBool::new(false));
             let stream = match supported.sample_format() {
                 cpal::SampleFormat::F32 => {
-                    let queue = Arc::clone(&queue);
                     let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
+                    let mut consumer = consumer;
                     device.build_output_stream(
                         &config,
-                        move |output: &mut [f32], _| fill_f32(output, &queue, &meter),
+                        move |output: &mut [f32], _| fill_f32(output, &mut consumer, &meter),
                         move |stream_error_value| set_stream_error(&error, stream_error_value),
                         None,
                     )
                 }
                 cpal::SampleFormat::I16 => {
-                    let queue = Arc::clone(&queue);
                     let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
+                    let mut consumer = consumer;
                     device.build_output_stream(
                         &config,
-                        move |output: &mut [i16], _| fill_i16(output, &queue, &meter),
+                        move |output: &mut [i16], _| fill_i16(output, &mut consumer, &meter),
                         move |stream_error_value| set_stream_error(&error, stream_error_value),
                         None,
                     )
                 }
                 cpal::SampleFormat::U16 => {
-                    let queue = Arc::clone(&queue);
                     let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
+                    let mut consumer = consumer;
                     device.build_output_stream(
                         &config,
-                        move |output: &mut [u16], _| fill_u16(output, &queue, &meter),
+                        move |output: &mut [u16], _| fill_u16(output, &mut consumer, &meter),
                         move |stream_error_value| set_stream_error(&error, stream_error_value),
                         None,
                     )
@@ -1035,12 +1097,12 @@ mod windows {
                 .map_err(|_| host_error("audio.open", "WASAPI output stream could not start"))?;
             Ok(Self {
                 _stream: stream,
-                queue,
+                producer,
                 meter,
                 stream_error,
                 channels: request.channels,
-                capacity_samples: request.max_buffered_frames * usize::from(request.channels),
                 next_sequence: 1,
+                submitted_samples: 0,
             })
         }
 
@@ -1052,43 +1114,26 @@ mod windows {
                     "audio packet sequence or channel count is invalid",
                 ));
             }
-            let mut queue = self
-                .queue
-                .lock()
-                .map_err(|_| host_error("audio.submit", "audio queue lock is poisoned"))?;
-            if queue.len() + packet.samples.len() > self.capacity_samples {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::QueueOverflow,
-                    "audio.submit",
-                    "audio output queue is full",
-                ));
-            }
-            queue.extend(packet.samples);
+            self.producer.push_samples(&packet.samples)?;
             self.next_sequence += 1;
+            self.submitted_samples = self
+                .submitted_samples
+                .checked_add(packet.samples.len() as u64)
+                .ok_or_else(|| host_error("audio.submit", "audio sample counter overflowed"))?;
             Ok(())
         }
 
         fn drain(&mut self) -> Result<AudioMeter, PlatformError> {
             let deadline = Instant::now() + Duration::from_secs(2);
             loop {
-                if let Some(_error) = self
-                    .stream_error
-                    .lock()
-                    .map_err(|_| host_error("audio.drain", "audio error lock is poisoned"))?
-                    .as_ref()
-                {
+                if self.stream_error.load(Ordering::Acquire) {
                     return Err(PlatformError::new(
                         PlatformErrorCode::DeviceLost,
                         "audio.drain",
                         "WASAPI output stream reported a device error",
                     ));
                 }
-                if self
-                    .queue
-                    .lock()
-                    .map_err(|_| host_error("audio.drain", "audio queue lock is poisoned"))?
-                    .is_empty()
-                {
+                if self.meter.sample_count.load(Ordering::Acquire) >= self.submitted_samples {
                     break;
                 }
                 if Instant::now() >= deadline {
@@ -1096,38 +1141,62 @@ mod windows {
                 }
                 thread::sleep(Duration::from_millis(5));
             }
-            let meter = self
-                .meter
-                .lock()
-                .map_err(|_| host_error("audio.drain", "audio meter lock is poisoned"))?;
-            Ok(meter.snapshot())
+            Ok(self.meter.snapshot())
         }
     }
 
     #[derive(Default)]
-    struct MeterState {
-        sample_count: u64,
-        peak: f32,
-        sum_squares: f64,
+    struct CallbackMeter {
+        sample_count: AtomicU64,
+        peak_bits: AtomicU32,
+        sum_squares_bits: AtomicU64,
     }
 
-    impl MeterState {
-        fn record(&mut self, sample: f32) {
+    impl CallbackMeter {
+        fn record(&self, sample: f32) {
             let magnitude = sample.abs();
-            self.peak = self.peak.max(magnitude);
-            self.sum_squares += f64::from(sample) * f64::from(sample);
-            self.sample_count += 1;
+            let magnitude_bits = magnitude.to_bits();
+            let mut peak_bits = self.peak_bits.load(Ordering::Relaxed);
+            while magnitude_bits > peak_bits {
+                match self.peak_bits.compare_exchange_weak(
+                    peak_bits,
+                    magnitude_bits,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(actual) => peak_bits = actual,
+                }
+            }
+            let contribution = f64::from(sample) * f64::from(sample);
+            let mut sum_bits = self.sum_squares_bits.load(Ordering::Relaxed);
+            loop {
+                let next = f64::from_bits(sum_bits) + contribution;
+                match self.sum_squares_bits.compare_exchange_weak(
+                    sum_bits,
+                    next.to_bits(),
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(actual) => sum_bits = actual,
+                }
+            }
+            self.sample_count.fetch_add(1, Ordering::Release);
         }
 
         fn snapshot(&self) -> AudioMeter {
-            let rms = if self.sample_count == 0 {
+            let sample_count = self.sample_count.load(Ordering::Acquire);
+            let rms = if sample_count == 0 {
                 0.0
             } else {
-                (self.sum_squares / self.sample_count as f64).sqrt() as f32
+                (f64::from_bits(self.sum_squares_bits.load(Ordering::Acquire))
+                    / sample_count as f64)
+                    .sqrt() as f32
             };
             AudioMeter {
-                sample_count: self.sample_count,
-                peak_dbfs: amplitude_dbfs(self.peak),
+                sample_count,
+                peak_dbfs: amplitude_dbfs(f32::from_bits(self.peak_bits.load(Ordering::Acquire))),
                 rms_dbfs: amplitude_dbfs(rms),
             }
         }
@@ -1141,55 +1210,48 @@ mod windows {
         }
     }
 
-    fn pop_sample(queue: &Arc<Mutex<VecDeque<f32>>>, meter: &Arc<Mutex<MeterState>>) -> f32 {
-        let sample = queue
-            .lock()
-            .ok()
-            .and_then(|mut queue| queue.pop_front())
-            .unwrap_or(0.0);
-        if sample != 0.0 {
-            if let Ok(mut meter) = meter.lock() {
-                meter.record(sample);
-            }
-        }
+    fn pop_sample(
+        consumer: &mut astra_platform_general::NativeAudioConsumer,
+        meter: &CallbackMeter,
+    ) -> f32 {
+        let sample = consumer.pop_sample().unwrap_or(0.0);
+        meter.record(sample);
         sample
     }
 
     fn fill_f32(
         output: &mut [f32],
-        queue: &Arc<Mutex<VecDeque<f32>>>,
-        meter: &Arc<Mutex<MeterState>>,
+        consumer: &mut astra_platform_general::NativeAudioConsumer,
+        meter: &CallbackMeter,
     ) {
         for target in output {
-            *target = pop_sample(queue, meter);
+            *target = pop_sample(consumer, meter);
         }
     }
 
     fn fill_i16(
         output: &mut [i16],
-        queue: &Arc<Mutex<VecDeque<f32>>>,
-        meter: &Arc<Mutex<MeterState>>,
+        consumer: &mut astra_platform_general::NativeAudioConsumer,
+        meter: &CallbackMeter,
     ) {
         for target in output {
-            *target = (pop_sample(queue, meter).clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
+            *target = (pop_sample(consumer, meter).clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
         }
     }
 
     fn fill_u16(
         output: &mut [u16],
-        queue: &Arc<Mutex<VecDeque<f32>>>,
-        meter: &Arc<Mutex<MeterState>>,
+        consumer: &mut astra_platform_general::NativeAudioConsumer,
+        meter: &CallbackMeter,
     ) {
         for target in output {
-            let sample = pop_sample(queue, meter).clamp(-1.0, 1.0);
+            let sample = pop_sample(consumer, meter).clamp(-1.0, 1.0);
             *target = ((sample * 0.5 + 0.5) * f32::from(u16::MAX)) as u16;
         }
     }
 
-    fn set_stream_error(error: &Arc<Mutex<Option<String>>>, value: cpal::StreamError) {
-        if let Ok(mut error) = error.lock() {
-            *error = Some(value.to_string());
-        }
+    fn set_stream_error(error: &AtomicBool, _value: cpal::StreamError) {
+        error.store(true, Ordering::Release);
     }
 
     struct DecodeResource {
