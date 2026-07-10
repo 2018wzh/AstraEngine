@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, future::Future, pin::Pin};
 
 use astra_core::{Diagnostic, Hash256};
 use schemars::JsonSchema;
@@ -177,6 +177,122 @@ impl PlayerHostCommandBatch {
 
 pub trait PlayerHostCommandSource {
     fn take_host_commands(&mut self) -> Result<PlayerHostCommandBatch, PlayerHostCommandError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayerHostCommandResult {
+    PackageOpened {
+        package: PlayerHostResourceId,
+    },
+    PackageRange {
+        package: PlayerHostResourceId,
+        bytes: Vec<u8>,
+    },
+    PackageClosed {
+        package: PlayerHostResourceId,
+    },
+    SaveStarted {
+        transaction: PlayerHostResourceId,
+    },
+    SaveCommitted {
+        transaction: PlayerHostResourceId,
+        hash: String,
+    },
+    SaveRead {
+        bytes: Vec<u8>,
+    },
+    AudioOpened {
+        output: PlayerHostResourceId,
+    },
+    AudioDrained {
+        output: PlayerHostResourceId,
+        sample_count: u64,
+        peak_dbfs_bits: u32,
+        rms_dbfs_bits: u32,
+    },
+    AudioClosed {
+        output: PlayerHostResourceId,
+    },
+    DecodeOpened {
+        session: PlayerHostResourceId,
+    },
+    Decoded {
+        session: PlayerHostResourceId,
+        format: String,
+        hash: String,
+        bytes: Vec<u8>,
+    },
+    DecodeClosed {
+        session: PlayerHostResourceId,
+    },
+    Presented {
+        surface: PlayerHostResourceId,
+    },
+    Captured {
+        surface: PlayerHostResourceId,
+        width: u32,
+        height: u32,
+        rgba8: Vec<u8>,
+    },
+    Unit,
+}
+
+pub trait PlayerHostCommandSink {
+    type Error;
+
+    fn execute<'a>(
+        &'a mut self,
+        command: &'a PlayerHostCommand,
+    ) -> Pin<Box<dyn Future<Output = Result<PlayerHostCommandResult, Self::Error>> + 'a>>;
+}
+
+pub struct PlayerHostCommandExecutor<S> {
+    sink: S,
+    last_sequence: u64,
+}
+
+impl<S> PlayerHostCommandExecutor<S> {
+    pub fn new(sink: S) -> Self {
+        Self {
+            sink,
+            last_sequence: 0,
+        }
+    }
+    pub fn sink(&self) -> &S {
+        &self.sink
+    }
+    pub fn sink_mut(&mut self) -> &mut S {
+        &mut self.sink
+    }
+}
+
+impl<S: PlayerHostCommandSink> PlayerHostCommandExecutor<S> {
+    pub async fn execute_batch(
+        &mut self,
+        batch: PlayerHostCommandBatch,
+    ) -> Result<Vec<PlayerHostCommandResult>, PlayerHostCommandExecutionError<S::Error>> {
+        let mut results = Vec::with_capacity(batch.commands.len());
+        for command in &batch.commands {
+            if command.sequence() <= self.last_sequence {
+                return Err(PlayerHostCommandExecutionError::SequenceNotStrictlyIncreasing);
+            }
+            let result = self
+                .sink
+                .execute(command)
+                .await
+                .map_err(PlayerHostCommandExecutionError::Sink)?;
+            self.last_sequence = command.sequence();
+            results.push(result);
+        }
+        Ok(results)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlayerHostCommandExecutionError<E> {
+    SequenceNotStrictlyIncreasing,
+    Sink(E),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
