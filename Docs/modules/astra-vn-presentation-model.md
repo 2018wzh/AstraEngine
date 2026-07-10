@@ -88,7 +88,7 @@ pub struct TimelineTaskState {
 
 这些类型通过 `serde` + `schemars` 生成 JSON Schema。YAML 和 `.astra` 只是作者源；Runtime 只消费 CompiledStory 中的 section。
 
-当前 Stage 3 slice 已有 `VnHeadlessPresentationExecutor`，它把 `StageModel` 转成 deterministic `DrawCommand`，通过 headless CPU renderer 生成 input frame，再可选执行 `CpuFilterExecutor` 的 `FilterGraph`。`VnPresentationExecutionReport` 只记录 renderer/filter provider id、input/output hash、draw/filter count 和 diagnostic，不输出截图 payload、商业文本、音频或影片。
+当前 Stage 3 slice 已把 contract 收敛为 `SceneCommand`：纹理和 glyph 先显式 upload，sprite 只引用 resource id 与 source rect，资源必须显式 release；command stream 同时表达 glyph run、transform、camera、clip、opacity/blend、video frame 与 `FilterGraph`。`DrawCommand` 只保留兼容 type alias。`VnHeadlessPresentationExecutor` 作为 CPU reference 执行同一 stream并生成定位 hash；Windows wgpu/WebGPU product backend 与 formal Player evidence 尚未闭合，因此 `S3-PRESENT-01` 保持 `IN_PROGRESS`。
 
 ## PresentationCommand
 
@@ -180,7 +180,7 @@ voice sync 由 `TextWindowState.voice_replay`、AudioGraph voice channel 和 Tim
 - 性能预算以 headless capture、frame budget 和 provider capability report 为证据。
 
 ```bash
-astra test run scenarios/advanced_presentation.yaml --package target/advancedvn.astrapkg --target advanced-vn-game --profile advanced-vn --headless --report target/reports/advanced-vn.yaml
+astra test run Examples/NativeVN/scenarios/route_rooftop.yaml --package target/nativevn.astrapkg --target nativevn-game --profile advanced-vn --headless --report target/reports/advanced-vn.yaml
 ```
 
 Expected report includes `vn.advanced_presentation`, `timeline.join_cancel`, `presentation.fallback`, `voice.sync` and `renderer.effect_budget`.

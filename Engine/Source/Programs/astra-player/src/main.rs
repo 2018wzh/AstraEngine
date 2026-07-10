@@ -1,6 +1,8 @@
 use astra_observability::{init_host, ConsoleFormat, HostObservabilityConfig, HostRole};
 use astra_player::{WebCdpInputHost, WindowsLiveAutomationRequest, WindowsSendInputHost};
-use astra_player_core::{PlayerAutomationScript, PlayerInputTranscript, PlayerPlatform};
+use astra_player_core::{
+    PlayerActionMap, PlayerAutomationScript, PlayerInputTranscript, PlayerPlatform,
+};
 use std::{env, fs, path::PathBuf};
 
 type PlayerCliError = Box<dyn std::error::Error + Send + Sync>;
@@ -138,13 +140,13 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     use astra_package::{PackageManifest, PackageReader};
     use astra_platform::{
         InputState, PackageSourceRequest, PlatformEventKind, PlatformHostFactory, PlatformId,
-        SurfaceRequest, WindowRequest,
+        PointerButton, SurfaceRequest, WindowRequest,
     };
     use astra_player::{
         NativeVnHostCommandSource, PlatformCommandSink, PlayerHostCommandExecutor,
         PlayerHostResourceId,
     };
-    use astra_vn_core::{CompiledStory, VnRunConfig};
+    use astra_vn_core::VnRunConfig;
     use serde::Deserialize;
 
     #[derive(Deserialize)]
@@ -169,7 +171,6 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     let package_hash = Hash256::from_sha256(&package_bytes).to_string();
     let package = PackageReader::open(&package_bytes)?;
     let manifest: PackageManifest = package.container().decode_postcard("package.manifest")?;
-    let compiled_story: CompiledStory = package.container().decode_postcard("vn.compiled_story")?;
     if manifest.profile != config.profile {
         return Err("Player config/package profile mismatch".into());
     }
@@ -231,8 +232,8 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         let mut sink = PlatformCommandSink::new(session.client.clone());
         sink.bind_surface(logical_surface, surface)?;
         let mut executor = PlayerHostCommandExecutor::new(sink);
-        let mut vn = NativeVnHostCommandSource::new(
-            compiled_story,
+        let mut vn = NativeVnHostCommandSource::from_package(
+            &package,
             VnRunConfig {
                 profile: config.profile,
                 locale: "zh-Hans".to_string(),
@@ -264,19 +265,50 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                     error.to_string(),
                 )
             })?;
+        let action_map = PlayerActionMap::standard();
+        let mut pointer = (0.0_f64, 0.0_f64);
         loop {
             let event = session.events.recv().await?;
             match event.kind {
                 PlatformEventKind::WindowClosed { window: closed } if closed == window => break,
                 PlatformEventKind::Keyboard {
                     window: input_window,
+                    physical_key,
                     state: InputState::Pressed,
                     ..
                 } if input_window == window => {
-                    let batch = vn.primary_input().map_err(|error| {
+                    let Some(action) = action_map.keyboard(&physical_key) else {
+                        continue;
+                    };
+                    let batch = vn.dispatch_action(action).map_err(|error| {
                         astra_platform::PlatformError::new(
                             astra_platform::PlatformErrorCode::InvalidState,
                             "player.runtime.input",
+                            error.to_string(),
+                        )
+                    })?;
+                    executor.execute_batch(batch).await.map_err(|error| {
+                        astra_platform::PlatformError::new(
+                            astra_platform::PlatformErrorCode::InvalidState,
+                            "player.host.execute",
+                            error.to_string(),
+                        )
+                    })?;
+                }
+                PlatformEventKind::PointerMoved {
+                    window: input_window,
+                    x,
+                    y,
+                } if input_window == window => pointer = (x, y),
+                PlatformEventKind::PointerButton {
+                    window: input_window,
+                    button: PointerButton::Primary,
+                    state: InputState::Pressed,
+                } if input_window == window => {
+                    let batch = vn.dispatch_pointer(pointer.0, pointer.1).map_err(|error| {
+                        astra_platform::PlatformError::new(
+                            astra_platform::PlatformErrorCode::InvalidState,
+                            "player.runtime.hit_test",
                             error.to_string(),
                         )
                     })?;

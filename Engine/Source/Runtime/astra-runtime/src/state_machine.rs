@@ -327,15 +327,20 @@ impl StateMachineStore {
                             candidate_output.trace.push(trace);
                         }
                         Err(err) => {
-                            transition_failed = Some(Diagnostic::blocking(
-                                "ASTRA_RUNTIME_ACTION_FAILED",
-                                format!("{} failed: {err}", invocation.action_id),
-                            ));
+                            let diagnostic = match err {
+                                RuntimeError::Diagnostic(diagnostic) => diagnostic,
+                                RuntimeError::Message(message) => Diagnostic::blocking(
+                                    "ASTRA_RUNTIME_ACTION_FAILED",
+                                    format!("{} failed: {message}", invocation.action_id),
+                                ),
+                            };
+                            let diagnostic_code = diagnostic.code.clone();
+                            transition_failed = Some(diagnostic);
                             warn!(
                                 step,
                                 machine_id = ?candidate_machine.definition.id,
                                 action_id = %invocation.action_id,
-                                diagnostic_code = "ASTRA_RUNTIME_ACTION_FAILED",
+                                diagnostic_code = %diagnostic_code,
                                 "state_machine.action.failed"
                             );
                             break;

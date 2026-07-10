@@ -1,6 +1,15 @@
 # AstraRPG Design Alignment Migration
 
-本迁移文档只列出当前实现向 AstraRPG 设计对齐的可执行路线。本次文档工作不做代码迁移，不新增 Rust crate，不修改 workspace member，也不把 AstraRPG 写成已实现能力。
+本迁移文档记录共享 runtime 基础向 AstraRPG 设计对齐的迁移结果。Migration 9 只关闭共享第 1–3 项；不新增 AstraRPG 产品 crate，也不把 Stage 7 内容写成已实现能力。
+
+## 当前状态
+
+| 项目 | 状态 | 实现证据 |
+| --- | --- | --- |
+| Shared policy runtime | `DONE` | `astra-policy` 提供通用 `PolicyVm`、sandbox、budget、`PolicyValue`、snapshot/restore、command/query/trace record 和 hash-bound bundle source cache；`astra-vn-policy` 保留 `astra.vn.*` binding 与既有 `vn.*` section id |
+| Component effects | `DONE` | `ComponentSelector::{ComponentId, ActorSchema}`、`ReplaceComponent` 与 `PatchComponentMap` 强制 schema/hash CAS；duplicate selector、set/remove conflict、非 map、codec/schema/hash mismatch 均 blocking，失败 transition 回滚 candidate world且不影响其他 machine |
+| Product runtime host | `DONE` | versioned single output envelope、descriptor output schema、必填 `abi_fingerprint`、Tokio async ordered worker、多 session、single in-flight ordering、strict `fixed_step`、timeout/worker/output poisoning 和 FFI parity 已落地 |
+| AstraRPG product code | `PLANNED_STAGE7` | AstraRPG、AI Town、`rpg.trpg`、CP2020 local-private adapter 均留在 Stage 7 |
 
 ## Scope
 

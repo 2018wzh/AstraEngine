@@ -6,7 +6,8 @@
 - Runtime save 已迁移到 `astra-package` 共享 container。后续 save section 扩展应继续使用同一 header、section table、codec 和 footer hash 规则。
 - Runtime determinism 修复已落地：snapshot 保存 stable id generator 与完整 EventQueue，Await replay policy、run-to-quiescence transaction、typed component mutation、serialized effect 和 provider-free replay transcript 都有回归测试。后续 provider 不得另建私有 tick/save/replay 管线。
 - Release Gate 独立 validator 已实现 Stage 2 package/media/scenario refs、Target manifest、strict scenario runner、Windows product platform evidence 和 Web browser evidence；desktop-release/web-release 缺 platform report 或 required evidence 时阻断。
-- AstraVN script frontend 标准化已重开 `S3-SCRIPT-01` 和 `S3-SCRIPT-02`。当前 parser/compiler 已让缩进参与 story/state/scene/choice option 归属，并阻断 detached option、非法 mutate 和 scene 外 command；剩余目标是 Lexer、TokenStream、Lossless CST、Typed AST、Semantic Passes、Command Registry、token-level source map、formatter/LSP adapter 和 release conformance。
+- Migration 6 frontend focused implementation 已完成：`logos`/`chumsky`/`rowan`/`text-size`、CST-backed Typed AST、固定 semantic passes、Command Registry、token-level source-map hash、formatter 与 language-service adapter 已落地。`S3-SCRIPT-01/02` 仍等待同 package Windows/Web formal Player evidence。
+- `S3-FLAGSHIP-DEMO-01` 保持 `IN_PROGRESS`；15–20 分钟三终局、中英双语、中文全配音和正式原创资产见 `Docs/migrations/nativevn-flagship-demo-migration.md`，本轮不实现。
 - 当前优先顺序仍在 Stage 3 Windows/Web live player host acceptance 和 TsuiNoSora commercial gate。已有 player route report 只能证明 bundle route slice；`player.full_playable` report validator 已落地，但真实平台 run 仍需要 window/browser host evidence、平台输入 transcript、视觉变化、音频 meter 和同次 route evidence。Linux/macOS/iOS/Android 真实 host smoke 与 player automation 移到 Stage 6。
 
 ## P1

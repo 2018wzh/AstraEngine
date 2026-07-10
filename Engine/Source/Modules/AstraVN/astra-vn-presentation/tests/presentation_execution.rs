@@ -1,8 +1,21 @@
+use astra_core::Hash256;
 use astra_media_core::{FilterGraph, FilterNode, FilterParam, FilterTarget};
 use astra_vn_presentation::{
     LayerKind, StageModel, StandardPresentationCommand, TextWindowState,
-    VnHeadlessPresentationExecutor, VnPresentationExecutionRequest,
+    VnHeadlessPresentationExecutor, VnPresentationAsset, VnPresentationExecutionRequest,
 };
+
+fn asset(asset_id: &str, rgba: [u8; 4]) -> VnPresentationAsset {
+    let bytes = rgba.repeat(4);
+    VnPresentationAsset {
+        asset_id: asset_id.to_string(),
+        format: "rgba8_srgb".to_string(),
+        width: 2,
+        height: 2,
+        hash: Hash256::from_sha256(&bytes),
+        bytes,
+    }
+}
 
 #[test]
 fn headless_presentation_executor_renders_stage_and_runs_filter_graph() {
@@ -30,6 +43,8 @@ fn headless_presentation_executor_renders_stage_and_runs_filter_graph() {
         width: 288.0,
         height: 42.0,
         visible: true,
+        layout: Default::default(),
+        input_priority: 0,
     });
     let filter_graph = FilterGraph {
         schema: "astra.filter_graph.v1".to_string(),
@@ -49,6 +64,13 @@ fn headless_presentation_executor_renders_stage_and_runs_filter_graph() {
     let executor = VnHeadlessPresentationExecutor;
     let request = VnPresentationExecutionRequest {
         stage,
+        assets: vec![
+            asset("native-assets/background/school.png", [20, 40, 80, 255]),
+            asset(
+                "native-assets/character/hero_atlas.png",
+                [180, 120, 100, 255],
+            ),
+        ],
         filters: Some(filter_graph),
         profile: "classic".to_string(),
     };
@@ -95,6 +117,10 @@ fn headless_presentation_executor_blocks_invalid_filter_graph() {
     let err = VnHeadlessPresentationExecutor
         .execute(VnPresentationExecutionRequest {
             stage,
+            assets: vec![asset(
+                "native-assets/background/room.png",
+                [40, 30, 20, 255],
+            )],
             filters: Some(filter_graph),
             profile: "classic".to_string(),
         })

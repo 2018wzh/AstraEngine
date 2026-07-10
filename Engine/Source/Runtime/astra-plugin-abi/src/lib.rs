@@ -130,6 +130,7 @@ pub struct ProductRuntimeDescriptor {
     pub capabilities: Vec<String>,
     pub package_sections: Vec<String>,
     pub release_checks: Vec<String>,
+    pub output_schemas: Vec<RuntimeOutputSchemaDescriptor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -229,18 +230,185 @@ pub struct RuntimeStepInput {
     pub payload: serde_json::Value,
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeOutputDomain {
+    Effect,
+    Presentation,
+    Audio,
+    Await,
+    Trace,
+    DirtySaveSection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeOutputCodec {
+    Postcard,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeOutputSchemaDescriptor {
+    pub domain: RuntimeOutputDomain,
+    pub schema: String,
+    pub version: SchemaVersion,
+    pub codec: RuntimeOutputCodec,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeOutputEnvelope {
+    pub domain: RuntimeOutputDomain,
+    pub schema: String,
+    pub version: SchemaVersion,
+    pub codec: RuntimeOutputCodec,
+    pub hash: Hash256,
+    pub bytes: Vec<u8>,
+}
+
+impl RuntimeOutputEnvelope {
+    pub fn postcard<T: Serialize>(
+        domain: RuntimeOutputDomain,
+        schema: impl Into<String>,
+        version: SchemaVersion,
+        value: &T,
+    ) -> Result<Self, RuntimeEnvelopeError> {
+        let payload = postcard::to_allocvec(value).map_err(|err| {
+            RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_ENVELOPE_ENCODE",
+                format!("encode runtime output envelope: {err}"),
+            )
+        })?;
+        Ok(Self {
+            domain,
+            schema: schema.into(),
+            version,
+            codec: RuntimeOutputCodec::Postcard,
+            hash: Hash256::from_sha256(&payload),
+            bytes: payload,
+        })
+    }
+
+    pub fn decode_postcard<T: for<'de> Deserialize<'de>>(
+        &self,
+        expected_domain: RuntimeOutputDomain,
+        expected_schema: &str,
+        expected_version: SchemaVersion,
+    ) -> Result<T, RuntimeEnvelopeError> {
+        if self.domain != expected_domain {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_ENVELOPE_DOMAIN",
+                "runtime output envelope domain does not match consumer",
+            ));
+        }
+        if self.schema != expected_schema {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_ENVELOPE_SCHEMA",
+                "runtime output envelope schema is unknown to consumer",
+            ));
+        }
+        if self.version != expected_version {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_ENVELOPE_VERSION",
+                "runtime output envelope version does not match consumer",
+            ));
+        }
+        if self.codec != RuntimeOutputCodec::Postcard {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_ENVELOPE_CODEC",
+                "runtime output envelope codec does not match consumer",
+            ));
+        }
+        if Hash256::from_sha256(&self.bytes) != self.hash {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_ENVELOPE_HASH",
+                "runtime output envelope hash does not match payload",
+            ));
+        }
+        postcard::from_bytes(&self.bytes).map_err(|err| {
+            RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_ENVELOPE_DECODE",
+                format!("decode runtime output envelope: {err}"),
+            )
+        })
+    }
+
+    pub fn validate_binding(
+        &self,
+        expected_domain: RuntimeOutputDomain,
+        expected_schema: &str,
+        expected_version: SchemaVersion,
+    ) -> Result<(), RuntimeEnvelopeError> {
+        if self.domain != expected_domain {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_ENVELOPE_DOMAIN",
+                "runtime output envelope domain does not match consumer",
+            ));
+        }
+        if self.schema != expected_schema {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_ENVELOPE_SCHEMA",
+                "runtime output envelope schema is unknown to consumer",
+            ));
+        }
+        if self.version != expected_version {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_ENVELOPE_VERSION",
+                "runtime output envelope version does not match consumer",
+            ));
+        }
+        if self.codec != RuntimeOutputCodec::Postcard {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_ENVELOPE_CODEC",
+                "runtime output envelope codec does not match consumer",
+            ));
+        }
+        if Hash256::from_sha256(&self.bytes) != self.hash {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_ENVELOPE_HASH",
+                "runtime output envelope hash does not match payload",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeEnvelopeError {
+    code: &'static str,
+    message: String,
+}
+
+impl RuntimeEnvelopeError {
+    fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn code(&self) -> &'static str {
+        self.code
+    }
+}
+
+impl std::fmt::Display for RuntimeEnvelopeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for RuntimeEnvelopeError {}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeStepOutput {
     pub session_id: GameRuntimeSessionId,
     pub status: String,
     #[serde(default)]
-    pub effects: Vec<serde_json::Value>,
-    #[serde(default)]
-    pub presentation: Vec<serde_json::Value>,
+    pub outputs: Vec<RuntimeOutputEnvelope>,
     #[serde(default)]
     pub diagnostics: Vec<String>,
-    #[serde(default)]
-    pub dirty_save_sections: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -458,6 +626,7 @@ mod tests {
             capabilities: vec!["runtime.native_vn".to_string()],
             package_sections: vec!["vn.compiled_story".to_string()],
             release_checks: vec!["runtime_provider.native_vn".to_string()],
+            output_schemas: Vec::new(),
         };
         let descriptor_json = serde_json::to_vec(&descriptor).unwrap();
         let registration = FfiRuntimeProviderRegistration {

@@ -1,6 +1,9 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
-use astra_core::{Diagnostic, SchemaVersion, StableId};
+use astra_core::{Diagnostic, Hash256, SchemaId, SchemaVersion, StableId};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -56,6 +59,13 @@ pub enum ActionCallResult {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ComponentSelector {
+    ComponentId { component_id: ComponentId },
+    ActorSchema { actor_id: ActorId, schema: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum ActionEffect {
     SetBlackboard {
@@ -75,6 +85,21 @@ pub enum ActionEffect {
         data: BlackboardValue,
         #[serde(default)]
         store_component_id_key: Option<String>,
+    },
+    ReplaceComponent {
+        selector: ComponentSelector,
+        expected_schema: String,
+        expected_hash: Hash256,
+        data: BlackboardValue,
+    },
+    PatchComponentMap {
+        selector: ComponentSelector,
+        expected_schema: String,
+        expected_hash: Hash256,
+        #[serde(default)]
+        set: BTreeMap<String, BlackboardValue>,
+        #[serde(default)]
+        remove: BTreeSet<String>,
     },
     RemoveActor {
         actor_id: ActorId,
@@ -260,6 +285,97 @@ impl<'a> DeterministicActionContext<'a> {
         Ok(())
     }
 
+    fn resolve_component(&self, selector: &ComponentSelector) -> Result<ComponentId, RuntimeError> {
+        match selector {
+            ComponentSelector::ComponentId { component_id } => self
+                .actors
+                .component(*component_id)
+                .map(|_| *component_id)
+                .ok_or_else(component_missing),
+            ComponentSelector::ActorSchema { actor_id, schema } => {
+                let schema_id = SchemaId::from(schema.clone());
+                let matches = self
+                    .actors
+                    .component_ids_for_actor_schema(*actor_id, &schema_id);
+                match matches.as_slice() {
+                    [component_id] => Ok(*component_id),
+                    [] => Err(component_missing()),
+                    _ => Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                        "ASTRA_RUNTIME_COMPONENT_SELECTOR_AMBIGUOUS",
+                        "actor and schema selector resolves to multiple components",
+                    ))),
+                }
+            }
+        }
+    }
+
+    fn validate_component_precondition(
+        &self,
+        component_id: ComponentId,
+        expected_schema: &str,
+        expected_hash: Hash256,
+    ) -> Result<(), RuntimeError> {
+        let component = self
+            .actors
+            .component(component_id)
+            .ok_or_else(component_missing)?;
+        if component.payload.schema.as_str() != expected_schema {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_SCHEMA_MISMATCH",
+                "runtime component schema does not match effect precondition",
+            )));
+        }
+        if component.payload.hash != expected_hash {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_HASH_MISMATCH",
+                "runtime component hash does not match effect precondition",
+            )));
+        }
+        Ok(())
+    }
+
+    fn replace_component_value(
+        &mut self,
+        selector: ComponentSelector,
+        expected_schema: String,
+        expected_hash: Hash256,
+        data: BlackboardValue,
+    ) -> Result<(), RuntimeError> {
+        let component_id = self.resolve_component(&selector)?;
+        self.validate_component_precondition(component_id, &expected_schema, expected_hash)?;
+        self.replace_component(component_id, &data)
+    }
+
+    fn patch_component_map(
+        &mut self,
+        selector: ComponentSelector,
+        expected_schema: String,
+        expected_hash: Hash256,
+        set: BTreeMap<String, BlackboardValue>,
+        remove: BTreeSet<String>,
+    ) -> Result<(), RuntimeError> {
+        if set.keys().any(|key| remove.contains(key)) {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_PATCH_CONFLICT",
+                "component map patch cannot set and remove the same key",
+            )));
+        }
+        let component_id = self.resolve_component(&selector)?;
+        self.validate_component_precondition(component_id, &expected_schema, expected_hash)?;
+        let value = self.read_component::<BlackboardValue>(component_id)?;
+        let BlackboardValue::Map(mut values) = value else {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_NOT_MAP",
+                "component map patch requires a BlackboardValue::Map payload",
+            )));
+        };
+        for key in remove {
+            values.remove(&key);
+        }
+        values.extend(set);
+        self.replace_component(component_id, &BlackboardValue::Map(values))
+    }
+
     pub fn emit_event(&mut self, source: EventSource, payload: EventPayload) {
         let event = RuntimeEvent {
             id: EventId(self.next_id()),
@@ -349,6 +465,19 @@ impl<'a> DeterministicActionContext<'a> {
                     self.set_blackboard(key, BlackboardValue::StableId(component_id.0));
                 }
             }
+            ActionEffect::ReplaceComponent {
+                selector,
+                expected_schema,
+                expected_hash,
+                data,
+            } => self.replace_component_value(selector, expected_schema, expected_hash, data)?,
+            ActionEffect::PatchComponentMap {
+                selector,
+                expected_schema,
+                expected_hash,
+                set,
+                remove,
+            } => self.patch_component_map(selector, expected_schema, expected_hash, set, remove)?,
             ActionEffect::RemoveActor { actor_id } => {
                 self.remove_actor(actor_id);
             }
@@ -369,6 +498,13 @@ impl<'a> DeterministicActionContext<'a> {
         }
         Ok(())
     }
+}
+
+fn component_missing() -> RuntimeError {
+    RuntimeError::diagnostic(Diagnostic::blocking(
+        "ASTRA_RUNTIME_COMPONENT_MISSING",
+        "runtime component does not exist",
+    ))
 }
 
 pub trait RuntimeAction: Send + Sync {

@@ -140,6 +140,20 @@ impl ActorStore {
         self.components.get_mut(&component_id)
     }
 
+    pub fn component_ids_for_actor_schema(
+        &self,
+        actor_id: ActorId,
+        schema: &SchemaId,
+    ) -> Vec<ComponentId> {
+        self.components
+            .values()
+            .filter(|component| {
+                component.actor_id == actor_id && &component.payload.schema == schema
+            })
+            .map(|component| component.component_id)
+            .collect()
+    }
+
     pub fn actor_snapshots(&self) -> Vec<ActorSnapshot> {
         let mut actors: Vec<_> = self
             .actors

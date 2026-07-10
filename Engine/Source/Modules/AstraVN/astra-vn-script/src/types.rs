@@ -4,6 +4,7 @@ use astra_core::{Diagnostic, Hash128, SourceRef};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::CommandSourceMap;
 use crate::VnError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +22,18 @@ impl AstraSource {
     }
 }
 
+impl From<(&str, &str)> for AstraSource {
+    fn from((path, text): (&str, &str)) -> Self {
+        Self::new(path, text)
+    }
+}
+
+impl From<(String, String)> for AstraSource {
+    fn from((path, text): (String, String)) -> Self {
+        Self::new(path, text)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CompiledStory {
     pub schema: String,
@@ -32,7 +45,7 @@ pub struct CompiledStory {
     pub stories: Vec<Story>,
     pub states: BTreeMap<String, State>,
     pub route_graph: RouteGraph,
-    pub source_map: BTreeMap<String, SourceRef>,
+    pub source_map: CommandSourceMap,
     pub debug_symbols: BTreeMap<String, String>,
 }
 

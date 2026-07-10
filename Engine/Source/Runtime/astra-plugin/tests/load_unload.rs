@@ -20,7 +20,8 @@ fn load_unload_loads_fixture_cdylib_and_releases_callbacks() {
     let loader = PluginLoader::new(PluginGate {
         engine_version: Version::parse("0.1.0").unwrap(),
         rustc_fingerprint: "rustc-stable".to_string(),
-        feature_fingerprint: "stage1-core".to_string(),
+        feature_fingerprint: "runtime-envelope-v2".to_string(),
+        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
         required_capabilities: vec!["presentation.headless".to_string()],
         required_permissions: vec!["runtime.presentation".to_string()],
     });

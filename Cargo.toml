@@ -6,6 +6,7 @@ members = [
     "Engine/Source/Runtime/astra-asset",
     "Engine/Source/Runtime/astra-media-core",
     "Engine/Source/Runtime/astra-media",
+    "Engine/Source/Runtime/astra-policy",
     "Engine/Source/Modules/AstraVN/astra-vn-script",
     "Engine/Source/Modules/AstraVN/astra-vn-presentation",
     "Engine/Source/Modules/AstraVN/astra-vn-core",
@@ -70,9 +71,11 @@ indexmap = { version = "2", features = ["serde"] }
 js-sys = "0.3"
 kira = "0.12"
 libloading = "0.8"
+logos = "0.16.1"
 mlua = { version = "0.10", features = ["luau", "vendored", "serialize"] }
 miette = { version = "7", features = ["fancy"] }
 postcard = { version = "1", features = ["alloc"] }
+proptest = "1.11.0"
 pollster = "0.4"
 proc-macro2 = "1"
 quote = "1"
@@ -80,6 +83,7 @@ reqwest = { version = "0.13.4", default-features = false, features = ["stream"] 
 rfd = { version = "0.17.2", default-features = false }
 rtrb = "0.3.4"
 schemars = { version = "0.8", features = ["uuid1"] }
+rowan = "0.16.1"
 semver = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -88,11 +92,14 @@ sha2 = "0.10"
 symphonia = { version = "0.6", features = ["all"] }
 syn = { version = "2", features = ["full"] }
 tempfile = "3"
+text-size = "1.1.1"
 thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+chumsky = "1.0.0-alpha.8"
+insta = "1.48.0"
 file-rotate = "0.8"
 time = { version = "0.3", features = ["formatting"] }
 uuid = { version = "1", features = ["serde"] }

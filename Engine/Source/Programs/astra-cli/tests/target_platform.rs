@@ -1080,8 +1080,8 @@ fn nativevn_sample_cooks_packages_validates_and_runs_full_playthrough() {
     )
     .unwrap();
     assert_eq!(display_config["schema"], "astra.player_display_config.v1");
-    assert_eq!(display_config["original_resolution"]["width"], 800);
-    assert_eq!(display_config["original_resolution"]["height"], 600);
+    assert_eq!(display_config["original_resolution"]["width"], 1920);
+    assert_eq!(display_config["original_resolution"]["height"], 1080);
     assert_eq!(display_config["scale_filter"], "linear");
 
     let validate_output = Command::new(env!("CARGO_BIN_EXE_astra"))
@@ -1121,7 +1121,7 @@ fn nativevn_sample_cooks_packages_validates_and_runs_full_playthrough() {
         .args([
             "test",
             "run",
-            "scenarios/full_playthrough.yaml",
+            "Examples/NativeVN/scenarios/route_library.yaml",
             "--headless",
             "--target",
             "nativevn-game",
@@ -1433,22 +1433,22 @@ fn nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes() {
 }
 
 #[test]
-fn advanced_vn_sample_runs_opt_in_presentation_gate() {
+fn nativevn_sample_runs_opt_in_advanced_presentation_gate() {
     let root = workspace_root();
     let case_dir = unique_case_dir(root, "advanced-vn-presentation");
     let cooked = case_dir.join("cooked");
-    let package = case_dir.join("advancedvn.astrapkg");
+    let package = case_dir.join("nativevn-advanced.astrapkg");
 
     fs::create_dir_all(&case_dir).unwrap();
 
     let cook_output = Command::new(env!("CARGO_BIN_EXE_astra"))
         .args([
             "cook",
-            "Examples/AdvancedVN/project.yaml",
+            "Examples/NativeVN/project.yaml",
             "--profile",
             "advanced-vn",
             "--target",
-            "advanced-vn-game",
+            "nativevn-game",
             "--out",
             cooked.to_str().unwrap(),
         ])
@@ -1467,7 +1467,7 @@ fn advanced_vn_sample_runs_opt_in_presentation_gate() {
             "build",
             cooked.to_str().unwrap(),
             "--target",
-            "advanced-vn-game",
+            "nativevn-game",
             "--out",
             package.to_str().unwrap(),
         ])
@@ -1488,7 +1488,7 @@ fn advanced_vn_sample_runs_opt_in_presentation_gate() {
             "--profile",
             "advanced-vn",
             "--target",
-            "advanced-vn-game",
+            "nativevn-game",
             "--format",
             "json",
         ])
@@ -1517,10 +1517,10 @@ fn advanced_vn_sample_runs_opt_in_presentation_gate() {
         .args([
             "test",
             "run",
-            "scenarios/advanced_presentation.yaml",
+            "Examples/NativeVN/scenarios/route_rooftop.yaml",
             "--headless",
             "--target",
-            "advanced-vn-game",
+            "nativevn-game",
             "--profile",
             "advanced-vn",
             "--package",

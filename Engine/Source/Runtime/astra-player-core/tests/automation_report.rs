@@ -157,6 +157,9 @@ fn transcript(platform: PlayerPlatform, source: &str) -> PlayerInputTranscript {
             height: 720,
         }],
         audio_meter: PlayerAudioMeterEvidence {
+            provider: "wasapi".into(),
+            callback_count: 4,
+            host_report_hash: "sha256:host".into(),
             sample_count: 48_000,
             peak_dbfs: -12.0,
             rms_dbfs: -24.0,

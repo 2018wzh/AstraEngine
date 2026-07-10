@@ -12,6 +12,15 @@ pub struct TextLayoutRequest {
     pub runs: Vec<TextRun>,
     pub constraint: LayoutConstraint,
     pub font_families: Vec<String>,
+    pub fonts: Vec<PackagedFont>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackagedFont {
+    pub asset_id: String,
+    pub family: String,
+    pub hash: Hash256,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -86,20 +95,16 @@ pub trait TextLayoutProvider {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct CosmicTextLayoutProvider {
-    headless: bool,
-}
+pub struct CosmicTextLayoutProvider;
 
 impl CosmicTextLayoutProvider {
     pub fn new_headless() -> Self {
-        Self { headless: true }
+        Self
     }
 }
 
 impl TextLayoutProvider for CosmicTextLayoutProvider {
     fn layout(&self, request: &TextLayoutRequest) -> Result<TextLayoutResult, MediaError> {
-        let _metrics =
-            cosmic_text::Metrics::new(request.constraint.font_size, request.constraint.line_height);
         let mut diagnostics = Vec::new();
         if request.constraint.max_width <= 0.0
             || request.constraint.font_size <= 0.0
@@ -109,23 +114,45 @@ impl TextLayoutProvider for CosmicTextLayoutProvider {
                 "text layout constraint values must be positive",
             ));
         }
-        if self.headless
-            && request
-                .font_families
-                .iter()
-                .any(|family| family.to_ascii_lowercase().contains("missing"))
-        {
-            diagnostics.push(Diagnostic::warning(
-                "ASTRA_TEXT_FONT_FALLBACK",
-                "requested font family was not available in headless layout",
+        if request.fonts.is_empty() {
+            return Err(MediaError::message(
+                "ASTRA_TEXT_PACKAGED_FONT_MISSING: text layout requires package font bytes",
             ));
+        }
+
+        let locale = request
+            .runs
+            .first()
+            .map(|run| run.locale.clone())
+            .unwrap_or_else(|| "und".into());
+        let mut font_system = cosmic_text::FontSystem::new_with_locale_and_db(
+            locale,
+            cosmic_text::fontdb::Database::new(),
+        );
+        for font in &request.fonts {
+            if font.bytes.is_empty() || Hash256::from_sha256(&font.bytes) != font.hash {
+                return Err(MediaError::message(
+                    "ASTRA_TEXT_PACKAGED_FONT_HASH: package font bytes do not match the sidecar hash",
+                ));
+            }
+            font_system.db_mut().load_font_data(font.bytes.clone());
+        }
+        for family in &request.font_families {
+            if !request.fonts.iter().any(|font| font.family == *family) {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        "ASTRA_TEXT_FONT_FALLBACK",
+                        "requested package font family was unavailable; packaged fallback was used",
+                    )
+                    .with_field("family", family),
+                );
+            }
         }
 
         let mut boxes = Vec::new();
         let mut ruby_boxes = Vec::new();
         let mut voice_refs = Vec::new();
         let mut line_cursor = 0u32;
-        let char_width = request.constraint.font_size * 0.5;
         for (run_index, run) in request.runs.iter().enumerate() {
             if let Some(voice) = &run.voice {
                 voice_refs.push(VoiceReplayRefRecord {
@@ -133,53 +160,74 @@ impl TextLayoutProvider for CosmicTextLayoutProvider {
                     cue: voice.cue.clone(),
                 });
             }
-            let chars_per_line =
-                (request.constraint.max_width / char_width).floor().max(1.0) as usize;
-            let chars: Vec<char> = run.text.chars().collect();
-            for (line_offset, chunk) in chars.chunks(chars_per_line).enumerate() {
-                let text: String = chunk.iter().collect();
+            let metrics = cosmic_text::Metrics::new(
+                request.constraint.font_size,
+                request.constraint.line_height,
+            );
+            let mut buffer = cosmic_text::Buffer::new(&mut font_system, metrics);
+            let mut buffer = buffer.borrow_with(&mut font_system);
+            buffer.set_size(Some(request.constraint.max_width), None);
+            let family = request
+                .font_families
+                .first()
+                .map(String::as_str)
+                .filter(|family| request.fonts.iter().any(|font| font.family == **family))
+                .unwrap_or_else(|| request.fonts[0].family.as_str());
+            let attrs = cosmic_text::Attrs::new().family(cosmic_text::Family::Name(family));
+            buffer.set_text(&run.text, &attrs, cosmic_text::Shaping::Advanced, None);
+            let shaped = buffer
+                .layout_runs()
+                .map(|layout| {
+                    (
+                        layout.line_i,
+                        layout.text.to_string(),
+                        layout.line_top,
+                        layout.line_w,
+                        layout.line_height,
+                    )
+                })
+                .collect::<Vec<_>>();
+            for (line_offset, (_, text, top, width, height)) in shaped.iter().enumerate() {
                 let line = line_cursor + line_offset as u32;
-                let char_start = line_offset * chars_per_line;
-                let char_end = char_start + chunk.len();
                 boxes.push(LayoutBox {
                     run_index,
                     line,
                     x: 0.0,
-                    y: line as f32 * request.constraint.line_height,
-                    width: (text.chars().count() as f32 * char_width)
-                        .min(request.constraint.max_width),
-                    height: request.constraint.line_height,
+                    y: line_cursor as f32 * request.constraint.line_height + *top,
+                    width: *width,
+                    height: *height,
                     text: text.clone(),
                 });
-                for ruby in &run.ruby {
-                    if ruby.base_range.start >= ruby.base_range.end
-                        || ruby.base_range.end > chars.len()
-                    {
-                        diagnostics.push(Diagnostic::blocking(
-                            "ASTRA_TEXT_RUBY_RANGE",
-                            "ruby base range is outside the text run",
-                        ));
-                        continue;
-                    }
-                    let start = ruby.base_range.start.max(char_start);
-                    let end = ruby.base_range.end.min(char_end);
-                    if start < end {
-                        ruby_boxes.push(RubyLayoutBox {
-                            run_index,
-                            base_start: ruby.base_range.start,
-                            base_end: ruby.base_range.end,
-                            line,
-                            x: (start - char_start) as f32 * char_width,
-                            y: line as f32 * request.constraint.line_height
-                                - request.constraint.font_size * 0.45,
-                            width: (end - start) as f32 * char_width,
-                            height: request.constraint.font_size * 0.5,
-                            text: ruby.text.clone(),
-                        });
-                    }
-                }
             }
-            line_cursor += chars.len().div_ceil(chars_per_line) as u32;
+            let char_count = run.text.chars().count();
+            for ruby in &run.ruby {
+                if ruby.base_range.start >= ruby.base_range.end || ruby.base_range.end > char_count
+                {
+                    diagnostics.push(Diagnostic::blocking(
+                        "ASTRA_TEXT_RUBY_RANGE",
+                        "ruby base range is outside the text run",
+                    ));
+                    continue;
+                }
+                let fraction = ruby.base_range.start as f32 / char_count.max(1) as f32;
+                ruby_boxes.push(RubyLayoutBox {
+                    run_index,
+                    base_start: ruby.base_range.start,
+                    base_end: ruby.base_range.end,
+                    line: line_cursor,
+                    x: boxes
+                        .last()
+                        .map(|layout| layout.width * fraction)
+                        .unwrap_or_default(),
+                    y: line_cursor as f32 * request.constraint.line_height
+                        - request.constraint.font_size * 0.45,
+                    width: request.constraint.font_size
+                        * (ruby.base_range.end - ruby.base_range.start) as f32,
+                    height: request.constraint.font_size * 0.5,
+                    text: ruby.text.clone(),
+                });
+            }
+            line_cursor += shaped.len().max(1) as u32;
         }
         let hash = layout_hash(&boxes, &ruby_boxes, &voice_refs, &diagnostics)?;
         Ok(TextLayoutResult {

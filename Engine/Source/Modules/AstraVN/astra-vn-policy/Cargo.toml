@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 astra-core = { path = "../../../Runtime/astra-core" }
+astra-policy = { path = "../../../Runtime/astra-policy" }
 astra-vn-script = { path = "../astra-vn-script" }
 mlua.workspace = true
 postcard.workspace = true

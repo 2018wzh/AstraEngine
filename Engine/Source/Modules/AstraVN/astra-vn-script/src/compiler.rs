@@ -1,21 +1,55 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use astra_core::{Diagnostic, Hash128, SourceRef};
+use astra_core::{Diagnostic, DiagnosticSeverity, Hash128, SourceRef};
 
 use crate::{
-    parser::{parse_sources, ParsedLine},
-    AstraSource, ChoiceOption, CommandManifest, CommandManifestEntry, CompiledCommand,
-    CompiledStory, MutationOp, PresentationCommand, RouteEdge, RouteGraph, RouteNode, Scene, State,
-    Story, StoryManifest, StoryManifestEntry, SystemPageKind, SystemStoryManifest,
-    VariableManifest, VariableScopeManifest, VnError,
+    lower::{lower_sources_from_cst, ParsedLine},
+    AstraSource, ChoiceOption, CommandManifest, CommandManifestEntry, CommandRegistry,
+    CommandSourceMap, CompiledCommand, CompiledStory, MutationOp, PresentationCommand, RouteEdge,
+    RouteGraph, RouteNode, Scene, State, Story, StoryManifest, StoryManifestEntry, SystemPageKind,
+    SystemStoryManifest, VariableManifest, VariableScopeManifest, VnError,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticPass {
+    Symbols,
+    Routes,
+    Variables,
+    Commands,
+    SystemStories,
+    CompiledStory,
+}
+
+pub const SEMANTIC_PASS_ORDER: [SemanticPass; 6] = [
+    SemanticPass::Symbols,
+    SemanticPass::Routes,
+    SemanticPass::Variables,
+    SemanticPass::Commands,
+    SemanticPass::SystemStories,
+    SemanticPass::CompiledStory,
+];
+
+fn trace_pass(pass: SemanticPass) {
+    tracing::debug!(
+        event = "vn.compile.semantic_pass",
+        pass = ?pass,
+        "AstraVN semantic pass started"
+    );
+}
 
 pub fn compile_astra_sources<I>(sources: I) -> Result<CompiledStory, VnError>
 where
     I: IntoIterator<Item = AstraSource>,
 {
+    compile_astra_sources_with_options(sources, CompileAstraOptions::default())
+}
+
+fn compile_bound_sources(
+    sources: Vec<AstraSource>,
+    registry: &CommandRegistry,
+) -> Result<CompiledStory, VnError> {
     tracing::info!(event = "vn.compile.start", "AstraVN compilation started");
-    let lines = parse_sources(sources)?;
+    let lines = lower_sources_from_cst(&sources);
     let mut builder = CompileBuilder::default();
     for line in &lines {
         builder.validate_structure(line)?;
@@ -41,7 +75,28 @@ where
             _ => builder.push_presentation(line)?,
         }
     }
-    let compiled = builder.finish()?;
+    trace_pass(SemanticPass::Symbols);
+    let mut compiled = builder.finish()?;
+    trace_pass(SemanticPass::Commands);
+    for line in &lines {
+        if !registry.is_known(&line.keyword) {
+            return Err(VnError::Diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_VN_COMMAND_UNBOUND",
+                    "command requires an explicit provider binding before compile",
+                )
+                .with_source(line.source_ref())
+                .with_field("command", &line.keyword),
+            ));
+        }
+    }
+    trace_pass(SemanticPass::SystemStories);
+    compiled.system_story_manifest = SystemStoryManifest::from_compiled(&compiled)?;
+    trace_pass(SemanticPass::CompiledStory);
+    let bytes = postcard::to_allocvec(&semantic_story(&compiled))?;
+    compiled.story_hash = Hash128::from_blake3(&bytes);
+    enrich_source_map(&mut compiled, &sources);
+    compiled.source_map.refresh_hash();
     tracing::info!(
         event = "vn.compile.complete",
         story_count = compiled.stories.len(),
@@ -52,6 +107,98 @@ where
     Ok(compiled)
 }
 
+fn enrich_source_map(compiled: &mut CompiledStory, sources: &[AstraSource]) {
+    for source in sources {
+        let parsed = crate::parse_astra_source(source.path.clone(), &source.text);
+        for command in parsed.ast.commands() {
+            let id = command.source_id().map(str::to_string).unwrap_or_else(|| {
+                format!("{}:{}:{}", source.path, command.line(), command.keyword())
+            });
+            let Some(entry) = compiled.source_map.entries.get_mut(&id) else {
+                continue;
+            };
+            entry.keyword = source_ref_for_span(&source.path, &source.text, command.keyword_span());
+            entry.source_id = command
+                .source_id_span()
+                .map(|span| source_ref_for_span(&source.path, &source.text, span));
+            entry.attributes = command
+                .attributes()
+                .map(|attribute| {
+                    (
+                        attribute.key().to_string(),
+                        source_ref_for_span(&source.path, &source.text, attribute.value_span),
+                    )
+                })
+                .collect();
+            entry.arguments = command
+                .arguments()
+                .map(|(_, span)| source_ref_for_span(&source.path, &source.text, span))
+                .collect();
+        }
+    }
+}
+
+fn source_ref_for_span(path: &str, text: &str, span: crate::TextSpan) -> SourceRef {
+    let start = u32::from(span.start) as usize;
+    let prefix = &text[..start.min(text.len())];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u32 + 1;
+    let column = prefix
+        .rsplit_once('\n')
+        .map_or(prefix.len(), |(_, tail)| tail.len()) as u32
+        + 1;
+    SourceRef {
+        source: path.to_string(),
+        line,
+        column,
+        length: u32::from(span.end - span.start),
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CompileAstraOptions {
+    extension_bindings: BTreeMap<String, String>,
+}
+
+impl CompileAstraOptions {
+    pub fn bind_extension(
+        mut self,
+        command: impl Into<String>,
+        provider: impl Into<String>,
+    ) -> Self {
+        self.extension_bindings
+            .insert(command.into(), provider.into());
+        self
+    }
+}
+
+pub fn compile_astra_sources_with_options<I, S>(
+    sources: I,
+    options: CompileAstraOptions,
+) -> Result<CompiledStory, VnError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<AstraSource>,
+{
+    let sources: Vec<AstraSource> = sources.into_iter().map(Into::into).collect();
+    for source in &sources {
+        let parsed = crate::parse_astra_source(source.path.clone(), &source.text);
+        if let Some(diagnostic) = parsed
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code != "ASTRA_VN_UNKNOWN_COMMAND")
+        {
+            let mut diagnostic = diagnostic.clone();
+            diagnostic.severity = DiagnosticSeverity::Blocking;
+            return Err(VnError::Diagnostic(diagnostic));
+        }
+    }
+    let mut registry = CommandRegistry::default();
+    for (command, provider) in options.extension_bindings {
+        registry.bind_extension(command, provider);
+    }
+    compile_bound_sources(sources, &registry)
+}
+
 #[derive(Default)]
 struct CompileBuilder {
     stories: Vec<Story>,
@@ -59,7 +206,7 @@ struct CompileBuilder {
     current_story: Option<String>,
     current_state: Option<String>,
     current_scene: Option<String>,
-    source_map: BTreeMap<String, SourceRef>,
+    source_map: CommandSourceMap,
     debug_symbols: BTreeMap<String, String>,
 }
 
@@ -406,15 +553,17 @@ impl CompileBuilder {
     }
 
     fn finish(mut self) -> Result<CompiledStory, VnError> {
+        trace_pass(SemanticPass::Routes);
         self.validate_targets()?;
         self.validate_main_reachability()?;
+        trace_pass(SemanticPass::Variables);
         self.validate_text_keys()?;
         let story_manifest = self.story_manifest();
         let variable_manifest = self.variable_manifest();
         let command_manifest = self.command_manifest();
         let route_graph = self.route_graph();
-        let mut compiled = CompiledStory {
-            schema: "astra.vn.compiled_story.v1".to_string(),
+        let compiled = CompiledStory {
+            schema: "astra.vn.compiled_story".to_string(),
             story_hash: Hash128::from_bytes([0; 16]),
             story_manifest,
             variable_manifest,
@@ -426,9 +575,6 @@ impl CompileBuilder {
             source_map: self.source_map,
             debug_symbols: self.debug_symbols,
         };
-        compiled.system_story_manifest = SystemStoryManifest::from_compiled(&compiled)?;
-        let bytes = postcard::to_allocvec(&compiled)?;
-        compiled.story_hash = Hash128::from_blake3(&bytes);
         Ok(compiled)
     }
 
@@ -751,6 +897,38 @@ impl CompileBuilder {
             .iter()
             .find(|scene| &scene.id == scene_id)
     }
+}
+
+fn semantic_story(compiled: &CompiledStory) -> CompiledStory {
+    let mut semantic = compiled.clone();
+    semantic.story_hash = Hash128::from_bytes([0; 16]);
+    semantic.source_map = CommandSourceMap::default();
+    semantic.debug_symbols.clear();
+    for entry in &mut semantic.command_manifest.commands {
+        entry.id.clear();
+        entry.source = None;
+    }
+    for entry in semantic.system_story_manifest.entries.values_mut() {
+        entry.source_id.clear();
+    }
+    for state in semantic.states.values_mut() {
+        for scene in &mut state.scenes {
+            for command in &mut scene.commands {
+                match command {
+                    CompiledCommand::Dialogue { id, .. }
+                    | CompiledCommand::Choice { id, .. }
+                    | CompiledCommand::Jump { id, .. }
+                    | CompiledCommand::Call { id, .. }
+                    | CompiledCommand::Return { id }
+                    | CompiledCommand::Mutate { id, .. }
+                    | CompiledCommand::SystemPage { id, .. }
+                    | CompiledCommand::Presentation { id, .. }
+                    | CompiledCommand::Wait { id, .. } => id.clear(),
+                }
+            }
+        }
+    }
+    semantic
 }
 
 fn required_attr(line: &ParsedLine, key: &str) -> Result<String, VnError> {

@@ -2,7 +2,174 @@ use astra_core::Diagnostic;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{CompiledCommand, CompiledStory, SystemStoryValidationStatus, SystemUnlockKind};
+use crate::{
+    CompiledCommand, CompiledStory, SystemPageKind, SystemStoryValidationStatus, SystemUnlockKind,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemUiSurface {
+    Title,
+    Message,
+    Choice,
+    Save,
+    Load,
+    Config,
+    Backlog,
+    Gallery,
+    Replay,
+    VoiceReplay,
+    RouteChart,
+    LocalizationPreview,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SystemUiRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl SystemUiRect {
+    fn contains(self, x: f64, y: f64) -> bool {
+        x >= self.x as f64
+            && y >= self.y as f64
+            && x < (self.x + self.width) as f64
+            && y < (self.y + self.height) as f64
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum SystemUiAction {
+    Advance,
+    ChooseIndex { index: usize },
+    Open { surface: SystemUiSurface },
+    Activate { control_id: String },
+    Back,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SystemUiControl {
+    pub id: String,
+    pub bounds: SystemUiRect,
+    pub input_priority: i32,
+    pub action: SystemUiAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SystemUiModel {
+    pub schema: String,
+    pub surface: SystemUiSurface,
+    pub viewport_width: u32,
+    pub viewport_height: u32,
+    pub controls: Vec<SystemUiControl>,
+}
+
+impl SystemUiModel {
+    pub fn message(viewport_width: u32, viewport_height: u32) -> Self {
+        Self::new(
+            SystemUiSurface::Message,
+            viewport_width,
+            viewport_height,
+            vec![SystemUiControl {
+                id: "message.advance".into(),
+                bounds: SystemUiRect {
+                    x: 0,
+                    y: 0,
+                    width: viewport_width,
+                    height: viewport_height,
+                },
+                input_priority: 0,
+                action: SystemUiAction::Advance,
+            }],
+        )
+    }
+
+    pub fn choice(viewport_width: u32, viewport_height: u32, option_count: usize) -> Self {
+        let row_height = 56_u32;
+        let width = viewport_width.saturating_sub(80).min(960);
+        let x = viewport_width.saturating_sub(width) / 2;
+        let total_height = row_height.saturating_mul(option_count as u32);
+        let y = viewport_height.saturating_sub(total_height) / 2;
+        let controls = (0..option_count)
+            .map(|index| SystemUiControl {
+                id: format!("choice.{index}"),
+                bounds: SystemUiRect {
+                    x,
+                    y: y + row_height * index as u32,
+                    width,
+                    height: row_height,
+                },
+                input_priority: 100,
+                action: SystemUiAction::ChooseIndex { index },
+            })
+            .collect();
+        Self::new(
+            SystemUiSurface::Choice,
+            viewport_width,
+            viewport_height,
+            controls,
+        )
+    }
+
+    pub fn system(page: SystemPageKind, viewport_width: u32, viewport_height: u32) -> Option<Self> {
+        let surface = match page {
+            SystemPageKind::Title => SystemUiSurface::Title,
+            SystemPageKind::Save => SystemUiSurface::Save,
+            SystemPageKind::Load => SystemUiSurface::Load,
+            SystemPageKind::Config => SystemUiSurface::Config,
+            SystemPageKind::Gallery => SystemUiSurface::Gallery,
+            SystemPageKind::Replay => SystemUiSurface::Replay,
+            SystemPageKind::VoiceReplay => SystemUiSurface::VoiceReplay,
+            SystemPageKind::RouteChart => SystemUiSurface::RouteChart,
+            SystemPageKind::Backlog => SystemUiSurface::Backlog,
+            SystemPageKind::LocalizationPreview => SystemUiSurface::LocalizationPreview,
+            SystemPageKind::Unknown => return None,
+        };
+        let controls = vec![SystemUiControl {
+            id: format!("{}.back", format!("{surface:?}").to_lowercase()),
+            bounds: SystemUiRect {
+                x: 24,
+                y: 24,
+                width: 160,
+                height: 52,
+            },
+            input_priority: 1000,
+            action: SystemUiAction::Back,
+        }];
+        Some(Self::new(
+            surface,
+            viewport_width,
+            viewport_height,
+            controls,
+        ))
+    }
+
+    pub fn hit_test(&self, x: f64, y: f64) -> Option<&SystemUiAction> {
+        self.controls
+            .iter()
+            .filter(|control| control.bounds.contains(x, y))
+            .max_by_key(|control| control.input_priority)
+            .map(|control| &control.action)
+    }
+
+    fn new(
+        surface: SystemUiSurface,
+        viewport_width: u32,
+        viewport_height: u32,
+        controls: Vec<SystemUiControl>,
+    ) -> Self {
+        Self {
+            schema: "astra.vn.system_ui_model.v1".into(),
+            surface,
+            viewport_width,
+            viewport_height,
+            controls,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnSystemUiProfileManifest {

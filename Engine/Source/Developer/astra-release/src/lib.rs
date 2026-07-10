@@ -12,10 +12,11 @@ use astra_plugin_abi::{
 };
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
 use astra_vn::{
-    CompiledStory, NativeVnRuntimeProvider, SystemStoryManifest, SystemStoryValidationStatus,
-    VnAdvancedPresentationManifest, VnCommercialBaselineManifest, VnExtensionManifest,
-    VnPolicyBundleManifest, VnPolicyBundleSourceCache, VnPresentationProviderManifest,
-    VnProfileManifest, VnRunConfig, VnStandardCommandManifest, VnSystemUiProfileManifest,
+    decode_compiled_story, NativeVnRuntimeProvider, SystemStoryManifest,
+    SystemStoryValidationStatus, VnAdvancedPresentationManifest, VnCommercialBaselineManifest,
+    VnExtensionManifest, VnPolicyBundleManifest, VnPolicyBundleSourceCache,
+    VnPresentationProviderManifest, VnProfileManifest, VnRunConfig, VnStandardCommandManifest,
+    VnSystemUiProfileManifest,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -929,15 +930,12 @@ fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckReco
 fn native_vn_behavioral_evidence(
     package: &PackageReader,
 ) -> Result<Vec<ReleaseEvidence>, (&'static str, String)> {
-    let compiled = package
-        .container()
-        .decode_postcard::<CompiledStory>("vn.compiled_story")
-        .map_err(|err| {
-            (
-                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PACKAGE",
-                format!("decode vn.compiled_story for provider conformance: {err}"),
-            )
-        })?;
+    let compiled = decode_compiled_story(package).map_err(|err| {
+        (
+            "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PACKAGE",
+            format!("decode vn.compiled_story for provider conformance: {err}"),
+        )
+    })?;
     let mut provider = NativeVnRuntimeProvider::default();
     let open = provider
         .open_compiled_story(
@@ -1958,10 +1956,7 @@ fn vn_checks(
 }
 
 fn vn_compiled_story_check(package: &PackageReader, profile: &str) -> ReleaseCheckRecord {
-    let compiled = match package
-        .container()
-        .decode_postcard::<CompiledStory>("vn.compiled_story")
-    {
+    let compiled = match decode_compiled_story(package) {
         Ok(compiled) => compiled,
         Err(err) => {
             return ReleaseCheckRecord {
@@ -1980,7 +1975,7 @@ fn vn_compiled_story_check(package: &PackageReader, profile: &str) -> ReleaseChe
             };
         }
     };
-    if compiled.schema != "astra.vn.compiled_story.v1"
+    if compiled.schema != "astra.vn.compiled_story"
         || compiled.stories.is_empty()
         || compiled.states.is_empty()
     {
@@ -2281,10 +2276,7 @@ fn vn_standard_commands_check(package: &PackageReader, profile: &str) -> Release
             };
         }
     };
-    let compiled = match package
-        .container()
-        .decode_postcard::<CompiledStory>("vn.compiled_story")
-    {
+    let compiled = match decode_compiled_story(package) {
         Ok(compiled) => compiled,
         Err(err) => {
             return ReleaseCheckRecord {

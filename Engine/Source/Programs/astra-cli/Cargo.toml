@@ -34,9 +34,9 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 tracing.workspace = true
+tempfile.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [

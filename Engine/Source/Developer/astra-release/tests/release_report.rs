@@ -1170,40 +1170,17 @@ fn release_gate_blocks_missing_standard_command_manifest_for_classic_profile() {
 }
 
 #[test]
-fn release_gate_blocks_unknown_standard_command_usage_for_classic_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
+fn compiler_blocks_unknown_standard_command_before_release_packaging() {
+    let error = compile_astra_sources([AstraSource::new(
         "main.astra",
         format!(
             "{}\nstate extra #@id state.extra\n  scene extra #@id scene.extra\n    warp asset:native-assets/effect/warp.json #@id command.warp\n",
             nativevn_story_with_system_pages()
         ),
     )])
-    .unwrap();
-    let sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
-    let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
+    .unwrap_err();
 
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "classic".to_string(),
-            require_ffmpeg: false,
-            target: Some("nativevn-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "vn.standard_commands")
-        .unwrap();
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert_eq!(
-        check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_VN_STANDARD_COMMAND_UNKNOWN"
-    );
+    assert_eq!(error.code(), "ASTRA_VN_COMMAND_UNBOUND");
 }
 
 #[test]

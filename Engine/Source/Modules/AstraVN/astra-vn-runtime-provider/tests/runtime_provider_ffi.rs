@@ -2,11 +2,11 @@ use abi_stable::std_types::RVec;
 use astra_core::{Hash256, SchemaVersion};
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeEditorMetadata, RuntimeOpenReport,
-    RuntimeOpenRequest, RuntimePrepareReport, RuntimePrepareRequest, RuntimeProviderCall,
-    RuntimeProviderCreateRequest, RuntimeProviderDestroyRequest, RuntimeProviderInstanceReport,
-    RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
-    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeShutdownReport, RuntimeStepInput,
-    RuntimeStepOutput, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
+    RuntimeOpenRequest, RuntimeOutputDomain, RuntimePrepareReport, RuntimePrepareRequest,
+    RuntimeProviderCall, RuntimeProviderCreateRequest, RuntimeProviderDestroyRequest,
+    RuntimeProviderInstanceReport, RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest,
+    RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeShutdownReport,
+    RuntimeStepInput, RuntimeStepOutput, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
 };
 use astra_vn_runtime_provider::{compile_astra_sources, AstraSource, NativeVnRuntimeProvider};
 use serde::{de::DeserializeOwned, Serialize};
@@ -61,7 +61,7 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
             package_hash: "sha256:fixture".to_string(),
             sections: vec![RuntimeSectionPayload {
                 section_id: "vn.compiled_story".to_string(),
-                schema: "astra.vn.compiled_story.v1".to_string(),
+                schema: "astra.vn.compiled_story".to_string(),
                 version: SchemaVersion::default(),
                 codec: RuntimeSectionCodec::Postcard,
                 hash: Hash256::from_sha256(&compiled_bytes),
@@ -80,7 +80,10 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
         },
     );
     assert_eq!(step.status, "blocked");
-    assert!(!step.presentation.is_empty());
+    assert!(step
+        .outputs
+        .iter()
+        .any(|output| output.domain == RuntimeOutputDomain::Presentation));
 
     let save = invoke_call::<_, RuntimeSaveSections>(
         registration.save,

@@ -1,65 +1,51 @@
 story main #@id story.main
 
 state prologue #@id state.prologue
-  scene opening #@id scene.opening
-    movie layer:video.opening asset:native-assets/movie/op.webm end:wait fallback:native-assets/movie/op_fallback.png #@id movie.opening
-    voice asset:native-assets/voice/hero0001.ogg sync:text #@id voice.opening
-    text key:prologue.hello speaker:hero voice:voice.hero.0001 #@id line.prologue.hello
-    choice key:prologue.where #@id choice.prologue.where
-      option key:choice.library -> library #@id choice.library
-      option key:choice.rooftop -> rooftop #@id choice.rooftop
+  scene technical_stage #@id scene.technical_stage
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.technical
+    layer id:bg kind:background z:0 blend:normal #@id layer.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.video
+    layer id:ui kind:text z:900 input:message #@id layer.ui
+    background asset:asset:/background/apartment-night layer:bg preset:soft_fade duration:300 #@id bg.technical
+    show id:hero asset:asset:/character/lin-yao pose:normal layer:character at:center preset:hero_enter #@id hero.show
+    camera target:main zoom:1.06 duration:480 preset:slow_push #@id camera.push
+    timeline id:tl.hero.enter target:hero join:block fence:timeline.hero.enter.complete fallback:flat budget_ms:2 #@id timeline.hero.enter
+    timeline id:tl.hero.enter action:cancel reason:replace_target #@id timeline.hero.cancel
+    movie layer:video asset:asset:/movie/rain-signal alpha:0.20 loop:true end:wait fence:movie.signal.end fallback:asset:/background/apartment-night #@id movie.signal
+    bgm asset:asset:/bgm/glass-city loop:true fade:600 #@id bgm.technical
+    voice asset:asset:/voice/cc0-sample sync:text #@id voice.cc0.sample
+    text key:technical.intro speaker:guide voice:voice.cc0.sample window:main #@id line.technical.intro
+    effect text:technical.reveal lip_sync:true filter:soft_glow fallback:plain_reveal budget_ms:2 #@id effect.technical.reveal
+    wait fence:voice_end #@id wait.voice
+    transition preset:flash_soft duration:220 #@id transition.choice
+    choice key:technical.route #@id choice.route
+      option key:technical.route.library -> ending_library #@id choice.library
+      option key:technical.route.rooftop -> ending_rooftop #@id choice.rooftop
 
-state library #@id state.library
-  scene library #@id scene.library
-    bgm asset:native-assets/bgm/library.ogg loop:true #@id bgm.library
-    se asset:native-assets/se/page.ogg #@id se.page
-    wait fence:library.pause #@id wait.library.pause
-    text key:library.followup speaker:hero voice:voice.hero.0002 #@id line.library.followup
-    jump ending.good #@id jump.good
+state ending_library #@id state.ending_library
+  scene library_result #@id scene.library_result
+    se asset:asset:/se/scan bus:se #@id se.library
+    text key:technical.library speaker:guide #@id line.technical.library
+    system_page kind:save policy:astra.policy.standard #@id system.library.save
+    jump target:system_stories #@id jump.system_stories
 
-state rooftop #@id state.rooftop
-  scene rooftop #@id scene.rooftop
-    text key:rooftop.followup speaker:hero voice:voice.hero.0003 #@id line.rooftop.followup
-    jump ending.rooftop #@id jump.rooftop
+state ending_rooftop #@id state.ending_rooftop
+  scene rooftop_result #@id scene.rooftop_result
+    shake target:camera.main strength:3 duration:160 #@id camera.rooftop.shake
+    se asset:asset:/se/wind bus:se #@id se.rooftop
+    text key:technical.rooftop speaker:guide #@id line.technical.rooftop
+    system_page kind:route_chart policy:astra.policy.standard #@id system.rooftop.chart
 
-story system #@id story.system
-
-state title #@id state.system.title
-  scene title #@id scene.system.title
-    system_page kind:title policy:astra.policy.standard #@id page.title
-
-state save #@id state.system.save
-  scene save #@id scene.system.save
-    system_page kind:save policy:astra.policy.standard #@id page.save
-
-state load #@id state.system.load
-  scene load #@id scene.system.load
-    system_page kind:load policy:astra.policy.standard #@id page.load
-
-state config #@id state.system.config
-  scene config #@id scene.system.config
-    system_page kind:config policy:astra.policy.standard #@id page.config
-
-state gallery #@id state.system.gallery
-  scene gallery #@id scene.system.gallery
-    system_page kind:gallery policy:astra.policy.standard #@id page.gallery
-
-state replay #@id state.system.replay
-  scene replay #@id scene.system.replay
-    system_page kind:replay policy:astra.policy.standard #@id page.replay
-
-state voice_replay #@id state.system.voice_replay
-  scene voice_replay #@id scene.system.voice_replay
-    system_page kind:voice_replay policy:astra.policy.standard #@id page.voice_replay
-
-state route_chart #@id state.system.route_chart
-  scene route_chart #@id scene.system.route_chart
-    system_page kind:route_chart policy:astra.policy.standard #@id page.route_chart
-
-state backlog #@id state.system.backlog
-  scene backlog #@id scene.system.backlog
-    system_page kind:backlog policy:astra.policy.standard #@id page.backlog
-
-state localization_preview #@id state.system.localization_preview
-  scene localization_preview #@id scene.system.localization_preview
-    system_page kind:localization_preview policy:astra.policy.standard #@id page.localization_preview
+state system_stories #@id state.system_stories
+  scene system_pages #@id scene.system_pages
+    system_page kind:title policy:astra.policy.standard #@id system.title
+    system_page kind:save policy:astra.policy.standard #@id system.save
+    system_page kind:load policy:astra.policy.standard #@id system.load
+    system_page kind:config policy:astra.policy.standard #@id system.config
+    system_page kind:gallery policy:astra.policy.standard #@id system.gallery
+    system_page kind:replay policy:astra.policy.standard #@id system.replay
+    system_page kind:voice_replay policy:astra.policy.standard #@id system.voice_replay
+    system_page kind:route_chart policy:astra.policy.standard #@id system.route_chart
+    system_page kind:backlog policy:astra.policy.standard #@id system.backlog
+    system_page kind:localization_preview policy:astra.policy.standard #@id system.localization_preview

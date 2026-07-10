@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/wind
+source: Assets/Se/wind.ogg
+source_hash: sha256:f6d3283b8231384ff0afd5d9e5734d5817970bfe1bd0f00da6237d7495718f2d
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [classic, modern, advanced-vn, windows-release, web-release-chrome]
+  params: {}
+review: accepted

@@ -38,18 +38,33 @@ targets:
   - id: nativevn-game
     kind: game
     crate: astra-vn
-    default_profile: classic
+    default_profile: advanced-vn
     runtime_provider: native_vn
     platforms: [headless, windows, web]
     packaged: true
 nativevn:
   sources:
     - Scripts
-  profiles: [classic, modern]
+  profiles: [classic, modern, advanced-vn]
+  asset_roots: [Assets]
   display:
     original_resolution:
-      width: 800
-      height: 600
+      width: 1920
+      height: 1080
     scale_filter: linear
   scenario_refs:
-    - scenarios/full_playthrough.yaml
+    - scenarios/route_library.yaml
+    - scenarios/route_rooftop.yaml
+package_sections:
+  - id: vn.localization.zh-Hans
+    schema: astra.vn.localization_table.v1
+    path: Localization/zh-Hans.json
+    codec: raw
+    targets: [nativevn-game]
+    profiles: [advanced-vn]
+  - id: vn.localization.en
+    schema: astra.vn.localization_table.v1
+    path: Localization/en.json
+    codec: raw
+    targets: [nativevn-game]
+    profiles: [advanced-vn]

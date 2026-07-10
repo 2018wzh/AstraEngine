@@ -6,6 +6,7 @@
     "astra-asset": { "status": "instrumented", "reason": "asset registry and VFS lifecycle" },
     "astra-media-core": { "status": "instrumented", "reason": "deterministic filter and frame execution" },
     "astra-media": { "status": "instrumented", "reason": "decode provider and audio graph lifecycle" },
+    "astra-policy": { "status": "instrumented", "reason": "shared policy VM execution and budget lifecycle" },
     "astra-vn-script": { "status": "instrumented", "reason": "compiler lifecycle and diagnostics" },
     "astra-vn-presentation": { "status": "instrumented", "reason": "presentation command execution" },
     "astra-vn-core": { "status": "instrumented", "reason": "VN runtime session and command lifecycle" },

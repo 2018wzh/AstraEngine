@@ -2,7 +2,7 @@
 
 Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astra` 仍是 canonical story source；AstraVN Core 持有 VN 权威语义，Luau policy 只处理表现、系统页和复杂演出。AstraVN 已迁到 `Engine/Source/Modules/AstraVN/` 并拆成多个功能 crate；`astra-vn` 只保留 Rust ABI dylib facade 和兼容 re-export。`NativeVnRuntimeProvider` 已作为同级 gameplay runtime provider 接入，AstraVN 仍保持 VN 语义，不作为 AstraEMU 或 AstraRPG 的基类。
 
-当前 Stage 3 是 `IN_PROGRESS`，不是 `DONE`。NativeVN 权威执行链已经收敛到 session-owned RuntimeWorld 与 `astra.vn.step` StateMachine action；结构化 cursor、call/system stack、dialogue/choice/system wait、Runtime AwaitToken、audio/timeline serialized effect、typed mutation、真实 FFI instance/session lifecycle、hashed save/restore 和 package-bound behavior release evidence 已落地。Luau query 使用注入 backing state，并受 interrupt、memory、output 和 snapshot-depth budget 限制。`.astra` baseline 已让缩进参与 story/state/scene/command/choice option 归属，detached option、非法 mutate 与 scene 外 command 都 blocking。现有 sample/package/player/route/TsuiNoSora 证据继续保留。`S3-SCRIPT-01` 与 `S3-SCRIPT-02` 仍因 Lexer、TokenStream、Lossless CST、Typed AST、Semantic Passes、Command Registry、token-level source map、formatter/LSP adapter 和 release conformance 重开。其他缺口仍是 Web live player automation、TsuiNoSora full-playable Windows route playback、完整 Director/Shockwave cast parser/source-map reader、真实商业全量 route extraction、真实商业 NativeVN payload 写入和正式 release signoff。
+当前 Stage 3 是 `IN_PROGRESS`，不是 `DONE`。Migration 6 frontend 与 Migration 9 shared 1–3 已完成 focused implementation：`.astra` 使用 lossless token/CST/AST、固定 semantic passes、command registry、token source map、formatter 和 language-service adapter；共享 policy、component effects、versioned runtime envelope 与 async multi-session host 已落地。NativeVN 样例已收敛为两路线技术验收内容，并移除无明确再分发许可的 SAPI 配音。Stage 3 work item 不因此提前关闭：`S3-SCRIPT-01/02`、presentation、system UI、sample 和 Windows/Web Player 都必须等待同一 `.astrapkg` 的 formal native-input evidence。顶层还受 `S3-TSUI-INTERNAL-DEMO-01`、`S3-TSUI-GATE-01` 与 `S3-FLAGSHIP-DEMO-01` 阻断。
 
 补充：`S3-TSUI-INTERNAL-DEMO-01` 的验收口径已提升为 full-resource classic playable bundle：`tsuinosora-internal-game` 必须完成全量 ProjectorRays dump coverage、全量资源转换 coverage、NativeVN `asset_roots`、asset sidecar、cooked asset package section、`asset.vfs_manifest`/`asset.catalog` package VFS evidence、同一 `.astrapkg` 派生 Windows/Web bundle manifest、`player.full_playable` live automation report 校验，以及原版/Demo 同 checkpoint 视觉截图对比。当前 repo-side pipeline 已落地 ProjectorRays 本地 dump adapter、脱敏 script source-map、Director reader-required preflight 外部 reader evidence、`demo-config-template`、带 `chunk_fourcc_counts`/`conversion_plan` 的 `tsuinosora.projectorrays_full_dump_report.v1`、`tsuinosora.projectorrays_converted_resources.v1` sidecar 校验、JSON-backed metadata chunk converter、`STXT` text converter、`Lscr` cast-member/source-number/CastScript/ParentScript source 映射和 malformed JSON numeric recovery、empty `Lscr` no-op metadata converter、`BITD` 1/16/32bpp PNG converter、8bpp `BITD` palette sidecar converter、KEY-bound `sndH`/`sndS` WAV converter、KEY-bound `ediM` `MACRZ` verified MP3 converter、score/metadata chunk 脱敏 converter、ProjectorRays `GO[...]` route identity 派生、ProjectorRays converted asset bridge、`tsuinosora.visual_screenshot_capture_report.v1`、`tsuinosora.visual_comparison_report.v1`、`capture_automation` 自动截图 intent/execution 脱敏记录、scenario refs package section、同 package Windows/Web bundle manifest、bundle 内原始分辨率 display config、Windows live window、`astra-player` Windows `SendInput` automation runner、player host consumed `TRACE` log 捕获、visual comparison hash 绑定、host conformance callback meter 和 release `player.full_playable` identity continuity 校验。私有 acceptance 命令是 `python Tools/TsuiNoSora/tsuinosora_tools.py internal-demo-bundle --config Examples/TsuiNoSora/.local/demo.config.json --repo-root .`；当前私有 dump 覆盖 2527 个 ProjectorRays binary chunk，2527 个 chunk 均有 converted evidence，`demo-slice` 可生成 28 条脱敏 route 的 NativeVN project/package input，`internal-demo-bundle` 已从同一个 `.astrapkg` 产出 Windows/Web bundle manifest，并能采集原版/Demo 同 checkpoint 截图且通过 title 视觉 comparison；最近一次 Windows live automation 中 28 次 `SendInput` 都被 player host consumed trace 证明。验收仍因 Windows live player 在真实输入后没有产生可见状态变化、automation transcript 未覆盖 28 条 full classic route、缺 required manual signoff 而 blocking，不能作为独立 milestone 标 `DONE`。`modern`、Patch-only 和 Runtime Patch/VFS 插件仍不属于该 milestone，但 full-resource conversion、原体验还原和 100% 可玩是该 milestone 的完成条件。
 
@@ -71,7 +71,7 @@ cargo test -p astra-vn-runtime-provider --test game_runtime_provider
 cargo test -p astra-vn-runtime-provider --test runtime_provider_ffi
 cargo test -p astra-runtime --test trigger_event
 cargo test -p astra-test --test vn_scenario
-cargo test -p astra-cli --test target_platform advanced_vn_sample_runs_opt_in_presentation_gate
+cargo test -p astra-cli --test target_platform nativevn_sample_runs_opt_in_advanced_presentation_gate
 cargo test -p astra-cli --test target_platform nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes
 cargo test -p astra-cli --test target_platform package_build_includes_target_filtered_tsuinosora_sections
 cargo test -p astra-cli --test target_platform tsuinosora_synthetic_gate_runs_internal_and_patch_player_routes
@@ -190,7 +190,7 @@ python Tools/check_docs.py
 
 **ID:** `S3-SCRIPT-01`
 
-**Status:** `REOPENED_SPEC`
+**Status:** `IN_PROGRESS`
 
 **Goal:** 把现有 line parser 迁到标准 frontend parser，覆盖 `.astra` 缩进块、story、state、scene、stage、text、choice、call/return、command id、lossless trivia 和 token/attribute span。
 
@@ -213,7 +213,7 @@ python Tools/check_docs.py
 
 **ID:** `S3-SCRIPT-02`
 
-**Status:** `REOPENED_SPEC`
+**Status:** `IN_PROGRESS`
 
 **Goal:** 用显式 semantic passes 从 Typed AST lowering 到 `CompiledStory` IR、StoryManifest、VariableManifest、CommandManifest、SystemStoryManifest、SourceMap、DebugSymbols 和 release conformance evidence。
 
@@ -363,6 +363,8 @@ python Tools/check_docs.py
 
 **ID:** `S3-PRESENT-01`
 
+**Status:** `IN_PROGRESS`
+
 **Goal:** 实现 `StageModel`、`LayerState`、`CameraState`、`TextWindowState`、`VideoLayerState`、`PresentationTimeline` 和标准命令库。
 
 **Depends On:** `S3-SCRIPT-02`、`S2-MEDIA-04`、[AstraVN Presentation Model](../../modules/astra-vn-presentation-model.md)、[AstraVN Standard Command Library](../../modules/astra-vn-standard-commands.md)
@@ -383,6 +385,8 @@ python Tools/check_docs.py
 ## S3-SYSTEM-01 System UI profile
 
 **ID:** `S3-SYSTEM-01`
+
+**Status:** `IN_PROGRESS`
 
 **Goal:** 完成 save/load、config、backlog、gallery、replay、route chart、voice replay 和 localization preview 的系统 UI 数据模型和 gate。
 
@@ -405,11 +409,13 @@ python Tools/check_docs.py
 
 **ID:** `S3-ADVANCED-01`
 
+**Status:** `IN_PROGRESS`
+
 **Goal:** 建立旗舰演出 profile，覆盖多层 stage、camera、video layer、shader/filter、voice sync、复杂 text effect、skip/auto/replay 和 fallback。
 
 **Depends On:** `S3-PRESENT-01`、`S3-SYSTEM-01`、`S2-MEDIA-04`
 
-**Target Paths:** `Examples/AdvancedVN/`、`scenarios/advanced_presentation.yaml`、`Engine/Source/Modules/AstraVN/astra-vn-package/tests/advanced_presentation.rs`、`Engine/Source/Programs/astra-cli/tests/target_platform.rs`
+**Target Paths:** `Examples/NativeVN/`、`Examples/NativeVN/scenarios/route_library.yaml`、`Examples/NativeVN/scenarios/route_rooftop.yaml`、`Engine/Source/Modules/AstraVN/astra-vn-package/tests/advanced_presentation.rs`、`Engine/Source/Programs/astra-cli/tests/target_platform.rs`
 
 **Steps:**
 
@@ -418,7 +424,7 @@ python Tools/check_docs.py
 3. 编写 full scenario，穿过 system UI、save/load、replay 和 release gate。
 4. 接入 `vn.advanced_presentation`、`presentation.fallback`、`renderer.effect_budget` 和 `timeline.join_cancel` evidence。
 
-**Done Evidence:** `cargo test -p astra-vn-package --test advanced_presentation` 和 `cargo test -p astra-cli --test target_platform advanced_vn_sample_runs_opt_in_presentation_gate` 通过；AdvancedVN 执行真实 cook、package、release validate 和 scenario，报告包含 `vn.advanced_presentation`、`timeline.join_cancel`、`presentation.fallback`、`voice.sync`、`renderer.effect_budget`、save/load、replay hash 和 player route evidence。项目未 opt-in 时该 profile 不阻断普通商业 VN 发布。
+**Current Evidence:** `cargo test -p astra-vn-package --test advanced_presentation` 和 `cargo test -p astra-cli --test target_platform nativevn_sample_runs_opt_in_advanced_presentation_gate` 通过；advanced profile 已收进 NativeVN，两条路线覆盖 `vn.advanced_presentation`、`timeline.join_cancel`、`presentation.fallback`、`voice.sync`、`renderer.effect_budget`、save/load 和 replay hash。Windows/Web formal runner 尚未形成真实宿主证据，因此本项仍为 `IN_PROGRESS`。
 
 **Linked Test IDs:** `T-S3-ADVANCED-01`
 
@@ -447,6 +453,8 @@ python Tools/check_docs.py
 
 **ID:** `S3-SAMPLE-01`
 
+**Status:** `IN_PROGRESS`
+
 **Goal:** 建立 NativeVN commercial baseline sample 和 full playthrough scenario。
 
 **Depends On:** `S3-CORE-03`、`S3-LUAU-02`、`S2-GATE-01`
@@ -467,6 +475,8 @@ python Tools/check_docs.py
 ## S3-GAME-TARGET-01 NativeVN Game target
 
 **ID:** `S3-GAME-TARGET-01`
+
+**Status:** `IN_PROGRESS`
 
 **Goal:** NativeVN sample 以 `Game` target 完成 cook、package、full playthrough 和 release gate。
 
@@ -489,6 +499,8 @@ python Tools/check_docs.py
 
 **ID:** `S3-PLAYER-AUTOMATION-01`
 
+**Status:** `IN_PROGRESS`
+
 **Goal:** Windows 和 Web player gate 必须通过平台原生输入推进 dialogue、choice、system page、config、save/load、backlog 和 route，不允许用 direct runtime command 或 route runner 冒充玩家输入。
 
 **Depends On:** `S3-GAME-TARGET-01`、`S3-SAMPLE-01`、`S3-SYSTEM-01`、`S3-PRESENT-01`
@@ -506,6 +518,18 @@ python Tools/check_docs.py
 **Current Evidence:** `cargo test -p astra-player-core`、`cargo test -p astra-player --test windows_input_automation`、`cargo test -p astra-player --test web_input_automation` 和 `cargo test -p astra-release release_gate_accepts_player_full_playable_only_with_matching_live_report` 通过；release gate 只有在显式传入匹配 package hash/profile/target 的 `astra.player_automation_report.v1` 时才让 `player.full_playable` pass，Windows transcript 只接受 `sendinput.*`，Web transcript 只接受 `cdp.*`，并要求 live input 有 player host consumed trace；visual comparison evidence 缺失会 blocking，direct `route_scenario`、DOM click、JS callback 和 direct `VnPlayerCommand` 会 blocking。Windows runner 已能启动 bundle live window、执行 `SendInput`、捕获 player host `TRACE` consumed log、采集 client region hash、绑定视觉 comparison report hash，并要求同 package/session 的 host conformance `audio.output_meter` callback evidence；当前私有 TsuiNoSora acceptance 的 report 已证明 28 次 `SendInput` 被窗口消费，但仍因输入后画面未变化和 full route coverage 缺失而 blocking。Web browser host run、真实 VN state 推进和同次 full route evidence 仍是下一步 acceptance。
 
 **Linked Test IDs:** `T-S3-PLAYER-AUTOMATION-01`
+
+## S3-FLAGSHIP-DEMO-01 NativeVN flagship demo
+
+**ID:** `S3-FLAGSHIP-DEMO-01`
+
+**Status:** `IN_PROGRESS`
+
+**Goal:** 在独立 migration 中交付 15–20 分钟、三终局、中英双语、中文全配音和正式原创资产的旗舰 Demo。
+
+**Depends On:** `S3-SAMPLE-01`、`S3-PLAYER-AUTOMATION-01`、[NativeVN Flagship Demo Migration](../../migrations/nativevn-flagship-demo-migration.md)
+
+**Current Evidence:** 本轮只保留两路线 NativeVN 技术验收样例。此前 WIP 中的三路线剧情、26 条 Windows SAPI 配音和大体量资源已移出提交候选；没有许可和 formal Windows/Web evidence 前不得标为 `DONE`。
 
 ## 跨 Stage Observability follow-up
 

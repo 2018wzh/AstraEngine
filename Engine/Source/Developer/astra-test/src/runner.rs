@@ -1,12 +1,16 @@
 use std::{collections::BTreeMap, fs, path::Path, path::PathBuf, process::Command};
 
-use astra_core::{Diagnostic, DiagnosticSeverity, StableId};
+use astra_core::{Diagnostic, DiagnosticSeverity, Hash256, SchemaVersion, StableId};
 use astra_package::{PackageManifest, PackageReader};
 use astra_plugin::{
     dylib_path, LoadedPlugin, PluginDescriptor, PluginError, PluginGate, PluginLoader,
-    PluginRegistrar,
+    PluginRegistrar, ProductRuntimeHost, RuntimeHostError, RuntimeHostSchemaRegistry,
 };
-use astra_plugin_abi::{GameRuntimeSessionId, RuntimeOpenRequest};
+use astra_plugin_abi::{
+    GameRuntimeSessionId, RuntimeOpenRequest, RuntimeOutputDomain, RuntimePrepareRequest,
+    RuntimeProbeRequest, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
+    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepInput,
+};
 use astra_runtime::{
     ActionInvocation, ActorId, BlackboardValue, EventPayload, EventSource, GuardExpr,
     PackageHandle, PresentationCommand, RuntimeConfig, RuntimeWorld, SaveBlob, SaveRequest,
@@ -14,8 +18,9 @@ use astra_runtime::{
 };
 use astra_target::{validate_manifest, TargetManifest, TargetValidationStatus};
 use astra_vn::{
-    CompiledStory, PresentationCommand as VnPresentationCommand, SkipMode, SystemPageKind,
-    SystemUnlockKind, VnAdvancedPresentationManifest, VnPlayerCommand, VnRunConfig, VnSaveBlob,
+    decode_compiled_story, CompiledStory, PresentationCommand as VnPresentationCommand, SkipMode,
+    SystemPageKind, SystemUnlockKind, VnAdvancedPresentationManifest, VnPlayerCommand,
+    VnRuntimeState,
 };
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 use semver::Version;
@@ -38,6 +43,8 @@ pub enum ScenarioError {
     Runtime(#[from] astra_runtime::RuntimeError),
     #[error("plugin failed: {0}")]
     Plugin(#[from] PluginError),
+    #[error("runtime provider host failed: {0}")]
+    RuntimeHost(#[from] RuntimeHostError),
     #[error("scenario failed: {0}")]
     Message(String),
 }
@@ -782,10 +789,7 @@ fn prepare_package_context(
         context
             .release_gate_checks
             .push("vn.compiled_story".to_string());
-        match reader
-            .container()
-            .decode_postcard::<CompiledStory>("vn.compiled_story")
-        {
+        match decode_compiled_story(&reader) {
             Ok(compiled) => context.compiled_story = Some(compiled),
             Err(err) => context.diagnostics.push(Diagnostic::blocking(
                 "ASTRA_VN_COMPILED_STORY",
@@ -1071,7 +1075,14 @@ fn load_visual_reference_evidence(reader: &PackageReader, context: &mut PackageC
 }
 
 fn normalize_repo_path(root: &Path, path: &Path) -> String {
-    if let Ok(relative) = path.strip_prefix(root) {
+    let resolved_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else if let Ok(current_dir) = std::env::current_dir() {
+        current_dir.join(path)
+    } else {
+        path.to_path_buf()
+    };
+    if let Ok(relative) = resolved_path.strip_prefix(root) {
         return relative.to_string_lossy().replace('\\', "/");
     }
     path.file_name()
@@ -1157,9 +1168,11 @@ struct RunContext {
     loaded_plugins: Vec<LoadedPlugin>,
     step: u64,
     saved: Option<SaveBlob>,
-    vn_provider: Option<NativeVnRuntimeProvider>,
+    vn_host: Option<ProductRuntimeHost>,
     vn_session: Option<GameRuntimeSessionId>,
-    vn_saved: Option<VnSaveBlob>,
+    vn_saved: Option<RuntimeSaveSections>,
+    vn_state: Option<VnRuntimeState>,
+    vn_step: u64,
     diagnostics: Vec<Diagnostic>,
     unsupported_actions: Vec<String>,
     fixture_actions_registered: bool,
@@ -1185,28 +1198,64 @@ impl RunContext {
             package,
         )?;
         let system_actor = world.create_actor("scenario.system", vec!["scenario".to_string()]);
-        let (vn_provider, vn_session) = if let Some(compiled) = compiled_story {
+        let (vn_host, vn_session) = if let Some(compiled) = compiled_story {
             let profile = profile.unwrap_or_else(|| "classic".to_string());
             let locale = locale.unwrap_or_else(|| "und".to_string());
-            let mut provider = NativeVnRuntimeProvider::default();
-            let open = provider
-                .open_compiled_story(
-                    compiled,
-                    VnRunConfig {
-                        profile: profile.clone(),
-                        locale: locale.clone(),
-                    },
-                    RuntimeOpenRequest {
-                        target_id: target_id.unwrap_or_else(|| "nativevn-game".to_string()),
-                        profile,
-                        locale,
-                        seed,
-                        package_hash: package_id,
-                        sections: vec![],
-                    },
-                )
+            let target_id = target_id.unwrap_or_else(|| "nativevn-game".to_string());
+            let compiled_bytes = postcard::to_allocvec(&compiled)
                 .map_err(|err| ScenarioError::Message(err.to_string()))?;
-            (Some(provider), Some(open.session_id))
+            let compiled_section = RuntimeSectionPayload {
+                section_id: "vn.compiled_story".to_string(),
+                schema: "astra.vn.compiled_story".to_string(),
+                version: SchemaVersion::default(),
+                codec: RuntimeSectionCodec::Postcard,
+                hash: Hash256::from_sha256(&compiled_bytes),
+                bytes: compiled_bytes,
+            };
+            let schemas = RuntimeHostSchemaRegistry::new()
+                .allow_version(
+                    RuntimeOutputDomain::Effect,
+                    "astra.vn.runtime_step_effect.v2",
+                    SchemaVersion::new(2, 0, 0),
+                )
+                .allow(
+                    RuntimeOutputDomain::Presentation,
+                    "astra.vn.presentation_command.v1",
+                )
+                .allow(RuntimeOutputDomain::Audio, "astra.vn.audio_command.v1")
+                .allow(RuntimeOutputDomain::Await, "astra.runtime.await_id.v1")
+                .allow(RuntimeOutputDomain::Trace, "astra.vn.runtime_step_trace.v1")
+                .allow(RuntimeOutputDomain::Trace, "astra.vn.runtime_state.v1")
+                .allow(
+                    RuntimeOutputDomain::DirtySaveSection,
+                    "astra.runtime.dirty_save_section.v1",
+                );
+            let mut host = ProductRuntimeHost::in_process(
+                "astra-test.native-vn",
+                NativeVnRuntimeProvider::default(),
+                schemas,
+            )?;
+            host.prepare(RuntimePrepareRequest {
+                target_id: target_id.clone(),
+                profile: profile.clone(),
+                package_hash: package_id.clone(),
+                section_ids: vec!["vn.compiled_story".to_string()],
+            })?;
+            host.probe(RuntimeProbeRequest {
+                target_id: target_id.clone(),
+                profile: profile.clone(),
+                platform: None,
+                section_ids: vec!["vn.compiled_story".to_string()],
+            })?;
+            let open = host.open(RuntimeOpenRequest {
+                target_id,
+                profile,
+                locale,
+                seed,
+                package_hash: package_id,
+                sections: vec![compiled_section],
+            })?;
+            (Some(host), Some(open.session_id))
         } else {
             (None, None)
         };
@@ -1217,9 +1266,11 @@ impl RunContext {
             loaded_plugins: Vec::new(),
             step: 0,
             saved: None,
-            vn_provider,
+            vn_host,
             vn_session,
             vn_saved: None,
+            vn_state: None,
+            vn_step: 0,
             diagnostics: Vec::new(),
             unsupported_actions: Vec::new(),
             fixture_actions_registered: false,
@@ -1432,14 +1483,7 @@ impl RunContext {
     }
 
     fn apply_vn_default_launch(&mut self) -> Result<(), ScenarioError> {
-        let session = self.vn_session()?;
-        let command = self
-            .vn_provider
-            .as_ref()
-            .ok_or_else(|| ScenarioError::Message("VN provider is not open".to_string()))?
-            .default_launch_command(session)
-            .map_err(|err| ScenarioError::Message(err.to_string()))?;
-        self.apply_vn(command)
+        self.apply_vn_input("launch_default", serde_json::json!({}))
     }
 
     fn apply_vn(&mut self, command: VnPlayerCommand) -> Result<(), ScenarioError> {
@@ -1454,24 +1498,68 @@ impl RunContext {
             self.unsupported_actions.push("vn.player".to_string());
             return Ok(());
         };
+        let payload =
+            serde_json::to_value(command).map_err(|err| ScenarioError::Message(err.to_string()))?;
+        self.apply_vn_input("command", payload)
+    }
+
+    fn apply_vn_input(
+        &mut self,
+        action: &str,
+        payload: serde_json::Value,
+    ) -> Result<(), ScenarioError> {
         let session = self.vn_session()?.clone();
+        self.vn_step = self
+            .vn_step
+            .checked_add(1)
+            .ok_or_else(|| ScenarioError::Message("VN fixed step overflowed".to_string()))?;
         let output = self
-            .vn_provider
+            .vn_host
             .as_mut()
-            .ok_or_else(|| ScenarioError::Message("VN provider is not open".to_string()))?
-            .apply_command(session, command)
-            .map_err(|err| ScenarioError::Message(err.to_string()))?;
-        for command in output.presentation {
-            let command = serde_json::from_value::<VnPresentationCommand>(command)
+            .ok_or_else(|| ScenarioError::Message("VN provider host is not open".to_string()))?
+            .step(RuntimeStepInput {
+                session_id: session,
+                fixed_step: self.vn_step,
+                action: action.to_string(),
+                payload,
+            })?;
+        for command in output
+            .outputs
+            .iter()
+            .filter(|envelope| envelope.domain == RuntimeOutputDomain::Presentation)
+        {
+            let command = command
+                .decode_postcard::<VnPresentationCommand>(
+                    RuntimeOutputDomain::Presentation,
+                    "astra.vn.presentation_command.v1",
+                    SchemaVersion::new(1, 0, 0),
+                )
                 .map_err(|err| ScenarioError::Message(err.to_string()))?;
             self.world
                 .emit_presentation(convert_vn_presentation(command));
+        }
+        for trace in output
+            .outputs
+            .iter()
+            .filter(|envelope| envelope.domain == RuntimeOutputDomain::Trace)
+        {
+            if trace.schema == "astra.vn.runtime_state.v1" {
+                self.vn_state = Some(
+                    trace
+                        .decode_postcard::<VnRuntimeState>(
+                            RuntimeOutputDomain::Trace,
+                            "astra.vn.runtime_state.v1",
+                            SchemaVersion::new(1, 0, 0),
+                        )
+                        .map_err(|err| ScenarioError::Message(err.to_string()))?,
+                );
+            }
         }
         Ok(())
     }
 
     fn has_vn_runtime(&self) -> bool {
-        self.vn_provider.is_some() && self.vn_session.is_some()
+        self.vn_host.is_some() && self.vn_session.is_some()
     }
 
     fn vn_session(&self) -> Result<&GameRuntimeSessionId, ScenarioError> {
@@ -1486,45 +1574,49 @@ impl RunContext {
         }
         let session = self.vn_session()?.clone();
         let save = self
-            .vn_provider
-            .as_ref()
-            .ok_or_else(|| ScenarioError::Message("VN provider is not open".to_string()))?
-            .save_slot(&session, slot)
-            .map_err(|err| ScenarioError::Message(err.to_string()))?;
+            .vn_host
+            .as_mut()
+            .ok_or_else(|| ScenarioError::Message("VN provider host is not open".to_string()))?
+            .save(RuntimeSaveRequest {
+                session_id: session,
+                slot,
+            })?;
         self.vn_saved = Some(save);
         Ok(())
     }
 
-    fn load_vn_slot(&mut self, save: VnSaveBlob) -> Result<(), ScenarioError> {
+    fn load_vn_slot(&mut self, save: RuntimeSaveSections) -> Result<(), ScenarioError> {
         let session = self.vn_session()?.clone();
-        self.vn_provider
+        self.vn_host
             .as_mut()
-            .ok_or_else(|| ScenarioError::Message("VN provider is not open".to_string()))?
-            .load_slot(&session, save)
-            .map_err(|err| ScenarioError::Message(err.to_string()))
+            .ok_or_else(|| ScenarioError::Message("VN provider host is not open".to_string()))?
+            .restore(RuntimeRestoreRequest {
+                session_id: session,
+                sections: save.sections,
+            })?;
+        Ok(())
     }
 
     fn register_fixture_actions(&mut self) -> Result<(), ScenarioError> {
         let dylib = dylib_path(&self.workspace_root, "headless_presentation_provider");
-        if !dylib.exists() {
-            info!("scenario.fixture.build");
-            let status = Command::new("cargo")
-                .args(["build", "-p", "headless-presentation-provider"])
-                .current_dir(&self.workspace_root)
-                .status()?;
-            if !status.success() {
-                warn!("scenario.fixture.build_failed");
-                return Err(ScenarioError::Message(
-                    "fixture action provider build failed".to_string(),
-                ));
-            }
+        info!("scenario.fixture.build");
+        let status = Command::new("cargo")
+            .args(["build", "-p", "headless-presentation-provider"])
+            .current_dir(&self.workspace_root)
+            .status()?;
+        if !status.success() {
+            warn!("scenario.fixture.build_failed");
+            return Err(ScenarioError::Message(
+                "fixture action provider build failed".to_string(),
+            ));
         }
 
         let mut registrar = PluginRegistrar::default();
         let loader = PluginLoader::new(PluginGate {
             engine_version: Version::parse("0.1.0").expect("valid engine version"),
             rustc_fingerprint: "rustc-stable".to_string(),
-            feature_fingerprint: "stage1-core".to_string(),
+            feature_fingerprint: "runtime-envelope-v2".to_string(),
+            abi_fingerprint: "astra-plugin-abi-v2".to_string(),
             required_capabilities: vec![
                 "presentation.headless".to_string(),
                 "action.fixture".to_string(),
@@ -1719,9 +1811,7 @@ impl RunContext {
     }
 
     fn vn_state(&self) -> Option<astra_vn::VnRuntimeState> {
-        let provider = self.vn_provider.as_ref()?;
-        let session = self.vn_session.as_ref()?;
-        provider.state(session).ok()
+        self.vn_state.clone()
     }
 
     fn fixture_action_ran(&self) -> bool {
@@ -1778,19 +1868,25 @@ fn scenario_action_kind(action: &ScenarioAction) -> &'static str {
 }
 
 fn scenario_root(path: &Path) -> Result<PathBuf, ScenarioError> {
-    if path
+    let current_dir = std::env::current_dir()?;
+    let resolved_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        current_dir.join(path)
+    };
+    if resolved_path
         .parent()
         .and_then(Path::file_name)
         .and_then(|name| name.to_str())
         == Some("scenarios")
     {
-        let parent = path
+        let parent = resolved_path
             .parent()
             .and_then(Path::parent)
             .ok_or_else(|| ScenarioError::Message("invalid scenario path".to_string()))?;
         return Ok(parent.to_path_buf());
     }
-    Ok(std::env::current_dir()?)
+    Ok(current_dir)
 }
 
 fn stable_hash(value: &str) -> u64 {
@@ -1907,7 +2003,8 @@ id: astra.fixture.headless_presentation
 version: 0.1.0
 engine_version: 0.1.0
 rustc_fingerprint: rustc-stable
-feature_fingerprint: stage1-core
+feature_fingerprint: runtime-envelope-v2
+abi_fingerprint: astra-plugin-abi-v2
 abi_style: abi_stable_rust
 capabilities:
   - presentation.headless
@@ -1920,7 +2017,8 @@ packaged: true
     let gate = PluginGate {
         engine_version: Version::parse("0.1.0").expect("valid engine version"),
         rustc_fingerprint: "rustc-stable".to_string(),
-        feature_fingerprint: "stage1-core".to_string(),
+        feature_fingerprint: "runtime-envelope-v2".to_string(),
+        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
         required_capabilities: vec!["presentation.headless".to_string()],
         required_permissions: vec!["runtime.presentation".to_string()],
     };
@@ -1938,5 +2036,31 @@ packaged: true
             ));
             ScenarioStatus::Blocked
         }
+    }
+}
+
+#[cfg(test)]
+mod scenario_root_tests {
+    use super::scenario_root;
+    use std::path::Path;
+
+    #[test]
+    fn relative_root_scenario_resolves_to_existing_workspace_directory() {
+        let current_dir = std::env::current_dir().unwrap();
+
+        assert_eq!(
+            scenario_root(Path::new("scenarios/native_smoke.yaml")).unwrap(),
+            current_dir
+        );
+    }
+
+    #[test]
+    fn relative_project_scenario_resolves_to_project_directory() {
+        let current_dir = std::env::current_dir().unwrap();
+
+        assert_eq!(
+            scenario_root(Path::new("Examples/NativeVN/scenarios/route.yaml")).unwrap(),
+            current_dir.join("Examples/NativeVN")
+        );
     }
 }

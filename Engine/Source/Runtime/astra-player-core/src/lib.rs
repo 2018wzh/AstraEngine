@@ -7,6 +7,61 @@ use serde::{Deserialize, Serialize};
 mod platform_sink;
 pub use platform_sink::*;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum PlayerAction {
+    Advance,
+    ChooseIndex { index: usize },
+    OpenSystemPage { page: String },
+    Back,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlayerActionBinding {
+    pub input: String,
+    pub action: PlayerAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlayerActionMap {
+    pub schema: String,
+    pub bindings: Vec<PlayerActionBinding>,
+}
+
+impl PlayerActionMap {
+    pub fn standard() -> Self {
+        let mut bindings = vec![
+            PlayerActionBinding {
+                input: "Enter".into(),
+                action: PlayerAction::Advance,
+            },
+            PlayerActionBinding {
+                input: "Space".into(),
+                action: PlayerAction::Advance,
+            },
+            PlayerActionBinding {
+                input: "Escape".into(),
+                action: PlayerAction::Back,
+            },
+        ];
+        bindings.extend((0..9).map(|index| PlayerActionBinding {
+            input: format!("Digit{}", index + 1),
+            action: PlayerAction::ChooseIndex { index },
+        }));
+        Self {
+            schema: "astra.player_action_map.v1".into(),
+            bindings,
+        }
+    }
+
+    pub fn keyboard(&self, physical_key: &str) -> Option<PlayerAction> {
+        self.bindings
+            .iter()
+            .find(|binding| binding.input == physical_key)
+            .map(|binding| binding.action.clone())
+    }
+}
+
 /// Logical resource identity used only inside the Player command stream. It is
 /// deliberately unrelated to platform handles and may safely cross runtime
 /// provider boundaries.
@@ -438,6 +493,9 @@ pub struct PlayerVisualRegionEvidence {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PlayerAudioMeterEvidence {
+    pub provider: String,
+    pub callback_count: u64,
+    pub host_report_hash: String,
     pub sample_count: u64,
     pub peak_dbfs: f32,
     pub rms_dbfs: f32,
@@ -857,12 +915,21 @@ fn visual_region_check(regions: &[PlayerVisualRegionEvidence]) -> PlayerAutomati
 }
 
 fn audio_meter_check(meter: &PlayerAudioMeterEvidence) -> PlayerAutomationCheck {
-    if meter.sample_count > 0 && meter.peak_dbfs > -80.0 && meter.rms_dbfs.is_finite() {
+    if matches!(meter.provider.as_str(), "wasapi" | "webaudio")
+        && meter.callback_count > 0
+        && meter.host_report_hash.starts_with("sha256:")
+        && meter.sample_count > 0
+        && meter.peak_dbfs > -80.0
+        && meter.rms_dbfs.is_finite()
+    {
         pass_check(
             "player.audio_meter",
             "audio meter recorded non-silent output",
             vec![
                 evidence("sample_count", meter.sample_count),
+                evidence("callback_count", meter.callback_count),
+                evidence("provider", &meter.provider),
+                evidence("host_report_hash", &meter.host_report_hash),
                 evidence("peak_dbfs", format!("{:.2}", meter.peak_dbfs)),
             ],
         )

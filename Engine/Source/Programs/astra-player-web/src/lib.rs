@@ -119,9 +119,11 @@ mod browser {
         InputState, PlatformEventKind, PlatformHostClient, PlatformHostFactory, PointerButton,
         SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest,
     };
-    use astra_player_core::{PlatformCommandSink, PlayerHostCommandExecutor, PlayerHostResourceId};
+    use astra_player_core::{
+        PlatformCommandSink, PlayerActionMap, PlayerHostCommandExecutor, PlayerHostResourceId,
+    };
     use astra_player_vn::NativeVnHostCommandSource;
-    use astra_vn_core::{CompiledStory, VnRunConfig};
+    use astra_vn_core::VnRunConfig;
     use std::cell::RefCell;
     use wasm_bindgen::prelude::*;
     use wasm_bindgen_futures::{spawn_local, JsFuture};
@@ -178,17 +180,13 @@ mod browser {
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         let package = astra_package::PackageReader::open(&package_bytes)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-        let compiled: CompiledStory = package
-            .container()
-            .decode_postcard("vn.compiled_story")
-            .map_err(|error| JsValue::from_str(&error.to_string()))?;
         let logical_surface = PlayerHostResourceId(1);
         let mut sink = PlatformCommandSink::new(session.client.clone());
         sink.bind_surface(logical_surface, surface)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         let mut executor = PlayerHostCommandExecutor::new(sink);
-        let mut vn = NativeVnHostCommandSource::new(
-            compiled,
+        let mut vn = NativeVnHostCommandSource::from_package(
+            &package,
             VnRunConfig {
                 profile: config.profile.clone(),
                 locale: "zh-Hans".to_string(),
@@ -207,7 +205,9 @@ mod browser {
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         let client = session.client.clone();
         let mut events = session.events;
+        let action_map = PlayerActionMap::standard();
         spawn_local(async move {
+            let mut pointer = (0.0_f64, 0.0_f64);
             while let Ok(event) = events.recv().await {
                 match event.kind {
                     PlatformEventKind::WindowClosed { .. } => {
@@ -218,15 +218,14 @@ mod browser {
                         break;
                     }
                     PlatformEventKind::Keyboard {
-                        state: InputState::Pressed,
-                        ..
-                    }
-                    | PlatformEventKind::PointerButton {
-                        button: PointerButton::Primary,
+                        physical_key,
                         state: InputState::Pressed,
                         ..
                     } => {
-                        let batch = match vn.primary_input() {
+                        let Some(action) = action_map.keyboard(&physical_key) else {
+                            continue;
+                        };
+                        let batch = match vn.dispatch_action(action) {
                             Ok(batch) => batch,
                             Err(error) => {
                                 tracing::error!(
@@ -244,6 +243,34 @@ mod browser {
                                 event = "player.web.host_command.failed",
                                 diagnostic_code = "ASTRA_PLAYER_HOST_COMMAND",
                                 operation = "player.host.execute",
+                                error = %error,
+                                "Web Player host command failed"
+                            );
+                            break;
+                        }
+                    }
+                    PlatformEventKind::PointerMoved { x, y, .. } => pointer = (x, y),
+                    PlatformEventKind::PointerButton {
+                        button: PointerButton::Primary,
+                        state: InputState::Pressed,
+                        ..
+                    } => {
+                        let batch = match vn.dispatch_pointer(pointer.0, pointer.1) {
+                            Ok(batch) => batch,
+                            Err(error) => {
+                                tracing::error!(
+                                    event = "player.web.runtime.hit_test_failed",
+                                    diagnostic_code = "ASTRA_PLAYER_HIT_TEST",
+                                    error = %error,
+                                    "Web Player pointer hit-test failed"
+                                );
+                                break;
+                            }
+                        };
+                        if let Err(error) = executor.execute_batch(batch).await {
+                            tracing::error!(
+                                event = "player.web.host_command.failed",
+                                diagnostic_code = "ASTRA_PLAYER_HOST_COMMAND",
                                 error = %error,
                                 "Web Player host command failed"
                             );

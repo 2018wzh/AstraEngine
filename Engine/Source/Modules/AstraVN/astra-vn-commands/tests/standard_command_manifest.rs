@@ -22,7 +22,7 @@ state prologue #@id state.prologue
 }
 
 #[test]
-fn standard_command_manifest_blocks_unknown_command_and_missing_movie_fallback() {
+fn standard_command_manifest_blocks_missing_movie_fallback() {
     let compiled = compile_astra_sources([AstraSource::new(
         "commands.astra",
         r#"
@@ -30,7 +30,6 @@ story main #@id story.main
 state prologue #@id state.prologue
   scene opening #@id scene.opening
     movie layer:video.opening asset:native-assets/movie/op.webm end:wait #@id movie.opening
-    warp asset:native-assets/effect/warp.json #@id command.warp
 "#,
     )])
     .unwrap();
@@ -42,8 +41,20 @@ state prologue #@id state.prologue
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "ASTRA_VN_STANDARD_COMMAND_FALLBACK"));
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "ASTRA_VN_STANDARD_COMMAND_UNKNOWN"));
+}
+
+#[test]
+fn compiler_blocks_unknown_command_before_manifest_generation() {
+    let error = compile_astra_sources([AstraSource::new(
+        "commands.astra",
+        r#"
+story main #@id story.main
+state prologue #@id state.prologue
+  scene opening #@id scene.opening
+    warp asset:native-assets/effect/warp.json #@id command.warp
+"#,
+    )])
+    .unwrap_err();
+
+    assert_eq!(error.code(), "ASTRA_VN_COMMAND_UNBOUND");
 }

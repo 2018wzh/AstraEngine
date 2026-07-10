@@ -1,10 +1,14 @@
 use astra_media::{
-    LayoutConstraint, RubySpan, TextLayoutProvider, TextLayoutRequest, TextRun, VoiceReplayRef,
+    LayoutConstraint, PackagedFont, RubySpan, TextLayoutProvider, TextLayoutRequest, TextRun,
+    VoiceReplayRef,
 };
 
 #[test]
 fn text_layout_covers_cjk_ruby_wrap_and_voice_metadata() {
     let provider = astra_media::CosmicTextLayoutProvider::new_headless();
+    let font_bytes =
+        include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/Poppins-Regular.ttf")
+            .to_vec();
     let request = TextLayoutRequest {
         key: "line.opening".to_string(),
         runs: vec![TextRun {
@@ -25,6 +29,12 @@ fn text_layout_covers_cjk_ruby_wrap_and_voice_metadata() {
             line_height: 20.0,
         },
         font_families: vec!["Missing Test Font".to_string()],
+        fonts: vec![PackagedFont {
+            asset_id: "asset:/font/ui".into(),
+            family: "Poppins".into(),
+            hash: astra_core::Hash256::from_sha256(&font_bytes),
+            bytes: font_bytes,
+        }],
     };
     let layout = provider.layout(&request).unwrap();
     assert!(!layout.boxes.is_empty());

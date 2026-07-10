@@ -8,7 +8,7 @@ fn native_smoke_runs_headless_and_matches_replay_hash() {
         .nth(4)
         .unwrap();
     let report = ScenarioRunner::run_file(root.join("scenarios/native_smoke.yaml")).unwrap();
-    assert_eq!(report.status, ScenarioStatus::Pass);
+    assert_eq!(report.status, ScenarioStatus::Pass, "{report:#?}");
     assert!(report
         .checks
         .iter()

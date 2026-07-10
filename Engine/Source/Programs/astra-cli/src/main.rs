@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     env, fs,
+    io::Write,
     path::{Component, Path, PathBuf},
 };
 
@@ -24,10 +25,14 @@ use astra_target::{
     validate_manifest, TargetKind, TargetManifest, TargetValidationReport, TargetValidationStatus,
 };
 use astra_test::{ScenarioReport, ScenarioRunOptions, ScenarioRunner};
-use astra_vn::{compile_astra_sources, package_sections_for_story, AstraSource};
+use astra_vn::{
+    compile_astra_sources, compile_astra_sources_with_options, format_astra_source,
+    package_sections_for_story, AstraSource, CompileAstraOptions, FormatOptions,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tempfile::NamedTempFile;
 use tracing::{debug, info};
 
 type CliError = Box<dyn std::error::Error + Send + Sync>;
@@ -81,6 +86,26 @@ enum Command {
     Platform {
         #[command(subcommand)]
         command: PlatformCommand,
+    },
+    Script {
+        #[command(subcommand)]
+        command: ScriptCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ScriptCommand {
+    Check {
+        #[arg(required = true)]
+        sources: Vec<PathBuf>,
+    },
+    Format {
+        #[arg(required = true)]
+        sources: Vec<PathBuf>,
+        #[arg(long, conflicts_with = "write")]
+        check: bool,
+        #[arg(long, conflicts_with = "check")]
+        write: bool,
     },
 }
 
@@ -239,6 +264,92 @@ fn main() -> Result<(), CliError> {
             let manifest = cook_project(project, &profile, target.as_deref(), out)?;
             println!("{}", serde_yaml::to_string(&manifest)?);
         }
+        Command::Script { command } => match command {
+            ScriptCommand::Check { sources } => {
+                let sources = read_astra_sources(&sources)?;
+                let compiled =
+                    compile_astra_sources_with_options(sources, CompileAstraOptions::default())?;
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "schema": "astra.script_check_report.v1",
+                        "status": "pass",
+                        "story_hash": compiled.story_hash.to_string(),
+                        "command_count": compiled.command_manifest.commands.len()
+                    })
+                );
+            }
+            ScriptCommand::Format {
+                sources,
+                check,
+                write,
+            } => {
+                if !check && !write {
+                    return Err("astra script format requires --check or --write".into());
+                }
+                let mut candidates = Vec::new();
+                for path in &sources {
+                    let source = fs::read_to_string(path)?;
+                    let formatted = format_astra_source(
+                        path.to_string_lossy(),
+                        &source,
+                        FormatOptions::default(),
+                    )?;
+                    if formatted != source {
+                        candidates.push((path.clone(), source, formatted));
+                    }
+                }
+                if check && !candidates.is_empty() {
+                    return Err(format!(
+                        "ASTRA_SCRIPT_FORMAT_REQUIRED: {} source file(s) require formatting",
+                        candidates.len()
+                    )
+                    .into());
+                }
+                if write && !candidates.is_empty() {
+                    let original = sources
+                        .iter()
+                        .map(|path| {
+                            Ok(AstraSource::new(
+                                path.to_string_lossy(),
+                                fs::read_to_string(path)?,
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, std::io::Error>>()?;
+                    let formatted = original
+                        .iter()
+                        .map(|source| {
+                            candidates
+                                .iter()
+                                .find(|(path, _, _)| path.to_string_lossy() == source.path)
+                                .map_or_else(
+                                    || source.clone(),
+                                    |(_, _, text)| {
+                                        AstraSource::new(source.path.clone(), text.clone())
+                                    },
+                                )
+                        })
+                        .collect::<Vec<_>>();
+                    let before = compile_astra_sources(original)?;
+                    let after = compile_astra_sources(formatted)?;
+                    if before.story_hash != after.story_hash {
+                        return Err("ASTRA_SCRIPT_FORMAT_SEMANTIC_CHANGE: formatter changed compiled semantics".into());
+                    }
+                    for (path, _, formatted) in &candidates {
+                        atomic_replace(path, formatted.as_bytes())?;
+                    }
+                }
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "schema": "astra.script_format_report.v1",
+                        "status": "pass",
+                        "changed": candidates.len(),
+                        "mode": if write { "write" } else { "check" }
+                    })
+                );
+            }
+        },
         Command::Package { command } => match command {
             PackageCommand::Build {
                 cooked,
@@ -419,6 +530,39 @@ fn main() -> Result<(), CliError> {
             }
         },
     }
+    Ok(())
+}
+
+fn read_astra_sources(paths: &[PathBuf]) -> Result<Vec<AstraSource>, CliError> {
+    paths
+        .iter()
+        .map(|path| {
+            if path.extension().and_then(|extension| extension.to_str()) != Some("astra") {
+                return Err(format!(
+                    "ASTRA_SCRIPT_SOURCE_EXTENSION: source must use the .astra extension: {}",
+                    path.display()
+                )
+                .into());
+            }
+            Ok(AstraSource::new(
+                path.to_string_lossy(),
+                fs::read_to_string(path)?,
+            ))
+        })
+        .collect()
+}
+
+fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
+    let parent = path.parent().ok_or_else(|| {
+        format!(
+            "ASTRA_SCRIPT_FORMAT_PATH: source has no parent: {}",
+            path.display()
+        )
+    })?;
+    let mut temporary = NamedTempFile::new_in(parent)?;
+    temporary.write_all(bytes)?;
+    temporary.as_file_mut().sync_all()?;
+    temporary.persist(path)?;
     Ok(())
 }
 
@@ -1168,7 +1312,7 @@ fn collect_asset_sidecars(
 }
 
 fn asset_role_for_path(path: &str, asset_type: &str) -> String {
-    let normalized = path.replace('\\', "/");
+    let normalized = path.replace('\\', "/").to_ascii_lowercase();
     let parts = normalized.split('/').collect::<Vec<_>>();
     if parts.contains(&"backgrounds") {
         "background".to_string()

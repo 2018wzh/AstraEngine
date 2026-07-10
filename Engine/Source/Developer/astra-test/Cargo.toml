@@ -14,6 +14,7 @@ astra-runtime = { path = "../../Runtime/astra-runtime" }
 astra-target = { path = "../../Platform/astra-target" }
 astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
 astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }
+postcard.workspace = true
 schemars.workspace = true
 semver.workspace = true
 serde.workspace = true

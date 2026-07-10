@@ -1,6 +1,6 @@
 # `.astra` Grammar And IR
 
-`.astra` 是 AstraVN 的 canonical story source。Stage 3 当前已有 line-based parser/compiler baseline，可以输出 `CompiledStory`、manifest、route graph、source map 和 debug symbols。新的标准化目标不是把脚本编译成本机代码，而是把编译器前端工程化，让 Editor、formatter、LSP、package、release gate 和 player evidence 共享同一套语法与语义证据。
+`.astra` 是 AstraVN 的 canonical story source。Migration 6 已完成 lossless frontend：`logos` token stream、`chumsky` recovery、层级 `rowan` CST、CST-backed Typed AST、`text-size` span、固定 semantic passes、Command Registry、semantic/source-map hash、formatter 与 language-service adapter 已落地。Stage 3 script work item 仍等待同 package Windows/Web formal Player evidence。
 
 目标管线：
 

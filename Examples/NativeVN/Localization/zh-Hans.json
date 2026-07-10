@@ -1,0 +1,12 @@
+{
+  "schema": "astra.vn.localization_table.v1",
+  "locale": "zh-Hans",
+  "strings": {
+    "technical.intro": "这个紧凑样例用于验收正式的演出、音频、选项、存档与系统界面契约。",
+    "technical.route": "请选择要验收的路线。",
+    "technical.route.library": "验收资料室路线",
+    "technical.route.rooftop": "验收屋顶路线",
+    "technical.library": "资料室路线已完成。",
+    "technical.rooftop": "屋顶路线已完成。"
+  }
+}

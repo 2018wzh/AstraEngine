@@ -1,4 +1,4 @@
-use astra_package::{ContainerError, SectionPayload};
+use astra_package::{ContainerError, PackageReader, SectionPayload};
 
 use crate::{
     CompiledStory, VnAdvancedPresentationManifest, VnCommercialBaselineManifest,
@@ -25,7 +25,7 @@ pub fn package_sections_for_story(
         profiles: profiles.to_vec(),
     };
     let mut sections = vec![
-        SectionPayload::postcard("vn.compiled_story", "astra.vn.compiled_story.v1", compiled)?,
+        SectionPayload::postcard("vn.compiled_story", "astra.vn.compiled_story", compiled)?,
         SectionPayload::postcard(
             "vn.profile_manifest",
             "astra.vn.profile_manifest.v1",
@@ -99,4 +99,36 @@ pub fn package_sections_for_story(
         "AstraVN package section build completed"
     );
     Ok(sections)
+}
+
+pub fn decode_compiled_story(package: &PackageReader) -> Result<CompiledStory, ContainerError> {
+    let entry = package
+        .container()
+        .section_entry("vn.compiled_story")
+        .ok_or_else(|| ContainerError::message("vn.compiled_story section is missing"))?;
+    if entry.schema == "astra.vn.compiled_story.v1" {
+        return Err(ContainerError::message(
+            "ASTRA_VN_RECOOK_REQUIRED: legacy compiled story package must be re-cooked",
+        ));
+    }
+    if entry.schema != "astra.vn.compiled_story" {
+        return Err(ContainerError::message(format!(
+            "ASTRA_VN_COMPILED_STORY_SCHEMA: unsupported compiled story schema {}",
+            entry.schema
+        )));
+    }
+    let compiled: CompiledStory = package
+        .container()
+        .decode_postcard("vn.compiled_story")
+        .map_err(|_| {
+            ContainerError::message(
+                "ASTRA_VN_RECOOK_REQUIRED: compiled story payload does not use the current layout",
+            )
+        })?;
+    if compiled.schema != "astra.vn.compiled_story" {
+        return Err(ContainerError::message(
+            "ASTRA_VN_COMPILED_STORY_SCHEMA: compiled story payload schema is not canonical",
+        ));
+    }
+    Ok(compiled)
 }

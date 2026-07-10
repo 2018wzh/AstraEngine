@@ -1,18 +1,30 @@
 use astra_core::{Diagnostic, Hash256};
 use astra_media_core::{
-    CpuFilterExecutor, DrawCommand, FilterExecutionReport, FilterGraph, HeadlessRendererProvider,
-    MediaError, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest,
+    BlendMode, CpuFilterExecutor, DrawCommand, FilterExecutionReport, FilterGraph,
+    HeadlessRendererProvider, MediaError, RectI, RenderTargetFormat, Renderer2DProvider,
+    RendererCreateRequest, TextureFrame, Transform2D,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{LayerKind, LayerState, StageModel, TextWindowState, VnError};
+use crate::{LayerBlend, LayerKind, LayerState, StageModel, TextWindowState, VnError};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct VnPresentationExecutionRequest {
     pub stage: StageModel,
+    pub assets: Vec<VnPresentationAsset>,
     pub filters: Option<FilterGraph>,
     pub profile: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VnPresentationAsset {
+    pub asset_id: String,
+    pub format: String,
+    pub width: u32,
+    pub height: u32,
+    pub hash: Hash256,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -47,7 +59,7 @@ impl VnHeadlessPresentationExecutor {
             })
             .map_err(media_error_to_vn_error)?;
 
-        let draw_commands = stage_draw_commands(&request.stage);
+        let draw_commands = stage_draw_commands(&request.stage, &request.assets)?;
         let input_frame = renderer
             .capture_frame(&draw_commands)
             .map_err(media_error_to_vn_error)?;
@@ -96,11 +108,37 @@ fn validate_stage(stage: &StageModel) -> Result<(), VnError> {
             "stage viewport must be non-empty",
         ));
     }
+    if stage.safe_area.left + stage.safe_area.right >= stage.viewport_width
+        || stage.safe_area.top + stage.safe_area.bottom >= stage.viewport_height
+    {
+        return Err(VnError::diagnostic(
+            "ASTRA_VN_STAGE_SAFE_AREA",
+            "stage safe area must leave a non-empty drawable region",
+        ));
+    }
+    if stage.frame_budget.max_draw_commands == 0
+        || stage.frame_budget.max_filter_nodes == 0
+        || stage.frame_budget.max_frame_time_us == 0
+    {
+        return Err(VnError::diagnostic(
+            "ASTRA_VN_STAGE_FRAME_BUDGET",
+            "stage frame budget limits must be non-zero",
+        ));
+    }
     Ok(())
 }
 
-fn stage_draw_commands(stage: &StageModel) -> Vec<DrawCommand> {
-    let mut commands = vec![DrawCommand::clear([0, 0, 0, 255])];
+fn stage_draw_commands(
+    stage: &StageModel,
+    assets: &[VnPresentationAsset],
+) -> Result<Vec<DrawCommand>, VnError> {
+    validate_assets(assets)?;
+    let mut commands = vec![
+        DrawCommand::clear([0, 0, 0, 255]),
+        DrawCommand::SetCamera {
+            transform: camera_transform(stage),
+        },
+    ];
     let mut layers = stage
         .layers
         .iter()
@@ -108,7 +146,7 @@ fn stage_draw_commands(stage: &StageModel) -> Vec<DrawCommand> {
         .collect::<Vec<_>>();
     layers.sort_by(|left, right| left.z.cmp(&right.z).then(left.id.cmp(&right.id)));
     for layer in layers {
-        commands.push(layer_draw_command(stage, layer));
+        commands.extend(layer_draw_commands(stage, layer, assets)?);
     }
 
     let mut text_windows = stage
@@ -120,12 +158,81 @@ fn stage_draw_commands(stage: &StageModel) -> Vec<DrawCommand> {
     for window in text_windows {
         commands.push(text_window_draw_command(stage, window));
     }
-    commands
+    if commands.len() > stage.frame_budget.max_draw_commands as usize {
+        return Err(VnError::diagnostic(
+            "ASTRA_VN_STAGE_DRAW_BUDGET",
+            "scene command count exceeds the declared frame budget",
+        ));
+    }
+    Ok(commands)
 }
 
-fn layer_draw_command(stage: &StageModel, layer: &LayerState) -> DrawCommand {
+fn layer_draw_commands(
+    stage: &StageModel,
+    layer: &LayerState,
+    assets: &[VnPresentationAsset],
+) -> Result<Vec<DrawCommand>, VnError> {
+    let asset_id = layer.asset.as_deref().ok_or_else(|| {
+        VnError::diagnostic(
+            "ASTRA_VN_PRESENTATION_ASSET_MISSING",
+            format!("visible layer {} has no cooked asset reference", layer.id),
+        )
+    })?;
+    let asset = assets
+        .iter()
+        .find(|asset| asset.asset_id == asset_id)
+        .ok_or_else(|| {
+            VnError::diagnostic(
+                "ASTRA_VN_PRESENTATION_ASSET_MISSING",
+                format!("cooked presentation asset {asset_id} is missing"),
+            )
+        })?;
     let (x, y, width, height) = layer_rect(stage, layer);
-    DrawCommand::rect(layer.id.clone(), x, y, width, height, layer_color(layer))
+    let frame = TextureFrame {
+        width: asset.width,
+        height: asset.height,
+        rgba8: asset.bytes.clone(),
+        hash: asset.hash,
+    };
+    let destination = RectI::new(x as i32, y as i32, width, height);
+    let resource_id = format!("layer:{}", layer.id);
+    let mut commands = vec![DrawCommand::UploadTexture {
+        resource_id: resource_id.clone(),
+        frame,
+    }];
+    if let Some(clip) = layer.clip {
+        commands.push(DrawCommand::PushClip {
+            rect: RectI::new(clip.x, clip.y, clip.width, clip.height),
+        });
+    }
+    let radians = layer.transform.rotation_degrees.to_radians();
+    commands.push(DrawCommand::PushTransform {
+        transform: Transform2D {
+            m11: radians.cos() * layer.transform.scale_x,
+            m12: radians.sin() * layer.transform.scale_x,
+            m21: -radians.sin() * layer.transform.scale_y,
+            m22: radians.cos() * layer.transform.scale_y,
+            tx: 0.0,
+            ty: 0.0,
+        },
+    });
+    commands.push(DrawCommand::Sprite {
+        id: layer.id.clone(),
+        texture_id: resource_id,
+        source: None,
+        destination,
+        opacity: layer.opacity,
+        blend: match layer.blend {
+            LayerBlend::Alpha => BlendMode::Alpha,
+            LayerBlend::Add => BlendMode::Add,
+            LayerBlend::Multiply => BlendMode::Multiply,
+        },
+    });
+    commands.push(DrawCommand::PopTransform);
+    if layer.clip.is_some() {
+        commands.push(DrawCommand::PopClip);
+    }
+    Ok(commands)
 }
 
 fn text_window_draw_command(stage: &StageModel, window: &TextWindowState) -> DrawCommand {
@@ -175,17 +282,59 @@ fn layer_rect(stage: &StageModel, layer: &LayerState) -> (u32, u32, u32, u32) {
     }
 }
 
-fn layer_color(layer: &LayerState) -> [u8; 4] {
-    let mut payload = Vec::new();
-    payload.extend_from_slice(layer.id.as_bytes());
-    payload.extend_from_slice(format!("{:?}", layer.kind).as_bytes());
-    if let Some(asset) = &layer.asset {
-        payload.extend_from_slice(asset.as_bytes());
+fn validate_assets(assets: &[VnPresentationAsset]) -> Result<(), VnError> {
+    let mut ids = std::collections::BTreeSet::new();
+    for asset in assets {
+        if !ids.insert(&asset.asset_id) {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_PRESENTATION_ASSET_DUPLICATE",
+                format!("presentation asset {} is duplicated", asset.asset_id),
+            ));
+        }
+        if asset.format != "rgba8_srgb" || asset.width == 0 || asset.height == 0 {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_PRESENTATION_ASSET_FORMAT",
+                format!(
+                    "presentation asset {} has an invalid cooked format",
+                    asset.asset_id
+                ),
+            ));
+        }
+        let expected = asset.width as usize * asset.height as usize * 4;
+        if asset.bytes.len() != expected {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_PRESENTATION_ASSET_SIZE",
+                format!(
+                    "presentation asset {} byte size does not match dimensions",
+                    asset.asset_id
+                ),
+            ));
+        }
+        if Hash256::from_sha256(&asset.bytes) != asset.hash {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_PRESENTATION_ASSET_HASH",
+                format!(
+                    "presentation asset {} hash does not match payload",
+                    asset.asset_id
+                ),
+            ));
+        }
     }
-    let hash = Hash256::from_sha256(&payload);
-    let bytes = hash.as_bytes();
-    let alpha = (255.0 * layer.opacity.clamp(0.0, 1.0)) as u8;
-    [bytes[0].max(16), bytes[1].max(16), bytes[2].max(16), alpha]
+    Ok(())
+}
+
+fn camera_transform(stage: &StageModel) -> Transform2D {
+    let radians = stage.camera.rotation.to_radians();
+    let cosine = radians.cos() * stage.camera.zoom;
+    let sine = radians.sin() * stage.camera.zoom;
+    Transform2D {
+        m11: cosine,
+        m12: sine,
+        m21: -sine,
+        m22: cosine,
+        tx: -stage.camera.x,
+        ty: -stage.camera.y,
+    }
 }
 
 fn camera_coord(value: f32, camera: f32, zoom: f32, limit: u32) -> u32 {

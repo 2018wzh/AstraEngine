@@ -1,11 +1,13 @@
-use std::{
-    cell::{Cell, RefCell},
-    collections::BTreeMap,
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use astra_core::{Diagnostic, Hash128};
-use mlua::{Lua, VmState};
+use astra_policy::create_sandboxed_lua;
+pub use astra_policy::{
+    PolicyCommandRecord as PolicyCommandTraceEntry, PolicyExecutionBudget,
+    PolicyQueryRecord as PolicyQueryTraceEntry, PolicyTraceRecord as PolicyTraceEvent,
+    PolicyValue as PolicySnapshotValue,
+};
+use mlua::Lua;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -101,41 +103,6 @@ pub struct MutationTraceEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PolicyCommandTraceEntry {
-    pub api: String,
-    pub name: String,
-    pub payload: PolicySnapshotValue,
-    pub replay_event: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PolicyQueryTraceEntry {
-    pub api: String,
-    pub target: String,
-    pub args: BTreeMap<String, PolicySnapshotValue>,
-    pub result_hash: Hash128,
-    pub replay_event: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PolicyTraceEvent {
-    pub api: String,
-    pub kind: String,
-    pub fields: PolicySnapshotValue,
-    pub replay_event: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum PolicySnapshotValue {
-    Nil,
-    Bool(bool),
-    Integer(i64),
-    String(String),
-    Object(BTreeMap<String, PolicySnapshotValue>),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PolicyQueryContext {
     pub text: BTreeMap<String, PolicySnapshotValue>,
     pub assets: BTreeMap<String, PolicySnapshotValue>,
@@ -152,25 +119,6 @@ impl Default for PolicyQueryContext {
             backlog: PolicySnapshotValue::Nil,
             savepoint: PolicySnapshotValue::Nil,
             layouts: BTreeMap::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PolicyExecutionBudget {
-    pub interrupt_limit: u64,
-    pub memory_bytes: usize,
-    pub output_limit: usize,
-    pub snapshot_depth: usize,
-}
-
-impl Default for PolicyExecutionBudget {
-    fn default() -> Self {
-        Self {
-            interrupt_limit: 100_000,
-            memory_bytes: 16 * 1024 * 1024,
-            output_limit: 4096,
-            snapshot_depth: 8,
         }
     }
 }
@@ -208,27 +156,9 @@ impl LuauPolicy {
         queries: &PolicyQueryContext,
         budget: PolicyExecutionBudget,
     ) -> Result<bool, VnError> {
-        let lua = Lua::new();
-        lua.set_memory_limit(budget.memory_bytes)
-            .map_err(sandbox_error)?;
-        let interrupts = Rc::new(Cell::new(0_u64));
-        let interrupt_counter = Rc::clone(&interrupts);
-        lua.set_interrupt(move |_| {
-            let count = interrupt_counter.get().saturating_add(1);
-            interrupt_counter.set(count);
-            if count > budget.interrupt_limit {
-                return Err(mlua::Error::runtime(
-                    "ASTRA_VN_LUAU_INSTRUCTION_BUDGET: policy exceeded interrupt budget",
-                ));
-            }
-            Ok(VmState::Continue)
-        });
+        let lua = create_sandboxed_lua(budget)
+            .map_err(|error| VnError::diagnostic(error.code(), error.to_string()))?;
         let globals = lua.globals();
-        for name in [
-            "io", "os", "debug", "package", "require", "loadfile", "dofile",
-        ] {
-            globals.set(name, mlua::Value::Nil).map_err(sandbox_error)?;
-        }
 
         let initial_output_count = state.command_trace.len()
             + state.query_trace.len()
@@ -655,6 +585,10 @@ fn sandbox_error(err: mlua::Error) -> VnError {
         ("ASTRA_VN_LUAU_AUTHORITY_API", "ASTRA_VN_LUAU_AUTHORITY_API"),
         (
             "ASTRA_VN_LUAU_INSTRUCTION_BUDGET",
+            "ASTRA_VN_LUAU_INSTRUCTION_BUDGET",
+        ),
+        (
+            "ASTRA_POLICY_INSTRUCTION_BUDGET",
             "ASTRA_VN_LUAU_INSTRUCTION_BUDGET",
         ),
         (

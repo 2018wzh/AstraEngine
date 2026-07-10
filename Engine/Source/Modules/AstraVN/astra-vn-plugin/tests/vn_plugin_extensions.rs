@@ -69,6 +69,7 @@ fn vn_extension_manifest_accepts_real_cdylib_provider_fixture() {
         engine_version: Version::parse("0.1.0").unwrap(),
         rustc_fingerprint: "rustc-stable".to_string(),
         feature_fingerprint: "stage3-vn".to_string(),
+        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
         required_capabilities: vec![
             "astra.vn.policy_bundle".to_string(),
             "astra.vn.command".to_string(),

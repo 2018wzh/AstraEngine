@@ -14,6 +14,7 @@ pub struct PluginDescriptor {
     pub engine_version: Version,
     pub rustc_fingerprint: String,
     pub feature_fingerprint: String,
+    pub abi_fingerprint: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binary_hash: Option<Hash256>,
     pub abi_style: String,
@@ -29,6 +30,7 @@ pub struct PluginGate {
     pub engine_version: Version,
     pub rustc_fingerprint: String,
     pub feature_fingerprint: String,
+    pub abi_fingerprint: String,
     pub required_capabilities: Vec<String>,
     pub required_permissions: Vec<String>,
 }
@@ -74,6 +76,12 @@ impl PluginDescriptor {
             diagnostics.push(Diagnostic::blocking(
                 "ASTRA_PLUGIN_FEATURE_FINGERPRINT",
                 "plugin feature fingerprint does not match",
+            ));
+        }
+        if self.abi_fingerprint != gate.abi_fingerprint {
+            diagnostics.push(Diagnostic::blocking(
+                "ASTRA_PLUGIN_ABI_FINGERPRINT",
+                "plugin ABI fingerprint does not match",
             ));
         }
         if self.abi_style != "abi_stable_rust" {

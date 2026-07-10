@@ -1,0 +1,10 @@
+{
+  "schema": "astra.demo_generated_media_manifest.v1",
+  "license": "LICENSE.md",
+  "assets": [
+    {"path":"Bgm/glass-city.ogg","asset_id":"asset:/bgm/glass-city","byte_size":111249,"sha256":"sha256:c5d9d78738b33a1adcb4c754580391f649b42513443a555aacbd22ce87d5d367","generation":"deterministic ffmpeg procedural generation"},
+    {"path":"Movies/rain-signal.webm","asset_id":"asset:/movie/rain-signal","byte_size":342531,"sha256":"sha256:0803f5a7e7ddcf5a5e503d564c856d5ea4736b6add9835796f49c39af32b5ce0","generation":"deterministic ffmpeg procedural generation"},
+    {"path":"Se/scan.ogg","asset_id":"asset:/se/scan","byte_size":4841,"sha256":"sha256:a2250cb3ebaa7f77771d85296878f1a4611fd7ac6dd15870d9ff6a69c8836125","generation":"deterministic ffmpeg procedural generation"},
+    {"path":"Se/wind.ogg","asset_id":"asset:/se/wind","byte_size":25234,"sha256":"sha256:f6d3283b8231384ff0afd5d9e5734d5817970bfe1bd0f00da6237d7495718f2d","generation":"deterministic ffmpeg procedural generation"}
+  ]
+}

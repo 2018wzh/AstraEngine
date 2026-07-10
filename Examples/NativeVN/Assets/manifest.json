@@ -1,0 +1,70 @@
+{
+  "schema": "astra.demo_asset_manifest.v1",
+  "license": "LICENSE.md",
+  "assets": [
+    {
+      "path": "Backgrounds/apartment-night.png",
+      "role": "background",
+      "provenance": "project-owned image generation",
+      "license": "project-owned-generated",
+      "byte_size": 2297608,
+      "sha256": "sha256:93cfaaaf1e41b99832665dabed1c8c6329724783c486c493c64a76ba3925df66"
+    },
+    {
+      "path": "Characters/lin-yao.png",
+      "role": "character_sprite",
+      "provenance": "project-owned image generation",
+      "license": "project-owned-generated",
+      "byte_size": 822395,
+      "sha256": "sha256:7cb9111a163423a107050326d5b09e79a01c35e393e9903cbba50561d0cef44f"
+    },
+    {
+      "path": "Fonts/Poppins-Regular.ttf",
+      "role": "font",
+      "provenance": "google/fonts ofl/poppins",
+      "license": "OFL-1.1",
+      "byte_size": 160316,
+      "sha256": "sha256:7e65201e9b79159e2300267cc885e16c8dcef2424cdfa09a29bfb0980a94a7ba"
+    },
+    {
+      "path": "Voice/cc0-voice-sample.mp3",
+      "role": "voice_sample",
+      "provenance": "MDN interactive-examples public-domain media fixture",
+      "license": "CC0-1.0",
+      "byte_size": 39868,
+      "sha256": "sha256:41191d0727073bf848bcc8f0bd851d71a0b0058e901abb1c1b236ad327bda52e"
+    },
+    {
+      "path": "Bgm/glass-city.ogg",
+      "role": "bgm",
+      "provenance": "deterministic FFmpeg procedural generation",
+      "license": "project-owned-generated",
+      "byte_size": 111249,
+      "sha256": "sha256:c5d9d78738b33a1adcb4c754580391f649b42513443a555aacbd22ce87d5d367"
+    },
+    {
+      "path": "Se/scan.ogg",
+      "role": "se",
+      "provenance": "deterministic FFmpeg procedural generation",
+      "license": "project-owned-generated",
+      "byte_size": 4841,
+      "sha256": "sha256:a2250cb3ebaa7f77771d85296878f1a4611fd7ac6dd15870d9ff6a69c8836125"
+    },
+    {
+      "path": "Se/wind.ogg",
+      "role": "se",
+      "provenance": "deterministic FFmpeg procedural generation",
+      "license": "project-owned-generated",
+      "byte_size": 25234,
+      "sha256": "sha256:f6d3283b8231384ff0afd5d9e5734d5817970bfe1bd0f00da6237d7495718f2d"
+    },
+    {
+      "path": "Movies/rain-signal.webm",
+      "role": "video",
+      "provenance": "deterministic FFmpeg procedural generation",
+      "license": "project-owned-generated",
+      "byte_size": 342531,
+      "sha256": "sha256:0803f5a7e7ddcf5a5e503d564c856d5ea4736b6add9835796f49c39af32b5ce0"
+    }
+  ]
+}

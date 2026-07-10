@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/scan
+source: Assets/Se/scan.ogg
+source_hash: sha256:a2250cb3ebaa7f77771d85296878f1a4611fd7ac6dd15870d9ff6a69c8836125
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [classic, modern, advanced-vn, windows-release, web-release-chrome]
+  params: {}
+review: accepted

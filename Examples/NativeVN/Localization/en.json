@@ -1,0 +1,12 @@
+{
+  "schema": "astra.vn.localization_table.v1",
+  "locale": "en",
+  "strings": {
+    "technical.intro": "This compact project exercises the production presentation, audio, choice, save and system UI contracts.",
+    "technical.route": "Choose the route to verify.",
+    "technical.route.library": "Verify the library route",
+    "technical.route.rooftop": "Verify the rooftop route",
+    "technical.library": "The library route completed.",
+    "technical.rooftop": "The rooftop route completed."
+  }
+}

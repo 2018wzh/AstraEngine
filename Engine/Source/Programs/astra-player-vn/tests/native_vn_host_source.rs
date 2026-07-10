@@ -1,5 +1,5 @@
 use astra_core::Hash256;
-use astra_player_core::{PlayerHostCommand, PlayerHostResourceId};
+use astra_player_core::{PlayerAction, PlayerHostCommand, PlayerHostResourceId};
 use astra_player_vn::NativeVnHostCommandSource;
 use astra_vn_core::{compile_astra_sources, AstraSource, VnRunConfig};
 
@@ -23,7 +23,7 @@ fn native_vn_source_turns_real_runtime_steps_into_changing_frames() {
     )
     .unwrap();
     let first = source.launch().unwrap();
-    let second = source.advance().unwrap();
+    let second = source.dispatch_action(PlayerAction::Advance).unwrap();
     let frame_hash = |command: &PlayerHostCommand| match command {
         PlayerHostCommand::PresentRgba { rgba8, .. } => Hash256::from_sha256(rgba8),
         _ => panic!("expected present command"),

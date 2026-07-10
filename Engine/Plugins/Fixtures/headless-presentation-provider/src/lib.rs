@@ -19,7 +19,8 @@ id: astra.fixture.headless_presentation
 version: 0.1.0
 engine_version: 0.1.0
 rustc_fingerprint: rustc-stable
-feature_fingerprint: stage1-core
+feature_fingerprint: runtime-envelope-v2
+abi_fingerprint: astra-plugin-abi-v2
 abi_style: abi_stable_rust
 capabilities:
   - presentation.headless

@@ -7,16 +7,18 @@ use std::{
 
 use abi_stable::std_types::{RString, RVec};
 use astra_core::{Hash128, Hash256, SchemaVersion};
+use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     FfiRuntimeProviderRegistration, FfiRuntimeProviderResult, GameRuntimeSessionId,
     ProductRuntimeDescriptor, ReleaseCheckDescriptor, RuntimeEditorMetadata, RuntimeOpenReport,
-    RuntimeOpenRequest, RuntimePackageSectionPlan, RuntimePrepareReport, RuntimePrepareRequest,
-    RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderCall, RuntimeProviderCreateRequest,
-    RuntimeProviderDestroyRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
-    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec,
-    RuntimeSectionPayload, RuntimeSectionRef, RuntimeShutdownReport, RuntimeStepInput,
-    RuntimeStepOutput, GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID,
-    PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA, RUNTIME_EDITOR_METADATA_SCHEMA,
+    RuntimeOpenRequest, RuntimeOutputCodec, RuntimeOutputDomain, RuntimeOutputEnvelope,
+    RuntimeOutputSchemaDescriptor, RuntimePackageSectionPlan, RuntimePrepareReport,
+    RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderCall,
+    RuntimeProviderCreateRequest, RuntimeProviderDestroyRequest, RuntimeProviderInstanceReport,
+    RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
+    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeSectionRef, RuntimeShutdownReport,
+    RuntimeStepInput, RuntimeStepOutput, GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID,
+    NATIVE_VN_RUNTIME_ID, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA, RUNTIME_EDITOR_METADATA_SCHEMA,
 };
 use astra_runtime::{
     ActionDescriptor, ActionInvocation, ActionTrace, BlackboardValue, ComponentId,
@@ -42,6 +44,79 @@ pub use astra_vn_save::*;
 #[derive(Default)]
 pub struct NativeVnRuntimeProvider {
     sessions: BTreeMap<String, NativeVnSession>,
+}
+
+fn output_schema(
+    domain: RuntimeOutputDomain,
+    schema: &str,
+    major: u16,
+) -> RuntimeOutputSchemaDescriptor {
+    RuntimeOutputSchemaDescriptor {
+        domain,
+        schema: schema.to_string(),
+        version: SchemaVersion::new(major, 0, 0),
+        codec: RuntimeOutputCodec::Postcard,
+    }
+}
+
+impl ProductRuntimeProvider for NativeVnRuntimeProvider {
+    fn prepare(&mut self, request: RuntimePrepareRequest) -> Result<RuntimePrepareReport, String> {
+        Ok(NativeVnRuntimeProvider::prepare(self, request))
+    }
+
+    fn probe(&mut self, request: RuntimeProbeRequest) -> Result<RuntimeProbeReport, String> {
+        Ok(NativeVnRuntimeProvider::probe(self, request))
+    }
+
+    fn open(&mut self, request: RuntimeOpenRequest) -> Result<RuntimeOpenReport, String> {
+        let compiled_section = required_restore_section(
+            &request.sections,
+            "vn.compiled_story",
+            "astra.vn.compiled_story",
+        )
+        .map_err(|err| err.to_string())?;
+        let compiled: CoreCompiledStory =
+            postcard::from_bytes(&compiled_section.bytes).map_err(|err| err.to_string())?;
+        let config = VnRunConfig {
+            profile: request.profile.clone(),
+            locale: request.locale.clone(),
+        };
+        self.open_compiled_story(compiled, config, request)
+            .map_err(|err| err.to_string())
+    }
+
+    fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, String> {
+        NativeVnRuntimeProvider::step(self, input).map_err(|err| err.to_string())
+    }
+
+    fn save(&mut self, request: RuntimeSaveRequest) -> Result<RuntimeSaveSections, String> {
+        NativeVnRuntimeProvider::save(self, request).map_err(|err| err.to_string())
+    }
+
+    fn restore(&mut self, request: RuntimeRestoreRequest) -> Result<RuntimeRestoreReport, String> {
+        NativeVnRuntimeProvider::restore(self, request).map_err(|err| err.to_string())
+    }
+
+    fn shutdown(
+        &mut self,
+        session_id: GameRuntimeSessionId,
+    ) -> Result<RuntimeShutdownReport, String> {
+        NativeVnRuntimeProvider::shutdown(self, session_id).map_err(|err| err.to_string())
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct NativeVnStepEffect {
+    coverage_reached: std::collections::BTreeSet<String>,
+    state_hash_before_advance: String,
+    state_hash_after_advance: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct NativeVnStepTrace {
+    runtime_state_hash: String,
+    runtime_event_hash: String,
+    runtime_presentation_hash: String,
 }
 
 struct NativeVnSession {
@@ -76,6 +151,31 @@ impl NativeVnRuntimeProvider {
             capabilities: vec!["runtime.native_vn".to_string()],
             package_sections: native_vn_package_sections(),
             release_checks: native_vn_release_check_ids(),
+            output_schemas: vec![
+                output_schema(
+                    RuntimeOutputDomain::Effect,
+                    "astra.vn.runtime_step_effect.v2",
+                    2,
+                ),
+                output_schema(
+                    RuntimeOutputDomain::Presentation,
+                    "astra.vn.presentation_command.v1",
+                    1,
+                ),
+                output_schema(RuntimeOutputDomain::Audio, "astra.vn.audio_command.v1", 1),
+                output_schema(RuntimeOutputDomain::Await, "astra.runtime.await_id.v1", 1),
+                output_schema(
+                    RuntimeOutputDomain::Trace,
+                    "astra.vn.runtime_step_trace.v1",
+                    1,
+                ),
+                output_schema(RuntimeOutputDomain::Trace, "astra.vn.runtime_state.v1", 1),
+                output_schema(
+                    RuntimeOutputDomain::DirtySaveSection,
+                    "astra.runtime.dirty_save_section.v1",
+                    1,
+                ),
+            ],
         }
     }
 
@@ -326,12 +426,87 @@ impl NativeVnRuntimeProvider {
                     "astra.vn.step did not produce an output",
                 )
             })?;
+        let current_state = session
+            .world
+            .read_component::<VnRuntimeState>(session.vn_component)
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
         let presentation = output
             .presentation
             .iter()
-            .map(serde_json::to_value)
+            .map(|command| {
+                RuntimeOutputEnvelope::postcard(
+                    RuntimeOutputDomain::Presentation,
+                    "astra.vn.presentation_command.v1",
+                    SchemaVersion::new(1, 0, 0),
+                    command,
+                )
+            })
             .collect::<Result<Vec<_>, _>>()
             .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let audio = output
+            .audio
+            .iter()
+            .map(|command| {
+                RuntimeOutputEnvelope::postcard(
+                    RuntimeOutputDomain::Audio,
+                    "astra.vn.audio_command.v1",
+                    SchemaVersion::new(1, 0, 0),
+                    command,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let awaits = output
+            .awaits
+            .iter()
+            .map(|await_id| {
+                RuntimeOutputEnvelope::postcard(
+                    RuntimeOutputDomain::Await,
+                    "astra.runtime.await_id.v1",
+                    SchemaVersion::new(1, 0, 0),
+                    await_id,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let effects = vec![RuntimeOutputEnvelope::postcard(
+            RuntimeOutputDomain::Effect,
+            "astra.vn.runtime_step_effect.v2",
+            SchemaVersion::new(2, 0, 0),
+            &NativeVnStepEffect {
+                coverage_reached: output.coverage.reached,
+                state_hash_before_advance: output.state_hash_before_advance.to_string(),
+                state_hash_after_advance: output.state_hash_after_advance.to_string(),
+            },
+        )
+        .map_err(|err| CoreVnError::message(err.to_string()))?];
+        let trace = vec![
+            RuntimeOutputEnvelope::postcard(
+                RuntimeOutputDomain::Trace,
+                "astra.vn.runtime_step_trace.v1",
+                SchemaVersion::new(1, 0, 0),
+                &NativeVnStepTrace {
+                    runtime_state_hash: tick.state_hash.to_string(),
+                    runtime_event_hash: tick.event_hash.to_string(),
+                    runtime_presentation_hash: tick.presentation_hash.to_string(),
+                },
+            )
+            .map_err(|err| CoreVnError::message(err.to_string()))?,
+            RuntimeOutputEnvelope::postcard(
+                RuntimeOutputDomain::Trace,
+                "astra.vn.runtime_state.v1",
+                SchemaVersion::new(1, 0, 0),
+                &current_state,
+            )
+            .map_err(|err| CoreVnError::message(err.to_string()))?,
+        ];
+        let dirty_save_sections = vec![RuntimeOutputEnvelope::postcard(
+            RuntimeOutputDomain::DirtySaveSection,
+            "astra.runtime.dirty_save_section.v1",
+            SchemaVersion::new(1, 0, 0),
+            &VN_RUNTIME_SECTION_ID.to_string(),
+        )
+        .map_err(|err| CoreVnError::message(err.to_string()))?];
         Ok(RuntimeStepOutput {
             session_id,
             status: if presentation.is_empty() {
@@ -339,18 +514,15 @@ impl NativeVnRuntimeProvider {
             } else {
                 "blocked".to_string()
             },
-            effects: vec![serde_json::json!({
-                "schema": "astra.vn.runtime_step_effect.v1",
-                "coverage_reached": output.coverage.reached,
-                "state_hash_before_advance": output.state_hash_before_advance.to_string(),
-                "state_hash_after_advance": output.state_hash_after_advance.to_string(),
-                "runtime_state_hash": tick.state_hash.to_string(),
-                "runtime_event_hash": tick.event_hash.to_string(),
-                "runtime_presentation_hash": tick.presentation_hash.to_string(),
-            })],
-            presentation,
+            outputs: effects
+                .into_iter()
+                .chain(presentation)
+                .chain(audio)
+                .chain(awaits)
+                .chain(trace)
+                .chain(dirty_save_sections)
+                .collect(),
             diagnostics: Vec::new(),
-            dirty_save_sections: vec![VN_RUNTIME_SECTION_ID.to_string()],
         })
     }
 
@@ -633,6 +805,8 @@ fn runtime_command_from_input(
     input: &RuntimeStepInput,
 ) -> Result<CoreVnPlayerCommand, CoreVnError> {
     match input.action.as_str() {
+        "command" => serde_json::from_value(input.payload.clone())
+            .map_err(|err| CoreVnError::message(format!("decode VN player command: {err}"))),
         "launch_default" => CoreVnRuntime::from_state(compiled.clone(), state.clone())?
             .default_launch_command()
             .ok_or_else(|| {
@@ -1023,7 +1197,7 @@ extern "C" fn ffi_open(payload: RVec<u8>) -> FfiRuntimeProviderResult {
         let compiled_section = required_restore_section(
             &request.sections,
             "vn.compiled_story",
-            "astra.vn.compiled_story.v1",
+            "astra.vn.compiled_story",
         )?;
         let compiled: CoreCompiledStory = postcard::from_bytes(&compiled_section.bytes)?;
         let config = VnRunConfig {
@@ -1040,7 +1214,7 @@ extern "C" fn ffi_step(payload: RVec<u8>) -> FfiRuntimeProviderResult {
 
 extern "C" fn ffi_save(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_instance_json(payload, |provider, request: RuntimeSaveRequest| {
-        provider.save(request)
+        NativeVnRuntimeProvider::save(provider, request)
     })
 }
 

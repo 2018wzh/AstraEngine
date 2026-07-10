@@ -7,6 +7,9 @@ pub struct StageModel {
     pub schema: String,
     pub viewport_width: u32,
     pub viewport_height: u32,
+    pub safe_area: SafeArea,
+    pub frame_budget: FrameBudget,
+    pub input_priority: Vec<InputPriority>,
     pub camera: CameraState,
     pub layers: Vec<LayerState>,
     #[serde(default)]
@@ -25,6 +28,9 @@ impl StageModel {
             schema: "astra.vn.stage_model.v1".to_string(),
             viewport_width,
             viewport_height,
+            safe_area: SafeArea::default(),
+            frame_budget: FrameBudget::default(),
+            input_priority: Vec::new(),
             camera: CameraState::identity(),
             layers: Vec::new(),
             video_layers: Vec::new(),
@@ -61,6 +67,12 @@ impl StageModel {
                     x,
                     y,
                     opacity: 1.0,
+                    blend: LayerBlend::Alpha,
+                    clip: None,
+                    mask_asset: None,
+                    pose: None,
+                    anchor: [0.5, 1.0],
+                    transform: LayerTransform::default(),
                 };
                 if let Some(existing) = self.layers.iter_mut().find(|layer| layer.id == id) {
                     *existing = layer;
@@ -89,6 +101,8 @@ impl StageModel {
                     width,
                     height,
                     visible: true,
+                    layout: TextLayoutState::default(),
+                    input_priority: 0,
                 };
                 if let Some(existing) = self.text_windows.iter_mut().find(|window| window.id == id)
                 {
@@ -109,6 +123,12 @@ impl StageModel {
                     x: 0.0,
                     y: 0.0,
                     opacity: video.alpha,
+                    blend: LayerBlend::Alpha,
+                    clip: None,
+                    mask_asset: None,
+                    pose: None,
+                    anchor: [0.5, 0.5],
+                    transform: LayerTransform::default(),
                 };
                 self.upsert_layer(layer);
                 if let Some(existing) = self
@@ -215,6 +235,37 @@ impl StageModel {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SafeArea {
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FrameBudget {
+    pub max_draw_commands: u32,
+    pub max_filter_nodes: u32,
+    pub max_frame_time_us: u32,
+}
+
+impl Default for FrameBudget {
+    fn default() -> Self {
+        Self {
+            max_draw_commands: 4096,
+            max_filter_nodes: 64,
+            max_frame_time_us: 16_667,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct InputPriority {
+    pub layer_id: String,
+    pub priority: i32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CameraState {
     pub x: f32,
@@ -244,6 +295,45 @@ pub struct LayerState {
     pub x: f32,
     pub y: f32,
     pub opacity: f32,
+    pub blend: LayerBlend,
+    pub clip: Option<LayerClip>,
+    pub mask_asset: Option<String>,
+    pub pose: Option<String>,
+    pub anchor: [f32; 2],
+    pub transform: LayerTransform,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LayerBlend {
+    Alpha,
+    Add,
+    Multiply,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LayerClip {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LayerTransform {
+    pub scale_x: f32,
+    pub scale_y: f32,
+    pub rotation_degrees: f32,
+}
+
+impl Default for LayerTransform {
+    fn default() -> Self {
+        Self {
+            scale_x: 1.0,
+            scale_y: 1.0,
+            rotation_degrees: 0.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -266,6 +356,35 @@ pub struct TextWindowState {
     pub width: f32,
     pub height: f32,
     pub visible: bool,
+    pub layout: TextLayoutState,
+    pub input_priority: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TextLayoutState {
+    pub font_asset: String,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub alignment: TextAlignment,
+}
+
+impl Default for TextLayoutState {
+    fn default() -> Self {
+        Self {
+            font_asset: "asset:/font/ui".into(),
+            font_size: 32.0,
+            line_height: 1.25,
+            alignment: TextAlignment::Start,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TextAlignment {
+    Start,
+    Center,
+    End,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

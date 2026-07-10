@@ -16,6 +16,7 @@ astra-platform-web = { path = "../../Platform/astra-platform-web" }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
 astra-player-vn = { path = "../astra-player-vn" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
+astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

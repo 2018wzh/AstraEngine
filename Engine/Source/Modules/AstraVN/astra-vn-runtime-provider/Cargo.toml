@@ -10,6 +10,7 @@ tracing.workspace = true
 abi_stable.workspace = true
 astra-core = { path = "../../../Runtime/astra-core" }
 astra-package = { path = "../../../Runtime/astra-package" }
+astra-plugin = { path = "../../../Runtime/astra-plugin" }
 astra-plugin-abi = { path = "../../../Runtime/astra-plugin-abi" }
 astra-runtime = { path = "../../../Runtime/astra-runtime" }
 astra-target = { path = "../../../Platform/astra-target" }

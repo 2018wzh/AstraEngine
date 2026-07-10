@@ -1,19 +1,19 @@
 # AstraVN Script Frontend Migration
 
-本迁移页记录当前 `astra-vn-script` baseline 到 lossless frontend 的实施路线。Canonical 缩进归属、detached option blocker、非法 mutate 与 scene 外 command blocker已经落地；Lexer/CST/AST 等剩余步骤按本页继续推进。设计依据见 [ADR 0013](../adr/0013-astravn-script-frontend-standardization.md)、[AstraVN Script Spec](../modules/astra-vn-script.md) 和 [`.astra` Grammar And IR](../implementation/astra-grammar-ir.md)。
+本迁移页记录 `astra-vn-script` baseline 到 lossless frontend 的实施结果。Migration 6 代码迁移状态为 `DONE`；Stage 3 的 script work item 仍须等待同一 package 的 Windows/Web formal Player evidence，不能用 frontend focused tests 代替产品验收。设计依据见 [ADR 0013](../adr/0013-astravn-script-frontend-standardization.md)、[AstraVN Script Spec](../modules/astra-vn-script.md) 和 [`.astra` Grammar And IR](../implementation/astra-grammar-ir.md)。
 
-## 当前 baseline
+## 已完成实现
 
-当前实现已经能把 `.astra` 编译成 `CompiledStory`，并覆盖 story/state/scene/text/choice/option/jump/call/return/mutate/system page、route graph、Story/Variable/Command/System manifest、source map、debug symbols 和 stable hash。缩进会决定 story/state/scene/command 与 choice option 归属，option 不能跨越其他 command 反向绑定。该 baseline 仍由 `compile_astra_sources` 兼容入口承载。
+当前 frontend 使用 `logos` 生成 lossless token stream，`chumsky` 负责 command recovery，`rowan` 保存层级 CST，所有 byte span 统一使用 `text-size`。Typed AST 只从 CST wrapper lowering；旧 `parser.rs` line parser 已删除。`compile_astra_sources` 保留为兼容入口，`compile_astra_sources_with_options` 通过 core/standard/extension command registry 阻断未绑定命令。
 
-需要迁移的短板：
+已落地的边界：
 
-- parser 以 line 为单位，不能保留完整 trivia、comment、blank line 和 token byte range。
-- indent 已参与 canonical 结构校验，但还没有 lossless CST 和 block tree 作为 Editor/formatter/LSP 的共同基础。
-- `CompileBuilder` 同时承担上下文推进、校验、manifest、route graph 和 IR assemble，pass 边界不够清晰。
-- unknown command 仍可能进入 presentation command；release profile 需要显式 command provider binding。
-- source map 仍是 line/column/keyword length 粗粒度，不能支持 attribute span、macro expansion stack 和精确 diagnostic。
-- frontend 仍需把 source span 和 command provider validation 从 builder 中拆成独立 pass。
+- semantic pass 顺序固定为 symbols、routes、variables、commands、system stories、compiled story。
+- `CommandSourceMap` 独立记录 command、keyword、source id、attribute 和 argument span，并带 source-map hash。
+- `story_hash` 只覆盖语义内容，不受 trivia、格式、source span、debug symbol 或隐式 command id 影响。
+- formatter 写回前必须重新 parse/compile，并比较 semantic hash；写入采用同目录原子替换。
+- `ScriptLanguageService` 提供 diagnostics、symbols、definition、references、hover 和 semantic tokens；本轮不实现 stdio LSP。
+- package schema 已直接切换为 `astra.vn.compiled_story`；旧 schema或旧布局返回 `ASTRA_VN_RECOOK_REQUIRED`。
 
 ## 迁移顺序
 
@@ -28,7 +28,7 @@
 | 7 | Source Map / Debug Symbols | 引入 `SourceSpan`、`CommandSourceMap`、attr/arg span 和 macro expansion frame；Editor metadata 改读新 source map | `cargo test -p astra-vn-editor --test editor_metadata` |
 | 8 | Formatter / LSP Adapter | 新增 formatter writer/rules 和 LSP diagnostics/symbols adapter；format 后 semantic hash 稳定 | `cargo test -p astra-vn-script formatter_roundtrip` |
 | 9 | Luau authority write 收紧 | `astra.mutate.*` 是唯一 authority write；`astra.var.get` 只读；policy-private cache 不进入 Core state | `cargo test -p astra-vn-policy --test luau_mutation` |
-| 10 | Expression bytecode | 只有在需要复杂表达式时引入 portable `ExprBytecode` interpreter；Cranelift 只允许未来 optional JIT | `cargo test -p astra-vn-script expr_interpreter` |
+| 10 | 后续语言扩展 | macro、`ExprBytecode`、Cranelift 与 stdio LSP 已移出 Stage 3 完成条件，另行立项 | 不属于 Migration 6 gate |
 
 ## Public API 迁移
 
@@ -40,24 +40,24 @@ where
     I: IntoIterator<Item = AstraSource>;
 ```
 
-计划新增：
+已稳定：
 
 ```rust
-pub fn parse_astra_source(source: AstraSource) -> ScriptParseOutput;
+pub fn parse_astra_source(path: impl Into<String>, text: &str) -> ParsedAstraSource;
 
-pub fn parse_astra_sources<I>(sources: I) -> ScriptParseOutput
+pub fn parse_astra_sources<I, S>(sources: I) -> Vec<ParsedAstraSource>
 where
     I: IntoIterator<Item = AstraSource>;
 
 pub fn compile_astra_sources_with_options<I>(
     sources: I,
-    options: CompileOptions,
+    options: CompileAstraOptions,
 ) -> Result<CompiledStory, VnError>
 where
     I: IntoIterator<Item = AstraSource>;
 ```
 
-`ScriptParseOutput` 只表示 parse/AST 结果和 diagnostics，不代表 release-ready IR。`CompileOptions` 承载 profile、unknown command policy 和 command registry。Release profile 必须 fail fast；development profile 可以保留 warning 级 unknown command diagnostic。
+`ParsedAstraSource` 只表示 CST/AST 与 diagnostics，不代表 release-ready IR。Unknown command 可以留在 parse/format/language-service 结果中；只有 registry 已绑定的 command 才能生成 `CompiledStory`。
 
 ## Cranelift 边界
 
@@ -71,12 +71,13 @@ where
 
 ## 状态回填规则
 
-迁移开始后，`S3-SCRIPT-01` 和 `S3-SCRIPT-02` 保持 `REOPENED_SPEC` 或 `IN_PROGRESS`。只有以下证据都存在时，才能改回 `DONE`：
+Migration 6 已关闭，但 `S3-SCRIPT-01` 和 `S3-SCRIPT-02` 保持 `IN_PROGRESS`。只有以下证据都存在时，才能改回 `DONE`：
 
 - Lexer/CST/AST tests 覆盖有效和无效语法。
 - Semantic pass tests 证明旧 baseline 行为保持稳定。
 - Command registry tests 证明 release unknown command blocking。
-- Source map tests 覆盖 token、attribute 和 macro expansion 定位。
+- Source map tests 覆盖 token、attribute、argument 和 source-map hash。
 - Formatter/LSP tests 证明 round-trip 和 diagnostics mapping。
 - Luau mutation tests 证明 authority write 不能绕过 `astra.mutate.*`。
+- Stage 3 formal runner 的 Windows/Web 报告来自同一 commit、build fingerprint 和 `.astrapkg`，且没有 direct runtime command、DOM click、JS callback 或自推进 route。
 - `python Tools/check_docs.py`、`cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings` 和 `cargo test --workspace` 通过。

@@ -124,6 +124,8 @@ TsuiNoSora standalone bundle 还必须把脱敏 `tsuinosora.mount_policy` sectio
 
 ## 6. 变更边界
 
+- NativeVN 公开样例只保留紧凑技术验收内容。15–20 分钟、三终局、中英双语、中文全配音和正式原创资产属于 `Docs/migrations/nativevn-flagship-demo-migration.md`；该 migration 完成许可与产品验收前，不得提交 Windows SAPI/TTS 产物或把旗舰 Demo 标为 Stage 3 完成证据。
+
 - 优先复用成熟库和已有模式，不为单一实现新增抽象。
 - 任何新增 public contract 都要同时说明权限、诊断、migration、release gate 和最小测试。
 - 旧 VN 兼容不能成为 NativeVN、Editor 或 EngineCore 达标前置条件。

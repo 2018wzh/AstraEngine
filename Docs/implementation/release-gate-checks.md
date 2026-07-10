@@ -157,8 +157,8 @@ checks:
 ```bash
 astra package validate target/nativevn.astrapkg --profile desktop-release --report target/release_report.yaml
 astra package bundle target/nativevn.astrapkg --profile classic --target nativevn-game --platform windows --out target/bundle/windows --format json
-astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --headless --report target/scenario_report.yaml
-astra test run scenarios/advanced_presentation.yaml --package target/advancedvn.astrapkg --target advanced-vn-game --profile advanced-vn --headless --report target/advanced_report.yaml
+astra test run Examples/NativeVN/scenarios/route_library.yaml --package target/nativevn.astrapkg --target nativevn-game --profile advanced-vn --headless --report target/scenario_report.yaml
+astra test run Examples/NativeVN/scenarios/route_rooftop.yaml --package target/nativevn.astrapkg --target nativevn-game --profile advanced-vn --headless --report target/advanced_report.yaml
 astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/artemis_report.yaml
 cargo test -p astra-release release_report
 ```

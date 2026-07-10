@@ -1,9 +1,10 @@
+use astra_core::SchemaVersion;
 use astra_plugin_abi::{
-    RuntimeOpenRequest, RuntimeStepInput, GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID,
-    NATIVE_VN_RUNTIME_ID,
+    RuntimeOpenRequest, RuntimeOutputDomain, RuntimeStepInput, GAME_RUNTIME_PROVIDER_SLOT,
+    NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID,
 };
 use astra_vn_runtime_provider::{
-    compile_astra_sources, AstraSource, NativeVnRuntimeProvider, VnRunConfig,
+    compile_astra_sources, AstraSource, NativeVnRuntimeProvider, PresentationCommand, VnRunConfig,
 };
 
 const STORY: &str = r#"
@@ -63,12 +64,15 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
         })
         .unwrap();
     assert_eq!(first.status, "blocked");
-    assert!(first.presentation.iter().any(|value| {
-        value
-            .get("Dialogue")
-            .and_then(|dialogue| dialogue.get("key"))
-            .and_then(|key| key.as_str())
-            == Some("line.hello")
+    assert!(first.outputs.iter().any(|value| {
+        matches!(
+            value.decode_postcard::<PresentationCommand>(
+                RuntimeOutputDomain::Presentation,
+                "astra.vn.presentation_command.v1",
+                SchemaVersion::new(1, 0, 0)
+            ),
+            Ok(PresentationCommand::Dialogue { key, .. }) if key == "line.hello"
+        )
     }));
     let runtime = provider.runtime_snapshot(&open.session_id).unwrap();
     assert!(runtime
@@ -109,10 +113,14 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
             payload: serde_json::json!({}),
         })
         .unwrap();
-    assert!(choice
-        .presentation
-        .iter()
-        .any(|value| value.get("Choice").is_some()));
+    assert!(choice.outputs.iter().any(|value| matches!(
+        value.decode_postcard::<PresentationCommand>(
+            RuntimeOutputDomain::Presentation,
+            "astra.vn.presentation_command.v1",
+            SchemaVersion::new(1, 0, 0)
+        ),
+        Ok(PresentationCommand::Choice { .. })
+    )));
 
     let selected = provider
         .step(RuntimeStepInput {
@@ -123,9 +131,13 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
         })
         .unwrap();
     assert_eq!(selected.status, "blocked");
-    assert!(selected
-        .dirty_save_sections
-        .contains(&"vn.runtime_state".to_string()));
+    assert!(selected.outputs.iter().any(|section| section
+        .decode_postcard::<String>(
+            RuntimeOutputDomain::DirtySaveSection,
+            "astra.runtime.dirty_save_section.v1",
+            SchemaVersion::new(1, 0, 0)
+        )
+        .is_ok_and(|section| section == "vn.runtime_state")));
 
     let save = provider
         .save(astra_plugin_abi::RuntimeSaveRequest {

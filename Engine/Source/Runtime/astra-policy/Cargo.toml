@@ -1,0 +1,15 @@
+[package]
+name = "astra-policy"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+astra-core = { path = "../astra-core" }
+mlua.workspace = true
+postcard.workspace = true
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

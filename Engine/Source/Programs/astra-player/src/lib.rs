@@ -266,6 +266,9 @@ fn host_audio_meter(
     };
     Ok((
         PlayerAudioMeterEvidence {
+            provider: value("provider")?.to_string(),
+            callback_count: value("callback_count")?.parse()?,
+            host_report_hash: sha256_file(report_path)?,
             sample_count: value("sample_count")?.parse()?,
             peak_dbfs: value("peak_dbfs")?.parse()?,
             rms_dbfs: value("rms_dbfs")?.parse()?,
