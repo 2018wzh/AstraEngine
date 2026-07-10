@@ -13,6 +13,7 @@ astra-platform-general = { path = "../astra-platform-general" }
 tokio.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true
+rfd.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true

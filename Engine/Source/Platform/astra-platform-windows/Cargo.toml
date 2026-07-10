@@ -17,6 +17,7 @@ astra-platform = { path = "../astra-platform" }
 astra-platform-general = { path = "../astra-platform-general" }
 cpal.workspace = true
 gilrs = { workspace = true, features = ["wgi"] }
+rfd.workspace = true
 pollster.workspace = true
 tokio.workspace = true
 wgpu.workspace = true

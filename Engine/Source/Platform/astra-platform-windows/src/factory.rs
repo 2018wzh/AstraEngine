@@ -76,7 +76,7 @@ mod windows {
         TouchPhase, WindowHandle,
     };
     use astra_platform_general::{
-        AtomicSaveStore, FilePackageSource, ResourceTable, SaveTransaction,
+        AtomicSaveStore, FilePackageSource, ResourceTable, SaveTransaction, VerifiedPackageCache,
     };
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use winit::{
@@ -154,6 +154,15 @@ mod windows {
                 return;
             }
         };
+        let package_cache = match VerifiedPackageCache::platform_cache_root(&profile.package_id)
+            .and_then(|root| VerifiedPackageCache::open(root, profile.package_cache.clone()))
+        {
+            Ok(cache) => cache,
+            Err(error) => {
+                let _ = ready.send(Err(error));
+                return;
+            }
+        };
         let event_loop = match EventLoop::builder().with_any_thread(true).build() {
             Ok(event_loop) => event_loop,
             Err(_) => {
@@ -166,10 +175,12 @@ mod windows {
             }
         };
         event_loop.set_control_flow(ControlFlow::Wait);
-        let mut app = match WindowsHostApp::new(backend, ready, save_store, roots.bundle_root) {
-            Ok(app) => app,
-            Err(_) => return,
-        };
+        let mut app =
+            match WindowsHostApp::new(backend, ready, save_store, package_cache, roots.bundle_root)
+            {
+                Ok(app) => app,
+                Err(_) => return,
+            };
         if let Err(error) = event_loop.run_app(&mut app) {
             tracing::error!(
                 event = "platform.windows.event_loop.failed",
@@ -189,6 +200,7 @@ mod windows {
         audio_outputs: ResourceTable<AudioResource, AudioOutputHandle>,
         decode_sessions: ResourceTable<DecodeResource, DecodeSessionHandle>,
         save_store: AtomicSaveStore,
+        package_cache: VerifiedPackageCache,
         save_transactions: ResourceTable<SaveTransaction, SaveTransactionHandle>,
         bundle_root: std::path::PathBuf,
         package_sources: ResourceTable<FilePackageSource, PackageSourceHandle>,
@@ -202,6 +214,7 @@ mod windows {
             backend: PlatformBackendChannels,
             ready: std_mpsc::SyncSender<Result<(), PlatformError>>,
             save_store: AtomicSaveStore,
+            package_cache: VerifiedPackageCache,
             bundle_root: std::path::PathBuf,
         ) -> Result<Self, PlatformError> {
             let gamepads = gilrs::Gilrs::new().map_err(|_| {
@@ -222,6 +235,7 @@ mod windows {
                 audio_outputs: ResourceTable::new("audio_output"),
                 decode_sessions: ResourceTable::new("decode_session"),
                 save_store,
+                package_cache,
                 save_transactions: ResourceTable::new("save_transaction"),
                 bundle_root,
                 package_sources: ResourceTable::new("package_source"),
@@ -411,8 +425,10 @@ mod windows {
                                 &expected_hash,
                             )
                             .and_then(|source| self.package_sources.insert(source)),
-                            PackageSourceRequest::UserAuthorized { .. }
-                            | PackageSourceRequest::HttpsRange { .. } => Err(host_error(
+                            PackageSourceRequest::UserAuthorized { expected_hash } => self
+                                .open_user_authorized_package(&expected_hash)
+                                .and_then(|source| self.package_sources.insert(source)),
+                            PackageSourceRequest::HttpsRange { .. } => Err(host_error(
                                 "package.open",
                                 "requested package source requires an unavailable permission provider",
                             )),
@@ -452,6 +468,27 @@ mod windows {
                     }
                 }
             }
+        }
+
+        fn open_user_authorized_package(
+            &mut self,
+            expected_hash: &str,
+        ) -> Result<FilePackageSource, PlatformError> {
+            let file = pollster::block_on(
+                rfd::AsyncFileDialog::new()
+                    .add_filter("Astra package", &["astrapkg"])
+                    .pick_file(),
+            )
+            .ok_or_else(|| {
+                PlatformError::new(
+                    PlatformErrorCode::Cancelled,
+                    "package.open_user_authorized",
+                    "user cancelled package selection",
+                )
+            })?;
+            let bytes = pollster::block_on(file.read());
+            self.package_cache.store_verified(expected_hash, &bytes)?;
+            self.package_cache.open_source(expected_hash)
         }
     }
 
