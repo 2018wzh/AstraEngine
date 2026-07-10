@@ -500,6 +500,7 @@ dependencies = [
  "astra-core",
  "astra-platform",
  "astra-platform-general",
+ "gilrs",
  "js-sys",
  "rfd",
  "serde_json",

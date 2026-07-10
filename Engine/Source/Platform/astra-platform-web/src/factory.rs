@@ -32,7 +32,7 @@ impl PlatformHostFactory for WebPlatformFactory {
 
 #[cfg(target_arch = "wasm32")]
 mod browser {
-    use std::collections::BTreeMap;
+    use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
     use astra_platform::{
         host_channel, AudioOutputHandle, CapturedFrame, DecodeSessionHandle, HostCommand,
@@ -267,6 +267,8 @@ mod browser {
     struct BrowserLifecycle {
         target: EventTarget,
         visibility: Closure<dyn FnMut(Event)>,
+        gamepad_timer: i32,
+        _gamepad_callback: Closure<dyn FnMut()>,
     }
 
     impl BrowserLifecycle {
@@ -275,13 +277,14 @@ mod browser {
                 .and_then(|window| window.document())
                 .ok_or_else(|| web_error("lifecycle.bind"))?;
             let target: EventTarget = document.clone().into();
+            let visibility_emitter = emitter.clone();
             let visibility = Closure::wrap(Box::new(move |_| {
                 let event = if document.hidden() {
                     PlatformEventKind::Suspended
                 } else {
                     PlatformEventKind::Resumed
                 };
-                let _ = emitter.emit(event);
+                let _ = visibility_emitter.emit(event);
             }) as Box<dyn FnMut(Event)>);
             target
                 .add_event_listener_with_callback(
@@ -289,7 +292,50 @@ mod browser {
                     visibility.as_ref().unchecked_ref(),
                 )
                 .map_err(|_| web_error("lifecycle.bind"))?;
-            Ok(Self { target, visibility })
+            let gamepads = gilrs::Gilrs::new().map_err(|_| {
+                PlatformError::new(
+                    PlatformErrorCode::ProviderUnavailable,
+                    "input.gamepad.open",
+                    "browser Gamepad API initialization failed",
+                )
+            })?;
+            let mapper = astra_platform_general::GamepadMapper::new(0.2)?;
+            let state = Rc::new(RefCell::new((gamepads, mapper)));
+            let gamepad_emitter = emitter.clone();
+            let gamepad_callback = Closure::wrap(Box::new(move || {
+                let mut state = state.borrow_mut();
+                while let Some(event) = state.0.next_event() {
+                    let Some(event) = raw_gamepad_event(event) else {
+                        continue;
+                    };
+                    match state.1.apply_checked(event) {
+                        Ok(events) => {
+                            for event in events {
+                                let _ = gamepad_emitter.emit(event);
+                            }
+                        }
+                        Err(error) => tracing::warn!(
+                            event = "platform.web.gamepad.invalid_event",
+                            diagnostic_code = ?error.code,
+                            operation = %error.operation,
+                            "browser Gamepad event was rejected"
+                        ),
+                    }
+                }
+            }) as Box<dyn FnMut()>);
+            let gamepad_timer = web_sys::window()
+                .ok_or_else(|| web_error("input.gamepad.bind"))?
+                .set_interval_with_callback_and_timeout_and_arguments_0(
+                    gamepad_callback.as_ref().unchecked_ref(),
+                    16,
+                )
+                .map_err(|_| web_error("input.gamepad.bind"))?;
+            Ok(Self {
+                target,
+                visibility,
+                gamepad_timer,
+                _gamepad_callback: gamepad_callback,
+            })
         }
     }
 
@@ -299,6 +345,88 @@ mod browser {
                 "visibilitychange",
                 self.visibility.as_ref().unchecked_ref(),
             );
+            if let Some(window) = web_sys::window() {
+                window.clear_interval_with_handle(self.gamepad_timer);
+            }
+        }
+    }
+
+    fn raw_gamepad_event(event: gilrs::Event) -> Option<astra_platform_general::RawGamepadEvent> {
+        use astra_platform::GamepadControl;
+        use astra_platform_general::RawGamepadEvent;
+        use gilrs::{Axis, Button, EventType};
+
+        let raw_device_id = u32::try_from(usize::from(event.id)).ok()?;
+        let map_button = |button| match button {
+            Button::South => Some(GamepadControl::South),
+            Button::East => Some(GamepadControl::East),
+            Button::West => Some(GamepadControl::West),
+            Button::North => Some(GamepadControl::North),
+            Button::DPadUp => Some(GamepadControl::DpadUp),
+            Button::DPadDown => Some(GamepadControl::DpadDown),
+            Button::DPadLeft => Some(GamepadControl::DpadLeft),
+            Button::DPadRight => Some(GamepadControl::DpadRight),
+            Button::LeftTrigger => Some(GamepadControl::LeftShoulder),
+            Button::RightTrigger => Some(GamepadControl::RightShoulder),
+            Button::LeftTrigger2 => Some(GamepadControl::LeftTrigger),
+            Button::RightTrigger2 => Some(GamepadControl::RightTrigger),
+            Button::LeftThumb => Some(GamepadControl::LeftStickButton),
+            Button::RightThumb => Some(GamepadControl::RightStickButton),
+            Button::Start => Some(GamepadControl::Start),
+            Button::Select => Some(GamepadControl::Select),
+            _ => None,
+        };
+        let map_axis = |axis| match axis {
+            Axis::LeftStickX => Some(GamepadControl::LeftStickX),
+            Axis::LeftStickY => Some(GamepadControl::LeftStickY),
+            Axis::RightStickX => Some(GamepadControl::RightStickX),
+            Axis::RightStickY => Some(GamepadControl::RightStickY),
+            _ => None,
+        };
+        match event.event {
+            EventType::Connected => Some(RawGamepadEvent::Connected { raw_device_id }),
+            EventType::Disconnected => Some(RawGamepadEvent::Disconnected { raw_device_id }),
+            EventType::ButtonPressed(button, _) | EventType::ButtonRepeated(button, _) => {
+                map_button(button).map(|control| RawGamepadEvent::Button {
+                    raw_device_id,
+                    control,
+                    pressed: true,
+                })
+            }
+            EventType::ButtonReleased(button, _) => {
+                map_button(button).map(|control| RawGamepadEvent::Button {
+                    raw_device_id,
+                    control,
+                    pressed: false,
+                })
+            }
+            EventType::ButtonChanged(button, value, _) => map_button(button).map(|control| {
+                if matches!(
+                    control,
+                    GamepadControl::LeftTrigger | GamepadControl::RightTrigger
+                ) {
+                    RawGamepadEvent::Axis {
+                        raw_device_id,
+                        control,
+                        value,
+                    }
+                } else {
+                    RawGamepadEvent::Button {
+                        raw_device_id,
+                        control,
+                        pressed: value >= 0.5,
+                    }
+                }
+            }),
+            EventType::AxisChanged(axis, value, _) => {
+                map_axis(axis).map(|control| RawGamepadEvent::Axis {
+                    raw_device_id,
+                    control,
+                    value,
+                })
+            }
+            EventType::Dropped | EventType::ForceFeedbackEffectCompleted => None,
+            _ => None,
         }
     }
 
