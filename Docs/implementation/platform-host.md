@@ -35,7 +35,7 @@ pub struct PlatformHostSession {
 
 ## Platform Profiles
 
-`project.yaml.platform_profiles` 直接反序列化为 `PlatformHostProfile`。Cook 校验 profile key、target、package、provider policy 和 package source policy，并写入 `platform.profiles` / `astra.platform_profiles.v1` package section。Player 不接受 CLI 覆盖发布策略。
+`project.yaml.platform_profiles` 以 `astra.platform_host_profile.v2` 表达 `PlatformHostProfile`。Cook 校验 profile key、target、package、provider policy、package source policy 与 verified package cache 限额，并写入 `platform.profiles` / `astra.platform_profiles.v2` package section。Player 只对既有 v1 section 执行显式迁移；未知 schema blocking，且不接受 CLI 覆盖发布策略。
 
 Windows release 要求 `wgpu_hardware`、`wmf`、`wasapi`、`saved_games`。Web release 只支持 Chrome，固定要求 `webgpu`、`webcodecs`、`webaudio`、`opfs`，不配置 fallback。
 

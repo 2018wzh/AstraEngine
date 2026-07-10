@@ -393,11 +393,18 @@ async fn fetch_bytes(path: &str) -> Result<Vec<u8>, PlatformError> {
 }
 
 async fn pick_file() -> Result<Vec<u8>, PlatformError> {
-    let function = Function::new_no_args(
-        "return (async () => { if (!window.showOpenFilePicker) throw new Error('file picker unavailable'); const handles = await window.showOpenFilePicker({multiple: false}); return new Uint8Array(await (await handles[0].getFile()).arrayBuffer()); })();",
-    );
-    let value = await_promise(function.call0(&JsValue::NULL)).await?;
-    Ok(Uint8Array::new(&value).to_vec())
+    let file = rfd::AsyncFileDialog::new()
+        .add_filter("Astra package", &["astrapkg"])
+        .pick_file()
+        .await
+        .ok_or_else(|| {
+            PlatformError::new(
+                PlatformErrorCode::Cancelled,
+                "package.open_user_authorized",
+                "user cancelled package selection",
+            )
+        })?;
+    Ok(file.read().await)
 }
 
 async fn await_promise(value: Result<JsValue, JsValue>) -> Result<JsValue, PlatformError> {

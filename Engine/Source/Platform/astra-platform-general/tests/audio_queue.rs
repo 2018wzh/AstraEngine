@@ -3,7 +3,7 @@ use astra_platform_general::NativeAudioQueue;
 
 #[test]
 fn native_audio_queue_reports_overflow_and_underflow_without_mutexes() {
-    let (mut producer, mut consumer, telemetry) = NativeAudioQueue::new(2).expect("queue");
+    let (mut producer, mut consumer, telemetry) = NativeAudioQueue::create(2).expect("queue");
     producer.push_samples(&[0.25, -0.25]).expect("fits");
     assert_eq!(
         producer.push_samples(&[0.5]).unwrap_err().code,

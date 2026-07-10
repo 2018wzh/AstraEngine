@@ -77,7 +77,7 @@ impl NativeAudioConsumer {
 pub struct NativeAudioQueue;
 
 impl NativeAudioQueue {
-    pub fn new(
+    pub fn create(
         capacity: usize,
     ) -> Result<
         (

@@ -44,10 +44,6 @@ impl GamepadMapper {
         })
     }
 
-    pub fn apply(&mut self, event: RawGamepadEvent) -> Vec<PlatformEventKind> {
-        self.apply_checked(event).unwrap_or_default()
-    }
-
     pub fn apply_checked(
         &mut self,
         event: RawGamepadEvent,

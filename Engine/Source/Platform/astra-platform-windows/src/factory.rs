@@ -1057,6 +1057,7 @@ mod windows {
     struct AudioResource {
         _stream: cpal::Stream,
         producer: astra_platform_general::NativeAudioProducer,
+        queue_telemetry: astra_platform_general::AudioQueueTelemetryReader,
         meter: Arc<CallbackMeter>,
         stream_error: Arc<AtomicBool>,
         channels: u16,
@@ -1083,8 +1084,8 @@ mod windows {
             }
             let config: cpal::StreamConfig = supported.clone().into();
             let capacity = request.max_buffered_frames * usize::from(request.channels);
-            let (producer, consumer, _queue_telemetry) =
-                astra_platform_general::NativeAudioQueue::new(capacity)?;
+            let (producer, consumer, queue_telemetry) =
+                astra_platform_general::NativeAudioQueue::create(capacity)?;
             let meter = Arc::new(CallbackMeter::default());
             let stream_error = Arc::new(AtomicBool::new(false));
             let stream = match supported.sample_format() {
@@ -1135,6 +1136,7 @@ mod windows {
             Ok(Self {
                 _stream: stream,
                 producer,
+                queue_telemetry,
                 meter,
                 stream_error,
                 channels: request.channels,
@@ -1170,7 +1172,7 @@ mod windows {
                         "WASAPI output stream reported a device error",
                     ));
                 }
-                if self.meter.sample_count.load(Ordering::Acquire) >= self.submitted_samples {
+                if self.queue_telemetry.snapshot().sample_count >= self.submitted_samples {
                     break;
                 }
                 if Instant::now() >= deadline {
@@ -1251,9 +1253,13 @@ mod windows {
         consumer: &mut astra_platform_general::NativeAudioConsumer,
         meter: &CallbackMeter,
     ) -> f32 {
-        let sample = consumer.pop_sample().unwrap_or(0.0);
-        meter.record(sample);
-        sample
+        match consumer.pop_sample() {
+            Some(sample) => {
+                meter.record(sample);
+                sample
+            }
+            None => 0.0,
+        }
     }
 
     fn fill_f32(
