@@ -175,12 +175,17 @@ mod windows {
             }
         };
         event_loop.set_control_flow(ControlFlow::Wait);
-        let mut app =
-            match WindowsHostApp::new(backend, ready, save_store, package_cache, roots.bundle_root)
-            {
-                Ok(app) => app,
-                Err(_) => return,
-            };
+        let mut app = match WindowsHostApp::new(
+            backend,
+            ready,
+            save_store,
+            package_cache,
+            profile.package_sources.clone(),
+            roots.bundle_root,
+        ) {
+            Ok(app) => app,
+            Err(_) => return,
+        };
         if let Err(error) = event_loop.run_app(&mut app) {
             tracing::error!(
                 event = "platform.windows.event_loop.failed",
@@ -201,6 +206,7 @@ mod windows {
         decode_sessions: ResourceTable<DecodeResource, DecodeSessionHandle>,
         save_store: AtomicSaveStore,
         package_cache: VerifiedPackageCache,
+        package_source_policies: Vec<astra_platform::PackageSourcePolicy>,
         save_transactions: ResourceTable<SaveTransaction, SaveTransactionHandle>,
         bundle_root: std::path::PathBuf,
         package_sources: ResourceTable<FilePackageSource, PackageSourceHandle>,
@@ -215,6 +221,7 @@ mod windows {
             ready: std_mpsc::SyncSender<Result<(), PlatformError>>,
             save_store: AtomicSaveStore,
             package_cache: VerifiedPackageCache,
+            package_source_policies: Vec<astra_platform::PackageSourcePolicy>,
             bundle_root: std::path::PathBuf,
         ) -> Result<Self, PlatformError> {
             let gamepads = gilrs::Gilrs::new().map_err(|_| {
@@ -236,6 +243,7 @@ mod windows {
                 decode_sessions: ResourceTable::new("decode_session"),
                 save_store,
                 package_cache,
+                package_source_policies,
                 save_transactions: ResourceTable::new("save_transaction"),
                 bundle_root,
                 package_sources: ResourceTable::new("package_source"),
@@ -428,10 +436,9 @@ mod windows {
                             PackageSourceRequest::UserAuthorized { expected_hash } => self
                                 .open_user_authorized_package(&expected_hash)
                                 .and_then(|source| self.package_sources.insert(source)),
-                            PackageSourceRequest::HttpsRange { .. } => Err(host_error(
-                                "package.open",
-                                "requested package source requires an unavailable permission provider",
-                            )),
+                            PackageSourceRequest::HttpsRange { url, expected_hash } => self
+                                .open_https_package(&url, &expected_hash)
+                                .and_then(|source| self.package_sources.insert(source)),
                         };
                         let _ = reply.send(result);
                     }
@@ -488,6 +495,26 @@ mod windows {
             })?;
             let bytes = pollster::block_on(file.read());
             self.package_cache.store_verified(expected_hash, &bytes)?;
+            self.package_cache.open_source(expected_hash)
+        }
+
+        fn open_https_package(
+            &mut self,
+            url: &str,
+            expected_hash: &str,
+        ) -> Result<FilePackageSource, PlatformError> {
+            let client = astra_platform_general::HttpRangeClient::from_policies(
+                &self.package_source_policies,
+            )?;
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| host_error("package.https.open", "HTTPS runtime could not start"))?;
+            runtime.block_on(client.fetch_into_cache(
+                url,
+                expected_hash,
+                &mut self.package_cache,
+            ))?;
             self.package_cache.open_source(expected_hash)
         }
     }

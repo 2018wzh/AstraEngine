@@ -460,13 +460,16 @@ dependencies = [
  "astra-core",
  "astra-platform",
  "directories",
+ "futures-util",
  "reqwest",
  "rtrb",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
+ "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]

@@ -7,9 +7,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use astra_core::Hash256;
 use astra_platform::{PackageCachePolicy, PlatformError, PlatformErrorCode};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::FilePackageSource;
 
@@ -42,6 +42,18 @@ pub struct VerifiedPackageCache {
     root: PathBuf,
     policy: PackageCachePolicy,
     index: CacheIndex,
+}
+
+/// A single verified-cache write.  The staging file is deleted on every error
+/// path, so callers can stream untrusted transport bytes without ever exposing
+/// them through a package handle.
+pub struct VerifiedPackageStaging<'a> {
+    cache: &'a mut VerifiedPackageCache,
+    expected_hash: String,
+    key: String,
+    staging: tempfile::NamedTempFile,
+    hasher: Sha256,
+    written: u64,
 }
 
 impl VerifiedPackageCache {
@@ -105,48 +117,26 @@ impl VerifiedPackageCache {
         expected_hash: &str,
         bytes: &[u8],
     ) -> Result<(), PlatformError> {
+        let mut staging = self.begin_staging(expected_hash)?;
+        staging.write(bytes)?;
+        staging.commit()
+    }
+
+    pub fn begin_staging(
+        &mut self,
+        expected_hash: &str,
+    ) -> Result<VerifiedPackageStaging<'_>, PlatformError> {
         let key = cache_key(expected_hash)?;
-        let byte_len = u64::try_from(bytes.len()).map_err(|_| {
-            PlatformError::new(
-                PlatformErrorCode::InvalidState,
-                "package.cache.store",
-                "package byte length overflows",
-            )
-        })?;
-        if byte_len > self.policy.max_entry_bytes {
-            return Err(PlatformError::new(
-                PlatformErrorCode::InvalidState,
-                "package.cache.store",
-                "package exceeds cache entry limit",
-            ));
-        }
-        if Hash256::from_sha256(bytes).to_string() != expected_hash {
-            return Err(PlatformError::new(
-                PlatformErrorCode::IntegrityMismatch,
-                "package.cache.store",
-                "package source hash does not match declared identity",
-            ));
-        }
-        self.evict_for(byte_len, Some(&key))?;
-        let destination = self.path_for(&key);
-        if !destination.exists() {
-            let mut staging = tempfile::NamedTempFile::new_in(&self.root)
-                .map_err(|_| io_error("package.cache.store"))?;
-            staging
-                .write_all(bytes)
-                .map_err(|_| io_error("package.cache.store"))?;
-            staging
-                .as_file()
-                .sync_all()
-                .map_err(|_| io_error("package.cache.store"))?;
-            match staging.persist_noclobber(&destination) {
-                Ok(_) => {}
-                Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(_) => return Err(io_error("package.cache.store")),
-            }
-        }
-        self.record_access(key, byte_len)?;
-        Ok(())
+        let staging = tempfile::NamedTempFile::new_in(&self.root)
+            .map_err(|_| io_error("package.cache.stage"))?;
+        Ok(VerifiedPackageStaging {
+            cache: self,
+            expected_hash: expected_hash.to_string(),
+            key,
+            staging,
+            hasher: Sha256::new(),
+            written: 0,
+        })
     }
 
     pub fn open_source(&mut self, expected_hash: &str) -> Result<FilePackageSource, PlatformError> {
@@ -169,6 +159,10 @@ impl VerifiedPackageCache {
 
     pub fn entry_count(&self) -> usize {
         self.index.entries.len()
+    }
+
+    pub fn max_entry_bytes(&self) -> u64 {
+        self.policy.max_entry_bytes
     }
 
     fn evict_for(&mut self, required: u64, keep: Option<&str>) -> Result<(), PlatformError> {
@@ -242,6 +236,70 @@ impl VerifiedPackageCache {
             .persist(self.root.join("index.json"))
             .map_err(|_| io_error("package.cache.index"))?;
         Ok(())
+    }
+}
+
+impl VerifiedPackageStaging<'_> {
+    pub fn write(&mut self, bytes: &[u8]) -> Result<(), PlatformError> {
+        let next = self
+            .written
+            .checked_add(u64::try_from(bytes.len()).map_err(|_| {
+                PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    "package.cache.stage",
+                    "package byte length overflows",
+                )
+            })?)
+            .ok_or_else(|| {
+                PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    "package.cache.stage",
+                    "package byte length overflows",
+                )
+            })?;
+        if next > self.cache.policy.max_entry_bytes {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "package.cache.stage",
+                "package exceeds cache entry limit",
+            ));
+        }
+        self.staging
+            .write_all(bytes)
+            .map_err(|_| io_error("package.cache.stage"))?;
+        self.hasher.update(bytes);
+        self.written = next;
+        Ok(())
+    }
+
+    pub fn commit(self) -> Result<(), PlatformError> {
+        let actual_hash = format!("sha256:{:x}", self.hasher.finalize());
+        if actual_hash != self.expected_hash {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "package.cache.commit",
+                "package source hash does not match declared identity",
+            ));
+        }
+        self.cache.evict_for(self.written, Some(&self.key))?;
+        let destination = self.cache.path_for(&self.key);
+        if destination.exists() {
+            // A concurrent or previous request may already have populated this
+            // content-addressed entry.  Verify it again before treating it as a
+            // cache hit; an orphaned/corrupt file must never become readable.
+            FilePackageSource::open(&destination, &self.expected_hash)?;
+        } else {
+            self.staging
+                .as_file()
+                .sync_all()
+                .map_err(|_| io_error("package.cache.commit"))?;
+            match self.staging.persist_noclobber(&destination) {
+                Ok(_) => {}
+                Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(_) => return Err(io_error("package.cache.commit")),
+            }
+        }
+        self.cache.record_access(self.key.clone(), self.written)
     }
 }
 

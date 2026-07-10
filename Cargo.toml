@@ -61,6 +61,7 @@ cosmic-text = "0.19"
 cpal = "0.17"
 directories = "6"
 ffmpeg-next = "8.1"
+futures-util = "0.3"
 hex = "0.4"
 gilrs = { version = "0.11.2", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
@@ -87,7 +88,7 @@ symphonia = { version = "0.6", features = ["all"] }
 syn = { version = "2", features = ["full"] }
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt", "sync", "time", "net"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
