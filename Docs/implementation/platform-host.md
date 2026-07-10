@@ -27,7 +27,7 @@ pub struct PlatformHostSession {
 | Crate | 职责 |
 | --- | --- |
 | `astra-platform` | profile、typed handle、async command/event contract、capability v2、conformance schema |
-| `astra-platform-general` | generational resource table、ordered completion、atomic save、hash-bound package range 和共用 policy |
+| `astra-platform-general` | generational resource table、ordered completion、atomic save、hash-bound package range、shared `WgpuPresentationCore`、audio/gamepad mapper、verified cache 与共用 policy |
 | `astra-platform-windows` | winit event loop、hardware wgpu、WASAPI、WMF、Saved Games、Windows package source；test injection 仅在 `platform-test-driver` |
 | `astra-platform-web` | canvas/DOM、WebGPU、WebAudio、WebCodecs、OPFS、fetch/File source |
 | `astra-player-web` | 独立 WASM Player，读取 config、package 和 cooked platform profile |
