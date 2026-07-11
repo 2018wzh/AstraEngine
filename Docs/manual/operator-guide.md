@@ -2,6 +2,17 @@
 
 Operator 负责构建、打包、平台适配、Release Gate、crash bundle 和 AstraEMU local case report。
 
+## Checkout-bound Cargo 验证
+
+多 worktree 或本地 release 验证统一通过 checkout-bound 入口执行：
+
+```bash
+python Tools/run_cargo_isolated.py clippy --workspace --all-targets -- -D warnings
+python Tools/run_cargo_isolated.py test --workspace
+```
+
+该入口从 commit/dirty state、workspace manifest、Cargo.lock、Rust toolchain 和 feature/target/profile 参数派生独立 target root。target root 内的 `astra-build-identity.json` 使用 `astra.build_identity.v1`，只记录 hash、状态、artifact role、相对路径和 byte size。报告损坏、identity 不一致、动态 fixture 不在同一 target root 或 Cargo 返回非零状态时必须停止，不得改用共享 `target/debug` 继续生成证据。
+
 ## 发布命令
 
 ```bash

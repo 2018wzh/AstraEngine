@@ -19,7 +19,7 @@
 
 | Area | Code status | Evidence |
 | --- | --- | --- |
-| Stage 1 EngineCore | `DONE` | `cargo test --workspace` 通过；Runtime snapshot 保存 stable id generator、完整 EventQueue/AwaitQueue/delayed queue、typed component、mutation/effect trace；flat FSM 支持 run-to-quiescence 和事务回滚；provider-free replay 校验 input/await/provider output 与逐 tick hash；plugin、property、Target manifest、headless scenario 证据保持通过 |
+| Stage 1 EngineCore | `DONE` | `python Tools/run_cargo_isolated.py test --workspace` 通过；checkout-bound identity绑定 commit/dirty state、workspace manifests、Cargo.lock、toolchain与features，动态 fixture build/load使用同一 target root；Runtime snapshot保存 stable id generator、完整 EventQueue/AwaitQueue/delayed queue、typed component、mutation/effect trace；flat FSM支持 run-to-quiescence和事务回滚；provider-free replay校验 input/await/provider output与逐 tick hash |
 | Stage 2 Media + Package | `DONE` | Asset/Cook/Package、headless media、release report、Target manifest、strict scenario runner、flat StateMachine、Await/Fence、Windows product host evidence、Web browser evidence 和 Provider URI Asset VFS slice 已落地；完成边界只覆盖 Windows/Web，Linux/macOS/iOS/Android 移到 Stage 6。VFS 现在由 `astra-asset` 持有 `VfsUri`、prefix/layer/entry/whiteout、`asset.catalog` 和 host-only local reader；`astra-package` 写入 `asset.vfs_manifest` + `asset.catalog`，不再写 `asset.registry`；`astra-release` 校验 `vfs.uri_format`、`vfs.prefix_registry`、`vfs.package_mount`、`vfs.overlay_mount` 和 `vfs.catalog`。已验证 `cargo test -p astra-asset vfs_uri`、`cargo test -p astra-asset vfs_overlayfs`、`cargo test -p astra-package package_vfs_mount`、`cargo test -p astra-package package_roundtrip`、`cargo test -p astra-plugin vfs_provider_registry`、`cargo test -p astra-release vfs_mount_gate`、`cargo test -p astra-release release_report`、`cargo test -p astra-cli --test target_platform tsuinosora_synthetic_gate_runs_internal_and_patch_player_routes`、以及既有 runtime/media/platform tests；legacy pack reader 实现仍留在 Stage 5 |
 | Stage 3 AstraVN | `IN_PROGRESS` | Migration 6 frontend 与 Migration 9 shared 1–3 focused implementation 已落地；NativeVN 已收敛为两路线技术样例并移除 SAPI 配音。`S3-SCRIPT-01/02`、presentation、system UI、sample、Windows/Web Player 均等待同一 `.astrapkg` 的 formal native-input evidence。顶层仍由 `S3-TSUI-INTERNAL-DEMO-01`、`S3-TSUI-GATE-01` 和 `S3-FLAGSHIP-DEMO-01` 阻断 |
 | Stage 4 Editor + AI/MCP | `REOPENED_SPEC` | Editor workflow、runtime-provider-aware shell、Plugin Manager、AI provider profile、ONNX ModelBundle、Runtime Director、memory、MCP context 和 AI/MCP gate 已写入文档；`Editor/Source` 和 `Engine/Plugins/Providers/astra-ai-onnx` 尚不存在。Stage 4 因 VFS/GameRuntime contract 重开，Project Wizard、PIE、Debugger 和 Release Gate 必须读取 `RuntimeEditorMetadata`，ONNX ModelBundle、Context Pack、generated artifact 和 MCP package access 需要改为统一 VFS mount evidence |
@@ -35,6 +35,7 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | Work ID | Status | Evidence |
 | --- | --- | --- |
 | `S1-BOOT-01` | `DONE` | workspace、toolchain、CI 配置存在 |
+| `S1-BUILD-IDENTITY-01` | `DONE` | `python -m unittest Tools.tests.test_run_cargo_isolated`、`python Tools/run_cargo_isolated.py test -p astra-plugin --test artifact_path`、`python Tools/run_cargo_isolated.py test -p astra-cli --test logging` 和隔离 workspace tests；`astra.build_identity.v1` 记录 checkout/manifest/lock/toolchain/feature identity 与相对 artifact hash |
 | `S1-CORE-01` | `DONE` | `cargo test -p astra-core core_types` |
 | `S1-RUNTIME-01` | `DONE` | `cargo test -p astra-runtime world_actor` 和 `cargo test -p astra-runtime trigger_event`；typed component payload/hash、component mutation record 和 trigger event 已覆盖 |
 | `S1-RUNTIME-02` | `DONE` | `cargo test -p astra-runtime state_machine_tick`；run-to-quiescence、terminal、cycle/microstep blocker 和整机事务回滚已覆盖 |
@@ -207,8 +208,8 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 ```bash
 python Tools/check_docs.py
 cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+python Tools/run_cargo_isolated.py clippy --workspace --all-targets -- -D warnings
+python Tools/run_cargo_isolated.py test --workspace
 git diff --check
 ```
 

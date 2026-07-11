@@ -187,6 +187,16 @@ unsafe fn root_module(library: &Library) -> Result<AstraPluginModuleRef, PluginE
 }
 
 pub fn dylib_path(root: &Path, name: &str) -> PathBuf {
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
+    dylib_path_for_target(root, target_dir.as_deref(), "debug", name)
+}
+
+pub fn dylib_path_for_target(
+    root: &Path,
+    target_dir: Option<&Path>,
+    profile: &str,
+    name: &str,
+) -> PathBuf {
     let file = if cfg!(target_os = "windows") {
         format!("{name}.dll")
     } else if cfg!(target_os = "macos") {
@@ -194,5 +204,10 @@ pub fn dylib_path(root: &Path, name: &str) -> PathBuf {
     } else {
         format!("lib{name}.so")
     };
-    root.join("target").join("debug").join(file)
+    let target_dir = match target_dir {
+        Some(path) if path.is_absolute() => path.to_path_buf(),
+        Some(path) => root.join(path),
+        None => root.join("target"),
+    };
+    target_dir.join(profile).join(file)
 }

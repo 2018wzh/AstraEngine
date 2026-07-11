@@ -236,6 +236,8 @@
 
 **分类：** `SILENT_FAILURE`, `SMOKE_ONLY`
 
+**修复状态：** `RESOLVED`。`Tools/run_cargo_isolated.py` 现将 checkout state、workspace manifest、Cargo.lock、Rust toolchain 与 feature/target/profile fingerprint 绑定到独立 target root，并写出 `astra.build_identity.v1`；`astra_plugin::dylib_path` 与 nested fixture build 共同遵循 `CARGO_TARGET_DIR`。identity mismatch、无效 report 和 Cargo 失败均阻断，artifact evidence 只记录相对 path、role、hash 与 byte size。回归由 `T-S1-BUILD-IDENTITY-01` 和隔离 workspace test 覆盖。
+
 **证据：** 本轮第一次 `cargo test --workspace` 的 logging 测试加载了与当前 gate 不匹配的动态 fixture binary，报 `ASTRA_PLUGIN_FEATURE_FINGERPRINT`；显式执行 `cargo build -p headless-presentation-provider` 后，`cargo test -p astra-cli --test logging -- --nocapture` 的 2 个测试通过。随后 workspace 全量执行中的 `astra-observability` coverage 测试加载了内置期望 45 个成员的旧测试二进制，而当前 `Cargo.toml` 和 `logging-coverage.json` 都是 44 个成员；单独重新编译 `cargo test -p astra-observability --test workspace_coverage -- --nocapture` 后通过。设置独立 `CARGO_TARGET_DIR=target/audit-workspace` 的全 workspace 命令在本轮时间窗内未完成，不能作为通过证据。
 
 **影响：** 当前测试命令可能把其他 worktree 的测试二进制、动态插件或 manifest 常量混入本 checkout，导致假失败或假通过。对于需要证明 UE 级完整度的 release gate，这种构建身份不确定性本身就是阻断问题。

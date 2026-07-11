@@ -24,10 +24,10 @@ jobs:
       - name: Format
         run: cargo fmt --check
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: python Tools/run_cargo_isolated.py clippy --workspace --all-targets -- -D warnings
       - name: Test
-        run: cargo test --workspace
+        run: python Tools/run_cargo_isolated.py test --workspace
       - name: Native smoke
-        run: cargo run -p astra-cli -- test run scenarios/native_smoke.yaml --headless --report target/reports/stage1.yaml
+        run: python Tools/run_cargo_isolated.py run -p astra-cli -- test run scenarios/native_smoke.yaml --headless --report target/reports/stage1.yaml
       - name: Explain report
-        run: cargo run -p astra-cli -- report explain target/reports/stage1.yaml
+        run: python Tools/run_cargo_isolated.py run -p astra-cli -- report explain target/reports/stage1.yaml
