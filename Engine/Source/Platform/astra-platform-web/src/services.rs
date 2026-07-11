@@ -1,8 +1,8 @@
 use astra_core::Hash256;
 use astra_platform::{
-    AudioMeter, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput, PackageCachePolicy,
-    PackageSourcePolicy, PackageSourceRequest, PlatformDecodeRequest, PlatformError,
-    PlatformErrorCode,
+    AudioMeter, AudioOutputRequest, AudioOutputState, AudioPacket, DecodeKind, DecodeOutput,
+    PackageCachePolicy, PackageSourcePolicy, PackageSourceRequest, PlatformDecodeRequest,
+    PlatformError, PlatformErrorCode,
 };
 use js_sys::{Function, Promise, Reflect, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};
@@ -19,6 +19,7 @@ pub(crate) struct WebAudioOutput {
     pending: std::rc::Rc<std::cell::RefCell<std::collections::BTreeMap<u64, usize>>>,
     queued_frames: std::rc::Rc<std::cell::Cell<usize>>,
     meter: std::rc::Rc<std::cell::RefCell<AudioMeter>>,
+    underflow_count: std::rc::Rc<std::cell::Cell<u64>>,
     submitted_samples: u64,
 }
 
@@ -53,13 +54,15 @@ impl WebAudioOutput {
         let queued_frames = std::rc::Rc::new(std::cell::Cell::new(0usize));
         let meter = std::rc::Rc::new(std::cell::RefCell::new(AudioMeter {
             sample_count: 0,
-            peak_dbfs: f32::NEG_INFINITY,
-            rms_dbfs: f32::NEG_INFINITY,
+            peak_dbfs: -120.0,
+            rms_dbfs: -120.0,
         }));
+        let underflow_count = std::rc::Rc::new(std::cell::Cell::new(0));
         let on_message = {
             let pending = pending.clone();
             let queued_frames = queued_frames.clone();
             let meter = meter.clone();
+            let underflow_count = underflow_count.clone();
             wasm_bindgen::closure::Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
                 let data = event.data();
                 let message_type = Reflect::get(&data, &JsValue::from_str("type"))
@@ -95,6 +98,13 @@ impl WebAudioOutput {
                             peak_dbfs: linear_to_db(peak),
                             rms_dbfs: linear_to_db(rms),
                         };
+                        if let Some(value) =
+                            Reflect::get(&data, &JsValue::from_str("underflowCount"))
+                                .ok()
+                                .and_then(|value| value.as_f64())
+                        {
+                            underflow_count.set(value as u64);
+                        }
                     }
                     _ => {}
                 }
@@ -112,6 +122,7 @@ impl WebAudioOutput {
             pending,
             queued_frames,
             meter,
+            underflow_count,
             submitted_samples: 0,
         })
     }
@@ -165,7 +176,13 @@ impl WebAudioOutput {
     }
 
     pub async fn drain(&self) -> Result<AudioMeter, PlatformError> {
-        for _ in 0..2_000 {
+        let poll_count = self
+            .request
+            .drain_timeout(self.submitted_samples)
+            .as_millis()
+            .div_ceil(5)
+            .max(1);
+        for _ in 0..poll_count {
             if self.queued_frames.get() == 0 {
                 let message = js_sys::Object::new();
                 Reflect::set(
@@ -191,6 +208,28 @@ impl WebAudioOutput {
             "audio.drain",
             "AudioWorklet did not drain before the deadline",
         ))
+    }
+
+    pub async fn state(&self) -> Result<AudioOutputState, PlatformError> {
+        let message = js_sys::Object::new();
+        Reflect::set(
+            &message,
+            &JsValue::from_str("type"),
+            &JsValue::from_str("meter"),
+        )
+        .map_err(|_| audio_error("audio.query"))?;
+        self.port
+            .post_message(&message)
+            .map_err(|_| audio_error("audio.query"))?;
+        sleep(5).await?;
+        let meter = self.meter.borrow().clone();
+        Ok(AudioOutputState {
+            queued_frames: self.queued_frames.get(),
+            submitted_samples: self.submitted_samples,
+            consumed_samples: meter.sample_count.min(self.submitted_samples),
+            underflow_count: self.underflow_count.get(),
+            meter,
+        })
     }
 
     pub async fn close(self) -> Result<(), PlatformError> {

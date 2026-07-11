@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use tokio::sync::{mpsc, oneshot};
@@ -92,6 +93,21 @@ pub struct AudioOutputRequest {
     pub max_buffered_frames: usize,
 }
 
+impl AudioOutputRequest {
+    /// Returns a drain deadline that covers the submitted playback duration plus
+    /// a fixed device/callback margin. Unlike a fixed timeout, this remains
+    /// valid for long-form voice and music streams.
+    pub fn drain_timeout(&self, submitted_samples: u64) -> Duration {
+        const CALLBACK_MARGIN_MS: u128 = 2_000;
+        let channels = u128::from(self.channels.max(1));
+        let sample_rate = u128::from(self.sample_rate.max(1));
+        let frames = u128::from(submitted_samples).div_ceil(channels);
+        let playback_ms = frames.saturating_mul(1_000).div_ceil(sample_rate);
+        let timeout_ms = playback_ms.saturating_add(CALLBACK_MARGIN_MS);
+        Duration::from_millis(u64::try_from(timeout_ms).unwrap_or(u64::MAX))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioPacket {
     pub sequence: u64,
@@ -113,6 +129,15 @@ pub struct AudioMeter {
     pub sample_count: u64,
     pub peak_dbfs: f32,
     pub rms_dbfs: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioOutputState {
+    pub queued_frames: usize,
+    pub submitted_samples: u64,
+    pub consumed_samples: u64,
+    pub underflow_count: u64,
+    pub meter: AudioMeter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,6 +220,10 @@ pub enum HostCommand {
         packet: AudioPacket,
         reply: oneshot::Sender<Result<(), PlatformError>>,
     },
+    QueryAudio {
+        output: AudioOutputHandle,
+        reply: oneshot::Sender<Result<AudioOutputState, PlatformError>>,
+    },
     DrainAudio {
         output: AudioOutputHandle,
         reply: oneshot::Sender<Result<AudioMeter, PlatformError>>,
@@ -267,6 +296,7 @@ impl HostCommand {
             Self::DestroyWindow { .. } => "window.destroy",
             Self::OpenAudioOutput { .. } => "audio.open",
             Self::SubmitAudio { .. } => "audio.submit",
+            Self::QueryAudio { .. } => "audio.query",
             Self::DrainAudio { .. } => "audio.drain",
             Self::CloseAudio { .. } => "audio.close",
             Self::OpenDecode { .. } => "decode.open",
@@ -324,6 +354,7 @@ impl HostCommand {
             Self::DestroyWindow { reply, .. } => send_error!(reply),
             Self::OpenAudioOutput { reply, .. } => send_error!(reply),
             Self::SubmitAudio { reply, .. } => send_error!(reply),
+            Self::QueryAudio { reply, .. } => send_error!(reply),
             Self::DrainAudio { reply, .. } => send_error!(reply),
             Self::CloseAudio { reply, .. } => send_error!(reply),
             Self::OpenDecode { reply, .. } => send_error!(reply),
@@ -664,6 +695,27 @@ impl PlatformHostClient {
             ));
         }
         Ok(meter)
+    }
+
+    pub async fn query_audio(
+        &self,
+        output: AudioOutputHandle,
+    ) -> Result<AudioOutputState, PlatformError> {
+        self.ensure_running("audio.query")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::QueryAudio { output, reply })?;
+        let state = response.await.map_err(|_| queue_closed("audio.query"))??;
+        if state.consumed_samples > state.submitted_samples
+            || !state.meter.peak_dbfs.is_finite()
+            || !state.meter.rms_dbfs.is_finite()
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "audio.query",
+                "audio output state is internally inconsistent",
+            ));
+        }
+        Ok(state)
     }
 
     pub async fn close_audio(&self, output: AudioOutputHandle) -> Result<(), PlatformError> {

@@ -10,6 +10,8 @@ mod audio;
 pub use audio::*;
 mod media_lifecycle;
 pub use media_lifecycle::*;
+mod persistent_audio;
+pub use persistent_audio::*;
 mod timeline;
 pub use timeline::*;
 
@@ -159,6 +161,10 @@ pub enum PlayerHostCommand {
         channels: u16,
         samples: Vec<f32>,
     },
+    QueryAudio {
+        sequence: u64,
+        output: PlayerHostResourceId,
+    },
     DrainAudio {
         sequence: u64,
         output: PlayerHostResourceId,
@@ -216,6 +222,7 @@ impl PlayerHostCommand {
             | Self::ReadSave { sequence, .. }
             | Self::OpenAudio { sequence, .. }
             | Self::SubmitAudio { sequence, .. }
+            | Self::QueryAudio { sequence, .. }
             | Self::DrainAudio { sequence, .. }
             | Self::CloseAudio { sequence, .. }
             | Self::OpenDecode { sequence, .. }
@@ -275,6 +282,15 @@ pub enum PlayerHostCommandResult {
     },
     AudioOpened {
         output: PlayerHostResourceId,
+    },
+    AudioState {
+        output: PlayerHostResourceId,
+        queued_frames: u64,
+        submitted_samples: u64,
+        consumed_samples: u64,
+        underflow_count: u64,
+        peak_dbfs_bits: u32,
+        rms_dbfs_bits: u32,
     },
     AudioDrained {
         output: PlayerHostResourceId,

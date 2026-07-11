@@ -371,6 +371,86 @@ impl NativeVnHostCommandSource {
         })
     }
 
+    pub fn prepare_persistent_audio_open(
+        &mut self,
+        sample_rate: u32,
+        channels: u16,
+        max_buffered_frames: u32,
+    ) -> Result<(PlayerHostResourceId, PlayerHostCommandBatch), NativeVnHostError> {
+        if max_buffered_frames == 0 {
+            return Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_AUDIO_BUFFER_BUDGET: persistent output capacity is zero".into(),
+            ));
+        }
+        let output = self.next_media_resource()?;
+        let batch = PlayerHostCommandBatch::new(vec![PlayerHostCommand::OpenAudio {
+            sequence: self.next_command_sequence()?,
+            output,
+            sample_rate,
+            channels,
+            max_buffered_frames,
+        }])?;
+        Ok((output, batch))
+    }
+
+    pub fn prepare_persistent_audio_query(
+        &mut self,
+        output: PlayerHostResourceId,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::QueryAudio {
+                sequence: self.next_command_sequence()?,
+                output,
+            },
+        ])?)
+    }
+
+    pub fn prepare_persistent_audio_submit(
+        &mut self,
+        output: PlayerHostResourceId,
+        packet_sequence: u64,
+        audio: &astra_player_core::PlayerMixedAudio,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        if audio.samples.is_empty() {
+            return Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_AUDIO_PACKET_EMPTY: mixer produced no samples".into(),
+            ));
+        }
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::SubmitAudio {
+                sequence: self.next_command_sequence()?,
+                output,
+                packet_sequence,
+                channels: audio.channels,
+                samples: audio.samples.clone(),
+            },
+        ])?)
+    }
+
+    pub fn prepare_persistent_audio_drain(
+        &mut self,
+        output: PlayerHostResourceId,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::DrainAudio {
+                sequence: self.next_command_sequence()?,
+                output,
+            },
+        ])?)
+    }
+
+    pub fn prepare_persistent_audio_close(
+        &mut self,
+        output: PlayerHostResourceId,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::CloseAudio {
+                sequence: self.next_command_sequence()?,
+                output,
+            },
+        ])?)
+    }
+
     pub fn complete_wait(
         &mut self,
         fence: impl Into<String>,

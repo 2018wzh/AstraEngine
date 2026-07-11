@@ -182,6 +182,13 @@ mod browser {
                     let result = audio.get_mut(output).and_then(|audio| audio.submit(packet));
                     let _ = reply.send(result);
                 }
+                HostCommand::QueryAudio { output, reply } => {
+                    let result = match audio.get(output) {
+                        Ok(audio) => audio.state().await,
+                        Err(error) => Err(error),
+                    };
+                    let _ = reply.send(result);
+                }
                 HostCommand::DrainAudio { output, reply } => {
                     let result = match audio.get(output) {
                         Ok(audio) => audio.drain().await,

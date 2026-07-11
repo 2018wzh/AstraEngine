@@ -272,21 +272,24 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         let timeline_clock = std::time::Instant::now();
         let mut timeline = astra_player_core::PlayerTimelineScheduler::new(256);
         let mut completed_media_signals = std::collections::BTreeSet::new();
-        process_timeline_updates(
+        let mut persistent_audio = WindowsPersistentAudio::default();
+        let player_result: Result<(), astra_platform::PlatformError> = async {
+            process_timeline_updates(
             &mut vn,
             &mut executor,
             &mut timeline,
             timeline_clock.elapsed().as_millis() as u64,
             Vec::new(),
             &mut completed_media_signals,
+            &mut persistent_audio,
         )
-        .await?;
-        let mut timeline_tick = tokio::time::interval(std::time::Duration::from_millis(8));
-        timeline_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
+            .await?;
+            let mut timeline_tick = tokio::time::interval(std::time::Duration::from_millis(8));
+            timeline_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
             let event = tokio::select! {
                 event = session.events.recv() => event?,
-                _ = timeline_tick.tick(), if timeline.active_count() > 0 => {
+                _ = timeline_tick.tick(), if timeline.active_count() > 0 || persistent_audio.is_active() => {
                     let now_ms = timeline_clock.elapsed().as_millis() as u64;
                     let completed = timeline
                         .poll(now_ms)
@@ -298,6 +301,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                         now_ms,
                         completed,
                         &mut completed_media_signals,
+                        &mut persistent_audio,
                     )
                     .await?;
                     continue;
@@ -370,6 +374,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                         timeline_clock.elapsed().as_millis() as u64,
                         Vec::new(),
                         &mut completed_media_signals,
+                        &mut persistent_audio,
                     )
                     .await?;
                     log_consumed_vn_step(player_sequence, "keyboard", &vn)?;
@@ -405,12 +410,28 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                         timeline_clock.elapsed().as_millis() as u64,
                         Vec::new(),
                         &mut completed_media_signals,
+                        &mut persistent_audio,
                     )
                     .await?;
                     log_consumed_vn_step(player_sequence, "pointer", &vn)?;
                 }
                 _ => {}
             }
+            }
+            Ok(())
+        }
+        .await;
+        let audio_cleanup = persistent_audio.shutdown(&mut vn, &mut executor).await;
+        match (player_result, audio_cleanup) {
+            (Err(error), Err(cleanup)) => {
+                return Err(player_platform_error(
+                    "player.session",
+                    format!("{error}; audio cleanup failed: {cleanup}"),
+                ));
+            }
+            (Err(error), Ok(())) => return Err(error),
+            (Ok(()), Err(cleanup)) => return Err(cleanup),
+            (Ok(()), Ok(())) => {}
         }
         session.client.destroy_surface(surface).await?;
         session.client.destroy_window(window).await?;
@@ -421,6 +442,348 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
 }
 
 #[cfg(target_os = "windows")]
+#[derive(Default)]
+struct WindowsPersistentAudio {
+    mixer: Option<astra_player_core::PlayerPersistentAudioMixer>,
+    output: Option<astra_player_core::PlayerHostResourceId>,
+    next_packet_sequence: u64,
+    queue: Option<astra_player_core::PlayerAudioQueueController>,
+    voice_kinds: std::collections::BTreeMap<String, String>,
+}
+
+#[cfg(target_os = "windows")]
+impl WindowsPersistentAudio {
+    const BUFFERED_FRAMES: u32 = 8_192;
+    const TARGET_QUEUED_FRAMES: usize = 4_096;
+    const MAX_RENDER_FRAMES: usize = 4_096;
+    const MAX_VOICES: usize = 64;
+
+    fn is_active(&self) -> bool {
+        self.mixer
+            .as_ref()
+            .is_some_and(|mixer| mixer.active_voice_count() > 0)
+    }
+
+    async fn start(
+        &mut self,
+        source: &mut astra_player::NativeVnHostCommandSource,
+        executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
+        request: &astra_player::NativeVnAudioRequest,
+        audio: astra_player_core::PlayerDecodedAudio,
+    ) -> Result<(), astra_platform::PlatformError> {
+        let looping = parse_audio_bool(request, "loop", request.command == "bgm")?;
+        let gain = parse_audio_f32(request, "gain", 1.0)?;
+        let bus = request
+            .attributes
+            .get("bus")
+            .cloned()
+            .unwrap_or_else(|| request.command.clone());
+        if self.mixer.is_none() {
+            let (output, open) = source
+                .prepare_persistent_audio_open(
+                    audio.sample_rate,
+                    audio.channels,
+                    Self::BUFFERED_FRAMES,
+                )
+                .map_err(|error| player_platform_error("player.audio.mixer.open.prepare", error))?;
+            let result = executor
+                .execute_batch(open)
+                .await
+                .map_err(|error| player_platform_error("player.audio.mixer.open", error))?;
+            if !matches!(
+                result.as_slice(),
+                [PlayerHostCommandResult::AudioOpened { output: opened }] if *opened == output
+            ) {
+                return Err(player_platform_error(
+                    "player.audio.mixer.open",
+                    "ASTRA_PLAYER_MIXER_OPEN_RESULT: platform returned an invalid output",
+                ));
+            }
+            self.mixer = Some(
+                astra_player_core::PlayerPersistentAudioMixer::new(
+                    audio.sample_rate,
+                    audio.channels,
+                    Self::MAX_VOICES,
+                    Self::MAX_RENDER_FRAMES,
+                )
+                .map_err(|error| player_platform_error("player.audio.mixer.create", error))?,
+            );
+            self.output = Some(output);
+            self.next_packet_sequence = 1;
+            self.queue = Some(
+                astra_player_core::PlayerAudioQueueController::new(
+                    Self::TARGET_QUEUED_FRAMES,
+                    Self::MAX_RENDER_FRAMES,
+                )
+                .map_err(|error| player_platform_error("player.audio.mixer.queue", error))?,
+            );
+        }
+        let mixer = self.mixer.as_mut().ok_or_else(|| {
+            player_platform_error("player.audio.mixer.start", "ASTRA_PLAYER_MIXER_MISSING")
+        })?;
+        mixer
+            .start_voice(astra_player_core::PlayerPersistentVoiceSpec {
+                id: request.command_id.clone(),
+                bus: bus.clone(),
+                audio,
+                looping,
+                gain,
+            })
+            .map_err(|error| player_platform_error("player.audio.mixer.start", error))?;
+        if let Some(fade_ms) = request.attributes.get("fade") {
+            let fade_ms = fade_ms.parse::<u64>().map_err(|_| {
+                player_platform_error(
+                    "player.audio.mixer.fade",
+                    "ASTRA_PLAYER_AUDIO_FADE_INVALID: fade must be an unsigned millisecond value",
+                )
+            })?;
+            if fade_ms > 0 {
+                let duration_frames = u64::from(mixer.sample_rate())
+                    .checked_mul(fade_ms)
+                    .and_then(|value| value.checked_add(999))
+                    .map(|value| value / 1_000)
+                    .ok_or_else(|| {
+                        player_platform_error(
+                            "player.audio.mixer.fade",
+                            "ASTRA_PLAYER_AUDIO_FADE_OVERFLOW",
+                        )
+                    })?;
+                mixer
+                    .set_bus_gain(&bus, 0.0)
+                    .and_then(|_| mixer.fade_bus(&bus, 1.0, duration_frames.max(1)))
+                    .map_err(|error| player_platform_error("player.audio.mixer.fade", error))?;
+            }
+        }
+        self.voice_kinds
+            .insert(request.command_id.clone(), request.command.clone());
+        Ok(())
+    }
+
+    async fn pump(
+        &mut self,
+        source: &mut astra_player::NativeVnHostCommandSource,
+        executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
+        completed_signals: &mut std::collections::BTreeSet<String>,
+    ) -> Result<(), astra_platform::PlatformError> {
+        if !self.is_active() {
+            return Ok(());
+        }
+        let output = self.output.ok_or_else(|| {
+            player_platform_error(
+                "player.audio.mixer.pump",
+                "ASTRA_PLAYER_MIXER_OUTPUT_MISSING",
+            )
+        })?;
+        let query = source
+            .prepare_persistent_audio_query(output)
+            .map_err(|error| player_platform_error("player.audio.mixer.query.prepare", error))?;
+        let result = executor
+            .execute_batch(query)
+            .await
+            .map_err(|error| player_platform_error("player.audio.mixer.query", error))?;
+        let (queued_frames, underflow_count) = match result.as_slice() {
+            [PlayerHostCommandResult::AudioState {
+                output: state_output,
+                queued_frames,
+                underflow_count,
+                ..
+            }] if *state_output == output => (
+                usize::try_from(*queued_frames).map_err(|_| {
+                    player_platform_error(
+                        "player.audio.mixer.query",
+                        "ASTRA_PLAYER_MIXER_QUEUE_RANGE",
+                    )
+                })?,
+                *underflow_count,
+            ),
+            _ => {
+                return Err(player_platform_error(
+                    "player.audio.mixer.query",
+                    "ASTRA_PLAYER_MIXER_QUERY_RESULT: platform returned invalid queue state",
+                ));
+            }
+        };
+        let frames = self
+            .queue
+            .as_mut()
+            .ok_or_else(|| {
+                player_platform_error(
+                    "player.audio.mixer.query",
+                    "ASTRA_PLAYER_AUDIO_QUEUE_MISSING",
+                )
+            })?
+            .observe(queued_frames, underflow_count)
+            .map_err(|error| player_platform_error("player.audio.mixer.query", error))?;
+        if frames == 0 {
+            return Ok(());
+        }
+        let mixed = self
+            .mixer
+            .as_mut()
+            .ok_or_else(|| {
+                player_platform_error("player.audio.mixer.pump", "ASTRA_PLAYER_MIXER_MISSING")
+            })?
+            .render(frames)
+            .map_err(|error| player_platform_error("player.audio.mixer.render", error))?;
+        let submit = source
+            .prepare_persistent_audio_submit(output, self.next_packet_sequence, &mixed)
+            .map_err(|error| player_platform_error("player.audio.mixer.submit.prepare", error))?;
+        let submitted = executor
+            .execute_batch(submit)
+            .await
+            .map_err(|error| player_platform_error("player.audio.mixer.submit", error))?;
+        if !matches!(submitted.as_slice(), [PlayerHostCommandResult::Unit]) {
+            return Err(player_platform_error(
+                "player.audio.mixer.submit",
+                "ASTRA_PLAYER_MIXER_SUBMIT_RESULT: platform returned an invalid result",
+            ));
+        }
+        self.next_packet_sequence = self.next_packet_sequence.checked_add(1).ok_or_else(|| {
+            player_platform_error(
+                "player.audio.mixer.submit",
+                "ASTRA_PLAYER_AUDIO_PACKET_SEQUENCE",
+            )
+        })?;
+        self.queue
+            .as_mut()
+            .ok_or_else(|| {
+                player_platform_error(
+                    "player.audio.mixer.submit",
+                    "ASTRA_PLAYER_AUDIO_QUEUE_MISSING",
+                )
+            })?
+            .record_submit()
+            .map_err(|error| player_platform_error("player.audio.mixer.submit", error))?;
+        for completion in mixed.completed {
+            let kind = self
+                .voice_kinds
+                .remove(&completion.voice_id)
+                .ok_or_else(|| {
+                    player_platform_error(
+                        "player.audio.mixer.complete",
+                        "ASTRA_PLAYER_AUDIO_COMPLETION_OWNER_MISSING",
+                    )
+                })?;
+            completed_signals.insert(completion.voice_id.clone());
+            completed_signals.insert(format!("{}.end", completion.voice_id));
+            if kind == "voice" {
+                completed_signals.insert("voice_end".into());
+            }
+            tracing::info!(
+                event = "astra.player.audio.completed",
+                command_id = %completion.voice_id,
+                command = %kind,
+                rendered_frames = completion.rendered_frames,
+                "Persistent Player audio voice completed"
+            );
+        }
+        Ok(())
+    }
+
+    async fn shutdown(
+        &mut self,
+        source: &mut astra_player::NativeVnHostCommandSource,
+        executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
+    ) -> Result<(), astra_platform::PlatformError> {
+        let Some(output) = self.output.take() else {
+            return Ok(());
+        };
+        let drain_result = async {
+            let drain = source
+                .prepare_persistent_audio_drain(output)
+                .map_err(|error| player_platform_error("player.audio.mixer.drain.prepare", error))?;
+            let drained = executor
+                .execute_batch(drain)
+                .await
+                .map_err(|error| player_platform_error("player.audio.mixer.drain", error))?;
+            if !matches!(
+                drained.as_slice(),
+                [PlayerHostCommandResult::AudioDrained { output: drained_output, .. }] if *drained_output == output
+            ) {
+                return Err(player_platform_error(
+                    "player.audio.mixer.drain",
+                    "ASTRA_PLAYER_MIXER_DRAIN_RESULT",
+                ));
+            }
+            Ok::<(), astra_platform::PlatformError>(())
+        }
+        .await;
+        let close_result = async {
+            let close = source
+                .prepare_persistent_audio_close(output)
+                .map_err(|error| player_platform_error("player.audio.mixer.close.prepare", error))?;
+            let closed = executor
+                .execute_batch(close)
+                .await
+                .map_err(|error| player_platform_error("player.audio.mixer.close", error))?;
+            if !matches!(
+                closed.as_slice(),
+                [PlayerHostCommandResult::AudioClosed { output: closed_output }] if *closed_output == output
+            ) {
+                return Err(player_platform_error(
+                    "player.audio.mixer.close",
+                    "ASTRA_PLAYER_MIXER_CLOSE_RESULT",
+                ));
+            }
+            Ok::<(), astra_platform::PlatformError>(())
+        }
+        .await;
+        self.mixer = None;
+        self.queue = None;
+        self.voice_kinds.clear();
+        match (drain_result, close_result) {
+            (Err(drain), Err(close)) => Err(player_platform_error(
+                "player.audio.mixer.shutdown",
+                format!("{drain}; close failed: {close}"),
+            )),
+            (Err(drain), Ok(())) => Err(drain),
+            (Ok(()), Err(close)) => Err(close),
+            (Ok(()), Ok(())) => Ok(()),
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn parse_audio_bool(
+    request: &astra_player::NativeVnAudioRequest,
+    key: &str,
+    default: bool,
+) -> Result<bool, astra_platform::PlatformError> {
+    match request.attributes.get(key).map(String::as_str) {
+        None => Ok(default),
+        Some("true") => Ok(true),
+        Some("false") => Ok(false),
+        Some(_) => Err(player_platform_error(
+            "player.audio.mixer.command",
+            format!(
+                "ASTRA_PLAYER_AUDIO_BOOL_INVALID: {}.{key}",
+                request.command_id
+            ),
+        )),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn parse_audio_f32(
+    request: &astra_player::NativeVnAudioRequest,
+    key: &str,
+    default: f32,
+) -> Result<f32, astra_platform::PlatformError> {
+    match request.attributes.get(key) {
+        None => Ok(default),
+        Some(value) => value.parse::<f32>().map_err(|_| {
+            player_platform_error(
+                "player.audio.mixer.command",
+                format!(
+                    "ASTRA_PLAYER_AUDIO_NUMBER_INVALID: {}.{key}",
+                    request.command_id
+                ),
+            )
+        }),
+    }
+}
+
+#[cfg(target_os = "windows")]
 async fn process_timeline_updates(
     source: &mut astra_player::NativeVnHostCommandSource,
     executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
@@ -428,6 +791,7 @@ async fn process_timeline_updates(
     now_ms: u64,
     mut completed: Vec<astra_player_core::PlayerTimelineCompletion>,
     completed_media_signals: &mut std::collections::BTreeSet<String>,
+    persistent_audio: &mut WindowsPersistentAudio,
 ) -> Result<(), astra_platform::PlatformError> {
     const MAX_DECODED_AUDIO_SAMPLES: usize = 10_000_000;
     for _ in 0..1024 {
@@ -462,21 +826,6 @@ async fn process_timeline_updates(
 
         let audio_requests = source.take_audio_requests();
         for request in audio_requests {
-            if request.command == "bgm"
-                || request
-                    .attributes
-                    .get("loop")
-                    .is_some_and(|value| value == "true")
-            {
-                return Err(astra_platform::PlatformError::new(
-                    astra_platform::PlatformErrorCode::InvalidProfile,
-                    "player.audio.playback",
-                    format!(
-                        "ASTRA_PLAYER_AUDIO_PERSISTENT_UNSUPPORTED: command {} requires a persistent mixer voice",
-                        request.command_id
-                    ),
-                ));
-            }
             let decode = source
                 .prepare_audio_decode(&request)
                 .map_err(|error| player_platform_error("player.audio.decode.prepare", error))?;
@@ -490,31 +839,23 @@ async fn process_timeline_updates(
                 MAX_DECODED_AUDIO_SAMPLES,
             )
             .map_err(|error| player_platform_error("player.audio.contract", error))?;
-            let playback = source
-                .prepare_audio_playback(&audio)
-                .map_err(|error| player_platform_error("player.audio.playback.prepare", error))?;
-            let evidence = executor
-                .execute_audio_lifecycle(playback)
-                .await
-                .map_err(|error| player_platform_error("player.audio.playback", error))?;
+            persistent_audio
+                .start(source, executor, &request, audio)
+                .await?;
             tracing::info!(
-                event = "astra.player.audio.completed",
+                event = "astra.player.audio.started",
                 command_id = %request.command_id,
                 command = %request.command,
                 asset_id = %request.asset_id,
                 encoded_hash = %request.encoded_hash,
                 decoded_hash = %decoded.hash,
-                sample_count = evidence.sample_count,
-                peak_dbfs = evidence.peak_dbfs,
-                rms_dbfs = evidence.rms_dbfs,
-                "Player completed a packaged audio resource lifecycle"
+                "Player started a packaged audio voice in the persistent mixer"
             );
-            completed_media_signals.insert(request.command_id.clone());
-            completed_media_signals.insert(format!("{}.end", request.command_id));
-            if request.command == "voice" {
-                completed_media_signals.insert("voice_end".into());
-            }
         }
+
+        persistent_audio
+            .pump(source, executor, completed_media_signals)
+            .await?;
 
         let pending_fence = source.pending_wait().map(|wait| wait.fence.clone());
         if let Some(fence) = pending_fence {

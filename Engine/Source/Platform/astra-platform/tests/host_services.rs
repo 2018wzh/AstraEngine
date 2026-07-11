@@ -1,7 +1,7 @@
 use astra_platform::{
-    host_channel, AudioOutputHandle, AudioOutputRequest, AudioPacket, CapturedFrame, HostCommand,
-    PackageSourceHandle, PackageSourceRequest, PlatformErrorCode, PlatformHostProfile,
-    SaveTransactionHandle, SurfaceHandle, SurfaceRequest, WindowHandle,
+    host_channel, AudioMeter, AudioOutputHandle, AudioOutputRequest, AudioOutputState, AudioPacket,
+    CapturedFrame, HostCommand, PackageSourceHandle, PackageSourceRequest, PlatformErrorCode,
+    PlatformHostProfile, SaveTransactionHandle, SurfaceHandle, SurfaceRequest, WindowHandle,
 };
 
 #[tokio::test]
@@ -98,6 +98,31 @@ async fn client_exposes_surface_audio_save_and_package_commands() {
     }
     submit.await.unwrap().unwrap();
 
+    let query = tokio::spawn({
+        let client = client.clone();
+        async move { client.query_audio(audio).await }
+    });
+    match backend.next_command().await.unwrap() {
+        HostCommand::QueryAudio { output, reply } => {
+            assert_eq!(output, audio);
+            reply
+                .send(Ok(AudioOutputState {
+                    queued_frames: 1,
+                    submitted_samples: 4,
+                    consumed_samples: 2,
+                    underflow_count: 0,
+                    meter: AudioMeter {
+                        sample_count: 2,
+                        peak_dbfs: -1.0,
+                        rms_dbfs: -3.0,
+                    },
+                }))
+                .unwrap();
+        }
+        other => panic!("unexpected command: {}", other.operation()),
+    }
+    assert_eq!(query.await.unwrap().unwrap().queued_frames, 1);
+
     let begin_save = tokio::spawn({
         let client = client.clone();
         async move { client.begin_save("slot-1").await }
@@ -163,4 +188,19 @@ async fn client_rejects_oversized_or_undeclared_operations_before_dispatch() {
         .await
         .unwrap_err();
     assert_eq!(error.code, PlatformErrorCode::PermissionDenied);
+}
+
+#[test]
+fn audio_drain_timeout_covers_long_form_playback_and_callback_margin() {
+    let request = AudioOutputRequest {
+        sample_rate: 48_000,
+        channels: 2,
+        max_buffered_frames: 4_096,
+    };
+
+    assert_eq!(
+        request.drain_timeout(48_000 * 2 * 30),
+        std::time::Duration::from_secs(32)
+    );
+    assert_eq!(request.drain_timeout(0), std::time::Duration::from_secs(2));
 }

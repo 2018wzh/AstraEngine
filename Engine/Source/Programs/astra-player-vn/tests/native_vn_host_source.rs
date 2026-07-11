@@ -268,6 +268,7 @@ state start #@id state.start
     assert_eq!(audio[0].codec, "mp3");
     assert_eq!(audio[0].encoded_bytes, encoded);
     assert_eq!(audio[0].encoded_hash, Hash256::from_sha256(&encoded));
+    assert_eq!(audio[0].attributes.get("asset"), Some(&audio[0].asset_id));
     let decode = source.prepare_audio_decode(&audio[0]).unwrap();
     assert!(matches!(
         decode.decode.commands.as_slice(),
@@ -285,6 +286,18 @@ state start #@id state.start
     assert!(matches!(
         playback.drain.commands.as_slice(),
         [PlayerHostCommand::DrainAudio { .. }]
+    ));
+    let (output, open) = source
+        .prepare_persistent_audio_open(48_000, 2, 8_192)
+        .unwrap();
+    assert!(matches!(
+        open.commands.as_slice(),
+        [PlayerHostCommand::OpenAudio { output: opened, max_buffered_frames: 8_192, .. }] if *opened == output
+    ));
+    let query = source.prepare_persistent_audio_query(output).unwrap();
+    assert!(matches!(
+        query.commands.as_slice(),
+        [PlayerHostCommand::QueryAudio { output: queried, .. }] if *queried == output
     ));
 }
 

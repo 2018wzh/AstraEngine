@@ -446,6 +446,10 @@ mod windows {
                             .and_then(|resource| resource.submit(packet));
                         let _ = reply.send(result);
                     }
+                    HostCommand::QueryAudio { output, reply } => {
+                        let result = self.audio_outputs.get(output).map(AudioResource::state);
+                        let _ = reply.send(result);
+                    }
                     HostCommand::DrainAudio { output, reply } => {
                         let result = self
                             .audio_outputs
@@ -1266,6 +1270,7 @@ mod windows {
         meter: Arc<CallbackMeter>,
         stream_error: Arc<AtomicBool>,
         channels: u16,
+        sample_rate: u32,
         next_sequence: u64,
         submitted_samples: u64,
     }
@@ -1345,6 +1350,7 @@ mod windows {
                 meter,
                 stream_error,
                 channels: request.channels,
+                sample_rate: request.sample_rate,
                 next_sequence: 1,
                 submitted_samples: 0,
             })
@@ -1368,7 +1374,12 @@ mod windows {
         }
 
         fn drain(&mut self) -> Result<AudioMeter, PlatformError> {
-            let deadline = Instant::now() + Duration::from_secs(2);
+            let request = AudioOutputRequest {
+                sample_rate: self.sample_rate,
+                channels: self.channels,
+                max_buffered_frames: 1,
+            };
+            let deadline = Instant::now() + request.drain_timeout(self.submitted_samples);
             loop {
                 if self.stream_error.load(Ordering::Acquire) {
                     return Err(PlatformError::new(
@@ -1386,6 +1397,21 @@ mod windows {
                 thread::sleep(Duration::from_millis(5));
             }
             Ok(self.meter.snapshot())
+        }
+
+        fn state(&self) -> astra_platform::AudioOutputState {
+            let telemetry = self.queue_telemetry.snapshot();
+            let queued_samples = self
+                .submitted_samples
+                .saturating_sub(telemetry.sample_count);
+            astra_platform::AudioOutputState {
+                queued_frames: usize::try_from(queued_samples / u64::from(self.channels))
+                    .unwrap_or(usize::MAX),
+                submitted_samples: self.submitted_samples,
+                consumed_samples: telemetry.sample_count,
+                underflow_count: telemetry.underflow_count,
+                meter: self.meter.snapshot(),
+            }
         }
     }
 

@@ -166,6 +166,25 @@ impl PlatformCommandSink {
                     .await?;
                 Ok(PlayerHostCommandResult::Unit)
             }
+            PlayerHostCommand::QueryAudio { output, .. } => {
+                let handle = lookup(&self.audio, output, "audio.query")?;
+                let state = self.client.query_audio(handle).await?;
+                Ok(PlayerHostCommandResult::AudioState {
+                    output: *output,
+                    queued_frames: u64::try_from(state.queued_frames).map_err(|_| {
+                        astra_platform::PlatformError::new(
+                            astra_platform::PlatformErrorCode::IntegrityMismatch,
+                            "audio.query",
+                            "queued frame count exceeds the player contract",
+                        )
+                    })?,
+                    submitted_samples: state.submitted_samples,
+                    consumed_samples: state.consumed_samples,
+                    underflow_count: state.underflow_count,
+                    peak_dbfs_bits: state.meter.peak_dbfs.to_bits(),
+                    rms_dbfs_bits: state.meter.rms_dbfs.to_bits(),
+                })
+            }
             PlayerHostCommand::DrainAudio { output, .. } => {
                 let handle = lookup(&self.audio, output, "audio.drain")?;
                 let meter = self.client.drain_audio(handle).await?;

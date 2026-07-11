@@ -8,6 +8,7 @@ class AstraAudioProcessor extends AudioWorkletProcessor {
     this.sampleCount = 0;
     this.sumSquares = 0;
     this.peak = 0;
+    this.underflowCount = 0;
     this.port.onmessage = ({ data }) => {
       if (data.type === "packet") {
         const frames = data.samples.length / this.channels;
@@ -25,6 +26,7 @@ class AstraAudioProcessor extends AudioWorkletProcessor {
           peak: this.peak,
           rms,
           queuedFrames: this.queuedFrames,
+          underflowCount: this.underflowCount,
         });
       }
     };
@@ -35,12 +37,17 @@ class AstraAudioProcessor extends AudioWorkletProcessor {
     const frames = output[0]?.length ?? 0;
     for (let frame = 0; frame < frames; frame += 1) {
       const packet = this.queue[0];
+      if (!packet) {
+        this.underflowCount += 1;
+      }
       for (let channel = 0; channel < output.length; channel += 1) {
         const sample = packet ? packet.samples[packet.offset + channel] ?? 0 : 0;
         output[channel][frame] = sample;
-        this.peak = Math.max(this.peak, Math.abs(sample));
-        this.sumSquares += sample * sample;
-        this.sampleCount += 1;
+        if (packet) {
+          this.peak = Math.max(this.peak, Math.abs(sample));
+          this.sumSquares += sample * sample;
+          this.sampleCount += 1;
+        }
       }
       if (packet) {
         packet.offset += this.channels;
