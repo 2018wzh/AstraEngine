@@ -93,7 +93,12 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
             slot: "slot.ffi".to_string(),
         },
     );
-    assert_eq!(save.sections.len(), 2);
+    assert_eq!(save.sections.len(), 3);
+    assert!(save
+        .sections
+        .iter()
+        .any(|section| section.section_id == "vn.runtime_world"
+            && section.schema == "astra.vn.runtime_world_snapshot.v1"));
     assert!(save
         .sections
         .iter()

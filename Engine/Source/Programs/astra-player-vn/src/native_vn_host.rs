@@ -12,8 +12,9 @@ use astra_player_core::{
 };
 use astra_plugin::{ProductRuntimeHost, RuntimeHostError, RuntimeHostSchemaRegistry};
 use astra_plugin_abi::{
-    GameRuntimeSessionId, RuntimeOpenRequest, RuntimeOutputDomain, RuntimeSectionCodec,
-    RuntimeSectionPayload, RuntimeStepInput,
+    GameRuntimeSessionId, RuntimeOpenRequest, RuntimeOutputDomain, RuntimeRestoreRequest,
+    RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload,
+    RuntimeStepInput,
 };
 use astra_vn_core::{
     CompiledStory, PresentationCommand, VnPlayerCommand, VnRunConfig, VnRuntimeState,
@@ -65,6 +66,28 @@ struct RuntimeStepTraceEvidence {
     runtime_state_hash: String,
     runtime_event_hash: String,
     runtime_presentation_hash: String,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct NativeVnPlayerSavePayload {
+    schema: String,
+    slot: String,
+    sections: RuntimeSaveSections,
+    runtime_state: VnRuntimeState,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct NativeVnPlayerSaveEnvelope {
+    schema: String,
+    payload_hash: Hash256,
+    payload: NativeVnPlayerSavePayload,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct VnRuntimeStateSaveEnvelope {
+    schema: String,
+    state_hash: astra_core::Hash128,
+    state: VnRuntimeState,
 }
 
 impl NativeVnHostCommandSource {
@@ -183,6 +206,90 @@ impl NativeVnHostCommandSource {
 
     pub fn last_step_evidence(&self) -> Option<&NativeVnStepEvidence> {
         self.last_step_evidence.as_ref()
+    }
+
+    pub fn complete_wait(
+        &mut self,
+        fence: impl Into<String>,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        self.command(VnPlayerCommand::CompleteWait {
+            fence: fence.into(),
+        })
+    }
+
+    pub fn save(&mut self, slot: impl Into<String>) -> Result<Vec<u8>, NativeVnHostError> {
+        let slot = slot.into();
+        if slot.trim().is_empty() {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_SLOT_INVALID: save slot must not be empty".into(),
+            ));
+        }
+        let runtime_state = self.runtime_state.clone().ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_STATE_MISSING: runtime has not launched".into(),
+            )
+        })?;
+        let sections = self.host.save(RuntimeSaveRequest {
+            session_id: self.session_id.clone(),
+            slot: slot.clone(),
+        })?;
+        validate_saved_runtime_state(&sections, &runtime_state)?;
+        let payload = NativeVnPlayerSavePayload {
+            schema: "astra.player.native_vn_save_payload.v1".into(),
+            slot,
+            sections,
+            runtime_state,
+        };
+        let payload_bytes = postcard::to_allocvec(&payload)
+            .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
+        postcard::to_allocvec(&NativeVnPlayerSaveEnvelope {
+            schema: "astra.player.native_vn_save.v1".into(),
+            payload_hash: Hash256::from_sha256(&payload_bytes),
+            payload,
+        })
+        .map_err(|error| NativeVnHostError::Save(error.to_string()))
+    }
+
+    pub fn restore(&mut self, bytes: &[u8]) -> Result<(), NativeVnHostError> {
+        let envelope: NativeVnPlayerSaveEnvelope =
+            postcard::from_bytes(bytes).map_err(|error| {
+                NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
+            })?;
+        if envelope.schema != "astra.player.native_vn_save.v1"
+            || envelope.payload.schema != "astra.player.native_vn_save_payload.v1"
+        {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_VERSION_UNSUPPORTED: save schema is not supported".into(),
+            ));
+        }
+        let payload_bytes = postcard::to_allocvec(&envelope.payload)
+            .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
+        if Hash256::from_sha256(&payload_bytes) != envelope.payload_hash {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_INTEGRITY: save payload hash mismatch".into(),
+            ));
+        }
+        if envelope.payload.sections.session_id != self.session_id {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_SESSION_MISMATCH: save belongs to another runtime session"
+                    .into(),
+            ));
+        }
+        validate_saved_runtime_state(&envelope.payload.sections, &envelope.payload.runtime_state)?;
+        let report = self.host.restore(RuntimeRestoreRequest {
+            session_id: self.session_id.clone(),
+            sections: envelope.payload.sections.sections,
+        })?;
+        if report.status != "restored" || !report.diagnostics.is_empty() {
+            return Err(NativeVnHostError::Save(format!(
+                "ASTRA_PLAYER_RESTORE_FAILED: status={} diagnostics={}",
+                report.status,
+                report.diagnostics.join(",")
+            )));
+        }
+        self.runtime_state = Some(envelope.payload.runtime_state);
+        self.last_step_evidence = None;
+        Ok(())
     }
 
     pub fn launch(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
@@ -685,6 +792,44 @@ fn validate_product_provider_bindings(
     Ok(())
 }
 
+fn validate_saved_runtime_state(
+    sections: &RuntimeSaveSections,
+    expected_state: &VnRuntimeState,
+) -> Result<(), NativeVnHostError> {
+    let section = sections
+        .sections
+        .iter()
+        .find(|section| section.section_id == "vn.runtime_state")
+        .ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_RUNTIME_SECTION_MISSING: vn.runtime_state is required".into(),
+            )
+        })?;
+    if section.schema != "astra.vn.runtime_state_save.v1"
+        || section.codec != RuntimeSectionCodec::Postcard
+        || Hash256::from_sha256(&section.bytes) != section.hash
+    {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_INTEGRITY: runtime section contract or hash mismatch".into(),
+        ));
+    }
+    let saved: VnRuntimeStateSaveEnvelope =
+        postcard::from_bytes(&section.bytes).map_err(|error| {
+            NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
+        })?;
+    let state_bytes = postcard::to_allocvec(&saved.state)
+        .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
+    if saved.schema != "astra.vn.runtime_state_save.v1"
+        || astra_core::Hash128::from_blake3(&state_bytes) != saved.state_hash
+        || &saved.state != expected_state
+    {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_INTEGRITY: runtime state evidence mismatch".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn read_package_json(
     package: &astra_package::PackageReader,
     section: &str,
@@ -893,4 +1038,6 @@ pub enum NativeVnHostError {
     RuntimeEvidence(String),
     #[error("provider binding failed: {0}")]
     ProviderBinding(String),
+    #[error("player save failed: {0}")]
+    Save(String),
 }

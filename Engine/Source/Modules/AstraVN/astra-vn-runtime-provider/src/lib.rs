@@ -36,6 +36,9 @@ use astra_vn_save::{
     VN_RUNTIME_STATE_SECTION_ID as VN_RUNTIME_SECTION_ID,
 };
 
+const VN_RUNTIME_WORLD_SECTION_ID: &str = "vn.runtime_world";
+const VN_RUNTIME_WORLD_SCHEMA: &str = "astra.vn.runtime_world_snapshot.v1";
+
 pub use astra_vn_core::*;
 pub use astra_vn_editor::*;
 pub use astra_vn_package::*;
@@ -615,6 +618,8 @@ impl NativeVnRuntimeProvider {
             state: policy,
         };
         let policy_payload = postcard::to_allocvec(&policy_state)?;
+        let world_snapshot = session.world.snapshot();
+        let world_payload = postcard::to_allocvec(&world_snapshot)?;
         Ok(RuntimeSaveSections {
             session_id: request.session_id,
             sections: vec![
@@ -633,6 +638,14 @@ impl NativeVnRuntimeProvider {
                     codec: RuntimeSectionCodec::Postcard,
                     hash: Hash256::from_sha256(&policy_payload),
                     bytes: policy_payload,
+                },
+                RuntimeSectionPayload {
+                    section_id: VN_RUNTIME_WORLD_SECTION_ID.to_string(),
+                    schema: VN_RUNTIME_WORLD_SCHEMA.to_string(),
+                    version: SchemaVersion::default(),
+                    codec: RuntimeSectionCodec::Postcard,
+                    hash: Hash256::from_sha256(&world_payload),
+                    bytes: world_payload,
                 },
             ],
             diagnostics: Vec::new(),
@@ -653,8 +666,14 @@ impl NativeVnRuntimeProvider {
             VN_POLICY_SECTION_ID,
             "astra.vn.policy_state_save.v1",
         )?;
+        let world_section = required_restore_section(
+            &request.sections,
+            VN_RUNTIME_WORLD_SECTION_ID,
+            VN_RUNTIME_WORLD_SCHEMA,
+        )?;
         let runtime_save: VnRuntimeStateSave = postcard::from_bytes(&runtime_section.bytes)?;
         let policy_save: VnPolicyStateSave = postcard::from_bytes(&policy_section.bytes)?;
+        let world_snapshot: RuntimeSnapshot = postcard::from_bytes(&world_section.bytes)?;
         let runtime_hash = Hash128::from_blake3(&postcard::to_allocvec(&runtime_save.state)?);
         if runtime_hash != runtime_save.state_hash {
             return Err(CoreVnError::diagnostic(
@@ -670,6 +689,37 @@ impl NativeVnRuntimeProvider {
             ));
         }
         let session = self.session_mut(&request.session_id)?;
+        let restored_runtime = world_snapshot
+            .actors
+            .component(session.vn_component)
+            .ok_or_else(|| {
+                CoreVnError::diagnostic(
+                    "ASTRA_NATIVE_VN_WORLD_COMPONENT_MISSING",
+                    "RuntimeWorld snapshot is missing the VN component",
+                )
+            })?
+            .payload
+            .decode::<VnRuntimeState>()
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let restored_policy = world_snapshot
+            .actors
+            .component(session.policy_component)
+            .ok_or_else(|| {
+                CoreVnError::diagnostic(
+                    "ASTRA_NATIVE_VN_WORLD_COMPONENT_MISSING",
+                    "RuntimeWorld snapshot is missing the policy component",
+                )
+            })?
+            .payload
+            .decode::<VnPolicyState>()
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        if restored_runtime != runtime_save.state || restored_policy != policy_save.state {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_WORLD_COMPONENT_MISMATCH",
+                "RuntimeWorld snapshot does not match VN and policy save sections",
+            ));
+        }
+        session.world.restore_snapshot(world_snapshot);
         session
             .world
             .replace_component(session.vn_component, &runtime_save.state)

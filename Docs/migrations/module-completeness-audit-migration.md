@@ -224,6 +224,8 @@
 
 **迁移要求：** 保留该检查作为 `runtime_provider.native_vn` 的最小生命周期 gate，同时新增独立的 full behavior gate：从 package/scenario 派生真实 input，覆盖 dialogue、choice、system、save/load、replay、await、audio/timeline effect 和 route terminal；该 gate 必须由 Player/host evidence 补齐，不能由 provider direct call 或 headless report 替代。
 
+**2026-07-11 修补进展：** NativeVN provider save 已增加 `vn.runtime_world`，不再只保存 VN/Policy component；恢复前交叉校验完整 `RuntimeSnapshot` 与 component sections。Player 侧已有带整体 hash 的 save envelope、tamper/session mismatch 阻断和 `complete_wait` provider 路径。真实平台 save transaction、media completion callback、多 route session 与 Windows/Web E3 evidence 尚未完成，因此 P1-011 仍保持开放。
+
 ### P2-002：容器和 VFS 的局部测试没有覆盖冲突矩阵
 
 **分类：** `SMOKE_ONLY`, `FIXTURE_ONLY`

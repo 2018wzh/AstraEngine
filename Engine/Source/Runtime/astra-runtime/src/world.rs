@@ -626,7 +626,7 @@ impl RuntimeWorld {
         Ok(report)
     }
 
-    fn restore_snapshot(&mut self, snapshot: RuntimeSnapshot) {
+    pub fn restore_snapshot(&mut self, snapshot: RuntimeSnapshot) {
         self.config = snapshot.config;
         self.package = snapshot.package;
         self.id_source = snapshot.id_source;

@@ -69,6 +69,91 @@ fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
 }
 
 #[test]
+fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
+    let mut source = NativeVnHostCommandSource::new(
+        compiled,
+        VnRunConfig::classic("zh-Hans"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+    source.launch().unwrap();
+    source.dispatch_action(PlayerAction::Advance).unwrap();
+    let saved = source.save("slot.main").unwrap();
+
+    source.dispatch_action(PlayerAction::Advance).unwrap();
+    let uninterrupted = source
+        .last_step_evidence()
+        .unwrap()
+        .vn_state_hash_after
+        .clone();
+
+    source.restore(&saved).unwrap();
+    source.dispatch_action(PlayerAction::Advance).unwrap();
+    assert_eq!(
+        source.last_step_evidence().unwrap().vn_state_hash_after,
+        uninterrupted
+    );
+}
+
+#[test]
+fn native_vn_source_rejects_tampered_save_before_restore() {
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
+    let mut source = NativeVnHostCommandSource::new(
+        compiled,
+        VnRunConfig::classic("zh-Hans"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+    source.launch().unwrap();
+    let mut saved = source.save("slot.main").unwrap();
+    let last = saved.len() - 1;
+    saved[last] ^= 0x5a;
+
+    let error = source.restore(&saved).unwrap_err();
+
+    assert!(error.to_string().contains("ASTRA_PLAYER_SAVE_INTEGRITY"));
+}
+
+#[test]
+fn native_vn_source_completes_wait_through_runtime_provider() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    wait fence:voice.end #@id wait.voice
+    text key:line.after #@id line.after
+"#;
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", story)]).unwrap();
+    let mut source = NativeVnHostCommandSource::new(
+        compiled,
+        VnRunConfig::classic("zh-Hans"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+    source.launch().unwrap();
+    let before = source
+        .last_step_evidence()
+        .unwrap()
+        .vn_state_hash_after
+        .clone();
+
+    source.complete_wait("voice.end").unwrap();
+
+    assert_ne!(
+        source.last_step_evidence().unwrap().vn_state_hash_after,
+        before
+    );
+    source.dispatch_action(PlayerAction::Advance).unwrap();
+}
+
+#[test]
 fn packaged_player_rejects_headless_presentation_binding() {
     let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
     let sections =
