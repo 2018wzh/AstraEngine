@@ -228,6 +228,8 @@
 
 NativeVN timeline task 现已通过 descriptor 声明的 `astra.vn.timeline_task.v1` effect envelope 返回 ProductRuntimeHost；此前仅写入 `RuntimeWorld.effects`、Player 不可见的 `UNWIRED_MAIN_PATH` 已消除。平台 timeline scheduler、真实 join/cancel completion 和 E3 evidence 仍未完成。
 
+Windows Player 已接入 bounded timeline scheduler：start/cancel/deadline 使用单调 host clock，重复 ID、容量溢出、非法 duration/symbol、未知 cancel 和时钟回退均 blocking；completion/cancel 保留原 fence 并经 ProductRuntimeHost `complete_wait` 回到固定 tick。Web 等价 scheduler 与正式 E3 evidence 仍未完成。
+
 ### P2-002：容器和 VFS 的局部测试没有覆盖冲突矩阵
 
 **分类：** `SMOKE_ONLY`, `FIXTURE_ONLY`

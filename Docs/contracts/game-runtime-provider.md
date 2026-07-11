@@ -52,6 +52,8 @@ pub struct RuntimeStepOutput {
 
 NativeVN 的 timeline task 通过 `RuntimeOutputDomain::Effect` 和 `astra.vn.timeline_task.v1` 返回。只把 task 写入 `RuntimeWorld` effect trace、却不放入 provider output 属于 `UNWIRED_MAIN_PATH`：Player 无法执行 join/cancel，也不能产生同 run completion evidence。Host 必须先按 descriptor/schema registry 校验该 envelope，再交给 timeline owner；completion 只能在对应 task 真正结束或取消后回到固定 tick 边界。
 
+Player timeline owner 使用 `astra.player_timeline_task.v1` 与 `astra.player_timeline_completion.v1`。Scheduler 必须限制 active task 容量、拒绝重复 task id、非法 symbol、零 duration、未知 cancel 和单调时钟回退；cancel 返回原 start task 的 fence。Windows host 用单调时钟轮询 deadline，并只在 scheduler 产出 completion 后调用 `complete_wait`。同一 provider step 返回的一组 task 要先在临时候选 scheduler 中全部验证，再整体提交，避免中途失败留下部分 active task。
+
 所有 DTO 只能携带 stable id、hash、section ref、`VfsUri`、source span、capability report 和 serde/postcard payload。Luau VM handle、legacy VM object、native renderer/audio handle、Editor widget、local root、provider secret 和商业 payload 不得跨 ABI 或进入 save/replay/report。
 
 ## Editor Metadata

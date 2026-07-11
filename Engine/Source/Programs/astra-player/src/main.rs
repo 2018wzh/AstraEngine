@@ -269,8 +269,37 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         let action_map = PlayerActionMap::standard();
         let mut pointer = (0.0_f64, 0.0_f64);
         let mut save_transaction_id = 1000_u64;
+        let timeline_clock = std::time::Instant::now();
+        let mut timeline = astra_player_core::PlayerTimelineScheduler::new(256);
+        process_timeline_updates(
+            &mut vn,
+            &mut executor,
+            &mut timeline,
+            timeline_clock.elapsed().as_millis() as u64,
+            Vec::new(),
+        )
+        .await?;
+        let mut timeline_tick = tokio::time::interval(std::time::Duration::from_millis(8));
+        timeline_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
-            let event = session.events.recv().await?;
+            let event = tokio::select! {
+                event = session.events.recv() => event?,
+                _ = timeline_tick.tick(), if timeline.active_count() > 0 => {
+                    let now_ms = timeline_clock.elapsed().as_millis() as u64;
+                    let completed = timeline
+                        .poll(now_ms)
+                        .map_err(|error| player_platform_error("player.timeline.poll", error))?;
+                    process_timeline_updates(
+                        &mut vn,
+                        &mut executor,
+                        &mut timeline,
+                        now_ms,
+                        completed,
+                    )
+                    .await?;
+                    continue;
+                }
+            };
             let player_sequence = event.sequence;
             match event.kind {
                 PlatformEventKind::WindowClosed { window: closed } if closed == window => break,
@@ -331,6 +360,14 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                             error.to_string(),
                         )
                     })?;
+                    process_timeline_updates(
+                        &mut vn,
+                        &mut executor,
+                        &mut timeline,
+                        timeline_clock.elapsed().as_millis() as u64,
+                        Vec::new(),
+                    )
+                    .await?;
                     log_consumed_vn_step(player_sequence, "keyboard", &vn)?;
                 }
                 PlatformEventKind::PointerMoved {
@@ -357,6 +394,14 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                             error.to_string(),
                         )
                     })?;
+                    process_timeline_updates(
+                        &mut vn,
+                        &mut executor,
+                        &mut timeline,
+                        timeline_clock.elapsed().as_millis() as u64,
+                        Vec::new(),
+                    )
+                    .await?;
                     log_consumed_vn_step(player_sequence, "pointer", &vn)?;
                 }
                 _ => {}
@@ -368,6 +413,60 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         Ok::<(), astra_platform::PlatformError>(())
     })?;
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+async fn process_timeline_updates(
+    source: &mut astra_player::NativeVnHostCommandSource,
+    executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
+    scheduler: &mut astra_player_core::PlayerTimelineScheduler,
+    now_ms: u64,
+    mut completed: Vec<astra_player_core::PlayerTimelineCompletion>,
+) -> Result<(), astra_platform::PlatformError> {
+    for _ in 0..1024 {
+        let tasks = source.take_timeline_tasks();
+        if !tasks.is_empty() {
+            let mut candidate = scheduler.clone();
+            let mut scheduled_completions = Vec::new();
+            for task in tasks {
+                scheduled_completions.extend(
+                    candidate.schedule(task, now_ms).map_err(|error| {
+                        player_platform_error("player.timeline.schedule", error)
+                    })?,
+                );
+            }
+            *scheduler = candidate;
+            completed.extend(scheduled_completions);
+        }
+        if completed.is_empty() {
+            return Ok(());
+        }
+        let current = std::mem::take(&mut completed);
+        for completion in current {
+            tracing::info!(
+                event = "astra.player.timeline.completed",
+                task_id = %completion.task_id,
+                target = %completion.target,
+                completion = ?completion.kind,
+                completed_at_ms = completion.completed_at_ms,
+                "Player timeline task reached a host completion boundary"
+            );
+            if let Some(fence) = completion.fence {
+                let batch = source
+                    .complete_wait(fence)
+                    .map_err(|error| player_platform_error("player.timeline.complete", error))?;
+                executor
+                    .execute_batch(batch)
+                    .await
+                    .map_err(|error| player_platform_error("player.timeline.present", error))?;
+            }
+        }
+    }
+    Err(astra_platform::PlatformError::new(
+        astra_platform::PlatformErrorCode::InvalidState,
+        "player.timeline.schedule",
+        "ASTRA_PLAYER_TIMELINE_COMPLETION_LOOP: completion chain exceeded its bound",
+    ))
 }
 
 #[cfg(target_os = "windows")]

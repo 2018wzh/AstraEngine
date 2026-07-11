@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 
 mod platform_sink;
 pub use platform_sink::*;
+mod timeline;
+pub use timeline::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]

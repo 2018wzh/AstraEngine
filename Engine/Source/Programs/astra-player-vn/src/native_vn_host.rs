@@ -8,7 +8,7 @@ use astra_media_core::{
 };
 use astra_player_core::{
     PlayerAction, PlayerHostCommand, PlayerHostCommandBatch, PlayerHostCommandError,
-    PlayerHostResourceId, PlayerSaveTransactionPlan,
+    PlayerHostResourceId, PlayerSaveTransactionPlan, PlayerTimelineTask, PlayerTimelineTaskAction,
 };
 use astra_plugin::{ProductRuntimeHost, RuntimeHostError, RuntimeHostSchemaRegistry};
 use astra_plugin_abi::{
@@ -38,6 +38,7 @@ pub struct NativeVnHostCommandSource {
     last_draw: Vec<DrawCommand>,
     last_step_evidence: Option<NativeVnStepEvidence>,
     terminal_routes: std::collections::BTreeSet<String>,
+    pending_timeline: Vec<PlayerTimelineTask>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -206,11 +207,16 @@ impl NativeVnHostCommandSource {
             last_draw: Vec::new(),
             last_step_evidence: None,
             terminal_routes,
+            pending_timeline: Vec::new(),
         })
     }
 
     pub fn last_step_evidence(&self) -> Option<&NativeVnStepEvidence> {
         self.last_step_evidence.as_ref()
+    }
+
+    pub fn take_timeline_tasks(&mut self) -> Vec<PlayerTimelineTask> {
+        std::mem::take(&mut self.pending_timeline)
     }
 
     pub fn complete_wait(
@@ -574,6 +580,19 @@ impl NativeVnHostCommandSource {
                 Default::default()
             },
         });
+        for envelope in output.outputs.iter().filter(|envelope| {
+            envelope.domain == RuntimeOutputDomain::Effect
+                && envelope.schema == "astra.vn.timeline_task.v1"
+        }) {
+            let task = envelope
+                .decode_postcard::<astra_vn_core::VnTimelineTask>(
+                    RuntimeOutputDomain::Effect,
+                    "astra.vn.timeline_task.v1",
+                    SchemaVersion::new(1, 0, 0),
+                )
+                .map_err(|error| NativeVnHostError::RuntimeEvidence(error.to_string()))?;
+            self.pending_timeline.push(player_timeline_task(task)?);
+        }
         let presentation = output
             .outputs
             .iter()
@@ -915,6 +934,44 @@ fn validate_saved_runtime_state(
         ));
     }
     Ok(())
+}
+
+fn player_timeline_task(
+    task: astra_vn_core::VnTimelineTask,
+) -> Result<PlayerTimelineTask, NativeVnHostError> {
+    let action = match task.attributes.get("action").map(String::as_str) {
+        None | Some("start") => PlayerTimelineTaskAction::Start,
+        Some("cancel") => PlayerTimelineTaskAction::Cancel,
+        Some(action) => {
+            return Err(NativeVnHostError::RuntimeEvidence(format!(
+                "ASTRA_PLAYER_TIMELINE_ACTION_UNSUPPORTED: {action}"
+            )));
+        }
+    };
+    let duration_ms = task
+        .attributes
+        .get("duration")
+        .map(|value| {
+            value.parse::<u64>().map_err(|_| {
+                NativeVnHostError::RuntimeEvidence(format!(
+                    "ASTRA_PLAYER_TIMELINE_DURATION_INVALID: {}",
+                    task.command_id
+                ))
+            })
+        })
+        .transpose()?;
+    Ok(PlayerTimelineTask {
+        schema: "astra.player_timeline_task.v1".to_string(),
+        task_id: task
+            .attributes
+            .get("id")
+            .cloned()
+            .unwrap_or(task.command_id),
+        target: task.attributes.get("target").cloned(),
+        action,
+        duration_ms,
+        fence: task.attributes.get("fence").cloned(),
+    })
 }
 
 fn read_package_json(

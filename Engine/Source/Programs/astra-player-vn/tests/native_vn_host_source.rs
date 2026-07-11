@@ -198,6 +198,34 @@ state start #@id state.start
 }
 
 #[test]
+fn native_vn_source_exposes_validated_timeline_tasks_to_player() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    timeline id:intro target:hero join:block fence:timeline.intro.complete duration:120 #@id timeline.intro
+"#;
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", story)]).unwrap();
+    let mut source = NativeVnHostCommandSource::new(
+        compiled,
+        VnRunConfig::classic("zh-Hans"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+
+    source.launch().unwrap();
+    let tasks = source.take_timeline_tasks();
+
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].task_id, "intro");
+    assert_eq!(tasks[0].target.as_deref(), Some("hero"));
+    assert_eq!(tasks[0].duration_ms, Some(120));
+    assert_eq!(tasks[0].fence.as_deref(), Some("timeline.intro.complete"));
+}
+
+#[test]
 fn packaged_player_rejects_headless_presentation_binding() {
     let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
     let sections =
