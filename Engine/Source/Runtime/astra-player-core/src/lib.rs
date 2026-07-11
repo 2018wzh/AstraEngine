@@ -450,6 +450,8 @@ pub struct PlayerInputTranscript {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visual_comparison: Option<PlayerVisualComparisonEvidence>,
     #[serde(default)]
+    pub runtime_routes: Vec<PlayerRuntimeRouteEvidence>,
+    #[serde(default)]
     pub route_coverage: Vec<String>,
 }
 
@@ -480,6 +482,25 @@ pub struct PlayerInputConsumptionEvidence {
     pub trace_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlayerRuntimeRouteEvidence {
+    pub input_sequence: u64,
+    pub player_sequence: u64,
+    pub fixed_step: u64,
+    #[serde(default)]
+    pub coverage_reached: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_state_id: Option<String>,
+    #[serde(default)]
+    pub pending_choice_ids: Vec<String>,
+    #[serde(default)]
+    pub terminal_route_ids: Vec<String>,
+    pub runtime_state_hash: String,
+    pub runtime_event_hash: String,
+    pub runtime_presentation_hash: String,
+    pub trace_hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -611,6 +632,7 @@ impl PlayerAutomationValidator {
             visual_region_check(&transcript.visual_regions),
             visual_comparison_check(transcript.visual_comparison.as_ref()),
             audio_meter_check(&transcript.audio_meter),
+            runtime_route_evidence_check(script, transcript),
             route_coverage_check(script, transcript),
         ];
         if let Some(identity) = identity {
@@ -711,7 +733,7 @@ fn schema_check(
     transcript: &PlayerInputTranscript,
 ) -> PlayerAutomationCheck {
     if script.schema == "astra.player_automation_script.v1"
-        && transcript.schema == "astra.player_input_transcript.v1"
+        && transcript.schema == "astra.player_input_transcript.v2"
         && is_safe_relative_ref(&script.scenario_ref)
     {
         pass_check(
@@ -858,6 +880,85 @@ fn input_consumption_trace_check(
                 evidence("live_input_count", live_inputs.len()),
                 evidence("missing_consumption_count", missing),
                 evidence("invalid_consumption_count", invalid),
+            ],
+        )
+    }
+}
+
+fn runtime_route_evidence_check(
+    script: &PlayerAutomationScript,
+    transcript: &PlayerInputTranscript,
+) -> PlayerAutomationCheck {
+    if transcript.runtime_routes.is_empty() {
+        return blocked_check(
+            "player.runtime_route_evidence",
+            "route coverage has no Runtime/provider evidence",
+            "ASTRA_PLAYER_RUNTIME_ROUTE_EVIDENCE_MISSING",
+        );
+    }
+    let consumed = transcript
+        .input_consumption
+        .iter()
+        .map(|item| (item.input_sequence, item.player_sequence))
+        .collect::<BTreeSet<_>>();
+    let mut actual_routes = BTreeSet::new();
+    let mut terminal_routes = BTreeSet::new();
+    let mut invalid = 0usize;
+    let mut previous_step = 0_u64;
+    for route in &transcript.runtime_routes {
+        let hashes_valid = route.runtime_state_hash.starts_with("hash128:")
+            && route.runtime_event_hash.starts_with("hash128:")
+            && route.runtime_presentation_hash.starts_with("hash128:")
+            && route.trace_hash.starts_with("sha256:");
+        let identity_valid = route.input_sequence > 0
+            && route.player_sequence > 0
+            && route.fixed_step > previous_step
+            && consumed.contains(&(route.input_sequence, route.player_sequence));
+        if !hashes_valid || !identity_valid {
+            invalid += 1;
+            continue;
+        }
+        previous_step = route.fixed_step;
+        actual_routes.extend(route.coverage_reached.iter().cloned());
+        terminal_routes.extend(route.terminal_route_ids.iter().cloned());
+    }
+    let declared_routes = transcript
+        .route_coverage
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let expected_routes = script
+        .expected_routes
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if invalid == 0
+        && !actual_routes.is_empty()
+        && !terminal_routes.is_empty()
+        && terminal_routes.is_subset(&actual_routes)
+        && actual_routes == declared_routes
+        && expected_routes.is_subset(&actual_routes)
+    {
+        pass_check(
+            "player.runtime_route_evidence",
+            "Runtime/provider traces prove route coverage",
+            vec![
+                evidence("runtime_step_count", transcript.runtime_routes.len()),
+                evidence("runtime_route_count", actual_routes.len()),
+                evidence("terminal_route_count", terminal_routes.len()),
+            ],
+        )
+    } else {
+        blocked_check_with_evidence(
+            "player.runtime_route_evidence",
+            "Runtime/provider traces do not match declared and expected routes",
+            "ASTRA_PLAYER_RUNTIME_ROUTE_EVIDENCE_INVALID",
+            vec![
+                evidence("invalid_runtime_step_count", invalid),
+                evidence("runtime_route_count", actual_routes.len()),
+                evidence("terminal_route_count", terminal_routes.len()),
+                evidence("declared_route_count", declared_routes.len()),
+                evidence("expected_route_count", expected_routes.len()),
             ],
         )
     }

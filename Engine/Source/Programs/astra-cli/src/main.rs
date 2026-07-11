@@ -1634,6 +1634,8 @@ fn build_package_from_cooked(
     );
     request.asset_vfs_manifest = asset_vfs_manifest;
     request.asset_catalog = asset_catalog;
+    request.provider_policy = product_provider_policy(&manifest.profile)?;
+    request.plugin_extension_registry = product_extension_registry()?;
     request.target_manifest = serde_json::to_vec(&package_target_manifest)?;
     request.platform_eligibility = platform_eligibility(&package_target_manifest, target)?;
     if !manifest.scenario_refs.is_empty() {
@@ -1644,6 +1646,89 @@ fn build_package_from_cooked(
     }
     request.release_summary = br#"{"schema":"astra.release_summary.v1","status":"built"}"#.to_vec();
     PackageBuilder::build(request).map_err(|err| err.to_string().into())
+}
+
+fn product_provider_policy(profile: &str) -> Result<Vec<u8>, CliError> {
+    Ok(serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.provider_policy.v1",
+        "profile": profile,
+        "renderer": "astra.renderer2d.wgpu",
+        "decode_fallback": "profile_bound",
+        "runtime_provider": {
+            "schema": "astra.product_runtime_descriptor.v1",
+            "runtime_id": "native_vn",
+            "product_kind": "visual_novel",
+            "provider_id": "astra.runtime.native_vn",
+            "supported_targets": ["game"],
+            "capabilities": ["runtime.native_vn"],
+            "package_sections": [
+                "vn.compiled_story",
+                "vn.profile_manifest",
+                "vn.policy_bundle_manifest",
+                "vn.extension_manifest",
+                "vn.standard_command_manifest",
+                "vn.presentation_provider_manifest",
+                "vn.commercial_baseline_manifest",
+                "vn.system_story_manifest",
+                "vn.system_ui_profile_manifest",
+                "vn.advanced_presentation_manifest"
+            ],
+            "release_checks": [
+                "runtime_provider.native_vn",
+                "vn.commercial_baseline",
+                "vn.system_ui_profile",
+                "vn.advanced_presentation",
+                "player.full_playable"
+            ]
+        },
+        "bindings": product_provider_bindings()
+    }))?)
+}
+
+fn product_extension_registry() -> Result<Vec<u8>, CliError> {
+    Ok(serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.plugin_extension_registry.v1",
+        "providers": [{
+            "slot": "presentation",
+            "provider_id": "astra.vn.standard_presentation",
+            "capability": "presentation.vn.standard",
+            "phase": "runtime",
+            "packaged": true
+        }, {
+            "slot": "renderer2d",
+            "provider_id": "astra.renderer2d.wgpu",
+            "capability": "renderer2d.wgpu",
+            "phase": "runtime",
+            "packaged": true
+        }, {
+            "slot": "vfs_provider",
+            "provider_id": "astra.vfs.package",
+            "capability": "vfs.backend.package",
+            "phase": "runtime",
+            "packaged": true
+        }, {
+            "slot": "game_runtime_provider",
+            "provider_id": "astra.runtime.native_vn",
+            "capability": "runtime.native_vn",
+            "phase": "runtime",
+            "packaged": true
+        }],
+        "bindings": product_provider_bindings(),
+        "conflicts": []
+    }))?)
+}
+
+fn product_provider_bindings() -> serde_json::Value {
+    serde_json::json!([{
+        "slot": "presentation",
+        "provider_id": "astra.vn.standard_presentation"
+    }, {
+        "slot": "renderer2d",
+        "provider_id": "astra.renderer2d.wgpu"
+    }, {
+        "slot": "game_runtime_provider",
+        "provider_id": "astra.runtime.native_vn"
+    }])
 }
 
 fn asset_vfs_manifest_from_cooked(

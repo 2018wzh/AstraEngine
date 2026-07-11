@@ -2,7 +2,7 @@ use astra_player::{WindowsSendInputHost, WINDOWS_SENDINPUT_KEYBOARD, WINDOWS_SEN
 use astra_player_core::{
     PlayerAudioMeterEvidence, PlayerAutomationScript, PlayerAutomationStatus, PlayerAutomationStep,
     PlayerInputConsumptionEvidence, PlayerInputEvent, PlayerInputTranscript, PlayerPlatform,
-    PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
+    PlayerRuntimeRouteEvidence, PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
 };
 
 #[test]
@@ -67,7 +67,7 @@ fn script() -> PlayerAutomationScript {
 
 fn transcript(sources: Vec<&str>) -> PlayerInputTranscript {
     PlayerInputTranscript {
-        schema: "astra.player_input_transcript.v1".to_string(),
+        schema: "astra.player_input_transcript.v2".to_string(),
         target: "tsuinosora-internal-game".to_string(),
         profile: "classic".to_string(),
         platform: PlayerPlatform::Windows,
@@ -128,6 +128,20 @@ fn transcript(sources: Vec<&str>) -> PlayerInputTranscript {
             checkpoint_count: 2,
             status: PlayerAutomationStatus::Pass,
         }),
+        runtime_routes: vec![PlayerRuntimeRouteEvidence {
+            input_sequence: 1,
+            player_sequence: 1,
+            fixed_step: 1,
+            coverage_reached: vec!["opening".to_string()],
+            current_state_id: Some("opening".to_string()),
+            pending_choice_ids: Vec::new(),
+            terminal_route_ids: vec!["opening".to_string()],
+            runtime_state_hash: "hash128:11111111111111111111111111111111".to_string(),
+            runtime_event_hash: "hash128:22222222222222222222222222222222".to_string(),
+            runtime_presentation_hash: "hash128:33333333333333333333333333333333".to_string(),
+            trace_hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                .to_string(),
+        }],
         route_coverage: vec!["opening".to_string()],
     }
 }

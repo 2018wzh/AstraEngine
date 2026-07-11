@@ -34,6 +34,37 @@ pub struct NativeVnHostCommandSource {
     height: u32,
     textures: BTreeMap<String, TextureFrame>,
     scene_draw: Vec<DrawCommand>,
+    last_step_evidence: Option<NativeVnStepEvidence>,
+    terminal_routes: std::collections::BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NativeVnStepEvidence {
+    pub schema: String,
+    pub fixed_step: u64,
+    pub coverage_reached: std::collections::BTreeSet<String>,
+    pub vn_state_hash_before: String,
+    pub vn_state_hash_after: String,
+    pub runtime_state_hash: String,
+    pub runtime_event_hash: String,
+    pub runtime_presentation_hash: String,
+    pub current_state_id: Option<String>,
+    pub pending_choice_ids: Vec<String>,
+    pub terminal_route_ids: std::collections::BTreeSet<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RuntimeStepEffectEvidence {
+    coverage_reached: std::collections::BTreeSet<String>,
+    state_hash_before_advance: String,
+    state_hash_after_advance: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RuntimeStepTraceEvidence {
+    runtime_state_hash: String,
+    runtime_event_hash: String,
+    runtime_presentation_hash: String,
 }
 
 impl NativeVnHostCommandSource {
@@ -54,6 +85,7 @@ impl NativeVnHostCommandSource {
         height: u32,
         surface: PlayerHostResourceId,
     ) -> Result<Self, NativeVnHostError> {
+        validate_product_provider_bindings(package)?;
         let compiled = decode_compiled_story(package)
             .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
         let textures = load_package_textures(package)?;
@@ -72,6 +104,13 @@ impl NativeVnHostCommandSource {
             return Err(NativeVnHostError::EmptyStory);
         }
         let package_hash = compiled.story_hash.to_string();
+        let terminal_routes = compiled
+            .route_graph
+            .nodes
+            .iter()
+            .filter(|node| node.terminal)
+            .map(|node| node.id.clone())
+            .collect();
         let compiled_bytes = postcard::to_allocvec(&compiled)
             .map_err(|err| NativeVnHostError::Serialize(err.to_string()))?;
         let compiled_section = RuntimeSectionPayload {
@@ -137,7 +176,13 @@ impl NativeVnHostCommandSource {
             height,
             textures,
             scene_draw: Vec::new(),
+            last_step_evidence: None,
+            terminal_routes,
         })
+    }
+
+    pub fn last_step_evidence(&self) -> Option<&NativeVnStepEvidence> {
+        self.last_step_evidence.as_ref()
     }
 
     pub fn launch(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
@@ -249,6 +294,42 @@ impl NativeVnHostCommandSource {
             action: action.to_string(),
             payload,
         })?;
+        let effect = output
+            .outputs
+            .iter()
+            .find(|envelope| {
+                envelope.domain == RuntimeOutputDomain::Effect
+                    && envelope.schema == "astra.vn.runtime_step_effect.v2"
+            })
+            .ok_or_else(|| {
+                NativeVnHostError::RuntimeEvidence(
+                    "ASTRA_PLAYER_VN_EFFECT_MISSING: runtime step effect is required".into(),
+                )
+            })?
+            .decode_postcard::<RuntimeStepEffectEvidence>(
+                RuntimeOutputDomain::Effect,
+                "astra.vn.runtime_step_effect.v2",
+                SchemaVersion::new(2, 0, 0),
+            )
+            .map_err(|err| NativeVnHostError::RuntimeEvidence(err.to_string()))?;
+        let runtime_trace = output
+            .outputs
+            .iter()
+            .find(|envelope| {
+                envelope.domain == RuntimeOutputDomain::Trace
+                    && envelope.schema == "astra.vn.runtime_step_trace.v1"
+            })
+            .ok_or_else(|| {
+                NativeVnHostError::RuntimeEvidence(
+                    "ASTRA_PLAYER_VN_TRACE_MISSING: runtime step trace is required".into(),
+                )
+            })?
+            .decode_postcard::<RuntimeStepTraceEvidence>(
+                RuntimeOutputDomain::Trace,
+                "astra.vn.runtime_step_trace.v1",
+                SchemaVersion::new(1, 0, 0),
+            )
+            .map_err(|err| NativeVnHostError::RuntimeEvidence(err.to_string()))?;
         for trace in output
             .outputs
             .iter()
@@ -266,6 +347,45 @@ impl NativeVnHostCommandSource {
                 );
             }
         }
+        let runtime_state = self.runtime_state.as_ref().ok_or_else(|| {
+            NativeVnHostError::RuntimeEvidence(
+                "ASTRA_PLAYER_VN_STATE_MISSING: runtime state trace is required".into(),
+            )
+        })?;
+        self.last_step_evidence = Some(NativeVnStepEvidence {
+            schema: "astra.player_vn_step_evidence.v1".to_string(),
+            fixed_step: self.fixed_step,
+            coverage_reached: effect.coverage_reached,
+            vn_state_hash_before: effect.state_hash_before_advance,
+            vn_state_hash_after: effect.state_hash_after_advance,
+            runtime_state_hash: runtime_trace.runtime_state_hash,
+            runtime_event_hash: runtime_trace.runtime_event_hash,
+            runtime_presentation_hash: runtime_trace.runtime_presentation_hash,
+            current_state_id: runtime_state
+                .cursor
+                .as_ref()
+                .map(|cursor| cursor.state_id.clone()),
+            pending_choice_ids: runtime_state
+                .pending_choice
+                .as_ref()
+                .map(|choice| {
+                    choice
+                        .options
+                        .iter()
+                        .map(|option| option.id.clone())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            terminal_route_ids: if runtime_state.cursor.is_none() {
+                runtime_state
+                    .route_coverage
+                    .intersection(&self.terminal_routes)
+                    .cloned()
+                    .collect()
+            } else {
+                Default::default()
+            },
+        });
         let presentation = output
             .outputs
             .iter()
@@ -463,6 +583,123 @@ impl NativeVnHostCommandSource {
     }
 }
 
+fn validate_product_provider_bindings(
+    package: &astra_package::PackageReader,
+) -> Result<(), NativeVnHostError> {
+    let policy = read_package_json(package, "provider.policy")?;
+    let registry = read_package_json(package, "plugin.extension_registry")?;
+    let headless_selected = policy.get("renderer").and_then(serde_json::Value::as_str)
+        == Some("headless")
+        || policy
+            .get("bindings")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|binding| {
+                binding
+                    .get("provider_id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|provider| provider.contains("headless"))
+            });
+    if headless_selected {
+        return Err(NativeVnHostError::ProviderBinding(
+            "ASTRA_PLAYER_PRESENTATION_PROVIDER_INELIGIBLE: headless presentation is not packaged Player eligible"
+                .to_string(),
+        ));
+    }
+    for (slot, provider_id, capability) in [
+        (
+            "game_runtime_provider",
+            "astra.runtime.native_vn",
+            "runtime.native_vn",
+        ),
+        (
+            "presentation",
+            "astra.vn.standard_presentation",
+            "presentation.vn.standard",
+        ),
+        ("renderer2d", "astra.renderer2d.wgpu", "renderer2d.wgpu"),
+    ] {
+        let policy_bound = policy
+            .get("bindings")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|bindings| {
+                bindings.iter().any(|binding| {
+                    binding.get("slot").and_then(serde_json::Value::as_str) == Some(slot)
+                        && binding
+                            .get("provider_id")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(provider_id)
+                })
+            });
+        let registry_bound = registry
+            .get("bindings")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|bindings| {
+                bindings.iter().any(|binding| {
+                    binding.get("slot").and_then(serde_json::Value::as_str) == Some(slot)
+                        && binding
+                            .get("provider_id")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(provider_id)
+                })
+            });
+        let registered = registry
+            .get("providers")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|providers| {
+                providers.iter().any(|provider| {
+                    provider.get("slot").and_then(serde_json::Value::as_str) == Some(slot)
+                        && provider
+                            .get("provider_id")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(provider_id)
+                        && provider
+                            .get("capability")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(capability)
+                        && provider
+                            .get("packaged")
+                            .and_then(serde_json::Value::as_bool)
+                            == Some(true)
+                })
+            });
+        if !policy_bound || !registry_bound || !registered {
+            return Err(NativeVnHostError::ProviderBinding(format!(
+                "ASTRA_PLAYER_PROVIDER_BINDING_INVALID: {slot} must bind packaged provider {provider_id}"
+            )));
+        }
+    }
+    let presentation: astra_vn_presentation::VnPresentationProviderManifest = package
+        .container()
+        .decode_postcard("vn.presentation_provider_manifest")
+        .map_err(|error| NativeVnHostError::ProviderBinding(error.to_string()))?;
+    if !presentation.validate_standard().passed
+        || presentation.renderer_provider != "astra.renderer2d.wgpu"
+    {
+        return Err(NativeVnHostError::ProviderBinding(
+            "ASTRA_PLAYER_PRESENTATION_PROVIDER_INELIGIBLE: package presentation provider is not the product wgpu path"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn read_package_json(
+    package: &astra_package::PackageReader,
+    section: &str,
+) -> Result<serde_json::Value, NativeVnHostError> {
+    let bytes = package
+        .container()
+        .read_bounded(section, 256 * 1024)
+        .map_err(|error| NativeVnHostError::ProviderBinding(error.to_string()))?;
+    serde_json::from_slice(&bytes).map_err(|error| {
+        NativeVnHostError::ProviderBinding(format!(
+            "ASTRA_PLAYER_PROVIDER_SECTION_INVALID: {section}: {error}"
+        ))
+    })
+}
+
 fn load_package_textures(
     package: &astra_package::PackageReader,
 ) -> Result<BTreeMap<String, TextureFrame>, NativeVnHostError> {
@@ -652,4 +889,8 @@ pub enum NativeVnHostError {
     Asset(String),
     #[error("player input failed: {0}")]
     Input(String),
+    #[error("runtime evidence failed: {0}")]
+    RuntimeEvidence(String),
+    #[error("provider binding failed: {0}")]
+    ProviderBinding(String),
 }

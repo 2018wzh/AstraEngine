@@ -4,7 +4,7 @@ pub use astra_player_core::{
     PlayerAutomationStatus, PlayerAutomationStep, PlayerAutomationValidator,
     PlayerHostCommandExecutor, PlayerHostResourceId, PlayerInputConsumptionEvidence,
     PlayerInputEvent, PlayerInputTranscript, PlayerPlatform, PlayerPlatformEvidenceIdentity,
-    PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
+    PlayerRuntimeRouteEvidence, PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
 };
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
@@ -103,7 +103,7 @@ impl WindowsSendInputHost {
             host_audio_meter(&request.host_conformance_report, &package_hash)?;
         let comparison = visual_comparison_evidence(&request.visual_comparison_report)?;
         let transcript = PlayerInputTranscript {
-            schema: "astra.player_input_transcript.v1".to_string(),
+            schema: "astra.player_input_transcript.v2".to_string(),
             target: bundle.target,
             profile: bundle.profile,
             platform: PlayerPlatform::Windows,
@@ -113,6 +113,7 @@ impl WindowsSendInputHost {
             visual_regions: live.visual_regions,
             audio_meter,
             visual_comparison: Some(comparison),
+            runtime_routes: live.runtime_routes,
             route_coverage: live.route_coverage,
         };
         let report = PlayerAutomationValidator.validate_with_platform_identity(
@@ -216,6 +217,7 @@ struct LiveInputRun {
     events: Vec<PlayerInputEvent>,
     input_consumption: Vec<PlayerInputConsumptionEvidence>,
     visual_regions: Vec<PlayerVisualRegionEvidence>,
+    runtime_routes: Vec<PlayerRuntimeRouteEvidence>,
     route_coverage: Vec<String>,
 }
 
@@ -335,6 +337,129 @@ fn is_safe_relative_ref(value: &str) -> bool {
             .any(|part| part.is_empty() || part == "." || part == ".." || part.ends_with(':'))
 }
 
+#[cfg(any(test, all(target_os = "windows", feature = "platform-test-driver")))]
+#[derive(Debug, Clone)]
+struct ParsedPlayerHostTrace {
+    player_sequence: u64,
+    fixed_step: u64,
+    kind: String,
+    trace_hash: String,
+    coverage_reached: Vec<String>,
+    runtime_state_hash: String,
+    runtime_event_hash: String,
+    runtime_presentation_hash: String,
+    current_state_id: Option<String>,
+    pending_choice_ids: Vec<String>,
+    terminal_route_ids: Vec<String>,
+}
+
+#[cfg(any(test, all(target_os = "windows", feature = "platform-test-driver")))]
+fn parse_player_host_traces(stderr: &str) -> Vec<ParsedPlayerHostTrace> {
+    let mut consumed = std::collections::BTreeMap::new();
+    let mut runtime = std::collections::BTreeMap::new();
+    for line in stderr.lines() {
+        if line.contains("event=astra.player.input.consumed") {
+            if let (Some(sequence), Some(kind)) = (
+                trace_token(line, "player_sequence").and_then(|value| value.parse().ok()),
+                trace_token(line, "kind"),
+            ) {
+                consumed.insert(sequence, (kind.to_string(), line));
+            }
+        } else if line.contains("event=astra.player.vn.step") {
+            let Some(sequence) =
+                trace_token(line, "player_sequence").and_then(|value| value.parse::<u64>().ok())
+            else {
+                continue;
+            };
+            let coverage = trace_token(line, "coverage")
+                .filter(|value| *value != "-")
+                .map(|value| {
+                    value
+                        .split(',')
+                        .filter(|item| !item.is_empty())
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let Some(fixed_step) =
+                trace_token(line, "fixed_step").and_then(|value| value.parse::<u64>().ok())
+            else {
+                continue;
+            };
+            let Some(state_hash) = trace_token(line, "runtime_state_hash") else {
+                continue;
+            };
+            let Some(event_hash) = trace_token(line, "runtime_event_hash") else {
+                continue;
+            };
+            let Some(presentation_hash) = trace_token(line, "runtime_presentation_hash") else {
+                continue;
+            };
+            runtime.insert(
+                sequence,
+                (
+                    coverage,
+                    fixed_step,
+                    state_hash.to_string(),
+                    event_hash.to_string(),
+                    presentation_hash.to_string(),
+                    trace_token(line, "current_state_id")
+                        .filter(|value| *value != "-")
+                        .map(str::to_string),
+                    trace_token(line, "pending_choice_ids")
+                        .filter(|value| *value != "-")
+                        .map(|value| value.split(',').map(str::to_string).collect::<Vec<_>>())
+                        .unwrap_or_default(),
+                    trace_token(line, "terminal_route_ids")
+                        .filter(|value| *value != "-")
+                        .map(|value| value.split(',').map(str::to_string).collect::<Vec<_>>())
+                        .unwrap_or_default(),
+                    line,
+                ),
+            );
+        }
+    }
+    consumed
+        .into_iter()
+        .filter_map(|(player_sequence, (kind, consumed_line))| {
+            let (
+                coverage_reached,
+                fixed_step,
+                runtime_state_hash,
+                runtime_event_hash,
+                runtime_presentation_hash,
+                current_state_id,
+                pending_choice_ids,
+                terminal_route_ids,
+                runtime_line,
+            ) = runtime.remove(&player_sequence)?;
+            Some(ParsedPlayerHostTrace {
+                player_sequence,
+                fixed_step,
+                kind,
+                trace_hash: Hash256::from_sha256(
+                    format!("{consumed_line}\n{runtime_line}").as_bytes(),
+                )
+                .to_string(),
+                coverage_reached,
+                runtime_state_hash,
+                runtime_event_hash,
+                runtime_presentation_hash,
+                current_state_id,
+                pending_choice_ids,
+                terminal_route_ids,
+            })
+        })
+        .collect()
+}
+
+#[cfg(any(test, all(target_os = "windows", feature = "platform-test-driver")))]
+fn trace_token<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let prefix = format!("{key}=");
+    line.split_whitespace()
+        .find_map(|token| token.strip_prefix(&prefix))
+}
+
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 fn windows_live_input_impl(
     bundle: &BundleContext,
@@ -348,9 +473,10 @@ fn windows_live_input_impl(
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 mod windows_live {
     use super::{
-        sha256_bytes, BundleContext, LiveInputRun, PlayerAutomationError,
-        PlayerInputConsumptionEvidence, PlayerInputEvent, PlayerVisualRegionEvidence,
-        WINDOWS_SENDINPUT_KEYBOARD, WINDOWS_SENDINPUT_MOUSE,
+        parse_player_host_traces, sha256_bytes, BundleContext, LiveInputRun, ParsedPlayerHostTrace,
+        PlayerAutomationError, PlayerInputConsumptionEvidence, PlayerInputEvent,
+        PlayerRuntimeRouteEvidence, PlayerVisualRegionEvidence, WINDOWS_SENDINPUT_KEYBOARD,
+        WINDOWS_SENDINPUT_MOUSE,
     };
     use astra_platform_windows::WindowsTestDriver;
     use std::{
@@ -416,7 +542,6 @@ mod windows_live {
                 route_id: None,
             }];
             let mut visual_regions = Vec::new();
-            let mut route_coverage = Vec::new();
             let mut previous = before;
             let routes = if expected_routes.is_empty() {
                 vec![None]
@@ -452,7 +577,7 @@ mod windows_live {
                     source: WINDOWS_SENDINPUT_KEYBOARD.to_string(),
                     kind: "key".to_string(),
                     sequence: input_sequence,
-                    route_id: route_id.clone(),
+                    route_id: None,
                 });
                 visual_regions.push(PlayerVisualRegionEvidence {
                     region_id: format!("client_full_frame.input.{}", index + 1),
@@ -461,46 +586,31 @@ mod windows_live {
                     width: previous.width.min(after.width),
                     height: previous.height.min(after.height),
                 });
-                if changed {
-                    if let Some(route_id) = route_id {
-                        route_coverage.push(route_id.clone());
-                    }
-                }
                 previous = after;
             }
             Ok(LiveInputRun {
                 events,
                 input_consumption: Vec::new(),
                 visual_regions,
-                route_coverage,
+                runtime_routes: Vec::new(),
+                route_coverage: Vec::new(),
             })
         })();
         let _ = child.kill();
         let output = child.wait_with_output()?;
         let host_stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        let consumed = parse_consumed_input_traces(&host_stderr);
+        let host_traces = parse_player_host_traces(&host_stderr);
         trace_line(
             &mut trace_lines,
             format!(
                 "level=TRACE event=astra.player.host.trace_captured consumed_count={} trace_hash={}",
-                consumed.len(),
+                host_traces.len(),
                 sha256_bytes(host_stderr.as_bytes())
             ),
         );
         let mut result = result;
         if let Ok(run) = result.as_mut() {
-            run.input_consumption = correlate_consumed_traces(&run.events, &consumed);
-            let consumed_inputs = run
-                .input_consumption
-                .iter()
-                .map(|item| item.input_sequence)
-                .collect::<std::collections::BTreeSet<_>>();
-            run.route_coverage.retain(|route| {
-                run.events.iter().any(|event| {
-                    event.route_id.as_ref() == Some(route)
-                        && consumed_inputs.contains(&event.sequence)
-                })
-            });
+            correlate_host_traces(run, &host_traces);
             trace_line(
                 &mut trace_lines,
                 format!(
@@ -525,62 +635,109 @@ mod windows_live {
         result
     }
 
-    #[derive(Debug, Clone)]
-    struct ConsumedInputTrace {
-        player_sequence: u64,
-        kind: String,
-        trace_hash: String,
-    }
-
     fn trace_line(lines: &mut Vec<String>, line: String) {
         eprintln!("{line}");
         lines.push(line);
     }
 
-    fn parse_consumed_input_traces(stderr: &str) -> Vec<ConsumedInputTrace> {
-        stderr
-            .lines()
-            .filter(|line| line.contains("event=astra.player.input.consumed"))
-            .filter_map(|line| {
-                let player_sequence = token_value(line, "player_sequence")?.parse().ok()?;
-                let kind = token_value(line, "kind")?.to_string();
-                Some(ConsumedInputTrace {
-                    player_sequence,
-                    kind,
-                    trace_hash: sha256_bytes(line.as_bytes()),
-                })
-            })
-            .collect()
-    }
-
-    fn correlate_consumed_traces(
-        events: &[PlayerInputEvent],
-        traces: &[ConsumedInputTrace],
-    ) -> Vec<PlayerInputConsumptionEvidence> {
-        events
-            .iter()
+    fn correlate_host_traces(run: &mut LiveInputRun, traces: &[ParsedPlayerHostTrace]) {
+        let input_events = run
+            .events
+            .iter_mut()
             .filter(|event| {
                 matches!(
                     event.source.as_str(),
                     WINDOWS_SENDINPUT_KEYBOARD | WINDOWS_SENDINPUT_MOUSE
                 )
             })
-            .zip(traces.iter())
-            .map(|(event, trace)| PlayerInputConsumptionEvidence {
+            .zip(traces.iter());
+        let mut route_coverage = std::collections::BTreeSet::new();
+        let mut consumption = Vec::new();
+        let mut runtime_routes = Vec::new();
+        for (event, trace) in input_events {
+            if !trace.runtime_state_hash.starts_with("hash128:")
+                || !trace.runtime_event_hash.starts_with("hash128:")
+                || !trace.runtime_presentation_hash.starts_with("hash128:")
+            {
+                continue;
+            }
+            let route_id = trace
+                .current_state_id
+                .clone()
+                .or_else(|| trace.coverage_reached.last().cloned());
+            event.route_id = route_id.clone();
+            route_coverage.extend(trace.coverage_reached.iter().cloned());
+            consumption.push(PlayerInputConsumptionEvidence {
                 input_sequence: event.sequence,
                 player_sequence: trace.player_sequence,
                 source: "player_host.trace".to_string(),
                 kind: trace.kind.clone(),
                 trace_event: "astra.player.input.consumed".to_string(),
                 trace_hash: trace.trace_hash.clone(),
-                route_id: event.route_id.clone(),
-            })
-            .collect()
+                route_id,
+            });
+            runtime_routes.push(PlayerRuntimeRouteEvidence {
+                input_sequence: event.sequence,
+                player_sequence: trace.player_sequence,
+                fixed_step: trace.fixed_step,
+                coverage_reached: trace.coverage_reached.clone(),
+                current_state_id: trace.current_state_id.clone(),
+                pending_choice_ids: trace.pending_choice_ids.clone(),
+                terminal_route_ids: trace.terminal_route_ids.clone(),
+                runtime_state_hash: trace.runtime_state_hash.clone(),
+                runtime_event_hash: trace.runtime_event_hash.clone(),
+                runtime_presentation_hash: trace.runtime_presentation_hash.clone(),
+                trace_hash: trace.trace_hash.clone(),
+            });
+        }
+        run.input_consumption = consumption;
+        run.runtime_routes = runtime_routes;
+        run.route_coverage = route_coverage.into_iter().collect();
+    }
+}
+
+#[cfg(test)]
+mod host_trace_tests {
+    use super::parse_player_host_traces;
+
+    #[test]
+    fn route_coverage_is_parsed_from_runtime_evidence_not_expected_labels() {
+        let stderr = concat!(
+            "event=astra.player.input.consumed player_sequence=17 kind=keyboard\n",
+            "event=astra.player.vn.step player_sequence=17 fixed_step=3 coverage=state.library,state.good ",
+            "runtime_state_hash=hash128:1111 runtime_event_hash=hash128:2222 ",
+            "runtime_presentation_hash=hash128:3333 current_state_id=state.library ",
+            "pending_choice_ids=choice.left,choice.right terminal_route_ids=ending.good\n",
+        );
+
+        let traces = parse_player_host_traces(stderr);
+
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].player_sequence, 17);
+        assert_eq!(traces[0].fixed_step, 3);
+        assert_eq!(traces[0].kind, "keyboard");
+        assert_eq!(
+            traces[0].coverage_reached,
+            vec!["state.library", "state.good"]
+        );
+        assert_eq!(traces[0].current_state_id.as_deref(), Some("state.library"));
+        assert_eq!(traces[0].runtime_state_hash, "hash128:1111");
+        assert_eq!(traces[0].runtime_event_hash, "hash128:2222");
+        assert_eq!(traces[0].runtime_presentation_hash, "hash128:3333");
+        assert_eq!(
+            traces[0].pending_choice_ids,
+            vec!["choice.left", "choice.right"]
+        );
+        assert_eq!(traces[0].terminal_route_ids, vec!["ending.good"]);
+        assert!(traces[0].trace_hash.starts_with("sha256:"));
     }
 
-    fn token_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
-        let prefix = format!("{key}=");
-        line.split_whitespace()
-            .find_map(|token| token.strip_prefix(&prefix))
+    #[test]
+    fn visual_change_without_runtime_route_trace_produces_no_coverage() {
+        let stderr = "event=astra.player.input.consumed player_sequence=2 kind=keyboard\n";
+
+        let traces = parse_player_host_traces(stderr);
+
+        assert!(traces.is_empty());
     }
 }

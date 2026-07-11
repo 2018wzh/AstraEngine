@@ -297,6 +297,50 @@ targets:
     assert_eq!(manifest.targets[0].kind, TargetKind::Game);
     assert!(manifest.targets[0].packaged);
 
+    let policy: serde_json::Value =
+        serde_json::from_slice(&package.container().read_section("provider.policy").unwrap())
+            .unwrap();
+    assert_eq!(policy["renderer"], "astra.renderer2d.wgpu");
+    assert_eq!(
+        policy["bindings"],
+        serde_json::json!([{
+            "slot": "presentation",
+            "provider_id": "astra.vn.standard_presentation"
+        }, {
+            "slot": "renderer2d",
+            "provider_id": "astra.renderer2d.wgpu"
+        }, {
+            "slot": "game_runtime_provider",
+            "provider_id": "astra.runtime.native_vn"
+        }])
+    );
+
+    let registry: serde_json::Value = serde_json::from_slice(
+        &package
+            .container()
+            .read_section("plugin.extension_registry")
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(registry["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|provider| {
+            provider["provider_id"] == "astra.renderer2d.wgpu"
+                && provider["capability"] == "renderer2d.wgpu"
+                && provider["packaged"] == true
+        }));
+    assert!(registry["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|provider| {
+            provider["provider_id"] == "astra.vn.standard_presentation"
+                && provider["capability"] == "presentation.vn.standard"
+                && provider["packaged"] == true
+        }));
+
     let wrong_target_output = Command::new(env!("CARGO_BIN_EXE_astra"))
         .args([
             "package",

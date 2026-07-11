@@ -2,6 +2,7 @@ use astra_core::Hash256;
 use astra_player_core::{PlayerAction, PlayerHostCommand, PlayerHostResourceId};
 use astra_player_vn::NativeVnHostCommandSource;
 use astra_vn_core::{compile_astra_sources, AstraSource, VnRunConfig};
+use astra_vn_package::package_sections_for_story;
 
 const STORY: &str = r#"
 story main #@id story.main
@@ -32,4 +33,138 @@ fn native_vn_source_turns_real_runtime_steps_into_changing_frames() {
         frame_hash(&first.commands[0]),
         frame_hash(&second.commands[0])
     );
+}
+
+#[test]
+fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
+    let mut source = NativeVnHostCommandSource::new(
+        compiled,
+        VnRunConfig::classic("zh-Hans"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+
+    source.launch().unwrap();
+    let evidence = source.last_step_evidence().expect("launch evidence");
+
+    assert_eq!(evidence.schema, "astra.player_vn_step_evidence.v1");
+    assert_eq!(evidence.fixed_step, 1);
+    assert!(evidence.coverage_reached.contains("state.start"));
+    assert!(evidence.runtime_state_hash.starts_with("hash128:"));
+    assert!(evidence.runtime_event_hash.starts_with("hash128:"));
+    assert!(evidence.runtime_presentation_hash.starts_with("hash128:"));
+    assert_eq!(evidence.current_state_id.as_deref(), Some("state.start"));
+
+    source.dispatch_action(PlayerAction::Advance).unwrap();
+    source.dispatch_action(PlayerAction::Advance).unwrap();
+    let terminal = source.last_step_evidence().expect("terminal evidence");
+    assert!(
+        !terminal.terminal_route_ids.is_empty(),
+        "terminal routes: {:?}",
+        terminal.terminal_route_ids
+    );
+}
+
+#[test]
+fn packaged_player_rejects_headless_presentation_binding() {
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
+    let sections =
+        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+    let request = astra_package::PackageBuildRequest::minimal(
+        "com.example.player-binding",
+        "classic",
+        sections,
+    );
+    let bytes = astra_package::PackageBuilder::build(request).unwrap();
+    let package = astra_package::PackageReader::open(bytes.as_bytes()).unwrap();
+
+    let error = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("zh-Hans"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .err()
+    .expect("headless presentation binding must be rejected");
+
+    assert!(error
+        .to_string()
+        .contains("ASTRA_PLAYER_PRESENTATION_PROVIDER_INELIGIBLE"));
+}
+
+#[test]
+fn packaged_player_accepts_explicit_product_provider_bindings() {
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
+    let sections =
+        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+    let mut request = astra_package::PackageBuildRequest::minimal(
+        "com.example.player-product-binding",
+        "classic",
+        sections,
+    );
+    request.provider_policy = serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.provider_policy.v1",
+        "profile": "classic",
+        "renderer": "astra.renderer2d.wgpu",
+        "bindings": [{
+            "slot": "presentation",
+            "provider_id": "astra.vn.standard_presentation"
+        }, {
+            "slot": "renderer2d",
+            "provider_id": "astra.renderer2d.wgpu"
+        }, {
+            "slot": "game_runtime_provider",
+            "provider_id": "astra.runtime.native_vn"
+        }]
+    }))
+    .unwrap();
+    request.plugin_extension_registry = serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.plugin_extension_registry.v1",
+        "providers": [{
+            "slot": "presentation",
+            "provider_id": "astra.vn.standard_presentation",
+            "capability": "presentation.vn.standard",
+            "phase": "runtime",
+            "packaged": true
+        }, {
+            "slot": "renderer2d",
+            "provider_id": "astra.renderer2d.wgpu",
+            "capability": "renderer2d.wgpu",
+            "phase": "runtime",
+            "packaged": true
+        }, {
+            "slot": "game_runtime_provider",
+            "provider_id": "astra.runtime.native_vn",
+            "capability": "runtime.native_vn",
+            "phase": "runtime",
+            "packaged": true
+        }],
+        "bindings": [{
+            "slot": "presentation",
+            "provider_id": "astra.vn.standard_presentation"
+        }, {
+            "slot": "renderer2d",
+            "provider_id": "astra.renderer2d.wgpu"
+        }, {
+            "slot": "game_runtime_provider",
+            "provider_id": "astra.runtime.native_vn"
+        }],
+        "conflicts": []
+    }))
+    .unwrap();
+    let bytes = astra_package::PackageBuilder::build(request).unwrap();
+    let package = astra_package::PackageReader::open(bytes.as_bytes()).unwrap();
+
+    NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("zh-Hans"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .expect("product-bound package should open");
 }

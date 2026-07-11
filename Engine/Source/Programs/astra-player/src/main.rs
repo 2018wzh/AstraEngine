@@ -269,6 +269,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         let mut pointer = (0.0_f64, 0.0_f64);
         loop {
             let event = session.events.recv().await?;
+            let player_sequence = event.sequence;
             match event.kind {
                 PlatformEventKind::WindowClosed { window: closed } if closed == window => break,
                 PlatformEventKind::Keyboard {
@@ -294,6 +295,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                             error.to_string(),
                         )
                     })?;
+                    log_consumed_vn_step(player_sequence, "keyboard", &vn)?;
                 }
                 PlatformEventKind::PointerMoved {
                     window: input_window,
@@ -319,6 +321,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                             error.to_string(),
                         )
                     })?;
+                    log_consumed_vn_step(player_sequence, "pointer", &vn)?;
                 }
                 _ => {}
             }
@@ -328,6 +331,67 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         session.client.shutdown().await?;
         Ok::<(), astra_platform::PlatformError>(())
     })?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn log_consumed_vn_step(
+    player_sequence: u64,
+    kind: &str,
+    source: &astra_player_vn::NativeVnHostCommandSource,
+) -> Result<(), astra_platform::PlatformError> {
+    let evidence = source.last_step_evidence().ok_or_else(|| {
+        astra_platform::PlatformError::new(
+            astra_platform::PlatformErrorCode::InvalidState,
+            "player.runtime.evidence",
+            "ASTRA_PLAYER_VN_EVIDENCE_MISSING: consumed input has no runtime evidence",
+        )
+    })?;
+    let coverage = if evidence.coverage_reached.is_empty() {
+        "-".to_string()
+    } else {
+        evidence
+            .coverage_reached
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let current_state_id = evidence.current_state_id.as_deref().unwrap_or("-");
+    let pending_choice_ids = if evidence.pending_choice_ids.is_empty() {
+        "-".to_string()
+    } else {
+        evidence.pending_choice_ids.join(",")
+    };
+    let terminal_route_ids = if evidence.terminal_route_ids.is_empty() {
+        "-".to_string()
+    } else {
+        evidence
+            .terminal_route_ids
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    tracing::info!(
+        event = "astra.player.input.consumed",
+        player_sequence,
+        kind,
+        "Player host consumed platform input"
+    );
+    tracing::info!(
+        event = "astra.player.vn.step",
+        player_sequence,
+        fixed_step = evidence.fixed_step,
+        coverage = %coverage,
+        runtime_state_hash = %evidence.runtime_state_hash,
+        runtime_event_hash = %evidence.runtime_event_hash,
+        runtime_presentation_hash = %evidence.runtime_presentation_hash,
+        current_state_id,
+        pending_choice_ids = %pending_choice_ids,
+        terminal_route_ids = %terminal_route_ids,
+        "Player host committed RuntimeWorld VN step"
+    );
     Ok(())
 }
 

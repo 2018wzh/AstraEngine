@@ -16,9 +16,11 @@ astra-player-core = { path = "../../Runtime/astra-player-core" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
 astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }
 astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
+astra-vn-presentation = { path = "../../Modules/AstraVN/astra-vn-presentation" }
 astra-vn-system = { path = "../../Modules/AstraVN/astra-vn-system" }
 image.workspace = true
 postcard.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

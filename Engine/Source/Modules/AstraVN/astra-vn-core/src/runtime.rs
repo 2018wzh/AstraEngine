@@ -259,6 +259,7 @@ impl VnRuntime {
             };
             let state_id = cursor.state_id.clone();
             let Some(command) = self.command_at_cursor(&cursor).cloned() else {
+                self.state.cursor = None;
                 return Ok(());
             };
             match command {
@@ -337,6 +338,7 @@ impl VnRuntime {
                         let story_id = self.story_for_state(&target)?;
                         self.state.cursor = Some(self.cursor_for(&story_id, &target, 0)?);
                     } else {
+                        self.state.cursor = None;
                         return Ok(());
                     }
                 }

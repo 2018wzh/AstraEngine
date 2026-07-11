@@ -844,6 +844,17 @@ impl CompileBuilder {
                 }
             }
         }
+        let states_with_outgoing_edges = edges
+            .iter()
+            .map(|edge| edge.from.as_str())
+            .collect::<BTreeSet<_>>();
+        for node in nodes.values_mut() {
+            if state_ids.contains(&node.id)
+                && !states_with_outgoing_edges.contains(node.id.as_str())
+            {
+                node.terminal = true;
+            }
+        }
         RouteGraph {
             schema: "astra.vn.route_graph.v1".to_string(),
             nodes: nodes.into_values().collect(),

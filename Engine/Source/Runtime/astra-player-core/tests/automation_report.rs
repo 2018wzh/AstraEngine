@@ -2,7 +2,7 @@ use astra_player_core::{
     PlayerAudioMeterEvidence, PlayerAutomationScript, PlayerAutomationStatus, PlayerAutomationStep,
     PlayerAutomationValidator, PlayerInputConsumptionEvidence, PlayerInputEvent,
     PlayerInputTranscript, PlayerPlatform, PlayerPlatformEvidenceIdentity,
-    PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
+    PlayerRuntimeRouteEvidence, PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
 };
 
 #[test]
@@ -105,6 +105,41 @@ fn player_automation_report_blocks_missing_consumed_trace() {
     assert!(!report.full_playable_passed());
 }
 
+#[test]
+fn player_automation_report_blocks_route_coverage_without_runtime_evidence() {
+    let script = script(PlayerPlatform::Windows);
+    let mut transcript = transcript(PlayerPlatform::Windows, "sendinput.mouse");
+    transcript.runtime_routes.clear();
+
+    let report = PlayerAutomationValidator.validate(&script, &transcript);
+
+    assert_eq!(report.status, PlayerAutomationStatus::Blocked);
+    assert!(report.checks.iter().any(|check| {
+        check.id == "player.runtime_route_evidence"
+            && check.status == PlayerAutomationStatus::Blocked
+            && check.diagnostic.as_ref().is_some_and(|diagnostic| {
+                diagnostic.code == "ASTRA_PLAYER_RUNTIME_ROUTE_EVIDENCE_MISSING"
+            })
+    }));
+}
+
+#[test]
+fn player_automation_report_blocks_route_without_terminal_signature() {
+    let script = script(PlayerPlatform::Windows);
+    let mut transcript = transcript(PlayerPlatform::Windows, "sendinput.mouse");
+    transcript.runtime_routes[0].terminal_route_ids.clear();
+
+    let report = PlayerAutomationValidator.validate(&script, &transcript);
+
+    assert!(report.checks.iter().any(|check| {
+        check.id == "player.runtime_route_evidence"
+            && check.status == PlayerAutomationStatus::Blocked
+            && check.diagnostic.as_ref().is_some_and(|diagnostic| {
+                diagnostic.code == "ASTRA_PLAYER_RUNTIME_ROUTE_EVIDENCE_INVALID"
+            })
+    }));
+}
+
 fn script(platform: PlayerPlatform) -> PlayerAutomationScript {
     let mut script = PlayerAutomationScript::new(
         "tsuinosora-internal-game",
@@ -124,7 +159,7 @@ fn script(platform: PlayerPlatform) -> PlayerAutomationScript {
 
 fn transcript(platform: PlayerPlatform, source: &str) -> PlayerInputTranscript {
     PlayerInputTranscript {
-        schema: "astra.player_input_transcript.v1".to_string(),
+        schema: "astra.player_input_transcript.v2".to_string(),
         target: "tsuinosora-internal-game".to_string(),
         profile: "classic".to_string(),
         platform,
@@ -170,6 +205,20 @@ fn transcript(platform: PlayerPlatform, source: &str) -> PlayerInputTranscript {
             checkpoint_count: 1,
             status: PlayerAutomationStatus::Pass,
         }),
+        runtime_routes: vec![PlayerRuntimeRouteEvidence {
+            input_sequence: 1,
+            player_sequence: 1,
+            fixed_step: 1,
+            coverage_reached: vec!["route.opening".to_string()],
+            current_state_id: Some("route.opening".to_string()),
+            pending_choice_ids: Vec::new(),
+            terminal_route_ids: vec!["route.opening".to_string()],
+            runtime_state_hash: "hash128:11111111111111111111111111111111".to_string(),
+            runtime_event_hash: "hash128:22222222222222222222222222222222".to_string(),
+            runtime_presentation_hash: "hash128:33333333333333333333333333333333".to_string(),
+            trace_hash: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                .to_string(),
+        }],
         route_coverage: vec!["route.opening".to_string()],
     }
 }
