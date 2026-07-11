@@ -58,6 +58,152 @@ impl PlayerDecodedAudio {
     pub fn frame_count(&self) -> usize {
         self.samples.len() / usize::from(self.channels)
     }
+
+    pub fn convert_to(
+        &self,
+        sample_rate: u32,
+        channels: u16,
+        max_output_samples: usize,
+    ) -> Result<Self, PlayerAudioContractError> {
+        use rubato::{
+            audioadapter::Adapter, audioadapter_buffers::direct::SequentialSliceOfVecs, Async,
+            FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
+            WindowFunction,
+        };
+
+        if !(8_000..=384_000).contains(&sample_rate) || !(1..=8).contains(&channels) {
+            return Err(PlayerAudioContractError::new(
+                "ASTRA_PLAYER_AUDIO_OUTPUT_FORMAT",
+                "target audio format is outside the supported range",
+            ));
+        }
+        if self.frame_count() == 0 || max_output_samples == 0 {
+            return Err(PlayerAudioContractError::new(
+                "ASTRA_PLAYER_AUDIO_CONVERSION_EMPTY",
+                "audio conversion input or output budget is empty",
+            ));
+        }
+        let planar = map_channels(self, channels)?;
+        let output_planar = if self.sample_rate == sample_rate {
+            planar
+        } else {
+            let ratio = f64::from(sample_rate) / f64::from(self.sample_rate);
+            let mut resampler = Async::<f32>::new_sinc(
+                ratio,
+                1.0,
+                &SincInterpolationParameters {
+                    sinc_len: 128,
+                    f_cutoff: Some(0.95),
+                    interpolation: SincInterpolationType::Cubic,
+                    oversampling_factor: 256,
+                    window: WindowFunction::BlackmanHarris2,
+                },
+                1_024,
+                usize::from(channels),
+                FixedAsync::Input,
+            )
+            .map_err(|error| {
+                PlayerAudioContractError::new(
+                    "ASTRA_PLAYER_AUDIO_RESAMPLER_CREATE",
+                    error.to_string(),
+                )
+            })?;
+            let input =
+                SequentialSliceOfVecs::new(&planar, usize::from(channels), self.frame_count())
+                    .map_err(|error| {
+                        PlayerAudioContractError::new(
+                            "ASTRA_PLAYER_AUDIO_RESAMPLER_INPUT",
+                            error.to_string(),
+                        )
+                    })?;
+            let output = resampler
+                .process_all(&input, self.frame_count(), None)
+                .map_err(|error| {
+                    PlayerAudioContractError::new("ASTRA_PLAYER_AUDIO_RESAMPLE", error.to_string())
+                })?;
+            let output_samples =
+                output
+                    .frames()
+                    .checked_mul(output.channels())
+                    .ok_or_else(|| {
+                        PlayerAudioContractError::new(
+                            "ASTRA_PLAYER_AUDIO_CONVERSION_OVERFLOW",
+                            "resampled output size overflowed",
+                        )
+                    })?;
+            if output_samples > max_output_samples {
+                return Err(PlayerAudioContractError::new(
+                    "ASTRA_PLAYER_AUDIO_CONVERSION_BUDGET",
+                    "resampled audio exceeds the configured sample budget",
+                ));
+            }
+            (0..output.channels())
+                .map(|channel| {
+                    (0..output.frames())
+                        .map(|frame| output.read_sample(channel, frame).unwrap_or_default())
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+        let frame_count = output_planar.first().map_or(0, Vec::len);
+        let output_samples = frame_count
+            .checked_mul(usize::from(channels))
+            .ok_or_else(|| {
+                PlayerAudioContractError::new(
+                    "ASTRA_PLAYER_AUDIO_CONVERSION_OVERFLOW",
+                    "converted output size overflowed",
+                )
+            })?;
+        if output_samples == 0 || output_samples > max_output_samples {
+            return Err(PlayerAudioContractError::new(
+                "ASTRA_PLAYER_AUDIO_CONVERSION_BUDGET",
+                "converted audio is empty or exceeds the configured sample budget",
+            ));
+        }
+        let mut samples = Vec::with_capacity(output_samples);
+        for frame in 0..frame_count {
+            for channel in &output_planar {
+                samples.push(channel[frame]);
+            }
+        }
+        Ok(Self {
+            sample_rate,
+            channels,
+            samples,
+        })
+    }
+}
+
+fn map_channels(
+    audio: &PlayerDecodedAudio,
+    target_channels: u16,
+) -> Result<Vec<Vec<f32>>, PlayerAudioContractError> {
+    let source_channels = usize::from(audio.channels);
+    let target_channels = usize::from(target_channels);
+    let frames = audio.frame_count();
+    match (source_channels, target_channels) {
+        (source, target) if source == target => Ok((0..source)
+            .map(|channel| {
+                (0..frames)
+                    .map(|frame| audio.samples[frame * source + channel])
+                    .collect()
+            })
+            .collect()),
+        (1, 2) => {
+            let mono = audio.samples.clone();
+            Ok(vec![mono.clone(), mono])
+        }
+        (2, 1) => Ok(vec![(0..frames)
+            .map(|frame| (audio.samples[frame * 2] + audio.samples[frame * 2 + 1]) * 0.5)
+            .collect()]),
+        _ => Err(PlayerAudioContractError::new(
+            "ASTRA_PLAYER_AUDIO_CHANNEL_LAYOUT_UNSUPPORTED",
+            format!(
+                "cannot convert {} channels to {target_channels} without channel layout metadata",
+                audio.channels
+            ),
+        )),
+    }
 }
 
 fn decode_s16le(bytes: &[u8], max_samples: usize) -> Result<Vec<f32>, PlayerAudioContractError> {

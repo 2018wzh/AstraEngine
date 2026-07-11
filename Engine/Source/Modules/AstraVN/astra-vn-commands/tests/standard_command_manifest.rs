@@ -58,3 +58,25 @@ state prologue #@id state.prologue
 
     assert_eq!(error.code(), "ASTRA_VN_COMMAND_UNBOUND");
 }
+
+#[test]
+fn standard_command_manifest_blocks_unknown_audio_control_action() {
+    let compiled = compile_astra_sources([AstraSource::new(
+        "commands.astra",
+        r#"
+story main #@id story.main
+state prologue #@id state.prologue
+  scene opening #@id scene.opening
+    audio action:rewind target:bgm.main #@id audio.invalid
+"#,
+    )])
+    .unwrap();
+
+    let report = VnStandardCommandManifest::standard().validate_usage(&compiled);
+
+    assert!(!report.passed);
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_VN_AUDIO_CONTROL_ACTION"));
+}

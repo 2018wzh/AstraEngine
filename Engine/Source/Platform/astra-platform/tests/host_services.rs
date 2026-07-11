@@ -1,7 +1,8 @@
 use astra_platform::{
-    host_channel, AudioMeter, AudioOutputHandle, AudioOutputRequest, AudioOutputState, AudioPacket,
-    CapturedFrame, HostCommand, PackageSourceHandle, PackageSourceRequest, PlatformErrorCode,
-    PlatformHostProfile, SaveTransactionHandle, SurfaceHandle, SurfaceRequest, WindowHandle,
+    host_channel, AudioMeter, AudioOutputFormat, AudioOutputHandle, AudioOutputRequest,
+    AudioOutputState, AudioPacket, CapturedFrame, HostCommand, PackageSourceHandle,
+    PackageSourceRequest, PlatformErrorCode, PlatformHostProfile, SaveTransactionHandle,
+    SurfaceHandle, SurfaceRequest, WindowHandle,
 };
 
 #[tokio::test]
@@ -54,6 +55,21 @@ async fn client_exposes_surface_audio_save_and_package_commands() {
         other => panic!("unexpected command: {}", other.operation()),
     }
     assert_eq!(capture.await.unwrap().unwrap().rgba8, [1, 2, 3, 255]);
+
+    let format = tokio::spawn({
+        let client = client.clone();
+        async move { client.preferred_audio_output_format().await }
+    });
+    match backend.next_command().await.unwrap() {
+        HostCommand::QueryAudioOutputFormat { reply } => reply
+            .send(Ok(AudioOutputFormat {
+                sample_rate: 48_000,
+                channels: 2,
+            }))
+            .unwrap(),
+        other => panic!("unexpected command: {}", other.operation()),
+    }
+    assert_eq!(format.await.unwrap().unwrap().sample_rate, 48_000);
 
     let open_audio = tokio::spawn({
         let client = client.clone();

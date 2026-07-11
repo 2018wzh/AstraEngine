@@ -123,6 +123,7 @@ struct PlayerAudioVoice {
     rendered_frames: u64,
     looping: bool,
     gain: f32,
+    paused: bool,
 }
 
 impl PlayerPersistentAudioMixer {
@@ -204,6 +205,7 @@ impl PlayerPersistentAudioMixer {
                 rendered_frames: 0,
                 looping: spec.looping,
                 gain: spec.gain,
+                paused: false,
             },
         );
         Ok(())
@@ -223,6 +225,40 @@ impl PlayerPersistentAudioMixer {
             voice_id: id.to_string(),
             rendered_frames: voice.rendered_frames,
         })
+    }
+
+    pub fn pause_voice(&mut self, id: &str) -> Result<(), PlayerPersistentAudioError> {
+        let voice = self.voices.get_mut(id).ok_or_else(|| {
+            PlayerPersistentAudioError::new(
+                "ASTRA_PLAYER_MIXER_VOICE_MISSING",
+                "persistent voice is not active",
+            )
+        })?;
+        if voice.paused {
+            return Err(PlayerPersistentAudioError::new(
+                "ASTRA_PLAYER_MIXER_VOICE_ALREADY_PAUSED",
+                "persistent voice is already paused",
+            ));
+        }
+        voice.paused = true;
+        Ok(())
+    }
+
+    pub fn resume_voice(&mut self, id: &str) -> Result<(), PlayerPersistentAudioError> {
+        let voice = self.voices.get_mut(id).ok_or_else(|| {
+            PlayerPersistentAudioError::new(
+                "ASTRA_PLAYER_MIXER_VOICE_MISSING",
+                "persistent voice is not active",
+            )
+        })?;
+        if !voice.paused {
+            return Err(PlayerPersistentAudioError::new(
+                "ASTRA_PLAYER_MIXER_VOICE_NOT_PAUSED",
+                "persistent voice is not paused",
+            ));
+        }
+        voice.paused = false;
+        Ok(())
     }
 
     pub fn set_bus_gain(&mut self, bus: &str, gain: f32) -> Result<(), PlayerPersistentAudioError> {
@@ -286,6 +322,9 @@ impl PlayerPersistentAudioMixer {
         for frame in 0..frames {
             self.advance_fades();
             for (id, voice) in &mut self.voices {
+                if voice.paused {
+                    continue;
+                }
                 let bus_gain = self.buses.get(&voice.bus).map_or(1.0, |bus| bus.gain);
                 let source = voice.frame_cursor * usize::from(self.channels);
                 let target = frame * usize::from(self.channels);

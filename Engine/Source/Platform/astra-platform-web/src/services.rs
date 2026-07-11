@@ -1,13 +1,26 @@
 use astra_core::Hash256;
 use astra_platform::{
-    AudioMeter, AudioOutputRequest, AudioOutputState, AudioPacket, DecodeKind, DecodeOutput,
-    PackageCachePolicy, PackageSourcePolicy, PackageSourceRequest, PlatformDecodeRequest,
-    PlatformError, PlatformErrorCode,
+    AudioMeter, AudioOutputFormat, AudioOutputRequest, AudioOutputState, AudioPacket, DecodeKind,
+    DecodeOutput, PackageCachePolicy, PackageSourcePolicy, PackageSourceRequest,
+    PlatformDecodeRequest, PlatformError, PlatformErrorCode,
 };
 use js_sys::{Function, Promise, Reflect, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Response, Url};
+
+pub(crate) async fn preferred_audio_output_format() -> Result<AudioOutputFormat, PlatformError> {
+    let context = web_sys::AudioContext::new().map_err(|_| audio_error("audio.format"))?;
+    let sample_rate = context.sample_rate() as u32;
+    let channels = context.destination().max_channel_count().clamp(1, 2) as u16;
+    JsFuture::from(context.close().map_err(|_| audio_error("audio.format"))?)
+        .await
+        .map_err(|_| audio_error("audio.format"))?;
+    Ok(AudioOutputFormat {
+        sample_rate,
+        channels,
+    })
+}
 
 pub(crate) struct WebAudioOutput {
     context: web_sys::AudioContext,
@@ -26,7 +39,18 @@ pub(crate) struct WebAudioOutput {
 impl WebAudioOutput {
     pub async fn open(request: AudioOutputRequest) -> Result<Self, PlatformError> {
         let context = web_sys::AudioContext::new().map_err(|_| audio_error("audio.open"))?;
+        if context.sample_rate() as u32 != request.sample_rate
+            || context.destination().max_channel_count() < u32::from(request.channels)
+        {
+            let _ = JsFuture::from(context.close().map_err(|_| audio_error("audio.open"))?).await;
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "audio.open",
+                "WebAudio output format changed after capability negotiation",
+            ));
+        }
         if context.state() != web_sys::AudioContextState::Running {
+            let _ = JsFuture::from(context.close().map_err(|_| audio_error("audio.open"))?).await;
             return Err(PlatformError::new(
                 PlatformErrorCode::PermissionDenied,
                 "audio.open",

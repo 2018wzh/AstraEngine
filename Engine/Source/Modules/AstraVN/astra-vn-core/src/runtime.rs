@@ -426,7 +426,7 @@ impl VnRuntime {
                 CompiledCommand::Presentation { id, command } => {
                     self.advance_cursor()?;
                     let wait = wait_state_from_presentation(&id, &command);
-                    presentation.push(command);
+                    presentation.push(bind_presentation_command_id(id, command));
                     if let Some(wait) = wait {
                         self.state.pending_wait = Some(wait);
                         return Ok(());
@@ -623,6 +623,16 @@ impl VnRuntime {
             SkipMode::All => true,
         }
     }
+}
+
+fn bind_presentation_command_id(
+    id: String,
+    mut command: PresentationCommand,
+) -> PresentationCommand {
+    if let PresentationCommand::Stage { attributes, .. } = &mut command {
+        attributes.entry("id".to_string()).or_insert(id);
+    }
+    command
 }
 
 pub fn reduce_vn_step(

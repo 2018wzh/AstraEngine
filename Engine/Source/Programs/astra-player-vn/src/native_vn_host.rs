@@ -41,7 +41,7 @@ pub struct NativeVnHostCommandSource {
     terminal_routes: std::collections::BTreeSet<String>,
     pending_timeline: Vec<PlayerTimelineTask>,
     media_assets: BTreeMap<String, PackagedMediaAsset>,
-    pending_audio: Vec<NativeVnAudioRequest>,
+    pending_audio: Vec<NativeVnAudioOutput>,
     next_media_resource_id: u64,
 }
 
@@ -61,6 +61,19 @@ pub struct NativeVnAudioRequest {
     pub codec: String,
     pub encoded_bytes: Vec<u8>,
     pub encoded_hash: Hash256,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeVnAudioControlRequest {
+    pub command_id: String,
+    pub action: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NativeVnAudioOutput {
+    Start(NativeVnAudioRequest),
+    Control(NativeVnAudioControlRequest),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -262,7 +275,7 @@ impl NativeVnHostCommandSource {
         std::mem::take(&mut self.pending_timeline)
     }
 
-    pub fn take_audio_requests(&mut self) -> Vec<NativeVnAudioRequest> {
+    pub fn take_audio_requests(&mut self) -> Vec<NativeVnAudioOutput> {
         std::mem::take(&mut self.pending_audio)
     }
 
@@ -391,6 +404,16 @@ impl NativeVnHostCommandSource {
             max_buffered_frames,
         }])?;
         Ok((output, batch))
+    }
+
+    pub fn prepare_audio_output_format_query(
+        &mut self,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::QueryAudioFormat {
+                sequence: self.next_command_sequence()?,
+            },
+        ])?)
     }
 
     pub fn prepare_persistent_audio_query(
@@ -844,6 +867,30 @@ impl NativeVnHostCommandSource {
                     SchemaVersion::new(1, 0, 0),
                 )
                 .map_err(|error| NativeVnHostError::RuntimeEvidence(error.to_string()))?;
+            if command.command == "audio" {
+                if let Some(action) = command.attributes.get("action") {
+                    if !matches!(action.as_str(), "stop" | "pause" | "resume") {
+                        return Err(NativeVnHostError::Asset(format!(
+                            "ASTRA_PLAYER_AUDIO_CONTROL_UNSUPPORTED: {}",
+                            command.command_id
+                        )));
+                    }
+                    let target = command.attributes.get("target").cloned().ok_or_else(|| {
+                        NativeVnHostError::Asset(format!(
+                            "ASTRA_PLAYER_AUDIO_CONTROL_TARGET_REQUIRED: {}",
+                            command.command_id
+                        ))
+                    })?;
+                    self.pending_audio.push(NativeVnAudioOutput::Control(
+                        NativeVnAudioControlRequest {
+                            command_id: command.command_id,
+                            action: action.clone(),
+                            target,
+                        },
+                    ));
+                    continue;
+                }
+            }
             let asset_id = command.attributes.get("asset").cloned().ok_or_else(|| {
                 NativeVnHostError::Asset(format!(
                     "ASTRA_PLAYER_AUDIO_ASSET_REQUIRED: {}",
@@ -853,15 +900,16 @@ impl NativeVnHostCommandSource {
             let asset = self.media_assets.get(&asset_id).ok_or_else(|| {
                 NativeVnHostError::Asset(format!("ASTRA_PLAYER_AUDIO_ASSET_MISSING: {asset_id}"))
             })?;
-            self.pending_audio.push(NativeVnAudioRequest {
-                command_id: command.command_id,
-                command: command.command,
-                attributes: command.attributes,
-                asset_id,
-                codec: asset.codec.clone(),
-                encoded_bytes: asset.bytes.clone(),
-                encoded_hash: asset.hash,
-            });
+            self.pending_audio
+                .push(NativeVnAudioOutput::Start(NativeVnAudioRequest {
+                    command_id: command.command_id,
+                    command: command.command,
+                    attributes: command.attributes,
+                    asset_id,
+                    codec: asset.codec.clone(),
+                    encoded_bytes: asset.bytes.clone(),
+                    encoded_hash: asset.hash,
+                }));
         }
         let presentation = output
             .outputs

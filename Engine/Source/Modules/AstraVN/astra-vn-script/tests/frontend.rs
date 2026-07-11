@@ -92,6 +92,19 @@ fn unknown_command_is_editable_but_requires_explicit_compile_binding() {
 }
 
 #[test]
+fn standard_audio_control_is_bound_without_an_extension_bypass() {
+    let source = "story main\nstate start\n  scene room\n    audio action:pause target:bgm.main #@id audio.pause\n";
+    let parsed = parse_astra_source("audio.astra", source);
+    assert!(!parsed
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_VN_UNKNOWN_COMMAND"));
+
+    let compiled = compile_astra_sources([("audio.astra", source).into()]).unwrap();
+    assert_eq!(compiled.schema, "astra.vn.compiled_story");
+}
+
+#[test]
 fn formatter_is_idempotent_and_preserves_semantics() {
     let formatted = format_astra_source("story.astra", SOURCE, FormatOptions::default()).unwrap();
     assert_eq!(

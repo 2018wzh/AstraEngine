@@ -435,6 +435,10 @@ mod windows {
                             .and_then(|resource| self.audio_outputs.insert(resource));
                         let _ = reply.send(result);
                     }
+                    HostCommand::QueryAudioOutputFormat { reply } => {
+                        let result = preferred_audio_output_format();
+                        let _ = reply.send(result);
+                    }
                     HostCommand::SubmitAudio {
                         output,
                         packet,
@@ -1273,6 +1277,27 @@ mod windows {
         sample_rate: u32,
         next_sequence: u64,
         submitted_samples: u64,
+    }
+
+    fn preferred_audio_output_format() -> Result<astra_platform::AudioOutputFormat, PlatformError> {
+        let device = cpal::default_host()
+            .default_output_device()
+            .ok_or_else(|| {
+                host_error(
+                    "audio.format",
+                    "WASAPI default output device is unavailable",
+                )
+            })?;
+        let supported = device.default_output_config().map_err(|_| {
+            host_error(
+                "audio.format",
+                "WASAPI default output config is unavailable",
+            )
+        })?;
+        Ok(astra_platform::AudioOutputFormat {
+            sample_rate: supported.sample_rate(),
+            channels: supported.channels(),
+        })
     }
 
     impl AudioResource {

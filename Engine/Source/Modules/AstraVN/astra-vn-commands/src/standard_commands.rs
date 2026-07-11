@@ -34,6 +34,11 @@ impl VnStandardCommandManifest {
                 descriptor("voice", "astra.command.voice.v1", &["asset"]),
                 descriptor("bgm", "astra.command.bgm.v1", &["asset"]),
                 descriptor("se", "astra.command.se.v1", &["asset"]),
+                descriptor(
+                    "audio",
+                    "astra.command.audio_control.v1",
+                    &["action", "target"],
+                ),
                 descriptor("stage", "astra.command.stage.v1", &[]),
                 descriptor("layer", "astra.command.layer.v1", &[]),
                 descriptor("timeline", "astra.command.timeline.v1", &[]),
@@ -73,7 +78,9 @@ impl VnStandardCommandManifest {
             .iter()
             .map(|descriptor| (descriptor.command.as_str(), descriptor))
             .collect::<BTreeMap<_, _>>();
-        for required in ["show", "hide", "camera", "movie", "voice", "bgm", "se"] {
+        for required in [
+            "show", "hide", "move", "camera", "movie", "voice", "bgm", "se", "audio",
+        ] {
             if !descriptors.contains_key(required) {
                 diagnostics.push(
                     Diagnostic::blocking(
@@ -138,6 +145,19 @@ impl VnStandardCommandManifest {
                     Diagnostic::blocking(
                         "ASTRA_VN_STANDARD_COMMAND_FALLBACK",
                         "movie end:wait requires a deterministic fallback frame",
+                    )
+                    .with_field("command_id", id),
+                );
+            }
+            if command == "audio"
+                && attributes
+                    .get("action")
+                    .is_some_and(|action| !matches!(action.as_str(), "pause" | "resume" | "stop"))
+            {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_VN_AUDIO_CONTROL_ACTION",
+                        "audio control action must be pause, resume, or stop",
                     )
                     .with_field("command_id", id),
                 );

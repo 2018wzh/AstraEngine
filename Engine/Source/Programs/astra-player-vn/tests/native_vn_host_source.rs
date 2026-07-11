@@ -1,6 +1,6 @@
 use astra_core::Hash256;
 use astra_player_core::{PlayerAction, PlayerHostCommand, PlayerHostResourceId};
-use astra_player_vn::NativeVnHostCommandSource;
+use astra_player_vn::{NativeVnAudioOutput, NativeVnHostCommandSource};
 use astra_vn_core::{compile_astra_sources, AstraSource, VnRunConfig};
 use astra_vn_package::package_sections_for_story;
 
@@ -11,6 +11,39 @@ state start #@id state.start
     text key:line.one speaker:hero #@id line.one
     text key:line.two speaker:hero #@id line.two
 "#;
+
+const AUDIO_CONTROL_STORY: &str = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    audio action:pause target:bgm.main #@id audio.pause
+    text key:line.one speaker:hero #@id line.one
+"#;
+
+#[test]
+fn native_vn_source_preserves_ordered_audio_control_without_asset_bypass() {
+    let compiled =
+        compile_astra_sources([AstraSource::new("audio.astra", AUDIO_CONTROL_STORY)]).unwrap();
+    let mut source = NativeVnHostCommandSource::new(
+        compiled,
+        VnRunConfig::classic("zh-Hans"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+
+    source.launch().unwrap();
+
+    let outputs = source.take_audio_requests();
+    assert!(matches!(
+        outputs.as_slice(),
+        [NativeVnAudioOutput::Control(control)]
+            if control.command_id == "audio.pause"
+                && control.action == "pause"
+                && control.target == "bgm.main"
+    ));
+}
 
 #[test]
 fn native_vn_source_turns_real_runtime_steps_into_changing_frames() {
@@ -264,12 +297,15 @@ state start #@id state.start
     let audio = source.take_audio_requests();
 
     assert_eq!(audio.len(), 1);
-    assert_eq!(audio[0].asset_id, "asset:/voice/hero/0001");
-    assert_eq!(audio[0].codec, "mp3");
-    assert_eq!(audio[0].encoded_bytes, encoded);
-    assert_eq!(audio[0].encoded_hash, Hash256::from_sha256(&encoded));
-    assert_eq!(audio[0].attributes.get("asset"), Some(&audio[0].asset_id));
-    let decode = source.prepare_audio_decode(&audio[0]).unwrap();
+    let NativeVnAudioOutput::Start(audio) = &audio[0] else {
+        panic!("expected packaged audio start output");
+    };
+    assert_eq!(audio.asset_id, "asset:/voice/hero/0001");
+    assert_eq!(audio.codec, "mp3");
+    assert_eq!(audio.encoded_bytes, encoded);
+    assert_eq!(audio.encoded_hash, Hash256::from_sha256(&encoded));
+    assert_eq!(audio.attributes.get("asset"), Some(&audio.asset_id));
+    let decode = source.prepare_audio_decode(audio).unwrap();
     assert!(matches!(
         decode.decode.commands.as_slice(),
         [PlayerHostCommand::Decode { codec, bytes, .. }] if codec == "mp3" && bytes == &encoded

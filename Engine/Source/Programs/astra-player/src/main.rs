@@ -453,10 +453,11 @@ struct WindowsPersistentAudio {
 
 #[cfg(target_os = "windows")]
 impl WindowsPersistentAudio {
-    const BUFFERED_FRAMES: u32 = 8_192;
-    const TARGET_QUEUED_FRAMES: usize = 4_096;
-    const MAX_RENDER_FRAMES: usize = 4_096;
+    const BUFFERED_FRAMES: u32 = 4_096;
+    const TARGET_QUEUED_FRAMES: usize = 2_048;
+    const MAX_RENDER_FRAMES: usize = 1_024;
     const MAX_VOICES: usize = 64;
+    const MAX_CONVERTED_SAMPLES: usize = 20_000_000;
 
     fn is_active(&self) -> bool {
         self.mixer
@@ -478,6 +479,36 @@ impl WindowsPersistentAudio {
             .get("bus")
             .cloned()
             .unwrap_or_else(|| request.command.clone());
+        let (output_sample_rate, output_channels) = if let Some(mixer) = &self.mixer {
+            (mixer.sample_rate(), mixer.channels())
+        } else {
+            let query = source
+                .prepare_audio_output_format_query()
+                .map_err(|error| player_platform_error("player.audio.format.prepare", error))?;
+            let result = executor
+                .execute_batch(query)
+                .await
+                .map_err(|error| player_platform_error("player.audio.format", error))?;
+            match result.as_slice() {
+                [PlayerHostCommandResult::AudioFormat {
+                    sample_rate,
+                    channels,
+                }] => (*sample_rate, *channels),
+                _ => {
+                    return Err(player_platform_error(
+                        "player.audio.format",
+                        "ASTRA_PLAYER_AUDIO_FORMAT_RESULT: platform returned an invalid preferred format",
+                    ));
+                }
+            }
+        };
+        let audio = audio
+            .convert_to(
+                output_sample_rate,
+                output_channels,
+                Self::MAX_CONVERTED_SAMPLES,
+            )
+            .map_err(|error| player_platform_error("player.audio.convert", error))?;
         if self.mixer.is_none() {
             let (output, open) = source
                 .prepare_persistent_audio_open(
@@ -680,6 +711,57 @@ impl WindowsPersistentAudio {
         Ok(())
     }
 
+    fn control(
+        &mut self,
+        request: &astra_player::NativeVnAudioControlRequest,
+        completed_signals: &mut std::collections::BTreeSet<String>,
+    ) -> Result<(), astra_platform::PlatformError> {
+        let mixer = self.mixer.as_mut().ok_or_else(|| {
+            player_platform_error("player.audio.mixer.control", "ASTRA_PLAYER_MIXER_MISSING")
+        })?;
+        match request.action.as_str() {
+            "pause" => mixer
+                .pause_voice(&request.target)
+                .map_err(|error| player_platform_error("player.audio.mixer.pause", error))?,
+            "resume" => mixer
+                .resume_voice(&request.target)
+                .map_err(|error| player_platform_error("player.audio.mixer.resume", error))?,
+            "stop" => {
+                let completion = mixer
+                    .stop_voice(&request.target)
+                    .map_err(|error| player_platform_error("player.audio.mixer.stop", error))?;
+                let kind = self.voice_kinds.remove(&request.target).ok_or_else(|| {
+                    player_platform_error(
+                        "player.audio.mixer.stop",
+                        "ASTRA_PLAYER_AUDIO_COMPLETION_OWNER_MISSING",
+                    )
+                })?;
+                completed_signals.insert(completion.voice_id.clone());
+                completed_signals.insert(format!("{}.end", completion.voice_id));
+                if kind == "voice" {
+                    completed_signals.insert("voice_end".into());
+                }
+            }
+            _ => {
+                return Err(player_platform_error(
+                    "player.audio.mixer.control",
+                    format!(
+                        "ASTRA_PLAYER_AUDIO_CONTROL_UNSUPPORTED: {}",
+                        request.command_id
+                    ),
+                ));
+            }
+        }
+        tracing::info!(
+            event = "astra.player.audio.controlled",
+            command_id = %request.command_id,
+            action = %request.action,
+            target = %request.target,
+            "Player applied a persistent audio control"
+        );
+        Ok(())
+    }
+
     async fn shutdown(
         &mut self,
         source: &mut astra_player::NativeVnHostCommandSource,
@@ -825,7 +907,14 @@ async fn process_timeline_updates(
         }
 
         let audio_requests = source.take_audio_requests();
-        for request in audio_requests {
+        for output in audio_requests {
+            let request = match output {
+                astra_player::NativeVnAudioOutput::Control(request) => {
+                    persistent_audio.control(&request, completed_media_signals)?;
+                    continue;
+                }
+                astra_player::NativeVnAudioOutput::Start(request) => request,
+            };
             let decode = source
                 .prepare_audio_decode(&request)
                 .map_err(|error| player_platform_error("player.audio.decode.prepare", error))?;

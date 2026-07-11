@@ -44,6 +44,7 @@ commands:
 | `voice` | `voice asset:voice.hero.0001 sync:text` | `AudioCommand` + voice fence | 播放 voice 并绑定文本；sync 进入 `VnWaitState::Fence` | waveform preview | voice replay、auto wait |
 | `bgm` | `bgm asset:bgm.room loop:true fade:600` | `AudioCommand` | 播放或切换 BGM bus | bus selector、loop marker | asset/license、loop point |
 | `se` | `se asset:se.door bus:se` | `AudioCommand` | 播放短音效 | bus selector、gain slider | asset/license |
+| `audio` | `audio action:pause|resume|stop target:bgm.room` | `AudioCommand` control | 对 stable command id 所有的 active voice 执行显式控制；不存在、重复 pause/resume 或未知 action 均 blocking | voice/bus picker、state indicator | target owner、ordered effect、cleanup |
 | `wait` | `wait ms:300` / `wait fence:voice_end` | `AwaitToken` | 进入 `VnWaitState::Fence` 或 timer await | fence picker | serializable token |
 | `choice` | `choice key:prologue.where` | `RuntimeEvent::ChoiceOpen` | 进入 `VnWaitState::Choice`，等待 `choice.selected` payload | option list、route graph | reachability、savepoint |
 | `system_page` | `system_page kind:save` | `SystemStoryCall` | 进入 `VnWaitState::SystemPage`，返回后恢复 cursor | system page picker | profile entry exists |

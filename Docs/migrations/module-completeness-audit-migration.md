@@ -230,7 +230,7 @@ NativeVN timeline task 现已通过 descriptor 声明的 `astra.vn.timeline_task
 
 Windows Player 已接入 bounded timeline scheduler：start/cancel/deadline 使用单调 host clock，重复 ID、容量溢出、非法 duration/symbol、未知 cancel 和时钟回退均 blocking；completion/cancel 保留原 fence 并经 ProductRuntimeHost `complete_wait` 回到固定 tick。Web 等价 scheduler 与正式 E3 evidence 仍未完成。
 
-NativeVN Player 已能从 package 的 catalog/VFS 唯一映射读取 encoded voice/audio，执行 bounded read、entry hash 和 MP3/Ogg/FLAC/WAV signature 校验；WMF `pcm_s16le` output 的截断、sample budget、sample rate、channel 和 frame alignment 也已有负向测试。Windows 产品主链现已执行 decode lifecycle，并把 voice/BGM/SE 送入持久 sample mixer；该 owner 覆盖 bounded voice/render budget、loop、bus fade、completion、queue query/backpressure、underflow blocking、时长感知 drain 和 close，`voice_end` 不再来自伪 callback。Web AudioWorklet 已补同一 queued/submitted/consumed/meter/underflow contract。Web Player 产品接线、显式 stop/pause/resume、设备恢复和同 run E3 evidence 仍未闭合，因此不能关闭真实音频缺口。
+NativeVN Player 已能从 package 的 catalog/VFS 唯一映射读取 encoded voice/audio，执行 bounded read、entry hash 和 MP3/Ogg/FLAC/WAV signature 校验；WMF `pcm_s16le` output 的截断、sample budget、sample rate、channel 和 frame alignment 也已有负向测试。Windows 产品主链现已执行 decode lifecycle，并把 voice/BGM/SE 送入持久 sample mixer；该 owner 覆盖平台 preferred format 协商、bounded sinc resampling、可证明的 mono/stereo mapping、loop、bus fade、ordered pause/resume/stop、completion、queue query/backpressure、underflow blocking、时长感知 drain 和 close，`voice_end` 不再来自伪 callback。Web AudioWorklet 已补同一 format/queued/submitted/consumed/meter/underflow contract。Web Player 产品接线、设备热切换恢复和同 run E3 evidence 仍未闭合，因此不能关闭真实音频缺口。
 
 ### P2-002：容器和 VFS 的局部测试没有覆盖冲突矩阵
 

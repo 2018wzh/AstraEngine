@@ -146,6 +146,13 @@ impl PlatformCommandSink {
                 insert_unique(&mut self.audio, *output, handle, "audio.open")?;
                 Ok(PlayerHostCommandResult::AudioOpened { output: *output })
             }
+            PlayerHostCommand::QueryAudioFormat { .. } => {
+                let format = self.client.preferred_audio_output_format().await?;
+                Ok(PlayerHostCommandResult::AudioFormat {
+                    sample_rate: format.sample_rate,
+                    channels: format.channels,
+                })
+            }
             PlayerHostCommand::SubmitAudio {
                 output,
                 packet_sequence,

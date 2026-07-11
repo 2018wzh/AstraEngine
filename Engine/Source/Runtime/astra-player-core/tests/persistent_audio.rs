@@ -25,6 +25,48 @@ fn queue_controller_primes_startup_then_blocks_new_underflow() {
 }
 
 #[test]
+fn decoded_audio_converts_mono_and_resamples_with_a_bounded_sinc_filter() {
+    let source = PlayerDecodedAudio {
+        sample_rate: 44_100,
+        channels: 1,
+        samples: (0..4_410)
+            .map(|frame| ((frame as f32 / 44_100.0) * 440.0 * std::f32::consts::TAU).sin() * 0.5)
+            .collect(),
+    };
+
+    let converted = source.convert_to(48_000, 2, 10_000).unwrap();
+
+    assert_eq!(converted.sample_rate, 48_000);
+    assert_eq!(converted.channels, 2);
+    assert_eq!(converted.frame_count(), 4_800);
+    assert!(converted.samples.iter().all(|sample| sample.is_finite()));
+    assert!(converted
+        .samples
+        .chunks_exact(2)
+        .all(|frame| (frame[0] - frame[1]).abs() < f32::EPSILON));
+}
+
+#[test]
+fn decoded_audio_rejects_unproven_surround_mapping_and_output_overflow() {
+    let surround = PlayerDecodedAudio {
+        sample_rate: 48_000,
+        channels: 6,
+        samples: vec![0.0; 60],
+    };
+    assert_eq!(
+        surround.convert_to(48_000, 2, 1_000).unwrap_err().code,
+        "ASTRA_PLAYER_AUDIO_CHANNEL_LAYOUT_UNSUPPORTED"
+    );
+    assert_eq!(
+        stereo(vec![0.0; 200])
+            .convert_to(96_000, 2, 100)
+            .unwrap_err()
+            .code,
+        "ASTRA_PLAYER_AUDIO_CONVERSION_BUDGET"
+    );
+}
+
+#[test]
 fn persistent_mixer_loops_and_clamps_real_samples() {
     let mut mixer = PlayerPersistentAudioMixer::new(48_000, 2, 4, 16).unwrap();
     mixer
@@ -103,4 +145,29 @@ fn persistent_mixer_rejects_duplicate_format_and_budget_bypasses() {
             .code(),
         "ASTRA_PLAYER_MIXER_FORMAT_MISMATCH"
     );
+}
+
+#[test]
+fn persistent_mixer_pause_resume_and_stop_preserve_cursor_and_owner() {
+    let mut mixer = PlayerPersistentAudioMixer::new(48_000, 2, 4, 16).unwrap();
+    mixer
+        .start_voice(PlayerPersistentVoiceSpec {
+            id: "bgm.main".into(),
+            bus: "bgm".into(),
+            audio: stereo(vec![0.25, 0.25, 0.5, 0.5]),
+            looping: true,
+            gain: 1.0,
+        })
+        .unwrap();
+    mixer.pause_voice("bgm.main").unwrap();
+    assert_eq!(mixer.render(2).unwrap().samples, [0.0; 4]);
+    assert_eq!(
+        mixer.pause_voice("bgm.main").unwrap_err().code(),
+        "ASTRA_PLAYER_MIXER_VOICE_ALREADY_PAUSED"
+    );
+    mixer.resume_voice("bgm.main").unwrap();
+    assert_eq!(mixer.render(1).unwrap().samples, [0.25, 0.25]);
+    let stopped = mixer.stop_voice("bgm.main").unwrap();
+    assert_eq!(stopped.rendered_frames, 1);
+    assert_eq!(mixer.active_voice_count(), 0);
 }

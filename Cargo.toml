@@ -82,6 +82,7 @@ quote = "1"
 reqwest = { version = "0.13.4", default-features = false, features = ["stream"] }
 rfd = { version = "0.17.2", default-features = false }
 rtrb = "0.3.4"
+rubato = { version = "4", default-features = false, features = ["fft_resampler"] }
 schemars = { version = "0.8", features = ["uuid1"] }
 rowan = "0.16.1"
 semver = { version = "1", features = ["serde"] }

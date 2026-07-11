@@ -1,5 +1,5 @@
 use astra_platform::{
-    host_channel, AudioMeter, AudioOutputHandle, AudioOutputState, HostCommand,
+    host_channel, AudioMeter, AudioOutputFormat, AudioOutputHandle, AudioOutputState, HostCommand,
     PlatformHostProfile, SaveTransactionHandle,
 };
 use astra_player_core::{
@@ -64,6 +64,15 @@ async fn platform_sink_exposes_bounded_audio_queue_state_without_native_handles(
     let native = AudioOutputHandle::from_parts(4, 2).unwrap();
     let backend_task = tokio::spawn(async move {
         match backend.next_command().await.unwrap() {
+            HostCommand::QueryAudioOutputFormat { reply } => reply
+                .send(Ok(AudioOutputFormat {
+                    sample_rate: 48_000,
+                    channels: 2,
+                }))
+                .unwrap(),
+            _ => panic!("unexpected command"),
+        }
+        match backend.next_command().await.unwrap() {
             HostCommand::OpenAudioOutput { reply, .. } => reply.send(Ok(native)).unwrap(),
             _ => panic!("unexpected command"),
         }
@@ -89,15 +98,16 @@ async fn platform_sink_exposes_bounded_audio_queue_state_without_native_handles(
     });
     let logical = PlayerHostResourceId(77);
     let batch = PlayerHostCommandBatch::new(vec![
+        PlayerHostCommand::QueryAudioFormat { sequence: 1 },
         PlayerHostCommand::OpenAudio {
-            sequence: 1,
+            sequence: 2,
             output: logical,
             sample_rate: 48_000,
             channels: 2,
             max_buffered_frames: 8_192,
         },
         PlayerHostCommand::QueryAudio {
-            sequence: 2,
+            sequence: 3,
             output: logical,
         },
     ])
@@ -109,6 +119,10 @@ async fn platform_sink_exposes_bounded_audio_queue_state_without_native_handles(
     assert!(matches!(
         results.as_slice(),
         [
+            PlayerHostCommandResult::AudioFormat {
+                sample_rate: 48_000,
+                channels: 2,
+            },
             PlayerHostCommandResult::AudioOpened { output },
             PlayerHostCommandResult::AudioState {
                 output: state_output,

@@ -93,6 +93,12 @@ pub struct AudioOutputRequest {
     pub max_buffered_frames: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AudioOutputFormat {
+    pub sample_rate: u32,
+    pub channels: u16,
+}
+
 impl AudioOutputRequest {
     /// Returns a drain deadline that covers the submitted playback duration plus
     /// a fixed device/callback margin. Unlike a fixed timeout, this remains
@@ -215,6 +221,9 @@ pub enum HostCommand {
         request: AudioOutputRequest,
         reply: oneshot::Sender<Result<AudioOutputHandle, PlatformError>>,
     },
+    QueryAudioOutputFormat {
+        reply: oneshot::Sender<Result<AudioOutputFormat, PlatformError>>,
+    },
     SubmitAudio {
         output: AudioOutputHandle,
         packet: AudioPacket,
@@ -295,6 +304,7 @@ impl HostCommand {
             Self::DestroySurface { .. } => "surface.destroy",
             Self::DestroyWindow { .. } => "window.destroy",
             Self::OpenAudioOutput { .. } => "audio.open",
+            Self::QueryAudioOutputFormat { .. } => "audio.format",
             Self::SubmitAudio { .. } => "audio.submit",
             Self::QueryAudio { .. } => "audio.query",
             Self::DrainAudio { .. } => "audio.drain",
@@ -353,6 +363,7 @@ impl HostCommand {
             Self::DestroySurface { reply, .. } => send_error!(reply),
             Self::DestroyWindow { reply, .. } => send_error!(reply),
             Self::OpenAudioOutput { reply, .. } => send_error!(reply),
+            Self::QueryAudioOutputFormat { reply } => send_error!(reply),
             Self::SubmitAudio { reply, .. } => send_error!(reply),
             Self::QueryAudio { reply, .. } => send_error!(reply),
             Self::DrainAudio { reply, .. } => send_error!(reply),
@@ -649,6 +660,21 @@ impl PlatformHostClient {
         let (reply, response) = oneshot::channel();
         self.try_send(HostCommand::OpenAudioOutput { request, reply })?;
         response.await.map_err(|_| queue_closed("audio.open"))?
+    }
+
+    pub async fn preferred_audio_output_format(&self) -> Result<AudioOutputFormat, PlatformError> {
+        self.ensure_running("audio.format")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::QueryAudioOutputFormat { reply })?;
+        let format = response.await.map_err(|_| queue_closed("audio.format"))??;
+        if !(8_000..=384_000).contains(&format.sample_rate) || !(1..=8).contains(&format.channels) {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "audio.format",
+                "audio provider returned an invalid preferred output format",
+            ));
+        }
+        Ok(format)
     }
 
     pub async fn submit_audio(

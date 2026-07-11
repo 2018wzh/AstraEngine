@@ -154,6 +154,9 @@ pub enum PlayerHostCommand {
         channels: u16,
         max_buffered_frames: u32,
     },
+    QueryAudioFormat {
+        sequence: u64,
+    },
     SubmitAudio {
         sequence: u64,
         output: PlayerHostResourceId,
@@ -221,6 +224,7 @@ impl PlayerHostCommand {
             | Self::AbortSave { sequence, .. }
             | Self::ReadSave { sequence, .. }
             | Self::OpenAudio { sequence, .. }
+            | Self::QueryAudioFormat { sequence }
             | Self::SubmitAudio { sequence, .. }
             | Self::QueryAudio { sequence, .. }
             | Self::DrainAudio { sequence, .. }
@@ -282,6 +286,10 @@ pub enum PlayerHostCommandResult {
     },
     AudioOpened {
         output: PlayerHostResourceId,
+    },
+    AudioFormat {
+        sample_rate: u32,
+        channels: u16,
     },
     AudioState {
         output: PlayerHostResourceId,

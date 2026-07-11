@@ -67,9 +67,9 @@ fn compile_bound_sources(
             "mutate" => builder.push_mutate(line)?,
             "system_page" => builder.push_system_page(line)?,
             "wait" => builder.push_wait(line)?,
-            "background" | "show" | "hide" | "camera" | "movie" | "voice" | "bgm" | "se"
-            | "transition" | "shake" | "stage" | "layer" | "timeline" | "task" | "effect"
-            | "fence" | "command" | "bind_setting" | "source" => {
+            "background" | "show" | "hide" | "move" | "camera" | "movie" | "voice" | "bgm"
+            | "se" | "audio" | "transition" | "shake" | "stage" | "layer" | "timeline" | "task"
+            | "effect" | "fence" | "command" | "bind_setting" | "source" => {
                 builder.push_presentation(line)?;
             }
             _ => builder.push_presentation(line)?,

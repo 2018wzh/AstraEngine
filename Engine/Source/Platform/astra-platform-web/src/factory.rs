@@ -50,7 +50,8 @@ mod browser {
     };
 
     use crate::services::{
-        commit_save, read_save, PackageBytes, SaveTransaction, WebAudioOutput, WebDecodeSession,
+        commit_save, preferred_audio_output_format, read_save, PackageBytes, SaveTransaction,
+        WebAudioOutput, WebDecodeSession,
     };
 
     pub async fn start(profile: PlatformHostProfile) -> Result<PlatformHostSession, PlatformError> {
@@ -173,6 +174,9 @@ mod browser {
                         .await
                         .and_then(|output| audio.insert(output));
                     let _ = reply.send(result);
+                }
+                HostCommand::QueryAudioOutputFormat { reply } => {
+                    let _ = reply.send(preferred_audio_output_format().await);
                 }
                 HostCommand::SubmitAudio {
                     output,
