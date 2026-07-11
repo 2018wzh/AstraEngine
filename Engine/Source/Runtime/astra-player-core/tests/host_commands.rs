@@ -1,6 +1,17 @@
 use astra_player_core::{
-    PlayerHostCommand, PlayerHostCommandBatch, PlayerHostCommandError, PlayerHostResourceId,
+    PlayerAction, PlayerActionMap, PlayerHostCommand, PlayerHostCommandBatch,
+    PlayerHostCommandError, PlayerHostResourceId,
 };
+
+#[test]
+fn standard_action_map_exposes_real_backlog_key() {
+    assert_eq!(
+        PlayerActionMap::standard().keyboard("KeyB"),
+        Some(PlayerAction::OpenSystemPage {
+            page: "backlog".to_string()
+        })
+    );
+}
 
 #[test]
 fn command_batch_requires_strictly_increasing_sequences() {

@@ -43,6 +43,12 @@ impl PlayerActionMap {
                 input: "Escape".into(),
                 action: PlayerAction::Back,
             },
+            PlayerActionBinding {
+                input: "KeyB".into(),
+                action: PlayerAction::OpenSystemPage {
+                    page: "backlog".into(),
+                },
+            },
         ];
         bindings.extend((0..9).map(|index| PlayerActionBinding {
             input: format!("Digit{}", index + 1),

@@ -6,7 +6,7 @@ pub use astra_player_core::{
     PlayerInputEvent, PlayerInputTranscript, PlayerPlatform, PlayerPlatformEvidenceIdentity,
     PlayerRuntimeRouteEvidence, PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
 };
-use std::{collections::BTreeSet, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 pub use astra_player_vn::*;
 
@@ -16,6 +16,126 @@ pub const WEB_CDP_MOUSE: &str = "cdp.mouse";
 pub const WEB_CDP_KEYBOARD: &str = "cdp.keyboard";
 
 pub type PlayerAutomationError = Box<dyn std::error::Error + Send + Sync>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ScenarioInputAction {
+    Advance,
+    Choose { option_id: String },
+    OpenSystem { page: String },
+    Back,
+}
+
+impl ScenarioInputAction {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Advance => "advance",
+            Self::Choose { .. } => "choose",
+            Self::OpenSystem { .. } => "open_system",
+            Self::Back => "back",
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PlayerScenarioDocument {
+    schema: String,
+    #[serde(default)]
+    actions: Vec<PlayerScenarioAction>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PlayerScenarioAction {
+    #[serde(default)]
+    launch: Option<serde_yaml::Value>,
+    #[serde(default)]
+    player_input: Option<PlayerScenarioInput>,
+    #[serde(default, flatten)]
+    unsupported: std::collections::BTreeMap<String, serde_yaml::Value>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PlayerScenarioInput {
+    kind: String,
+    #[serde(default)]
+    value: Option<String>,
+    #[serde(default = "one_tick")]
+    ticks: u64,
+}
+
+fn one_tick() -> u64 {
+    1
+}
+
+fn parse_scenario_input_plan(bytes: &[u8]) -> Result<Vec<ScenarioInputAction>, String> {
+    let scenario: PlayerScenarioDocument = serde_yaml::from_slice(bytes)
+        .map_err(|error| format!("ASTRA_PLAYER_SCENARIO_INVALID: {error}"))?;
+    if scenario.schema != "astra.scenario.v1" {
+        return Err(format!(
+            "ASTRA_PLAYER_SCENARIO_VERSION_UNSUPPORTED: {}",
+            scenario.schema
+        ));
+    }
+    let mut plan = Vec::new();
+    for (index, action) in scenario.actions.into_iter().enumerate() {
+        if !action.unsupported.is_empty() {
+            return Err(format!(
+                "ASTRA_PLAYER_SCENARIO_ACTION_UNSUPPORTED: action {index} contains {}",
+                action
+                    .unsupported
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+        if action.launch.is_some() {
+            if action.player_input.is_some() {
+                return Err(format!(
+                    "ASTRA_PLAYER_SCENARIO_ACTION_AMBIGUOUS: action {index} declares launch and player_input"
+                ));
+            }
+            continue;
+        }
+        let input = action.player_input.ok_or_else(|| {
+            format!("ASTRA_PLAYER_SCENARIO_ACTION_EMPTY: action {index} has no supported action")
+        })?;
+        match input.kind.as_str() {
+            "advance" => {
+                if input.ticks == 0 {
+                    return Err(format!(
+                        "ASTRA_PLAYER_SCENARIO_TICKS_INVALID: action {index} has zero ticks"
+                    ));
+                }
+                plan.extend((0..input.ticks).map(|_| ScenarioInputAction::Advance));
+            }
+            "choose" => plan.push(ScenarioInputAction::Choose {
+                option_id: input.value.ok_or_else(|| {
+                    format!("ASTRA_PLAYER_SCENARIO_VALUE_REQUIRED: choose action {index}")
+                })?,
+            }),
+            "open_system" => plan.push(ScenarioInputAction::OpenSystem {
+                page: input.value.ok_or_else(|| {
+                    format!("ASTRA_PLAYER_SCENARIO_VALUE_REQUIRED: open_system action {index}")
+                })?,
+            }),
+            "back" => plan.push(ScenarioInputAction::Back),
+            "complete_wait" => {
+                return Err(format!(
+                    "ASTRA_PLAYER_AUTOMATION_MEDIA_COMPLETION_REQUIRED: action {index} must be completed by the live media provider"
+                ));
+            }
+            other => {
+                return Err(format!(
+                    "ASTRA_PLAYER_SCENARIO_INPUT_UNSUPPORTED: action {index} uses {other}"
+                ));
+            }
+        }
+    }
+    if plan.is_empty() {
+        return Err("ASTRA_PLAYER_SCENARIO_INPUT_EMPTY: scenario has no host input actions".into());
+    }
+    Ok(plan)
+}
 
 #[derive(Debug, Clone)]
 pub struct WindowsLiveAutomationRequest {
@@ -62,20 +182,15 @@ impl WindowsSendInputHost {
             return Err("bundle package hash does not match bundle manifest".into());
         }
 
-        let expected_routes = bundle.expected_route_ids()?;
-        let scenario_ref = bundle
-            .scenario_refs
-            .iter()
-            .find(|item| item.contains(".windows."))
-            .or_else(|| bundle.scenario_refs.first())
-            .cloned()
-            .unwrap_or_else(|| "scenario.refs/windows-live.json".to_string());
+        let scenario = bundle.automation_scenario()?;
+        let host_inputs = bundle.resolve_host_inputs(&scenario.inputs)?;
+        let expected_routes = vec![scenario.route_id.clone()];
         let mut script = PlayerAutomationScript::new(
             &bundle.target,
             &bundle.profile,
             PlayerPlatform::Windows,
             package_hash.clone(),
-            scenario_ref,
+            scenario.scenario_ref.clone(),
         );
         script.expected_routes = expected_routes.clone();
         script.steps = vec![PlayerAutomationStep {
@@ -85,11 +200,12 @@ impl WindowsSendInputHost {
         }];
         script
             .steps
-            .extend(expected_routes.iter().enumerate().map(|(index, route)| {
+            .extend(scenario.inputs.iter().enumerate().map(|(index, input)| {
                 PlayerAutomationStep {
-                    id: format!("input.advance.{}", index + 1),
-                    action: "sendinput.advance".to_string(),
-                    expected_route_id: Some(route.clone()),
+                    id: format!("input.{}.{}", input.kind(), index + 1),
+                    action: format!("sendinput.{}", input.kind()),
+                    expected_route_id: (index + 1 == scenario.inputs.len())
+                        .then(|| scenario.route_id.clone()),
                 }
             }));
 
@@ -97,7 +213,7 @@ impl WindowsSendInputHost {
             &bundle,
             request.timeout_ms,
             request.trace_log.as_ref(),
-            &expected_routes,
+            &host_inputs,
         )?;
         let (audio_meter, platform_identity) =
             host_audio_meter(&request.host_conformance_report, &package_hash)?;
@@ -159,6 +275,19 @@ struct BundleContext {
     scenario_refs: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+struct BundleAutomationScenario {
+    scenario_ref: String,
+    route_id: String,
+    inputs: Vec<ScenarioInputAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ScenarioHostInput {
+    kind: &'static str,
+    virtual_key: u16,
+}
+
 impl BundleContext {
     fn read(bundle_dir: PathBuf) -> Result<Self, PlayerAutomationError> {
         let manifest_path = bundle_dir.join("bundle_manifest.json");
@@ -193,22 +322,96 @@ impl BundleContext {
         })
     }
 
-    fn expected_route_ids(&self) -> Result<Vec<String>, PlayerAutomationError> {
-        let mut routes = BTreeSet::new();
-        for scenario_ref in &self.scenario_refs {
-            if !scenario_ref.contains(".windows.") {
-                continue;
-            }
-            let scenario_path = self.bundle_dir.join(scenario_ref);
-            let scenario: serde_json::Value = serde_json::from_slice(&fs::read(scenario_path)?)?;
-            if let Some(route) = scenario
-                .get("generated_route_id")
-                .and_then(serde_json::Value::as_str)
-            {
-                routes.insert(route.to_string());
+    fn automation_scenario(&self) -> Result<BundleAutomationScenario, PlayerAutomationError> {
+        let refs = self
+            .scenario_refs
+            .iter()
+            .filter(|scenario_ref| {
+                let platform_marker = format!(".{}.", self.platform);
+                scenario_ref.contains(&platform_marker) || self.scenario_refs.len() == 1
+            })
+            .collect::<Vec<_>>();
+        if refs.len() != 1 {
+            return Err(format!(
+                "ASTRA_PLAYER_AUTOMATION_SCENARIO_COUNT: expected exactly one {} scenario, found {}",
+                self.platform,
+                refs.len()
+            )
+            .into());
+        }
+        let scenario_ref = refs[0];
+        let bytes = fs::read(self.bundle_dir.join(scenario_ref))?;
+        let value: serde_yaml::Value = serde_yaml::from_slice(&bytes)?;
+        let route_id = value
+            .get("generated_route_id")
+            .and_then(serde_yaml::Value::as_str)
+            .ok_or("ASTRA_PLAYER_AUTOMATION_ROUTE_MISSING: scenario has no generated_route_id")?
+            .to_string();
+        Ok(BundleAutomationScenario {
+            scenario_ref: scenario_ref.clone(),
+            route_id,
+            inputs: parse_scenario_input_plan(&bytes)
+                .map_err(|error| -> PlayerAutomationError { error.into() })?,
+        })
+    }
+
+    fn resolve_host_inputs(
+        &self,
+        inputs: &[ScenarioInputAction],
+    ) -> Result<Vec<ScenarioHostInput>, PlayerAutomationError> {
+        let package_bytes = fs::read(&self.package_path)?;
+        let package = astra_package::PackageReader::open(&package_bytes)?;
+        let compiled = astra_vn_package::decode_compiled_story(&package)?;
+        let mut option_indexes = std::collections::BTreeMap::new();
+        for state in compiled.states.values() {
+            for scene in &state.scenes {
+                for command in &scene.commands {
+                    if let astra_vn_core::CompiledCommand::Choice { options, .. } = command {
+                        for (index, option) in options.iter().enumerate() {
+                            if option_indexes.insert(option.id.clone(), index).is_some() {
+                                return Err(format!(
+                                    "ASTRA_PLAYER_CHOICE_ID_DUPLICATE: {}",
+                                    option.id
+                                )
+                                .into());
+                            }
+                        }
+                    }
+                }
             }
         }
-        Ok(routes.into_iter().collect())
+        inputs
+            .iter()
+            .map(|input| {
+                let virtual_key = match input {
+                    ScenarioInputAction::Advance => 0x20,
+                    ScenarioInputAction::Choose { option_id } => {
+                        let index = option_indexes.get(option_id).ok_or_else(|| {
+                            format!("ASTRA_PLAYER_CHOICE_ID_UNKNOWN: {option_id}")
+                        })?;
+                        if *index >= 9 {
+                            return Err(format!(
+                                "ASTRA_PLAYER_CHOICE_KEY_UNAVAILABLE: {option_id} uses index {index}"
+                            )
+                            .into());
+                        }
+                        0x31 + *index as u16
+                    }
+                    ScenarioInputAction::OpenSystem { page } if page == "backlog" => 0x42,
+                    ScenarioInputAction::OpenSystem { page } => {
+                        return Err(format!(
+                            "ASTRA_PLAYER_SYSTEM_KEY_UNAVAILABLE: no physical binding for {page}"
+                        )
+                        .into());
+                    }
+                    ScenarioInputAction::Back => 0x1B,
+                };
+                Ok(ScenarioHostInput {
+                    kind: input.kind(),
+                    virtual_key,
+                })
+            })
+            .collect()
     }
 }
 
@@ -225,15 +428,15 @@ fn windows_live_input(
     bundle: &BundleContext,
     timeout_ms: u64,
     trace_log: Option<&PathBuf>,
-    expected_routes: &[String],
+    inputs: &[ScenarioHostInput],
 ) -> Result<LiveInputRun, PlayerAutomationError> {
     #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
     {
-        windows_live_input_impl(bundle, timeout_ms, trace_log, expected_routes)
+        windows_live_input_impl(bundle, timeout_ms, trace_log, inputs)
     }
     #[cfg(not(all(target_os = "windows", feature = "platform-test-driver")))]
     {
-        let _ = (bundle, timeout_ms, trace_log, expected_routes);
+        let _ = (bundle, timeout_ms, trace_log, inputs);
         Err("windows live automation requires Windows".into())
     }
 }
@@ -465,9 +668,9 @@ fn windows_live_input_impl(
     bundle: &BundleContext,
     timeout_ms: u64,
     trace_log: Option<&PathBuf>,
-    expected_routes: &[String],
+    inputs: &[ScenarioHostInput],
 ) -> Result<LiveInputRun, PlayerAutomationError> {
-    windows_live::run(bundle, timeout_ms, trace_log, expected_routes)
+    windows_live::run(bundle, timeout_ms, trace_log, inputs)
 }
 
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
@@ -475,8 +678,8 @@ mod windows_live {
     use super::{
         parse_player_host_traces, sha256_bytes, BundleContext, LiveInputRun, ParsedPlayerHostTrace,
         PlayerAutomationError, PlayerInputConsumptionEvidence, PlayerInputEvent,
-        PlayerRuntimeRouteEvidence, PlayerVisualRegionEvidence, WINDOWS_SENDINPUT_KEYBOARD,
-        WINDOWS_SENDINPUT_MOUSE,
+        PlayerRuntimeRouteEvidence, PlayerVisualRegionEvidence, ScenarioHostInput,
+        WINDOWS_SENDINPUT_KEYBOARD, WINDOWS_SENDINPUT_MOUSE,
     };
     use astra_platform_windows::WindowsTestDriver;
     use std::{
@@ -491,7 +694,7 @@ mod windows_live {
         bundle: &BundleContext,
         timeout_ms: u64,
         trace_log: Option<&PathBuf>,
-        expected_routes: &[String],
+        inputs: &[ScenarioHostInput],
     ) -> Result<LiveInputRun, PlayerAutomationError> {
         let mut trace_lines = Vec::new();
         trace_line(
@@ -543,15 +746,7 @@ mod windows_live {
             }];
             let mut visual_regions = Vec::new();
             let mut previous = before;
-            let routes = if expected_routes.is_empty() {
-                vec![None]
-            } else {
-                expected_routes
-                    .iter()
-                    .map(|route| Some(route.clone()))
-                    .collect()
-            };
-            for (index, route_id) in routes.iter().enumerate() {
+            for (index, input) in inputs.iter().enumerate() {
                 let input_sequence = (index + 2) as u64;
                 trace_line(
                     &mut trace_lines,
@@ -559,7 +754,7 @@ mod windows_live {
                         "level=TRACE event=astra.player.input.sent source=sendinput.keyboard kind=key input_sequence={input_sequence}"
                     ),
                 );
-                window.send_key(0x20)?;
+                window.send_key(input.virtual_key)?;
                 thread::sleep(Duration::from_millis(160));
                 let after = window.capture_rgba()?;
                 let previous_hash = sha256_bytes(&previous.rgba8);
@@ -573,7 +768,7 @@ mod windows_live {
                     ),
                 );
                 events.push(PlayerInputEvent {
-                    step_id: format!("input.advance.{}", index + 1),
+                    step_id: format!("input.{}.{}", input.kind, index + 1),
                     source: WINDOWS_SENDINPUT_KEYBOARD.to_string(),
                     kind: "key".to_string(),
                     sequence: input_sequence,
@@ -698,7 +893,49 @@ mod windows_live {
 
 #[cfg(test)]
 mod host_trace_tests {
-    use super::parse_player_host_traces;
+    use super::{parse_player_host_traces, parse_scenario_input_plan, ScenarioInputAction};
+
+    #[test]
+    fn scenario_input_plan_uses_declared_actions_instead_of_expected_route_count() {
+        let yaml = br#"
+schema: astra.scenario.v1
+generated_route_id: route.library
+actions:
+  - launch: {}
+  - player_input: { kind: advance, ticks: 2 }
+  - player_input: { kind: choose, value: choice.library }
+  - player_input: { kind: open_system, value: backlog }
+"#;
+
+        let plan = parse_scenario_input_plan(yaml).unwrap();
+
+        assert_eq!(
+            plan,
+            vec![
+                ScenarioInputAction::Advance,
+                ScenarioInputAction::Advance,
+                ScenarioInputAction::Choose {
+                    option_id: "choice.library".to_string()
+                },
+                ScenarioInputAction::OpenSystem {
+                    page: "backlog".to_string()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn scenario_input_plan_blocks_media_completion_bypass() {
+        let yaml = br#"
+schema: astra.scenario.v1
+actions:
+  - player_input: { kind: complete_wait, value: voice.end }
+"#;
+
+        let error = parse_scenario_input_plan(yaml).unwrap_err();
+
+        assert!(error.contains("ASTRA_PLAYER_AUTOMATION_MEDIA_COMPLETION_REQUIRED"));
+    }
 
     #[test]
     fn route_coverage_is_parsed_from_runtime_evidence_not_expected_labels() {
