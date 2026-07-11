@@ -120,6 +120,50 @@ fn native_vn_source_rejects_tampered_save_before_restore() {
 }
 
 #[test]
+fn native_vn_source_builds_atomic_platform_save_transaction() {
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
+    let mut source = NativeVnHostCommandSource::new(
+        compiled,
+        VnRunConfig::classic("zh-Hans"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+    source.launch().unwrap();
+
+    let plan = source
+        .prepare_save_transaction("slot.main", PlayerHostResourceId(20))
+        .unwrap();
+
+    assert!(matches!(
+        plan.begin.commands.as_slice(),
+        [PlayerHostCommand::BeginSave {
+            transaction: PlayerHostResourceId(20),
+            ..
+        }]
+    ));
+    assert!(matches!(
+        plan.write.commands.as_slice(),
+        [PlayerHostCommand::WriteSave { transaction: PlayerHostResourceId(20), bytes, .. }] if !bytes.is_empty()
+    ));
+    assert!(matches!(
+        plan.commit.commands.as_slice(),
+        [PlayerHostCommand::CommitSave {
+            transaction: PlayerHostResourceId(20),
+            ..
+        }]
+    ));
+    assert!(matches!(
+        plan.abort.commands.as_slice(),
+        [PlayerHostCommand::AbortSave {
+            transaction: PlayerHostResourceId(20),
+            ..
+        }]
+    ));
+}
+
+#[test]
 fn native_vn_source_completes_wait_through_runtime_provider() {
     let story = r#"
 story main #@id story.main

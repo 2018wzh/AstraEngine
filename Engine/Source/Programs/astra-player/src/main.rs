@@ -1,7 +1,8 @@
 use astra_observability::{init_host, ConsoleFormat, HostObservabilityConfig, HostRole};
 use astra_player::{WebCdpInputHost, WindowsLiveAutomationRequest, WindowsSendInputHost};
 use astra_player_core::{
-    PlayerActionMap, PlayerAutomationScript, PlayerInputTranscript, PlayerPlatform,
+    PlayerActionMap, PlayerAutomationScript, PlayerHostCommandResult, PlayerInputTranscript,
+    PlayerPlatform,
 };
 use std::{env, fs, path::PathBuf};
 
@@ -267,6 +268,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
             })?;
         let action_map = PlayerActionMap::standard();
         let mut pointer = (0.0_f64, 0.0_f64);
+        let mut save_transaction_id = 1000_u64;
         loop {
             let event = session.events.recv().await?;
             let player_sequence = event.sequence;
@@ -278,6 +280,40 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                     state: InputState::Pressed,
                     ..
                 } if input_window == window => {
+                    if physical_key == "F5" {
+                        save_transaction_id =
+                            save_transaction_id.checked_add(1).ok_or_else(|| {
+                                astra_platform::PlatformError::new(
+                                    astra_platform::PlatformErrorCode::InvalidState,
+                                    "player.save.transaction",
+                                    "ASTRA_PLAYER_SAVE_TRANSACTION_OVERFLOW",
+                                )
+                            })?;
+                        execute_platform_save(
+                            &mut vn,
+                            &mut executor,
+                            "slot.quick",
+                            PlayerHostResourceId(save_transaction_id),
+                        )
+                        .await?;
+                        tracing::info!(
+                            event = "astra.player.save.committed",
+                            player_sequence,
+                            slot = "slot.quick",
+                            "Player committed platform save transaction"
+                        );
+                        continue;
+                    }
+                    if physical_key == "F9" {
+                        execute_platform_load(&mut vn, &mut executor, "slot.quick").await?;
+                        tracing::info!(
+                            event = "astra.player.save.restored",
+                            player_sequence,
+                            slot = "slot.quick",
+                            "Player restored platform save transaction"
+                        );
+                        continue;
+                    }
                     let Some(action) = action_map.keyboard(&physical_key) else {
                         continue;
                     };
@@ -332,6 +368,69 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         Ok::<(), astra_platform::PlatformError>(())
     })?;
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+async fn execute_platform_save(
+    source: &mut astra_player::NativeVnHostCommandSource,
+    executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
+    slot: &str,
+    transaction: astra_player::PlayerHostResourceId,
+) -> Result<(), astra_platform::PlatformError> {
+    let plan = source
+        .prepare_save_transaction(slot, transaction)
+        .map_err(|error| player_platform_error("player.save.prepare", error))?;
+    executor
+        .execute_save_transaction(plan)
+        .await
+        .map_err(|error| player_platform_error("player.save.transaction", error))?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+async fn execute_platform_load(
+    source: &mut astra_player::NativeVnHostCommandSource,
+    executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
+    slot: &str,
+) -> Result<(), astra_platform::PlatformError> {
+    let results = executor
+        .execute_batch(
+            source
+                .read_save(slot)
+                .map_err(|error| player_platform_error("player.save.read.prepare", error))?,
+        )
+        .await
+        .map_err(|error| player_platform_error("player.save.read", error))?;
+    let bytes = match results.as_slice() {
+        [PlayerHostCommandResult::SaveRead { bytes }] => bytes,
+        _ => {
+            return Err(astra_platform::PlatformError::new(
+                astra_platform::PlatformErrorCode::InvalidState,
+                "player.save.read",
+                "ASTRA_PLAYER_SAVE_RESULT_INVALID: platform returned an unexpected result",
+            ));
+        }
+    };
+    let present = source
+        .restore(bytes)
+        .map_err(|error| player_platform_error("player.save.restore", error))?;
+    executor
+        .execute_batch(present)
+        .await
+        .map_err(|error| player_platform_error("player.save.present", error))?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn player_platform_error(
+    operation: &'static str,
+    error: impl std::fmt::Display,
+) -> astra_platform::PlatformError {
+    astra_platform::PlatformError::new(
+        astra_platform::PlatformErrorCode::InvalidState,
+        operation,
+        error.to_string(),
+    )
 }
 
 #[cfg(target_os = "windows")]

@@ -317,6 +317,55 @@ pub struct PlayerHostCommandExecutor<S> {
     last_sequence: u64,
 }
 
+pub struct PlayerSaveTransactionPlan {
+    pub begin: PlayerHostCommandBatch,
+    pub write: PlayerHostCommandBatch,
+    pub commit: PlayerHostCommandBatch,
+    pub abort: PlayerHostCommandBatch,
+}
+
+#[derive(Debug)]
+pub enum PlayerSaveTransactionError<E> {
+    Begin(PlayerHostCommandExecutionError<E>),
+    Write {
+        source: PlayerHostCommandExecutionError<E>,
+        abort: Option<PlayerHostCommandExecutionError<E>>,
+    },
+    Commit {
+        source: PlayerHostCommandExecutionError<E>,
+        abort: Option<PlayerHostCommandExecutionError<E>>,
+    },
+}
+
+impl<E: std::fmt::Display> std::fmt::Display for PlayerSaveTransactionError<E> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Begin(error) => write!(formatter, "save begin failed: {error}"),
+            Self::Write { source, abort } => {
+                write_transaction_failure(formatter, "save write", source, abort.as_ref())
+            }
+            Self::Commit { source, abort } => {
+                write_transaction_failure(formatter, "save commit", source, abort.as_ref())
+            }
+        }
+    }
+}
+
+fn write_transaction_failure<E: std::fmt::Display>(
+    formatter: &mut std::fmt::Formatter<'_>,
+    operation: &str,
+    source: &PlayerHostCommandExecutionError<E>,
+    abort: Option<&PlayerHostCommandExecutionError<E>>,
+) -> std::fmt::Result {
+    write!(formatter, "{operation} failed: {source}")?;
+    if let Some(abort) = abort {
+        write!(formatter, "; save abort also failed: {abort}")?;
+    }
+    Ok(())
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for PlayerSaveTransactionError<E> {}
+
 impl<S> PlayerHostCommandExecutor<S> {
     pub fn new(sink: S) -> Self {
         Self {
@@ -351,6 +400,24 @@ impl<S: PlayerHostCommandSink> PlayerHostCommandExecutor<S> {
             results.push(result);
         }
         Ok(results)
+    }
+
+    pub async fn execute_save_transaction(
+        &mut self,
+        plan: PlayerSaveTransactionPlan,
+    ) -> Result<(), PlayerSaveTransactionError<S::Error>> {
+        self.execute_batch(plan.begin)
+            .await
+            .map_err(PlayerSaveTransactionError::Begin)?;
+        if let Err(source) = self.execute_batch(plan.write).await {
+            let abort = self.execute_batch(plan.abort).await.err();
+            return Err(PlayerSaveTransactionError::Write { source, abort });
+        }
+        if let Err(source) = self.execute_batch(plan.commit).await {
+            let abort = self.execute_batch(plan.abort).await.err();
+            return Err(PlayerSaveTransactionError::Commit { source, abort });
+        }
+        Ok(())
     }
 }
 

@@ -8,7 +8,7 @@ use astra_media_core::{
 };
 use astra_player_core::{
     PlayerAction, PlayerHostCommand, PlayerHostCommandBatch, PlayerHostCommandError,
-    PlayerHostResourceId,
+    PlayerHostResourceId, PlayerSaveTransactionPlan,
 };
 use astra_plugin::{ProductRuntimeHost, RuntimeHostError, RuntimeHostSchemaRegistry};
 use astra_plugin_abi::{
@@ -35,6 +35,7 @@ pub struct NativeVnHostCommandSource {
     height: u32,
     textures: BTreeMap<String, TextureFrame>,
     scene_draw: Vec<DrawCommand>,
+    last_draw: Vec<DrawCommand>,
     last_step_evidence: Option<NativeVnStepEvidence>,
     terminal_routes: std::collections::BTreeSet<String>,
 }
@@ -74,6 +75,8 @@ struct NativeVnPlayerSavePayload {
     slot: String,
     sections: RuntimeSaveSections,
     runtime_state: VnRuntimeState,
+    draw_commands_json: Vec<u8>,
+    draw_commands_hash: Hash256,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -199,6 +202,7 @@ impl NativeVnHostCommandSource {
             height,
             textures,
             scene_draw: Vec::new(),
+            last_draw: Vec::new(),
             last_step_evidence: None,
             terminal_routes,
         })
@@ -234,11 +238,15 @@ impl NativeVnHostCommandSource {
             slot: slot.clone(),
         })?;
         validate_saved_runtime_state(&sections, &runtime_state)?;
+        let draw_commands_json = serde_json::to_vec(&self.last_draw)
+            .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
         let payload = NativeVnPlayerSavePayload {
             schema: "astra.player.native_vn_save_payload.v1".into(),
             slot,
             sections,
             runtime_state,
+            draw_commands_hash: Hash256::from_sha256(&draw_commands_json),
+            draw_commands_json,
         };
         let payload_bytes = postcard::to_allocvec(&payload)
             .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
@@ -250,7 +258,7 @@ impl NativeVnHostCommandSource {
         .map_err(|error| NativeVnHostError::Save(error.to_string()))
     }
 
-    pub fn restore(&mut self, bytes: &[u8]) -> Result<(), NativeVnHostError> {
+    pub fn restore(&mut self, bytes: &[u8]) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         let envelope: NativeVnPlayerSaveEnvelope =
             postcard::from_bytes(bytes).map_err(|error| {
                 NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
@@ -287,9 +295,81 @@ impl NativeVnHostCommandSource {
                 report.diagnostics.join(",")
             )));
         }
+        if Hash256::from_sha256(&envelope.payload.draw_commands_json)
+            != envelope.payload.draw_commands_hash
+        {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_INTEGRITY: presentation command hash mismatch".into(),
+            ));
+        }
+        let draw_commands =
+            serde_json::from_slice(&envelope.payload.draw_commands_json).map_err(|error| {
+                NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
+            })?;
         self.runtime_state = Some(envelope.payload.runtime_state);
+        self.last_draw = draw_commands;
         self.last_step_evidence = None;
-        Ok(())
+        let draw = self.last_draw.clone();
+        self.present_draw(&draw, 0)
+    }
+
+    pub fn prepare_save_transaction(
+        &mut self,
+        slot: impl Into<String>,
+        transaction: PlayerHostResourceId,
+    ) -> Result<PlayerSaveTransactionPlan, NativeVnHostError> {
+        let slot = slot.into();
+        let bytes = self.save(slot.clone())?;
+        let begin = PlayerHostCommandBatch::new(vec![PlayerHostCommand::BeginSave {
+            sequence: self.next_command_sequence()?,
+            slot,
+            transaction,
+        }])?;
+        let write = PlayerHostCommandBatch::new(vec![PlayerHostCommand::WriteSave {
+            sequence: self.next_command_sequence()?,
+            transaction,
+            bytes,
+        }])?;
+        let commit = PlayerHostCommandBatch::new(vec![PlayerHostCommand::CommitSave {
+            sequence: self.next_command_sequence()?,
+            transaction,
+        }])?;
+        let abort = PlayerHostCommandBatch::new(vec![PlayerHostCommand::AbortSave {
+            sequence: self.next_command_sequence()?,
+            transaction,
+        }])?;
+        Ok(PlayerSaveTransactionPlan {
+            begin,
+            write,
+            commit,
+            abort,
+        })
+    }
+
+    pub fn read_save(
+        &mut self,
+        slot: impl Into<String>,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        let slot = slot.into();
+        if slot.trim().is_empty() {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_SLOT_INVALID: save slot must not be empty".into(),
+            ));
+        }
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::ReadSave {
+                sequence: self.next_command_sequence()?,
+                slot,
+            },
+        ])?)
+    }
+
+    fn next_command_sequence(&mut self) -> Result<u64, NativeVnHostError> {
+        self.command_sequence = self
+            .command_sequence
+            .checked_add(1)
+            .ok_or(NativeVnHostError::SequenceOverflow)?;
+        Ok(self.command_sequence)
     }
 
     pub fn launch(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
@@ -578,21 +658,27 @@ impl NativeVnHostCommandSource {
             }
         }
         draw.splice(1..1, self.scene_draw.clone());
-        let frame = self.renderer.capture_frame(&draw)?;
-        self.command_sequence = self
-            .command_sequence
-            .checked_add(1)
-            .ok_or(NativeVnHostError::SequenceOverflow)?;
+        self.last_draw = draw.clone();
+        self.present_draw(&draw, presentation.len())
+    }
+
+    fn present_draw(
+        &mut self,
+        draw: &[DrawCommand],
+        presentation_count: usize,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        let frame = self.renderer.capture_frame(draw)?;
+        let sequence = self.next_command_sequence()?;
         tracing::trace!(
             event = "player.vn.runtime.command.emit",
-            sequence = self.command_sequence,
-            presentation_count = presentation.len(),
+            sequence,
+            presentation_count,
             frame_hash = %frame.hash,
             "emitted AstraVN Player host command"
         );
         Ok(PlayerHostCommandBatch::new(vec![
             PlayerHostCommand::PresentRgba {
-                sequence: self.command_sequence,
+                sequence,
                 surface: self.surface,
                 width: frame.width,
                 height: frame.height,
