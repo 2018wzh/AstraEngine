@@ -14,6 +14,8 @@ wgpu 是默认 provider，但不是唯一后端。Renderer2D provider 声明 bac
 
 Player 从 package 消费 encoded audio 时，必须先通过 `asset.catalog` 与 `asset.vfs_manifest` 得到唯一 package-backed entry，执行 bounded read 和 SHA-256 校验，再按文件签名识别 codec。不能用 asset id、文件名或 provider descriptor 猜测已解码成功。Windows Media Foundation 当前返回 `pcm_s16le:<sample_rate>:<channels>`；Player 必须检查格式字段、采样率、声道、sample budget、sample 截断和 frame alignment，再显式转换为 interleaved `f32`。未知格式、空/越界 stream shape 和不完整 frame 都是 blocking，不能转为空音频成功。
 
+Player 的一次性音频必须执行完整资源事务：`OpenDecode -> Decode -> CloseDecode -> OpenAudio -> ordered SubmitAudio -> DrainAudio -> CloseAudio`。每一步都要校验返回的 logical resource；decoded bytes 必须重新计算 hash；drain 返回的 sample count 必须与提交量一致，meter 必须是有限且不高于 `0 dBFS` 的同 run 结果。open 后任一步失败都必须尝试 close，并把 cleanup failure 附加到原始 diagnostic，不能用 `Unit`、空 meter 或静态 report 冒充播放成功。`voice_end` 只能由这条事务完成后产生。持续 BGM、loop、fade、pause/resume 和多 voice mixing 必须由持久 mixer voice owner 实现；在该 owner 接入前，shipping Player 对这些命令返回 `ASTRA_PLAYER_AUDIO_PERSISTENT_UNSUPPORTED`，不得降级为一次性播放。
+
 ## FilterGraph
 
 视觉 FilterGraph 是 typed node graph：

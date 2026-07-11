@@ -8,6 +8,8 @@ mod platform_sink;
 pub use platform_sink::*;
 mod audio;
 pub use audio::*;
+mod media_lifecycle;
+pub use media_lifecycle::*;
 mod timeline;
 pub use timeline::*;
 

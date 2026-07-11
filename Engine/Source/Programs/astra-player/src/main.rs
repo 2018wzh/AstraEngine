@@ -271,12 +271,14 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         let mut save_transaction_id = 1000_u64;
         let timeline_clock = std::time::Instant::now();
         let mut timeline = astra_player_core::PlayerTimelineScheduler::new(256);
+        let mut completed_media_signals = std::collections::BTreeSet::new();
         process_timeline_updates(
             &mut vn,
             &mut executor,
             &mut timeline,
             timeline_clock.elapsed().as_millis() as u64,
             Vec::new(),
+            &mut completed_media_signals,
         )
         .await?;
         let mut timeline_tick = tokio::time::interval(std::time::Duration::from_millis(8));
@@ -295,6 +297,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                         &mut timeline,
                         now_ms,
                         completed,
+                        &mut completed_media_signals,
                     )
                     .await?;
                     continue;
@@ -366,6 +369,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                         &mut timeline,
                         timeline_clock.elapsed().as_millis() as u64,
                         Vec::new(),
+                        &mut completed_media_signals,
                     )
                     .await?;
                     log_consumed_vn_step(player_sequence, "keyboard", &vn)?;
@@ -400,6 +404,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                         &mut timeline,
                         timeline_clock.elapsed().as_millis() as u64,
                         Vec::new(),
+                        &mut completed_media_signals,
                     )
                     .await?;
                     log_consumed_vn_step(player_sequence, "pointer", &vn)?;
@@ -422,7 +427,9 @@ async fn process_timeline_updates(
     scheduler: &mut astra_player_core::PlayerTimelineScheduler,
     now_ms: u64,
     mut completed: Vec<astra_player_core::PlayerTimelineCompletion>,
+    completed_media_signals: &mut std::collections::BTreeSet<String>,
 ) -> Result<(), astra_platform::PlatformError> {
+    const MAX_DECODED_AUDIO_SAMPLES: usize = 10_000_000;
     for _ in 0..1024 {
         let tasks = source.take_timeline_tasks();
         if !tasks.is_empty() {
@@ -438,9 +445,6 @@ async fn process_timeline_updates(
             *scheduler = candidate;
             completed.extend(scheduled_completions);
         }
-        if completed.is_empty() {
-            return Ok(());
-        }
         let current = std::mem::take(&mut completed);
         for completion in current {
             tracing::info!(
@@ -452,14 +456,81 @@ async fn process_timeline_updates(
                 "Player timeline task reached a host completion boundary"
             );
             if let Some(fence) = completion.fence {
+                completed_media_signals.insert(fence);
+            }
+        }
+
+        let audio_requests = source.take_audio_requests();
+        for request in audio_requests {
+            if request.command == "bgm"
+                || request
+                    .attributes
+                    .get("loop")
+                    .is_some_and(|value| value == "true")
+            {
+                return Err(astra_platform::PlatformError::new(
+                    astra_platform::PlatformErrorCode::InvalidProfile,
+                    "player.audio.playback",
+                    format!(
+                        "ASTRA_PLAYER_AUDIO_PERSISTENT_UNSUPPORTED: command {} requires a persistent mixer voice",
+                        request.command_id
+                    ),
+                ));
+            }
+            let decode = source
+                .prepare_audio_decode(&request)
+                .map_err(|error| player_platform_error("player.audio.decode.prepare", error))?;
+            let decoded = executor
+                .execute_decode_lifecycle(decode)
+                .await
+                .map_err(|error| player_platform_error("player.audio.decode", error))?;
+            let audio = astra_player_core::PlayerDecodedAudio::parse(
+                &decoded.format,
+                &decoded.bytes,
+                MAX_DECODED_AUDIO_SAMPLES,
+            )
+            .map_err(|error| player_platform_error("player.audio.contract", error))?;
+            let playback = source
+                .prepare_audio_playback(&audio)
+                .map_err(|error| player_platform_error("player.audio.playback.prepare", error))?;
+            let evidence = executor
+                .execute_audio_lifecycle(playback)
+                .await
+                .map_err(|error| player_platform_error("player.audio.playback", error))?;
+            tracing::info!(
+                event = "astra.player.audio.completed",
+                command_id = %request.command_id,
+                command = %request.command,
+                asset_id = %request.asset_id,
+                encoded_hash = %request.encoded_hash,
+                decoded_hash = %decoded.hash,
+                sample_count = evidence.sample_count,
+                peak_dbfs = evidence.peak_dbfs,
+                rms_dbfs = evidence.rms_dbfs,
+                "Player completed a packaged audio resource lifecycle"
+            );
+            completed_media_signals.insert(request.command_id.clone());
+            completed_media_signals.insert(format!("{}.end", request.command_id));
+            if request.command == "voice" {
+                completed_media_signals.insert("voice_end".into());
+            }
+        }
+
+        let pending_fence = source.pending_wait().map(|wait| wait.fence.clone());
+        if let Some(fence) = pending_fence {
+            if completed_media_signals.remove(&fence) {
                 let batch = source
                     .complete_wait(fence)
-                    .map_err(|error| player_platform_error("player.timeline.complete", error))?;
+                    .map_err(|error| player_platform_error("player.media.complete_wait", error))?;
                 executor
                     .execute_batch(batch)
                     .await
-                    .map_err(|error| player_platform_error("player.timeline.present", error))?;
+                    .map_err(|error| player_platform_error("player.media.present", error))?;
+                continue;
             }
+        }
+        if completed.is_empty() {
+            return Ok(());
         }
     }
     Err(astra_platform::PlatformError::new(

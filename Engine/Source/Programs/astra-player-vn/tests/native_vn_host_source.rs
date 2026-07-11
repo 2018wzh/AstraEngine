@@ -268,6 +268,24 @@ state start #@id state.start
     assert_eq!(audio[0].codec, "mp3");
     assert_eq!(audio[0].encoded_bytes, encoded);
     assert_eq!(audio[0].encoded_hash, Hash256::from_sha256(&encoded));
+    let decode = source.prepare_audio_decode(&audio[0]).unwrap();
+    assert!(matches!(
+        decode.decode.commands.as_slice(),
+        [PlayerHostCommand::Decode { codec, bytes, .. }] if codec == "mp3" && bytes == &encoded
+    ));
+    let playback = source
+        .prepare_audio_playback(&astra_player_core::PlayerDecodedAudio {
+            sample_rate: 48_000,
+            channels: 2,
+            samples: vec![0.0; 10_000],
+        })
+        .unwrap();
+    assert_eq!(playback.expected_sample_count, 10_000);
+    assert_eq!(playback.submits.len(), 2);
+    assert!(matches!(
+        playback.drain.commands.as_slice(),
+        [PlayerHostCommand::DrainAudio { .. }]
+    ));
 }
 
 fn apply_product_bindings(request: &mut astra_package::PackageBuildRequest) {

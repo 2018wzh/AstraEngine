@@ -7,7 +7,8 @@ use astra_media_core::{
     RectI, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest, TextureFrame,
 };
 use astra_player_core::{
-    PlayerAction, PlayerHostCommand, PlayerHostCommandBatch, PlayerHostCommandError,
+    PlayerAction, PlayerAudioLifecyclePlan, PlayerDecodeKind, PlayerDecodeLifecyclePlan,
+    PlayerDecodedAudio, PlayerHostCommand, PlayerHostCommandBatch, PlayerHostCommandError,
     PlayerHostResourceId, PlayerSaveTransactionPlan, PlayerTimelineTask, PlayerTimelineTaskAction,
 };
 use astra_plugin::{ProductRuntimeHost, RuntimeHostError, RuntimeHostSchemaRegistry};
@@ -41,6 +42,7 @@ pub struct NativeVnHostCommandSource {
     pending_timeline: Vec<PlayerTimelineTask>,
     media_assets: BTreeMap<String, PackagedMediaAsset>,
     pending_audio: Vec<NativeVnAudioRequest>,
+    next_media_resource_id: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +56,7 @@ struct PackagedMediaAsset {
 pub struct NativeVnAudioRequest {
     pub command_id: String,
     pub command: String,
+    pub attributes: BTreeMap<String, String>,
     pub asset_id: String,
     pub codec: String,
     pub encoded_bytes: Vec<u8>,
@@ -247,6 +250,7 @@ impl NativeVnHostCommandSource {
             pending_timeline: Vec::new(),
             media_assets,
             pending_audio: Vec::new(),
+            next_media_resource_id: 10_000,
         })
     }
 
@@ -260,6 +264,111 @@ impl NativeVnHostCommandSource {
 
     pub fn take_audio_requests(&mut self) -> Vec<NativeVnAudioRequest> {
         std::mem::take(&mut self.pending_audio)
+    }
+
+    pub fn pending_wait(&self) -> Option<&astra_vn_core::VnWaitState> {
+        self.runtime_state
+            .as_ref()
+            .and_then(|state| state.pending_wait.as_ref())
+    }
+
+    pub fn prepare_audio_decode(
+        &mut self,
+        request: &NativeVnAudioRequest,
+    ) -> Result<PlayerDecodeLifecyclePlan, NativeVnHostError> {
+        if request.encoded_bytes.is_empty()
+            || Hash256::from_sha256(&request.encoded_bytes) != request.encoded_hash
+        {
+            return Err(NativeVnHostError::Asset(format!(
+                "ASTRA_PLAYER_AUDIO_ENCODED_HASH: {}",
+                request.asset_id
+            )));
+        }
+        let session = self.next_media_resource()?;
+        Ok(PlayerDecodeLifecyclePlan {
+            session,
+            open: PlayerHostCommandBatch::new(vec![PlayerHostCommand::OpenDecode {
+                sequence: self.next_command_sequence()?,
+                session,
+                kind: PlayerDecodeKind::Audio,
+            }])?,
+            decode: PlayerHostCommandBatch::new(vec![PlayerHostCommand::Decode {
+                sequence: self.next_command_sequence()?,
+                request_sequence: 1,
+                session,
+                kind: PlayerDecodeKind::Audio,
+                codec: request.codec.clone(),
+                description: Vec::new(),
+                sample_rate: None,
+                channels: None,
+                coded_width: None,
+                coded_height: None,
+                keyframe: true,
+                bytes: request.encoded_bytes.clone(),
+            }])?,
+            close: PlayerHostCommandBatch::new(vec![PlayerHostCommand::CloseDecode {
+                sequence: self.next_command_sequence()?,
+                session,
+            }])?,
+        })
+    }
+
+    pub fn prepare_audio_playback(
+        &mut self,
+        audio: &PlayerDecodedAudio,
+    ) -> Result<PlayerAudioLifecyclePlan, NativeVnHostError> {
+        const PACKET_FRAMES: usize = 4096;
+        if audio.samples.is_empty() || audio.frame_count() == 0 {
+            return Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_AUDIO_EMPTY: decoded audio contains no frames".into(),
+            ));
+        }
+        let frame_count = u32::try_from(audio.frame_count()).map_err(|_| {
+            NativeVnHostError::Asset(
+                "ASTRA_PLAYER_AUDIO_FRAME_BUDGET: frame count exceeds platform contract".into(),
+            )
+        })?;
+        let output = self.next_media_resource()?;
+        let open = PlayerHostCommandBatch::new(vec![PlayerHostCommand::OpenAudio {
+            sequence: self.next_command_sequence()?,
+            output,
+            sample_rate: audio.sample_rate,
+            channels: audio.channels,
+            max_buffered_frames: frame_count,
+        }])?;
+        let samples_per_packet = PACKET_FRAMES
+            .checked_mul(usize::from(audio.channels))
+            .ok_or_else(|| NativeVnHostError::Asset("ASTRA_PLAYER_AUDIO_PACKET_BUDGET".into()))?;
+        let mut submits = Vec::new();
+        for (index, samples) in audio.samples.chunks(samples_per_packet).enumerate() {
+            submits.push(PlayerHostCommandBatch::new(vec![
+                PlayerHostCommand::SubmitAudio {
+                    sequence: self.next_command_sequence()?,
+                    output,
+                    packet_sequence: u64::try_from(index + 1).map_err(|_| {
+                        NativeVnHostError::Asset("ASTRA_PLAYER_AUDIO_PACKET_SEQUENCE".into())
+                    })?,
+                    channels: audio.channels,
+                    samples: samples.to_vec(),
+                },
+            ])?);
+        }
+        let drain = PlayerHostCommandBatch::new(vec![PlayerHostCommand::DrainAudio {
+            sequence: self.next_command_sequence()?,
+            output,
+        }])?;
+        let close = PlayerHostCommandBatch::new(vec![PlayerHostCommand::CloseAudio {
+            sequence: self.next_command_sequence()?,
+            output,
+        }])?;
+        Ok(PlayerAudioLifecyclePlan {
+            output,
+            expected_sample_count: audio.samples.len() as u64,
+            open,
+            submits,
+            drain,
+            close,
+        })
     }
 
     pub fn complete_wait(
@@ -420,6 +529,14 @@ impl NativeVnHostCommandSource {
             .checked_add(1)
             .ok_or(NativeVnHostError::SequenceOverflow)?;
         Ok(self.command_sequence)
+    }
+
+    fn next_media_resource(&mut self) -> Result<PlayerHostResourceId, NativeVnHostError> {
+        self.next_media_resource_id = self
+            .next_media_resource_id
+            .checked_add(1)
+            .ok_or(NativeVnHostError::SequenceOverflow)?;
+        Ok(PlayerHostResourceId(self.next_media_resource_id))
     }
 
     pub fn launch(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
@@ -659,6 +776,7 @@ impl NativeVnHostCommandSource {
             self.pending_audio.push(NativeVnAudioRequest {
                 command_id: command.command_id,
                 command: command.command,
+                attributes: command.attributes,
                 asset_id,
                 codec: asset.codec.clone(),
                 encoded_bytes: asset.bytes.clone(),
