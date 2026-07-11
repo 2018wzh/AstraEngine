@@ -226,6 +226,104 @@ state start #@id state.start
 }
 
 #[test]
+fn packaged_native_vn_source_exposes_hash_validated_audio_requests() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    voice asset:asset:/voice/hero/0001 end:continue #@id voice.hero.0001
+    text key:line.after #@id line.after
+"#;
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", story)]).unwrap();
+    let mut sections =
+        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+    let encoded = b"ID3\x04\x00\x00\x00\x00\x00\x00fixture".to_vec();
+    sections.push(astra_package::SectionPayload::raw(
+        "asset.voice.hero.0001",
+        "astra.cooked_audio.v1",
+        encoded.clone(),
+    ));
+    let mut request = astra_package::PackageBuildRequest::minimal(
+        "com.example.player-audio",
+        "classic",
+        sections,
+    );
+    apply_product_bindings(&mut request);
+    let bytes = astra_package::PackageBuilder::build(request).unwrap();
+    let package = astra_package::PackageReader::open(bytes.as_bytes()).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("zh-Hans"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+
+    source.launch().unwrap();
+    let audio = source.take_audio_requests();
+
+    assert_eq!(audio.len(), 1);
+    assert_eq!(audio[0].asset_id, "asset:/voice/hero/0001");
+    assert_eq!(audio[0].codec, "mp3");
+    assert_eq!(audio[0].encoded_bytes, encoded);
+    assert_eq!(audio[0].encoded_hash, Hash256::from_sha256(&encoded));
+}
+
+fn apply_product_bindings(request: &mut astra_package::PackageBuildRequest) {
+    request.provider_policy = serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.provider_policy.v1",
+        "profile": "classic",
+        "renderer": "astra.renderer2d.wgpu",
+        "bindings": [{
+            "slot": "presentation",
+            "provider_id": "astra.vn.standard_presentation"
+        }, {
+            "slot": "renderer2d",
+            "provider_id": "astra.renderer2d.wgpu"
+        }, {
+            "slot": "game_runtime_provider",
+            "provider_id": "astra.runtime.native_vn"
+        }]
+    }))
+    .unwrap();
+    request.plugin_extension_registry = serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.plugin_extension_registry.v1",
+        "providers": [{
+            "slot": "presentation",
+            "provider_id": "astra.vn.standard_presentation",
+            "capability": "presentation.vn.standard",
+            "phase": "runtime",
+            "packaged": true
+        }, {
+            "slot": "renderer2d",
+            "provider_id": "astra.renderer2d.wgpu",
+            "capability": "renderer2d.wgpu",
+            "phase": "runtime",
+            "packaged": true
+        }, {
+            "slot": "game_runtime_provider",
+            "provider_id": "astra.runtime.native_vn",
+            "capability": "runtime.native_vn",
+            "phase": "runtime",
+            "packaged": true
+        }],
+        "bindings": [{
+            "slot": "presentation",
+            "provider_id": "astra.vn.standard_presentation"
+        }, {
+            "slot": "renderer2d",
+            "provider_id": "astra.renderer2d.wgpu"
+        }, {
+            "slot": "game_runtime_provider",
+            "provider_id": "astra.runtime.native_vn"
+        }],
+        "conflicts": []
+    }))
+    .unwrap();
+}
+
+#[test]
 fn packaged_player_rejects_headless_presentation_binding() {
     let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
     let sections =

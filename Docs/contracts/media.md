@@ -12,6 +12,8 @@ wgpu 是默认 provider，但不是唯一后端。Renderer2D provider 声明 bac
 
 平台解码优先：AVFoundation、MediaCodec、WebCodecs、Windows Media Foundation 等平台模块先接管可用格式。桌面 fallback 通过 optional `ffmpeg-vcpkg` feature 接入，使用 `ffmpeg-next`/`ffmpeg-sys-next` 的 `vcpkg` crate provider 查找 FFmpeg；默认 build 不要求本机 FFmpeg。DecodeProvider 输出 CPU buffer 或 `MediaSurfaceToken`；public API 不暴露平台 native handle。
 
+Player 从 package 消费 encoded audio 时，必须先通过 `asset.catalog` 与 `asset.vfs_manifest` 得到唯一 package-backed entry，执行 bounded read 和 SHA-256 校验，再按文件签名识别 codec。不能用 asset id、文件名或 provider descriptor 猜测已解码成功。Windows Media Foundation 当前返回 `pcm_s16le:<sample_rate>:<channels>`；Player 必须检查格式字段、采样率、声道、sample budget、sample 截断和 frame alignment，再显式转换为 interleaved `f32`。未知格式、空/越界 stream shape 和不完整 frame 都是 blocking，不能转为空音频成功。
+
 ## FilterGraph
 
 视觉 FilterGraph 是 typed node graph：

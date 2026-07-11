@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 
 mod platform_sink;
 pub use platform_sink::*;
+mod audio;
+pub use audio::*;
 mod timeline;
 pub use timeline::*;
 

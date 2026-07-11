@@ -230,6 +230,8 @@ NativeVN timeline task 现已通过 descriptor 声明的 `astra.vn.timeline_task
 
 Windows Player 已接入 bounded timeline scheduler：start/cancel/deadline 使用单调 host clock，重复 ID、容量溢出、非法 duration/symbol、未知 cancel 和时钟回退均 blocking；completion/cancel 保留原 fence 并经 ProductRuntimeHost `complete_wait` 回到固定 tick。Web 等价 scheduler 与正式 E3 evidence 仍未完成。
 
+NativeVN Player 已能从 package 的 catalog/VFS 唯一映射读取 encoded voice/audio，执行 bounded read、entry hash 和 MP3/Ogg/FLAC/WAV signature 校验；WMF `pcm_s16le` output 的截断、sample budget、sample rate、channel 和 frame alignment 也已有负向测试。平台 decode/audio lifecycle、drain meter 与 voice fence 尚未接通，因此不能据此关闭真实音频缺口。
+
 ### P2-002：容器和 VFS 的局部测试没有覆盖冲突矩阵
 
 **分类：** `SMOKE_ONLY`, `FIXTURE_ONLY`

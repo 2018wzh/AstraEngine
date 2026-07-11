@@ -39,6 +39,25 @@ pub struct NativeVnHostCommandSource {
     last_step_evidence: Option<NativeVnStepEvidence>,
     terminal_routes: std::collections::BTreeSet<String>,
     pending_timeline: Vec<PlayerTimelineTask>,
+    media_assets: BTreeMap<String, PackagedMediaAsset>,
+    pending_audio: Vec<NativeVnAudioRequest>,
+}
+
+#[derive(Debug, Clone)]
+struct PackagedMediaAsset {
+    codec: String,
+    bytes: Vec<u8>,
+    hash: Hash256,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeVnAudioRequest {
+    pub command_id: String,
+    pub command: String,
+    pub asset_id: String,
+    pub codec: String,
+    pub encoded_bytes: Vec<u8>,
+    pub encoded_hash: Hash256,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -102,7 +121,15 @@ impl NativeVnHostCommandSource {
         height: u32,
         surface: PlayerHostResourceId,
     ) -> Result<Self, NativeVnHostError> {
-        Self::open(compiled, config, width, height, surface, BTreeMap::new())
+        Self::open(
+            compiled,
+            config,
+            width,
+            height,
+            surface,
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
     }
 
     pub fn from_package(
@@ -116,7 +143,16 @@ impl NativeVnHostCommandSource {
         let compiled = decode_compiled_story(package)
             .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
         let textures = load_package_textures(package)?;
-        Self::open(compiled, config, width, height, surface, textures)
+        let media_assets = load_package_media_assets(package)?;
+        Self::open(
+            compiled,
+            config,
+            width,
+            height,
+            surface,
+            textures,
+            media_assets,
+        )
     }
 
     fn open(
@@ -126,6 +162,7 @@ impl NativeVnHostCommandSource {
         height: u32,
         surface: PlayerHostResourceId,
         textures: BTreeMap<String, TextureFrame>,
+        media_assets: BTreeMap<String, PackagedMediaAsset>,
     ) -> Result<Self, NativeVnHostError> {
         if compiled.story_manifest.stories.is_empty() {
             return Err(NativeVnHostError::EmptyStory);
@@ -208,6 +245,8 @@ impl NativeVnHostCommandSource {
             last_step_evidence: None,
             terminal_routes,
             pending_timeline: Vec::new(),
+            media_assets,
+            pending_audio: Vec::new(),
         })
     }
 
@@ -217,6 +256,10 @@ impl NativeVnHostCommandSource {
 
     pub fn take_timeline_tasks(&mut self) -> Vec<PlayerTimelineTask> {
         std::mem::take(&mut self.pending_timeline)
+    }
+
+    pub fn take_audio_requests(&mut self) -> Vec<NativeVnAudioRequest> {
+        std::mem::take(&mut self.pending_audio)
     }
 
     pub fn complete_wait(
@@ -592,6 +635,35 @@ impl NativeVnHostCommandSource {
                 )
                 .map_err(|error| NativeVnHostError::RuntimeEvidence(error.to_string()))?;
             self.pending_timeline.push(player_timeline_task(task)?);
+        }
+        for envelope in output.outputs.iter().filter(|envelope| {
+            envelope.domain == RuntimeOutputDomain::Audio
+                && envelope.schema == "astra.vn.audio_command.v1"
+        }) {
+            let command = envelope
+                .decode_postcard::<astra_vn_core::VnAudioCommand>(
+                    RuntimeOutputDomain::Audio,
+                    "astra.vn.audio_command.v1",
+                    SchemaVersion::new(1, 0, 0),
+                )
+                .map_err(|error| NativeVnHostError::RuntimeEvidence(error.to_string()))?;
+            let asset_id = command.attributes.get("asset").cloned().ok_or_else(|| {
+                NativeVnHostError::Asset(format!(
+                    "ASTRA_PLAYER_AUDIO_ASSET_REQUIRED: {}",
+                    command.command_id
+                ))
+            })?;
+            let asset = self.media_assets.get(&asset_id).ok_or_else(|| {
+                NativeVnHostError::Asset(format!("ASTRA_PLAYER_AUDIO_ASSET_MISSING: {asset_id}"))
+            })?;
+            self.pending_audio.push(NativeVnAudioRequest {
+                command_id: command.command_id,
+                command: command.command,
+                asset_id,
+                codec: asset.codec.clone(),
+                encoded_bytes: asset.bytes.clone(),
+                encoded_hash: asset.hash,
+            });
         }
         let presentation = output
             .outputs
@@ -1053,6 +1125,100 @@ fn load_package_textures(
         );
     }
     Ok(textures)
+}
+
+fn load_package_media_assets(
+    package: &astra_package::PackageReader,
+) -> Result<BTreeMap<String, PackagedMediaAsset>, NativeVnHostError> {
+    const MAX_ENCODED_MEDIA_BYTES: usize = 512 * 1024 * 1024;
+    let catalog: AssetCatalog = serde_json::from_slice(
+        &package
+            .container()
+            .read_bounded("asset.catalog", 16 * 1024 * 1024)
+            .map_err(|err| NativeVnHostError::Package(err.to_string()))?,
+    )
+    .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
+    let manifest: VfsManifest = serde_json::from_slice(
+        &package
+            .container()
+            .read_bounded("asset.vfs_manifest", 32 * 1024 * 1024)
+            .map_err(|err| NativeVnHostError::Package(err.to_string()))?,
+    )
+    .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
+    let mut assets = BTreeMap::new();
+    for asset in catalog.assets.into_iter().filter(|asset| {
+        asset.media_kind.starts_with("audio") || asset.media_kind.starts_with("voice")
+    }) {
+        let matches = manifest
+            .entries
+            .iter()
+            .filter(|entry| entry.uri == asset.uri)
+            .collect::<Vec<_>>();
+        let [entry] = matches.as_slice() else {
+            return Err(NativeVnHostError::Asset(format!(
+                "ASTRA_PLAYER_ASSET_VFS_AMBIGUOUS: catalog asset {} must resolve to one VFS entry",
+                asset.asset_id
+            )));
+        };
+        let VfsSourceRef::PackageSection { section_id } = &entry.source else {
+            return Err(NativeVnHostError::Asset(format!(
+                "ASTRA_PLAYER_ASSET_SOURCE: asset {} is not package-backed",
+                asset.asset_id
+            )));
+        };
+        let bytes = package
+            .container()
+            .read_bounded(section_id, MAX_ENCODED_MEDIA_BYTES)
+            .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
+        let hash = Hash256::from_sha256(&bytes);
+        if hash != entry.hash {
+            return Err(NativeVnHostError::Asset(format!(
+                "ASTRA_PLAYER_ASSET_HASH: asset {} failed VFS hash validation",
+                asset.asset_id
+            )));
+        }
+        let codec = sniff_audio_codec(&bytes).ok_or_else(|| {
+            NativeVnHostError::Asset(format!(
+                "ASTRA_PLAYER_AUDIO_CODEC_UNSUPPORTED: {}",
+                asset.asset_id
+            ))
+        })?;
+        if assets
+            .insert(
+                asset.asset_id.clone(),
+                PackagedMediaAsset {
+                    codec: codec.to_string(),
+                    bytes,
+                    hash,
+                },
+            )
+            .is_some()
+        {
+            return Err(NativeVnHostError::Asset(format!(
+                "ASTRA_PLAYER_ASSET_ID_DUPLICATE: {}",
+                asset.asset_id
+            )));
+        }
+    }
+    Ok(assets)
+}
+
+fn sniff_audio_codec(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"ID3")
+        || bytes
+            .get(..2)
+            .is_some_and(|prefix| prefix[0] == 0xff && prefix[1] & 0xe0 == 0xe0)
+    {
+        Some("mp3")
+    } else if bytes.starts_with(b"OggS") {
+        Some("ogg")
+    } else if bytes.starts_with(b"fLaC") {
+        Some("flac")
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE") {
+        Some("wav")
+    } else {
+        None
+    }
 }
 
 fn required_attribute<'a>(
