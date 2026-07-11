@@ -589,6 +589,7 @@ dependencies = [
  "astra-core",
  "astra-media-core",
  "astra-package",
+ "astra-platform",
  "astra-player-core",
  "astra-plugin",
  "astra-plugin-abi",
@@ -602,6 +603,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tokio",
  "tracing",
 ]
 
@@ -617,6 +619,7 @@ dependencies = [
  "astra-player-vn",
  "astra-vn-core",
  "astra-vn-package",
+ "futures-util",
  "js-sys",
  "serde",
  "serde_json",

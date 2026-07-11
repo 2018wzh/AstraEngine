@@ -13,6 +13,7 @@ astra-package = { path = "../../Runtime/astra-package" }
 astra-plugin = { path = "../../Runtime/astra-plugin" }
 astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi" }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
+astra-platform = { path = "../../Platform/astra-platform" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
 astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }
 astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
@@ -24,3 +25,6 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

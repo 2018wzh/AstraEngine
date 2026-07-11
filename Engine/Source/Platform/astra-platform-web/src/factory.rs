@@ -30,7 +30,11 @@ impl PlatformHostFactory for WebPlatformFactory {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", feature = "web-code-check"))]
+#[cfg_attr(
+    all(feature = "web-code-check", not(target_arch = "wasm32")),
+    allow(dead_code)
+)]
 mod browser {
     use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
@@ -779,6 +783,7 @@ mod browser {
 
     type SurfaceResource = astra_platform_general::WgpuPresentationCore;
 
+    #[cfg(target_arch = "wasm32")]
     async fn create_surface(
         canvas: HtmlCanvasElement,
         width: u32,
@@ -789,6 +794,19 @@ mod browser {
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
             .map_err(|_| web_error("surface.create"))?;
         SurfaceResource::new(instance, surface, width, height, true).await
+    }
+
+    #[cfg(all(feature = "web-code-check", not(target_arch = "wasm32")))]
+    async fn create_surface(
+        _canvas: HtmlCanvasElement,
+        _width: u32,
+        _height: u32,
+    ) -> Result<SurfaceResource, PlatformError> {
+        Err(PlatformError::new(
+            PlatformErrorCode::UnsupportedPlatform,
+            "surface.create",
+            "web-code-check validates browser control flow without constructing a native canvas surface",
+        ))
     }
 
     async fn capture_surface(

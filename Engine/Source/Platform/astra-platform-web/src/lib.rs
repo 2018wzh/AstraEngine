@@ -1,5 +1,9 @@
 mod factory;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", feature = "web-code-check"))]
+#[cfg_attr(
+    all(feature = "web-code-check", not(target_arch = "wasm32")),
+    allow(dead_code)
+)]
 mod services;
 
 pub use factory::*;

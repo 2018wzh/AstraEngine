@@ -50,6 +50,22 @@ impl WebAudioOutput {
             ));
         }
         if context.state() != web_sys::AudioContextState::Running {
+            let resumed = match context.resume() {
+                Ok(promise) => JsFuture::from(promise).await.is_ok(),
+                Err(_) => false,
+            };
+            if !resumed {
+                if let Ok(promise) = context.close() {
+                    let _ = JsFuture::from(promise).await;
+                }
+                return Err(PlatformError::new(
+                    PlatformErrorCode::PermissionDenied,
+                    "audio.open",
+                    "WebAudio user activation handshake failed",
+                ));
+            }
+        }
+        if context.state() != web_sys::AudioContextState::Running {
             let _ = JsFuture::from(context.close().map_err(|_| audio_error("audio.open"))?).await;
             return Err(PlatformError::new(
                 PlatformErrorCode::PermissionDenied,
@@ -61,16 +77,41 @@ impl WebAudioOutput {
             "context, channels, capacity",
             "return (async () => { await context.audioWorklet.addModule('astra-audio-worklet.js'); const node = new AudioWorkletNode(context, 'astra-audio-output', {numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [channels], processorOptions: {channels, capacityFrames: capacity}}); node.connect(context.destination); return node; })();",
         );
-        let value = await_promise(create.call3(
+        let value = match await_promise(create.call3(
             &JsValue::NULL,
             context.as_ref(),
             &JsValue::from_f64(f64::from(request.channels)),
             &JsValue::from_f64(request.max_buffered_frames as f64),
         ))
-        .await?;
-        let node: web_sys::AudioWorkletNode =
-            value.dyn_into().map_err(|_| audio_error("audio.open"))?;
-        let port = node.port().map_err(|_| audio_error("audio.open"))?;
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                if let Ok(promise) = context.close() {
+                    let _ = JsFuture::from(promise).await;
+                }
+                return Err(error);
+            }
+        };
+        let node: web_sys::AudioWorkletNode = match value.dyn_into() {
+            Ok(node) => node,
+            Err(_) => {
+                if let Ok(promise) = context.close() {
+                    let _ = JsFuture::from(promise).await;
+                }
+                return Err(audio_error("audio.open"));
+            }
+        };
+        let port = match node.port() {
+            Ok(port) => port,
+            Err(_) => {
+                let _ = node.disconnect();
+                if let Ok(promise) = context.close() {
+                    let _ = JsFuture::from(promise).await;
+                }
+                return Err(audio_error("audio.open"));
+            }
+        };
         let pending = std::rc::Rc::new(std::cell::RefCell::new(std::collections::BTreeMap::<
             u64,
             usize,

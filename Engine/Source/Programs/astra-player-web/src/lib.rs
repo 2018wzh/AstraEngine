@@ -112,19 +112,25 @@ pub fn validate_package(
     Ok(profile)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", feature = "web-code-check"))]
 mod browser {
     use super::*;
     use astra_platform::{
-        InputState, PlatformEventKind, PlatformHostClient, PlatformHostFactory, PointerButton,
-        SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest,
+        InputState, PlatformErrorCode, PlatformEventKind, PlatformHostClient, PlatformHostFactory,
+        PointerButton, SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest,
     };
     use astra_player_core::{
-        PlatformCommandSink, PlayerActionMap, PlayerHostCommandExecutor, PlayerHostResourceId,
+        PlatformCommandSink, PlayerActionMap, PlayerHostCommandExecutor, PlayerHostCommandResult,
+        PlayerHostResourceId, PlayerTimelineCompletion, PlayerTimelineScheduler,
     };
-    use astra_player_vn::NativeVnHostCommandSource;
+    use astra_player_vn::{
+        NativeVnAudioOutput, NativeVnHostCommandSource, NativeVnProductAudioHost,
+    };
     use astra_vn_core::VnRunConfig;
-    use std::cell::RefCell;
+    use futures_util::future::{select, Either};
+    use futures_util::FutureExt;
+    use js_sys::Promise;
+    use std::{cell::RefCell, collections::BTreeSet};
     use wasm_bindgen::prelude::*;
     use wasm_bindgen_futures::{spawn_local, JsFuture};
     use web_sys::Response;
@@ -208,12 +214,70 @@ mod browser {
         let action_map = PlayerActionMap::standard();
         spawn_local(async move {
             let mut pointer = (0.0_f64, 0.0_f64);
-            while let Ok(event) = events.recv().await {
+            let mut media = NativeVnProductAudioHost::default();
+            let mut timeline = PlayerTimelineScheduler::new(256);
+            let mut completed_signals = BTreeSet::new();
+            let timeline_clock = js_sys::Date::now();
+            let mut user_activated = false;
+            let mut save_transaction_id = 1_000_u64;
+            loop {
+                let event = events.recv().boxed_local();
+                let tick = sleep(8).boxed_local();
+                let event = match select(event, tick).await {
+                    Either::Left((event, _)) => match event {
+                        Ok(event) => event,
+                        Err(_) => break,
+                    },
+                    Either::Right((result, _)) => {
+                        if let Err(error) = result {
+                            tracing::error!(
+                                event = "player.web.media_timer.failed",
+                                diagnostic_code = "ASTRA_PLAYER_WEB_TIMER",
+                                error = ?error,
+                                "Web Player media timer failed"
+                            );
+                            break;
+                        }
+                        if user_activated && (timeline.active_count() > 0 || media.is_active()) {
+                            let now_ms = (js_sys::Date::now() - timeline_clock).max(0.0) as u64;
+                            let completed = match timeline.poll(now_ms) {
+                                Ok(completed) => completed,
+                                Err(error) => {
+                                    tracing::error!(
+                                        event = "player.web.timeline.poll_failed",
+                                        diagnostic_code = "ASTRA_PLAYER_TIMELINE_POLL",
+                                        error = %error,
+                                        "Web Player timeline poll failed"
+                                    );
+                                    break;
+                                }
+                            };
+                            if let Err(error) = process_web_media(
+                                &mut vn,
+                                &mut executor,
+                                &mut media,
+                                &mut timeline,
+                                now_ms,
+                                completed,
+                                &mut completed_signals,
+                            )
+                            .await
+                            {
+                                tracing::error!(
+                                    event = "player.web.media.failed",
+                                    diagnostic_code = "ASTRA_PLAYER_WEB_MEDIA",
+                                    error = %error,
+                                    "Web Player media processing failed"
+                                );
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                };
+                let player_sequence = event.sequence;
                 match event.kind {
                     PlatformEventKind::WindowClosed { .. } => {
-                        let _ = client.destroy_surface(surface).await;
-                        let _ = client.destroy_window(window).await;
-                        let _ = client.shutdown().await;
                         PLAYER.with(|player| *player.borrow_mut() = None);
                         break;
                     }
@@ -222,6 +286,89 @@ mod browser {
                         state: InputState::Pressed,
                         ..
                     } => {
+                        user_activated = true;
+                        if physical_key == "F5" {
+                            save_transaction_id = match save_transaction_id.checked_add(1) {
+                                Some(value) => value,
+                                None => {
+                                    tracing::error!(
+                                        event = "player.web.save.sequence_overflow",
+                                        diagnostic_code = "ASTRA_PLAYER_SAVE_TRANSACTION_OVERFLOW",
+                                        "Web Player save transaction sequence overflowed"
+                                    );
+                                    break;
+                                }
+                            };
+                            if let Err(error) = execute_web_save(
+                                &mut vn,
+                                &mut executor,
+                                "slot.quick",
+                                PlayerHostResourceId(save_transaction_id),
+                            )
+                            .await
+                            {
+                                tracing::error!(
+                                    event = "player.web.save.failed",
+                                    diagnostic_code = "ASTRA_PLAYER_WEB_SAVE",
+                                    error = %error,
+                                    "Web Player save transaction failed"
+                                );
+                                break;
+                            }
+                            if let Err(error) = process_web_media(
+                                &mut vn,
+                                &mut executor,
+                                &mut media,
+                                &mut timeline,
+                                (js_sys::Date::now() - timeline_clock).max(0.0) as u64,
+                                Vec::new(),
+                                &mut completed_signals,
+                            )
+                            .await
+                            {
+                                tracing::error!(
+                                    event = "player.web.media.failed",
+                                    diagnostic_code = "ASTRA_PLAYER_WEB_MEDIA",
+                                    error = %error,
+                                    "Web Player media processing failed after save"
+                                );
+                                break;
+                            }
+                            continue;
+                        }
+                        if physical_key == "F9" {
+                            if let Err(error) =
+                                execute_web_load(&mut vn, &mut executor, "slot.quick").await
+                            {
+                                tracing::error!(
+                                    event = "player.web.load.failed",
+                                    diagnostic_code = "ASTRA_PLAYER_WEB_LOAD",
+                                    error = %error,
+                                    "Web Player load transaction failed"
+                                );
+                                break;
+                            }
+                            if let Err(error) = process_web_media(
+                                &mut vn,
+                                &mut executor,
+                                &mut media,
+                                &mut timeline,
+                                (js_sys::Date::now() - timeline_clock).max(0.0) as u64,
+                                Vec::new(),
+                                &mut completed_signals,
+                            )
+                            .await
+                            {
+                                tracing::error!(
+                                    event = "player.web.media.failed",
+                                    diagnostic_code = "ASTRA_PLAYER_WEB_MEDIA",
+                                    error = %error,
+                                    "Web Player media processing failed after load"
+                                );
+                                break;
+                            }
+                            continue;
+                        }
                         let Some(action) = action_map.keyboard(&physical_key) else {
                             continue;
                         };
@@ -248,6 +395,35 @@ mod browser {
                             );
                             break;
                         }
+                        if let Err(error) = process_web_media(
+                            &mut vn,
+                            &mut executor,
+                            &mut media,
+                            &mut timeline,
+                            (js_sys::Date::now() - timeline_clock).max(0.0) as u64,
+                            Vec::new(),
+                            &mut completed_signals,
+                        )
+                        .await
+                        {
+                            tracing::error!(
+                                event = "player.web.media.failed",
+                                diagnostic_code = "ASTRA_PLAYER_WEB_MEDIA",
+                                error = %error,
+                                "Web Player media processing failed after keyboard input"
+                            );
+                            break;
+                        }
+                        if let Err(error) = log_web_consumed_step(player_sequence, "keyboard", &vn)
+                        {
+                            tracing::error!(
+                                event = "player.web.runtime.evidence_failed",
+                                diagnostic_code = "ASTRA_PLAYER_RUNTIME_EVIDENCE",
+                                error = %error,
+                                "Web Player runtime evidence was unavailable"
+                            );
+                            break;
+                        }
                     }
                     PlatformEventKind::PointerMoved { x, y, .. } => pointer = (x, y),
                     PlatformEventKind::PointerButton {
@@ -255,6 +431,7 @@ mod browser {
                         state: InputState::Pressed,
                         ..
                     } => {
+                        user_activated = true;
                         let batch = match vn.dispatch_pointer(pointer.0, pointer.1) {
                             Ok(batch) => batch,
                             Err(error) => {
@@ -276,10 +453,49 @@ mod browser {
                             );
                             break;
                         }
+                        if let Err(error) = process_web_media(
+                            &mut vn,
+                            &mut executor,
+                            &mut media,
+                            &mut timeline,
+                            (js_sys::Date::now() - timeline_clock).max(0.0) as u64,
+                            Vec::new(),
+                            &mut completed_signals,
+                        )
+                        .await
+                        {
+                            tracing::error!(
+                                event = "player.web.media.failed",
+                                diagnostic_code = "ASTRA_PLAYER_WEB_MEDIA",
+                                error = %error,
+                                "Web Player media processing failed after pointer input"
+                            );
+                            break;
+                        }
+                        if let Err(error) = log_web_consumed_step(player_sequence, "pointer", &vn) {
+                            tracing::error!(
+                                event = "player.web.runtime.evidence_failed",
+                                diagnostic_code = "ASTRA_PLAYER_RUNTIME_EVIDENCE",
+                                error = %error,
+                                "Web Player runtime evidence was unavailable"
+                            );
+                            break;
+                        }
                     }
                     _ => {}
                 }
             }
+            if let Err(error) = media.shutdown(&mut vn, &mut executor).await {
+                tracing::error!(
+                    event = "player.web.media.cleanup_failed",
+                    diagnostic_code = "ASTRA_PLAYER_WEB_MEDIA_CLEANUP",
+                    error = %error,
+                    "Web Player media cleanup failed"
+                );
+            }
+            let _ = client.destroy_surface(surface).await;
+            let _ = client.destroy_window(window).await;
+            let _ = client.shutdown().await;
         });
         PLAYER.with(|player| {
             *player.borrow_mut() = Some(WebPlayerRuntime {
@@ -291,6 +507,205 @@ mod browser {
         });
         tracing::info!(event = "player.web.ready", "Web Player host is ready");
         Ok(())
+    }
+
+    async fn process_web_media(
+        source: &mut NativeVnHostCommandSource,
+        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
+        media: &mut NativeVnProductAudioHost,
+        timeline: &mut PlayerTimelineScheduler,
+        now_ms: u64,
+        mut completed: Vec<PlayerTimelineCompletion>,
+        completed_signals: &mut BTreeSet<String>,
+    ) -> Result<(), astra_platform::PlatformError> {
+        const MAX_DECODED_AUDIO_SAMPLES: usize = 10_000_000;
+        for _ in 0..1_024 {
+            let tasks = source.take_timeline_tasks();
+            if !tasks.is_empty() {
+                let mut candidate = timeline.clone();
+                let mut immediate = Vec::new();
+                for task in tasks {
+                    immediate.extend(
+                        candidate
+                            .schedule(task, now_ms)
+                            .map_err(|error| web_player_error("player.timeline.schedule", error))?,
+                    );
+                }
+                *timeline = candidate;
+                completed.extend(immediate);
+            }
+            for completion in std::mem::take(&mut completed) {
+                tracing::info!(
+                    event = "astra.player.web.timeline.completed",
+                    task_id = %completion.task_id,
+                    target = %completion.target,
+                    completion = ?completion.kind,
+                    completed_at_ms = completion.completed_at_ms,
+                    "Web Player timeline task reached a host completion boundary"
+                );
+                if let Some(fence) = completion.fence {
+                    completed_signals.insert(fence);
+                }
+            }
+            for output in source.take_audio_requests() {
+                let request = match output {
+                    NativeVnAudioOutput::Control(request) => {
+                        media.control(&request, completed_signals)?;
+                        continue;
+                    }
+                    NativeVnAudioOutput::Start(request) => request,
+                };
+                let decode = source
+                    .prepare_audio_decode(&request)
+                    .map_err(|error| web_player_error("player.audio.decode.prepare", error))?;
+                let decoded = executor
+                    .execute_decode_lifecycle(decode)
+                    .await
+                    .map_err(|error| web_player_error("player.audio.decode", error))?;
+                let audio = astra_player_core::PlayerDecodedAudio::parse(
+                    &decoded.format,
+                    &decoded.bytes,
+                    MAX_DECODED_AUDIO_SAMPLES,
+                )
+                .map_err(|error| web_player_error("player.audio.contract", error))?;
+                media.start(source, executor, &request, audio).await?;
+                tracing::info!(
+                    event = "astra.player.web.audio.started",
+                    command_id = %request.command_id,
+                    command = %request.command,
+                    asset_id = %request.asset_id,
+                    encoded_hash = %request.encoded_hash,
+                    decoded_hash = %decoded.hash,
+                    "Web Player started a packaged audio voice"
+                );
+            }
+            media.pump(source, executor, completed_signals).await?;
+            let pending_fence = source.pending_wait().map(|wait| wait.fence.clone());
+            if let Some(fence) = pending_fence {
+                if completed_signals.remove(&fence) {
+                    let present = source
+                        .complete_wait(fence)
+                        .map_err(|error| web_player_error("player.media.complete_wait", error))?;
+                    executor
+                        .execute_batch(present)
+                        .await
+                        .map_err(|error| web_player_error("player.media.present", error))?;
+                    continue;
+                }
+            }
+            return Ok(());
+        }
+        Err(web_player_error(
+            "player.media.process",
+            "ASTRA_PLAYER_MEDIA_COMPLETION_LOOP: completion chain exceeded its bound",
+        ))
+    }
+
+    async fn execute_web_save(
+        source: &mut NativeVnHostCommandSource,
+        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
+        slot: &str,
+        transaction: PlayerHostResourceId,
+    ) -> Result<(), astra_platform::PlatformError> {
+        let plan = source
+            .prepare_save_transaction(slot, transaction)
+            .map_err(|error| web_player_error("player.save.prepare", error))?;
+        executor
+            .execute_save_transaction(plan)
+            .await
+            .map_err(|error| web_player_error("player.save.transaction", error))?;
+        Ok(())
+    }
+
+    async fn execute_web_load(
+        source: &mut NativeVnHostCommandSource,
+        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
+        slot: &str,
+    ) -> Result<(), astra_platform::PlatformError> {
+        let results = executor
+            .execute_batch(
+                source
+                    .read_save(slot)
+                    .map_err(|error| web_player_error("player.save.read.prepare", error))?,
+            )
+            .await
+            .map_err(|error| web_player_error("player.save.read", error))?;
+        let bytes = match results.as_slice() {
+            [PlayerHostCommandResult::SaveRead { bytes }] => bytes,
+            _ => {
+                return Err(web_player_error(
+                    "player.save.read",
+                    "ASTRA_PLAYER_SAVE_RESULT_INVALID: platform returned an unexpected result",
+                ));
+            }
+        };
+        let present = source
+            .restore(bytes)
+            .map_err(|error| web_player_error("player.save.restore", error))?;
+        executor
+            .execute_batch(present)
+            .await
+            .map_err(|error| web_player_error("player.save.present", error))?;
+        Ok(())
+    }
+
+    fn web_player_error(
+        operation: &'static str,
+        error: impl std::fmt::Display,
+    ) -> astra_platform::PlatformError {
+        astra_platform::PlatformError::new(
+            PlatformErrorCode::InvalidState,
+            operation,
+            error.to_string(),
+        )
+    }
+
+    fn log_web_consumed_step(
+        player_sequence: u64,
+        kind: &str,
+        source: &NativeVnHostCommandSource,
+    ) -> Result<(), astra_platform::PlatformError> {
+        let evidence = source.last_step_evidence().ok_or_else(|| {
+            web_player_error(
+                "player.runtime.evidence",
+                "ASTRA_PLAYER_RUNTIME_EVIDENCE_MISSING",
+            )
+        })?;
+        tracing::info!(
+            event = "astra.player.web.runtime.input_consumed",
+            player_sequence,
+            input_kind = kind,
+            fixed_step = evidence.fixed_step,
+            runtime_state_hash = %evidence.runtime_state_hash,
+            runtime_event_hash = %evidence.runtime_event_hash,
+            runtime_presentation_hash = %evidence.runtime_presentation_hash,
+            terminal_route_count = evidence.terminal_route_ids.len(),
+            pending_choice_count = evidence.pending_choice_ids.len(),
+            "Web Player consumed a platform input through RuntimeWorld"
+        );
+        Ok(())
+    }
+
+    async fn sleep(milliseconds: i32) -> Result<(), JsValue> {
+        let promise = Promise::new(&mut |resolve, reject| {
+            let Some(window) = web_sys::window() else {
+                let _ = reject.call1(
+                    &JsValue::UNDEFINED,
+                    &JsValue::from_str("window unavailable"),
+                );
+                return;
+            };
+            if window
+                .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, milliseconds)
+                .is_err()
+            {
+                let _ = reject.call1(
+                    &JsValue::UNDEFINED,
+                    &JsValue::from_str("timer registration failed"),
+                );
+            }
+        });
+        JsFuture::from(promise).await.map(|_| ())
     }
 
     async fn fetch_bytes(path: &str) -> Result<Vec<u8>, JsValue> {
