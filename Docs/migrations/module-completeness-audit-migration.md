@@ -226,6 +226,8 @@
 
 **2026-07-11 修补进展：** NativeVN provider save 已增加 `vn.runtime_world`，不再只保存 VN/Policy component；恢复前交叉校验完整 `RuntimeSnapshot` 与 component sections。Player 侧已有带整体 hash 的 save envelope、tamper/session mismatch 阻断和 `complete_wait` provider 路径；Windows F5/F9 已走平台原子 save transaction，写入或提交失败会执行 abort，load 后重新提交保存时的已校验 presentation frame。media completion callback、多 route session、Web 等价路径与 Windows/Web E3 evidence 尚未完成，因此 P1-011 仍保持开放。
 
+NativeVN timeline task 现已通过 descriptor 声明的 `astra.vn.timeline_task.v1` effect envelope 返回 ProductRuntimeHost；此前仅写入 `RuntimeWorld.effects`、Player 不可见的 `UNWIRED_MAIN_PATH` 已消除。平台 timeline scheduler、真实 join/cancel completion 和 E3 evidence 仍未完成。
+
 ### P2-002：容器和 VFS 的局部测试没有覆盖冲突矩阵
 
 **分类：** `SMOKE_ONLY`, `FIXTURE_ONLY`

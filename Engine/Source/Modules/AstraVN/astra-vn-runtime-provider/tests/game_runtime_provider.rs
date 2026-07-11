@@ -5,6 +5,7 @@ use astra_plugin_abi::{
 };
 use astra_vn_runtime_provider::{
     compile_astra_sources, AstraSource, NativeVnRuntimeProvider, PresentationCommand, VnRunConfig,
+    VnTimelineTask,
 };
 
 const STORY: &str = r#"
@@ -175,4 +176,53 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
 
     let shutdown = provider.shutdown(open.session_id).unwrap();
     assert_eq!(shutdown.status, "shutdown");
+}
+
+#[test]
+fn native_vn_provider_returns_timeline_tasks_to_the_product_host() {
+    let story = r#"
+story main #@id story.main
+state prologue #@id state.prologue
+  scene room #@id scene.room
+    timeline id:intro target:hero join:block fence:timeline.intro.complete duration:120 #@id timeline.intro
+"#;
+    let compiled = compile_astra_sources([AstraSource::new("timeline.astra", story)]).unwrap();
+    let mut provider = NativeVnRuntimeProvider::default();
+    let open = provider
+        .open_compiled_story(
+            compiled,
+            VnRunConfig::classic("zh-Hans"),
+            RuntimeOpenRequest {
+                target_id: "nativevn-game".to_string(),
+                profile: "classic".to_string(),
+                locale: "zh-Hans".to_string(),
+                seed: 9,
+                package_hash: "sha256:fixture".to_string(),
+                sections: vec![],
+            },
+        )
+        .unwrap();
+
+    let first = provider
+        .step(RuntimeStepInput {
+            session_id: open.session_id,
+            fixed_step: 0,
+            action: "launch_default".to_string(),
+            payload: serde_json::json!({}),
+        })
+        .unwrap();
+
+    assert!(first.outputs.iter().any(|value| {
+        value
+            .decode_postcard::<VnTimelineTask>(
+                RuntimeOutputDomain::Effect,
+                "astra.vn.timeline_task.v1",
+                SchemaVersion::new(1, 0, 0),
+            )
+            .is_ok_and(|task| {
+                task.command == "timeline"
+                    && task.attributes.get("fence").map(String::as_str)
+                        == Some("timeline.intro.complete")
+            })
+    }));
 }

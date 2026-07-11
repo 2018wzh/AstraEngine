@@ -159,6 +159,7 @@ impl NativeVnHostCommandSource {
             )
             .allow(RuntimeOutputDomain::Audio, "astra.vn.audio_command.v1")
             .allow(RuntimeOutputDomain::Await, "astra.runtime.await_id.v1")
+            .allow(RuntimeOutputDomain::Effect, "astra.vn.timeline_task.v1")
             .allow(RuntimeOutputDomain::Trace, "astra.vn.runtime_step_trace.v1")
             .allow(RuntimeOutputDomain::Trace, "astra.vn.runtime_state.v1")
             .allow(

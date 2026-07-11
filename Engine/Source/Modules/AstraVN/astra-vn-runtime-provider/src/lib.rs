@@ -167,6 +167,7 @@ impl NativeVnRuntimeProvider {
                 ),
                 output_schema(RuntimeOutputDomain::Audio, "astra.vn.audio_command.v1", 1),
                 output_schema(RuntimeOutputDomain::Await, "astra.runtime.await_id.v1", 1),
+                output_schema(RuntimeOutputDomain::Effect, "astra.vn.timeline_task.v1", 1),
                 output_schema(
                     RuntimeOutputDomain::Trace,
                     "astra.vn.runtime_step_trace.v1",
@@ -472,6 +473,19 @@ impl NativeVnRuntimeProvider {
             })
             .collect::<Result<Vec<_>, _>>()
             .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let timeline = output
+            .timeline_tasks
+            .iter()
+            .map(|task| {
+                RuntimeOutputEnvelope::postcard(
+                    RuntimeOutputDomain::Effect,
+                    "astra.vn.timeline_task.v1",
+                    SchemaVersion::new(1, 0, 0),
+                    task,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| CoreVnError::message(err.to_string()))?;
         let effects = vec![RuntimeOutputEnvelope::postcard(
             RuntimeOutputDomain::Effect,
             "astra.vn.runtime_step_effect.v2",
@@ -521,6 +535,7 @@ impl NativeVnRuntimeProvider {
                 .into_iter()
                 .chain(presentation)
                 .chain(audio)
+                .chain(timeline)
                 .chain(awaits)
                 .chain(trace)
                 .chain(dirty_save_sections)

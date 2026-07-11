@@ -43,11 +43,14 @@ pub struct RuntimeStepOutput {
     pub awaits: Vec<AwaitToken>,
     pub presentation: Vec<PresentationCommand>,
     pub audio: Vec<AudioCommand>,
+    pub timeline_tasks: Vec<TimelineTask>,
     pub diagnostics: Vec<Diagnostic>,
     pub trace: Vec<StateMachineTrace>,
     pub dirty_save_sections: Vec<SectionId>,
 }
 ```
+
+NativeVN 的 timeline task 通过 `RuntimeOutputDomain::Effect` 和 `astra.vn.timeline_task.v1` 返回。只把 task 写入 `RuntimeWorld` effect trace、却不放入 provider output 属于 `UNWIRED_MAIN_PATH`：Player 无法执行 join/cancel，也不能产生同 run completion evidence。Host 必须先按 descriptor/schema registry 校验该 envelope，再交给 timeline owner；completion 只能在对应 task 真正结束或取消后回到固定 tick 边界。
 
 所有 DTO 只能携带 stable id、hash、section ref、`VfsUri`、source span、capability report 和 serde/postcard payload。Luau VM handle、legacy VM object、native renderer/audio handle、Editor widget、local root、provider secret 和商业 payload 不得跨 ABI 或进入 save/replay/report。
 
