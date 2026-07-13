@@ -1,0 +1,41 @@
+{
+  "schema": "astra.open_font_fixture_manifest.v1",
+  "source_repository": "https://github.com/google/fonts",
+  "source_revision": "ec0464b978de222073645d6d3366f3fdf03376d8",
+  "license": "OFL-1.1",
+  "fonts": [
+    {
+      "id": "noto_sans_sc_variable",
+      "file": "NotoSansSC-Variable.ttf",
+      "family": "Noto Sans SC",
+      "face_index": 0,
+      "license_file": "OFL-NotoSansSC.txt",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/ec0464b978de222073645d6d3366f3fdf03376d8/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+      "byte_size": 17772300,
+      "sha256": "sha256:a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+      "coverage": ["cjk", "hiragana", "katakana", "east_asian_punctuation"]
+    },
+    {
+      "id": "noto_sans_arabic_variable",
+      "file": "NotoSansArabic-Variable.ttf",
+      "family": "Noto Sans Arabic",
+      "face_index": 0,
+      "license_file": "OFL-NotoSansArabic.txt",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/ec0464b978de222073645d6d3366f3fdf03376d8/ofl/notosansarabic/NotoSansArabic%5Bwdth%2Cwght%5D.ttf",
+      "byte_size": 844676,
+      "sha256": "sha256:63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e",
+      "coverage": ["arabic", "rtl", "combining_marks"]
+    },
+    {
+      "id": "noto_emoji_variable",
+      "file": "NotoEmoji-Variable.ttf",
+      "family": "Noto Emoji",
+      "face_index": 0,
+      "license_file": "OFL-NotoEmoji.txt",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/ec0464b978de222073645d6d3366f3fdf03376d8/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf",
+      "byte_size": 1982596,
+      "sha256": "sha256:de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551",
+      "coverage": ["emoji", "variation_sequences", "zwj_clusters"]
+    }
+  ]
+}

@@ -266,25 +266,62 @@ fn detect_overflow(pass: &LayoutPass, constraint: LayoutConstraint) -> bool {
 }
 
 pub(super) fn glyph_bitmap(image: &cosmic_text::SwashImage) -> Result<GlyphBitmap, MediaError> {
-    let format = match image.content {
-        SwashContent::Mask => GlyphBitmapFormat::Alpha8,
-        SwashContent::SubpixelMask | SwashContent::Color => GlyphBitmapFormat::Rgba8,
-    };
-    let channels = match format {
-        GlyphBitmapFormat::Alpha8 => 1,
-        GlyphBitmapFormat::Rgba8 => 4,
-    };
-    let expected = image.placement.width as usize * image.placement.height as usize * channels;
-    if image.placement.width == 0 || image.placement.height == 0 || image.data.len() != expected {
-        return Err(MediaError::message(
-            "ASTRA_TEXT_GLYPH_BITMAP: rasterizer returned an invalid bitmap",
-        ));
+    let pixels = (image.placement.width as usize)
+        .checked_mul(image.placement.height as usize)
+        .ok_or_else(|| {
+            MediaError::message("ASTRA_TEXT_GLYPH_BITMAP: rasterized dimensions overflow")
+        })?;
+    if image.placement.width == 0 || image.placement.height == 0 {
+        return Err(MediaError::message(format!(
+            "ASTRA_TEXT_GLYPH_BITMAP: rasterizer returned an invalid bitmap (content={:?}, width={}, height={}, bytes={})",
+            image.content,
+            image.placement.width,
+            image.placement.height,
+            image.data.len(),
+        )));
     }
+    let (format, pixels) = match image.content {
+        SwashContent::Mask if image.data.len() == pixels => {
+            (GlyphBitmapFormat::Alpha8, image.data.clone())
+        }
+        SwashContent::SubpixelMask
+            if image.data.len()
+                == pixels.checked_mul(3).ok_or_else(|| {
+                    MediaError::message("ASTRA_TEXT_GLYPH_BITMAP: subpixel bitmap size overflows")
+                })? =>
+        {
+            // SceneCommand uses target-independent glyph resources. Collapse RGB subpixel
+            // coverage to a stable mask so replay does not depend on panel stripe order.
+            let alpha = image
+                .data
+                .chunks_exact(3)
+                .map(|coverage| coverage[0].max(coverage[1]).max(coverage[2]))
+                .collect();
+            (GlyphBitmapFormat::Alpha8, alpha)
+        }
+        SwashContent::Color
+            if image.data.len()
+                == pixels.checked_mul(4).ok_or_else(|| {
+                    MediaError::message("ASTRA_TEXT_GLYPH_BITMAP: color bitmap size overflows")
+                })? =>
+        {
+            (GlyphBitmapFormat::Rgba8, image.data.clone())
+        }
+        _ => {
+            return Err(MediaError::message(format!(
+                "ASTRA_TEXT_GLYPH_BITMAP: rasterizer returned an invalid bitmap (content={:?}, width={}, height={}, bytes={})",
+                image.content,
+                image.placement.width,
+                image.placement.height,
+                image.data.len(),
+            )))
+        }
+    };
     Ok(GlyphBitmap {
         width: image.placement.width,
         height: image.placement.height,
         format,
-        hash: Hash256::from_sha256(&image.data),
-        pixels: image.data.clone(),
+        hash: Hash256::from_sha256(&pixels),
+        pixels,
     })
 }

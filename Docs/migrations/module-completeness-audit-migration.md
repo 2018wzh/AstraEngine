@@ -75,7 +75,9 @@
 
 **现有证据：** `Engine/Source/Runtime/astra-media/tests/text_layout.rs` 使用仓库内 OFL 字体覆盖 `astra.font_manifest.v1 → verified package → VFS resolve context → font section bytes → provider` 主链、Latin、组合字符、ruby、RTL paragraph、空输入、wrap/clip/ellipsis、hash/face/fallback/direction 负向路径、字体替换 cache invalidation 和真实 CPU glyph capture；`Engine/Source/Runtime/astra-media-core/tests/scene_compositor.rs` 覆盖 Alpha8/RGBA glyph、引用资源绘制和失败回滚。该证据达到 shared E2，但不能外推为 Windows 产品视觉 E3。
 
-**剩余缺口：** 尚未加入带许可且进入 package sidecar 的 CJK、Arabic 和 emoji 字体 fixture，因而没有对复杂 script shaping、实际多字体 fallback 和 color emoji 做 hermetic 语义/视觉回归；Windows glyph atlas/golden、layout save/replay continuation 与 release drift check 尚未闭合。P1-001 保持开放，不能标记 `RESOLVED`。
+**2026-07-13 新增证据：** `Engine/Fixtures/PublicDomainFonts/manifest.json` 固定同一 `google/fonts` revision、OFL license、byte size 和 SHA-256；Noto Sans SC、Noto Sans Arabic、Noto Emoji 与 Poppins 会进入真实 `astra.font_manifest.v1`、Package section 和 VFS resolve 主链。`text_layout.rs` 现覆盖 CJK/假名/ruby、Arabic RTL/组合字符、emoji variation/ZWJ cluster、实际 fallback family、glyph bitmap 和 layout hash。该回归同时暴露并修复了把三通道 subpixel mask 当四通道 RGBA、零 advance 组合 glyph 被误判损坏的问题。
+
+**剩余缺口：** Windows glyph atlas/golden、layout save/replay continuation 与 release drift check 尚未闭合。P1-001 保持开放，不能标记 `RESOLVED`。
 
 **迁移要求：**
 

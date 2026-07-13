@@ -13,6 +13,104 @@ use astra_media_core::{
 };
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
 
+fn open_font_fixture(file: &str) -> Vec<u8> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../Fixtures/PublicDomainFonts")
+        .join(file);
+    std::fs::read(path).unwrap()
+}
+
+fn fixture_font(
+    asset_id: &str,
+    family: &str,
+    file: &str,
+    coverage: Vec<UnicodeRange>,
+) -> PackagedFont {
+    let bytes = open_font_fixture(file);
+    PackagedFont {
+        asset_id: asset_id.into(),
+        family: family.into(),
+        face_index: 0,
+        hash: Hash256::from_sha256(&bytes),
+        license_id: "OFL-1.1".into(),
+        subset: None,
+        coverage,
+        targets: vec!["windows".into()],
+        profiles: vec!["classic".into()],
+        bytes,
+    }
+}
+
+fn multiscript_fonts() -> Vec<PackagedFont> {
+    vec![
+        font(
+            include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/Poppins-Regular.ttf")
+                .to_vec(),
+        ),
+        fixture_font(
+            "asset:/font/fallback/noto-sans-sc",
+            "Noto Sans SC",
+            "NotoSansSC-Variable.ttf",
+            vec![
+                UnicodeRange {
+                    start: 0x3000,
+                    end: 0x30ff,
+                },
+                UnicodeRange {
+                    start: 0x3400,
+                    end: 0x9fff,
+                },
+                UnicodeRange {
+                    start: 0xff00,
+                    end: 0xffef,
+                },
+            ],
+        ),
+        fixture_font(
+            "asset:/font/fallback/noto-sans-arabic",
+            "Noto Sans Arabic",
+            "NotoSansArabic-Variable.ttf",
+            vec![
+                UnicodeRange {
+                    start: 0x0600,
+                    end: 0x06ff,
+                },
+                UnicodeRange {
+                    start: 0x0750,
+                    end: 0x077f,
+                },
+                UnicodeRange {
+                    start: 0x08a0,
+                    end: 0x08ff,
+                },
+            ],
+        ),
+        fixture_font(
+            "asset:/font/fallback/noto-emoji",
+            "Noto Emoji",
+            "NotoEmoji-Variable.ttf",
+            vec![
+                UnicodeRange {
+                    start: 0x200d,
+                    end: 0x200d,
+                },
+                UnicodeRange {
+                    start: 0x2600,
+                    end: 0x27bf,
+                },
+                UnicodeRange {
+                    start: 0xfe0f,
+                    end: 0xfe0f,
+                },
+                UnicodeRange {
+                    start: 0x1f300,
+                    end: 0x1faff,
+                },
+            ],
+        ),
+    ]
+}
+
 fn font(bytes: Vec<u8>) -> PackagedFont {
     PackagedFont {
         asset_id: "asset:/font/ui/poppins-regular".into(),
@@ -179,6 +277,120 @@ fn shaped_clusters_fonts_ruby_voice_and_glyph_bitmaps_reach_renderer() {
     assert_eq!(stats.entries, 1);
     assert_eq!(stats.misses, 1);
     assert_eq!(stats.hits, 1);
+}
+
+#[test]
+fn licensed_multiscript_fallback_shapes_cjk_arabic_and_emoji_clusters() {
+    let provider = CosmicTextLayoutProvider::new(
+        FontBindingContext {
+            target: "windows".into(),
+            profile: "classic".into(),
+            default_locale: "en-US".into(),
+        },
+        multiscript_fonts(),
+        TextLayoutConfig::production_defaults(),
+    )
+    .unwrap();
+    let mut request = request("Latin cafe\u{301}");
+    request.key = "multiscript.production".into();
+    request.font_families = vec![
+        "Poppins".into(),
+        "Noto Sans SC".into(),
+        "Noto Sans Arabic".into(),
+        "Noto Emoji".into(),
+    ];
+    request.runs.extend([
+        TextRun {
+            text: "中文かなカナ".into(),
+            language: "zh-CN".into(),
+            script: Some("Hans".into()),
+            direction: TextDirection::LeftToRight,
+            ruby: vec![RubySpan {
+                base_range: SourceRange { start: 0, end: 6 },
+                text: "ちゅうぶん".into(),
+            }],
+            voice: None,
+        },
+        TextRun {
+            text: "السَّلَامُ".into(),
+            language: "ar".into(),
+            script: Some("Arab".into()),
+            direction: TextDirection::RightToLeft,
+            ruby: Vec::new(),
+            voice: None,
+        },
+        TextRun {
+            text: "☀️👩‍💻😀".into(),
+            language: "und".into(),
+            script: Some("Zyyy".into()),
+            direction: TextDirection::LeftToRight,
+            ruby: Vec::new(),
+            voice: None,
+        },
+    ]);
+    request.constraint.max_width = 640.0;
+
+    let layout = provider.layout(&request).unwrap();
+    let families = layout
+        .shaped_runs
+        .iter()
+        .map(|run| run.font_family.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    for family in ["Poppins", "Noto Sans SC", "Noto Sans Arabic", "Noto Emoji"] {
+        assert!(families.contains(family), "missing shaped family {family}");
+    }
+    assert!(layout
+        .shaped_runs
+        .iter()
+        .filter(|run| run.run_index == 2)
+        .all(|run| run.direction == TextDirection::RightToLeft));
+    assert!(layout
+        .shaped_runs
+        .iter()
+        .flat_map(|run| &run.glyphs)
+        .all(|glyph| glyph.glyph_id != 0 && glyph.source.start <= glyph.source.end));
+    assert!(
+        layout
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "ASTRA_TEXT_FONT_FALLBACK")
+            .count()
+            >= 3
+    );
+    assert!(layout
+        .glyph_resources
+        .iter()
+        .any(|resource| resource.font_asset_id.ends_with("noto-emoji")));
+    assert_eq!(layout.hash, provider.layout(&request).unwrap().hash);
+}
+
+#[test]
+fn open_font_fixture_manifest_is_revision_hash_and_license_bound() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../Fixtures/PublicDomainFonts");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["schema"], "astra.open_font_fixture_manifest.v1");
+    assert_eq!(
+        manifest["source_revision"],
+        "ec0464b978de222073645d6d3366f3fdf03376d8"
+    );
+    let fonts = manifest["fonts"].as_array().unwrap();
+    assert_eq!(fonts.len(), 3);
+    for entry in fonts {
+        let bytes = std::fs::read(root.join(entry["file"].as_str().unwrap())).unwrap();
+        assert_eq!(entry["byte_size"].as_u64().unwrap(), bytes.len() as u64);
+        assert_eq!(
+            entry["sha256"].as_str().unwrap(),
+            Hash256::from_sha256(&bytes).to_string()
+        );
+        let license = std::fs::read(root.join(entry["license_file"].as_str().unwrap())).unwrap();
+        assert!(!license.is_empty());
+        assert!(entry["source_url"]
+            .as_str()
+            .unwrap()
+            .contains(manifest["source_revision"].as_str().unwrap()));
+    }
 }
 
 #[test]
@@ -419,4 +631,115 @@ fn verified_package_vfs_is_the_font_database_authority() {
     assert!(wrong_context
         .to_string()
         .contains("ASTRA_TEXT_PACKAGE_MANIFEST_IDENTITY"));
+}
+
+#[test]
+fn multiscript_fallback_database_is_loaded_from_verified_package_sections() {
+    let mut fonts = multiscript_fonts();
+    for font in &mut fonts {
+        font.targets = vec!["native-smoke-game".into()];
+    }
+    let mut sections = Vec::new();
+    let mut entries = Vec::new();
+    let mut manifest_fonts = Vec::new();
+    for (index, font) in fonts.iter().enumerate() {
+        let section_id = format!("asset.font.multiscript.{index}");
+        let uri = VfsUri::parse(&format!("package:/font/multiscript/{index}")).unwrap();
+        sections.push(SectionPayload::raw(
+            section_id.clone(),
+            "astra.cooked_asset.v1",
+            font.bytes.clone(),
+        ));
+        entries.push(serde_json::json!({
+            "vfs_uri": uri,
+            "layer_id": "package.base",
+            "source": { "kind": "package_section", "section_id": section_id },
+            "offset": 0,
+            "size": font.bytes.len(),
+            "hash": font.hash,
+            "codec": "raw",
+            "media_kind": "font",
+            "diagnostics": []
+        }));
+        manifest_fonts.push(FontPackageEntry {
+            asset_id: font.asset_id.clone(),
+            uri,
+            family: font.family.clone(),
+            face_index: font.face_index,
+            hash: font.hash,
+            license_id: font.license_id.clone(),
+            subset: font.subset.clone(),
+            coverage: font.coverage.clone(),
+            targets: font.targets.clone(),
+            profiles: font.profiles.clone(),
+        });
+    }
+    let mut build =
+        PackageBuildRequest::fixture("com.example.multiscript-fonts", "classic", sections);
+    build.asset_vfs_manifest = serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.asset_vfs_manifest.v1",
+        "prefixes": [{
+            "prefix": "package",
+            "provider_id": "astra.vfs.package",
+            "backend": "package",
+            "case_policy": "case_sensitive",
+            "mode": "read_only",
+            "redaction": "shipping",
+            "capabilities": ["vfs.backend.package"]
+        }],
+        "layers": [{
+            "layer_id": "package.base",
+            "prefix": "package",
+            "priority": 0,
+            "source": { "kind": "package_section", "section_id": "package.manifest" },
+            "targets": ["native-smoke-game"],
+            "profiles": ["classic"]
+        }],
+        "entries": entries,
+        "whiteouts": []
+    }))
+    .unwrap();
+    let manifest = FontPackageManifest {
+        schema: FONT_PACKAGE_MANIFEST_SCHEMA.into(),
+        target: "native-smoke-game".into(),
+        profile: "classic".into(),
+        provider_binding: "astra.vfs.package".into(),
+        fonts: manifest_fonts,
+    };
+    build.extra_sections.push(SectionPayload::raw(
+        "media.font_manifest",
+        FONT_PACKAGE_MANIFEST_SCHEMA,
+        serde_json::to_vec(&manifest).unwrap(),
+    ));
+    let blob = PackageBuilder::build(build).unwrap();
+    let package = PackageReader::open(blob.as_bytes()).unwrap();
+    let provider = CosmicTextLayoutProvider::from_package(
+        &package,
+        "media.font_manifest",
+        FontBindingContext {
+            target: "native-smoke-game".into(),
+            profile: "classic".into(),
+            default_locale: "und".into(),
+        },
+        TextLayoutConfig::production_defaults(),
+    )
+    .unwrap();
+    let mut mixed = request("A中ا😀");
+    mixed.runs[0].language = "und".into();
+    mixed.runs[0].script = None;
+    mixed.runs[0].direction = TextDirection::Auto;
+    mixed.font_families = vec![
+        "Poppins".into(),
+        "Noto Sans SC".into(),
+        "Noto Sans Arabic".into(),
+        "Noto Emoji".into(),
+    ];
+    let layout = provider.layout(&mixed).unwrap();
+    let families = layout
+        .shaped_runs
+        .iter()
+        .map(|run| run.font_family.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(families.len(), 4);
+    assert_eq!(layout.hash, provider.layout(&mixed).unwrap().hash);
 }

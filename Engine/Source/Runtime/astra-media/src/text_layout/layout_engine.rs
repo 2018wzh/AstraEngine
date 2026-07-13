@@ -446,7 +446,8 @@ fn append_raw_layout(
             let empty_image = image.as_ref().is_some_and(|image| {
                 image.placement.width == 0 || image.placement.height == 0 || image.data.is_empty()
             });
-            let (resource_id, render_x, render_y) = if empty_image && invisible {
+            let zero_advance = glyph.w.abs() <= f32::EPSILON;
+            let (resource_id, render_x, render_y) = if empty_image && (invisible || zero_advance) {
                 (None, None, None)
             } else if let Some(image) = image {
                 let bitmap = glyph_bitmap(&image)?;

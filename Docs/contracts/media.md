@@ -61,9 +61,9 @@ Headless reference output 使用固定采样率、固定声道布局的 PCM S16L
 
 `TextLayoutRequest` 明确声明 language、script、direction、OpenType feature、fallback family chain、wrap 和 overflow policy。输出是带 UTF-8 source cluster、实际 font face/hash、glyph id、BiDi direction、advance、baseline、visual line、ruby placement 和 raster resource id 的 `ShapedGlyphRun`，不再输出按字符数估算的 box。`Clip` 和 ellipsis 是 contract 结果的一部分；voice replay metadata 与 layout identity 一起参与 hash。
 
-Swash raster 输出 `Alpha8` 或 `Rgba8` glyph bitmap。`TextRenderResourceOwner` 负责跨 frame 引用计数、增量 upload、最后引用 release、重复 bitmap 冲突和 shutdown drain；command stream 失败时，headless renderer 不提交任何 resource mutation。缺字、未声明 fallback、fallback 顺序漂移、错误方向、字体 hash 漂移、无效 ruby range、资源冲突和预算超限分别返回稳定 `ASTRA_TEXT_*` diagnostic。
+Swash raster 输出 `Alpha8` 或 `Rgba8` glyph bitmap。RGB subpixel mask 会先校验三通道长度，再折叠为与面板 stripe order 无关的 deterministic `Alpha8`；零尺寸且零 advance 的组合/连接 glyph 保留 shaping identity，但不创建伪 bitmap。`TextRenderResourceOwner` 负责跨 frame 引用计数、增量 upload、最后引用 release、重复 bitmap 冲突和 shutdown drain；command stream 失败时，headless renderer 不提交任何 resource mutation。缺字、未声明 fallback、fallback 顺序漂移、错误方向、字体 hash 漂移、无效 ruby range、资源冲突和预算超限分别返回稳定 `ASTRA_TEXT_*` diagnostic。
 
-当前共享实现已经提供 packaged font database、`astra.font_manifest.v1` 到已验证 Package/VFS section 的权威读取、真实 shaping/raster、动态字体替换与 cache invalidation、cluster mapping、ruby、BiDi、wrap/clip/ellipsis 和 renderer-ready glyph command；它属于 E2 shared implementation。加密字体 section 必须显式提供匹配的 container crypto provider，未提供时直接失败。P1-001 仍等待带许可的 CJK/Arabic/emoji package font fixtures、Windows 真实 visual golden 和 save/replay/release drift 证据，不能据此宣称字体产品能力达到 E3。
+当前共享实现已经提供 packaged font database、`astra.font_manifest.v1` 到已验证 Package/VFS section 的权威读取、真实 shaping/raster、动态字体替换与 cache invalidation、cluster mapping、ruby、BiDi、wrap/clip/ellipsis 和 renderer-ready glyph command；它属于 E2 shared implementation。仓库内固定 revision/hash/OFL 的 Noto Sans SC、Noto Sans Arabic 和 Noto Emoji fixture 会作为真实 package sections 加载，覆盖 CJK/假名/ruby、Arabic RTL/组合字符、emoji variation/ZWJ cluster 与显式多字体 fallback。加密字体 section 必须显式提供匹配的 container crypto provider，未提供时直接失败。P1-001 仍等待 Windows glyph atlas visual golden、layout save/replay continuation 与 release drift consumer，不能据此宣称字体产品能力达到 E3。
 
 ## Command Boundary
 

@@ -134,7 +134,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 3. 实现 bounded layout/raster cache、动态字体事务替换与失效、Alpha8/RGBA glyph、layout identity 和 `TextRenderResourceOwner` 引用生命周期。
 4. 覆盖 Latin/组合字符、ruby、BiDi、wrap、clip、ellipsis、空输入、font/hash/fallback/direction 负向路径以及真实 CPU glyph capture。
 
-**Done Evidence:** `cargo test -p astra-media --test text_layout` 与 `cargo test -p astra-media-core --test scene_compositor` 证明 shared E2 contract 从 verified package/VFS font section 建库，使用真实 glyph shaping/raster，并且 resource mutation 在失败时不提交。该证据不包含 CJK/Arabic/emoji licensed fixture或 Windows visual golden；这些仍由 P1-001/E3 阻断，不能从 Stage 2 contract 状态外推为完整产品字体能力。
+**Done Evidence:** `cargo test -p astra-media --test text_layout` 与 `cargo test -p astra-media-core --test scene_compositor` 证明 shared E2 contract 从 verified package/VFS font sections 建库，使用固定 revision/hash/OFL 的 Poppins、Noto Sans SC、Noto Sans Arabic 和 Noto Emoji 执行 Latin/组合字符、CJK/假名/ruby、Arabic RTL、emoji variation/ZWJ fallback 与真实 glyph shaping/raster；subpixel mask、零 advance cluster、动态 cache 和失败 resource mutation 也有负向回归。该证据不包含 Windows glyph atlas visual golden、layout save/replay continuation 或 release drift consumer；这些仍由 P1-001/E3 阻断，不能从 Stage 2 contract 状态外推为完整产品字体能力。
 
 **Linked Test IDs:** `T-S2-MEDIA-02`
 
