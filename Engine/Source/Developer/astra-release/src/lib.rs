@@ -1,8 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use astra_asset::{
-    AssetCatalog, ResolveContext, VfsBackendKind, VfsManifest, VfsSourceRef, VfsUri,
-};
+use astra_asset::{AssetCatalog, ResolveContext, VfsManifest, VfsSourceRef, VfsUri};
 use astra_core::{Diagnostic, Hash256};
 use astra_package::{CookSummaryManifest, PackageManifest, PackageReader};
 use astra_platform::{
@@ -10,7 +8,8 @@ use astra_platform::{
 };
 use astra_player_core::{PlayerAutomationReport, PlayerAutomationStatus};
 use astra_plugin_abi::{
-    RuntimeOpenRequest, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeStepInput,
+    PluginExtensionRegistrySnapshot, ProviderPolicy, RuntimeOpenRequest, RuntimeRestoreRequest,
+    RuntimeSaveRequest, RuntimeStepInput,
 };
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
 use astra_vn::{
@@ -569,7 +568,10 @@ fn section_check(package: &PackageReader, section: &str) -> ReleaseCheckRecord {
 }
 
 fn plugin_extension_registry_check(package: &PackageReader) -> ReleaseCheckRecord {
-    let registry = match read_json_section(package, "plugin.extension_registry") {
+    let registry = match read_typed_json_section::<PluginExtensionRegistrySnapshot>(
+        package,
+        "plugin.extension_registry",
+    ) {
         Ok(value) => value,
         Err((code, message)) => {
             return plugin_blocked(
@@ -580,78 +582,43 @@ fn plugin_extension_registry_check(package: &PackageReader) -> ReleaseCheckRecor
             )
         }
     };
-    let provider_policy = match read_json_section(package, "provider.policy") {
-        Ok(value) => value,
-        Err((code, message)) => {
+    let provider_policy =
+        match read_typed_json_section::<ProviderPolicy>(package, "provider.policy") {
+            Ok(value) => value,
+            Err((code, message)) => {
+                return plugin_blocked(
+                    "plugin.extension_registry",
+                    code,
+                    message,
+                    vec![evidence("section", "provider.policy")],
+                )
+            }
+        };
+    let manifest = match package
+        .container()
+        .decode_postcard::<PackageManifest>("package.manifest")
+    {
+        Ok(manifest) => manifest,
+        Err(error) => {
             return plugin_blocked(
                 "plugin.extension_registry",
-                code,
-                message,
-                vec![evidence("section", "provider.policy")],
+                "ASTRA_PACKAGE_MANIFEST_INVALID",
+                error.to_string(),
+                vec![evidence("section", "package.manifest")],
             )
         }
     };
-    let providers = registry
-        .get("providers")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let bindings = registry
-        .get("bindings")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let conflicts = registry
-        .get("conflicts")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-
-    if !conflicts.is_empty() {
+    if let Err(diagnostic) = registry.validate_embedded_package(
+        &provider_policy,
+        &manifest.package_id,
+        &manifest.profile,
+    ) {
         return plugin_blocked(
             "plugin.extension_registry",
-            "ASTRA_PLUGIN_EXTENSION_CONFLICT",
-            "plugin extension registry contains unresolved conflicts",
-            vec![evidence("conflict_count", conflicts.len())],
+            diagnostic.code,
+            diagnostic.message,
+            vec![evidence("section", "plugin.extension_registry")],
         );
-    }
-
-    for binding in bindings.iter().chain(
-        provider_policy
-            .get("bindings")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten(),
-    ) {
-        let provider_id = binding
-            .get("provider_id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        let Some(provider) = providers.iter().find(|provider| {
-            provider
-                .get("provider_id")
-                .and_then(serde_json::Value::as_str)
-                == Some(provider_id)
-        }) else {
-            return plugin_blocked(
-                "plugin.extension_registry",
-                "ASTRA_PLUGIN_PROVIDER_BINDING_MISSING",
-                format!("provider binding {provider_id} is not registered"),
-                vec![evidence("provider_id", provider_id)],
-            );
-        };
-        if !provider
-            .get("packaged")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        {
-            return plugin_blocked(
-                "plugin.extension_registry",
-                "ASTRA_PLUGIN_PACKAGED_INELIGIBLE",
-                format!("provider binding {provider_id} is not packaged eligible"),
-                vec![evidence("provider_id", provider_id)],
-            );
-        }
     }
 
     ReleaseCheckRecord {
@@ -661,8 +628,8 @@ fn plugin_extension_registry_check(package: &PackageReader) -> ReleaseCheckRecor
         summary: "plugin extension registry has resolved bindings and no conflicts".to_string(),
         diagnostic: None,
         evidence: vec![
-            evidence("provider_count", providers.len()),
-            evidence("binding_count", bindings.len()),
+            evidence("provider_count", registry.providers.len()),
+            evidence("binding_count", registry.bindings.len()),
         ],
     }
 }
@@ -732,18 +699,22 @@ fn runtime_provider_binding_check(
     selected_target: Option<&str>,
     profile: &str,
 ) -> ReleaseCheckRecord {
-    let provider_policy = match read_json_section(package, "provider.policy") {
-        Ok(value) => value,
-        Err((code, message)) => {
-            return runtime_blocked(
-                "runtime_provider.binding",
-                code,
-                message,
-                vec![evidence("section", "provider.policy")],
-            )
-        }
-    };
-    let registry = match read_json_section(package, "plugin.extension_registry") {
+    let provider_policy =
+        match read_typed_json_section::<ProviderPolicy>(package, "provider.policy") {
+            Ok(value) => value,
+            Err((code, message)) => {
+                return runtime_blocked(
+                    "runtime_provider.binding",
+                    code,
+                    message,
+                    vec![evidence("section", "provider.policy")],
+                )
+            }
+        };
+    let registry = match read_typed_json_section::<PluginExtensionRegistrySnapshot>(
+        package,
+        "plugin.extension_registry",
+    ) {
         Ok(value) => value,
         Err((code, message)) => {
             return runtime_blocked(
@@ -790,54 +761,40 @@ fn runtime_provider_binding_check(
             ],
         );
     }
-    let bindings = provider_policy
-        .get("bindings")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let has_policy_binding = bindings.iter().any(|binding| {
-        binding.get("slot").and_then(serde_json::Value::as_str) == Some("game_runtime_provider")
-            && binding
-                .get("provider_id")
-                .and_then(serde_json::Value::as_str)
-                == Some("astra.runtime.native_vn")
-    });
-    if !has_policy_binding {
-        return runtime_blocked(
-            "runtime_provider.binding",
-            "ASTRA_RUNTIME_PROVIDER_BINDING_MISSING",
-            "provider.policy must bind game_runtime_provider to astra.runtime.native_vn",
-            vec![evidence("target", &target.id), evidence("profile", profile)],
-        );
-    }
-    let providers = registry
-        .get("providers")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let Some(provider) = providers.iter().find(|provider| {
-        provider.get("slot").and_then(serde_json::Value::as_str) == Some("game_runtime_provider")
-            && provider
-                .get("provider_id")
-                .and_then(serde_json::Value::as_str)
-                == Some("astra.runtime.native_vn")
-    }) else {
-        return runtime_blocked(
-            "runtime_provider.binding",
-            "ASTRA_RUNTIME_PROVIDER_REGISTRY_MISSING",
-            "plugin registry must register astra.runtime.native_vn for game_runtime_provider",
-            vec![evidence("provider_id", "astra.runtime.native_vn")],
-        );
+    let manifest = match package
+        .container()
+        .decode_postcard::<PackageManifest>("package.manifest")
+    {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            return runtime_blocked(
+                "runtime_provider.binding",
+                "ASTRA_PACKAGE_MANIFEST_INVALID",
+                error.to_string(),
+                vec![evidence("section", "package.manifest")],
+            )
+        }
     };
-    if !provider
-        .get("packaged")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
+    if let Err(diagnostic) =
+        registry.validate_for_package(&provider_policy, &manifest.package_id, &target.id, profile)
     {
         return runtime_blocked(
             "runtime_provider.binding",
-            "ASTRA_RUNTIME_PROVIDER_UNPACKAGED",
-            "runtime provider must be packaged eligible",
+            diagnostic.code,
+            diagnostic.message,
+            vec![evidence("target", &target.id), evidence("profile", profile)],
+        );
+    }
+    let has_runtime_binding = registry.bindings.iter().any(|binding| {
+        binding.slot == "game_runtime_provider"
+            && binding.provider_id == "astra.runtime.native_vn"
+            && binding.context.required_capability == "runtime.native_vn"
+    });
+    if !has_runtime_binding {
+        return runtime_blocked(
+            "runtime_provider.binding",
+            "ASTRA_RUNTIME_PROVIDER_BINDING_MISSING",
+            "provider policy and registry must bind NativeVN runtime capability",
             vec![evidence("provider_id", "astra.runtime.native_vn")],
         );
     }
@@ -858,33 +815,21 @@ fn runtime_provider_binding_check(
 }
 
 fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckRecord {
-    let provider_policy = match read_json_section(package, "provider.policy") {
-        Ok(value) => value,
-        Err((code, message)) => {
-            return runtime_blocked(
-                "runtime_provider.native_vn",
-                code,
-                message,
-                vec![evidence("section", "provider.policy")],
-            )
-        }
-    };
-    let Some(descriptor) = provider_policy.get("runtime_provider") else {
-        return runtime_blocked(
-            "runtime_provider.native_vn",
-            "ASTRA_RUNTIME_PROVIDER_DESCRIPTOR_MISSING",
-            "provider.policy must include NativeVN runtime provider descriptor",
-            vec![evidence("provider_id", "astra.runtime.native_vn")],
-        );
-    };
-    let runtime_id = descriptor
-        .get("runtime_id")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let provider_id = descriptor
-        .get("provider_id")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
+    let provider_policy =
+        match read_typed_json_section::<ProviderPolicy>(package, "provider.policy") {
+            Ok(value) => value,
+            Err((code, message)) => {
+                return runtime_blocked(
+                    "runtime_provider.native_vn",
+                    code,
+                    message,
+                    vec![evidence("section", "provider.policy")],
+                )
+            }
+        };
+    let descriptor = &provider_policy.runtime_provider;
+    let runtime_id = descriptor.runtime_id.as_str();
+    let provider_id = descriptor.provider_id.as_str();
     if runtime_id != "native_vn" || provider_id != "astra.runtime.native_vn" {
         return runtime_blocked(
             "runtime_provider.native_vn",
@@ -896,11 +841,7 @@ fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckReco
             ],
         );
     }
-    let package_sections = descriptor
-        .get("package_sections")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let package_sections = &descriptor.package_sections;
     let required_sections = [
         "vn.compiled_story",
         "vn.profile_manifest",
@@ -922,11 +863,7 @@ fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckReco
             );
         }
     }
-    let release_checks = descriptor
-        .get("release_checks")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let release_checks = &descriptor.release_checks;
     if !release_checks
         .iter()
         .any(|value| value == "runtime_provider.native_vn")
@@ -1219,12 +1156,8 @@ fn vfs_prefix_registry_check(package: &PackageReader) -> ReleaseCheckRecord {
                 ],
             );
         }
-        let required_capability = vfs_backend_capability(prefix.backend);
-        if !provider
-            .capability
-            .as_deref()
-            .is_some_and(|capability| vfs_capability_matches(capability, required_capability))
-        {
+        let required_capability = prefix.backend.required_provider_capability();
+        if !vfs_capability_matches(&provider.capability, required_capability) {
             return package_blocked(
                 "vfs.prefix_registry",
                 "ASTRA_VFS_PROVIDER_CAPABILITY_MISMATCH",
@@ -1551,71 +1484,80 @@ fn decode_asset_catalog(package: &PackageReader) -> Result<AssetCatalog, Box<Rel
 
 #[derive(Debug, Clone)]
 struct RegisteredVfsProvider {
-    capability: Option<String>,
+    capability: String,
     packaged: bool,
 }
 
 fn vfs_registered_providers(
     package: &PackageReader,
 ) -> Result<BTreeMap<String, RegisteredVfsProvider>, Box<ReleaseCheckRecord>> {
-    let registry =
-        read_json_section(package, "plugin.extension_registry").map_err(|(code, message)| {
+    let registry = read_typed_json_section::<PluginExtensionRegistrySnapshot>(
+        package,
+        "plugin.extension_registry",
+    )
+    .map_err(|(code, message)| {
+        Box::new(plugin_blocked(
+            "vfs.prefix_registry",
+            code,
+            message,
+            vec![evidence("section", "plugin.extension_registry")],
+        ))
+    })?;
+    let policy = read_typed_json_section::<ProviderPolicy>(package, "provider.policy").map_err(
+        |(code, message)| {
             Box::new(plugin_blocked(
                 "vfs.prefix_registry",
                 code,
                 message,
+                vec![evidence("section", "provider.policy")],
+            ))
+        },
+    )?;
+    let manifest = package
+        .container()
+        .decode_postcard::<PackageManifest>("package.manifest")
+        .map_err(|error| {
+            Box::new(plugin_blocked(
+                "vfs.prefix_registry",
+                "ASTRA_PACKAGE_MANIFEST_INVALID",
+                error.to_string(),
+                vec![evidence("section", "package.manifest")],
+            ))
+        })?;
+    registry
+        .validate_embedded_package(&policy, &manifest.package_id, &manifest.profile)
+        .map_err(|diagnostic| {
+            Box::new(plugin_blocked(
+                "vfs.prefix_registry",
+                diagnostic.code,
+                diagnostic.message,
                 vec![evidence("section", "plugin.extension_registry")],
             ))
         })?;
     let mut providers = BTreeMap::new();
-    for provider in registry
-        .get("providers")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
+    for binding in registry
+        .bindings
+        .iter()
+        .filter(|binding| binding.slot == "vfs_provider")
     {
-        if provider.get("slot").and_then(serde_json::Value::as_str) != Some("vfs_provider") {
-            continue;
-        }
-        let Some(provider_id) = provider
-            .get("provider_id")
-            .and_then(serde_json::Value::as_str)
-        else {
+        let Some(provider) = registry.providers.iter().find(|provider| {
+            provider.slot == binding.slot && provider.provider_id == binding.provider_id
+        }) else {
             continue;
         };
         providers.insert(
-            provider_id.to_string(),
+            provider.provider_id.clone(),
             RegisteredVfsProvider {
-                capability: provider
-                    .get("capability")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string),
-                packaged: provider
-                    .get("packaged")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false),
+                capability: provider.capability.clone(),
+                packaged: provider.packaged,
             },
         );
     }
     Ok(providers)
 }
 
-fn vfs_backend_capability(backend: VfsBackendKind) -> &'static str {
-    match backend {
-        VfsBackendKind::Package => "vfs.backend.package",
-        VfsBackendKind::LocalAuthorized => "vfs.backend.local_authorized",
-        VfsBackendKind::Overlay => "vfs.backend.overlay",
-        VfsBackendKind::Memory => "vfs.backend.memory",
-        VfsBackendKind::LegacyPack => "vfs.backend.legacy_pack",
-    }
-}
-
 fn vfs_capability_matches(actual: &str, required: &str) -> bool {
     actual == required
-        || (required == "vfs.backend.local_authorized" && actual == "vfs.backend.local")
-        || actual
-            .strip_prefix(required)
-            .is_some_and(|suffix| suffix.starts_with('.'))
 }
 
 fn forbidden_vfs_report_field(package: &PackageReader, section: &str) -> Option<String> {
@@ -1737,6 +1679,22 @@ fn read_json_section(
         .read_bounded(section, 256 * 1024)
         .map_err(|err| ("ASTRA_PLUGIN_SECTION_MISSING", err.to_string()))?;
     serde_json::from_slice(&bytes).map_err(|err| ("ASTRA_PLUGIN_SECTION_JSON", err.to_string()))
+}
+
+fn read_typed_json_section<T: serde::de::DeserializeOwned>(
+    package: &PackageReader,
+    section: &str,
+) -> Result<T, (&'static str, String)> {
+    let bytes = package
+        .container()
+        .read_bounded(section, 256 * 1024)
+        .map_err(|err| ("ASTRA_PLUGIN_SECTION_MISSING", err.to_string()))?;
+    serde_json::from_slice(&bytes).map_err(|err| {
+        (
+            "ASTRA_PLUGIN_SECTION_CONTRACT",
+            format!("section {section} does not satisfy its typed contract: {err}"),
+        )
+    })
 }
 
 fn plugin_blocked(

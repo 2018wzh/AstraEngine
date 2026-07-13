@@ -23,10 +23,12 @@ astra-platform-linux = { path = "../../Platform/astra-platform-linux" }
 astra-platform-macos = { path = "../../Platform/astra-platform-macos" }
 astra-platform-web = { path = "../../Platform/astra-platform-web" }
 astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
+astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi" }
 astra-release = { path = "../../Developer/astra-release" }
 astra-target = { path = "../../Platform/astra-target" }
 astra-test = { path = "../../Developer/astra-test" }
 astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
+astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }
 clap.workspace = true
 image.workspace = true
 schemars.workspace = true

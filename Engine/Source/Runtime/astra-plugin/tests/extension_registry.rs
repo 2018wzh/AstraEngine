@@ -1,6 +1,6 @@
 use astra_plugin::{
-    EngineModuleSlot, ExtensionConflict, LoadPhase, PluginDependency, PluginRegistrar,
-    ProviderBindingContext, RegisteredProvider,
+    provider_binding_context_from_runtime_package, EngineModuleSlot, ExtensionConflict, LoadPhase,
+    PluginDependency, PluginRegistrar, ProviderBindingContext, RegisteredProvider,
 };
 
 fn provider(id: &str) -> RegisteredProvider {
@@ -18,7 +18,7 @@ fn provider(id: &str) -> RegisteredProvider {
 }
 
 fn context() -> ProviderBindingContext {
-    ProviderBindingContext::from_runtime_package(
+    provider_binding_context_from_runtime_package(
         &astra_runtime::PackageHandle::default(),
         "presentation.headless",
     )
@@ -27,7 +27,9 @@ fn context() -> ProviderBindingContext {
 #[test]
 fn extension_registry_preserves_explicit_binding_and_reports_conflicts() {
     let mut registrar = PluginRegistrar::default();
-    registrar.register_provider(provider("astra.provider.first"));
+    registrar
+        .register_provider(provider("astra.provider.first"))
+        .unwrap();
     registrar
         .bind_provider(
             &EngineModuleSlot("presentation".to_string()),
@@ -36,14 +38,16 @@ fn extension_registry_preserves_explicit_binding_and_reports_conflicts() {
         )
         .unwrap();
 
-    registrar.register_provider(provider("astra.provider.second"));
+    registrar
+        .register_provider(provider("astra.provider.second"))
+        .unwrap();
 
     let selected = registrar
         .selected_provider(&EngineModuleSlot("presentation".to_string()))
         .unwrap();
     assert_eq!(selected.provider_id, "astra.provider.first");
 
-    let snapshot = registrar.extension_registry_snapshot();
+    let snapshot = registrar.extension_registry_snapshot().unwrap();
     assert_eq!(snapshot.providers.len(), 2);
     assert!(snapshot.conflicts.is_empty());
 
@@ -63,7 +67,7 @@ fn extension_registry_preserves_explicit_binding_and_reports_conflicts() {
         "astra.provider.first"
     );
     assert_eq!(
-        registrar.extension_registry_snapshot().conflicts,
+        registrar.extension_registry_snapshot().unwrap().conflicts,
         vec![ExtensionConflict {
             slot: "presentation".to_string(),
             selected_provider: "astra.provider.first".to_string(),
@@ -99,7 +103,7 @@ fn explicit_binding_is_registration_order_independent_and_blocks_context_drift()
     ] {
         let mut registrar = PluginRegistrar::default();
         for id in order {
-            registrar.register_provider(provider(id));
+            registrar.register_provider(provider(id)).unwrap();
         }
         let mut drifted = context();
         drifted.feature_fingerprint = "wrong-feature".to_string();
@@ -128,4 +132,23 @@ fn explicit_binding_is_registration_order_independent_and_blocks_context_drift()
             "astra.provider.second"
         );
     }
+}
+
+#[test]
+fn provider_registration_rejects_duplicate_and_malformed_identity_without_partial_insert() {
+    let mut registrar = PluginRegistrar::default();
+    registrar
+        .register_provider(provider("astra.provider.first"))
+        .unwrap();
+    let duplicate = registrar
+        .register_provider(provider("astra.provider.first"))
+        .unwrap_err();
+    assert!(duplicate.contains("ASTRA_PLUGIN_PROVIDER_DUPLICATE"));
+    assert_eq!(registrar.extensions.providers().len(), 1);
+
+    let mut malformed = provider("astra.provider.second");
+    malformed.capability = "renderer capability with spaces".to_string();
+    let error = registrar.register_provider(malformed).unwrap_err();
+    assert!(error.contains("ASTRA_PLUGIN_PROVIDER_IDENTITY_INVALID"));
+    assert_eq!(registrar.extensions.providers().len(), 1);
 }

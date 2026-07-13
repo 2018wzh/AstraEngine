@@ -62,6 +62,8 @@ Minimum package sections:
 - `luau.policy_lock`
 - `media.manifest`
 - `provider.policy`
+- `plugin.extension_registry`
+- `plugin.dependency_graph`
 - `module.fingerprint`
 - `target.manifest`：只包含当前包内单一 packaged `Game` target
 - `release.summary`
@@ -69,6 +71,8 @@ Minimum package sections:
 - `platform.eligibility`
 
 `scenario.refs` 使用 `astra.scenario_refs.v2`，每个条目分别记录规范化的 bundle 相对 `path`、合法且与路径分离的 package `section_id`、payload `sha256` 和 byte size。Cook 以路径生成稳定 section id，Package reader 要求 path/section 双向唯一、section 存在且 hash/size 一致；scenario runner 还会校验实际执行的 scenario bytes 与 package binding 相同。旧的“把 `scenarios/foo.yaml` 直接当 section id”以及只列路径、不绑定 payload identity 的 v1 输入不再接受。
+
+`provider.policy` 使用 `astra.provider_policy.v2`，`plugin.extension_registry` 使用 `astra.plugin_extension_registry.v2`。Builder 和 reader 都会校验两者 binding 集合、binding hash、provider capability/fingerprint、package/profile/target identity、runtime descriptor、target manifest 与 VFS backend binding。`target.manifest` 中必须存在 binding 指向的 packaged `Game` target，且其 runtime provider 与 policy 一致；每个 VFS prefix 必须绑定 `vfs_provider`，backend capability 必须精确匹配，并在当前 target/profile 下唯一 resolve。旧 v1、缺 binding 或互相矛盾的控制面 section 不能进入 Player。
 
 Stage 3 NativeVN 还会写入 `vn.policy_bundle_manifest` 和 `vn.policy_bundle_source_cache`。前者记录 policy id、相对 entry、capability、dependency、lock hash、source hash、byte size 和 source cache section；后者保存包内可执行的官方 Luau source。Release report 只输出 hash、size、section id 和 diagnostic，不输出 Luau source payload。
 

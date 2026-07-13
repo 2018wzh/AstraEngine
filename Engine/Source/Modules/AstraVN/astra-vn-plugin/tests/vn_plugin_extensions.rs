@@ -87,7 +87,7 @@ fn vn_extension_manifest_accepts_real_cdylib_provider_fixture() {
         plugin.descriptor().id,
         "astra.fixture.vn_extension_provider"
     );
-    let snapshot = registrar.extension_registry_snapshot();
+    let snapshot = registrar.extension_registry_snapshot().unwrap();
     let manifest = VnExtensionManifest {
         schema: "astra.vn.extension_manifest.v1".to_string(),
         bindings: snapshot

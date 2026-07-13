@@ -219,7 +219,7 @@ fn package_roundtrip_builder_writes_required_runtime_sections() {
         .read_section("plugin.extension_registry")
         .unwrap();
     let registry: serde_json::Value = serde_json::from_slice(&registry).unwrap();
-    assert_eq!(registry["schema"], "astra.plugin_extension_registry.v1");
+    assert_eq!(registry["schema"], "astra.plugin_extension_registry.v2");
     assert_eq!(registry["bindings"][0]["slot"], "presentation");
 
     let dependency_graph = package
@@ -231,4 +231,27 @@ fn package_roundtrip_builder_writes_required_runtime_sections() {
         dependency_graph["schema"],
         "astra.plugin_dependency_graph.v1"
     );
+}
+
+#[test]
+fn package_builder_rejects_legacy_or_tampered_provider_authority() {
+    let mut legacy = PackageBuildRequest::fixture("com.example.game", "desktop-release", vec![]);
+    let mut legacy_policy: serde_json::Value =
+        serde_json::from_slice(&legacy.provider_policy).unwrap();
+    legacy_policy["schema"] = "astra.provider_policy.v1".into();
+    legacy.provider_policy = serde_json::to_vec(&legacy_policy).unwrap();
+    assert!(PackageBuilder::build(legacy)
+        .unwrap_err()
+        .to_string()
+        .contains("ASTRA_PROVIDER_POLICY_VERSION_UNSUPPORTED"));
+
+    let mut tampered = PackageBuildRequest::fixture("com.example.game", "desktop-release", vec![]);
+    let mut registry: astra_plugin_abi::PluginExtensionRegistrySnapshot =
+        serde_json::from_slice(&tampered.plugin_extension_registry).unwrap();
+    registry.bindings[0].provider_id = "astra.renderer.unbound".to_string();
+    tampered.plugin_extension_registry = serde_json::to_vec(&registry).unwrap();
+    assert!(PackageBuilder::build(tampered)
+        .unwrap_err()
+        .to_string()
+        .contains("ASTRA_PLUGIN_BINDING_HASH_MISMATCH"));
 }

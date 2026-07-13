@@ -220,51 +220,21 @@ fn release_gate_blocks_plugin_registry_conflict_and_invalid_binding() {
             b"hero".to_vec(),
         )],
     );
-    request.plugin_extension_registry = serde_json::json!({
-        "schema": "astra.plugin_extension_registry.v1",
-        "providers": [{
-            "slot": "presentation",
-            "provider_id": "astra.provider.first",
-            "capability": "presentation.headless",
-            "phase": "runtime",
-            "packaged": true
-        }],
-        "bindings": [{
-            "slot": "presentation",
-            "provider_id": "astra.provider.missing"
-        }],
-        "conflicts": [{
-            "slot": "presentation",
-            "selected_provider": "astra.provider.first",
-            "conflicting_provider": "astra.provider.second",
-            "reason": "provider slot already has an explicit binding"
-        }]
-    })
-    .to_string()
-    .into_bytes();
-    let blob = PackageBuilder::build(request).unwrap();
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "desktop-release".to_string(),
-            require_ffmpeg: false,
-            target: Some("native-smoke-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let plugin_check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "plugin.extension_registry")
-        .unwrap();
-    assert_eq!(plugin_check.status, CheckStatus::Blocked);
-    assert_eq!(
-        plugin_check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_PLUGIN_EXTENSION_CONFLICT"
-    );
+    let mut registry: astra_plugin_abi::PluginExtensionRegistrySnapshot =
+        serde_json::from_slice(&request.plugin_extension_registry).unwrap();
+    registry
+        .conflicts
+        .push(astra_plugin_abi::ExtensionConflict {
+            slot: "presentation".into(),
+            selected_provider: "astra.fixture.headless_presentation".into(),
+            conflicting_provider: "astra.provider.second".into(),
+            reason: "provider slot already has an explicit binding".into(),
+        });
+    request.plugin_extension_registry = serde_json::to_vec(&registry).unwrap();
+    let error = PackageBuilder::build(request).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_PLUGIN_EXTENSION_CONFLICT"));
 }
 
 #[test]
@@ -278,44 +248,16 @@ fn runtime_provider_gate_blocks_missing_nativevn_binding() {
             b"hero".to_vec(),
         )],
     );
-    request.provider_policy = serde_json::json!({
-        "schema": "astra.provider_policy.v1",
-        "profile": "desktop-release",
-        "bindings": []
-    })
-    .to_string()
-    .into_bytes();
-    request.plugin_extension_registry = serde_json::json!({
-        "schema": "astra.plugin_extension_registry.v1",
-        "providers": [],
-        "bindings": [],
-        "conflicts": []
-    })
-    .to_string()
-    .into_bytes();
-    let blob = PackageBuilder::build(request).unwrap();
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "desktop-release".to_string(),
-            require_ffmpeg: false,
-            target: Some("native-smoke-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let binding = report
-        .checks
-        .iter()
-        .find(|check| check.id == "runtime_provider.binding")
-        .unwrap();
-    assert_eq!(binding.status, CheckStatus::Blocked);
-    assert_eq!(
-        binding.diagnostic.as_ref().unwrap().code,
-        "ASTRA_RUNTIME_PROVIDER_BINDING_MISSING"
-    );
+    let mut policy: astra_plugin_abi::ProviderPolicy =
+        serde_json::from_slice(&request.provider_policy).unwrap();
+    let mut registry: astra_plugin_abi::PluginExtensionRegistrySnapshot =
+        serde_json::from_slice(&request.plugin_extension_registry).unwrap();
+    policy.bindings.clear();
+    registry.bindings.clear();
+    request.provider_policy = serde_json::to_vec(&policy).unwrap();
+    request.plugin_extension_registry = serde_json::to_vec(&registry).unwrap();
+    let error = PackageBuilder::build(request).unwrap_err();
+    assert!(error.to_string().contains("ASTRA_PLUGIN_BINDING_MISSING"));
 }
 
 #[test]
@@ -462,37 +404,23 @@ fn vfs_mount_gate_blocks_missing_provider_binding_for_prefix() {
             b"hero".to_vec(),
         )],
     );
-    request.plugin_extension_registry = serde_json::json!({
-        "schema": "astra.plugin_extension_registry.v1",
-        "providers": [],
-        "bindings": [],
-        "conflicts": []
-    })
-    .to_string()
-    .into_bytes();
-    let blob = PackageBuilder::build(request).unwrap();
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "desktop-release".to_string(),
-            require_ffmpeg: false,
-            target: Some("native-smoke-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let vfs_check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "vfs.prefix_registry")
-        .unwrap();
-    assert_eq!(vfs_check.status, CheckStatus::Blocked);
-    assert_eq!(
-        vfs_check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_VFS_PROVIDER_MISSING"
-    );
+    let mut policy: astra_plugin_abi::ProviderPolicy =
+        serde_json::from_slice(&request.provider_policy).unwrap();
+    let mut registry: astra_plugin_abi::PluginExtensionRegistrySnapshot =
+        serde_json::from_slice(&request.plugin_extension_registry).unwrap();
+    policy
+        .bindings
+        .retain(|binding| binding.slot != "vfs_provider");
+    registry
+        .bindings
+        .retain(|binding| binding.slot != "vfs_provider");
+    registry
+        .providers
+        .retain(|provider| provider.slot != "vfs_provider");
+    request.provider_policy = serde_json::to_vec(&policy).unwrap();
+    request.plugin_extension_registry = serde_json::to_vec(&registry).unwrap();
+    let error = PackageBuilder::build(request).unwrap_err();
+    assert!(error.to_string().contains("ASTRA_VFS_PROVIDER_MISSING"));
 }
 
 #[test]
@@ -506,43 +434,19 @@ fn plugin_provider_gate_blocks_unpacked_vfs_prefix_provider() {
             b"hero".to_vec(),
         )],
     );
-    request.plugin_extension_registry = serde_json::json!({
-        "schema": "astra.plugin_extension_registry.v1",
-        "providers": [{
-            "slot": "vfs_provider",
-            "provider_id": "astra.vfs.package",
-            "capability": "vfs.backend.package",
-            "phase": "runtime",
-            "packaged": false
-        }],
-        "bindings": [],
-        "conflicts": []
-    })
-    .to_string()
-    .into_bytes();
-    let blob = PackageBuilder::build(request).unwrap();
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "desktop-release".to_string(),
-            require_ffmpeg: false,
-            target: Some("native-smoke-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let vfs_check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "vfs.prefix_registry")
-        .unwrap();
-    assert_eq!(vfs_check.status, CheckStatus::Blocked);
-    assert_eq!(
-        vfs_check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_VFS_PROVIDER_UNPACKAGED"
-    );
+    let mut registry: astra_plugin_abi::PluginExtensionRegistrySnapshot =
+        serde_json::from_slice(&request.plugin_extension_registry).unwrap();
+    registry
+        .providers
+        .iter_mut()
+        .find(|provider| provider.slot == "vfs_provider")
+        .unwrap()
+        .packaged = false;
+    request.plugin_extension_registry = serde_json::to_vec(&registry).unwrap();
+    let error = PackageBuilder::build(request).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_PLUGIN_PACKAGED_INELIGIBLE"));
 }
 
 #[test]
@@ -925,6 +829,7 @@ fn release_gate_blocks_package_target_manifests_with_editor_descriptors() {
                 "id": "native-smoke-game",
                 "kind": "game",
                 "crate": "astra-runtime",
+                "runtime_provider": "native_vn",
                 "default_profile": "desktop-release",
                 "platforms": ["windows"],
                 "packaged": true
@@ -975,6 +880,7 @@ fn release_gate_requires_nativevn_sections_for_classic_profile() {
                 "id": "nativevn-game",
                 "kind": "game",
                 "crate": "astra-vn",
+                "runtime_provider": "native_vn",
                 "default_profile": "classic",
                 "platforms": ["windows", "web"],
                 "packaged": true
@@ -1017,6 +923,7 @@ fn release_gate_accepts_nativevn_sections_for_classic_profile() {
                 "id": "nativevn-game",
                 "kind": "game",
                 "crate": "astra-vn",
+                "runtime_provider": "native_vn",
                 "default_profile": "classic",
                 "platforms": ["windows", "web"],
                 "packaged": true
@@ -2382,6 +2289,35 @@ fn package_with_target_manifest(
             _ => request.extra_sections.push(section),
         }
     }
+    let target_id = target_manifest["targets"]
+        .as_array()
+        .and_then(|targets| targets.iter().find(|target| target["kind"] == "game"))
+        .and_then(|target| target["id"].as_str())
+        .expect("test target manifest must contain a game target");
+    let mut policy: astra_plugin_abi::ProviderPolicy =
+        serde_json::from_slice(&request.provider_policy).unwrap();
+    let mut registry: astra_plugin_abi::PluginExtensionRegistrySnapshot =
+        serde_json::from_slice(&request.plugin_extension_registry).unwrap();
+    let bindings = registry
+        .bindings
+        .iter()
+        .map(|binding| {
+            let mut context = binding.context.clone();
+            context.target = target_id.to_string();
+            context.profile = profile.to_string();
+            astra_plugin_abi::ProviderBinding::new(
+                binding.slot.clone(),
+                binding.provider_id.clone(),
+                context,
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    policy.profile = profile.to_string();
+    policy.bindings = bindings.clone();
+    registry.bindings = bindings;
+    request.provider_policy = serde_json::to_vec(&policy).unwrap();
+    request.plugin_extension_registry = serde_json::to_vec(&registry).unwrap();
     request.target_manifest = target_manifest.to_string().into_bytes();
     PackageBuilder::build(request).unwrap()
 }
@@ -2393,6 +2329,7 @@ fn nativevn_target_manifest() -> serde_json::Value {
             "id": "nativevn-game",
             "kind": "game",
             "crate": "astra-vn",
+            "runtime_provider": "native_vn",
             "default_profile": "classic",
             "platforms": ["windows", "web"],
             "packaged": true
@@ -2407,6 +2344,7 @@ fn tsuinosora_target_manifest() -> serde_json::Value {
             "id": "tsuinosora-internal-game",
             "kind": "game",
             "crate": "astra-vn",
+            "runtime_provider": "native_vn",
             "default_profile": "classic",
             "platforms": ["headless", "windows", "web"],
             "packaged": true

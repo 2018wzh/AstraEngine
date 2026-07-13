@@ -118,6 +118,18 @@ pub enum VfsBackendKind {
     LegacyPack,
 }
 
+impl VfsBackendKind {
+    pub fn required_provider_capability(self) -> &'static str {
+        match self {
+            Self::Package => "vfs.backend.package",
+            Self::LocalAuthorized => "vfs.backend.local_authorized",
+            Self::Overlay => "vfs.backend.overlay",
+            Self::Memory => "vfs.backend.memory",
+            Self::LegacyPack => "vfs.backend.legacy_pack",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VfsReadWriteMode {

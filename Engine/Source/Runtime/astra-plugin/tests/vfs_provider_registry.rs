@@ -1,5 +1,6 @@
 use astra_plugin::{
-    EngineModuleSlot, LoadPhase, PluginRegistrar, ProviderBindingContext, RegisteredProvider,
+    provider_binding_context_from_runtime_package, EngineModuleSlot, LoadPhase, PluginRegistrar,
+    ProviderBindingContext, RegisteredProvider,
 };
 
 fn vfs_provider(provider_id: &str, capability: &str) -> RegisteredProvider {
@@ -17,7 +18,7 @@ fn vfs_provider(provider_id: &str, capability: &str) -> RegisteredProvider {
 }
 
 fn context(capability: &str) -> ProviderBindingContext {
-    ProviderBindingContext::from_runtime_package(
+    provider_binding_context_from_runtime_package(
         &astra_runtime::PackageHandle::default(),
         capability,
     )
@@ -26,11 +27,17 @@ fn context(capability: &str) -> ProviderBindingContext {
 #[test]
 fn vfs_provider_registry_allows_multiple_providers_on_single_slot() {
     let mut registrar = PluginRegistrar::default();
-    registrar.register_provider(vfs_provider("astra.vfs.package", "vfs.backend.package"));
-    registrar.register_provider(vfs_provider("astra.vfs.local", "vfs.backend.local"));
-    registrar.register_provider(vfs_provider("astra.vfs.fvp", "vfs.backend.legacy_pack.fvp"));
+    registrar
+        .register_provider(vfs_provider("astra.vfs.package", "vfs.backend.package"))
+        .unwrap();
+    registrar
+        .register_provider(vfs_provider("astra.vfs.local", "vfs.backend.local"))
+        .unwrap();
+    registrar
+        .register_provider(vfs_provider("astra.vfs.fvp", "vfs.backend.legacy_pack.fvp"))
+        .unwrap();
 
-    let snapshot = registrar.extension_registry_snapshot();
+    let snapshot = registrar.extension_registry_snapshot().unwrap();
     assert_eq!(snapshot.providers.len(), 3);
     assert!(snapshot
         .providers
@@ -44,17 +51,19 @@ fn vfs_provider_registry_allows_multiple_providers_on_single_slot() {
 fn runtime_provider_registry_keeps_explicit_single_binding_conflicts() {
     let mut registrar = PluginRegistrar::default();
     let slot = EngineModuleSlot("game_runtime_provider".to_string());
-    registrar.register_provider(RegisteredProvider {
-        slot: slot.clone(),
-        provider_id: "astra.runtime.native_vn".to_string(),
-        capability: "runtime.native_vn".to_string(),
-        phase: LoadPhase::Runtime,
-        packaged: true,
-        engine_version: "0.1.0".to_string(),
-        rustc_fingerprint: "rustc-stable".to_string(),
-        feature_fingerprint: "runtime-envelope-v2".to_string(),
-        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
-    });
+    registrar
+        .register_provider(RegisteredProvider {
+            slot: slot.clone(),
+            provider_id: "astra.runtime.native_vn".to_string(),
+            capability: "runtime.native_vn".to_string(),
+            phase: LoadPhase::Runtime,
+            packaged: true,
+            engine_version: "0.1.0".to_string(),
+            rustc_fingerprint: "rustc-stable".to_string(),
+            feature_fingerprint: "runtime-envelope-v2".to_string(),
+            abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+        })
+        .unwrap();
     registrar
         .bind_provider(
             &slot,
@@ -62,17 +71,19 @@ fn runtime_provider_registry_keeps_explicit_single_binding_conflicts() {
             context("runtime.native_vn"),
         )
         .unwrap();
-    registrar.register_provider(RegisteredProvider {
-        slot: slot.clone(),
-        provider_id: "astra.runtime.astra_emu".to_string(),
-        capability: "runtime.astra_emu".to_string(),
-        phase: LoadPhase::Runtime,
-        packaged: true,
-        engine_version: "0.1.0".to_string(),
-        rustc_fingerprint: "rustc-stable".to_string(),
-        feature_fingerprint: "runtime-envelope-v2".to_string(),
-        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
-    });
+    registrar
+        .register_provider(RegisteredProvider {
+            slot: slot.clone(),
+            provider_id: "astra.runtime.astra_emu".to_string(),
+            capability: "runtime.astra_emu".to_string(),
+            phase: LoadPhase::Runtime,
+            packaged: true,
+            engine_version: "0.1.0".to_string(),
+            rustc_fingerprint: "rustc-stable".to_string(),
+            feature_fingerprint: "runtime-envelope-v2".to_string(),
+            abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+        })
+        .unwrap();
     assert!(registrar
         .bind_provider(
             &slot,
@@ -82,7 +93,7 @@ fn runtime_provider_registry_keeps_explicit_single_binding_conflicts() {
         .unwrap_err()
         .contains("ASTRA_PLUGIN_BINDING_CONFLICT"));
 
-    let snapshot = registrar.extension_registry_snapshot();
+    let snapshot = registrar.extension_registry_snapshot().unwrap();
     assert_eq!(snapshot.conflicts.len(), 1);
     assert_eq!(snapshot.conflicts[0].slot, "game_runtime_provider");
 }

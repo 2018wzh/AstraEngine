@@ -1875,57 +1875,65 @@ fn production_package_request(
         )
         .into());
     }
-    let provider_policy = serde_json::to_vec(&serde_json::json!({
-        "schema": "astra.provider_policy.v1",
-        "profile": profile,
-        "renderer": "astra.renderer.wgpu",
-        "decode_fallback": "profile_bound",
-        "runtime_provider": {
-            "schema": "astra.product_runtime_descriptor.v1",
-            "runtime_id": "native_vn",
-            "product_kind": "visual_novel",
-            "provider_id": "astra.runtime.native_vn",
-            "supported_targets": ["game"],
-            "capabilities": ["runtime.native_vn"],
-            "package_sections": [
-                "vn.compiled_story", "vn.profile_manifest", "vn.policy_bundle_manifest",
-                "vn.extension_manifest", "vn.standard_command_manifest",
-                "vn.presentation_provider_manifest", "vn.commercial_baseline_manifest",
-                "vn.system_story_manifest", "vn.system_ui_profile_manifest",
-                "vn.advanced_presentation_manifest"
-            ],
-            "release_checks": [
-                "runtime_provider.native_vn", "vn.commercial_baseline",
-                "vn.system_ui_profile", "vn.advanced_presentation", "player.full_playable"
-            ]
-        },
-        "bindings": [
-            {"slot": "presentation", "provider_id": "astra.renderer.wgpu"},
-            {"slot": "game_runtime_provider", "provider_id": "astra.runtime.native_vn"}
-        ]
-    }))?;
-    let plugin_extension_registry = serde_json::to_vec(&serde_json::json!({
-        "schema": "astra.plugin_extension_registry.v1",
-        "providers": [
-            {
-                "slot": "presentation", "provider_id": "astra.renderer.wgpu",
-                "capability": "renderer2d.wgpu", "phase": "runtime", "packaged": true
-            },
-            {
-                "slot": "vfs_provider", "provider_id": "astra.vfs.package",
-                "capability": "vfs.backend.package", "phase": "runtime", "packaged": true
-            },
-            {
-                "slot": "game_runtime_provider", "provider_id": "astra.runtime.native_vn",
-                "capability": "runtime.native_vn", "phase": "runtime", "packaged": true
-            }
-        ],
-        "bindings": [
-            {"slot": "presentation", "provider_id": "astra.renderer.wgpu"},
-            {"slot": "game_runtime_provider", "provider_id": "astra.runtime.native_vn"}
-        ],
-        "conflicts": []
-    }))?;
+    let provider_specs = [
+        ("presentation", "astra.renderer.wgpu", "renderer2d.wgpu"),
+        ("vfs_provider", "astra.vfs.package", "vfs.backend.package"),
+        (
+            "game_runtime_provider",
+            "astra.runtime.native_vn",
+            "runtime.native_vn",
+        ),
+    ];
+    let bindings = provider_specs
+        .iter()
+        .map(|(slot, provider_id, capability)| {
+            astra_plugin_abi::ProviderBinding::new(
+                *slot,
+                *provider_id,
+                astra_plugin_abi::ProviderBindingContext {
+                    package_id: package_id.clone(),
+                    target: target_id.to_string(),
+                    profile: profile.clone(),
+                    required_capability: capability.to_string(),
+                    engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                    rustc_fingerprint: "rustc-stable".to_string(),
+                    feature_fingerprint: "runtime-envelope-v2".to_string(),
+                    abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+                },
+            )
+            .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let provider_policy = serde_json::to_vec(&astra_plugin_abi::ProviderPolicy {
+        schema: astra_plugin_abi::PROVIDER_POLICY_SCHEMA.to_string(),
+        profile: profile.clone(),
+        renderer: "astra.renderer.wgpu".to_string(),
+        decode_fallback: "profile_bound".to_string(),
+        runtime_provider: astra_vn_runtime_provider::NativeVnRuntimeProvider::descriptor(),
+        bindings: bindings.clone(),
+    })?;
+    let plugin_extension_registry =
+        serde_json::to_vec(&astra_plugin_abi::PluginExtensionRegistrySnapshot {
+            schema: astra_plugin_abi::PLUGIN_EXTENSION_REGISTRY_SCHEMA.to_string(),
+            providers: provider_specs
+                .iter()
+                .map(
+                    |(slot, provider_id, capability)| astra_plugin_abi::ProviderExtensionRecord {
+                        slot: slot.to_string(),
+                        provider_id: provider_id.to_string(),
+                        capability: capability.to_string(),
+                        phase: astra_plugin_abi::LoadPhase::Runtime,
+                        packaged: true,
+                        engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                        rustc_fingerprint: "rustc-stable".to_string(),
+                        feature_fingerprint: "runtime-envelope-v2".to_string(),
+                        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+                    },
+                )
+                .collect(),
+            bindings,
+            conflicts: vec![],
+        })?;
     Ok(PackageBuildRequest {
         package_id,
         profile: profile.clone(),

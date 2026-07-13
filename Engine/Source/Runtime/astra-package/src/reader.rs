@@ -12,10 +12,10 @@ const REQUIRED_SECTIONS: &[(&str, &str)] = &[
     ("asset.vfs_manifest", "astra.asset_vfs_manifest.v1"),
     ("asset.catalog", "astra.asset_catalog.v1"),
     ("media.manifest", "astra.media_manifest.v1"),
-    ("provider.policy", "astra.provider_policy.v1"),
+    ("provider.policy", "astra.provider_policy.v2"),
     (
         "plugin.extension_registry",
-        "astra.plugin_extension_registry.v1",
+        "astra.plugin_extension_registry.v2",
     ),
     (
         "plugin.dependency_graph",
@@ -60,6 +60,19 @@ impl PackageReader {
                 "package manifest identity or version is invalid",
             ));
         }
+        let policy_bytes = container.read_bounded("provider.policy", 256 * 1024)?;
+        let extension_registry_bytes =
+            container.read_bounded("plugin.extension_registry", 256 * 1024)?;
+        let target_manifest_bytes = container.read_bounded("target.manifest", 256 * 1024)?;
+        let vfs_manifest_bytes = container.read_bounded("asset.vfs_manifest", 16 * 1024 * 1024)?;
+        crate::authority::validate_provider_authority(
+            &manifest.package_id,
+            &manifest.profile,
+            &policy_bytes,
+            &extension_registry_bytes,
+            &target_manifest_bytes,
+            &vfs_manifest_bytes,
+        )?;
         let registry_bytes = container.read_bounded("schema.registry", 16 * 1024 * 1024)?;
         let registry: SchemaRegistryManifest =
             serde_json::from_slice(&registry_bytes).map_err(|error| {

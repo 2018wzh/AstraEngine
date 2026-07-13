@@ -117,7 +117,6 @@ impl PluginLoader {
             &fs::read(path).map_err(|err| PluginError::Load(err.to_string()))?,
         ))?;
         let registration = (module.register())();
-        let mut slots = Vec::new();
         let mut registered_providers = Vec::new();
         for provider in registration.providers {
             let provider = RegisteredProvider {
@@ -132,9 +131,7 @@ impl PluginLoader {
                 feature_fingerprint: descriptor.feature_fingerprint.clone(),
                 abi_fingerprint: descriptor.abi_fingerprint.clone(),
             };
-            slots.push(provider.slot.0.clone());
-            registered_providers.push(provider.clone());
-            registrar.register_provider(provider);
+            registered_providers.push(provider);
         }
         for provider in registration.runtime_providers {
             let provider = RegisteredProvider {
@@ -149,10 +146,20 @@ impl PluginLoader {
                 feature_fingerprint: descriptor.feature_fingerprint.clone(),
                 abi_fingerprint: descriptor.abi_fingerprint.clone(),
             };
-            slots.push(provider.slot.0.clone());
-            registered_providers.push(provider.clone());
-            registrar.register_provider(provider);
+            registered_providers.push(provider);
         }
+        for (registered_count, provider) in registered_providers.iter().enumerate() {
+            if let Err(error) = registrar.register_provider(provider.clone()) {
+                for registered in &registered_providers[..registered_count] {
+                    registrar.unregister_provider(registered);
+                }
+                return Err(PluginError::Load(error));
+            }
+        }
+        let slots = registered_providers
+            .iter()
+            .map(|provider| provider.slot.0.clone())
+            .collect();
         let registered_actions: Vec<LoadedFfiAction> = registration
             .actions
             .into_iter()

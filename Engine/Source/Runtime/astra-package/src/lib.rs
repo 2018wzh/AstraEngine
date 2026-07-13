@@ -1,3 +1,4 @@
+mod authority;
 pub mod builder;
 pub mod container;
 pub mod reader;

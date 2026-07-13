@@ -224,6 +224,8 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **ID:** `S2-PLUGIN-GATE-01`
 
+**Status:** `DONE`
+
 **Goal:** Package 写入 Stage 1 产出的 plugin extension registry 和 dependency graph，Release Gate 校验 provider binding、packaged eligibility、conflict 和依赖闭包。
 
 **Depends On:** `S1-PLUGIN-03`、`S2-PACKAGE-01`、`S2-GATE-01`
@@ -234,11 +236,11 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 1. `PackageBuildRequest` 写入 `plugin.extension_registry` 和 `plugin.dependency_graph` section。
 2. 默认 provider policy 显式绑定 provider，不按加载顺序选择。
-3. Release Gate 校验 registry JSON、provider policy binding、packaged eligibility 和 unresolved conflict。
+3. Package builder、reader 与 Release Gate 通过共享 typed validator 校验 registry、provider policy binding、binding hash、packaged eligibility、capability/fingerprint、target/profile、runtime descriptor 与 VFS provider authority。
 4. Release Gate 校验 required dependency 是否 resolved。
 5. 编写 package section、registry pass、conflict blocked、missing binding blocked 和 unresolved dependency blocked 测试。
 
-**Done Evidence:** `cargo test -p astra-package package_roundtrip` 和 `cargo test -p astra-release release_report` 通过；release report 输出 `plugin.extension_registry` 和 `plugin.dependency_graph` evidence。
+**Done Evidence:** `cargo test -p astra-plugin-abi --test provider_registry_v2`、`cargo test -p astra-plugin --test extension_registry`、`cargo test -p astra-package --test package_roundtrip` 和 `cargo test -p astra-release --test release_report` 通过。`astra.plugin_extension_registry.v2` / `astra.provider_policy.v2` 在 package builder、reader、scenario runner、VFS 与 Release Gate 共用 validator；旧 schema、hash/capability/fingerprint/target/profile drift、重复或缺失 binding 和未 packaged provider 均在进入 Player 前阻断。
 
 **Linked Test IDs:** `T-S2-PLUGIN-GATE-01`
 

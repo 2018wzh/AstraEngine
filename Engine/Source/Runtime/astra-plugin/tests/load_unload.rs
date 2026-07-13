@@ -1,7 +1,8 @@
 use std::{path::Path, process::Command};
 
 use astra_plugin::{
-    dylib_path, EngineModuleSlot, PluginGate, PluginLoader, PluginRegistrar, ProviderBindingContext,
+    dylib_path, provider_binding_context_from_runtime_package, EngineModuleSlot, PluginGate,
+    PluginLoader, PluginRegistrar,
 };
 use semver::Version;
 
@@ -42,7 +43,7 @@ fn load_unload_loads_fixture_cdylib_and_releases_callbacks() {
         .bind_provider(
             &EngineModuleSlot("presentation".to_string()),
             "astra.fixture.headless_presentation",
-            ProviderBindingContext::from_runtime_package(
+            provider_binding_context_from_runtime_package(
                 &astra_runtime::PackageHandle::default(),
                 "presentation.headless",
             ),

@@ -2,7 +2,8 @@ use astra_engine::{
     core::StableId,
     package::{PackageBuildRequest, PackageBuilder},
     plugin::{
-        EngineModuleSlot, LoadPhase, PluginRegistrar, ProviderBindingContext, RegisteredProvider,
+        provider_binding_context_from_runtime_package, EngineModuleSlot, LoadPhase,
+        PluginRegistrar, RegisteredProvider,
     },
     runtime::{PackageHandle, RuntimeConfig, RuntimeWorld},
 };
@@ -27,22 +28,24 @@ fn dylib_facade_reexports_enginecore_public_api() {
     assert!(!package.as_bytes().is_empty());
 
     let mut registrar = PluginRegistrar::default();
-    registrar.register_provider(RegisteredProvider {
-        slot: EngineModuleSlot("presentation".to_string()),
-        provider_id: "astra.fixture.headless".to_string(),
-        capability: "presentation.headless".to_string(),
-        phase: LoadPhase::Runtime,
-        packaged: true,
-        engine_version: "0.1.0".to_string(),
-        rustc_fingerprint: "rustc-stable".to_string(),
-        feature_fingerprint: "runtime-envelope-v2".to_string(),
-        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
-    });
+    registrar
+        .register_provider(RegisteredProvider {
+            slot: EngineModuleSlot("presentation".to_string()),
+            provider_id: "astra.fixture.headless".to_string(),
+            capability: "presentation.headless".to_string(),
+            phase: LoadPhase::Runtime,
+            packaged: true,
+            engine_version: "0.1.0".to_string(),
+            rustc_fingerprint: "rustc-stable".to_string(),
+            feature_fingerprint: "runtime-envelope-v2".to_string(),
+            abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+        })
+        .unwrap();
     registrar
         .bind_provider(
             &EngineModuleSlot("presentation".to_string()),
             "astra.fixture.headless",
-            ProviderBindingContext::from_runtime_package(
+            provider_binding_context_from_runtime_package(
                 &PackageHandle::default(),
                 "presentation.headless",
             ),

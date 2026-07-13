@@ -198,7 +198,7 @@
 
 **迁移要求：** 删除或私有化无 binding 语义的 `select()`；公开选择 API 必须要求 binding context 并返回 selected provider 或 blocking conflict。新增两个 provider、显式选择第二个 provider、重新排序注册顺序和缺 binding 的负向测试，并让 release gate 使用同一选择实现。
 
-**2026-07-13 修补进度：** 无 binding context 的 `ExtensionRegistry::select()` 已删除，provider 注册不再创建隐式默认 binding；`PluginRegistrar::bind_provider` 是唯一公开选择入口，缺 provider、capability/fingerprint drift、重复或冲突 binding 返回稳定错误，`runtime_binding` 只从已绑定的 package/target/profile/fingerprint context 生成 Runtime token。两种注册顺序下显式选择第二个 provider 的测试已落地。`ProductRuntimeProvider` 的默认 fake create/destroy 已删除；host 已覆盖 create rollback、duplicate open rollback、instance/session report identity、连续 step、panic/error poison、timeout worker drain、save/restore section hash/bounds 和 poisoned cleanup。release validator 与 runtime registry 仍需共享同一 binding DTO/validator，P1-008 暂不关闭。
+**2026-07-13 关闭证据：** 无 binding context 的 `ExtensionRegistry::select()` 已删除，provider 注册不再创建隐式默认 binding；`PluginRegistrar::bind_provider` 是唯一公开选择入口。`astra-plugin-abi` 现提供 `astra.plugin_extension_registry.v2`、`astra.provider_policy.v2`、带 canonical hash 的 `ProviderBinding` 和共享 validator，Package builder/reader、scenario runner、Release Gate 与 VFS provider gate 使用同一语义。注册 API 已 fallible，非法或重复 provider 不产生部分写入，loader 注册失败会回滚。两种注册顺序、缺失/重复 binding、hash、capability、fingerprint、package/target/profile drift 和未 packaged provider 的负向测试均已落地。P1-008 关闭。
 
 ### P1-009：VFS resolve 没有 target/profile eligibility，且 layer 冲突可能被静默覆盖
 
@@ -210,7 +210,7 @@
 
 **迁移要求：** 增加 `ResolveContext { target, profile, capability, provider_binding }`，由 resolve 统一过滤 eligibility；validate 必须阻断重复 prefix、layer id、URI/layer/priority 冲突、缺 provider registration 和非法 overlay base。Release gate、runtime reader、Editor preview 和 local mount 必须共用该解析规则。
 
-**2026-07-13 修补进度：** `VfsManifest::resolve` 已强制接收 `ResolveContext`，校验 target/profile eligibility、prefix provider binding 与 capability；manifest validation 阻断重复 prefix/layer/URI-layer/whiteout、entry-layer prefix mismatch、range overflow 和非法 overlay base，resolve 阻断缺候选与同 priority 多权威候选。`vfs_uri.rs` 已覆盖 context bypass 和冲突矩阵。Release validator 和 package runtime reader 接入同一 typed validator 后再关闭 P1-009。
+**2026-07-13 关闭证据：** `VfsManifest::resolve` 强制接收 `ResolveContext`，校验 target/profile eligibility、prefix provider binding 与 capability；manifest validation 阻断重复 prefix/layer/URI-layer/whiteout、entry-layer prefix mismatch、range overflow和非法 overlay base，resolve 阻断缺候选与同 priority 多权威候选。Package builder/reader 现同时验证 mount graph、当前 package target/profile 的唯一 resolve、VFS prefix 显式 binding 与 backend capability；Release Gate 复用同一 `VfsManifest` validator，backend capability 真源移入 `VfsBackendKind::required_provider_capability`。P1-009 关闭。
 
 ### P1-010：Astra package container 接受重复 section id，读取时取第一条
 

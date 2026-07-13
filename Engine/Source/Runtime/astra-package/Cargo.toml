@@ -6,7 +6,10 @@ version.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+astra-asset = { path = "../astra-asset" }
 astra-core = { path = "../astra-core" }
+astra-plugin-abi = { path = "../astra-plugin-abi" }
+astra-target = { path = "../../Platform/astra-target" }
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true

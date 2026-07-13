@@ -783,6 +783,7 @@ fn prepare_package_context(
         context.handle = PackageHandle {
             package_id: manifest.package_id,
             target: target.clone().unwrap_or_else(|| "unresolved".to_string()),
+            profile: manifest.profile,
             ..PackageHandle::default()
         };
     }
@@ -870,14 +871,20 @@ fn validate_package_runtime_provider(reader: &PackageReader, context: &mut Packa
     context
         .release_gate_checks
         .push("runtime_provider.native_vn".to_string());
-    let provider_policy = match read_json_section(reader, "provider.policy") {
+    let provider_policy = match read_typed_json_section::<astra_plugin_abi::ProviderPolicy>(
+        reader,
+        "provider.policy",
+    ) {
         Ok(value) => value,
         Err(diagnostic) => {
             context.diagnostics.push(diagnostic);
             return;
         }
     };
-    let registry = match read_json_section(reader, "plugin.extension_registry") {
+    let registry = match read_typed_json_section::<astra_plugin_abi::PluginExtensionRegistrySnapshot>(
+        reader,
+        "plugin.extension_registry",
+    ) {
         Ok(value) => value,
         Err(diagnostic) => {
             context.diagnostics.push(diagnostic);
@@ -885,56 +892,47 @@ fn validate_package_runtime_provider(reader: &PackageReader, context: &mut Packa
         }
     };
 
-    let descriptor_ok = provider_policy
-        .get("runtime_provider")
-        .is_some_and(|descriptor| {
-            descriptor
-                .get("runtime_id")
-                .and_then(serde_json::Value::as_str)
-                == Some("native_vn")
-                && descriptor
-                    .get("provider_id")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("astra.runtime.native_vn")
-        });
-    let policy_binding_ok = provider_policy
-        .get("bindings")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|bindings| {
-            bindings.iter().any(|binding| {
-                binding.get("slot").and_then(serde_json::Value::as_str)
-                    == Some("game_runtime_provider")
-                    && binding
-                        .get("provider_id")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("astra.runtime.native_vn")
-            })
-        });
-    let registry_provider_ok = registry
-        .get("providers")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|providers| {
-            providers.iter().any(|provider| {
-                provider.get("slot").and_then(serde_json::Value::as_str)
-                    == Some("game_runtime_provider")
-                    && provider
-                        .get("provider_id")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("astra.runtime.native_vn")
-                    && provider
-                        .get("packaged")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-            })
-        });
-    if descriptor_ok && policy_binding_ok && registry_provider_ok {
-        context.native_vn_runtime_provider_bound = true;
-    } else {
+    if let Err(diagnostic) = registry.validate_for_package(
+        &provider_policy,
+        &context.handle.package_id,
+        &context.handle.target,
+        &context.handle.profile,
+    ) {
+        context
+            .diagnostics
+            .push(Diagnostic::blocking(diagnostic.code, diagnostic.message));
+        return;
+    }
+    let Some(binding) = registry.bindings.iter().find(|binding| {
+        binding.slot == astra_plugin_abi::GAME_RUNTIME_PROVIDER_SLOT
+            && binding.provider_id == astra_plugin_abi::NATIVE_VN_PROVIDER_ID
+            && provider_policy.runtime_provider.runtime_id == astra_plugin_abi::NATIVE_VN_RUNTIME_ID
+    }) else {
         context.diagnostics.push(Diagnostic::blocking(
             "ASTRA_SCENARIO_RUNTIME_PROVIDER",
-            "package must bind native_vn through provider.policy and plugin.extension_registry",
+            "package must explicitly bind the NativeVN runtime provider",
         ));
-    }
+        return;
+    };
+    context.handle.engine_version = binding.context.engine_version.clone();
+    context.handle.rustc_fingerprint = binding.context.rustc_fingerprint.clone();
+    context.handle.feature_fingerprint = binding.context.feature_fingerprint.clone();
+    context.handle.abi_fingerprint = binding.context.abi_fingerprint.clone();
+    context.native_vn_runtime_provider_bound = true;
+}
+
+fn read_typed_json_section<T: serde::de::DeserializeOwned>(
+    reader: &PackageReader,
+    section_id: &str,
+) -> Result<T, Diagnostic> {
+    let value = read_json_section(reader, section_id)?;
+    serde_json::from_value(value).map_err(|err| {
+        Diagnostic::blocking(
+            "ASTRA_SCENARIO_RUNTIME_PROVIDER_CONTRACT",
+            format!("runtime provider section {section_id} violates its typed contract: {err}"),
+        )
+        .with_field("section", section_id)
+    })
 }
 
 fn read_json_section(
@@ -1676,7 +1674,7 @@ impl RunContext {
             .bind_provider(
                 &astra_plugin::EngineModuleSlot("presentation".to_string()),
                 "astra.fixture.headless_presentation",
-                astra_plugin::ProviderBindingContext::from_runtime_package(
+                astra_plugin::provider_binding_context_from_runtime_package(
                     self.world.package_handle(),
                     "presentation.headless",
                 ),

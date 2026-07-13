@@ -295,10 +295,12 @@ dependencies = [
  "astra-platform-web",
  "astra-platform-windows",
  "astra-player-core",
+ "astra-plugin-abi",
  "astra-release",
  "astra-target",
  "astra-test",
  "astra-vn",
+ "astra-vn-runtime-provider",
  "clap",
  "ctrlc",
  "image",
@@ -430,7 +432,10 @@ dependencies = [
 name = "astra-package"
 version = "0.1.0"
 dependencies = [
+ "astra-asset",
  "astra-core",
+ "astra-plugin-abi",
+ "astra-target",
  "postcard",
  "schemars",
  "serde",

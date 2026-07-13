@@ -2,7 +2,8 @@ use std::{collections::BTreeMap, path::Path, process::Command};
 
 use astra_core::StableId;
 use astra_plugin::{
-    dylib_path, EngineModuleSlot, PluginGate, PluginLoader, PluginRegistrar, ProviderBindingContext,
+    dylib_path, provider_binding_context_from_runtime_package, EngineModuleSlot, PluginGate,
+    PluginLoader, PluginRegistrar,
 };
 use astra_runtime::{
     ActionInvocation, BlackboardValue, EventPayload, EventSource, GuardExpr, PackageHandle,
@@ -49,7 +50,7 @@ fn ffi_action_provider_registers_executes_and_unloads() {
         .bind_provider(
             &EngineModuleSlot("presentation".to_string()),
             "astra.fixture.headless_presentation",
-            ProviderBindingContext::from_runtime_package(
+            provider_binding_context_from_runtime_package(
                 &PackageHandle::default(),
                 "presentation.headless",
             ),

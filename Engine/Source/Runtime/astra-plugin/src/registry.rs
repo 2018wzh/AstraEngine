@@ -5,7 +5,8 @@ use tracing::debug;
 
 use astra_plugin_abi::{
     ExtensionConflict, LoadPhase, PluginDependency, PluginDependencyGraphSnapshot,
-    PluginExtensionRegistrySnapshot, ProviderBinding, ProviderExtensionRecord,
+    PluginExtensionRegistrySnapshot, ProviderBinding, ProviderBindingContext,
+    ProviderExtensionRecord, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
 };
 
 #[derive(
@@ -26,33 +27,53 @@ pub struct RegisteredProvider {
     pub abi_fingerprint: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ProviderBindingContext {
-    pub package_id: String,
-    pub target: String,
-    pub profile: String,
-    pub required_capability: String,
-    pub engine_version: String,
-    pub rustc_fingerprint: String,
-    pub feature_fingerprint: String,
-    pub abi_fingerprint: String,
+impl RegisteredProvider {
+    fn validate(&self) -> Result<(), String> {
+        for (field, value) in [
+            ("slot", self.slot.0.as_str()),
+            ("provider_id", self.provider_id.as_str()),
+            ("capability", self.capability.as_str()),
+        ] {
+            if value.is_empty()
+                || value.len() > 128
+                || !value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+            {
+                return Err(format!(
+                    "ASTRA_PLUGIN_PROVIDER_IDENTITY_INVALID: provider {field} is malformed"
+                ));
+            }
+        }
+        for (field, value) in [
+            ("engine_version", self.engine_version.as_str()),
+            ("rustc_fingerprint", self.rustc_fingerprint.as_str()),
+            ("feature_fingerprint", self.feature_fingerprint.as_str()),
+            ("abi_fingerprint", self.abi_fingerprint.as_str()),
+        ] {
+            if value.is_empty() || value.len() > 256 || value.chars().any(char::is_whitespace) {
+                return Err(format!(
+                    "ASTRA_PLUGIN_PROVIDER_FINGERPRINT_INVALID: provider {field} is malformed"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
-impl ProviderBindingContext {
-    pub fn from_runtime_package(
-        package: &astra_runtime::PackageHandle,
-        required_capability: impl Into<String>,
-    ) -> Self {
-        Self {
-            package_id: package.package_id.clone(),
-            target: package.target.clone(),
-            profile: package.profile.clone(),
-            required_capability: required_capability.into(),
-            engine_version: package.engine_version.clone(),
-            rustc_fingerprint: package.rustc_fingerprint.clone(),
-            feature_fingerprint: package.feature_fingerprint.clone(),
-            abi_fingerprint: package.abi_fingerprint.clone(),
-        }
+pub fn provider_binding_context_from_runtime_package(
+    package: &astra_runtime::PackageHandle,
+    required_capability: impl Into<String>,
+) -> ProviderBindingContext {
+    ProviderBindingContext {
+        package_id: package.package_id.clone(),
+        target: package.target.clone(),
+        profile: package.profile.clone(),
+        required_capability: required_capability.into(),
+        engine_version: package.engine_version.clone(),
+        rustc_fingerprint: package.rustc_fingerprint.clone(),
+        feature_fingerprint: package.feature_fingerprint.clone(),
+        abi_fingerprint: package.abi_fingerprint.clone(),
     }
 }
 
@@ -115,12 +136,22 @@ pub struct ExtensionRegistry {
 }
 
 impl ExtensionRegistry {
-    pub fn register(&mut self, provider: RegisteredProvider) {
+    pub fn register(&mut self, provider: RegisteredProvider) -> Result<(), String> {
+        provider.validate()?;
+        if self.providers.iter().any(|registered| {
+            registered.slot == provider.slot && registered.provider_id == provider.provider_id
+        }) {
+            return Err(format!(
+                "ASTRA_PLUGIN_PROVIDER_DUPLICATE: provider {} is already registered for slot {}",
+                provider.provider_id, provider.slot.0
+            ));
+        }
         self.providers.push(provider);
         self.providers.sort_by(|a, b| {
             (a.slot.0.as_str(), a.provider_id.as_str())
                 .cmp(&(b.slot.0.as_str(), b.provider_id.as_str()))
         });
+        Ok(())
     }
 
     pub fn unregister(&mut self, slot: &EngineModuleSlot, provider_id: &str) {
@@ -150,14 +181,14 @@ pub struct PluginRegistrar {
 }
 
 impl PluginRegistrar {
-    pub fn register_provider(&mut self, provider: RegisteredProvider) {
+    pub fn register_provider(&mut self, provider: RegisteredProvider) -> Result<(), String> {
         debug!(
             slot = %provider.slot.0,
             provider_id = %provider.provider_id,
             capability = %provider.capability,
             "plugin.provider.register"
         );
-        self.extensions.register(provider);
+        self.extensions.register(provider)
     }
 
     pub fn bind_provider(
@@ -288,9 +319,11 @@ impl PluginRegistrar {
         &self.dependency_graph
     }
 
-    pub fn extension_registry_snapshot(&self) -> PluginExtensionRegistrySnapshot {
-        PluginExtensionRegistrySnapshot {
-            schema: "astra.plugin_extension_registry.v1".to_string(),
+    pub fn extension_registry_snapshot(
+        &self,
+    ) -> Result<PluginExtensionRegistrySnapshot, astra_plugin_abi::ProviderRegistryDiagnostic> {
+        Ok(PluginExtensionRegistrySnapshot {
+            schema: PLUGIN_EXTENSION_REGISTRY_SCHEMA.to_string(),
             providers: self
                 .extensions
                 .providers()
@@ -301,18 +334,25 @@ impl PluginRegistrar {
                     capability: provider.capability.clone(),
                     phase: provider.phase,
                     packaged: provider.packaged,
+                    engine_version: provider.engine_version.clone(),
+                    rustc_fingerprint: provider.rustc_fingerprint.clone(),
+                    feature_fingerprint: provider.feature_fingerprint.clone(),
+                    abi_fingerprint: provider.abi_fingerprint.clone(),
                 })
                 .collect(),
             bindings: self
                 .services
                 .bindings()
-                .map(|(slot, binding)| ProviderBinding {
-                    slot: slot.clone(),
-                    provider_id: binding.provider_id.clone(),
+                .map(|(slot, binding)| {
+                    ProviderBinding::new(
+                        slot.clone(),
+                        binding.provider_id.clone(),
+                        binding.context.clone(),
+                    )
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
             conflicts: self.extensions.conflicts().to_vec(),
-        }
+        })
     }
 
     pub fn dependency_graph_snapshot(&self) -> PluginDependencyGraphSnapshot {

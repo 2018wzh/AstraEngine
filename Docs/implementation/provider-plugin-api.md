@@ -88,6 +88,8 @@ Plugin Manager 保存 project enable/disable 状态，读取 Stage 1/2 的 depen
 
 Stage 1 实现 registry backend 和 explicit provider binding。Stage 2 将 `plugin.extension_registry` 与 `plugin.dependency_graph` 写入 package 并执行 release gate。Stage 4 的 Plugin Manager 只提供 Editor UI、enablement 编辑和 diagnostic jump，不再拥有第二套 provider selection 或 dependency graph 实现。
 
+当前 package contract 使用 `astra.plugin_extension_registry.v2` / `astra.provider_policy.v2`。`ProviderBindingContext` 固化 package、target、profile、required capability、engine、rustc、feature 与 ABI fingerprint，`ProviderBinding` 额外记录 canonical SHA-256。Package builder、reader、Release Gate、scenario runner 和 VFS prefix gate 调用同一个 `astra-plugin-abi` validator；policy 与 registry 不能分别解释、按数组第一项选择或在缺 binding 时回退。`presentation` 必须与 policy renderer 相同，`game_runtime_provider` 必须与 runtime descriptor 的 provider/capability/output schema 相同，`vfs_provider` 必须与 mount backend capability 精确匹配。
+
 ## StateMachine Action Provider
 
 Stage 1 的 gameplay action provider 走 host adapter，不把 trait object 穿过 ABI：

@@ -54,6 +54,30 @@ fn build_test_package(
     })
     .to_string()
     .into_bytes();
+    let mut policy: astra_plugin_abi::ProviderPolicy =
+        serde_json::from_slice(&request.provider_policy).unwrap();
+    let mut registry: astra_plugin_abi::PluginExtensionRegistrySnapshot =
+        serde_json::from_slice(&request.plugin_extension_registry).unwrap();
+    let provider_bindings = registry
+        .bindings
+        .iter()
+        .map(|binding| {
+            let mut context = binding.context.clone();
+            context.target = "nativevn-game".to_string();
+            context.profile = profile.to_string();
+            astra_plugin_abi::ProviderBinding::new(
+                binding.slot.clone(),
+                binding.provider_id.clone(),
+                context,
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    policy.profile = profile.to_string();
+    policy.bindings = provider_bindings.clone();
+    registry.bindings = provider_bindings;
+    request.provider_policy = serde_json::to_vec(&policy).unwrap();
+    request.plugin_extension_registry = serde_json::to_vec(&registry).unwrap();
     let mut bindings = Vec::new();
     for (path, payload) in scenarios {
         let section_id = format!(
