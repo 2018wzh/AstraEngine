@@ -121,16 +121,14 @@ mod browser {
     };
     use astra_player_core::{
         PlatformCommandSink, PlayerActionMap, PlayerHostCommandExecutor, PlayerHostCommandResult,
-        PlayerHostResourceId, PlayerTimelineCompletion, PlayerTimelineScheduler,
+        PlayerHostResourceId,
     };
-    use astra_player_vn::{
-        NativeVnAudioOutput, NativeVnHostCommandSource, NativeVnProductAudioHost,
-    };
+    use astra_player_vn::{NativeVnHostCommandSource, NativeVnProductMediaHost};
     use astra_vn_core::VnRunConfig;
     use futures_util::future::{select, Either};
     use futures_util::FutureExt;
     use js_sys::Promise;
-    use std::{cell::RefCell, collections::BTreeSet};
+    use std::cell::RefCell;
     use wasm_bindgen::prelude::*;
     use wasm_bindgen_futures::{spawn_local, JsFuture};
     use web_sys::Response;
@@ -214,9 +212,7 @@ mod browser {
         let action_map = PlayerActionMap::standard();
         spawn_local(async move {
             let mut pointer = (0.0_f64, 0.0_f64);
-            let mut media = NativeVnProductAudioHost::default();
-            let mut timeline = PlayerTimelineScheduler::new(256);
-            let mut completed_signals = BTreeSet::new();
+            let mut media = NativeVnProductMediaHost::default();
             let timeline_clock = js_sys::Date::now();
             let mut user_activated = false;
             let mut save_transaction_id = 1_000_u64;
@@ -238,30 +234,10 @@ mod browser {
                             );
                             break;
                         }
-                        if user_activated && (timeline.active_count() > 0 || media.is_active()) {
+                        if user_activated && media.is_active() {
                             let now_ms = (js_sys::Date::now() - timeline_clock).max(0.0) as u64;
-                            let completed = match timeline.poll(now_ms) {
-                                Ok(completed) => completed,
-                                Err(error) => {
-                                    tracing::error!(
-                                        event = "player.web.timeline.poll_failed",
-                                        diagnostic_code = "ASTRA_PLAYER_TIMELINE_POLL",
-                                        error = %error,
-                                        "Web Player timeline poll failed"
-                                    );
-                                    break;
-                                }
-                            };
-                            if let Err(error) = process_web_media(
-                                &mut vn,
-                                &mut executor,
-                                &mut media,
-                                &mut timeline,
-                                now_ms,
-                                completed,
-                                &mut completed_signals,
-                            )
-                            .await
+                            if let Err(error) =
+                                media.poll_and_process(&mut vn, &mut executor, now_ms).await
                             {
                                 tracing::error!(
                                     event = "player.web.media.failed",
@@ -315,16 +291,14 @@ mod browser {
                                 );
                                 break;
                             }
-                            if let Err(error) = process_web_media(
-                                &mut vn,
-                                &mut executor,
-                                &mut media,
-                                &mut timeline,
-                                (js_sys::Date::now() - timeline_clock).max(0.0) as u64,
-                                Vec::new(),
-                                &mut completed_signals,
-                            )
-                            .await
+                            if let Err(error) = media
+                                .process(
+                                    &mut vn,
+                                    &mut executor,
+                                    (js_sys::Date::now() - timeline_clock).max(0.0) as u64,
+                                    Vec::new(),
+                                )
+                                .await
                             {
                                 tracing::error!(
                                     event = "player.web.media.failed",
@@ -348,16 +322,14 @@ mod browser {
                                 );
                                 break;
                             }
-                            if let Err(error) = process_web_media(
-                                &mut vn,
-                                &mut executor,
-                                &mut media,
-                                &mut timeline,
-                                (js_sys::Date::now() - timeline_clock).max(0.0) as u64,
-                                Vec::new(),
-                                &mut completed_signals,
-                            )
-                            .await
+                            if let Err(error) = media
+                                .process(
+                                    &mut vn,
+                                    &mut executor,
+                                    (js_sys::Date::now() - timeline_clock).max(0.0) as u64,
+                                    Vec::new(),
+                                )
+                                .await
                             {
                                 tracing::error!(
                                     event = "player.web.media.failed",
@@ -395,16 +367,14 @@ mod browser {
                             );
                             break;
                         }
-                        if let Err(error) = process_web_media(
-                            &mut vn,
-                            &mut executor,
-                            &mut media,
-                            &mut timeline,
-                            (js_sys::Date::now() - timeline_clock).max(0.0) as u64,
-                            Vec::new(),
-                            &mut completed_signals,
-                        )
-                        .await
+                        if let Err(error) = media
+                            .process(
+                                &mut vn,
+                                &mut executor,
+                                (js_sys::Date::now() - timeline_clock).max(0.0) as u64,
+                                Vec::new(),
+                            )
+                            .await
                         {
                             tracing::error!(
                                 event = "player.web.media.failed",
@@ -453,16 +423,14 @@ mod browser {
                             );
                             break;
                         }
-                        if let Err(error) = process_web_media(
-                            &mut vn,
-                            &mut executor,
-                            &mut media,
-                            &mut timeline,
-                            (js_sys::Date::now() - timeline_clock).max(0.0) as u64,
-                            Vec::new(),
-                            &mut completed_signals,
-                        )
-                        .await
+                        if let Err(error) = media
+                            .process(
+                                &mut vn,
+                                &mut executor,
+                                (js_sys::Date::now() - timeline_clock).max(0.0) as u64,
+                                Vec::new(),
+                            )
+                            .await
                         {
                             tracing::error!(
                                 event = "player.web.media.failed",
@@ -507,98 +475,6 @@ mod browser {
         });
         tracing::info!(event = "player.web.ready", "Web Player host is ready");
         Ok(())
-    }
-
-    async fn process_web_media(
-        source: &mut NativeVnHostCommandSource,
-        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
-        media: &mut NativeVnProductAudioHost,
-        timeline: &mut PlayerTimelineScheduler,
-        now_ms: u64,
-        mut completed: Vec<PlayerTimelineCompletion>,
-        completed_signals: &mut BTreeSet<String>,
-    ) -> Result<(), astra_platform::PlatformError> {
-        const MAX_DECODED_AUDIO_SAMPLES: usize = 10_000_000;
-        for _ in 0..1_024 {
-            let tasks = source.take_timeline_tasks();
-            if !tasks.is_empty() {
-                let mut candidate = timeline.clone();
-                let mut immediate = Vec::new();
-                for task in tasks {
-                    immediate.extend(
-                        candidate
-                            .schedule(task, now_ms)
-                            .map_err(|error| web_player_error("player.timeline.schedule", error))?,
-                    );
-                }
-                *timeline = candidate;
-                completed.extend(immediate);
-            }
-            for completion in std::mem::take(&mut completed) {
-                tracing::info!(
-                    event = "astra.player.web.timeline.completed",
-                    task_id = %completion.task_id,
-                    target = %completion.target,
-                    completion = ?completion.kind,
-                    completed_at_ms = completion.completed_at_ms,
-                    "Web Player timeline task reached a host completion boundary"
-                );
-                if let Some(fence) = completion.fence {
-                    completed_signals.insert(fence);
-                }
-            }
-            for output in source.take_audio_requests() {
-                let request = match output {
-                    NativeVnAudioOutput::Control(request) => {
-                        media.control(&request, completed_signals)?;
-                        continue;
-                    }
-                    NativeVnAudioOutput::Start(request) => request,
-                };
-                let decode = source
-                    .prepare_audio_decode(&request)
-                    .map_err(|error| web_player_error("player.audio.decode.prepare", error))?;
-                let decoded = executor
-                    .execute_decode_lifecycle(decode)
-                    .await
-                    .map_err(|error| web_player_error("player.audio.decode", error))?;
-                let audio = astra_player_core::PlayerDecodedAudio::parse(
-                    &decoded.format,
-                    &decoded.bytes,
-                    MAX_DECODED_AUDIO_SAMPLES,
-                )
-                .map_err(|error| web_player_error("player.audio.contract", error))?;
-                media.start(source, executor, &request, audio).await?;
-                tracing::info!(
-                    event = "astra.player.web.audio.started",
-                    command_id = %request.command_id,
-                    command = %request.command,
-                    asset_id = %request.asset_id,
-                    encoded_hash = %request.encoded_hash,
-                    decoded_hash = %decoded.hash,
-                    "Web Player started a packaged audio voice"
-                );
-            }
-            media.pump(source, executor, completed_signals).await?;
-            let pending_fence = source.pending_wait().map(|wait| wait.fence.clone());
-            if let Some(fence) = pending_fence {
-                if completed_signals.remove(&fence) {
-                    let present = source
-                        .complete_wait(fence)
-                        .map_err(|error| web_player_error("player.media.complete_wait", error))?;
-                    executor
-                        .execute_batch(present)
-                        .await
-                        .map_err(|error| web_player_error("player.media.present", error))?;
-                    continue;
-                }
-            }
-            return Ok(());
-        }
-        Err(web_player_error(
-            "player.media.process",
-            "ASTRA_PLAYER_MEDIA_COMPLETION_LOOP: completion chain exceeded its bound",
-        ))
     }
 
     async fn execute_web_save(

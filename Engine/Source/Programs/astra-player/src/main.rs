@@ -270,158 +270,138 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         let mut pointer = (0.0_f64, 0.0_f64);
         let mut save_transaction_id = 1000_u64;
         let timeline_clock = std::time::Instant::now();
-        let mut timeline = astra_player_core::PlayerTimelineScheduler::new(256);
-        let mut completed_media_signals = std::collections::BTreeSet::new();
-        let mut persistent_audio = astra_player::NativeVnProductAudioHost::default();
+        let mut media = astra_player::NativeVnProductMediaHost::default();
         let player_result: Result<(), astra_platform::PlatformError> = async {
-            process_timeline_updates(
-            &mut vn,
-            &mut executor,
-            &mut timeline,
-            timeline_clock.elapsed().as_millis() as u64,
-            Vec::new(),
-            &mut completed_media_signals,
-            &mut persistent_audio,
-        )
-            .await?;
+            media
+                .process(
+                    &mut vn,
+                    &mut executor,
+                    timeline_clock.elapsed().as_millis() as u64,
+                    Vec::new(),
+                )
+                .await?;
             let mut timeline_tick = tokio::time::interval(std::time::Duration::from_millis(8));
             timeline_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
-            let event = tokio::select! {
-                event = session.events.recv() => event?,
-                _ = timeline_tick.tick(), if timeline.active_count() > 0 || persistent_audio.is_active() => {
-                    let now_ms = timeline_clock.elapsed().as_millis() as u64;
-                    let completed = timeline
-                        .poll(now_ms)
-                        .map_err(|error| player_platform_error("player.timeline.poll", error))?;
-                    process_timeline_updates(
-                        &mut vn,
-                        &mut executor,
-                        &mut timeline,
-                        now_ms,
-                        completed,
-                        &mut completed_media_signals,
-                        &mut persistent_audio,
-                    )
-                    .await?;
-                    continue;
-                }
-            };
-            let player_sequence = event.sequence;
-            match event.kind {
-                PlatformEventKind::WindowClosed { window: closed } if closed == window => break,
-                PlatformEventKind::Keyboard {
-                    window: input_window,
-                    physical_key,
-                    state: InputState::Pressed,
-                    ..
-                } if input_window == window => {
-                    if physical_key == "F5" {
-                        save_transaction_id =
-                            save_transaction_id.checked_add(1).ok_or_else(|| {
-                                astra_platform::PlatformError::new(
-                                    astra_platform::PlatformErrorCode::InvalidState,
-                                    "player.save.transaction",
-                                    "ASTRA_PLAYER_SAVE_TRANSACTION_OVERFLOW",
-                                )
-                            })?;
-                        execute_platform_save(
-                            &mut vn,
-                            &mut executor,
-                            "slot.quick",
-                            PlayerHostResourceId(save_transaction_id),
-                        )
-                        .await?;
-                        tracing::info!(
-                            event = "astra.player.save.committed",
-                            player_sequence,
-                            slot = "slot.quick",
-                            "Player committed platform save transaction"
-                        );
+                let event = tokio::select! {
+                    event = session.events.recv() => event?,
+                    _ = timeline_tick.tick(), if media.is_active() => {
+                        let now_ms = timeline_clock.elapsed().as_millis() as u64;
+                        media.poll_and_process(&mut vn, &mut executor, now_ms).await?;
                         continue;
                     }
-                    if physical_key == "F9" {
-                        execute_platform_load(&mut vn, &mut executor, "slot.quick").await?;
-                        tracing::info!(
-                            event = "astra.player.save.restored",
-                            player_sequence,
-                            slot = "slot.quick",
-                            "Player restored platform save transaction"
-                        );
-                        continue;
+                };
+                let player_sequence = event.sequence;
+                match event.kind {
+                    PlatformEventKind::WindowClosed { window: closed } if closed == window => break,
+                    PlatformEventKind::Keyboard {
+                        window: input_window,
+                        physical_key,
+                        state: InputState::Pressed,
+                        ..
+                    } if input_window == window => {
+                        if physical_key == "F5" {
+                            save_transaction_id =
+                                save_transaction_id.checked_add(1).ok_or_else(|| {
+                                    astra_platform::PlatformError::new(
+                                        astra_platform::PlatformErrorCode::InvalidState,
+                                        "player.save.transaction",
+                                        "ASTRA_PLAYER_SAVE_TRANSACTION_OVERFLOW",
+                                    )
+                                })?;
+                            execute_platform_save(
+                                &mut vn,
+                                &mut executor,
+                                "slot.quick",
+                                PlayerHostResourceId(save_transaction_id),
+                            )
+                            .await?;
+                            tracing::info!(
+                                event = "astra.player.save.committed",
+                                player_sequence,
+                                slot = "slot.quick",
+                                "Player committed platform save transaction"
+                            );
+                            continue;
+                        }
+                        if physical_key == "F9" {
+                            execute_platform_load(&mut vn, &mut executor, "slot.quick").await?;
+                            tracing::info!(
+                                event = "astra.player.save.restored",
+                                player_sequence,
+                                slot = "slot.quick",
+                                "Player restored platform save transaction"
+                            );
+                            continue;
+                        }
+                        let Some(action) = action_map.keyboard(&physical_key) else {
+                            continue;
+                        };
+                        let batch = vn.dispatch_action(action).map_err(|error| {
+                            astra_platform::PlatformError::new(
+                                astra_platform::PlatformErrorCode::InvalidState,
+                                "player.runtime.input",
+                                error.to_string(),
+                            )
+                        })?;
+                        executor.execute_batch(batch).await.map_err(|error| {
+                            astra_platform::PlatformError::new(
+                                astra_platform::PlatformErrorCode::InvalidState,
+                                "player.host.execute",
+                                error.to_string(),
+                            )
+                        })?;
+                        media
+                            .process(
+                                &mut vn,
+                                &mut executor,
+                                timeline_clock.elapsed().as_millis() as u64,
+                                Vec::new(),
+                            )
+                            .await?;
+                        log_consumed_vn_step(player_sequence, "keyboard", &vn)?;
                     }
-                    let Some(action) = action_map.keyboard(&physical_key) else {
-                        continue;
-                    };
-                    let batch = vn.dispatch_action(action).map_err(|error| {
-                        astra_platform::PlatformError::new(
-                            astra_platform::PlatformErrorCode::InvalidState,
-                            "player.runtime.input",
-                            error.to_string(),
-                        )
-                    })?;
-                    executor.execute_batch(batch).await.map_err(|error| {
-                        astra_platform::PlatformError::new(
-                            astra_platform::PlatformErrorCode::InvalidState,
-                            "player.host.execute",
-                            error.to_string(),
-                        )
-                    })?;
-                    process_timeline_updates(
-                        &mut vn,
-                        &mut executor,
-                        &mut timeline,
-                        timeline_clock.elapsed().as_millis() as u64,
-                        Vec::new(),
-                        &mut completed_media_signals,
-                        &mut persistent_audio,
-                    )
-                    .await?;
-                    log_consumed_vn_step(player_sequence, "keyboard", &vn)?;
+                    PlatformEventKind::PointerMoved {
+                        window: input_window,
+                        x,
+                        y,
+                    } if input_window == window => pointer = (x, y),
+                    PlatformEventKind::PointerButton {
+                        window: input_window,
+                        button: PointerButton::Primary,
+                        state: InputState::Pressed,
+                    } if input_window == window => {
+                        let batch = vn.dispatch_pointer(pointer.0, pointer.1).map_err(|error| {
+                            astra_platform::PlatformError::new(
+                                astra_platform::PlatformErrorCode::InvalidState,
+                                "player.runtime.hit_test",
+                                error.to_string(),
+                            )
+                        })?;
+                        executor.execute_batch(batch).await.map_err(|error| {
+                            astra_platform::PlatformError::new(
+                                astra_platform::PlatformErrorCode::InvalidState,
+                                "player.host.execute",
+                                error.to_string(),
+                            )
+                        })?;
+                        media
+                            .process(
+                                &mut vn,
+                                &mut executor,
+                                timeline_clock.elapsed().as_millis() as u64,
+                                Vec::new(),
+                            )
+                            .await?;
+                        log_consumed_vn_step(player_sequence, "pointer", &vn)?;
+                    }
+                    _ => {}
                 }
-                PlatformEventKind::PointerMoved {
-                    window: input_window,
-                    x,
-                    y,
-                } if input_window == window => pointer = (x, y),
-                PlatformEventKind::PointerButton {
-                    window: input_window,
-                    button: PointerButton::Primary,
-                    state: InputState::Pressed,
-                } if input_window == window => {
-                    let batch = vn.dispatch_pointer(pointer.0, pointer.1).map_err(|error| {
-                        astra_platform::PlatformError::new(
-                            astra_platform::PlatformErrorCode::InvalidState,
-                            "player.runtime.hit_test",
-                            error.to_string(),
-                        )
-                    })?;
-                    executor.execute_batch(batch).await.map_err(|error| {
-                        astra_platform::PlatformError::new(
-                            astra_platform::PlatformErrorCode::InvalidState,
-                            "player.host.execute",
-                            error.to_string(),
-                        )
-                    })?;
-                    process_timeline_updates(
-                        &mut vn,
-                        &mut executor,
-                        &mut timeline,
-                        timeline_clock.elapsed().as_millis() as u64,
-                        Vec::new(),
-                        &mut completed_media_signals,
-                        &mut persistent_audio,
-                    )
-                    .await?;
-                    log_consumed_vn_step(player_sequence, "pointer", &vn)?;
-                }
-                _ => {}
-            }
             }
             Ok(())
         }
         .await;
-        let audio_cleanup = persistent_audio.shutdown(&mut vn, &mut executor).await;
+        let audio_cleanup = media.shutdown(&mut vn, &mut executor).await;
         match (player_result, audio_cleanup) {
             (Err(error), Err(cleanup)) => {
                 return Err(player_platform_error(
@@ -439,111 +419,6 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         Ok::<(), astra_platform::PlatformError>(())
     })?;
     Ok(())
-}
-
-#[cfg(target_os = "windows")]
-async fn process_timeline_updates(
-    source: &mut astra_player::NativeVnHostCommandSource,
-    executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
-    scheduler: &mut astra_player_core::PlayerTimelineScheduler,
-    now_ms: u64,
-    mut completed: Vec<astra_player_core::PlayerTimelineCompletion>,
-    completed_media_signals: &mut std::collections::BTreeSet<String>,
-    persistent_audio: &mut astra_player::NativeVnProductAudioHost,
-) -> Result<(), astra_platform::PlatformError> {
-    const MAX_DECODED_AUDIO_SAMPLES: usize = 10_000_000;
-    for _ in 0..1024 {
-        let tasks = source.take_timeline_tasks();
-        if !tasks.is_empty() {
-            let mut candidate = scheduler.clone();
-            let mut scheduled_completions = Vec::new();
-            for task in tasks {
-                scheduled_completions.extend(
-                    candidate.schedule(task, now_ms).map_err(|error| {
-                        player_platform_error("player.timeline.schedule", error)
-                    })?,
-                );
-            }
-            *scheduler = candidate;
-            completed.extend(scheduled_completions);
-        }
-        let current = std::mem::take(&mut completed);
-        for completion in current {
-            tracing::info!(
-                event = "astra.player.timeline.completed",
-                task_id = %completion.task_id,
-                target = %completion.target,
-                completion = ?completion.kind,
-                completed_at_ms = completion.completed_at_ms,
-                "Player timeline task reached a host completion boundary"
-            );
-            if let Some(fence) = completion.fence {
-                completed_media_signals.insert(fence);
-            }
-        }
-
-        let audio_requests = source.take_audio_requests();
-        for output in audio_requests {
-            let request = match output {
-                astra_player::NativeVnAudioOutput::Control(request) => {
-                    persistent_audio.control(&request, completed_media_signals)?;
-                    continue;
-                }
-                astra_player::NativeVnAudioOutput::Start(request) => request,
-            };
-            let decode = source
-                .prepare_audio_decode(&request)
-                .map_err(|error| player_platform_error("player.audio.decode.prepare", error))?;
-            let decoded = executor
-                .execute_decode_lifecycle(decode)
-                .await
-                .map_err(|error| player_platform_error("player.audio.decode", error))?;
-            let audio = astra_player_core::PlayerDecodedAudio::parse(
-                &decoded.format,
-                &decoded.bytes,
-                MAX_DECODED_AUDIO_SAMPLES,
-            )
-            .map_err(|error| player_platform_error("player.audio.contract", error))?;
-            persistent_audio
-                .start(source, executor, &request, audio)
-                .await?;
-            tracing::info!(
-                event = "astra.player.audio.started",
-                command_id = %request.command_id,
-                command = %request.command,
-                asset_id = %request.asset_id,
-                encoded_hash = %request.encoded_hash,
-                decoded_hash = %decoded.hash,
-                "Player started a packaged audio voice in the persistent mixer"
-            );
-        }
-
-        persistent_audio
-            .pump(source, executor, completed_media_signals)
-            .await?;
-
-        let pending_fence = source.pending_wait().map(|wait| wait.fence.clone());
-        if let Some(fence) = pending_fence {
-            if completed_media_signals.remove(&fence) {
-                let batch = source
-                    .complete_wait(fence)
-                    .map_err(|error| player_platform_error("player.media.complete_wait", error))?;
-                executor
-                    .execute_batch(batch)
-                    .await
-                    .map_err(|error| player_platform_error("player.media.present", error))?;
-                continue;
-            }
-        }
-        if completed.is_empty() {
-            return Ok(());
-        }
-    }
-    Err(astra_platform::PlatformError::new(
-        astra_platform::PlatformErrorCode::InvalidState,
-        "player.timeline.schedule",
-        "ASTRA_PLAYER_TIMELINE_COMPLETION_LOOP: completion chain exceeded its bound",
-    ))
 }
 
 #[cfg(target_os = "windows")]

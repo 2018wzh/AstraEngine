@@ -275,6 +275,11 @@ impl NativeVnHostCommandSource {
         std::mem::take(&mut self.pending_timeline)
     }
 
+    pub(crate) fn restore_timeline_tasks(&mut self, mut tasks: Vec<PlayerTimelineTask>) {
+        tasks.append(&mut self.pending_timeline);
+        self.pending_timeline = tasks;
+    }
+
     pub fn take_audio_requests(&mut self) -> Vec<NativeVnAudioOutput> {
         std::mem::take(&mut self.pending_audio)
     }

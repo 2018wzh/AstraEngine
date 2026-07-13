@@ -226,11 +226,11 @@
 
 **2026-07-11 修补进展：** NativeVN provider save 已增加 `vn.runtime_world`，不再只保存 VN/Policy component；恢复前交叉校验完整 `RuntimeSnapshot` 与 component sections。Player 侧已有带整体 hash 的 save envelope、tamper/session mismatch 阻断和 `complete_wait` provider 路径；Windows F5/F9 已走平台原子 save transaction，写入或提交失败会执行 abort，load 后重新提交保存时的已校验 presentation frame。media completion callback、多 route session、Web 等价路径与 Windows/Web E3 evidence 尚未完成，因此 P1-011 仍保持开放。
 
-NativeVN timeline task 现已通过 descriptor 声明的 `astra.vn.timeline_task.v1` effect envelope 返回 ProductRuntimeHost；此前仅写入 `RuntimeWorld.effects`、Player 不可见的 `UNWIRED_MAIN_PATH` 已消除。平台 timeline scheduler、真实 join/cancel completion 和 E3 evidence 仍未完成。
+NativeVN timeline task 现已通过 descriptor 声明的 `astra.vn.timeline_task.v1` effect envelope 返回 ProductRuntimeHost；此前仅写入 `RuntimeWorld.effects`、Player 不可见的 `UNWIRED_MAIN_PATH` 已消除。Windows/Web 已通过共享产品 media owner 执行 scheduler 与 join/cancel completion；真实浏览器和 E3 evidence 仍未完成。
 
-Windows Player 已接入 bounded timeline scheduler：start/cancel/deadline 使用单调 host clock，重复 ID、容量溢出、非法 duration/symbol、未知 cancel 和时钟回退均 blocking；completion/cancel 保留原 fence 并经 ProductRuntimeHost `complete_wait` 回到固定 tick。Web 等价 scheduler 与正式 E3 evidence 仍未完成。
+Windows/Web Player 已接入同一 bounded timeline scheduler：start/cancel/deadline 使用单调 host clock，重复 ID、容量溢出、非法 duration/symbol、未知 cancel 和时钟回退均 blocking；completion/cancel 保留原 fence，并由共享 `NativeVnProductMediaHost` 经 ProductRuntimeHost `complete_wait` 回到固定 tick。正式 E3 evidence 仍未完成。
 
-NativeVN Player 已能从 package 的 catalog/VFS 唯一映射读取 encoded voice/audio，执行 bounded read、entry hash 和 MP3/Ogg/FLAC/WAV signature 校验；WMF `pcm_s16le` output 的截断、sample budget、sample rate、channel 和 frame alignment 也已有负向测试。Windows/Web 产品主链现共享 `NativeVnProductAudioHost`，把 Runtime audio output 送入同一持久 sample mixer；该 owner 覆盖平台 preferred format 协商、bounded sinc resampling、可证明的 mono/stereo mapping、loop、bus fade、ordered pause/resume/stop、completion、queue query/backpressure、underflow blocking、时长感知 drain 和 close，`voice_end` 不再来自伪 callback。Web 还要求真实 input 后 `AudioContext.resume()`，并已接 timeline、wait completion、F5/F9 save/load 和 Runtime consumed trace。设备热切换恢复、真实浏览器/CDP run 和同 run E3 evidence 仍未闭合，因此不能关闭真实音频缺口。
+NativeVN Player 已能从 package 的 catalog/VFS 唯一映射读取 encoded voice/audio，执行 bounded read、entry hash 和 MP3/Ogg/FLAC/WAV signature 校验；WMF `pcm_s16le` output 的截断、sample budget、sample rate、channel 和 frame alignment 也已有负向测试。Windows/Web 产品主链现共享 `NativeVnProductMediaHost`，由其内部 `NativeVnProductAudioHost` 把 Runtime audio output 送入同一持久 sample mixer；该 owner 覆盖平台 preferred format 协商、bounded sinc resampling、可证明的 mono/stereo mapping、loop、bus fade、ordered pause/resume/stop、completion、queue query/backpressure、underflow blocking、时长感知 drain 和 close，`voice_end` 不再来自伪 callback。Web 还要求真实 input 后 `AudioContext.resume()`，并已接 timeline、wait completion、F5/F9 save/load 和 Runtime consumed trace。设备热切换恢复、真实浏览器/CDP run 和同 run E3 evidence 仍未闭合，因此不能关闭真实音频缺口。
 
 ### P2-002：容器和 VFS 的局部测试没有覆盖冲突矩阵
 
