@@ -22,6 +22,11 @@ const MAX_DECODED_VIDEO_FRAME_BYTES: usize = 64 * 1024 * 1024;
 
 #[cfg(feature = "ffmpeg-vcpkg")]
 mod ffmpeg;
+#[cfg(feature = "ffmpeg-vcpkg")]
+mod ffmpeg_stream;
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+pub use ffmpeg_stream::*;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
