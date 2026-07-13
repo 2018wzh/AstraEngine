@@ -198,7 +198,7 @@
 
 **迁移要求：** 删除或私有化无 binding 语义的 `select()`；公开选择 API 必须要求 binding context 并返回 selected provider 或 blocking conflict。新增两个 provider、显式选择第二个 provider、重新排序注册顺序和缺 binding 的负向测试，并让 release gate 使用同一选择实现。
 
-**2026-07-13 修补进度：** 无 binding context 的 `ExtensionRegistry::select()` 已删除，provider 注册不再创建隐式默认 binding；`PluginRegistrar::bind_provider` 是唯一公开选择入口，缺 provider、capability/fingerprint drift、重复或冲突 binding 返回稳定错误，`runtime_binding` 只从已绑定的 package/target/profile/fingerprint context 生成 Runtime token。两种注册顺序下显式选择第二个 provider 的测试已落地。release validator 与 runtime registry 仍需共享同一 binding DTO/validator，P1-008 暂不关闭。
+**2026-07-13 修补进度：** 无 binding context 的 `ExtensionRegistry::select()` 已删除，provider 注册不再创建隐式默认 binding；`PluginRegistrar::bind_provider` 是唯一公开选择入口，缺 provider、capability/fingerprint drift、重复或冲突 binding 返回稳定错误，`runtime_binding` 只从已绑定的 package/target/profile/fingerprint context 生成 Runtime token。两种注册顺序下显式选择第二个 provider 的测试已落地。`ProductRuntimeProvider` 的默认 fake create/destroy 已删除；host 已覆盖 create rollback、duplicate open rollback、instance/session report identity、连续 step、panic/error poison、timeout worker drain、save/restore section hash/bounds 和 poisoned cleanup。release validator 与 runtime registry 仍需共享同一 binding DTO/validator，P1-008 暂不关闭。
 
 ### P1-009：VFS resolve 没有 target/profile eligibility，且 layer 冲突可能被静默覆盖
 

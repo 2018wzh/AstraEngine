@@ -98,6 +98,8 @@ project target
 
 Provider 可以在内部维护 product-specific cursor，但权威 Runtime 结果必须在 fixed tick 边界变成可序列化 effects、await tokens、event queue entries、presentation/audio commands 和 save sections。Replay 读取已保存的 provider output，不重新请求外部 provider 或平台回调。
 
+`ProductRuntimeProvider` 必须显式实现 `create_instance` 和 `destroy_instance`，不得依赖 host 伪造成功报告。`ProductRuntimeHost` 校验 instance/session report identity、首 step 为 `1` 且后续严格连续、output schema/size、save/restore section descriptor、唯一 id、hash 和容量。create 或 duplicate open 的部分成功必须执行 rollback；provider error、panic、malformed output 和 timeout 会 poison 对应 session 或 instance，除 cleanup 外不再接受调用。活动 session 阻断普通 destroy；`cleanup_after_failure` 按 session shutdown 后 destroy，并等待已超时的 blocking provider call drain，不能让后台调用继续并发修改已返回给调用方的 session。
+
 ## AstraRPG Profile Boundary
 
 AstraRPG 的完整 contract 见 [AstraRPG Contract](rpg-trpg.md)。项目通过 `runtime_provider: astra_rpg` 选择 provider，再用 profile/ruleset 区分 `traditional_rpg`、`ai_sim` 和 `trpg`。`trpg` profile 的 package/save/report section 必须使用 `rpg.trpg.*`，不能创建顶层 `trpg.*` namespace。CP2020 等规则书适配只能作为 local-private adapter，report 只写 manifest、hash、coverage、byte size 和 diagnostic。
@@ -113,4 +115,4 @@ AstraRPG 的完整 contract 见 [AstraRPG Contract](rpg-trpg.md)。项目通过 
 
 缺 explicit binding、provider fingerprint 不匹配、package section 不完整、save section 不能迁移、effect 不可序列化、replay 依赖 live provider 或 report 泄露 payload，都必须 blocking。
 
-`runtime_provider.native_vn` 不能只验证 descriptor。Release validator 必须从 `vn.compiled_story` 解码 package payload，执行 open、最短 step、save、restore、state hash 对比和 shutdown，并把 behavior state/event/presentation hash 与 save section count 写入 evidence。FFI lifecycle 由独立测试覆盖 create/destroy、package section open、step、save payload hash、restore 和活动 session 销毁阻断。
+`runtime_provider.native_vn` 不能只验证 descriptor。Release validator 必须从 `vn.compiled_story` 解码 package payload，执行 open、最短 step、save、restore、state hash 对比和 shutdown，并把 behavior state/event/presentation hash 与 save section count 写入 evidence。FFI lifecycle 由独立测试覆盖 create/destroy、package section open、step、save payload hash、restore 和活动 session 销毁阻断；host lifecycle 测试还必须覆盖 create rollback、duplicate session、step gap、panic、timeout drain、malformed section 和 poisoned cleanup。

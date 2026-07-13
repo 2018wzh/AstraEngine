@@ -53,6 +53,7 @@ pub use astra_vn_save::*;
 
 #[derive(Default)]
 pub struct NativeVnRuntimeProvider {
+    instance_id: Option<astra_plugin_abi::ProviderInstanceId>,
     sessions: BTreeMap<String, NativeVnSession>,
 }
 
@@ -70,6 +71,45 @@ fn output_schema(
 }
 
 impl ProductRuntimeProvider for NativeVnRuntimeProvider {
+    fn create_instance(
+        &mut self,
+        instance_id: astra_plugin_abi::ProviderInstanceId,
+    ) -> Result<RuntimeProviderInstanceReport, String> {
+        if self.instance_id.is_some() {
+            return Err(
+                "ASTRA_NATIVE_VN_INSTANCE_DUPLICATE: provider instance already created".into(),
+            );
+        }
+        self.instance_id = Some(instance_id.clone());
+        Ok(RuntimeProviderInstanceReport {
+            instance_id,
+            status: "created".into(),
+            diagnostics: vec![],
+        })
+    }
+
+    fn destroy_instance(
+        &mut self,
+        instance_id: astra_plugin_abi::ProviderInstanceId,
+    ) -> Result<RuntimeProviderInstanceReport, String> {
+        if !self.sessions.is_empty() {
+            return Err(
+                "ASTRA_NATIVE_VN_INSTANCE_ACTIVE_SESSIONS: provider has active sessions".into(),
+            );
+        }
+        if self.instance_id.as_ref() != Some(&instance_id) {
+            return Err(
+                "ASTRA_NATIVE_VN_INSTANCE_MISMATCH: provider instance id does not match".into(),
+            );
+        }
+        self.instance_id = None;
+        Ok(RuntimeProviderInstanceReport {
+            instance_id,
+            status: "destroyed".into(),
+            diagnostics: vec![],
+        })
+    }
+
     fn prepare(&mut self, request: RuntimePrepareRequest) -> Result<RuntimePrepareReport, String> {
         Ok(NativeVnRuntimeProvider::prepare(self, request))
     }

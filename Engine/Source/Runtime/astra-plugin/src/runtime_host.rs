@@ -20,7 +20,7 @@ use astra_plugin_abi::{
     RuntimeOpenRequest, RuntimeOutputDomain, RuntimeOutputEnvelope, RuntimePrepareReport,
     RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderInstanceReport,
     RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
-    RuntimeShutdownReport, RuntimeStepInput, RuntimeStepOutput,
+    RuntimeSectionPayload, RuntimeShutdownReport, RuntimeStepInput, RuntimeStepOutput,
 };
 #[cfg(feature = "dynamic-abi")]
 use serde::{de::DeserializeOwned, Serialize};
@@ -29,24 +29,12 @@ pub trait ProductRuntimeProvider: Send {
     fn create_instance(
         &mut self,
         instance_id: ProviderInstanceId,
-    ) -> Result<RuntimeProviderInstanceReport, String> {
-        Ok(RuntimeProviderInstanceReport {
-            instance_id,
-            status: "created".to_string(),
-            diagnostics: Vec::new(),
-        })
-    }
+    ) -> Result<RuntimeProviderInstanceReport, String>;
 
     fn destroy_instance(
         &mut self,
         instance_id: ProviderInstanceId,
-    ) -> Result<RuntimeProviderInstanceReport, String> {
-        Ok(RuntimeProviderInstanceReport {
-            instance_id,
-            status: "destroyed".to_string(),
-            diagnostics: Vec::new(),
-        })
-    }
+    ) -> Result<RuntimeProviderInstanceReport, String>;
 
     fn prepare(&mut self, request: RuntimePrepareRequest) -> Result<RuntimePrepareReport, String>;
     fn probe(&mut self, request: RuntimeProbeRequest) -> Result<RuntimeProbeReport, String>;
@@ -168,6 +156,55 @@ impl RuntimeHostSchemaRegistry {
         }
         Ok(())
     }
+
+    fn validate_sections(
+        &self,
+        sections: &[RuntimeSectionPayload],
+    ) -> Result<(), RuntimeHostError> {
+        if sections.len() > self.max_outputs {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_SECTION_COUNT",
+                "runtime save section count exceeds the configured bound",
+            ));
+        }
+        let mut ids = BTreeSet::new();
+        let mut bytes = 0usize;
+        for section in sections {
+            if !is_safe_runtime_symbol(&section.section_id)
+                || !is_safe_runtime_symbol(&section.schema)
+            {
+                return Err(RuntimeHostError::new(
+                    "ASTRA_RUNTIME_HOST_SECTION_DESCRIPTOR",
+                    "runtime save section id and schema must be non-empty safe symbols",
+                ));
+            }
+            if !ids.insert(section.section_id.as_str()) {
+                return Err(RuntimeHostError::new(
+                    "ASTRA_RUNTIME_HOST_SECTION_DUPLICATE",
+                    "runtime save section ids must be unique",
+                ));
+            }
+            if !section.validate_hash() {
+                return Err(RuntimeHostError::new(
+                    "ASTRA_RUNTIME_HOST_SECTION_HASH",
+                    "runtime save section hash does not match its bytes",
+                ));
+            }
+            bytes = bytes.checked_add(section.bytes.len()).ok_or_else(|| {
+                RuntimeHostError::new(
+                    "ASTRA_RUNTIME_HOST_SECTION_BYTES",
+                    "runtime save section byte count overflowed",
+                )
+            })?;
+        }
+        if bytes > self.max_output_bytes {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_SECTION_BYTES",
+                "runtime save section bytes exceed the configured bound",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,6 +212,7 @@ enum HostState {
     Created,
     Open,
     Shutdown,
+    Poisoned,
     Destroyed,
 }
 
@@ -214,9 +252,42 @@ impl ProductRuntimeHost {
         schemas: RuntimeHostSchemaRegistry,
     ) -> Result<Self, RuntimeHostError> {
         let instance_id = ProviderInstanceId(instance_id.into());
-        provider
-            .create_instance(instance_id.clone())
-            .map_err(|message| RuntimeHostError::new("ASTRA_RUNTIME_HOST_CREATE", message))?;
+        if instance_id.0.trim().is_empty() {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_INSTANCE_ID",
+                "runtime provider instance id must not be empty",
+            ));
+        }
+        let report = match call_provider("ASTRA_RUNTIME_HOST_CREATE", "create", || {
+            provider.create_instance(instance_id.clone())
+        }) {
+            Ok(report) => report,
+            Err(create_error) => {
+                let rollback =
+                    call_provider("ASTRA_RUNTIME_HOST_CREATE_ROLLBACK", "destroy", || {
+                        provider.destroy_instance(instance_id.clone())
+                    });
+                return Err(match rollback {
+                    Ok(_) => create_error,
+                    Err(rollback_error) => RuntimeHostError::new(
+                        "ASTRA_RUNTIME_HOST_CREATE_ROLLBACK",
+                        format!("{create_error}; rollback failed: {rollback_error}"),
+                    ),
+                });
+            }
+        };
+        if let Err(report_error) = validate_instance_report(&report, &instance_id, "created") {
+            let rollback = call_provider("ASTRA_RUNTIME_HOST_CREATE_ROLLBACK", "destroy", || {
+                provider.destroy_instance(instance_id.clone())
+            });
+            return Err(match rollback {
+                Ok(_) => report_error,
+                Err(rollback_error) => RuntimeHostError::new(
+                    "ASTRA_RUNTIME_HOST_CREATE_ROLLBACK",
+                    format!("{report_error}; rollback failed: {rollback_error}"),
+                ),
+            });
+        }
         Ok(Self {
             instance_id,
             provider,
@@ -231,9 +302,12 @@ impl ProductRuntimeHost {
         request: RuntimePrepareRequest,
     ) -> Result<RuntimePrepareReport, RuntimeHostError> {
         self.require_state(HostState::Created, "prepare")?;
-        self.provider
-            .prepare(request)
-            .map_err(|message| RuntimeHostError::new("ASTRA_RUNTIME_HOST_PREPARE", message))
+        call_provider("ASTRA_RUNTIME_HOST_PREPARE", "prepare", || {
+            self.provider.prepare(request)
+        })
+        .inspect_err(|_| {
+            self.state = HostState::Poisoned;
+        })
     }
 
     pub fn probe(
@@ -241,35 +315,54 @@ impl ProductRuntimeHost {
         request: RuntimeProbeRequest,
     ) -> Result<RuntimeProbeReport, RuntimeHostError> {
         self.require_state(HostState::Created, "probe")?;
-        self.provider
-            .probe(request)
-            .map_err(|message| RuntimeHostError::new("ASTRA_RUNTIME_HOST_PROBE", message))
+        call_provider("ASTRA_RUNTIME_HOST_PROBE", "probe", || {
+            self.provider.probe(request)
+        })
+        .inspect_err(|_| {
+            self.state = HostState::Poisoned;
+        })
     }
 
     pub fn open(
         &mut self,
         request: RuntimeOpenRequest,
     ) -> Result<RuntimeOpenReport, RuntimeHostError> {
-        if self.state == HostState::Destroyed {
+        if matches!(self.state, HostState::Destroyed | HostState::Poisoned) {
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_LIFECYCLE",
-                "open is invalid after provider destruction",
+                "open is invalid after provider destruction or poisoning",
             ));
         }
-        let report = self
-            .provider
-            .open(request)
-            .map_err(|message| RuntimeHostError::new("ASTRA_RUNTIME_HOST_OPEN", message))?;
-        if self
-            .sessions
-            .insert(report.session_id.0.clone(), SessionState::default())
-            .is_some()
-        {
+        let report = call_provider("ASTRA_RUNTIME_HOST_OPEN", "open", || {
+            self.provider.open(request)
+        })
+        .inspect_err(|_| {
+            self.state = HostState::Poisoned;
+        })?;
+        if report.session_id.0.trim().is_empty() {
+            self.state = HostState::Poisoned;
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_SESSION_ID",
+                "provider returned an empty session id",
+            ));
+        }
+        if self.sessions.contains_key(&report.session_id.0) {
+            let rollback = call_provider("ASTRA_RUNTIME_HOST_OPEN_ROLLBACK", "shutdown", || {
+                self.provider.shutdown(report.session_id.clone())
+            });
+            self.state = HostState::Poisoned;
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_SESSION_DUPLICATE",
-                "provider returned an already-open session id",
+                match rollback {
+                    Ok(_) => "provider returned an already-open session id".to_string(),
+                    Err(error) => format!(
+                        "provider returned an already-open session id; rollback failed: {error}"
+                    ),
+                },
             ));
         }
+        self.sessions
+            .insert(report.session_id.0.clone(), SessionState::default());
         self.state = HostState::Open;
         Ok(report)
     }
@@ -277,24 +370,26 @@ impl ProductRuntimeHost {
     pub fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, RuntimeHostError> {
         self.require_session(&input.session_id, "step")?;
         let session = self.require_session_mut(&input.session_id, "step")?;
-        if session
+        let expected_step = session
             .last_fixed_step
-            .is_some_and(|last_step| input.fixed_step <= last_step)
-        {
+            .map_or(1, |step| step.saturating_add(1));
+        if input.fixed_step != expected_step {
             session.poisoned = true;
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_STEP_ORDER",
-                "runtime fixed steps must be strictly increasing",
+                format!("runtime fixed step must be {expected_step}"),
             ));
         }
         let expected_session = input.session_id.clone();
         let fixed_step = input.fixed_step;
-        let output = self.provider.step(input);
+        let output = call_provider("ASTRA_RUNTIME_HOST_STEP", "step", || {
+            self.provider.step(input)
+        });
         let output = match output {
             Ok(output) => output,
-            Err(message) => {
+            Err(error) => {
                 self.poison_session(&expected_session);
-                return Err(RuntimeHostError::new("ASTRA_RUNTIME_HOST_STEP", message));
+                return Err(error);
             }
         };
         if output.session_id != expected_session {
@@ -320,9 +415,25 @@ impl ProductRuntimeHost {
         request: RuntimeSaveRequest,
     ) -> Result<RuntimeSaveSections, RuntimeHostError> {
         self.require_session(&request.session_id, "save")?;
-        self.provider
-            .save(request)
-            .map_err(|message| RuntimeHostError::new("ASTRA_RUNTIME_HOST_SAVE", message))
+        let session_id = request.session_id.clone();
+        let report = call_provider("ASTRA_RUNTIME_HOST_SAVE", "save", || {
+            self.provider.save(request)
+        })
+        .inspect_err(|_| {
+            self.poison_session(&session_id);
+        })?;
+        if report.session_id != session_id {
+            self.poison_session(&session_id);
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_SAVE_SESSION",
+                "save report session does not match the requested session",
+            ));
+        }
+        if let Err(error) = self.schemas.validate_sections(&report.sections) {
+            self.poison_session(&session_id);
+            return Err(error);
+        }
+        Ok(report)
     }
 
     pub fn restore(
@@ -330,20 +441,47 @@ impl ProductRuntimeHost {
         request: RuntimeRestoreRequest,
     ) -> Result<RuntimeRestoreReport, RuntimeHostError> {
         self.require_session(&request.session_id, "restore")?;
-        self.provider
-            .restore(request)
-            .map_err(|message| RuntimeHostError::new("ASTRA_RUNTIME_HOST_RESTORE", message))
+        let session_id = request.session_id.clone();
+        self.schemas.validate_sections(&request.sections)?;
+        let report = call_provider("ASTRA_RUNTIME_HOST_RESTORE", "restore", || {
+            self.provider.restore(request)
+        })
+        .inspect_err(|_| {
+            self.poison_session(&session_id);
+        })?;
+        if report.session_id != session_id {
+            self.poison_session(&session_id);
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_RESTORE_SESSION",
+                "restore report session does not match the requested session",
+            ));
+        }
+        Ok(report)
     }
 
     pub fn shutdown_session(
         &mut self,
         session_id: GameRuntimeSessionId,
     ) -> Result<RuntimeShutdownReport, RuntimeHostError> {
-        self.require_session(&session_id, "shutdown")?;
-        let report = self
-            .provider
-            .shutdown(session_id.clone())
-            .map_err(|message| RuntimeHostError::new("ASTRA_RUNTIME_HOST_SHUTDOWN", message))?;
+        if !self.sessions.contains_key(&session_id.0) {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_SESSION",
+                "shutdown session is not open in this provider instance",
+            ));
+        }
+        let report = call_provider("ASTRA_RUNTIME_HOST_SHUTDOWN", "shutdown", || {
+            self.provider.shutdown(session_id.clone())
+        })
+        .inspect_err(|_| {
+            self.poison_session(&session_id);
+        })?;
+        if report.session_id != session_id {
+            self.poison_session(&session_id);
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_SHUTDOWN_SESSION",
+                "shutdown report session does not match the requested session",
+            ));
+        }
         self.sessions.remove(&session_id.0);
         if self.sessions.is_empty() {
             self.state = HostState::Shutdown;
@@ -369,16 +507,53 @@ impl ProductRuntimeHost {
     }
 
     pub fn destroy(&mut self) -> Result<RuntimeProviderInstanceReport, RuntimeHostError> {
-        if !self.sessions.is_empty() || self.state == HostState::Destroyed {
+        if !self.sessions.is_empty()
+            || matches!(self.state, HostState::Destroyed | HostState::Poisoned)
+        {
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_LIFECYCLE",
                 "destroy requires a created or shutdown provider instance",
             ));
         }
-        let report = self
-            .provider
-            .destroy_instance(self.instance_id.clone())
-            .map_err(|message| RuntimeHostError::new("ASTRA_RUNTIME_HOST_DESTROY", message))?;
+        let report = call_provider("ASTRA_RUNTIME_HOST_DESTROY", "destroy", || {
+            self.provider.destroy_instance(self.instance_id.clone())
+        })
+        .inspect_err(|_| {
+            self.state = HostState::Poisoned;
+        })?;
+        if let Err(error) = validate_instance_report(&report, &self.instance_id, "destroyed") {
+            self.state = HostState::Poisoned;
+            return Err(error);
+        }
+        self.state = HostState::Destroyed;
+        Ok(report)
+    }
+
+    pub fn cleanup_after_failure(
+        &mut self,
+    ) -> Result<RuntimeProviderInstanceReport, RuntimeHostError> {
+        let session_ids = self
+            .sessions
+            .keys()
+            .cloned()
+            .map(GameRuntimeSessionId)
+            .collect::<Vec<_>>();
+        for session_id in session_ids {
+            let report = call_provider("ASTRA_RUNTIME_HOST_CLEANUP_SHUTDOWN", "shutdown", || {
+                self.provider.shutdown(session_id.clone())
+            })?;
+            if report.session_id != session_id {
+                return Err(RuntimeHostError::new(
+                    "ASTRA_RUNTIME_HOST_CLEANUP_SESSION",
+                    "cleanup shutdown report session does not match the requested session",
+                ));
+            }
+            self.sessions.remove(&session_id.0);
+        }
+        let report = call_provider("ASTRA_RUNTIME_HOST_CLEANUP_DESTROY", "destroy", || {
+            self.provider.destroy_instance(self.instance_id.clone())
+        })?;
+        validate_instance_report(&report, &self.instance_id, "destroyed")?;
         self.state = HostState::Destroyed;
         Ok(report)
     }
@@ -420,6 +595,12 @@ impl ProductRuntimeHost {
         session_id: &GameRuntimeSessionId,
         operation: &str,
     ) -> Result<(), RuntimeHostError> {
+        if matches!(self.state, HostState::Poisoned | HostState::Destroyed) {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_LIFECYCLE",
+                format!("{operation} is blocked in host state {:?}", self.state),
+            ));
+        }
         let Some(session) = self.sessions.get(&session_id.0) else {
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_SESSION",
@@ -532,7 +713,7 @@ impl AsyncProductRuntimeHost {
             ));
         }
         let inner = Arc::clone(&self.inner);
-        let worker = tokio::task::spawn_blocking(move || {
+        let mut worker = tokio::task::spawn_blocking(move || {
             let mut host = inner.lock().map_err(|_| {
                 RuntimeHostError::new(
                     "ASTRA_RUNTIME_HOST_WORKER",
@@ -541,7 +722,7 @@ impl AsyncProductRuntimeHost {
             })?;
             call(&mut host)
         });
-        match tokio::time::timeout(self.timeout, worker).await {
+        match tokio::time::timeout(self.timeout, &mut worker).await {
             Ok(Ok(result)) => result,
             Ok(Err(join_error)) => {
                 self.instance_poisoned.store(true, Ordering::Release);
@@ -552,6 +733,7 @@ impl AsyncProductRuntimeHost {
             }
             Err(_) => {
                 self.instance_poisoned.store(true, Ordering::Release);
+                let _ = worker.await;
                 Err(RuntimeHostError::new(
                     "ASTRA_RUNTIME_HOST_TIMEOUT",
                     format!("runtime provider {operation} timed out"),
@@ -614,6 +796,30 @@ impl AsyncProductRuntimeHost {
 
     pub async fn destroy(&self) -> Result<RuntimeProviderInstanceReport, RuntimeHostError> {
         self.invoke("destroy", ProductRuntimeHost::destroy).await
+    }
+
+    pub async fn cleanup_after_failure(
+        &self,
+    ) -> Result<RuntimeProviderInstanceReport, RuntimeHostError> {
+        let inner = Arc::clone(&self.inner);
+        let report = tokio::task::spawn_blocking(move || {
+            let mut host = inner.lock().map_err(|_| {
+                RuntimeHostError::new(
+                    "ASTRA_RUNTIME_HOST_WORKER",
+                    "runtime provider worker mutex is poisoned",
+                )
+            })?;
+            host.cleanup_after_failure()
+        })
+        .await
+        .map_err(|error| {
+            RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_WORKER",
+                format!("runtime provider cleanup worker failed: {error}"),
+            )
+        })??;
+        self.instance_poisoned.store(false, Ordering::Release);
+        Ok(report)
     }
 }
 
@@ -733,6 +939,49 @@ fn decode_ffi_result<T: DeserializeOwned>(
             .join("; "));
     }
     serde_json::from_slice(result.payload.as_slice()).map_err(|err| err.to_string())
+}
+
+fn call_provider<T>(
+    code: &'static str,
+    operation: &'static str,
+    call: impl FnOnce() -> Result<T, String>,
+) -> Result<T, RuntimeHostError> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(message)) => Err(RuntimeHostError::new(code, message)),
+        Err(_) => Err(RuntimeHostError::new(
+            "ASTRA_RUNTIME_HOST_PROVIDER_PANIC",
+            format!("runtime provider panicked during {operation}"),
+        )),
+    }
+}
+
+fn validate_instance_report(
+    report: &RuntimeProviderInstanceReport,
+    expected_id: &ProviderInstanceId,
+    expected_status: &str,
+) -> Result<(), RuntimeHostError> {
+    if report.instance_id != *expected_id {
+        return Err(RuntimeHostError::new(
+            "ASTRA_RUNTIME_HOST_INSTANCE_REPORT_ID",
+            "provider instance report id does not match the host instance",
+        ));
+    }
+    if report.status != expected_status {
+        return Err(RuntimeHostError::new(
+            "ASTRA_RUNTIME_HOST_INSTANCE_REPORT_STATUS",
+            format!("provider instance report status must be {expected_status}"),
+        ));
+    }
+    Ok(())
+}
+
+fn is_safe_runtime_symbol(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

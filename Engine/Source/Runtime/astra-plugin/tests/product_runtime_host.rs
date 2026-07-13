@@ -1,5 +1,11 @@
-use astra_core::SchemaVersion;
-use std::time::Duration;
+use astra_core::{Hash256, SchemaVersion};
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use astra_plugin::{
     AsyncProductRuntimeHost, ProductRuntimeHost, ProductRuntimeProvider, RuntimeHostSchemaRegistry,
@@ -11,7 +17,85 @@ struct Provider {
     opened: bool,
 }
 
+struct CreateFailureProvider {
+    malformed_report: bool,
+    destroy_calls: Arc<AtomicUsize>,
+}
+
+impl ProductRuntimeProvider for CreateFailureProvider {
+    fn create_instance(
+        &mut self,
+        instance_id: ProviderInstanceId,
+    ) -> Result<RuntimeProviderInstanceReport, String> {
+        if self.malformed_report {
+            Ok(RuntimeProviderInstanceReport {
+                instance_id,
+                status: "unknown".into(),
+                diagnostics: vec![],
+            })
+        } else {
+            Err("partial create failure".into())
+        }
+    }
+
+    fn destroy_instance(
+        &mut self,
+        instance_id: ProviderInstanceId,
+    ) -> Result<RuntimeProviderInstanceReport, String> {
+        self.destroy_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(RuntimeProviderInstanceReport {
+            instance_id,
+            status: "destroyed".into(),
+            diagnostics: vec![],
+        })
+    }
+
+    fn prepare(&mut self, _: RuntimePrepareRequest) -> Result<RuntimePrepareReport, String> {
+        Err("unreachable".into())
+    }
+    fn probe(&mut self, _: RuntimeProbeRequest) -> Result<RuntimeProbeReport, String> {
+        Err("unreachable".into())
+    }
+    fn open(&mut self, _: RuntimeOpenRequest) -> Result<RuntimeOpenReport, String> {
+        Err("unreachable".into())
+    }
+    fn step(&mut self, _: RuntimeStepInput) -> Result<RuntimeStepOutput, String> {
+        Err("unreachable".into())
+    }
+    fn save(&mut self, _: RuntimeSaveRequest) -> Result<RuntimeSaveSections, String> {
+        Err("unreachable".into())
+    }
+    fn restore(&mut self, _: RuntimeRestoreRequest) -> Result<RuntimeRestoreReport, String> {
+        Err("unreachable".into())
+    }
+    fn shutdown(&mut self, _: GameRuntimeSessionId) -> Result<RuntimeShutdownReport, String> {
+        Err("unreachable".into())
+    }
+}
+
 impl ProductRuntimeProvider for Provider {
+    fn create_instance(
+        &mut self,
+        instance_id: ProviderInstanceId,
+    ) -> Result<RuntimeProviderInstanceReport, String> {
+        Ok(RuntimeProviderInstanceReport {
+            instance_id,
+            status: "created".into(),
+            diagnostics: vec![],
+        })
+    }
+
+    fn destroy_instance(
+        &mut self,
+        instance_id: ProviderInstanceId,
+    ) -> Result<RuntimeProviderInstanceReport, String> {
+        Ok(RuntimeProviderInstanceReport {
+            instance_id,
+            status: "destroyed".into(),
+            diagnostics: vec![],
+        })
+    }
+
     fn prepare(&mut self, _: RuntimePrepareRequest) -> Result<RuntimePrepareReport, String> {
         Ok(RuntimePrepareReport {
             runtime_id: "test".into(),
@@ -42,6 +126,9 @@ impl ProductRuntimeProvider for Provider {
 
     fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, String> {
         assert!(self.opened);
+        if input.action == "panic" {
+            panic!("provider panic fixture");
+        }
         if input.action == "slow" {
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -62,7 +149,18 @@ impl ProductRuntimeProvider for Provider {
     fn save(&mut self, request: RuntimeSaveRequest) -> Result<RuntimeSaveSections, String> {
         Ok(RuntimeSaveSections {
             session_id: request.session_id,
-            sections: vec![],
+            sections: if request.slot == "bad" {
+                vec![RuntimeSectionPayload {
+                    section_id: "state".into(),
+                    schema: "test.state.v1".into(),
+                    version: SchemaVersion::new(1, 0, 0),
+                    codec: RuntimeSectionCodec::Postcard,
+                    hash: Hash256::from_sha256(b"different"),
+                    bytes: vec![],
+                }]
+            } else {
+                vec![]
+            },
             diagnostics: vec![],
         })
     }
@@ -145,6 +243,62 @@ fn in_process_host_owns_provider_lifecycle_and_validates_step_envelopes() {
 }
 
 #[test]
+fn host_rolls_back_failed_and_malformed_instance_creation() {
+    for malformed_report in [false, true] {
+        let destroy_calls = Arc::new(AtomicUsize::new(0));
+        let error = ProductRuntimeHost::in_process(
+            "instance",
+            CreateFailureProvider {
+                malformed_report,
+                destroy_calls: Arc::clone(&destroy_calls),
+            },
+            RuntimeHostSchemaRegistry::new(),
+        )
+        .err()
+        .expect("create must fail");
+        assert_eq!(destroy_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            error.code(),
+            if malformed_report {
+                "ASTRA_RUNTIME_HOST_INSTANCE_REPORT_STATUS"
+            } else {
+                "ASTRA_RUNTIME_HOST_CREATE"
+            }
+        );
+    }
+}
+
+#[test]
+fn duplicate_open_rolls_back_and_blocks_use_until_cleanup() {
+    let schemas =
+        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+    let mut host =
+        ProductRuntimeHost::in_process("instance", Provider::default(), schemas).unwrap();
+    let request = RuntimeOpenRequest {
+        target_id: "test".into(),
+        profile: "release".into(),
+        locale: "und".into(),
+        seed: 1,
+        package_hash: "sha256:test".into(),
+        sections: vec![],
+    };
+    let first = host.open(request.clone()).unwrap();
+    let duplicate = host.open(request).unwrap_err();
+    assert_eq!(duplicate.code(), "ASTRA_RUNTIME_HOST_SESSION_DUPLICATE");
+    let blocked = host
+        .step(RuntimeStepInput {
+            session_id: first.session_id.clone(),
+            fixed_step: 1,
+            action: "advance".into(),
+            payload: serde_json::json!({}),
+        })
+        .unwrap_err();
+    assert_eq!(blocked.code(), "ASTRA_RUNTIME_HOST_LIFECYCLE");
+    host.shutdown_session(first.session_id).unwrap();
+    host.destroy().unwrap();
+}
+
+#[test]
 fn host_blocks_unknown_step_schema() {
     let mut host = ProductRuntimeHost::in_process(
         "instance",
@@ -202,6 +356,61 @@ fn host_blocks_output_count_and_payload_bounds() {
 }
 
 #[test]
+fn host_validates_save_and_restore_sections_before_accepting_state() {
+    let schemas =
+        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+    let mut host =
+        ProductRuntimeHost::in_process("instance", Provider::default(), schemas).unwrap();
+    let open = host
+        .open(RuntimeOpenRequest {
+            target_id: "test".into(),
+            profile: "release".into(),
+            locale: "und".into(),
+            seed: 1,
+            package_hash: "sha256:test".into(),
+            sections: vec![],
+        })
+        .unwrap();
+    let invalid_restore = RuntimeSectionPayload {
+        section_id: "state".into(),
+        schema: "test.state.v1".into(),
+        version: SchemaVersion::new(1, 0, 0),
+        codec: RuntimeSectionCodec::Postcard,
+        hash: Hash256::from_sha256(b"different"),
+        bytes: vec![],
+    };
+    assert_eq!(
+        host.restore(RuntimeRestoreRequest {
+            session_id: open.session_id.clone(),
+            sections: vec![invalid_restore],
+        })
+        .unwrap_err()
+        .code(),
+        "ASTRA_RUNTIME_HOST_SECTION_HASH"
+    );
+    let save_error = host
+        .save(RuntimeSaveRequest {
+            session_id: open.session_id.clone(),
+            slot: "bad".into(),
+        })
+        .unwrap_err();
+    assert_eq!(save_error.code(), "ASTRA_RUNTIME_HOST_SECTION_HASH");
+    assert_eq!(
+        host.step(RuntimeStepInput {
+            session_id: open.session_id.clone(),
+            fixed_step: 1,
+            action: "advance".into(),
+            payload: serde_json::json!({}),
+        })
+        .unwrap_err()
+        .code(),
+        "ASTRA_RUNTIME_HOST_SESSION_POISONED"
+    );
+    host.shutdown_session(open.session_id).unwrap();
+    host.destroy().unwrap();
+}
+
+#[test]
 fn host_rejects_non_monotonic_fixed_steps_and_poisons_the_session() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
@@ -234,6 +443,70 @@ fn host_rejects_non_monotonic_fixed_steps_and_poisons_the_session() {
         })
         .unwrap_err();
     assert_eq!(poisoned.code(), "ASTRA_RUNTIME_HOST_SESSION_POISONED");
+}
+
+#[test]
+fn host_requires_first_step_one_and_catches_provider_panics() {
+    let schemas =
+        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+    let mut host =
+        ProductRuntimeHost::in_process("instance", Provider::default(), schemas).unwrap();
+    let open = host
+        .open(RuntimeOpenRequest {
+            target_id: "test".into(),
+            profile: "release".into(),
+            locale: "und".into(),
+            seed: 1,
+            package_hash: "sha256:test".into(),
+            sections: vec![],
+        })
+        .unwrap();
+    let error = host
+        .step(RuntimeStepInput {
+            session_id: open.session_id.clone(),
+            fixed_step: 2,
+            action: "advance".into(),
+            payload: serde_json::json!({}),
+        })
+        .unwrap_err();
+    assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_STEP_ORDER");
+    host.shutdown_session(open.session_id).unwrap();
+    host.destroy().unwrap();
+
+    let schemas =
+        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+    let mut host =
+        ProductRuntimeHost::in_process("instance-panic", Provider::default(), schemas).unwrap();
+    let open = host
+        .open(RuntimeOpenRequest {
+            target_id: "test".into(),
+            profile: "release".into(),
+            locale: "und".into(),
+            seed: 1,
+            package_hash: "sha256:test".into(),
+            sections: vec![],
+        })
+        .unwrap();
+    let error = host
+        .step(RuntimeStepInput {
+            session_id: open.session_id.clone(),
+            fixed_step: 1,
+            action: "panic".into(),
+            payload: serde_json::json!({}),
+        })
+        .unwrap_err();
+    assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_PROVIDER_PANIC");
+    assert_eq!(
+        host.save(RuntimeSaveRequest {
+            session_id: open.session_id.clone(),
+            slot: "slot".into(),
+        })
+        .unwrap_err()
+        .code(),
+        "ASTRA_RUNTIME_HOST_SESSION_POISONED"
+    );
+    host.shutdown_session(open.session_id).unwrap();
+    host.destroy().unwrap();
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -314,4 +587,5 @@ async fn async_host_timeout_poisons_the_provider_instance() {
         .await
         .unwrap_err();
     assert_eq!(poisoned.code(), "ASTRA_RUNTIME_HOST_INSTANCE_POISONED");
+    host.cleanup_after_failure().await.unwrap();
 }
