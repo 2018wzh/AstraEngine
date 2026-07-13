@@ -1,12 +1,13 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use astra_asset::{AssetCatalog, VfsManifest, VfsSourceRef};
 use astra_core::{Hash256, SchemaVersion};
-use astra_media_core::{
-    BlendMode, DrawCommand, GlyphBitmap, GlyphBitmapFormat, HeadlessRenderer,
-    HeadlessRendererProvider, MediaError, RectI, RenderTargetFormat, Renderer2DProvider,
-    RendererCreateRequest, TextureFrame,
+use astra_media::{
+    CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, TextDirection,
+    TextLayoutConfig, TextLayoutProvider, TextLayoutRequest, TextRenderResourceOwner, TextRun,
+    WrapPolicy,
 };
+use astra_media_core::{BlendMode, MediaError, RectI, SceneCommand, TextureFrame};
 use astra_player_core::{
     PlayerAction, PlayerAudioLifecyclePlan, PlayerDecodeKind, PlayerDecodeLifecyclePlan,
     PlayerDecodedAudio, PlayerHostCommand, PlayerHostCommandBatch, PlayerHostCommandError,
@@ -19,9 +20,13 @@ use astra_plugin_abi::{
     RuntimeStepInput,
 };
 use astra_vn_core::{
-    CompiledStory, PresentationCommand, VnPlayerCommand, VnRunConfig, VnRuntimeState,
+    CompiledCommand, CompiledStory, PresentationCommand, SystemPageKind, VnPlayerCommand,
+    VnRunConfig, VnRuntimeState,
 };
-use astra_vn_package::decode_compiled_story;
+use astra_vn_package::{
+    decode_compiled_story, load_localization as load_package_localization,
+    load_player_locale_config, VnLocalizationTable,
+};
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 use astra_vn_system::{SystemUiAction, SystemUiModel};
 
@@ -29,21 +34,27 @@ pub struct NativeVnHostCommandSource {
     host: ProductRuntimeHost,
     session_id: GameRuntimeSessionId,
     runtime_state: Option<VnRuntimeState>,
-    renderer: HeadlessRenderer,
+    text_provider: CosmicTextLayoutProvider,
+    font_families: Vec<String>,
+    text_resources: TextRenderResourceOwner,
+    localization: VnLocalizationTable,
     surface: PlayerHostResourceId,
     command_sequence: u64,
     fixed_step: u64,
     width: u32,
     height: u32,
     textures: BTreeMap<String, TextureFrame>,
-    scene_draw: Vec<DrawCommand>,
-    last_draw: Vec<DrawCommand>,
+    live_texture_ids: BTreeSet<String>,
+    live_layout_ids: BTreeSet<String>,
+    scene_draw: Vec<SceneCommand>,
+    last_draw: Vec<SceneCommand>,
     last_step_evidence: Option<NativeVnStepEvidence>,
     terminal_routes: std::collections::BTreeSet<String>,
     pending_timeline: Vec<PlayerTimelineTask>,
     media_assets: BTreeMap<String, PackagedMediaAsset>,
     pending_audio: Vec<NativeVnAudioOutput>,
     next_media_resource_id: u64,
+    shutdown_started: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -130,25 +141,15 @@ struct VnRuntimeStateSaveEnvelope {
     state: VnRuntimeState,
 }
 
-impl NativeVnHostCommandSource {
-    pub fn new(
-        compiled: CompiledStory,
-        config: VnRunConfig,
-        width: u32,
-        height: u32,
-        surface: PlayerHostResourceId,
-    ) -> Result<Self, NativeVnHostError> {
-        Self::open(
-            compiled,
-            config,
-            width,
-            height,
-            surface,
-            BTreeMap::new(),
-            BTreeMap::new(),
-        )
-    }
+struct ProductPresentationBinding {
+    textures: BTreeMap<String, TextureFrame>,
+    media_assets: BTreeMap<String, PackagedMediaAsset>,
+    localization: VnLocalizationTable,
+    text_provider: CosmicTextLayoutProvider,
+    font_families: Vec<String>,
+}
 
+impl NativeVnHostCommandSource {
     pub fn from_package(
         package: &astra_package::PackageReader,
         config: VnRunConfig,
@@ -161,14 +162,51 @@ impl NativeVnHostCommandSource {
             .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
         let textures = load_package_textures(package)?;
         let media_assets = load_package_media_assets(package)?;
+        validate_story_presentation(&compiled, &textures)?;
+        let locale_config = load_player_locale_config(package)
+            .map_err(|error| NativeVnHostError::Localization(error.to_string()))?;
+        if locale_config
+            .available_locales
+            .binary_search(&config.locale)
+            .is_err()
+        {
+            return Err(NativeVnHostError::Localization(format!(
+                "ASTRA_PLAYER_LOCALE_UNDECLARED: locale {} is not declared by player.locale_config",
+                config.locale
+            )));
+        }
+        let localization = load_package_localization(package, &config.locale, 16 * 1024 * 1024)
+            .map_err(|error| NativeVnHostError::Localization(error.to_string()))?;
+        let text_provider = CosmicTextLayoutProvider::from_package(
+            package,
+            "media.font_manifest",
+            FontBindingContext {
+                target: "nativevn-game".to_string(),
+                profile: config.profile.clone(),
+                default_locale: config.locale.clone(),
+            },
+            TextLayoutConfig::production_defaults(),
+        )?;
+        let font_families = text_provider
+            .identity()?
+            .fonts
+            .into_iter()
+            .map(|font| font.family)
+            .collect::<Vec<_>>();
+        validate_story_text(&compiled, &localization, &text_provider, &font_families)?;
         Self::open(
             compiled,
             config,
             width,
             height,
             surface,
-            textures,
-            media_assets,
+            ProductPresentationBinding {
+                textures,
+                media_assets,
+                localization,
+                text_provider,
+                font_families,
+            },
         )
     }
 
@@ -178,8 +216,7 @@ impl NativeVnHostCommandSource {
         width: u32,
         height: u32,
         surface: PlayerHostResourceId,
-        textures: BTreeMap<String, TextureFrame>,
-        media_assets: BTreeMap<String, PackagedMediaAsset>,
+        presentation: ProductPresentationBinding,
     ) -> Result<Self, NativeVnHostError> {
         if compiled.story_manifest.stories.is_empty() {
             return Err(NativeVnHostError::EmptyStory);
@@ -234,12 +271,6 @@ impl NativeVnHostCommandSource {
             package_hash,
             sections: vec![compiled_section],
         })?;
-        let renderer = HeadlessRendererProvider.create(RendererCreateRequest {
-            width,
-            height,
-            format: RenderTargetFormat::Rgba8Srgb,
-            profile: "player".to_string(),
-        })?;
         tracing::info!(
             event = "player.vn.runtime.open",
             width,
@@ -250,21 +281,27 @@ impl NativeVnHostCommandSource {
             host,
             session_id: open.session_id,
             runtime_state: None,
-            renderer,
+            text_provider: presentation.text_provider,
+            font_families: presentation.font_families,
+            text_resources: TextRenderResourceOwner::default(),
+            localization: presentation.localization,
             surface,
             command_sequence: 0,
             fixed_step: 0,
             width,
             height,
-            textures,
+            textures: presentation.textures,
+            live_texture_ids: BTreeSet::new(),
+            live_layout_ids: BTreeSet::new(),
             scene_draw: Vec::new(),
             last_draw: Vec::new(),
             last_step_evidence: None,
             terminal_routes,
             pending_timeline: Vec::new(),
-            media_assets,
+            media_assets: presentation.media_assets,
             pending_audio: Vec::new(),
             next_media_resource_id: 10_000,
+            shutdown_started: false,
         })
     }
 
@@ -585,8 +622,20 @@ impl NativeVnHostCommandSource {
         self.runtime_state = Some(envelope.payload.runtime_state);
         self.last_draw = draw_commands;
         self.last_step_evidence = None;
-        let draw = self.last_draw.clone();
-        self.present_draw(&draw, 0)
+        self.command_sequence = self
+            .command_sequence
+            .checked_add(1)
+            .ok_or(NativeVnHostError::SequenceOverflow)?;
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::PresentScene {
+                sequence: self.command_sequence,
+                surface: self.surface,
+                width: self.width,
+                height: self.height,
+                clear_rgba: [8, 10, 16, 255],
+                commands: self.last_draw.clone(),
+            },
+        ])?)
     }
 
     pub fn prepare_save_transaction(
@@ -735,7 +784,53 @@ impl NativeVnHostCommandSource {
         self.dispatch_action(action)
     }
 
+    pub fn release_resources(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        if self.shutdown_started {
+            return Err(NativeVnHostError::Input(
+                "ASTRA_PLAYER_SHUTDOWN_REPEATED: resource shutdown already started".to_string(),
+            ));
+        }
+        let mut commands = self.text_resources.shutdown();
+        commands.extend(self.live_texture_ids.iter().map(|resource_id| {
+            SceneCommand::ReleaseResource {
+                resource_id: resource_id.clone(),
+            }
+        }));
+        commands.push(SceneCommand::rect(
+            "vn.shutdown.clear",
+            0,
+            0,
+            self.width,
+            self.height,
+            [0, 0, 0, 255],
+        ));
+        self.live_texture_ids.clear();
+        self.live_layout_ids.clear();
+        self.scene_draw.clear();
+        self.shutdown_started = true;
+        self.command_sequence = self
+            .command_sequence
+            .checked_add(1)
+            .ok_or(NativeVnHostError::SequenceOverflow)?;
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::PresentScene {
+                sequence: self.command_sequence,
+                surface: self.surface,
+                width: self.width,
+                height: self.height,
+                clear_rgba: [0, 0, 0, 255],
+                commands,
+            },
+        ])?)
+    }
+
     pub fn shutdown(mut self) -> Result<(), NativeVnHostError> {
+        if !self.shutdown_started {
+            return Err(NativeVnHostError::Input(
+                "ASTRA_PLAYER_SHUTDOWN_ORDER: release_resources must execute before provider shutdown"
+                    .to_string(),
+            ));
+        }
         self.host.shutdown()?;
         self.host.destroy()?;
         Ok(())
@@ -755,6 +850,12 @@ impl NativeVnHostCommandSource {
         action: &str,
         payload: serde_json::Value,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        if self.shutdown_started {
+            return Err(NativeVnHostError::Input(
+                "ASTRA_PLAYER_SHUTDOWN_STATE: runtime input arrived after shutdown started"
+                    .to_string(),
+            ));
+        }
         self.fixed_step = self
             .fixed_step
             .checked_add(1)
@@ -946,12 +1047,49 @@ impl NativeVnHostCommandSource {
         &mut self,
         presentation: &[PresentationCommand],
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        let mut draw = vec![DrawCommand::clear([8, 10, 16, 255])];
+        let mut next_scene_draw = self.scene_draw.clone();
+        for command in presentation {
+            if let PresentationCommand::Stage {
+                command,
+                attributes,
+            } = command
+            {
+                apply_stage_command(
+                    &mut next_scene_draw,
+                    &self.textures,
+                    self.width,
+                    self.height,
+                    command,
+                    attributes,
+                )?;
+            }
+        }
+
+        let next_texture_ids = scene_texture_ids(&next_scene_draw);
+        let mut lifecycle = Vec::new();
+        for asset_id in self.live_texture_ids.difference(&next_texture_ids) {
+            lifecycle.push(SceneCommand::ReleaseResource {
+                resource_id: asset_id.clone(),
+            });
+        }
+        for asset_id in next_texture_ids.difference(&self.live_texture_ids) {
+            lifecycle.push(SceneCommand::UploadTexture {
+                resource_id: asset_id.clone(),
+                frame: self.texture(asset_id)?.clone(),
+            });
+        }
+
+        let mut next_text_resources = self.text_resources.clone();
+        let mut next_layout_ids = BTreeSet::new();
+        let mut text_lifecycle = Vec::new();
+        let mut text_draw = Vec::new();
+        let mut panel_draw = Vec::new();
+        let body_font_size = (self.height as f32 / 30.0).clamp(18.0, 34.0);
         for command in presentation {
             match command {
                 PresentationCommand::Dialogue { key, speaker, .. } => {
                     let panel_height = (self.height / 3).max(64);
-                    draw.push(DrawCommand::rect(
+                    panel_draw.push(SceneCommand::rect(
                         "vn.dialogue.panel",
                         24,
                         self.height.saturating_sub(panel_height + 24),
@@ -960,163 +1098,197 @@ impl NativeVnHostCommandSource {
                         [18, 22, 34, 236],
                     ));
                     if let Some(speaker) = speaker {
-                        push_bitmap_text(
-                            &mut draw,
-                            speaker,
+                        let localization_key = format!("speaker.{speaker}");
+                        append_text_layout(
+                            &mut next_text_resources,
+                            &self.text_provider,
+                            &self.font_families,
+                            &self.localization,
+                            &mut next_layout_ids,
+                            &mut text_lifecycle,
+                            &mut text_draw,
+                            "vn.dialogue.speaker",
+                            &localization_key,
                             42,
-                            self.height.saturating_sub(panel_height + 4),
+                            self.height.saturating_sub(panel_height + 12),
+                            self.width.saturating_sub(84),
+                            (body_font_size * 0.78).max(16.0),
+                            1,
                             [120, 210, 255, 255],
-                        );
+                        )?;
                     }
-                    push_bitmap_text(
-                        &mut draw,
+                    append_text_layout(
+                        &mut next_text_resources,
+                        &self.text_provider,
+                        &self.font_families,
+                        &self.localization,
+                        &mut next_layout_ids,
+                        &mut text_lifecycle,
+                        &mut text_draw,
+                        "vn.dialogue.body",
                         key,
                         42,
-                        self.height.saturating_sub(panel_height - 28),
+                        self.height.saturating_sub(panel_height.saturating_sub(42)),
+                        self.width.saturating_sub(84),
+                        body_font_size,
+                        4,
                         [245, 245, 248, 255],
-                    );
+                    )?;
                 }
                 PresentationCommand::Choice { key, options } => {
-                    push_bitmap_text(&mut draw, key, 42, 32, [245, 245, 248, 255]);
-                    for (index, option) in options.iter().enumerate() {
-                        let y = 64 + index as u32 * 38;
-                        draw.push(DrawCommand::rect(
+                    append_text_layout(
+                        &mut next_text_resources,
+                        &self.text_provider,
+                        &self.font_families,
+                        &self.localization,
+                        &mut next_layout_ids,
+                        &mut text_lifecycle,
+                        &mut text_draw,
+                        "vn.choice.prompt",
+                        key,
+                        42,
+                        32,
+                        self.width.saturating_sub(84),
+                        body_font_size,
+                        2,
+                        [245, 245, 248, 255],
+                    )?;
+                    let model = SystemUiModel::choice(self.width, self.height, options.len());
+                    for (index, (option, control)) in
+                        options.iter().zip(model.controls.iter()).enumerate()
+                    {
+                        panel_draw.push(SceneCommand::rect(
                             format!("vn.choice.{}", option.id),
-                            34,
-                            y,
-                            self.width.saturating_sub(68),
-                            30,
+                            control.bounds.x,
+                            control.bounds.y,
+                            control.bounds.width,
+                            control.bounds.height.saturating_sub(4),
                             [30, 48, 70, 245],
                         ));
-                        push_bitmap_text(&mut draw, &option.key, 46, y + 8, [255, 255, 255, 255]);
+                        append_text_layout(
+                            &mut next_text_resources,
+                            &self.text_provider,
+                            &self.font_families,
+                            &self.localization,
+                            &mut next_layout_ids,
+                            &mut text_lifecycle,
+                            &mut text_draw,
+                            &format!("vn.choice.option.{index}"),
+                            &option.key,
+                            control.bounds.x.saturating_add(12),
+                            control.bounds.y.saturating_add(10),
+                            control.bounds.width.saturating_sub(24),
+                            (body_font_size * 0.82).max(16.0),
+                            1,
+                            [255, 255, 255, 255],
+                        )?;
                     }
                 }
                 PresentationCommand::SystemPage { page } => {
-                    push_bitmap_text(
-                        &mut draw,
-                        &format!("SYSTEM {page:?}"),
+                    let model =
+                        SystemUiModel::system(*page, self.width, self.height).ok_or_else(|| {
+                            NativeVnHostError::Input(
+                                "ASTRA_PLAYER_SYSTEM_PAGE: unknown system page".into(),
+                            )
+                        })?;
+                    panel_draw.push(SceneCommand::rect(
+                        "vn.system.panel",
+                        0,
+                        0,
+                        self.width,
+                        self.height,
+                        [12, 18, 30, 252],
+                    ));
+                    append_text_layout(
+                        &mut next_text_resources,
+                        &self.text_provider,
+                        &self.font_families,
+                        &self.localization,
+                        &mut next_layout_ids,
+                        &mut text_lifecycle,
+                        &mut text_draw,
+                        "vn.system.title",
+                        system_page_localization_key(*page)?,
                         42,
-                        42,
+                        96,
+                        self.width.saturating_sub(84),
+                        (body_font_size * 1.25).min(42.0),
+                        1,
                         [220, 230, 255, 255],
-                    );
+                    )?;
+                    for control in model.controls {
+                        panel_draw.push(SceneCommand::rect(
+                            format!("vn.system.control.{}", control.id),
+                            control.bounds.x,
+                            control.bounds.y,
+                            control.bounds.width,
+                            control.bounds.height,
+                            [38, 58, 84, 255],
+                        ));
+                        append_text_layout(
+                            &mut next_text_resources,
+                            &self.text_provider,
+                            &self.font_families,
+                            &self.localization,
+                            &mut next_layout_ids,
+                            &mut text_lifecycle,
+                            &mut text_draw,
+                            &format!("vn.system.control_text.{}", control.id),
+                            "system.back",
+                            control.bounds.x.saturating_add(16),
+                            control.bounds.y.saturating_add(12),
+                            control.bounds.width.saturating_sub(32),
+                            (body_font_size * 0.72).max(16.0),
+                            1,
+                            [255; 4],
+                        )?;
+                    }
                 }
-                PresentationCommand::Stage {
-                    command,
-                    attributes,
-                } => {
-                    self.apply_stage_command(command, attributes)?;
-                }
+                PresentationCommand::Stage { .. } => {}
                 PresentationCommand::Marker { .. } => {}
             }
         }
-        draw.splice(1..1, self.scene_draw.clone());
-        self.last_draw = draw.clone();
-        self.present_draw(&draw, presentation.len())
-    }
-
-    fn present_draw(
-        &mut self,
-        draw: &[DrawCommand],
-        presentation_count: usize,
-    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        let frame = self.renderer.capture_frame(draw)?;
-        let sequence = self.next_command_sequence()?;
+        for layout_id in self.live_layout_ids.difference(&next_layout_ids) {
+            text_lifecycle.extend(next_text_resources.remove_layout(layout_id)?);
+        }
+        lifecycle.extend(text_lifecycle);
+        lifecycle.push(SceneCommand::rect(
+            "vn.frame.clear",
+            0,
+            0,
+            self.width,
+            self.height,
+            [8, 10, 16, 255],
+        ));
+        lifecycle.extend(next_scene_draw.iter().cloned());
+        lifecycle.extend(panel_draw);
+        lifecycle.extend(text_draw);
+        self.command_sequence = self
+            .command_sequence
+            .checked_add(1)
+            .ok_or(NativeVnHostError::SequenceOverflow)?;
         tracing::trace!(
             event = "player.vn.runtime.command.emit",
-            sequence,
-            presentation_count,
-            frame_hash = %frame.hash,
+            sequence = self.command_sequence,
+            presentation_count = presentation.len(),
+            scene_command_count = lifecycle.len(),
             "emitted AstraVN Player host command"
         );
+        self.last_draw = lifecycle.clone();
+        self.scene_draw = next_scene_draw;
+        self.live_texture_ids = next_texture_ids;
+        self.text_resources = next_text_resources;
+        self.live_layout_ids = next_layout_ids;
         Ok(PlayerHostCommandBatch::new(vec![
-            PlayerHostCommand::PresentRgba {
-                sequence,
+            PlayerHostCommand::PresentScene {
+                sequence: self.command_sequence,
                 surface: self.surface,
-                width: frame.width,
-                height: frame.height,
-                rgba8: frame.bytes,
+                width: self.width,
+                height: self.height,
+                clear_rgba: [8, 10, 16, 255],
+                commands: lifecycle,
             },
         ])?)
-    }
-
-    fn apply_stage_command(
-        &mut self,
-        command: &str,
-        attributes: &BTreeMap<String, String>,
-    ) -> Result<(), NativeVnHostError> {
-        match command {
-            "background" => {
-                let asset_id = required_attribute(attributes, "asset", command)?;
-                let frame = self.texture(asset_id)?.clone();
-                self.scene_draw
-                    .retain(|draw| !draw_id_is(draw, "vn.scene.background"));
-                self.scene_draw.insert(
-                    0,
-                    DrawCommand::Texture {
-                        id: "vn.scene.background".to_string(),
-                        frame,
-                        destination: RectI::new(0, 0, self.width, self.height),
-                        opacity: 1.0,
-                        blend: BlendMode::Alpha,
-                    },
-                );
-            }
-            "show" => {
-                let asset_id = required_attribute(attributes, "asset", command)?;
-                let frame = self.texture(asset_id)?.clone();
-                let destination_height = self.height.saturating_mul(9) / 10;
-                let destination_width = ((destination_height as u64 * frame.width as u64)
-                    / frame.height as u64)
-                    .min(self.width as u64) as u32;
-                let x = match attributes.get("at").map(String::as_str) {
-                    Some("left") => self.width / 12,
-                    Some("center") => self.width.saturating_sub(destination_width) / 2,
-                    _ => self
-                        .width
-                        .saturating_sub(destination_width + self.width / 12),
-                };
-                let id = attributes
-                    .get("id")
-                    .cloned()
-                    .or_else(|| attributes.get("character").cloned())
-                    .unwrap_or_else(|| "character".to_string());
-                let draw_id = format!("vn.scene.character.{id}");
-                self.scene_draw.retain(|draw| !draw_id_is(draw, &draw_id));
-                self.scene_draw.push(DrawCommand::Texture {
-                    id: draw_id,
-                    frame,
-                    destination: RectI::new(
-                        x as i32,
-                        self.height.saturating_sub(destination_height) as i32,
-                        destination_width,
-                        destination_height,
-                    ),
-                    opacity: 1.0,
-                    blend: BlendMode::Alpha,
-                });
-            }
-            "hide" => {
-                let id = attributes
-                    .get("id")
-                    .or_else(|| attributes.get("character"))
-                    .ok_or_else(|| {
-                        NativeVnHostError::Asset(
-                            "ASTRA_PLAYER_STAGE_ATTRIBUTE: hide requires id or character"
-                                .to_string(),
-                        )
-                    })?;
-                let draw_id = format!("vn.scene.character.{id}");
-                self.scene_draw.retain(|draw| !draw_id_is(draw, &draw_id));
-            }
-            "movie" => {
-                let asset_id = required_attribute(attributes, "asset", command)?;
-                return Err(NativeVnHostError::Asset(format!(
-                    "ASTRA_PLAYER_VIDEO_DECODE_REQUIRED: packaged video asset {asset_id} requires the platform decode bridge"
-                )));
-            }
-            _ => {}
-        }
-        Ok(())
     }
 
     fn texture(&self, asset_id: &str) -> Result<&TextureFrame, NativeVnHostError> {
@@ -1493,96 +1665,383 @@ fn required_attribute<'a>(
     })
 }
 
-fn draw_id_is(draw: &DrawCommand, expected: &str) -> bool {
+fn apply_stage_command(
+    scene_draw: &mut Vec<SceneCommand>,
+    textures: &BTreeMap<String, TextureFrame>,
+    width: u32,
+    height: u32,
+    command: &str,
+    attributes: &BTreeMap<String, String>,
+) -> Result<(), NativeVnHostError> {
+    match command {
+        "background" => {
+            let asset_id = required_attribute(attributes, "asset", command)?;
+            if !textures.contains_key(asset_id) {
+                return Err(missing_texture(asset_id));
+            }
+            scene_draw.retain(|draw| !draw_id_is(draw, "vn.scene.background"));
+            scene_draw.insert(
+                0,
+                SceneCommand::Sprite {
+                    id: "vn.scene.background".to_string(),
+                    texture_id: asset_id.to_string(),
+                    source: None,
+                    destination: RectI::new(0, 0, width, height),
+                    opacity: 1.0,
+                    blend: BlendMode::Alpha,
+                },
+            );
+        }
+        "show" => {
+            let asset_id = required_attribute(attributes, "asset", command)?;
+            let frame = textures
+                .get(asset_id)
+                .ok_or_else(|| missing_texture(asset_id))?;
+            let destination_height = height.saturating_mul(9) / 10;
+            let destination_width = ((destination_height as u64 * frame.width as u64)
+                / frame.height as u64)
+                .min(width as u64) as u32;
+            let x = match attributes.get("at").map(String::as_str) {
+                Some("left") => width / 12,
+                Some("center") => width.saturating_sub(destination_width) / 2,
+                Some("right") | None => width.saturating_sub(destination_width + width / 12),
+                Some(position) => {
+                    return Err(NativeVnHostError::Asset(format!(
+                        "ASTRA_PLAYER_STAGE_POSITION: unsupported character position {position}"
+                    )))
+                }
+            };
+            let id = attributes
+                .get("id")
+                .or_else(|| attributes.get("character"))
+                .ok_or_else(|| {
+                    NativeVnHostError::Asset(
+                        "ASTRA_PLAYER_STAGE_ATTRIBUTE: show requires id or character".to_string(),
+                    )
+                })?;
+            let draw_id = format!("vn.scene.character.{id}");
+            scene_draw.retain(|draw| !draw_id_is(draw, &draw_id));
+            scene_draw.push(SceneCommand::Sprite {
+                id: draw_id,
+                texture_id: asset_id.to_string(),
+                source: None,
+                destination: RectI::new(
+                    x as i32,
+                    height.saturating_sub(destination_height) as i32,
+                    destination_width,
+                    destination_height,
+                ),
+                opacity: 1.0,
+                blend: BlendMode::Alpha,
+            });
+        }
+        "hide" => {
+            let id = attributes
+                .get("id")
+                .or_else(|| attributes.get("character"))
+                .ok_or_else(|| {
+                    NativeVnHostError::Asset(
+                        "ASTRA_PLAYER_STAGE_ATTRIBUTE: hide requires id or character".to_string(),
+                    )
+                })?;
+            let draw_id = format!("vn.scene.character.{id}");
+            scene_draw.retain(|draw| !draw_id_is(draw, &draw_id));
+        }
+        unsupported => {
+            return Err(NativeVnHostError::Asset(format!(
+                "ASTRA_PLAYER_PRESENTATION_UNSUPPORTED: stage command {unsupported} has no product renderer binding"
+            )))
+        }
+    }
+    Ok(())
+}
+
+fn missing_texture(asset_id: &str) -> NativeVnHostError {
+    NativeVnHostError::Asset(format!(
+        "ASTRA_PLAYER_ASSET_MISSING: cooked texture {asset_id} is not mounted"
+    ))
+}
+
+fn draw_id_is(draw: &SceneCommand, expected: &str) -> bool {
     match draw {
-        DrawCommand::Rect { id, .. }
-        | DrawCommand::Texture { id, .. }
-        | DrawCommand::VideoFrame { id, .. }
-        | DrawCommand::Glyph { id, .. } => id == expected,
+        SceneCommand::Sprite { id, .. }
+        | SceneCommand::Rect { id, .. }
+        | SceneCommand::GlyphRun { id, .. } => id == expected,
         _ => false,
     }
 }
 
-fn push_bitmap_text(
-    commands: &mut Vec<DrawCommand>,
-    text: &str,
-    mut x: u32,
+fn scene_texture_ids(draw: &[SceneCommand]) -> BTreeSet<String> {
+    draw.iter()
+        .filter_map(|command| match command {
+            SceneCommand::Sprite { texture_id, .. } => Some(texture_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_text_layout(
+    owner: &mut TextRenderResourceOwner,
+    provider: &CosmicTextLayoutProvider,
+    font_families: &[String],
+    localization: &VnLocalizationTable,
+    layout_ids: &mut BTreeSet<String>,
+    lifecycle: &mut Vec<SceneCommand>,
+    draw: &mut Vec<SceneCommand>,
+    layout_id: &str,
+    localization_key: &str,
+    x: u32,
     y: u32,
+    max_width: u32,
+    font_size: f32,
+    max_lines: u32,
     rgba: [u8; 4],
-) {
-    for (index, character) in text.chars().take(96).enumerate() {
-        let alpha8 = bitmap_glyph(character);
-        let hash = Hash256::from_sha256(&alpha8);
-        commands.push(DrawCommand::Glyph {
-            id: format!("vn.text.{index}"),
-            glyph: GlyphBitmap {
-                width: 5,
-                height: 7,
-                format: GlyphBitmapFormat::Alpha8,
-                pixels: alpha8,
-                hash,
-            },
-            x: x as i32,
-            y: y as i32,
-            rgba,
-            opacity: 1.0,
-            blend: BlendMode::Alpha,
-        });
-        x = x.saturating_add(6);
+) -> Result<(), NativeVnHostError> {
+    let text = resolve_localized(localization, localization_key)?;
+    let request = text_request(
+        localization_key,
+        text,
+        &localization.locale,
+        font_families,
+        max_width,
+        font_size,
+        max_lines,
+    );
+    let layout = provider.layout(&request)?;
+    let commands = owner.update_layout(layout_id, &layout, rgba)?;
+    for command in commands {
+        match command {
+            SceneCommand::UploadGlyph { .. } | SceneCommand::ReleaseResource { .. } => {
+                lifecycle.push(command);
+            }
+            command => draw.push(translate_text_command(command, x, y)?),
+        }
+    }
+    if !layout_ids.insert(layout_id.to_string()) {
+        return Err(NativeVnHostError::Asset(format!(
+            "ASTRA_PLAYER_LAYOUT_DUPLICATE: layout id {layout_id} was emitted twice"
+        )));
+    }
+    Ok(())
+}
+
+fn text_request(
+    key: &str,
+    text: &str,
+    locale: &str,
+    font_families: &[String],
+    max_width: u32,
+    font_size: f32,
+    max_lines: u32,
+) -> TextLayoutRequest {
+    let line_height = font_size * 1.3;
+    TextLayoutRequest {
+        key: key.to_string(),
+        runs: vec![TextRun {
+            text: text.to_string(),
+            language: locale.to_string(),
+            script: None,
+            direction: TextDirection::Auto,
+            ruby: Vec::new(),
+            voice: None,
+        }],
+        constraint: LayoutConstraint {
+            max_width: max_width.max(1) as f32,
+            max_height: Some(line_height * max_lines.max(1) as f32),
+            max_lines: Some(max_lines.max(1)),
+            font_size,
+            line_height,
+            wrap: WrapPolicy::WordOrGlyph,
+            overflow: OverflowPolicy::EllipsisEnd,
+        },
+        font_families: font_families.to_vec(),
+        features: Vec::new(),
     }
 }
 
-fn bitmap_glyph(character: char) -> Vec<u8> {
-    let rows: [u8; 7] = match character.to_ascii_uppercase() {
-        'A' => [0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11],
-        'B' => [0x1e, 0x11, 0x11, 0x1e, 0x11, 0x11, 0x1e],
-        'C' => [0x0f, 0x10, 0x10, 0x10, 0x10, 0x10, 0x0f],
-        'D' => [0x1e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1e],
-        'E' => [0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x1f],
-        'F' => [0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x10],
-        'G' => [0x0f, 0x10, 0x10, 0x13, 0x11, 0x11, 0x0f],
-        'H' => [0x11, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11],
-        'I' => [0x1f, 0x04, 0x04, 0x04, 0x04, 0x04, 0x1f],
-        'J' => [0x07, 0x02, 0x02, 0x02, 0x12, 0x12, 0x0c],
-        'K' => [0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11],
-        'L' => [0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1f],
-        'M' => [0x11, 0x1b, 0x15, 0x15, 0x11, 0x11, 0x11],
-        'N' => [0x11, 0x19, 0x19, 0x15, 0x13, 0x13, 0x11],
-        'O' => [0x0e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e],
-        'P' => [0x1e, 0x11, 0x11, 0x1e, 0x10, 0x10, 0x10],
-        'Q' => [0x0e, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0d],
-        'R' => [0x1e, 0x11, 0x11, 0x1e, 0x14, 0x12, 0x11],
-        'S' => [0x0f, 0x10, 0x10, 0x0e, 0x01, 0x01, 0x1e],
-        'T' => [0x1f, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04],
-        'U' => [0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e],
-        'V' => [0x11, 0x11, 0x11, 0x11, 0x11, 0x0a, 0x04],
-        'W' => [0x11, 0x11, 0x11, 0x15, 0x15, 0x15, 0x0a],
-        'X' => [0x11, 0x11, 0x0a, 0x04, 0x0a, 0x11, 0x11],
-        'Y' => [0x11, 0x11, 0x0a, 0x04, 0x04, 0x04, 0x04],
-        'Z' => [0x1f, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1f],
-        '0' => [0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e],
-        '1' => [0x04, 0x0c, 0x04, 0x04, 0x04, 0x04, 0x0e],
-        '2' => [0x0e, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1f],
-        '3' => [0x1e, 0x01, 0x01, 0x0e, 0x01, 0x01, 0x1e],
-        '4' => [0x02, 0x06, 0x0a, 0x12, 0x1f, 0x02, 0x02],
-        '5' => [0x1f, 0x10, 0x10, 0x1e, 0x01, 0x01, 0x1e],
-        '6' => [0x0e, 0x10, 0x10, 0x1e, 0x11, 0x11, 0x0e],
-        '7' => [0x1f, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08],
-        '8' => [0x0e, 0x11, 0x11, 0x0e, 0x11, 0x11, 0x0e],
-        '9' => [0x0e, 0x11, 0x11, 0x0f, 0x01, 0x01, 0x0e],
-        '.' => [0, 0, 0, 0, 0, 0x06, 0x06],
-        '_' => [0, 0, 0, 0, 0, 0, 0x1f],
-        '-' => [0, 0, 0, 0x1f, 0, 0, 0],
-        ' ' => [0; 7],
-        _ => [0x0e, 0x11, 0x01, 0x02, 0x04, 0, 0x04],
-    };
-    rows.into_iter()
-        .flat_map(|row| {
-            (0..5)
-                .rev()
-                .map(move |bit| if row & (1 << bit) != 0 { 255 } else { 0 })
-        })
-        .collect()
+fn translate_text_command(
+    mut command: SceneCommand,
+    x: u32,
+    y: u32,
+) -> Result<SceneCommand, NativeVnHostError> {
+    let x = i32::try_from(x).map_err(|_| {
+        NativeVnHostError::Asset("ASTRA_PLAYER_LAYOUT_COORDINATE: x exceeds i32".to_string())
+    })?;
+    let y = i32::try_from(y).map_err(|_| {
+        NativeVnHostError::Asset("ASTRA_PLAYER_LAYOUT_COORDINATE: y exceeds i32".to_string())
+    })?;
+    match &mut command {
+        SceneCommand::GlyphRun { glyphs, .. } => {
+            for glyph in glyphs {
+                glyph.x = glyph.x.checked_add(x).ok_or_else(|| {
+                    NativeVnHostError::Asset(
+                        "ASTRA_PLAYER_LAYOUT_COORDINATE: glyph x overflowed".to_string(),
+                    )
+                })?;
+                glyph.y = glyph.y.checked_add(y).ok_or_else(|| {
+                    NativeVnHostError::Asset(
+                        "ASTRA_PLAYER_LAYOUT_COORDINATE: glyph y overflowed".to_string(),
+                    )
+                })?;
+            }
+        }
+        SceneCommand::PushClip { rect } => {
+            rect.x = rect.x.checked_add(x).ok_or_else(|| {
+                NativeVnHostError::Asset(
+                    "ASTRA_PLAYER_LAYOUT_COORDINATE: clip x overflowed".to_string(),
+                )
+            })?;
+            rect.y = rect.y.checked_add(y).ok_or_else(|| {
+                NativeVnHostError::Asset(
+                    "ASTRA_PLAYER_LAYOUT_COORDINATE: clip y overflowed".to_string(),
+                )
+            })?;
+        }
+        SceneCommand::PopClip => {}
+        _ => {
+            return Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_LAYOUT_COMMAND: text owner emitted an unexpected draw command"
+                    .to_string(),
+            ))
+        }
+    }
+    Ok(command)
+}
+
+fn system_page_localization_key(page: SystemPageKind) -> Result<&'static str, NativeVnHostError> {
+    match page {
+        SystemPageKind::Title => Ok("system.title"),
+        SystemPageKind::Save => Ok("system.save"),
+        SystemPageKind::Load => Ok("system.load"),
+        SystemPageKind::Config => Ok("system.config"),
+        SystemPageKind::Gallery => Ok("system.gallery"),
+        SystemPageKind::Replay => Ok("system.replay"),
+        SystemPageKind::VoiceReplay => Ok("system.voice_replay"),
+        SystemPageKind::RouteChart => Ok("system.route_chart"),
+        SystemPageKind::Backlog => Ok("system.backlog"),
+        SystemPageKind::LocalizationPreview => Ok("system.localization_preview"),
+        SystemPageKind::Unknown => Err(NativeVnHostError::Input(
+            "ASTRA_PLAYER_SYSTEM_PAGE: unknown system page".to_string(),
+        )),
+    }
+}
+
+fn resolve_localized<'a>(
+    localization: &'a VnLocalizationTable,
+    key: &str,
+) -> Result<&'a str, NativeVnHostError> {
+    localization
+        .resolve(key)
+        .map_err(|error| NativeVnHostError::Localization(error.to_string()))
+}
+
+fn validate_story_text(
+    compiled: &CompiledStory,
+    localization: &VnLocalizationTable,
+    provider: &CosmicTextLayoutProvider,
+    font_families: &[String],
+) -> Result<(), NativeVnHostError> {
+    let mut keys = BTreeSet::new();
+    for command in compiled
+        .states
+        .values()
+        .flat_map(|state| &state.scenes)
+        .flat_map(|scene| &scene.commands)
+    {
+        match command {
+            CompiledCommand::Dialogue { key, speaker, .. } => {
+                keys.insert(key.clone());
+                if let Some(speaker) = speaker {
+                    keys.insert(format!("speaker.{speaker}"));
+                }
+            }
+            CompiledCommand::Choice { key, options, .. } => {
+                keys.insert(key.clone());
+                keys.extend(options.iter().map(|option| option.key.clone()));
+            }
+            CompiledCommand::SystemPage { page, .. } => {
+                keys.insert(system_page_localization_key(*page)?.to_string());
+                keys.insert("system.back".to_string());
+            }
+            CompiledCommand::Presentation { command, .. } => match command {
+                PresentationCommand::Dialogue { key, speaker, .. } => {
+                    keys.insert(key.clone());
+                    if let Some(speaker) = speaker {
+                        keys.insert(format!("speaker.{speaker}"));
+                    }
+                }
+                PresentationCommand::Choice { key, options } => {
+                    keys.insert(key.clone());
+                    keys.extend(options.iter().map(|option| option.key.clone()));
+                }
+                PresentationCommand::SystemPage { page } => {
+                    keys.insert(system_page_localization_key(*page)?.to_string());
+                    keys.insert("system.back".to_string());
+                }
+                PresentationCommand::Stage { .. } | PresentationCommand::Marker { .. } => {}
+            },
+            _ => {}
+        }
+    }
+    for key in keys {
+        let text = resolve_localized(localization, &key)?;
+        provider.layout(&text_request(
+            &format!("preflight.{key}"),
+            text,
+            &localization.locale,
+            font_families,
+            4096,
+            28.0,
+            16,
+        ))?;
+    }
+    Ok(())
+}
+
+fn validate_story_presentation(
+    compiled: &CompiledStory,
+    textures: &BTreeMap<String, TextureFrame>,
+) -> Result<(), NativeVnHostError> {
+    for command in compiled
+        .states
+        .values()
+        .flat_map(|state| &state.scenes)
+        .flat_map(|scene| &scene.commands)
+    {
+        let CompiledCommand::Presentation {
+            command:
+                PresentationCommand::Stage {
+                    command,
+                    attributes,
+                },
+            ..
+        } = command
+        else {
+            continue;
+        };
+        match command.as_str() {
+            "background" | "show" => {
+                let asset_id = required_attribute(attributes, "asset", command)?;
+                if !textures.contains_key(asset_id) {
+                    return Err(missing_texture(asset_id));
+                }
+            }
+            "hide" => {
+                if !attributes.contains_key("id") && !attributes.contains_key("character") {
+                    return Err(NativeVnHostError::Asset(
+                        "ASTRA_PLAYER_STAGE_ATTRIBUTE: hide requires id or character".to_string(),
+                    ));
+                }
+            }
+            unsupported => {
+                return Err(NativeVnHostError::Asset(format!(
+                    "ASTRA_PLAYER_PRESENTATION_UNSUPPORTED: stage command {unsupported} has no product renderer binding"
+                )))
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1603,6 +2062,8 @@ pub enum NativeVnHostError {
     Package(String),
     #[error("presentation asset failed: {0}")]
     Asset(String),
+    #[error("localization failed: {0}")]
+    Localization(String),
     #[error("player input failed: {0}")]
     Input(String),
     #[error("runtime evidence failed: {0}")]

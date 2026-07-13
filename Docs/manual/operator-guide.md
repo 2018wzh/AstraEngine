@@ -51,6 +51,8 @@ astra-headless serve --stdio \
 
 会渲染文本的 shipping profile 必须在 `media.manifest` 中设置 `font_manifest_required: true`，并通过 `font_manifest_section` 指向同包内的 `astra.font_manifest.v1`。字体 manifest 的每个条目必须绑定 package VFS URI、provider、target/profile、face index、license、coverage 和内容 hash。验证器不会读取系统字体或 loose file 补齐缺失资源；`media.font_package` blocked 时应修复 package/cook 输入，不能关闭检查或改成 optional。
 
+NativeVN 字体 asset 的 `astra.asset.v1` sidecar 必须声明 `font.family`、`font.face_index`、可选 `font.subset` 和有序且不重叠的 Unicode scalar `font.coverage`。项目通过 `nativevn.default_locale` 选择默认语言；Cook 只从当前 target/profile 可用的 `vn.localization.<locale>` sections 生成 `player.locale_config`。Release Gate 会重新读取 config 和每个声明的 localization section，并阻断缺 section、重复 key、locale/schema 漂移或 default 不在 available 列表的 package；不得由 Player 在运行时读取 loose JSON 或回退到硬编码语言。
+
 Windows 字形视觉回归由 `astra.windows_gpu_glyph_golden.v1` 绑定字体 revision、layout hash 和真实 GPU capture hash。更新字体、shaping provider 或 atlas shader 后，必须先确认视觉变化符合设计，再在同一变更中更新 golden；不能只改 hash 让测试通过。`platform-test-driver` 的 device-loss 注入只用于自动验证 retained glyph resource rebuild，正式发布证据仍需记录真实 host、build、profile、package 和 session identity。Web text pass 尚未实现时必须返回 `PLATFORM_NOT_IMPLEMENTED`，不能改用 headless capture 代替。
 
 产品 release evidence 还必须提供 `astra.player_presentation_report.v1`。该报告只能由 Player command sink 完成真实平台 capture 后生成，并与 capability、host conformance、automation 的 package/profile/build/session identity 一致。缺报告、`astra.renderer.headless`、零变化像素或 identity drift 都是 `ASTRA_PLAYER_PRESENTATION_EVIDENCE` blocking；不能手工填写静态 hash 补过门禁。

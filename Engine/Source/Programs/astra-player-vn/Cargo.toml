@@ -5,10 +5,15 @@ license.workspace = true
 version.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+platform-test-driver = ["astra-platform-windows/platform-test-driver"]
+
 [dependencies]
 astra-core = { path = "../../Runtime/astra-core" }
 astra-asset = { path = "../../Runtime/astra-asset" }
 astra-media-core = { path = "../../Runtime/astra-media-core" }
+astra-media = { path = "../../Runtime/astra-media" }
 astra-package = { path = "../../Runtime/astra-package" }
 astra-plugin = { path = "../../Runtime/astra-plugin", default-features = false }
 astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi", default-features = false }
@@ -27,4 +32,6 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+astra-platform = { path = "../../Platform/astra-platform" }
+astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
 tokio.workspace = true

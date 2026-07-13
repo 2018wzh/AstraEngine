@@ -7,6 +7,18 @@
     "technical.route.library": "验收资料室路线",
     "technical.route.rooftop": "验收屋顶路线",
     "technical.library": "资料室路线已完成。",
-    "technical.rooftop": "屋顶路线已完成。"
+    "technical.rooftop": "屋顶路线已完成。",
+    "speaker.guide": "向导",
+    "system.back": "返回",
+    "system.title": "标题",
+    "system.save": "保存",
+    "system.load": "读取",
+    "system.config": "设置",
+    "system.gallery": "鉴赏",
+    "system.replay": "回放",
+    "system.voice_replay": "语音回放",
+    "system.route_chart": "路线图",
+    "system.backlog": "历史记录",
+    "system.localization_preview": "本地化预览"
   }
 }

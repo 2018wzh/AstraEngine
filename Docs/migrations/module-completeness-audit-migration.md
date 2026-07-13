@@ -79,9 +79,9 @@
 
 **2026-07-13 Windows 子项：** `WgpuGlyphAtlasRenderer` 已把 renderer-ready glyph command 接到真实 hardware wgpu atlas、vertex/scissor draw、surface present 和 GPU texture readback。`text_surface.rs` 用固定 revision/hash/OFL 的 CJK/假名、Arabic、emoji 字体生成 layout，校验 layout hash、GPU capture hash、变化像素、重复 upload 事务回滚、资源 release、loss/rebuild 后同图，并明确拒绝非文本 command。逻辑 glyph resource 只在 present 成功后提交；测试注入只证明 loss 后 retained-resource rebuild，不伪装成物理 GPU 移除。
 
-**2026-07-13 Player 子项：** `PlayerHostCommand::PresentTextScene` 和 `PlatformCommandSink` 已直接转发 renderer-ready glyph command，不携带 CPU raster frame。Windows product-path test 从真实 Package/VFS font sections 创建 provider，经 Player command executor 到 hardware GPU capture，并生成 `astra.player_presentation_report.v1`。Release product evidence API 会把该报告与 capability、conformance、automation 的 package/profile/build/session/renderer identity 逐项对齐；缺报告、headless provider、空画面或 identity drift 均 blocking。
+**2026-07-13 Player 子项：** `PlayerHostCommand::PresentScene` 和 `PlatformCommandSink` 已直接转发 renderer-ready glyph/texture/sprite/rect command，不携带 CPU raster frame。Windows product-path test 从真实 Package/VFS font sections 创建 provider，经 Player command executor 到 hardware GPU capture，并生成 `astra.player_presentation_report.v1`。bundled VN 的 bitmap glyph、`HeadlessRenderer` 和 `PresentRgba` 路径已删除；dialogue、choice、system page 会解析 package localization，使用 Cook 生成的 font manifest完成 shaping，再进入 retained GPU stream。缺 locale/key/font coverage、重复 localization key、未绑定 presentation command 和未释放资源都会 blocking。Release product evidence API 会把报告与 capability、conformance、automation 的 package/profile/build/session/renderer identity 逐项对齐；缺报告、headless provider、空画面或 identity drift 均 blocking。
 
-**剩余缺口：** shared layout save/replay continuation、Windows GPU glyph atlas/golden、Player command/release consumer 已闭合；WebGPU glyph consumer、bundled VN 主路径和完整 SceneCommand GPU renderer 仍未闭合。P1-001 保持开放，不能标记 `RESOLVED`。
+**剩余缺口：** shared layout save/replay continuation、Windows retained atlas/golden、Player command/release consumer与 bundled VN text/system 子路径已闭合；WebGPU consumer、bundled VN camera/timeline/video/audio 和完整 SceneCommand GPU renderer 仍未闭合。P1-001 保持开放，不能标记 `RESOLVED`。
 
 **迁移要求：**
 
@@ -168,7 +168,7 @@
 
 **分类：** `BYPASS`, `FAKE_IMPLEMENTATION`, `UNWIRED_MAIN_PATH`
 
-**证据：** `Engine/Source/Programs/astra-player/src/main.rs:225-240` 创建的是 `NativeVnHostCommandSource`；`Engine/Source/Programs/astra-player-vn/src/native_vn_host.rs:9-16` 直接持有 `astra_vn_core::VnRuntime` 和 `astra_media_core::HeadlessRenderer`，`native_vn_host.rs:42-48` 创建 headless renderer；`native_vn_host.rs:66-100` 直接调用 `VnPlayerCommand::Launch/Advance/Choose`。这条 bundled Player 主路径没有创建 `NativeVnRuntimeProvider`、`RuntimeWorld`、`astra.vn.step` StateMachine action 或真实平台 renderer provider。
+**2026-07-13 复核：** `NativeVnHostCommandSource` 已改为通过 `ProductRuntimeHost` 创建 `NativeVnRuntimeProvider` session，runtime output经 package localization/font shaping转换为 `PresentScene`，并由 Windows WGPU执行；旧 `VnRuntime` owner、`HeadlessRenderer`、bitmap glyph 与 `PresentRgba` 已删除。该修补仍直接构造 in-process provider，尚未从 package `ExtensionRegistry` binding创建 instance/session；camera、timeline、video、audio command 也仍以 `ASTRA_PLAYER_PRESENTATION_UNSUPPORTED` 在 package open 阶段阻断。因此本项从“完整 bypass”缩小为“provider binding 与完整 command stream 未闭合”，不能标记 `RESOLVED`。
 
 **视觉证据问题：** `native_vn_host.rs:104-128` 只把 state hash 转成清屏颜色，把 presentation JSON 的 hash 转成矩形条，再由 headless CPU renderer 输出 RGBA。它没有加载字体、图片、立绘、真实 dialogue、choice、timeline、video 或 audio graph，因此即使窗口发生像素变化，也不能证明 VN 场景真实渲染。
 

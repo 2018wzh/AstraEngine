@@ -50,6 +50,7 @@ pub struct WebPlayerConfig {
     pub target: String,
     pub profile: String,
     pub platform: String,
+    pub locale: String,
     pub package: String,
 }
 
@@ -63,7 +64,15 @@ pub fn validate_package(
     config: &WebPlayerConfig,
     package_bytes: &[u8],
 ) -> Result<PlatformHostProfile, PlatformError> {
-    if config.schema != "astra.player_config.v2" || config.platform != "web" {
+    if config.schema != "astra.player_config.v2"
+        || config.platform != "web"
+        || config.locale.is_empty()
+        || config.locale.len() > 64
+        || !config
+            .locale
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
         return Err(PlatformError::new(
             PlatformErrorCode::InvalidProfile,
             "web_player.config",
@@ -265,7 +274,7 @@ mod browser {
             &package,
             VnRunConfig {
                 profile: config.profile.clone(),
-                locale: "zh-Hans".to_string(),
+                locale: config.locale.clone(),
             },
             1280,
             720,
@@ -326,6 +335,33 @@ mod browser {
                 let player_sequence = event.sequence;
                 match event.kind {
                     PlatformEventKind::WindowClosed { .. } => {
+                        let shutdown = async {
+                            let batch =
+                                vn.release_resources().map_err(|error| error.to_string())?;
+                            executor
+                                .execute_batch(batch)
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            vn.shutdown().map_err(|error| error.to_string())?;
+                            client
+                                .destroy_surface(surface)
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            client
+                                .destroy_window(window)
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            client.shutdown().await.map_err(|error| error.to_string())
+                        }
+                        .await;
+                        if let Err(error) = shutdown {
+                            tracing::error!(
+                                event = "player.web.shutdown.failed",
+                                diagnostic_code = "ASTRA_PLAYER_SHUTDOWN",
+                                error = %error,
+                                "Web Player shutdown failed"
+                            );
+                        }
                         PLAYER.with(|player| *player.borrow_mut() = None);
                         break;
                     }

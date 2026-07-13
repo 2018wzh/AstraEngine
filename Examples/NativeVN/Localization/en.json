@@ -7,6 +7,18 @@
     "technical.route.library": "Verify the library route",
     "technical.route.rooftop": "Verify the rooftop route",
     "technical.library": "The library route completed.",
-    "technical.rooftop": "The rooftop route completed."
+    "technical.rooftop": "The rooftop route completed.",
+    "speaker.guide": "Guide",
+    "system.back": "Back",
+    "system.title": "Title",
+    "system.save": "Save",
+    "system.load": "Load",
+    "system.config": "Config",
+    "system.gallery": "Gallery",
+    "system.replay": "Replay",
+    "system.voice_replay": "Voice replay",
+    "system.route_chart": "Route chart",
+    "system.backlog": "Backlog",
+    "system.localization_preview": "Localization preview"
   }
 }

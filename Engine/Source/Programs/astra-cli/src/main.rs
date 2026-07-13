@@ -5,12 +5,15 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use astra_asset::AssetSidecar;
+use astra_asset::{AssetSidecar, VfsUri};
 use astra_cook::{
     CookBatchExecutor, CookBatchLimits, CookBatchRequest, CookCancellationToken, CookNode,
     CookProcessorRegistry, CookRequest, DefaultCookProcessor, FileCookCache,
 };
 use astra_core::Hash256;
+use astra_media::{
+    FontPackageEntry, FontPackageManifest, UnicodeRange, FONT_PACKAGE_MANIFEST_SCHEMA,
+};
 use astra_observability::{
     init_host, ConsoleFormat, CrashReportingMode, HostObservabilityConfig, ObservabilityGuard,
 };
@@ -31,7 +34,8 @@ use astra_target::{
 use astra_test::{ScenarioReport, ScenarioRunOptions, ScenarioRunner};
 use astra_vn::{
     compile_astra_sources, compile_astra_sources_with_options, format_astra_source,
-    package_sections_for_story, AstraSource, CompileAstraOptions, FormatOptions,
+    load_player_locale_config, package_sections_for_story, AstraSource, CompileAstraOptions,
+    FormatOptions, PlayerLocaleConfig, PLAYER_LOCALE_CONFIG_SCHEMA,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 use schemars::JsonSchema;
@@ -753,6 +757,8 @@ struct CookedArtifactRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     asset_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    font: Option<CookedFontMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     scenario_path: Option<String>,
 }
 
@@ -764,6 +770,16 @@ struct PreparedAssetCook {
     source_byte_size: u64,
     asset_role: String,
     asset_type: String,
+    font: Option<CookedFontMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+struct CookedFontMetadata {
+    family: String,
+    face_index: u32,
+    license_id: String,
+    subset: Option<String>,
+    coverage: Vec<UnicodeRange>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -1118,6 +1134,7 @@ fn cook_project_into(
         asset_byte_size: None,
         asset_type: None,
         asset_id: None,
+        font: None,
         scenario_path: None,
     }];
     if let Some(platform_profiles) = cook_platform_profiles(
@@ -1141,6 +1158,7 @@ fn cook_project_into(
             asset_byte_size: None,
             asset_type: None,
             asset_id: None,
+            font: None,
             scenario_path: None,
         });
     }
@@ -1160,6 +1178,7 @@ fn cook_project_into(
             asset_byte_size: None,
             asset_type: None,
             asset_id: None,
+            font: None,
             scenario_path: None,
         });
     }
@@ -1184,6 +1203,9 @@ fn cook_project_into(
         target,
         &artifacts,
     )?);
+    if project_uses_nativevn(&project_yaml) {
+        artifacts.push(cook_player_locale_config(&project_yaml, &artifacts, &out)?);
+    }
     let scenario_refs = scenario_refs_from_project(&project_yaml);
     artifacts.extend(cook_scenario_ref_sections(
         &scenario_refs,
@@ -1191,6 +1213,11 @@ fn cook_project_into(
         &out,
         &artifacts,
     )?);
+    if project_uses_nativevn(&project_yaml) {
+        artifacts.push(cook_font_manifest_section(
+            &artifacts, target, profile, &out,
+        )?);
+    }
     let manifest = CookManifest {
         schema: "astra.cook_manifest.v2".to_string(),
         package_id,
@@ -1343,6 +1370,7 @@ fn cook_nativevn_sections(
             asset_byte_size: None,
             asset_type: None,
             asset_id: None,
+            font: None,
             scenario_path: None,
         });
     }
@@ -1402,6 +1430,23 @@ fn cook_nativevn_asset_sections(
                     source_byte_size,
                     asset_role: asset_role_for_path(&sidecar.source, &sidecar.asset_type),
                     asset_type: sidecar.asset_type.clone(),
+                    font: sidecar.font.as_ref().map(|font| CookedFontMetadata {
+                        family: font.family.clone(),
+                        face_index: font.face_index,
+                        license_id: sidecar
+                            .license
+                            .clone()
+                            .expect("validated asset sidecar has a license"),
+                        subset: font.subset.clone(),
+                        coverage: font
+                            .coverage
+                            .iter()
+                            .map(|range| UnicodeRange {
+                                start: range.start,
+                                end: range.end,
+                            })
+                            .collect(),
+                    }),
                 },
             )
             .is_some()
@@ -1473,6 +1518,7 @@ fn cook_nativevn_asset_sections(
             asset_byte_size: Some(metadata.source_byte_size),
             asset_type: Some(metadata.asset_type),
             asset_id: Some(metadata.asset_id),
+            font: metadata.font,
             scenario_path: None,
         });
     }
@@ -1488,6 +1534,150 @@ fn nativevn_asset_roots(project: &serde_yaml::Value) -> Vec<String> {
             .get("nativevn")
             .and_then(|nativevn| nativevn.get("asset_roots")),
     )
+}
+
+fn cook_font_manifest_section(
+    artifacts: &[CookedArtifactRef],
+    target: &str,
+    profile: &str,
+    out: &std::path::Path,
+) -> Result<CookedArtifactRef, CliError> {
+    if artifacts
+        .iter()
+        .any(|artifact| artifact.section_id == "media.font_manifest")
+    {
+        return Err(
+            "ASTRA_COOK_FONT_MANIFEST_DUPLICATE: media.font_manifest is generated from font assets"
+                .into(),
+        );
+    }
+    let mut fonts = artifacts
+        .iter()
+        .filter_map(|artifact| artifact.font.as_ref().map(|font| (artifact, font)))
+        .map(|(artifact, font)| {
+            let asset_id = artifact
+                .asset_id
+                .clone()
+                .ok_or("ASTRA_COOK_FONT_IDENTITY: font artifact is missing its asset id")?;
+            let asset_path = artifact
+                .asset_path
+                .as_deref()
+                .ok_or("ASTRA_COOK_FONT_IDENTITY: font artifact is missing its package path")?;
+            let hash: Hash256 = artifact
+                .hash
+                .parse()
+                .map_err(|_| "ASTRA_COOK_FONT_HASH: font artifact hash is invalid")?;
+            Ok(FontPackageEntry {
+                asset_id,
+                uri: VfsUri::parse(&format!("package:/{}", normalize_vfs_path(asset_path)?))?,
+                family: font.family.clone(),
+                face_index: font.face_index,
+                hash,
+                license_id: font.license_id.clone(),
+                subset: font.subset.clone(),
+                coverage: font.coverage.clone(),
+                targets: vec![target.to_string()],
+                profiles: vec![profile.to_string()],
+            })
+        })
+        .collect::<Result<Vec<_>, CliError>>()?;
+    fonts.sort_by(|left, right| left.asset_id.cmp(&right.asset_id));
+    if fonts.is_empty() {
+        return Err(
+            "ASTRA_COOK_FONT_MANIFEST_MISSING: NativeVN projects require at least one packaged font asset"
+                .into(),
+        );
+    }
+    let manifest = FontPackageManifest {
+        schema: FONT_PACKAGE_MANIFEST_SCHEMA.to_string(),
+        target: target.to_string(),
+        profile: profile.to_string(),
+        provider_binding: "astra.vfs.package".to_string(),
+        fonts,
+    };
+    let payload = serde_json::to_vec_pretty(&manifest)?;
+    let section_dir = out.join("sections");
+    fs::create_dir_all(&section_dir)?;
+    let file_name = "media_font_manifest.json";
+    fs::write(section_dir.join(file_name), &payload)?;
+    Ok(CookedArtifactRef {
+        section_id: "media.font_manifest".to_string(),
+        schema: FONT_PACKAGE_MANIFEST_SCHEMA.to_string(),
+        path: normalize_relative_path(std::path::Path::new("sections").join(file_name)),
+        hash: Hash256::from_sha256(&payload).to_string(),
+        codec: SectionCodec::Raw,
+        asset_path: None,
+        asset_role: None,
+        asset_sha256: None,
+        asset_byte_size: None,
+        asset_type: None,
+        asset_id: None,
+        font: None,
+        scenario_path: None,
+    })
+}
+
+fn cook_player_locale_config(
+    project: &serde_yaml::Value,
+    artifacts: &[CookedArtifactRef],
+    out: &std::path::Path,
+) -> Result<CookedArtifactRef, CliError> {
+    let default_locale = project
+        .get("nativevn")
+        .and_then(|nativevn| nativevn.get("default_locale"))
+        .and_then(serde_yaml::Value::as_str)
+        .ok_or("ASTRA_COOK_LOCALE_DEFAULT: nativevn.default_locale is required")?;
+    if default_locale.is_empty()
+        || default_locale.len() > 64
+        || !default_locale
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err("ASTRA_COOK_LOCALE_DEFAULT: default locale id is unsafe".into());
+    }
+    let mut available_locales = artifacts
+        .iter()
+        .filter(|artifact| artifact.schema == "astra.vn.localization_table.v1")
+        .filter_map(|artifact| artifact.section_id.strip_prefix("vn.localization."))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    available_locales.sort();
+    available_locales.dedup();
+    if available_locales.is_empty()
+        || !available_locales
+            .iter()
+            .any(|locale| locale == default_locale)
+    {
+        return Err(
+            "ASTRA_COOK_LOCALE_COVERAGE: default locale has no profile-eligible localization section"
+                .into(),
+        );
+    }
+    let config = PlayerLocaleConfig {
+        schema: PLAYER_LOCALE_CONFIG_SCHEMA.to_string(),
+        default_locale: default_locale.to_string(),
+        available_locales,
+    };
+    let payload = serde_json::to_vec_pretty(&config)?;
+    let section_dir = out.join("sections");
+    fs::create_dir_all(&section_dir)?;
+    let file_name = "player_locale_config.json";
+    fs::write(section_dir.join(file_name), &payload)?;
+    Ok(CookedArtifactRef {
+        section_id: "player.locale_config".to_string(),
+        schema: PLAYER_LOCALE_CONFIG_SCHEMA.to_string(),
+        path: normalize_relative_path(std::path::Path::new("sections").join(file_name)),
+        hash: Hash256::from_sha256(&payload).to_string(),
+        codec: SectionCodec::Raw,
+        asset_path: None,
+        asset_role: None,
+        asset_sha256: None,
+        asset_byte_size: None,
+        asset_type: None,
+        asset_id: None,
+        font: None,
+        scenario_path: None,
+    })
 }
 
 fn collect_asset_sidecars(
@@ -1583,6 +1773,7 @@ fn cook_scenario_ref_sections(
             asset_byte_size: None,
             asset_type: None,
             asset_id: None,
+            font: None,
             scenario_path: Some(normalized_path),
         });
     }
@@ -1675,6 +1866,7 @@ fn cook_project_package_sections(
             asset_byte_size: None,
             asset_type: None,
             asset_id: None,
+            font: None,
             scenario_path: None,
         });
     }
@@ -1860,6 +2052,9 @@ fn production_package_request(
     target_manifest: &TargetManifest,
     target_id: &str,
 ) -> Result<PackageBuildRequest, CliError> {
+    let has_font_manifest = cooked_assets.iter().any(|section| {
+        section.id == "media.font_manifest" && section.schema == FONT_PACKAGE_MANIFEST_SCHEMA
+    });
     let target = target_manifest
         .targets
         .iter()
@@ -1944,7 +2139,9 @@ fn production_package_request(
         media_manifest: serde_json::to_vec(&serde_json::json!({
             "schema": "astra.media_manifest.v1",
             "codecs": ["png", "jpeg", "webp", "wav", "ogg", "flac", "mp3"],
-            "ffmpeg": "profile_bound"
+            "ffmpeg": "profile_bound",
+            "font_manifest_required": has_font_manifest,
+            "font_manifest_section": if has_font_manifest { "media.font_manifest" } else { "" }
         }))?,
         provider_policy,
         plugin_extension_registry,
@@ -2253,6 +2450,7 @@ fn build_standalone_bundle_into(
         return Err(format!("target {target} does not support platform {platform_name}").into());
     }
     let display_config = package_player_display_config(&reader)?;
+    let locale_config = package_player_locale_config(&reader)?;
 
     fs::create_dir_all(out.join("package"))?;
     let bundled_package = out.join("package").join("nativevn.astrapkg");
@@ -2341,7 +2539,13 @@ fn build_standalone_bundle_into(
                 status: "pass".to_string(),
             });
 
-            let config = player_config_bytes(target, profile, platform_name, &display_config)?;
+            let config = player_config_bytes(
+                target,
+                profile,
+                platform_name,
+                &display_config,
+                &locale_config,
+            )?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
                 "AstraPlayer.config.json",
@@ -2365,7 +2569,13 @@ fn build_standalone_bundle_into(
                 status: "pass".to_string(),
             });
 
-            let config = player_config_bytes(target, profile, platform_name, &display_config)?;
+            let config = player_config_bytes(
+                target,
+                profile,
+                platform_name,
+                &display_config,
+                &locale_config,
+            )?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
                 "AstraPlayer.config.json",
@@ -2492,6 +2702,7 @@ fn player_config_bytes(
     profile: &str,
     platform_name: &str,
     display_config: &Option<PlayerDisplayConfig>,
+    locale_config: &PlayerLocaleConfig,
 ) -> Result<Vec<u8>, CliError> {
     let observability = if platform_name == "windows" {
         serde_json::json!({
@@ -2513,6 +2724,7 @@ fn player_config_bytes(
         "target": target,
         "profile": profile,
         "platform": platform_name,
+        "locale": locale_config.default_locale,
         "package": "package/nativevn.astrapkg",
         "observability": observability
     });
@@ -2532,6 +2744,10 @@ fn package_player_display_config(
         serde_json::from_slice(&reader.container().read_section("player.display_config")?)?;
     validate_player_display_config(&display)?;
     Ok(Some(display))
+}
+
+fn package_player_locale_config(reader: &PackageReader) -> Result<PlayerLocaleConfig, CliError> {
+    load_player_locale_config(reader).map_err(|error| error.to_string().into())
 }
 
 fn validate_player_display_config(display: &PlayerDisplayConfig) -> Result<(), CliError> {

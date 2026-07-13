@@ -43,6 +43,7 @@ targets:
     platforms: [headless, windows, web]
     packaged: true
 nativevn:
+  default_locale: en
   sources:
     - Scripts
   profiles: [classic, modern, advanced-vn]
@@ -61,10 +62,10 @@ package_sections:
     path: Localization/zh-Hans.json
     codec: raw
     targets: [nativevn-game]
-    profiles: [advanced-vn]
+    profiles: [classic, modern, advanced-vn]
   - id: vn.localization.en
     schema: astra.vn.localization_table.v1
     path: Localization/en.json
     codec: raw
     targets: [nativevn-game]
-    profiles: [advanced-vn]
+    profiles: [classic, modern, advanced-vn]

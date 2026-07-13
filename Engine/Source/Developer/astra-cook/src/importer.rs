@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use astra_asset::{
-    normalize_source_path, AssetError, AssetId, AssetSidecar, CookSettings, ReviewStatus,
+    normalize_source_path, AssetError, AssetId, AssetSidecar, CookSettings, FontAssetMetadata,
+    ReviewStatus,
 };
 use astra_core::{Diagnostic, Hash256};
 use schemars::JsonSchema;
@@ -46,6 +47,7 @@ pub struct ImportRequest {
     pub source_path: PathBuf,
     pub asset_type: String,
     pub license: String,
+    pub font: Option<FontAssetMetadata>,
     pub target_profiles: Vec<String>,
 }
 
@@ -102,6 +104,7 @@ impl DefaultMetadataImporter {
             asset_type: request.asset_type,
             license: Some(request.license),
             importer: self.importer_id.clone(),
+            font: request.font,
             dependencies: Vec::new(),
             cook: CookSettings {
                 processor: default_processor_for(&metadata.kind).to_string(),

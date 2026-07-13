@@ -19,7 +19,10 @@ use astra_release::{
     CheckStatus, PackageValidateRequest, ProductPerformanceEvidence, ReleaseDomain,
     ReleaseValidator,
 };
-use astra_vn::{compile_astra_sources, package_sections_for_story, AstraSource};
+use astra_vn::{
+    compile_astra_sources, package_sections_for_story, AstraSource, PLAYER_LOCALE_CONFIG_SCHEMA,
+    VN_LOCALIZATION_TABLE_SCHEMA,
+};
 
 #[test]
 fn release_report_covers_pass_warning_and_blocked_checks() {
@@ -1171,8 +1174,9 @@ fn release_gate_accepts_nativevn_sections_for_classic_profile() {
         nativevn_story_with_system_pages(),
     )])
     .unwrap();
-    let sections =
+    let mut sections =
         package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+    append_valid_locale_sections(&mut sections);
     let blob = package_with_target_manifest(
         "classic",
         serde_json::json!({
@@ -1212,6 +1216,10 @@ fn release_gate_accepts_nativevn_sections_for_classic_profile() {
     assert!(report
         .checks
         .iter()
+        .any(|check| check.id == "player.locale_config" && check.status == CheckStatus::Pass));
+    assert!(report
+        .checks
+        .iter()
         .any(|check| check.id == "vn.policy_bundle" && check.status == CheckStatus::Pass));
     assert!(report
         .checks
@@ -1237,6 +1245,76 @@ fn release_gate_accepts_nativevn_sections_for_classic_profile() {
                 .iter()
                 .any(|evidence| evidence.key == "behavior_state_hash")
     }));
+}
+
+#[test]
+fn release_gate_blocks_missing_or_duplicate_nativevn_localization() {
+    let compiled = compile_astra_sources([AstraSource::new(
+        "main.astra",
+        nativevn_story_with_system_pages(),
+    )])
+    .unwrap();
+    let sections =
+        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+    let missing =
+        package_with_target_manifest("classic", nativevn_target_manifest(), sections.clone());
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: missing.into_bytes(),
+            profile: "classic".to_string(),
+            require_ffmpeg: false,
+            target: Some("nativevn-game".to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+    let check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "player.locale_config")
+        .unwrap();
+    assert_eq!(check.status, CheckStatus::Blocked);
+    assert!(check
+        .diagnostic
+        .as_ref()
+        .unwrap()
+        .message
+        .contains("ASTRA_PLAYER_LOCALE_CONFIG_MISSING"));
+
+    let mut duplicate = sections;
+    duplicate.push(SectionPayload::raw(
+        "vn.localization.en",
+        VN_LOCALIZATION_TABLE_SCHEMA,
+        br#"{"schema":"astra.vn.localization_table.v1","locale":"en","strings":{"line.one":"A","line.one":"B"}}"#.to_vec(),
+    ));
+    duplicate.push(SectionPayload::raw(
+        "player.locale_config",
+        PLAYER_LOCALE_CONFIG_SCHEMA,
+        br#"{"schema":"astra.player_locale_config.v1","default_locale":"en","available_locales":["en"]}"#.to_vec(),
+    ));
+    let duplicate = package_with_target_manifest("classic", nativevn_target_manifest(), duplicate);
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: duplicate.into_bytes(),
+            profile: "classic".to_string(),
+            require_ffmpeg: false,
+            target: Some("nativevn-game".to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+    let check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "player.locale_config")
+        .unwrap();
+    assert_eq!(check.status, CheckStatus::Blocked);
+    assert!(check
+        .diagnostic
+        .as_ref()
+        .unwrap()
+        .message
+        .contains("duplicate localization key"));
 }
 
 #[test]
@@ -2858,6 +2936,19 @@ fn package_request(package_bytes: Vec<u8>) -> PackageValidateRequest {
         require_platform_report: false,
         platform_report: None,
     }
+}
+
+fn append_valid_locale_sections(sections: &mut Vec<SectionPayload>) {
+    sections.push(SectionPayload::raw(
+        "vn.localization.en",
+        VN_LOCALIZATION_TABLE_SCHEMA,
+        br#"{"schema":"astra.vn.localization_table.v1","locale":"en","strings":{"line.one":"Hello"}}"#.to_vec(),
+    ));
+    sections.push(SectionPayload::raw(
+        "player.locale_config",
+        PLAYER_LOCALE_CONFIG_SCHEMA,
+        br#"{"schema":"astra.player_locale_config.v1","default_locale":"en","available_locales":["en"]}"#.to_vec(),
+    ));
 }
 
 fn player_report(package_hash: &str, profile: &str, target: &str) -> PlayerAutomationReport {

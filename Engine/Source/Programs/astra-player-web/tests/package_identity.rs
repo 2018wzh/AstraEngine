@@ -48,6 +48,7 @@ fn web_player_binds_profile_to_validated_package() {
         target: "game-web".to_string(),
         profile: "web-release".to_string(),
         platform: "web".to_string(),
+        locale: "en".to_string(),
         package: "package/game.astrapkg".to_string(),
     };
     let profile = validate_package(&config, package.as_bytes()).unwrap();
@@ -68,6 +69,7 @@ fn web_player_rejects_profile_mismatch_and_corrupt_package() {
         target: "game-web".to_string(),
         profile: "web-release".to_string(),
         platform: "web".to_string(),
+        locale: "en".to_string(),
         package: "package/game.astrapkg".to_string(),
     };
     assert!(validate_package(&config, package.as_bytes()).is_err());

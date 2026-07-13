@@ -22,7 +22,7 @@ use astra_plugin_abi::{
 };
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
 use astra_vn::{
-    decode_compiled_story, NativeVnRuntimeProvider, SystemStoryManifest,
+    decode_compiled_story, load_player_locale_config, NativeVnRuntimeProvider, SystemStoryManifest,
     SystemStoryValidationStatus, VnAdvancedPresentationManifest, VnCommercialBaselineManifest,
     VnExtensionManifest, VnPolicyBundleManifest, VnPolicyBundleSourceCache,
     VnPresentationProviderManifest, VnProfileManifest, VnRunConfig, VnStandardCommandManifest,
@@ -2426,6 +2426,7 @@ fn vn_checks(
     }
     let mut checks = vec![
         vn_compiled_story_check(package, profile),
+        vn_locale_config_check(package),
         vn_profile_manifest_check(package, profile, selected_target),
         vn_policy_bundle_check(package, profile),
         vn_extension_bindings_check(package, profile),
@@ -2438,6 +2439,43 @@ fn vn_checks(
         checks.push(vn_advanced_presentation_check(package, profile));
     }
     checks
+}
+
+fn vn_locale_config_check(package: &PackageReader) -> ReleaseCheckRecord {
+    let config = match load_player_locale_config(package) {
+        Ok(config) => config,
+        Err(error) => {
+            return ReleaseCheckRecord {
+                id: "player.locale_config".to_string(),
+                domain: ReleaseDomain::Vn,
+                status: CheckStatus::Blocked,
+                summary: "Player locale config or a declared localization table is invalid"
+                    .to_string(),
+                diagnostic: Some(Diagnostic::blocking(
+                    "ASTRA_PLAYER_LOCALE_CONFIG",
+                    error.to_string(),
+                )),
+                evidence: vec![evidence("section", "player.locale_config")],
+            };
+        }
+    };
+    let entry = package
+        .container()
+        .section_entry("player.locale_config")
+        .expect("validated locale config section must exist");
+    ReleaseCheckRecord {
+        id: "player.locale_config".to_string(),
+        domain: ReleaseDomain::Vn,
+        status: CheckStatus::Pass,
+        summary: "Player locale config and every declared localization table are valid".to_string(),
+        diagnostic: None,
+        evidence: vec![
+            evidence("section", "player.locale_config"),
+            evidence("section_hash", entry.hash),
+            evidence("default_locale", config.default_locale),
+            evidence("locale_count", config.available_locales.len()),
+        ],
+    }
 }
 
 fn vn_compiled_story_check(package: &PackageReader, profile: &str) -> ReleaseCheckRecord {

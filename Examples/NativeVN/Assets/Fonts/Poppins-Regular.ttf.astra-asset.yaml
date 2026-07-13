@@ -5,6 +5,12 @@ source_hash: sha256:7e65201e9b79159e2300267cc885e16c8dcef2424cdfa09a29bfb0980a94
 type: font.ttf
 license: OFL-1.1
 importer: astra.import.font
+font:
+  family: Poppins
+  face_index: 0
+  subset: latin-basic
+  coverage:
+    - { start: 32, end: 126 }
 cook:
   processor: astra.cook.font
   target_profiles: [classic, modern, advanced-vn, windows-release, web-release-chrome]

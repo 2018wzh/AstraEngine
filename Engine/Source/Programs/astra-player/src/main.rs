@@ -156,6 +156,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         target: String,
         profile: String,
         platform: String,
+        locale: String,
         package: String,
     }
     #[derive(Deserialize)]
@@ -237,7 +238,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
             &package,
             VnRunConfig {
                 profile: config.profile,
-                locale: "zh-Hans".to_string(),
+                locale: config.locale,
             },
             width,
             height,
@@ -413,6 +414,30 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
             (Ok(()), Err(cleanup)) => return Err(cleanup),
             (Ok(()), Ok(())) => {}
         }
+        let shutdown_batch = vn.release_resources().map_err(|error| {
+            astra_platform::PlatformError::new(
+                astra_platform::PlatformErrorCode::InvalidState,
+                "player.runtime.release_resources",
+                error.to_string(),
+            )
+        })?;
+        executor
+            .execute_batch(shutdown_batch)
+            .await
+            .map_err(|error| {
+                astra_platform::PlatformError::new(
+                    astra_platform::PlatformErrorCode::InvalidState,
+                    "player.host.release_resources",
+                    error.to_string(),
+                )
+            })?;
+        vn.shutdown().map_err(|error| {
+            astra_platform::PlatformError::new(
+                astra_platform::PlatformErrorCode::InvalidState,
+                "player.runtime.shutdown",
+                error.to_string(),
+            )
+        })?;
         session.client.destroy_surface(surface).await?;
         session.client.destroy_window(window).await?;
         session.client.shutdown().await?;

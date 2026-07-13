@@ -28,7 +28,7 @@ Transcript identity 必须由完整 canonical JSON 计算；序列化失败或 a
 1. platform driver 发现并聚焦 player host。
 2. driver 注入 mouse/keyboard/touch input。
 3. host event loop 把输入转换为 `PlayerPlatformEvent`。
-4. `astra-player-core` 推进 runtime、presentation、audio graph 和 route state；`PlayerHostCommand::PresentTextScene` 只转发 renderer-ready glyph command，不允许 Player CPU raster 或 headless frame 代替平台输出。
+4. `astra-player-core` 推进 runtime、presentation、audio graph 和 route state；`PlayerHostCommand::PresentScene` 只转发 renderer-ready glyph/texture/sprite/rect command，不允许 Player CPU raster 或 headless frame 代替平台输出。
 5. 同一次 run 采样 frame/audio/route/input evidence。
 
 `VnPlayerCommand` 可继续服务 headless scenario 和 crate 单元测试，但不得出现在 live-player gate 的输入路径或 evidence 中。

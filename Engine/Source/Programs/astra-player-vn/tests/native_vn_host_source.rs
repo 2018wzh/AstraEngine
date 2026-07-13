@@ -1,8 +1,14 @@
+use astra_asset::VfsUri;
 use astra_core::Hash256;
+use astra_media::{
+    FontPackageEntry, FontPackageManifest, UnicodeRange, FONT_PACKAGE_MANIFEST_SCHEMA,
+};
+use astra_media_core::SceneCommand;
+use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
 use astra_player_core::{PlayerAction, PlayerHostCommand, PlayerHostResourceId};
 use astra_player_vn::{NativeVnAudioOutput, NativeVnHostCommandSource};
 use astra_vn_core::{compile_astra_sources, AstraSource, VnRunConfig};
-use astra_vn_package::package_sections_for_story;
+use astra_vn_package::{package_sections_for_story, PLAYER_LOCALE_CONFIG_SCHEMA};
 
 const STORY: &str = r#"
 story main #@id story.main
@@ -45,27 +51,283 @@ fn native_vn_source_preserves_ordered_audio_control_without_asset_bypass() {
     ));
 }
 
+fn product_package() -> Vec<u8> {
+    product_package_for(STORY)
+}
+
+fn product_package_for(story: &str) -> Vec<u8> {
+    let compiled = compile_astra_sources([AstraSource::new("main.astra", story)]).unwrap();
+    let mut sections =
+        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+    let font = include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/Poppins-Regular.ttf")
+        .to_vec();
+    let font_hash = Hash256::from_sha256(&font);
+    sections.push(SectionPayload::raw(
+        "asset.font.ui",
+        "astra.cooked_asset.v1",
+        font.clone(),
+    ));
+    sections.push(SectionPayload::raw(
+        "media.font_manifest",
+        FONT_PACKAGE_MANIFEST_SCHEMA,
+        serde_json::to_vec(&FontPackageManifest {
+            schema: FONT_PACKAGE_MANIFEST_SCHEMA.to_string(),
+            target: "nativevn-game".to_string(),
+            profile: "classic".to_string(),
+            provider_binding: "astra.vfs.package".to_string(),
+            fonts: vec![FontPackageEntry {
+                asset_id: "asset:/font/ui".to_string(),
+                uri: VfsUri::parse("package:/fonts/ui.ttf").unwrap(),
+                family: "Poppins".to_string(),
+                face_index: 0,
+                hash: font_hash,
+                license_id: "OFL-1.1".to_string(),
+                subset: Some("latin-basic".to_string()),
+                coverage: vec![UnicodeRange {
+                    start: 32,
+                    end: 126,
+                }],
+                targets: vec!["nativevn-game".to_string()],
+                profiles: vec!["classic".to_string()],
+            }],
+        })
+        .unwrap(),
+    ));
+    sections.push(SectionPayload::raw(
+        "vn.localization.en",
+        "astra.vn.localization_table.v1",
+        br#"{
+            "schema":"astra.vn.localization_table.v1",
+            "locale":"en",
+            "strings":{
+                "line.one":"First production line.",
+                "line.two":"Second production line.",
+                "speaker.hero":"Hero"
+            }
+        }"#
+        .to_vec(),
+    ));
+    sections.push(SectionPayload::raw(
+        "player.locale_config",
+        PLAYER_LOCALE_CONFIG_SCHEMA,
+        br#"{
+            "schema":"astra.player_locale_config.v1",
+            "default_locale":"en",
+            "available_locales":["en"]
+        }"#
+        .to_vec(),
+    ));
+
+    let mut request = PackageBuildRequest::fixture("com.example.player", "classic", sections);
+    request.asset_vfs_manifest = serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.asset_vfs_manifest.v1",
+        "prefixes": [{
+            "prefix": "package",
+            "provider_id": "astra.vfs.package",
+            "backend": "package",
+            "case_policy": "case_sensitive",
+            "mode": "read_only",
+            "redaction": "shipping",
+            "capabilities": ["vfs.backend.package"]
+        }],
+        "layers": [{
+            "layer_id": "package.base",
+            "prefix": "package",
+            "priority": 0,
+            "source": {"kind": "package_section", "section_id": "package.manifest"},
+            "targets": ["nativevn-game"],
+            "profiles": ["classic"]
+        }],
+        "entries": [{
+            "vfs_uri": "package:/fonts/ui.ttf",
+            "layer_id": "package.base",
+            "source": {"kind": "package_section", "section_id": "asset.font.ui"},
+            "offset": 0,
+            "size": font.len(),
+            "hash": font_hash,
+            "codec": "raw",
+            "media_kind": "font",
+            "diagnostics": []
+        }],
+        "whiteouts": []
+    }))
+    .unwrap();
+    request.asset_catalog = serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.asset_catalog.v1",
+        "assets": [{
+            "asset_id": "asset:/font/ui",
+            "vfs_uri": "package:/fonts/ui.ttf",
+            "media_kind": "font",
+            "tags": ["ui"],
+            "bundle_id": "classic",
+            "chunk_id": "base",
+            "profiles": ["classic"]
+        }]
+    }))
+    .unwrap();
+    PackageBuilder::build(request).unwrap().into_bytes()
+}
+
+fn scene_commands(batch: &astra_player_core::PlayerHostCommandBatch) -> &[SceneCommand] {
+    match &batch.commands[0] {
+        PlayerHostCommand::PresentScene { commands, .. } => commands,
+        command => panic!("expected retained scene presentation, got {command:?}"),
+    }
+}
+
 #[test]
-fn native_vn_source_turns_real_runtime_steps_into_changing_frames() {
-    let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
-    let mut source = NativeVnHostCommandSource::new(
-        compiled,
-        VnRunConfig::classic("zh-Hans"),
-        320,
-        180,
+fn packaged_native_vn_source_shapes_localized_text_into_retained_scene_commands() {
+    let bytes = product_package();
+    let package = PackageReader::open(&bytes).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        640,
+        360,
         PlayerHostResourceId(1),
     )
     .unwrap();
+
     let first = source.launch().unwrap();
     let second = source.dispatch_action(PlayerAction::Advance).unwrap();
-    let frame_hash = |command: &PlayerHostCommand| match command {
-        PlayerHostCommand::PresentRgba { rgba8, .. } => Hash256::from_sha256(rgba8),
-        _ => panic!("expected present command"),
-    };
+    for commands in [scene_commands(&first), scene_commands(&second)] {
+        assert!(commands
+            .iter()
+            .any(|command| matches!(command, SceneCommand::UploadGlyph { .. })));
+        assert!(commands
+            .iter()
+            .any(|command| matches!(command, SceneCommand::GlyphRun { .. })));
+        assert!(!commands.iter().any(|command| {
+            matches!(
+                command,
+                SceneCommand::Glyph { .. }
+                    | SceneCommand::Texture { .. }
+                    | SceneCommand::VideoFrame { .. }
+            )
+        }));
+    }
     assert_ne!(
-        frame_hash(&first.commands[0]),
-        frame_hash(&second.commands[0])
+        Hash256::from_sha256(&serde_json::to_vec(scene_commands(&first)).unwrap()),
+        Hash256::from_sha256(&serde_json::to_vec(scene_commands(&second)).unwrap())
     );
+    let shutdown = source.release_resources().unwrap();
+    assert!(scene_commands(&shutdown)
+        .iter()
+        .any(|command| matches!(command, SceneCommand::ReleaseResource { .. })));
+    source.shutdown().unwrap();
+}
+
+#[test]
+fn package_open_blocks_undeclared_localization() {
+    let bytes = product_package();
+    let package = PackageReader::open(&bytes).unwrap();
+    let missing_locale = match NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("zh-Hans"),
+        640,
+        360,
+        PlayerHostResourceId(1),
+    ) {
+        Ok(_) => panic!("undeclared localization must block package open"),
+        Err(error) => error.to_string(),
+    };
+    assert!(missing_locale.contains("ASTRA_PLAYER_LOCALE_UNDECLARED"));
+}
+
+#[test]
+fn package_open_blocks_unwired_presentation_commands_before_runtime_step() {
+    let bytes = product_package_for(
+        r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    camera target:main zoom:1.1 duration:100 #@id camera.unsupported
+    text key:line.one speaker:hero #@id line.one
+"#,
+    );
+    let package = PackageReader::open(&bytes).unwrap();
+    let error = match NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        640,
+        360,
+        PlayerHostResourceId(1),
+    ) {
+        Ok(_) => panic!("unwired presentation command must block package open"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("ASTRA_PLAYER_PRESENTATION_UNSUPPORTED"));
+}
+
+#[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
+#[tokio::test(flavor = "current_thread")]
+async fn packaged_native_vn_scene_reaches_live_windows_wgpu_and_releases_resources() {
+    use astra_platform::{PlatformHostFactory, PlatformHostProfile, SurfaceRequest, WindowRequest};
+    use astra_player_core::{PlatformCommandSink, PlayerHostCommandExecutor};
+
+    let bytes = product_package();
+    let package = PackageReader::open(&bytes).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        640,
+        360,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+    let session = astra_platform_windows::factory()
+        .start(PlatformHostProfile::windows_release(
+            "nativevn-game",
+            "com.example.player",
+        ))
+        .await
+        .unwrap();
+    let window = session
+        .client
+        .create_window(WindowRequest {
+            title: "AstraVN retained scene test".to_string(),
+            width: 640,
+            height: 360,
+            visible: true,
+        })
+        .await
+        .unwrap();
+    let surface = session
+        .client
+        .create_surface(SurfaceRequest {
+            window,
+            width: 640,
+            height: 360,
+        })
+        .await
+        .unwrap();
+    let mut sink = PlatformCommandSink::new(session.client.clone());
+    sink.bind_surface(PlayerHostResourceId(1), surface).unwrap();
+    let mut executor = PlayerHostCommandExecutor::new(sink);
+    executor
+        .execute_batch(source.launch().unwrap())
+        .await
+        .unwrap();
+    let first = session.client.capture_surface(surface).await.unwrap();
+    assert!(first
+        .rgba8
+        .chunks_exact(4)
+        .any(|pixel| pixel != [8, 10, 16, 255]));
+
+    executor
+        .execute_batch(source.release_resources().unwrap())
+        .await
+        .unwrap();
+    let released = session.client.capture_surface(surface).await.unwrap();
+    assert!(released
+        .rgba8
+        .chunks_exact(4)
+        .all(|pixel| pixel == [0, 0, 0, 255]));
+    source.shutdown().unwrap();
+    drop(executor);
+    session.client.destroy_surface(surface).await.unwrap();
+    session.client.destroy_window(window).await.unwrap();
+    session.client.shutdown().await.unwrap();
 }
 
 #[test]

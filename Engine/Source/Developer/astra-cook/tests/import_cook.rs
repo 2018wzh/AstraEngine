@@ -19,6 +19,7 @@ fn import_cook_classifies_fresh_stale_and_blocked_artifacts() {
             source_path: source.clone(),
             asset_type: "image.rgba".to_string(),
             license: "project-owned".to_string(),
+            font: None,
             target_profiles: vec!["desktop-release".to_string()],
         })
         .unwrap();

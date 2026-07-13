@@ -1257,6 +1257,9 @@ fn nativevn_sample_cooks_packages_validates_and_runs_full_playthrough() {
         "vn.presentation_provider_manifest",
         "vn.commercial_baseline_manifest",
         "vn.system_story_manifest",
+        "media.font_manifest",
+        "player.locale_config",
+        "vn.localization.en",
     ] {
         assert!(reader.has_section(section), "missing section {section}");
     }
@@ -1271,6 +1274,39 @@ fn nativevn_sample_cooks_packages_validates_and_runs_full_playthrough() {
     assert_eq!(display_config["original_resolution"]["width"], 1920);
     assert_eq!(display_config["original_resolution"]["height"], 1080);
     assert_eq!(display_config["scale_filter"], "linear");
+    let font_manifest: serde_json::Value = serde_json::from_slice(
+        &reader
+            .container()
+            .read_section("media.font_manifest")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(font_manifest["schema"], "astra.font_manifest.v1");
+    assert_eq!(font_manifest["target"], "nativevn-game");
+    assert_eq!(font_manifest["profile"], "classic");
+    assert_eq!(font_manifest["provider_binding"], "astra.vfs.package");
+    assert_eq!(font_manifest["fonts"][0]["asset_id"], "asset:/font/ui");
+    assert_eq!(font_manifest["fonts"][0]["family"], "Poppins");
+    assert_eq!(font_manifest["fonts"][0]["coverage"][0]["start"], 32);
+    let media_manifest: serde_json::Value =
+        serde_json::from_slice(&reader.container().read_section("media.manifest").unwrap())
+            .unwrap();
+    assert_eq!(media_manifest["font_manifest_required"], true);
+    assert_eq!(
+        media_manifest["font_manifest_section"],
+        "media.font_manifest"
+    );
+    let locale_config: serde_json::Value = serde_json::from_slice(
+        &reader
+            .container()
+            .read_section("player.locale_config")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(locale_config["schema"], "astra.player_locale_config.v1");
+    assert_eq!(locale_config["default_locale"], "en");
+    assert_eq!(locale_config["available_locales"][0], "en");
+    assert_eq!(locale_config["available_locales"][1], "zh-Hans");
 
     let validate_output = Command::new(env!("CARGO_BIN_EXE_astra"))
         .args([
@@ -1439,6 +1475,7 @@ fn nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes() {
                 .unwrap();
         assert_eq!(player_config["display"], display_config);
         assert_eq!(player_config["schema"], "astra.player_config.v2");
+        assert_eq!(player_config["locale"], "en");
         assert_eq!(
             manifest["observability"]["log_schema"],
             "astra.log_event.v1"

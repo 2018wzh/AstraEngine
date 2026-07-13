@@ -27,6 +27,7 @@ fn node(id: &str, source: &[u8], dependencies: &[&str]) -> CookNode {
                 asset_type: "binary.test".to_string(),
                 license: Some("test-fixture".to_string()),
                 importer: "astra.import.test".to_string(),
+                font: None,
                 dependencies: dependencies
                     .iter()
                     .map(|dependency| dependency.parse().unwrap())

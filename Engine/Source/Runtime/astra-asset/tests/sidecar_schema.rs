@@ -51,6 +51,7 @@ fn sidecar_schema_invalid_sidecar_reports_blocking_diagnostics() {
         asset_type: "image.rgba".to_string(),
         license: None,
         importer: String::new(),
+        font: None,
         dependencies: vec![
             AssetId::parse("asset:/bad").unwrap(),
             AssetId::parse("asset:/bad").unwrap(),
@@ -97,4 +98,68 @@ fn sidecar_schema_duplicate_asset_id_blocks_registry_insert() {
         .diagnostics()
         .iter()
         .any(|diag| diag.code == "ASTRA_ASSET_DUPLICATE_ID"));
+}
+
+#[test]
+fn font_sidecar_requires_typed_ordered_unicode_coverage() {
+    let valid = AssetSidecar::from_yaml(
+        r#"
+schema: astra.asset.v1
+id: asset:/font/ui
+source: content/fonts/ui.ttf
+source_hash: sha256:936a185caaa266bb9cbe981e9e05cb78e716a8667b53e07f1f2f37de2f0368c5
+type: font.ttf
+license: OFL-1.1
+importer: astra.import.font
+font:
+  family: Example Sans
+  face_index: 0
+  subset: latin-basic
+  coverage:
+    - { start: 32, end: 126 }
+    - { start: 160, end: 255 }
+cook:
+  processor: astra.cook.font
+  target_profiles: [shipping]
+  params: {}
+review: accepted
+"#,
+    )
+    .unwrap();
+    assert!(valid.validate().is_empty());
+    assert_eq!(
+        AssetSidecar::from_yaml(&valid.to_yaml().unwrap()).unwrap(),
+        valid
+    );
+
+    let mut invalid = valid;
+    invalid.font.as_mut().unwrap().coverage[1].start = 120;
+    assert!(invalid
+        .validate()
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_ASSET_FONT_COVERAGE"));
+}
+
+#[test]
+fn font_metadata_cannot_be_omitted_or_attached_to_non_font_assets() {
+    let mut font = AssetSidecar::new_test("asset:/font/ui", "content/ui.ttf", "font.ttf");
+    assert!(font
+        .validate()
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_ASSET_FONT_METADATA_MISSING"));
+
+    font.asset_type = "image.rgba".to_string();
+    font.font = Some(astra_asset::FontAssetMetadata {
+        family: "Example Sans".to_string(),
+        face_index: 0,
+        subset: None,
+        coverage: vec![astra_asset::FontCoverageRange {
+            start: 32,
+            end: 126,
+        }],
+    });
+    assert!(font
+        .validate()
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_ASSET_FONT_METADATA_UNEXPECTED"));
 }

@@ -17,6 +17,7 @@ path = "src/main.rs"
 astra-asset = { path = "../../Runtime/astra-asset" }
 astra-observability = { path = "../../Developer/astra-observability" }
 astra-core = { path = "../../Runtime/astra-core" }
+astra-media = { path = "../../Runtime/astra-media" }
 astra-cook = { path = "../../Developer/astra-cook" }
 astra-package = { path = "../../Runtime/astra-package" }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
