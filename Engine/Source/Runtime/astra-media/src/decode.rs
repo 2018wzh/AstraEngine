@@ -1,4 +1,7 @@
-use std::io::{Cursor, ErrorKind};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::{Cursor, ErrorKind},
+};
 
 use astra_core::{Diagnostic, Hash256};
 use schemars::JsonSchema;
@@ -14,10 +17,15 @@ use symphonia::core::{
 use crate::MediaError;
 
 const MAX_DECODED_AUDIO_BYTES: usize = 16 * 1024 * 1024;
-#[cfg(windows)]
+#[cfg(any(windows, feature = "ffmpeg-vcpkg"))]
 const MAX_DECODED_VIDEO_FRAME_BYTES: usize = 64 * 1024 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg(feature = "ffmpeg-vcpkg")]
+mod ffmpeg;
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DecodeKind {
     Image,
@@ -75,6 +83,7 @@ pub struct DecodeCapability {
     pub codecs: Vec<String>,
     pub feature_gated: bool,
     pub packaged_eligible: bool,
+    pub reference_only: bool,
 }
 
 pub trait DecodeProvider: Send + Sync {
@@ -83,115 +92,235 @@ pub trait DecodeProvider: Send + Sync {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct DecodePolicy {
+pub struct DecodeBindingContext {
+    pub provider_id: String,
+    pub target: String,
     pub profile: String,
-    pub fallback_enabled: bool,
-    pub prefer_fallback: bool,
+    pub allow_fallback: bool,
+    pub allow_reference_provider: bool,
 }
 
-impl DecodePolicy {
-    pub fn desktop_release() -> Self {
+impl DecodeBindingContext {
+    pub fn shipping(
+        provider_id: impl Into<String>,
+        target: impl Into<String>,
+        profile: impl Into<String>,
+    ) -> Self {
         Self {
-            profile: "desktop-release".to_string(),
-            fallback_enabled: true,
-            prefer_fallback: false,
+            provider_id: provider_id.into(),
+            target: target.into(),
+            profile: profile.into(),
+            allow_fallback: false,
+            allow_reference_provider: false,
         }
     }
 
-    pub fn without_fallback(mut self) -> Self {
-        self.fallback_enabled = false;
+    pub fn with_declared_fallback(mut self) -> Self {
+        self.allow_fallback = true;
         self
     }
 
-    pub fn prefer_fallback_for_tests(mut self) -> Self {
-        self.prefer_fallback = true;
+    pub fn for_reference_tests(mut self) -> Self {
+        self.allow_reference_provider = true;
         self
     }
 }
 
 #[derive(Default)]
 pub struct DecodeProviderRegistry {
-    providers: Vec<Box<dyn DecodeProvider>>,
+    providers: BTreeMap<String, Box<dyn DecodeProvider>>,
 }
 
 impl DecodeProviderRegistry {
-    pub fn register(&mut self, provider: Box<dyn DecodeProvider>) {
+    pub fn register(&mut self, provider: Box<dyn DecodeProvider>) -> Result<(), MediaError> {
         let capability = provider.capability();
+        validate_capability(&capability)?;
+        if self.providers.contains_key(&capability.provider_id) {
+            return Err(decode_error(
+                "ASTRA_DECODE_PROVIDER_DUPLICATE",
+                "decode provider id is already registered",
+            ));
+        }
         tracing::info!(
             event = "media.decode.provider.register",
             provider_id = %capability.provider_id,
             codec_count = capability.codecs.len(),
             "media decode provider registered"
         );
-        self.providers.push(provider);
+        self.providers
+            .insert(capability.provider_id.clone(), provider);
+        Ok(())
     }
 
     pub fn select(
         &self,
         request: &DecodeRequest,
-        policy: &DecodePolicy,
+        binding: &DecodeBindingContext,
     ) -> Result<DecodeCapability, MediaError> {
+        validate_request(request, binding)?;
         tracing::debug!(
             event = "media.decode.select.start",
             codec = %request.codec,
-            profile = %policy.profile,
+            profile = %binding.profile,
+            target_id = %binding.target,
+            provider_id = %binding.provider_id,
             provider_count = self.providers.len(),
-            fallback_enabled = policy.fallback_enabled,
             "media decode provider selection started"
         );
-        let mut candidates: Vec<_> = self
-            .providers
-            .iter()
-            .map(|provider| provider.capability())
-            .filter(|capability| {
-                capability.kinds.contains(&request.kind)
-                    && capability
-                        .codecs
-                        .iter()
-                        .any(|codec| codec == &request.codec)
-                    && capability.packaged_eligible
-                    && (policy.fallback_enabled
-                        || capability.priority != ProviderPriority::Fallback)
-            })
-            .collect();
-        candidates.sort_by_key(
-            |capability| match (policy.prefer_fallback, capability.priority) {
-                (true, ProviderPriority::Fallback) => 0,
-                (true, ProviderPriority::Platform) => 1,
-                (false, ProviderPriority::Platform) => 0,
-                (false, ProviderPriority::Fallback) => 1,
-            },
-        );
-        match candidates.into_iter().next() {
-            Some(capability) => {
-                if capability.priority == ProviderPriority::Fallback {
-                    tracing::warn!(
-                        event = "media.decode.select.fallback",
-                        provider_id = %capability.provider_id,
-                        codec = %request.codec,
-                        "media decode fallback selected"
-                    );
-                } else {
-                    tracing::info!(
-                        event = "media.decode.select.complete",
-                        provider_id = %capability.provider_id,
-                        codec = %request.codec,
-                        "media decode provider selected"
-                    );
-                }
-                Ok(capability)
+        let provider = self.providers.get(&binding.provider_id).ok_or_else(|| {
+            decode_error(
+                "ASTRA_DECODE_BINDING_MISSING",
+                "bound decode provider is not registered",
+            )
+        })?;
+        let capability = provider.capability();
+        validate_capability(&capability)?;
+        if capability.feature_gated
+            || !capability.kinds.contains(&request.kind)
+            || !capability
+                .codecs
+                .iter()
+                .any(|codec| codec == &request.codec)
+            || (!capability.packaged_eligible && !binding.allow_reference_provider)
+            || (capability.priority == ProviderPriority::Fallback && !binding.allow_fallback)
+            || (capability.reference_only && !binding.allow_reference_provider)
+        {
+            return Err(decode_error(
+                "ASTRA_DECODE_BINDING_INELIGIBLE",
+                "bound decode provider is not eligible for the request and binding context",
+            ));
+        }
+        if capability.priority == ProviderPriority::Fallback {
+            tracing::warn!(
+                event = "media.decode.select.fallback",
+                provider_id = %capability.provider_id,
+                codec = %request.codec,
+                "explicitly declared media decode fallback selected"
+            );
+        } else {
+            tracing::info!(
+                event = "media.decode.select.complete",
+                provider_id = %capability.provider_id,
+                codec = %request.codec,
+                "bound media decode provider selected"
+            );
+        }
+        Ok(capability)
+    }
+
+    pub fn decode(
+        &self,
+        request: &DecodeRequest,
+        binding: &DecodeBindingContext,
+    ) -> Result<DecodeResult, MediaError> {
+        let capability = self.select(request, binding)?;
+        let provider = self.providers.get(&capability.provider_id).ok_or_else(|| {
+            decode_error(
+                "ASTRA_DECODE_REGISTRY_STATE",
+                "selected decode provider disappeared from the registry",
+            )
+        })?;
+        let result = provider.decode(request)?;
+        if result.provider_id != capability.provider_id
+            || result.kind != request.kind
+            || result.codec != request.codec
+        {
+            return Err(decode_error(
+                "ASTRA_DECODE_OUTPUT_IDENTITY",
+                "decode provider output identity does not match the bound request",
+            ));
+        }
+        validate_output(&result.output)?;
+        Ok(result)
+    }
+}
+
+fn validate_capability(capability: &DecodeCapability) -> Result<(), MediaError> {
+    let kinds = capability.kinds.iter().copied().collect::<BTreeSet<_>>();
+    let codecs = capability.codecs.iter().collect::<BTreeSet<_>>();
+    if !safe_identity(&capability.provider_id)
+        || capability.kinds.is_empty()
+        || kinds.len() != capability.kinds.len()
+        || capability.codecs.is_empty()
+        || codecs.len() != capability.codecs.len()
+        || capability.codecs.iter().any(|codec| !safe_codec(codec))
+        || (capability.reference_only && capability.packaged_eligible)
+    {
+        return Err(decode_error(
+            "ASTRA_DECODE_CAPABILITY_INVALID",
+            "decode provider capability descriptor is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_request(
+    request: &DecodeRequest,
+    binding: &DecodeBindingContext,
+) -> Result<(), MediaError> {
+    if request.bytes.is_empty()
+        || !safe_codec(&request.codec)
+        || !safe_identity(&request.profile)
+        || !safe_identity(&binding.provider_id)
+        || !safe_identity(&binding.target)
+        || !safe_identity(&binding.profile)
+        || request.profile != binding.profile
+    {
+        return Err(decode_error(
+            "ASTRA_DECODE_REQUEST_INVALID",
+            "decode request or binding context is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_output(output: &DecodeOutput) -> Result<(), MediaError> {
+    match output {
+        DecodeOutput::CpuBuffer {
+            bytes,
+            format,
+            hash,
+        } => {
+            if bytes.is_empty() || format.is_empty() || Hash256::from_sha256(bytes) != *hash {
+                return Err(decode_error(
+                    "ASTRA_DECODE_OUTPUT_INVALID",
+                    "decoded CPU buffer is empty or has an invalid hash",
+                ));
             }
-            None => {
-                tracing::error!(
-                    event = "media.decode.select.failed",
-                    codec = %request.codec,
-                    profile = %policy.profile,
-                    "no eligible media decode provider"
-                );
-                Err(MediaError::message("no eligible decode provider"))
+        }
+        DecodeOutput::MediaSurfaceToken(token) => {
+            if !safe_identity(&token.provider_id)
+                || token.token_id.trim().is_empty()
+                || token.format.trim().is_empty()
+            {
+                return Err(decode_error(
+                    "ASTRA_DECODE_OUTPUT_INVALID",
+                    "decoded media surface token is invalid",
+                ));
             }
         }
     }
+    Ok(())
+}
+
+fn safe_identity(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn safe_codec(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn decode_error(code: impl Into<String>, message: impl Into<String>) -> MediaError {
+    MediaError::Diagnostics(vec![Diagnostic::blocking(code, message)])
 }
 
 #[derive(Debug, Clone, Default)]
@@ -211,6 +340,7 @@ impl DecodeProvider for ImageDecodeProvider {
             ],
             feature_gated: false,
             packaged_eligible: true,
+            reference_only: false,
         }
     }
 
@@ -255,7 +385,8 @@ impl DecodeProvider for SyntheticPlatformDecodeProvider {
             kinds: vec![DecodeKind::Image, DecodeKind::Audio, DecodeKind::Video],
             codecs: self.codecs.clone(),
             feature_gated: false,
-            packaged_eligible: true,
+            packaged_eligible: false,
+            reference_only: true,
         }
     }
 
@@ -291,6 +422,7 @@ impl SymphoniaAudioDecodeProvider {
             ],
             feature_gated: false,
             packaged_eligible: true,
+            reference_only: false,
         }
     }
 
@@ -346,14 +478,15 @@ impl DecodeProvider for SymphoniaAudioDecodeProvider {
             .as_ref()
             .map(|channels| channels.count())
             .unwrap_or_default();
-        let mut diagnostics = Vec::new();
-
         loop {
             let packet = match format.next_packet() {
                 Ok(Some(packet)) => packet,
                 Ok(None) => break,
                 Err(SymphoniaError::IoError(err)) if err.kind() == ErrorKind::UnexpectedEof => {
-                    break;
+                    return Err(decode_error(
+                        "ASTRA_AUDIO_DECODE_TRUNCATED_INPUT",
+                        "audio container ended before an explicit end of stream",
+                    ));
                 }
                 Err(err) => return Err(MediaError::message(format!("read audio packet: {err}"))),
             };
@@ -362,27 +495,43 @@ impl DecodeProvider for SymphoniaAudioDecodeProvider {
             }
             let decoded = match decoder.decode(&packet) {
                 Ok(decoded) => decoded,
-                Err(SymphoniaError::DecodeError(_)) => continue,
+                Err(SymphoniaError::DecodeError(_)) => {
+                    return Err(decode_error(
+                        "ASTRA_AUDIO_DECODE_CORRUPT_PACKET",
+                        "audio decoder rejected a media packet",
+                    ));
+                }
                 Err(err) => return Err(MediaError::message(format!("decode audio packet: {err}"))),
             };
             sample_rate = decoded.spec().rate();
             channels = decoded.spec().channels().count();
             let mut samples = vec![0i16; decoded.samples_interleaved()];
             decoded.copy_to_slice_interleaved(&mut samples);
-            let additional = samples.len() * std::mem::size_of::<i16>();
-            if pcm.len().saturating_add(additional) > MAX_DECODED_AUDIO_BYTES {
-                diagnostics.push(Diagnostic::warning(
-                    "ASTRA_AUDIO_DECODE_TRUNCATED",
-                    "decoded audio exceeded the bounded CPU buffer limit",
+            let additional = samples
+                .len()
+                .checked_mul(std::mem::size_of::<i16>())
+                .ok_or_else(|| {
+                    decode_error(
+                        "ASTRA_AUDIO_DECODE_BUDGET",
+                        "decoded audio byte count overflowed",
+                    )
+                })?;
+            if pcm
+                .len()
+                .checked_add(additional)
+                .is_none_or(|total| total > MAX_DECODED_AUDIO_BYTES)
+            {
+                return Err(decode_error(
+                    "ASTRA_AUDIO_DECODE_BUDGET",
+                    "decoded audio exceeds the bounded CPU buffer budget",
                 ));
-                break;
             }
             for sample in samples {
                 pcm.extend_from_slice(&sample.to_le_bytes());
             }
         }
 
-        if pcm.is_empty() {
+        if pcm.is_empty() || sample_rate == 0 || channels == 0 {
             return Err(MediaError::message("audio decode produced no PCM samples"));
         }
         Ok(DecodeResult {
@@ -394,7 +543,7 @@ impl DecodeProvider for SymphoniaAudioDecodeProvider {
                 bytes: pcm,
                 format: format!("pcm_s16le:{sample_rate}:{channels}"),
             },
-            diagnostics,
+            diagnostics: Vec::new(),
         })
     }
 }
@@ -426,6 +575,7 @@ impl WindowsMediaFoundationDecodeProvider {
             ],
             feature_gated: false,
             packaged_eligible: true,
+            reference_only: false,
         }
     }
 }
@@ -485,6 +635,7 @@ impl WebCodecsDecodeProvider {
             ],
             feature_gated: false,
             packaged_eligible: true,
+            reference_only: false,
         }
     }
 }
@@ -689,12 +840,13 @@ mod wmf_decode {
             let media_type = media_type(&MFMediaType_Audio, &MFAudioFormat_PCM)?;
             reader.SetCurrentMediaType(stream_index, None, &media_type)?;
             let current_type = reader.GetCurrentMediaType(stream_index)?;
-            let sample_rate =
-                attribute_u32(&current_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND).unwrap_or_default();
-            let channels =
-                attribute_u32(&current_type, &MF_MT_AUDIO_NUM_CHANNELS).unwrap_or_default();
+            let sample_rate = attribute_u32(&current_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND)
+                .filter(|value| *value > 0)
+                .ok_or_else(|| wmf_error("audio decode reported an invalid sample rate"))?;
+            let channels = attribute_u32(&current_type, &MF_MT_AUDIO_NUM_CHANNELS)
+                .filter(|value| *value > 0)
+                .ok_or_else(|| wmf_error("audio decode reported an invalid channel count"))?;
             let mut pcm = Vec::new();
-            let mut diagnostics = Vec::new();
 
             loop {
                 let mut flags = 0;
@@ -719,12 +871,9 @@ mod wmf_decode {
                 }
                 let remaining = MAX_DECODED_AUDIO_BYTES.saturating_sub(pcm.len());
                 if chunk.len() > remaining {
-                    pcm.extend_from_slice(&chunk[..remaining]);
-                    diagnostics.push(Diagnostic::warning(
-                        "ASTRA_WMF_AUDIO_DECODE_TRUNCATED",
-                        "decoded audio exceeded the bounded CPU buffer limit",
+                    return Err(wmf_error(
+                        "decoded audio exceeds the bounded CPU buffer budget",
                     ));
-                    break;
                 }
                 pcm.extend_from_slice(&chunk);
             }
@@ -736,7 +885,7 @@ mod wmf_decode {
                 pcm,
                 sample_rate,
                 channels,
-                diagnostics,
+                diagnostics: Vec::new(),
             })
         }
     }
@@ -863,31 +1012,21 @@ mod wmf_decode {
     }
 }
 
-#[cfg(feature = "ffmpeg")]
+#[cfg(feature = "ffmpeg-vcpkg")]
 #[derive(Debug, Clone)]
 pub struct FfmpegDecodeProvider {
     probed: bool,
 }
 
-#[cfg(feature = "ffmpeg")]
+#[cfg(feature = "ffmpeg-vcpkg")]
 impl FfmpegDecodeProvider {
     pub fn new_unprobed() -> Self {
         Self { probed: false }
     }
 
     pub fn probe() -> Result<Self, MediaError> {
-        #[cfg(feature = "ffmpeg-vcpkg")]
-        {
-            ffmpeg_next::init()
-                .map_err(|err| MediaError::message(format!("ffmpeg init: {err}")))?;
-            return Ok(Self { probed: true });
-        }
-        #[cfg(not(feature = "ffmpeg-vcpkg"))]
-        {
-            Err(MediaError::message(
-                "ffmpeg feature is enabled without ffmpeg-vcpkg native bindings",
-            ))
-        }
+        ffmpeg::probe()?;
+        Ok(Self { probed: true })
     }
 
     pub fn capability(&self) -> DecodeCapability {
@@ -905,11 +1044,12 @@ impl FfmpegDecodeProvider {
             ],
             feature_gated: !self.probed,
             packaged_eligible: true,
+            reference_only: false,
         }
     }
 }
 
-#[cfg(feature = "ffmpeg")]
+#[cfg(feature = "ffmpeg-vcpkg")]
 impl DecodeProvider for FfmpegDecodeProvider {
     fn capability(&self) -> DecodeCapability {
         FfmpegDecodeProvider::capability(self)
@@ -921,16 +1061,6 @@ impl DecodeProvider for FfmpegDecodeProvider {
                 "ffmpeg decode provider must be explicitly probed before use",
             ));
         }
-        Ok(DecodeResult {
-            provider_id: self.capability().provider_id,
-            kind: request.kind,
-            codec: request.codec.clone(),
-            output: DecodeOutput::MediaSurfaceToken(MediaSurfaceToken {
-                provider_id: self.capability().provider_id,
-                token_id: format!("ffmpeg:{}", Hash256::from_sha256(&request.bytes).to_hex()),
-                format: request.codec.clone(),
-            }),
-            diagnostics: Vec::new(),
-        })
+        ffmpeg::decode(self.capability().provider_id, request)
     }
 }

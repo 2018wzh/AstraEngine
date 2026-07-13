@@ -4,13 +4,15 @@ Media 分为 Renderer2D、TextLayout、DecodeProvider、FilterGraph、AudioGraph
 
 ## Renderer2D
 
-wgpu 是默认 provider，但不是唯一后端。Renderer2D provider 声明 backend、surface capability、headless support、shader model、target format 和 packaged eligibility。
+wgpu 是默认 provider，但不是唯一后端。真实 wgpu owner 是 platform host 的 `WgpuPresentationCore`；`astra-media` 不再用只返回 descriptor 的 facade 冒充 renderer。Windows host 持有 hardware adapter、device、surface、upload/readback resource 和 frame sequence，显式处理 resize、context loss、device loss、资源重建与失败事件。Headless CPU provider只用于 E1/E2 reference，不具备 shipping eligibility。
 
 现有 `HeadlessRenderer` 只证明轻量 CPU contract 和 deterministic frame。Migration 11 planned 完整 Headless Platform 必须显式绑定 Media 层的真实 renderer、font/TextLayout、FilterGraph、AudioGraph 和 decode provider，输出真实 PNG/WAV。state hash 颜色块、矩形变化、空音频、静态 meter 或 synthetic decode 都不能作为完整 Headless 产品证据。
 
 ## DecodeProvider
 
-平台解码优先：AVFoundation、MediaCodec、WebCodecs、Windows Media Foundation 等平台模块先接管可用格式。桌面 fallback 通过 optional `ffmpeg-vcpkg` feature 接入，使用 `ffmpeg-next`/`ffmpeg-sys-next` 的 `vcpkg` crate provider 查找 FFmpeg；默认 build 不要求本机 FFmpeg。DecodeProvider 输出 CPU buffer 或 `MediaSurfaceToken`；public API 不暴露平台 native handle。
+Decode 只能通过 `DecodeBindingContext { provider_id, target, profile, allow_fallback, allow_reference_provider }` 选择一个显式 provider。Registry 阻断重复 id、无 binding、profile drift、unsupported codec/kind、feature-gated provider、未声明 fallback 和 reference provider 进入 shipping；注册顺序不参与选择。平台 provider 包括 Windows Media Foundation；CPU fallback 包括 Image/Symphonia。`SyntheticPlatformDecodeProvider` 明确为 non-packaged reference provider。DecodeProvider 输出经过 provider/kind/codec/hash 校验的 CPU buffer 或 `MediaSurfaceToken`，public API 不暴露平台 native handle。
+
+桌面 FFmpeg 由 optional `ffmpeg-vcpkg` feature 声明，默认 build 不要求本机 FFmpeg。启用后 provider 必须先完成 native probe，再从受限临时输入执行真实 demux、audio decode/resample 或 video first-frame decode；损坏输入、缺 stream、超预算和未 probe 均产生 blocking diagnostic。当前真实 one-shot decode 已覆盖，但 seek/pause/resume/EOS session 与 A/V sync 尚未闭合，因此仍不能单独作为完整 release fallback 证据。
 
 Player 从 package 消费 encoded audio 时，必须先通过 `asset.catalog` 与 `asset.vfs_manifest` 得到唯一 package-backed entry，执行 bounded read 和 SHA-256 校验，再按文件签名识别 codec。不能用 asset id、文件名或 provider descriptor 猜测已解码成功。Windows Media Foundation 当前返回 `pcm_s16le:<sample_rate>:<channels>`；Player 必须检查格式字段、采样率、声道、sample budget、sample 截断和 frame alignment，再显式转换为 interleaved `f32`。未知格式、空/越界 stream shape 和不完整 frame 都是 blocking，不能转为空音频成功。
 
@@ -32,16 +34,16 @@ nodes:
     kind: astra.filter.bloom
     input: final
     output: final
-    params: { intensity: 0.35, threshold: 0.8 }
+    params: { intensity: 0.35 }
 ```
 
-Node 必须声明 input/output target、参数 schema、GPU/CPU capability、determinism、fallback 和 release gate rule。
+Node 必须声明 input/output target、精确参数集合、GPU/CPU capability、determinism、fallback 和 release gate rule。当前 deterministic CPU executor 只接受已实现的 bloom、fade 和 color matrix，要求显式 `allow_cpu_fallback`，并阻断 unknown node、no-op fallback、跨 target 伪执行、参数缺失/多余/越界和损坏 frame。跨 target graph 与 GPU node provider 未闭合前保持未完成。
 
 AstraEMU filter preset 复用同一 `FilterGraph`。final-frame preset 作用在合成后画面；per-layer preset 绑定 `PresentationCommand` 的 layer id 或 role。family 缺少 layer metadata 时，Manager 只启用 final-frame preset 并输出 diagnostic。
 
 ## AudioGraph
 
-AudioGraph 独立于视觉 FilterGraph。它处理 bus、voice、BGM、SE、DSP、ducking、fade、loop、latency 和 platform output。Timeline 负责音画同步。
+`astra.audio_graph.v2` 独立于视觉 FilterGraph。共享 owner 提供 bounded bus/voice/fade/fence、显式 voice id、play/pause/resume/seek/stop、loop position、fixed-delta tick、事务性 command 和 deterministic snapshot hash；非法 gain、资源 URI、状态迁移、冲突 fade、重复 id、容量和时间溢出都必须在修改状态前失败。真实输出由 platform host 的 bounded audio queue 和 WASAPI callback持有，close/shutdown 必须 drain；graph hash 不是音频 meter，也不能替代真实 callback meter、A/V sync 或听测证据。
 
 Headless reference output 使用固定采样率、固定声道布局的 PCM S16LE WAV，并保留完整 sample sequence。音频限额、写入失败、静音、削波、声道和时长不匹配都进入 machine-readable diagnostic；不能只记录 peak/RMS 后丢弃实际音频。
 

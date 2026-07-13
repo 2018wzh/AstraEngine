@@ -98,6 +98,8 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **ID:** `S2-MEDIA-01`
 
+**Status:** `IN_PROGRESS`
+
 **Goal:** 建立 Renderer2D provider slot、wgpu provider 边界和 headless capture provider。
 
 **Depends On:** `S1-PLUGIN-01`、`Docs/contracts/media.md`
@@ -111,7 +113,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 3. 实现 headless capture provider，输出 deterministic image hash。
 4. 编写 provider eligibility、headless render command 和 hash repeatability 测试。
 
-**Done Evidence:** `cargo test -p astra-media headless_capture` 证明 headless capture hash 可重复，provider descriptor 可被 release gate 检查。
+**Current Evidence:** `cargo test -p astra-media headless_capture` 只证明 reference CPU capture；`cargo test -p astra-platform-windows --test host_backend` 证明 Windows hardware wgpu ordered frame、byte-size rejection、resize、present/readback 和资源释放，`WgpuPresentationCore` 还补入 context/device loss 分类与 retained frame resource rebuild。旧的 descriptor-only `WgpuRendererProvider` 已删除。真实 SceneCommand/glyph atlas product E3 与可注入 device-loss recovery test 尚未闭合。
 
 **Linked Test IDs:** `T-S2-MEDIA-01`
 
@@ -136,11 +138,13 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **Linked Test IDs:** `T-S2-MEDIA-02`
 
-## S2-MEDIA-03 AudioGraph 与 headless meter
+## S2-MEDIA-03 AudioGraph 与 platform output
 
 **ID:** `S2-MEDIA-03`
 
-**Goal:** AudioGraph 覆盖 bus、voice、BGM、SE、fade、loop、latency 和 headless meter。
+**Status:** `IN_PROGRESS`
+
+**Goal:** AudioGraph 覆盖 bus、voice、BGM、SE、fade、loop、latency 和 platform output lifecycle。
 
 **Depends On:** `S1-RUNTIME-03`
 
@@ -148,18 +152,20 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **Steps:**
 
-1. 定义 AudioCommand、AudioGraph source、bus、voice handle ref 和 deterministic meter output。
-2. 分离平台 audio output provider 和 headless meter provider。
+1. 定义 `astra.audio_graph.v2`、AudioCommand、bus、显式 voice id、状态、position、fade 和 fence。
+2. 分离 deterministic graph state 与 platform callback meter；graph hash 不得作为 audio meter。
 3. 把 audio wait/fade/loop 完成事件接入 AwaitToken。
 4. 编写 bus mix、fade completion、loop marker 和 headless meter hash 测试。
 
-**Done Evidence:** `cargo test -p astra-media audio_graph` 覆盖 bus mix、fade completion、loop marker 和 headless meter hash。
+**Current Evidence:** `cargo test -p astra-media --test audio_graph` 覆盖 play/pause/resume/seek/stop、loop、fade completion/conflict、invalid command rollback、fixed delta 和 deterministic continuation；`cargo test -p astra-platform-windows --test host_services` 覆盖 bounded WASAPI queue、NaN/sequence rejection、callback meter、drain 和 close drain。DSP/ducking、decode→output streaming、A/V sync、设备切换和性能预算仍未闭合。
 
 **Linked Test IDs:** `T-S2-MEDIA-03`
 
 ## S2-MEDIA-04 FilterGraph typed node validation
 
 **ID:** `S2-MEDIA-04`
+
+**Status:** `IN_PROGRESS`
 
 **Goal:** FilterGraph 支持 typed node、target、params schema、determinism、fallback 和 release gate rule。
 
@@ -174,13 +180,15 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 3. 校验环路、缺失 target、参数类型错误和 provider ineligible。
 4. 编写 typed validation 和 fallback diagnostic 测试。
 
-**Done Evidence:** `cargo test -p astra-media --test filter_graph` 覆盖 typed validation、fallback diagnostic 和 deterministic CPU filter execution。
+**Current Evidence:** `cargo test -p astra-media --test filter_graph` 覆盖 bloom/fade/color-matrix 精确参数、deterministic CPU semantic output、显式 fallback evidence，并阻断 unknown/no-op fallback、undeclared CPU fallback、跨 target bypass、损坏 frame 和参数错误。跨 target graph、GPU node provider、资源预算和 Windows visual evidence 尚未闭合。
 
 **Linked Test IDs:** `T-S2-MEDIA-04`
 
 ## S2-MEDIA-05 DecodeProvider 与 fallback policy
 
 **ID:** `S2-MEDIA-05`
+
+**Status:** `IN_PROGRESS`
 
 **Goal:** 建立 image/audio/video DecodeProvider slot，平台解码优先，桌面 FFmpeg fallback 通过 policy 开关。
 
@@ -191,11 +199,11 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 **Steps:**
 
 1. 定义 DecodeRequest、DecodeResult、MediaSurfaceToken 和 provider capability。
-2. 实现 provider selection：platform provider 优先，fallback provider 只在 profile 允许时启用。
+2. 实现显式 `DecodeBindingContext`：provider/target/profile 精确匹配，fallback/reference provider 只在 binding 明确允许时启用；注册顺序不参与选择。
 3. public API 只返回 CPU buffer 或 MediaSurfaceToken，不暴露 native handle。
 4. 编写 unsupported codec、fallback disabled 和 fallback selected 测试。
 
-**Done Evidence:** `cargo test -p astra-media decode_provider` 证明 provider 选择和 release profile 绑定，而不是按加载顺序抢占；`Engine/Fixtures/PublicDomainMedia/manifest.json` 校验 CC0 fixture 的 sha256、byte size 和 codec metadata；Windows WMF provider 用 `t-rex-roar.mp3` 解码 bounded PCM CPU buffer，用 `flower.mp4` 解码 BGRA 首帧 CPU buffer，视频失败返回 blocking diagnostic；FFmpeg 由 optional feature 显式接入。
+**Current Evidence:** `cargo test -p astra-media --test decode_provider` 证明 exact binding、duplicate/missing/profile/reference/fallback blocking、output identity/hash、Symphonia PCM 与 corrupt/truncated input；CC0 fixture manifest 固定 sha256/byte size。Windows WMF 用 MP3/MP4 验证 bounded PCM/BGRA 首帧，平台 host 保留原始 diagnostic code 并在失败后允许同 sequence retry。`cargo test -p astra-media --test decode_provider --features ffmpeg-vcpkg ffmpeg_decode_provider_decodes_real_audio_and_video` 证明 FFmpeg native probe、真实 MP3 decode/resample、真实 MP4 first-frame、未 probe 与损坏 container blocking。seek/pause/resume/EOS session、取消、A/V sync 和 fallback release evidence 尚未闭合，因此不能标记完成。
 
 **Linked Test IDs:** `T-S2-MEDIA-05`
 

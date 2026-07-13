@@ -7,10 +7,7 @@ rust-version.workspace = true
 
 [features]
 default = []
-desktop-wgpu = ["dep:wgpu"]
-desktop-audio = ["dep:kira"]
-ffmpeg = []
-ffmpeg-vcpkg = ["ffmpeg", "dep:ffmpeg-next"]
+ffmpeg-vcpkg = ["dep:ffmpeg-next", "dep:tempfile"]
 
 [dependencies]
 astra-core = { path = "../astra-core" }
@@ -19,8 +16,8 @@ astra-media-core = { path = "../astra-media-core" }
 astra-package = { path = "../astra-package" }
 cosmic-text.workspace = true
 ffmpeg-next = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 image.workspace = true
-kira = { workspace = true, optional = true }
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true
@@ -30,7 +27,6 @@ symphonia.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 unicode-segmentation.workspace = true
-wgpu = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
@@ -44,6 +40,3 @@ windows = { workspace = true, features = [
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
 wasm-bindgen.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true

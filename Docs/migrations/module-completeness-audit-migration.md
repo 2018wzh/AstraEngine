@@ -127,6 +127,8 @@
 
 **迁移要求：** 为每个 provider 增加 owner、selected/available evidence、真实资源生命周期、device/context loss recovery、bounded queue、取消和 release profile；把 headless/fixture 证据与 E3/E4 产品证据分离，不允许 gate 复用弱证据。
 
+**2026-07-13 修补进度：** 已删除 descriptor-only `WgpuRendererProvider`、graph-hash audio meter 和 Kira facade；`WgpuPresentationCore` 增加 ordered frame、malformed rollback、resize、context/device recovery policy 与 retained upload rebuild；Windows WASAPI 增加 bounded queue、finite sample validation、失败无部分提交和 close drain；FilterGraph 阻断 unknown/no-op/target bypass；DecodeRegistry 改为 exact provider/target/profile binding，WMF 保留 diagnostic/sequence rollback，optional `ffmpeg-vcpkg` 已执行真实 MP3 decode/resample 与 MP4 first-frame，不再返回 hash token。GPU FilterGraph、可注入 device-loss、媒体 session、A/V sync、设备变化、性能预算和 Windows product E3 仍开放，因此 P1-005 保持未关闭。
+
 ### P1-006：Workspace 与状态页必须持续阻断未实现 Stage 4/5/7
 
 **分类：** `STATUS_MISMATCH` 风险，当前部分已由文档正确标记为 planned/reopened
@@ -143,11 +145,11 @@
 
 | UE 能力域 | AstraEngine 当前状态 | 后续闭合条件 |
 | --- | --- | --- |
-| 字体/文本 | 有 DTO、hash 和固定宽度布局 | 真实 font database、shaping、fallback、glyph capture、跨平台视觉和 replay |
+| 字体/文本 | 已有 verified package font database、真实 shaping/raster、fallback、glyph resource 和 layout identity E2 | 补 CJK/Arabic/emoji licensed fixture、Windows glyph atlas/golden、save/replay continuation 和 product E3 |
 | Editor | 只有设计和 metadata contract | 可创建项目、编辑、PIE、调试、撤销、打包和 release review |
 | 资产规模 | 有 VFS URI、package section、hash 和 cook audit | DDC/cache、增量 cook、依赖图、并发、取消、恢复、超大资产和发布包验证 |
 | 渲染 | 有 headless CPU contract、wgpu provider 代码和部分 host | 资源生命周期、材质/纹理管理、surface/device recovery、GPU budget、真实视觉验收 |
-| 媒体 | 有 provider registry、WMF/WebCodecs 路径和 fixture | 长视频/音频同步、seek、暂停恢复、设备丢失、真实输出和 profile gate |
+| 媒体 | exact provider binding、Symphonia/WMF/optional FFmpeg 真实 one-shot decode、AudioGraph v2 与 Windows WASAPI 输出已落地 | 长视频/音频 session、同步、seek、暂停恢复、设备变化、真实产品输出和 profile gate |
 | 输入/平台 | Windows/Web host plumbing 存在，完整 Player route 未闭合 | 真实宿主输入、焦点、resize、IME/gamepad、save、audio、decode、恢复和同 run evidence |
 | 网络 | Stage 8 只定义 planned RPG protocol | 权威 session、seat、同步、断线恢复、审计、provider-free replay 和安全边界 |
 | 调试/工具链 | tracing、crash、CLI、scenario 基础存在 | 长流程 traceability、profiling、memory/resource inspector、capture/replay、artifact retention |

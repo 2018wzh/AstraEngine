@@ -60,7 +60,7 @@ targets = [
 | `astra-cook` | 2 | Importer/CookProcessor、DDC key、cook audit | `astra-asset`, `astra-package`, `image` | Editor UI |
 | `astra-package` | 2 | binary package/save container、section reader/writer、Zstd codec、crypto descriptor、plugin registry sections、`asset.vfs_manifest`、`asset.catalog` 和 package-backed VFS source | `astra-core`, `postcard`, `serde`, `zstd` | story/runtime semantics, legacy pack reader |
 | `astra-media-core` | 2/3 | Renderer2D/FilterGraph serde contract、headless CPU frame、deterministic filter executor，可被 AstraVN presentation/runtime provider crate 依赖 | `astra-core`, `serde`, `schemars` | decode/text/audio/native provider |
-| `astra-media` | 2 | TextLayout/Decode/AudioGraph providers，并 re-export `astra-media-core` 的 Renderer2D/FilterGraph traits and headless providers | `astra-media-core`, `astra-core`, `image`, `symphonia`, `cosmic-text`, optional `wgpu`/`ffmpeg-next` via `ffmpeg-vcpkg`/`kira` | VN state |
+| `astra-media` | 2 | TextLayout/Decode/AudioGraph providers，并 re-export `astra-media-core` 的 Renderer2D/FilterGraph traits and headless providers | `astra-media-core`, `astra-core`, `image`, `symphonia`, `cosmic-text`, optional `ffmpeg-next` via `ffmpeg-vcpkg` | VN state |
 | `astra-release` | 2/3 | Release Gate validators、plugin/package/VFS/provider/VN/player checks、report writer | `astra-core`, `astra-asset`, `astra-package`, `astra-media`, `astra-vn`, `astra-player-core` | Editor-only state |
 | `astra-platform` | 2 | PlatformHost trait、PlatformCapabilityReport、SDK 状态和 token DTO | `astra-core`, `serde`, `schemars` | Runtime state、Actor 指针、native handle ownership |
 | `astra-platform-windows` | 2 | Windows capability probe 和 host adapter | `astra-platform` | non-Windows private API leaking into shared crate |

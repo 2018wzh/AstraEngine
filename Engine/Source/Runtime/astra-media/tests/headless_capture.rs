@@ -32,13 +32,3 @@ fn headless_capture_hash_is_repeatable_and_descriptor_is_gateable() {
         &[255, 64, 32, 255]
     );
 }
-
-#[cfg(feature = "desktop-wgpu")]
-#[test]
-fn desktop_renderer_provider_reports_wgpu_descriptor() {
-    let provider = astra_media::WgpuRendererProvider;
-    let descriptor = provider.descriptor();
-    assert_eq!(descriptor.provider_id, "astra.renderer.wgpu");
-    assert!(descriptor.backend.contains("Rgba8UnormSrgb"));
-    assert!(descriptor.packaged_eligible);
-}

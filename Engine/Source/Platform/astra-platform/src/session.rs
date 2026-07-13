@@ -523,6 +523,9 @@ pub enum PlatformEventKind {
     DeviceLost {
         provider: String,
     },
+    DeviceRestored {
+        provider: String,
+    },
     ContextLost {
         provider: String,
     },

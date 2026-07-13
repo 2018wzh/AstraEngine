@@ -1,47 +1,59 @@
 use astra_media::{
-    DecodeKind, DecodeOutput, DecodePolicy, DecodeProvider, DecodeProviderRegistry, DecodeRequest,
-    ImageDecodeProvider, SymphoniaAudioDecodeProvider, SyntheticPlatformDecodeProvider,
+    DecodeBindingContext, DecodeKind, DecodeOutput, DecodeProvider, DecodeProviderRegistry,
+    DecodeRequest, ImageDecodeProvider, SymphoniaAudioDecodeProvider,
+    SyntheticPlatformDecodeProvider,
 };
 use serde_json::Value;
 
 #[test]
 fn decode_provider_selection_is_profile_bound_not_load_order() {
     let mut registry = DecodeProviderRegistry::default();
-    registry.register(Box::new(ImageDecodeProvider));
-    registry.register(Box::new(SyntheticPlatformDecodeProvider::new(
-        "platform.desktop",
-        vec!["png"],
-    )));
+    registry.register(Box::new(ImageDecodeProvider)).unwrap();
+    registry
+        .register(Box::new(SyntheticPlatformDecodeProvider::new(
+            "platform.desktop",
+            vec!["png"],
+        )))
+        .unwrap();
 
     let request = DecodeRequest {
         kind: DecodeKind::Image,
         codec: "png".to_string(),
-        bytes: vec![],
+        bytes: vec![1],
         profile: "desktop-release".to_string(),
     };
-    let selected = registry
-        .select(&request, &DecodePolicy::desktop_release())
-        .unwrap();
+    let shipping_platform =
+        DecodeBindingContext::shipping("platform.desktop", "native-game", "desktop-release");
+    assert!(registry.select(&request, &shipping_platform).is_err());
+
+    let reference_platform = shipping_platform.for_reference_tests();
+    let selected = registry.select(&request, &reference_platform).unwrap();
     assert_eq!(selected.provider_id, "platform.desktop");
 
-    let unsupported = DecodeRequest {
-        codec: "wmv".to_string(),
-        ..request.clone()
-    };
+    let image =
+        DecodeBindingContext::shipping("astra.decode.image", "native-game", "desktop-release");
+    assert!(registry.select(&request, &image).is_err());
+    let selected = registry
+        .select(&request, &image.with_declared_fallback())
+        .unwrap();
+    assert_eq!(selected.provider_id, "astra.decode.image");
+
     assert!(registry
         .select(
-            &unsupported,
-            &DecodePolicy::desktop_release().without_fallback()
+            &request,
+            &DecodeBindingContext::shipping("missing.provider", "native-game", "desktop-release",)
         )
         .is_err());
 
-    let selected = registry
-        .select(
-            &request,
-            &DecodePolicy::desktop_release().prefer_fallback_for_tests(),
-        )
-        .unwrap();
-    assert_eq!(selected.provider_id, "astra.decode.image");
+    assert!(registry.register(Box::new(ImageDecodeProvider)).is_err());
+
+    let mismatched_profile = DecodeRequest {
+        profile: "classic".into(),
+        ..request
+    };
+    assert!(registry
+        .select(&mismatched_profile, &reference_platform)
+        .is_err());
 }
 
 #[test]
@@ -68,6 +80,27 @@ fn symphonia_decode_provider_decodes_bounded_wav_to_cpu_pcm() {
         }
         DecodeOutput::MediaSurfaceToken(_) => panic!("expected CPU PCM output"),
     }
+}
+
+#[test]
+fn registry_executes_only_the_explicit_provider_and_validates_output_identity() {
+    let mut registry = DecodeProviderRegistry::default();
+    registry
+        .register(Box::new(SymphoniaAudioDecodeProvider))
+        .unwrap();
+    registry.register(Box::new(ImageDecodeProvider)).unwrap();
+    let request = DecodeRequest {
+        kind: DecodeKind::Audio,
+        codec: "wav".into(),
+        bytes: tiny_wav(),
+        profile: "desktop-release".into(),
+    };
+    let binding =
+        DecodeBindingContext::shipping("astra.decode.symphonia", "native-game", "desktop-release")
+            .with_declared_fallback();
+    let result = registry.decode(&request, &binding).unwrap();
+    assert_eq!(result.provider_id, "astra.decode.symphonia");
+    assert!(matches!(result.output, DecodeOutput::CpuBuffer { .. }));
 }
 
 #[test]
@@ -253,20 +286,63 @@ fn fixture_bytes(file: &str) -> Vec<u8> {
     std::fs::read(path).unwrap()
 }
 
-#[cfg(feature = "ffmpeg")]
+#[cfg(feature = "ffmpeg-vcpkg")]
 #[test]
-fn ffmpeg_decode_provider_records_explicit_feature_gate() {
-    if std::env::var_os("ASTRA_RUN_FFMPEG_TESTS").is_none() {
-        eprintln!("skipping ffmpeg runtime probe; set ASTRA_RUN_FFMPEG_TESTS=1");
-        let provider = astra_media::FfmpegDecodeProvider::new_unprobed();
-        assert!(provider.capability().feature_gated);
-        return;
-    }
+fn ffmpeg_decode_provider_decodes_real_audio_and_video() {
+    let unavailable = astra_media::FfmpegDecodeProvider::new_unprobed()
+        .decode(&DecodeRequest {
+            kind: DecodeKind::Audio,
+            codec: "mp3".to_string(),
+            bytes: fixture_bytes("t-rex-roar.mp3"),
+            profile: "desktop".to_string(),
+        })
+        .unwrap_err();
+    assert!(unavailable.to_string().contains("explicitly probed"));
+
     let provider = astra_media::FfmpegDecodeProvider::probe()
         .expect("ASTRA_RUN_FFMPEG_TESTS requires the ffmpeg-vcpkg feature and native FFmpeg");
-    assert!(provider
-        .capability()
-        .codecs
-        .iter()
-        .any(|codec| codec == "mp4"));
+    assert!(!provider.capability().feature_gated);
+
+    let audio = provider
+        .decode(&DecodeRequest {
+            kind: DecodeKind::Audio,
+            codec: "mp3".to_string(),
+            bytes: fixture_bytes("t-rex-roar.mp3"),
+            profile: "desktop".to_string(),
+        })
+        .unwrap();
+    assert!(matches!(
+        audio.output,
+        DecodeOutput::CpuBuffer { ref format, ref bytes, .. }
+            if format.starts_with("pcm_s16le:") && !bytes.is_empty()
+    ));
+
+    let video = provider
+        .decode(&DecodeRequest {
+            kind: DecodeKind::Video,
+            codec: "mp4".to_string(),
+            bytes: fixture_bytes("flower.mp4"),
+            profile: "desktop".to_string(),
+        })
+        .unwrap();
+    assert!(matches!(
+        video.output,
+        DecodeOutput::CpuBuffer { ref format, ref bytes, .. }
+            if format.starts_with("bgra8:first_frame:") && !bytes.is_empty()
+    ));
+
+    let corrupt = provider
+        .decode(&DecodeRequest {
+            kind: DecodeKind::Video,
+            codec: "mp4".to_string(),
+            bytes: b"not an mp4 container".to_vec(),
+            profile: "desktop".to_string(),
+        })
+        .unwrap_err();
+    match corrupt {
+        astra_media::MediaError::Diagnostics(diagnostics) => assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "ASTRA_FFMPEG_DEMUX")),
+        other => panic!("expected structured FFmpeg diagnostic, got {other:?}"),
+    }
 }

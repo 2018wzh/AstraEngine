@@ -81,8 +81,20 @@ impl FilterValidator {
                 "filter graph schema must be astra.filter_graph.v1",
             ));
         }
+        if graph.nodes.len() > 256 {
+            diagnostics.push(Diagnostic::blocking(
+                "ASTRA_FILTER_NODE_BUDGET",
+                "filter graph exceeds the bounded node budget",
+            ));
+        }
         let mut seen = std::collections::BTreeSet::new();
         for node in &graph.nodes {
+            if !safe_symbol(&node.id) || !safe_filter_kind(&node.kind) {
+                diagnostics.push(Diagnostic::blocking(
+                    "ASTRA_FILTER_NODE_IDENTITY",
+                    "filter node id or kind is invalid",
+                ));
+            }
             if !seen.insert(node.id.clone()) {
                 diagnostics.push(Diagnostic::blocking(
                     "ASTRA_FILTER_DUPLICATE_NODE",
@@ -95,14 +107,14 @@ impl FilterValidator {
                     format!("filter node {} is not deterministic", node.id),
                 ));
             }
-            if node.kind == "astra.filter.bloom" {
-                match node.params.get("intensity") {
-                    Some(FilterParam::Float(_)) => {}
-                    _ => diagnostics.push(Diagnostic::blocking(
-                        "ASTRA_FILTER_PARAM_TYPE",
-                        "bloom intensity must be a float",
-                    )),
-                }
+            if node.input != node.output {
+                diagnostics.push(Diagnostic::blocking(
+                    "ASTRA_FILTER_TARGET_FLOW",
+                    "the current deterministic executor requires in-place target flow",
+                ));
+            }
+            if let Err(diagnostic) = validate_node_params(node) {
+                diagnostics.push(diagnostic);
             }
             if node.allow_cpu_fallback {
                 diagnostics.push(Diagnostic::warning(
@@ -173,37 +185,34 @@ impl CpuFilterExecutor {
             return Err(MediaError::Diagnostics(validation.diagnostics));
         }
 
+        validate_frame(&frame)?;
         let input_hash = frame.hash;
         let mut executed_nodes = Vec::with_capacity(graph.nodes.len());
         for node in &graph.nodes {
             match node.kind.as_str() {
                 "astra.filter.bloom" => {
-                    let intensity = float_param(node, "intensity").unwrap_or(0.0);
+                    require_cpu_fallback(node)?;
+                    let intensity = required_float_param(node, "intensity")?;
                     apply_bloom(&mut frame.bytes, intensity);
                     executed_nodes.push(FilterExecutionNode {
                         id: node.id.clone(),
                         kind: node.kind.clone(),
-                        fallback_used: false,
+                        fallback_used: true,
                     });
                 }
                 "astra.filter.color_matrix" => {
-                    apply_color_matrix(&mut frame.bytes, node);
+                    require_cpu_fallback(node)?;
+                    apply_color_matrix(&mut frame.bytes, node)?;
                     executed_nodes.push(FilterExecutionNode {
                         id: node.id.clone(),
                         kind: node.kind.clone(),
-                        fallback_used: false,
+                        fallback_used: true,
                     });
                 }
                 "astra.filter.fade" => {
-                    let amount = float_param(node, "amount").unwrap_or(1.0);
+                    require_cpu_fallback(node)?;
+                    let amount = required_float_param(node, "amount")?;
                     apply_fade(&mut frame.bytes, amount);
-                    executed_nodes.push(FilterExecutionNode {
-                        id: node.id.clone(),
-                        kind: node.kind.clone(),
-                        fallback_used: false,
-                    });
-                }
-                _ if node.allow_cpu_fallback => {
                     executed_nodes.push(FilterExecutionNode {
                         id: node.id.clone(),
                         kind: node.kind.clone(),
@@ -247,17 +256,18 @@ fn apply_bloom(bytes: &mut [u8], intensity: f32) {
     }
 }
 
-fn apply_color_matrix(bytes: &mut [u8], node: &FilterNode) {
-    let r = float_param(node, "r").unwrap_or(1.0);
-    let g = float_param(node, "g").unwrap_or(1.0);
-    let b = float_param(node, "b").unwrap_or(1.0);
-    let a = float_param(node, "a").unwrap_or(1.0);
+fn apply_color_matrix(bytes: &mut [u8], node: &FilterNode) -> Result<(), MediaError> {
+    let r = required_float_param(node, "r")?;
+    let g = required_float_param(node, "g")?;
+    let b = required_float_param(node, "b")?;
+    let a = required_float_param(node, "a")?;
     for pixel in bytes.chunks_exact_mut(4) {
         pixel[0] = scaled_channel(pixel[0], r);
         pixel[1] = scaled_channel(pixel[1], g);
         pixel[2] = scaled_channel(pixel[2], b);
         pixel[3] = scaled_channel(pixel[3], a);
     }
+    Ok(())
 }
 
 fn apply_fade(bytes: &mut [u8], amount: f32) {
@@ -276,7 +286,101 @@ fn scaled_channel(channel: u8, scale: f32) -> u8 {
 fn float_param(node: &FilterNode, name: &str) -> Option<f32> {
     match node.params.get(name) {
         Some(FilterParam::Float(value)) => Some(*value),
-        Some(FilterParam::Int(value)) => Some(*value as f32),
         _ => None,
     }
+}
+
+fn validate_node_params(node: &FilterNode) -> Result<(), Diagnostic> {
+    let required: &[&str] = match node.kind.as_str() {
+        "astra.filter.bloom" => &["intensity"],
+        "astra.filter.fade" => &["amount"],
+        "astra.filter.color_matrix" => &["r", "g", "b", "a"],
+        _ => {
+            return Err(Diagnostic::blocking(
+                "ASTRA_FILTER_UNSUPPORTED",
+                "filter node kind has no deterministic executor",
+            ));
+        }
+    };
+    if node.params.len() != required.len()
+        || node
+            .params
+            .keys()
+            .any(|name| !required.contains(&name.as_str()))
+    {
+        return Err(Diagnostic::blocking(
+            "ASTRA_FILTER_PARAM_SET",
+            "filter node parameter set does not match its contract",
+        ));
+    }
+    for name in required {
+        let Some(FilterParam::Float(value)) = node.params.get(*name) else {
+            return Err(Diagnostic::blocking(
+                "ASTRA_FILTER_PARAM_TYPE",
+                "filter parameter must be an explicit float",
+            ));
+        };
+        let max = if node.kind == "astra.filter.color_matrix" {
+            4.0
+        } else {
+            1.0
+        };
+        if !value.is_finite() || !(0.0..=max).contains(value) {
+            return Err(Diagnostic::blocking(
+                "ASTRA_FILTER_PARAM_RANGE",
+                "filter parameter is outside its finite supported range",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn required_float_param(node: &FilterNode, name: &str) -> Result<f32, MediaError> {
+    float_param(node, name).ok_or_else(|| {
+        MediaError::Diagnostics(vec![Diagnostic::blocking(
+            "ASTRA_FILTER_PARAM_TYPE",
+            "validated filter parameter is unavailable",
+        )])
+    })
+}
+
+fn require_cpu_fallback(node: &FilterNode) -> Result<(), MediaError> {
+    if !node.allow_cpu_fallback {
+        return Err(MediaError::Diagnostics(vec![Diagnostic::blocking(
+            "ASTRA_FILTER_CPU_FALLBACK_FORBIDDEN",
+            "CPU execution was not explicitly authorized for this filter node",
+        )]));
+    }
+    Ok(())
+}
+
+fn validate_frame(frame: &CpuFrame) -> Result<(), MediaError> {
+    let expected = frame
+        .width
+        .checked_mul(frame.height)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .and_then(|bytes| usize::try_from(bytes).ok())
+        .ok_or_else(|| MediaError::message("ASTRA_FILTER_FRAME_SIZE: frame size overflows"))?;
+    if frame.width == 0
+        || frame.height == 0
+        || frame.bytes.len() != expected
+        || frame_hash(frame.width, frame.height, frame.format, &frame.bytes) != frame.hash
+    {
+        return Err(MediaError::message(
+            "ASTRA_FILTER_FRAME_INVALID: input frame dimensions, bytes, or hash are invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn safe_symbol(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn safe_filter_kind(value: &str) -> bool {
+    value.starts_with("astra.filter.") && safe_symbol(value)
 }

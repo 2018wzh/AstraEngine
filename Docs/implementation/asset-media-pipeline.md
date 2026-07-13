@@ -61,7 +61,7 @@ Runtime 发 command，Media provider 执行 command。Media provider 不写剧�
 | Image Decode | platform image API | Rust image decoder where profile allows |
 | Audio Decode | platform decoder | Symphonia fallback; FFmpeg optional |
 | Video Decode | AVFoundation/MediaCodec/WebCodecs/WMF | FFmpeg optional |
-| Audio Output | platform output or optional Kira provider | 当前 headless meter；Migration 11 planned 完整 PCM S16LE WAV output |
+| Audio Output | platform-owned output provider（Windows 当前为 WASAPI） | reference queue/meter 不作为 shipping evidence；Migration 11 planned 完整 PCM S16LE WAV output |
 
 ## Graph Validation
 

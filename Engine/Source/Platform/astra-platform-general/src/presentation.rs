@@ -1,3 +1,8 @@
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
 use astra_platform::{
     CapturedFrame, PlatformError, PlatformErrorCode, PlatformEventKind, RgbaFrame,
 };
@@ -8,7 +13,7 @@ use astra_platform::{
 pub struct WgpuPresentationCore {
     _instance: wgpu::Instance,
     surface: wgpu::Surface<'static>,
-    _adapter: wgpu::Adapter,
+    adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -16,6 +21,9 @@ pub struct WgpuPresentationCore {
     sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     last_upload: Option<UploadFrame>,
+    last_frame: Option<RgbaFrame>,
+    last_sequence: Option<u64>,
+    device_lost: Arc<AtomicBool>,
 }
 
 pub struct WgpuReadback {
@@ -64,6 +72,8 @@ impl WgpuPresentationCore {
             .request_device(&wgpu::DeviceDescriptor::default())
             .await
             .map_err(|_| unavailable("surface.create", "wgpu device creation failed"))?;
+        let device_lost = Arc::new(AtomicBool::new(false));
+        install_device_lost_callback(&device, Arc::clone(&device_lost));
         let mut config = surface
             .get_default_config(&adapter, width, height)
             .ok_or_else(|| unavailable("surface.create", "surface configuration is unavailable"))?;
@@ -83,7 +93,7 @@ impl WgpuPresentationCore {
         Ok(Self {
             _instance: instance,
             surface,
-            _adapter: adapter,
+            adapter,
             device,
             queue,
             config,
@@ -91,56 +101,56 @@ impl WgpuPresentationCore {
             sampler,
             pipeline,
             last_upload: None,
+            last_frame: None,
+            last_sequence: None,
+            device_lost,
         })
     }
 
     pub fn present(&mut self, frame: RgbaFrame) -> Result<(), PlatformError> {
+        self.ensure_device_available("surface.present_rgba")?;
         if frame.width == 0 || frame.height == 0 {
             return Err(invalid(
                 "surface.present_rgba",
                 "frame dimensions must be non-zero",
             ));
         }
+        let expected_bytes = frame
+            .width
+            .checked_mul(frame.height)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .and_then(|bytes| usize::try_from(bytes).ok())
+            .ok_or_else(|| invalid("surface.present_rgba", "frame byte size overflows"))?;
+        if frame.rgba8.len() != expected_bytes {
+            return Err(invalid(
+                "surface.present_rgba",
+                "frame byte size does not match its dimensions",
+            ));
+        }
+        let expected_sequence = match self.last_sequence {
+            Some(sequence) => sequence.checked_add(1).ok_or_else(|| {
+                invalid("surface.present_rgba", "frame sequence counter overflowed")
+            })?,
+            None => 1,
+        };
+        if frame.sequence != expected_sequence {
+            return Err(invalid(
+                "surface.present_rgba",
+                "frame sequence is duplicated, skipped, or out of order",
+            ));
+        }
         if frame.width != self.config.width || frame.height != self.config.height {
+            tracing::info!(
+                event = "platform.wgpu.surface.resized",
+                width = frame.width,
+                height = frame.height,
+                "wgpu surface resized at frame boundary"
+            );
             self.config.width = frame.width;
             self.config.height = frame.height;
             self.surface.configure(&self.device, &self.config);
         }
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("astra-platform-frame-upload"),
-            size: wgpu::Extent3d {
-                width: frame.width,
-                height: frame.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &frame.rgba8,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(frame.width * 4),
-                rows_per_image: Some(frame.height),
-            },
-            wgpu::Extent3d {
-                width: frame.width,
-                height: frame.height,
-                depth_or_array_layers: 1,
-            },
-        );
+        let texture = upload_frame(&self.device, &self.queue, &frame);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("astra-platform-frame-bind-group"),
@@ -211,10 +221,13 @@ impl WgpuPresentationCore {
             width: frame.width,
             height: frame.height,
         });
+        self.last_sequence = Some(frame.sequence);
+        self.last_frame = Some(frame);
         Ok(())
     }
 
     pub fn begin_capture(&self) -> Result<WgpuReadback, PlatformError> {
+        self.ensure_device_available("surface.capture")?;
         let upload = self
             .last_upload
             .as_ref()
@@ -267,6 +280,7 @@ impl WgpuPresentationCore {
     }
 
     pub fn reconfigure_after_loss(&mut self) -> Result<(), PlatformError> {
+        self.ensure_device_available("surface.reconfigure")?;
         if self.config.width == 0 || self.config.height == 0 {
             return Err(invalid(
                 "surface.reconfigure",
@@ -274,10 +288,75 @@ impl WgpuPresentationCore {
             ));
         }
         self.surface.configure(&self.device, &self.config);
+        tracing::warn!(
+            event = "platform.wgpu.surface.reconfigured",
+            width = self.config.width,
+            height = self.config.height,
+            "wgpu surface was explicitly reconfigured after context loss"
+        );
+        Ok(())
+    }
+
+    pub async fn recover_device(&mut self) -> Result<bool, PlatformError> {
+        if !self.device_lost.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        tracing::warn!(
+            event = "platform.wgpu.device.recovery_started",
+            "wgpu device recovery started"
+        );
+        let (device, queue) = self
+            .adapter
+            .request_device(&wgpu::DeviceDescriptor::default())
+            .await
+            .map_err(|_| {
+                PlatformError::new(
+                    PlatformErrorCode::DeviceLost,
+                    "surface.recover_device",
+                    "wgpu device recreation failed",
+                )
+            })?;
+        let device_lost = Arc::new(AtomicBool::new(false));
+        install_device_lost_callback(&device, Arc::clone(&device_lost));
+        let (layout, sampler, pipeline) = pipeline(&device, self.config.format);
+        self.surface.configure(&device, &self.config);
+        let last_upload = self.last_frame.as_ref().map(|frame| UploadFrame {
+            texture: upload_frame(&device, &queue, frame),
+            width: frame.width,
+            height: frame.height,
+        });
+        self.device = device;
+        self.queue = queue;
+        self.layout = layout;
+        self.sampler = sampler;
+        self.pipeline = pipeline;
+        self.last_upload = last_upload;
+        self.device_lost = device_lost;
+        tracing::info!(
+            event = "platform.wgpu.device.recovered",
+            resource_rebuilt = self.last_upload.is_some(),
+            "wgpu device and retained frame resources were rebuilt"
+        );
+        Ok(true)
+    }
+
+    pub fn is_device_lost(&self) -> bool {
+        self.device_lost.load(Ordering::Acquire)
+    }
+
+    fn ensure_device_available(&self, operation: &'static str) -> Result<(), PlatformError> {
+        if self.is_device_lost() {
+            return Err(PlatformError::new(
+                PlatformErrorCode::DeviceLost,
+                operation,
+                "wgpu device is lost and must be explicitly recovered",
+            ));
+        }
         Ok(())
     }
 
     pub fn poll(&self, poll_type: wgpu::PollType) -> Result<(), PlatformError> {
+        self.ensure_device_available("surface.capture")?;
         self.device
             .poll(poll_type)
             .map(|_| ())
@@ -291,6 +370,18 @@ pub fn wgpu_recovery_events(provider: &str, recovered: bool) -> Vec<PlatformEven
     }];
     if recovered {
         events.push(PlatformEventKind::ContextRestored {
+            provider: provider.to_string(),
+        });
+    }
+    events
+}
+
+pub fn wgpu_device_recovery_events(provider: &str, recovered: bool) -> Vec<PlatformEventKind> {
+    let mut events = vec![PlatformEventKind::DeviceLost {
+        provider: provider.to_string(),
+    }];
+    if recovered {
+        events.push(PlatformEventKind::DeviceRestored {
             provider: provider.to_string(),
         });
     }
@@ -332,6 +423,55 @@ impl WgpuReadback {
             rgba8,
         })
     }
+}
+
+fn install_device_lost_callback(device: &wgpu::Device, lost: Arc<AtomicBool>) {
+    device.set_device_lost_callback(move |_reason, _message| {
+        lost.store(true, Ordering::Release);
+        tracing::error!(
+            event = "platform.wgpu.device.lost",
+            "wgpu device loss callback fired"
+        );
+    });
+}
+
+fn upload_frame(device: &wgpu::Device, queue: &wgpu::Queue, frame: &RgbaFrame) -> wgpu::Texture {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("astra-platform-frame-upload"),
+        size: wgpu::Extent3d {
+            width: frame.width,
+            height: frame.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &frame.rgba8,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(frame.width * 4),
+            rows_per_image: Some(frame.height),
+        },
+        wgpu::Extent3d {
+            width: frame.width,
+            height: frame.height,
+            depth_or_array_layers: 1,
+        },
+    );
+    texture
 }
 
 fn pipeline(

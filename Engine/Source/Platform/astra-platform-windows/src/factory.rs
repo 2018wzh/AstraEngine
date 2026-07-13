@@ -413,6 +413,23 @@ mod windows {
                             ) {
                                 self.emit(event);
                             }
+                        } else if result
+                            .as_ref()
+                            .is_err_and(|error| error.code == PlatformErrorCode::DeviceLost)
+                        {
+                            let recovered = self
+                                .surfaces
+                                .get_mut(surface)
+                                .and_then(|surface| {
+                                    pollster::block_on(surface.recover_device()).map(|_| ())
+                                })
+                                .is_ok();
+                            for event in astra_platform_general::wgpu_device_recovery_events(
+                                "wgpu_hardware",
+                                recovered,
+                            ) {
+                                self.emit(event);
+                            }
                         }
                         let _ = reply.send(result);
                     }
@@ -462,7 +479,11 @@ mod windows {
                         let _ = reply.send(result);
                     }
                     HostCommand::CloseAudio { output, reply } => {
-                        let result = self.audio_outputs.remove(output).map(|_| ());
+                        let result = self
+                            .audio_outputs
+                            .get_mut(output)
+                            .and_then(AudioResource::drain)
+                            .and_then(|_| self.audio_outputs.remove(output).map(|_| ()));
                         let _ = reply.send(result);
                     }
                     HostCommand::OpenDecode { kind, reply } => {
@@ -1302,6 +1323,14 @@ mod windows {
 
     impl AudioResource {
         fn new(request: AudioOutputRequest) -> Result<Self, PlatformError> {
+            if request.sample_rate == 0 || request.channels == 0 || request.max_buffered_frames == 0
+            {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    "audio.open",
+                    "audio output format and queue capacity must be non-zero",
+                ));
+            }
             let host = cpal::default_host();
             let device = host.default_output_device().ok_or_else(|| {
                 host_error("audio.open", "WASAPI default output device is unavailable")
@@ -1318,7 +1347,16 @@ mod windows {
                 ));
             }
             let config: cpal::StreamConfig = supported.clone().into();
-            let capacity = request.max_buffered_frames * usize::from(request.channels);
+            let capacity = request
+                .max_buffered_frames
+                .checked_mul(usize::from(request.channels))
+                .ok_or_else(|| {
+                    PlatformError::new(
+                        PlatformErrorCode::InvalidState,
+                        "audio.open",
+                        "audio output queue capacity overflows",
+                    )
+                })?;
             let (producer, consumer, queue_telemetry) =
                 astra_platform_general::NativeAudioQueue::create(capacity)?;
             let meter = Arc::new(CallbackMeter::default());
@@ -1382,19 +1420,32 @@ mod windows {
         }
 
         fn submit(&mut self, packet: AudioPacket) -> Result<(), PlatformError> {
-            if packet.sequence != self.next_sequence || packet.channels != self.channels {
+            if packet.sequence != self.next_sequence
+                || packet.channels != self.channels
+                || packet.samples.is_empty()
+                || packet.samples.len() % usize::from(packet.channels) != 0
+                || packet.samples.iter().any(|sample| !sample.is_finite())
+            {
                 return Err(PlatformError::new(
                     PlatformErrorCode::InvalidState,
                     "audio.submit",
                     "audio packet sequence or channel count is invalid",
                 ));
             }
-            self.producer.push_samples(&packet.samples)?;
-            self.next_sequence += 1;
-            self.submitted_samples = self
+            let next_sequence = self.next_sequence.checked_add(1).ok_or_else(|| {
+                PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    "audio.submit",
+                    "audio packet sequence overflowed",
+                )
+            })?;
+            let submitted_samples = self
                 .submitted_samples
                 .checked_add(packet.samples.len() as u64)
                 .ok_or_else(|| host_error("audio.submit", "audio sample counter overflowed"))?;
+            self.producer.push_samples(&packet.samples)?;
+            self.next_sequence = next_sequence;
+            self.submitted_samples = submitted_samples;
             Ok(())
         }
 
@@ -1583,13 +1634,33 @@ mod windows {
             &mut self,
             request: PlatformDecodeRequest,
         ) -> Result<DecodeOutput, PlatformError> {
-            if request.sequence != self.next_sequence || request.kind != self.kind {
+            let capability = self.provider.capability();
+            if request.sequence != self.next_sequence
+                || request.kind != self.kind
+                || request.bytes.is_empty()
+                || !capability
+                    .codecs
+                    .iter()
+                    .any(|codec| codec == &request.codec)
+                || !request.description.is_empty()
+                || request.sample_rate.is_some()
+                || request.channels.is_some()
+                || request.coded_width.is_some()
+                || request.coded_height.is_some()
+            {
                 return Err(PlatformError::new(
                     PlatformErrorCode::InvalidState,
                     "decode.submit",
-                    "decode request sequence or media kind is invalid",
+                    "decode request sequence, kind, codec, payload, or metadata is invalid",
                 ));
             }
+            let next_sequence = self.next_sequence.checked_add(1).ok_or_else(|| {
+                PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    "decode.submit",
+                    "decode request sequence overflowed",
+                )
+            })?;
             let kind = match request.kind {
                 DecodeKind::Audio => astra_media::DecodeKind::Audio,
                 DecodeKind::Video => astra_media::DecodeKind::Video,
@@ -1602,8 +1673,8 @@ mod windows {
                     bytes: request.bytes,
                     profile: "desktop-release".to_string(),
                 })
-                .map_err(|_| host_error("decode.submit", "WMF decode failed"))?;
-            self.next_sequence += 1;
+                .map_err(media_decode_error)?;
+            self.next_sequence = next_sequence;
             match result.output {
                 MediaDecodeOutput::CpuBuffer {
                     bytes,
@@ -1619,6 +1690,30 @@ mod windows {
                     "WMF returned an unsupported external media surface",
                 )),
             }
+        }
+    }
+
+    fn media_decode_error(error: astra_media::MediaError) -> PlatformError {
+        match error {
+            astra_media::MediaError::Diagnostics(diagnostics) => {
+                let diagnostic = diagnostics.into_iter().next();
+                let mut error = PlatformError::new(
+                    PlatformErrorCode::ProviderUnavailable,
+                    "decode.submit",
+                    diagnostic
+                        .as_ref()
+                        .map_or("WMF decode failed", |value| value.message.as_str()),
+                );
+                if let Some(diagnostic) = diagnostic {
+                    error = error.with_field("diagnostic_code", diagnostic.code);
+                }
+                error
+            }
+            astra_media::MediaError::Message(message) => PlatformError::new(
+                PlatformErrorCode::ProviderUnavailable,
+                "decode.submit",
+                message,
+            ),
         }
     }
 

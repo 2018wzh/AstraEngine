@@ -2,7 +2,7 @@
 
 use astra_platform::{
     AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput, PlatformDecodeRequest,
-    PlatformHostFactory, PlatformHostProfile,
+    PlatformErrorCode, PlatformHostFactory, PlatformHostProfile,
 };
 use cpal::traits::{DeviceTrait, HostTrait};
 
@@ -38,6 +38,19 @@ async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
             ((frame as f32 / sample_rate as f32) * 440.0 * std::f32::consts::TAU).sin() * 0.2;
         samples.extend(std::iter::repeat_n(sample, usize::from(channels)));
     }
+    let invalid = session
+        .client
+        .submit_audio(
+            audio,
+            AudioPacket {
+                sequence: 1,
+                channels,
+                samples: vec![f32::NAN; usize::from(channels)],
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(invalid.code, PlatformErrorCode::InvalidState);
     session
         .client
         .submit_audio(
@@ -64,6 +77,29 @@ async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
         .open_decode(DecodeKind::Video)
         .await
         .expect("open WMF session");
+    let corrupt = session
+        .client
+        .decode(
+            decode,
+            PlatformDecodeRequest {
+                sequence: 1,
+                kind: DecodeKind::Video,
+                codec: "mp4".to_string(),
+                description: Vec::new(),
+                sample_rate: None,
+                channels: None,
+                coded_width: None,
+                coded_height: None,
+                keyframe: true,
+                bytes: b"not-an-mp4".to_vec(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        corrupt.fields.get("diagnostic_code").map(String::as_str),
+        Some("ASTRA_WMF_DECODE")
+    );
     let output = session
         .client
         .decode(
