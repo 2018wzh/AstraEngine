@@ -82,6 +82,7 @@ async fn platform_sink_exposes_bounded_audio_queue_state_without_native_handles(
                 reply
                     .send(Ok(AudioOutputState {
                         queued_frames: 256,
+                        callback_count: 1,
                         submitted_samples: 1_024,
                         consumed_samples: 512,
                         underflow_count: 3,

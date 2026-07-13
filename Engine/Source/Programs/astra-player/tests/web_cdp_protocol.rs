@@ -36,6 +36,8 @@ fn cdp_session_consumes_runtime_owned_evidence_and_real_protocol_results() {
                             "runtime_state_hash": format!("sha256:{}", "2".repeat(64)),
                             "runtime_event_hash": format!("sha256:{}", "3".repeat(64)),
                             "runtime_presentation_hash": format!("sha256:{}", "4".repeat(64)),
+                            "coverage_reached": ["route.library"],
+                            "current_state_id": "route.library",
                             "terminal_route_ids": ["route.library"],
                             "pending_choice_ids": [],
                             "audio_meter": null

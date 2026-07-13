@@ -296,6 +296,7 @@ pub enum PlayerHostCommandResult {
     AudioState {
         output: PlayerHostResourceId,
         queued_frames: u64,
+        callback_count: u64,
         submitted_samples: u64,
         consumed_samples: u64,
         underflow_count: u64,

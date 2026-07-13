@@ -21,6 +21,8 @@ fn web_live_evidence_roundtrips_stable_runtime_identity_without_payload() {
         runtime_state_hash: Some(format!("sha256:{}", "2".repeat(64))),
         runtime_event_hash: Some(format!("sha256:{}", "3".repeat(64))),
         runtime_presentation_hash: Some(format!("sha256:{}", "4".repeat(64))),
+        coverage_reached: vec!["route.library".to_string()],
+        current_state_id: Some("route.library".to_string()),
         terminal_route_ids: vec!["route.library".to_string()],
         pending_choice_ids: vec!["choice.library".to_string()],
         audio_meter: None,

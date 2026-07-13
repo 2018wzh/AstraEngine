@@ -33,6 +33,10 @@ pub struct WebPlayerLiveEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_presentation_hash: Option<String>,
     #[serde(default)]
+    pub coverage_reached: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_state_id: Option<String>,
+    #[serde(default)]
     pub terminal_route_ids: Vec<String>,
     #[serde(default)]
     pub pending_choice_ids: Vec<String>,
@@ -221,6 +225,8 @@ mod browser {
             runtime_state_hash: None,
             runtime_event_hash: None,
             runtime_presentation_hash: None,
+            coverage_reached: Vec::new(),
+            current_state_id: None,
             terminal_route_ids: Vec::new(),
             pending_choice_ids: Vec::new(),
             audio_meter: None,
@@ -653,6 +659,8 @@ mod browser {
             runtime_state_hash: Some(evidence.runtime_state_hash.to_string()),
             runtime_event_hash: Some(evidence.runtime_event_hash.to_string()),
             runtime_presentation_hash: Some(evidence.runtime_presentation_hash.to_string()),
+            coverage_reached: evidence.coverage_reached.iter().cloned().collect(),
+            current_state_id: evidence.current_state_id.clone(),
             terminal_route_ids: evidence.terminal_route_ids.iter().cloned().collect(),
             pending_choice_ids: evidence.pending_choice_ids.clone(),
             audio_meter: media.last_audio_meter(),

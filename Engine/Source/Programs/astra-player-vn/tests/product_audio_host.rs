@@ -147,6 +147,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
                 reply
                     .send(Ok(AudioOutputState {
                         queued_frames: 0,
+                        callback_count: 1,
                         submitted_samples: 0,
                         consumed_samples: 0,
                         underflow_count: 64,

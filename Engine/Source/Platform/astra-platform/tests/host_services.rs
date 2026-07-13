@@ -124,6 +124,7 @@ async fn client_exposes_surface_audio_save_and_package_commands() {
             reply
                 .send(Ok(AudioOutputState {
                     queued_frames: 1,
+                    callback_count: 1,
                     submitted_samples: 4,
                     consumed_samples: 2,
                     underflow_count: 0,

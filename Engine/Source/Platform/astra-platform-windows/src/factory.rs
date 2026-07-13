@@ -1432,6 +1432,7 @@ mod windows {
             astra_platform::AudioOutputState {
                 queued_frames: usize::try_from(queued_samples / u64::from(self.channels))
                     .unwrap_or(usize::MAX),
+                callback_count: self.meter.callback_count.load(Ordering::Acquire),
                 submitted_samples: self.submitted_samples,
                 consumed_samples: telemetry.sample_count,
                 underflow_count: telemetry.underflow_count,
@@ -1442,12 +1443,17 @@ mod windows {
 
     #[derive(Default)]
     struct CallbackMeter {
+        callback_count: AtomicU64,
         sample_count: AtomicU64,
         peak_bits: AtomicU32,
         sum_squares_bits: AtomicU64,
     }
 
     impl CallbackMeter {
+        fn begin_callback(&self) {
+            self.callback_count.fetch_add(1, Ordering::Release);
+        }
+
         fn record(&self, sample: f32) {
             let magnitude = sample.abs();
             let magnitude_bits = magnitude.to_bits();
@@ -1523,6 +1529,7 @@ mod windows {
         consumer: &mut astra_platform_general::NativeAudioConsumer,
         meter: &CallbackMeter,
     ) {
+        meter.begin_callback();
         for target in output {
             *target = pop_sample(consumer, meter);
         }
@@ -1533,6 +1540,7 @@ mod windows {
         consumer: &mut astra_platform_general::NativeAudioConsumer,
         meter: &CallbackMeter,
     ) {
+        meter.begin_callback();
         for target in output {
             *target = (pop_sample(consumer, meter).clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
         }
@@ -1543,6 +1551,7 @@ mod windows {
         consumer: &mut astra_platform_general::NativeAudioConsumer,
         meter: &CallbackMeter,
     ) {
+        meter.begin_callback();
         for target in output {
             let sample = pop_sample(consumer, meter).clamp(-1.0, 1.0);
             *target = ((sample * 0.5 + 0.5) * f32::from(u16::MAX)) as u16;

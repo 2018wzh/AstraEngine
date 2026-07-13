@@ -251,6 +251,23 @@ impl WindowsSendInputHost {
 #[derive(Debug, Clone, Default)]
 pub struct WebCdpInputHost;
 
+#[derive(Debug, Clone)]
+pub struct WebLiveAutomationRequest {
+    pub bundle_dir: PathBuf,
+    pub browser_executable: PathBuf,
+    pub visual_comparison_report: PathBuf,
+    pub host_conformance_report: PathBuf,
+    pub headless: bool,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct WebLiveAutomationRun {
+    pub script: PlayerAutomationScript,
+    pub transcript: PlayerInputTranscript,
+    pub report: PlayerAutomationReport,
+}
+
 impl WebCdpInputHost {
     pub fn build_report(
         &self,
@@ -263,6 +280,112 @@ impl WebCdpInputHost {
     pub fn supports(script: &PlayerAutomationScript) -> bool {
         script.platform == PlayerPlatform::Web
     }
+
+    pub fn run_live_bundle(
+        &self,
+        request: WebLiveAutomationRequest,
+    ) -> Result<WebLiveAutomationRun, PlayerAutomationError> {
+        let bundle = BundleContext::read(request.bundle_dir)?;
+        if bundle.platform != "web" {
+            return Err("ASTRA_PLAYER_WEB_BUNDLE_REQUIRED".into());
+        }
+        let package_hash = sha256_file(&bundle.package_path)?;
+        if package_hash != bundle.package_hash {
+            return Err("ASTRA_PLAYER_BUNDLE_PACKAGE_HASH_MISMATCH".into());
+        }
+        let scenario = bundle.automation_scenario()?;
+        let mut script = PlayerAutomationScript::new(
+            &bundle.target,
+            &bundle.profile,
+            PlayerPlatform::Web,
+            package_hash.clone(),
+            scenario.scenario_ref.clone(),
+        );
+        script.expected_routes = vec![scenario.route_id.clone()];
+        script.steps = scenario
+            .inputs
+            .iter()
+            .enumerate()
+            .map(|(index, input)| PlayerAutomationStep {
+                id: format!("input.{}.{}", input.kind(), index + 1),
+                action: format!("cdp.{}", input.kind()),
+                expected_route_id: (index + 1 == scenario.inputs.len())
+                    .then(|| scenario.route_id.clone()),
+            })
+            .collect();
+        let timeout = std::time::Duration::from_millis(request.timeout_ms.max(1));
+        let live = run_web_live_input(
+            &bundle,
+            &scenario.inputs,
+            request.browser_executable,
+            request.headless,
+            timeout,
+        )?;
+        let (audio_meter, platform_identity) =
+            host_audio_meter(&request.host_conformance_report, &package_hash)?;
+        validate_web_same_run_audio(&live.final_evidence, &audio_meter, &platform_identity)?;
+        let comparison = visual_comparison_evidence(&request.visual_comparison_report)?;
+        let transcript = PlayerInputTranscript {
+            schema: "astra.player_input_transcript.v2".to_string(),
+            target: bundle.target,
+            profile: bundle.profile,
+            platform: PlayerPlatform::Web,
+            package_hash,
+            events: live.live.events,
+            input_consumption: live.live.input_consumption,
+            visual_regions: live.live.visual_regions,
+            audio_meter,
+            visual_comparison: Some(comparison),
+            runtime_routes: live.live.runtime_routes,
+            route_coverage: live.live.route_coverage,
+        };
+        let report = PlayerAutomationValidator.validate_with_platform_identity(
+            &script,
+            &transcript,
+            &platform_identity,
+        );
+        Ok(WebLiveAutomationRun {
+            script,
+            transcript,
+            report,
+        })
+    }
+}
+
+fn validate_web_same_run_audio(
+    evidence: &WebCdpRuntimeEvidence,
+    meter: &PlayerAudioMeterEvidence,
+    identity: &PlayerPlatformEvidenceIdentity,
+) -> Result<(), PlayerAutomationError> {
+    if evidence.session_id.as_deref() != Some(identity.session_id.as_str()) {
+        return Err("ASTRA_PLAYER_WEB_SESSION_IDENTITY_MISMATCH".into());
+    }
+    let value = evidence
+        .audio_meter
+        .as_ref()
+        .ok_or("ASTRA_PLAYER_WEB_AUDIO_EVIDENCE_MISSING")?;
+    let u64_field = |key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| -> PlayerAutomationError {
+                format!("ASTRA_PLAYER_WEB_AUDIO_FIELD_MISSING: {key}").into()
+            })
+    };
+    let callback_count = u64_field("callback_count")?;
+    let consumed_samples = u64_field("consumed_samples")?;
+    let peak_bits = u64_field("peak_dbfs_bits")?;
+    let rms_bits = u64_field("rms_dbfs_bits")?;
+    let peak_bits = u32::try_from(peak_bits).map_err(|_| "ASTRA_PLAYER_WEB_AUDIO_PEAK_RANGE")?;
+    let rms_bits = u32::try_from(rms_bits).map_err(|_| "ASTRA_PLAYER_WEB_AUDIO_RMS_RANGE")?;
+    if callback_count != meter.callback_count
+        || consumed_samples != meter.sample_count
+        || f32::from_bits(peak_bits).to_bits() != meter.peak_dbfs.to_bits()
+        || f32::from_bits(rms_bits).to_bits() != meter.rms_dbfs.to_bits()
+    {
+        return Err("ASTRA_PLAYER_WEB_AUDIO_REPORT_MISMATCH".into());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -527,7 +650,6 @@ fn sha256_file(path: &PathBuf) -> Result<String, PlayerAutomationError> {
     Ok(Hash256::from_sha256(&fs::read(path)?).to_string())
 }
 
-#[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 fn sha256_bytes(bytes: &[u8]) -> String {
     Hash256::from_sha256(bytes).to_string()
 }

@@ -33,6 +33,7 @@ pub(crate) struct WebAudioOutput {
     queued_frames: std::rc::Rc<std::cell::Cell<usize>>,
     meter: std::rc::Rc<std::cell::RefCell<AudioMeter>>,
     underflow_count: std::rc::Rc<std::cell::Cell<u64>>,
+    callback_count: std::rc::Rc<std::cell::Cell<u64>>,
     submitted_samples: u64,
 }
 
@@ -123,11 +124,13 @@ impl WebAudioOutput {
             rms_dbfs: -120.0,
         }));
         let underflow_count = std::rc::Rc::new(std::cell::Cell::new(0));
+        let callback_count = std::rc::Rc::new(std::cell::Cell::new(0));
         let on_message = {
             let pending = pending.clone();
             let queued_frames = queued_frames.clone();
             let meter = meter.clone();
             let underflow_count = underflow_count.clone();
+            let callback_count = callback_count.clone();
             wasm_bindgen::closure::Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
                 let data = event.data();
                 let message_type = Reflect::get(&data, &JsValue::from_str("type"))
@@ -170,6 +173,13 @@ impl WebAudioOutput {
                         {
                             underflow_count.set(value as u64);
                         }
+                        if let Some(value) =
+                            Reflect::get(&data, &JsValue::from_str("callbackCount"))
+                                .ok()
+                                .and_then(|value| value.as_f64())
+                        {
+                            callback_count.set(value as u64);
+                        }
                     }
                     _ => {}
                 }
@@ -188,6 +198,7 @@ impl WebAudioOutput {
             queued_frames,
             meter,
             underflow_count,
+            callback_count,
             submitted_samples: 0,
         })
     }
@@ -290,6 +301,7 @@ impl WebAudioOutput {
         let meter = self.meter.borrow().clone();
         Ok(AudioOutputState {
             queued_frames: self.queued_frames.get(),
+            callback_count: self.callback_count.get(),
             submitted_samples: self.submitted_samples,
             consumed_samples: meter.sample_count.min(self.submitted_samples),
             underflow_count: self.underflow_count.get(),

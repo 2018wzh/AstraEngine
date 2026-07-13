@@ -185,6 +185,7 @@ impl PlatformCommandSink {
                             "queued frame count exceeds the player contract",
                         )
                     })?,
+                    callback_count: state.callback_count,
                     submitted_samples: state.submitted_samples,
                     consumed_samples: state.consumed_samples,
                     underflow_count: state.underflow_count,

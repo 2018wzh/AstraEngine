@@ -140,6 +140,7 @@ pub struct AudioMeter {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioOutputState {
     pub queued_frames: usize,
+    pub callback_count: u64,
     pub submitted_samples: u64,
     pub consumed_samples: u64,
     pub underflow_count: u64,

@@ -12,6 +12,7 @@ pub struct NativeVnProductAudioHost {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NativeVnAudioMeterSnapshot {
+    pub callback_count: u64,
     pub submitted_samples: u64,
     pub consumed_samples: u64,
     pub underflow_count: u64,
@@ -191,6 +192,7 @@ impl NativeVnProductAudioHost {
             [PlayerHostCommandResult::AudioState {
                 output: state_output,
                 queued_frames,
+                callback_count,
                 submitted_samples,
                 consumed_samples,
                 underflow_count,
@@ -198,6 +200,7 @@ impl NativeVnProductAudioHost {
                 rms_dbfs_bits,
             }] if *state_output == output => {
                 self.last_meter = Some(NativeVnAudioMeterSnapshot {
+                    callback_count: *callback_count,
                     submitted_samples: *submitted_samples,
                     consumed_samples: *consumed_samples,
                     underflow_count: *underflow_count,
@@ -377,6 +380,7 @@ impl NativeVnProductAudioHost {
                     rms_dbfs_bits,
                 }] if *drained_output == output => {
                     let previous = self.last_meter.unwrap_or(NativeVnAudioMeterSnapshot {
+                        callback_count: 0,
                         submitted_samples: *sample_count,
                         consumed_samples: *sample_count,
                         underflow_count: 0,
@@ -384,6 +388,7 @@ impl NativeVnProductAudioHost {
                         rms_dbfs_bits: *rms_dbfs_bits,
                     });
                     self.last_meter = Some(NativeVnAudioMeterSnapshot {
+                        callback_count: previous.callback_count,
                         submitted_samples: previous.submitted_samples.max(*sample_count),
                         consumed_samples: *sample_count,
                         underflow_count: previous.underflow_count,
