@@ -902,7 +902,6 @@ dependencies = [
  "astra-vn-editor",
  "astra-vn-package",
  "astra-vn-plugin",
- "astra-vn-policy",
  "astra-vn-presentation",
  "astra-vn-save",
  "astra-vn-script",

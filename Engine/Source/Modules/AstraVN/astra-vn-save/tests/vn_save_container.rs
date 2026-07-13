@@ -1,10 +1,11 @@
 use astra_runtime::{
     write_runtime_save_with_sections, PackageHandle, RuntimeConfig, RuntimeWorld, SaveRequest,
 };
+use astra_vn_policy::{LuauPolicy, PolicySnapshotValue, VnPolicyState};
 use astra_vn_save::{
     compile_astra_sources, policy_state_save_section, read_runtime_save_policy_state,
-    read_runtime_save_vn_state, runtime_state_save_section, AstraSource, LuauPolicy,
-    PolicySnapshotValue, VnPlayerCommand, VnPolicyState, VnRunConfig, VnRuntime,
+    read_runtime_save_vn_state, runtime_state_save_section, AstraSource, VnPlayerCommand,
+    VnRunConfig, VnRuntime,
 };
 
 const STORY: &str = r#"

@@ -5,9 +5,13 @@ license.workspace = true
 version.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["luau-runtime"]
+luau-runtime = ["dep:mlua"]
+
 [dependencies]
 astra-core = { path = "../astra-core" }
-mlua.workspace = true
+mlua = { workspace = true, optional = true }
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true

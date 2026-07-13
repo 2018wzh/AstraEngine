@@ -1,10 +1,11 @@
 use astra_core::{Hash128, SchemaMigrationRegistry};
 use astra_package::{ContainerError, SectionPayload};
 use astra_runtime::{read_runtime_save_section, RuntimeError, SaveBlob};
+use astra_vn_policy::VnPolicyState;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{VnPolicyState, VnRuntimeState};
+use crate::VnRuntimeState;
 
 pub const VN_RUNTIME_STATE_SECTION_ID: &str = "vn.runtime_state";
 pub const VN_POLICY_STATE_SECTION_ID: &str = "vn.policy_state";

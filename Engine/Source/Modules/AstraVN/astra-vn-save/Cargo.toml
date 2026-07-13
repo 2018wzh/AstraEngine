@@ -11,7 +11,10 @@ astra-core = { path = "../../../Runtime/astra-core" }
 astra-package = { path = "../../../Runtime/astra-package" }
 astra-runtime = { path = "../../../Runtime/astra-runtime" }
 astra-vn-core = { path = "../astra-vn-core" }
-astra-vn-policy = { path = "../astra-vn-policy" }
+astra-vn-policy = { path = "../astra-vn-policy", default-features = false }
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+astra-vn-policy = { path = "../astra-vn-policy", features = ["luau-runtime"] }
