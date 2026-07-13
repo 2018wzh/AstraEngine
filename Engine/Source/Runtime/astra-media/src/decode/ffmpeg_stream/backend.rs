@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use astra_core::Hash256;
 use ffmpeg_next as ffmpeg;
 
-use super::{FfmpegDecodedPacket, FfmpegStreamLimits};
+use super::{FfmpegAudioOutputFormat, FfmpegDecodedPacket, FfmpegStreamLimits};
 use crate::decode::{decode_error, MediaError};
 use crate::{AudioFramePacket, VideoFramePacket};
 
@@ -13,6 +13,8 @@ pub(super) struct AudioDecoder {
     pub(super) decoder: ffmpeg::decoder::Audio,
     pub(super) resampler: ffmpeg::software::resampling::Context,
     pub(super) format: ffmpeg::format::Sample,
+    pub(super) source_layout: ffmpeg::ChannelLayout,
+    pub(super) source_sample_rate: u32,
     pub(super) layout: ffmpeg::ChannelLayout,
     pub(super) sample_rate: u32,
     pub(super) channels: u16,
@@ -36,6 +38,7 @@ pub(super) struct VideoDecoder {
 
 pub(super) fn create_audio_decoder(
     input: &ffmpeg::format::context::Input,
+    output: Option<FfmpegAudioOutputFormat>,
 ) -> Result<Option<AudioDecoder>, MediaError> {
     let Some(stream) = input.streams().best(ffmpeg::media::Type::Audio) else {
         return Ok(None);
@@ -49,33 +52,51 @@ pub(super) fn create_audio_decoder(
     let decoder = context.decoder().audio().map_err(|error| {
         ffmpeg_error("ASTRA_FFMPEG_STREAM_DECODER", "open audio decoder", error)
     })?;
-    let sample_rate = decoder.rate();
-    let channels = decoder.channels();
-    if sample_rate == 0 || channels == 0 || channels > 8 {
+    let source_sample_rate = decoder.rate();
+    let source_channels = decoder.channels();
+    if source_sample_rate == 0 || source_channels == 0 || source_channels > 8 {
         return Err(decode_error(
             "ASTRA_FFMPEG_STREAM_AUDIO_FORMAT",
             "FFmpeg audio track has an invalid rate or channel count",
         ));
     }
-    let layout = if decoder.channel_layout().is_empty() {
-        ffmpeg::ChannelLayout::default(i32::from(channels))
+    let source_layout = if decoder.channel_layout().is_empty() {
+        ffmpeg::ChannelLayout::default(i32::from(source_channels))
     } else {
         decoder.channel_layout()
     };
-    if layout.is_empty() {
+    if source_layout.is_empty() {
         return Err(decode_error(
             "ASTRA_FFMPEG_STREAM_AUDIO_FORMAT",
             "FFmpeg audio track has no channel layout",
         ));
     }
+    let sample_rate = output.map_or(source_sample_rate, |format| format.sample_rate);
+    let channels = output.map_or(source_channels, |format| format.channels);
+    let layout = ffmpeg::ChannelLayout::default(i32::from(channels));
+    if layout.is_empty() {
+        return Err(decode_error(
+            "ASTRA_FFMPEG_STREAM_AUDIO_OUTPUT",
+            "FFmpeg target audio channel layout is unavailable",
+        ));
+    }
     let format = ffmpeg::format::Sample::I16(ffmpeg::format::sample::Type::Packed);
-    let resampler = create_resampler(decoder.format(), layout, sample_rate, format)?;
+    let resampler = create_resampler(
+        decoder.format(),
+        source_layout,
+        source_sample_rate,
+        format,
+        layout,
+        sample_rate,
+    )?;
     Ok(Some(AudioDecoder {
         stream_index,
         time_base,
         decoder,
         resampler,
         format,
+        source_layout,
+        source_sample_rate,
         layout,
         sample_rate,
         channels,
@@ -88,17 +109,19 @@ pub(super) fn create_audio_decoder(
 
 pub(super) fn create_resampler(
     source_format: ffmpeg::format::Sample,
-    layout: ffmpeg::ChannelLayout,
-    sample_rate: u32,
+    source_layout: ffmpeg::ChannelLayout,
+    source_sample_rate: u32,
     target_format: ffmpeg::format::Sample,
+    target_layout: ffmpeg::ChannelLayout,
+    target_sample_rate: u32,
 ) -> Result<ffmpeg::software::resampling::Context, MediaError> {
     ffmpeg::software::resampling::Context::get(
         source_format,
-        layout,
-        sample_rate,
+        source_layout,
+        source_sample_rate,
         target_format,
-        layout,
-        sample_rate,
+        target_layout,
+        target_sample_rate,
     )
     .map_err(|error| {
         ffmpeg_error(
@@ -107,6 +130,36 @@ pub(super) fn create_resampler(
             error,
         )
     })
+}
+
+pub(super) fn reconfigure_audio_decoder(
+    audio: &mut AudioDecoder,
+    output: FfmpegAudioOutputFormat,
+) -> Result<(), MediaError> {
+    let layout = ffmpeg::ChannelLayout::default(i32::from(output.channels));
+    if layout.is_empty() {
+        return Err(decode_error(
+            "ASTRA_FFMPEG_STREAM_AUDIO_OUTPUT",
+            "FFmpeg target audio channel layout is unavailable",
+        ));
+    }
+    let resampler = create_resampler(
+        audio.decoder.format(),
+        audio.source_layout,
+        audio.source_sample_rate,
+        audio.format,
+        layout,
+        output.sample_rate,
+    )?;
+    audio.resampler = resampler;
+    audio.layout = layout;
+    audio.sample_rate = output.sample_rate;
+    audio.channels = output.channels;
+    audio.eof_sent = false;
+    audio.decoder_drained = false;
+    audio.resampler_flushed = false;
+    audio.next_output_pts_us = None;
+    Ok(())
 }
 
 pub(super) fn create_video_decoder(

@@ -1,4 +1,5 @@
 mod contract;
+mod pipeline;
 mod validation;
 
 use std::collections::VecDeque;
@@ -8,6 +9,7 @@ use astra_core::{Diagnostic, Hash256};
 use crate::MediaError;
 
 pub use contract::*;
+pub use pipeline::*;
 use validation::*;
 
 impl MediaPlaybackSession {

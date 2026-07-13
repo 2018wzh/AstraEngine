@@ -182,6 +182,13 @@ mod browser {
                 HostCommand::QueryAudioOutputFormat { reply } => {
                     let _ = reply.send(preferred_audio_output_format().await);
                 }
+                HostCommand::QueryAudioDeviceFormat { reply } => {
+                    let _ = reply.send(Err(PlatformError::new(
+                        PlatformErrorCode::PlatformNotImplemented,
+                        "audio.query_device_format",
+                        "WebAudio format is selected during user-activated output creation",
+                    )));
+                }
                 HostCommand::SubmitAudio {
                     output,
                     packet,
@@ -203,6 +210,39 @@ mod browser {
                         Err(error) => Err(error),
                     };
                     let _ = reply.send(result);
+                }
+                HostCommand::QueryAudioOutput { output, reply } => {
+                    let result = audio.get(output).map(|audio| audio.status());
+                    let _ = reply.send(result);
+                }
+                HostCommand::PauseAudio { output, reply } => {
+                    let result = match audio.get(output) {
+                        Ok(audio) => audio.pause().await,
+                        Err(error) => Err(error),
+                    };
+                    let _ = reply.send(result);
+                }
+                HostCommand::ResumeAudio { output, reply } => {
+                    let result = match audio.get(output) {
+                        Ok(audio) => audio.resume().await,
+                        Err(error) => Err(error),
+                    };
+                    let _ = reply.send(result);
+                }
+                HostCommand::AbortAudio { output, reply } => {
+                    let result = match audio.remove(output) {
+                        Ok(audio) => audio.close().await,
+                        Err(error) => Err(error),
+                    };
+                    let _ = reply.send(result);
+                }
+                #[cfg(feature = "platform-test-driver")]
+                HostCommand::InjectAudioDeviceLoss { reply, .. } => {
+                    let _ = reply.send(Err(PlatformError::new(
+                        PlatformErrorCode::PlatformNotImplemented,
+                        "audio.test.inject_device_loss",
+                        "Windows-only test injection is unavailable on Web",
+                    )));
                 }
                 HostCommand::CloseAudio { output, reply } => {
                     let result = match audio.remove(output) {

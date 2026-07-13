@@ -68,12 +68,12 @@ mod windows {
 
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
-        host_channel, AudioMeter, AudioOutputHandle, AudioOutputRequest, AudioPacket,
-        CapturedFrame, DecodeKind, DecodeOutput, DecodeSessionHandle, HostCommand, InputState,
-        PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels, PlatformDecodeRequest,
-        PlatformError, PlatformErrorCode, PlatformEvent, PlatformEventKind, PlatformHostProfile,
-        PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle, TouchPhase,
-        WindowHandle,
+        host_channel, AudioDeviceFormat, AudioMeter, AudioOutputHandle, AudioOutputRequest,
+        AudioOutputStatus, AudioPacket, CapturedFrame, DecodeKind, DecodeOutput,
+        DecodeSessionHandle, HostCommand, InputState, PackageSourceHandle, PackageSourceRequest,
+        PlatformBackendChannels, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
+        PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
+        SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowHandle,
     };
     use astra_platform_general::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, ResourceTable, SaveTransaction,
@@ -456,6 +456,9 @@ mod windows {
                         let result = preferred_audio_output_format();
                         let _ = reply.send(result);
                     }
+                    HostCommand::QueryAudioDeviceFormat { reply } => {
+                        let _ = reply.send(default_audio_device_format());
+                    }
                     HostCommand::SubmitAudio {
                         output,
                         packet,
@@ -494,6 +497,48 @@ mod windows {
                                 provider: "windows.wasapi".to_string(),
                             });
                         }
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::QueryAudioOutput { output, reply } => {
+                        let result = self
+                            .audio_outputs
+                            .get(output)
+                            .and_then(AudioResource::status);
+                        if result
+                            .as_ref()
+                            .is_err_and(|error| error.code == PlatformErrorCode::DeviceLost)
+                        {
+                            let _ = self.audio_outputs.remove(output);
+                            self.emit(PlatformEventKind::DeviceLost {
+                                provider: "windows.wasapi".to_string(),
+                            });
+                        }
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::PauseAudio { output, reply } => {
+                        let result = self
+                            .audio_outputs
+                            .get_mut(output)
+                            .and_then(AudioResource::pause);
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::ResumeAudio { output, reply } => {
+                        let result = self
+                            .audio_outputs
+                            .get_mut(output)
+                            .and_then(AudioResource::resume);
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::AbortAudio { output, reply } => {
+                        let result = self.audio_outputs.remove(output).map(|_| ());
+                        let _ = reply.send(result);
+                    }
+                    #[cfg(feature = "platform-test-driver")]
+                    HostCommand::InjectAudioDeviceLoss { output, reply } => {
+                        let result = self
+                            .audio_outputs
+                            .get_mut(output)
+                            .map(AudioResource::inject_device_loss);
                         let _ = reply.send(result);
                     }
                     HostCommand::CloseAudio { output, reply } => {
@@ -976,7 +1021,7 @@ mod windows {
     }
 
     struct AudioResource {
-        _stream: cpal::Stream,
+        stream: cpal::Stream,
         producer: astra_platform_general::NativeAudioProducer,
         queue_telemetry: astra_platform_general::AudioQueueTelemetryReader,
         meter: Arc<CallbackMeter>,
@@ -985,6 +1030,7 @@ mod windows {
         sample_rate: u32,
         next_sequence: u64,
         submitted_samples: u64,
+        paused: bool,
     }
 
     fn preferred_audio_output_format() -> Result<astra_platform::AudioOutputFormat, PlatformError> {
@@ -1022,17 +1068,24 @@ mod windows {
             let device = host.default_output_device().ok_or_else(|| {
                 host_error("audio.open", "WASAPI default output device is unavailable")
             })?;
-            let supported = device.default_output_config().map_err(|_| {
-                host_error("audio.open", "WASAPI default output config is unavailable")
-            })?;
-            if supported.sample_rate() != request.sample_rate
-                || supported.channels() != request.channels
-            {
-                return Err(host_error(
-                    "audio.open",
-                    "WASAPI default format does not match the requested explicit format",
-                ));
-            }
+            let requested_rate = request.sample_rate;
+            let supported = device
+                .supported_output_configs()
+                .map_err(|_| host_error("audio.open", "WASAPI output format enumeration failed"))?
+                .filter(|range| {
+                    range.channels() == request.channels
+                        && range.min_sample_rate() <= requested_rate
+                        && range.max_sample_rate() >= requested_rate
+                        && sample_format_rank(range.sample_format()).is_some()
+                })
+                .map(|range| range.with_sample_rate(requested_rate))
+                .min_by_key(|config| sample_format_rank(config.sample_format()))
+                .ok_or_else(|| {
+                    host_error(
+                        "audio.open",
+                        "WASAPI has no exact supported format for the requested rate and channels",
+                    )
+                })?;
             let config: cpal::StreamConfig = supported.clone().into();
             let capacity = request
                 .max_buffered_frames
@@ -1094,7 +1147,7 @@ mod windows {
                 .play()
                 .map_err(|_| host_error("audio.open", "WASAPI output stream could not start"))?;
             Ok(Self {
-                _stream: stream,
+                stream,
                 producer,
                 queue_telemetry,
                 meter,
@@ -1103,6 +1156,7 @@ mod windows {
                 sample_rate: request.sample_rate,
                 next_sequence: 1,
                 submitted_samples: 0,
+                paused: false,
             })
         }
 
@@ -1143,7 +1197,45 @@ mod windows {
             Ok(())
         }
 
+        fn pause(&mut self) -> Result<(), PlatformError> {
+            if self.paused {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    "audio.pause",
+                    "WASAPI output is already paused",
+                ));
+            }
+            self.stream
+                .pause()
+                .map_err(|_| host_error("audio.pause", "WASAPI output could not pause"))?;
+            self.paused = true;
+            Ok(())
+        }
+
+        fn resume(&mut self) -> Result<(), PlatformError> {
+            if !self.paused {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    "audio.resume",
+                    "WASAPI output is not paused",
+                ));
+            }
+            self.stream
+                .play()
+                .map_err(|_| host_error("audio.resume", "WASAPI output could not resume"))?;
+            self.paused = false;
+            Ok(())
+        }
+
+        #[cfg(feature = "platform-test-driver")]
+        fn inject_device_loss(&mut self) {
+            self.stream_error.store(true, Ordering::Release);
+        }
+
         fn drain(&mut self) -> Result<AudioMeter, PlatformError> {
+            if self.paused {
+                self.resume()?;
+            }
             let request = AudioOutputRequest {
                 sample_rate: self.sample_rate,
                 channels: self.channels,
@@ -1184,6 +1276,66 @@ mod windows {
                 meter: self.meter.snapshot(),
             }
         }
+
+        fn status(&self) -> Result<AudioOutputStatus, PlatformError> {
+            if self.stream_error.load(Ordering::Acquire) {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::DeviceLost,
+                    "audio.query",
+                    "WASAPI output stream reported a device error",
+                ));
+            }
+            let consumed_samples = self.queue_telemetry.snapshot();
+            let channels = u64::from(self.channels);
+            if consumed_samples.sample_count > self.submitted_samples
+                || self.submitted_samples % channels != 0
+            {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::IntegrityMismatch,
+                    "audio.query",
+                    "WASAPI queue telemetry is inconsistent with submitted audio",
+                ));
+            }
+            let submitted_frames = self.submitted_samples / channels;
+            let played_frames = consumed_samples.sample_count / channels;
+            Ok(AudioOutputStatus {
+                submitted_frames,
+                played_frames,
+                buffered_frames: submitted_frames - played_frames,
+                underflow_count: consumed_samples.underflow_count,
+                meter: self.meter.snapshot(),
+            })
+        }
+    }
+
+    fn default_audio_device_format() -> Result<AudioDeviceFormat, PlatformError> {
+        let device = cpal::default_host()
+            .default_output_device()
+            .ok_or_else(|| {
+                host_error(
+                    "audio.query_device_format",
+                    "WASAPI default output device is unavailable",
+                )
+            })?;
+        let config = device.default_output_config().map_err(|_| {
+            host_error(
+                "audio.query_device_format",
+                "WASAPI default output format is unavailable",
+            )
+        })?;
+        if sample_format_rank(config.sample_format()).is_none()
+            || config.sample_rate() == 0
+            || config.channels() == 0
+        {
+            return Err(host_error(
+                "audio.query_device_format",
+                "WASAPI default output format is unsupported",
+            ));
+        }
+        Ok(AudioDeviceFormat {
+            sample_rate: config.sample_rate(),
+            channels: config.channels(),
+        })
     }
 
     #[derive(Default)]
@@ -1253,6 +1405,15 @@ mod windows {
             -120.0
         } else {
             20.0 * value.log10()
+        }
+    }
+
+    fn sample_format_rank(format: cpal::SampleFormat) -> Option<u8> {
+        match format {
+            cpal::SampleFormat::F32 => Some(0),
+            cpal::SampleFormat::I16 => Some(1),
+            cpal::SampleFormat::U16 => Some(2),
+            _ => None,
         }
     }
 

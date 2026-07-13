@@ -103,6 +103,25 @@ fn profile_rejects_invalid_cache_limits() {
 
 #[test]
 fn release_profile_rejects_undeclared_fallback_and_invalid_https_origin() {
+    let mut windows = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
+    windows.decode.providers.push("ffmpeg".to_string());
+    windows.decode.allow_software = true;
+    assert!(validate_host_profile(&windows).is_ok());
+
+    let mut wrong_order = windows.clone();
+    wrong_order.decode.providers.reverse();
+    assert_eq!(
+        validate_host_profile(&wrong_order).unwrap_err().code,
+        PlatformErrorCode::InvalidProfile
+    );
+
+    let mut undeclared = windows;
+    undeclared.decode.allow_software = false;
+    assert_eq!(
+        validate_host_profile(&undeclared).unwrap_err().code,
+        PlatformErrorCode::InvalidProfile
+    );
+
     let mut web = PlatformHostProfile::web_release("nativevn-web", "com.example.game");
     web.renderer.providers.push("webgl".to_string());
     assert_eq!(

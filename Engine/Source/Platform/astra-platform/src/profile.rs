@@ -344,6 +344,13 @@ fn validate_release_provider_policy(profile: &PlatformHostProfile) -> Result<(),
     .into_iter()
     .zip(expected)
     {
+        let declared_windows_ffmpeg_fallback = profile.platform == PlatformId::Windows
+            && field == "decode"
+            && policy.allow_software
+            && policy.providers.as_slice() == ["wmf", "ffmpeg"];
+        if declared_windows_ffmpeg_fallback {
+            continue;
+        }
         if policy.allow_software || policy.providers.as_slice() != [required] {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidProfile,

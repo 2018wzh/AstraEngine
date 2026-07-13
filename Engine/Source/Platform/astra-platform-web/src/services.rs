@@ -1,8 +1,8 @@
 use astra_core::Hash256;
 use astra_platform::{
-    AudioMeter, AudioOutputFormat, AudioOutputRequest, AudioOutputState, AudioPacket, DecodeKind,
-    DecodeOutput, PackageCachePolicy, PackageSourcePolicy, PackageSourceRequest,
-    PlatformDecodeRequest, PlatformError, PlatformErrorCode,
+    AudioMeter, AudioOutputFormat, AudioOutputRequest, AudioOutputState, AudioOutputStatus,
+    AudioPacket, DecodeKind, DecodeOutput, PackageCachePolicy, PackageSourcePolicy,
+    PackageSourceRequest, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
 };
 use js_sys::{Function, Promise, Reflect, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};
@@ -248,6 +248,54 @@ impl WebAudioOutput {
             .submitted_samples
             .saturating_add(packet.samples.len() as u64);
         self.next_sequence += 1;
+        Ok(())
+    }
+
+    pub fn status(&self) -> AudioOutputStatus {
+        let submitted_frames = self.submitted_samples / u64::from(self.request.channels);
+        let buffered_frames = self.queued_frames.get() as u64;
+        AudioOutputStatus {
+            submitted_frames,
+            played_frames: submitted_frames.saturating_sub(buffered_frames),
+            buffered_frames,
+            underflow_count: 0,
+            meter: self.meter.borrow().clone(),
+        }
+    }
+
+    pub async fn pause(&self) -> Result<(), PlatformError> {
+        if self.context.state() != web_sys::AudioContextState::Running {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "audio.pause",
+                "WebAudio output is not running",
+            ));
+        }
+        JsFuture::from(
+            self.context
+                .suspend()
+                .map_err(|_| audio_error("audio.pause"))?,
+        )
+        .await
+        .map_err(|_| audio_error("audio.pause"))?;
+        Ok(())
+    }
+
+    pub async fn resume(&self) -> Result<(), PlatformError> {
+        if self.context.state() != web_sys::AudioContextState::Suspended {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "audio.resume",
+                "WebAudio output is not suspended",
+            ));
+        }
+        JsFuture::from(
+            self.context
+                .resume()
+                .map_err(|_| audio_error("audio.resume"))?,
+        )
+        .await
+        .map_err(|_| audio_error("audio.resume"))?;
         Ok(())
     }
 

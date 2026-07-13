@@ -5,6 +5,10 @@ license.workspace = true
 version.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+platform-test-driver = []
+
 [dependencies]
 tracing.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }

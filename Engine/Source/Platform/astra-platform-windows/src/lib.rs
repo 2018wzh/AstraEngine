@@ -1,10 +1,14 @@
 mod diagnostics;
 mod factory;
+#[cfg(all(target_os = "windows", feature = "ffmpeg-vcpkg"))]
+mod media_session;
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 mod test_driver;
 
 pub use diagnostics::*;
 pub use factory::*;
+#[cfg(all(target_os = "windows", feature = "ffmpeg-vcpkg"))]
+pub use media_session::*;
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 pub use test_driver::*;
 

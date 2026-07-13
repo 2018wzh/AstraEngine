@@ -63,6 +63,15 @@ async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
         )
         .await
         .expect("submit audio");
+    let queued = session.client.query_audio_output(audio).await.unwrap();
+    assert_eq!(queued.submitted_frames, 480);
+    assert_eq!(queued.buffered_frames + queued.played_frames, 480);
+    session.client.pause_audio(audio).await.unwrap();
+    assert_eq!(
+        session.client.pause_audio(audio).await.unwrap_err().code,
+        PlatformErrorCode::InvalidState
+    );
+    session.client.resume_audio(audio).await.unwrap();
     let meter = session
         .client
         .drain_audio(audio)
@@ -70,7 +79,25 @@ async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
         .expect("drain audio");
     assert!(meter.sample_count > 0);
     assert!(meter.peak_dbfs > -80.0);
+    let drained = session.client.query_audio_output(audio).await.unwrap();
+    assert_eq!(drained.played_frames, 480);
+    assert_eq!(drained.buffered_frames, 0);
     session.client.close_audio(audio).await.unwrap();
+    let aborted_audio = session
+        .client
+        .open_audio_output(AudioOutputRequest {
+            sample_rate,
+            channels,
+            max_buffered_frames: 4_800,
+        })
+        .await
+        .unwrap();
+    session.client.abort_audio(aborted_audio).await.unwrap();
+    assert!(session
+        .client
+        .query_audio_output(aborted_audio)
+        .await
+        .is_err());
 
     let decode = session
         .client

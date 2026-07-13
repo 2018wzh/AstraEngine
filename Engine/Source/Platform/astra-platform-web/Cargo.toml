@@ -8,6 +8,7 @@ rust-version.workspace = true
 [features]
 default = []
 web-code-check = []
+platform-test-driver = ["astra-platform/platform-test-driver"]
 
 [dependencies]
 tracing.workspace = true

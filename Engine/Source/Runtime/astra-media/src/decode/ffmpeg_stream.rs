@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tempfile::{Builder, NamedTempFile};
 
 use super::{decode_error, MediaError};
-use crate::{AudioFramePacket, LateVideoPolicy, MediaPlaybackConfig, VideoFramePacket};
+use crate::{LateVideoPolicy, MediaPlaybackConfig};
 
 mod backend;
 use backend::*;
@@ -34,7 +34,7 @@ impl Default for FfmpegStreamLimits {
             max_audio_packet_bytes: 4 * 1024 * 1024,
             max_video_frame_bytes: 64 * 1024 * 1024,
             max_pending_packets: 64,
-            max_video_frames: 12,
+            max_video_frames: 64,
             max_audio_packets: 64,
             max_tick_us: 100_000,
             max_audio_clock_jump_us: 250_000,
@@ -45,16 +45,12 @@ impl Default for FfmpegStreamLimits {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FfmpegDecodedPacket {
-    Audio {
-        packet: AudioFramePacket,
-        pcm_s16le: Vec<u8>,
-    },
-    Video {
-        packet: VideoFramePacket,
-        bgra8: Vec<u8>,
-    },
+pub type FfmpegDecodedPacket = crate::DecodedMediaPacket;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FfmpegAudioOutputFormat {
+    pub sample_rate: u32,
+    pub channels: u16,
 }
 
 pub struct FfmpegPlaybackDecoder {
@@ -75,7 +71,24 @@ pub struct FfmpegPlaybackDecoder {
 
 impl FfmpegPlaybackDecoder {
     pub fn open(codec: &str, bytes: &[u8], limits: FfmpegStreamLimits) -> Result<Self, MediaError> {
+        Self::open_with_audio_output(codec, bytes, limits, None)
+    }
+
+    pub fn open_with_audio_output(
+        codec: &str,
+        bytes: &[u8],
+        limits: FfmpegStreamLimits,
+        audio_output: Option<FfmpegAudioOutputFormat>,
+    ) -> Result<Self, MediaError> {
         validate_limits(&limits)?;
+        if audio_output.is_some_and(|format| {
+            format.sample_rate == 0 || format.channels == 0 || format.channels > 8
+        }) {
+            return Err(decode_error(
+                "ASTRA_FFMPEG_STREAM_AUDIO_OUTPUT",
+                "FFmpeg target audio format is invalid",
+            ));
+        }
         if !safe_codec(codec) || bytes.is_empty() || bytes.len() > limits.max_encoded_bytes {
             return Err(decode_error(
                 "ASTRA_FFMPEG_STREAM_INPUT",
@@ -113,7 +126,7 @@ impl FfmpegPlaybackDecoder {
                 "encoded stream duration exceeds the playback clock",
             )
         })?;
-        let audio = create_audio_decoder(&input)?;
+        let audio = create_audio_decoder(&input, audio_output)?;
         let video = create_video_decoder(&input)?;
         if audio.is_none() && video.is_none() {
             return Err(decode_error(
@@ -151,6 +164,34 @@ impl FfmpegPlaybackDecoder {
             max_video_lag_us: self.limits.max_video_lag_us,
             late_video_policy: self.limits.late_video_policy,
         }
+    }
+
+    pub fn configure_audio_output(
+        &mut self,
+        format: FfmpegAudioOutputFormat,
+    ) -> Result<(), MediaError> {
+        if format.sample_rate == 0
+            || format.channels == 0
+            || format.channels > 8
+            || self.generation != 1
+            || self.next_audio_sequence != 1
+            || self.next_video_sequence != 1
+            || !self.pending.is_empty()
+            || self.demux_eof
+            || self.cancelled
+        {
+            return Err(decode_error(
+                "ASTRA_FFMPEG_STREAM_AUDIO_OUTPUT",
+                "audio output can only be configured before the first decode operation",
+            ));
+        }
+        let audio = self.audio.as_mut().ok_or_else(|| {
+            decode_error(
+                "ASTRA_FFMPEG_STREAM_AUDIO_OUTPUT",
+                "audio output was configured for a stream without audio",
+            )
+        })?;
+        reconfigure_audio_decoder(audio, format)
     }
 
     pub fn generation(&self) -> u64 {
@@ -264,9 +305,11 @@ impl FfmpegPlaybackDecoder {
             audio.decoder.flush();
             audio.resampler = create_resampler(
                 audio.decoder.format(),
+                audio.source_layout,
+                audio.source_sample_rate,
+                audio.format,
                 audio.layout,
                 audio.sample_rate,
-                audio.format,
             )?;
             audio.eof_sent = false;
             audio.decoder_drained = false;

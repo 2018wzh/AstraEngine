@@ -94,10 +94,12 @@ pub struct AudioOutputRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AudioOutputFormat {
+pub struct AudioDeviceFormat {
     pub sample_rate: u32,
     pub channels: u16,
 }
+
+pub type AudioOutputFormat = AudioDeviceFormat;
 
 impl AudioOutputRequest {
     /// Returns a drain deadline that covers the submitted playback duration plus
@@ -143,6 +145,15 @@ pub struct AudioOutputState {
     pub callback_count: u64,
     pub submitted_samples: u64,
     pub consumed_samples: u64,
+    pub underflow_count: u64,
+    pub meter: AudioMeter,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioOutputStatus {
+    pub submitted_frames: u64,
+    pub played_frames: u64,
+    pub buffered_frames: u64,
     pub underflow_count: u64,
     pub meter: AudioMeter,
 }
@@ -225,6 +236,9 @@ pub enum HostCommand {
     QueryAudioOutputFormat {
         reply: oneshot::Sender<Result<AudioOutputFormat, PlatformError>>,
     },
+    QueryAudioDeviceFormat {
+        reply: oneshot::Sender<Result<AudioDeviceFormat, PlatformError>>,
+    },
     SubmitAudio {
         output: AudioOutputHandle,
         packet: AudioPacket,
@@ -237,6 +251,27 @@ pub enum HostCommand {
     DrainAudio {
         output: AudioOutputHandle,
         reply: oneshot::Sender<Result<AudioMeter, PlatformError>>,
+    },
+    QueryAudioOutput {
+        output: AudioOutputHandle,
+        reply: oneshot::Sender<Result<AudioOutputStatus, PlatformError>>,
+    },
+    PauseAudio {
+        output: AudioOutputHandle,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    ResumeAudio {
+        output: AudioOutputHandle,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    AbortAudio {
+        output: AudioOutputHandle,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    #[cfg(feature = "platform-test-driver")]
+    InjectAudioDeviceLoss {
+        output: AudioOutputHandle,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
     },
     CloseAudio {
         output: AudioOutputHandle,
@@ -306,9 +341,16 @@ impl HostCommand {
             Self::DestroyWindow { .. } => "window.destroy",
             Self::OpenAudioOutput { .. } => "audio.open",
             Self::QueryAudioOutputFormat { .. } => "audio.format",
+            Self::QueryAudioDeviceFormat { .. } => "audio.query_device_format",
             Self::SubmitAudio { .. } => "audio.submit",
             Self::QueryAudio { .. } => "audio.query",
             Self::DrainAudio { .. } => "audio.drain",
+            Self::QueryAudioOutput { .. } => "audio.query",
+            Self::PauseAudio { .. } => "audio.pause",
+            Self::ResumeAudio { .. } => "audio.resume",
+            Self::AbortAudio { .. } => "audio.abort",
+            #[cfg(feature = "platform-test-driver")]
+            Self::InjectAudioDeviceLoss { .. } => "audio.test.inject_device_loss",
             Self::CloseAudio { .. } => "audio.close",
             Self::OpenDecode { .. } => "decode.open",
             Self::Decode { .. } => "decode.submit",
@@ -331,12 +373,17 @@ impl HostCommand {
             | Self::DestroySurface { reply, .. }
             | Self::DestroyWindow { reply, .. }
             | Self::SubmitAudio { reply, .. }
+            | Self::PauseAudio { reply, .. }
+            | Self::ResumeAudio { reply, .. }
+            | Self::AbortAudio { reply, .. }
             | Self::CloseAudio { reply, .. }
             | Self::CloseDecode { reply, .. }
             | Self::WriteSave { reply, .. }
             | Self::AbortSave { reply, .. }
             | Self::ClosePackage { reply, .. }
             | Self::Shutdown { reply } => reply.send(result),
+            #[cfg(feature = "platform-test-driver")]
+            Self::InjectAudioDeviceLoss { reply, .. } => reply.send(result),
             other => {
                 return Err(PlatformError::new(
                     PlatformErrorCode::InvalidState,
@@ -365,9 +412,16 @@ impl HostCommand {
             Self::DestroyWindow { reply, .. } => send_error!(reply),
             Self::OpenAudioOutput { reply, .. } => send_error!(reply),
             Self::QueryAudioOutputFormat { reply } => send_error!(reply),
+            Self::QueryAudioDeviceFormat { reply } => send_error!(reply),
             Self::SubmitAudio { reply, .. } => send_error!(reply),
             Self::QueryAudio { reply, .. } => send_error!(reply),
             Self::DrainAudio { reply, .. } => send_error!(reply),
+            Self::QueryAudioOutput { reply, .. } => send_error!(reply),
+            Self::PauseAudio { reply, .. } => send_error!(reply),
+            Self::ResumeAudio { reply, .. } => send_error!(reply),
+            Self::AbortAudio { reply, .. } => send_error!(reply),
+            #[cfg(feature = "platform-test-driver")]
+            Self::InjectAudioDeviceLoss { reply, .. } => send_error!(reply),
             Self::CloseAudio { reply, .. } => send_error!(reply),
             Self::OpenDecode { reply, .. } => send_error!(reply),
             Self::Decode { reply, .. } => send_error!(reply),
@@ -542,6 +596,23 @@ pub struct PlatformHostClient {
 }
 
 impl PlatformHostClient {
+    pub async fn query_audio_device_format(&self) -> Result<AudioDeviceFormat, PlatformError> {
+        self.ensure_running("audio.query_device_format")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::QueryAudioDeviceFormat { reply })?;
+        let format = response
+            .await
+            .map_err(|_| queue_closed("audio.query_device_format"))??;
+        if format.sample_rate == 0 || format.channels == 0 {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "audio.query_device_format",
+                "audio provider returned an invalid device format",
+            ));
+        }
+        Ok(format)
+    }
+
     pub async fn create_window(
         &self,
         request: WindowRequest,
@@ -748,6 +819,72 @@ impl PlatformHostClient {
         Ok(state)
     }
 
+    pub async fn query_audio_output(
+        &self,
+        output: AudioOutputHandle,
+    ) -> Result<AudioOutputStatus, PlatformError> {
+        self.ensure_running("audio.query")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::QueryAudioOutput { output, reply })?;
+        let status = response.await.map_err(|_| queue_closed("audio.query"))??;
+        if status.played_frames > status.submitted_frames
+            || status.buffered_frames != status.submitted_frames - status.played_frames
+            || !status.meter.peak_dbfs.is_finite()
+            || !status.meter.rms_dbfs.is_finite()
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "audio.query",
+                "audio output status is internally inconsistent",
+            ));
+        }
+        Ok(status)
+    }
+
+    pub async fn pause_audio(&self, output: AudioOutputHandle) -> Result<(), PlatformError> {
+        let (reply, response) = oneshot::channel();
+        self.send_unit(
+            HostCommand::PauseAudio { output, reply },
+            response,
+            "audio.pause",
+        )
+        .await
+    }
+
+    pub async fn resume_audio(&self, output: AudioOutputHandle) -> Result<(), PlatformError> {
+        let (reply, response) = oneshot::channel();
+        self.send_unit(
+            HostCommand::ResumeAudio { output, reply },
+            response,
+            "audio.resume",
+        )
+        .await
+    }
+
+    pub async fn abort_audio(&self, output: AudioOutputHandle) -> Result<(), PlatformError> {
+        let (reply, response) = oneshot::channel();
+        self.send_unit(
+            HostCommand::AbortAudio { output, reply },
+            response,
+            "audio.abort",
+        )
+        .await
+    }
+
+    #[cfg(feature = "platform-test-driver")]
+    pub async fn inject_audio_device_loss(
+        &self,
+        output: AudioOutputHandle,
+    ) -> Result<(), PlatformError> {
+        let (reply, response) = oneshot::channel();
+        self.send_unit(
+            HostCommand::InjectAudioDeviceLoss { output, reply },
+            response,
+            "audio.test.inject_device_loss",
+        )
+        .await
+    }
+
     pub async fn close_audio(&self, output: AudioOutputHandle) -> Result<(), PlatformError> {
         let (reply, response) = oneshot::channel();
         self.send_unit(
@@ -756,6 +893,10 @@ impl PlatformHostClient {
             "audio.close",
         )
         .await
+    }
+
+    pub fn profile(&self) -> &PlatformHostProfile {
+        &self.profile
     }
 
     pub async fn open_decode(

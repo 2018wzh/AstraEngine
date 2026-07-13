@@ -1,7 +1,7 @@
 use astra_platform::{
-    host_channel, AudioMeter, AudioOutputHandle, DecodeKind, DecodeOutput, DecodeSessionHandle,
-    HostCommand, PackageSourceHandle, PlatformDecodeRequest, PlatformHostProfile, RgbaFrame,
-    SaveTransactionHandle, SurfaceHandle, WindowHandle,
+    host_channel, AudioDeviceFormat, AudioMeter, AudioOutputHandle, AudioOutputStatus, DecodeKind,
+    DecodeOutput, DecodeSessionHandle, HostCommand, PackageSourceHandle, PlatformDecodeRequest,
+    PlatformHostProfile, RgbaFrame, SaveTransactionHandle, SurfaceHandle, WindowHandle,
 };
 
 #[tokio::test]
@@ -108,6 +108,65 @@ async fn client_exposes_explicit_present_close_and_storage_lifecycle() {
         other => panic!("unexpected command: {}", other.operation()),
     }
     assert_eq!(drain.await.unwrap().unwrap().sample_count, 2);
+
+    let query = tokio::spawn({
+        let client = client.clone();
+        async move { client.query_audio_output(audio).await }
+    });
+    match backend.next_command().await.unwrap() {
+        HostCommand::QueryAudioOutput { reply, .. } => reply
+            .send(Ok(AudioOutputStatus {
+                submitted_frames: 2,
+                played_frames: 1,
+                buffered_frames: 1,
+                underflow_count: 0,
+                meter: AudioMeter {
+                    sample_count: 2,
+                    peak_dbfs: -6.0,
+                    rms_dbfs: -9.0,
+                },
+            }))
+            .unwrap(),
+        other => panic!("unexpected command: {}", other.operation()),
+    }
+    assert_eq!(query.await.unwrap().unwrap().buffered_frames, 1);
+
+    let device_format = tokio::spawn({
+        let client = client.clone();
+        async move { client.query_audio_device_format().await }
+    });
+    match backend.next_command().await.unwrap() {
+        HostCommand::QueryAudioDeviceFormat { reply } => reply
+            .send(Ok(AudioDeviceFormat {
+                sample_rate: 48_000,
+                channels: 2,
+            }))
+            .unwrap(),
+        other => panic!("unexpected command: {}", other.operation()),
+    }
+    assert_eq!(device_format.await.unwrap().unwrap().sample_rate, 48_000);
+
+    for (operation, task) in [
+        (
+            "audio.pause",
+            tokio::spawn({
+                let client = client.clone();
+                async move { client.pause_audio(audio).await }
+            }),
+        ),
+        (
+            "audio.resume",
+            tokio::spawn({
+                let client = client.clone();
+                async move { client.resume_audio(audio).await }
+            }),
+        ),
+    ] {
+        let command = backend.next_command().await.unwrap();
+        assert_eq!(command.operation(), operation);
+        command.reply_unit(Ok(())).unwrap();
+        task.await.unwrap().unwrap();
+    }
 
     let open_decode = tokio::spawn({
         let client = client.clone();
