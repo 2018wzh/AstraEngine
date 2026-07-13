@@ -27,6 +27,7 @@ pub struct ReleaseCheckRecord {
 | runtime | `runtime_provider.binding` | target manifest, provider descriptor | missing gameplay runtime provider, fingerprint mismatch, profile not supported or provider selected by load order | target id, runtime provider id, profile, descriptor hash |
 | package | `package.integrity` | package container | invalid section/hash/bounds | section table hash |
 | package | `package.cooked_project` | package `compiled.project` section | release profile package lacks cook/project artifact, wrong schema or mismatched package metadata | section id, schema, target, profile |
+| package | `package.cook_graph` | required `cook.summary` / `astra.cook_batch_summary.v1` | missing/old schema, invalid graph hash, zero concurrency limit, count overflow, cache-hit+cooked count mismatch or artifact count differs from cooked asset sections | graph hash, artifact/cache-hit/cooked count, max concurrency |
 | package | `vfs.uri_format` | `asset.vfs_manifest` | `VfsUri` invalid, `asset.registry` present, host path or inline payload detected | `vfs_uri`, section id, diagnostic |
 | package | `vfs.prefix_registry` | prefix registry, `plugin.extension_registry` | prefix missing, provider missing, provider not packaged or capability mismatch | prefix, provider id, backend capability |
 | package | `vfs.package_mount` | package section table, VFS entries | section ref missing, hash mismatch, bounds invalid, codec unsupported or schema mismatch | `vfs_uri`, section id, hash, offset, size |

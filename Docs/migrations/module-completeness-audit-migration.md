@@ -256,7 +256,7 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 
 **迁移要求：** 在实现修补前先补齐这些负向测试，确保现有绿色测试不会掩盖冲突输入。测试必须断言稳定 diagnostic code、无部分提交、无状态变化、无错误 report 生成和 package 不可发布。
 
-**2026-07-13 修补进度：** Runtime tick/replay、Plugin binding/lifecycle、VFS graph/context、package builder/reader 冲突矩阵、恶意 table、required schema registry 和 shared release reader 已补齐；`scenario.refs.v2` 进一步把 bundle path 与 package section authority 分离，并绑定 hash/size。Cook graph/cache/cancel/atomic commit 和规模测试仍开放，P2-002 暂不关闭。
+**2026-07-13 修补进度：** Runtime tick/replay、Plugin binding/lifecycle、VFS graph/context、package builder/reader 冲突矩阵、恶意 table、required schema registry 和 shared release reader 已补齐；`scenario.refs.v2` 把 bundle path 与 package section authority 分离并绑定 hash/size。Cook 已补 sidecar typed dependency、唯一无环 graph、processor registry、source/version identity、持久内容 cache、显式 node/byte/concurrency limits、取消、panic containment、128-node/8-MiB 规模测试和 CLI staging/swap/rollback。P2-002 的 Runtime/Media 长流程、设备恢复和资源释放矩阵仍开放，暂不关闭。
 
 ### P1-012：workspace verification 不能可靠地区分当前 checkout 与其他 worktree 的构建产物
 

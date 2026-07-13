@@ -6,14 +6,17 @@ use std::{
 };
 
 use astra_asset::AssetSidecar;
-use astra_cook::{CookRequest, DefaultCookProcessor};
+use astra_cook::{
+    CookBatchExecutor, CookBatchLimits, CookBatchRequest, CookCancellationToken, CookNode,
+    CookProcessorRegistry, CookRequest, DefaultCookProcessor, FileCookCache,
+};
 use astra_core::Hash256;
 use astra_observability::{
     init_host, ConsoleFormat, CrashReportingMode, HostObservabilityConfig, ObservabilityGuard,
 };
 use astra_package::{
-    MigrationPolicy, PackageBuildRequest, PackageBuilder, PackageManifest, PackageReader,
-    ScenarioReference, ScenarioRefsManifest, SectionCodec, SectionPayload,
+    CookSummaryManifest, MigrationPolicy, PackageBuildRequest, PackageBuilder, PackageManifest,
+    PackageReader, ScenarioReference, ScenarioRefsManifest, SectionCodec, SectionPayload,
     CURRENT_CONTAINER_VERSION,
 };
 use astra_platform::{
@@ -265,7 +268,10 @@ fn main() -> Result<(), CliError> {
             target,
             out,
         } => {
-            let manifest = cook_project(project, &profile, target.as_deref(), out)?;
+            let cancellation = CookCancellationToken::default();
+            let signal_token = cancellation.clone();
+            ctrlc::set_handler(move || signal_token.cancel())?;
+            let manifest = cook_project(project, &profile, target.as_deref(), out, &cancellation)?;
             println!("{}", serde_yaml::to_string(&manifest)?);
         }
         Command::Script { command } => match command {
@@ -365,7 +371,7 @@ fn main() -> Result<(), CliError> {
                 if let Some(parent) = out.parent() {
                     fs::create_dir_all(parent)?;
                 }
-                fs::write(out, package.into_bytes())?;
+                atomic_replace(&out, &package.into_bytes())?;
             }
             PackageCommand::Bundle {
                 package,
@@ -723,6 +729,7 @@ struct CookManifest {
     #[serde(default)]
     scenario_refs: Vec<String>,
     artifacts: Vec<CookedArtifactRef>,
+    asset_cook: CookSummaryManifest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -747,6 +754,16 @@ struct CookedArtifactRef {
     asset_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     scenario_path: Option<String>,
+}
+
+#[derive(Debug)]
+struct PreparedAssetCook {
+    asset_id: String,
+    source_path: PathBuf,
+    source_hash: Hash256,
+    source_byte_size: u64,
+    asset_role: String,
+    asset_type: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -951,7 +968,93 @@ fn cook_project(
     profile: &str,
     target: Option<&str>,
     out: PathBuf,
+    cancellation: &CookCancellationToken,
 ) -> Result<CookManifest, CliError> {
+    cancellation.check_cancelled()?;
+    let parent = out
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let staging = tempfile::Builder::new()
+        .prefix(".astra-cook-stage-")
+        .tempdir_in(parent)?;
+    let manifest = cook_project_into(
+        project,
+        profile,
+        target,
+        staging.path().to_path_buf(),
+        cancellation,
+    )?;
+    cancellation.check_cancelled()?;
+    atomic_replace_directory(staging, &out)?;
+    Ok(manifest)
+}
+
+fn atomic_replace_directory(
+    staging: tempfile::TempDir,
+    destination: &Path,
+) -> Result<(), CliError> {
+    if destination.exists() && !destination.is_dir() {
+        return Err("ASTRA_COOK_COMMIT_PATH: cook output exists and is not a directory".into());
+    }
+    let parent = destination
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let staging_path = staging.keep();
+    if !destination.exists() {
+        if let Err(error) = fs::rename(&staging_path, destination) {
+            let _ = fs::remove_dir_all(&staging_path);
+            return Err(format!("ASTRA_COOK_COMMIT_SWAP: {error}").into());
+        }
+        return Ok(());
+    }
+    let staging_name = staging_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("ASTRA_COOK_COMMIT_PATH: staging directory name is invalid")?;
+    let backup = parent.join(format!("{staging_name}.backup"));
+    fs::rename(destination, &backup)
+        .map_err(|error| format!("ASTRA_COOK_COMMIT_BACKUP: {error}"))?;
+    if let Err(error) = fs::rename(&staging_path, destination) {
+        let rollback = fs::rename(&backup, destination);
+        let _ = fs::remove_dir_all(&staging_path);
+        return match rollback {
+            Ok(()) => Err(format!("ASTRA_COOK_COMMIT_SWAP: {error}").into()),
+            Err(rollback_error) => Err(format!(
+                "ASTRA_COOK_COMMIT_ROLLBACK: swap failed ({error}) and rollback failed ({rollback_error})"
+            )
+            .into()),
+        };
+    }
+    if let Err(error) = fs::remove_dir_all(&backup) {
+        let failed_output = parent.join(format!("{staging_name}.rollback"));
+        let rollback =
+            fs::rename(destination, &failed_output).and_then(|_| fs::rename(&backup, destination));
+        let _ = fs::remove_dir_all(&failed_output);
+        return match rollback {
+            Ok(()) => Err(format!(
+                "ASTRA_COOK_COMMIT_CLEANUP: {error}; previous output restored"
+            )
+            .into()),
+            Err(rollback_error) => Err(format!(
+                "ASTRA_COOK_COMMIT_ROLLBACK: cleanup failed ({error}) and rollback failed ({rollback_error})"
+            )
+            .into()),
+        };
+    }
+    Ok(())
+}
+
+fn cook_project_into(
+    project: PathBuf,
+    profile: &str,
+    target: Option<&str>,
+    out: PathBuf,
+    cancellation: &CookCancellationToken,
+) -> Result<CookManifest, CliError> {
+    cancellation.check_cancelled()?;
     tracing::info!(
         target: "astra_cook",
         event = "cook.run.start",
@@ -977,6 +1080,7 @@ fn cook_project(
     ) {
         return Err(format!("target validation failed: {target}").into());
     }
+    cancellation.check_cancelled()?;
     let target_descriptor = target_manifest
         .find(target)
         .ok_or_else(|| format!("target {target} is not defined"))?;
@@ -1059,14 +1163,18 @@ fn cook_project(
             scenario_path: None,
         });
     }
+    let mut asset_cook = CookSummaryManifest::empty();
     if project_uses_nativevn(&project_yaml) {
-        artifacts.extend(cook_nativevn_sections(
+        let (nativevn_artifacts, summary) = cook_nativevn_sections(
             &project_yaml,
             project_dir,
             &out,
             profile,
             target,
-        )?);
+            cancellation,
+        )?;
+        artifacts.extend(nativevn_artifacts);
+        asset_cook = summary;
     }
     artifacts.extend(cook_project_package_sections(
         &project_yaml,
@@ -1084,7 +1192,7 @@ fn cook_project(
         &artifacts,
     )?);
     let manifest = CookManifest {
-        schema: "astra.cook_manifest.v1".to_string(),
+        schema: "astra.cook_manifest.v2".to_string(),
         package_id,
         profile: profile.to_string(),
         target: target.to_string(),
@@ -1092,7 +1200,9 @@ fn cook_project(
         target_manifest,
         scenario_refs,
         artifacts,
+        asset_cook,
     };
+    cancellation.check_cancelled()?;
     fs::write(
         out.join("cook_manifest.yaml"),
         serde_yaml::to_string(&manifest)?,
@@ -1152,7 +1262,25 @@ fn cook_platform_profiles(
 
 fn read_cook_manifest(cooked: &std::path::Path) -> Result<CookManifest, CliError> {
     let text = fs::read_to_string(cooked.join("cook_manifest.yaml"))?;
-    Ok(serde_yaml::from_str(&text)?)
+    let manifest: CookManifest = serde_yaml::from_str(&text)?;
+    if manifest.schema != "astra.cook_manifest.v2"
+        || manifest.asset_cook.schema != "astra.cook_batch_summary.v1"
+    {
+        return Err("ASTRA_COOK_MANIFEST_VERSION: unsupported cook manifest schema".into());
+    }
+    let asset_count = manifest
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.asset_id.is_some())
+        .count() as u64;
+    if asset_count != manifest.asset_cook.artifact_count
+        || manifest.asset_cook.cache_hit_count + manifest.asset_cook.cooked_count
+            != manifest.asset_cook.artifact_count
+        || manifest.asset_cook.max_concurrency == 0
+    {
+        return Err("ASTRA_COOK_MANIFEST_IDENTITY: asset cook summary is inconsistent".into());
+    }
+    Ok(manifest)
 }
 
 fn project_uses_nativevn(project: &serde_yaml::Value) -> bool {
@@ -1165,7 +1293,9 @@ fn cook_nativevn_sections(
     out: &std::path::Path,
     profile: &str,
     target: &str,
-) -> Result<Vec<CookedArtifactRef>, CliError> {
+    cancellation: &CookCancellationToken,
+) -> Result<(Vec<CookedArtifactRef>, CookSummaryManifest), CliError> {
+    cancellation.check_cancelled()?;
     let source_paths = nativevn_source_paths(project, project_dir)?;
     if source_paths.is_empty() {
         return Err("nativevn project must declare at least one .astra source".into());
@@ -1216,13 +1346,10 @@ fn cook_nativevn_sections(
             scenario_path: None,
         });
     }
-    artifacts.extend(cook_nativevn_asset_sections(
-        project,
-        project_dir,
-        out,
-        profile,
-    )?);
-    Ok(artifacts)
+    let (asset_artifacts, asset_cook) =
+        cook_nativevn_asset_sections(project, project_dir, out, profile, cancellation)?;
+    artifacts.extend(asset_artifacts);
+    Ok((artifacts, asset_cook))
 }
 
 fn cook_nativevn_asset_sections(
@@ -1230,7 +1357,9 @@ fn cook_nativevn_asset_sections(
     project_dir: &std::path::Path,
     out: &std::path::Path,
     profile: &str,
-) -> Result<Vec<CookedArtifactRef>, CliError> {
+    cancellation: &CookCancellationToken,
+) -> Result<(Vec<CookedArtifactRef>, CookSummaryManifest), CliError> {
+    cancellation.check_cancelled()?;
     let mut sidecar_paths = Vec::new();
     for root in nativevn_asset_roots(project) {
         let relative_root = validate_project_relative_path(&root)?;
@@ -1244,9 +1373,9 @@ fn cook_nativevn_asset_sections(
     sidecar_paths
         .dedup_by(|left, right| normalize_relative_path(left) == normalize_relative_path(right));
 
-    let section_dir = out.join("sections");
-    fs::create_dir_all(&section_dir)?;
-    let mut artifacts = Vec::new();
+    let mut nodes = Vec::with_capacity(sidecar_paths.len());
+    let mut prepared = BTreeMap::new();
+    let mut processor_ids = std::collections::BTreeSet::new();
     for sidecar_path in sidecar_paths {
         let sidecar_text = fs::read_to_string(project_dir.join(&sidecar_path))?;
         let sidecar = AssetSidecar::from_yaml(&sidecar_text)?;
@@ -1261,13 +1390,74 @@ fn cook_nativevn_asset_sections(
             return Err(format!("nativevn asset hash mismatch: {}", sidecar.source).into());
         }
 
-        let processor = DefaultCookProcessor::new(&sidecar.cook.processor, "1.0.0");
-        let cooked = processor.cook(CookRequest {
-            sidecar: sidecar.clone(),
-            source_bytes,
-            target_profile: profile.to_string(),
-            processor_version: "1.0.0".to_string(),
-        })?;
+        let source_byte_size = source_bytes.len() as u64;
+        let asset_id = sidecar.id.to_string();
+        if prepared
+            .insert(
+                asset_id.clone(),
+                PreparedAssetCook {
+                    asset_id: asset_id.clone(),
+                    source_path,
+                    source_hash,
+                    source_byte_size,
+                    asset_role: asset_role_for_path(&sidecar.source, &sidecar.asset_type),
+                    asset_type: sidecar.asset_type.clone(),
+                },
+            )
+            .is_some()
+        {
+            return Err(format!("nativevn asset id is duplicated: {asset_id}").into());
+        }
+        processor_ids.insert(sidecar.cook.processor.clone());
+        nodes.push(CookNode {
+            request: CookRequest {
+                sidecar: sidecar.clone(),
+                source_bytes,
+                target_profile: profile.to_string(),
+                processor_version: "1.0.0".to_string(),
+                dependency_artifacts: Default::default(),
+            },
+        });
+    }
+    let mut registry = CookProcessorRegistry::default();
+    for processor_id in processor_ids {
+        registry.register(DefaultCookProcessor::new(processor_id, "1.0.0"))?;
+    }
+    let cache = FileCookCache::new(project_dir.join(".astra-cache").join("cook"));
+    let executor = CookBatchExecutor::new(&registry, Some(&cache));
+    let max_concurrency = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .min(8);
+    let batch = executor.execute(
+        CookBatchRequest {
+            nodes,
+            max_concurrency,
+            limits: CookBatchLimits {
+                max_node_count: 65_536,
+                max_source_bytes_per_node: 1024 * 1024 * 1024,
+                max_total_source_bytes: 8 * 1024 * 1024 * 1024,
+                max_concurrency: 8,
+            },
+        },
+        cancellation,
+    )?;
+
+    let summary = CookSummaryManifest {
+        schema: "astra.cook_batch_summary.v1".to_string(),
+        graph_hash: batch.graph_hash,
+        artifact_count: batch.artifacts.len() as u64,
+        cache_hit_count: batch.cache_hit_count,
+        cooked_count: batch.cooked_count,
+        max_concurrency: max_concurrency as u64,
+    };
+    let section_dir = out.join("sections");
+    fs::create_dir_all(&section_dir)?;
+    let mut artifacts = Vec::with_capacity(batch.artifacts.len());
+    for cooked in batch.artifacts {
+        let metadata = prepared
+            .remove(&cooked.asset_id)
+            .ok_or_else(|| format!("cooked asset has no prepared metadata: {}", cooked.asset_id))?;
         let section = cooked.to_section();
         let file_name = format!("{}.bin", section.id.replace('.', "_"));
         fs::write(section_dir.join(&file_name), &section.payload)?;
@@ -1277,16 +1467,19 @@ fn cook_nativevn_asset_sections(
             path: normalize_relative_path(std::path::Path::new("sections").join(file_name)),
             hash: Hash256::from_sha256(&section.payload).to_string(),
             codec: section.codec,
-            asset_path: Some(normalize_relative_path(&source_path)),
-            asset_role: Some(asset_role_for_path(&sidecar.source, &sidecar.asset_type)),
-            asset_sha256: Some(source_hash.to_string()),
-            asset_byte_size: Some(fs::metadata(project_dir.join(&source_path))?.len()),
-            asset_type: Some(sidecar.asset_type),
-            asset_id: Some(sidecar.id.to_string()),
+            asset_path: Some(normalize_relative_path(&metadata.source_path)),
+            asset_role: Some(metadata.asset_role),
+            asset_sha256: Some(metadata.source_hash.to_string()),
+            asset_byte_size: Some(metadata.source_byte_size),
+            asset_type: Some(metadata.asset_type),
+            asset_id: Some(metadata.asset_id),
             scenario_path: None,
         });
     }
-    Ok(artifacts)
+    if !prepared.is_empty() {
+        return Err("cook batch did not produce every prepared asset".into());
+    }
+    Ok((artifacts, summary))
 }
 
 fn nativevn_asset_roots(project: &serde_yaml::Value) -> Vec<String> {
@@ -1645,6 +1838,7 @@ fn build_package_from_cooked(
         &package_target_manifest,
         target,
     )?;
+    request.cook_summary = serde_json::to_vec(&manifest.asset_cook)?;
     request.asset_vfs_manifest = asset_vfs_manifest;
     request.asset_catalog = asset_catalog;
     request.provider_policy = product_provider_policy(&manifest.profile)?;
@@ -1736,6 +1930,7 @@ fn production_package_request(
         package_id,
         profile: profile.clone(),
         cooked_assets,
+        cook_summary: vec![],
         asset_vfs_manifest: vec![],
         asset_catalog: vec![],
         media_manifest: serde_json::to_vec(&serde_json::json!({

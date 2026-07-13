@@ -31,7 +31,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **Depends On:** `S2-ASSET-01`
 
-**Target Paths:** `Engine/Source/Developer/astra-cook/src/importer.rs`、`Engine/Source/Developer/astra-cook/src/cook.rs`、`Engine/Source/Developer/astra-cook/src/audit.rs`、`Engine/Source/Developer/astra-cook/tests/import_cook.rs`
+**Target Paths:** `Engine/Source/Runtime/astra-asset/src/sidecar.rs`、`Engine/Source/Developer/astra-cook/src/importer.rs`、`Engine/Source/Developer/astra-cook/src/cook.rs`、`Engine/Source/Developer/astra-cook/src/batch.rs`、`Engine/Source/Developer/astra-cook/src/audit.rs`、`Engine/Source/Developer/astra-cook/tests/import_cook.rs`、`Engine/Source/Developer/astra-cook/tests/batch_cook.rs`
 
 **Steps:**
 
@@ -39,8 +39,12 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 2. 实现 source hash、sidecar hash、processor version 和 target profile 共同组成 cache key。
 3. 建 Stage 2 image/font/audio metadata importer，不写商业 payload 到测试仓库。
 4. 编写 stale artifact、license blocked 和 cook artifact hash 测试。
+5. sidecar dependency 构建唯一无环 graph；缺依赖、自依赖、重复依赖和 cycle 阻断。
+6. 通过显式 node/byte/concurrency limits 做 bounded parallel cook，支持进程信号取消并隔离 processor panic。
+7. 内容寻址 cache 命中必须重新验证 artifact identity；corruption/version/source drift 阻断，不能静默 recook。
+8. CLI cook 和 package 文件通过 staging + swap 原子提交；失败或取消不得覆盖上一份完整产物。
 
-**Done Evidence:** `cargo test -p astra-cook import_cook` 区分 fresh、stale、blocked 三种 artifact 状态。
+**Done Evidence:** `cargo test -p astra-cook --all-targets` 覆盖 fresh/stale/blocked、graph 错误、processor drift/panic、预取消/执行中取消、cache hit/corruption、128 个节点、8 MiB payload、显式容量上限和目录原子替换；`cargo test -p astra-cli --test target_platform nativevn_sample_cooks_packages_validates_and_runs_full_playthrough` 覆盖 `astra.cook_manifest.v2`、真实项目二次 cache hit、旧输出清理和失败 recook 保留完整产物。
 
 **Linked Test IDs:** `T-S2-ASSET-02`
 

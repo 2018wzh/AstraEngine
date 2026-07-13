@@ -19,6 +19,7 @@ pub struct PackageBuildRequest {
     pub package_id: String,
     pub profile: String,
     pub cooked_assets: Vec<SectionPayload>,
+    pub cook_summary: Vec<u8>,
     pub asset_vfs_manifest: Vec<u8>,
     pub asset_catalog: Vec<u8>,
     pub media_manifest: Vec<u8>,
@@ -41,12 +42,17 @@ impl PackageBuildRequest {
     ) -> Self {
         let package_id = package_id.into();
         let profile = profile.into();
+        let cook_summary = CookSummaryManifest::from_sections(&cooked_assets);
         Self {
             package_id: package_id.clone(),
             profile: profile.clone(),
             asset_vfs_manifest: default_asset_vfs_manifest(&cooked_assets),
             asset_catalog: default_asset_catalog(&cooked_assets, &profile),
             cooked_assets,
+            cook_summary: json_bytes(
+                serde_json::to_value(cook_summary)
+                    .expect("fixture cook summary serialization must succeed"),
+            ),
             media_manifest: json_bytes(serde_json::json!({
                 "schema": "astra.media_manifest.v1",
                 "codecs": ["png", "jpeg", "webp", "wav", "ogg", "flac", "mp3"],
@@ -275,6 +281,11 @@ impl PackageBuilder {
             SectionPayload::postcard("package.manifest", "astra.package_manifest.v1", &manifest)?;
         let mut sections = vec![
             SectionPayload::raw(
+                "cook.summary",
+                "astra.cook_batch_summary.v1",
+                request.cook_summary,
+            ),
+            SectionPayload::raw(
                 "asset.vfs_manifest",
                 "astra.asset_vfs_manifest.v1",
                 request.asset_vfs_manifest,
@@ -387,4 +398,71 @@ pub struct SchemaRegistryEntry {
     pub section_id: String,
     pub schema: String,
     pub version: astra_core::SchemaVersion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CookSummaryManifest {
+    pub schema: String,
+    pub graph_hash: astra_core::Hash256,
+    pub artifact_count: u64,
+    pub cache_hit_count: u64,
+    pub cooked_count: u64,
+    pub max_concurrency: u64,
+}
+
+impl CookSummaryManifest {
+    pub fn empty() -> Self {
+        Self {
+            schema: "astra.cook_batch_summary.v1".to_string(),
+            graph_hash: astra_core::Hash256::from_sha256(b"astra.cook_graph.v1|empty"),
+            artifact_count: 0,
+            cache_hit_count: 0,
+            cooked_count: 0,
+            max_concurrency: 1,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ContainerError> {
+        if self.schema != "astra.cook_batch_summary.v1"
+            || self.max_concurrency == 0
+            || self.cache_hit_count.checked_add(self.cooked_count) != Some(self.artifact_count)
+        {
+            return Err(ContainerError::message(
+                "package cook summary identity is invalid",
+            ));
+        }
+        Ok(())
+    }
+
+    fn from_sections(sections: &[SectionPayload]) -> Self {
+        let cooked = sections
+            .iter()
+            .filter(|section| section.schema == "astra.cooked_asset.v1")
+            .collect::<Vec<_>>();
+        let identity = cooked
+            .iter()
+            .map(|section| {
+                format!(
+                    "{}|{}|{}",
+                    section.id,
+                    section.schema,
+                    astra_core::Hash256::from_sha256(&section.payload)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let artifact_count = cooked.len() as u64;
+        Self {
+            schema: "astra.cook_batch_summary.v1".to_string(),
+            graph_hash: if cooked.is_empty() {
+                astra_core::Hash256::from_sha256(b"astra.cook_graph.v1|empty")
+            } else {
+                astra_core::Hash256::from_sha256(identity.as_bytes())
+            },
+            artifact_count,
+            cache_hit_count: 0,
+            cooked_count: artifact_count,
+            max_concurrency: 1,
+        }
+    }
 }

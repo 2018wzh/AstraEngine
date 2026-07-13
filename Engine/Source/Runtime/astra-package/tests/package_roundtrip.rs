@@ -87,6 +87,26 @@ fn container_builder_rejects_duplicate_and_invalid_section_authority() {
 }
 
 #[test]
+fn package_reader_rejects_cook_summary_that_does_not_cover_cooked_assets() {
+    let mut request = PackageBuildRequest::fixture(
+        "com.example.invalid-cook-summary",
+        "test",
+        vec![SectionPayload::raw(
+            "asset.invalid",
+            "astra.cooked_asset.v1",
+            b"asset".to_vec(),
+        )],
+    );
+    request.cook_summary =
+        serde_json::to_vec(&astra_package::CookSummaryManifest::empty()).unwrap();
+    let blob = PackageBuilder::build(request).unwrap();
+    assert!(PackageReader::open(blob.as_bytes())
+        .unwrap_err()
+        .to_string()
+        .contains("cooked asset sections"));
+}
+
+#[test]
 fn package_roundtrip_zstd_codec_roundtrips_and_encryption_descriptor_requires_provider() {
     let section = SectionPayload::new(
         "media.manifest",
@@ -173,6 +193,7 @@ fn package_roundtrip_builder_writes_required_runtime_sections() {
     for section in [
         "package.manifest",
         "schema.registry",
+        "cook.summary",
         "asset.vfs_manifest",
         "asset.catalog",
         "media.manifest",

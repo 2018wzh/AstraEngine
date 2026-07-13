@@ -51,6 +51,10 @@ fn sidecar_schema_invalid_sidecar_reports_blocking_diagnostics() {
         asset_type: "image.rgba".to_string(),
         license: None,
         importer: String::new(),
+        dependencies: vec![
+            AssetId::parse("asset:/bad").unwrap(),
+            AssetId::parse("asset:/bad").unwrap(),
+        ],
         cook: CookSettings {
             processor: String::new(),
             target_profiles: vec![],
@@ -71,6 +75,12 @@ fn sidecar_schema_invalid_sidecar_reports_blocking_diagnostics() {
     assert!(diagnostics
         .iter()
         .any(|diag| diag.code == "ASTRA_ASSET_SOURCE_HASH_MISSING"));
+    assert!(diagnostics
+        .iter()
+        .any(|diag| diag.code == "ASTRA_ASSET_DEPENDENCY_SELF"));
+    assert!(diagnostics
+        .iter()
+        .any(|diag| diag.code == "ASTRA_ASSET_DEPENDENCY_DUPLICATE"));
 }
 
 #[test]

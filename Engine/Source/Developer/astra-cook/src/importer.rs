@@ -14,6 +14,8 @@ pub enum CookError {
     Message(String),
     #[error("cook blocked")]
     Diagnostics(Vec<Diagnostic>),
+    #[error("ASTRA_COOK_CANCELLED: cook batch was cancelled")]
+    Cancelled,
 }
 
 impl CookError {
@@ -24,7 +26,7 @@ impl CookError {
     pub fn diagnostics(&self) -> &[Diagnostic] {
         match self {
             Self::Diagnostics(diagnostics) => diagnostics,
-            Self::Message(_) => &[],
+            Self::Message(_) | Self::Cancelled => &[],
         }
     }
 }
@@ -100,6 +102,7 @@ impl DefaultMetadataImporter {
             asset_type: request.asset_type,
             license: Some(request.license),
             importer: self.importer_id.clone(),
+            dependencies: Vec::new(),
             cook: CookSettings {
                 processor: default_processor_for(&metadata.kind).to_string(),
                 target_profiles: request.target_profiles,

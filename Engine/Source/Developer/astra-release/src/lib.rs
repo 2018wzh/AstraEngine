@@ -4,7 +4,7 @@ use astra_asset::{
     AssetCatalog, ResolveContext, VfsBackendKind, VfsManifest, VfsSourceRef, VfsUri,
 };
 use astra_core::{Diagnostic, Hash256};
-use astra_package::{PackageManifest, PackageReader};
+use astra_package::{CookSummaryManifest, PackageManifest, PackageReader};
 use astra_platform::{
     PlatformCapabilityReport, PlatformHostConformanceReport, PlatformValidationStatus,
 };
@@ -209,6 +209,7 @@ impl ReleaseValidator {
                 });
                 for section in [
                     "schema.registry",
+                    "cook.summary",
                     "asset.vfs_manifest",
                     "asset.catalog",
                     "media.manifest",
@@ -237,6 +238,7 @@ impl ReleaseValidator {
                     &request.profile,
                     package_manifest.as_ref(),
                 ));
+                checks.push(cook_graph_identity_check(&package));
                 checks.extend(vn_checks(
                     &package,
                     &request.profile,
@@ -320,6 +322,40 @@ impl ReleaseValidator {
             ),
         }
         Ok(report)
+    }
+}
+
+fn cook_graph_identity_check(package: &PackageReader) -> ReleaseCheckRecord {
+    let summary = package
+        .container()
+        .read_bounded("cook.summary", 1024 * 1024)
+        .map_err(|error| error.to_string())
+        .and_then(|bytes| {
+            serde_json::from_slice::<CookSummaryManifest>(&bytes).map_err(|error| error.to_string())
+        });
+    match summary {
+        Ok(summary) => ReleaseCheckRecord {
+            id: "package.cook_graph".to_string(),
+            domain: ReleaseDomain::Package,
+            status: CheckStatus::Pass,
+            summary: "cook graph and incremental artifact identity verified".to_string(),
+            diagnostic: None,
+            evidence: vec![
+                evidence("graph_hash", summary.graph_hash),
+                evidence("artifact_count", summary.artifact_count),
+                evidence("cache_hit_count", summary.cache_hit_count),
+                evidence("cooked_count", summary.cooked_count),
+                evidence("max_concurrency", summary.max_concurrency),
+            ],
+        },
+        Err(error) => ReleaseCheckRecord {
+            id: "package.cook_graph".to_string(),
+            domain: ReleaseDomain::Package,
+            status: CheckStatus::Blocked,
+            summary: "cook graph identity is unavailable".to_string(),
+            diagnostic: Some(Diagnostic::blocking("ASTRA_COOK_GRAPH_IDENTITY", error)),
+            evidence: Vec::new(),
+        },
     }
 }
 

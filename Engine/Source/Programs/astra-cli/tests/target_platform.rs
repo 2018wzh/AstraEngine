@@ -351,7 +351,6 @@ targets:
         "stderr={}",
         String::from_utf8_lossy(&cook_output.stderr)
     );
-
     let package_output = Command::new(env!("CARGO_BIN_EXE_astra"))
         .args([
             "package",
@@ -1164,6 +1163,68 @@ fn nativevn_sample_cooks_packages_validates_and_runs_full_playthrough() {
         cook_output.status.success(),
         "stderr={}",
         String::from_utf8_lossy(&cook_output.stderr)
+    );
+    let first_manifest_bytes = fs::read(cooked.join("cook_manifest.yaml")).unwrap();
+    let first_manifest: serde_yaml::Value = serde_yaml::from_slice(&first_manifest_bytes).unwrap();
+    assert_eq!(first_manifest["schema"], "astra.cook_manifest.v2");
+    assert_eq!(
+        first_manifest["asset_cook"]["schema"],
+        "astra.cook_batch_summary.v1"
+    );
+    let artifact_count = first_manifest["asset_cook"]["artifact_count"]
+        .as_u64()
+        .unwrap();
+    assert!(artifact_count > 0);
+
+    fs::write(cooked.join("stale.partial"), b"must be replaced").unwrap();
+    let recook_output = Command::new(env!("CARGO_BIN_EXE_astra"))
+        .args([
+            "cook",
+            "Examples/NativeVN/project.yaml",
+            "--profile",
+            "classic",
+            "--target",
+            "nativevn-game",
+            "--out",
+            cooked.to_str().unwrap(),
+        ])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        recook_output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&recook_output.stderr)
+    );
+    assert!(!cooked.join("stale.partial").exists());
+    let recooked_manifest_bytes = fs::read(cooked.join("cook_manifest.yaml")).unwrap();
+    let recooked_manifest: serde_yaml::Value =
+        serde_yaml::from_slice(&recooked_manifest_bytes).unwrap();
+    assert_eq!(
+        recooked_manifest["asset_cook"]["cache_hit_count"],
+        artifact_count
+    );
+    assert_eq!(recooked_manifest["asset_cook"]["cooked_count"], 0);
+
+    let failed_recook = Command::new(env!("CARGO_BIN_EXE_astra"))
+        .args([
+            "cook",
+            "Examples/NativeVN/project.yaml",
+            "--profile",
+            "unsupported-profile",
+            "--target",
+            "nativevn-game",
+            "--out",
+            cooked.to_str().unwrap(),
+        ])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(!failed_recook.status.success());
+    assert_eq!(
+        fs::read(cooked.join("cook_manifest.yaml")).unwrap(),
+        recooked_manifest_bytes,
+        "failed cook must preserve the previous complete output"
     );
 
     let package_output = Command::new(env!("CARGO_BIN_EXE_astra"))

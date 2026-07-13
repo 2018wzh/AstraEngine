@@ -8,6 +8,7 @@ use crate::{
 const REQUIRED_SECTIONS: &[(&str, &str)] = &[
     ("package.manifest", "astra.package_manifest.v1"),
     ("schema.registry", "astra.schema_registry.v2"),
+    ("cook.summary", "astra.cook_batch_summary.v1"),
     ("asset.vfs_manifest", "astra.asset_vfs_manifest.v1"),
     ("asset.catalog", "astra.asset_catalog.v1"),
     ("media.manifest", "astra.media_manifest.v1"),
@@ -106,6 +107,23 @@ impl PackageReader {
             ));
         }
         let reader = Self { container };
+        let cook_summary: crate::CookSummaryManifest =
+            serde_json::from_slice(&reader.container.read_bounded("cook.summary", 1024 * 1024)?)
+                .map_err(|error| {
+                    ContainerError::message(format!("cook summary decode failed: {error}"))
+                })?;
+        cook_summary.validate()?;
+        let cooked_asset_count = reader
+            .container
+            .entries()
+            .iter()
+            .filter(|entry| entry.schema == "astra.cooked_asset.v1")
+            .count() as u64;
+        if cooked_asset_count != cook_summary.artifact_count {
+            return Err(ContainerError::message(
+                "package cooked asset sections do not match cook.summary artifact_count",
+            ));
+        }
         let scenario_refs: crate::ScenarioRefsManifest = serde_json::from_slice(
             &reader
                 .container

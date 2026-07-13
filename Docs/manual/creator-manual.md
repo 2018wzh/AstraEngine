@@ -12,6 +12,8 @@
 6. 在 PIE 中跑 full-flow YAML scenario。
 7. 通过 Package/Release Gate 面板生成二进制 package。
 
+Cook 会读取每个 `AssetSidecar.dependencies` 构建依赖图，并把内容缓存写入项目内 ignored `.astra-cache/cook/`。正常的重复 Cook 应在 `astra.cook_manifest.v2.asset_cook` 中出现 cache hit；cache corruption、依赖缺失/cycle、source hash 或 processor version drift 会直接失败。输出先写 sibling staging directory，全部成功后替换目标目录；失败或按 Ctrl+C 取消时保留上一份完整 Cook 结果。不要手工复制 cache artifact 到 package，也不要把 `.astra-cache/` 提交到仓库。
+
 脚本机制、Luau 策略和可视化规则见 [AstraVN Script Spec](../modules/astra-vn-script.md)。演出模型、标准命令和系统 UI 见 [AstraVN Presentation Model](../modules/astra-vn-presentation-model.md)、[AstraVN Standard Command Library](../modules/astra-vn-standard-commands.md) 和 [AstraVN System UI Profile](../modules/astra-vn-system-ui-profile.md)。样例见 [AstraVN Script Sample](../samples/astra-vn-script/README.md) 和 [AstraVN Advanced Presentation Sample](../samples/astra-vn-advanced/README.md)。
 
 ## AI

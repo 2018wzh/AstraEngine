@@ -41,6 +41,16 @@ fn release_report_covers_pass_warning_and_blocked_checks() {
     assert!(report.checks.iter().any(|check| {
         check.domain == ReleaseDomain::Package && check.status == CheckStatus::Pass
     }));
+    let cook_graph = report
+        .checks
+        .iter()
+        .find(|check| check.id == "package.cook_graph")
+        .unwrap();
+    assert_eq!(cook_graph.status, CheckStatus::Pass);
+    assert!(cook_graph
+        .evidence
+        .iter()
+        .any(|entry| entry.key == "artifact_count" && entry.value == "1"));
     assert!(report.checks.iter().any(|check| {
         check.domain == ReleaseDomain::Media && check.status == CheckStatus::Warning
     }));

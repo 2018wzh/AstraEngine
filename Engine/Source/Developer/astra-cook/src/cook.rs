@@ -12,6 +12,7 @@ pub struct CookRequest {
     pub source_bytes: Vec<u8>,
     pub target_profile: String,
     pub processor_version: String,
+    pub dependency_artifacts: BTreeMap<String, Hash256>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -37,12 +38,49 @@ impl CookArtifact {
             self.payload.clone(),
         )
     }
+
+    pub fn validate_for(
+        &self,
+        request: &CookRequest,
+        processor_id: &str,
+        processor_version: &str,
+    ) -> Result<(), CookError> {
+        let sidecar_yaml = request
+            .sidecar
+            .to_yaml()
+            .map_err(|error| CookError::message(error.to_string()))?;
+        let expected_source_hash = Hash256::from_sha256(&request.source_bytes);
+        let expected_sidecar_hash = Hash256::from_sha256(sidecar_yaml.as_bytes());
+        let expected_cache_key = expected_cache_key(request, processor_id)?;
+        if self.schema != "astra.cook_artifact.v1"
+            || self.asset_id != request.sidecar.id.to_string()
+            || self.section_id != section_id_for(&request.sidecar)
+            || self.target_profile != request.target_profile
+            || self.processor_id != processor_id
+            || self.processor_version != processor_version
+            || self.source_hash != expected_source_hash
+            || self.sidecar_hash != expected_sidecar_hash
+            || self.cache_key != expected_cache_key
+            || self.payload_hash != Hash256::from_sha256(&self.payload)
+        {
+            return Err(CookError::message(
+                "ASTRA_COOK_CACHE_CORRUPT: cached artifact does not match the complete cook identity",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct DefaultCookProcessor {
     processor_id: String,
     processor_version: String,
+}
+
+pub trait CookProcessor: Send + Sync {
+    fn processor_id(&self) -> &str;
+    fn processor_version(&self) -> &str;
+    fn cook(&self, request: CookRequest) -> Result<CookArtifact, CookError>;
 }
 
 impl DefaultCookProcessor {
@@ -61,7 +99,8 @@ impl DefaultCookProcessor {
             source_byte_size = request.source_bytes.len(),
             "asset cook started"
         );
-        let diagnostics = validate_cook_request(&request, &self.processor_id);
+        let diagnostics =
+            validate_cook_request(&request, &self.processor_id, &self.processor_version);
         if !diagnostics.is_empty() {
             tracing::error!(
                 event = "cook.asset.blocked",
@@ -83,6 +122,7 @@ impl DefaultCookProcessor {
             &self.processor_id,
             &request.processor_version,
             &request.target_profile,
+            &request.dependency_artifacts,
         );
         let payload = request.source_bytes.clone();
         let artifact = CookArtifact {
@@ -107,6 +147,28 @@ impl DefaultCookProcessor {
         );
         Ok(artifact)
     }
+
+    pub fn processor_id(&self) -> &str {
+        &self.processor_id
+    }
+
+    pub fn processor_version(&self) -> &str {
+        &self.processor_version
+    }
+}
+
+impl CookProcessor for DefaultCookProcessor {
+    fn processor_id(&self) -> &str {
+        self.processor_id()
+    }
+
+    fn processor_version(&self) -> &str {
+        self.processor_version()
+    }
+
+    fn cook(&self, request: CookRequest) -> Result<CookArtifact, CookError> {
+        self.cook(request)
+    }
 }
 
 pub fn cook_cache_key(
@@ -115,10 +177,16 @@ pub fn cook_cache_key(
     processor_id: &str,
     processor_version: &str,
     target_profile: &str,
+    dependency_artifacts: &BTreeMap<String, Hash256>,
 ) -> Hash256 {
+    let dependencies = dependency_artifacts
+        .iter()
+        .map(|(asset_id, hash)| format!("{asset_id}={hash}"))
+        .collect::<Vec<_>>()
+        .join(",");
     let input = format!(
-        "{}|{}|{}|{}|{}",
-        source_hash, sidecar_hash, processor_id, processor_version, target_profile
+        "{}|{}|{}|{}|{}|{}",
+        source_hash, sidecar_hash, processor_id, processor_version, target_profile, dependencies
     );
     Hash256::from_sha256(input.as_bytes())
 }
@@ -134,15 +202,50 @@ pub fn expected_cache_key(request: &CookRequest, processor_id: &str) -> Result<H
         processor_id,
         &request.processor_version,
         &request.target_profile,
+        &request.dependency_artifacts,
     ))
 }
 
-fn validate_cook_request(request: &CookRequest, processor_id: &str) -> Vec<Diagnostic> {
+fn validate_cook_request(
+    request: &CookRequest,
+    processor_id: &str,
+    processor_version: &str,
+) -> Vec<Diagnostic> {
     let mut diagnostics = request.sidecar.validate();
+    let actual_source_hash = Hash256::from_sha256(&request.source_bytes);
+    if request.sidecar.source_hash.as_ref() != Some(&actual_source_hash) {
+        diagnostics.push(Diagnostic::blocking(
+            "ASTRA_COOK_SOURCE_HASH_MISMATCH",
+            "cook request bytes do not match the sidecar source hash",
+        ));
+    }
+    let expected_dependencies = request
+        .sidecar
+        .dependencies
+        .iter()
+        .map(ToString::to_string)
+        .collect::<BTreeSet<_>>();
+    let actual_dependencies = request
+        .dependency_artifacts
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if expected_dependencies != actual_dependencies {
+        diagnostics.push(Diagnostic::blocking(
+            "ASTRA_COOK_DEPENDENCY_ARTIFACT_MISMATCH",
+            "dependency artifact hashes do not match the sidecar dependency set",
+        ));
+    }
     if request.sidecar.cook.processor != processor_id {
         diagnostics.push(Diagnostic::blocking(
             "ASTRA_COOK_PROCESSOR_MISMATCH",
             "cook processor does not match sidecar",
+        ));
+    }
+    if request.processor_version != processor_version {
+        diagnostics.push(Diagnostic::blocking(
+            "ASTRA_COOK_PROCESSOR_VERSION_MISMATCH",
+            "cook request processor version does not match the registered processor",
         ));
     }
     if !request
@@ -167,3 +270,4 @@ fn section_id_for(sidecar: &AssetSidecar) -> String {
         .replace('/', ".");
     format!("asset.{normalized}")
 }
+use std::collections::{BTreeMap, BTreeSet};

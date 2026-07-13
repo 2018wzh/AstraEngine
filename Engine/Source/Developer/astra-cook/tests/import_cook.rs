@@ -31,6 +31,7 @@ fn import_cook_classifies_fresh_stale_and_blocked_artifacts() {
         source_bytes: std::fs::read(&source).unwrap(),
         target_profile: "desktop-release".to_string(),
         processor_version: "1.0.0".to_string(),
+        dependency_artifacts: Default::default(),
     };
     let artifact = processor.cook(request.clone()).unwrap();
     let source_bytes = std::fs::read(&source).unwrap();
@@ -58,6 +59,7 @@ fn import_cook_classifies_fresh_stale_and_blocked_artifacts() {
         source_bytes: std::fs::read(&source).unwrap(),
         target_profile: "desktop-release".to_string(),
         processor_version: "1.0.0".to_string(),
+        dependency_artifacts: Default::default(),
     });
     assert!(blocked
         .unwrap_err()

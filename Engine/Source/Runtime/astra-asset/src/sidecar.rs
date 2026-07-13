@@ -18,6 +18,8 @@ pub struct AssetSidecar {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
     pub importer: String,
+    #[serde(default)]
+    pub dependencies: Vec<AssetId>,
     pub cook: CookSettings,
     pub review: ReviewStatus,
 }
@@ -40,6 +42,7 @@ impl AssetSidecar {
             asset_type: asset_type.to_string(),
             license: Some("project-owned".to_string()),
             importer: "astra.import.test".to_string(),
+            dependencies: Vec::new(),
             cook: CookSettings {
                 processor: "astra.cook.test".to_string(),
                 target_profiles: vec!["desktop-release".to_string()],
@@ -89,6 +92,28 @@ impl AssetSidecar {
                 )
                 .with_field("asset_id", self.id.as_str()),
             );
+        }
+        let mut dependencies = std::collections::BTreeSet::new();
+        for dependency in &self.dependencies {
+            if dependency == &self.id {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_ASSET_DEPENDENCY_SELF",
+                        "asset sidecar cannot depend on itself",
+                    )
+                    .with_field("asset_id", self.id.as_str()),
+                );
+            }
+            if !dependencies.insert(dependency) {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_ASSET_DEPENDENCY_DUPLICATE",
+                        "asset sidecar repeats a dependency",
+                    )
+                    .with_field("asset_id", self.id.as_str())
+                    .with_field("dependency", dependency.as_str()),
+                );
+            }
         }
         if self.cook.processor.trim().is_empty() {
             diagnostics.push(

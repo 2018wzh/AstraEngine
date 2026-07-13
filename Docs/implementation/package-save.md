@@ -54,6 +54,7 @@ Encryption descriptor 只记录 provider 能力、AAD hash 和外部 key referen
 Minimum package sections:
 
 - `schema.registry`
+- `cook.summary`
 - `asset.vfs_manifest`
 - `asset.catalog`
 - `compiled_story`
@@ -137,6 +138,8 @@ Release Gate validates a complete chain from `minimum_supported_version` to curr
 Package validation report includes section table hash, schema registry hash, policy lock hash and migration chain status. It never includes raw media payload or full localized text.
 
 `schema.registry` 当前使用 `astra.schema_registry.v2`，由 `PackageBuilder` 从实际 section table 派生每个 `section_id/schema/version`，不接受调用方提供的空成功 registry。`PackageReader` 要求 registry 与除自身外的 section table 双向一一对应，并在任何 release/runtime reader 读取 policy 或 payload 前验证 required section schema、package identity、container version 和 registry binding。旧 v1、缺项、多项、unknown section 或 schema/version drift 都是 package integrity blocker。
+
+`cook.summary` 使用 `astra.cook_batch_summary.v1`，从 `astra.cook_manifest.v2` 复制 content-bound graph hash、artifact/cache-hit/cooked count 和 concurrency limit。Reader 要求计数闭合且 artifact count 与 package 内 `astra.cooked_asset.v1` section 数量相同；Release Gate 输出 `package.cook_graph`，只记录摘要字段，不记录 DDC root、源路径或 payload。
 
 ## Tests
 

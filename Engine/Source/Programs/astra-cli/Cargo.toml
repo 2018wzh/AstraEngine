@@ -36,6 +36,7 @@ serde_yaml.workspace = true
 tracing.workspace = true
 wasmparser.workspace = true
 tempfile.workspace = true
+ctrlc.workspace = true
 
 [dev-dependencies]
 
