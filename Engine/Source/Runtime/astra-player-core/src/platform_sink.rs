@@ -292,7 +292,7 @@ impl PlatformCommandSink {
                     .await?;
                 Ok(PlayerHostCommandResult::Presented { surface: *surface })
             }
-            PlayerHostCommand::PresentTextScene {
+            PlayerHostCommand::PresentScene {
                 surface,
                 sequence,
                 width,
@@ -300,11 +300,11 @@ impl PlatformCommandSink {
                 clear_rgba,
                 commands,
             } => {
-                let handle = lookup(&self.surfaces, surface, "surface.present_text_scene")?;
+                let handle = lookup(&self.surfaces, surface, "surface.present_scene")?;
                 self.client
-                    .present_text_scene(
+                    .present_scene(
                         handle,
-                        astra_platform::TextSceneFrame {
+                        astra_platform::SceneFrame {
                             sequence: *sequence,
                             width: *width,
                             height: *height,

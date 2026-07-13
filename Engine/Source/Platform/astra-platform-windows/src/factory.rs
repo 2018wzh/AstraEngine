@@ -433,7 +433,7 @@ mod windows {
                         }
                         let _ = reply.send(result);
                     }
-                    HostCommand::PresentTextScene {
+                    HostCommand::PresentScene {
                         surface,
                         frame,
                         reply,
@@ -441,7 +441,7 @@ mod windows {
                         let result = self
                             .surfaces
                             .get_mut(surface)
-                            .and_then(|surface| surface.present_text_scene(frame));
+                            .and_then(|surface| surface.present_scene(frame));
                         if result
                             .as_ref()
                             .is_err_and(|error| error.code == PlatformErrorCode::ContextLost)

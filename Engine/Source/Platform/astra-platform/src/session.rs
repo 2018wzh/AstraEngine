@@ -89,7 +89,7 @@ pub struct RgbaFrame {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TextSceneFrame {
+pub struct SceneFrame {
     pub sequence: u64,
     pub width: u32,
     pub height: u32,
@@ -232,9 +232,9 @@ pub enum HostCommand {
         frame: RgbaFrame,
         reply: oneshot::Sender<Result<(), PlatformError>>,
     },
-    PresentTextScene {
+    PresentScene {
         surface: SurfaceHandle,
-        frame: TextSceneFrame,
+        frame: SceneFrame,
         reply: oneshot::Sender<Result<(), PlatformError>>,
     },
     #[cfg(feature = "platform-test-driver")]
@@ -358,7 +358,7 @@ impl HostCommand {
             Self::CreateSurface { .. } => "surface.create",
             Self::CaptureSurface { .. } => "surface.capture",
             Self::PresentRgba { .. } => "surface.present_rgba",
-            Self::PresentTextScene { .. } => "surface.present_text_scene",
+            Self::PresentScene { .. } => "surface.present_scene",
             #[cfg(feature = "platform-test-driver")]
             Self::InjectSurfaceDeviceLoss { .. } => "surface.test.inject_device_loss",
             Self::DestroySurface { .. } => "surface.destroy",
@@ -394,7 +394,7 @@ impl HostCommand {
     pub fn reply_unit(self, result: Result<(), PlatformError>) -> Result<(), PlatformError> {
         let sent = match self {
             Self::PresentRgba { reply, .. }
-            | Self::PresentTextScene { reply, .. }
+            | Self::PresentScene { reply, .. }
             | Self::DestroySurface { reply, .. }
             | Self::DestroyWindow { reply, .. }
             | Self::SubmitAudio { reply, .. }
@@ -434,7 +434,7 @@ impl HostCommand {
             Self::CreateSurface { reply, .. } => send_error!(reply),
             Self::CaptureSurface { reply, .. } => send_error!(reply),
             Self::PresentRgba { reply, .. } => send_error!(reply),
-            Self::PresentTextScene { reply, .. } => send_error!(reply),
+            Self::PresentScene { reply, .. } => send_error!(reply),
             #[cfg(feature = "platform-test-driver")]
             Self::InjectSurfaceDeviceLoss { reply, .. } => send_error!(reply),
             Self::DestroySurface { reply, .. } => send_error!(reply),
@@ -725,22 +725,22 @@ impl PlatformHostClient {
             .map_err(|_| queue_closed("surface.present_rgba"))?
     }
 
-    pub async fn present_text_scene(
+    pub async fn present_scene(
         &self,
         surface: SurfaceHandle,
-        frame: TextSceneFrame,
+        frame: SceneFrame,
     ) -> Result<(), PlatformError> {
-        validate_text_scene_frame(&frame, self.profile.limits.max_frame_bytes)?;
-        self.ensure_running("surface.present_text_scene")?;
+        validate_scene_frame(&frame, self.profile.limits.max_frame_bytes)?;
+        self.ensure_running("surface.present_scene")?;
         let (reply, response) = oneshot::channel();
-        self.try_send(HostCommand::PresentTextScene {
+        self.try_send(HostCommand::PresentScene {
             surface,
             frame,
             reply,
         })?;
         response
             .await
-            .map_err(|_| queue_closed("surface.present_text_scene"))?
+            .map_err(|_| queue_closed("surface.present_scene"))?
     }
 
     #[cfg(feature = "platform-test-driver")]
@@ -1405,10 +1405,7 @@ fn validate_rgba_frame(
     Ok(())
 }
 
-fn validate_text_scene_frame(
-    frame: &TextSceneFrame,
-    max_bytes: usize,
-) -> Result<(), PlatformError> {
+fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), PlatformError> {
     let output_bytes = usize::try_from(frame.width)
         .ok()
         .and_then(|width| {
@@ -1425,14 +1422,45 @@ fn validate_text_scene_frame(
     {
         return Err(PlatformError::new(
             PlatformErrorCode::InvalidState,
-            "surface.present_text_scene",
+            "surface.present_scene",
             "text scene sequence, dimensions, or command count exceeds profile limits",
         ));
     }
-    let mut glyph_bytes = 0usize;
+    let mut resource_bytes = 0usize;
     let mut clip_depth = 0usize;
     for command in &frame.commands {
         match command {
+            SceneCommand::UploadTexture { frame: texture, .. } => {
+                let expected = usize::try_from(texture.width)
+                    .ok()
+                    .and_then(|width| {
+                        usize::try_from(texture.height)
+                            .ok()
+                            .and_then(|height| width.checked_mul(height))
+                    })
+                    .and_then(|pixels| pixels.checked_mul(4));
+                if texture.width == 0
+                    || texture.height == 0
+                    || expected != Some(texture.rgba8.len())
+                    || astra_core::Hash256::from_sha256(&texture.rgba8) != texture.hash
+                {
+                    return Err(PlatformError::new(
+                        PlatformErrorCode::IntegrityMismatch,
+                        "surface.present_scene",
+                        "texture dimensions or content hash are invalid",
+                    ));
+                }
+                resource_bytes =
+                    resource_bytes
+                        .checked_add(texture.rgba8.len())
+                        .ok_or_else(|| {
+                            PlatformError::new(
+                                PlatformErrorCode::InvalidState,
+                                "surface.present_scene",
+                                "scene resource byte count overflowed",
+                            )
+                        })?;
+            }
             SceneCommand::UploadGlyph { glyph, .. } => {
                 let channels = match glyph.format {
                     astra_media_core::GlyphBitmapFormat::Alpha8 => 1usize,
@@ -1453,31 +1481,66 @@ fn validate_text_scene_frame(
                 {
                     return Err(PlatformError::new(
                         PlatformErrorCode::IntegrityMismatch,
-                        "surface.present_text_scene",
+                        "surface.present_scene",
                         "glyph bitmap dimensions or content hash are invalid",
                     ));
                 }
-                glyph_bytes = glyph_bytes.checked_add(glyph.pixels.len()).ok_or_else(|| {
-                    PlatformError::new(
-                        PlatformErrorCode::InvalidState,
-                        "surface.present_text_scene",
-                        "glyph upload byte count overflowed",
-                    )
-                })?;
+                resource_bytes =
+                    resource_bytes
+                        .checked_add(glyph.pixels.len())
+                        .ok_or_else(|| {
+                            PlatformError::new(
+                                PlatformErrorCode::InvalidState,
+                                "surface.present_scene",
+                                "glyph upload byte count overflowed",
+                            )
+                        })?;
             }
             SceneCommand::ReleaseResource { .. } | SceneCommand::GlyphRun { .. } => {}
+            SceneCommand::Rect { width, height, .. } => {
+                if *width == 0 || *height == 0 {
+                    return Err(PlatformError::new(
+                        PlatformErrorCode::InvalidState,
+                        "surface.present_scene",
+                        "rectangle dimensions must be non-zero",
+                    ));
+                }
+            }
+            SceneCommand::Sprite {
+                source,
+                destination,
+                opacity,
+                blend,
+                ..
+            } => {
+                if destination.width == 0
+                    || destination.height == 0
+                    || source.is_some_and(|source| {
+                        source.x < 0 || source.y < 0 || source.width == 0 || source.height == 0
+                    })
+                    || !opacity.is_finite()
+                    || !(0.0..=1.0).contains(opacity)
+                    || *blend != astra_media_core::BlendMode::Alpha
+                {
+                    return Err(PlatformError::new(
+                        PlatformErrorCode::InvalidState,
+                        "surface.present_scene",
+                        "sprite geometry, opacity, or blend mode is invalid",
+                    ));
+                }
+            }
             SceneCommand::PushClip { rect } => {
                 if rect.width == 0 || rect.height == 0 {
                     return Err(PlatformError::new(
                         PlatformErrorCode::InvalidState,
-                        "surface.present_text_scene",
+                        "surface.present_scene",
                         "text clip dimensions must be non-zero",
                     ));
                 }
                 clip_depth = clip_depth.checked_add(1).ok_or_else(|| {
                     PlatformError::new(
                         PlatformErrorCode::InvalidState,
-                        "surface.present_text_scene",
+                        "surface.present_scene",
                         "text clip stack overflowed",
                     )
                 })?;
@@ -1486,23 +1549,23 @@ fn validate_text_scene_frame(
             SceneCommand::PopClip => {
                 return Err(PlatformError::new(
                     PlatformErrorCode::InvalidState,
-                    "surface.present_text_scene",
+                    "surface.present_scene",
                     "text clip stack underflowed",
                 ));
             }
             _ => {
                 return Err(PlatformError::new(
                     PlatformErrorCode::InvalidState,
-                    "surface.present_text_scene",
+                    "surface.present_scene",
                     "text scene contains a non-text renderer command",
                 ));
             }
         }
     }
-    if glyph_bytes > max_bytes || clip_depth != 0 {
+    if resource_bytes > max_bytes || clip_depth != 0 {
         return Err(PlatformError::new(
             PlatformErrorCode::InvalidState,
-            "surface.present_text_scene",
+            "surface.present_scene",
             "glyph upload budget or clip stack is invalid",
         ));
     }

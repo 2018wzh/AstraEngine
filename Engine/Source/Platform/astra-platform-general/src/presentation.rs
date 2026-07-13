@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use astra_platform::{
-    CapturedFrame, PlatformError, PlatformErrorCode, PlatformEventKind, RgbaFrame, TextSceneFrame,
+    CapturedFrame, PlatformError, PlatformErrorCode, PlatformEventKind, RgbaFrame, SceneFrame,
 };
 
 use crate::glyph_atlas::WgpuGlyphAtlasRenderer;
@@ -25,7 +25,7 @@ pub struct WgpuPresentationCore {
     glyph_renderer: WgpuGlyphAtlasRenderer,
     last_upload: Option<UploadFrame>,
     last_frame: Option<RgbaFrame>,
-    last_text_frame: Option<TextSceneFrame>,
+    last_scene_frame: Option<SceneFrame>,
     last_sequence: Option<u64>,
     device_lost: Arc<AtomicBool>,
     #[cfg(feature = "platform-test-driver")]
@@ -110,7 +110,7 @@ impl WgpuPresentationCore {
             glyph_renderer,
             last_upload: None,
             last_frame: None,
-            last_text_frame: None,
+            last_scene_frame: None,
             last_sequence: None,
             device_lost,
             #[cfg(feature = "platform-test-driver")]
@@ -234,24 +234,21 @@ impl WgpuPresentationCore {
         });
         self.last_sequence = Some(frame.sequence);
         self.last_frame = Some(frame);
-        self.last_text_frame = None;
+        self.last_scene_frame = None;
         Ok(())
     }
 
-    pub fn present_text_scene(&mut self, frame: TextSceneFrame) -> Result<(), PlatformError> {
-        self.ensure_device_available("surface.present_text_scene")?;
+    pub fn present_scene(&mut self, frame: SceneFrame) -> Result<(), PlatformError> {
+        self.ensure_device_available("surface.present_scene")?;
         let expected_sequence = match self.last_sequence {
             Some(sequence) => sequence.checked_add(1).ok_or_else(|| {
-                invalid(
-                    "surface.present_text_scene",
-                    "frame sequence counter overflowed",
-                )
+                invalid("surface.present_scene", "frame sequence counter overflowed")
             })?,
             None => 1,
         };
         if frame.sequence != expected_sequence || frame.width == 0 || frame.height == 0 {
             return Err(invalid(
-                "surface.present_text_scene",
+                "surface.present_scene",
                 "text frame sequence or dimensions are invalid",
             ));
         }
@@ -263,7 +260,7 @@ impl WgpuPresentationCore {
         let prepared = self
             .glyph_renderer
             .render(&self.device, &self.queue, &frame)?;
-        self.present_texture(&prepared.texture, "surface.present_text_scene")?;
+        self.present_texture(&prepared.texture, "surface.present_scene")?;
         let texture = self.glyph_renderer.commit(prepared);
         self.last_upload = Some(UploadFrame {
             texture,
@@ -272,7 +269,7 @@ impl WgpuPresentationCore {
         });
         self.last_sequence = Some(frame.sequence);
         self.last_frame = None;
-        self.last_text_frame = Some(frame);
+        self.last_scene_frame = Some(frame);
         Ok(())
     }
 
@@ -360,7 +357,7 @@ impl WgpuPresentationCore {
                     width: frame.width,
                     height: frame.height,
                 })
-            } else if let Some(frame) = self.last_text_frame.as_ref() {
+            } else if let Some(frame) = self.last_scene_frame.as_ref() {
                 Some(UploadFrame {
                     texture: self.glyph_renderer.render_retained(
                         &self.device,
@@ -407,7 +404,7 @@ impl WgpuPresentationCore {
                 width: frame.width,
                 height: frame.height,
             })
-        } else if let Some(frame) = self.last_text_frame.as_ref() {
+        } else if let Some(frame) = self.last_scene_frame.as_ref() {
             Some(UploadFrame {
                 texture: self
                     .glyph_renderer

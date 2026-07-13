@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use astra_media_core::{BlendMode, GlyphBitmap, GlyphBitmapFormat, RectI, SceneCommand};
-use astra_platform::{PlatformError, PlatformErrorCode, TextSceneFrame};
+use astra_media_core::{
+    BlendMode, GlyphBitmap, GlyphBitmapFormat, RectI, SceneCommand, TextureFrame,
+};
+use astra_platform::{PlatformError, PlatformErrorCode, SceneFrame};
 use wgpu::util::DeviceExt;
 
 const ATLAS_SIDE: u32 = 4096;
@@ -11,7 +13,7 @@ const MAX_GLYPH_BYTES: usize = 64 * 1024 * 1024;
 const VERTEX_STRIDE: wgpu::BufferAddress = 32;
 
 pub(super) struct WgpuGlyphAtlasRenderer {
-    resources: BTreeMap<String, GlyphBitmap>,
+    resources: BTreeMap<String, AtlasResource>,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
@@ -19,14 +21,41 @@ pub(super) struct WgpuGlyphAtlasRenderer {
 
 pub(super) struct PreparedGlyphFrame {
     pub(super) texture: wgpu::Texture,
-    next_resources: BTreeMap<String, GlyphBitmap>,
+    next_resources: BTreeMap<String, AtlasResource>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+enum AtlasResource {
+    Glyph(GlyphBitmap),
+    Texture(TextureFrame),
+}
+
+impl AtlasResource {
+    fn width(&self) -> u32 {
+        match self {
+            Self::Glyph(value) => value.width,
+            Self::Texture(value) => value.width,
+        }
+    }
+
+    fn height(&self) -> u32 {
+        match self {
+            Self::Glyph(value) => value.height,
+            Self::Texture(value) => value.height,
+        }
+    }
+
+    fn byte_len(&self) -> usize {
+        match self {
+            Self::Glyph(value) => value.pixels.len(),
+            Self::Texture(value) => value.rgba8.len(),
+        }
+    }
 }
 
 struct AtlasPlacement {
     x: u32,
     y: u32,
-    width: u32,
-    height: u32,
 }
 
 struct PackedAtlas {
@@ -35,15 +64,18 @@ struct PackedAtlas {
     height: u32,
 }
 
-struct DrawGlyph {
-    resource_id: String,
-    bitmap: GlyphBitmap,
-    x: i32,
-    y: i32,
+enum QuadSource {
+    Resource { resource_id: String, source: RectI },
+    White,
+}
+
+struct DrawQuad {
+    source: QuadSource,
+    destination: RectI,
 }
 
 struct DrawRun {
-    glyphs: Vec<DrawGlyph>,
+    quads: Vec<DrawQuad>,
     rgba: [u8; 4],
     opacity: f32,
     clip: RectI,
@@ -77,7 +109,7 @@ impl WgpuGlyphAtlasRenderer {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        frame: &TextSceneFrame,
+        frame: &SceneFrame,
     ) -> Result<PreparedGlyphFrame, PlatformError> {
         let (texture, next_resources) = self.render_internal(device, queue, frame, true)?;
         Ok(PreparedGlyphFrame {
@@ -90,7 +122,7 @@ impl WgpuGlyphAtlasRenderer {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        frame: &TextSceneFrame,
+        frame: &SceneFrame,
     ) -> Result<wgpu::Texture, PlatformError> {
         self.render_internal(device, queue, frame, false)
             .map(|(texture, _)| texture)
@@ -105,9 +137,9 @@ impl WgpuGlyphAtlasRenderer {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        frame: &TextSceneFrame,
+        frame: &SceneFrame,
         apply_mutations: bool,
-    ) -> Result<(wgpu::Texture, BTreeMap<String, GlyphBitmap>), PlatformError> {
+    ) -> Result<(wgpu::Texture, BTreeMap<String, AtlasResource>), PlatformError> {
         let mut resources = self.resources.clone();
         let mut draw_runs = Vec::new();
         let mut clip_stack = Vec::new();
@@ -115,6 +147,23 @@ impl WgpuGlyphAtlasRenderer {
         let mut drawn_resources = BTreeSet::new();
         for command in &frame.commands {
             match command {
+                SceneCommand::UploadTexture { resource_id, frame } => {
+                    validate_resource_id(resource_id)?;
+                    validate_texture(frame)?;
+                    if apply_mutations {
+                        if resources.contains_key(resource_id) {
+                            return Err(invalid("texture upload repeats a live resource id"));
+                        }
+                        resources
+                            .insert(resource_id.clone(), AtlasResource::Texture(frame.clone()));
+                    } else if resources.get(resource_id)
+                        != Some(&AtlasResource::Texture(frame.clone()))
+                    {
+                        return Err(invalid(
+                            "retained texture resource does not match the recovery frame",
+                        ));
+                    }
+                }
                 SceneCommand::UploadGlyph { resource_id, glyph } => {
                     validate_resource_id(resource_id)?;
                     validate_glyph(glyph)?;
@@ -122,8 +171,10 @@ impl WgpuGlyphAtlasRenderer {
                         if resources.contains_key(resource_id) {
                             return Err(invalid("glyph upload repeats a live resource id"));
                         }
-                        resources.insert(resource_id.clone(), glyph.clone());
-                    } else if resources.get(resource_id) != Some(glyph) {
+                        resources.insert(resource_id.clone(), AtlasResource::Glyph(glyph.clone()));
+                    } else if resources.get(resource_id)
+                        != Some(&AtlasResource::Glyph(glyph.clone()))
+                    {
                         return Err(invalid(
                             "retained glyph resource does not match the recovery frame",
                         ));
@@ -178,21 +229,25 @@ impl WgpuGlyphAtlasRenderer {
                             "glyph run identity, opacity, or blend mode is invalid",
                         ));
                     }
-                    let mut draw_glyphs = Vec::with_capacity(glyphs.len());
+                    let mut quads = Vec::with_capacity(glyphs.len());
                     for glyph in glyphs {
                         let bitmap = resources.get(&glyph.resource_id).ok_or_else(|| {
                             invalid("glyph run references a resource that is not live")
                         })?;
-                        draw_glyphs.push(DrawGlyph {
-                            resource_id: glyph.resource_id.clone(),
-                            bitmap: bitmap.clone(),
-                            x: glyph.x,
-                            y: glyph.y,
+                        let AtlasResource::Glyph(bitmap) = bitmap else {
+                            return Err(invalid("glyph run references a non-glyph resource"));
+                        };
+                        quads.push(DrawQuad {
+                            source: QuadSource::Resource {
+                                resource_id: glyph.resource_id.clone(),
+                                source: RectI::new(0, 0, bitmap.width, bitmap.height),
+                            },
+                            destination: RectI::new(glyph.x, glyph.y, bitmap.width, bitmap.height),
                         });
                         drawn_resources.insert(glyph.resource_id.clone());
                     }
                     draw_runs.push(DrawRun {
-                        glyphs: draw_glyphs,
+                        quads,
                         rgba: *rgba,
                         opacity: *opacity,
                         clip: clip_stack.last().copied().unwrap_or(RectI::new(
@@ -203,7 +258,89 @@ impl WgpuGlyphAtlasRenderer {
                         )),
                     });
                 }
-                _ => return Err(invalid("text pass received a non-text scene command")),
+                SceneCommand::Sprite {
+                    id,
+                    texture_id,
+                    source,
+                    destination,
+                    opacity,
+                    blend,
+                } => {
+                    if id.is_empty()
+                        || id.len() > 256
+                        || !run_ids.insert(id.clone())
+                        || !opacity.is_finite()
+                        || !(0.0..=1.0).contains(opacity)
+                        || *blend != BlendMode::Alpha
+                    {
+                        return Err(invalid(
+                            "sprite identity, opacity, or blend mode is invalid",
+                        ));
+                    }
+                    let texture = resources
+                        .get(texture_id)
+                        .ok_or_else(|| invalid("sprite references a resource that is not live"))?;
+                    let AtlasResource::Texture(texture) = texture else {
+                        return Err(invalid("sprite references a non-texture resource"));
+                    };
+                    let source = source.unwrap_or(RectI::new(0, 0, texture.width, texture.height));
+                    validate_source_rect(source, texture.width, texture.height)?;
+                    validate_destination(*destination)?;
+                    drawn_resources.insert(texture_id.clone());
+                    draw_runs.push(DrawRun {
+                        quads: vec![DrawQuad {
+                            source: QuadSource::Resource {
+                                resource_id: texture_id.clone(),
+                                source,
+                            },
+                            destination: *destination,
+                        }],
+                        rgba: [255; 4],
+                        opacity: *opacity,
+                        clip: clip_stack.last().copied().unwrap_or(RectI::new(
+                            0,
+                            0,
+                            frame.width,
+                            frame.height,
+                        )),
+                    });
+                }
+                SceneCommand::Rect {
+                    id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rgba,
+                } => {
+                    if id.is_empty()
+                        || id.len() > 256
+                        || !run_ids.insert(id.clone())
+                        || *width == 0
+                        || *height == 0
+                    {
+                        return Err(invalid("rectangle identity or dimensions are invalid"));
+                    }
+                    draw_runs.push(DrawRun {
+                        quads: vec![DrawQuad {
+                            source: QuadSource::White,
+                            destination: RectI::new(*x as i32, *y as i32, *width, *height),
+                        }],
+                        rgba: *rgba,
+                        opacity: 1.0,
+                        clip: clip_stack.last().copied().unwrap_or(RectI::new(
+                            0,
+                            0,
+                            frame.width,
+                            frame.height,
+                        )),
+                    });
+                }
+                _ => {
+                    return Err(invalid(
+                        "GPU scene pass received an unsupported scene command",
+                    ))
+                }
             }
         }
         if !clip_stack.is_empty() {
@@ -211,23 +348,8 @@ impl WgpuGlyphAtlasRenderer {
         }
         validate_resource_budget(&resources)?;
 
-        let mut atlas_resources = resources.clone();
-        for run in &draw_runs {
-            for glyph in &run.glyphs {
-                match atlas_resources.get(&glyph.resource_id) {
-                    Some(existing) if existing != &glyph.bitmap => {
-                        return Err(invalid("content-addressed glyph changed within one frame"));
-                    }
-                    Some(_) => {}
-                    None => {
-                        atlas_resources.insert(glyph.resource_id.clone(), glyph.bitmap.clone());
-                    }
-                }
-            }
-        }
-        validate_resource_budget(&atlas_resources)?;
-        let packed_atlas = pack_atlas(&atlas_resources)?;
-        let atlas_pixels = build_atlas_pixels(&atlas_resources, &packed_atlas)?;
+        let packed_atlas = pack_atlas(&resources)?;
+        let atlas_pixels = build_atlas_pixels(&resources, &packed_atlas)?;
         let atlas = upload_atlas(
             device,
             queue,
@@ -325,12 +447,12 @@ impl WgpuGlyphAtlasRenderer {
 }
 
 fn validate_resource_budget(
-    resources: &BTreeMap<String, GlyphBitmap>,
+    resources: &BTreeMap<String, AtlasResource>,
 ) -> Result<(), PlatformError> {
-    let bytes = resources.values().try_fold(0usize, |total, glyph| {
+    let bytes = resources.values().try_fold(0usize, |total, resource| {
         total
-            .checked_add(glyph.pixels.len())
-            .ok_or_else(|| invalid("glyph resource byte count overflowed"))
+            .checked_add(resource.byte_len())
+            .ok_or_else(|| invalid("scene resource byte count overflowed"))
     })?;
     if resources.len() > MAX_GLYPH_RESOURCES || bytes > MAX_GLYPH_BYTES {
         return Err(invalid("glyph atlas resource budget was exceeded"));
@@ -366,17 +488,57 @@ fn validate_glyph(glyph: &GlyphBitmap) -> Result<(), PlatformError> {
     {
         return Err(PlatformError::new(
             PlatformErrorCode::IntegrityMismatch,
-            "surface.present_text_scene",
+            "surface.present_scene",
             "glyph dimensions, format, or content hash is invalid",
         ));
     }
     Ok(())
 }
 
-fn pack_atlas(resources: &BTreeMap<String, GlyphBitmap>) -> Result<PackedAtlas, PlatformError> {
+fn validate_texture(texture: &TextureFrame) -> Result<(), PlatformError> {
+    let expected = (texture.width as usize)
+        .checked_mul(texture.height as usize)
+        .and_then(|pixels| pixels.checked_mul(4));
+    if texture.width == 0
+        || texture.height == 0
+        || expected != Some(texture.rgba8.len())
+        || astra_core::Hash256::from_sha256(&texture.rgba8) != texture.hash
+    {
+        return Err(PlatformError::new(
+            PlatformErrorCode::IntegrityMismatch,
+            "surface.present_scene",
+            "texture dimensions or content hash is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_source_rect(source: RectI, width: u32, height: u32) -> Result<(), PlatformError> {
+    let right = i64::from(source.x) + i64::from(source.width);
+    let bottom = i64::from(source.y) + i64::from(source.height);
+    if source.x < 0
+        || source.y < 0
+        || source.width == 0
+        || source.height == 0
+        || right > i64::from(width)
+        || bottom > i64::from(height)
+    {
+        return Err(invalid("sprite source rectangle is outside its texture"));
+    }
+    Ok(())
+}
+
+fn validate_destination(destination: RectI) -> Result<(), PlatformError> {
+    if destination.width == 0 || destination.height == 0 {
+        return Err(invalid("sprite destination rectangle is empty"));
+    }
+    Ok(())
+}
+
+fn pack_atlas(resources: &BTreeMap<String, AtlasResource>) -> Result<PackedAtlas, PlatformError> {
     let widest = resources
         .values()
-        .map(|glyph| glyph.width + ATLAS_PADDING * 2)
+        .map(|resource| resource.width() + ATLAS_PADDING * 2)
         .max()
         .unwrap_or(64);
     let atlas_width = widest
@@ -387,36 +549,28 @@ fn pack_atlas(resources: &BTreeMap<String, GlyphBitmap>) -> Result<PackedAtlas, 
         return Err(invalid("glyph is larger than the configured atlas"));
     }
     let mut placements = BTreeMap::new();
-    let mut x = ATLAS_PADDING;
+    let mut x = ATLAS_PADDING * 3;
     let mut y = ATLAS_PADDING;
     let mut row_height = 0;
-    for (resource_id, glyph) in resources {
-        if glyph.width + ATLAS_PADDING * 2 > atlas_width
-            || glyph.height + ATLAS_PADDING * 2 > ATLAS_SIDE
+    for (resource_id, resource) in resources {
+        if resource.width() + ATLAS_PADDING * 2 > atlas_width
+            || resource.height() + ATLAS_PADDING * 2 > ATLAS_SIDE
         {
             return Err(invalid("glyph is larger than the configured atlas"));
         }
-        if x + glyph.width + ATLAS_PADDING > atlas_width {
-            x = ATLAS_PADDING;
+        if x + resource.width() + ATLAS_PADDING > atlas_width {
+            x = ATLAS_PADDING * 3;
             y = y
                 .checked_add(row_height + ATLAS_PADDING)
                 .ok_or_else(|| invalid("glyph atlas row overflowed"))?;
             row_height = 0;
         }
-        if y + glyph.height + ATLAS_PADDING > ATLAS_SIDE {
+        if y + resource.height() + ATLAS_PADDING > ATLAS_SIDE {
             return Err(invalid("glyph atlas capacity was exceeded"));
         }
-        placements.insert(
-            resource_id.clone(),
-            AtlasPlacement {
-                x,
-                y,
-                width: glyph.width,
-                height: glyph.height,
-            },
-        );
-        x += glyph.width + ATLAS_PADDING;
-        row_height = row_height.max(glyph.height);
+        placements.insert(resource_id.clone(), AtlasPlacement { x, y });
+        x += resource.width() + ATLAS_PADDING;
+        row_height = row_height.max(resource.height());
     }
     let used_height = (y + row_height + ATLAS_PADDING).max(1);
     let atlas_height = used_height
@@ -433,37 +587,61 @@ fn pack_atlas(resources: &BTreeMap<String, GlyphBitmap>) -> Result<PackedAtlas, 
 }
 
 fn build_atlas_pixels(
-    resources: &BTreeMap<String, GlyphBitmap>,
+    resources: &BTreeMap<String, AtlasResource>,
     atlas: &PackedAtlas,
 ) -> Result<Vec<u8>, PlatformError> {
     let mut pixels = vec![0; atlas.width as usize * atlas.height as usize * 4];
-    for (resource_id, glyph) in resources {
+    pixels[..4].copy_from_slice(&[255; 4]);
+    for (resource_id, resource) in resources {
         let placement = atlas
             .placements
             .get(resource_id)
             .ok_or_else(|| invalid("glyph atlas placement is missing"))?;
-        for row in 0..glyph.height as usize {
-            for column in 0..glyph.width as usize {
-                let destination = (((placement.y as usize + row) * atlas.width as usize)
-                    + placement.x as usize
-                    + column)
-                    * 4;
-                match glyph.format {
-                    GlyphBitmapFormat::Alpha8 => {
-                        let alpha = glyph.pixels[row * glyph.width as usize + column];
-                        pixels[destination..destination + 4]
-                            .copy_from_slice(&[255, 255, 255, alpha]);
-                    }
-                    GlyphBitmapFormat::Rgba8 => {
-                        let source = (row * glyph.width as usize + column) * 4;
-                        pixels[destination..destination + 4]
-                            .copy_from_slice(&glyph.pixels[source..source + 4]);
-                    }
-                }
+        for padded_row in -1_i32..=resource.height() as i32 {
+            for padded_column in -1_i32..=resource.width() as i32 {
+                let source_row = padded_row.clamp(0, resource.height() as i32 - 1) as usize;
+                let source_column = padded_column.clamp(0, resource.width() as i32 - 1) as usize;
+                let destination_row = (placement.y as i32 + padded_row) as usize;
+                let destination_column = (placement.x as i32 + padded_column) as usize;
+                let destination = (destination_row * atlas.width as usize + destination_column) * 4;
+                pixels[destination..destination + 4].copy_from_slice(&resource_pixel(
+                    resource,
+                    source_column,
+                    source_row,
+                ));
             }
         }
     }
     Ok(pixels)
+}
+
+fn resource_pixel(resource: &AtlasResource, column: usize, row: usize) -> [u8; 4] {
+    match resource {
+        AtlasResource::Glyph(glyph) if glyph.format == GlyphBitmapFormat::Alpha8 => [
+            255,
+            255,
+            255,
+            glyph.pixels[row * glyph.width as usize + column],
+        ],
+        AtlasResource::Glyph(glyph) => {
+            let source = (row * glyph.width as usize + column) * 4;
+            [
+                glyph.pixels[source],
+                glyph.pixels[source + 1],
+                glyph.pixels[source + 2],
+                glyph.pixels[source + 3],
+            ]
+        }
+        AtlasResource::Texture(texture) => {
+            let source = (row * texture.width as usize + column) * 4;
+            [
+                texture.rgba8[source],
+                texture.rgba8[source + 1],
+                texture.rgba8[source + 2],
+                texture.rgba8[source + 3],
+            ]
+        }
+    }
 }
 
 fn upload_atlas(
@@ -510,7 +688,7 @@ fn upload_atlas(
 }
 
 fn build_vertices(
-    frame: &TextSceneFrame,
+    frame: &SceneFrame,
     runs: &[DrawRun],
     atlas: &PackedAtlas,
 ) -> Result<(Vec<u8>, Vec<DrawBatch>), PlatformError> {
@@ -528,19 +706,35 @@ fn build_vertices(
             srgb_byte_to_linear(run.rgba[2]),
             (f32::from(run.rgba[3]) / 255.0) * run.opacity,
         ];
-        for glyph in &run.glyphs {
-            let placement = atlas
-                .placements
-                .get(&glyph.resource_id)
-                .ok_or_else(|| invalid("draw glyph has no atlas placement"))?;
-            let left = glyph.x as f32;
-            let top = glyph.y as f32;
-            let right = left + placement.width as f32;
-            let bottom = top + placement.height as f32;
-            let u0 = placement.x as f32 / atlas.width as f32;
-            let v0 = placement.y as f32 / atlas.height as f32;
-            let u1 = (placement.x + placement.width) as f32 / atlas.width as f32;
-            let v1 = (placement.y + placement.height) as f32 / atlas.height as f32;
+        for quad in &run.quads {
+            let left = quad.destination.x as f32;
+            let top = quad.destination.y as f32;
+            let right = left + quad.destination.width as f32;
+            let bottom = top + quad.destination.height as f32;
+            let (u0, v0, u1, v1) = match &quad.source {
+                QuadSource::Resource {
+                    resource_id,
+                    source,
+                } => {
+                    let placement = atlas
+                        .placements
+                        .get(resource_id)
+                        .ok_or_else(|| invalid("draw resource has no atlas placement"))?;
+                    let source_right = source.x as u32 + source.width;
+                    let source_bottom = source.y as u32 + source.height;
+                    (
+                        (placement.x + source.x as u32) as f32 / atlas.width as f32,
+                        (placement.y + source.y as u32) as f32 / atlas.height as f32,
+                        (placement.x + source_right) as f32 / atlas.width as f32,
+                        (placement.y + source_bottom) as f32 / atlas.height as f32,
+                    )
+                }
+                QuadSource::White => {
+                    let u = 0.5 / atlas.width as f32;
+                    let v = 0.5 / atlas.height as f32;
+                    (u, v, u, v)
+                }
+            };
             for (x, y, u, v) in [
                 (left, top, u0, v0),
                 (right, top, u1, v0),
@@ -693,7 +887,7 @@ fn create_pipeline(
 fn invalid(message: &'static str) -> PlatformError {
     PlatformError::new(
         PlatformErrorCode::InvalidState,
-        "surface.present_text_scene",
+        "surface.present_scene",
         message,
     )
 }

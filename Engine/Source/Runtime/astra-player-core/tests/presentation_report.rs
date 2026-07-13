@@ -49,7 +49,7 @@ fn commands() -> Vec<SceneCommand> {
 }
 
 fn present() -> astra_player_core::PlayerHostCommand {
-    astra_player_core::PlayerHostCommand::PresentTextScene {
+    astra_player_core::PlayerHostCommand::PresentScene {
         sequence: 1,
         surface: astra_player_core::PlayerHostResourceId(1),
         width: 2,

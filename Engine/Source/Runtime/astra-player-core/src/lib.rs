@@ -208,7 +208,7 @@ pub enum PlayerHostCommand {
         height: u32,
         rgba8: Vec<u8>,
     },
-    PresentTextScene {
+    PresentScene {
         sequence: u64,
         surface: PlayerHostResourceId,
         width: u32,
@@ -243,7 +243,7 @@ impl PlayerHostCommand {
             | Self::Decode { sequence, .. }
             | Self::CloseDecode { sequence, .. }
             | Self::PresentRgba { sequence, .. }
-            | Self::PresentTextScene { sequence, .. }
+            | Self::PresentScene { sequence, .. }
             | Self::CaptureSurface { sequence, .. } => *sequence,
         }
     }
@@ -706,7 +706,7 @@ impl PlayerPresentationReport {
         background: [u8; 4],
     ) -> Result<Self, PlayerPresentationError> {
         validate_presentation_identity(&identity)?;
-        let PlayerHostCommand::PresentTextScene {
+        let PlayerHostCommand::PresentScene {
             sequence,
             width,
             height,
@@ -786,7 +786,7 @@ pub enum PlayerPresentationError {
     NoVisualOutput,
     #[error("player presentation command stream is empty")]
     EmptyCommandStream,
-    #[error("player presentation evidence requires a PresentTextScene command")]
+    #[error("player presentation evidence requires a PresentScene command")]
     UnsupportedCommand,
     #[error("player presentation command stream is not serializable: {0}")]
     CommandSerialization(serde_json::Error),

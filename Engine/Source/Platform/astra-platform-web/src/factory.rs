@@ -160,11 +160,11 @@ mod browser {
                     }
                     let _ = reply.send(result);
                 }
-                HostCommand::PresentTextScene { reply, .. } => {
+                HostCommand::PresentScene { reply, .. } => {
                     let _ = reply.send(Err(PlatformError::new(
                         PlatformErrorCode::PlatformNotImplemented,
-                        "surface.present_text_scene",
-                        "Web GPU text scene execution is outside the current implementation scope",
+                        "surface.present_scene",
+                        "Web GPU scene execution is outside the current implementation scope",
                     )));
                 }
                 #[cfg(feature = "platform-test-driver")]

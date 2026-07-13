@@ -259,7 +259,7 @@ async fn player_command_path_presents_packaged_layout_and_records_live_gpu_ident
     let mut sink = PlatformCommandSink::new(session.client.clone());
     sink.bind_surface(logical, surface).unwrap();
     let mut executor = PlayerHostCommandExecutor::new(sink);
-    let present = PlayerHostCommand::PresentTextScene {
+    let present = PlayerHostCommand::PresentScene {
         sequence: 1,
         surface: logical,
         width: WIDTH,

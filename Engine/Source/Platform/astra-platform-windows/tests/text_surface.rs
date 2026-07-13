@@ -2,13 +2,14 @@
 
 use astra_core::Hash256;
 use astra_media::{
-    CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, PackagedFont,
-    SceneCommand, TextDirection, TextLayoutConfig, TextLayoutProvider, TextLayoutRequest,
-    TextRenderResourceOwner, TextRun, UnicodeRange, WrapPolicy,
+    BlendMode, CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy,
+    PackagedFont, RectI, SceneCommand, TextDirection, TextLayoutConfig, TextLayoutProvider,
+    TextLayoutRequest, TextRenderResourceOwner, TextRun, TextureFrame, Transform2D, UnicodeRange,
+    WrapPolicy,
 };
 use astra_platform::{
-    PlatformErrorCode, PlatformHostFactory, PlatformHostProfile, SurfaceRequest, TextSceneFrame,
-    WindowRequest,
+    PlatformErrorCode, PlatformHostClient, PlatformHostFactory, PlatformHostProfile, SceneFrame,
+    SurfaceHandle, SurfaceRequest, WindowRequest,
 };
 
 const WIDTH: u32 = 640;
@@ -194,9 +195,9 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
         .cloned()
         .unwrap();
     host.client
-        .present_text_scene(
+        .present_scene(
             surface,
-            TextSceneFrame {
+            SceneFrame {
                 sequence: 1,
                 width: WIDTH,
                 height: HEIGHT,
@@ -225,9 +226,9 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
         .unwrap();
     let lost = host
         .client
-        .present_text_scene(
+        .present_scene(
             surface,
-            TextSceneFrame {
+            SceneFrame {
                 sequence: 2,
                 width: WIDTH,
                 height: HEIGHT,
@@ -239,9 +240,9 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
         .unwrap_err();
     assert_eq!(lost.code, PlatformErrorCode::DeviceLost);
     host.client
-        .present_text_scene(
+        .present_scene(
             surface,
-            TextSceneFrame {
+            SceneFrame {
                 sequence: 2,
                 width: WIDTH,
                 height: HEIGHT,
@@ -256,9 +257,9 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
 
     let duplicate = host
         .client
-        .present_text_scene(
+        .present_scene(
             surface,
-            TextSceneFrame {
+            SceneFrame {
                 sequence: 3,
                 width: WIDTH,
                 height: HEIGHT,
@@ -277,21 +278,16 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
 
     let unsupported = host
         .client
-        .present_text_scene(
+        .present_scene(
             surface,
-            TextSceneFrame {
+            SceneFrame {
                 sequence: 3,
                 width: WIDTH,
                 height: HEIGHT,
                 clear_rgba: BACKGROUND,
-                commands: vec![SceneCommand::rect(
-                    "not-text",
-                    0,
-                    0,
-                    10,
-                    10,
-                    [255, 0, 0, 255],
-                )],
+                commands: vec![SceneCommand::PushTransform {
+                    transform: Transform2D::IDENTITY,
+                }],
             },
         )
         .await
@@ -300,9 +296,9 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
 
     let releases = resources.remove_layout("golden.multiscript").unwrap();
     host.client
-        .present_text_scene(
+        .present_scene(
             surface,
-            TextSceneFrame {
+            SceneFrame {
                 sequence: 3,
                 width: WIDTH,
                 height: HEIGHT,
@@ -318,7 +314,104 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
         .chunks_exact(4)
         .all(|pixel| pixel == BACKGROUND));
 
+    exercise_scene_atlas(&host.client, surface).await;
+
     host.client.destroy_surface(surface).await.unwrap();
     host.client.destroy_window(window).await.unwrap();
     host.client.shutdown().await.unwrap();
+}
+
+async fn exercise_scene_atlas(client: &PlatformHostClient, surface: SurfaceHandle) {
+    let texture_bytes = vec![255, 0, 0, 255];
+    let upload = SceneCommand::UploadTexture {
+        resource_id: "texture:solid-red".into(),
+        frame: TextureFrame {
+            width: 1,
+            height: 1,
+            hash: Hash256::from_sha256(&texture_bytes),
+            rgba8: texture_bytes,
+        },
+    };
+    let draws = vec![
+        SceneCommand::Sprite {
+            id: "sprite:red".into(),
+            texture_id: "texture:solid-red".into(),
+            source: None,
+            destination: RectI::new(0, 0, 64, 64),
+            opacity: 1.0,
+            blend: BlendMode::Alpha,
+        },
+        SceneCommand::rect("rect:green", 64, 0, 64, 64, [0, 255, 0, 255]),
+    ];
+    let mut first_commands = vec![upload.clone()];
+    first_commands.extend(draws.clone());
+    client
+        .present_scene(
+            surface,
+            SceneFrame {
+                sequence: 4,
+                width: 128,
+                height: 64,
+                clear_rgba: [0, 0, 0, 255],
+                commands: first_commands,
+            },
+        )
+        .await
+        .unwrap();
+    let first = client.capture_surface(surface).await.unwrap();
+    assert_eq!(&first.rgba8[(32 * 128 + 32) * 4..][..4], [255, 0, 0, 255]);
+    assert_eq!(&first.rgba8[(32 * 128 + 96) * 4..][..4], [0, 255, 0, 255]);
+    let first_hash = Hash256::from_sha256(&first.rgba8);
+
+    client.inject_surface_device_loss(surface).await.unwrap();
+    let lost = client
+        .present_scene(
+            surface,
+            SceneFrame {
+                sequence: 5,
+                width: 128,
+                height: 64,
+                clear_rgba: [0, 0, 0, 255],
+                commands: draws.clone(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(lost.code, PlatformErrorCode::DeviceLost);
+    client
+        .present_scene(
+            surface,
+            SceneFrame {
+                sequence: 5,
+                width: 128,
+                height: 64,
+                clear_rgba: [0, 0, 0, 255],
+                commands: draws,
+            },
+        )
+        .await
+        .unwrap();
+    let recovered = client.capture_surface(surface).await.unwrap();
+    assert_eq!(Hash256::from_sha256(&recovered.rgba8), first_hash);
+
+    client
+        .present_scene(
+            surface,
+            SceneFrame {
+                sequence: 6,
+                width: 128,
+                height: 64,
+                clear_rgba: [0, 0, 0, 255],
+                commands: vec![SceneCommand::ReleaseResource {
+                    resource_id: "texture:solid-red".into(),
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    let cleared = client.capture_surface(surface).await.unwrap();
+    assert!(cleared
+        .rgba8
+        .chunks_exact(4)
+        .all(|pixel| pixel == [0, 0, 0, 255]));
 }

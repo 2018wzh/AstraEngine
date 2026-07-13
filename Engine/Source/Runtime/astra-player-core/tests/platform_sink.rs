@@ -173,7 +173,7 @@ async fn platform_sink_forwards_renderer_ready_glyph_commands_without_cpu_frames
     let expected = commands.clone();
     let backend_task = tokio::spawn(async move {
         match backend.next_command().await.unwrap() {
-            HostCommand::PresentTextScene {
+            HostCommand::PresentScene {
                 surface,
                 frame,
                 reply,
@@ -194,7 +194,7 @@ async fn platform_sink_forwards_renderer_ready_glyph_commands_without_cpu_frames
     let mut executor = PlayerHostCommandExecutor::new(sink);
     let results = executor
         .execute_batch(
-            PlayerHostCommandBatch::new(vec![PlayerHostCommand::PresentTextScene {
+            PlayerHostCommandBatch::new(vec![PlayerHostCommand::PresentScene {
                 sequence: 1,
                 surface: logical,
                 width: 64,
