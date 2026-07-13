@@ -356,6 +356,31 @@ state start #@id state.start
 }
 
 #[test]
+fn package_open_blocks_undeclared_presentation_preset_before_provider_creation() {
+    let bytes = product_package_for(
+        r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    background asset:asset:/background/missing layer:bg preset:not_packaged duration:100 #@id background.policy
+    text key:line.one speaker:hero #@id line.one
+"#,
+    );
+    let package = PackageReader::open(&bytes).unwrap();
+    let error = match NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        640,
+        360,
+        PlayerHostResourceId(1),
+    ) {
+        Ok(_) => panic!("undeclared presentation preset must block package open"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("ASTRA_VN_PRESENTATION_PRESET_UNDECLARED"));
+}
+
+#[test]
 fn package_open_blocks_runtime_descriptor_drift_before_provider_creation() {
     let bytes = product_package_with_request(STORY, |request| {
         let mut policy: ProviderPolicy = serde_json::from_slice(&request.provider_policy).unwrap();

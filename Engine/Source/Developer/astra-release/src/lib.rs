@@ -23,11 +23,11 @@ use astra_plugin_abi::{
 };
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
 use astra_vn::{
-    decode_compiled_story, load_player_locale_config, NativeVnRuntimeProvider, SystemStoryManifest,
-    SystemStoryValidationStatus, VnAdvancedPresentationManifest, VnCommercialBaselineManifest,
-    VnExtensionManifest, VnPolicyBundleManifest, VnPolicyBundleSourceCache,
-    VnPresentationProviderManifest, VnProfileManifest, VnStandardCommandManifest,
-    VnSystemUiProfileManifest,
+    decode_compiled_story, load_player_locale_config, load_presentation_provider_manifest,
+    NativeVnRuntimeProvider, SystemStoryManifest, SystemStoryValidationStatus,
+    VnAdvancedPresentationManifest, VnCommercialBaselineManifest, VnExtensionManifest,
+    VnPolicyBundleManifest, VnPolicyBundleSourceCache, VnProfileManifest,
+    VnStandardCommandManifest, VnSystemUiProfileManifest,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -2944,10 +2944,7 @@ fn vn_standard_commands_check(package: &PackageReader, profile: &str) -> Release
 }
 
 fn vn_presentation_provider_check(package: &PackageReader, profile: &str) -> ReleaseCheckRecord {
-    let manifest = match package
-        .container()
-        .decode_postcard::<VnPresentationProviderManifest>("vn.presentation_provider_manifest")
-    {
+    let manifest = match load_presentation_provider_manifest(package, profile) {
         Ok(manifest) => manifest,
         Err(err) => {
             return ReleaseCheckRecord {
@@ -2984,6 +2981,8 @@ fn vn_presentation_provider_check(package: &PackageReader, profile: &str) -> Rel
                 evidence("filter_count", report.filter_count),
                 evidence("fallback_count", report.fallback_count),
                 evidence("wait_capability_count", report.wait_capability_count),
+                evidence("profile_count", report.profile_count),
+                evidence("preset_count", report.preset_count),
                 evidence("diagnostic_count", report.diagnostics.len()),
             ],
         };
@@ -2993,8 +2992,9 @@ fn vn_presentation_provider_check(package: &PackageReader, profile: &str) -> Rel
         id: "vn.presentation_provider".to_string(),
         domain: ReleaseDomain::Vn,
         status: CheckStatus::Pass,
-        summary: "VN presentation provider declares filter fallback and await capabilities"
-            .to_string(),
+        summary:
+            "VN presentation provider declares validated profile, preset, fallback and await policy"
+                .to_string(),
         diagnostic: None,
         evidence: vec![
             evidence("section", "vn.presentation_provider_manifest"),
@@ -3002,6 +3002,8 @@ fn vn_presentation_provider_check(package: &PackageReader, profile: &str) -> Rel
             evidence("filter_count", report.filter_count),
             evidence("fallback_count", report.fallback_count),
             evidence("wait_capability_count", report.wait_capability_count),
+            evidence("profile_count", report.profile_count),
+            evidence("preset_count", report.preset_count),
         ],
     }
 }

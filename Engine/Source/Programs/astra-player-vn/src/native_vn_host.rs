@@ -26,7 +26,8 @@ use astra_vn_core::{
 };
 use astra_vn_package::{
     decode_compiled_story, load_localization as load_package_localization,
-    load_player_locale_config, VnLocalizationTable,
+    load_player_locale_config, load_presentation_provider_manifest, VnLocalizationTable,
+    VnPresentationProviderManifest,
 };
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 use astra_vn_system::{SystemUiAction, SystemUiModel};
@@ -56,6 +57,8 @@ pub struct NativeVnHostCommandSource {
     media_assets: BTreeMap<String, PackagedMediaAsset>,
     pending_audio: Vec<NativeVnAudioOutput>,
     next_media_resource_id: u64,
+    presentation_manifest: VnPresentationProviderManifest,
+    presentation_profile: String,
     shutdown_started: bool,
 }
 
@@ -149,6 +152,7 @@ struct ProductPresentationBinding {
     localization: VnLocalizationTable,
     text_provider: CosmicTextLayoutProvider,
     font_families: Vec<String>,
+    manifest: VnPresentationProviderManifest,
 }
 
 struct ProductPackageBinding {
@@ -179,7 +183,15 @@ impl NativeVnHostCommandSource {
             .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
         let textures = load_package_textures(package)?;
         let media_assets = load_package_media_assets(package)?;
-        validate_story_presentation(&compiled, &textures)?;
+        let presentation_manifest =
+            load_presentation_provider_manifest(package, &config.profile)
+                .map_err(|error| NativeVnHostError::Package(error.to_string()))?;
+        validate_story_presentation(
+            &compiled,
+            &textures,
+            &presentation_manifest,
+            &config.profile,
+        )?;
         let locale_config = load_player_locale_config(package)
             .map_err(|error| NativeVnHostError::Localization(error.to_string()))?;
         if locale_config
@@ -232,6 +244,7 @@ impl NativeVnHostCommandSource {
                     localization,
                     text_provider,
                     font_families,
+                    manifest: presentation_manifest,
                 },
             },
         )
@@ -362,6 +375,8 @@ impl NativeVnHostCommandSource {
             media_assets: binding.presentation.media_assets,
             pending_audio: Vec::new(),
             next_media_resource_id: 10_000,
+            presentation_profile: binding.runtime_provider.profile().to_string(),
+            presentation_manifest: binding.presentation.manifest,
             shutdown_started: false,
         })
     }
@@ -1120,6 +1135,8 @@ impl NativeVnHostCommandSource {
                     self.width,
                     self.height,
                     stage,
+                    &self.presentation_manifest,
+                    &self.presentation_profile,
                 )?;
             }
         }
@@ -1776,7 +1793,10 @@ fn apply_stage_command(
     width: u32,
     height: u32,
     command: &StageCommand,
+    manifest: &VnPresentationProviderManifest,
+    profile: &str,
 ) -> Result<(), NativeVnHostError> {
+    validate_stage_command_policy(command, manifest, profile)?;
     match command {
         StageCommand::Background { asset: asset_id, .. } => {
             if !textures.contains_key(asset_id) {
@@ -2094,6 +2114,8 @@ fn validate_story_text(
 fn validate_story_presentation(
     compiled: &CompiledStory,
     textures: &BTreeMap<String, TextureFrame>,
+    manifest: &VnPresentationProviderManifest,
+    profile: &str,
 ) -> Result<(), NativeVnHostError> {
     for command in compiled
         .states
@@ -2105,23 +2127,26 @@ fn validate_story_presentation(
             continue;
         };
         match command {
-            PresentationCommand::Stage(stage) => match stage {
-                StageCommand::Background { asset: asset_id, .. }
-                | StageCommand::Show {
-                    asset: asset_id, ..
-                } => {
-                    if !textures.contains_key(asset_id) {
-                        return Err(missing_texture(asset_id));
+            PresentationCommand::Stage(stage) => {
+                validate_stage_command_policy(stage, manifest, profile)?;
+                match stage {
+                    StageCommand::Background { asset: asset_id, .. }
+                    | StageCommand::Show {
+                        asset: asset_id, ..
+                    } => {
+                        if !textures.contains_key(asset_id) {
+                            return Err(missing_texture(asset_id));
+                        }
+                    }
+                    StageCommand::Hide { .. } => {}
+                    unsupported => {
+                        return Err(NativeVnHostError::Asset(format!(
+                            "ASTRA_PLAYER_PRESENTATION_UNSUPPORTED: typed stage command {} has no product renderer binding",
+                            unsupported.kind()
+                        )))
                     }
                 }
-                StageCommand::Hide { .. } => {}
-                unsupported => {
-                    return Err(NativeVnHostError::Asset(format!(
-                        "ASTRA_PLAYER_PRESENTATION_UNSUPPORTED: typed stage command {} has no product renderer binding",
-                        unsupported.kind()
-                    )))
-                }
-            },
+            }
             PresentationCommand::Extension(extension) => {
                 return Err(NativeVnHostError::Asset(format!(
                     "ASTRA_PLAYER_EXTENSION_PROVIDER_UNWIRED: command {} requires provider {}",
@@ -2130,6 +2155,30 @@ fn validate_story_presentation(
             }
             _ => {}
         }
+    }
+    Ok(())
+}
+
+fn validate_stage_command_policy(
+    command: &StageCommand,
+    manifest: &VnPresentationProviderManifest,
+    profile: &str,
+) -> Result<(), NativeVnHostError> {
+    let preset = match command {
+        StageCommand::Background { preset, .. }
+        | StageCommand::Show { preset, .. }
+        | StageCommand::Hide { preset, .. }
+        | StageCommand::Move { preset, .. }
+        | StageCommand::Camera { preset, .. } => preset.as_deref(),
+        StageCommand::Transition { preset, .. } => Some(preset.as_str()),
+        _ => None,
+    };
+    if let Some(preset) = preset {
+        manifest
+            .resolve_preset(profile, command.kind(), preset)
+            .map_err(|diagnostic| {
+                NativeVnHostError::Package(format!("{}: {}", diagnostic.code, diagnostic.message))
+            })?;
     }
     Ok(())
 }

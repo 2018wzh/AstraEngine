@@ -200,6 +200,8 @@
 
 **2026-07-13 typed presentation 修补进度：** Standard presentation 不再把 command 名和 `BTreeMap<String, String>` 作为 Runtime IR。编译器会生成 `StageCommand` v2、`FixedScalar`、typed audio/movie/timeline/effect；timeline 必须提供有序 keyframe，blocking join 必须提供 fence，movie wait 必须同时提供 fence 和 fallback。扩展命令改为 `ExtensionCommandDescriptor`，provider、schema、字段类型和 required 状态缺一不可。`task`、`fence`、`command`、`bind_setting`、`source` 等没有完整语义的伪 standard command 已从 registry 删除。Runtime output 的 presentation/audio schema 升为 v2，Player 遇到未实现 typed command 或未绑定 extension provider 会在 package open 阶段阻断。该修补关闭 raw IR 和静默忽略问题；preset policy、StageModel product director、平台 frame tick、camera/timeline/video/audio 执行与同 run evidence 仍开放，因此 P0-002 继续保持未关闭。
 
+**2026-07-13 presentation policy 修补进度：** `vn.presentation_provider_manifest` 已升级为 v2，并把 `classic`、`modern`、`advanced-vn` 的 preset、filter、fallback、layer/timeline/effect budget 写入经过验证的 package section。Package loader、Player 和 Release Gate 复用同一 validator；重复或未知 id、preset/command 不匹配、profile 越权、filter/fallback 断链、预算越界和旧 v1 schema 都会在 provider session 创建前阻断。Player 不再依赖源码内隐式 preset 默认值。该子项关闭 preset policy binding 缺口，但不代表 preset 已由 frame tick 执行；typed product director、平台 timer、camera/timeline/video/audio command stream 与真实证据仍开放。
+
 ### P1-008：ExtensionRegistry 的公开 `select()` 忽略显式 binding
 
 **分类：** `BYPASS`, `STATUS_MISMATCH`

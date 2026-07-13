@@ -4,7 +4,7 @@ use crate::{
     CompiledStory, VnAdvancedPresentationManifest, VnCommercialBaselineManifest,
     VnExtensionManifest, VnPolicyBundleManifest, VnPolicyBundleSourceCache,
     VnPresentationProviderManifest, VnProfileManifest, VnStandardCommandManifest,
-    VnSystemUiProfileManifest,
+    VnSystemUiProfileManifest, VN_PRESENTATION_PROVIDER_MANIFEST_SCHEMA,
 };
 
 pub fn package_sections_for_story(
@@ -53,7 +53,7 @@ pub fn package_sections_for_story(
         )?,
         SectionPayload::postcard(
             "vn.presentation_provider_manifest",
-            "astra.vn.presentation_provider_manifest.v1",
+            VN_PRESENTATION_PROVIDER_MANIFEST_SCHEMA,
             &VnPresentationProviderManifest::standard(),
         )?,
         SectionPayload::postcard(
@@ -89,6 +89,43 @@ pub fn package_sections_for_story(
         "AstraVN package section build completed"
     );
     Ok(sections)
+}
+
+pub fn load_presentation_provider_manifest(
+    package: &PackageReader,
+    profile: &str,
+) -> Result<VnPresentationProviderManifest, ContainerError> {
+    let entry = package
+        .container()
+        .section_entry("vn.presentation_provider_manifest")
+        .ok_or_else(|| {
+            ContainerError::message(
+                "ASTRA_VN_PRESENTATION_PROVIDER_MANIFEST: package section is missing",
+            )
+        })?;
+    if entry.schema != VN_PRESENTATION_PROVIDER_MANIFEST_SCHEMA {
+        return Err(ContainerError::message(format!(
+            "ASTRA_VN_PRESENTATION_PROVIDER_SCHEMA: unsupported schema {}; package must be re-cooked",
+            entry.schema
+        )));
+    }
+    let manifest: VnPresentationProviderManifest = package
+        .container()
+        .decode_postcard("vn.presentation_provider_manifest")
+        .map_err(|error| {
+            ContainerError::message(format!("ASTRA_VN_PRESENTATION_PROVIDER_MANIFEST: {error}"))
+        })?;
+    let report = manifest.validate_standard();
+    if let Some(diagnostic) = report.diagnostics.first() {
+        return Err(ContainerError::message(format!(
+            "{}: {}",
+            diagnostic.code, diagnostic.message
+        )));
+    }
+    manifest.profile(profile).map_err(|diagnostic| {
+        ContainerError::message(format!("{}: {}", diagnostic.code, diagnostic.message))
+    })?;
+    Ok(manifest)
 }
 
 pub fn decode_compiled_story(package: &PackageReader) -> Result<CompiledStory, ContainerError> {

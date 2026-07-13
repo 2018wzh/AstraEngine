@@ -117,11 +117,15 @@ command_providers:
 
 两个插件声明同一命令时，未绑定项目直接阻断 package。绑定记录进入 package metadata 和 release report。
 
+表现 preset 由 package 内的 `astra.vn.presentation_provider_manifest.v2` 绑定。每个 preset 必须声明允许的 command kind、duration、easing、filter、fallback policy 和预算；每个 profile 再声明可用 preset/filter/fallback 和最大 layer、timeline、effect budget。Player 在创建 provider session 前校验整份 manifest 和 story 中的 preset 引用。未知 preset、command 不匹配、重复 id、跨 profile 使用、预算越界或 v1 schema 都会 blocking，不允许用内置默认动画继续运行。
+
 ## Verification
 
 ```bash
 cargo test -p astra-vn-script --test typed_stage_ir
 cargo test -p astra-vn-commands --test standard_command_manifest
+cargo test -p astra-vn-presentation --test presentation_provider_manifest
+cargo test -p astra-vn-package --test presentation_provider_package
 astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --headless --report target/reports/vn-command.yaml
 ```
 
