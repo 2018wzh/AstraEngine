@@ -8,6 +8,9 @@ pub use astra_player_core::{
 };
 use std::{fs, path::PathBuf};
 
+mod web_cdp;
+pub use web_cdp::*;
+
 pub use astra_player_vn::*;
 
 pub const WINDOWS_SENDINPUT_MOUSE: &str = "sendinput.mouse";

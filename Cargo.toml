@@ -56,6 +56,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 abi_stable = "0.11"
+base64 = "0.22"
 blake3 = "1"
 camino = { version = "1", features = ["serde1"] }
 clap = { version = "4", features = ["derive"] }
@@ -99,6 +100,7 @@ tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tungstenite = "0.30"
 chumsky = "1.0.0-alpha.8"
 insta = "1.48.0"
 file-rotate = "0.8"

@@ -66,6 +66,8 @@ Web required evidence：
 | `player.audio.webaudio_meter` | WebAudio meter from the same player run |
 | `player.route.full` | route/system UI checks reached through CDP input |
 
+CDP transport由 `astra-player::WebCdpSession` 持有，连接只允许本机 `ws` page target。它负责 request/response sequence、timeout、duplicate/invalid message blocking、`Runtime.exceptionThrown` blocking、`Input.dispatchMouseEvent`、`Input.dispatchKeyEvent`、`Page.captureScreenshot` 和 `ASTRA_PLAYER_EVIDENCE ` console envelope 解析。启动按钮和 canvas 只允许读取固定 selector 的几何位置后使用 CDP input；driver 不得调用 `element.click()`、产品 JS callback、route runner 或修改页面状态。
+
 ## Blocking Rules
 
 `player.full_playable` 必须在以下情况 blocked：

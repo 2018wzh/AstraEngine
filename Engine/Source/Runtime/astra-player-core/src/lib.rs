@@ -4,6 +4,8 @@ use astra_core::{Diagnostic, Hash256};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub const WEB_PLAYER_LIVE_EVIDENCE_SCHEMA: &str = "astra.player_web_live_evidence.v1";
+
 mod platform_sink;
 pub use platform_sink::*;
 mod audio;

@@ -238,6 +238,8 @@ Web target 的真实编译曾先后被 Luau C++ VM 与 `abi_stable` dynamic load
 
 Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_evidence.v1` console envelope。package 验证记录 target/profile/package hash；每次真实 keyboard/pointer 经 RuntimeWorld 消费后记录 provider/session、player sequence、fixed step、state/event/presentation hash、terminal route、pending choice 和最近平台 audio meter。audio owner 同时保留 query/drain meter，避免 driver 根据音频文件或静态 report 估算。该 envelope 是 CDP driver 的输入证据，不是 E3 本身；没有 screenshot region drift、CDP dispatch、平台 meter 和完整 route 时仍然 blocking。
 
+`astra-player` 已增加真实 WebSocket CDP protocol owner：稳定 request sequence、command error、timeout、runtime exception、unsupported message 和 duplicate response 都会 fail fast；mouse/keyboard dispatch、固定 launch/canvas geometry query、PNG screenshot capture 与 runtime-owned evidence 解析不再依赖测试里的 `--dump-dom`。当前 transport 及伪 CDP peer 负向边界已测试，浏览器进程/HTTP lifecycle、scenario route 编排和同 run report 聚合仍在后续检查点完成前保持 `IN_PROGRESS`。
+
 ### P2-002：容器和 VFS 的局部测试没有覆盖冲突矩阵
 
 **分类：** `SMOKE_ONLY`, `FIXTURE_ONLY`
