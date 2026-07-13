@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use astra_asset::{AssetCatalog, VfsManifest, VfsSourceRef};
 use astra_core::{Hash256, SchemaVersion};
 use astra_media_core::{
-    BlendMode, DrawCommand, GlyphBitmap, HeadlessRenderer, HeadlessRendererProvider, MediaError,
-    RectI, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest, TextureFrame,
+    BlendMode, DrawCommand, GlyphBitmap, GlyphBitmapFormat, HeadlessRenderer,
+    HeadlessRendererProvider, MediaError, RectI, RenderTargetFormat, Renderer2DProvider,
+    RendererCreateRequest, TextureFrame,
 };
 use astra_player_core::{
     PlayerAction, PlayerAudioLifecyclePlan, PlayerDecodeKind, PlayerDecodeLifecyclePlan,
@@ -1517,7 +1518,8 @@ fn push_bitmap_text(
             glyph: GlyphBitmap {
                 width: 5,
                 height: 7,
-                alpha8,
+                format: GlyphBitmapFormat::Alpha8,
+                pixels: alpha8,
                 hash,
             },
             x: x as i32,

@@ -47,7 +47,13 @@ Headless reference output 使用固定采样率、固定声道布局的 PCM S16L
 
 ## TextLayout
 
-默认 TextLayout provider 使用 `cosmic-text`/Swash。CJK、ruby/furigana、inline wait、voice replay metadata 和 backlog shaping 都必须进入 TextLayout contract，不允许散落到 VN UI 特例。
+默认 TextLayout provider 使用 `cosmic-text`/Swash，contract schema 为 `astra.text_layout.v2`。Provider 在创建时接收 `FontBindingContext { target, profile, default_locale }`、显式预算和 package 提供的字体集合；字体 descriptor 必须包含 asset id、family、face index、content hash、license、subset、Unicode coverage、target/profile eligibility 和实际 bytes。字体 hash、face metadata、eligibility 或 coverage 不一致时创建失败，不能转用系统字体。
+
+`TextLayoutRequest` 明确声明 language、script、direction、OpenType feature、fallback family chain、wrap 和 overflow policy。输出是带 UTF-8 source cluster、实际 font face/hash、glyph id、BiDi direction、advance、baseline、visual line、ruby placement 和 raster resource id 的 `ShapedGlyphRun`，不再输出按字符数估算的 box。`Clip` 和 ellipsis 是 contract 结果的一部分；voice replay metadata 与 layout identity 一起参与 hash。
+
+Swash raster 输出 `Alpha8` 或 `Rgba8` glyph bitmap。`TextRenderResourceOwner` 负责跨 frame 引用计数、增量 upload、最后引用 release、重复 bitmap 冲突和 shutdown drain；command stream 失败时，headless renderer 不提交任何 resource mutation。缺字、未声明 fallback、fallback 顺序漂移、错误方向、字体 hash 漂移、无效 ruby range、资源冲突和预算超限分别返回稳定 `ASTRA_TEXT_*` diagnostic。
+
+当前共享实现已经提供 packaged font database、`astra.font_manifest.v1` 到已验证 Package/VFS section 的权威读取、真实 shaping/raster、动态字体替换与 cache invalidation、cluster mapping、ruby、BiDi、wrap/clip/ellipsis 和 renderer-ready glyph command；它属于 E2 shared implementation。加密字体 section 必须显式提供匹配的 container crypto provider，未提供时直接失败。P1-001 仍等待带许可的 CJK/Arabic/emoji package font fixtures、Windows 真实 visual golden 和 save/replay/release drift 证据，不能据此宣称字体产品能力达到 E3。
 
 ## Command Boundary
 

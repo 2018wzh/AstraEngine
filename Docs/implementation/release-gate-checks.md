@@ -34,6 +34,7 @@ pub struct ReleaseCheckRecord {
 | package | `vfs.catalog` | `asset.catalog`, VFS entries | catalog schema invalid, duplicate asset id or catalog URI without VFS entry | asset id, `vfs_uri`, media kind |
 | package | `vfs.overlay_mount` | overlay policy, base mount report | overlay lacks allowlist, priority conflict, base mount missing, source hash mismatch or payload/path leak | `vfs_uri`, layer id, priority, allowlist id |
 | package | `vfs.legacy_pack_mount` | legacy pack reader report | reader identity missing, entry table hash missing, duplicate key, unsupported compression, offset/size out of bounds or media kind unknown | reader id, prefix, entry count, hash |
+| media | `media.font_package` | `media.manifest`, `media.font_manifest`, package VFS | required manifest missing, schema/target/profile/provider binding mismatch, font URI unresolved, non-package backend, media kind/codec/hash/coverage drift, section bounds invalid or font database rejects the declared face | manifest hash, font count, target, profile, section id |
 | media | `media.decode.capability` | platform report | required codec missing | provider id, codec list |
 | vn | `vn.compiled_story` | package `vn.compiled_story` section | classic/modern profile 缺 section、解码失败、schema 错误或无 story/state | story hash, story count, state count, route node count |
 | vn | `vn.profile_manifest` | package `vn.profile_manifest` section | classic/modern profile 缺 section、未声明 validation profile 或 target 不匹配 | target, profile, profile count |

@@ -92,7 +92,7 @@ fn vfs_overlayfs_resolves_highest_priority_and_whiteout() {
             case_policy: VfsCasePolicy::CaseSensitive,
             mode: VfsReadWriteMode::ReadOnly,
             redaction: "shipping".to_string(),
-            capabilities: vec!["package.read".to_string()],
+            capabilities: vec!["vfs.backend.package".to_string()],
         }],
         layers: vec![
             VfsLayerDescriptor {
@@ -150,7 +150,7 @@ fn vfs_overlayfs_resolves_highest_priority_and_whiteout() {
     let context = ResolveContext {
         target: "nativevn-game".to_string(),
         profile: "classic".to_string(),
-        capability: "package.read".to_string(),
+        capability: "vfs.backend.package".to_string(),
         provider_binding: "astra.vfs.package".to_string(),
     };
     let resolved = manifest.resolve(&uri, &context).unwrap().unwrap();
@@ -228,7 +228,7 @@ fn vfs_manifest_blocks_duplicate_graph_nodes_and_context_bypass() {
         ResolveContext {
             target: "other".into(),
             profile: "release".into(),
-            capability: "package.read".into(),
+            capability: "vfs.backend.package".into(),
             provider_binding: "astra.vfs.package".into(),
         },
         ResolveContext {
@@ -240,7 +240,7 @@ fn vfs_manifest_blocks_duplicate_graph_nodes_and_context_bypass() {
         ResolveContext {
             target: "game".into(),
             profile: "release".into(),
-            capability: "package.read".into(),
+            capability: "vfs.backend.package".into(),
             provider_binding: "astra.vfs.other".into(),
         },
     ] {
@@ -269,7 +269,7 @@ fn vfs_resolve_rejects_equal_priority_authority_conflict() {
             &ResolveContext {
                 target: "game".into(),
                 profile: "release".into(),
-                capability: "package.read".into(),
+                capability: "vfs.backend.package".into(),
                 provider_binding: "astra.vfs.package".into(),
             },
         )
@@ -289,7 +289,7 @@ fn package_manifest_fixture() -> VfsManifest {
             case_policy: VfsCasePolicy::CaseSensitive,
             mode: VfsReadWriteMode::ReadOnly,
             redaction: "shipping".into(),
-            capabilities: vec!["package.read".into()],
+            capabilities: vec!["vfs.backend.package".into()],
         }],
         layers: vec![VfsLayerDescriptor {
             layer_id: "base".into(),

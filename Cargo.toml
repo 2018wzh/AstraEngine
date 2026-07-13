@@ -102,6 +102,7 @@ tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 tungstenite = "0.30"
+unicode-segmentation = "1"
 chumsky = "1.0.0-alpha.8"
 insta = "1.48.0"
 file-rotate = "0.8"

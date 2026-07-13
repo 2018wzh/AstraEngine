@@ -2002,7 +2002,7 @@ fn asset_vfs_manifest_from_cooked(
             "case_policy": "case_sensitive",
             "mode": "read_only",
             "redaction": "shipping",
-            "capabilities": ["package.read"]
+            "capabilities": ["vfs.backend.package"]
         }],
         "layers": [{
             "layer_id": "package.base",

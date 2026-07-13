@@ -1,7 +1,7 @@
 use astra_core::Hash256;
 use astra_media_core::{
-    BlendMode, DrawCommand, GlyphBitmap, HeadlessRendererProvider, RectI, RenderTargetFormat,
-    Renderer2DProvider, RendererCreateRequest, TextureFrame, Transform2D,
+    BlendMode, DrawCommand, GlyphBitmap, GlyphBitmapFormat, HeadlessRendererProvider, RectI,
+    RenderTargetFormat, Renderer2DProvider, RendererCreateRequest, TextureFrame, Transform2D,
 };
 
 #[test]
@@ -41,7 +41,8 @@ fn cpu_reference_compositor_executes_texture_glyph_clip_transform_and_blend() {
             glyph: GlyphBitmap {
                 width: 2,
                 height: 2,
-                alpha8: vec![255, 0, 0, 255],
+                format: GlyphBitmapFormat::Alpha8,
+                pixels: vec![255, 0, 0, 255],
                 hash: Hash256::from_sha256(&[255, 0, 0, 255]),
             },
             x: 0,
@@ -147,4 +148,69 @@ fn compositor_blocks_corrupt_texture_and_unbalanced_state() {
         .unwrap_err()
         .to_string()
         .contains("ASTRA_MEDIA_CLIP_STACK"));
+}
+
+#[test]
+fn resource_updates_are_transactional_and_color_glyphs_preserve_rgba() {
+    let mut renderer = HeadlessRendererProvider
+        .create(RendererCreateRequest {
+            width: 1,
+            height: 1,
+            format: RenderTargetFormat::Rgba8Srgb,
+            profile: "golden".into(),
+        })
+        .unwrap();
+    let color = vec![200, 100, 50, 128];
+    let glyph = GlyphBitmap {
+        width: 1,
+        height: 1,
+        format: GlyphBitmapFormat::Rgba8,
+        hash: Hash256::from_sha256(&color),
+        pixels: color,
+    };
+    let failure = renderer
+        .capture_frame(&[
+            DrawCommand::UploadGlyph {
+                resource_id: "color".into(),
+                glyph: glyph.clone(),
+            },
+            DrawCommand::PopClip,
+        ])
+        .unwrap_err();
+    assert!(failure.to_string().contains("ASTRA_MEDIA_CLIP_STACK"));
+    let missing = renderer
+        .capture_frame(&[DrawCommand::GlyphRun {
+            id: "must-not-exist".into(),
+            glyphs: vec![astra_media_core::GlyphInstance {
+                resource_id: "color".into(),
+                x: 0,
+                y: 0,
+            }],
+            rgba: [255; 4],
+            opacity: 1.0,
+            blend: BlendMode::Alpha,
+        }])
+        .unwrap_err();
+    assert!(missing.to_string().contains("ASTRA_MEDIA_RESOURCE_UNKNOWN"));
+
+    let frame = renderer
+        .capture_frame(&[
+            DrawCommand::UploadGlyph {
+                resource_id: "color".into(),
+                glyph,
+            },
+            DrawCommand::GlyphRun {
+                id: "color-run".into(),
+                glyphs: vec![astra_media_core::GlyphInstance {
+                    resource_id: "color".into(),
+                    x: 0,
+                    y: 0,
+                }],
+                rgba: [255; 4],
+                opacity: 1.0,
+                blend: BlendMode::Alpha,
+            },
+        ])
+        .unwrap();
+    assert_eq!(frame.bytes, vec![200, 100, 50, 128]);
 }

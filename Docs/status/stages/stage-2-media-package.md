@@ -123,16 +123,16 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **Depends On:** `S2-MEDIA-01`
 
-**Target Paths:** `Engine/Source/Runtime/astra-media/src/text_layout.rs`、`Engine/Source/Runtime/astra-media/tests/text_layout.rs`
+**Target Paths:** `Engine/Source/Runtime/astra-media/src/text_layout.rs`、`Engine/Source/Runtime/astra-media/src/text_layout/`、`Engine/Source/Runtime/astra-media/tests/text_layout.rs`
 
 **Steps:**
 
-1. 定义 TextLayoutRequest、TextRun、RubySpan、LayoutBox 和 VoiceReplayRef。
-2. 接入 cosmic-text/Swash provider 边界，平台 font fallback 只通过 capability 报告暴露。
-3. 实现 headless layout hash，避免截图作为唯一证据。
-4. 编写 CJK shaping、ruby span、line wrap 和 missing font diagnostic 测试。
+1. 定义 `astra.text_layout.v2` request/result 与 `astra.font_manifest.v1` package binding，覆盖 shaped run、cluster/source mapping、ruby、clip/ellipsis、glyph resource 和 voice replay contract。
+2. 使用空系统数据库创建 cosmic-text/Swash provider，只装载 hash、face、coverage、license 与 target/profile eligibility 均通过的 package 字体；fallback chain 必须显式且有序。
+3. 实现 bounded layout/raster cache、动态字体事务替换与失效、Alpha8/RGBA glyph、layout identity 和 `TextRenderResourceOwner` 引用生命周期。
+4. 覆盖 Latin/组合字符、ruby、BiDi、wrap、clip、ellipsis、空输入、font/hash/fallback/direction 负向路径以及真实 CPU glyph capture。
 
-**Done Evidence:** `cargo test -p astra-media text_layout` 覆盖 CJK、ruby、wrapping、voice replay metadata 和 missing font diagnostic。
+**Done Evidence:** `cargo test -p astra-media --test text_layout` 与 `cargo test -p astra-media-core --test scene_compositor` 证明 shared E2 contract 从 verified package/VFS font section 建库，使用真实 glyph shaping/raster，并且 resource mutation 在失败时不提交。该证据不包含 CJK/Arabic/emoji licensed fixture或 Windows visual golden；这些仍由 P1-001/E3 阻断，不能从 Stage 2 contract 状态外推为完整产品字体能力。
 
 **Linked Test IDs:** `T-S2-MEDIA-02`
 

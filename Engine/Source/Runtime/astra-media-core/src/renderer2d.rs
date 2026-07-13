@@ -155,10 +155,18 @@ pub struct TextureFrame {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GlyphBitmapFormat {
+    Alpha8,
+    Rgba8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GlyphBitmap {
     pub width: u32,
     pub height: u32,
-    pub alpha8: Vec<u8>,
+    pub format: GlyphBitmapFormat,
+    pub pixels: Vec<u8>,
     pub hash: Hash256,
 }
 
@@ -349,6 +357,9 @@ impl Renderer2D for HeadlessRenderer {
             .and_then(|pixels| pixels.checked_mul(4))
             .ok_or_else(|| MediaError::message("render target is too large"))?;
         let mut bytes = vec![0; byte_len];
+        // Resource mutations are committed only after the whole command stream succeeds.
+        let mut textures = self.textures.clone();
+        let mut glyph_resources = self.glyphs.clone();
         let full_clip = RectI::new(0, 0, self.request.width, self.request.height);
         let mut clips = vec![full_clip];
         let mut transforms = vec![Transform2D::IDENTITY];
@@ -358,31 +369,25 @@ impl Renderer2D for HeadlessRenderer {
             match command {
                 DrawCommand::UploadTexture { resource_id, frame } => {
                     validate_texture(frame)?;
-                    if self
-                        .textures
-                        .insert(resource_id.clone(), frame.clone())
-                        .is_some()
-                    {
+                    if textures.contains_key(resource_id) {
                         return Err(MediaError::message(
                             "ASTRA_MEDIA_RESOURCE_DUPLICATE: texture resource is already uploaded",
                         ));
                     }
+                    textures.insert(resource_id.clone(), frame.clone());
                 }
                 DrawCommand::UploadGlyph { resource_id, glyph } => {
                     validate_glyph(glyph)?;
-                    if self
-                        .glyphs
-                        .insert(resource_id.clone(), glyph.clone())
-                        .is_some()
-                    {
+                    if glyph_resources.contains_key(resource_id) {
                         return Err(MediaError::message(
                             "ASTRA_MEDIA_RESOURCE_DUPLICATE: glyph resource is already uploaded",
                         ));
                     }
+                    glyph_resources.insert(resource_id.clone(), glyph.clone());
                 }
                 DrawCommand::ReleaseResource { resource_id } => {
-                    let removed = self.textures.remove(resource_id).is_some()
-                        | self.glyphs.remove(resource_id).is_some();
+                    let removed = textures.remove(resource_id).is_some()
+                        | glyph_resources.remove(resource_id).is_some();
                     if !removed {
                         return Err(MediaError::message(
                             "ASTRA_MEDIA_RESOURCE_UNKNOWN: released resource is not uploaded",
@@ -397,7 +402,7 @@ impl Renderer2D for HeadlessRenderer {
                     blend,
                     ..
                 } => {
-                    let frame = self.textures.get(texture_id).ok_or_else(|| {
+                    let frame = textures.get(texture_id).ok_or_else(|| {
                         MediaError::message(
                             "ASTRA_MEDIA_RESOURCE_UNKNOWN: sprite texture is not uploaded",
                         )
@@ -429,11 +434,12 @@ impl Renderer2D for HeadlessRenderer {
                     ..
                 } => {
                     for instance in glyphs {
-                        let glyph = self.glyphs.get(&instance.resource_id).ok_or_else(|| {
-                            MediaError::message(
-                                "ASTRA_MEDIA_RESOURCE_UNKNOWN: glyph resource is not uploaded",
-                            )
-                        })?;
+                        let glyph =
+                            glyph_resources.get(&instance.resource_id).ok_or_else(|| {
+                                MediaError::message(
+                                    "ASTRA_MEDIA_RESOURCE_UNKNOWN: glyph resource is not uploaded",
+                                )
+                            })?;
                         draw_glyph(
                             &mut bytes,
                             width,
@@ -599,13 +605,24 @@ impl Renderer2D for HeadlessRenderer {
             self.request.format,
             &bytes,
         );
-        Ok(CpuFrame {
+        let frame = CpuFrame {
             width: self.request.width,
             height: self.request.height,
             format: self.request.format,
             bytes,
             hash,
-        })
+        };
+        self.textures = textures;
+        self.glyphs = glyph_resources;
+        tracing::trace!(
+            target: "astra_media_core::renderer2d",
+            event = "renderer2d.frame.committed",
+            command_count = commands.len(),
+            texture_count = self.textures.len(),
+            glyph_count = self.glyphs.len(),
+            frame_hash = %frame.hash,
+        );
+        Ok(frame)
     }
 }
 
@@ -664,13 +681,20 @@ fn validate_texture(frame: &TextureFrame) -> Result<(), MediaError> {
 }
 
 fn validate_glyph(glyph: &GlyphBitmap) -> Result<(), MediaError> {
-    let expected = glyph.width as usize * glyph.height as usize;
-    if glyph.width == 0 || glyph.height == 0 || glyph.alpha8.len() != expected {
+    let channels = match glyph.format {
+        GlyphBitmapFormat::Alpha8 => 1,
+        GlyphBitmapFormat::Rgba8 => 4,
+    };
+    let expected = (glyph.width as usize)
+        .checked_mul(glyph.height as usize)
+        .and_then(|pixels| pixels.checked_mul(channels))
+        .ok_or_else(|| MediaError::message("ASTRA_MEDIA_GLYPH_SIZE: glyph size overflows"))?;
+    if glyph.width == 0 || glyph.height == 0 || glyph.pixels.len() != expected {
         return Err(MediaError::message(
             "ASTRA_MEDIA_GLYPH_SIZE: glyph dimensions do not match payload",
         ));
     }
-    if Hash256::from_sha256(&glyph.alpha8) != glyph.hash {
+    if Hash256::from_sha256(&glyph.pixels) != glyph.hash {
         return Err(MediaError::message(
             "ASTRA_MEDIA_GLYPH_HASH: glyph payload hash mismatch",
         ));
@@ -808,14 +832,28 @@ fn draw_glyph(
     opacity: f32,
     blend: BlendMode,
 ) -> Result<(), MediaError> {
-    let mut rgba8 = Vec::with_capacity(glyph.alpha8.len() * 4);
-    for alpha in &glyph.alpha8 {
-        rgba8.extend_from_slice(&[
-            rgba[0],
-            rgba[1],
-            rgba[2],
-            ((*alpha as u16 * rgba[3] as u16) / 255) as u8,
-        ]);
+    let mut rgba8 = Vec::with_capacity(glyph.width as usize * glyph.height as usize * 4);
+    match glyph.format {
+        GlyphBitmapFormat::Alpha8 => {
+            for alpha in &glyph.pixels {
+                rgba8.extend_from_slice(&[
+                    rgba[0],
+                    rgba[1],
+                    rgba[2],
+                    ((*alpha as u16 * rgba[3] as u16) / 255) as u8,
+                ]);
+            }
+        }
+        GlyphBitmapFormat::Rgba8 => {
+            for source in glyph.pixels.chunks_exact(4) {
+                rgba8.extend_from_slice(&[
+                    ((source[0] as u16 * rgba[0] as u16) / 255) as u8,
+                    ((source[1] as u16 * rgba[1] as u16) / 255) as u8,
+                    ((source[2] as u16 * rgba[2] as u16) / 255) as u8,
+                    ((source[3] as u16 * rgba[3] as u16) / 255) as u8,
+                ]);
+            }
+        }
     }
     let frame = TextureFrame {
         width: glyph.width,
@@ -889,13 +927,18 @@ fn intersection(left: RectI, right: RectI) -> RectI {
 
 fn blend_pixel(target: &mut [u8], source: &[u8], opacity: f32, blend: BlendMode) {
     let alpha = source[3] as f32 / 255.0 * opacity;
+    let target_alpha = target[3] as f32 / 255.0;
+    let output_alpha = alpha + target_alpha * (1.0 - alpha);
     match blend {
         BlendMode::Alpha => {
             for channel in 0..3 {
-                target[channel] = (source[channel] as f32 * alpha
-                    + target[channel] as f32 * (1.0 - alpha))
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
+                let premultiplied = source[channel] as f32 * alpha
+                    + target[channel] as f32 * target_alpha * (1.0 - alpha);
+                target[channel] = if output_alpha > 0.0 {
+                    (premultiplied / output_alpha).round().clamp(0.0, 255.0) as u8
+                } else {
+                    0
+                };
             }
         }
         BlendMode::Add => {
@@ -913,9 +956,7 @@ fn blend_pixel(target: &mut [u8], source: &[u8], opacity: f32, blend: BlendMode)
             }
         }
     }
-    target[3] = ((source[3] as f32 * opacity) + target[3] as f32 * (1.0 - alpha))
-        .round()
-        .clamp(0.0, 255.0) as u8;
+    target[3] = (output_alpha * 255.0).round().clamp(0.0, 255.0) as u8;
 }
 
 pub fn frame_hash(width: u32, height: u32, format: RenderTargetFormat, bytes: &[u8]) -> Hash256 {

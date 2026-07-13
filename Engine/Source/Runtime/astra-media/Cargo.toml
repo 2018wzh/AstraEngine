@@ -14,7 +14,9 @@ ffmpeg-vcpkg = ["ffmpeg", "dep:ffmpeg-next"]
 
 [dependencies]
 astra-core = { path = "../astra-core" }
+astra-asset = { path = "../astra-asset" }
 astra-media-core = { path = "../astra-media-core" }
+astra-package = { path = "../astra-package" }
 cosmic-text.workspace = true
 ffmpeg-next = { workspace = true, optional = true }
 image.workspace = true
@@ -27,6 +29,7 @@ serde_yaml.workspace = true
 symphonia.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+unicode-segmentation.workspace = true
 wgpu = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]

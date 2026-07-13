@@ -47,6 +47,8 @@ astra-headless serve --stdio \
 
 真实平台验收只能在 `astra.headless_run_report.v1`、`astra.headless_review.v1` 和 `astra.headless_preflight_link.v1` 全部通过后启动。Headless 与真实平台 run 必须绑定同一 build、cooked package、input sequence、scenario、target 和 content identity；Headless 结果不能替代真实窗口、浏览器、音频设备或原生输入证据。
 
+会渲染文本的 shipping profile 必须在 `media.manifest` 中设置 `font_manifest_required: true`，并通过 `font_manifest_section` 指向同包内的 `astra.font_manifest.v1`。字体 manifest 的每个条目必须绑定 package VFS URI、provider、target/profile、face index、license、coverage 和内容 hash。验证器不会读取系统字体或 loose file 补齐缺失资源；`media.font_package` blocked 时应修复 package/cook 输入，不能关闭检查或改成 optional。
+
 ## 日志命令
 
 `astra` 默认把 machine-readable report 写到 stdout，把日志写到 stderr。需要结构化日志时使用：

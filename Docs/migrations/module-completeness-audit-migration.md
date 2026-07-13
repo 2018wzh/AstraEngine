@@ -71,9 +71,11 @@
 
 **分类：** `MINIMAL_IMPLEMENTATION`, `SMOKE_ONLY`, `STATUS_MISMATCH`
 
-**证据：** `Engine/Source/Runtime/astra-media/src/text_layout.rs:99-122` 构造了 `cosmic_text::Metrics`，但没有创建 font system、字体数据库、buffer、shape run 或 glyph layout；`Engine/Source/Runtime/astra-media/src/text_layout.rs:128-150` 使用 `font_size * 0.5` 作为所有字符宽度，并按 `Vec<char>` 固定切块。fallback 只在 headless 模式下检测字体名是否包含 `missing`，没有验证字体是否存在、覆盖哪些 Unicode/script 或实际选择了哪个 fallback。`Engine/Source/Runtime/astra-media/tests/text_layout.rs:7-45` 只有一个 synthetic CJK/ruby/voice fixture，且故意传入 `Missing Test Font`，测试的是诊断标志而不是真实字体装载、shaping 或视觉输出。
+**修复状态：** `PARTIALLY_RESOLVED`。固定字符宽度、按 `char` 切行、字体名模拟 missing font 和未使用 `Metrics` 的旧实现已经删除。`Engine/Source/Runtime/astra-media/src/text_layout/` 现在持有 target/profile-bound package font database、真实 cosmic-text shaping、Swash raster、UTF-8 cluster/source mapping、actual face/hash/fallback decision、baseline/advance、ruby、BiDi、wrap/clip/ellipsis、bounded cache、动态字体事务替换和 renderer glyph resource owner。`astra-media-core` 的 glyph contract同时支持 Alpha8/RGBA，并保证失败 command stream 不提交 resource mutation。
 
-**缺口：** 没有真实 glyph shaping、字体覆盖选择、复杂脚本、组合字符、RTL、emoji、字距、字体度量、真实换行/省略、字体资源生命周期、跨平台字体绑定、字体 hash、视觉 golden evidence 或 layout replay compatibility。当前 `TextLayoutResult` 中的 `text`/box 结果不能证明 renderer 能按实际 glyph 绘制。
+**现有证据：** `Engine/Source/Runtime/astra-media/tests/text_layout.rs` 使用仓库内 OFL 字体覆盖 `astra.font_manifest.v1 → verified package → VFS resolve context → font section bytes → provider` 主链、Latin、组合字符、ruby、RTL paragraph、空输入、wrap/clip/ellipsis、hash/face/fallback/direction 负向路径、字体替换 cache invalidation 和真实 CPU glyph capture；`Engine/Source/Runtime/astra-media-core/tests/scene_compositor.rs` 覆盖 Alpha8/RGBA glyph、引用资源绘制和失败回滚。该证据达到 shared E2，但不能外推为 Windows 产品视觉 E3。
+
+**剩余缺口：** 尚未加入带许可且进入 package sidecar 的 CJK、Arabic 和 emoji 字体 fixture，因而没有对复杂 script shaping、实际多字体 fallback 和 color emoji 做 hermetic 语义/视觉回归；Windows glyph atlas/golden、layout save/replay continuation 与 release drift check 尚未闭合。P1-001 保持开放，不能标记 `RESOLVED`。
 
 **迁移要求：**
 
@@ -351,7 +353,7 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 已执行的定向检查：
 
 - tracked inventory：555 个 tracked 文件，其中 227 个 Rust 文件、211 个 Markdown 文件；`Editor/` 和 `AstraEMU/` 当前各只有 `.gitkeep`。
-- `cargo test -p astra-media text_layout -- --nocapture`：1 个 text layout 测试通过；该测试只覆盖 synthetic CJK/ruby/voice 和人为的 missing-font diagnostic，不能证明真实字体系统。
+- 修补前 `cargo test -p astra-media text_layout -- --nocapture` 只有 1 个 synthetic 测试。当前 `cargo test -p astra-media --test text_layout` 为 5 个生产语义测试，另由 `cargo test -p astra-media-core --test scene_compositor` 覆盖 renderer resource transaction；它们证明 shared E2，不证明尚缺的跨 script package fixture和 Windows E3。
 - `cargo metadata --no-deps --format-version 1`：workspace package 44 个，`astra-ai` 不在 workspace。
 - `cargo test -p astra-ai`：根 workspace 无法将 `astra-ai` 作为 workspace package 测试，证明其当前不是可由主 workspace 验证的产品模块。
 - 首次执行 `cargo test --workspace` 时，`astra-cli` logging 两个测试因已存在的动态 fixture binary 与当前 gate 的 feature fingerprint 不一致而失败；显式执行 `cargo build -p headless-presentation-provider` 后重新执行 `cargo test -p astra-cli --test logging -- --nocapture`，2 个测试通过。该现象说明 fixture 动态库不能只按文件存在判断新鲜度，后续应绑定 source/build fingerprint 或每次验证 binary hash。
@@ -366,7 +368,7 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 在后续修补完成前，以下结论必须保持：
 
 - EngineCore、Package、Media contract、AstraVN 已实现部分可以继续独立演进，但不能宣称整个引擎达到 UE 级完备。
-- TextLayout 不能标记为完整字体系统；必须先完成 P1-001 的真实 shaping/provider/视觉证据。
+- TextLayout 已删除固定宽度实现并建立 shared E2，但仍不能标记为完整字体产品系统；必须补齐 P1-001 的 CJK/Arabic/emoji package、Package/VFS provider 主链和 Windows 视觉/replay/release 证据。
 - Editor、AI/MCP、AstraEMU、AstraRPG 不能从 planned/reopened 改为 DONE，直到存在真实 workspace target、主路径和对应 release evidence。
 - Windows/Web Player 和 TsuiNoSora full playable gate 继续阻断于真实状态推进、完整路线和同 run host evidence。
 - 每一项弱证据都必须在报告中保留其真实等级和用途，不能通过改名或重新包装规避验收。

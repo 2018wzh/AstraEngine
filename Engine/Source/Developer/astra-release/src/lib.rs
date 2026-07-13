@@ -2,6 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use astra_asset::{AssetCatalog, ResolveContext, VfsManifest, VfsSourceRef, VfsUri};
 use astra_core::{Diagnostic, Hash256};
+use astra_media::{
+    CosmicTextLayoutProvider, FontBindingContext, FontPackageManifest, TextLayoutConfig,
+    FONT_PACKAGE_MANIFEST_SCHEMA,
+};
 use astra_package::{CookSummaryManifest, PackageManifest, PackageReader};
 use astra_platform::{
     PlatformCapabilityReport, PlatformHostConformanceReport, PlatformValidationStatus,
@@ -231,6 +235,11 @@ impl ReleaseValidator {
                     request.target.as_deref(),
                     &request.profile,
                 ));
+                checks.push(font_package_check(
+                    &package,
+                    request.target.as_deref(),
+                    &request.profile,
+                ));
                 checks.push(target_manifest_check(&package, request.target.as_deref()));
                 checks.push(cooked_project_input_check(
                     &package,
@@ -321,6 +330,121 @@ impl ReleaseValidator {
             ),
         }
         Ok(report)
+    }
+}
+
+fn font_package_check(
+    package: &PackageReader,
+    selected_target: Option<&str>,
+    profile: &str,
+) -> ReleaseCheckRecord {
+    let media = package
+        .container()
+        .read_bounded("media.manifest", 1024 * 1024)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let required = media
+        .as_ref()
+        .and_then(|value| value.get("font_manifest_required"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let section_id = media
+        .as_ref()
+        .and_then(|value| value.get("font_manifest_section"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("media.font_manifest");
+    if !package.has_section(section_id) {
+        if required {
+            return media_blocked(
+                "media.font_package",
+                "ASTRA_TEXT_PACKAGE_MANIFEST_MISSING",
+                "selected media profile requires a package font manifest",
+                vec![evidence("section", section_id)],
+            );
+        }
+        return ReleaseCheckRecord {
+            id: "media.font_package".to_string(),
+            domain: ReleaseDomain::Media,
+            status: CheckStatus::Pass,
+            summary: "media profile does not declare a package font manifest".to_string(),
+            diagnostic: None,
+            evidence: vec![evidence("required", false)],
+        };
+    }
+    let Some(entry) = package.container().section_entry(section_id) else {
+        unreachable!("package section presence was checked");
+    };
+    if entry.schema != FONT_PACKAGE_MANIFEST_SCHEMA {
+        return media_blocked(
+            "media.font_package",
+            "ASTRA_TEXT_PACKAGE_MANIFEST_SCHEMA",
+            "package font manifest uses an unsupported schema",
+            vec![evidence("schema", &entry.schema)],
+        );
+    }
+    let bytes = match package
+        .container()
+        .read_bounded(section_id, 4 * 1024 * 1024)
+    {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return media_blocked(
+                "media.font_package",
+                "ASTRA_TEXT_PACKAGE_MANIFEST_READ",
+                format!("package font manifest could not be read: {error}"),
+                vec![evidence("section", section_id)],
+            )
+        }
+    };
+    let manifest: FontPackageManifest = match serde_json::from_slice(&bytes) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            return media_blocked(
+                "media.font_package",
+                "ASTRA_TEXT_PACKAGE_MANIFEST_DECODE",
+                format!("package font manifest JSON is invalid: {error}"),
+                vec![evidence("section", section_id)],
+            )
+        }
+    };
+    let target = selected_target
+        .map(str::to_string)
+        .unwrap_or_else(|| manifest.target.clone());
+    let context = FontBindingContext {
+        target: target.clone(),
+        profile: profile.to_string(),
+        default_locale: "und".to_string(),
+    };
+    if let Err(error) = CosmicTextLayoutProvider::from_package(
+        package,
+        section_id,
+        context,
+        TextLayoutConfig::production_defaults(),
+    ) {
+        return media_blocked(
+            "media.font_package",
+            "ASTRA_TEXT_PACKAGE_INVALID",
+            error.to_string(),
+            vec![
+                evidence("section", section_id),
+                evidence("target", target),
+                evidence("profile", profile),
+            ],
+        );
+    }
+    ReleaseCheckRecord {
+        id: "media.font_package".to_string(),
+        domain: ReleaseDomain::Media,
+        status: CheckStatus::Pass,
+        summary: "package fonts resolve through the selected VFS/provider context".to_string(),
+        diagnostic: None,
+        evidence: vec![
+            evidence("section", section_id),
+            evidence("manifest_hash", Hash256::from_sha256(&bytes)),
+            evidence("font_count", manifest.fonts.len()),
+            evidence("target", target),
+            evidence("profile", profile),
+        ],
     }
 }
 
@@ -1226,11 +1350,12 @@ fn vfs_package_mount_check(
                     ],
                 );
             };
-            if entry.offset != 0 || entry.size != section.decoded_length {
+            let end = entry.offset.checked_add(entry.size);
+            if entry.size == 0 || end.is_none_or(|end| end > section.decoded_length) {
                 return package_blocked(
                     "vfs.package_mount",
                     "ASTRA_VFS_BOUNDS_INVALID",
-                    format!("VFS package entry bounds do not match section {section_id}"),
+                    format!("VFS package entry bounds exceed section {section_id}"),
                     vec![
                         evidence("vfs_uri", entry.uri.as_str()),
                         evidence("section_id", section_id),
@@ -1239,11 +1364,33 @@ fn vfs_package_mount_check(
                     ],
                 );
             }
-            if entry.hash != section.hash {
+            let section_bytes = match package.container().read_section(section_id) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    return package_blocked(
+                        "vfs.package_mount",
+                        "ASTRA_VFS_PACKAGE_SECTION_READ",
+                        format!("VFS package section {section_id} could not be read: {error}"),
+                        vec![evidence("section_id", section_id)],
+                    )
+                }
+            };
+            let (Ok(start), Ok(size)) =
+                (usize::try_from(entry.offset), usize::try_from(entry.size))
+            else {
+                return package_blocked(
+                    "vfs.package_mount",
+                    "ASTRA_VFS_BOUNDS_INVALID",
+                    "VFS package entry bounds do not fit host coordinates",
+                    vec![evidence("vfs_uri", entry.uri.as_str())],
+                );
+            };
+            let end = start + size;
+            if Hash256::from_sha256(&section_bytes[start..end]) != entry.hash {
                 return package_blocked(
                     "vfs.package_mount",
                     "ASTRA_VFS_HASH_MISMATCH",
-                    format!("VFS package entry hash does not match section {section_id}"),
+                    format!("VFS package entry hash does not match its section range {section_id}"),
                     vec![
                         evidence("vfs_uri", entry.uri.as_str()),
                         evidence("section_id", section_id),
@@ -1296,18 +1443,23 @@ fn vfs_package_mount_check(
             .iter()
             .find(|prefix| prefix.prefix == entry.uri.prefix())
             .expect("validated VFS manifest prefix must exist");
-        let Some(capability) = prefix.capabilities.first() else {
+        let required_capability = prefix.backend.required_provider_capability();
+        if !prefix
+            .capabilities
+            .iter()
+            .any(|capability| capability == required_capability)
+        {
             return package_blocked(
                 "vfs.package_mount",
                 "ASTRA_VFS_CAPABILITY_MISSING",
-                "VFS prefix must declare a read capability",
+                "VFS prefix must declare its backend capability",
                 vec![evidence("prefix", &prefix.prefix)],
             );
-        };
+        }
         let context = ResolveContext {
             target: target.clone(),
             profile: profile.to_string(),
-            capability: capability.clone(),
+            capability: required_capability.to_string(),
             provider_binding: prefix.provider_id.clone(),
         };
         if let Err(diagnostics) = manifest.resolve(&entry.uri, &context) {
@@ -1652,6 +1804,23 @@ fn package_blocked(
     ReleaseCheckRecord {
         id: id.into(),
         domain: ReleaseDomain::Package,
+        status: CheckStatus::Blocked,
+        diagnostic: Some(Diagnostic::blocking(code, summary.clone())),
+        summary,
+        evidence: evidence_values,
+    }
+}
+
+fn media_blocked(
+    id: impl Into<String>,
+    code: &'static str,
+    summary: impl Into<String>,
+    evidence_values: Vec<ReleaseEvidence>,
+) -> ReleaseCheckRecord {
+    let summary = summary.into();
+    ReleaseCheckRecord {
+        id: id.into(),
+        domain: ReleaseDomain::Media,
         status: CheckStatus::Blocked,
         diagnostic: Some(Diagnostic::blocking(code, summary.clone())),
         summary,

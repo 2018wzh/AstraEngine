@@ -48,7 +48,9 @@ checks:
 
 ## Blocking Domains
 
-Runtime determinism、schema migration、package integrity、cook/project artifact、Target manifest、plugin fingerprint、plugin extension registry、permission policy、AI replay、ONNX ModelBundle、ONNX Runtime pack/VFS、execution provider evidence、Luau sandbox、media decode、VN commercial baseline、system UI profile、advanced presentation opt-in、live player automation、AstraEMU legacy runtime provider、AstraRPG provider binding、RPG policy bundle、intent validator、committed agent output、TRPG dice/seat/transcript、CP2020 local-private adapter redaction、save/load、headless scenario、platform eligibility 和 manual signoff 都可以阻止发布。
+Runtime determinism、schema migration、package integrity、cook/project artifact、Target manifest、plugin fingerprint、plugin extension registry、permission policy、AI replay、ONNX ModelBundle、ONNX Runtime pack/VFS、execution provider evidence、Luau sandbox、package font authority、media decode、VN commercial baseline、system UI profile、advanced presentation opt-in、live player automation、AstraEMU legacy runtime provider、AstraRPG provider binding、RPG policy bundle、intent validator、committed agent output、TRPG dice/seat/transcript、CP2020 local-private adapter redaction、save/load、headless scenario、platform eligibility 和 manual signoff 都可以阻止发布。
+
+`media.manifest` 通过 `font_manifest_required` 和 `font_manifest_section` 显式声明字体要求。声明 required 后，Release Gate 必须从同一 package 的 `astra.font_manifest.v1` 和 `asset.vfs_manifest` 解析字体，校验 target/profile、provider binding、package backend、section range、font hash、face 与 coverage；任何 loose file、system font 或未声明 fallback 都不能补足缺失字体。未要求字体的 profile 必须显式保持 `font_manifest_required: false`，其通过结果只说明该 profile 不消费文本字体，不证明字体能力完成。
 
 `desktop-release` 和 `web-release` 的 package 必须由 `astra cook` 产出 `compiled.project` section。Fixture package 或缺少 cook/project metadata 的包只能用于 dev/headless 验证，不能通过 release profile。
 

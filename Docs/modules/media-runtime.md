@@ -16,13 +16,13 @@ Media Runtime 执行表现，不保存剧情权威状态。它消费 Presentatio
 ## 内置 provider
 
 - Renderer2D：wgpu provider，当前 headless capture provider；Migration 11 planned 完整 CPU reference path。
-- TextLayout：cosmic-text/Swash provider。
+- TextLayout：`astra.text_layout.v2` 的 cosmic-text/Swash provider；只装载 target/profile 允许且 hash/face/coverage 可验证的 package 字体，输出 shaped glyph、cluster/font identity 与 Alpha8/RGBA glyph resource。`TextRenderResourceOwner` 管理跨 frame upload/reference/release，不能由 Player 自行估算字符矩形。
 - Decode：platform provider 优先，desktop FFmpeg fallback。Windows WMF provider 已用 CC0 public MP3/MP4 fixture 验证 bounded PCM 和 BGRA 首帧；Web browser media path 用同一 fixture 验证 MP4/WebM/MP3 metadata load。
 - Audio：platform output provider + 当前 headless meter provider；Migration 11 planned 完整 PCM WAV output。
 
 ## 测试
 
-Media tests 覆盖 image/font/text/filter/audio decode、headless capture、AudioGraph bus、FilterGraph typed node validation、public media manifest hash、WMF audio/video decode 和 provider fallback。视频 fallback 通过 optional `ffmpeg-vcpkg` feature 接入；默认 workspace build 不要求本机 FFmpeg。
+Media tests 覆盖 `astra.font_manifest.v1` 经 package VFS context 解析真实字体 section、packaged font hash/face/coverage、Latin/组合字符、ruby、BiDi paragraph、真实 glyph raster、wrap/clip/ellipsis、动态字体 cache invalidation、transactional renderer resource lifecycle、image/text/filter/audio decode、headless capture、AudioGraph bus、FilterGraph typed node validation、public media manifest hash、WMF audio/video decode 和 provider fallback。CJK/Arabic/emoji 的 licensed package fixture 与 Windows visual golden 尚未闭合。视频 fallback 通过 optional `ffmpeg-vcpkg` feature 接入；默认 workspace build 不要求本机 FFmpeg。
 
 这些测试只证明 Media contract 与局部 provider。完整 Headless Platform、全 Runtime test 收束、真实 PNG/WAV 和模型审查见 [Migration 11](../migrations/headless-platform-test-backend-migration.md)，当前状态为 `SPEC_READY`。
 

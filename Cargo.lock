@@ -377,8 +377,10 @@ dependencies = [
 name = "astra-media"
 version = "0.1.0"
 dependencies = [
+ "astra-asset",
  "astra-core",
  "astra-media-core",
+ "astra-package",
  "cosmic-text",
  "ffmpeg-next",
  "image",
@@ -393,6 +395,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tracing",
+ "unicode-segmentation",
  "wasm-bindgen",
  "wgpu",
  "windows",

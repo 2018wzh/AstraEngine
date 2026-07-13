@@ -152,7 +152,8 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | 1 | `S2-PACKAGE-01` package container | `DONE` | `astra-package` 提供共享 container、Zstd codec、crypto descriptor、bounded reader；Runtime save 已迁移 |
 | 2 | `S2-ASSET-01` + `S2-ASSET-02` asset/import/cook | `DONE` | `cargo test -p astra-asset --all-targets`、`cargo test -p astra-cook --all-targets` 和 NativeVN product cook test 覆盖 typed dependency、persistent DDC、bounded batch、取消/panic、规模、原子提交与失败回滚 |
 | 3 | `S2-GATE-01` release report | `DONE` | `astra-release` 和 `astra package validate` 输出 `astra.release_report.v1`；release profile 缺 `compiled.project` cook/project artifact 时阻断 |
-| 4 | `S2-MEDIA-01` 到 `S2-MEDIA-05` media providers | `DONE` | `astra-media` 提供 headless renderer、TextLayout、AudioGraph、FilterGraph、DecodeProvider 和 optional native feature gates |
+| 4 | `S2-MEDIA-01` 到 `S2-MEDIA-05` media contract/providers | `DONE` | Stage 2 contract 边界完成；`astra.text_layout.v2` 已达到 packaged font database、真实 shaping/raster、cluster/font identity、动态 cache/lifecycle 和 transactional CPU renderer 的 shared E2，不代表产品视觉 E3 |
+| 4a | P1-001 Text/Font 产品闭环 | `IN_PROGRESS` | 固定宽度根因已删除，`astra.font_manifest.v1` 已通过 verified Package/VFS 构造 provider；仍需 CJK/Arabic/emoji licensed package fixture、Windows glyph atlas/golden、save/replay continuation 和 release drift check，证据不足前不得标记完整字体系统 |
 | 5 | `S2-HEADLESS-*` Migration 11 | `SPEC_READY` | 先建立测试专用完整 host、真实 PNG/WAV、序列化物理输入和全 Runtime test 收束，再把它设为真实平台验收强制 preflight |
 | 6 | `S2-WINDOWS-HOST-01` + `S2-WINDOWS-WMF-01` + `S2-WINDOWS-GATE-01` Windows platform repair | `IN_PROGRESS` | Windows real host 已接入 winit/wgpu/WASAPI/WMF/Saved Games/package range；Player 全服务接线和同 run conformance/automation evidence 尚未完成 |
 | 7 | `S3-MODULE-LAYOUT-01` AstraVN module layout | `DONE` | AstraVN 已迁到 `Engine/Source/Modules/AstraVN/`，workspace/path dependency 已改链 |
