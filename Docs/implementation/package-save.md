@@ -106,10 +106,7 @@ Minimum save sections:
 - `runtime.world`
 - `migration.manifest`
 
-Runtime save 可以携带模块 extra sections。Stage 3 AstraVN 当前写入：
-
-- `vn.runtime_state`：`postcard` 编码的 `VnRuntimeStateSave`，包含 VN runtime state、state hash、backlog、read-state、voice replay、route flags、变量、system state 和 pending wait。
-- `vn.policy_state`：`postcard` 编码的 `VnPolicyStateSave`，包含 Luau policy state、mutation trace、rollback scope、replay event metadata 和 serializable snapshots。
+Runtime save 可以携带模块 extra sections。NativeVN product provider 对外只输出一个 `runtime.world` section，schema 为 `astra.runtime.save_blob.v2`、codec 为 `Raw`。它的 payload 是上述 Runtime save container；VN runtime/policy 作为 typed component 与完整 queue、mutation/effect trace 一起保存在内部 `runtime.world` snapshot。`astra-vn-save` 的 `vn.runtime_state`/`vn.policy_state` 只保留为局部/reference 数据类型，不能进入 Player 权威 save/restore 主路径。
 
 以下 section 是后续模块接入点，缺 provider 时不得伪造 payload：
 

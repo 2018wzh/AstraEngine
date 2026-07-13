@@ -291,7 +291,7 @@ python Tools/check_docs.py
 3. 处理 Luau policy snapshot ref，但不保存 function、thread、userdata 或 native handle。
 4. 编写 save-load-resume、replay-from-start 和 invalid snapshot 测试。
 
-**Done Evidence:** `cargo test -p astra-vn-core --test compiler_runtime`、`cargo test -p astra-vn-save --test vn_save_container`、`cargo test -p astra-vn-runtime-provider`、`cargo test -p astra-player-vn --test native_vn_host_source` 和 `cargo test -p astra-test --test vn_scenario` 通过；`vn.runtime_state`、`vn.policy_state` 与新增的 `vn.runtime_world` 同时保存。`vn.runtime_world` 是完整 `RuntimeSnapshot`，恢复前会与 VN/Policy section 交叉校验，覆盖 StableId、Actor/Component、AwaitQueue、delayed/event queue、Mutation/effect/presentation trace 和 step；Player save envelope 还校验整体 payload hash，篡改或 session mismatch 会阻断。
+**Done Evidence:** `cargo test -p astra-vn-runtime-provider --tests`、`cargo test -p astra-plugin --test product_runtime_host` 和 `cargo test -p astra-test --test vn_scenario` 通过；VN state 与 Luau policy state 作为 typed component 进入完整 RuntimeSnapshot，并由唯一 `runtime.world`/`astra.runtime.save_blob.v2` section 承载。证据覆盖 outer/nested hash、损坏回滚、完整 queue/mutation/effect trace、restored step/seed、restore continuation、delta/seed/mode drift 和 live-provider replay 阻断；拆分 state blob 不再作为产品权威 save。
 
 **Linked Test IDs:** `T-S3-CORE-03`
 

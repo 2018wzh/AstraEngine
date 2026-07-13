@@ -45,13 +45,13 @@ Provider 输出只能是可序列化 effect list、await token、presentation/au
 - `probe` 校验 package sections、target/profile、scenario refs 和 player route model。
 - `open` 创建 session-owned `RuntimeWorld`、VN Actor、typed VN/policy components、runtime cursor、policy state 和 flat story StateMachine。
 - `step` 把 launch、advance、choose、system page、wait completion 等输入编码成 RuntimeEvent，由 `astra.vn.step` action 推进 dialogue、choice、system story、wait、presentation、audio、timeline 和 mutation。
-- `save/restore` 读写并校验 `vn.runtime_state` 与 `vn.policy_state` 的 schema、codec、version、hash 和 postcard payload，restore 后必须复现保存时的状态 hash。
+- `save/restore` 只读写权威 `runtime.world`/`astra.runtime.save_blob.v2` section。Nested Runtime save container 保存完整 RuntimeSnapshot；restore 在 outer hash、container footer、section hash 和 schema/version 全部通过后事务替换 world，并回报 restored step/seed。
 - `package_sections` 继续输出 `vn.*` sections。
 - `release_checks` 继续声明 `vn.commercial_baseline`、`vn.system_ui_profile`、`vn.advanced_presentation`、`player.full_playable` 等 check。
 
 VN Core 保持 dialogue、choice、backlog、save/load、read-state 和 voice replay 的权威语义。Luau policy 和 plugin command 只扩展表现、系统页和高级演出策略。
 
-当前 FFI adapter 有显式 provider instance registry。`create_instance`、`destroy_instance`、`open`、`step`、`save`、`restore` 和 `shutdown` 都调用同一真实 provider 路径；in-process provider 也必须实现真实 instance lifecycle，host 不提供默认成功实现。Host 在 create/open 部分失败时 rollback，校验 instance/session identity、连续 fixed step、output/save section schema/hash/bounds，并把 provider panic、错误、malformed output 和 timeout 转成 poisoned lifecycle。timeout 返回前先等待 blocking worker drain；调用方随后用 `cleanup_after_failure` shutdown 全部 session 并 destroy instance。`open` 从请求中的 `vn.compiled_story` section 解码 story，不能创建未绑定 session。外部 dylib 的分发、签名和版本协商仍留给插件发布工作，不影响当前 ABI lifecycle 行为证据。
+当前 FFI adapter 有显式 provider instance registry。`create_instance`、`destroy_instance`、`open`、`step`、`save`、`restore` 和 `shutdown` 都调用同一真实 provider 路径；in-process provider 也必须实现真实 instance lifecycle，host 不提供默认成功实现。Host 在 create/open 部分失败时 rollback，校验 instance/session identity、连续 fixed step、1..=1 秒 delta、session seed、live/restore mode、output/save section schema/hash/bounds，并阻断 live provider replay。Restore report 回传 snapshot step/seed，下一 tick 只能使用一次 `RestoreContinuation`，随后恢复 `Live`。Provider panic、错误、malformed output 和 timeout 会进入 poisoned lifecycle。timeout 返回前先等待 blocking worker drain；调用方随后用 `cleanup_after_failure` shutdown 全部 session 并 destroy instance。`open` 从请求中的 `vn.compiled_story` section 解码 story，不能创建未绑定 session。外部 dylib 的分发、签名和版本协商仍留给插件发布工作，不影响当前 ABI lifecycle 行为证据。
 
 Release validator 从 package 内的 `vn.compiled_story` 执行 package-bound lifecycle conformance，并记录 state/event/presentation hash。Runtime replay 另存 hash-validated `ProviderReplayOutput`，回放阶段不调用 FFI 或 in-process provider。
 

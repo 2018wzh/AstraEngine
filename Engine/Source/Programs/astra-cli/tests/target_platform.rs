@@ -447,17 +447,36 @@ fn package_build_includes_target_filtered_tsuinosora_sections() {
     let case_dir = unique_case_dir(root, "tsuinosora-package-sections");
     let project = case_dir.join("project.yaml");
     let scripts = case_dir.join("Scripts");
+    let localization = case_dir.join("Localization");
+    let fonts = case_dir.join("Assets/Fonts");
     let package_sections = case_dir.join("PackageSections");
     let cooked = case_dir.join("cooked");
     let package = case_dir.join("tsuinosora.astrapkg");
 
     fs::create_dir_all(&scripts).unwrap();
+    fs::create_dir_all(&localization).unwrap();
+    fs::create_dir_all(&fonts).unwrap();
     fs::create_dir_all(&package_sections).unwrap();
     fs::write(
         scripts.join("main.astra"),
         fs::read_to_string(root.join("Examples/NativeVN/Scripts/main.astra")).unwrap(),
     )
     .unwrap();
+    fs::copy(
+        root.join("Examples/NativeVN/Localization/en.json"),
+        localization.join("en.json"),
+    )
+    .unwrap();
+    for name in [
+        "Poppins-Regular.ttf",
+        "Poppins-Regular.ttf.astra-asset.yaml",
+    ] {
+        fs::copy(
+            root.join("Examples/NativeVN/Assets/Fonts").join(name),
+            fonts.join(name),
+        )
+        .unwrap();
+    }
     write_tsuinosora_package_sections(&package_sections);
     fs::write(
         &project,
@@ -480,15 +499,23 @@ targets:
     platforms: [headless, windows, web]
     packaged: true
 nativevn:
+  default_locale: en
   sources:
     - Scripts
   profiles: [classic, modern]
+  asset_roots: [Assets]
   display:
     original_resolution:
       width: 800
       height: 600
     scale_filter: linear
 package_sections:
+  - id: vn.localization.en
+    schema: astra.vn.localization_table.v1
+    path: Localization/en.json
+    codec: raw
+    targets: [tsuinosora-internal-game]
+    profiles: [classic]
   - id: tsuinosora.reference_evidence
     schema: tsuinosora.visual_reference_report.v1
     path: PackageSections/reference_evidence.json

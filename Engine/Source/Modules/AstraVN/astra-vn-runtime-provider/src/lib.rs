@@ -23,29 +23,22 @@ use astra_plugin_abi::{
     RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest,
     RuntimeProviderInstanceReport, RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest,
     RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeSectionRef,
-    RuntimeShutdownReport, RuntimeStepInput, RuntimeStepOutput, GAME_RUNTIME_PROVIDER_SLOT,
-    NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID, RUNTIME_EDITOR_METADATA_SCHEMA,
+    RuntimeShutdownReport, RuntimeStepInput, RuntimeStepMode, RuntimeStepOutput,
+    GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID,
+    RUNTIME_EDITOR_METADATA_SCHEMA,
 };
 use astra_runtime::{
     ActionDescriptor, ActionInvocation, ActionTrace, BlackboardValue, ComponentId,
     DeterministicActionContext, EventPayload, GuardExpr, OrderedTickIngress, PackageHandle,
     PlayerInput, PresentationCommand as RuntimePresentationCommand, RuntimeAction, RuntimeConfig,
-    RuntimeError, RuntimeSnapshot, RuntimeWorld, StateDefinition, StateMachineDefinition,
-    TickIngress, TickInput, TickRequest, TransitionDefinition,
+    RuntimeError, RuntimeSnapshot, RuntimeWorld, SaveBlob, SaveRequest, StateDefinition,
+    StateMachineDefinition, TickIngress, TickInput, TickRequest, TransitionDefinition,
 };
+pub use astra_vn_core::*;
 use astra_vn_core::{
     CompiledStory as CoreCompiledStory, VnError as CoreVnError,
     VnPlayerCommand as CoreVnPlayerCommand, VnRuntime as CoreVnRuntime,
 };
-use astra_vn_save::{
-    VN_POLICY_STATE_SECTION_ID as VN_POLICY_SECTION_ID,
-    VN_RUNTIME_STATE_SECTION_ID as VN_RUNTIME_SECTION_ID,
-};
-
-const VN_RUNTIME_WORLD_SECTION_ID: &str = "vn.runtime_world";
-const VN_RUNTIME_WORLD_SCHEMA: &str = "astra.vn.runtime_world_snapshot.v1";
-
-pub use astra_vn_core::*;
 pub use astra_vn_editor::*;
 pub use astra_vn_package::*;
 pub use astra_vn_save::*;
@@ -175,7 +168,6 @@ struct NativeVnStepTrace {
 struct NativeVnSession {
     world: RuntimeWorld,
     vn_component: ComponentId,
-    policy_component: ComponentId,
     compiled: Arc<CoreCompiledStory>,
     output: Arc<Mutex<Option<VnStepOutput>>>,
 }
@@ -313,7 +305,7 @@ impl NativeVnRuntimeProvider {
         let vn_component = world
             .attach_component(owner, "astra.vn.runtime_state.v1", initial_runtime.state())
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let policy_component = world
+        world
             .attach_component(owner, "astra.vn.policy_state.v1", &VnPolicyState::default())
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         let compiled = Arc::new(compiled);
@@ -364,7 +356,6 @@ impl NativeVnRuntimeProvider {
             NativeVnSession {
                 world,
                 vn_component,
-                policy_component,
                 compiled,
                 output,
             },
@@ -378,6 +369,12 @@ impl NativeVnRuntimeProvider {
     }
 
     pub fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, CoreVnError> {
+        if input.mode == RuntimeStepMode::Replay {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_LIVE_PROVIDER_REPLAY",
+                "provider-free replay cannot call NativeVnRuntimeProvider::step",
+            ));
+        }
         tracing::trace!(
             event = "vn.provider.session.step",
             fixed_step = input.fixed_step,
@@ -391,16 +388,14 @@ impl NativeVnRuntimeProvider {
                 .map_err(|err| CoreVnError::message(err.to_string()))?;
             runtime_command_from_input(&session.compiled, &state, &input)?
         };
-        self.apply_command_at_step(input.session_id, command, input.fixed_step)
-    }
-
-    pub fn apply_command(
-        &mut self,
-        session_id: GameRuntimeSessionId,
-        command: CoreVnPlayerCommand,
-    ) -> Result<RuntimeStepOutput, CoreVnError> {
-        let step = self.session(&session_id)?.world.snapshot().step + 1;
-        self.apply_command_at_step(session_id, command, step)
+        self.apply_command_at_step(
+            input.session_id,
+            command,
+            input.fixed_step,
+            input.delta_ns,
+            input.session_seed,
+            input.mode,
+        )
     }
 
     fn apply_command_at_step(
@@ -408,6 +403,9 @@ impl NativeVnRuntimeProvider {
         session_id: GameRuntimeSessionId,
         command: CoreVnPlayerCommand,
         fixed_step: u64,
+        delta_ns: u64,
+        session_seed: u64,
+        mode: RuntimeStepMode,
     ) -> Result<RuntimeStepOutput, CoreVnError> {
         let session = self.session_mut(&session_id)?;
         *session
@@ -458,17 +456,21 @@ impl NativeVnRuntimeProvider {
                 },
             }),
         });
-        let seed = session.world.snapshot().config.seed;
+        let timing = TickInput {
+            fixed_step,
+            delta_ns,
+            seed: session_seed,
+        };
+        let request = match mode {
+            RuntimeStepMode::Live => TickRequest::live(timing, ingress),
+            RuntimeStepMode::RestoreContinuation => {
+                TickRequest::restore_continuation(timing, ingress)
+            }
+            RuntimeStepMode::Replay => TickRequest::replay(timing, ingress),
+        };
         let tick = session
             .world
-            .tick(TickRequest::live(
-                TickInput {
-                    fixed_step,
-                    delta_ns: 16_666_667,
-                    seed,
-                },
-                ingress,
-            ))
+            .tick(request)
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         if let Some(diagnostic) = tick.diagnostics.first() {
             return Err(CoreVnError::diagnostic(
@@ -578,7 +580,7 @@ impl NativeVnRuntimeProvider {
             RuntimeOutputDomain::DirtySaveSection,
             "astra.runtime.dirty_save_section.v1",
             SchemaVersion::new(1, 0, 0),
-            &VN_RUNTIME_SECTION_ID.to_string(),
+            &"runtime.world".to_string(),
         )
         .map_err(|err| CoreVnError::message(err.to_string()))?];
         Ok(RuntimeStepOutput {
@@ -670,56 +672,21 @@ impl NativeVnRuntimeProvider {
 
     pub fn save(&self, request: RuntimeSaveRequest) -> Result<RuntimeSaveSections, CoreVnError> {
         let session = self.session(&request.session_id)?;
-        let runtime = session
+        let save = session
             .world
-            .read_component::<VnRuntimeState>(session.vn_component)
+            .save(SaveRequest::default())
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let runtime_state = VnRuntimeStateSave {
-            schema: "astra.vn.runtime_state_save.v1".to_string(),
-            state_hash: Hash128::from_blake3(&postcard::to_allocvec(&runtime)?),
-            state: runtime,
-        };
-        let state_payload = postcard::to_allocvec(&runtime_state)?;
-        let policy = session
-            .world
-            .read_component::<VnPolicyState>(session.policy_component)
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let policy_state = VnPolicyStateSave {
-            schema: "astra.vn.policy_state_save.v1".to_string(),
-            state_hash: Hash128::from_blake3(&postcard::to_allocvec(&policy)?),
-            state: policy,
-        };
-        let policy_payload = postcard::to_allocvec(&policy_state)?;
-        let world_snapshot = session.world.snapshot();
-        let world_payload = postcard::to_allocvec(&world_snapshot)?;
+        let save_hash = Hash256::from_sha256(&save.0);
         Ok(RuntimeSaveSections {
             session_id: request.session_id,
-            sections: vec![
-                RuntimeSectionPayload {
-                    section_id: VN_RUNTIME_SECTION_ID.to_string(),
-                    schema: "astra.vn.runtime_state_save.v1".to_string(),
-                    version: SchemaVersion::default(),
-                    codec: RuntimeSectionCodec::Postcard,
-                    hash: Hash256::from_sha256(&state_payload),
-                    bytes: state_payload,
-                },
-                RuntimeSectionPayload {
-                    section_id: VN_POLICY_SECTION_ID.to_string(),
-                    schema: "astra.vn.policy_state_save.v1".to_string(),
-                    version: SchemaVersion::default(),
-                    codec: RuntimeSectionCodec::Postcard,
-                    hash: Hash256::from_sha256(&policy_payload),
-                    bytes: policy_payload,
-                },
-                RuntimeSectionPayload {
-                    section_id: VN_RUNTIME_WORLD_SECTION_ID.to_string(),
-                    schema: VN_RUNTIME_WORLD_SCHEMA.to_string(),
-                    version: SchemaVersion::default(),
-                    codec: RuntimeSectionCodec::Postcard,
-                    hash: Hash256::from_sha256(&world_payload),
-                    bytes: world_payload,
-                },
-            ],
+            sections: vec![RuntimeSectionPayload {
+                section_id: "runtime.world".to_string(),
+                schema: "astra.runtime.save_blob.v2".to_string(),
+                version: SchemaVersion::new(2, 0, 0),
+                codec: RuntimeSectionCodec::Raw,
+                hash: save_hash,
+                bytes: save.0,
+            }],
             diagnostics: Vec::new(),
         })
     }
@@ -728,80 +695,28 @@ impl NativeVnRuntimeProvider {
         &mut self,
         request: RuntimeRestoreRequest,
     ) -> Result<RuntimeRestoreReport, CoreVnError> {
-        let runtime_section = required_restore_section(
-            &request.sections,
-            VN_RUNTIME_SECTION_ID,
-            "astra.vn.runtime_state_save.v1",
-        )?;
-        let policy_section = required_restore_section(
-            &request.sections,
-            VN_POLICY_SECTION_ID,
-            "astra.vn.policy_state_save.v1",
-        )?;
-        let world_section = required_restore_section(
-            &request.sections,
-            VN_RUNTIME_WORLD_SECTION_ID,
-            VN_RUNTIME_WORLD_SCHEMA,
-        )?;
-        let runtime_save: VnRuntimeStateSave = postcard::from_bytes(&runtime_section.bytes)?;
-        let policy_save: VnPolicyStateSave = postcard::from_bytes(&policy_section.bytes)?;
-        let world_snapshot: RuntimeSnapshot = postcard::from_bytes(&world_section.bytes)?;
-        let runtime_hash = Hash128::from_blake3(&postcard::to_allocvec(&runtime_save.state)?);
-        if runtime_hash != runtime_save.state_hash {
+        if request.sections.len() != 1 {
             return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_RUNTIME_STATE_HASH",
-                "VN runtime state hash does not match the restored state",
+                "ASTRA_NATIVE_VN_RESTORE_SECTION_SET",
+                "restore requires exactly one authoritative runtime.world section",
             ));
         }
-        let policy_hash = Hash128::from_blake3(&postcard::to_allocvec(&policy_save.state)?);
-        if policy_hash != policy_save.state_hash {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_POLICY_STATE_HASH",
-                "VN policy state hash does not match the restored state",
-            ));
-        }
+        let runtime_section = required_restore_section_with_codec(
+            &request.sections,
+            "runtime.world",
+            "astra.runtime.save_blob.v2",
+            RuntimeSectionCodec::Raw,
+        )?;
         let session = self.session_mut(&request.session_id)?;
-        let restored_runtime = world_snapshot
-            .actors
-            .component(session.vn_component)
-            .ok_or_else(|| {
-                CoreVnError::diagnostic(
-                    "ASTRA_NATIVE_VN_WORLD_COMPONENT_MISSING",
-                    "RuntimeWorld snapshot is missing the VN component",
-                )
-            })?
-            .payload
-            .decode::<VnRuntimeState>()
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let restored_policy = world_snapshot
-            .actors
-            .component(session.policy_component)
-            .ok_or_else(|| {
-                CoreVnError::diagnostic(
-                    "ASTRA_NATIVE_VN_WORLD_COMPONENT_MISSING",
-                    "RuntimeWorld snapshot is missing the policy component",
-                )
-            })?
-            .payload
-            .decode::<VnPolicyState>()
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        if restored_runtime != runtime_save.state || restored_policy != policy_save.state {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_WORLD_COMPONENT_MISMATCH",
-                "RuntimeWorld snapshot does not match VN and policy save sections",
-            ));
-        }
-        session.world.restore_snapshot(world_snapshot);
         session
             .world
-            .replace_component(session.vn_component, &runtime_save.state)
+            .load(SaveBlob(runtime_section.bytes.clone()))
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        session
-            .world
-            .replace_component(session.policy_component, &policy_save.state)
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let snapshot = session.world.snapshot();
         Ok(RuntimeRestoreReport {
             session_id: request.session_id,
+            restored_fixed_step: snapshot.step,
+            session_seed: snapshot.config.seed,
             status: "restored".to_string(),
             diagnostics: Vec::new(),
         })
@@ -1197,6 +1112,15 @@ fn required_restore_section<'a>(
     section_id: &str,
     schema: &str,
 ) -> Result<&'a RuntimeSectionPayload, CoreVnError> {
+    required_restore_section_with_codec(sections, section_id, schema, RuntimeSectionCodec::Postcard)
+}
+
+fn required_restore_section_with_codec<'a>(
+    sections: &'a [RuntimeSectionPayload],
+    section_id: &str,
+    schema: &str,
+    codec: RuntimeSectionCodec,
+) -> Result<&'a RuntimeSectionPayload, CoreVnError> {
     let mut matches = sections
         .iter()
         .filter(|section| section.section_id == section_id);
@@ -1212,7 +1136,7 @@ fn required_restore_section<'a>(
             format!("restore section {section_id} is duplicated"),
         ));
     }
-    if section.schema != schema || section.codec != RuntimeSectionCodec::Postcard {
+    if section.schema != schema || section.codec != codec {
         return Err(CoreVnError::diagnostic(
             "ASTRA_NATIVE_VN_RESTORE_SECTION_SCHEMA",
             format!("restore section {section_id} has an incompatible schema or codec"),

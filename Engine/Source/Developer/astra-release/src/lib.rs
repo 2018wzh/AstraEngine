@@ -19,7 +19,7 @@ use astra_player_core::{
 use astra_plugin::{ProductRuntimeHost, RuntimeHostSchemaRegistry};
 use astra_plugin_abi::{
     PluginExtensionRegistrySnapshot, ProviderPolicy, RuntimeOpenRequest, RuntimeOutputDomain,
-    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeStepInput,
+    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeStepInput, RuntimeStepMode,
 };
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
 use astra_vn::{
@@ -1353,6 +1353,9 @@ fn native_vn_behavioral_evidence(
             .step(RuntimeStepInput {
                 session_id: open.session_id.clone(),
                 fixed_step: 1,
+                delta_ns: 16_666_667,
+                session_seed: 0xA57A,
+                mode: RuntimeStepMode::Live,
                 action: "launch_default".to_string(),
                 payload: serde_json::json!({}),
             })

@@ -77,7 +77,7 @@ pub struct VnStepOutput {
 }
 ```
 
-`VnRuntimeState` 作为 typed component 进入 Runtime snapshot 和 `vn.runtime_state` save section。Provider 把 `VnStepOutput.awaits` 映射成 Runtime `AwaitToken`，把 audio/timeline DTO 写成 hash-validated `SerializedEffectEnvelope`。Luau snapshot 只能保存策略私有的可序列化值，不能保存 function、thread、userdata、native handle 或 coroutine state。
+`VnRuntimeState` 和 policy state 作为 typed component 进入完整 Runtime snapshot。NativeVN product provider 把自描述 Runtime save container 封装成唯一 `runtime.world`/`astra.runtime.save_blob.v2` section，不再并列保存容易漂移的 `vn.runtime_state`/`vn.policy_state` 权威副本。Provider 把 `VnStepOutput.awaits` 映射成 Runtime `AwaitToken`，把 audio/timeline DTO 写成 hash-validated `SerializedEffectEnvelope`。Luau snapshot 只能保存策略私有的可序列化值，不能保存 function、thread、userdata、native handle 或 coroutine state。
 
 ## Step Action
 

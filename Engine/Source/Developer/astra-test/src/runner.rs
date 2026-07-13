@@ -9,7 +9,7 @@ use astra_plugin::{
 use astra_plugin_abi::{
     GameRuntimeSessionId, RuntimeOpenRequest, RuntimeOutputDomain, RuntimePrepareRequest,
     RuntimeProbeRequest, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
-    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepInput,
+    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepInput, RuntimeStepMode,
 };
 use astra_runtime::{
     ActionInvocation, ActorId, BlackboardValue, EventPayload, EventSource, GuardExpr,
@@ -1211,6 +1211,7 @@ struct RunContext {
     vn_saved: Option<RuntimeSaveSections>,
     vn_state: Option<VnRuntimeState>,
     vn_step: u64,
+    vn_restore_tick_pending: bool,
     diagnostics: Vec<Diagnostic>,
     unsupported_actions: Vec<String>,
     fixture_actions_registered: bool,
@@ -1311,6 +1312,7 @@ impl RunContext {
             vn_saved: None,
             vn_state: None,
             vn_step: 0,
+            vn_restore_tick_pending: false,
             diagnostics: Vec::new(),
             unsupported_actions: Vec::new(),
             fixture_actions_registered: false,
@@ -1555,6 +1557,11 @@ impl RunContext {
             .vn_step
             .checked_add(1)
             .ok_or_else(|| ScenarioError::Message("VN fixed step overflowed".to_string()))?;
+        let mode = if self.vn_restore_tick_pending {
+            RuntimeStepMode::RestoreContinuation
+        } else {
+            RuntimeStepMode::Live
+        };
         let output = self
             .vn_host
             .as_mut()
@@ -1562,9 +1569,13 @@ impl RunContext {
             .step(RuntimeStepInput {
                 session_id: session,
                 fixed_step: self.vn_step,
+                delta_ns: 16_666_667,
+                session_seed: self.session_seed,
+                mode,
                 action: action.to_string(),
                 payload,
             })?;
+        self.vn_restore_tick_pending = false;
         for command in output
             .outputs
             .iter()
@@ -1629,13 +1640,16 @@ impl RunContext {
 
     fn load_vn_slot(&mut self, save: RuntimeSaveSections) -> Result<(), ScenarioError> {
         let session = self.vn_session()?.clone();
-        self.vn_host
+        let report = self
+            .vn_host
             .as_mut()
             .ok_or_else(|| ScenarioError::Message("VN provider host is not open".to_string()))?
             .restore(RuntimeRestoreRequest {
                 session_id: session,
                 sections: save.sections,
             })?;
+        self.vn_step = report.restored_fixed_step;
+        self.vn_restore_tick_pending = true;
         Ok(())
     }
 

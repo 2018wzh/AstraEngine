@@ -6,7 +6,7 @@ use astra_plugin_abi::{
     RuntimeProviderCall, RuntimeProviderCreateRequest, RuntimeProviderDestroyRequest,
     RuntimeProviderInstanceReport, RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest,
     RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeShutdownReport,
-    RuntimeStepInput, RuntimeStepOutput, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
+    RuntimeStepInput, RuntimeStepMode, RuntimeStepOutput, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
 };
 use astra_vn_runtime_provider::{compile_astra_sources, AstraSource, NativeVnRuntimeProvider};
 use serde::{de::DeserializeOwned, Serialize};
@@ -75,6 +75,9 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
         &RuntimeStepInput {
             session_id: open.session_id.clone(),
             fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed: 41,
+            mode: RuntimeStepMode::Live,
             action: "launch_default".to_string(),
             payload: serde_json::json!({}),
         },
@@ -93,12 +96,9 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
             slot: "slot.ffi".to_string(),
         },
     );
-    assert_eq!(save.sections.len(), 3);
-    assert!(save
-        .sections
-        .iter()
-        .any(|section| section.section_id == "vn.runtime_world"
-            && section.schema == "astra.vn.runtime_world_snapshot.v1"));
+    assert_eq!(save.sections.len(), 1);
+    assert_eq!(save.sections[0].section_id, "runtime.world");
+    assert_eq!(save.sections[0].schema, "astra.runtime.save_blob.v2");
     assert!(save
         .sections
         .iter()
@@ -113,6 +113,8 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
         },
     );
     assert_eq!(restore.status, "restored");
+    assert_eq!(restore.restored_fixed_step, 1);
+    assert_eq!(restore.session_seed, 41);
 
     let shutdown = invoke_call::<_, RuntimeShutdownReport>(
         registration.shutdown,

@@ -17,7 +17,7 @@ use astra_plugin::{ProductRuntimeHost, RuntimeHostError, RuntimeHostSchemaRegist
 use astra_plugin_abi::{
     GameRuntimeSessionId, RuntimeOpenRequest, RuntimeOutputDomain, RuntimePrepareRequest,
     RuntimeProbeRequest, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
-    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepInput,
+    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepInput, RuntimeStepMode,
     ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
 };
 use astra_vn_core::{
@@ -42,6 +42,7 @@ pub struct NativeVnHostCommandSource {
     surface: PlayerHostResourceId,
     command_sequence: u64,
     fixed_step: u64,
+    session_seed: u64,
     width: u32,
     height: u32,
     textures: BTreeMap<String, TextureFrame>,
@@ -347,6 +348,7 @@ impl NativeVnHostCommandSource {
             surface,
             command_sequence: 0,
             fixed_step: 0,
+            session_seed: 0,
             width,
             height,
             textures: binding.presentation.textures,
@@ -922,6 +924,9 @@ impl NativeVnHostCommandSource {
         let output = self.host.step(RuntimeStepInput {
             session_id: self.session_id.clone(),
             fixed_step: self.fixed_step,
+            delta_ns: 16_666_667,
+            session_seed: self.session_seed,
+            mode: RuntimeStepMode::Live,
             action: action.to_string(),
             payload,
         })?;

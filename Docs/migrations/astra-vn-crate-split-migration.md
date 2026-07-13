@@ -25,7 +25,7 @@
 | `astra-vn-policy` | Luau sandbox、policy state、mutation/query/trace、policy bundle manifest、source cache、`standard_policy.luau` |
 | `astra-vn-commands` | standard command library、command schema、usage validation、command manifest |
 | `astra-vn-system` | system stories、save/config/backlog/gallery/replay/route chart/localization profile |
-| `astra-vn-save` | `vn.runtime_state`、`vn.policy_state` save sections、save blob、hash、migration glue |
+| `astra-vn-save` | 局部/reference VN state blob、hash、migration glue；产品 save authority 已迁到完整 `runtime.world` snapshot |
 | `astra-vn-package` | `vn.*` package section plans、profile manifest、commercial baseline、advanced presentation manifest、package evidence |
 | `astra-vn-plugin` | VN extension points、extension manifest、provider slot ids |
 | `astra-vn-editor` | Graph/Timeline authoring metadata、source round-trip metadata、NativeVN `RuntimeEditorMetadata` |

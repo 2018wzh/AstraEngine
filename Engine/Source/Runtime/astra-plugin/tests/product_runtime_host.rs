@@ -177,6 +177,8 @@ impl ProductRuntimeProvider for Provider {
     fn restore(&mut self, request: RuntimeRestoreRequest) -> Result<RuntimeRestoreReport, String> {
         Ok(RuntimeRestoreReport {
             session_id: request.session_id,
+            restored_fixed_step: 0,
+            session_seed: 1,
             status: "restored".into(),
             diagnostics: vec![],
         })
@@ -351,6 +353,9 @@ fn in_process_host_owns_provider_lifecycle_and_validates_step_envelopes() {
         .step(RuntimeStepInput {
             session_id: open.session_id.clone(),
             fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed: 1,
+            mode: RuntimeStepMode::Live,
             action: "advance".into(),
             payload: serde_json::json!({}),
         })
@@ -417,6 +422,9 @@ fn duplicate_open_rolls_back_and_blocks_use_until_cleanup() {
         .step(RuntimeStepInput {
             session_id: first.session_id.clone(),
             fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed: 1,
+            mode: RuntimeStepMode::Live,
             action: "advance".into(),
             payload: serde_json::json!({}),
         })
@@ -448,6 +456,9 @@ fn host_blocks_unknown_step_schema() {
         .step(RuntimeStepInput {
             session_id: open.session_id,
             fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed: 1,
+            mode: RuntimeStepMode::Live,
             action: "advance".into(),
             payload: serde_json::json!({}),
         })
@@ -476,6 +487,9 @@ fn host_blocks_output_count_and_payload_bounds() {
         .step(RuntimeStepInput {
             session_id: open.session_id,
             fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed: 1,
+            mode: RuntimeStepMode::Live,
             action: "advance".into(),
             payload: serde_json::json!({}),
         })
@@ -527,6 +541,9 @@ fn host_validates_save_and_restore_sections_before_accepting_state() {
         host.step(RuntimeStepInput {
             session_id: open.session_id.clone(),
             fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed: 1,
+            mode: RuntimeStepMode::Live,
             action: "advance".into(),
             payload: serde_json::json!({}),
         })
@@ -557,6 +574,9 @@ fn host_rejects_non_monotonic_fixed_steps_and_poisons_the_session() {
     let input = RuntimeStepInput {
         session_id: open.session_id.clone(),
         fixed_step: 1,
+        delta_ns: 16_666_667,
+        session_seed: 1,
+        mode: RuntimeStepMode::Live,
         action: "advance".into(),
         payload: serde_json::json!({}),
     };
@@ -593,6 +613,9 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
         .step(RuntimeStepInput {
             session_id: open.session_id.clone(),
             fixed_step: 2,
+            delta_ns: 16_666_667,
+            session_seed: 1,
+            mode: RuntimeStepMode::Live,
             action: "advance".into(),
             payload: serde_json::json!({}),
         })
@@ -620,6 +643,9 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
         .step(RuntimeStepInput {
             session_id: open.session_id.clone(),
             fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed: 1,
+            mode: RuntimeStepMode::Live,
             action: "panic".into(),
             payload: serde_json::json!({}),
         })
@@ -634,6 +660,118 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
         .code(),
         "ASTRA_RUNTIME_HOST_SESSION_POISONED"
     );
+    host.shutdown_session(open.session_id).unwrap();
+    host.destroy().unwrap();
+}
+
+#[test]
+fn host_enforces_seed_delta_and_live_provider_replay_boundaries_before_dispatch() {
+    let invalid_cases = [
+        (0, 1, RuntimeStepMode::Live, "ASTRA_RUNTIME_HOST_DELTA"),
+        (
+            16_666_667,
+            2,
+            RuntimeStepMode::Live,
+            "ASTRA_RUNTIME_HOST_SEED",
+        ),
+        (
+            16_666_667,
+            1,
+            RuntimeStepMode::Replay,
+            "ASTRA_RUNTIME_HOST_REPLAY_PROVIDER_BYPASS",
+        ),
+        (
+            16_666_667,
+            1,
+            RuntimeStepMode::RestoreContinuation,
+            "ASTRA_RUNTIME_HOST_STEP_MODE",
+        ),
+    ];
+    for (delta_ns, session_seed, mode, expected_code) in invalid_cases {
+        let schemas = RuntimeHostSchemaRegistry::new()
+            .allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+        let mut host =
+            ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas)
+                .unwrap();
+        let open = host
+            .open(RuntimeOpenRequest {
+                target_id: "test".into(),
+                profile: "release".into(),
+                locale: "und".into(),
+                seed: 1,
+                package_hash: "sha256:test".into(),
+                sections: vec![],
+            })
+            .unwrap();
+        let error = host
+            .step(RuntimeStepInput {
+                session_id: open.session_id,
+                fixed_step: 1,
+                delta_ns,
+                session_seed,
+                mode,
+                action: "advance".into(),
+                payload: serde_json::json!({}),
+            })
+            .unwrap_err();
+        assert_eq!(error.code(), expected_code);
+        host.cleanup_after_failure().unwrap();
+    }
+}
+
+#[test]
+fn host_resynchronizes_fixed_step_and_requires_restore_continuation() {
+    let schemas =
+        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+    let mut host =
+        ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
+    let open = host
+        .open(RuntimeOpenRequest {
+            target_id: "test".into(),
+            profile: "release".into(),
+            locale: "und".into(),
+            seed: 1,
+            package_hash: "sha256:test".into(),
+            sections: vec![],
+        })
+        .unwrap();
+    host.step(RuntimeStepInput {
+        session_id: open.session_id.clone(),
+        fixed_step: 1,
+        delta_ns: 16_666_667,
+        session_seed: 1,
+        mode: RuntimeStepMode::Live,
+        action: "advance".into(),
+        payload: serde_json::json!({}),
+    })
+    .unwrap();
+    let restored = host
+        .restore(RuntimeRestoreRequest {
+            session_id: open.session_id.clone(),
+            sections: vec![],
+        })
+        .unwrap();
+    assert_eq!(restored.restored_fixed_step, 0);
+    host.step(RuntimeStepInput {
+        session_id: open.session_id.clone(),
+        fixed_step: 1,
+        delta_ns: 16_666_667,
+        session_seed: 1,
+        mode: RuntimeStepMode::RestoreContinuation,
+        action: "advance".into(),
+        payload: serde_json::json!({}),
+    })
+    .unwrap();
+    host.step(RuntimeStepInput {
+        session_id: open.session_id.clone(),
+        fixed_step: 2,
+        delta_ns: 16_666_667,
+        session_seed: 1,
+        mode: RuntimeStepMode::Live,
+        action: "advance".into(),
+        payload: serde_json::json!({}),
+    })
+    .unwrap();
     host.shutdown_session(open.session_id).unwrap();
     host.destroy().unwrap();
 }
@@ -661,10 +799,16 @@ async fn async_host_supports_multiple_sessions_on_one_ordered_provider_worker() 
     let second = host.open(request(2)).await.unwrap();
     assert_ne!(first.session_id, second.session_id);
 
-    for session_id in [first.session_id.clone(), second.session_id.clone()] {
+    for (session_id, session_seed) in [
+        (first.session_id.clone(), 1),
+        (second.session_id.clone(), 2),
+    ] {
         host.step(RuntimeStepInput {
             session_id,
             fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed,
+            mode: RuntimeStepMode::Live,
             action: "advance".into(),
             payload: serde_json::json!({}),
         })
@@ -701,6 +845,9 @@ async fn async_host_timeout_poisons_the_provider_instance() {
         .step(RuntimeStepInput {
             session_id: open.session_id.clone(),
             fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed: 1,
+            mode: RuntimeStepMode::Live,
             action: "slow".into(),
             payload: serde_json::json!({}),
         })

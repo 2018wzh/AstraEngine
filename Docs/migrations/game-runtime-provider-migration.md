@@ -25,7 +25,7 @@
 - `probe`：校验 target/profile、package sections、scenario refs、mount policy 和 player route model。
 - `open`：创建 VN runtime cursor、policy state、presentation state 和 save section cursor。
 - `step`：推进 dialogue、choice、system page、wait、presentation command、audio command 和 Luau policy effect。
-- `save/restore`：读写 `vn.runtime_state` 和 `vn.policy_state`。
+- `save/restore`：产品主路径只读写唯一 `runtime.world`/`astra.runtime.save_blob.v2` section，保存完整 RuntimeSnapshot；拆分 VN state blob 只保留为 reference utility。
 - `package_sections`：继续输出 `vn.*` package sections。
 - `release_checks`：继续声明 `vn.commercial_baseline`、`vn.system_ui_profile`、`vn.advanced_presentation`、`player.full_playable` 等 check。
 

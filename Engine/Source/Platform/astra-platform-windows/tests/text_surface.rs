@@ -1,4 +1,4 @@
-#![cfg(target_os = "windows")]
+#![cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 
 use astra_core::Hash256;
 use astra_media::{

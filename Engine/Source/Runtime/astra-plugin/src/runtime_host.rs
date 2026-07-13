@@ -20,8 +20,8 @@ use astra_plugin_abi::{
     RuntimeOpenRequest, RuntimeOutputDomain, RuntimeOutputEnvelope, RuntimePrepareReport,
     RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderInstanceReport,
     RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
-    RuntimeSectionPayload, RuntimeShutdownReport, RuntimeStepInput, RuntimeStepOutput,
-    ValidatedRuntimeProviderSelection,
+    RuntimeSectionPayload, RuntimeShutdownReport, RuntimeStepInput, RuntimeStepMode,
+    RuntimeStepOutput, ValidatedRuntimeProviderSelection,
 };
 #[cfg(feature = "dynamic-abi")]
 use serde::{de::DeserializeOwned, Serialize};
@@ -53,10 +53,23 @@ pub trait ProductRuntimeProvider: Send {
     ) -> Result<RuntimeShutdownReport, String>;
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 struct SessionState {
+    seed: u64,
     last_fixed_step: Option<u64>,
+    next_step_mode: RuntimeStepMode,
     poisoned: bool,
+}
+
+impl SessionState {
+    fn opened(seed: u64) -> Self {
+        Self {
+            seed,
+            last_fixed_step: None,
+            next_step_mode: RuntimeStepMode::Live,
+            poisoned: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -389,6 +402,7 @@ impl ProductRuntimeHost {
             ));
         }
         self.validate_bound_request(&request.target_id, &request.profile)?;
+        let session_seed = request.seed;
         let report = call_provider("ASTRA_RUNTIME_HOST_OPEN", "open", || {
             self.provider.open(request)
         })
@@ -432,8 +446,10 @@ impl ProductRuntimeHost {
                 },
             ));
         }
-        self.sessions
-            .insert(report.session_id.0.clone(), SessionState::default());
+        self.sessions.insert(
+            report.session_id.0.clone(),
+            SessionState::opened(session_seed),
+        );
         self.state = HostState::Open;
         Ok(report)
     }
@@ -484,6 +500,37 @@ impl ProductRuntimeHost {
                 format!("runtime fixed step must be {expected_step}"),
             ));
         }
+        if input.delta_ns == 0 || input.delta_ns > 1_000_000_000 {
+            session.poisoned = true;
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_DELTA",
+                "runtime delta_ns must be within 1..=1000000000",
+            ));
+        }
+        if input.session_seed != session.seed {
+            session.poisoned = true;
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_SEED",
+                "runtime step seed does not match the opened session seed",
+            ));
+        }
+        if input.mode == RuntimeStepMode::Replay {
+            session.poisoned = true;
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_REPLAY_PROVIDER_BYPASS",
+                "provider-free replay cannot invoke a live runtime provider",
+            ));
+        }
+        if input.mode != session.next_step_mode {
+            session.poisoned = true;
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_STEP_MODE",
+                format!(
+                    "runtime step mode must be {:?} after the preceding lifecycle operation",
+                    session.next_step_mode
+                ),
+            ));
+        }
         let expected_session = input.session_id.clone();
         let fixed_step = input.fixed_step;
         let output = call_provider("ASTRA_RUNTIME_HOST_STEP", "step", || {
@@ -511,6 +558,10 @@ impl ProductRuntimeHost {
             .get_mut(&expected_session.0)
             .expect("validated runtime session must remain registered")
             .last_fixed_step = Some(fixed_step);
+        self.sessions
+            .get_mut(&expected_session.0)
+            .expect("validated runtime session must remain registered")
+            .next_step_mode = RuntimeStepMode::Live;
         Ok(output)
     }
 
@@ -560,6 +611,19 @@ impl ProductRuntimeHost {
                 "restore report session does not match the requested session",
             ));
         }
+        let session = self
+            .sessions
+            .get_mut(&session_id.0)
+            .expect("validated runtime session must remain registered");
+        if report.session_seed != session.seed {
+            session.poisoned = true;
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_RESTORE_SEED",
+                "restored runtime seed does not match the opened session seed",
+            ));
+        }
+        session.last_fixed_step = Some(report.restored_fixed_step);
+        session.next_step_mode = RuntimeStepMode::RestoreContinuation;
         Ok(report)
     }
 

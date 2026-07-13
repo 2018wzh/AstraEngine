@@ -26,7 +26,7 @@ AstraVN 作为 `NativeVnRuntimeProvider` 接入 [Game Runtime Provider](../contr
 | `astra-vn-presentation` | StageModel、layer/camera/video/audio/timeline/fallback、headless presentation execution、presentation provider manifest |
 | `astra-vn-commands` | standard command library、command schema、usage validation、command manifest |
 | `astra-vn-system` | system stories、save/config/backlog/gallery/replay/route chart/localization profile |
-| `astra-vn-save` | `vn.runtime_state`、`vn.policy_state` save sections、save blob、hash、migration glue |
+| `astra-vn-save` | 局部/reference VN state blob、hash 与 migration glue；产品 provider 的权威 save 是完整 `runtime.world` snapshot |
 | `astra-vn-package` | `vn.*` package section plans、profile manifest、commercial baseline、advanced presentation manifest、package evidence |
 | `astra-vn-plugin` | VN extension points、extension manifest、provider slot ids |
 | `astra-vn-editor` | Graph/Timeline authoring metadata、source round-trip metadata、NativeVN `RuntimeEditorMetadata` |

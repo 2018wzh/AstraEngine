@@ -688,9 +688,19 @@ pub struct RuntimeOpenReport {
 pub struct RuntimeStepInput {
     pub session_id: GameRuntimeSessionId,
     pub fixed_step: u64,
+    pub delta_ns: u64,
+    pub session_seed: u64,
+    pub mode: RuntimeStepMode,
     pub action: String,
-    #[serde(default)]
     pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeStepMode {
+    Live,
+    RestoreContinuation,
+    Replay,
 }
 
 #[derive(
@@ -896,6 +906,8 @@ pub struct RuntimeRestoreRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeRestoreReport {
     pub session_id: GameRuntimeSessionId,
+    pub restored_fixed_step: u64,
+    pub session_seed: u64,
     pub status: String,
     pub diagnostics: Vec<String>,
 }
