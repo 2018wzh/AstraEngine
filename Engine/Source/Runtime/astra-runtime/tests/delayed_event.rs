@@ -1,5 +1,6 @@
 use astra_runtime::{
     EventPayload, EventSource, PackageHandle, RuntimeConfig, RuntimeWorld, SaveRequest, TickInput,
+    TickRequest,
 };
 
 #[test]
@@ -36,7 +37,16 @@ fn delayed_events_survive_save_load_before_due_tick() {
     let mut loaded =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
     loaded.load(save).unwrap();
-    tick(&mut loaded, 2);
+    loaded
+        .tick(TickRequest::restore_continuation(
+            TickInput {
+                fixed_step: 2,
+                delta_ns: 16_666_667,
+                seed: 0,
+            },
+            vec![],
+        ))
+        .unwrap();
     tick(&mut loaded, 3);
     assert!(loaded.debug_session().event_trace().is_empty());
     tick(&mut loaded, 4);
@@ -48,10 +58,13 @@ fn delayed_events_survive_save_load_before_due_tick() {
 
 fn tick(world: &mut RuntimeWorld, fixed_step: u64) {
     world
-        .tick(TickInput {
-            fixed_step,
-            delta_ns: 16_666_667,
-            seed: 0,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step,
+                delta_ns: 16_666_667,
+                seed: 0,
+            },
+            Vec::new(),
+        ))
         .unwrap();
 }

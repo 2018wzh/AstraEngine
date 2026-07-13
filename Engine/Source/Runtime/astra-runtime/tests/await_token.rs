@@ -1,7 +1,7 @@
 use astra_core::StableId;
 use astra_runtime::{
-    AwaitKind, AwaitReplayPolicy, AwaitResult, AwaitToken, AwaitTokenId, PackageHandle,
-    RuntimeConfig, RuntimeWorld, TickInput,
+    AwaitKind, AwaitReplayPolicy, AwaitResult, AwaitToken, AwaitTokenId, OrderedTickIngress,
+    PackageHandle, RuntimeConfig, RuntimeWorld, TickIngress, TickInput, TickRequest,
 };
 
 #[test]
@@ -41,24 +41,28 @@ fn run_with_order(order: [u64; 2]) -> astra_runtime::TickReport {
             replay_policy: AwaitReplayPolicy::RecordedResult,
         })
         .unwrap();
-    world.submit_await_result(AwaitResult::custom(
-        token_for(order[0], token_a, token_b),
-        order[0],
-        1,
-        "done",
-    ));
-    world.submit_await_result(AwaitResult::custom(
-        token_for(order[1], token_a, token_b),
-        order[1],
-        1,
-        "done",
-    ));
-    world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 13,
+    let ingress = order
+        .into_iter()
+        .enumerate()
+        .map(|(index, sequence)| OrderedTickIngress {
+            sequence: index as u64 + 1,
+            payload: TickIngress::AwaitCompletion(AwaitResult::custom(
+                token_for(sequence, token_a, token_b),
+                sequence,
+                1,
+                "done",
+            )),
         })
+        .collect();
+    world
+        .tick(TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 13,
+            },
+            ingress,
+        ))
         .unwrap()
 }
 
@@ -105,25 +109,34 @@ fn await_timeout_materializes_deterministic_result() {
         .unwrap();
 
     world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 13,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 13,
+            },
+            Vec::new(),
+        ))
         .unwrap();
     world
-        .tick(TickInput {
-            fixed_step: 2,
-            delta_ns: 16_666_667,
-            seed: 13,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 2,
+                delta_ns: 16_666_667,
+                seed: 13,
+            },
+            Vec::new(),
+        ))
         .unwrap();
     let report = world
-        .tick(TickInput {
-            fixed_step: 3,
-            delta_ns: 16_666_667,
-            seed: 13,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 3,
+                delta_ns: 16_666_667,
+                seed: 13,
+            },
+            Vec::new(),
+        ))
         .unwrap();
 
     assert!(report
@@ -157,21 +170,40 @@ fn unknown_and_duplicate_await_results_are_diagnostic_only() {
             replay_policy: AwaitReplayPolicy::RecordedResult,
         })
         .unwrap();
-    world.submit_await_result(AwaitResult::custom(token_id, 1, 1, "done"));
-    world.submit_await_result(AwaitResult::custom(token_id, 1, 1, "done-again"));
-    world.submit_await_result(AwaitResult::custom(
-        AwaitTokenId(StableId::deterministic_v7(3, 2, 13)),
-        2,
-        1,
-        "unknown",
-    ));
+    let ingress = vec![
+        OrderedTickIngress {
+            sequence: 1,
+            payload: TickIngress::AwaitCompletion(AwaitResult::custom(token_id, 1, 1, "done")),
+        },
+        OrderedTickIngress {
+            sequence: 2,
+            payload: TickIngress::AwaitCompletion(AwaitResult::custom(
+                token_id,
+                1,
+                1,
+                "done-again",
+            )),
+        },
+        OrderedTickIngress {
+            sequence: 3,
+            payload: TickIngress::AwaitCompletion(AwaitResult::custom(
+                AwaitTokenId(StableId::deterministic_v7(3, 2, 13)),
+                2,
+                1,
+                "unknown",
+            )),
+        },
+    ];
 
     let report = world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 13,
-        })
+        .tick(TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 13,
+            },
+            ingress,
+        ))
         .unwrap();
 
     assert!(report
@@ -224,13 +256,23 @@ fn await_replay_policy_rejects_invalid_tokens_and_live_timeout_results() {
             replay_policy: AwaitReplayPolicy::DeterministicTimeout,
         })
         .unwrap();
-    world.submit_await_result(AwaitResult::custom(timeout_token, 1, 1, "live"));
     let report = world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 13,
-        })
+        .tick(TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 13,
+            },
+            vec![OrderedTickIngress {
+                sequence: 1,
+                payload: TickIngress::AwaitCompletion(AwaitResult::custom(
+                    timeout_token,
+                    1,
+                    1,
+                    "live",
+                )),
+            }],
+        ))
         .unwrap();
     assert!(report
         .diagnostics

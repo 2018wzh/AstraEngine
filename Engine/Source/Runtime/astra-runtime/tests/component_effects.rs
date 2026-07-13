@@ -97,11 +97,14 @@ fn install_machine(
 fn tick(world: &mut RuntimeWorld) -> astra_runtime::TickReport {
     world.emit_event(EventSource::Scenario, EventPayload::new("test.apply"));
     world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 0,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 0,
+            },
+            Vec::new(),
+        ))
         .unwrap()
 }
 

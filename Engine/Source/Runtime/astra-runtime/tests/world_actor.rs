@@ -52,11 +52,14 @@ fn world_actor_creates_component_and_stable_snapshot_hash() {
         )
         .unwrap();
     let report = world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 7,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 7,
+            },
+            Vec::new(),
+        ))
         .unwrap();
 
     let debug = world.debug_session();

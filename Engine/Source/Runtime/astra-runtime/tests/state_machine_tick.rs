@@ -63,11 +63,14 @@ fn run_once() -> astra_runtime::TickReport {
         .unwrap();
     world.emit_event(EventSource::Scenario, EventPayload::new("scenario.start"));
     world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 11,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 11,
+            },
+            Vec::new(),
+        ))
         .unwrap()
 }
 
@@ -118,11 +121,14 @@ fn state_machine_presentation_action_supports_generic_commands() {
         })
         .unwrap();
     world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 11,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 11,
+            },
+            Vec::new(),
+        ))
         .unwrap();
     let presentation = world.debug_session().presentation_trace();
     assert_eq!(
@@ -190,11 +196,14 @@ fn state_machine_runs_transition_actions_in_order() {
 
     world.emit_event(EventSource::Scenario, EventPayload::new("scenario.start"));
     world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 11,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 11,
+            },
+            Vec::new(),
+        ))
         .unwrap();
 
     let snapshot = world.snapshot();
@@ -297,11 +306,14 @@ fn action_failure_keeps_machine_state_and_allows_other_machines() {
 
     world.emit_event(EventSource::Scenario, EventPayload::new("scenario.start"));
     let report = world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 11,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 11,
+            },
+            Vec::new(),
+        ))
         .unwrap();
 
     assert!(report
@@ -431,18 +443,24 @@ fn terminal_state_marks_machine_completed_and_blocks_future_ticks() {
         .unwrap();
 
     world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 11,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 11,
+            },
+            Vec::new(),
+        ))
         .unwrap();
     world
-        .tick(TickInput {
-            fixed_step: 2,
-            delta_ns: 16_666_667,
-            seed: 11,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 2,
+                delta_ns: 16_666_667,
+                seed: 11,
+            },
+            Vec::new(),
+        ))
         .unwrap();
 
     let machines = world.debug_session().state_machines(actor);
@@ -510,11 +528,14 @@ fn state_machine_runs_transitions_until_it_reaches_a_stable_state() {
         .unwrap();
 
     world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 0,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 0,
+            },
+            Vec::new(),
+        ))
         .unwrap();
 
     let machine = world.debug_session().state_machines(actor).remove(0);
@@ -571,11 +592,14 @@ fn state_machine_cycle_blocks_without_committing_partial_progress() {
         .unwrap();
 
     let report = world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 0,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 0,
+            },
+            Vec::new(),
+        ))
         .unwrap();
 
     assert!(report

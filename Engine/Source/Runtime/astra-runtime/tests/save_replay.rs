@@ -4,10 +4,10 @@ use astra_package::{
 };
 use astra_runtime::{
     AwaitKind, AwaitReplayPolicy, AwaitToken, AwaitTokenId, EventId, EventPayload, EventSource,
-    MigrationManifest, MigrationManifestEntry, PackageHandle, PlayerInput, PresentationCommand,
-    ProviderReplayOutput, ReplayHashCheckpoint, ReplayTick, RuntimeConfig, RuntimeEvent,
-    RuntimeReplayTranscript, RuntimeWorld, SaveBlob, SaveRequest, SerializedEffectEnvelope,
-    TickInput,
+    MigrationManifest, MigrationManifestEntry, OrderedTickIngress, PackageHandle, PlayerInput,
+    PresentationCommand, ProviderReplayOutput, ReplayHashCheckpoint, ReplayTick, RuntimeConfig,
+    RuntimeEvent, RuntimeReplayTranscript, RuntimeWorld, SaveBlob, SaveRequest,
+    SerializedEffectEnvelope, TickIngress, TickInput, TickRequest,
 };
 
 #[test]
@@ -60,11 +60,14 @@ fn save_replay_loads_hash_and_blocks_missing_migrator() {
     .unwrap();
     world.create_actor("save-test", vec![]);
     world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 17,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 17,
+            },
+            Vec::new(),
+        ))
         .unwrap();
     let before = world.state_hash();
     let save = world.save(SaveRequest::default()).unwrap();
@@ -81,6 +84,136 @@ fn save_replay_loads_hash_and_blocks_missing_migrator() {
     assert!(unsupported
         .to_string()
         .contains("ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED"));
+}
+
+#[test]
+fn restored_world_requires_exactly_one_restore_continuation_tick() {
+    let config = RuntimeConfig {
+        seed: 17,
+        required_slots: vec![],
+    };
+    let world = RuntimeWorld::create(config.clone(), PackageHandle::default()).unwrap();
+    let save = world.save(SaveRequest::default()).unwrap();
+    let mut restored = RuntimeWorld::create(config, PackageHandle::default()).unwrap();
+    restored.load(save).unwrap();
+    let checkpoint = postcard::to_allocvec(&restored.snapshot()).unwrap();
+
+    let live_error = restored
+        .tick(TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 17,
+            },
+            vec![],
+        ))
+        .unwrap_err();
+    assert!(live_error
+        .to_string()
+        .contains("ASTRA_RUNTIME_TICK_MODE_INVALID"));
+    assert_eq!(
+        postcard::to_allocvec(&restored.snapshot()).unwrap(),
+        checkpoint
+    );
+
+    restored
+        .tick(TickRequest::restore_continuation(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 17,
+            },
+            vec![],
+        ))
+        .unwrap();
+    let second_restore = restored
+        .tick(TickRequest::restore_continuation(
+            TickInput {
+                fixed_step: 2,
+                delta_ns: 16_666_667,
+                seed: 17,
+            },
+            vec![],
+        ))
+        .unwrap_err();
+    assert!(second_restore
+        .to_string()
+        .contains("ASTRA_RUNTIME_TICK_MODE_INVALID"));
+}
+
+#[test]
+fn replay_rejects_old_schema_and_live_output_without_partial_world_changes() {
+    let config = RuntimeConfig {
+        seed: 37,
+        required_slots: vec![],
+    };
+    let mut world = RuntimeWorld::create(config, PackageHandle::default()).unwrap();
+    world.create_actor("original", vec![]);
+    let original = postcard::to_allocvec(&world.snapshot()).unwrap();
+    let checkpoint = RuntimeWorld::create(
+        RuntimeConfig {
+            seed: 37,
+            required_slots: vec![],
+        },
+        PackageHandle::default(),
+    )
+    .unwrap()
+    .snapshot();
+    let expected = ReplayHashCheckpoint {
+        step: 1,
+        state_hash: astra_core::Hash128::from_blake3(b"unused"),
+        event_hash: astra_core::Hash128::from_blake3(b"unused"),
+        presentation_hash: astra_core::Hash128::from_blake3(b"unused"),
+    };
+
+    let old_schema = world
+        .replay(RuntimeReplayTranscript {
+            schema: "astra.runtime_replay_transcript.v1".to_string(),
+            checkpoint: checkpoint.clone(),
+            ticks: vec![],
+        })
+        .unwrap_err();
+    assert!(old_schema
+        .to_string()
+        .contains("ASTRA_RUNTIME_REPLAY_SCHEMA"));
+    assert_eq!(postcard::to_allocvec(&world.snapshot()).unwrap(), original);
+
+    let payload = vec![];
+    let live_output = ProviderReplayOutput {
+        provider_id: "provider.fixture".to_string(),
+        session_id: "session.fixture".to_string(),
+        schema: "provider.output.v1".to_string(),
+        payload_hash: Hash256::from_sha256(&payload),
+        payload,
+        events: vec![],
+        presentation: vec![],
+        awaits: vec![],
+        effects: vec![],
+    };
+    let error = world
+        .replay(RuntimeReplayTranscript {
+            schema: "astra.runtime_replay_transcript.v2".to_string(),
+            checkpoint,
+            ticks: vec![ReplayTick {
+                request: TickRequest::replay(
+                    TickInput {
+                        fixed_step: 1,
+                        delta_ns: 16_666_667,
+                        seed: 37,
+                    },
+                    vec![OrderedTickIngress {
+                        sequence: 1,
+                        payload: TickIngress::LiveProviderOutput(live_output),
+                    }],
+                ),
+                expected,
+            }],
+        })
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_RUNTIME_REPLAY_LIVE_OUTPUT_FORBIDDEN"));
+    assert_eq!(postcard::to_allocvec(&world.snapshot()).unwrap(), original);
 }
 
 #[test]
@@ -112,11 +245,14 @@ fn save_load_continues_the_stable_id_sequence() {
     let mut uninterrupted = RuntimeWorld::create(config.clone(), PackageHandle::default()).unwrap();
     uninterrupted.create_actor("before-save", vec![]);
     uninterrupted
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: config.seed,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: config.seed,
+            },
+            Vec::new(),
+        ))
         .unwrap();
     let save = uninterrupted.save(SaveRequest::default()).unwrap();
     let expected = uninterrupted.create_actor("after-save", vec![]);
@@ -144,11 +280,14 @@ fn save_load_preserves_pending_events_trace_and_sequence() {
         payload: EventPayload::new("future.event"),
     });
     world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: config.seed,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: config.seed,
+            },
+            Vec::new(),
+        ))
         .unwrap();
     let save = world.save(SaveRequest::default()).unwrap();
 
@@ -164,11 +303,14 @@ fn save_load_preserves_pending_events_trace_and_sequence() {
     });
 
     restored
-        .tick(TickInput {
-            fixed_step: 2,
-            delta_ns: 16_666_667,
-            seed: 29,
-        })
+        .tick(TickRequest::restore_continuation(
+            TickInput {
+                fixed_step: 2,
+                delta_ns: 16_666_667,
+                seed: 29,
+            },
+            vec![],
+        ))
         .unwrap();
     let trace = restored.debug_session().event_trace();
     assert_eq!(trace.len(), 2);
@@ -190,22 +332,32 @@ fn replay_consumes_checkpoint_and_ordered_player_input_transcript() {
         kind: "player.advance".to_string(),
         payload: EventPayload::new("player.advance"),
     };
-    recorded.apply_input(player_input.clone()).unwrap();
     let tick = TickInput {
         fixed_step: 1,
         delta_ns: 16_666_667,
         seed: 31,
     };
-    let expected = recorded.tick(tick).unwrap();
+    let expected = recorded
+        .tick(TickRequest::live(
+            tick,
+            vec![OrderedTickIngress {
+                sequence: 1,
+                payload: TickIngress::PlayerInput(player_input.clone()),
+            }],
+        ))
+        .unwrap();
 
     let transcript = RuntimeReplayTranscript {
-        schema: "astra.runtime_replay_transcript.v1".to_string(),
+        schema: "astra.runtime_replay_transcript.v2".to_string(),
         checkpoint,
         ticks: vec![ReplayTick {
-            tick,
-            player_inputs: vec![player_input],
-            await_results: vec![],
-            provider_outputs: vec![],
+            request: TickRequest::replay(
+                tick,
+                vec![OrderedTickIngress {
+                    sequence: 1,
+                    payload: TickIngress::PlayerInput(player_input),
+                }],
+            ),
             expected: ReplayHashCheckpoint::from(&expected),
         }],
     };
@@ -257,24 +409,32 @@ fn replay_applies_hash_validated_provider_output_without_a_live_provider() {
         )
         .unwrap()],
     };
-    recorded
-        .apply_recorded_provider_output(1, output.clone())
-        .unwrap();
     let tick = TickInput {
         fixed_step: 1,
         delta_ns: 16_666_667,
         seed: 37,
     };
-    let expected = recorded.tick(tick).unwrap();
+    let expected = recorded
+        .tick(TickRequest::live(
+            tick,
+            vec![OrderedTickIngress {
+                sequence: 1,
+                payload: TickIngress::LiveProviderOutput(output.clone()),
+            }],
+        ))
+        .unwrap();
 
     let transcript = RuntimeReplayTranscript {
-        schema: "astra.runtime_replay_transcript.v1".to_string(),
+        schema: "astra.runtime_replay_transcript.v2".to_string(),
         checkpoint,
         ticks: vec![ReplayTick {
-            tick,
-            player_inputs: vec![],
-            await_results: vec![],
-            provider_outputs: vec![output],
+            request: TickRequest::replay(
+                tick,
+                vec![OrderedTickIngress {
+                    sequence: 1,
+                    payload: TickIngress::RecordedProviderOutput(output),
+                }],
+            ),
             expected: ReplayHashCheckpoint::from(&expected),
         }],
     };
@@ -303,7 +463,33 @@ fn replay_blocks_provider_output_payload_hash_mismatch() {
         effects: vec![],
     };
 
-    let error = world.apply_recorded_provider_output(1, output).unwrap_err();
+    let checkpoint = world.snapshot();
+    let expected = ReplayHashCheckpoint {
+        step: 1,
+        state_hash: world.state_hash(),
+        event_hash: world.event_hash(),
+        presentation_hash: world.presentation_hash(),
+    };
+    let error = world
+        .replay(RuntimeReplayTranscript {
+            schema: "astra.runtime_replay_transcript.v2".to_string(),
+            checkpoint,
+            ticks: vec![ReplayTick {
+                request: TickRequest::replay(
+                    TickInput {
+                        fixed_step: 1,
+                        delta_ns: 16_666_667,
+                        seed: 0,
+                    },
+                    vec![OrderedTickIngress {
+                        sequence: 1,
+                        payload: TickIngress::RecordedProviderOutput(output),
+                    }],
+                ),
+                expected,
+            }],
+        })
+        .unwrap_err();
     assert!(error
         .to_string()
         .contains("ASTRA_RUNTIME_PROVIDER_OUTPUT_HASH"));

@@ -59,7 +59,7 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
     let first = provider
         .step(RuntimeStepInput {
             session_id: open.session_id.clone(),
-            fixed_step: 0,
+            fixed_step: 1,
             action: "launch_default".to_string(),
             payload: serde_json::json!({}),
         })
@@ -109,7 +109,7 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
     let choice = provider
         .step(RuntimeStepInput {
             session_id: open.session_id.clone(),
-            fixed_step: 1,
+            fixed_step: 2,
             action: "advance".to_string(),
             payload: serde_json::json!({}),
         })
@@ -126,7 +126,7 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
     let selected = provider
         .step(RuntimeStepInput {
             session_id: open.session_id.clone(),
-            fixed_step: 2,
+            fixed_step: 3,
             action: "choose".to_string(),
             payload: serde_json::json!({ "option_id": "choice.library" }),
         })
@@ -157,7 +157,7 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
     provider
         .step(RuntimeStepInput {
             session_id: open.session_id.clone(),
-            fixed_step: 3,
+            fixed_step: 4,
             action: "advance".to_string(),
             payload: serde_json::json!({}),
         })

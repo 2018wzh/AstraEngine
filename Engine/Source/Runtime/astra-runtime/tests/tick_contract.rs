@@ -1,6 +1,8 @@
+use astra_core::Hash256;
 use astra_runtime::{
-    EngineModuleSlot, ModuleBindingContext, PackageHandle, RuntimeConfig, RuntimeWorld, TickInput,
-    ValidatedModuleBinding,
+    EngineModuleSlot, EventPayload, ModuleBindingContext, OrderedTickIngress, PackageHandle,
+    PlayerInput, ProviderReplayOutput, RuntimeConfig, RuntimeWorld, TickIngress, TickInput,
+    TickMode, TickRequest, ValidatedModuleBinding,
 };
 
 fn input(step: u64, seed: u64) -> TickInput {
@@ -9,6 +11,10 @@ fn input(step: u64, seed: u64) -> TickInput {
         delta_ns: 16_666_667,
         seed,
     }
+}
+
+fn request(input: TickInput) -> TickRequest {
+    TickRequest::live(input, Vec::new())
 }
 
 fn binding_context(package_id: &str) -> ModuleBindingContext {
@@ -35,7 +41,7 @@ fn tick_rejects_duplicate_gap_regression_delta_and_seed_without_mutation() {
     )
     .unwrap();
     world.create_actor("system", vec![]);
-    world.tick(input(1, 41)).unwrap();
+    world.tick(request(input(1, 41))).unwrap();
     let checkpoint = postcard::to_allocvec(&world.snapshot()).unwrap();
 
     let cases = [
@@ -53,14 +59,14 @@ fn tick_rejects_duplicate_gap_regression_delta_and_seed_without_mutation() {
         input(2, 42),
     ];
     for invalid in cases {
-        assert!(world.tick(invalid).is_err());
+        assert!(world.tick(request(invalid)).is_err());
         assert_eq!(
             postcard::to_allocvec(&world.snapshot()).unwrap(),
             checkpoint
         );
     }
 
-    assert_eq!(world.tick(input(2, 41)).unwrap().step, 2);
+    assert_eq!(world.tick(request(input(2, 41))).unwrap().step, 2);
 }
 
 #[test]
@@ -74,7 +80,7 @@ fn missing_required_module_blocks_before_step_or_id_state_changes() {
     )
     .unwrap();
     let checkpoint = postcard::to_allocvec(&world.snapshot()).unwrap();
-    let error = world.tick(input(1, 7)).unwrap_err();
+    let error = world.tick(request(input(1, 7))).unwrap_err();
     assert!(error.to_string().contains("ASTRA_RUNTIME_MODULE_MISSING"));
     assert_eq!(
         postcard::to_allocvec(&world.snapshot()).unwrap(),
@@ -136,4 +142,156 @@ fn module_mount_requires_matching_explicit_packaged_binding_and_unique_slot() {
     )
     .unwrap();
     assert!(world.mount_module(slot, duplicate).is_err());
+}
+
+#[test]
+fn tick_rejects_invalid_ingress_order_and_mode_without_mutation() {
+    let mut world = RuntimeWorld::create(
+        RuntimeConfig {
+            seed: 41,
+            required_slots: vec![],
+        },
+        PackageHandle::default(),
+    )
+    .unwrap();
+    let checkpoint = postcard::to_allocvec(&world.snapshot()).unwrap();
+    let player_input = || {
+        TickIngress::PlayerInput(PlayerInput {
+            kind: "advance".to_string(),
+            payload: EventPayload::default(),
+        })
+    };
+
+    for ingress in [
+        vec![OrderedTickIngress {
+            sequence: 0,
+            payload: player_input(),
+        }],
+        vec![
+            OrderedTickIngress {
+                sequence: 1,
+                payload: player_input(),
+            },
+            OrderedTickIngress {
+                sequence: 1,
+                payload: player_input(),
+            },
+        ],
+        vec![
+            OrderedTickIngress {
+                sequence: 2,
+                payload: player_input(),
+            },
+            OrderedTickIngress {
+                sequence: 1,
+                payload: player_input(),
+            },
+        ],
+    ] {
+        let error = world
+            .tick(TickRequest::live(input(1, 41), ingress))
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("ASTRA_RUNTIME_TICK_INGRESS_ORDER_INVALID"));
+        assert_eq!(
+            postcard::to_allocvec(&world.snapshot()).unwrap(),
+            checkpoint
+        );
+    }
+
+    let recorded = ProviderReplayOutput {
+        provider_id: "provider.fixture".to_string(),
+        session_id: "session.fixture".to_string(),
+        schema: "provider.output.v1".to_string(),
+        payload_hash: Hash256::from_sha256(&[]),
+        payload: vec![],
+        events: vec![],
+        presentation: vec![],
+        awaits: vec![],
+        effects: vec![],
+    };
+    let error = world
+        .tick(TickRequest::live(
+            input(1, 41),
+            vec![OrderedTickIngress {
+                sequence: 1,
+                payload: TickIngress::RecordedProviderOutput(recorded.clone()),
+            }],
+        ))
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_RUNTIME_LIVE_RECORDED_OUTPUT_FORBIDDEN"));
+    assert_eq!(
+        postcard::to_allocvec(&world.snapshot()).unwrap(),
+        checkpoint
+    );
+
+    let error = world
+        .tick(TickRequest {
+            timing: input(1, 41),
+            mode: TickMode::Replay,
+            ingress: vec![OrderedTickIngress {
+                sequence: 1,
+                payload: TickIngress::LiveProviderOutput(recorded),
+            }],
+        })
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_RUNTIME_TICK_MODE_INVALID"));
+    assert_eq!(
+        postcard::to_allocvec(&world.snapshot()).unwrap(),
+        checkpoint
+    );
+}
+
+#[test]
+fn tick_rolls_back_all_prior_ingress_when_provider_output_is_invalid() {
+    let mut world = RuntimeWorld::create(
+        RuntimeConfig {
+            seed: 41,
+            required_slots: vec![],
+        },
+        PackageHandle::default(),
+    )
+    .unwrap();
+    let checkpoint = postcard::to_allocvec(&world.snapshot()).unwrap();
+    let error = world
+        .tick(TickRequest::live(
+            input(1, 41),
+            vec![
+                OrderedTickIngress {
+                    sequence: 1,
+                    payload: TickIngress::PlayerInput(PlayerInput {
+                        kind: "advance".to_string(),
+                        payload: EventPayload::default(),
+                    }),
+                },
+                OrderedTickIngress {
+                    sequence: 2,
+                    payload: TickIngress::LiveProviderOutput(ProviderReplayOutput {
+                        provider_id: "provider.fixture".to_string(),
+                        session_id: "session.fixture".to_string(),
+                        schema: "provider.output.v1".to_string(),
+                        payload_hash: Hash256::from_sha256(b"different"),
+                        payload: vec![],
+                        events: vec![],
+                        presentation: vec![],
+                        awaits: vec![],
+                        effects: vec![],
+                    }),
+                },
+            ],
+        ))
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_RUNTIME_PROVIDER_OUTPUT_HASH"));
+    assert_eq!(
+        postcard::to_allocvec(&world.snapshot()).unwrap(),
+        checkpoint
+    );
+    assert!(world.debug_session().event_trace().is_empty());
 }

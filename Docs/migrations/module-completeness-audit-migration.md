@@ -186,7 +186,7 @@
 
 **迁移要求：** 引入 typed `EngineModuleSlot`/provider reference 或 host-owned binding token；mount 必须返回错误并验证 registry selection、capability、package/profile eligibility 和 fingerprint。tick 必须明确允许的首 tick、连续 tick、恢复 tick、重复 tick 和 replay tick，非法序列必须返回稳定 diagnostic；`delta_ns`、seed 和 fixed step 的语义必须写入 contract 并有负向测试。
 
-**2026-07-13 修补进度：** Runtime 已改用 `EngineModuleSlot + ValidatedModuleBinding`，显式阻断未选择、非 packaged、slot/context mismatch 和重复挂载；binding context 已固化 package、target、profile、capability、engine version 与 rustc/feature/ABI fingerprint。tick 已阻断重复、回退、跳步、非法 delta、seed mismatch 和缺 required slot，并用 tick 前 snapshot 保证错误不部分提交。`runtime.world` 升为 `2.0.0`，旧布局稳定拒绝。`Engine/Source/Runtime/astra-runtime/tests/tick_contract.rs` 覆盖上述负向路径。ordered input/await completion 与 replay mode 尚未合并进单次 typed tick transaction，P1-007 暂不关闭。
+**2026-07-13 修补进度：** Runtime 已改用 `EngineModuleSlot + ValidatedModuleBinding`，显式阻断未选择、非 packaged、slot/context mismatch 和重复挂载；binding context 已固化 package、target、profile、capability、engine version 与 rustc/feature/ABI fingerprint。`RuntimeWorld::tick` 只接收 typed `TickRequest`，ordered player input、Await completion、live/recorded provider output 在同一事务提交；live、restore continuation、replay mode 被严格隔离，旧的 tick 外 input/await/provider output 公开旁路已删除。tick 阻断 ingress 乱序、重复/回退/跳步、非法 delta、seed mismatch 和缺 required slot，任一失败恢复 tick 前 snapshot；整个 replay transcript 失败也恢复 replay 调用前 world。`runtime.world` 为 `2.0.0`、replay transcript 为 `v2`，旧布局稳定拒绝。`tick_contract.rs` 与 `save_replay.rs` 覆盖负向路径。Runtime 单体缺口已关闭；release validator 与 registry 共用 binding validator 的剩余工作计入 P1-008，因此 P1-007 可关闭。
 
 ### P1-008：ExtensionRegistry 的公开 `select()` 忽略显式 binding
 

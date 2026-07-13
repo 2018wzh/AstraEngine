@@ -222,6 +222,64 @@ pub struct TickInput {
     pub seed: u64,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TickMode {
+    #[default]
+    Live,
+    RestoreContinuation,
+    Replay,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct OrderedTickIngress {
+    pub sequence: u64,
+    pub payload: TickIngress,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum TickIngress {
+    PlayerInput(PlayerInput),
+    AwaitCompletion(AwaitResult),
+    LiveProviderOutput(ProviderReplayOutput),
+    RecordedProviderOutput(ProviderReplayOutput),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TickRequest {
+    pub timing: TickInput,
+    pub mode: TickMode,
+    #[serde(default)]
+    pub ingress: Vec<OrderedTickIngress>,
+}
+
+impl TickRequest {
+    pub fn live(timing: TickInput, ingress: Vec<OrderedTickIngress>) -> Self {
+        Self {
+            timing,
+            mode: TickMode::Live,
+            ingress,
+        }
+    }
+
+    pub fn replay(timing: TickInput, ingress: Vec<OrderedTickIngress>) -> Self {
+        Self {
+            timing,
+            mode: TickMode::Replay,
+            ingress,
+        }
+    }
+
+    pub fn restore_continuation(timing: TickInput, ingress: Vec<OrderedTickIngress>) -> Self {
+        Self {
+            timing,
+            mode: TickMode::RestoreContinuation,
+            ingress,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TickReport {
     pub step: u64,
@@ -273,6 +331,7 @@ pub struct RuntimeWorld {
     diagnostics: Vec<Diagnostic>,
     mounted_modules: BTreeMap<String, ModuleBindingSnapshot>,
     step: u64,
+    required_tick_mode: TickMode,
 }
 
 impl RuntimeWorld {
@@ -306,6 +365,7 @@ impl RuntimeWorld {
             diagnostics: Vec::new(),
             mounted_modules: BTreeMap::new(),
             step: 0,
+            required_tick_mode: TickMode::Live,
         })
     }
 
@@ -582,7 +642,7 @@ impl RuntimeWorld {
         });
     }
 
-    pub fn submit_await_result(&mut self, result: AwaitResult) {
+    fn submit_await_result(&mut self, result: AwaitResult) {
         debug!(
             token_id = ?result.token_id,
             sequence = result.sequence,
@@ -603,7 +663,7 @@ impl RuntimeWorld {
         self.awaits.insert(token).map_err(RuntimeError::diagnostic)
     }
 
-    pub fn apply_recorded_provider_output(
+    fn apply_provider_output(
         &mut self,
         step: u64,
         output: ProviderReplayOutput,
@@ -671,7 +731,7 @@ impl RuntimeWorld {
         Ok(())
     }
 
-    pub fn apply_input(&mut self, input: PlayerInput) -> Result<(), RuntimeError> {
+    fn apply_input(&mut self, input: PlayerInput) -> Result<(), RuntimeError> {
         let mut payload = input.payload;
         if payload.kind.is_empty() {
             payload.kind = input.kind;
@@ -680,11 +740,31 @@ impl RuntimeWorld {
         Ok(())
     }
 
-    pub fn tick(&mut self, input: TickInput) -> Result<TickReport, RuntimeError> {
-        self.validate_tick_input(input)?;
+    pub fn tick(&mut self, request: TickRequest) -> Result<TickReport, RuntimeError> {
+        self.validate_tick_request(&request)?;
         let checkpoint = self.snapshot();
         let diagnostics = self.diagnostics.clone();
-        match self.tick_validated(input) {
+        let result = (|| {
+            for ingress in request.ingress {
+                match ingress.payload {
+                    TickIngress::PlayerInput(input) => self.apply_input(input)?,
+                    TickIngress::AwaitCompletion(result) => self.submit_await_result(result),
+                    TickIngress::LiveProviderOutput(output) => {
+                        self.apply_provider_output(request.timing.fixed_step, output)?
+                    }
+                    TickIngress::RecordedProviderOutput(output) => {
+                        self.apply_provider_output(request.timing.fixed_step, output)?
+                    }
+                }
+            }
+            let report = self.tick_validated(request.timing)?;
+            self.required_tick_mode = match request.mode {
+                TickMode::Replay => TickMode::Replay,
+                TickMode::Live | TickMode::RestoreContinuation => TickMode::Live,
+            };
+            Ok(report)
+        })();
+        match result {
             Ok(report) => Ok(report),
             Err(error) => {
                 self.restore_snapshot(checkpoint);
@@ -694,7 +774,44 @@ impl RuntimeWorld {
         }
     }
 
-    fn validate_tick_input(&self, input: TickInput) -> Result<(), RuntimeError> {
+    fn validate_tick_request(&self, request: &TickRequest) -> Result<(), RuntimeError> {
+        let input = request.timing;
+        if request.mode != self.required_tick_mode {
+            return Err(RuntimeError::diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_TICK_MODE_INVALID",
+                    "runtime tick mode does not match world lifecycle state",
+                )
+                .with_field("expected_mode", format!("{:?}", self.required_tick_mode))
+                .with_field("actual_mode", format!("{:?}", request.mode)),
+            ));
+        }
+        let mut previous_sequence = 0;
+        for ingress in &request.ingress {
+            if ingress.sequence == 0 || ingress.sequence <= previous_sequence {
+                return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                    "ASTRA_RUNTIME_TICK_INGRESS_ORDER_INVALID",
+                    "tick ingress sequence must be non-zero and strictly increasing",
+                )));
+            }
+            if matches!(ingress.payload, TickIngress::RecordedProviderOutput(_))
+                && request.mode != TickMode::Replay
+            {
+                return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                    "ASTRA_RUNTIME_LIVE_RECORDED_OUTPUT_FORBIDDEN",
+                    "live tick cannot consume recorded provider output",
+                )));
+            }
+            if matches!(ingress.payload, TickIngress::LiveProviderOutput(_))
+                && request.mode == TickMode::Replay
+            {
+                return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                    "ASTRA_RUNTIME_REPLAY_LIVE_OUTPUT_FORBIDDEN",
+                    "replay tick cannot consume live provider output",
+                )));
+            }
+            previous_sequence = ingress.sequence;
+        }
         let expected_step = self.step.checked_add(1).ok_or_else(|| {
             RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_TICK_STEP_OVERFLOW",
@@ -881,6 +998,7 @@ impl RuntimeWorld {
         debug!("runtime.load.with_registry");
         let snapshot = crate::save::read_runtime_save(&save, registry)?;
         self.restore_snapshot(snapshot);
+        self.required_tick_mode = TickMode::RestoreContinuation;
         let report = LoadReport {
             state_hash: self.state_hash(),
         };
@@ -909,42 +1027,46 @@ impl RuntimeWorld {
         &mut self,
         replay: RuntimeReplayTranscript,
     ) -> Result<ReplayReport, RuntimeError> {
-        if replay.schema != "astra.runtime_replay_transcript.v1" {
+        if replay.schema != "astra.runtime_replay_transcript.v2" {
             return Err(RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_REPLAY_SCHEMA",
                 "runtime replay transcript schema is invalid",
             )));
         }
         info!(input_count = replay.ticks.len(), "runtime.replay.start");
-        self.restore_snapshot(replay.checkpoint);
-        for entry in replay.ticks {
-            for input in entry.player_inputs {
-                self.apply_input(input)?;
+        let original = self.snapshot();
+        let original_mode = self.required_tick_mode;
+        let result = (|| {
+            self.restore_snapshot(replay.checkpoint);
+            self.required_tick_mode = TickMode::Replay;
+            for entry in replay.ticks {
+                let report = self.tick(entry.request)?;
+                let actual = crate::ReplayHashCheckpoint::from(&report);
+                if actual != entry.expected {
+                    return Err(RuntimeError::diagnostic(
+                        Diagnostic::blocking(
+                            "ASTRA_RUNTIME_REPLAY_HASH_MISMATCH",
+                            "runtime replay hash checkpoint does not match the transcript",
+                        )
+                        .with_field("step", report.step.to_string())
+                        .with_field("expected_state_hash", entry.expected.state_hash.to_string())
+                        .with_field("actual_state_hash", report.state_hash.to_string()),
+                    ));
+                }
             }
-            for output in entry.provider_outputs {
-                self.apply_recorded_provider_output(entry.tick.fixed_step, output)?;
+            Ok(ReplayReport {
+                state_hash: self.state_hash(),
+                event_hash: self.event_hash(),
+                presentation_hash: self.presentation_hash(),
+            })
+        })();
+        let report = match result {
+            Ok(report) => report,
+            Err(error) => {
+                self.restore_snapshot(original);
+                self.required_tick_mode = original_mode;
+                return Err(error);
             }
-            for result in entry.await_results {
-                self.submit_await_result(result);
-            }
-            let report = self.tick(entry.tick)?;
-            let actual = crate::ReplayHashCheckpoint::from(&report);
-            if actual != entry.expected {
-                return Err(RuntimeError::diagnostic(
-                    Diagnostic::blocking(
-                        "ASTRA_RUNTIME_REPLAY_HASH_MISMATCH",
-                        "runtime replay hash checkpoint does not match the transcript",
-                    )
-                    .with_field("step", report.step.to_string())
-                    .with_field("expected_state_hash", entry.expected.state_hash.to_string())
-                    .with_field("actual_state_hash", report.state_hash.to_string()),
-                ));
-            }
-        }
-        let report = ReplayReport {
-            state_hash: self.state_hash(),
-            event_hash: self.event_hash(),
-            presentation_hash: self.presentation_hash(),
         };
         info!(
             state_hash = %report.state_hash,

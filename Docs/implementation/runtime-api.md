@@ -39,7 +39,7 @@ impl RuntimeWorld {
     pub fn unregister_action_provider(&mut self, provider_id: &str);
     pub fn schedule_event(&mut self, due_tick: u64, source: EventSource, payload: EventPayload) -> DelayedEventId;
     pub fn cancel_delayed_event(&mut self, id: DelayedEventId) -> bool;
-    pub fn tick(&mut self, input: TickInput) -> Result<TickReport, RuntimeError>;
+    pub fn tick(&mut self, request: TickRequest) -> Result<TickReport, RuntimeError>;
     pub fn save(&self, request: SaveRequest) -> Result<SaveBlob, RuntimeError>;
     pub fn load(&mut self, save: SaveBlob) -> Result<LoadReport, RuntimeError>;
     pub fn replay(&mut self, replay: ReplayInput) -> Result<ReplayReport, RuntimeError>;
@@ -47,7 +47,7 @@ impl RuntimeWorld {
 }
 ```
 
-`mount_module` 只接收 typed slot 和经过 registry selection、packaged eligibility、capability、package/target/profile identity、engine/rustc/feature/ABI fingerprint 校验的 binding token，不接收 provider 字符串或 native handle。缺失必需 slot、重复挂载、slot/token 不一致和 context mismatch 都是 blocking diagnostic。`tick` 在任何 mutation 之前校验连续 fixed step、session seed、delta 范围和 required slot；执行期错误会恢复 tick 前 snapshot，不允许部分提交。
+`mount_module` 只接收 typed slot 和经过 registry selection、packaged eligibility、capability、package/target/profile identity、engine/rustc/feature/ABI fingerprint 校验的 binding token，不接收 provider 字符串或 native handle。缺失必需 slot、重复挂载、slot/token 不一致和 context mismatch 都是 blocking diagnostic。`tick` 只接收 typed `TickRequest`；input、await 和 provider output 没有 tick 外公开注入 API。Runtime 在任何 mutation 之前校验 lifecycle mode、strict ingress order、连续 fixed step、session seed、delta 范围和 required slot；执行期错误会恢复 tick 前 snapshot。load 后第一 tick 使用一次 `RestoreContinuation`；provider-free replay 使用 `Replay` 与 recorded output，且整个 transcript 失败时恢复 replay 调用前 world。
 
 ## State Machine
 

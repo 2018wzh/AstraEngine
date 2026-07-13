@@ -98,11 +98,14 @@ fn ffi_action_provider_registers_executes_and_unloads() {
 
     world.emit_event(EventSource::Scenario, EventPayload::new("fixture.start"));
     world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 0,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 0,
+            },
+            Vec::new(),
+        ))
         .unwrap();
 
     assert_eq!(

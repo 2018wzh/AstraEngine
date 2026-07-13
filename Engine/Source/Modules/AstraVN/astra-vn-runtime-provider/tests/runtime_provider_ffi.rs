@@ -74,7 +74,7 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
         &instance_id,
         &RuntimeStepInput {
             session_id: open.session_id.clone(),
-            fixed_step: 0,
+            fixed_step: 1,
             action: "launch_default".to_string(),
             payload: serde_json::json!({}),
         },

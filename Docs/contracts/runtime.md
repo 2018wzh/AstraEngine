@@ -10,6 +10,8 @@ pub struct RuntimeConfig;
 pub struct ActorId(pub StableId);
 pub struct ComponentId(pub StableId);
 pub struct TickInput { pub fixed_step: u64, pub delta_ns: u64, pub seed: u64 }
+pub enum TickMode { Live, RestoreContinuation, Replay }
+pub struct TickRequest { pub timing: TickInput, pub mode: TickMode, pub ingress: Vec<OrderedTickIngress> }
 pub struct EngineModuleSlot(pub String);
 pub struct ValidatedModuleBinding;
 pub struct TickReport {
@@ -23,8 +25,7 @@ pub struct TickReport {
 impl RuntimeWorld {
     pub fn create(config: RuntimeConfig, package: PackageHandle) -> Result<Self, RuntimeError>;
     pub fn mount_module(&mut self, slot: EngineModuleSlot, binding: ValidatedModuleBinding) -> Result<(), RuntimeError>;
-    pub fn tick(&mut self, input: TickInput) -> Result<TickReport, RuntimeError>;
-    pub fn apply_input(&mut self, input: PlayerInput) -> Result<(), RuntimeError>;
+    pub fn tick(&mut self, request: TickRequest) -> Result<TickReport, RuntimeError>;
     pub fn register_action<A: RuntimeAction + 'static>(&mut self, provider_id: impl Into<String>, action: A) -> Result<(), RuntimeError>;
     pub fn unregister_action_provider(&mut self, provider_id: &str);
     pub fn schedule_event(&mut self, due_tick: u64, source: EventSource, payload: EventPayload) -> DelayedEventId;
@@ -36,7 +37,7 @@ impl RuntimeWorld {
 }
 ```
 
-`ValidatedModuleBinding` 只能由显式 registry selection、packaged eligibility、capability、package、target、profile、engine version、rustc/feature/ABI fingerprint 校验生成。上述 identity 由已验证的 `PackageHandle` 固化；重复 slot、token/slot 不一致或任一 identity 不一致必须在修改 world 前失败。`tick` 的首步固定为 `1`，之后每次只能递增 `1`；`seed` 必须等于 session seed，`delta_ns` 必须处于 `1..=1_000_000_000`。重复、回退、跳步、非法 delta、seed mismatch 和缺少 required module 都返回稳定 blocking diagnostic，并保持 snapshot 不变。
+`ValidatedModuleBinding` 只能由显式 registry selection、packaged eligibility、capability、package、target、profile、engine version、rustc/feature/ABI fingerprint 校验生成。上述 identity 由已验证的 `PackageHandle` 固化；重复 slot、token/slot 不一致或任一 identity 不一致必须在修改 world 前失败。`tick` 的首步固定为 `1`，之后每次只能递增 `1`；`seed` 必须等于 session seed，`delta_ns` 必须处于 `1..=1_000_000_000`。Player input、Await completion、live provider output 和 recorded provider output 只能通过 non-zero、strictly increasing 的 `OrderedTickIngress` 在同一个 `TickRequest` 中提交。load 后第一步必须使用一次 `RestoreContinuation`，replay 只能使用 `Replay` 并拒绝 live output；live tick 拒绝 recorded output。重复、回退、跳步、非法 delta、seed mismatch、mode mismatch、ingress 乱序、缺少 required module 或任一 ingress 校验失败都返回稳定 blocking diagnostic，并恢复完整 tick 前状态。
 
 `runtime.world` 当前二进制 schema 为 `2.0.0`。旧布局和调用方请求的旧 minimum version 直接返回 `ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED`；本阶段不提供隐藏兼容 adapter。
 
@@ -86,7 +87,7 @@ Tokio task 完成后只提交 `AwaitResult`。Runtime 在固定 tick 边界按 `
 
 ## Replay Transcript
 
-`RuntimeReplayTranscript` 从一个完整 `RuntimeSnapshot` checkpoint 开始。每个 `ReplayTick` 记录 ordered player input、AwaitResult、provider output 和 hash checkpoint。Recorded provider output 携带原始 payload/hash、RuntimeEvent、PresentationCommand、AwaitToken 和 `SerializedEffectEnvelope`；Runtime 校验 descriptor、tick、payload hash 和 effect hash 后再原子应用，不调用 live provider。
+`RuntimeReplayTranscript` 当前 schema 为 `astra.runtime_replay_transcript.v2`，从一个完整 `RuntimeSnapshot` checkpoint 开始。每个 `ReplayTick` 保存 mode 为 `Replay` 的完整 `TickRequest` 和 hash checkpoint。Recorded provider output 携带原始 payload/hash、RuntimeEvent、PresentationCommand、AwaitToken 和 `SerializedEffectEnvelope`；Runtime 校验 descriptor、tick、payload hash 和 effect hash 后再原子应用，不加载或调用 live provider。schema、mode、output 或 checkpoint hash 任一失败时，整个 replay 恢复调用前 world，不能留下已执行的前缀 tick。
 
 `AwaitReplayPolicy::RecordedResult` 只接受 transcript 或 host 提交的记录结果，不能声明 deterministic timeout。`AwaitReplayPolicy::DeterministicTimeout` 必须声明合法 timeout step，并拒绝外部 completion result。
 

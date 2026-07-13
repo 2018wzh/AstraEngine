@@ -53,11 +53,14 @@ fn action_context_exposes_transition_trigger_event() {
 
     world.emit_event(EventSource::PlayerInput, EventPayload::new("vn.advance"));
     world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 0,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 0,
+            },
+            Vec::new(),
+        ))
         .unwrap();
 
     assert_eq!(
@@ -145,11 +148,14 @@ fn action_context_commits_typed_component_mutation() {
         .unwrap();
 
     world
-        .tick(TickInput {
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            seed: 0,
-        })
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 0,
+            },
+            Vec::new(),
+        ))
         .unwrap();
 
     assert_eq!(

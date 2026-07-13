@@ -3,8 +3,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AwaitResult, AwaitToken, PlayerInput, PresentationCommand, RuntimeEvent, RuntimeSnapshot,
-    SerializedEffectEnvelope, TickInput, TickReport,
+    AwaitToken, PresentationCommand, RuntimeEvent, RuntimeSnapshot, SerializedEffectEnvelope,
+    TickReport, TickRequest,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -16,13 +16,7 @@ pub struct RuntimeReplayTranscript {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ReplayTick {
-    pub tick: TickInput,
-    #[serde(default)]
-    pub player_inputs: Vec<PlayerInput>,
-    #[serde(default)]
-    pub await_results: Vec<AwaitResult>,
-    #[serde(default)]
-    pub provider_outputs: Vec<ProviderReplayOutput>,
+    pub request: TickRequest,
     pub expected: ReplayHashCheckpoint,
 }
 

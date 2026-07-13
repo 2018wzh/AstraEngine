@@ -1748,11 +1748,14 @@ impl RunContext {
         for _ in 0..ticks {
             self.step += 1;
             debug!(step = self.step, "scenario.advance");
-            let report = self.world.tick(TickInput {
-                fixed_step: self.step,
-                delta_ns: 16_666_667,
-                seed: 0,
-            })?;
+            let report = self.world.tick(astra_runtime::TickRequest::live(
+                TickInput {
+                    fixed_step: self.step,
+                    delta_ns: 16_666_667,
+                    seed: 0,
+                },
+                Vec::new(),
+            ))?;
             for diagnostic in &report.diagnostics {
                 warn!(
                     step = report.step,

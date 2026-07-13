@@ -29,10 +29,10 @@ use astra_plugin_abi::{
 };
 use astra_runtime::{
     ActionDescriptor, ActionInvocation, ActionTrace, BlackboardValue, ComponentId,
-    DeterministicActionContext, EventPayload, GuardExpr, PackageHandle, PlayerInput,
-    PresentationCommand as RuntimePresentationCommand, RuntimeAction, RuntimeConfig, RuntimeError,
-    RuntimeSnapshot, RuntimeWorld, StateDefinition, StateMachineDefinition, TickInput,
-    TransitionDefinition,
+    DeterministicActionContext, EventPayload, GuardExpr, OrderedTickIngress, PackageHandle,
+    PlayerInput, PresentationCommand as RuntimePresentationCommand, RuntimeAction, RuntimeConfig,
+    RuntimeError, RuntimeSnapshot, RuntimeWorld, StateDefinition, StateMachineDefinition,
+    TickIngress, TickInput, TickRequest, TransitionDefinition,
 };
 use astra_vn_core::{
     CompiledStory as CoreCompiledStory, VnError as CoreVnError,
@@ -377,6 +377,7 @@ impl NativeVnRuntimeProvider {
             .world
             .read_component::<VnRuntimeState>(session.vn_component)
             .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let mut ingress = Vec::new();
         if command_resolves_wait(&command, state.pending_wait.as_ref().map(|wait| wait.kind)) {
             let await_id = state
                 .pending_wait
@@ -392,18 +393,19 @@ impl NativeVnRuntimeProvider {
                 astra_core::StableId::parse(await_id)
                     .map_err(|err| CoreVnError::message(err.to_string()))?,
             );
-            session
-                .world
-                .submit_await_result(astra_runtime::AwaitResult {
+            ingress.push(OrderedTickIngress {
+                sequence: 1,
+                payload: TickIngress::AwaitCompletion(astra_runtime::AwaitResult {
                     token_id,
                     sequence: fixed_step,
                     completed_at_step: fixed_step,
                     payload: EventPayload::new("await.resolved"),
-                });
+                }),
+            });
         }
-        session
-            .world
-            .apply_input(PlayerInput {
+        ingress.push(OrderedTickIngress {
+            sequence: ingress.len() as u64 + 1,
+            payload: TickIngress::PlayerInput(PlayerInput {
                 kind: event_kind.clone(),
                 payload: EventPayload {
                     kind: event_kind,
@@ -411,16 +413,19 @@ impl NativeVnRuntimeProvider {
                         .into_iter()
                         .collect(),
                 },
-            })
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
+            }),
+        });
         let seed = session.world.snapshot().config.seed;
         let tick = session
             .world
-            .tick(TickInput {
-                fixed_step,
-                delta_ns: 16_666_667,
-                seed,
-            })
+            .tick(TickRequest::live(
+                TickInput {
+                    fixed_step,
+                    delta_ns: 16_666_667,
+                    seed,
+                },
+                ingress,
+            ))
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         if let Some(diagnostic) = tick.diagnostics.first() {
             return Err(CoreVnError::diagnostic(
