@@ -232,6 +232,8 @@ Windows/Web Player 已接入同一 bounded timeline scheduler：start/cancel/dea
 
 NativeVN Player 已能从 package 的 catalog/VFS 唯一映射读取 encoded voice/audio，执行 bounded read、entry hash 和 MP3/Ogg/FLAC/WAV signature 校验；WMF `pcm_s16le` output 的截断、sample budget、sample rate、channel 和 frame alignment 也已有负向测试。Windows/Web 产品主链现共享 `NativeVnProductMediaHost`，由其内部 `NativeVnProductAudioHost` 把 Runtime audio output 送入同一持久 sample mixer；该 owner 覆盖平台 preferred format 协商、bounded sinc resampling、可证明的 mono/stereo mapping、loop、bus fade、ordered pause/resume/stop、completion、queue query/backpressure、underflow blocking、时长感知 drain 和 close，`voice_end` 不再来自伪 callback。Web 还要求真实 input 后 `AudioContext.resume()`，并已接 timeline、wait completion、F5/F9 save/load 和 Runtime consumed trace。设备热切换恢复、真实浏览器/CDP run 和同 run E3 evidence 仍未闭合，因此不能关闭真实音频缺口。
 
+Web bundle 过去把可任意替换的 loader 当作产品入口，并且没有打包 loader 所 import 的 wasm-bindgen glue，真实 bundle 会在模块解析阶段失败，fixture loader 却能让静态 browser test 通过。现已删除 `--web-player-loader` 与 `--web-audio-worklet` 输入，改由 `astra-cli` 嵌入并写出同版本 canonical host scripts；调用方必须显式提供匹配的 `--web-player-wasm` 与 `--web-player-glue`。bundle 构建使用 staging directory 原子提交，wasm 通过 `wasmparser` 完整校验，glue 缺固定 wasm-bindgen marker 或包含 route/DOM input bypass marker时 blocking，失败不会留下可发布目录。该修补关闭了 bundle 形态的 `BYPASS`/`SMOKE_ONLY`，但不能替代真实 CDP/E3 run。
+
 ### P2-002：容器和 VFS 的局部测试没有覆盖冲突矩阵
 
 **分类：** `SMOKE_ONLY`, `FIXTURE_ONLY`

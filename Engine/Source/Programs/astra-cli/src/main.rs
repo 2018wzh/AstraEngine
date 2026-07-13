@@ -36,6 +36,11 @@ use tempfile::NamedTempFile;
 use tracing::{debug, info};
 
 type CliError = Box<dyn std::error::Error + Send + Sync>;
+const WEB_PLAYER_LOADER: &[u8] =
+    include_bytes!("../../astra-player-web/web/astra-player-loader.js");
+const WEB_AUDIO_WORKLET: &[u8] =
+    include_bytes!("../../astra-player-web/web/astra-audio-worklet.js");
+
 #[derive(Parser)]
 #[command(name = "astra")]
 #[command(about = "AstraEngine Stage 1 command line")]
@@ -135,9 +140,7 @@ enum PackageCommand {
         #[arg(long)]
         web_player_wasm: Option<PathBuf>,
         #[arg(long)]
-        web_player_loader: Option<PathBuf>,
-        #[arg(long)]
-        web_audio_worklet: Option<PathBuf>,
+        web_player_glue: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = ReportFormat::Yaml)]
         format: ReportFormat,
     },
@@ -372,16 +375,14 @@ fn main() -> Result<(), CliError> {
                 windows_player,
                 crash_reporter,
                 web_player_wasm,
-                web_player_loader,
-                web_audio_worklet,
+                web_player_glue,
                 format,
             } => {
                 let artifacts = BundleArtifactInputs {
                     windows_player,
                     crash_reporter,
                     web_player_wasm,
-                    web_player_loader,
-                    web_audio_worklet,
+                    web_player_glue,
                 };
                 let manifest = build_standalone_bundle(
                     &package,
@@ -786,8 +787,7 @@ struct BundleArtifactInputs {
     windows_player: Option<PathBuf>,
     crash_reporter: Option<PathBuf>,
     web_player_wasm: Option<PathBuf>,
-    web_player_loader: Option<PathBuf>,
-    web_audio_worklet: Option<PathBuf>,
+    web_player_glue: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1896,6 +1896,49 @@ fn build_standalone_bundle(
     platform: PlatformId,
     artifacts: &BundleArtifactInputs,
 ) -> Result<StandaloneBundleManifest, CliError> {
+    if out.exists() {
+        return Err("ASTRA_BUNDLE_OUTPUT_EXISTS: refusing to replace existing output".into());
+    }
+    let parent = out
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let staging = tempfile::Builder::new()
+        .prefix(".astra-bundle-staging-")
+        .tempdir_in(parent)?;
+    let manifest = build_standalone_bundle_into(
+        package,
+        staging.path(),
+        target,
+        profile,
+        platform,
+        artifacts,
+    )?;
+    let staging_path = staging.keep();
+    if let Err(error) = fs::rename(&staging_path, out) {
+        let cleanup = fs::remove_dir_all(&staging_path);
+        return Err(format!(
+            "ASTRA_BUNDLE_COMMIT_FAILED: {error}; staging_cleanup={}",
+            if cleanup.is_ok() {
+                "complete"
+            } else {
+                "failed"
+            }
+        )
+        .into());
+    }
+    Ok(manifest)
+}
+
+fn build_standalone_bundle_into(
+    package: &std::path::Path,
+    out: &std::path::Path,
+    target: &str,
+    profile: &str,
+    platform: PlatformId,
+    artifacts: &BundleArtifactInputs,
+) -> Result<StandaloneBundleManifest, CliError> {
     let platform_name = platform_id_name(platform);
     let package_bytes = fs::read(package)?;
     let reader = PackageReader::open(&package_bytes)?;
@@ -2039,6 +2082,19 @@ fn build_standalone_bundle(
                 &config,
             ));
 
+            fs::write(out.join("astra-player-loader.js"), WEB_PLAYER_LOADER)?;
+            files.push(bundle_file(
+                "astra-player-loader.js",
+                "web_player_loader",
+                WEB_PLAYER_LOADER,
+            ));
+            fs::write(out.join("astra-audio-worklet.js"), WEB_AUDIO_WORKLET)?;
+            files.push(bundle_file(
+                "astra-audio-worklet.js",
+                "web_audio_worklet",
+                WEB_AUDIO_WORKLET,
+            ));
+
             for (source, destination, role, missing) in [
                 (
                     artifacts.web_player_wasm.as_deref(),
@@ -2047,20 +2103,19 @@ fn build_standalone_bundle(
                     "Web bundle requires --web-player-wasm",
                 ),
                 (
-                    artifacts.web_player_loader.as_deref(),
-                    "astra-player-loader.js",
-                    "web_player_loader",
-                    "Web bundle requires --web-player-loader",
-                ),
-                (
-                    artifacts.web_audio_worklet.as_deref(),
-                    "astra-audio-worklet.js",
-                    "web_audio_worklet",
-                    "Web bundle requires --web-audio-worklet",
+                    artifacts.web_player_glue.as_deref(),
+                    "astra_player_web.js",
+                    "web_player_glue",
+                    "Web bundle requires --web-player-glue",
                 ),
             ] {
                 let source = source.ok_or(missing)?;
                 let bytes = fs::read(source)?;
+                match role {
+                    "web_player_wasm" => validate_web_player_wasm(&bytes)?,
+                    "web_player_glue" => validate_web_player_glue(&bytes)?,
+                    _ => unreachable!("web artifact role is closed"),
+                }
                 fs::write(out.join(destination), &bytes)?;
                 files.push(bundle_file(destination, role, &bytes));
             }
@@ -2098,6 +2153,40 @@ fn build_standalone_bundle(
         serde_json::to_vec_pretty(&manifest)?,
     )?;
     Ok(manifest)
+}
+
+fn validate_web_player_wasm(bytes: &[u8]) -> Result<(), CliError> {
+    wasmparser::Validator::new()
+        .validate_all(bytes)
+        .map_err(|error| format!("ASTRA_WEB_PLAYER_WASM_INVALID: {error}"))?;
+    Ok(())
+}
+
+fn validate_web_player_glue(bytes: &[u8]) -> Result<(), CliError> {
+    let source = std::str::from_utf8(bytes)
+        .map_err(|error| format!("ASTRA_WEB_PLAYER_GLUE_INVALID: non-UTF-8 module: {error}"))?;
+    for required in ["astra_player_web_bg.wasm", "WebAssembly", "export default"] {
+        if !source.contains(required) {
+            return Err(format!(
+                "ASTRA_WEB_PLAYER_GLUE_INVALID: missing required wasm-bindgen marker {required}"
+            )
+            .into());
+        }
+    }
+    for forbidden in [
+        "astra-route-report",
+        "AstraPlayer.route_model",
+        "--dump-dom",
+        ".click()",
+    ] {
+        if source.contains(forbidden) {
+            return Err(format!(
+                "ASTRA_WEB_PLAYER_GLUE_BYPASS: forbidden route/input bypass marker {forbidden}"
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 fn player_config_bytes(

@@ -108,6 +108,7 @@ url = "2"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 wasm-bindgen-test = "0.3"
+wasmparser = "0.253"
 web-sys = "0.3"
 windows = { version = "0.62", default-features = false }
 winit = "0.30"

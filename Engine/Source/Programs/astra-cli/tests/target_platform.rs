@@ -116,7 +116,7 @@ fn target_validate_and_platform_probe_emit_machine_readable_reports() {
 }
 
 #[test]
-fn web_bundle_requires_explicit_wasm_loader_and_worklet_without_route_runner() {
+fn web_bundle_requires_wasm_bindgen_pair_and_embeds_canonical_host_scripts() {
     let root = workspace_root();
     let case_dir = unique_case_dir(root, "web-explicit-artifacts");
     let cooked = case_dir.join("cooked");
@@ -168,11 +168,95 @@ fn web_bundle_requires_explicit_wasm_loader_and_worklet_without_route_runner() {
     assert!(String::from_utf8_lossy(&missing.stderr).contains("--web-player-wasm"));
 
     let wasm = case_dir.join("astra_player_web_bg.wasm");
-    let loader = case_dir.join("astra-player-loader.js");
-    let worklet = case_dir.join("astra-audio-worklet.js");
-    fs::write(&wasm, b"wasm-artifact").unwrap();
-    fs::write(&loader, b"export default async function init() {}").unwrap();
-    fs::write(&worklet, b"registerProcessor('astra-audio', class extends AudioWorkletProcessor { process() { return true; } });").unwrap();
+    let glue = case_dir.join("astra_player_web.js");
+    fs::write(&wasm, b"\0asm\x01\0\0\0").unwrap();
+    fs::write(
+        &glue,
+        b"export default async function init(path = new URL('astra_player_web_bg.wasm', import.meta.url)) { return WebAssembly.instantiateStreaming(fetch(path)); }",
+    )
+    .unwrap();
+    let missing_glue = Command::new(env!("CARGO_BIN_EXE_astra"))
+        .args([
+            "package",
+            "bundle",
+            package.to_str().unwrap(),
+            "--target",
+            "nativevn-game",
+            "--profile",
+            "classic",
+            "--platform",
+            "web",
+            "--out",
+            missing_dir.to_str().unwrap(),
+            "--web-player-wasm",
+            wasm.to_str().unwrap(),
+        ])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(!missing_glue.status.success());
+    assert!(String::from_utf8_lossy(&missing_glue.stderr).contains("--web-player-glue"));
+
+    let invalid_wasm = case_dir.join("invalid.wasm");
+    let invalid_wasm_bundle = case_dir.join("invalid-wasm-bundle");
+    fs::write(&invalid_wasm, b"not-wasm").unwrap();
+    let invalid_wasm_output = Command::new(env!("CARGO_BIN_EXE_astra"))
+        .args([
+            "package",
+            "bundle",
+            package.to_str().unwrap(),
+            "--target",
+            "nativevn-game",
+            "--profile",
+            "classic",
+            "--platform",
+            "web",
+            "--out",
+            invalid_wasm_bundle.to_str().unwrap(),
+            "--web-player-wasm",
+            invalid_wasm.to_str().unwrap(),
+            "--web-player-glue",
+            glue.to_str().unwrap(),
+        ])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(!invalid_wasm_output.status.success());
+    assert!(String::from_utf8_lossy(&invalid_wasm_output.stderr)
+        .contains("ASTRA_WEB_PLAYER_WASM_INVALID"));
+    assert!(!invalid_wasm_bundle.exists());
+
+    let bypass_glue = case_dir.join("bypass.js");
+    let bypass_glue_bundle = case_dir.join("bypass-glue-bundle");
+    fs::write(
+        &bypass_glue,
+        b"export default function init() { WebAssembly; return 'astra_player_web_bg.wasm astra-route-report'; }",
+    )
+    .unwrap();
+    let bypass_output = Command::new(env!("CARGO_BIN_EXE_astra"))
+        .args([
+            "package",
+            "bundle",
+            package.to_str().unwrap(),
+            "--target",
+            "nativevn-game",
+            "--profile",
+            "classic",
+            "--platform",
+            "web",
+            "--out",
+            bypass_glue_bundle.to_str().unwrap(),
+            "--web-player-wasm",
+            wasm.to_str().unwrap(),
+            "--web-player-glue",
+            bypass_glue.to_str().unwrap(),
+        ])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(!bypass_output.status.success());
+    assert!(String::from_utf8_lossy(&bypass_output.stderr).contains("ASTRA_WEB_PLAYER_GLUE_BYPASS"));
+    assert!(!bypass_glue_bundle.exists());
     let bundle = case_dir.join("bundle");
     let output = Command::new(env!("CARGO_BIN_EXE_astra"))
         .args([
@@ -189,10 +273,8 @@ fn web_bundle_requires_explicit_wasm_loader_and_worklet_without_route_runner() {
             bundle.to_str().unwrap(),
             "--web-player-wasm",
             wasm.to_str().unwrap(),
-            "--web-player-loader",
-            loader.to_str().unwrap(),
-            "--web-audio-worklet",
-            worklet.to_str().unwrap(),
+            "--web-player-glue",
+            glue.to_str().unwrap(),
             "--format",
             "json",
         ])
@@ -212,6 +294,7 @@ fn web_bundle_requires_explicit_wasm_loader_and_worklet_without_route_runner() {
         .filter_map(|file| file["role"].as_str())
         .collect::<Vec<_>>();
     assert!(roles.contains(&"web_player_wasm"));
+    assert!(roles.contains(&"web_player_glue"));
     assert!(roles.contains(&"web_player_loader"));
     assert!(roles.contains(&"web_audio_worklet"));
     assert!(!bundle.join("AstraPlayer.route_model.json").exists());
