@@ -47,6 +47,12 @@ AstraEMU filter preset 复用同一 `FilterGraph`。final-frame preset 作用在
 
 Headless reference output 使用固定采样率、固定声道布局的 PCM S16LE WAV，并保留完整 sample sequence。音频限额、写入失败、静音、削波、声道和时长不匹配都进入 machine-readable diagnostic；不能只记录 peak/RMS 后丢弃实际音频。
 
+## MediaPlayback
+
+`astra.media_playback.v1` 是 decode 与 platform output 之间的共享时序 owner。Session 显式声明 audio/video track、duration、queue/tick/audio-clock/video lead/lag budget 和 `LateVideoPolicy`；packet 必须绑定 generation、连续 sequence、PTS/duration、resource id、format/dimensions 与 content hash。audio callback playhead 是含音频 session 的 master clock，缺失、回退、跳变、超时长和未声明 drop 都 blocking。play/pause/seek/complete-seek/EOS/cancel/tick 都有稳定状态机，seek 提升 generation 并清空旧资源，非法 tick 和 A/V drift 在提交前失败。snapshot 保存完整 queue、EOS、clock、generation 和 sequence；restore 会重新验证 schema、预算、时序和资源 identity，恢复后的 continuation hash 必须与 uninterrupted run 一致。
+
+该 contract 只闭合共享 A/V scheduler、事务和 replay 边界。平台 decode provider 仍需产出真实 timestamped packet，Windows output 仍需把 scheduler output 接到 WGPU/WASAPI；没有这条产品接线时，不能把 `astra.media_playback.v1` 单独算作完整媒体 session 或 E3。
+
 ## TextLayout
 
 默认 TextLayout provider 使用 `cosmic-text`/Swash，contract schema 为 `astra.text_layout.v2`。Provider 在创建时接收 `FontBindingContext { target, profile, default_locale }`、显式预算和 package 提供的字体集合；字体 descriptor 必须包含 asset id、family、face index、content hash、license、subset、Unicode coverage、target/profile eligibility 和实际 bytes。字体 hash、face metadata、eligibility 或 coverage 不一致时创建失败，不能转用系统字体。
