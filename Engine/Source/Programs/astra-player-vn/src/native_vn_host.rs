@@ -15,9 +15,10 @@ use astra_player_core::{
 };
 use astra_plugin::{ProductRuntimeHost, RuntimeHostError, RuntimeHostSchemaRegistry};
 use astra_plugin_abi::{
-    GameRuntimeSessionId, RuntimeOpenRequest, RuntimeOutputDomain, RuntimeRestoreRequest,
-    RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload,
-    RuntimeStepInput,
+    GameRuntimeSessionId, RuntimeOpenRequest, RuntimeOutputDomain, RuntimePrepareRequest,
+    RuntimeProbeRequest, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
+    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepInput,
+    ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
 };
 use astra_vn_core::{
     CompiledCommand, CompiledStory, PresentationCommand, SystemPageKind, VnPlayerCommand,
@@ -149,6 +150,13 @@ struct ProductPresentationBinding {
     font_families: Vec<String>,
 }
 
+struct ProductPackageBinding {
+    runtime_provider: ValidatedRuntimeProviderSelection,
+    package_hash: Hash256,
+    package_section_ids: Vec<String>,
+    presentation: ProductPresentationBinding,
+}
+
 impl NativeVnHostCommandSource {
     pub fn from_package(
         package: &astra_package::PackageReader,
@@ -158,6 +166,14 @@ impl NativeVnHostCommandSource {
         surface: PlayerHostResourceId,
     ) -> Result<Self, NativeVnHostError> {
         validate_product_provider_bindings(package)?;
+        let runtime_provider = package.runtime_provider_selection().clone();
+        if config.profile != runtime_provider.profile() {
+            return Err(NativeVnHostError::Package(format!(
+                "ASTRA_PLAYER_RUNTIME_PROFILE_MISMATCH: requested profile {} does not match package provider profile {}",
+                config.profile,
+                runtime_provider.profile()
+            )));
+        }
         let compiled = decode_compiled_story(package)
             .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
         let textures = load_package_textures(package)?;
@@ -181,7 +197,7 @@ impl NativeVnHostCommandSource {
             package,
             "media.font_manifest",
             FontBindingContext {
-                target: "nativevn-game".to_string(),
+                target: runtime_provider.target().to_string(),
                 profile: config.profile.clone(),
                 default_locale: config.locale.clone(),
             },
@@ -200,12 +216,22 @@ impl NativeVnHostCommandSource {
             width,
             height,
             surface,
-            ProductPresentationBinding {
-                textures,
-                media_assets,
-                localization,
-                text_provider,
-                font_families,
+            ProductPackageBinding {
+                runtime_provider,
+                package_hash: package.package_hash(),
+                package_section_ids: package
+                    .container()
+                    .entries()
+                    .iter()
+                    .map(|entry| entry.id.clone())
+                    .collect(),
+                presentation: ProductPresentationBinding {
+                    textures,
+                    media_assets,
+                    localization,
+                    text_provider,
+                    font_families,
+                },
             },
         )
     }
@@ -216,12 +242,11 @@ impl NativeVnHostCommandSource {
         width: u32,
         height: u32,
         surface: PlayerHostResourceId,
-        presentation: ProductPresentationBinding,
+        binding: ProductPackageBinding,
     ) -> Result<Self, NativeVnHostError> {
         if compiled.story_manifest.stories.is_empty() {
             return Err(NativeVnHostError::EmptyStory);
         }
-        let package_hash = compiled.story_hash.to_string();
         let terminal_routes = compiled
             .route_graph
             .nodes
@@ -239,38 +264,72 @@ impl NativeVnHostCommandSource {
             hash: Hash256::from_sha256(&compiled_bytes),
             bytes: compiled_bytes,
         };
-        let schemas = RuntimeHostSchemaRegistry::new()
-            .allow_version(
-                RuntimeOutputDomain::Effect,
-                "astra.vn.runtime_step_effect.v2",
-                SchemaVersion::new(2, 0, 0),
-            )
-            .allow(
-                RuntimeOutputDomain::Presentation,
-                "astra.vn.presentation_command.v1",
-            )
-            .allow(RuntimeOutputDomain::Audio, "astra.vn.audio_command.v1")
-            .allow(RuntimeOutputDomain::Await, "astra.runtime.await_id.v1")
-            .allow(RuntimeOutputDomain::Effect, "astra.vn.timeline_task.v1")
-            .allow(RuntimeOutputDomain::Trace, "astra.vn.runtime_step_trace.v1")
-            .allow(RuntimeOutputDomain::Trace, "astra.vn.runtime_state.v1")
-            .allow(
-                RuntimeOutputDomain::DirtySaveSection,
-                "astra.runtime.dirty_save_section.v1",
-            );
-        let mut host = ProductRuntimeHost::in_process(
-            "astra-player.native-vn",
+        let runtime_provider = &binding.runtime_provider;
+        let schemas = RuntimeHostSchemaRegistry::from_descriptor(runtime_provider.descriptor());
+        if runtime_provider.provider_id() != NATIVE_VN_PROVIDER_ID {
+            return Err(NativeVnHostError::Package(format!(
+                "ASTRA_PLAYER_RUNTIME_PROVIDER_UNAVAILABLE: package selected unlinked provider {}",
+                runtime_provider.provider_id()
+            )));
+        }
+        let instance_id = format!(
+            "astra-player.native-vn.{}",
+            runtime_provider
+                .binding_hash()
+                .to_string()
+                .trim_start_matches("sha256:")
+        );
+        let mut host = ProductRuntimeHost::bound_in_process(
+            instance_id,
+            runtime_provider,
             NativeVnRuntimeProvider::default(),
             schemas,
         )?;
-        let open = host.open(RuntimeOpenRequest {
-            target_id: "nativevn-game".to_string(),
+        let prepare = match host.prepare(RuntimePrepareRequest {
+            target_id: runtime_provider.target().to_string(),
+            profile: config.profile.clone(),
+            package_hash: binding.package_hash.to_string(),
+            section_ids: binding.package_section_ids.clone(),
+        }) {
+            Ok(report) => report,
+            Err(error) => return Err(cleanup_runtime_host(&mut host, error)),
+        };
+        if prepare.status != "pass" || !prepare.diagnostics.is_empty() {
+            let error = NativeVnHostError::Package(format!(
+                "ASTRA_PLAYER_RUNTIME_PREPARE_BLOCKED: provider preparation returned {} with {} diagnostics",
+                prepare.status,
+                prepare.diagnostics.len()
+            ));
+            return Err(cleanup_runtime_host(&mut host, error));
+        }
+        let probe = match host.probe(RuntimeProbeRequest {
+            target_id: runtime_provider.target().to_string(),
+            profile: config.profile.clone(),
+            platform: None,
+            section_ids: binding.package_section_ids,
+        }) {
+            Ok(report) => report,
+            Err(error) => return Err(cleanup_runtime_host(&mut host, error)),
+        };
+        if probe.status != "pass" || !probe.diagnostics.is_empty() {
+            let error = NativeVnHostError::Package(format!(
+                "ASTRA_PLAYER_RUNTIME_PROBE_BLOCKED: provider probe returned {} with {} diagnostics",
+                probe.status,
+                probe.diagnostics.len()
+            ));
+            return Err(cleanup_runtime_host(&mut host, error));
+        }
+        let open = match host.open(RuntimeOpenRequest {
+            target_id: runtime_provider.target().to_string(),
             profile: config.profile,
             locale: config.locale,
             seed: 0,
-            package_hash,
+            package_hash: binding.package_hash.to_string(),
             sections: vec![compiled_section],
-        })?;
+        }) {
+            Ok(report) => report,
+            Err(error) => return Err(cleanup_runtime_host(&mut host, error)),
+        };
         tracing::info!(
             event = "player.vn.runtime.open",
             width,
@@ -281,16 +340,16 @@ impl NativeVnHostCommandSource {
             host,
             session_id: open.session_id,
             runtime_state: None,
-            text_provider: presentation.text_provider,
-            font_families: presentation.font_families,
+            text_provider: binding.presentation.text_provider,
+            font_families: binding.presentation.font_families,
             text_resources: TextRenderResourceOwner::default(),
-            localization: presentation.localization,
+            localization: binding.presentation.localization,
             surface,
             command_sequence: 0,
             fixed_step: 0,
             width,
             height,
-            textures: presentation.textures,
+            textures: binding.presentation.textures,
             live_texture_ids: BTreeSet::new(),
             live_layout_ids: BTreeSet::new(),
             scene_draw: Vec::new(),
@@ -298,7 +357,7 @@ impl NativeVnHostCommandSource {
             last_step_evidence: None,
             terminal_routes,
             pending_timeline: Vec::new(),
-            media_assets: presentation.media_assets,
+            media_assets: binding.presentation.media_assets,
             pending_audio: Vec::new(),
             next_media_resource_id: 10_000,
             shutdown_started: false,
@@ -1491,6 +1550,18 @@ fn read_package_json(
             "ASTRA_PLAYER_PROVIDER_SECTION_INVALID: {section}: {error}"
         ))
     })
+}
+
+fn cleanup_runtime_host(
+    host: &mut ProductRuntimeHost,
+    error: impl std::fmt::Display,
+) -> NativeVnHostError {
+    match host.cleanup_after_failure() {
+        Ok(_) => NativeVnHostError::Package(error.to_string()),
+        Err(cleanup_error) => NativeVnHostError::Package(format!(
+            "ASTRA_PLAYER_RUNTIME_CLEANUP_FAILED: {error}; cleanup failed: {cleanup_error}"
+        )),
+    }
 }
 
 fn load_package_textures(

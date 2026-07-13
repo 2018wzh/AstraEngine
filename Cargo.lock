@@ -725,6 +725,7 @@ dependencies = [
  "astra-package",
  "astra-platform",
  "astra-player-core",
+ "astra-plugin",
  "astra-plugin-abi",
  "astra-target",
  "astra-vn",

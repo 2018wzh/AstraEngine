@@ -94,6 +94,26 @@ fn v2_registry_closes_policy_provider_and_package_identity() {
             .unwrap(),
         "game"
     );
+    let selection = registry
+        .resolve_embedded_runtime_provider(&policy, "game.package", "desktop-release")
+        .unwrap();
+    assert_eq!(selection.provider_id(), "astra.runtime.native_vn");
+    assert_eq!(selection.target(), "game");
+    assert_eq!(selection.profile(), "desktop-release");
+    assert_eq!(selection.package_id(), "game.package");
+    selection
+        .validate_linked_descriptor(&policy.runtime_provider)
+        .unwrap();
+
+    let mut linked_drift = policy.runtime_provider.clone();
+    linked_drift.output_schemas[0].schema = "astra.vn.runtime_step_effect.drift".into();
+    assert_eq!(
+        selection
+            .validate_linked_descriptor(&linked_drift)
+            .unwrap_err()
+            .code,
+        "ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH"
+    );
 }
 
 #[test]

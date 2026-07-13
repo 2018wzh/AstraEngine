@@ -4,6 +4,8 @@ use crate::{
     AstraContainerReader, ContainerError, ContainerKind, PackageManifest, SchemaRegistryManifest,
     CURRENT_CONTAINER_VERSION,
 };
+use astra_core::Hash256;
+use astra_plugin_abi::ValidatedRuntimeProviderSelection;
 
 const REQUIRED_SECTIONS: &[(&str, &str)] = &[
     ("package.manifest", "astra.package_manifest.v1"),
@@ -31,10 +33,13 @@ const REQUIRED_SECTIONS: &[(&str, &str)] = &[
 #[derive(Debug, Clone)]
 pub struct PackageReader {
     container: AstraContainerReader,
+    runtime_provider: ValidatedRuntimeProviderSelection,
+    package_hash: Hash256,
 }
 
 impl PackageReader {
     pub fn open(bytes: &[u8]) -> Result<Self, ContainerError> {
+        let package_hash = Hash256::from_sha256(bytes);
         let container = AstraContainerReader::new(bytes)?;
         if container.kind() != ContainerKind::Package {
             return Err(ContainerError::message("container is not a package"));
@@ -65,7 +70,7 @@ impl PackageReader {
             container.read_bounded("plugin.extension_registry", 256 * 1024)?;
         let target_manifest_bytes = container.read_bounded("target.manifest", 256 * 1024)?;
         let vfs_manifest_bytes = container.read_bounded("asset.vfs_manifest", 16 * 1024 * 1024)?;
-        crate::authority::validate_provider_authority(
+        let runtime_provider = crate::authority::validate_provider_authority(
             &manifest.package_id,
             &manifest.profile,
             &policy_bytes,
@@ -119,7 +124,11 @@ impl PackageReader {
                 "schema registry contains entries without package sections",
             ));
         }
-        let reader = Self { container };
+        let reader = Self {
+            container,
+            runtime_provider,
+            package_hash,
+        };
         let cook_summary: crate::CookSummaryManifest =
             serde_json::from_slice(&reader.container.read_bounded("cook.summary", 1024 * 1024)?)
                 .map_err(|error| {
@@ -155,5 +164,13 @@ impl PackageReader {
 
     pub fn container(&self) -> &AstraContainerReader {
         &self.container
+    }
+
+    pub fn runtime_provider_selection(&self) -> &ValidatedRuntimeProviderSelection {
+        &self.runtime_provider
+    }
+
+    pub fn package_hash(&self) -> Hash256 {
+        self.package_hash
     }
 }

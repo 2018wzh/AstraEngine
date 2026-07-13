@@ -21,11 +21,16 @@ use astra_plugin_abi::{
     RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderInstanceReport,
     RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
     RuntimeSectionPayload, RuntimeShutdownReport, RuntimeStepInput, RuntimeStepOutput,
+    ValidatedRuntimeProviderSelection,
 };
 #[cfg(feature = "dynamic-abi")]
 use serde::{de::DeserializeOwned, Serialize};
 
 pub trait ProductRuntimeProvider: Send {
+    fn descriptor(&self) -> Result<ProductRuntimeDescriptor, String> {
+        Err("ASTRA_RUNTIME_PROVIDER_DESCRIPTOR_UNAVAILABLE: provider does not expose a linked descriptor".to_string())
+    }
+
     fn create_instance(
         &mut self,
         instance_id: ProviderInstanceId,
@@ -222,10 +227,28 @@ pub struct ProductRuntimeHost {
     schemas: RuntimeHostSchemaRegistry,
     sessions: BTreeMap<String, SessionState>,
     state: HostState,
+    runtime_binding: Option<ValidatedRuntimeProviderSelection>,
 }
 
 impl ProductRuntimeHost {
-    pub fn in_process<P: ProductRuntimeProvider + 'static>(
+    pub fn bound_in_process<P: ProductRuntimeProvider + 'static>(
+        instance_id: impl Into<String>,
+        selection: &ValidatedRuntimeProviderSelection,
+        provider: P,
+        schemas: RuntimeHostSchemaRegistry,
+    ) -> Result<Self, RuntimeHostError> {
+        let descriptor = provider.descriptor().map_err(|message| {
+            RuntimeHostError::new("ASTRA_RUNTIME_PROVIDER_DESCRIPTOR_UNAVAILABLE", message)
+        })?;
+        selection
+            .validate_linked_descriptor(&descriptor)
+            .map_err(|diagnostic| RuntimeHostError::new(diagnostic.code, diagnostic.message))?;
+        let mut host = Self::create(instance_id, Box::new(provider), schemas)?;
+        host.runtime_binding = Some(selection.clone());
+        Ok(host)
+    }
+
+    pub fn reference_in_process<P: ProductRuntimeProvider + 'static>(
         instance_id: impl Into<String>,
         provider: P,
         schemas: RuntimeHostSchemaRegistry,
@@ -234,7 +257,22 @@ impl ProductRuntimeHost {
     }
 
     #[cfg(feature = "dynamic-abi")]
-    pub fn ffi(
+    pub fn bound_ffi(
+        instance_id: impl Into<String>,
+        selection: &ValidatedRuntimeProviderSelection,
+        registration: FfiRuntimeProviderRegistration,
+        schemas: RuntimeHostSchemaRegistry,
+    ) -> Result<Self, RuntimeHostError> {
+        Self::bound_in_process(
+            instance_id,
+            selection,
+            FfiProductRuntimeProvider::new(registration),
+            schemas,
+        )
+    }
+
+    #[cfg(feature = "dynamic-abi")]
+    pub fn reference_ffi(
         instance_id: impl Into<String>,
         registration: FfiRuntimeProviderRegistration,
         schemas: RuntimeHostSchemaRegistry,
@@ -294,6 +332,7 @@ impl ProductRuntimeHost {
             schemas,
             sessions: BTreeMap::new(),
             state: HostState::Created,
+            runtime_binding: None,
         })
     }
 
@@ -302,12 +341,20 @@ impl ProductRuntimeHost {
         request: RuntimePrepareRequest,
     ) -> Result<RuntimePrepareReport, RuntimeHostError> {
         self.require_state(HostState::Created, "prepare")?;
-        call_provider("ASTRA_RUNTIME_HOST_PREPARE", "prepare", || {
+        self.validate_bound_request(&request.target_id, &request.profile)?;
+        let report = call_provider("ASTRA_RUNTIME_HOST_PREPARE", "prepare", || {
             self.provider.prepare(request)
         })
         .inspect_err(|_| {
             self.state = HostState::Poisoned;
-        })
+        })?;
+        if let Err(error) =
+            self.validate_bound_output_identity(&report.runtime_id, &report.provider_id, "prepare")
+        {
+            self.state = HostState::Poisoned;
+            return Err(error);
+        }
+        Ok(report)
     }
 
     pub fn probe(
@@ -315,12 +362,20 @@ impl ProductRuntimeHost {
         request: RuntimeProbeRequest,
     ) -> Result<RuntimeProbeReport, RuntimeHostError> {
         self.require_state(HostState::Created, "probe")?;
-        call_provider("ASTRA_RUNTIME_HOST_PROBE", "probe", || {
+        self.validate_bound_request(&request.target_id, &request.profile)?;
+        let report = call_provider("ASTRA_RUNTIME_HOST_PROBE", "probe", || {
             self.provider.probe(request)
         })
         .inspect_err(|_| {
             self.state = HostState::Poisoned;
-        })
+        })?;
+        if let Err(error) =
+            self.validate_bound_output_identity(&report.runtime_id, &report.provider_id, "probe")
+        {
+            self.state = HostState::Poisoned;
+            return Err(error);
+        }
+        Ok(report)
     }
 
     pub fn open(
@@ -333,6 +388,7 @@ impl ProductRuntimeHost {
                 "open is invalid after provider destruction or poisoning",
             ));
         }
+        self.validate_bound_request(&request.target_id, &request.profile)?;
         let report = call_provider("ASTRA_RUNTIME_HOST_OPEN", "open", || {
             self.provider.open(request)
         })
@@ -345,6 +401,21 @@ impl ProductRuntimeHost {
                 "ASTRA_RUNTIME_HOST_SESSION_ID",
                 "provider returned an empty session id",
             ));
+        }
+        if let Err(identity_error) =
+            self.validate_bound_output_identity(&report.runtime_id, &report.provider_id, "open")
+        {
+            let rollback = call_provider("ASTRA_RUNTIME_HOST_OPEN_ROLLBACK", "shutdown", || {
+                self.provider.shutdown(report.session_id.clone())
+            });
+            self.state = HostState::Poisoned;
+            return Err(match rollback {
+                Ok(_) => identity_error,
+                Err(rollback_error) => RuntimeHostError::new(
+                    "ASTRA_RUNTIME_HOST_OPEN_ROLLBACK",
+                    format!("{identity_error}; rollback failed: {rollback_error}"),
+                ),
+            });
         }
         if self.sessions.contains_key(&report.session_id.0) {
             let rollback = call_provider("ASTRA_RUNTIME_HOST_OPEN_ROLLBACK", "shutdown", || {
@@ -365,6 +436,39 @@ impl ProductRuntimeHost {
             .insert(report.session_id.0.clone(), SessionState::default());
         self.state = HostState::Open;
         Ok(report)
+    }
+
+    fn validate_bound_request(&self, target: &str, profile: &str) -> Result<(), RuntimeHostError> {
+        let Some(binding) = &self.runtime_binding else {
+            return Ok(());
+        };
+        if target != binding.target() || profile != binding.profile() {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_BINDING_CONTEXT",
+                "runtime request target/profile does not match the package-selected binding",
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_bound_output_identity(
+        &self,
+        runtime_id: &str,
+        provider_id: &str,
+        operation: &str,
+    ) -> Result<(), RuntimeHostError> {
+        let Some(binding) = &self.runtime_binding else {
+            return Ok(());
+        };
+        if runtime_id != binding.descriptor().runtime_id || provider_id != binding.provider_id() {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_PROVIDER_IDENTITY",
+                format!(
+                    "runtime provider {operation} report does not match the package-selected descriptor"
+                ),
+            ));
+        }
+        Ok(())
     }
 
     pub fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, RuntimeHostError> {
@@ -653,36 +757,63 @@ pub struct AsyncProductRuntimeHost {
 }
 
 impl AsyncProductRuntimeHost {
-    pub fn in_process<P: ProductRuntimeProvider + 'static>(
+    pub fn bound_in_process<P: ProductRuntimeProvider + 'static>(
+        instance_id: impl Into<String>,
+        selection: &ValidatedRuntimeProviderSelection,
+        provider: P,
+        schemas: RuntimeHostSchemaRegistry,
+        timeout: Duration,
+    ) -> Result<Self, RuntimeHostError> {
+        Self::from_host(
+            ProductRuntimeHost::bound_in_process(instance_id, selection, provider, schemas)?,
+            timeout,
+        )
+    }
+
+    pub fn reference_in_process<P: ProductRuntimeProvider + 'static>(
         instance_id: impl Into<String>,
         provider: P,
         schemas: RuntimeHostSchemaRegistry,
         timeout: Duration,
     ) -> Result<Self, RuntimeHostError> {
         Self::from_host(
-            ProductRuntimeHost::in_process(instance_id, provider, schemas)?,
+            ProductRuntimeHost::reference_in_process(instance_id, provider, schemas)?,
             timeout,
         )
     }
 
-    pub fn local_serialized<P: ProductRuntimeProvider + 'static>(
+    pub fn reference_local_serialized<P: ProductRuntimeProvider + 'static>(
         instance_id: impl Into<String>,
         provider: P,
         schemas: RuntimeHostSchemaRegistry,
         timeout: Duration,
     ) -> Result<Self, RuntimeHostError> {
-        Self::in_process(instance_id, provider, schemas, timeout)
+        Self::reference_in_process(instance_id, provider, schemas, timeout)
     }
 
     #[cfg(feature = "dynamic-abi")]
-    pub fn ffi(
+    pub fn bound_ffi(
+        instance_id: impl Into<String>,
+        selection: &ValidatedRuntimeProviderSelection,
+        registration: FfiRuntimeProviderRegistration,
+        schemas: RuntimeHostSchemaRegistry,
+        timeout: Duration,
+    ) -> Result<Self, RuntimeHostError> {
+        Self::from_host(
+            ProductRuntimeHost::bound_ffi(instance_id, selection, registration, schemas)?,
+            timeout,
+        )
+    }
+
+    #[cfg(feature = "dynamic-abi")]
+    pub fn reference_ffi(
         instance_id: impl Into<String>,
         registration: FfiRuntimeProviderRegistration,
         schemas: RuntimeHostSchemaRegistry,
         timeout: Duration,
     ) -> Result<Self, RuntimeHostError> {
         Self::from_host(
-            ProductRuntimeHost::ffi(instance_id, registration, schemas)?,
+            ProductRuntimeHost::reference_ffi(instance_id, registration, schemas)?,
             timeout,
         )
     }
@@ -868,6 +999,19 @@ impl FfiProductRuntimeProvider {
 
 #[cfg(feature = "dynamic-abi")]
 impl ProductRuntimeProvider for FfiProductRuntimeProvider {
+    fn descriptor(&self) -> Result<ProductRuntimeDescriptor, String> {
+        if self.registration.descriptor_schema.as_str()
+            != astra_plugin_abi::PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA
+        {
+            return Err(
+                "ASTRA_RUNTIME_PROVIDER_DESCRIPTOR_SCHEMA: FFI descriptor schema is unsupported"
+                    .to_string(),
+            );
+        }
+        serde_json::from_slice(self.registration.descriptor_json.as_slice())
+            .map_err(|error| format!("ASTRA_RUNTIME_PROVIDER_DESCRIPTOR_DECODE: {error}"))
+    }
+
     fn create_instance(
         &mut self,
         instance_id: ProviderInstanceId,

@@ -1,5 +1,7 @@
 use astra_asset::{ResolveContext, VfsManifest};
-use astra_plugin_abi::{PluginExtensionRegistrySnapshot, ProviderPolicy};
+use astra_plugin_abi::{
+    PluginExtensionRegistrySnapshot, ProviderPolicy, ValidatedRuntimeProviderSelection,
+};
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
 use std::collections::BTreeSet;
 
@@ -12,7 +14,7 @@ pub(crate) fn validate_provider_authority(
     registry_bytes: &[u8],
     target_manifest_bytes: &[u8],
     vfs_manifest_bytes: &[u8],
-) -> Result<(), ContainerError> {
+) -> Result<ValidatedRuntimeProviderSelection, ContainerError> {
     let policy: ProviderPolicy = serde_json::from_slice(policy_bytes).map_err(|error| {
         ContainerError::message(format!(
             "ASTRA_PROVIDER_POLICY_INVALID: provider policy v2 decode failed: {error}"
@@ -26,7 +28,8 @@ pub(crate) fn validate_provider_authority(
         })?;
     let target = registry
         .validate_embedded_package(&policy, package_id, profile)
-        .map_err(|diagnostic| ContainerError::message(diagnostic.to_string()))?;
+        .map_err(|diagnostic| ContainerError::message(diagnostic.to_string()))?
+        .to_string();
 
     let target_manifest: TargetManifest =
         serde_json::from_slice(target_manifest_bytes).map_err(|error| {
@@ -34,7 +37,7 @@ pub(crate) fn validate_provider_authority(
                 "ASTRA_TARGET_MANIFEST_INVALID: target manifest decode failed: {error}"
             ))
         })?;
-    let validation = validate_manifest(&target_manifest, Some(target));
+    let validation = validate_manifest(&target_manifest, Some(&target));
     if validation.status == TargetValidationStatus::Blocked {
         let code = validation
             .diagnostics
@@ -70,7 +73,7 @@ pub(crate) fn validate_provider_authority(
         .runtime_provider
         .supported_targets
         .iter()
-        .any(|supported| supported == target || supported == "game")
+        .any(|supported| supported == &target || supported == "game")
     {
         return Err(ContainerError::message(
             "ASTRA_RUNTIME_PROVIDER_TARGET_UNSUPPORTED: runtime provider does not declare the selected target",
@@ -116,7 +119,7 @@ pub(crate) fn validate_provider_authority(
         else {
             continue;
         };
-        if (!layer.targets.is_empty() && !layer.targets.iter().any(|value| value == target))
+        if (!layer.targets.is_empty() && !layer.targets.iter().any(|value| value == &target))
             || (!layer.profiles.is_empty() && !layer.profiles.iter().any(|value| value == profile))
             || !resolved_uris.insert(entry.uri.clone())
         {
@@ -139,7 +142,7 @@ pub(crate) fn validate_provider_authority(
         vfs.resolve(
             &entry.uri,
             &ResolveContext {
-                target: target.to_string(),
+                target: target.clone(),
                 profile: profile.to_string(),
                 capability: capability.clone(),
                 provider_binding: prefix.provider_id.clone(),
@@ -153,5 +156,7 @@ pub(crate) fn validate_provider_authority(
             ContainerError::message(format!("{}: {}", diagnostic.code, diagnostic.message))
         })?;
     }
-    Ok(())
+    registry
+        .resolve_embedded_runtime_provider(&policy, package_id, profile)
+        .map_err(|diagnostic| ContainerError::message(diagnostic.to_string()))
 }

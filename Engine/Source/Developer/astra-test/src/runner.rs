@@ -1268,7 +1268,7 @@ impl RunContext {
                     RuntimeOutputDomain::DirtySaveSection,
                     "astra.runtime.dirty_save_section.v1",
                 );
-            let mut host = ProductRuntimeHost::in_process(
+            let mut host = ProductRuntimeHost::reference_in_process(
                 "astra-test.native-vn",
                 NativeVnRuntimeProvider::default(),
                 schemas,

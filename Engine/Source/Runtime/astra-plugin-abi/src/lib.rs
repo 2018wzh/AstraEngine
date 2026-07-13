@@ -147,6 +147,57 @@ pub struct ProviderPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedRuntimeProviderSelection {
+    binding: ProviderBinding,
+    descriptor: ProductRuntimeDescriptor,
+}
+
+impl ValidatedRuntimeProviderSelection {
+    pub fn provider_id(&self) -> &str {
+        &self.binding.provider_id
+    }
+
+    pub fn target(&self) -> &str {
+        &self.binding.context.target
+    }
+
+    pub fn profile(&self) -> &str {
+        &self.binding.context.profile
+    }
+
+    pub fn package_id(&self) -> &str {
+        &self.binding.context.package_id
+    }
+
+    pub fn binding_hash(&self) -> Hash256 {
+        self.binding.binding_hash
+    }
+
+    pub fn descriptor(&self) -> &ProductRuntimeDescriptor {
+        &self.descriptor
+    }
+
+    pub fn validate_linked_descriptor(
+        &self,
+        descriptor: &ProductRuntimeDescriptor,
+    ) -> Result<(), ProviderRegistryDiagnostic> {
+        if descriptor.provider_id != self.binding.provider_id {
+            return Err(diagnostic(
+                "ASTRA_RUNTIME_PROVIDER_LINKED_ID_MISMATCH",
+                "linked runtime provider id does not match the package-selected binding",
+            ));
+        }
+        if descriptor != &self.descriptor {
+            return Err(diagnostic(
+                "ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH",
+                "linked runtime provider descriptor does not exactly match provider.policy",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderRegistryDiagnostic {
     pub code: &'static str,
     pub message: String,
@@ -239,6 +290,29 @@ impl ProviderBinding {
 }
 
 impl PluginExtensionRegistrySnapshot {
+    pub fn resolve_embedded_runtime_provider(
+        &self,
+        policy: &ProviderPolicy,
+        package_id: &str,
+        profile: &str,
+    ) -> Result<ValidatedRuntimeProviderSelection, ProviderRegistryDiagnostic> {
+        self.validate_embedded_package(policy, package_id, profile)?;
+        let binding = self
+            .bindings
+            .iter()
+            .find(|binding| binding.slot == GAME_RUNTIME_PROVIDER_SLOT)
+            .ok_or_else(|| {
+                diagnostic(
+                    "ASTRA_RUNTIME_PROVIDER_BINDING_MISSING",
+                    "package has no explicit game runtime provider binding",
+                )
+            })?;
+        Ok(ValidatedRuntimeProviderSelection {
+            binding: binding.clone(),
+            descriptor: policy.runtime_provider.clone(),
+        })
+    }
+
     pub fn validate_embedded_package(
         &self,
         policy: &ProviderPolicy,

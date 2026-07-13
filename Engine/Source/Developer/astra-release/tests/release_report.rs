@@ -2609,6 +2609,9 @@ fn package_with_target_manifest(
     sections: Vec<SectionPayload>,
 ) -> astra_package::ContainerBlob {
     let mut request = PackageBuildRequest::fixture("com.example.nativevn", profile, vec![]);
+    let has_compiled_story = sections
+        .iter()
+        .any(|section| section.id == "vn.compiled_story");
     for section in sections {
         match section.id.as_str() {
             "asset.vfs_manifest" => request.asset_vfs_manifest = section.payload,
@@ -2651,6 +2654,9 @@ fn package_with_target_manifest(
         .collect::<Vec<_>>();
     policy.profile = profile.to_string();
     policy.bindings = bindings.clone();
+    if has_compiled_story {
+        policy.runtime_provider = astra_vn::NativeVnRuntimeProvider::descriptor();
+    }
     registry.bindings = bindings;
     request.provider_policy = serde_json::to_vec(&policy).unwrap();
     request.plugin_extension_registry = serde_json::to_vec(&registry).unwrap();

@@ -7,8 +7,14 @@ use astra_media_core::SceneCommand;
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
 use astra_player_core::{PlayerAction, PlayerHostCommand, PlayerHostResourceId};
 use astra_player_vn::{NativeVnAudioOutput, NativeVnHostCommandSource};
+use astra_plugin_abi::{
+    LoadPhase, PluginExtensionRegistrySnapshot, ProviderBinding, ProviderBindingContext,
+    ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
+    PROVIDER_POLICY_SCHEMA,
+};
 use astra_vn_core::{compile_astra_sources, AstraSource, VnRunConfig};
 use astra_vn_package::{package_sections_for_story, PLAYER_LOCALE_CONFIG_SCHEMA};
+use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 
 const STORY: &str = r#"
 story main #@id story.main
@@ -56,6 +62,13 @@ fn product_package() -> Vec<u8> {
 }
 
 fn product_package_for(story: &str) -> Vec<u8> {
+    product_package_with_request(story, |_| {})
+}
+
+fn product_package_with_request(
+    story: &str,
+    mutate: impl FnOnce(&mut PackageBuildRequest),
+) -> Vec<u8> {
     let compiled = compile_astra_sources([AstraSource::new("main.astra", story)]).unwrap();
     let mut sections =
         package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
@@ -119,6 +132,7 @@ fn product_package_for(story: &str) -> Vec<u8> {
     ));
 
     let mut request = PackageBuildRequest::fixture("com.example.player", "classic", sections);
+    bind_product_provider_authority(&mut request);
     request.asset_vfs_manifest = serde_json::to_vec(&serde_json::json!({
         "schema": "astra.asset_vfs_manifest.v1",
         "prefixes": [{
@@ -165,7 +179,89 @@ fn product_package_for(story: &str) -> Vec<u8> {
         }]
     }))
     .unwrap();
+    mutate(&mut request);
     PackageBuilder::build(request).unwrap().into_bytes()
+}
+
+fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
+    let specs = [
+        ("presentation", "astra.renderer.wgpu", "renderer2d.wgpu"),
+        ("vfs_provider", "astra.vfs.package", "vfs.backend.package"),
+        (
+            "game_runtime_provider",
+            "astra.runtime.native_vn",
+            "runtime.native_vn",
+        ),
+    ];
+    let bindings = specs
+        .iter()
+        .map(|(slot, provider_id, capability)| {
+            ProviderBinding::new(
+                *slot,
+                *provider_id,
+                ProviderBindingContext {
+                    package_id: request.package_id.clone(),
+                    target: "nativevn-game".to_string(),
+                    profile: request.profile.clone(),
+                    required_capability: capability.to_string(),
+                    engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                    rustc_fingerprint: "rustc-stable".to_string(),
+                    feature_fingerprint: "runtime-envelope-v2".to_string(),
+                    abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+                },
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    request.provider_policy = serde_json::to_vec(&ProviderPolicy {
+        schema: PROVIDER_POLICY_SCHEMA.to_string(),
+        profile: request.profile.clone(),
+        renderer: "astra.renderer.wgpu".to_string(),
+        decode_fallback: "profile_bound".to_string(),
+        runtime_provider: NativeVnRuntimeProvider::descriptor(),
+        bindings: bindings.clone(),
+    })
+    .unwrap();
+    request.plugin_extension_registry = serde_json::to_vec(&PluginExtensionRegistrySnapshot {
+        schema: PLUGIN_EXTENSION_REGISTRY_SCHEMA.to_string(),
+        providers: specs
+            .iter()
+            .map(|(slot, provider_id, capability)| ProviderExtensionRecord {
+                slot: slot.to_string(),
+                provider_id: provider_id.to_string(),
+                capability: capability.to_string(),
+                phase: LoadPhase::Runtime,
+                packaged: true,
+                engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                rustc_fingerprint: "rustc-stable".to_string(),
+                feature_fingerprint: "runtime-envelope-v2".to_string(),
+                abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+            })
+            .collect(),
+        bindings,
+        conflicts: vec![],
+    })
+    .unwrap();
+    request.target_manifest = serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.target_manifest.v1",
+        "targets": [{
+            "id": "nativevn-game",
+            "kind": "game",
+            "crate": "astra-vn",
+            "runtime_provider": "native_vn",
+            "default_profile": "classic",
+            "platforms": ["windows", "web"],
+            "packaged": true
+        }]
+    }))
+    .unwrap();
+    request.platform_eligibility = serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.platform_eligibility.v1",
+        "target": "nativevn-game",
+        "profiles": ["classic"],
+        "platforms": ["windows", "web"]
+    }))
+    .unwrap();
 }
 
 fn scene_commands(batch: &astra_player_core::PlayerHostCommandBatch) -> &[SceneCommand] {
@@ -257,6 +353,28 @@ state start #@id state.start
         Err(error) => error.to_string(),
     };
     assert!(error.contains("ASTRA_PLAYER_PRESENTATION_UNSUPPORTED"));
+}
+
+#[test]
+fn package_open_blocks_runtime_descriptor_drift_before_provider_creation() {
+    let bytes = product_package_with_request(STORY, |request| {
+        let mut policy: ProviderPolicy = serde_json::from_slice(&request.provider_policy).unwrap();
+        policy.runtime_provider.output_schemas[0].schema =
+            "astra.vn.runtime_step_effect.drift".to_string();
+        request.provider_policy = serde_json::to_vec(&policy).unwrap();
+    });
+    let package = PackageReader::open(&bytes).unwrap();
+    let error = match NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        640,
+        360,
+        PlayerHostResourceId(1),
+    ) {
+        Ok(_) => panic!("linked provider descriptor drift must block package open"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("ASTRA_RUNTIME_PROVIDER_LINKED_DESCRIPTOR_MISMATCH"));
 }
 
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]

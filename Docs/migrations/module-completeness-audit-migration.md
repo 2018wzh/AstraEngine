@@ -168,11 +168,11 @@
 
 **分类：** `BYPASS`, `FAKE_IMPLEMENTATION`, `UNWIRED_MAIN_PATH`
 
-**2026-07-13 复核：** `NativeVnHostCommandSource` 已改为通过 `ProductRuntimeHost` 创建 `NativeVnRuntimeProvider` session，runtime output经 package localization/font shaping转换为 `PresentScene`，并由 Windows WGPU执行；旧 `VnRuntime` owner、`HeadlessRenderer`、bitmap glyph 与 `PresentRgba` 已删除。该修补仍直接构造 in-process provider，尚未从 package `ExtensionRegistry` binding创建 instance/session；camera、timeline、video、audio command 也仍以 `ASTRA_PLAYER_PRESENTATION_UNSUPPORTED` 在 package open 阶段阻断。因此本项从“完整 bypass”缩小为“provider binding 与完整 command stream 未闭合”，不能标记 `RESOLVED`。
+**2026-07-13 复核：** `NativeVnHostCommandSource` 已改为读取 `PackageReader` 保留的 `ValidatedRuntimeProviderSelection`，按 binding 的 provider id、target、profile、binding hash 和完整 descriptor 创建 instance，执行 prepare/probe/open，并在失败时清理 instance/session；request context、linked descriptor 或 provider report identity 漂移都会 blocking。runtime output再经 package localization/font shaping转换为 `PresentScene`，由 Windows WGPU执行；旧 `VnRuntime` owner、`HeadlessRenderer`、bitmap glyph 与 `PresentRgba` 已删除。camera、timeline、video、audio command 仍以 `ASTRA_PLAYER_PRESENTATION_UNSUPPORTED` 在 package open 阶段阻断，因此本项缩小为“完整 presentation/audio command stream 未闭合”，不能标记 `RESOLVED`。
 
-**视觉证据问题：** `native_vn_host.rs:104-128` 只把 state hash 转成清屏颜色，把 presentation JSON 的 hash 转成矩形条，再由 headless CPU renderer 输出 RGBA。它没有加载字体、图片、立绘、真实 dialogue、choice、timeline、video 或 audio graph，因此即使窗口发生像素变化，也不能证明 VN 场景真实渲染。
+**剩余视觉/音频问题：** dialogue、choice、system page、背景 texture/sprite 已进入 retained scene 和真实 Windows GPU capture，但 camera、timeline、video、voice、BGM/SE、AudioGraph 与 FilterGraph尚未接入同一 bundled session。当前 fail-fast preflight 会阻止包含这些 command 的 package 启动；这是诚实的未完成状态，不能用 text 子路径的 capture 外推完整 VN 演出。
 
-**影响：** 当前 Windows bundled Player 可以证明“独立的 VN reducer + headless frame 能被送到 host”，不能证明设计要求的 packaged Game 通过 runtime provider 和 RuntimeWorld 工作。若将这条路径作为 `player.full_playable` 证据，会构成核心架构旁路和假可玩证据。
+**影响：** 当前 Windows bundled Player 已证明 packaged Game 的 provider/RuntimeWorld/text/texture/GPU 子链，但尚不能证明 advanced presentation、真实音频、等待/取消和完整 route 可玩。若仅凭该子链生成 `player.full_playable`，仍会构成证据拔高。
 
 **迁移要求：** 删除 Player 主路径中的 direct `VnRuntime`/`VnPlayerCommand` 快捷实现；Player 必须从 package 读取 provider binding，创建 provider instance/session，由 RuntimeWorld 的 `astra.vn.step` action 消费平台事件，输出可序列化 presentation/audio/effect，再由真实 platform renderer/audio provider 执行。headless renderer 只能保留为明确标记的 unit/headless evidence，不能作为 bundled Player renderer。
 

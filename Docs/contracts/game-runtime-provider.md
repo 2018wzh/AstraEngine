@@ -98,7 +98,9 @@ project target
 
 Provider 可以在内部维护 product-specific cursor，但权威 Runtime 结果必须在 fixed tick 边界变成可序列化 effects、await tokens、event queue entries、presentation/audio commands 和 save sections。Replay 读取已保存的 provider output，不重新请求外部 provider 或平台回调。
 
-`ProductRuntimeProvider` 必须显式实现 `create_instance` 和 `destroy_instance`，不得依赖 host 伪造成功报告。`ProductRuntimeHost` 校验 instance/session report identity、首 step 为 `1` 且后续严格连续、output schema/size、save/restore section descriptor、唯一 id、hash 和容量。create 或 duplicate open 的部分成功必须执行 rollback；provider error、panic、malformed output 和 timeout 会 poison 对应 session 或 instance，除 cleanup 外不再接受调用。活动 session 阻断普通 destroy；`cleanup_after_failure` 按 session shutdown 后 destroy，并等待已超时的 blocking provider call drain，不能让后台调用继续并发修改已返回给调用方的 session。
+`ProductRuntimeProvider` 必须显式实现 `create_instance` 和 `destroy_instance`，不得依赖 host 伪造成功报告。产品入口只允许使用 `PackageReader::runtime_provider_selection` 产生的 `ValidatedRuntimeProviderSelection` 创建 `ProductRuntimeHost::bound_in_process`/`bound_ffi`；host 会在 create 前逐字段比对 linked descriptor，在 prepare/probe/open 前比对 target/profile，并验证 provider/runtime report identity。无 package binding 的入口已改名为 `reference_in_process`/`reference_ffi`，只用于明确的 fixture/reference runner，不能进入 Player 或 shipping host。
+
+`ProductRuntimeHost` 还校验 instance/session report identity、首 step 为 `1` 且后续严格连续、output schema/size、save/restore section descriptor、唯一 id、hash 和容量。create、prepare/probe/open 或 duplicate open 的部分成功必须执行 rollback；provider error、panic、malformed output 和 timeout 会 poison 对应 session 或 instance，除 cleanup 外不再接受调用。活动 session 阻断普通 destroy；`cleanup_after_failure` 按 session shutdown 后 destroy，并等待已超时的 blocking provider call drain，不能让后台调用继续并发修改已返回给调用方的 session。
 
 ## AstraRPG Profile Boundary
 

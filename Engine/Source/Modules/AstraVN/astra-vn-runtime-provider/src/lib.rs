@@ -14,18 +14,17 @@ use astra_plugin::ProductRuntimeProvider;
 #[cfg(feature = "ffi")]
 use astra_plugin_abi::{
     FfiRuntimeProviderRegistration, FfiRuntimeProviderResult, RuntimeProviderCall,
-    RuntimeProviderCreateRequest, RuntimeProviderDestroyRequest, RuntimeProviderInstanceReport,
-    PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
+    RuntimeProviderCreateRequest, RuntimeProviderDestroyRequest, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
 };
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ReleaseCheckDescriptor, RuntimeEditorMetadata,
     RuntimeOpenReport, RuntimeOpenRequest, RuntimeOutputCodec, RuntimeOutputDomain,
     RuntimeOutputEnvelope, RuntimeOutputSchemaDescriptor, RuntimePackageSectionPlan,
     RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest,
-    RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
-    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeSectionRef, RuntimeShutdownReport,
-    RuntimeStepInput, RuntimeStepOutput, GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID,
-    NATIVE_VN_RUNTIME_ID, RUNTIME_EDITOR_METADATA_SCHEMA,
+    RuntimeProviderInstanceReport, RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest,
+    RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeSectionRef,
+    RuntimeShutdownReport, RuntimeStepInput, RuntimeStepOutput, GAME_RUNTIME_PROVIDER_SLOT,
+    NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID, RUNTIME_EDITOR_METADATA_SCHEMA,
 };
 use astra_runtime::{
     ActionDescriptor, ActionInvocation, ActionTrace, BlackboardValue, ComponentId,
@@ -71,6 +70,10 @@ fn output_schema(
 }
 
 impl ProductRuntimeProvider for NativeVnRuntimeProvider {
+    fn descriptor(&self) -> Result<ProductRuntimeDescriptor, String> {
+        Ok(NativeVnRuntimeProvider::descriptor())
+    }
+
     fn create_instance(
         &mut self,
         instance_id: astra_plugin_abi::ProviderInstanceId,

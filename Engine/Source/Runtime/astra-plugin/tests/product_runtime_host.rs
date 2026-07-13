@@ -15,6 +15,7 @@ use astra_plugin_abi::*;
 #[derive(Default)]
 struct Provider {
     opened: bool,
+    wrong_identity: bool,
 }
 
 struct CreateFailureProvider {
@@ -74,6 +75,10 @@ impl ProductRuntimeProvider for CreateFailureProvider {
 }
 
 impl ProductRuntimeProvider for Provider {
+    fn descriptor(&self) -> Result<ProductRuntimeDescriptor, String> {
+        Ok(provider_descriptor())
+    }
+
     fn create_instance(
         &mut self,
         instance_id: ProviderInstanceId,
@@ -99,7 +104,11 @@ impl ProductRuntimeProvider for Provider {
     fn prepare(&mut self, _: RuntimePrepareRequest) -> Result<RuntimePrepareReport, String> {
         Ok(RuntimePrepareReport {
             runtime_id: "test".into(),
-            provider_id: "test.provider".into(),
+            provider_id: if self.wrong_identity {
+                "test.provider.wrong".into()
+            } else {
+                "test.provider".into()
+            },
             status: "ready".into(),
             diagnostics: vec![],
         })
@@ -186,6 +195,125 @@ impl ProductRuntimeProvider for Provider {
     }
 }
 
+fn provider_descriptor() -> ProductRuntimeDescriptor {
+    ProductRuntimeDescriptor {
+        runtime_id: "test".into(),
+        product_kind: "test".into(),
+        provider_id: "test.provider".into(),
+        supported_targets: vec!["test".into()],
+        capabilities: vec!["runtime.test".into()],
+        package_sections: vec![],
+        release_checks: vec![],
+        output_schemas: vec![RuntimeOutputSchemaDescriptor {
+            domain: RuntimeOutputDomain::Effect,
+            schema: "astra.test.effect.v1".into(),
+            version: SchemaVersion::new(1, 0, 0),
+            codec: RuntimeOutputCodec::Postcard,
+        }],
+    }
+}
+
+fn bound_selection() -> ValidatedRuntimeProviderSelection {
+    let context = |capability: &str| ProviderBindingContext {
+        package_id: "test.package".into(),
+        target: "test".into(),
+        profile: "release".into(),
+        required_capability: capability.into(),
+        engine_version: "0.1.0".into(),
+        rustc_fingerprint: "rustc-stable".into(),
+        feature_fingerprint: "runtime-envelope-v2".into(),
+        abi_fingerprint: "astra-plugin-abi-v2".into(),
+    };
+    let presentation =
+        ProviderBinding::new("presentation", "test.renderer", context("renderer2d.test")).unwrap();
+    let runtime = ProviderBinding::new(
+        GAME_RUNTIME_PROVIDER_SLOT,
+        "test.provider",
+        context("runtime.test"),
+    )
+    .unwrap();
+    let registry = PluginExtensionRegistrySnapshot {
+        schema: PLUGIN_EXTENSION_REGISTRY_SCHEMA.into(),
+        providers: vec![
+            ProviderExtensionRecord {
+                slot: "presentation".into(),
+                provider_id: "test.renderer".into(),
+                capability: "renderer2d.test".into(),
+                phase: LoadPhase::Runtime,
+                packaged: true,
+                engine_version: "0.1.0".into(),
+                rustc_fingerprint: "rustc-stable".into(),
+                feature_fingerprint: "runtime-envelope-v2".into(),
+                abi_fingerprint: "astra-plugin-abi-v2".into(),
+            },
+            ProviderExtensionRecord {
+                slot: GAME_RUNTIME_PROVIDER_SLOT.into(),
+                provider_id: "test.provider".into(),
+                capability: "runtime.test".into(),
+                phase: LoadPhase::Runtime,
+                packaged: true,
+                engine_version: "0.1.0".into(),
+                rustc_fingerprint: "rustc-stable".into(),
+                feature_fingerprint: "runtime-envelope-v2".into(),
+                abi_fingerprint: "astra-plugin-abi-v2".into(),
+            },
+        ],
+        bindings: vec![presentation.clone(), runtime.clone()],
+        conflicts: vec![],
+    };
+    let policy = ProviderPolicy {
+        schema: PROVIDER_POLICY_SCHEMA.into(),
+        profile: "release".into(),
+        renderer: "test.renderer".into(),
+        decode_fallback: "forbid".into(),
+        runtime_provider: provider_descriptor(),
+        bindings: vec![presentation, runtime],
+    };
+    registry
+        .resolve_embedded_runtime_provider(&policy, "test.package", "release")
+        .unwrap()
+}
+
+#[test]
+fn bound_host_blocks_request_and_provider_report_identity_drift() {
+    let selection = bound_selection();
+    let schemas = RuntimeHostSchemaRegistry::from_descriptor(selection.descriptor());
+    let mut host = ProductRuntimeHost::bound_in_process(
+        "bound-instance",
+        &selection,
+        Provider::default(),
+        schemas.clone(),
+    )
+    .unwrap();
+    let mut wrong_context = prepare_request();
+    wrong_context.target_id = "other".into();
+    assert_eq!(
+        host.prepare(wrong_context).unwrap_err().code(),
+        "ASTRA_RUNTIME_HOST_BINDING_CONTEXT"
+    );
+    host.prepare(prepare_request()).unwrap();
+    host.destroy().unwrap();
+
+    let mut wrong_provider = ProductRuntimeHost::bound_in_process(
+        "wrong-provider-instance",
+        &selection,
+        Provider {
+            wrong_identity: true,
+            ..Provider::default()
+        },
+        schemas,
+    )
+    .unwrap();
+    assert_eq!(
+        wrong_provider
+            .prepare(prepare_request())
+            .unwrap_err()
+            .code(),
+        "ASTRA_RUNTIME_HOST_PROVIDER_IDENTITY"
+    );
+    wrong_provider.cleanup_after_failure().unwrap();
+}
+
 fn prepare_request() -> RuntimePrepareRequest {
     RuntimePrepareRequest {
         target_id: "test".into(),
@@ -200,7 +328,7 @@ fn in_process_host_owns_provider_lifecycle_and_validates_step_envelopes() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
     let mut host =
-        ProductRuntimeHost::in_process("instance", Provider::default(), schemas).unwrap();
+        ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
     host.prepare(prepare_request()).unwrap();
     host.probe(RuntimeProbeRequest {
         target_id: "test".into(),
@@ -246,7 +374,7 @@ fn in_process_host_owns_provider_lifecycle_and_validates_step_envelopes() {
 fn host_rolls_back_failed_and_malformed_instance_creation() {
     for malformed_report in [false, true] {
         let destroy_calls = Arc::new(AtomicUsize::new(0));
-        let error = ProductRuntimeHost::in_process(
+        let error = ProductRuntimeHost::reference_in_process(
             "instance",
             CreateFailureProvider {
                 malformed_report,
@@ -273,7 +401,7 @@ fn duplicate_open_rolls_back_and_blocks_use_until_cleanup() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
     let mut host =
-        ProductRuntimeHost::in_process("instance", Provider::default(), schemas).unwrap();
+        ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
     let request = RuntimeOpenRequest {
         target_id: "test".into(),
         profile: "release".into(),
@@ -300,7 +428,7 @@ fn duplicate_open_rolls_back_and_blocks_use_until_cleanup() {
 
 #[test]
 fn host_blocks_unknown_step_schema() {
-    let mut host = ProductRuntimeHost::in_process(
+    let mut host = ProductRuntimeHost::reference_in_process(
         "instance",
         Provider::default(),
         RuntimeHostSchemaRegistry::new(),
@@ -333,7 +461,7 @@ fn host_blocks_output_count_and_payload_bounds() {
         .allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1")
         .with_bounds(0, 1);
     let mut host =
-        ProductRuntimeHost::in_process("instance", Provider::default(), schemas).unwrap();
+        ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
     let open = host
         .open(RuntimeOpenRequest {
             target_id: "test".into(),
@@ -360,7 +488,7 @@ fn host_validates_save_and_restore_sections_before_accepting_state() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
     let mut host =
-        ProductRuntimeHost::in_process("instance", Provider::default(), schemas).unwrap();
+        ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
     let open = host
         .open(RuntimeOpenRequest {
             target_id: "test".into(),
@@ -415,7 +543,7 @@ fn host_rejects_non_monotonic_fixed_steps_and_poisons_the_session() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
     let mut host =
-        ProductRuntimeHost::in_process("instance", Provider::default(), schemas).unwrap();
+        ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
     let open = host
         .open(RuntimeOpenRequest {
             target_id: "test".into(),
@@ -450,7 +578,7 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
     let mut host =
-        ProductRuntimeHost::in_process("instance", Provider::default(), schemas).unwrap();
+        ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
     let open = host
         .open(RuntimeOpenRequest {
             target_id: "test".into(),
@@ -476,7 +604,8 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
     let mut host =
-        ProductRuntimeHost::in_process("instance-panic", Provider::default(), schemas).unwrap();
+        ProductRuntimeHost::reference_in_process("instance-panic", Provider::default(), schemas)
+            .unwrap();
     let open = host
         .open(RuntimeOpenRequest {
             target_id: "test".into(),
@@ -513,7 +642,7 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
 async fn async_host_supports_multiple_sessions_on_one_ordered_provider_worker() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
-    let host = AsyncProductRuntimeHost::in_process(
+    let host = AsyncProductRuntimeHost::reference_in_process(
         "instance",
         Provider::default(),
         schemas,
@@ -550,7 +679,7 @@ async fn async_host_supports_multiple_sessions_on_one_ordered_provider_worker() 
 
 #[tokio::test(flavor = "current_thread")]
 async fn async_host_timeout_poisons_the_provider_instance() {
-    let host = AsyncProductRuntimeHost::in_process(
+    let host = AsyncProductRuntimeHost::reference_in_process(
         "instance",
         Provider::default(),
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1"),

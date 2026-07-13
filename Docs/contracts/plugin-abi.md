@@ -93,6 +93,8 @@ FFI 边界只传 stable id、string id、section ref、hash、diagnostic 和 bou
 
 Package 使用 `astra.plugin_extension_registry.v2` 和 `astra.provider_policy.v2`。两者共享 `ProviderBinding`，binding 同时固化 slot、provider id、required capability、package、target、profile、engine version、rustc/feature/ABI fingerprint 与 canonical `binding_hash`。Registry 中的 binding 集合必须与 policy 完全一致；缺失、重复、冲突、hash drift、capability/fingerprint mismatch、未 packaged provider 或 target/profile 不一致都会在 package builder、package reader、scenario runner 和 Release Gate 的同一 typed validator 中阻断。v1 section 不迁移，也不自动补默认 provider。
 
+`PackageReader` 在 open 时保留已验证的 `ValidatedRuntimeProviderSelection` 和真实 package SHA-256。Player 不能根据 provider 注册顺序、runtime 名称或硬编码 target 创建 provider；必须用 selection 的 provider id、target、profile、binding hash 和完整 `ProductRuntimeDescriptor` 匹配当前 binary/FFI registration。descriptor、request context 或 prepare/probe/open report identity 任一漂移都会在 provider 修改 session 前阻断；初始化失败必须执行 instance/session cleanup。
+
 `PluginRegistrar::register_provider` 是 fallible API。非法 identity 与重复 `(slot, provider_id)` 不写入 registry；loader 先解析全部 registration，再提交注册，任一注册失败会撤销本次已提交的 provider。无 binding context 的选择 API 不存在，provider 注册顺序不能改变结果。
 
 Stage 1 host registry 负责 `LoadPhase`、provider binding、conflict report 和 `PluginDependency` dependency graph。Stage 2 package/release gate 写入并校验 `plugin.extension_registry` 和 `plugin.dependency_graph`。Stage 4 Editor Plugin Manager 只显示和修改这些后端产物。
