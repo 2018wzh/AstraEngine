@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use astra_asset::{AssetCatalog, ResolveContext, VfsManifest, VfsSourceRef, VfsUri};
-use astra_core::{Diagnostic, Hash256};
+use astra_core::{
+    validate_performance_report, Diagnostic, Hash256, PerformanceBudget, PerformanceReport,
+};
 use astra_media::{
     CosmicTextLayoutProvider, FontBindingContext, FontPackageManifest, TextLayoutConfig,
     FONT_PACKAGE_MANIFEST_SCHEMA,
@@ -48,6 +50,12 @@ pub struct PackageValidateRequest {
     pub target: Option<String>,
     pub require_platform_report: bool,
     pub platform_report: Option<PlatformCapabilityReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProductPerformanceEvidence {
+    pub budget: PerformanceBudget,
+    pub report: PerformanceReport,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -120,6 +128,34 @@ pub struct ReleaseEvidence {
 pub struct ReleaseValidator;
 
 impl ReleaseValidator {
+    pub fn validate_package_with_product_evidence(
+        &self,
+        request: PackageValidateRequest,
+        conformance_report: Option<PlatformHostConformanceReport>,
+        player_report: Option<PlayerAutomationReport>,
+        performance_evidence: Vec<ProductPerformanceEvidence>,
+    ) -> Result<ReleaseReport, ReleaseError> {
+        let target = request.target.clone();
+        let profile = request.profile.clone();
+        let capability_report = request.platform_report.clone();
+        let mut report = self.validate_package_with_platform_evidence(
+            request,
+            conformance_report.clone(),
+            player_report.clone(),
+        )?;
+        report.checks.push(product_performance_check(
+            &performance_evidence,
+            &report.package_hash,
+            target.as_deref(),
+            &profile,
+            capability_report.as_ref(),
+            conformance_report.as_ref(),
+            player_report.as_ref(),
+        ));
+        report.status = release_status(&report.checks);
+        Ok(report)
+    }
+
     pub fn validate_package_with_platform_evidence(
         &self,
         request: PackageValidateRequest,
@@ -330,6 +366,99 @@ impl ReleaseValidator {
             ),
         }
         Ok(report)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn product_performance_check(
+    evidence_set: &[ProductPerformanceEvidence],
+    package_hash: &str,
+    target: Option<&str>,
+    profile: &str,
+    capability: Option<&PlatformCapabilityReport>,
+    conformance: Option<&PlatformHostConformanceReport>,
+    player: Option<&PlayerAutomationReport>,
+) -> ReleaseCheckRecord {
+    let mut budget_ids = BTreeSet::new();
+    let player_evidence = |key: &str| {
+        player.and_then(|report| {
+            report
+                .checks
+                .iter()
+                .flat_map(|check| &check.evidence)
+                .find(|entry| entry.key == key)
+                .map(|entry| entry.value.as_str())
+        })
+    };
+    let common_identity =
+        capability
+            .zip(conformance)
+            .zip(player)
+            .filter(|((capability, conformance), player)| {
+                capability.profile_hash == conformance.profile_hash
+                    && capability.build_fingerprint == conformance.build_fingerprint
+                    && conformance.package_hash == package_hash
+                    && player.package_hash == package_hash
+                    && player.profile == profile
+                    && target.is_none_or(|expected| {
+                        capability.target == expected
+                            && conformance.target == expected
+                            && player.target == expected
+                    })
+                    && player_evidence("profile_hash") == Some(conformance.profile_hash.as_str())
+                    && player_evidence("build_fingerprint")
+                        == Some(conformance.build_fingerprint.as_str())
+                    && player_evidence("session_id") == Some(conformance.session_id.as_str())
+            });
+    if evidence_set.is_empty() || common_identity.is_none() {
+        return media_blocked(
+            "performance.product_run",
+            "ASTRA_PERFORMANCE_EVIDENCE_MISSING",
+            "measured performance requires capability, host, player and budget evidence from one run",
+            vec![evidence("report_count", evidence_set.len())],
+        );
+    }
+    let ((capability, conformance), _) = common_identity.expect("identity presence was checked");
+    for item in evidence_set {
+        let identity = &item.report.identity;
+        let valid = budget_ids.insert(item.budget.budget_id.clone())
+            && validate_performance_report(&item.budget, identity, &item.report).is_ok()
+            && !identity.dirty
+            && identity.package_hash == package_hash
+            && identity.profile == profile
+            && identity.profile_hash == conformance.profile_hash
+            && identity.build_fingerprint == conformance.build_fingerprint
+            && identity.session_id == conformance.session_id
+            && identity.target == capability.target
+            && target.is_none_or(|expected| identity.target == expected);
+        if !valid {
+            return media_blocked(
+                "performance.product_run",
+                "ASTRA_PERFORMANCE_EVIDENCE_IDENTITY",
+                "performance report failed its budget or same-run release identity validation",
+                vec![
+                    evidence("budget_id", &item.budget.budget_id),
+                    evidence("package_hash", &identity.package_hash),
+                    evidence("profile", &identity.profile),
+                    evidence("target", &identity.target),
+                ],
+            );
+        }
+    }
+    ReleaseCheckRecord {
+        id: "performance.product_run".to_string(),
+        domain: ReleaseDomain::Media,
+        status: CheckStatus::Pass,
+        summary: "performance budgets and measured reports share the product run identity"
+            .to_string(),
+        diagnostic: None,
+        evidence: vec![
+            evidence("report_count", evidence_set.len()),
+            evidence("package_hash", package_hash),
+            evidence("profile_hash", &conformance.profile_hash),
+            evidence("build_fingerprint", &conformance.build_fingerprint),
+            evidence("session_id", &conformance.session_id),
+        ],
     }
 }
 

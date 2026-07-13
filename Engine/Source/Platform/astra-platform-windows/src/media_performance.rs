@@ -8,19 +8,25 @@ pub const WINDOWS_MEDIA_PERFORMANCE_BUDGET_ID: &str = "windows.native_media.v1";
 
 pub fn windows_media_performance_budget(
     profile: &PlatformHostProfile,
+    product_profile: &str,
 ) -> Result<PerformanceBudget, PlatformError> {
-    if profile.platform != PlatformId::Windows {
+    if profile.platform != PlatformId::Windows
+        || product_profile.is_empty()
+        || !product_profile
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
         return Err(PlatformError::new(
             PlatformErrorCode::InvalidProfile,
             "media.performance_budget",
-            "native Windows media budget requires a Windows profile",
+            "native Windows media budget requires a Windows host and safe product profile",
         ));
     }
     Ok(PerformanceBudget {
         schema: PERFORMANCE_BUDGET_SCHEMA.into(),
         budget_id: WINDOWS_MEDIA_PERFORMANCE_BUDGET_ID.into(),
         target: profile.target.clone(),
-        profile: profile.id.clone(),
+        profile: product_profile.to_string(),
         profile_hash: profile.hash()?,
         min_run_duration_us: 1_000_000,
         metrics: vec![

@@ -1,4 +1,7 @@
-use astra_core::Hash256;
+use astra_core::{
+    Hash256, PerformanceBudget, PerformanceMetricBudget, PerformanceRecorder,
+    PerformanceRunIdentity, PerformanceThresholds, PerformanceUnit, PERFORMANCE_BUDGET_SCHEMA,
+};
 use astra_package::{
     AstraContainerBuilder, ContainerKind, PackageBuildRequest, PackageBuilder, PackageManifest,
     SectionPayload, CURRENT_CONTAINER_VERSION,
@@ -11,7 +14,10 @@ use astra_player_core::{
     PlayerAutomationCheck, PlayerAutomationEvidence, PlayerAutomationReport,
     PlayerAutomationStatus, PlayerPlatform,
 };
-use astra_release::{CheckStatus, PackageValidateRequest, ReleaseDomain, ReleaseValidator};
+use astra_release::{
+    CheckStatus, PackageValidateRequest, ProductPerformanceEvidence, ReleaseDomain,
+    ReleaseValidator,
+};
 use astra_vn::{compile_astra_sources, package_sections_for_story, AstraSource};
 
 #[test]
@@ -256,6 +262,133 @@ fn release_gate_requires_capability_conformance_player_identity_continuity() {
     assert!(report.checks.iter().any(|check| {
         check.id == "platform.evidence_continuity" && check.status == CheckStatus::Pass
     }));
+}
+
+#[test]
+fn release_gate_accepts_only_measured_performance_from_the_same_clean_product_run() {
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
+        "com.example.performance",
+        "classic",
+        Vec::new(),
+    ))
+    .unwrap();
+    let package_bytes = blob.into_bytes();
+    let package_hash = Hash256::from_sha256(&package_bytes).to_string();
+    let capability = platform_capability(
+        PlatformId::Windows,
+        "tsuinosora-internal-game",
+        &["wgpu_hardware", "wmf", "wasapi", "saved_games"],
+    );
+    let session_id = "session.windows.performance";
+    let conformance = PlatformHostConformanceReport {
+        schema: PLATFORM_HOST_CONFORMANCE_REPORT_SCHEMA.to_string(),
+        status: ConformanceStatus::Pass,
+        platform: PlatformId::Windows,
+        target: capability.target.clone(),
+        profile_hash: capability.profile_hash.clone(),
+        package_hash: package_hash.clone(),
+        build_fingerprint: capability.build_fingerprint.clone(),
+        session_id: session_id.to_string(),
+        checks: astra_platform::required_conformance_checks(PlatformId::Windows)
+            .iter()
+            .map(|id| ConformanceCheck::pass(*id, [("hash", &package_hash)]))
+            .collect(),
+        diagnostics: Vec::new(),
+    };
+    let mut player = player_report(&package_hash, "classic", "tsuinosora-internal-game");
+    player.checks[0].evidence.extend([
+        PlayerAutomationEvidence {
+            key: "profile_hash".into(),
+            value: capability.profile_hash.clone(),
+        },
+        PlayerAutomationEvidence {
+            key: "build_fingerprint".into(),
+            value: capability.build_fingerprint.clone(),
+        },
+        PlayerAutomationEvidence {
+            key: "session_id".into(),
+            value: session_id.into(),
+        },
+    ]);
+    let budget = PerformanceBudget {
+        schema: PERFORMANCE_BUDGET_SCHEMA.into(),
+        budget_id: "windows.product.performance.v1".into(),
+        target: capability.target.clone(),
+        profile: "classic".into(),
+        profile_hash: capability.profile_hash.clone(),
+        min_run_duration_us: 1,
+        metrics: vec![PerformanceMetricBudget {
+            id: "frame.total_us".into(),
+            unit: PerformanceUnit::Microseconds,
+            min_samples: 1,
+            max_samples: 2,
+            thresholds: PerformanceThresholds {
+                min_p50: None,
+                min_p95: None,
+                max_p50: Some(20_000),
+                max_p95: Some(20_000),
+                max_p99: Some(20_000),
+                max: Some(20_000),
+            },
+        }],
+    };
+    let identity = PerformanceRunIdentity {
+        source_revision: "0123456789abcdef0123456789abcdef01234567".into(),
+        dirty: false,
+        target: capability.target.clone(),
+        profile: "classic".into(),
+        profile_hash: capability.profile_hash.clone(),
+        package_hash: package_hash.clone(),
+        build_fingerprint: capability.build_fingerprint.clone(),
+        session_id: session_id.into(),
+    };
+    let mut recorder = PerformanceRecorder::new(budget.clone()).unwrap();
+    recorder.record("frame.total_us", 16_000).unwrap();
+    let performance = recorder.finalize(identity, 1).unwrap();
+    let mut request = package_request(package_bytes.clone());
+    request.platform_report = Some(capability.clone());
+    request.require_platform_report = true;
+    let report = ReleaseValidator
+        .validate_package_with_product_evidence(
+            request,
+            Some(conformance.clone()),
+            Some(player.clone()),
+            vec![ProductPerformanceEvidence {
+                budget: budget.clone(),
+                report: performance.clone(),
+            }],
+        )
+        .unwrap();
+    assert!(report.checks.iter().any(|check| {
+        check.id == "performance.product_run" && check.status == CheckStatus::Pass
+    }));
+
+    let mut dirty = performance;
+    dirty.identity.dirty = true;
+    let mut request = package_request(package_bytes);
+    request.platform_report = Some(capability);
+    request.require_platform_report = true;
+    let blocked = ReleaseValidator
+        .validate_package_with_product_evidence(
+            request,
+            Some(conformance),
+            Some(player),
+            vec![ProductPerformanceEvidence {
+                budget,
+                report: dirty,
+            }],
+        )
+        .unwrap();
+    let check = blocked
+        .checks
+        .iter()
+        .find(|check| check.id == "performance.product_run")
+        .unwrap();
+    assert_eq!(check.status, CheckStatus::Blocked);
+    assert_eq!(
+        check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_PERFORMANCE_EVIDENCE_IDENTITY"
+    );
 }
 
 #[test]

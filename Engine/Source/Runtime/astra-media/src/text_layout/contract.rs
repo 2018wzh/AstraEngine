@@ -79,6 +79,12 @@ pub struct PackagedFontIdentity {
     pub coverage: Vec<UnicodeRange>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TextLayoutProviderIdentity {
+    pub context: FontBindingContext,
+    pub fonts: Vec<PackagedFontIdentity>,
+}
+
 impl From<&PackagedFont> for PackagedFontIdentity {
     fn from(font: &PackagedFont) -> Self {
         Self {
@@ -489,6 +495,8 @@ pub struct TextLayoutCacheStats {
 }
 
 pub trait TextLayoutProvider {
+    fn identity(&self) -> Result<TextLayoutProviderIdentity, MediaError>;
+    fn request_hash(&self, request: &TextLayoutRequest) -> Result<Hash256, MediaError>;
     fn layout(&self, request: &TextLayoutRequest) -> Result<TextLayoutResult, MediaError>;
     fn layout_hash(&self, request: &TextLayoutRequest) -> Result<Hash256, MediaError>;
 }

@@ -82,7 +82,6 @@ impl WindowsNativeMediaSession {
             .validate()
             .map_err(performance_error)?;
         if config.performance_identity.target != client.profile().target
-            || config.performance_identity.profile != client.profile().id
             || config.performance_identity.profile_hash != client.profile().hash()?
         {
             return Err(PlatformError::new(

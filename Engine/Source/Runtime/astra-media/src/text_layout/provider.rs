@@ -242,6 +242,21 @@ impl CosmicTextLayoutProvider {
 }
 
 impl TextLayoutProvider for CosmicTextLayoutProvider {
+    fn identity(&self) -> Result<TextLayoutProviderIdentity, MediaError> {
+        let state = self.lock_state()?;
+        Ok(TextLayoutProviderIdentity {
+            context: self.context.clone(),
+            fonts: state.fonts.iter().map(PackagedFontIdentity::from).collect(),
+        })
+    }
+
+    fn request_hash(&self, request: &TextLayoutRequest) -> Result<Hash256, MediaError> {
+        super::validation::validate_request(request, &self.config)?;
+        let state = self.lock_state()?;
+        validate_family_chain(request, &state)?;
+        request_cache_key(request, &state.fonts)
+    }
+
     fn layout(&self, request: &TextLayoutRequest) -> Result<TextLayoutResult, MediaError> {
         let span = tracing::debug_span!(
             target: "astra_media::text",
