@@ -222,3 +222,22 @@ fn transcript(platform: PlayerPlatform, source: &str) -> PlayerInputTranscript {
         route_coverage: vec!["route.opening".to_string()],
     }
 }
+
+#[test]
+fn transcript_hash_failure_blocks_full_playable_instead_of_hashing_empty_bytes() {
+    let script = script(PlayerPlatform::Windows);
+    let mut transcript = transcript(PlayerPlatform::Windows, "send_input");
+    transcript.audio_meter.peak_dbfs = f32::NAN;
+
+    let report = PlayerAutomationValidator.validate(&script, &transcript);
+    assert_eq!(report.status, PlayerAutomationStatus::Blocked);
+    assert!(report.transcript_hash.is_empty());
+    assert!(report.checks.iter().any(|check| {
+        check.id == "player.transcript_serialization"
+            && check.status == PlayerAutomationStatus::Blocked
+            && check.diagnostic.as_ref().is_some_and(|diagnostic| {
+                diagnostic.code == "ASTRA_PLAYER_TRANSCRIPT_SERIALIZATION"
+            })
+    }));
+    assert!(!report.full_playable_passed());
+}

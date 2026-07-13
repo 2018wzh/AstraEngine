@@ -14,6 +14,8 @@
 | `astra.player_input_transcript.v1` | 记录每个真实平台输入事件和 player event loop 接收情况 | event source、坐标、按键、target region、frame hash before/after、focus state、event-loop receipt、diagnostic |
 | `astra.player_automation_report.v1` | 聚合 input transcript、visual report、audio report 和 route report | check id/status、region hash、meter summary、host evidence id、route coverage 和 blocking diagnostic |
 
+Transcript identity 必须由完整 canonical JSON 计算；序列化失败或 audio meter 出现 NaN/Infinity 时，`player.transcript_serialization` 以 `ASTRA_PLAYER_TRANSCRIPT_SERIALIZATION` 阻断，不能对空 bytes、被 JSON 静默替换的值或部分字段计算成功 hash。
+
 这些 report 不得记录截图、音频、影片、商业正文、商业素材 payload、本地绝对路径、用户名、native handle 或 host secret。视觉证据只能写 region id、尺寸、frame hash 和 changed/blank 状态；音频证据只能写 bus id、peak/rms 区间、sample count、host provider evidence 和 silent/blocking 状态。
 
 ## Shared Player Core

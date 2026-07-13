@@ -562,10 +562,22 @@ pub struct PlayerInputTranscript {
 }
 
 impl PlayerInputTranscript {
-    pub fn hash(&self) -> Hash256 {
-        let bytes = serde_json::to_vec(self).unwrap_or_default();
-        Hash256::from_sha256(&bytes)
+    pub fn hash(&self) -> Result<Hash256, PlayerTranscriptHashError> {
+        if !self.audio_meter.peak_dbfs.is_finite() || !self.audio_meter.rms_dbfs.is_finite() {
+            return Err(PlayerTranscriptHashError::NonFiniteAudioMeter);
+        }
+        serde_json::to_vec(self)
+            .map(|bytes| Hash256::from_sha256(&bytes))
+            .map_err(PlayerTranscriptHashError::Serialization)
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PlayerTranscriptHashError {
+    #[error("player transcript audio meter contains a non-finite value")]
+    NonFiniteAudioMeter,
+    #[error("serialize player transcript: {0}")]
+    Serialization(serde_json::Error),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -724,8 +736,26 @@ impl PlayerAutomationValidator {
             input_event_count = transcript.events.len(),
             "player automation validation started"
         );
-        let transcript_hash = transcript.hash().to_string();
+        let (transcript_hash, serialization_check) = match transcript.hash() {
+            Ok(hash) => (
+                hash.to_string(),
+                pass_check(
+                    "player.transcript_serialization",
+                    "player transcript has a canonical JSON identity",
+                    vec![evidence("transcript_hash", hash)],
+                ),
+            ),
+            Err(_) => (
+                String::new(),
+                blocked_check(
+                    "player.transcript_serialization",
+                    "player transcript could not be serialized without data loss",
+                    "ASTRA_PLAYER_TRANSCRIPT_SERIALIZATION",
+                ),
+            ),
+        };
         let mut checks = vec![
+            serialization_check,
             schema_check(script, transcript),
             identity_check(script, transcript),
             live_input_surface_check(script.platform, &transcript.events),
