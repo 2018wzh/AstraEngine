@@ -90,6 +90,8 @@ pub struct TimelineTaskState {
 
 当前 Stage 3 slice 已把 contract 收敛为 `SceneCommand`：纹理和 glyph 先显式 upload，sprite 只引用 resource id 与 source rect，资源必须显式 release；command stream 同时表达 glyph run、transform、camera、clip、opacity/blend、video frame 与 `FilterGraph`。`DrawCommand` 只保留兼容 type alias。`VnHeadlessPresentationExecutor` 作为 CPU reference 执行同一 stream并生成定位 hash；Windows hardware glyph subset 已由 platform host 执行并生成 GPU visual golden，但 sprite、camera、filter、video 等完整 Windows stream、WebGPU 与 formal Player evidence 尚未闭合，因此 `S3-PRESENT-01` 保持 `IN_PROGRESS`。
 
+`ProductStageDirector` 是 typed `StageCommand` 的产品状态 owner。它用 fixed-point 保存 layer/entity/camera、tween、timeline、shake、movie/effect intent 和 frame identity；`apply`、`tick`、snapshot/restore 都采用事务提交，并受 package-bound profile budget 约束。NativeVN Player 已通过该 director 生成 background/sprite 的 retained `SceneCommand`，执行 safe-area clip、camera zoom/translation、opacity tween 和 texture lifecycle。当前平台 event loop 尚未把固定 frame tick送入 director，timeline completion 也尚未回到 Runtime await；movie/audio/effect、非 normal blend 和 camera rotation 仍会 blocking，不能由本地 director 单元测试外推为完整演出链。
+
 ## PresentationCommand
 
 ```rust

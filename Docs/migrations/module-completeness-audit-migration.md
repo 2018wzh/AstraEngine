@@ -202,6 +202,8 @@
 
 **2026-07-13 presentation policy 修补进度：** `vn.presentation_provider_manifest` 已升级为 v2，并把 `classic`、`modern`、`advanced-vn` 的 preset、filter、fallback、layer/timeline/effect budget 写入经过验证的 package section。Package loader、Player 和 Release Gate 复用同一 validator；重复或未知 id、preset/command 不匹配、profile 越权、filter/fallback 断链、预算越界和旧 v1 schema 都会在 provider session 创建前阻断。Player 不再依赖源码内隐式 preset 默认值。该子项关闭 preset policy binding 缺口，但不代表 preset 已由 frame tick 执行；typed product director、平台 timer、camera/timeline/video/audio command stream 与真实证据仍开放。
 
+**2026-07-13 product director 检查点：** `ProductStageDirector` 已成为 NativeVN Player 的 typed stage state owner。它以 fixed-point 和 profile budget 管理 layer/entity/camera、tween、timeline、shake、movie/effect intent、frame identity 与 snapshot/restore，所有 apply/tick/restore 失败都保持原状态。Player 已从 director state 生成 package texture-backed background/sprite stream，并执行 safe-area clip、camera translation/zoom、opacity 和资源生命周期。当前只保存为可恢复检查点：平台 event loop 尚未送入固定 frame tick，timeline fence 尚未回注 Runtime await，movie/audio/effect、非 normal blend、camera rotation 和完整 Windows/Web E3 仍 blocking；P0-002/P1-011 不关闭。
+
 ### P1-008：ExtensionRegistry 的公开 `select()` 忽略显式 binding
 
 **分类：** `BYPASS`, `STATUS_MISMATCH`

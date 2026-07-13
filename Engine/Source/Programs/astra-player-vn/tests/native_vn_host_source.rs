@@ -75,6 +75,10 @@ fn product_package_with_request(
     let font = include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/Poppins-Regular.ttf")
         .to_vec();
     let font_hash = Hash256::from_sha256(&font);
+    let background =
+        include_bytes!("../../../../../Examples/NativeVN/Assets/Backgrounds/apartment-night.png")
+            .to_vec();
+    let background_hash = Hash256::from_sha256(&background);
     sections.push(SectionPayload::raw(
         "asset.font.ui",
         "astra.cooked_asset.v1",
@@ -105,6 +109,11 @@ fn product_package_with_request(
             }],
         })
         .unwrap(),
+    ));
+    sections.push(SectionPayload::raw(
+        "asset.image.background",
+        "astra.cooked_asset.v1",
+        background.clone(),
     ));
     sections.push(SectionPayload::raw(
         "vn.localization.en",
@@ -152,31 +161,55 @@ fn product_package_with_request(
             "targets": ["nativevn-game"],
             "profiles": ["classic"]
         }],
-        "entries": [{
-            "vfs_uri": "package:/fonts/ui.ttf",
-            "layer_id": "package.base",
-            "source": {"kind": "package_section", "section_id": "asset.font.ui"},
-            "offset": 0,
-            "size": font.len(),
-            "hash": font_hash,
-            "codec": "raw",
-            "media_kind": "font",
-            "diagnostics": []
-        }],
+        "entries": [
+            {
+                "vfs_uri": "package:/fonts/ui.ttf",
+                "layer_id": "package.base",
+                "source": {"kind": "package_section", "section_id": "asset.font.ui"},
+                "offset": 0,
+                "size": font.len(),
+                "hash": font_hash,
+                "codec": "raw",
+                "media_kind": "font",
+                "diagnostics": []
+            },
+            {
+                "vfs_uri": "package:/background/apartment-night.png",
+                "layer_id": "package.base",
+                "source": {"kind": "package_section", "section_id": "asset.image.background"},
+                "offset": 0,
+                "size": background.len(),
+                "hash": background_hash,
+                "codec": "raw",
+                "media_kind": "image/png",
+                "diagnostics": []
+            }
+        ],
         "whiteouts": []
     }))
     .unwrap();
     request.asset_catalog = serde_json::to_vec(&serde_json::json!({
         "schema": "astra.asset_catalog.v1",
-        "assets": [{
-            "asset_id": "asset:/font/ui",
-            "vfs_uri": "package:/fonts/ui.ttf",
-            "media_kind": "font",
-            "tags": ["ui"],
-            "bundle_id": "classic",
-            "chunk_id": "base",
-            "profiles": ["classic"]
-        }]
+        "assets": [
+            {
+                "asset_id": "asset:/font/ui",
+                "vfs_uri": "package:/fonts/ui.ttf",
+                "media_kind": "font",
+                "tags": ["ui"],
+                "bundle_id": "classic",
+                "chunk_id": "base",
+                "profiles": ["classic"]
+            },
+            {
+                "asset_id": "asset:/background/apartment-night",
+                "vfs_uri": "package:/background/apartment-night.png",
+                "media_kind": "image/png",
+                "tags": ["background"],
+                "bundle_id": "classic",
+                "chunk_id": "base",
+                "profiles": ["classic"]
+            }
+        ]
     }))
     .unwrap();
     mutate(&mut request);
@@ -314,6 +347,50 @@ fn packaged_native_vn_source_shapes_localized_text_into_retained_scene_commands(
 }
 
 #[test]
+fn packaged_native_vn_stage_uses_product_director_and_package_texture() {
+    let bytes = product_package_for(
+        r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    stage viewport:640x360 safe_area:16:9 #@id stage.main
+    layer id:bg kind:background z:0 blend:normal clip:stage #@id layer.bg
+    background asset:asset:/background/apartment-night layer:bg duration:0 #@id background.main
+    text key:line.one speaker:hero #@id line.one
+"#,
+    );
+    let package = PackageReader::open(&bytes).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        640,
+        360,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+
+    let launch = source.launch().unwrap();
+    let commands = scene_commands(&launch);
+    assert!(commands.iter().any(|command| matches!(
+        command,
+        SceneCommand::UploadTexture { resource_id, .. }
+            if resource_id == "asset:/background/apartment-night"
+    )));
+    assert!(commands.iter().any(|command| matches!(
+        command,
+        SceneCommand::Sprite { texture_id, destination, .. }
+            if texture_id == "asset:/background/apartment-night"
+                && destination.width == 640
+                && destination.height == 360
+    )));
+    assert!(commands
+        .iter()
+        .any(|command| matches!(command, SceneCommand::PushClip { .. })));
+    source.release_resources().unwrap();
+    source.shutdown().unwrap();
+}
+
+#[test]
 fn package_open_blocks_undeclared_localization() {
     let bytes = product_package();
     let package = PackageReader::open(&bytes).unwrap();
@@ -337,7 +414,7 @@ fn package_open_blocks_unwired_presentation_commands_before_runtime_step() {
 story main #@id story.main
 state start #@id state.start
   scene room #@id scene.room
-    camera target:main zoom:1.1 duration:100 #@id camera.unsupported
+    transition preset:flash_soft duration:100 #@id transition.unsupported
     text key:line.one speaker:hero #@id line.one
 "#,
     );

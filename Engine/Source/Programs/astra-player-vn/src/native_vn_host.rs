@@ -21,13 +21,13 @@ use astra_plugin_abi::{
     ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
 };
 use astra_vn_core::{
-    CompiledCommand, CompiledStory, PresentationCommand, StageCommand, StagePlacement,
-    SystemPageKind, VnPlayerCommand, VnRunConfig, VnRuntimeState,
+    CompiledCommand, CompiledStory, PresentationCommand, StageBlendMode, StageClipPolicy,
+    StageCommand, StageLayerKind, SystemPageKind, VnPlayerCommand, VnRunConfig, VnRuntimeState,
 };
 use astra_vn_package::{
     decode_compiled_story, load_localization as load_package_localization,
-    load_player_locale_config, load_presentation_provider_manifest, VnLocalizationTable,
-    VnPresentationProviderManifest,
+    load_player_locale_config, load_presentation_provider_manifest, ProductStageDirector,
+    ProductStageState, StageDirectorOutput, VnLocalizationTable, VnPresentationProviderManifest,
 };
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 use astra_vn_system::{SystemUiAction, SystemUiModel};
@@ -59,6 +59,7 @@ pub struct NativeVnHostCommandSource {
     next_media_resource_id: u64,
     presentation_manifest: VnPresentationProviderManifest,
     presentation_profile: String,
+    stage_director: ProductStageDirector,
     shutdown_started: bool,
 }
 
@@ -278,6 +279,12 @@ impl NativeVnHostCommandSource {
             hash: Hash256::from_sha256(&compiled_bytes),
             bytes: compiled_bytes,
         };
+        let stage_director = ProductStageDirector::new(
+            binding.presentation.manifest.clone(),
+            binding.runtime_provider.profile(),
+            astra_vn_package::StageViewport { width, height },
+        )
+        .map_err(stage_director_error)?;
         let runtime_provider = &binding.runtime_provider;
         let schemas = RuntimeHostSchemaRegistry::from_descriptor(runtime_provider.descriptor());
         if runtime_provider.provider_id() != NATIVE_VN_PROVIDER_ID {
@@ -377,6 +384,7 @@ impl NativeVnHostCommandSource {
             next_media_resource_id: 10_000,
             presentation_profile: binding.runtime_provider.profile().to_string(),
             presentation_manifest: binding.presentation.manifest,
+            stage_director,
             shutdown_started: false,
         })
     }
@@ -1126,20 +1134,21 @@ impl NativeVnHostCommandSource {
         &mut self,
         presentation: &[PresentationCommand],
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        let mut next_scene_draw = self.scene_draw.clone();
+        let mut next_stage_director = self.stage_director.clone();
         for command in presentation {
             if let PresentationCommand::Stage(stage) = command {
-                apply_stage_command(
-                    &mut next_scene_draw,
-                    &self.textures,
-                    self.width,
-                    self.height,
-                    stage,
-                    &self.presentation_manifest,
-                    &self.presentation_profile,
-                )?;
+                let outputs = next_stage_director
+                    .apply(stage)
+                    .map_err(stage_director_error)?;
+                reject_unwired_stage_outputs(&outputs)?;
             }
         }
+        let next_scene_draw = stage_scene_commands(
+            next_stage_director.state(),
+            &self.textures,
+            self.width,
+            self.height,
+        )?;
 
         let next_texture_ids = scene_texture_ids(&next_scene_draw);
         let mut lifecycle = Vec::new();
@@ -1386,6 +1395,7 @@ impl NativeVnHostCommandSource {
         );
         self.last_draw = lifecycle.clone();
         self.scene_draw = next_scene_draw;
+        self.stage_director = next_stage_director;
         self.live_texture_ids = next_texture_ids;
         self.text_resources = next_text_resources;
         self.live_layout_ids = next_layout_ids;
@@ -1775,107 +1785,236 @@ fn sniff_audio_codec(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-fn required_attribute<'a>(
-    attributes: &'a BTreeMap<String, String>,
-    key: &str,
-    command: &str,
-) -> Result<&'a str, NativeVnHostError> {
-    attributes.get(key).map(String::as_str).ok_or_else(|| {
-        NativeVnHostError::Asset(format!(
-            "ASTRA_PLAYER_STAGE_ATTRIBUTE: {command} requires {key}"
-        ))
-    })
-}
-
-fn apply_stage_command(
-    scene_draw: &mut Vec<SceneCommand>,
+fn stage_scene_commands(
+    state: &ProductStageState,
     textures: &BTreeMap<String, TextureFrame>,
     width: u32,
     height: u32,
-    command: &StageCommand,
-    manifest: &VnPresentationProviderManifest,
-    profile: &str,
-) -> Result<(), NativeVnHostError> {
-    validate_stage_command_policy(command, manifest, profile)?;
-    match command {
-        StageCommand::Background { asset: asset_id, .. } => {
-            if !textures.contains_key(asset_id) {
-                return Err(missing_texture(asset_id));
-            }
-            scene_draw.retain(|draw| !draw_id_is(draw, "vn.scene.background"));
-            scene_draw.insert(
-                0,
-                SceneCommand::Sprite {
-                    id: "vn.scene.background".to_string(),
-                    texture_id: asset_id.to_string(),
-                    source: None,
-                    destination: RectI::new(0, 0, width, height),
-                    opacity: 1.0,
-                    blend: BlendMode::Alpha,
-                },
-            );
+) -> Result<Vec<SceneCommand>, NativeVnHostError> {
+    if state.camera.rotation.millionths != 0 {
+        return Err(NativeVnHostError::Asset(
+            "ASTRA_PLAYER_CAMERA_ROTATION_UNWIRED: retained sprite renderer does not yet execute rotated camera geometry"
+                .to_string(),
+        ));
+    }
+    let mut entities = state
+        .entities
+        .values()
+        .filter(|entity| entity.visible)
+        .collect::<Vec<_>>();
+    entities.sort_by(|left, right| {
+        let left_z = state
+            .layers
+            .get(&left.layer)
+            .map_or(i32::MIN, |layer| layer.z);
+        let right_z = state
+            .layers
+            .get(&right.layer)
+            .map_or(i32::MIN, |layer| layer.z);
+        left_z.cmp(&right_z).then(left.id.cmp(&right.id))
+    });
+    let mut commands = Vec::new();
+    for entity in entities {
+        let layer = state.layers.get(&entity.layer).ok_or_else(|| {
+            NativeVnHostError::Asset(format!(
+                "ASTRA_PLAYER_STAGE_LAYER_UNKNOWN: entity {} references an undeclared layer",
+                entity.id
+            ))
+        })?;
+        let texture = textures
+            .get(&entity.asset)
+            .ok_or_else(|| missing_texture(&entity.asset))?;
+        let clip = match layer.clip {
+            Some(StageClipPolicy::SafeArea) => Some(safe_area_rect(
+                width,
+                height,
+                state.safe_area.width,
+                state.safe_area.height,
+            )?),
+            Some(StageClipPolicy::Stage) => Some(RectI::new(0, 0, width, height)),
+            None => None,
+        };
+        if let Some(clip) = clip {
+            commands.push(SceneCommand::PushClip { rect: clip });
         }
-        StageCommand::Show {
-            id,
-            asset: asset_id,
-            placement,
-            ..
-        } => {
-            let frame = textures
-                .get(asset_id)
-                .ok_or_else(|| missing_texture(asset_id))?;
-            let destination_height = height.saturating_mul(9) / 10;
-            let destination_width = ((destination_height as u64 * frame.width as u64)
-                / frame.height as u64)
-                .min(width as u64) as u32;
-            let x = match placement {
-                StagePlacement::Left => width / 12,
-                StagePlacement::Center => width.saturating_sub(destination_width) / 2,
-                StagePlacement::Right => width.saturating_sub(destination_width + width / 12),
-            };
-            let draw_id = format!("vn.scene.character.{id}");
-            scene_draw.retain(|draw| !draw_id_is(draw, &draw_id));
-            scene_draw.push(SceneCommand::Sprite {
-                id: draw_id,
-                texture_id: asset_id.to_string(),
-                source: None,
-                destination: RectI::new(
-                    x as i32,
-                    height.saturating_sub(destination_height) as i32,
-                    destination_width,
-                    destination_height,
-                ),
-                opacity: 1.0,
-                blend: BlendMode::Alpha,
-            });
-        }
-        StageCommand::Hide { id, .. } => {
-            let draw_id = format!("vn.scene.character.{id}");
-            scene_draw.retain(|draw| !draw_id_is(draw, &draw_id));
-        }
-        unsupported => {
-            return Err(NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_PRESENTATION_UNSUPPORTED: typed stage command {} has no product renderer binding",
-                unsupported.kind()
-            )))
+        let destination = if layer.kind == StageLayerKind::Background {
+            RectI::new(0, 0, width, height)
+        } else {
+            entity_destination(
+                state,
+                texture,
+                entity.x.millionths,
+                entity.y.millionths,
+                width,
+                height,
+            )?
+        };
+        commands.push(SceneCommand::Sprite {
+            id: format!("vn.scene.{}.{}", entity.layer, entity.id),
+            texture_id: entity.asset.clone(),
+            source: None,
+            destination,
+            opacity: fixed_opacity(entity.opacity.millionths)?,
+            blend: stage_blend(layer.blend)?,
+        });
+        if clip.is_some() {
+            commands.push(SceneCommand::PopClip);
         }
     }
+    Ok(commands)
+}
+
+fn entity_destination(
+    state: &ProductStageState,
+    texture: &TextureFrame,
+    entity_x: i64,
+    entity_y: i64,
+    width: u32,
+    height: u32,
+) -> Result<RectI, NativeVnHostError> {
+    let zoom = state.camera.zoom.millionths;
+    if zoom <= 0 {
+        return Err(NativeVnHostError::Asset(
+            "ASTRA_PLAYER_CAMERA_ZOOM: camera zoom must remain positive".to_string(),
+        ));
+    }
+    let base_height = height.saturating_mul(9) / 10;
+    let base_width = ((u64::from(base_height) * u64::from(texture.width))
+        / u64::from(texture.height))
+    .min(u64::from(width));
+    let destination_width = scale_dimension(base_width, zoom)?;
+    let destination_height = scale_dimension(u64::from(base_height), zoom)?;
+    let center_x = camera_coordinate(
+        entity_x,
+        state.camera.x.millionths + state.camera.shake_x.millionths,
+        i64::from(state.viewport.width) * 500_000,
+        i64::from(width) * 500_000,
+        zoom,
+    )?;
+    let bottom_y = camera_coordinate(
+        entity_y,
+        state.camera.y.millionths + state.camera.shake_y.millionths,
+        i64::from(state.viewport.height) * 500_000,
+        i64::from(height) * 500_000,
+        zoom,
+    )?;
+    let x = center_x - i64::from(destination_width) / 2;
+    let y = bottom_y - i64::from(destination_height);
+    Ok(RectI::new(
+        i32::try_from(x).map_err(|_| stage_coordinate_error())?,
+        i32::try_from(y).map_err(|_| stage_coordinate_error())?,
+        destination_width,
+        destination_height,
+    ))
+}
+
+fn camera_coordinate(
+    value: i64,
+    camera: i64,
+    stage_center: i64,
+    output_center: i64,
+    zoom: i64,
+) -> Result<i64, NativeVnHostError> {
+    let centered = i128::from(value) - i128::from(camera) - i128::from(stage_center);
+    let scaled = centered
+        .checked_mul(i128::from(zoom))
+        .ok_or_else(stage_coordinate_error)?
+        / 1_000_000;
+    i64::try_from((scaled + i128::from(output_center)) / 1_000_000)
+        .map_err(|_| stage_coordinate_error())
+}
+
+fn scale_dimension(value: u64, zoom: i64) -> Result<u32, NativeVnHostError> {
+    let scaled = u128::from(value)
+        .checked_mul(u128::try_from(zoom).map_err(|_| stage_coordinate_error())?)
+        .ok_or_else(stage_coordinate_error)?
+        / 1_000_000;
+    u32::try_from(scaled.max(1)).map_err(|_| stage_coordinate_error())
+}
+
+fn safe_area_rect(
+    width: u32,
+    height: u32,
+    ratio_width: u32,
+    ratio_height: u32,
+) -> Result<RectI, NativeVnHostError> {
+    if ratio_width == 0 || ratio_height == 0 {
+        return Err(NativeVnHostError::Asset(
+            "ASTRA_PLAYER_SAFE_AREA: safe-area ratio is invalid".to_string(),
+        ));
+    }
+    let candidate_height = u64::from(width) * u64::from(ratio_height) / u64::from(ratio_width);
+    let (safe_width, safe_height) = if candidate_height <= u64::from(height) {
+        (
+            width,
+            u32::try_from(candidate_height).map_err(|_| stage_coordinate_error())?,
+        )
+    } else {
+        (
+            u32::try_from(u64::from(height) * u64::from(ratio_width) / u64::from(ratio_height))
+                .map_err(|_| stage_coordinate_error())?,
+            height,
+        )
+    };
+    Ok(RectI::new(
+        ((width - safe_width) / 2) as i32,
+        ((height - safe_height) / 2) as i32,
+        safe_width,
+        safe_height,
+    ))
+}
+
+fn fixed_opacity(millionths: i64) -> Result<f32, NativeVnHostError> {
+    if !(0..=1_000_000).contains(&millionths) {
+        return Err(NativeVnHostError::Asset(
+            "ASTRA_PLAYER_STAGE_OPACITY: stage opacity is outside zero and one".to_string(),
+        ));
+    }
+    Ok(millionths as f32 / 1_000_000.0)
+}
+
+fn stage_blend(blend: StageBlendMode) -> Result<BlendMode, NativeVnHostError> {
+    match blend {
+        StageBlendMode::Normal => Ok(BlendMode::Alpha),
+        StageBlendMode::Add | StageBlendMode::Multiply | StageBlendMode::Screen => {
+            Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_STAGE_BLEND_UNWIRED: selected stage blend has no product GPU binding"
+                    .to_string(),
+            ))
+        }
+    }
+}
+
+fn stage_coordinate_error() -> NativeVnHostError {
+    NativeVnHostError::Asset(
+        "ASTRA_PLAYER_STAGE_COORDINATE: stage transform exceeds renderer coordinate limits"
+            .to_string(),
+    )
+}
+
+fn reject_unwired_stage_outputs(outputs: &[StageDirectorOutput]) -> Result<(), NativeVnHostError> {
+    if let Some(output) = outputs.first() {
+        let domain = match output {
+            StageDirectorOutput::Audio(_) => "audio",
+            StageDirectorOutput::Movie(_) => "movie",
+            StageDirectorOutput::Effect(_) => "effect",
+            StageDirectorOutput::FenceCompleted { .. } => "completion",
+        };
+        return Err(NativeVnHostError::Asset(format!(
+            "ASTRA_PLAYER_PRESENTATION_OUTPUT_UNWIRED: product stage {domain} output has no host execution binding"
+        )));
+    }
     Ok(())
+}
+
+fn stage_director_error(error: astra_vn_package::VnError) -> NativeVnHostError {
+    NativeVnHostError::Asset(format!("{}: {error}", error.code()))
 }
 
 fn missing_texture(asset_id: &str) -> NativeVnHostError {
     NativeVnHostError::Asset(format!(
         "ASTRA_PLAYER_ASSET_MISSING: cooked texture {asset_id} is not mounted"
     ))
-}
-
-fn draw_id_is(draw: &SceneCommand, expected: &str) -> bool {
-    match draw {
-        SceneCommand::Sprite { id, .. }
-        | SceneCommand::Rect { id, .. }
-        | SceneCommand::GlyphRun { id, .. } => id == expected,
-        _ => false,
-    }
 }
 
 fn scene_texture_ids(draw: &[SceneCommand]) -> BTreeSet<String> {
@@ -2138,7 +2277,25 @@ fn validate_story_presentation(
                             return Err(missing_texture(asset_id));
                         }
                     }
-                    StageCommand::Hide { .. } => {}
+                    StageCommand::Configure { .. }
+                    | StageCommand::Hide { .. }
+                    | StageCommand::Move { .. } => {}
+                    StageCommand::DeclareLayer { blend, .. } => {
+                        if *blend != StageBlendMode::Normal {
+                            return Err(NativeVnHostError::Asset(
+                                "ASTRA_PLAYER_STAGE_BLEND_UNWIRED: selected stage blend has no product GPU binding"
+                                    .to_string(),
+                            ));
+                        }
+                    }
+                    StageCommand::Camera { rotation, .. } => {
+                        if rotation.millionths != 0 {
+                            return Err(NativeVnHostError::Asset(
+                                "ASTRA_PLAYER_CAMERA_ROTATION_UNWIRED: retained sprite renderer does not yet execute rotated camera geometry"
+                                    .to_string(),
+                            ));
+                        }
+                    }
                     unsupported => {
                         return Err(NativeVnHostError::Asset(format!(
                             "ASTRA_PLAYER_PRESENTATION_UNSUPPORTED: typed stage command {} has no product renderer binding",
