@@ -1420,13 +1420,13 @@ mod windows {
     fn pop_sample(
         consumer: &mut astra_platform_general::NativeAudioConsumer,
         meter: &CallbackMeter,
-    ) -> f32 {
+    ) -> Option<f32> {
         match consumer.pop_sample() {
             Some(sample) => {
                 meter.record(sample);
-                sample
+                Some(sample)
             }
-            None => 0.0,
+            None => None,
         }
     }
 
@@ -1436,8 +1436,15 @@ mod windows {
         meter: &CallbackMeter,
     ) {
         meter.begin_callback();
+        let mut underflowed = false;
         for target in output {
-            *target = pop_sample(consumer, meter);
+            *target = pop_sample(consumer, meter).unwrap_or_else(|| {
+                underflowed = true;
+                0.0
+            });
+        }
+        if underflowed {
+            consumer.record_underflow();
         }
     }
 
@@ -1447,8 +1454,16 @@ mod windows {
         meter: &CallbackMeter,
     ) {
         meter.begin_callback();
+        let mut underflowed = false;
         for target in output {
-            *target = (pop_sample(consumer, meter).clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
+            let sample = pop_sample(consumer, meter).unwrap_or_else(|| {
+                underflowed = true;
+                0.0
+            });
+            *target = (sample.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
+        }
+        if underflowed {
+            consumer.record_underflow();
         }
     }
 
@@ -1458,9 +1473,18 @@ mod windows {
         meter: &CallbackMeter,
     ) {
         meter.begin_callback();
+        let mut underflowed = false;
         for target in output {
-            let sample = pop_sample(consumer, meter).clamp(-1.0, 1.0);
+            let sample = pop_sample(consumer, meter)
+                .unwrap_or_else(|| {
+                    underflowed = true;
+                    0.0
+                })
+                .clamp(-1.0, 1.0);
             *target = ((sample * 0.5 + 0.5) * f32::from(u16::MAX)) as u16;
+        }
+        if underflowed {
+            consumer.record_underflow();
         }
     }
 
