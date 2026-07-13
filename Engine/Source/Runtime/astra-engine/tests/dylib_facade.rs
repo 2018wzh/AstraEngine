@@ -32,6 +32,12 @@ fn dylib_facade_reexports_enginecore_public_api() {
         phase: LoadPhase::Runtime,
         packaged: true,
     });
+    registrar
+        .bind_provider(
+            &EngineModuleSlot("presentation".to_string()),
+            "astra.fixture.headless",
+        )
+        .unwrap();
 
     assert_eq!(
         registrar

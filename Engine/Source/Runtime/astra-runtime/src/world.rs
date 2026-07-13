@@ -49,6 +49,100 @@ pub struct PackageHandle {
     pub package_id: String,
 }
 
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+pub struct EngineModuleSlot(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModuleBindingSnapshot {
+    pub provider_id: String,
+    pub capability: String,
+    pub package_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedModuleBinding {
+    slot: EngineModuleSlot,
+    snapshot: ModuleBindingSnapshot,
+}
+
+impl ValidatedModuleBinding {
+    pub fn validate(
+        slot: EngineModuleSlot,
+        provider_id: impl Into<String>,
+        capability: impl Into<String>,
+        package_id: impl Into<String>,
+        packaged: bool,
+        explicitly_selected: bool,
+    ) -> Result<Self, RuntimeError> {
+        let provider_id = provider_id.into();
+        let capability = capability.into();
+        let package_id = package_id.into();
+        for (code, name, value) in [
+            ("ASTRA_RUNTIME_MODULE_SLOT_INVALID", "slot", slot.0.as_str()),
+            (
+                "ASTRA_RUNTIME_MODULE_PROVIDER_INVALID",
+                "provider_id",
+                provider_id.as_str(),
+            ),
+            (
+                "ASTRA_RUNTIME_MODULE_CAPABILITY_INVALID",
+                "capability",
+                capability.as_str(),
+            ),
+            (
+                "ASTRA_RUNTIME_MODULE_PACKAGE_INVALID",
+                "package_id",
+                package_id.as_str(),
+            ),
+        ] {
+            if !is_safe_binding_symbol(value) {
+                return Err(RuntimeError::diagnostic(
+                    Diagnostic::blocking(code, "module binding contains an invalid identifier")
+                        .with_field("field", name),
+                ));
+            }
+        }
+        if !packaged {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_MODULE_NOT_PACKAGED",
+                "module provider is not eligible for packaged runtime use",
+            )));
+        }
+        if !explicitly_selected {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_MODULE_BINDING_MISSING",
+                "module provider has no explicit registry binding",
+            )));
+        }
+        Ok(Self {
+            slot,
+            snapshot: ModuleBindingSnapshot {
+                provider_id,
+                capability,
+                package_id,
+            },
+        })
+    }
+
+    pub fn slot(&self) -> &EngineModuleSlot {
+        &self.slot
+    }
+
+    pub fn provider_id(&self) -> &str {
+        &self.snapshot.provider_id
+    }
+}
+
+fn is_safe_binding_symbol(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
 impl Default for PackageHandle {
     fn default() -> Self {
         Self {
@@ -94,7 +188,7 @@ pub struct RuntimeSnapshot {
     pub presentation: Vec<PresentationRecord>,
     pub mutations: Vec<RuntimeMutationRecord>,
     pub effects: Vec<RuntimeEffectRecord>,
-    pub mounted_modules: BTreeMap<String, String>,
+    pub mounted_modules: BTreeMap<String, ModuleBindingSnapshot>,
     pub step: u64,
 }
 
@@ -113,7 +207,7 @@ pub struct RuntimeWorld {
     mutations: Vec<RuntimeMutationRecord>,
     effects: Vec<RuntimeEffectRecord>,
     diagnostics: Vec<Diagnostic>,
-    mounted_modules: BTreeMap<String, String>,
+    mounted_modules: BTreeMap<String, ModuleBindingSnapshot>,
     step: u64,
 }
 
@@ -151,11 +245,39 @@ impl RuntimeWorld {
         })
     }
 
-    pub fn mount_module(&mut self, slot: impl Into<String>, provider_id: impl Into<String>) {
-        let slot = slot.into();
-        let provider_id = provider_id.into();
-        info!(slot = %slot, provider_id = %provider_id, "runtime.module.mount");
-        self.mounted_modules.insert(slot, provider_id);
+    pub fn package_id(&self) -> &str {
+        &self.package.package_id
+    }
+
+    pub fn mount_module(
+        &mut self,
+        slot: EngineModuleSlot,
+        binding: ValidatedModuleBinding,
+    ) -> Result<(), RuntimeError> {
+        if binding.slot != slot {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_MODULE_SLOT_MISMATCH",
+                "module binding token does not match the requested slot",
+            )));
+        }
+        if binding.snapshot.package_id != self.package.package_id {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_MODULE_PACKAGE_MISMATCH",
+                "module binding token belongs to a different package",
+            )));
+        }
+        if self.mounted_modules.contains_key(&slot.0) {
+            return Err(RuntimeError::diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_MODULE_SLOT_OCCUPIED",
+                    "runtime module slot is already mounted",
+                )
+                .with_field("slot", &slot.0),
+            ));
+        }
+        info!(slot = %slot.0, provider_id = %binding.snapshot.provider_id, "runtime.module.mount");
+        self.mounted_modules.insert(slot.0, binding.snapshot);
+        Ok(())
     }
 
     pub fn register_action<A: RuntimeAction + 'static>(
@@ -473,6 +595,74 @@ impl RuntimeWorld {
     }
 
     pub fn tick(&mut self, input: TickInput) -> Result<TickReport, RuntimeError> {
+        self.validate_tick_input(input)?;
+        let checkpoint = self.snapshot();
+        let diagnostics = self.diagnostics.clone();
+        match self.tick_validated(input) {
+            Ok(report) => Ok(report),
+            Err(error) => {
+                self.restore_snapshot(checkpoint);
+                self.diagnostics = diagnostics;
+                Err(error)
+            }
+        }
+    }
+
+    fn validate_tick_input(&self, input: TickInput) -> Result<(), RuntimeError> {
+        let expected_step = self.step.checked_add(1).ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_TICK_STEP_OVERFLOW",
+                "runtime fixed step cannot advance beyond u64::MAX",
+            ))
+        })?;
+        if input.fixed_step != expected_step {
+            return Err(RuntimeError::diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_TICK_STEP_INVALID",
+                    "runtime tick must advance by exactly one fixed step",
+                )
+                .with_field("current_step", self.step)
+                .with_field("expected_step", expected_step)
+                .with_field("actual_step", input.fixed_step),
+            ));
+        }
+        if input.delta_ns == 0 || input.delta_ns > 1_000_000_000 {
+            return Err(RuntimeError::diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_TICK_DELTA_INVALID",
+                    "runtime tick delta must be within the supported fixed-step range",
+                )
+                .with_field("delta_ns", input.delta_ns),
+            ));
+        }
+        if input.seed != self.config.seed {
+            return Err(RuntimeError::diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_TICK_SEED_MISMATCH",
+                    "runtime tick seed does not match the session seed",
+                )
+                .with_field("expected_seed", self.config.seed)
+                .with_field("actual_seed", input.seed),
+            ));
+        }
+        if let Some(slot) = self
+            .config
+            .required_slots
+            .iter()
+            .find(|slot| !self.mounted_modules.contains_key(*slot))
+        {
+            return Err(RuntimeError::diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_MODULE_MISSING",
+                    "runtime required module slot is not mounted",
+                )
+                .with_field("slot", slot),
+            ));
+        }
+        Ok(())
+    }
+
+    fn tick_validated(&mut self, input: TickInput) -> Result<TickReport, RuntimeError> {
         debug!(
             step = input.fixed_step,
             delta_ns = input.delta_ns,
@@ -482,20 +672,6 @@ impl RuntimeWorld {
         self.step = input.fixed_step;
         self.id_source.set_step(input.fixed_step);
         self.diagnostics.clear();
-        for slot in &self.config.required_slots {
-            if !self.mounted_modules.contains_key(slot) {
-                let diagnostic = Diagnostic::blocking(
-                    "ASTRA_RUNTIME_MODULE_MISSING",
-                    format!("missing required module slot {slot}"),
-                );
-                warn!(
-                    slot,
-                    diagnostic_code = %diagnostic.code,
-                    "runtime.diagnostic"
-                );
-                self.diagnostics.push(diagnostic);
-            }
-        }
         let await_drain = self.awaits.drain_ordered_results(input.fixed_step);
         for diagnostic in &await_drain.diagnostics {
             warn!(

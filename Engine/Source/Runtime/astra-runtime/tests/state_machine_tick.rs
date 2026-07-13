@@ -73,8 +73,14 @@ fn run_once() -> astra_runtime::TickReport {
 
 #[test]
 fn state_machine_presentation_action_supports_generic_commands() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(
+        RuntimeConfig {
+            seed: 11,
+            ..RuntimeConfig::default()
+        },
+        PackageHandle::default(),
+    )
+    .unwrap();
     let actor = world.create_actor("system", vec![]);
     let start = StableId::deterministic_v7(2, 1, 11);
     let done = StableId::deterministic_v7(2, 2, 11);
@@ -129,8 +135,14 @@ fn state_machine_presentation_action_supports_generic_commands() {
 
 #[test]
 fn state_machine_runs_transition_actions_in_order() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(
+        RuntimeConfig {
+            seed: 11,
+            ..RuntimeConfig::default()
+        },
+        PackageHandle::default(),
+    )
+    .unwrap();
     let actor = world.create_actor("system", vec![]);
     let start = StableId::deterministic_v7(3, 1, 11);
     let done = StableId::deterministic_v7(3, 2, 11);
@@ -204,8 +216,14 @@ fn state_machine_runs_transition_actions_in_order() {
 
 #[test]
 fn action_failure_keeps_machine_state_and_allows_other_machines() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(
+        RuntimeConfig {
+            seed: 11,
+            ..RuntimeConfig::default()
+        },
+        PackageHandle::default(),
+    )
+    .unwrap();
     let actor = world.create_actor("system", vec![]);
     let failed_start = StableId::deterministic_v7(4, 1, 11);
     let failed_done = StableId::deterministic_v7(4, 2, 11);
@@ -370,8 +388,14 @@ fn validates_state_machine_shape_and_conflicts() {
 
 #[test]
 fn terminal_state_marks_machine_completed_and_blocks_future_ticks() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(
+        RuntimeConfig {
+            seed: 11,
+            ..RuntimeConfig::default()
+        },
+        PackageHandle::default(),
+    )
+    .unwrap();
     let actor = world.create_actor("system", vec![]);
     let start = StableId::deterministic_v7(6, 1, 11);
     let done = StableId::deterministic_v7(6, 2, 11);

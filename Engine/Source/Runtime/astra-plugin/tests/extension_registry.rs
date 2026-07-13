@@ -33,28 +33,30 @@ fn extension_registry_preserves_explicit_binding_and_reports_conflicts() {
 
     let snapshot = registrar.extension_registry_snapshot();
     assert_eq!(snapshot.providers.len(), 2);
+    assert!(snapshot.conflicts.is_empty());
+
+    let error = registrar
+        .bind_provider(
+            &EngineModuleSlot("presentation".to_string()),
+            "astra.provider.second",
+        )
+        .unwrap_err();
+    assert!(error.contains("ASTRA_PLUGIN_BINDING_CONFLICT"));
     assert_eq!(
-        snapshot.conflicts,
+        registrar
+            .selected_provider(&EngineModuleSlot("presentation".to_string()))
+            .unwrap()
+            .provider_id,
+        "astra.provider.first"
+    );
+    assert_eq!(
+        registrar.extension_registry_snapshot().conflicts,
         vec![ExtensionConflict {
             slot: "presentation".to_string(),
             selected_provider: "astra.provider.first".to_string(),
             conflicting_provider: "astra.provider.second".to_string(),
             reason: "provider slot already has an explicit binding".to_string(),
         }]
-    );
-
-    registrar
-        .bind_provider(
-            &EngineModuleSlot("presentation".to_string()),
-            "astra.provider.second",
-        )
-        .unwrap();
-    assert_eq!(
-        registrar
-            .selected_provider(&EngineModuleSlot("presentation".to_string()))
-            .unwrap()
-            .provider_id,
-        "astra.provider.second"
     );
 
     registrar.record_dependency(PluginDependency {

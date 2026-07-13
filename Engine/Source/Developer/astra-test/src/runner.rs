@@ -1628,11 +1628,19 @@ impl RunContext {
         });
         info!("scenario.fixture.load");
         let plugin = loader.load(dylib, &mut registrar)?;
+        registrar
+            .bind_provider(
+                &astra_plugin::EngineModuleSlot("presentation".to_string()),
+                "astra.fixture.headless_presentation",
+            )
+            .map_err(ScenarioError::Message)?;
         if let Some(provider) =
             registrar.selected_provider(&astra_plugin::EngineModuleSlot("presentation".to_string()))
         {
+            let slot = provider.slot.clone();
+            let binding = registrar.runtime_binding(&slot, self.world.package_id())?;
             self.world
-                .mount_module(provider.slot.0.clone(), provider.provider_id.clone());
+                .mount_module(astra_runtime::EngineModuleSlot(slot.0), binding)?;
         }
         plugin.install_runtime_actions(&mut self.world)?;
         self.loaded_plugins.push(plugin);

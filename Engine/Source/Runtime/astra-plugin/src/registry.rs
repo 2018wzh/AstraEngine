@@ -28,10 +28,6 @@ pub struct ServiceRegistry {
 }
 
 impl ServiceRegistry {
-    pub fn register_default(&mut self, id: impl Into<String>, provider: impl Into<String>) {
-        self.services.entry(id.into()).or_insert(provider.into());
-    }
-
     pub fn bind(&mut self, id: impl Into<String>, provider: impl Into<String>) {
         self.services.insert(id.into(), provider.into());
     }
@@ -62,20 +58,7 @@ pub struct ExtensionRegistry {
 }
 
 impl ExtensionRegistry {
-    pub fn register(&mut self, provider: RegisteredProvider, selected_provider: Option<&str>) {
-        if let Some(selected_provider) = selected_provider {
-            if selected_provider != provider.provider_id {
-                let conflict = ExtensionConflict {
-                    slot: provider.slot.0.clone(),
-                    selected_provider: selected_provider.to_string(),
-                    conflicting_provider: provider.provider_id.clone(),
-                    reason: "provider slot already has an explicit binding".to_string(),
-                };
-                if !self.conflicts.contains(&conflict) {
-                    self.conflicts.push(conflict);
-                }
-            }
-        }
+    pub fn register(&mut self, provider: RegisteredProvider) {
         self.providers.push(provider);
         self.providers.sort_by(|a, b| {
             (a.slot.0.as_str(), a.provider_id.as_str())
@@ -91,12 +74,6 @@ impl ExtensionRegistry {
                 || (conflict.selected_provider != provider_id
                     && conflict.conflicting_provider != provider_id)
         });
-    }
-
-    pub fn select(&self, slot: &EngineModuleSlot) -> Option<&RegisteredProvider> {
-        self.providers
-            .iter()
-            .find(|provider| &provider.slot == slot)
     }
 
     pub fn providers(&self) -> &[RegisteredProvider] {
@@ -123,13 +100,7 @@ impl PluginRegistrar {
             capability = %provider.capability,
             "plugin.provider.register"
         );
-        if !is_multi_provider_slot(&provider.slot) {
-            self.services
-                .register_default(provider.slot.0.clone(), provider.provider_id.clone());
-        }
-        let selected_provider = self.services.get(&provider.slot.0).map(str::to_string);
-        self.extensions
-            .register(provider, selected_provider.as_deref());
+        self.extensions.register(provider);
     }
 
     pub fn bind_provider(
@@ -144,7 +115,22 @@ impl PluginRegistrar {
             .any(|provider| &provider.slot == slot && provider.provider_id == provider_id);
         if !exists {
             return Err(format!(
-                "provider {provider_id} is not registered for slot {}",
+                "ASTRA_PLUGIN_BINDING_PROVIDER_MISSING: provider {provider_id} is not registered for slot {}",
+                slot.0
+            ));
+        }
+        if let Some(selected_provider) = self.services.get(&slot.0) {
+            let conflict = ExtensionConflict {
+                slot: slot.0.clone(),
+                selected_provider: selected_provider.to_string(),
+                conflicting_provider: provider_id.to_string(),
+                reason: "provider slot already has an explicit binding".to_string(),
+            };
+            if !self.extensions.conflicts.contains(&conflict) {
+                self.extensions.conflicts.push(conflict);
+            }
+            return Err(format!(
+                "ASTRA_PLUGIN_BINDING_CONFLICT: slot {} is already bound to {selected_provider}",
                 slot.0
             ));
         }
@@ -158,6 +144,27 @@ impl PluginRegistrar {
             .providers()
             .iter()
             .find(|provider| &provider.slot == slot && provider.provider_id == provider_id)
+    }
+
+    pub fn runtime_binding(
+        &self,
+        slot: &EngineModuleSlot,
+        package_id: &str,
+    ) -> Result<astra_runtime::ValidatedModuleBinding, astra_runtime::RuntimeError> {
+        let provider = self.selected_provider(slot).ok_or_else(|| {
+            astra_runtime::RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
+                "ASTRA_RUNTIME_MODULE_BINDING_MISSING",
+                "runtime module slot has no explicitly selected provider",
+            ))
+        })?;
+        astra_runtime::ValidatedModuleBinding::validate(
+            astra_runtime::EngineModuleSlot(slot.0.clone()),
+            provider.provider_id.clone(),
+            provider.capability.clone(),
+            package_id,
+            provider.packaged,
+            true,
+        )
     }
 
     pub fn unregister_provider(&mut self, provider: &RegisteredProvider) {
@@ -213,8 +220,4 @@ impl PluginRegistrar {
             dependencies: self.dependency_graph.clone(),
         }
     }
-}
-
-fn is_multi_provider_slot(slot: &EngineModuleSlot) -> bool {
-    slot.0 == "vfs_provider"
 }

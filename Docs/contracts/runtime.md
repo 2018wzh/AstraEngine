@@ -10,6 +10,8 @@ pub struct RuntimeConfig;
 pub struct ActorId(pub StableId);
 pub struct ComponentId(pub StableId);
 pub struct TickInput { pub fixed_step: u64, pub delta_ns: u64, pub seed: u64 }
+pub struct EngineModuleSlot(pub String);
+pub struct ValidatedModuleBinding;
 pub struct TickReport {
     pub step: u64,
     pub state_hash: Hash128,
@@ -20,6 +22,7 @@ pub struct TickReport {
 
 impl RuntimeWorld {
     pub fn create(config: RuntimeConfig, package: PackageHandle) -> Result<Self, RuntimeError>;
+    pub fn mount_module(&mut self, slot: EngineModuleSlot, binding: ValidatedModuleBinding) -> Result<(), RuntimeError>;
     pub fn tick(&mut self, input: TickInput) -> Result<TickReport, RuntimeError>;
     pub fn apply_input(&mut self, input: PlayerInput) -> Result<(), RuntimeError>;
     pub fn register_action<A: RuntimeAction + 'static>(&mut self, provider_id: impl Into<String>, action: A) -> Result<(), RuntimeError>;
@@ -32,6 +35,8 @@ impl RuntimeWorld {
     pub fn debug_session(&self) -> RuntimeDebugSession<'_>;
 }
 ```
+
+`ValidatedModuleBinding` 只能由显式 registry selection、packaged eligibility、capability 和 package identity 校验生成。重复 slot、token/slot 不一致或 package 不一致必须在修改 world 前失败。`tick` 的首步固定为 `1`，之后每次只能递增 `1`；`seed` 必须等于 session seed，`delta_ns` 必须处于 `1..=1_000_000_000`。重复、回退、跳步、非法 delta、seed mismatch 和缺少 required module 都返回稳定 blocking diagnostic，并保持 snapshot 不变。
 
 字段级实现蓝图见 [Runtime API Blueprint](../implementation/runtime-api.md)、[Runtime Execution](../implementation/runtime-execution.md) 和 [StateMachine Action Provider](../implementation/state-machine-action-provider.md)。
 

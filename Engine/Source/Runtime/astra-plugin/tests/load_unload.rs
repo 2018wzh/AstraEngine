@@ -36,6 +36,12 @@ fn load_unload_loads_fixture_cdylib_and_releases_callbacks() {
         "astra.fixture.headless_presentation"
     );
     assert_eq!(registrar.extensions.providers().len(), 1);
+    registrar
+        .bind_provider(
+            &EngineModuleSlot("presentation".to_string()),
+            "astra.fixture.headless_presentation",
+        )
+        .unwrap();
     assert_eq!(
         registrar
             .selected_provider(&EngineModuleSlot("presentation".to_string()))

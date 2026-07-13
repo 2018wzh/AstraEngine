@@ -34,7 +34,7 @@ Actor/Component 是 public save、Inspector 和 script 可见模型。局部 ECS
 ```rust
 impl RuntimeWorld {
     pub fn create(config: RuntimeConfig, package: PackageHandle) -> Result<Self, RuntimeError>;
-    pub fn mount_module(&mut self, slot: EngineModuleSlot, provider: ProviderRef) -> Result<(), RuntimeError>;
+    pub fn mount_module(&mut self, slot: EngineModuleSlot, binding: ValidatedModuleBinding) -> Result<(), RuntimeError>;
     pub fn register_action<A: RuntimeAction + 'static>(&mut self, provider_id: impl Into<String>, action: A);
     pub fn unregister_action_provider(&mut self, provider_id: &str);
     pub fn schedule_event(&mut self, due_tick: u64, source: EventSource, payload: EventPayload) -> DelayedEventId;
@@ -47,7 +47,7 @@ impl RuntimeWorld {
 }
 ```
 
-`mount_module` 只接收 slot 和 provider reference，不接收 native handle。缺失必需 slot 是 blocking diagnostic。
+`mount_module` 只接收 typed slot 和经过 registry selection、packaged eligibility、capability、package identity 校验的 binding token，不接收 provider 字符串或 native handle。缺失必需 slot、重复挂载、slot/token 不一致和 package mismatch 都是 blocking diagnostic。`tick` 在任何 mutation 之前校验连续 fixed step、session seed、delta 范围和 required slot；执行期错误会恢复 tick 前 snapshot，不允许部分提交。
 
 ## State Machine
 

@@ -1,7 +1,7 @@
 use astra_core::{SchemaVersion, StableId};
 use astra_runtime::{
-    ActorId, PackageHandle, RuntimeComponentPayload, RuntimeConfig, RuntimeWorld, SaveRequest,
-    TickInput,
+    ActorId, EngineModuleSlot, PackageHandle, RuntimeComponentPayload, RuntimeConfig, RuntimeWorld,
+    SaveRequest, TickInput, ValidatedModuleBinding,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +21,17 @@ fn world_actor_creates_component_and_stable_snapshot_hash() {
         PackageHandle::default(),
     )
     .unwrap();
-    world.mount_module("presentation", "astra.fixture.headless_presentation");
+    let slot = EngineModuleSlot("presentation".to_string());
+    let binding = ValidatedModuleBinding::validate(
+        slot.clone(),
+        "astra.fixture.headless_presentation",
+        "presentation.headless",
+        "stage1.headless",
+        true,
+        true,
+    )
+    .unwrap();
+    world.mount_module(slot, binding).unwrap();
     let actor = world.create_actor("hero", vec!["player".to_string()]);
     let component = world
         .attach_component(

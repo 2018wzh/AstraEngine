@@ -100,7 +100,7 @@ fn tick(world: &mut RuntimeWorld) -> astra_runtime::TickReport {
         .tick(TickInput {
             fixed_step: 1,
             delta_ns: 16_666_667,
-            seed: 9,
+            seed: 0,
         })
         .unwrap()
 }

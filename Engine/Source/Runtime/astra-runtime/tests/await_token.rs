@@ -85,8 +85,14 @@ fn await_token_is_serializable() {
 
 #[test]
 fn await_timeout_materializes_deterministic_result() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(
+        RuntimeConfig {
+            seed: 13,
+            ..RuntimeConfig::default()
+        },
+        PackageHandle::default(),
+    )
+    .unwrap();
     let token_id = AwaitTokenId(StableId::deterministic_v7(2, 1, 13));
     world
         .insert_await_token(AwaitToken {
@@ -98,6 +104,13 @@ fn await_timeout_materializes_deterministic_result() {
         })
         .unwrap();
 
+    world
+        .tick(TickInput {
+            fixed_step: 1,
+            delta_ns: 16_666_667,
+            seed: 13,
+        })
+        .unwrap();
     world
         .tick(TickInput {
             fixed_step: 2,
@@ -126,8 +139,14 @@ fn await_timeout_materializes_deterministic_result() {
 
 #[test]
 fn unknown_and_duplicate_await_results_are_diagnostic_only() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(
+        RuntimeConfig {
+            seed: 13,
+            ..RuntimeConfig::default()
+        },
+        PackageHandle::default(),
+    )
+    .unwrap();
     let token_id = AwaitTokenId(StableId::deterministic_v7(3, 1, 13));
     world
         .insert_await_token(AwaitToken {
@@ -175,8 +194,14 @@ fn unknown_and_duplicate_await_results_are_diagnostic_only() {
 
 #[test]
 fn await_replay_policy_rejects_invalid_tokens_and_live_timeout_results() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let mut world = RuntimeWorld::create(
+        RuntimeConfig {
+            seed: 13,
+            ..RuntimeConfig::default()
+        },
+        PackageHandle::default(),
+    )
+    .unwrap();
     let invalid_recorded = AwaitTokenId(StableId::deterministic_v7(4, 1, 13));
     let error = world
         .insert_await_token(AwaitToken {

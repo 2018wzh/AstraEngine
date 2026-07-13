@@ -42,12 +42,16 @@ fn runtime_provider_registry_keeps_explicit_single_binding_conflicts() {
         .bind_provider(&slot, "astra.runtime.native_vn")
         .unwrap();
     registrar.register_provider(RegisteredProvider {
-        slot,
+        slot: slot.clone(),
         provider_id: "astra.runtime.astra_emu".to_string(),
         capability: "runtime.astra_emu".to_string(),
         phase: LoadPhase::Runtime,
         packaged: true,
     });
+    assert!(registrar
+        .bind_provider(&slot, "astra.runtime.astra_emu")
+        .unwrap_err()
+        .contains("ASTRA_PLUGIN_BINDING_CONFLICT"));
 
     let snapshot = registrar.extension_registry_snapshot();
     assert_eq!(snapshot.conflicts.len(), 1);

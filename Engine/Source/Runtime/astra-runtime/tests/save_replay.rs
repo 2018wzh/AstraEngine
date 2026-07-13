@@ -81,7 +81,7 @@ fn save_load_continues_the_stable_id_sequence() {
     uninterrupted.create_actor("before-save", vec![]);
     uninterrupted
         .tick(TickInput {
-            fixed_step: 7,
+            fixed_step: 1,
             delta_ns: 16_666_667,
             seed: config.seed,
         })

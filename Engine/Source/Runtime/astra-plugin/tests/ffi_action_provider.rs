@@ -43,6 +43,12 @@ fn ffi_action_provider_registers_executes_and_unloads() {
             &mut registrar,
         )
         .unwrap();
+    registrar
+        .bind_provider(
+            &EngineModuleSlot("presentation".to_string()),
+            "astra.fixture.headless_presentation",
+        )
+        .unwrap();
 
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
