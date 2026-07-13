@@ -53,6 +53,8 @@ astra-headless serve --stdio \
 
 Windows 字形视觉回归由 `astra.windows_gpu_glyph_golden.v1` 绑定字体 revision、layout hash 和真实 GPU capture hash。更新字体、shaping provider 或 atlas shader 后，必须先确认视觉变化符合设计，再在同一变更中更新 golden；不能只改 hash 让测试通过。`platform-test-driver` 的 device-loss 注入只用于自动验证 retained glyph resource rebuild，正式发布证据仍需记录真实 host、build、profile、package 和 session identity。Web text pass 尚未实现时必须返回 `PLATFORM_NOT_IMPLEMENTED`，不能改用 headless capture 代替。
 
+产品 release evidence 还必须提供 `astra.player_presentation_report.v1`。该报告只能由 Player command sink 完成真实平台 capture 后生成，并与 capability、host conformance、automation 的 package/profile/build/session identity 一致。缺报告、`astra.renderer.headless`、零变化像素或 identity drift 都是 `ASTRA_PLAYER_PRESENTATION_EVIDENCE` blocking；不能手工填写静态 hash 补过门禁。
+
 ## 日志命令
 
 `astra` 默认把 machine-readable report 写到 stdout，把日志写到 stderr。需要结构化日志时使用：

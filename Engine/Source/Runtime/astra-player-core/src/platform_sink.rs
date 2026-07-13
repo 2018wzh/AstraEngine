@@ -292,6 +292,29 @@ impl PlatformCommandSink {
                     .await?;
                 Ok(PlayerHostCommandResult::Presented { surface: *surface })
             }
+            PlayerHostCommand::PresentTextScene {
+                surface,
+                sequence,
+                width,
+                height,
+                clear_rgba,
+                commands,
+            } => {
+                let handle = lookup(&self.surfaces, surface, "surface.present_text_scene")?;
+                self.client
+                    .present_text_scene(
+                        handle,
+                        astra_platform::TextSceneFrame {
+                            sequence: *sequence,
+                            width: *width,
+                            height: *height,
+                            clear_rgba: *clear_rgba,
+                            commands: commands.clone(),
+                        },
+                    )
+                    .await?;
+                Ok(PlayerHostCommandResult::Presented { surface: *surface })
+            }
             PlayerHostCommand::CaptureSurface { surface, .. } => {
                 let handle = lookup(&self.surfaces, surface, "surface.capture")?;
                 let frame = self.client.capture_surface(handle).await?;

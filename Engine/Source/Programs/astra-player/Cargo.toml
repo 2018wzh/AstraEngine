@@ -37,3 +37,9 @@ tempfile.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
+
+[dev-dependencies]
+tempfile.workspace = true
+astra-asset = { path = "../../Runtime/astra-asset" }
+astra-media = { path = "../../Runtime/astra-media" }
+astra-media-core = { path = "../../Runtime/astra-media-core" }

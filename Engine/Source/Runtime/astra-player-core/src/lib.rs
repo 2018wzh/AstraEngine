@@ -208,6 +208,14 @@ pub enum PlayerHostCommand {
         height: u32,
         rgba8: Vec<u8>,
     },
+    PresentTextScene {
+        sequence: u64,
+        surface: PlayerHostResourceId,
+        width: u32,
+        height: u32,
+        clear_rgba: [u8; 4],
+        commands: Vec<astra_media_core::SceneCommand>,
+    },
     CaptureSurface {
         sequence: u64,
         surface: PlayerHostResourceId,
@@ -235,6 +243,7 @@ impl PlayerHostCommand {
             | Self::Decode { sequence, .. }
             | Self::CloseDecode { sequence, .. }
             | Self::PresentRgba { sequence, .. }
+            | Self::PresentTextScene { sequence, .. }
             | Self::CaptureSurface { sequence, .. } => *sequence,
         }
     }
@@ -645,6 +654,164 @@ pub struct PlayerVisualComparisonEvidence {
     pub report_hash: String,
     pub checkpoint_count: u32,
     pub status: PlayerAutomationStatus,
+}
+
+pub const PLAYER_PRESENTATION_REPORT_SCHEMA: &str = "astra.player_presentation_report.v1";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerPresentationRunIdentity {
+    pub target: String,
+    pub profile: String,
+    pub platform: PlayerPlatform,
+    pub package_hash: String,
+    pub profile_hash: String,
+    pub build_fingerprint: String,
+    pub session_id: String,
+    pub renderer_provider: String,
+    pub presentation_path: String,
+    pub font_provider_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlayerPresentationReport {
+    pub schema: String,
+    pub status: PlayerAutomationStatus,
+    pub target: String,
+    pub profile: String,
+    pub platform: PlayerPlatform,
+    pub package_hash: String,
+    pub profile_hash: String,
+    pub build_fingerprint: String,
+    pub session_id: String,
+    pub renderer_provider: String,
+    pub presentation_path: String,
+    pub font_provider_hash: String,
+    pub layout_hash: String,
+    pub command_hash: String,
+    pub capture_hash: String,
+    pub sequence: u64,
+    pub width: u32,
+    pub height: u32,
+    pub changed_pixels: u64,
+    #[serde(default)]
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+impl PlayerPresentationReport {
+    pub fn from_live_capture(
+        identity: PlayerPresentationRunIdentity,
+        layout_hash: Hash256,
+        present_command: &PlayerHostCommand,
+        capture: &astra_platform::CapturedFrame,
+        background: [u8; 4],
+    ) -> Result<Self, PlayerPresentationError> {
+        validate_presentation_identity(&identity)?;
+        let PlayerHostCommand::PresentTextScene {
+            sequence,
+            width,
+            height,
+            commands,
+            ..
+        } = present_command
+        else {
+            return Err(PlayerPresentationError::UnsupportedCommand);
+        };
+        if *sequence == 0
+            || *width == 0
+            || *height == 0
+            || capture.width != *width
+            || capture.height != *height
+        {
+            return Err(PlayerPresentationError::InvalidDimensions);
+        }
+        let expected_bytes = usize::try_from(capture.width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(capture.height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or(PlayerPresentationError::InvalidDimensions)?;
+        if capture.rgba8.len() != expected_bytes {
+            return Err(PlayerPresentationError::InvalidCaptureLength);
+        }
+        let changed_pixels = capture
+            .rgba8
+            .chunks_exact(4)
+            .filter(|pixel| *pixel != background)
+            .count() as u64;
+        if changed_pixels == 0 {
+            return Err(PlayerPresentationError::NoVisualOutput);
+        }
+        let command_bytes = serde_json::to_vec(present_command)
+            .map_err(PlayerPresentationError::CommandSerialization)?;
+        if commands.is_empty() {
+            return Err(PlayerPresentationError::EmptyCommandStream);
+        }
+        Ok(Self {
+            schema: PLAYER_PRESENTATION_REPORT_SCHEMA.to_string(),
+            status: PlayerAutomationStatus::Pass,
+            target: identity.target,
+            profile: identity.profile,
+            platform: identity.platform,
+            package_hash: identity.package_hash,
+            profile_hash: identity.profile_hash,
+            build_fingerprint: identity.build_fingerprint,
+            session_id: identity.session_id,
+            renderer_provider: identity.renderer_provider,
+            presentation_path: identity.presentation_path,
+            font_provider_hash: identity.font_provider_hash,
+            layout_hash: layout_hash.to_string(),
+            command_hash: Hash256::from_sha256(&command_bytes).to_string(),
+            capture_hash: Hash256::from_sha256(&capture.rgba8).to_string(),
+            sequence: *sequence,
+            width: capture.width,
+            height: capture.height,
+            changed_pixels,
+            diagnostics: Vec::new(),
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PlayerPresentationError {
+    #[error("player presentation identity is incomplete or unsupported")]
+    InvalidIdentity,
+    #[error("player presentation capture dimensions or sequence are invalid")]
+    InvalidDimensions,
+    #[error("player presentation capture byte length is invalid")]
+    InvalidCaptureLength,
+    #[error("player presentation capture contains no visual output")]
+    NoVisualOutput,
+    #[error("player presentation command stream is empty")]
+    EmptyCommandStream,
+    #[error("player presentation evidence requires a PresentTextScene command")]
+    UnsupportedCommand,
+    #[error("player presentation command stream is not serializable: {0}")]
+    CommandSerialization(serde_json::Error),
+}
+
+fn validate_presentation_identity(
+    identity: &PlayerPresentationRunIdentity,
+) -> Result<(), PlayerPresentationError> {
+    let renderer_matches = match identity.platform {
+        PlayerPlatform::Windows => identity.renderer_provider == "wgpu_hardware",
+        PlayerPlatform::Web => identity.renderer_provider == "webgpu",
+    };
+    if identity.target.is_empty()
+        || identity.profile.is_empty()
+        || !identity.package_hash.starts_with("sha256:")
+        || !identity.profile_hash.starts_with("sha256:")
+        || !identity.build_fingerprint.starts_with("sha256:")
+        || identity.session_id.is_empty()
+        || !identity.font_provider_hash.starts_with("sha256:")
+        || identity.presentation_path != "glyph_atlas"
+        || !renderer_matches
+    {
+        return Err(PlayerPresentationError::InvalidIdentity);
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

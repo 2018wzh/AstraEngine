@@ -79,7 +79,9 @@
 
 **2026-07-13 Windows 子项：** `WgpuGlyphAtlasRenderer` 已把 renderer-ready glyph command 接到真实 hardware wgpu atlas、vertex/scissor draw、surface present 和 GPU texture readback。`text_surface.rs` 用固定 revision/hash/OFL 的 CJK/假名、Arabic、emoji 字体生成 layout，校验 layout hash、GPU capture hash、变化像素、重复 upload 事务回滚、资源 release、loss/rebuild 后同图，并明确拒绝非文本 command。逻辑 glyph resource 只在 present 成功后提交；测试注入只证明 loss 后 retained-resource rebuild，不伪装成物理 GPU 移除。
 
-**剩余缺口：** shared layout save/replay continuation和 Windows GPU glyph atlas/golden 已闭合；WebGPU glyph consumer、产品 Player presentation/release evidence 消费和完整 SceneCommand GPU renderer 仍未闭合。P1-001 保持开放，不能标记 `RESOLVED`。
+**2026-07-13 Player 子项：** `PlayerHostCommand::PresentTextScene` 和 `PlatformCommandSink` 已直接转发 renderer-ready glyph command，不携带 CPU raster frame。Windows product-path test 从真实 Package/VFS font sections 创建 provider，经 Player command executor 到 hardware GPU capture，并生成 `astra.player_presentation_report.v1`。Release product evidence API 会把该报告与 capability、conformance、automation 的 package/profile/build/session/renderer identity 逐项对齐；缺报告、headless provider、空画面或 identity drift 均 blocking。
+
+**剩余缺口：** shared layout save/replay continuation、Windows GPU glyph atlas/golden、Player command/release consumer 已闭合；WebGPU glyph consumer、bundled VN 主路径和完整 SceneCommand GPU renderer 仍未闭合。P1-001 保持开放，不能标记 `RESOLVED`。
 
 **迁移要求：**
 
@@ -149,7 +151,7 @@
 
 | UE 能力域 | AstraEngine 当前状态 | 后续闭合条件 |
 | --- | --- | --- |
-| 字体/文本 | 已有 verified package font database、真实 multiscript shaping/raster、fallback、glyph resource、layout identity、bounded provider-free replay E2 和 Windows hardware glyph visual E3 子证据 | 补 WebGPU glyph consumer、产品 presentation/release evidence 和完整跨端 E3 |
+| 字体/文本 | 已有 verified package font database、真实 multiscript shaping/raster、fallback、glyph resource、layout identity、bounded provider-free replay E2，以及 Windows Player command/release hardware glyph E3 子证据 | 补 WebGPU glyph consumer、bundled VN 主路径和完整跨端 E3 |
 | Editor | 只有设计和 metadata contract | 可创建项目、编辑、PIE、调试、撤销、打包和 release review |
 | 资产规模 | 有 VFS URI、package section、hash 和 cook audit | DDC/cache、增量 cook、依赖图、并发、取消、恢复、超大资产和发布包验证 |
 | 渲染 | 有 headless CPU contract、wgpu provider 代码和部分 host | 资源生命周期、材质/纹理管理、surface/device recovery、GPU budget、真实视觉验收 |
@@ -374,7 +376,7 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 在后续修补完成前，以下结论必须保持：
 
 - EngineCore、Package、Media contract、AstraVN 已实现部分可以继续独立演进，但不能宣称整个引擎达到 UE 级完备。
-- TextLayout 已删除固定宽度实现，建立 shared E2 和 Windows hardware glyph visual E3 子证据，但仍不能标记为完整字体产品系统；必须补齐 P1-001 的 WebGPU 与产品 Player presentation/release evidence。
+- TextLayout 已删除固定宽度实现，建立 shared E2 与 Windows Player command/release hardware glyph E3 子证据，但仍不能标记为完整字体产品系统；必须补齐 P1-001 的 WebGPU 与 bundled VN 产品主路径。
 - Editor、AI/MCP、AstraEMU、AstraRPG 不能从 planned/reopened 改为 DONE，直到存在真实 workspace target、主路径和对应 release evidence。
 - Windows/Web Player 和 TsuiNoSora full playable gate 继续阻断于真实状态推进、完整路线和同 run host evidence。
 - 每一项弱证据都必须在报告中保留其真实等级和用途，不能通过改名或重新包装规避验收。

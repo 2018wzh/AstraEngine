@@ -561,7 +561,10 @@ dependencies = [
 name = "astra-player"
 version = "0.1.0"
 dependencies = [
+ "astra-asset",
  "astra-core",
+ "astra-media",
+ "astra-media-core",
  "astra-observability",
  "astra-package",
  "astra-platform",
@@ -585,6 +588,7 @@ name = "astra-player-core"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-media-core",
  "astra-platform",
  "rubato",
  "schemars",

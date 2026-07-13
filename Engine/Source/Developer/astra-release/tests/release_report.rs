@@ -12,7 +12,8 @@ use astra_platform::{
 };
 use astra_player_core::{
     PlayerAutomationCheck, PlayerAutomationEvidence, PlayerAutomationReport,
-    PlayerAutomationStatus, PlayerPlatform,
+    PlayerAutomationStatus, PlayerPlatform, PlayerPresentationReport,
+    PLAYER_PRESENTATION_REPORT_SCHEMA,
 };
 use astra_release::{
     CheckStatus, PackageValidateRequest, ProductPerformanceEvidence, ReleaseDomain,
@@ -345,6 +346,28 @@ fn release_gate_accepts_only_measured_performance_from_the_same_clean_product_ru
     let mut recorder = PerformanceRecorder::new(budget.clone()).unwrap();
     recorder.record("frame.total_us", 16_000).unwrap();
     let performance = recorder.finalize(identity, 1).unwrap();
+    let presentation = PlayerPresentationReport {
+        schema: PLAYER_PRESENTATION_REPORT_SCHEMA.into(),
+        status: PlayerAutomationStatus::Pass,
+        target: capability.target.clone(),
+        profile: "classic".into(),
+        platform: PlayerPlatform::Windows,
+        package_hash: package_hash.clone(),
+        profile_hash: capability.profile_hash.clone(),
+        build_fingerprint: capability.build_fingerprint.clone(),
+        session_id: session_id.into(),
+        renderer_provider: "wgpu_hardware".into(),
+        presentation_path: "glyph_atlas".into(),
+        font_provider_hash: Hash256::from_sha256(b"font-provider").to_string(),
+        layout_hash: Hash256::from_sha256(b"layout").to_string(),
+        command_hash: Hash256::from_sha256(b"commands").to_string(),
+        capture_hash: Hash256::from_sha256(b"capture").to_string(),
+        sequence: 1,
+        width: 1280,
+        height: 720,
+        changed_pixels: 4096,
+        diagnostics: Vec::new(),
+    };
     let mut request = package_request(package_bytes.clone());
     request.platform_report = Some(capability.clone());
     request.require_platform_report = true;
@@ -353,6 +376,7 @@ fn release_gate_accepts_only_measured_performance_from_the_same_clean_product_ru
             request,
             Some(conformance.clone()),
             Some(player.clone()),
+            Some(presentation.clone()),
             vec![ProductPerformanceEvidence {
                 budget: budget.clone(),
                 report: performance.clone(),
@@ -362,19 +386,43 @@ fn release_gate_accepts_only_measured_performance_from_the_same_clean_product_ru
     assert!(report.checks.iter().any(|check| {
         check.id == "performance.product_run" && check.status == CheckStatus::Pass
     }));
+    assert!(report
+        .checks
+        .iter()
+        .any(|check| check.id == "player.presentation" && check.status == CheckStatus::Pass));
 
-    let mut dirty = performance;
+    let mut request = package_request(package_bytes.clone());
+    request.platform_report = Some(capability.clone());
+    request.require_platform_report = true;
+    let missing = ReleaseValidator
+        .validate_package_with_product_evidence(
+            request,
+            Some(conformance.clone()),
+            Some(player.clone()),
+            None,
+            vec![ProductPerformanceEvidence {
+                budget: budget.clone(),
+                report: performance.clone(),
+            }],
+        )
+        .unwrap();
+    assert!(missing.checks.iter().any(|check| {
+        check.id == "player.presentation" && check.status == CheckStatus::Blocked
+    }));
+
+    let mut dirty = performance.clone();
     dirty.identity.dirty = true;
-    let mut request = package_request(package_bytes);
-    request.platform_report = Some(capability);
+    let mut request = package_request(package_bytes.clone());
+    request.platform_report = Some(capability.clone());
     request.require_platform_report = true;
     let blocked = ReleaseValidator
         .validate_package_with_product_evidence(
             request,
-            Some(conformance),
-            Some(player),
+            Some(conformance.clone()),
+            Some(player.clone()),
+            Some(presentation.clone()),
             vec![ProductPerformanceEvidence {
-                budget,
+                budget: budget.clone(),
                 report: dirty,
             }],
         )
@@ -388,6 +436,34 @@ fn release_gate_accepts_only_measured_performance_from_the_same_clean_product_ru
     assert_eq!(
         check.diagnostic.as_ref().unwrap().code,
         "ASTRA_PERFORMANCE_EVIDENCE_IDENTITY"
+    );
+
+    let mut presentation_drift = presentation;
+    presentation_drift.session_id = "session.other".into();
+    let mut request = package_request(package_bytes);
+    request.platform_report = Some(capability);
+    request.require_platform_report = true;
+    let blocked = ReleaseValidator
+        .validate_package_with_product_evidence(
+            request,
+            Some(conformance),
+            Some(player),
+            Some(presentation_drift),
+            vec![ProductPerformanceEvidence {
+                budget,
+                report: performance,
+            }],
+        )
+        .unwrap();
+    let check = blocked
+        .checks
+        .iter()
+        .find(|check| check.id == "player.presentation")
+        .unwrap();
+    assert_eq!(check.status, CheckStatus::Blocked);
+    assert_eq!(
+        check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_PLAYER_PRESENTATION_EVIDENCE"
     );
 }
 

@@ -12,7 +12,10 @@ use astra_package::{CookSummaryManifest, PackageManifest, PackageReader};
 use astra_platform::{
     PlatformCapabilityReport, PlatformHostConformanceReport, PlatformValidationStatus,
 };
-use astra_player_core::{PlayerAutomationReport, PlayerAutomationStatus};
+use astra_player_core::{
+    PlayerAutomationReport, PlayerAutomationStatus, PlayerPlatform, PlayerPresentationReport,
+    PLAYER_PRESENTATION_REPORT_SCHEMA,
+};
 use astra_plugin_abi::{
     PluginExtensionRegistrySnapshot, ProviderPolicy, RuntimeOpenRequest, RuntimeRestoreRequest,
     RuntimeSaveRequest, RuntimeStepInput,
@@ -133,6 +136,7 @@ impl ReleaseValidator {
         request: PackageValidateRequest,
         conformance_report: Option<PlatformHostConformanceReport>,
         player_report: Option<PlayerAutomationReport>,
+        presentation_report: Option<PlayerPresentationReport>,
         performance_evidence: Vec<ProductPerformanceEvidence>,
     ) -> Result<ReleaseReport, ReleaseError> {
         let target = request.target.clone();
@@ -145,6 +149,15 @@ impl ReleaseValidator {
         )?;
         report.checks.push(product_performance_check(
             &performance_evidence,
+            &report.package_hash,
+            target.as_deref(),
+            &profile,
+            capability_report.as_ref(),
+            conformance_report.as_ref(),
+            player_report.as_ref(),
+        ));
+        report.checks.push(player_presentation_check(
+            presentation_report.as_ref(),
             &report.package_hash,
             target.as_deref(),
             &profile,
@@ -366,6 +379,99 @@ impl ReleaseValidator {
             ),
         }
         Ok(report)
+    }
+}
+
+fn player_presentation_check(
+    report: Option<&PlayerPresentationReport>,
+    package_hash: &str,
+    target: Option<&str>,
+    profile: &str,
+    capability: Option<&PlatformCapabilityReport>,
+    conformance: Option<&PlatformHostConformanceReport>,
+    player: Option<&PlayerAutomationReport>,
+) -> ReleaseCheckRecord {
+    let player_evidence = |key: &str| {
+        player
+            .into_iter()
+            .flat_map(|report| &report.checks)
+            .flat_map(|check| &check.evidence)
+            .find(|entry| entry.key == key)
+            .map(|entry| entry.value.as_str())
+    };
+    let matches = report.is_some_and(|report| {
+        let expected_platform = match report.platform {
+            PlayerPlatform::Windows => astra_platform::PlatformId::Windows,
+            PlayerPlatform::Web => astra_platform::PlatformId::Web,
+        };
+        report.schema == PLAYER_PRESENTATION_REPORT_SCHEMA
+            && report.status == PlayerAutomationStatus::Pass
+            && report.package_hash == package_hash
+            && report.profile == profile
+            && target.is_none_or(|target| report.target == target)
+            && report.presentation_path == "glyph_atlas"
+            && report.layout_hash.starts_with("sha256:")
+            && report.command_hash.starts_with("sha256:")
+            && report.capture_hash.starts_with("sha256:")
+            && report.font_provider_hash.starts_with("sha256:")
+            && report.sequence > 0
+            && report.width > 0
+            && report.height > 0
+            && report.changed_pixels > 0
+            && report.diagnostics.is_empty()
+            && capability
+                .zip(conformance)
+                .is_some_and(|(capability, conformance)| {
+                    capability.platform == expected_platform
+                        && capability.target == report.target
+                        && capability.profile_hash == report.profile_hash
+                        && capability.build_fingerprint == report.build_fingerprint
+                        && capability.renderer.selected.as_deref()
+                            == Some(report.renderer_provider.as_str())
+                        && conformance.platform == expected_platform
+                        && conformance.target == report.target
+                        && conformance.profile_hash == report.profile_hash
+                        && conformance.package_hash == report.package_hash
+                        && conformance.build_fingerprint == report.build_fingerprint
+                        && conformance.session_id == report.session_id
+                })
+            && player.is_some_and(|player| {
+                player.package_hash == report.package_hash
+                    && player.target == report.target
+                    && player.profile == report.profile
+                    && player_evidence("profile_hash") == Some(report.profile_hash.as_str())
+                    && player_evidence("build_fingerprint")
+                        == Some(report.build_fingerprint.as_str())
+                    && player_evidence("session_id") == Some(report.session_id.as_str())
+            })
+    });
+    ReleaseCheckRecord {
+        id: "player.presentation".to_string(),
+        domain: ReleaseDomain::Player,
+        status: if matches {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Blocked
+        },
+        summary: "live Player glyph presentation shares package, host and automation identity"
+            .to_string(),
+        diagnostic: (!matches).then(|| {
+            Diagnostic::blocking(
+                "ASTRA_PLAYER_PRESENTATION_EVIDENCE",
+                "product release requires a live hardware glyph presentation report from the same run",
+            )
+        }),
+        evidence: report
+            .map(|report| {
+                vec![
+                    evidence("renderer_provider", &report.renderer_provider),
+                    evidence("layout_hash", &report.layout_hash),
+                    evidence("capture_hash", &report.capture_hash),
+                    evidence("changed_pixels", report.changed_pixels),
+                    evidence("session_id", &report.session_id),
+                ]
+            })
+            .unwrap_or_default(),
     }
 }
 

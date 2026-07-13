@@ -6,13 +6,14 @@
 
 `astra.player_route_report.v1` 仍保留为 bundle route slice：它能证明 player 入口读取 bundle manifest、package、scenario refs、route model 或 mount policy，并输出脱敏 route report。它不能单独满足 `player.full_playable`。
 
-`player.full_playable` 需要同一次自动化运行产出三个 report：
+`player.full_playable` 需要同一次自动化运行产出四个 report：
 
 | Schema | 作用 | 允许记录 |
 | --- | --- | --- |
 | `astra.player_automation_script.v1` | 描述启动、点击、按键、等待、截图采样、音频采样和期望 route/system UI 状态 | target/profile/platform、公开 scenario 相对路径、target region id、按键名、等待条件和期望 check id |
 | `astra.player_input_transcript.v1` | 记录每个真实平台输入事件和 player event loop 接收情况 | event source、坐标、按键、target region、frame hash before/after、focus state、event-loop receipt、diagnostic |
 | `astra.player_automation_report.v1` | 聚合 input transcript、visual report、audio report 和 route report | check id/status、region hash、meter summary、host evidence id、route coverage 和 blocking diagnostic |
+| `astra.player_presentation_report.v1` | 证明 renderer-ready glyph command 经 Player command sink 到真实平台 GPU | package/profile/build/session、renderer/font provider、layout/command/capture hash、frame sequence、尺寸和变化像素 |
 
 Transcript identity 必须由完整 canonical JSON 计算；序列化失败或 audio meter 出现 NaN/Infinity 时，`player.transcript_serialization` 以 `ASTRA_PLAYER_TRANSCRIPT_SERIALIZATION` 阻断，不能对空 bytes、被 JSON 静默替换的值或部分字段计算成功 hash。
 
@@ -27,7 +28,7 @@ Transcript identity 必须由完整 canonical JSON 计算；序列化失败或 a
 1. platform driver 发现并聚焦 player host。
 2. driver 注入 mouse/keyboard/touch input。
 3. host event loop 把输入转换为 `PlayerPlatformEvent`。
-4. `astra-player-core` 推进 VN runtime、presentation、audio graph 和 route state。
+4. `astra-player-core` 推进 runtime、presentation、audio graph 和 route state；`PlayerHostCommand::PresentTextScene` 只转发 renderer-ready glyph command，不允许 Player CPU raster 或 headless frame 代替平台输出。
 5. 同一次 run 采样 frame/audio/route/input evidence。
 
 `VnPlayerCommand` 可继续服务 headless scenario 和 crate 单元测试，但不得出现在 live-player gate 的输入路径或 evidence 中。
@@ -79,6 +80,7 @@ CDP transport由 `astra-player::WebCdpSession` 持有，连接只允许本机 `w
 - Windows 没有 focus、`SendInput` mouse 或 `SendInput` keyboard evidence。
 - Web 没有 CDP session、CDP mouse 或 CDP keyboard evidence。
 - 截图、canvas 或 window region 为空，或输入前后 region hash 没变化。
+- `astra.player_presentation_report.v1` 缺失、来自 headless、没有变化像素，或 package/profile/build/session/renderer identity 与 capability、conformance、automation 不连续。
 - required voice/BGM/SE 期望存在但 AudioGraph、WebAudio 或 WASAPI meter 静音。
 - 缺 Windows/Web host evidence。
 - 发现 `VnPlayerCommand`、`--route-scenario` 自推进、`--dump-dom` route runner、DOM `element.click()`、JS callback 或直接 runtime command path。
