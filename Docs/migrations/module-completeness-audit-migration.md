@@ -119,7 +119,7 @@
 
 **分类：** `CONTRACT_ONLY`, `FIXTURE_ONLY`, `SMOKE_ONLY`
 
-**证据：** `Engine/Source/Runtime/astra-media-core/src/renderer2d.rs:109` 提供 `HeadlessRendererProvider`；`Engine/Source/Runtime/astra-media/tests/headless_capture.rs` 和 `filter_graph.rs` 主要验证 CPU/headless frame/hash。`Engine/Source/Runtime/astra-media/tests/decode_provider.rs` 同时使用 `SyntheticPlatformDecodeProvider` 和公开媒体 fixture。`Engine/Source/Runtime/astra-package/src/builder.rs:38` 提供 `PackageBuildRequest::minimal`，其调用点出现在 `Engine/Source/Developer/astra-test/tests/vn_scenario.rs:42` 等测试中。
+**证据：** `Engine/Source/Runtime/astra-media-core/src/renderer2d.rs:109` 提供 `HeadlessRendererProvider`；`Engine/Source/Runtime/astra-media/tests/headless_capture.rs` 和 `filter_graph.rs` 主要验证 CPU/headless frame/hash。`Engine/Source/Runtime/astra-media/tests/decode_provider.rs` 同时使用 `SyntheticPlatformDecodeProvider` 和公开媒体 fixture。`astra-package` 只保留显式命名的 `PackageBuildRequest::fixture` 供局部测试；`astra-cli` 产品 package 路径已改为从已验证 target 构造显式 wgpu/runtime/VFS policy，不再调用 fixture constructor。
 
 **结论边界：** 这些实现作为 contract、headless、fixture 和负向 gate 是合理的；它们不能证明真实 surface、设备丢失恢复、真实音频输出、长视频同步、字体 glyph 绘制或发布 package 的产品完备度。文档已经规定 minimal package 不能冒充 release input，后续审查必须继续保持这一边界。
 
@@ -222,7 +222,7 @@
 
 **迁移要求：** builder 在写入时阻断空 id、非法 schema 和重复 id；reader 在读取 table 时阻断重复 id，并增加重复 id、同 hash/不同 payload、不同 schema、加密/未加密混合重复 section 的负向 fixture。Release validator 必须把该 diagnostic 作为 package blocking。
 
-**2026-07-13 修补进度：** container builder 与 reader 已同时校验非空 safe section id/schema、唯一 id、section count/table/decoded-size 上限、migration range、alignment、header/table overlap、section overlap、bounds、stored/decoded hash 和 encryption AAD；Zstd decoded length 使用 checked conversion。`package_roundtrip.rs` 已覆盖 builder duplicate/invalid descriptor/migration。仍需增加 reader 侧恶意 table fixture，并让 `PackageReader` 校验 typed required-section schema registry 后再关闭 P1-010。
+**2026-07-13 修补进度：** container builder 与 reader 已同时校验非空 safe section id/schema、唯一 id、section count/table/decoded-size 上限、migration range、alignment、header/table overlap、section overlap、bounds、stored/decoded hash 和 encryption AAD；Zstd decoded length 使用 checked conversion。reader 私有恶意 table fixture覆盖 duplicate authority 与 range overlap。`PackageBuilder` 生成 `astra.schema_registry.v2` 的 section-id/schema/version 精确映射，`PackageReader` 在进入 release/runtime 前验证 required sections、package identity 以及 registry 双向闭合，旧 v1/unknown/mismatch schema 直接拒绝。Release validator 使用同一 `PackageReader`，P1-010 已关闭。
 
 ### P1-011：NativeVN release behavior evidence 仍是最短 smoke，不是完整产品行为
 
@@ -256,7 +256,7 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 
 **迁移要求：** 在实现修补前先补齐这些负向测试，确保现有绿色测试不会掩盖冲突输入。测试必须断言稳定 diagnostic code、无部分提交、无状态变化、无错误 report 生成和 package 不可发布。
 
-**2026-07-13 修补进度：** Runtime tick/replay、Plugin binding/lifecycle、VFS graph/context 和 package builder 冲突矩阵已补齐。reader 恶意 table、shared release validator、Cook graph/cancel/atomic commit 和规模测试仍开放，P2-002 暂不关闭。
+**2026-07-13 修补进度：** Runtime tick/replay、Plugin binding/lifecycle、VFS graph/context、package builder/reader 冲突矩阵、恶意 table、required schema registry 和 shared release reader 已补齐；`scenario.refs.v2` 进一步把 bundle path 与 package section authority 分离，并绑定 hash/size。Cook graph/cache/cancel/atomic commit 和规模测试仍开放，P2-002 暂不关闭。
 
 ### P1-012：workspace verification 不能可靠地区分当前 checkout 与其他 worktree 的构建产物
 

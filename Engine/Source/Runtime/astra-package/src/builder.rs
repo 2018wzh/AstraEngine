@@ -19,7 +19,6 @@ pub struct PackageBuildRequest {
     pub package_id: String,
     pub profile: String,
     pub cooked_assets: Vec<SectionPayload>,
-    pub schema_registry: Vec<u8>,
     pub asset_vfs_manifest: Vec<u8>,
     pub asset_catalog: Vec<u8>,
     pub media_manifest: Vec<u8>,
@@ -35,7 +34,7 @@ pub struct PackageBuildRequest {
 }
 
 impl PackageBuildRequest {
-    pub fn minimal(
+    pub fn fixture(
         package_id: impl Into<String>,
         profile: impl Into<String>,
         cooked_assets: Vec<SectionPayload>,
@@ -48,10 +47,6 @@ impl PackageBuildRequest {
             asset_vfs_manifest: default_asset_vfs_manifest(&cooked_assets),
             asset_catalog: default_asset_catalog(&cooked_assets, &profile),
             cooked_assets,
-            schema_registry: json_bytes(serde_json::json!({
-                "schema": "astra.schema_registry.v1",
-                "schemas": []
-            })),
             media_manifest: json_bytes(serde_json::json!({
                 "schema": "astra.media_manifest.v1",
                 "codecs": ["png", "jpeg", "webp", "wav", "ogg", "flac", "mp3"],
@@ -152,8 +147,8 @@ impl PackageBuildRequest {
                 "status": "unchecked"
             })),
             scenario_refs: json_bytes(serde_json::json!({
-                "schema": "astra.scenario_refs.v1",
-                "scenarios": ["scenarios/native_smoke.yaml"]
+                "schema": "astra.scenario_refs.v2",
+                "scenarios": []
             })),
             platform_eligibility: json_bytes(serde_json::json!({
                 "schema": "astra.platform_eligibility.v1",
@@ -276,76 +271,88 @@ impl PackageBuilder {
             profile: request.profile,
             container_version: CURRENT_CONTAINER_VERSION,
         };
-        let mut builder = AstraContainerBuilder::new(ContainerKind::Package)
-            .add_section(SectionPayload::postcard(
-                "package.manifest",
-                "astra.package_manifest.v1",
-                &manifest,
-            )?)
-            .add_section(SectionPayload::raw(
-                "schema.registry",
-                "astra.schema_registry.v1",
-                request.schema_registry,
-            ))
-            .add_section(SectionPayload::raw(
+        let manifest_section =
+            SectionPayload::postcard("package.manifest", "astra.package_manifest.v1", &manifest)?;
+        let mut sections = vec![
+            SectionPayload::raw(
                 "asset.vfs_manifest",
                 "astra.asset_vfs_manifest.v1",
                 request.asset_vfs_manifest,
-            ))
-            .add_section(SectionPayload::raw(
+            ),
+            SectionPayload::raw(
                 "asset.catalog",
                 "astra.asset_catalog.v1",
                 request.asset_catalog,
-            ))
-            .add_section(SectionPayload::raw(
+            ),
+            SectionPayload::raw(
                 "media.manifest",
                 "astra.media_manifest.v1",
                 request.media_manifest,
-            ))
-            .add_section(SectionPayload::raw(
+            ),
+            SectionPayload::raw(
                 "provider.policy",
                 "astra.provider_policy.v1",
                 request.provider_policy,
-            ))
-            .add_section(SectionPayload::raw(
+            ),
+            SectionPayload::raw(
                 "plugin.extension_registry",
                 "astra.plugin_extension_registry.v1",
                 request.plugin_extension_registry,
-            ))
-            .add_section(SectionPayload::raw(
+            ),
+            SectionPayload::raw(
                 "plugin.dependency_graph",
                 "astra.plugin_dependency_graph.v1",
                 request.plugin_dependency_graph,
-            ))
-            .add_section(SectionPayload::raw(
+            ),
+            SectionPayload::raw(
                 "module.fingerprint",
                 "astra.module_fingerprint.v1",
                 request.module_fingerprint,
-            ))
-            .add_section(SectionPayload::raw(
+            ),
+            SectionPayload::raw(
                 "target.manifest",
                 "astra.target_manifest.v1",
                 request.target_manifest,
-            ))
-            .add_section(SectionPayload::raw(
+            ),
+            SectionPayload::raw(
                 "release.summary",
                 "astra.release_summary.v1",
                 request.release_summary,
-            ))
-            .add_section(SectionPayload::raw(
+            ),
+            SectionPayload::raw(
                 "scenario.refs",
-                "astra.scenario_refs.v1",
+                "astra.scenario_refs.v2",
                 request.scenario_refs,
-            ))
-            .add_section(SectionPayload::raw(
+            ),
+            SectionPayload::raw(
                 "platform.eligibility",
                 "astra.platform_eligibility.v1",
                 request.platform_eligibility,
-            ));
-        for section in request.cooked_assets {
-            builder = builder.add_section(section);
-        }
-        for section in request.extra_sections {
+            ),
+        ];
+        sections.extend(request.cooked_assets);
+        sections.extend(request.extra_sections);
+        let registry = SchemaRegistryManifest {
+            schema: "astra.schema_registry.v2".to_string(),
+            schemas: std::iter::once(&manifest_section)
+                .chain(sections.iter())
+                .map(|section| SchemaRegistryEntry {
+                    section_id: section.id.clone(),
+                    schema: section.schema.clone(),
+                    version: section.version,
+                })
+                .collect(),
+        };
+        let registry_section = SectionPayload::raw(
+            "schema.registry",
+            "astra.schema_registry.v2",
+            serde_json::to_vec(&registry)
+                .map_err(|error| ContainerError::message(error.to_string()))?,
+        );
+        let mut builder = AstraContainerBuilder::new(ContainerKind::Package)
+            .add_section(manifest_section)
+            .add_section(registry_section);
+        for section in sections {
             builder = builder.add_section(section);
         }
         match builder.write() {
@@ -367,4 +374,17 @@ impl PackageBuilder {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SchemaRegistryManifest {
+    pub schema: String,
+    pub schemas: Vec<SchemaRegistryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SchemaRegistryEntry {
+    pub section_id: String,
+    pub schema: String,
+    pub version: astra_core::SchemaVersion,
 }

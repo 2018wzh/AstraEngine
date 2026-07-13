@@ -1,6 +1,6 @@
 # Stage 2 Media + Package Work
 
-Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS 和 release gate。资产、Cook、Package、局部 headless media contract、release report、Target manifest、严格 scenario runner、flat StateMachine、Await/Fence 基础以及 `asset.vfs_manifest`/`asset.catalog` package VFS slice 已落地。Migration 11 重新打开完整 Headless Platform 完成口径：当前分散的 `ScenarioRunner`、CPU frame、AudioGraph meter 和 Player automation 尚未收束为全功能测试 host。平台完成边界仍只覆盖 Windows 和 Web；Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是 Stage 2 完成前置。
+Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS 和 release gate。生产完备度审查已将本 Stage 重开为 `IN_PROGRESS`：Package/VFS 权威校验已完成加固，Cook 批次事务与非 Web renderer/media 恢复、资源生命周期和性能门禁仍在实施。Migration 11 同时重开完整 Headless Platform 完成口径：当前分散的 `ScenarioRunner`、CPU frame、AudioGraph meter 和 Player automation 尚未收束为全功能测试 host。Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是本轮完成前置。
 
 ## S2-ASSET-01 AssetId、VFS 基础与 sidecar schema
 

@@ -102,7 +102,7 @@ pub struct ReleaseCheckRecord {
 | emu | `emu.text_redaction` | text pipeline report | report contains full commercial text without local opt-in | text hash, source ref, dump policy |
 | emu | `emu.filter_preset` | filter preset report | preset bypasses FilterGraph validation or leaks native handle | preset id, target layer, validation status |
 
-`desktop-release` 和 `web-release` 默认要求 `compiled.project` 与 `platform.capability_report`。Release package 必须来自 `astra cook`/project 输入，`PackageBuildRequest::minimal` 这类 fixture package 只能用于 dev/headless 测试，不能冒充发布输入。缺 platform report 时是 blocking；headless/dev profile 可降为 warning。Desktop release 缺 `windowed_smoke`、`renderer.wgpu_surface`、`decode.wmf.audio`、`decode.wmf.video_first_frame`、`audio.wasapi` 或 `save.known_folder_rw` 时必须 blocked。Web release 使用同一 check；真实浏览器缺 `browser_smoke`、`renderer.browser_context`、`decode.browser_media`、`decode.webcodecs_config`、`audio.webaudio_render`、`save.web_storage_rw` 或 `package.web_source_read` 时，check 必须是 `blocked`，不能降级成 fallback pass。
+`desktop-release` 和 `web-release` 默认要求 `compiled.project` 与 `platform.capability_report`。Release package 必须来自 `astra cook`/project 输入，`PackageBuildRequest::fixture` 只能用于 dev/headless 测试，不能冒充发布输入；`astra-cli` 产品 package 路径不得调用该 constructor。缺 platform report 时是 blocking；headless/dev profile 可降为 warning。Desktop release 缺 `windowed_smoke`、`renderer.wgpu_surface`、`decode.wmf.audio`、`decode.wmf.video_first_frame`、`audio.wasapi` 或 `save.known_folder_rw` 时必须 blocked。Web release 使用同一 check；真实浏览器缺 `browser_smoke`、`renderer.browser_context`、`decode.browser_media`、`decode.webcodecs_config`、`audio.webaudio_render`、`save.web_storage_rw` 或 `package.web_source_read` 时，check 必须是 `blocked`，不能降级成 fallback pass。
 
 ## Report Schema
 

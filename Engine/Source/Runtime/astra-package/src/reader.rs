@@ -1,4 +1,31 @@
-use crate::{AstraContainerReader, ContainerError, ContainerKind};
+use std::collections::BTreeMap;
+
+use crate::{
+    AstraContainerReader, ContainerError, ContainerKind, PackageManifest, SchemaRegistryManifest,
+    CURRENT_CONTAINER_VERSION,
+};
+
+const REQUIRED_SECTIONS: &[(&str, &str)] = &[
+    ("package.manifest", "astra.package_manifest.v1"),
+    ("schema.registry", "astra.schema_registry.v2"),
+    ("asset.vfs_manifest", "astra.asset_vfs_manifest.v1"),
+    ("asset.catalog", "astra.asset_catalog.v1"),
+    ("media.manifest", "astra.media_manifest.v1"),
+    ("provider.policy", "astra.provider_policy.v1"),
+    (
+        "plugin.extension_registry",
+        "astra.plugin_extension_registry.v1",
+    ),
+    (
+        "plugin.dependency_graph",
+        "astra.plugin_dependency_graph.v1",
+    ),
+    ("module.fingerprint", "astra.module_fingerprint.v1"),
+    ("target.manifest", "astra.target_manifest.v1"),
+    ("release.summary", "astra.release_summary.v1"),
+    ("scenario.refs", "astra.scenario_refs.v2"),
+    ("platform.eligibility", "astra.platform_eligibility.v1"),
+];
 
 #[derive(Debug, Clone)]
 pub struct PackageReader {
@@ -11,7 +38,84 @@ impl PackageReader {
         if container.kind() != ContainerKind::Package {
             return Err(ContainerError::message("container is not a package"));
         }
-        Ok(Self { container })
+        for (id, schema) in REQUIRED_SECTIONS {
+            let entry = container.section_entry(id).ok_or_else(|| {
+                ContainerError::message(format!("package is missing required section {id}"))
+            })?;
+            if entry.schema != *schema {
+                return Err(ContainerError::message(format!(
+                    "required section {id} uses unsupported schema {}",
+                    entry.schema
+                )));
+            }
+        }
+        let manifest: PackageManifest = container.decode_postcard("package.manifest")?;
+        if manifest.schema != "astra.package_manifest.v1"
+            || manifest.container_version != CURRENT_CONTAINER_VERSION
+            || manifest.package_id.trim().is_empty()
+            || manifest.profile.trim().is_empty()
+        {
+            return Err(ContainerError::message(
+                "package manifest identity or version is invalid",
+            ));
+        }
+        let registry_bytes = container.read_bounded("schema.registry", 16 * 1024 * 1024)?;
+        let registry: SchemaRegistryManifest =
+            serde_json::from_slice(&registry_bytes).map_err(|error| {
+                ContainerError::message(format!("schema registry decode failed: {error}"))
+            })?;
+        if registry.schema != "astra.schema_registry.v2" {
+            return Err(ContainerError::message(
+                "unsupported package schema registry version",
+            ));
+        }
+        let mut registered = BTreeMap::new();
+        for schema in registry.schemas {
+            let section_id = schema.section_id;
+            if registered
+                .insert(section_id.clone(), (schema.schema, schema.version))
+                .is_some()
+            {
+                return Err(ContainerError::message(format!(
+                    "schema registry contains duplicate section {}",
+                    section_id
+                )));
+            }
+        }
+        for entry in container
+            .entries()
+            .iter()
+            .filter(|entry| entry.id != "schema.registry")
+        {
+            let Some((schema, version)) = registered.get(entry.id.as_str()) else {
+                return Err(ContainerError::message(format!(
+                    "section {} is not registered in schema.registry",
+                    entry.id
+                )));
+            };
+            if schema != &entry.schema || *version != entry.version {
+                return Err(ContainerError::message(format!(
+                    "section {} schema registry binding does not match its table entry",
+                    entry.id
+                )));
+            }
+        }
+        if registered.len() + 1 != container.entries().len() {
+            return Err(ContainerError::message(
+                "schema registry contains entries without package sections",
+            ));
+        }
+        let reader = Self { container };
+        let scenario_refs: crate::ScenarioRefsManifest = serde_json::from_slice(
+            &reader
+                .container
+                .read_bounded("scenario.refs", 16 * 1024 * 1024)?,
+        )
+        .map_err(|error| {
+            ContainerError::message(format!("scenario refs decode failed: {error}"))
+        })?;
+        scenario_refs.validate(&reader)?;
+        Ok(reader)
     }
 
     pub fn has_section(&self, id: &str) -> bool {

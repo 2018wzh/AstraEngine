@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use astra_asset::{AssetCatalog, VfsBackendKind, VfsManifest, VfsSourceRef, VfsUri};
+use astra_asset::{
+    AssetCatalog, ResolveContext, VfsBackendKind, VfsManifest, VfsSourceRef, VfsUri,
+};
 use astra_core::{Diagnostic, Hash256};
 use astra_package::{PackageManifest, PackageReader};
 use astra_platform::{
@@ -224,7 +226,11 @@ impl ReleaseValidator {
                     request.target.as_deref(),
                     &request.profile,
                 ));
-                checks.extend(vfs_checks(&package));
+                checks.extend(vfs_checks(
+                    &package,
+                    request.target.as_deref(),
+                    &request.profile,
+                ));
                 checks.push(target_manifest_check(&package, request.target.as_deref()));
                 checks.push(cooked_project_input_check(
                     &package,
@@ -954,7 +960,7 @@ fn native_vn_behavioral_evidence(
     provider
         .step(RuntimeStepInput {
             session_id: open.session_id.clone(),
-            fixed_step: 0,
+            fixed_step: 1,
             action: "launch_default".to_string(),
             payload: serde_json::json!({}),
         })
@@ -1043,11 +1049,15 @@ fn select_game_target<'a>(
         .find(|target| target.kind == TargetKind::Game)
 }
 
-fn vfs_checks(package: &PackageReader) -> Vec<ReleaseCheckRecord> {
+fn vfs_checks(
+    package: &PackageReader,
+    selected_target: Option<&str>,
+    profile: &str,
+) -> Vec<ReleaseCheckRecord> {
     vec![
         vfs_uri_format_check(package),
         vfs_prefix_registry_check(package),
-        vfs_package_mount_check(package),
+        vfs_package_mount_check(package, selected_target, profile),
         vfs_overlay_mount_check(package),
         vfs_catalog_check(package),
     ]
@@ -1208,7 +1218,11 @@ fn vfs_prefix_registry_check(package: &PackageReader) -> ReleaseCheckRecord {
     }
 }
 
-fn vfs_package_mount_check(package: &PackageReader) -> ReleaseCheckRecord {
+fn vfs_package_mount_check(
+    package: &PackageReader,
+    selected_target: Option<&str>,
+    profile: &str,
+) -> ReleaseCheckRecord {
     let manifest = match decode_vfs_manifest(package) {
         Ok(manifest) => manifest,
         Err(check) => return (*check).with_id("vfs.package_mount"),
@@ -1267,6 +1281,79 @@ fn vfs_package_mount_check(package: &PackageReader) -> ReleaseCheckRecord {
                     ],
                 );
             }
+        }
+    }
+
+    let target = selected_target
+        .map(str::to_string)
+        .or_else(|| {
+            package
+                .container()
+                .read_bounded("target.manifest", 256 * 1024)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<TargetManifest>(&bytes).ok())
+                .and_then(|manifest| {
+                    manifest
+                        .targets
+                        .into_iter()
+                        .find(|target| target.kind == TargetKind::Game)
+                        .map(|target| target.id)
+                })
+        })
+        .unwrap_or_default();
+    if target.is_empty() {
+        return package_blocked(
+            "vfs.package_mount",
+            "ASTRA_VFS_RESOLVE_TARGET_MISSING",
+            "VFS release validation requires a selected game target",
+            vec![],
+        );
+    }
+    let mut uris = BTreeSet::new();
+    for entry in &manifest.entries {
+        let Some(layer) = layers.get(entry.layer_id.as_str()) else {
+            continue;
+        };
+        if (!layer.targets.is_empty() && !layer.targets.iter().any(|value| value == &target))
+            || (!layer.profiles.is_empty() && !layer.profiles.iter().any(|value| value == profile))
+        {
+            continue;
+        }
+        if !uris.insert(entry.uri.clone()) {
+            continue;
+        }
+        let prefix = manifest
+            .prefixes
+            .iter()
+            .find(|prefix| prefix.prefix == entry.uri.prefix())
+            .expect("validated VFS manifest prefix must exist");
+        let Some(capability) = prefix.capabilities.first() else {
+            return package_blocked(
+                "vfs.package_mount",
+                "ASTRA_VFS_CAPABILITY_MISSING",
+                "VFS prefix must declare a read capability",
+                vec![evidence("prefix", &prefix.prefix)],
+            );
+        };
+        let context = ResolveContext {
+            target: target.clone(),
+            profile: profile.to_string(),
+            capability: capability.clone(),
+            provider_binding: prefix.provider_id.clone(),
+        };
+        if let Err(diagnostics) = manifest.resolve(&entry.uri, &context) {
+            return ReleaseCheckRecord {
+                id: "vfs.package_mount".to_string(),
+                domain: ReleaseDomain::Package,
+                status: CheckStatus::Blocked,
+                summary: "VFS entry is not uniquely resolvable for the release context".to_string(),
+                diagnostic: diagnostics.into_iter().next(),
+                evidence: vec![
+                    evidence("vfs_uri", entry.uri.as_str()),
+                    evidence("target", &target),
+                    evidence("profile", profile),
+                ],
+            };
         }
     }
 

@@ -9,7 +9,7 @@ fn package_vfs_mount_writes_vfs_manifest_and_catalog_without_asset_registry() {
         b"opening".to_vec(),
     );
     let expected_hash = Hash256::from_sha256(&cooked.payload).to_string();
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "classic",
         vec![cooked],

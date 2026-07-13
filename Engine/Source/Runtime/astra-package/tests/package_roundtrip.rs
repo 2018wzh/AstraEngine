@@ -158,7 +158,7 @@ impl astra_package::ContainerCryptoProvider for XorCryptoProvider {
 
 #[test]
 fn package_roundtrip_builder_writes_required_runtime_sections() {
-    let request = PackageBuildRequest::minimal(
+    let request = PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(

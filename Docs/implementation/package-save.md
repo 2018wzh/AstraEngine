@@ -67,6 +67,8 @@ Minimum package sections:
 - `scenario.refs`
 - `platform.eligibility`
 
+`scenario.refs` 使用 `astra.scenario_refs.v2`，每个条目分别记录规范化的 bundle 相对 `path`、合法且与路径分离的 package `section_id`、payload `sha256` 和 byte size。Cook 以路径生成稳定 section id，Package reader 要求 path/section 双向唯一、section 存在且 hash/size 一致；scenario runner 还会校验实际执行的 scenario bytes 与 package binding 相同。旧的“把 `scenarios/foo.yaml` 直接当 section id”以及只列路径、不绑定 payload identity 的 v1 输入不再接受。
+
 Stage 3 NativeVN 还会写入 `vn.policy_bundle_manifest` 和 `vn.policy_bundle_source_cache`。前者记录 policy id、相对 entry、capability、dependency、lock hash、source hash、byte size 和 source cache section；后者保存包内可执行的官方 Luau source。Release report 只输出 hash、size、section id 和 diagnostic，不输出 Luau source payload。
 
 Project-level `package_sections` descriptor 可在 cook 阶段复制额外脱敏 section。每个条目包含 `id`、`schema`、相对 `path`、`codec`，并可用 `targets` 和 `profiles` 限定写入范围。cook 会阻断绝对路径、`..`、重复 section id 和 target/profile 不匹配的误写；package 里只保留 section payload、hash、codec 和 schema，并在 `asset.vfs_manifest.entries` 中生成 `package:/...` URI，不记录源文件绝对路径。
@@ -133,6 +135,8 @@ Release Gate validates a complete chain from `minimum_supported_version` to curr
 ## Report Evidence
 
 Package validation report includes section table hash, schema registry hash, policy lock hash and migration chain status. It never includes raw media payload or full localized text.
+
+`schema.registry` 当前使用 `astra.schema_registry.v2`，由 `PackageBuilder` 从实际 section table 派生每个 `section_id/schema/version`，不接受调用方提供的空成功 registry。`PackageReader` 要求 registry 与除自身外的 section table 双向一一对应，并在任何 release/runtime reader 读取 policy 或 payload 前验证 required section schema、package identity、container version 和 registry binding。旧 v1、缺项、多项、unknown section 或 schema/version drift 都是 package integrity blocker。
 
 ## Tests
 

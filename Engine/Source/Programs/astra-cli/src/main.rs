@@ -13,7 +13,8 @@ use astra_observability::{
 };
 use astra_package::{
     MigrationPolicy, PackageBuildRequest, PackageBuilder, PackageManifest, PackageReader,
-    SectionCodec, SectionPayload, CURRENT_CONTAINER_VERSION,
+    ScenarioReference, ScenarioRefsManifest, SectionCodec, SectionPayload,
+    CURRENT_CONTAINER_VERSION,
 };
 use astra_platform::{
     migrate_host_profile_json, validate_host_profile, PlatformCapabilityReport,
@@ -744,6 +745,8 @@ struct CookedArtifactRef {
     asset_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     asset_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scenario_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -1011,6 +1014,7 @@ fn cook_project(
         asset_byte_size: None,
         asset_type: None,
         asset_id: None,
+        scenario_path: None,
     }];
     if let Some(platform_profiles) = cook_platform_profiles(
         &project_yaml,
@@ -1033,6 +1037,7 @@ fn cook_project(
             asset_byte_size: None,
             asset_type: None,
             asset_id: None,
+            scenario_path: None,
         });
     }
     if let Some(display_config) = project_player_display_config(&project_yaml)? {
@@ -1051,6 +1056,7 @@ fn cook_project(
             asset_byte_size: None,
             asset_type: None,
             asset_id: None,
+            scenario_path: None,
         });
     }
     if project_uses_nativevn(&project_yaml) {
@@ -1207,6 +1213,7 @@ fn cook_nativevn_sections(
             asset_byte_size: None,
             asset_type: None,
             asset_id: None,
+            scenario_path: None,
         });
     }
     artifacts.extend(cook_nativevn_asset_sections(
@@ -1276,6 +1283,7 @@ fn cook_nativevn_asset_sections(
             asset_byte_size: Some(fs::metadata(project_dir.join(&source_path))?.len()),
             asset_type: Some(sidecar.asset_type),
             asset_id: Some(sidecar.id.to_string()),
+            scenario_path: None,
         });
     }
     Ok(artifacts)
@@ -1369,8 +1377,9 @@ fn cook_scenario_ref_sections(
             .map_err(|err| format!("scenario ref {scenario_ref} is not readable: {err}"))?;
         let file_name = format!("scenario_ref_{:04}.bin", index + 1);
         fs::write(section_dir.join(&file_name), &payload)?;
+        let normalized_path = normalize_vfs_path(scenario_ref)?;
         artifacts.push(CookedArtifactRef {
-            section_id: scenario_ref.clone(),
+            section_id: scenario_section_id(&normalized_path),
             schema: scenario_ref_schema(&payload),
             path: normalize_relative_path(std::path::Path::new("sections").join(file_name)),
             hash: Hash256::from_sha256(&payload).to_string(),
@@ -1381,6 +1390,7 @@ fn cook_scenario_ref_sections(
             asset_byte_size: None,
             asset_type: None,
             asset_id: None,
+            scenario_path: Some(normalized_path),
         });
     }
     Ok(artifacts)
@@ -1472,6 +1482,7 @@ fn cook_project_package_sections(
             asset_byte_size: None,
             asset_type: None,
             asset_id: None,
+            scenario_path: None,
         });
     }
     Ok(artifacts)
@@ -1627,32 +1638,53 @@ fn build_package_from_cooked(
     }
     let asset_vfs_manifest = asset_vfs_manifest_from_cooked(&manifest, &artifacts)?;
     let asset_catalog = asset_catalog_from_cooked(&manifest, &artifacts)?;
-    let mut request = PackageBuildRequest::minimal(
+    let mut request = production_package_request(
         manifest.package_id.clone(),
         manifest.profile.clone(),
         artifacts,
-    );
+        &package_target_manifest,
+        target,
+    )?;
     request.asset_vfs_manifest = asset_vfs_manifest;
     request.asset_catalog = asset_catalog;
     request.provider_policy = product_provider_policy(&manifest.profile)?;
     request.plugin_extension_registry = product_extension_registry()?;
     request.target_manifest = serde_json::to_vec(&package_target_manifest)?;
     request.platform_eligibility = platform_eligibility(&package_target_manifest, target)?;
-    if !manifest.scenario_refs.is_empty() {
-        request.scenario_refs = serde_json::to_vec(&serde_json::json!({
-            "schema": "astra.scenario_refs.v1",
-            "scenarios": manifest.scenario_refs,
-        }))?;
-    }
+    request.scenario_refs = serde_json::to_vec(&scenario_refs_manifest_from_cooked(
+        &manifest,
+        &request.cooked_assets,
+    )?)?;
     request.release_summary = br#"{"schema":"astra.release_summary.v1","status":"built"}"#.to_vec();
     PackageBuilder::build(request).map_err(|err| err.to_string().into())
 }
 
-fn product_provider_policy(profile: &str) -> Result<Vec<u8>, CliError> {
-    Ok(serde_json::to_vec(&serde_json::json!({
+fn production_package_request(
+    package_id: String,
+    profile: String,
+    cooked_assets: Vec<SectionPayload>,
+    target_manifest: &TargetManifest,
+    target_id: &str,
+) -> Result<PackageBuildRequest, CliError> {
+    let target = target_manifest
+        .targets
+        .iter()
+        .find(|target| target.id == target_id && target.kind == astra_target::TargetKind::Game)
+        .ok_or_else(|| format!("package target {target_id} is not a game target"))?;
+    let runtime_provider = target
+        .runtime_provider
+        .as_deref()
+        .ok_or_else(|| format!("package target {target_id} has no runtime provider binding"))?;
+    if runtime_provider != "native_vn" {
+        return Err(format!(
+            "runtime provider {runtime_provider} is not implemented for product packaging"
+        )
+        .into());
+    }
+    let provider_policy = serde_json::to_vec(&serde_json::json!({
         "schema": "astra.provider_policy.v1",
         "profile": profile,
-        "renderer": "astra.renderer2d.wgpu",
+        "renderer": "astra.renderer.wgpu",
         "decode_fallback": "profile_bound",
         "runtime_provider": {
             "schema": "astra.product_runtime_descriptor.v1",
@@ -1662,73 +1694,69 @@ fn product_provider_policy(profile: &str) -> Result<Vec<u8>, CliError> {
             "supported_targets": ["game"],
             "capabilities": ["runtime.native_vn"],
             "package_sections": [
-                "vn.compiled_story",
-                "vn.profile_manifest",
-                "vn.policy_bundle_manifest",
-                "vn.extension_manifest",
-                "vn.standard_command_manifest",
-                "vn.presentation_provider_manifest",
-                "vn.commercial_baseline_manifest",
-                "vn.system_story_manifest",
-                "vn.system_ui_profile_manifest",
+                "vn.compiled_story", "vn.profile_manifest", "vn.policy_bundle_manifest",
+                "vn.extension_manifest", "vn.standard_command_manifest",
+                "vn.presentation_provider_manifest", "vn.commercial_baseline_manifest",
+                "vn.system_story_manifest", "vn.system_ui_profile_manifest",
                 "vn.advanced_presentation_manifest"
             ],
             "release_checks": [
-                "runtime_provider.native_vn",
-                "vn.commercial_baseline",
-                "vn.system_ui_profile",
-                "vn.advanced_presentation",
-                "player.full_playable"
+                "runtime_provider.native_vn", "vn.commercial_baseline",
+                "vn.system_ui_profile", "vn.advanced_presentation", "player.full_playable"
             ]
         },
-        "bindings": product_provider_bindings()
-    }))?)
-}
-
-fn product_extension_registry() -> Result<Vec<u8>, CliError> {
-    Ok(serde_json::to_vec(&serde_json::json!({
+        "bindings": [
+            {"slot": "presentation", "provider_id": "astra.renderer.wgpu"},
+            {"slot": "game_runtime_provider", "provider_id": "astra.runtime.native_vn"}
+        ]
+    }))?;
+    let plugin_extension_registry = serde_json::to_vec(&serde_json::json!({
         "schema": "astra.plugin_extension_registry.v1",
-        "providers": [{
-            "slot": "presentation",
-            "provider_id": "astra.vn.standard_presentation",
-            "capability": "presentation.vn.standard",
-            "phase": "runtime",
-            "packaged": true
-        }, {
-            "slot": "renderer2d",
-            "provider_id": "astra.renderer2d.wgpu",
-            "capability": "renderer2d.wgpu",
-            "phase": "runtime",
-            "packaged": true
-        }, {
-            "slot": "vfs_provider",
-            "provider_id": "astra.vfs.package",
-            "capability": "vfs.backend.package",
-            "phase": "runtime",
-            "packaged": true
-        }, {
-            "slot": "game_runtime_provider",
-            "provider_id": "astra.runtime.native_vn",
-            "capability": "runtime.native_vn",
-            "phase": "runtime",
-            "packaged": true
-        }],
-        "bindings": product_provider_bindings(),
+        "providers": [
+            {
+                "slot": "presentation", "provider_id": "astra.renderer.wgpu",
+                "capability": "renderer2d.wgpu", "phase": "runtime", "packaged": true
+            },
+            {
+                "slot": "vfs_provider", "provider_id": "astra.vfs.package",
+                "capability": "vfs.backend.package", "phase": "runtime", "packaged": true
+            },
+            {
+                "slot": "game_runtime_provider", "provider_id": "astra.runtime.native_vn",
+                "capability": "runtime.native_vn", "phase": "runtime", "packaged": true
+            }
+        ],
+        "bindings": [
+            {"slot": "presentation", "provider_id": "astra.renderer.wgpu"},
+            {"slot": "game_runtime_provider", "provider_id": "astra.runtime.native_vn"}
+        ],
         "conflicts": []
-    }))?)
-}
-
-fn product_provider_bindings() -> serde_json::Value {
-    serde_json::json!([{
-        "slot": "presentation",
-        "provider_id": "astra.vn.standard_presentation"
-    }, {
-        "slot": "renderer2d",
-        "provider_id": "astra.renderer2d.wgpu"
-    }, {
-        "slot": "game_runtime_provider",
-        "provider_id": "astra.runtime.native_vn"
-    }])
+    }))?;
+    Ok(PackageBuildRequest {
+        package_id,
+        profile: profile.clone(),
+        cooked_assets,
+        asset_vfs_manifest: vec![],
+        asset_catalog: vec![],
+        media_manifest: serde_json::to_vec(&serde_json::json!({
+            "schema": "astra.media_manifest.v1",
+            "codecs": ["png", "jpeg", "webp", "wav", "ogg", "flac", "mp3"],
+            "ffmpeg": "profile_bound"
+        }))?,
+        provider_policy,
+        plugin_extension_registry,
+        plugin_dependency_graph:
+            br#"{"schema":"astra.plugin_dependency_graph.v1","dependencies":[]}"#.to_vec(),
+        module_fingerprint: serde_json::to_vec(&serde_json::json!({
+            "schema": "astra.module_fingerprint.v1",
+            "modules": [{"crate": target.crate_name, "target": target.id}]
+        }))?,
+        target_manifest: serde_json::to_vec(target_manifest)?,
+        release_summary: br#"{"schema":"astra.release_summary.v1","status":"built"}"#.to_vec(),
+        scenario_refs: serde_json::to_vec(&ScenarioRefsManifest::empty())?,
+        platform_eligibility: vec![],
+        extra_sections: vec![],
+    })
 }
 
 fn asset_vfs_manifest_from_cooked(
@@ -1788,6 +1816,50 @@ fn asset_vfs_manifest_from_cooked(
         "whiteouts": []
     }))
     .map_err(Into::into)
+}
+
+fn scenario_refs_manifest_from_cooked(
+    manifest: &CookManifest,
+    sections: &[SectionPayload],
+) -> Result<ScenarioRefsManifest, CliError> {
+    let section_by_id = sections
+        .iter()
+        .map(|section| (section.id.as_str(), section))
+        .collect::<BTreeMap<_, _>>();
+    let mut refs_by_path = manifest
+        .artifacts
+        .iter()
+        .filter_map(|artifact| {
+            artifact
+                .scenario_path
+                .as_deref()
+                .map(|path| (path, artifact))
+        })
+        .collect::<BTreeMap<_, _>>();
+    if refs_by_path.len() != manifest.scenario_refs.len() {
+        return Err("cook manifest scenario path bindings are incomplete or duplicated".into());
+    }
+    let mut scenarios = Vec::with_capacity(manifest.scenario_refs.len());
+    for path in &manifest.scenario_refs {
+        let normalized = normalize_vfs_path(path)?;
+        let artifact = refs_by_path
+            .remove(normalized.as_str())
+            .ok_or_else(|| format!("scenario ref {normalized} has no cooked section binding"))?;
+        let section = section_by_id
+            .get(artifact.section_id.as_str())
+            .ok_or_else(|| format!("scenario ref {normalized} section is missing"))?;
+        scenarios.push(ScenarioReference {
+            path: normalized,
+            section_id: artifact.section_id.clone(),
+            hash: Hash256::from_sha256(&section.payload),
+            byte_size: section.payload.len() as u64,
+        });
+    }
+    scenarios.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(ScenarioRefsManifest {
+        schema: "astra.scenario_refs.v2".to_string(),
+        scenarios,
+    })
 }
 
 fn asset_catalog_from_cooked(
@@ -1860,6 +1932,13 @@ fn normalize_vfs_path(path: &str) -> Result<String, CliError> {
         return Err(format!("invalid VFS path {path}").into());
     }
     Ok(parts.join("/"))
+}
+
+fn scenario_section_id(path: &str) -> String {
+    format!(
+        "scenario.ref.{}",
+        Hash256::from_sha256(path.as_bytes()).to_hex()
+    )
 }
 
 fn section_codec_name(codec: &SectionCodec) -> &'static str {
@@ -1975,7 +2054,7 @@ fn build_standalone_bundle_into(
     fs::create_dir_all(out.join("package"))?;
     let bundled_package = out.join("package").join("nativevn.astrapkg");
     fs::write(&bundled_package, &package_bytes)?;
-    let scenario_refs = package_scenario_refs(&reader);
+    let scenario_bindings = package_scenario_refs(&reader)?;
     let mut files = vec![bundle_file(
         "package/nativevn.astrapkg",
         "package",
@@ -1984,18 +2063,27 @@ fn build_standalone_bundle_into(
     let mount_policy = bundle_mount_policy(&reader, out, &mut files)?;
     let mut bundle_checks = Vec::new();
     let mut crash_reporter_ref = None;
-    for scenario_ref in &scenario_refs {
-        let relative = validate_bundle_relative_path(scenario_ref)?;
+    for scenario_ref in &scenario_bindings {
+        let relative = validate_bundle_relative_path(&scenario_ref.path)?;
         let scenario_bytes = reader
             .container()
-            .read_section(scenario_ref)
-            .map_err(|_| format!("scenario ref {scenario_ref} is not available in package"))?;
+            .read_section(&scenario_ref.section_id)
+            .map_err(|_| {
+                format!(
+                    "scenario ref {} section {} is not available in package",
+                    scenario_ref.path, scenario_ref.section_id
+                )
+            })?;
         let destination = out.join(&relative);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)?;
         }
         fs::write(&destination, &scenario_bytes)?;
-        files.push(bundle_file(scenario_ref, "scenario_ref", &scenario_bytes));
+        files.push(bundle_file(
+            &scenario_ref.path,
+            "scenario_ref",
+            &scenario_bytes,
+        ));
     }
 
     let entrypoint = match platform {
@@ -2134,7 +2222,10 @@ fn build_standalone_bundle_into(
         entrypoint,
         package_hash: Hash256::from_sha256(&package_bytes).to_string(),
         package: "package/nativevn.astrapkg".to_string(),
-        scenario_refs,
+        scenario_refs: scenario_bindings
+            .into_iter()
+            .map(|scenario| scenario.path)
+            .collect(),
         mount_policy,
         observability: BundleObservabilityEvidence {
             log_schema: astra_observability::LOG_EVENT_SCHEMA.to_string(),
@@ -2301,24 +2392,13 @@ fn looks_like_local_path(value: &str) -> bool {
         || value.split(['/', '\\']).any(|part| part == "..")
 }
 
-fn package_scenario_refs(reader: &PackageReader) -> Vec<String> {
-    let Ok(bytes) = reader.container().read_section("scenario.refs") else {
-        return Vec::new();
-    };
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-        return Vec::new();
-    };
-    let mut refs = value
-        .get("scenarios")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(serde_json::Value::as_str)
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    refs.sort();
-    refs.dedup();
-    refs
+fn package_scenario_refs(reader: &PackageReader) -> Result<Vec<ScenarioReference>, CliError> {
+    let bytes = reader.container().read_section("scenario.refs")?;
+    let mut manifest: ScenarioRefsManifest = serde_json::from_slice(&bytes)?;
+    manifest
+        .scenarios
+        .sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(manifest.scenarios)
 }
 
 fn bundle_file(path: &str, role: &str, bytes: &[u8]) -> StandaloneBundleFile {

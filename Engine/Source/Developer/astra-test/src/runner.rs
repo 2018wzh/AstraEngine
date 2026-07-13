@@ -997,18 +997,52 @@ fn validate_package_scenario_ref(
         return;
     };
     let scenario_ref = normalize_repo_path(workspace_root, scenario_path);
-    let listed = scenarios
-        .iter()
-        .filter_map(serde_json::Value::as_str)
-        .any(|entry| entry == scenario_ref);
+    let binding = scenarios.iter().find(|entry| {
+        entry
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|entry| entry == scenario_ref)
+    });
     context
         .release_gate_checks
         .push("scenario.refs".to_string());
-    if !listed {
+    let Some(binding) = binding else {
         context.diagnostics.push(
             Diagnostic::blocking(
                 "ASTRA_SCENARIO_REF_MISSING",
                 "scenario file is not listed in package scenario refs",
+            )
+            .with_field("scenario", scenario_ref),
+        );
+        return;
+    };
+    let binding: astra_package::ScenarioReference = match serde_json::from_value(binding.clone()) {
+        Ok(binding) => binding,
+        Err(error) => {
+            context.diagnostics.push(Diagnostic::blocking(
+                "ASTRA_SCENARIO_REF_INVALID",
+                format!("scenario package binding is invalid: {error}"),
+            ));
+            return;
+        }
+    };
+    let scenario_bytes = match fs::read(scenario_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            context.diagnostics.push(Diagnostic::blocking(
+                "ASTRA_SCENARIO_REF_READ",
+                format!("scenario input cannot be read for package identity validation: {error}"),
+            ));
+            return;
+        }
+    };
+    if binding.byte_size != scenario_bytes.len() as u64
+        || binding.hash != Hash256::from_sha256(&scenario_bytes)
+    {
+        context.diagnostics.push(
+            Diagnostic::blocking(
+                "ASTRA_SCENARIO_REF_IDENTITY_MISMATCH",
+                "scenario input does not match the package-bound scenario bytes",
             )
             .with_field("scenario", scenario_ref),
         );
@@ -1167,10 +1201,12 @@ fn advanced_evidence_status(
 
 struct RunContext {
     world: RuntimeWorld,
+    session_seed: u64,
     workspace_root: PathBuf,
     system_actor: ActorId,
     loaded_plugins: Vec<LoadedPlugin>,
     step: u64,
+    restore_tick_pending: bool,
     saved: Option<SaveBlob>,
     vn_host: Option<ProductRuntimeHost>,
     vn_session: Option<GameRuntimeSessionId>,
@@ -1265,10 +1301,12 @@ impl RunContext {
         };
         Ok(Self {
             world,
+            session_seed: seed,
             workspace_root,
             system_actor,
             loaded_plugins: Vec::new(),
             step: 0,
+            restore_tick_pending: false,
             saved: None,
             vn_host,
             vn_session,
@@ -1375,6 +1413,7 @@ impl RunContext {
                 .clone()
                 .ok_or_else(|| ScenarioError::Message("load requested before save".to_string()))?;
             self.world.load(save)?;
+            self.restore_tick_pending = true;
             if let Some(save) = self.vn_saved.clone() {
                 self.load_vn_slot(save)?;
             }
@@ -1431,6 +1470,7 @@ impl RunContext {
                     ScenarioError::Message("player_input load requested before save".to_string())
                 })?;
                 self.world.load(save)?;
+                self.restore_tick_pending = true;
                 if let Some(save) = self.vn_saved.clone() {
                     self.load_vn_slot(save)?;
                 }
@@ -1748,14 +1788,18 @@ impl RunContext {
         for _ in 0..ticks {
             self.step += 1;
             debug!(step = self.step, "scenario.advance");
-            let report = self.world.tick(astra_runtime::TickRequest::live(
-                TickInput {
-                    fixed_step: self.step,
-                    delta_ns: 16_666_667,
-                    seed: 0,
-                },
-                Vec::new(),
-            ))?;
+            let input = TickInput {
+                fixed_step: self.step,
+                delta_ns: 16_666_667,
+                seed: self.session_seed,
+            };
+            let request = if self.restore_tick_pending {
+                astra_runtime::TickRequest::restore_continuation(input, Vec::new())
+            } else {
+                astra_runtime::TickRequest::live(input, Vec::new())
+            };
+            let report = self.world.tick(request)?;
+            self.restore_tick_pending = false;
             for diagnostic in &report.diagnostics {
                 warn!(
                     step = report.step,

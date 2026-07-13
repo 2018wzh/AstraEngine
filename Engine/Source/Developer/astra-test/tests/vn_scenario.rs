@@ -1,6 +1,10 @@
 use std::fs;
 
-use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader};
+use astra_core::Hash256;
+use astra_package::{
+    ContainerBlob, PackageBuildRequest, PackageBuilder, PackageReader, ScenarioReference,
+    ScenarioRefsManifest, SectionPayload,
+};
 use astra_test::{ScenarioRunner, ScenarioStatus};
 use astra_vn::{compile_astra_sources, package_sections_for_story, AstraSource};
 
@@ -30,6 +34,52 @@ state prologue #@id state.prologue
     text key:opening.after_movie speaker:narrator #@id line.after_movie
 "#;
 
+fn build_test_package(
+    sections: Vec<SectionPayload>,
+    profile: &str,
+    scenarios: &[(&str, &[u8])],
+) -> ContainerBlob {
+    let mut request = PackageBuildRequest::fixture("com.example.nativevn", profile, sections);
+    request.target_manifest = serde_json::json!({
+        "schema": "astra.target_manifest.v1",
+        "targets": [{
+            "id": "nativevn-game",
+            "kind": "game",
+            "crate": "astra-vn",
+            "default_profile": profile,
+            "runtime_provider": "native_vn",
+            "platforms": ["windows", "web"],
+            "packaged": true
+        }]
+    })
+    .to_string()
+    .into_bytes();
+    let mut bindings = Vec::new();
+    for (path, payload) in scenarios {
+        let section_id = format!(
+            "scenario.ref.{}",
+            Hash256::from_sha256(path.as_bytes()).to_hex()
+        );
+        request.cooked_assets.push(SectionPayload::raw(
+            section_id.clone(),
+            "astra.scenario.v1",
+            payload.to_vec(),
+        ));
+        bindings.push(ScenarioReference {
+            path: (*path).to_string(),
+            section_id,
+            hash: Hash256::from_sha256(payload),
+            byte_size: payload.len() as u64,
+        });
+    }
+    request.scenario_refs = serde_json::to_vec(&ScenarioRefsManifest {
+        schema: "astra.scenario_refs.v2".to_string(),
+        scenarios: bindings,
+    })
+    .unwrap();
+    PackageBuilder::build(request).unwrap()
+}
+
 #[test]
 fn vn_scenario_runs_full_player_route_from_package() {
     let root = tempfile::tempdir().unwrap();
@@ -39,39 +89,7 @@ fn vn_scenario_runs_full_player_route_from_package() {
     let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
     let sections =
         package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
-    let mut request = PackageBuildRequest::minimal("com.example.nativevn", "classic", sections);
-    request.target_manifest = serde_json::json!({
-        "schema": "astra.target_manifest.v1",
-        "targets": [{
-            "id": "nativevn-game",
-            "kind": "game",
-            "crate": "astra-vn",
-            "default_profile": "classic",
-            "runtime_provider": "native_vn",
-            "platforms": ["windows", "web"],
-            "packaged": true
-        }]
-    })
-    .to_string()
-    .into_bytes();
-    request.scenario_refs = serde_json::json!({
-        "schema": "astra.scenario_refs.v1",
-        "scenarios": ["scenarios/vn_route.yaml"]
-    })
-    .to_string()
-    .into_bytes();
-    let package = PackageBuilder::build(request).unwrap();
-    let reader = PackageReader::open(package.as_bytes()).unwrap();
-    assert!(reader.has_section("vn.compiled_story"));
-    let _: astra_vn::CompiledStory = reader
-        .container()
-        .decode_postcard("vn.compiled_story")
-        .unwrap();
-    fs::write(root.path().join("game.astrapkg"), package.as_bytes()).unwrap();
-
-    fs::write(
-        scenario_dir.join("vn_route.yaml"),
-        r#"
+    let scenario = r#"
 schema: astra.scenario.v1
 stage: stage3-astra-vn
 package: game.astrapkg
@@ -96,9 +114,21 @@ assertions:
   - voice_replay_available: voice.hero.0002
   - replay_hash_match: true
   - no_blocking_diagnostics: true
-"#,
-    )
-    .unwrap();
+"#;
+    let package = build_test_package(
+        sections,
+        "classic",
+        &[("scenarios/vn_route.yaml", scenario.as_bytes())],
+    );
+    let reader = PackageReader::open(package.as_bytes()).unwrap();
+    assert!(reader.has_section("vn.compiled_story"));
+    let _: astra_vn::CompiledStory = reader
+        .container()
+        .decode_postcard("vn.compiled_story")
+        .unwrap();
+    fs::write(root.path().join("game.astrapkg"), package.as_bytes()).unwrap();
+
+    fs::write(scenario_dir.join("vn_route.yaml"), scenario).unwrap();
 
     let report = ScenarioRunner::run_file(scenario_dir.join("vn_route.yaml")).unwrap();
     assert_eq!(
@@ -131,33 +161,7 @@ fn vn_scenario_completes_movie_await_through_real_player_input() {
         compile_astra_sources([AstraSource::new("movie_wait.astra", MOVIE_WAIT_STORY)]).unwrap();
     let sections =
         package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
-    let mut request = PackageBuildRequest::minimal("com.example.nativevn", "classic", sections);
-    request.target_manifest = serde_json::json!({
-        "schema": "astra.target_manifest.v1",
-        "targets": [{
-            "id": "nativevn-game",
-            "kind": "game",
-            "crate": "astra-vn",
-            "default_profile": "classic",
-            "runtime_provider": "native_vn",
-            "platforms": ["windows", "web"],
-            "packaged": true
-        }]
-    })
-    .to_string()
-    .into_bytes();
-    request.scenario_refs = serde_json::json!({
-        "schema": "astra.scenario_refs.v1",
-        "scenarios": ["scenarios/movie_wait.yaml"]
-    })
-    .to_string()
-    .into_bytes();
-    let package = PackageBuilder::build(request).unwrap();
-    fs::write(root.path().join("game.astrapkg"), package.as_bytes()).unwrap();
-
-    fs::write(
-        scenario_dir.join("movie_wait.yaml"),
-        r#"
+    let scenario = r#"
 schema: astra.scenario.v1
 stage: stage3-astra-vn
 package: game.astrapkg
@@ -182,9 +186,14 @@ actions:
 assertions:
   - backlog_has_key: opening.after_movie
   - no_blocking_diagnostics: true
-"#,
-    )
-    .unwrap();
+"#;
+    let package = build_test_package(
+        sections,
+        "classic",
+        &[("scenarios/movie_wait.yaml", scenario.as_bytes())],
+    );
+    fs::write(root.path().join("game.astrapkg"), package.as_bytes()).unwrap();
+    fs::write(scenario_dir.join("movie_wait.yaml"), scenario).unwrap();
 
     let report = ScenarioRunner::run_file(scenario_dir.join("movie_wait.yaml")).unwrap();
     assert_eq!(
@@ -225,30 +234,6 @@ fn vn_scenario_supports_stage3_player_input_coverage_visual_and_hash_assertions(
         .to_string()
         .into_bytes(),
     ));
-    let mut request = PackageBuildRequest::minimal("com.example.nativevn", "classic", sections);
-    request.target_manifest = serde_json::json!({
-        "schema": "astra.target_manifest.v1",
-        "targets": [{
-            "id": "nativevn-game",
-            "kind": "game",
-            "crate": "astra-vn",
-            "default_profile": "classic",
-            "runtime_provider": "native_vn",
-            "platforms": ["windows", "web"],
-            "packaged": true
-        }]
-    })
-    .to_string()
-    .into_bytes();
-    request.scenario_refs = serde_json::json!({
-        "schema": "astra.scenario_refs.v1",
-        "scenarios": ["scenarios/stage3_route.yaml", "scenarios/stage3_route_hash.yaml"]
-    })
-    .to_string()
-    .into_bytes();
-    let package = PackageBuilder::build(request).unwrap();
-    fs::write(root.path().join("game.astrapkg"), package.as_bytes()).unwrap();
-
     let scenario_template = |hash_assertion: &str| {
         format!(
             r#"
@@ -319,11 +304,14 @@ assertions:
 "#
         )
     };
-    fs::write(
-        scenario_dir.join("stage3_route.yaml"),
-        scenario_template(""),
-    )
-    .unwrap();
+    let first_scenario = scenario_template("");
+    fs::write(scenario_dir.join("stage3_route.yaml"), &first_scenario).unwrap();
+    let package = build_test_package(
+        sections.clone(),
+        "classic",
+        &[("scenarios/stage3_route.yaml", first_scenario.as_bytes())],
+    );
+    fs::write(root.path().join("game.astrapkg"), package.as_bytes()).unwrap();
 
     let report = ScenarioRunner::run_file(scenario_dir.join("stage3_route.yaml")).unwrap();
     assert_eq!(report.status, ScenarioStatus::Pass, "{}", report.explain());
@@ -337,11 +325,17 @@ assertions:
         "  - hash:\n      state: {}\n      event: {}\n      presentation: {}\n",
         report.hashes.state, report.hashes.event, report.hashes.presentation
     );
-    fs::write(
-        scenario_dir.join("stage3_route_hash.yaml"),
-        scenario_template(&hash_assertion),
-    )
-    .unwrap();
+    let hash_scenario = scenario_template(&hash_assertion);
+    fs::write(scenario_dir.join("stage3_route_hash.yaml"), &hash_scenario).unwrap();
+    let package = build_test_package(
+        sections,
+        "classic",
+        &[
+            ("scenarios/stage3_route.yaml", first_scenario.as_bytes()),
+            ("scenarios/stage3_route_hash.yaml", hash_scenario.as_bytes()),
+        ],
+    );
+    fs::write(root.path().join("game.astrapkg"), package.as_bytes()).unwrap();
     let hash_report =
         ScenarioRunner::run_file(scenario_dir.join("stage3_route_hash.yaml")).unwrap();
     assert_eq!(

@@ -18,7 +18,7 @@ fn dylib_facade_reexports_enginecore_public_api() {
         "00000000-0000-0000-0000-000000000000"
     );
 
-    let package = PackageBuilder::build(PackageBuildRequest::minimal(
+    let package = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.facade",
         "headless",
         vec![],

@@ -33,7 +33,7 @@ state prologue #@id state.prologue
 
     let sections =
         package_sections_for_story(&compiled, &["classic".to_string()], "facade-game").unwrap();
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.facade",
         "classic",
         sections,

@@ -12,7 +12,7 @@ fn legacy_compiled_story_schema_requires_recook() {
     let section =
         SectionPayload::postcard("vn.compiled_story", "astra.vn.compiled_story.v1", &compiled)
             .unwrap();
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "legacy.story",
         "classic",
         vec![section],

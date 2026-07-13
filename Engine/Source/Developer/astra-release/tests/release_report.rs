@@ -16,7 +16,7 @@ use astra_vn::{compile_astra_sources, package_sections_for_story, AstraSource};
 
 #[test]
 fn release_report_covers_pass_warning_and_blocked_checks() {
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(
@@ -79,7 +79,7 @@ fn release_report_covers_pass_warning_and_blocked_checks() {
 
 #[test]
 fn release_gate_accepts_player_full_playable_only_with_matching_live_report() {
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "classic",
         vec![SectionPayload::raw(
@@ -138,7 +138,7 @@ fn release_gate_accepts_player_full_playable_only_with_matching_live_report() {
 
 #[test]
 fn release_gate_requires_capability_conformance_player_identity_continuity() {
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "classic",
         Vec::new(),
@@ -201,7 +201,7 @@ fn release_gate_requires_capability_conformance_player_identity_continuity() {
 
 #[test]
 fn release_gate_blocks_plugin_registry_conflict_and_invalid_binding() {
-    let mut request = PackageBuildRequest::minimal(
+    let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(
@@ -259,7 +259,7 @@ fn release_gate_blocks_plugin_registry_conflict_and_invalid_binding() {
 
 #[test]
 fn runtime_provider_gate_blocks_missing_nativevn_binding() {
-    let mut request = PackageBuildRequest::minimal(
+    let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(
@@ -310,7 +310,7 @@ fn runtime_provider_gate_blocks_missing_nativevn_binding() {
 
 #[test]
 fn release_gate_blocks_unresolved_plugin_dependency() {
-    let mut request = PackageBuildRequest::minimal(
+    let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(
@@ -388,21 +388,21 @@ fn vfs_mount_gate_blocks_missing_vfs_manifest() {
         })
         .unwrap();
 
-    let vfs_check = report
+    let integrity = report
         .checks
         .iter()
-        .find(|check| check.id == "vfs.prefix_registry")
+        .find(|check| check.id == "package.integrity")
         .unwrap();
-    assert_eq!(vfs_check.status, CheckStatus::Blocked);
+    assert_eq!(integrity.status, CheckStatus::Blocked);
     assert_eq!(
-        vfs_check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_VFS_MANIFEST_MISSING"
+        integrity.diagnostic.as_ref().unwrap().code,
+        "ASTRA_PACKAGE_INTEGRITY"
     );
 }
 
 #[test]
 fn vfs_mount_gate_blocks_asset_registry_compat_section() {
-    let mut request = PackageBuildRequest::minimal(
+    let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(
@@ -443,7 +443,7 @@ fn vfs_mount_gate_blocks_asset_registry_compat_section() {
 
 #[test]
 fn vfs_mount_gate_blocks_missing_provider_binding_for_prefix() {
-    let mut request = PackageBuildRequest::minimal(
+    let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(
@@ -487,7 +487,7 @@ fn vfs_mount_gate_blocks_missing_provider_binding_for_prefix() {
 
 #[test]
 fn plugin_provider_gate_blocks_unpacked_vfs_prefix_provider() {
-    let mut request = PackageBuildRequest::minimal(
+    let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(
@@ -537,7 +537,7 @@ fn plugin_provider_gate_blocks_unpacked_vfs_prefix_provider() {
 
 #[test]
 fn release_profile_blocks_missing_platform_report() {
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(
@@ -574,7 +574,7 @@ fn release_profile_blocks_missing_platform_report() {
 
 #[test]
 fn dev_profile_warns_on_missing_platform_report() {
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "dev",
         vec![SectionPayload::raw(
@@ -606,7 +606,7 @@ fn dev_profile_warns_on_missing_platform_report() {
 
 #[test]
 fn release_profile_blocks_fixture_package_without_cooked_project() {
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(
@@ -643,7 +643,7 @@ fn release_profile_blocks_fixture_package_without_cooked_project() {
 
 #[test]
 fn release_profile_accepts_cooked_project_input_section() {
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![
@@ -682,7 +682,7 @@ fn release_profile_accepts_cooked_project_input_section() {
 
 #[test]
 fn release_profile_blocks_package_profile_mismatch() {
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "dev",
         vec![
@@ -721,7 +721,7 @@ fn release_profile_blocks_package_profile_mismatch() {
 
 #[test]
 fn release_report_blocks_windows_platform_report_without_required_provider() {
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(
@@ -762,7 +762,7 @@ fn release_report_blocks_windows_platform_report_without_required_provider() {
 
 #[test]
 fn release_report_includes_windows_platform_provider_evidence() {
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(
@@ -810,7 +810,7 @@ fn release_report_includes_windows_platform_provider_evidence() {
 
 #[test]
 fn release_report_blocks_web_platform_report_without_required_provider() {
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "web-release",
         vec![SectionPayload::raw(
@@ -850,7 +850,7 @@ fn release_report_blocks_web_platform_report_without_required_provider() {
 
 #[test]
 fn release_report_includes_web_platform_provider_evidence() {
-    let blob = PackageBuilder::build(PackageBuildRequest::minimal(
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
         "web-release",
         vec![SectionPayload::raw(
@@ -899,7 +899,7 @@ fn release_report_includes_web_platform_provider_evidence() {
 
 #[test]
 fn release_gate_blocks_package_target_manifests_with_editor_descriptors() {
-    let mut request = PackageBuildRequest::minimal(
+    let mut request = PackageBuildRequest::fixture(
         "com.example.nativevn",
         "desktop-release",
         vec![SectionPayload::raw(
@@ -2355,7 +2355,23 @@ fn package_with_target_manifest(
     target_manifest: serde_json::Value,
     sections: Vec<SectionPayload>,
 ) -> astra_package::ContainerBlob {
-    let mut request = PackageBuildRequest::minimal("com.example.nativevn", profile, sections);
+    let mut request = PackageBuildRequest::fixture("com.example.nativevn", profile, vec![]);
+    for section in sections {
+        match section.id.as_str() {
+            "asset.vfs_manifest" => request.asset_vfs_manifest = section.payload,
+            "asset.catalog" => request.asset_catalog = section.payload,
+            "media.manifest" => request.media_manifest = section.payload,
+            "provider.policy" => request.provider_policy = section.payload,
+            "plugin.extension_registry" => request.plugin_extension_registry = section.payload,
+            "plugin.dependency_graph" => request.plugin_dependency_graph = section.payload,
+            "module.fingerprint" => request.module_fingerprint = section.payload,
+            "release.summary" => request.release_summary = section.payload,
+            "scenario.refs" => request.scenario_refs = section.payload,
+            "platform.eligibility" => request.platform_eligibility = section.payload,
+            _ if section.id.starts_with("asset.") => request.cooked_assets.push(section),
+            _ => request.extra_sections.push(section),
+        }
+    }
     request.target_manifest = target_manifest.to_string().into_bytes();
     PackageBuilder::build(request).unwrap()
 }

@@ -37,7 +37,7 @@ fn web_live_evidence_roundtrips_stable_runtime_identity_without_payload() {
 
 #[test]
 fn web_player_binds_profile_to_validated_package() {
-    let package = PackageBuilder::build(PackageBuildRequest::minimal(
+    let package = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.game",
         "web-release",
         vec![platform_profiles("game-web", "com.example.game")],
@@ -57,7 +57,7 @@ fn web_player_binds_profile_to_validated_package() {
 
 #[test]
 fn web_player_rejects_profile_mismatch_and_corrupt_package() {
-    let package = PackageBuilder::build(PackageBuildRequest::minimal(
+    let package = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.game",
         "classic",
         vec![platform_profiles("game-web", "com.example.game")],

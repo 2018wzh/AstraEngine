@@ -771,12 +771,14 @@ fn validate_section_descriptor(
     migration: &MigrationPolicy,
 ) -> Result<(), ContainerError> {
     if !is_safe_section_symbol(id) {
-        return Err(ContainerError::message("section id is empty or invalid"));
+        return Err(ContainerError::message(format!(
+            "section id is empty or invalid: {id}"
+        )));
     }
     if !is_safe_section_symbol(schema) {
-        return Err(ContainerError::message(
-            "section schema is empty or invalid",
-        ));
+        return Err(ContainerError::message(format!(
+            "section schema is empty or invalid: {schema}"
+        )));
     }
     if decoded_length > MAX_DECODED_SECTION_LEN {
         return Err(ContainerError::message(
@@ -812,4 +814,68 @@ fn hex_prefix(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect::<Vec<_>>()
         .join("")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reader_rejects_duplicate_ids_from_a_tampered_authority_table() {
+        let blob = AstraContainerBuilder::new(ContainerKind::Package)
+            .add_section(SectionPayload::raw("alpha", "schema.alpha", b"a".to_vec()))
+            .add_section(SectionPayload::raw("bravo", "schema.bravo", b"b".to_vec()))
+            .write()
+            .unwrap();
+        let mut bytes = blob.into_bytes();
+        let table_len = u64::from_le_bytes(bytes[20..28].try_into().unwrap()) as usize;
+        let mut entries: Vec<SectionEntry> =
+            postcard::from_bytes(&bytes[HEADER_LEN..HEADER_LEN + table_len]).unwrap();
+        entries[1].id = entries[0].id.clone();
+        entries[1].schema = "schema.other".to_string();
+        let table = postcard::to_allocvec(&entries).unwrap();
+        assert_eq!(table.len(), table_len);
+        bytes[HEADER_LEN..HEADER_LEN + table_len].copy_from_slice(&table);
+        rewrite_footer(&mut bytes);
+
+        let error = AstraContainerReader::new(&bytes).unwrap_err();
+        assert!(error.to_string().contains("duplicate section id alpha"));
+    }
+
+    #[test]
+    fn reader_rejects_overlapping_section_ranges() {
+        let blob = AstraContainerBuilder::new(ContainerKind::Package)
+            .add_section(SectionPayload::raw(
+                "alpha",
+                "schema.alpha",
+                b"aaaa".to_vec(),
+            ))
+            .add_section(SectionPayload::raw(
+                "bravo",
+                "schema.bravo",
+                b"bbbb".to_vec(),
+            ))
+            .write()
+            .unwrap();
+        let mut bytes = blob.into_bytes();
+        let table_len = u64::from_le_bytes(bytes[20..28].try_into().unwrap()) as usize;
+        let mut entries: Vec<SectionEntry> =
+            postcard::from_bytes(&bytes[HEADER_LEN..HEADER_LEN + table_len]).unwrap();
+        entries[1].offset = entries[0].offset;
+        entries[1].stored_hash = entries[0].stored_hash;
+        entries[1].hash = entries[0].hash;
+        let table = postcard::to_allocvec(&entries).unwrap();
+        assert_eq!(table.len(), table_len);
+        bytes[HEADER_LEN..HEADER_LEN + table_len].copy_from_slice(&table);
+        rewrite_footer(&mut bytes);
+
+        let error = AstraContainerReader::new(&bytes).unwrap_err();
+        assert!(error.to_string().contains("overlaps section"));
+    }
+
+    fn rewrite_footer(bytes: &mut [u8]) {
+        let footer_start = bytes.len() - FOOTER_LEN;
+        let footer = Hash256::from_sha256(&bytes[..footer_start]);
+        bytes[footer_start..].copy_from_slice(footer.as_bytes());
+    }
 }

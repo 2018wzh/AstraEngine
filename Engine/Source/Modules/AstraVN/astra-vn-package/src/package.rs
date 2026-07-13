@@ -71,16 +71,6 @@ pub fn package_sections_for_story(
             "astra.vn.system_ui_profile_manifest.v1",
             &VnSystemUiProfileManifest::from_compiled(compiled, vec!["zh-Hans".to_string()]),
         )?,
-        SectionPayload::raw(
-            "scenario.refs",
-            "astra.scenario_refs.v1",
-            serde_json::json!({
-                "schema": "astra.scenario_refs.v1",
-                "scenarios": []
-            })
-            .to_string()
-            .into_bytes(),
-        ),
     ];
     if profiles
         .iter()
