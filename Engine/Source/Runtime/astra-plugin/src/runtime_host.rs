@@ -7,17 +7,22 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "dynamic-abi")]
 use abi_stable::std_types::RVec;
 use astra_core::SchemaVersion;
+#[cfg(feature = "dynamic-abi")]
 use astra_plugin_abi::{
-    FfiRuntimeProviderInvoke, FfiRuntimeProviderRegistration, GameRuntimeSessionId,
-    ProductRuntimeDescriptor, ProviderInstanceId, RuntimeOpenReport, RuntimeOpenRequest,
-    RuntimeOutputDomain, RuntimeOutputEnvelope, RuntimePrepareReport, RuntimePrepareRequest,
-    RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderCall, RuntimeProviderCreateRequest,
-    RuntimeProviderDestroyRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
-    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeShutdownReport,
-    RuntimeStepInput, RuntimeStepOutput,
+    FfiRuntimeProviderInvoke, FfiRuntimeProviderRegistration, RuntimeProviderCall,
+    RuntimeProviderCreateRequest, RuntimeProviderDestroyRequest,
 };
+use astra_plugin_abi::{
+    GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeOpenReport,
+    RuntimeOpenRequest, RuntimeOutputDomain, RuntimeOutputEnvelope, RuntimePrepareReport,
+    RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderInstanceReport,
+    RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
+    RuntimeShutdownReport, RuntimeStepInput, RuntimeStepOutput,
+};
+#[cfg(feature = "dynamic-abi")]
 use serde::{de::DeserializeOwned, Serialize};
 
 pub trait ProductRuntimeProvider: Send {
@@ -190,6 +195,7 @@ impl ProductRuntimeHost {
         Self::create(instance_id, Box::new(provider), schemas)
     }
 
+    #[cfg(feature = "dynamic-abi")]
     pub fn ffi(
         instance_id: impl Into<String>,
         registration: FfiRuntimeProviderRegistration,
@@ -487,6 +493,7 @@ impl AsyncProductRuntimeHost {
         Self::in_process(instance_id, provider, schemas, timeout)
     }
 
+    #[cfg(feature = "dynamic-abi")]
     pub fn ffi(
         instance_id: impl Into<String>,
         registration: FfiRuntimeProviderRegistration,
@@ -610,11 +617,13 @@ impl AsyncProductRuntimeHost {
     }
 }
 
+#[cfg(feature = "dynamic-abi")]
 struct FfiProductRuntimeProvider {
     registration: FfiRuntimeProviderRegistration,
     instance_id: Option<ProviderInstanceId>,
 }
 
+#[cfg(feature = "dynamic-abi")]
 impl FfiProductRuntimeProvider {
     fn new(registration: FfiRuntimeProviderRegistration) -> Self {
         Self {
@@ -651,6 +660,7 @@ impl FfiProductRuntimeProvider {
     }
 }
 
+#[cfg(feature = "dynamic-abi")]
 impl ProductRuntimeProvider for FfiProductRuntimeProvider {
     fn create_instance(
         &mut self,
@@ -710,6 +720,7 @@ impl ProductRuntimeProvider for FfiProductRuntimeProvider {
     }
 }
 
+#[cfg(feature = "dynamic-abi")]
 fn decode_ffi_result<T: DeserializeOwned>(
     result: astra_plugin_abi::FfiRuntimeProviderResult,
 ) -> Result<T, String> {

@@ -2,6 +2,8 @@
 
 Astra 插件采用 Rust-facing `abi_stable` 风格 ABI。目标是给插件作者 Rust 体验，同时让二进制兼容性可检查、可拒绝、可审计。
 
+`astra-plugin-abi` 同时承载跨平台 provider DTO 与 native dynamic ABI adapter，但两者必须通过 feature 分层。`ffi`/`dynamic-abi` 只在支持动态库的 native host 启用，并携带 `abi_stable`、`libloading`、RootModule 和 FFI entrypoint；Web 等静态 in-process target 关闭这些 feature，只使用同一组 serde/schema provider request、output、binding 和 lifecycle contract。关闭 dynamic ABI 不得改变 provider binding、instance/session lifecycle、RuntimeWorld authority 或 replay 约束，也不得以直接持有产品 runtime 替代 `ProductRuntimeHost::in_process`。
+
 `astra-plugin-abi` 是插件二进制边界的真源，包含 `AstraPluginModule`、FFI registration、`LoadPhase`、extension registry DTO、dependency graph DTO 和 runtime provider DTO+FFI entrypoints。`astra-plugin` 是 host 侧 loader、registry 和 Runtime action adapter。`astra-engine` 和 `astra-vn` 都是 Rust dylib facade，分别 re-export EngineCore 与 VN public API，不扩大插件 ABI。
 
 ## 版本绑定

@@ -45,7 +45,7 @@ targets = [
 | `astra-core` | 1 | id、diagnostic、schema、hash、source span | `serde`, `schemars`, `thiserror`, `miette`, `uuid`, `sha2`, `blake3` | Runtime、Editor、Luau、GPU/audio |
 | `astra-runtime` | 1 | World、Actor/Component、StateMachine、EventBus、AwaitToken、Save/Replay facade | `astra-core`, `postcard`, `indexmap` | Editor UI、Luau host、renderer backend |
 | `astra-engine` | 1 | Rust ABI dynamic library facade，re-export EngineCore public API | `astra-core`, `astra-runtime`, `astra-package`, `astra-plugin` | second runtime, C ABI promise |
-| `astra-plugin-abi` | 1/3 | `abi_stable` RootModule、FFI structs、LoadPhase、extension/dependency DTO、runtime provider DTO+FFI entrypoints | `abi_stable`, `serde`, `schemars` | host loader、RuntimeWorld |
+| `astra-plugin-abi` | 1/3 | portable LoadPhase、extension/dependency/runtime provider DTO；native `ffi` feature 追加 `abi_stable` RootModule 与 FFI entrypoints | `serde`, `schemars`；native `ffi` 使用 `abi_stable` | host loader、RuntimeWorld |
 | `astra-plugin` | 1/2/3 | descriptor gate、registry、module slot、真实 loader、action adapter、extension registry backend、single-slot `vfs_provider` registry 和 gameplay runtime provider selection backend | `astra-core`, `astra-plugin-abi`, `astra-runtime`, `libloading`, `semver` | Editor widget、native handles in public API |
 | `headless-presentation-provider` | 1 | public plugin fixture，真实 cdylib 注册 presentation/action provider | `astra-plugin-abi`, `astra-runtime`, `postcard` | product runtime state、commercial payload |
 | `vn-extension-provider` | 3 | public plugin fixture，真实 cdylib 注册 VN policy/command/presentation/editor metadata/release check provider slots | `astra-plugin-abi`, `abi_stable` | Luau VM handle、renderer/audio native handle、commercial payload |

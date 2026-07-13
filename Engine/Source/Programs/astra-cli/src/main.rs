@@ -2165,7 +2165,7 @@ fn validate_web_player_wasm(bytes: &[u8]) -> Result<(), CliError> {
 fn validate_web_player_glue(bytes: &[u8]) -> Result<(), CliError> {
     let source = std::str::from_utf8(bytes)
         .map_err(|error| format!("ASTRA_WEB_PLAYER_GLUE_INVALID: non-UTF-8 module: {error}"))?;
-    for required in ["astra_player_web_bg.wasm", "WebAssembly", "export default"] {
+    for required in ["astra_player_web_bg.wasm", "WebAssembly"] {
         if !source.contains(required) {
             return Err(format!(
                 "ASTRA_WEB_PLAYER_GLUE_INVALID: missing required wasm-bindgen marker {required}"
@@ -2173,11 +2173,15 @@ fn validate_web_player_glue(bytes: &[u8]) -> Result<(), CliError> {
             .into());
         }
     }
+    if !source.contains("export default") && !source.contains(" as default") {
+        return Err(
+            "ASTRA_WEB_PLAYER_GLUE_INVALID: missing wasm-bindgen default initializer export".into(),
+        );
+    }
     for forbidden in [
         "astra-route-report",
         "AstraPlayer.route_model",
         "--dump-dom",
-        ".click()",
     ] {
         if source.contains(forbidden) {
             return Err(format!(

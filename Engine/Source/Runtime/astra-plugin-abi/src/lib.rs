@@ -1,3 +1,4 @@
+#[cfg(feature = "ffi")]
 use abi_stable::{
     library::RootModule,
     sabi_types::VersionStrings,
@@ -500,6 +501,7 @@ pub struct RuntimeEditorMetadata {
 }
 
 #[repr(C)]
+#[cfg(feature = "ffi")]
 #[derive(Debug, Clone, StableAbi)]
 pub struct FfiProviderRegistration {
     pub slot: RString,
@@ -509,10 +511,13 @@ pub struct FfiProviderRegistration {
     pub packaged: bool,
 }
 
+#[cfg(feature = "ffi")]
 pub type FfiActionInvoke = extern "C" fn(RVec<u8>) -> RVec<u8>;
+#[cfg(feature = "ffi")]
 pub type FfiRuntimeProviderInvoke = extern "C" fn(RVec<u8>) -> FfiRuntimeProviderResult;
 
 #[repr(C)]
+#[cfg(feature = "ffi")]
 #[derive(Debug, Clone, StableAbi)]
 pub struct FfiRuntimeProviderResult {
     pub ok: bool,
@@ -521,6 +526,7 @@ pub struct FfiRuntimeProviderResult {
 }
 
 #[repr(C)]
+#[cfg(feature = "ffi")]
 #[derive(Debug, Clone, StableAbi)]
 pub struct FfiRuntimeProviderRegistration {
     pub provider_id: RString,
@@ -557,6 +563,7 @@ pub struct FfiRuntimeProviderRegistration {
 }
 
 #[repr(C)]
+#[cfg(feature = "ffi")]
 #[derive(Debug, Clone, StableAbi)]
 pub struct FfiActionRegistration {
     pub provider_id: RString,
@@ -568,6 +575,7 @@ pub struct FfiActionRegistration {
 }
 
 #[repr(C)]
+#[cfg(feature = "ffi")]
 #[derive(Debug, Clone, StableAbi)]
 pub struct FfiPluginRegistration {
     pub providers: RVec<FfiProviderRegistration>,
@@ -577,12 +585,14 @@ pub struct FfiPluginRegistration {
 }
 
 #[repr(C)]
+#[cfg(feature = "ffi")]
 #[derive(Debug, Clone, StableAbi)]
 pub struct FfiPluginShutdown {
     pub callbacks_released: bool,
 }
 
 #[repr(C)]
+#[cfg(feature = "ffi")]
 #[derive(StableAbi)]
 #[sabi(kind(Prefix(
     prefix_ref = AstraPluginModuleRef,
@@ -596,6 +606,7 @@ pub struct AstraPluginModule {
     pub shutdown: extern "C" fn() -> FfiPluginShutdown,
 }
 
+#[cfg(feature = "ffi")]
 impl RootModule for AstraPluginModuleRef {
     abi_stable::declare_root_module_statics! {AstraPluginModuleRef}
 
@@ -604,7 +615,7 @@ impl RootModule for AstraPluginModuleRef {
     const VERSION_STRINGS: VersionStrings = abi_stable::package_version_strings!();
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "ffi"))]
 mod tests {
     use super::*;
 

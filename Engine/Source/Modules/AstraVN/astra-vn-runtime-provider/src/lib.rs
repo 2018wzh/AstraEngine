@@ -1,24 +1,31 @@
 //! Native AstraVN gameplay runtime provider and ABI-safe FFI adapter.
 
+#[cfg(feature = "ffi")]
+use std::sync::OnceLock;
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex},
 };
 
+#[cfg(feature = "ffi")]
 use abi_stable::std_types::{RString, RVec};
 use astra_core::{Hash128, Hash256, SchemaVersion};
 use astra_plugin::ProductRuntimeProvider;
+#[cfg(feature = "ffi")]
 use astra_plugin_abi::{
-    FfiRuntimeProviderRegistration, FfiRuntimeProviderResult, GameRuntimeSessionId,
-    ProductRuntimeDescriptor, ReleaseCheckDescriptor, RuntimeEditorMetadata, RuntimeOpenReport,
-    RuntimeOpenRequest, RuntimeOutputCodec, RuntimeOutputDomain, RuntimeOutputEnvelope,
-    RuntimeOutputSchemaDescriptor, RuntimePackageSectionPlan, RuntimePrepareReport,
-    RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderCall,
+    FfiRuntimeProviderRegistration, FfiRuntimeProviderResult, RuntimeProviderCall,
     RuntimeProviderCreateRequest, RuntimeProviderDestroyRequest, RuntimeProviderInstanceReport,
+    PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
+};
+use astra_plugin_abi::{
+    GameRuntimeSessionId, ProductRuntimeDescriptor, ReleaseCheckDescriptor, RuntimeEditorMetadata,
+    RuntimeOpenReport, RuntimeOpenRequest, RuntimeOutputCodec, RuntimeOutputDomain,
+    RuntimeOutputEnvelope, RuntimeOutputSchemaDescriptor, RuntimePackageSectionPlan,
+    RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest,
     RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
     RuntimeSectionCodec, RuntimeSectionPayload, RuntimeSectionRef, RuntimeShutdownReport,
     RuntimeStepInput, RuntimeStepOutput, GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID,
-    NATIVE_VN_RUNTIME_ID, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA, RUNTIME_EDITOR_METADATA_SCHEMA,
+    NATIVE_VN_RUNTIME_ID, RUNTIME_EDITOR_METADATA_SCHEMA,
 };
 use astra_runtime::{
     ActionDescriptor, ActionInvocation, ActionTrace, BlackboardValue, ComponentId,
@@ -818,6 +825,7 @@ impl NativeVnRuntimeProvider {
         }
     }
 
+    #[cfg(feature = "ffi")]
     pub fn ffi_registration() -> FfiRuntimeProviderRegistration {
         FfiRuntimeProviderRegistration {
             provider_id: RString::from(NATIVE_VN_PROVIDER_ID),
@@ -1199,18 +1207,22 @@ fn native_vn_release_check_ids() -> Vec<String> {
     .collect()
 }
 
+#[cfg(feature = "ffi")]
 extern "C" fn ffi_prepare(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_json(payload, |request: RuntimePrepareRequest| {
         NativeVnRuntimeProvider::default().prepare(request)
     })
 }
 
+#[cfg(feature = "ffi")]
 static FFI_INSTANCES: OnceLock<Mutex<BTreeMap<String, NativeVnRuntimeProvider>>> = OnceLock::new();
 
+#[cfg(feature = "ffi")]
 fn ffi_instances() -> &'static Mutex<BTreeMap<String, NativeVnRuntimeProvider>> {
     FFI_INSTANCES.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+#[cfg(feature = "ffi")]
 extern "C" fn ffi_create_instance(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_json_result(payload, |request: RuntimeProviderCreateRequest| {
         let mut instances = ffi_instances()
@@ -1231,6 +1243,7 @@ extern "C" fn ffi_create_instance(payload: RVec<u8>) -> FfiRuntimeProviderResult
     })
 }
 
+#[cfg(feature = "ffi")]
 extern "C" fn ffi_destroy_instance(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_json_result(payload, |request: RuntimeProviderDestroyRequest| {
         let mut instances = ffi_instances()
@@ -1251,12 +1264,14 @@ extern "C" fn ffi_destroy_instance(payload: RVec<u8>) -> FfiRuntimeProviderResul
     })
 }
 
+#[cfg(feature = "ffi")]
 extern "C" fn ffi_probe(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_json(payload, |request: RuntimeProbeRequest| {
         NativeVnRuntimeProvider::default().probe(request)
     })
 }
 
+#[cfg(feature = "ffi")]
 extern "C" fn ffi_open(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_instance_json(payload, |provider, request: RuntimeOpenRequest| {
         let compiled_section = required_restore_section(
@@ -1273,38 +1288,46 @@ extern "C" fn ffi_open(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     })
 }
 
+#[cfg(feature = "ffi")]
 extern "C" fn ffi_step(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_instance_json(payload, NativeVnRuntimeProvider::step)
 }
 
+#[cfg(feature = "ffi")]
 extern "C" fn ffi_save(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_instance_json(payload, |provider, request: RuntimeSaveRequest| {
         NativeVnRuntimeProvider::save(provider, request)
     })
 }
 
+#[cfg(feature = "ffi")]
 extern "C" fn ffi_restore(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_instance_json(payload, NativeVnRuntimeProvider::restore)
 }
 
+#[cfg(feature = "ffi")]
 extern "C" fn ffi_shutdown(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_instance_json(payload, |provider, session_id: GameRuntimeSessionId| {
         provider.shutdown(session_id)
     })
 }
 
+#[cfg(feature = "ffi")]
 extern "C" fn ffi_package_sections(_payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_json_value(NativeVnRuntimeProvider::default().package_sections())
 }
 
+#[cfg(feature = "ffi")]
 extern "C" fn ffi_release_checks(_payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_json_value(NativeVnRuntimeProvider::default().release_checks())
 }
 
+#[cfg(feature = "ffi")]
 extern "C" fn ffi_editor_metadata(_payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_json_value(NativeVnRuntimeProvider::default().editor_metadata())
 }
 
+#[cfg(feature = "ffi")]
 fn ffi_json<T, U>(payload: RVec<u8>, f: impl FnOnce(T) -> U) -> FfiRuntimeProviderResult
 where
     T: serde::de::DeserializeOwned,
@@ -1316,6 +1339,7 @@ where
     }
 }
 
+#[cfg(feature = "ffi")]
 fn ffi_json_result<T, U, E>(
     payload: RVec<u8>,
     f: impl FnOnce(T) -> Result<U, E>,
@@ -1334,6 +1358,7 @@ where
     }
 }
 
+#[cfg(feature = "ffi")]
 fn ffi_instance_json<T, U>(
     payload: RVec<u8>,
     f: impl FnOnce(&mut NativeVnRuntimeProvider, T) -> Result<U, CoreVnError>,
@@ -1361,6 +1386,7 @@ where
     })
 }
 
+#[cfg(feature = "ffi")]
 fn ffi_json_value(value: impl serde::Serialize) -> FfiRuntimeProviderResult {
     match serde_json::to_vec(&value) {
         Ok(payload) => FfiRuntimeProviderResult {
@@ -1372,6 +1398,7 @@ fn ffi_json_value(value: impl serde::Serialize) -> FfiRuntimeProviderResult {
     }
 }
 
+#[cfg(feature = "ffi")]
 fn ffi_error(code: &'static str, message: String) -> FfiRuntimeProviderResult {
     FfiRuntimeProviderResult {
         ok: false,

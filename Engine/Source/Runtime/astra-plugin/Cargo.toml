@@ -5,12 +5,16 @@ license.workspace = true
 version.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["dynamic-abi"]
+dynamic-abi = ["dep:abi_stable", "dep:libloading", "astra-plugin-abi/ffi"]
+
 [dependencies]
-abi_stable.workspace = true
+abi_stable = { workspace = true, optional = true }
 astra-core = { path = "../astra-core" }
-astra-plugin-abi = { path = "../astra-plugin-abi" }
+astra-plugin-abi = { path = "../astra-plugin-abi", default-features = false }
 astra-runtime = { path = "../astra-runtime" }
-libloading.workspace = true
+libloading = { workspace = true, optional = true }
 postcard.workspace = true
 schemars.workspace = true
 semver.workspace = true

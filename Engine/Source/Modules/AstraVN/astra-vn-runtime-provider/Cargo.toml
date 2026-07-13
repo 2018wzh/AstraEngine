@@ -5,13 +5,17 @@ license.workspace = true
 version.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["ffi"]
+ffi = ["dep:abi_stable", "astra-plugin/dynamic-abi", "astra-plugin-abi/ffi"]
+
 [dependencies]
 tracing.workspace = true
-abi_stable.workspace = true
+abi_stable = { workspace = true, optional = true }
 astra-core = { path = "../../../Runtime/astra-core" }
 astra-package = { path = "../../../Runtime/astra-package" }
-astra-plugin = { path = "../../../Runtime/astra-plugin" }
-astra-plugin-abi = { path = "../../../Runtime/astra-plugin-abi" }
+astra-plugin = { path = "../../../Runtime/astra-plugin", default-features = false }
+astra-plugin-abi = { path = "../../../Runtime/astra-plugin-abi", default-features = false }
 astra-runtime = { path = "../../../Runtime/astra-runtime" }
 astra-target = { path = "../../../Platform/astra-target" }
 astra-vn-commands = { path = "../astra-vn-commands" }
