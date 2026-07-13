@@ -49,6 +49,14 @@ pub struct MediaPipelineLimits {
     pub max_live_video_bytes: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MediaPipelineResourceStats {
+    pub live_audio_resources: usize,
+    pub live_video_resources: usize,
+    pub live_audio_bytes: usize,
+    pub live_video_bytes: usize,
+}
+
 impl Default for MediaPipelineLimits {
     fn default() -> Self {
         Self {
@@ -91,6 +99,15 @@ impl MediaPlaybackPipeline {
 
     pub fn scheduler(&self) -> &MediaPlaybackSession {
         &self.scheduler
+    }
+
+    pub fn resource_stats(&self) -> MediaPipelineResourceStats {
+        MediaPipelineResourceStats {
+            live_audio_resources: self.live_audio_resources.len(),
+            live_video_resources: self.video_payloads.len(),
+            live_audio_bytes: self.live_audio_bytes,
+            live_video_bytes: self.live_video_bytes,
+        }
     }
 
     pub fn queue_decoded(

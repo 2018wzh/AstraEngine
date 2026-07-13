@@ -1,6 +1,24 @@
 use astra_media::MediaPlaybackPipeline;
 use astra_platform::{PlatformError, PlatformErrorCode, PlatformHostClient, PlatformId};
 
+pub(super) fn performance_error(error: astra_core::PerformanceError) -> PlatformError {
+    PlatformError::new(
+        PlatformErrorCode::IntegrityMismatch,
+        "media.performance",
+        error.to_string(),
+    )
+}
+
+pub(super) fn duration_us(duration: std::time::Duration) -> Result<u64, PlatformError> {
+    u64::try_from(duration.as_micros()).map_err(|_| {
+        PlatformError::new(
+            PlatformErrorCode::InvalidState,
+            "media.performance",
+            "measured duration exceeds the report range",
+        )
+    })
+}
+
 pub(super) fn initial_buffer_ready(pipeline: &MediaPlaybackPipeline) -> bool {
     let scheduler = pipeline.scheduler();
     (!scheduler.config.has_audio || !scheduler.audio_queue.is_empty())

@@ -51,6 +51,26 @@
         "channels": 2,
         "duration_seconds": 2.115918
       }
+    },
+    {
+      "id": "flower_roar_mp4",
+      "file": "flower-roar.mp4",
+      "codec": "mp4",
+      "kind": "audio_video",
+      "license": "CC0-1.0",
+      "derived_from": ["flower_mp4", "trex_roar_mp3"],
+      "derivation": "flower H.264 video stream remuxed with AAC-encoded t-rex-roar audio",
+      "byte_size": 475033,
+      "sha256": "sha256:e1c862ba5b75e31414d3945d6bdf9c7691af94eea1be84190fbe5531d6fec341",
+      "expected": {
+        "video_codec_name": "h264",
+        "audio_codec_name": "aac",
+        "width": 960,
+        "height": 540,
+        "sample_rate": 44100,
+        "channels": 2,
+        "duration_seconds": 2.073991
+      }
     }
   ]
 }

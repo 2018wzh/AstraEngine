@@ -13,6 +13,7 @@ fn native_audio_queue_reports_overflow_and_underflow_without_mutexes() {
     assert_eq!(consumer.pop_sample(), Some(0.25));
     assert_eq!(consumer.pop_sample(), Some(-0.25));
     assert_eq!(consumer.pop_sample(), None);
+    consumer.record_underflow();
 
     let snapshot = telemetry.snapshot();
     assert_eq!(snapshot.underflow_count, 1);

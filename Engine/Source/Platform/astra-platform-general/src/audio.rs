@@ -66,11 +66,13 @@ impl NativeAudioConsumer {
                 self.sample_count.fetch_add(1, Ordering::Relaxed);
                 Some(sample)
             }
-            Err(_) => {
-                self.underflow_count.fetch_add(1, Ordering::Relaxed);
-                None
-            }
+            Err(_) => None,
         }
+    }
+
+    /// Records one native callback that could not fill its requested output buffer.
+    pub fn record_underflow(&self) {
+        self.underflow_count.fetch_add(1, Ordering::Relaxed);
     }
 }
 

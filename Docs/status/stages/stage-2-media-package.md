@@ -1,6 +1,6 @@
 # Stage 2 Media + Package Work
 
-Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS 和 release gate。生产完备度审查已将本 Stage 重开为 `IN_PROGRESS`：Package/VFS 权威校验已完成加固，Cook 批次事务与非 Web renderer/media 恢复、资源生命周期和性能门禁仍在实施。Migration 11 同时重开完整 Headless Platform 完成口径：当前分散的 `ScenarioRunner`、CPU frame、AudioGraph meter 和 Player automation 尚未收束为全功能测试 host。Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是本轮完成前置。
+Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS 和 release gate。生产完备度审查已将本 Stage 重开为 `IN_PROGRESS`：Package/VFS 权威校验、Cook 批次事务、Windows native media 恢复/资源生命周期和 measured performance contract 已完成加固；GPU FilterGraph、Windows font golden、正式 release-reference performance pass 与 Player/package same-run 主链仍在实施。Migration 11 同时重开完整 Headless Platform 完成口径：当前分散的 `ScenarioRunner`、CPU frame、AudioGraph meter 和 Player automation 尚未收束为全功能测试 host。Web 本轮暂缓；Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是本轮完成前置。
 
 ## S2-ASSET-01 AssetId、VFS 基础与 sidecar schema
 
@@ -157,7 +157,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 3. 把 audio wait/fade/loop 完成事件接入 AwaitToken。
 4. 编写 bus mix、fade completion、loop marker 和 headless meter hash 测试。
 
-**Current Evidence:** `cargo test -p astra-media --test audio_graph` 覆盖 play/pause/resume/seek/stop、loop、fade completion/conflict、invalid command rollback、fixed delta 和 deterministic continuation；`cargo test -p astra-media --test playback` 覆盖 audio-master A/V clock、timestamped bounded queue、play/pause/seek/EOS/cancel、显式 drop policy、invalid drift rollback 和 snapshot continuation；`cargo test -p astra-platform-windows --test host_services` 覆盖 bounded WASAPI queue、NaN/sequence rejection、callback meter、drain 和 close drain。Windows host 在 callback device error 后阻断后续 submit/drain、移除失效 handle 并发出 typed `DeviceLost`；close 即使 drain 失败也释放资源。真实 decoder timestamp packet → scheduler → WGPU/WASAPI 产品接线、可注入 device-change 自动化、DSP/ducking 和性能预算仍未闭合。
+**Current Evidence:** `cargo test -p astra-media --test audio_graph` 覆盖 play/pause/resume/seek/stop、loop、fade completion/conflict、invalid command rollback、fixed delta 和 deterministic continuation；`cargo test -p astra-media --test playback` 覆盖 audio-master A/V clock、timestamped bounded queue、play/pause/seek/EOS/cancel、显式 drop policy、invalid drift rollback 和 snapshot continuation；`cargo test -p astra-platform-windows --test host_services --test media_session --features ffmpeg-vcpkg,platform-test-driver` 覆盖 bounded WASAPI queue、callback-level underflow、非静音 meter、真实 decoder timestamp packet→scheduler→WGPU/WASAPI、device-loss recovery 和失败清理。`cargo test -p astra-core --test performance` 覆盖 budget/sample/identity/report 的 tamper 与 blocking。DSP/ducking、GPU FilterGraph、正式 reference threshold pass 和 Player/package same-run 仍未闭合。
 
 **Linked Test IDs:** `T-S2-MEDIA-03`
 
@@ -203,7 +203,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 3. public API 只返回 CPU buffer 或 MediaSurfaceToken，不暴露 native handle。
 4. 编写 unsupported codec、fallback disabled 和 fallback selected 测试。
 
-**Current Evidence:** `cargo test -p astra-media --features ffmpeg-vcpkg` 证明 exact binding、output identity/hash、Symphonia、WMF one-shot、FFmpeg native probe、真实 timestamped packet、目标设备 resample、PCM/BGRA hash、live byte budget、单 packet backpressure、EOS drain、seek generation、取消和 scheduler payload ownership；CC0 fixture manifest 固定 sha256/byte size。`cargo test -p astra-platform-windows --test host_services --test media_session --features ffmpeg-vcpkg,platform-test-driver` 从显式 `[wmf, ffmpeg]` profile 创建真实 window/surface/WASAPI output，执行 FFmpeg→audio-master scheduler→WASAPI/wgpu，同一 session 断言视觉 capture、audio meter、pause/resume、seek、late-frame policy、可注入 device-loss recovery 和 shutdown release。`astra-release`/`astra-cli` required gate 仍只在 native probe 通过后放行。该证据尚未绑定 Player/package/session identity 与性能报告，因此完整 release fallback 和 Windows Player E3 保持开放。
+**Current Evidence:** `cargo test -p astra-media --features ffmpeg-vcpkg` 证明 exact binding、output identity/hash、Symphonia、WMF one-shot、FFmpeg native probe、真实 timestamped packet、目标设备 resample、PCM/BGRA hash、live byte budget、单 packet backpressure、EOS drain、seek generation、取消和 scheduler payload ownership；CC0 fixture manifest 固定原始与派生 A/V fixture 的 provenance、sha256、byte size 和 metadata。`cargo test -p astra-platform-windows --test host_services --test media_session --features ffmpeg-vcpkg,platform-test-driver` 从显式 `[wmf, ffmpeg]` profile 创建真实 window/surface/WASAPI output，执行 FFmpeg→audio-master scheduler→WASAPI/wgpu，同一 session 断言视觉 capture、非静音 audio meter、pause/resume、seek、late-frame policy、可注入 device-loss recovery、shutdown release 和 measured performance report。普通 debug/reference 环境若不满足阈值会诚实输出 blocked；`astra-release`/`astra-cli` 尚未把 pass report 与 Player/package session identity 绑定，因此完整 release fallback 和 Windows Player E3 保持开放。
 
 **Linked Test IDs:** `T-S2-MEDIA-05`
 

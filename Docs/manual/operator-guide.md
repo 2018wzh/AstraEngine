@@ -13,6 +13,8 @@ python Tools/run_cargo_isolated.py test --workspace
 
 该入口从 commit/dirty state、workspace manifest、Cargo.lock、Rust toolchain 和 feature/target/profile 参数派生独立 target root。target root 内的 `astra-build-identity.json` 使用 `astra.build_identity.v1`，只记录 hash、状态、artifact role、相对路径和 byte size。报告损坏、identity 不一致、动态 fixture 不在同一 target root 或 Cargo 返回非零状态时必须停止，不得改用共享 `target/debug` 继续生成证据。
 
+性能验收必须把同一份 build identity 继续传入 `PerformanceRunIdentity`，并补齐 package hash、profile hash 和 session id。`astra.performance_report.v1` 为 `blocked` 时，应按 diagnostic 检查 run duration、sample count、threshold 或 identity drift；不要重写报告、删掉慢 sample 或在采样后放宽 budget。普通 debug test 只验证 recorder 和 host 接线，正式阈值需要 release build 与声明的参考环境。
+
 ## 发布命令
 
 ```bash

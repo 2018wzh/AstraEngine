@@ -6,6 +6,7 @@
 
 use std::time::Duration;
 
+use astra_core::{validate_performance_report, Hash256, PerformanceRunIdentity, PerformanceStatus};
 use astra_media::{FfmpegStreamLimits, LateVideoPolicy, MediaPipelineLimits};
 use astra_platform::{PlatformHostFactory, PlatformHostProfile, SurfaceRequest, WindowRequest};
 
@@ -37,17 +38,56 @@ async fn windows_media_session_streams_ffmpeg_to_wasapi_and_wgpu() {
         })
         .await
         .unwrap();
+    let performance_budget =
+        astra_platform_windows::windows_media_performance_budget(host.client.profile()).unwrap();
+    let performance_identity = PerformanceRunIdentity {
+        source_revision: "a".repeat(40),
+        dirty: true,
+        target: host.client.profile().target.clone(),
+        profile: host.client.profile().id.clone(),
+        profile_hash: host.client.profile().hash().unwrap(),
+        package_hash: Hash256::from_sha256(&fixture_bytes("flower-roar.mp4")).to_string(),
+        build_fingerprint: astra_platform::build_fingerprint(
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION"),
+            ["ffmpeg-vcpkg", "platform-test-driver"],
+        ),
+        session_id: "windows.media.test.1".into(),
+    };
+    let mut mismatched_budget = performance_budget.clone();
+    mismatched_budget.profile_hash = format!("sha256:{}", "f".repeat(64));
+    let error = astra_platform_windows::WindowsNativeMediaSession::open(
+        host.client.clone(),
+        surface,
+        "mp4",
+        &fixture_bytes("flower-roar.mp4"),
+        astra_platform_windows::WindowsNativeMediaOpenConfig {
+            stream_limits: FfmpegStreamLimits::default(),
+            pipeline_limits: MediaPipelineLimits::default(),
+            performance_identity: performance_identity.clone(),
+            performance_budget: mismatched_budget,
+        },
+    )
+    .await
+    .err()
+    .unwrap();
+    assert_eq!(error.operation, "media.open");
+    assert!(error.message.contains("performance budget"));
     let mut media = astra_platform_windows::WindowsNativeMediaSession::open(
         host.client.clone(),
         surface,
         "mp4",
-        &fixture_bytes("flower.mp4"),
-        FfmpegStreamLimits {
-            max_audio_clock_jump_us: 1_000_000,
-            late_video_policy: LateVideoPolicy::Drop,
-            ..FfmpegStreamLimits::default()
+        &fixture_bytes("flower-roar.mp4"),
+        astra_platform_windows::WindowsNativeMediaOpenConfig {
+            stream_limits: FfmpegStreamLimits {
+                max_audio_clock_jump_us: 5_000_000,
+                late_video_policy: LateVideoPolicy::Drop,
+                ..FfmpegStreamLimits::default()
+            },
+            pipeline_limits: MediaPipelineLimits::default(),
+            performance_identity: performance_identity.clone(),
+            performance_budget: performance_budget.clone(),
         },
-        MediaPipelineLimits::default(),
     )
     .await
     .unwrap();
@@ -61,7 +101,7 @@ async fn windows_media_session_streams_ffmpeg_to_wasapi_and_wgpu() {
         heard_samples |= output
             .audio_status
             .as_ref()
-            .is_some_and(|status| status.meter.sample_count > 0);
+            .is_some_and(|status| status.meter.sample_count > 0 && status.meter.peak_dbfs > -90.0);
         if presented >= 3 && heard_samples {
             break;
         }
@@ -102,7 +142,28 @@ async fn windows_media_session_streams_ffmpeg_to_wasapi_and_wgpu() {
     }
     assert!(post_seek_presented);
 
-    media.shutdown().await.unwrap();
+    for iteration in 0..100 {
+        if media.state() == astra_media::MediaPlaybackState::Ended {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        if let Err(error) = media.tick(10_000).await {
+            let status = host
+                .client
+                .query_audio_output(media.audio_output_handle_for_test().unwrap())
+                .await;
+            panic!("long-run tick {iteration} failed: {error:?}; audio={status:?}");
+        }
+    }
+
+    let performance = media.shutdown().await.unwrap();
+    match performance.status {
+        PerformanceStatus::Pass => {
+            validate_performance_report(&performance_budget, &performance_identity, &performance)
+                .unwrap();
+        }
+        PerformanceStatus::Blocked => assert!(!performance.diagnostics.is_empty()),
+    }
     host.client.destroy_surface(surface).await.unwrap();
     host.client.destroy_window(window).await.unwrap();
     host.client.shutdown().await.unwrap();

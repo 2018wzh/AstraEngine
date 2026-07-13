@@ -108,7 +108,12 @@ fn public_domain_media_manifest_matches_checked_in_assets() {
     let manifest = public_media_manifest();
     assert_eq!(manifest["license"], "CC0-1.0");
     let assets = manifest["assets"].as_array().unwrap();
-    for id in ["flower_mp4", "flower_webm", "trex_roar_mp3"] {
+    for id in [
+        "flower_mp4",
+        "flower_webm",
+        "trex_roar_mp3",
+        "flower_roar_mp4",
+    ] {
         let asset = assets
             .iter()
             .find(|asset| asset["id"] == id)
@@ -120,10 +125,20 @@ fn public_domain_media_manifest_matches_checked_in_assets() {
             astra_core::Hash256::from_sha256(&bytes).to_string()
         );
         assert_eq!(asset["license"].as_str().unwrap(), "CC0-1.0");
-        assert!(asset["source_url"]
-            .as_str()
-            .unwrap()
-            .starts_with("https://"));
+        if id == "flower_roar_mp4" {
+            assert_eq!(
+                asset["derived_from"],
+                serde_json::json!(["flower_mp4", "trex_roar_mp3"])
+            );
+            assert!(asset["derivation"]
+                .as_str()
+                .is_some_and(|value| { value.contains("H.264") && value.contains("AAC") }));
+        } else {
+            assert!(asset["source_url"]
+                .as_str()
+                .unwrap()
+                .starts_with("https://"));
+        }
     }
 }
 
