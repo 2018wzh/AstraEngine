@@ -271,6 +271,14 @@ impl NativeVnHostCommandSource {
         self.last_step_evidence.as_ref()
     }
 
+    pub fn session_id(&self) -> &str {
+        &self.session_id.0
+    }
+
+    pub fn provider_id(&self) -> &'static str {
+        astra_plugin_abi::NATIVE_VN_PROVIDER_ID
+    }
+
     pub fn take_timeline_tasks(&mut self) -> Vec<PlayerTimelineTask> {
         std::mem::take(&mut self.pending_timeline)
     }

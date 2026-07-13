@@ -7,6 +7,16 @@ pub struct NativeVnProductAudioHost {
     next_packet_sequence: u64,
     queue: Option<astra_player_core::PlayerAudioQueueController>,
     voice_kinds: std::collections::BTreeMap<String, String>,
+    last_meter: Option<NativeVnAudioMeterSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NativeVnAudioMeterSnapshot {
+    pub submitted_samples: u64,
+    pub consumed_samples: u64,
+    pub underflow_count: u64,
+    pub peak_dbfs_bits: u32,
+    pub rms_dbfs_bits: u32,
 }
 
 impl NativeVnProductAudioHost {
@@ -20,6 +30,10 @@ impl NativeVnProductAudioHost {
         self.mixer
             .as_ref()
             .is_some_and(|mixer| mixer.active_voice_count() > 0)
+    }
+
+    pub fn last_meter(&self) -> Option<NativeVnAudioMeterSnapshot> {
+        self.last_meter
     }
 
     pub async fn start(
@@ -177,17 +191,29 @@ impl NativeVnProductAudioHost {
             [PlayerHostCommandResult::AudioState {
                 output: state_output,
                 queued_frames,
+                submitted_samples,
+                consumed_samples,
                 underflow_count,
-                ..
-            }] if *state_output == output => (
-                usize::try_from(*queued_frames).map_err(|_| {
-                    player_platform_error(
-                        "player.audio.mixer.query",
-                        "ASTRA_PLAYER_MIXER_QUEUE_RANGE",
-                    )
-                })?,
-                *underflow_count,
-            ),
+                peak_dbfs_bits,
+                rms_dbfs_bits,
+            }] if *state_output == output => {
+                self.last_meter = Some(NativeVnAudioMeterSnapshot {
+                    submitted_samples: *submitted_samples,
+                    consumed_samples: *consumed_samples,
+                    underflow_count: *underflow_count,
+                    peak_dbfs_bits: *peak_dbfs_bits,
+                    rms_dbfs_bits: *rms_dbfs_bits,
+                });
+                (
+                    usize::try_from(*queued_frames).map_err(|_| {
+                        player_platform_error(
+                            "player.audio.mixer.query",
+                            "ASTRA_PLAYER_MIXER_QUEUE_RANGE",
+                        )
+                    })?,
+                    *underflow_count,
+                )
+            }
             _ => {
                 return Err(player_platform_error(
                     "player.audio.mixer.query",
@@ -336,19 +362,41 @@ impl NativeVnProductAudioHost {
         let drain_result = async {
             let drain = source
                 .prepare_persistent_audio_drain(output)
-                .map_err(|error| player_platform_error("player.audio.mixer.drain.prepare", error))?;
+                .map_err(|error| {
+                    player_platform_error("player.audio.mixer.drain.prepare", error)
+                })?;
             let drained = executor
                 .execute_batch(drain)
                 .await
                 .map_err(|error| player_platform_error("player.audio.mixer.drain", error))?;
-            if !matches!(
-                drained.as_slice(),
-                [PlayerHostCommandResult::AudioDrained { output: drained_output, .. }] if *drained_output == output
-            ) {
-                return Err(player_platform_error(
-                    "player.audio.mixer.drain",
-                    "ASTRA_PLAYER_MIXER_DRAIN_RESULT",
-                ));
+            match drained.as_slice() {
+                [PlayerHostCommandResult::AudioDrained {
+                    output: drained_output,
+                    sample_count,
+                    peak_dbfs_bits,
+                    rms_dbfs_bits,
+                }] if *drained_output == output => {
+                    let previous = self.last_meter.unwrap_or(NativeVnAudioMeterSnapshot {
+                        submitted_samples: *sample_count,
+                        consumed_samples: *sample_count,
+                        underflow_count: 0,
+                        peak_dbfs_bits: *peak_dbfs_bits,
+                        rms_dbfs_bits: *rms_dbfs_bits,
+                    });
+                    self.last_meter = Some(NativeVnAudioMeterSnapshot {
+                        submitted_samples: previous.submitted_samples.max(*sample_count),
+                        consumed_samples: *sample_count,
+                        underflow_count: previous.underflow_count,
+                        peak_dbfs_bits: *peak_dbfs_bits,
+                        rms_dbfs_bits: *rms_dbfs_bits,
+                    });
+                }
+                _ => {
+                    return Err(player_platform_error(
+                        "player.audio.mixer.drain",
+                        "ASTRA_PLAYER_MIXER_DRAIN_RESULT",
+                    ));
+                }
             }
             Ok::<(), astra_platform::PlatformError>(())
         }

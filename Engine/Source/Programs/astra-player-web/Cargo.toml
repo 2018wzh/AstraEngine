@@ -27,6 +27,7 @@ tracing.workspace = true
 futures-util.workspace = true
 js-sys.workspace = true
 web-sys = { workspace = true, features = [
+    "console",
     "Response",
     "Window",
 ] }

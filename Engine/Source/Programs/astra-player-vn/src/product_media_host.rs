@@ -36,6 +36,10 @@ impl NativeVnProductMediaHost {
         self.timeline.active_count() > 0 || self.audio.is_active()
     }
 
+    pub fn last_audio_meter(&self) -> Option<crate::NativeVnAudioMeterSnapshot> {
+        self.audio.last_meter()
+    }
+
     pub async fn poll_and_process(
         &mut self,
         source: &mut NativeVnHostCommandSource,

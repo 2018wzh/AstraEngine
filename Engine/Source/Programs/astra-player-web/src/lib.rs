@@ -5,6 +5,41 @@ use astra_platform::{
 };
 use serde::{Deserialize, Serialize};
 
+pub const WEB_PLAYER_LIVE_EVIDENCE_SCHEMA: &str = "astra.player_web_live_evidence.v1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WebPlayerLiveEvidence {
+    pub schema: String,
+    pub event: String,
+    pub target: String,
+    pub profile: String,
+    pub package_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_byte_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_sequence: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_step: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_state_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_event_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_presentation_hash: Option<String>,
+    #[serde(default)]
+    pub terminal_route_ids: Vec<String>,
+    #[serde(default)]
+    pub pending_choice_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_meter: Option<astra_player_vn::NativeVnAudioMeterSnapshot>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebPlayerConfig {
     pub schema: String,
@@ -144,6 +179,13 @@ mod browser {
         _package_bytes: Vec<u8>,
     }
 
+    #[derive(Clone)]
+    struct WebEvidenceIdentity {
+        target: String,
+        profile: String,
+        package_hash: String,
+    }
+
     #[wasm_bindgen(start)]
     pub async fn start() -> Result<(), JsValue> {
         tracing::info!(event = "player.web.start", "Web Player startup began");
@@ -151,6 +193,11 @@ mod browser {
         let config: WebPlayerConfig = serde_json::from_slice(&config_bytes)
             .map_err(|error| JsValue::from_str(&format!("invalid player config: {error}")))?;
         let package_bytes = fetch_bytes(&config.package).await?;
+        let evidence_identity = WebEvidenceIdentity {
+            target: config.target.clone(),
+            profile: config.profile.clone(),
+            package_hash: astra_core::Hash256::from_sha256(&package_bytes).to_string(),
+        };
         let profile = validate_package(&config, &package_bytes)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         tracing::info!(
@@ -159,6 +206,25 @@ mod browser {
             package_byte_size = package_bytes.len(),
             "Web Player package identity validated"
         );
+        emit_web_evidence(&WebPlayerLiveEvidence {
+            schema: WEB_PLAYER_LIVE_EVIDENCE_SCHEMA.to_string(),
+            event: "package.validated".to_string(),
+            target: evidence_identity.target.clone(),
+            profile: evidence_identity.profile.clone(),
+            package_hash: evidence_identity.package_hash.clone(),
+            package_byte_size: Some(package_bytes.len() as u64),
+            provider_id: None,
+            session_id: None,
+            player_sequence: None,
+            input_kind: None,
+            fixed_step: None,
+            runtime_state_hash: None,
+            runtime_event_hash: None,
+            runtime_presentation_hash: None,
+            terminal_route_ids: Vec::new(),
+            pending_choice_ids: Vec::new(),
+            audio_meter: None,
+        })?;
         let session = astra_platform_web::factory()
             .start(profile)
             .await
@@ -384,8 +450,13 @@ mod browser {
                             );
                             break;
                         }
-                        if let Err(error) = log_web_consumed_step(player_sequence, "keyboard", &vn)
-                        {
+                        if let Err(error) = log_web_consumed_step(
+                            player_sequence,
+                            "keyboard",
+                            &evidence_identity,
+                            &vn,
+                            &media,
+                        ) {
                             tracing::error!(
                                 event = "player.web.runtime.evidence_failed",
                                 diagnostic_code = "ASTRA_PLAYER_RUNTIME_EVIDENCE",
@@ -440,7 +511,13 @@ mod browser {
                             );
                             break;
                         }
-                        if let Err(error) = log_web_consumed_step(player_sequence, "pointer", &vn) {
+                        if let Err(error) = log_web_consumed_step(
+                            player_sequence,
+                            "pointer",
+                            &evidence_identity,
+                            &vn,
+                            &media,
+                        ) {
                             tracing::error!(
                                 event = "player.web.runtime.evidence_failed",
                                 diagnostic_code = "ASTRA_PLAYER_RUNTIME_EVIDENCE",
@@ -539,7 +616,9 @@ mod browser {
     fn log_web_consumed_step(
         player_sequence: u64,
         kind: &str,
+        identity: &WebEvidenceIdentity,
         source: &NativeVnHostCommandSource,
+        media: &NativeVnProductMediaHost,
     ) -> Result<(), astra_platform::PlatformError> {
         let evidence = source.last_step_evidence().ok_or_else(|| {
             web_player_error(
@@ -559,6 +638,35 @@ mod browser {
             pending_choice_count = evidence.pending_choice_ids.len(),
             "Web Player consumed a platform input through RuntimeWorld"
         );
+        emit_web_evidence(&WebPlayerLiveEvidence {
+            schema: WEB_PLAYER_LIVE_EVIDENCE_SCHEMA.to_string(),
+            event: "runtime.input_consumed".to_string(),
+            target: identity.target.clone(),
+            profile: identity.profile.clone(),
+            package_hash: identity.package_hash.clone(),
+            package_byte_size: None,
+            provider_id: Some(source.provider_id().to_string()),
+            session_id: Some(source.session_id().to_string()),
+            player_sequence: Some(player_sequence),
+            input_kind: Some(kind.to_string()),
+            fixed_step: Some(evidence.fixed_step),
+            runtime_state_hash: Some(evidence.runtime_state_hash.to_string()),
+            runtime_event_hash: Some(evidence.runtime_event_hash.to_string()),
+            runtime_presentation_hash: Some(evidence.runtime_presentation_hash.to_string()),
+            terminal_route_ids: evidence.terminal_route_ids.iter().cloned().collect(),
+            pending_choice_ids: evidence.pending_choice_ids.clone(),
+            audio_meter: media.last_audio_meter(),
+        })
+        .map_err(|error| web_player_error("player.runtime.evidence", error))?;
+        Ok(())
+    }
+
+    fn emit_web_evidence(value: &WebPlayerLiveEvidence) -> Result<(), String> {
+        let encoded = serde_json::to_string(&value)
+            .map_err(|error| format!("ASTRA_PLAYER_WEB_EVIDENCE_ENCODE: {error}"))?;
+        web_sys::console::info_1(&JsValue::from_str(&format!(
+            "ASTRA_PLAYER_EVIDENCE {encoded}"
+        )));
         Ok(())
     }
 

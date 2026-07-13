@@ -215,6 +215,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     host.pump(&mut source, &mut executor, &mut signals)
         .await
         .unwrap();
+    assert_eq!(host.last_meter().unwrap().underflow_count, 64);
     host.control(
         &NativeVnAudioControlRequest {
             command_id: "audio.pause".into(),
@@ -244,5 +245,8 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     .unwrap();
     assert!(signals.contains("bgm.main.end"));
     host.shutdown(&mut source, &mut executor).await.unwrap();
+    let final_meter = host.last_meter().unwrap();
+    assert_eq!(final_meter.consumed_samples, 2_048);
+    assert_eq!(f32::from_bits(final_meter.peak_dbfs_bits), -6.0);
     backend_task.await.unwrap();
 }
