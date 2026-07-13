@@ -40,16 +40,16 @@ fn baseline_story() -> &'static str {
 story main #@id story.main
 state prologue #@id state.prologue
   scene room #@id scene.room
-    movie layer:video.opening asset:native-assets/movie/op.webm end:wait fallback:native-assets/movie/op_fallback.png #@id movie.opening
-    voice asset:native-assets/voice/hero0001.ogg sync:text #@id voice.opening
+    movie layer:video.opening asset:asset:/movie/op end:wait fence:movie.opening.end fallback:asset:/movie/op_fallback #@id movie.opening
+    voice asset:asset:/voice/hero0001 sync:text #@id voice.opening
     text key:hello speaker:narrator voice:voice.hero.0001 #@id line.hello
     choice key:where #@id choice.where
       option key:choice.library -> library #@id choice.library
       option key:choice.rooftop -> rooftop #@id choice.rooftop
 state library #@id state.library
   scene library #@id scene.library
-    bgm asset:native-assets/bgm/library.ogg loop:true #@id bgm.library
-    se asset:native-assets/se/page.ogg #@id se.page
+    bgm asset:asset:/bgm/library loop:true #@id bgm.library
+    se asset:asset:/se/page #@id se.page
     wait fence:voice.opening.end #@id wait.voice
     jump ending.good #@id jump.good
 state rooftop #@id state.rooftop

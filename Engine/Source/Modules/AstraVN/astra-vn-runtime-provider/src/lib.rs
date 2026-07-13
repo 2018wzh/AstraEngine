@@ -204,10 +204,10 @@ impl NativeVnRuntimeProvider {
                 ),
                 output_schema(
                     RuntimeOutputDomain::Presentation,
-                    "astra.vn.presentation_command.v1",
-                    1,
+                    "astra.vn.presentation_command.v2",
+                    2,
                 ),
-                output_schema(RuntimeOutputDomain::Audio, "astra.vn.audio_command.v1", 1),
+                output_schema(RuntimeOutputDomain::Audio, "astra.vn.audio_command.v2", 2),
                 output_schema(RuntimeOutputDomain::Await, "astra.runtime.await_id.v1", 1),
                 output_schema(RuntimeOutputDomain::Effect, "astra.vn.timeline_task.v1", 1),
                 output_schema(
@@ -499,8 +499,8 @@ impl NativeVnRuntimeProvider {
             .map(|command| {
                 RuntimeOutputEnvelope::postcard(
                     RuntimeOutputDomain::Presentation,
-                    "astra.vn.presentation_command.v1",
-                    SchemaVersion::new(1, 0, 0),
+                    "astra.vn.presentation_command.v2",
+                    SchemaVersion::new(2, 0, 0),
                     command,
                 )
             })
@@ -512,8 +512,8 @@ impl NativeVnRuntimeProvider {
             .map(|command| {
                 RuntimeOutputEnvelope::postcard(
                     RuntimeOutputDomain::Audio,
-                    "astra.vn.audio_command.v1",
-                    SchemaVersion::new(1, 0, 0),
+                    "astra.vn.audio_command.v2",
+                    SchemaVersion::new(2, 0, 0),
                     command,
                 )
             })
@@ -930,13 +930,13 @@ impl RuntimeAction for VnStepAction {
             );
         }
         for command in &output.presentation {
-            ctx.emit_presentation(runtime_presentation(command));
+            ctx.emit_presentation(runtime_presentation(command)?);
         }
         for command in &output.audio {
-            ctx.emit_serialized_effect("audio", "astra.vn.audio_command.v1", command)?;
+            ctx.emit_serialized_effect("audio", "astra.vn.audio_command.v2", command)?;
         }
         for task in &output.timeline_tasks {
-            ctx.emit_serialized_effect("timeline", "astra.vn.timeline_task.v1", task)?;
+            ctx.emit_serialized_effect("timeline", "astra.vn.timeline_task.v2", task)?;
         }
         let mut trace_payload = input.clone();
         trace_payload.insert(
@@ -962,8 +962,10 @@ impl RuntimeAction for VnStepAction {
     }
 }
 
-fn runtime_presentation(command: &PresentationCommand) -> RuntimePresentationCommand {
-    match command {
+fn runtime_presentation(
+    command: &PresentationCommand,
+) -> Result<RuntimePresentationCommand, RuntimeError> {
+    let converted = match command {
         PresentationCommand::Dialogue {
             key,
             speaker,
@@ -1024,20 +1026,59 @@ fn runtime_presentation(command: &PresentationCommand) -> RuntimePresentationCom
             .into_iter()
             .collect(),
         },
-        PresentationCommand::Stage {
-            command,
-            attributes,
-        } => RuntimePresentationCommand::Custom {
-            kind: format!("vn.stage.{command}"),
-            data: attributes
-                .iter()
-                .map(|(key, value)| (key.clone(), BlackboardValue::String(value.clone())))
-                .collect(),
+        PresentationCommand::SystemOption { option } => RuntimePresentationCommand::Custom {
+            kind: "vn.system_option.v1".to_string(),
+            data: [
+                ("id".to_string(), BlackboardValue::String(option.id.clone())),
+                (
+                    "key".to_string(),
+                    BlackboardValue::String(option.key.clone()),
+                ),
+                (
+                    "target".to_string(),
+                    BlackboardValue::String(option.target.clone()),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+        PresentationCommand::Stage(stage) => RuntimePresentationCommand::Custom {
+            kind: format!("vn.stage.{}.v2", stage.kind()),
+            data: [(
+                "typed_payload".to_string(),
+                BlackboardValue::Bytes(postcard::to_allocvec(stage).map_err(|err| {
+                    RuntimeError::message(format!("encode typed VN stage command: {err}"))
+                })?),
+            )]
+            .into_iter()
+            .collect(),
+        },
+        PresentationCommand::Extension(extension) => RuntimePresentationCommand::Custom {
+            kind: format!("vn.extension.{}", extension.command),
+            data: [
+                (
+                    "provider_id".to_string(),
+                    BlackboardValue::String(extension.provider_id.clone()),
+                ),
+                (
+                    "schema".to_string(),
+                    BlackboardValue::String(extension.schema.clone()),
+                ),
+                (
+                    "typed_payload".to_string(),
+                    BlackboardValue::Bytes(postcard::to_allocvec(extension).map_err(|err| {
+                        RuntimeError::message(format!("encode typed VN extension command: {err}"))
+                    })?),
+                ),
+            ]
+            .into_iter()
+            .collect(),
         },
         PresentationCommand::Marker { id } => {
             RuntimePresentationCommand::Marker { name: id.clone() }
         }
-    }
+    };
+    Ok(converted)
 }
 
 fn vn_event_kind(command: &CoreVnPlayerCommand) -> &'static str {

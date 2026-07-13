@@ -4,10 +4,12 @@ use astra_core::{Diagnostic, DiagnosticSeverity, Hash128, SourceRef};
 
 use crate::{
     lower::{lower_sources_from_cst, ParsedLine},
-    AstraSource, ChoiceOption, CommandManifest, CommandManifestEntry, CommandRegistry,
-    CommandSourceMap, CompiledCommand, CompiledStory, MutationOp, PresentationCommand, RouteEdge,
-    RouteGraph, RouteNode, Scene, State, Story, StoryManifest, StoryManifestEntry, SystemPageKind,
-    SystemStoryManifest, VariableManifest, VariableScopeManifest, VnError,
+    stage_compile::{compile_extension_command, compile_stage_command},
+    AstraSource, ChoiceOption, CommandManifest, CommandManifestEntry, CommandProvider,
+    CommandRegistry, CommandSourceMap, CompiledCommand, CompiledStory, ExtensionCommandDescriptor,
+    MutationOp, PresentationCommand, RouteEdge, RouteGraph, RouteNode, Scene, State, Story,
+    StoryManifest, StoryManifestEntry, SystemPageKind, SystemStoryManifest, VariableManifest,
+    VariableScopeManifest, VnError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,29 +69,37 @@ fn compile_bound_sources(
             "mutate" => builder.push_mutate(line)?,
             "system_page" => builder.push_system_page(line)?,
             "wait" => builder.push_wait(line)?,
-            "background" | "show" | "hide" | "move" | "camera" | "movie" | "voice" | "bgm"
-            | "se" | "audio" | "transition" | "shake" | "stage" | "layer" | "timeline" | "task"
-            | "effect" | "fence" | "command" | "bind_setting" | "source" => {
-                builder.push_presentation(line)?;
-            }
-            _ => builder.push_presentation(line)?,
+            _ => match registry.provider(&line.keyword) {
+                Some(CommandProvider::Standard) => builder.push_stage_presentation(line)?,
+                Some(CommandProvider::Extension(descriptor)) => {
+                    builder.push_extension_presentation(line, descriptor)?;
+                }
+                Some(CommandProvider::Core) => {
+                    return Err(VnError::Diagnostic(
+                        Diagnostic::blocking(
+                            "ASTRA_VN_CORE_COMMAND_UNHANDLED",
+                            "core command has no compiler lowering",
+                        )
+                        .with_source(line.source_ref())
+                        .with_field("command", &line.keyword),
+                    ));
+                }
+                None => {
+                    return Err(VnError::Diagnostic(
+                        Diagnostic::blocking(
+                            "ASTRA_VN_COMMAND_UNBOUND",
+                            "command requires an explicit provider binding before compile",
+                        )
+                        .with_source(line.source_ref())
+                        .with_field("command", &line.keyword),
+                    ));
+                }
+            },
         }
     }
     trace_pass(SemanticPass::Symbols);
     let mut compiled = builder.finish()?;
     trace_pass(SemanticPass::Commands);
-    for line in &lines {
-        if !registry.is_known(&line.keyword) {
-            return Err(VnError::Diagnostic(
-                Diagnostic::blocking(
-                    "ASTRA_VN_COMMAND_UNBOUND",
-                    "command requires an explicit provider binding before compile",
-                )
-                .with_source(line.source_ref())
-                .with_field("command", &line.keyword),
-            ));
-        }
-    }
     trace_pass(SemanticPass::SystemStories);
     compiled.system_story_manifest = SystemStoryManifest::from_compiled(&compiled)?;
     trace_pass(SemanticPass::CompiledStory);
@@ -156,17 +166,12 @@ fn source_ref_for_span(path: &str, text: &str, span: crate::TextSpan) -> SourceR
 
 #[derive(Debug, Clone, Default)]
 pub struct CompileAstraOptions {
-    extension_bindings: BTreeMap<String, String>,
+    extension_bindings: Vec<ExtensionCommandDescriptor>,
 }
 
 impl CompileAstraOptions {
-    pub fn bind_extension(
-        mut self,
-        command: impl Into<String>,
-        provider: impl Into<String>,
-    ) -> Self {
-        self.extension_bindings
-            .insert(command.into(), provider.into());
+    pub fn bind_extension(mut self, descriptor: ExtensionCommandDescriptor) -> Self {
+        self.extension_bindings.push(descriptor);
         self
     }
 }
@@ -193,8 +198,8 @@ where
         }
     }
     let mut registry = CommandRegistry::default();
-    for (command, provider) in options.extension_bindings {
-        registry.bind_extension(command, provider);
+    for descriptor in options.extension_bindings {
+        registry.bind_extension(descriptor)?;
     }
     compile_bound_sources(sources, &registry)
 }
@@ -401,13 +406,7 @@ impl CompileBuilder {
         } else if matches!(commands.last(), Some(CompiledCommand::SystemPage { .. })) {
             commands.push(CompiledCommand::Presentation {
                 id: option.id.clone(),
-                command: PresentationCommand::Stage {
-                    command: "option".to_string(),
-                    attributes: BTreeMap::from([
-                        ("key".to_string(), option.key),
-                        ("target".to_string(), option.target),
-                    ]),
-                },
+                command: PresentationCommand::SystemOption { option },
             });
             Ok(())
         } else {
@@ -539,15 +538,28 @@ impl CompileBuilder {
         Ok(())
     }
 
-    fn push_presentation(&mut self, line: &ParsedLine) -> Result<(), VnError> {
+    fn push_stage_presentation(&mut self, line: &ParsedLine) -> Result<(), VnError> {
         self.current_scene_mut()?
             .commands
             .push(CompiledCommand::Presentation {
                 id: line.stable_id(),
-                command: PresentationCommand::Stage {
-                    command: line.keyword.clone(),
-                    attributes: line.attrs.clone(),
-                },
+                command: PresentationCommand::Stage(compile_stage_command(line)?),
+            });
+        Ok(())
+    }
+
+    fn push_extension_presentation(
+        &mut self,
+        line: &ParsedLine,
+        descriptor: &ExtensionCommandDescriptor,
+    ) -> Result<(), VnError> {
+        self.current_scene_mut()?
+            .commands
+            .push(CompiledCommand::Presentation {
+                id: line.stable_id(),
+                command: PresentationCommand::Extension(compile_extension_command(
+                    line, descriptor,
+                )?),
             });
         Ok(())
     }

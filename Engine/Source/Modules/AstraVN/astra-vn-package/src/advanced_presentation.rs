@@ -4,7 +4,10 @@ use astra_core::{Diagnostic, Hash128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{CompiledCommand, CompiledStory, PresentationCommand};
+use crate::{
+    CompiledCommand, CompiledStory, PresentationCommand, StageCommand, TimelineCommand, VnAudioBus,
+    VnAudioSync,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnAdvancedPresentationManifest {
@@ -43,70 +46,57 @@ impl VnAdvancedPresentationManifest {
             .flat_map(|scene| &scene.commands)
         {
             let CompiledCommand::Presentation {
-                command:
-                    PresentationCommand::Stage {
-                        command,
-                        attributes,
-                    },
+                command: PresentationCommand::Stage(stage),
                 ..
             } = command
             else {
                 continue;
             };
 
-            match command.as_str() {
-                "layer" => {
-                    if let Some(id) = attributes.get("id") {
-                        layer_ids.insert(id.clone());
-                    }
+            match stage {
+                StageCommand::DeclareLayer { id, .. } => {
+                    layer_ids.insert(id.clone());
                 }
-                "camera" => {
+                StageCommand::Camera { .. } => {
                     evidence.insert("camera.task".to_string());
                 }
-                "movie" => {
-                    if attributes.contains_key("layer") {
-                        evidence.insert("video.layer".to_string());
-                    }
-                    if attributes.contains_key("fallback") {
+                StageCommand::Movie { fallback, .. } => {
+                    evidence.insert("video.layer".to_string());
+                    if fallback.is_some() {
                         evidence.insert("presentation.fallback".to_string());
                     }
                 }
-                "voice" => {
-                    if attributes
-                        .get("sync")
-                        .is_some_and(|value| matches!(value.as_str(), "text" | "fence"))
-                    {
+                StageCommand::Audio(cue) => {
+                    if cue.bus == VnAudioBus::Voice && cue.sync != VnAudioSync::None {
                         evidence.insert("voice.sync".to_string());
                     }
                 }
-                "timeline" => {
-                    if let Some(id) = attributes.get("id") {
-                        timeline_ids.insert(id.clone());
-                    }
-                    if attributes
-                        .get("join")
-                        .is_some_and(|value| matches!(value.as_str(), "wait" | "block"))
-                    {
+                StageCommand::Timeline(TimelineCommand::Start(spec)) => {
+                    timeline_ids.insert(spec.id.clone());
+                    if spec.join == crate::VnTimelineJoinPolicy::Block {
                         has_timeline_join = true;
                     }
-                    if attributes
-                        .get("action")
-                        .is_some_and(|value| matches!(value.as_str(), "cancel" | "replace"))
-                    {
-                        has_timeline_cancel = true;
-                    }
-                    if attributes.contains_key("fallback") {
+                    if spec.fallback.is_some() {
                         evidence.insert("presentation.fallback".to_string());
                     }
-                    if attributes.contains_key("budget_ms") {
+                    if spec.budget_us > 0 {
                         evidence.insert("renderer.effect_budget".to_string());
                     }
                 }
-                "effect" => {
-                    if attributes.contains_key("fallback") {
+                StageCommand::Timeline(TimelineCommand::Cancel { id, .. }) => {
+                    timeline_ids.insert(id.clone());
+                    has_timeline_cancel = true;
+                }
+                StageCommand::Effect {
+                    fallback,
+                    filter,
+                    budget_us,
+                    ..
+                } => {
+                    if !fallback.is_empty() {
                         evidence.insert("presentation.fallback".to_string());
                     }
-                    if attributes.contains_key("filter") && attributes.contains_key("budget_ms") {
+                    if !filter.is_empty() && *budget_us > 0 {
                         evidence.insert("renderer.effect_budget".to_string());
                     }
                 }

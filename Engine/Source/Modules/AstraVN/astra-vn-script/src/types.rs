@@ -345,10 +345,11 @@ pub enum PresentationCommand {
     SystemPage {
         page: SystemPageKind,
     },
-    Stage {
-        command: String,
-        attributes: BTreeMap<String, String>,
+    SystemOption {
+        option: ChoiceOption,
     },
+    Stage(crate::StageCommand),
+    Extension(crate::ExtensionPresentationCommand),
     Marker {
         id: String,
     },
@@ -638,15 +639,13 @@ pub struct VnEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnAudioCommand {
     pub command_id: String,
-    pub command: String,
-    pub attributes: BTreeMap<String, String>,
+    pub cue: crate::AudioCue,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnTimelineTask {
     pub command_id: String,
-    pub command: String,
-    pub attributes: BTreeMap<String, String>,
+    pub command: crate::TimelineCommand,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

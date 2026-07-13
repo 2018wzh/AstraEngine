@@ -1,8 +1,10 @@
 use astra_vn_script::{
     compile_astra_sources, compile_astra_sources_with_options, format_astra_source,
-    parse_astra_source, CompileAstraOptions, FormatOptions, ScriptLanguageService, SemanticPass,
-    SyntaxKind, SEMANTIC_PASS_ORDER,
+    parse_astra_source, CompileAstraOptions, ExtensionCommandDescriptor, ExtensionFieldContract,
+    ExtensionFieldKind, FormatOptions, ScriptLanguageService, SemanticPass, SyntaxKind,
+    SEMANTIC_PASS_ORDER,
 };
+use std::collections::BTreeMap;
 
 const SOURCE: &str = "# leading\nstory main #@id story.main\n\nstate prologue #@id state.prologue\n  scene room #@id scene.room\n    text key:\"line hello\" speaker:hero #@id line.hello\n";
 
@@ -85,7 +87,18 @@ fn unknown_command_is_editable_but_requires_explicit_compile_binding() {
 
     let compiled = compile_astra_sources_with_options(
         [("unknown.astra", source)],
-        CompileAstraOptions::default().bind_extension("studio_fx", "studio.presentation"),
+        CompileAstraOptions::default().bind_extension(ExtensionCommandDescriptor {
+            command: "studio_fx".to_string(),
+            provider_id: "studio.presentation".to_string(),
+            schema: "studio.presentation.fx.v1".to_string(),
+            fields: BTreeMap::from([(
+                "intensity".to_string(),
+                ExtensionFieldContract {
+                    kind: ExtensionFieldKind::Integer,
+                    required: true,
+                },
+            )]),
+        }),
     )
     .unwrap();
     assert_eq!(compiled.schema, "astra.vn.compiled_story");

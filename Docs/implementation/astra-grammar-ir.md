@@ -152,7 +152,7 @@ pub struct CompiledStory {
 }
 ```
 
-Migration targets include `luau_manifest`、`timeline_ir`、`text_effect_ir`、token/attribute spans、macro expansion stack and `CommandSourceMap`. These fields are not implemented evidence until Rust schema, package writer, release gate and tests use them.
+`StageCommand`、typed timeline track/keyframe、token/attribute spans 和 `CommandSourceMap` 已进入当前 IR。`luau_manifest`、macro expansion stack 和 package-bound extension execution 仍是 migration target；Rust schema、package writer、release gate 和测试未共同使用前，不计入实现证据。
 
 IR rules:
 
@@ -164,22 +164,18 @@ IR rules:
 
 ## Command Registry
 
-`CommandRegistry` is the planned source of truth for command names, provider ids, attributes, children, Editor metadata and release checks.
+`CommandRegistry` 是 Core、standard 和 extension command binding 的编译期真源。Standard command 的 allowed/required 字段由 Rust lowering 函数定义；extension command 则携带完整 descriptor。
 
 ```rust
 pub struct CommandRegistry {
-    providers: BTreeMap<String, CommandProvider>,
-    commands: BTreeMap<String, CommandSchema>,
+    commands: BTreeMap<String, CommandProvider>,
 }
 
-pub struct CommandSchema {
-    pub name: String,
+pub struct ExtensionCommandDescriptor {
+    pub command: String,
     pub schema: String,
     pub provider_id: String,
-    pub required_attrs: BTreeSet<String>,
-    pub allowed_attrs: BTreeSet<String>,
-    pub child_policy: ChildPolicy,
-    pub release_checks: Vec<String>,
+    pub fields: BTreeMap<String, ExtensionFieldContract>,
 }
 ```
 

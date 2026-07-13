@@ -4,7 +4,10 @@ use astra_core::{Diagnostic, Hash128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{CompiledCommand, CompiledStory, PresentationCommand, SystemPageKind};
+use crate::{
+    CompiledCommand, CompiledStory, PresentationCommand, StageCommand, SystemPageKind, VnAudioBus,
+    VnAudioSync, VnMovieEndBehavior,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnCommercialBaselineManifest {
@@ -46,36 +49,30 @@ impl VnCommercialBaselineManifest {
                     features_present.insert("explicit_wait".to_string());
                 }
                 CompiledCommand::Presentation {
-                    command:
-                        PresentationCommand::Stage {
-                            command,
-                            attributes,
-                        },
+                    command: PresentationCommand::Stage(stage),
                     ..
-                } => match command.as_str() {
-                    "movie" => {
-                        if attributes
-                            .get("end")
-                            .is_some_and(|value| value.eq_ignore_ascii_case("wait"))
-                            && attributes.contains_key("fallback")
-                        {
+                } => match stage {
+                    StageCommand::Movie {
+                        end: VnMovieEndBehavior::Wait,
+                        fence,
+                        fallback,
+                        ..
+                    } => {
+                        if fence.is_some() && fallback.is_some() {
                             features_present.insert("movie_wait".to_string());
                             features_present.insert("explicit_wait".to_string());
                         }
                     }
-                    "voice" => {
+                    StageCommand::Audio(cue) if cue.bus == VnAudioBus::Voice => {
                         features_present.insert("voice_command".to_string());
-                        if attributes
-                            .get("sync")
-                            .is_some_and(|value| matches!(value.as_str(), "text" | "fence"))
-                        {
+                        if cue.sync != VnAudioSync::None {
                             features_present.insert("explicit_wait".to_string());
                         }
                     }
-                    "bgm" => {
+                    StageCommand::Audio(cue) if cue.bus == VnAudioBus::Bgm => {
                         features_present.insert("bgm".to_string());
                     }
-                    "se" => {
+                    StageCommand::Audio(cue) if cue.bus == VnAudioBus::Se => {
                         features_present.insert("se".to_string());
                     }
                     _ => {}

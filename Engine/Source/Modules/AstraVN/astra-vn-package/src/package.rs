@@ -48,7 +48,7 @@ pub fn package_sections_for_story(
         )?,
         SectionPayload::postcard(
             "vn.standard_command_manifest",
-            "astra.vn.standard_command_manifest.v1",
+            "astra.vn.standard_command_manifest.v2",
             &VnStandardCommandManifest::standard(),
         )?,
         SectionPayload::postcard(

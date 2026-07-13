@@ -42,19 +42,20 @@ Cranelift 不进入 v1 主线依赖。后续只有在表达式 bytecode 已经�
 story main #@id story.main
 state prologue #@id state.prologue
   scene room #@id scene.room
-    stage:
-      background asset:bg.room preset:soft_fade duration:300 #@id bg.room
-      show character:hero pose:normal at:center preset:hero_enter #@id hero.enter
-
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.room
+    layer id:bg kind:background z:0 blend:normal #@id layer.bg
+    layer id:characters kind:sprite z:100 blend:normal #@id layer.characters
+    background asset:asset:/background/room layer:bg preset:soft_fade duration:300 #@id bg.room
+    show id:hero asset:asset:/character/hero pose:normal layer:characters at:center preset:hero_enter #@id hero.enter
+    voice asset:asset:/voice/hero0001 sync:text #@id voice.hero.0001
     text key:prologue.hello speaker:hero voice:voice.hero.0001 #@id line.hello
-      effect text:cinematic.reveal lip_sync:true
-
+    effect text:cinematic.reveal lip_sync:true filter:soft_glow fallback:plain_reveal budget_ms:2 #@id effect.reveal
     choice key:prologue.where #@id choice.where
       option key:choice.library -> library #@id choice.library
       option key:choice.rooftop -> rooftop #@id choice.rooftop
 ```
 
-Macro 是编译期机制。展开结果必须保留 source map、参数来源、展开栈和 debug symbol；运行时不保存 macro stack。
+Macro 是后续编译期机制。实现时必须让展开结果保留 source map、参数来源、展开栈和 debug symbol；当前 frontend 不接受 macro，不能把设计示例当成已实现能力。
 
 ## Core Semantics
 

@@ -12,7 +12,7 @@ const STORY: &str = r#"
 story main #@id story.main
 state prologue #@id state.prologue
   scene room #@id scene.room
-    voice asset:voice.hero.0001 end:continue #@id voice.hello
+    voice asset:asset:/voice/hero0001 #@id voice.hello
     text key:line.hello speaker:hero #@id line.hello
     choice key:choice.next #@id choice.next
       option key:choice.library -> library #@id choice.library
@@ -88,8 +88,8 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
         matches!(
             value.decode_postcard::<PresentationCommand>(
                 RuntimeOutputDomain::Presentation,
-                "astra.vn.presentation_command.v1",
-                SchemaVersion::new(1, 0, 0)
+                "astra.vn.presentation_command.v2",
+                SchemaVersion::new(2, 0, 0)
             ),
             Ok(PresentationCommand::Dialogue { key, .. }) if key == "line.hello"
         )
@@ -139,8 +139,8 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
     assert!(choice.outputs.iter().any(|value| matches!(
         value.decode_postcard::<PresentationCommand>(
             RuntimeOutputDomain::Presentation,
-            "astra.vn.presentation_command.v1",
-            SchemaVersion::new(1, 0, 0)
+            "astra.vn.presentation_command.v2",
+            SchemaVersion::new(2, 0, 0)
         ),
         Ok(PresentationCommand::Choice { .. })
     )));

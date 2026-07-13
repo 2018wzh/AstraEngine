@@ -6,11 +6,11 @@ state prologue #@id state.prologue
     layer id:bg kind:background z:0 blend:normal #@id layer.bg
     layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.character
     layer id:video kind:video z:200 blend:screen clip:stage #@id layer.video
-    layer id:ui kind:text z:900 input:message #@id layer.ui
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.ui
     background asset:asset:/background/apartment-night layer:bg preset:soft_fade duration:300 #@id bg.technical
     show id:hero asset:asset:/character/lin-yao pose:normal layer:character at:center preset:hero_enter #@id hero.show
     camera target:main zoom:1.06 duration:480 preset:slow_push #@id camera.push
-    timeline id:tl.hero.enter target:hero join:block fence:timeline.hero.enter.complete fallback:flat budget_ms:2 #@id timeline.hero.enter
+    timeline id:tl.hero.enter target:hero property:opacity keyframes:0=0,300=1 join:block fence:timeline.hero.enter.complete fallback:flat budget_ms:2 #@id timeline.hero.enter
     timeline id:tl.hero.enter action:cancel reason:replace_target #@id timeline.hero.cancel
     movie layer:video asset:asset:/movie/rain-signal alpha:0.20 loop:true end:wait fence:movie.signal.end fallback:asset:/background/apartment-night #@id movie.signal
     bgm asset:asset:/bgm/glass-city loop:true fade:600 #@id bgm.technical

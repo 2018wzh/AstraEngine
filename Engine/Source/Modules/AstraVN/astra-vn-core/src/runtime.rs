@@ -3,11 +3,12 @@ use std::collections::BTreeSet;
 use astra_core::Hash128;
 
 use crate::{
-    resolve_target, BacklogEntry, BacklogLayoutMetadata, ChoiceOption, CompiledCommand,
-    CompiledStory, MutationOp, PendingChoice, PresentationCommand, SkipMode, SystemUnlockKind,
-    VnCallFrame, VnCommandCursor, VnCoverage, VnError, VnPlayerCommand, VnReplayUiState,
-    VnRouteFlag, VnRouteFlagKind, VnRunConfig, VnRuntimeState, VnSaveBlob, VnStepOutput,
-    VnSystemFrame, VnWaitKind, VnWaitState, VoiceReplayEntry,
+    resolve_target, AudioCue, BacklogEntry, BacklogLayoutMetadata, ChoiceOption, CompiledCommand,
+    CompiledStory, MutationOp, PendingChoice, PresentationCommand, SkipMode, StageCommand,
+    SystemUnlockKind, TimelineCommand, VnAudioBus, VnAudioSync, VnCallFrame, VnCommandCursor,
+    VnCoverage, VnError, VnMovieEndBehavior, VnPlayerCommand, VnReplayUiState, VnRouteFlag,
+    VnRouteFlagKind, VnRunConfig, VnRuntimeState, VnSaveBlob, VnStepOutput, VnSystemFrame,
+    VnTimelineJoinPolicy, VnWaitKind, VnWaitState, VoiceReplayEntry,
 };
 
 #[derive(Debug, Clone)]
@@ -156,10 +157,14 @@ impl VnRuntime {
                         format!("voice replay entry {voice} is not available"),
                     ));
                 }
-                presentation.push(PresentationCommand::Stage {
-                    command: "voice_replay".to_string(),
-                    attributes: [("voice".to_string(), voice)].into_iter().collect(),
-                });
+                presentation.push(PresentationCommand::Stage(StageCommand::Audio(AudioCue {
+                    id: format!("voice.replay.{voice}"),
+                    bus: VnAudioBus::Voice,
+                    asset: voice,
+                    looped: false,
+                    fade_ms: 0,
+                    sync: VnAudioSync::None,
+                })));
             }
             VnPlayerCommand::SetAuto { enabled } => {
                 self.state.system.auto_enabled = enabled;
@@ -425,8 +430,8 @@ impl VnRuntime {
                 }
                 CompiledCommand::Presentation { id, command } => {
                     self.advance_cursor()?;
-                    let wait = wait_state_from_presentation(&id, &command);
-                    presentation.push(bind_presentation_command_id(id, command));
+                    let wait = wait_state_from_presentation(&id, &command)?;
+                    presentation.push(command);
                     if let Some(wait) = wait {
                         self.state.pending_wait = Some(wait);
                         return Ok(());
@@ -660,44 +665,26 @@ fn compiled_command_id(command: &CompiledCommand) -> String {
 }
 
 fn vn_audio_command(command: &PresentationCommand) -> Option<crate::VnAudioCommand> {
-    let PresentationCommand::Stage {
-        command,
-        attributes,
-    } = command
-    else {
+    let PresentationCommand::Stage(StageCommand::Audio(cue)) = command else {
         return None;
     };
-    if !matches!(command.as_str(), "voice" | "bgm" | "se" | "audio") {
-        return None;
-    }
     Some(crate::VnAudioCommand {
-        command_id: attributes
-            .get("id")
-            .cloned()
-            .unwrap_or_else(|| format!("audio:{command}")),
-        command: command.clone(),
-        attributes: attributes.clone(),
+        command_id: cue.id.clone(),
+        cue: cue.clone(),
     })
 }
 
 fn vn_timeline_task(command: &PresentationCommand) -> Option<crate::VnTimelineTask> {
-    let PresentationCommand::Stage {
-        command,
-        attributes,
-    } = command
-    else {
+    let PresentationCommand::Stage(StageCommand::Timeline(command)) = command else {
         return None;
     };
-    if !matches!(command.as_str(), "timeline" | "task") {
-        return None;
-    }
+    let command_id = match command {
+        TimelineCommand::Start(spec) => spec.id.clone(),
+        TimelineCommand::Cancel { id, .. } => id.clone(),
+    };
     Some(crate::VnTimelineTask {
-        command_id: attributes
-            .get("id")
-            .cloned()
-            .unwrap_or_else(|| format!("timeline:{command}")),
+        command_id,
         command: command.clone(),
-        attributes: attributes.clone(),
     })
 }
 
@@ -764,61 +751,53 @@ fn route_flag_kind_id(kind: VnRouteFlagKind) -> &'static str {
 fn wait_state_from_presentation(
     command_id: &str,
     command: &PresentationCommand,
-) -> Option<VnWaitState> {
-    let PresentationCommand::Stage {
-        command,
-        attributes,
-    } = command
-    else {
-        return None;
+) -> Result<Option<VnWaitState>, VnError> {
+    let PresentationCommand::Stage(stage) = command else {
+        return Ok(None);
     };
-    match command.as_str() {
-        "movie" if attr_is(attributes, "end", "wait") || attr_is(attributes, "wait_for", "end") => {
-            Some(VnWaitState::new(
-                VnWaitKind::MovieEnd,
-                attributes
-                    .get("fence")
-                    .cloned()
-                    .unwrap_or_else(|| format!("{command_id}.end")),
-                command_id.to_string(),
-            ))
-        }
-        "voice"
-            if attr_is(attributes, "sync", "text")
-                || attr_is(attributes, "sync", "fence")
-                || attr_is(attributes, "wait", "true") =>
+    let wait = match stage {
+        StageCommand::Movie {
+            end: VnMovieEndBehavior::Wait,
+            fence,
+            ..
+        } => Some(VnWaitState::new(
+            VnWaitKind::MovieEnd,
+            required_typed_fence(command_id, fence.as_deref())?,
+            command_id.to_string(),
+        )),
+        StageCommand::Audio(cue)
+            if cue.bus == VnAudioBus::Voice && cue.sync != VnAudioSync::None =>
         {
+            let fence = match &cue.sync {
+                VnAudioSync::Fence(fence) => fence.clone(),
+                VnAudioSync::Text => format!("{}.end", cue.id),
+                VnAudioSync::None => unreachable!(),
+            };
             Some(VnWaitState::new(
                 VnWaitKind::VoiceEnd,
-                attributes
-                    .get("fence")
-                    .cloned()
-                    .unwrap_or_else(|| format!("{command_id}.end")),
+                fence,
                 command_id.to_string(),
             ))
         }
-        "timeline"
-            if attr_is(attributes, "join", "wait") || attr_is(attributes, "join", "block") =>
+        StageCommand::Timeline(TimelineCommand::Start(spec))
+            if spec.join == VnTimelineJoinPolicy::Block =>
         {
             Some(VnWaitState::new(
                 VnWaitKind::TimelineComplete,
-                attributes
-                    .get("fence")
-                    .cloned()
-                    .unwrap_or_else(|| format!("{command_id}.complete")),
+                required_typed_fence(command_id, spec.fence.as_deref())?,
                 command_id.to_string(),
             ))
         }
         _ => None,
-    }
+    };
+    Ok(wait)
 }
 
-fn attr_is(
-    attributes: &std::collections::BTreeMap<String, String>,
-    key: &str,
-    expected: &str,
-) -> bool {
-    attributes
-        .get(key)
-        .is_some_and(|value| value.eq_ignore_ascii_case(expected))
+fn required_typed_fence(command_id: &str, fence: Option<&str>) -> Result<String, VnError> {
+    fence.map(str::to_string).ok_or_else(|| {
+        VnError::diagnostic(
+            "ASTRA_VN_TYPED_FENCE_MISSING",
+            format!("typed presentation command {command_id} is missing its required fence"),
+        )
+    })
 }

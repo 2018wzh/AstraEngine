@@ -122,7 +122,7 @@ fn luau_policy_records_command_query_and_trace_capabilities() {
     let result = policy
         .eval_bool_with_context(
             r#"
-            astra.command.register("show.hero", { schema = "astra.command.show.v1" }, function() return true end)
+            astra.command.register("show.hero", { schema = "astra.command.show.v2" }, function() return true end)
             astra.command.emit("show.hero", { layer = "hero", x = 320 })
             astra.command.enqueue("voice.line", { asset = "voice.001" })
             astra.command.filter("show.hero", function(command) return command end)

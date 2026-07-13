@@ -1,10 +1,14 @@
 use std::collections::BTreeMap;
 
+use astra_core::Diagnostic;
+
+use crate::{ExtensionCommandDescriptor, VnError};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandProvider {
     Core,
     Standard,
-    Extension(String),
+    Extension(ExtensionCommandDescriptor),
 }
 
 #[derive(Debug, Clone)]
@@ -51,12 +55,7 @@ impl Default for CommandRegistry {
             "stage",
             "layer",
             "timeline",
-            "task",
             "effect",
-            "fence",
-            "command",
-            "bind_setting",
-            "source",
         ] {
             registry
                 .commands
@@ -67,9 +66,26 @@ impl Default for CommandRegistry {
 }
 
 impl CommandRegistry {
-    pub fn bind_extension(&mut self, command: impl Into<String>, provider: impl Into<String>) {
-        self.commands
-            .insert(command.into(), CommandProvider::Extension(provider.into()));
+    pub fn bind_extension(
+        &mut self,
+        descriptor: ExtensionCommandDescriptor,
+    ) -> Result<(), VnError> {
+        descriptor.validate().map_err(VnError::Diagnostic)?;
+        if self.commands.contains_key(&descriptor.command) {
+            return Err(VnError::Diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_VN_COMMAND_BINDING_CONFLICT",
+                    "command already has an authoritative provider binding",
+                )
+                .with_field("command", &descriptor.command)
+                .with_field("provider", &descriptor.provider_id),
+            ));
+        }
+        self.commands.insert(
+            descriptor.command.clone(),
+            CommandProvider::Extension(descriptor),
+        );
+        Ok(())
     }
 
     pub fn provider(&self, command: &str) -> Option<&CommandProvider> {

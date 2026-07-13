@@ -7,6 +7,8 @@ pub mod language_service;
 mod lower;
 pub mod registry;
 pub mod source_map;
+mod stage;
+mod stage_compile;
 pub mod syntax;
 mod types;
 
@@ -16,5 +18,6 @@ pub use formatter::*;
 pub use language_service::*;
 pub use registry::*;
 pub use source_map::*;
+pub use stage::*;
 pub use syntax::*;
 pub use types::*;

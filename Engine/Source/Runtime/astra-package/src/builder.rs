@@ -203,10 +203,10 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
                 ),
                 (
                     RuntimeOutputDomain::Presentation,
-                    "astra.vn.presentation_command.v1",
-                    1,
+                    "astra.vn.presentation_command.v2",
+                    2,
                 ),
-                (RuntimeOutputDomain::Audio, "astra.vn.audio_command.v1", 1),
+                (RuntimeOutputDomain::Audio, "astra.vn.audio_command.v2", 2),
                 (RuntimeOutputDomain::Await, "astra.runtime.await_id.v1", 1),
                 (
                     RuntimeOutputDomain::Trace,

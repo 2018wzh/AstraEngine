@@ -21,8 +21,8 @@ use astra_plugin_abi::{
     ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
 };
 use astra_vn_core::{
-    CompiledCommand, CompiledStory, PresentationCommand, SystemPageKind, VnPlayerCommand,
-    VnRunConfig, VnRuntimeState,
+    CompiledCommand, CompiledStory, PresentationCommand, StageCommand, StagePlacement,
+    SystemPageKind, VnPlayerCommand, VnRunConfig, VnRuntimeState,
 };
 use astra_vn_package::{
     decode_compiled_story, load_localization as load_package_localization,
@@ -1098,8 +1098,8 @@ impl NativeVnHostCommandSource {
                 envelope
                     .decode_postcard(
                         RuntimeOutputDomain::Presentation,
-                        "astra.vn.presentation_command.v1",
-                        SchemaVersion::new(1, 0, 0),
+                        "astra.vn.presentation_command.v2",
+                        SchemaVersion::new(2, 0, 0),
                     )
                     .map_err(|err| NativeVnHostError::Serialize(err.to_string()))
             })
@@ -1113,18 +1113,13 @@ impl NativeVnHostCommandSource {
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         let mut next_scene_draw = self.scene_draw.clone();
         for command in presentation {
-            if let PresentationCommand::Stage {
-                command,
-                attributes,
-            } = command
-            {
+            if let PresentationCommand::Stage(stage) = command {
                 apply_stage_command(
                     &mut next_scene_draw,
                     &self.textures,
                     self.width,
                     self.height,
-                    command,
-                    attributes,
+                    stage,
                 )?;
             }
         }
@@ -1308,7 +1303,41 @@ impl NativeVnHostCommandSource {
                         )?;
                     }
                 }
-                PresentationCommand::Stage { .. } => {}
+                PresentationCommand::SystemOption { option } => {
+                    let y = 180u32.saturating_add((next_layout_ids.len() as u32) * 64);
+                    panel_draw.push(SceneCommand::rect(
+                        format!("vn.system.option.{}", option.id),
+                        42,
+                        y,
+                        self.width.saturating_sub(84),
+                        54,
+                        [38, 58, 84, 255],
+                    ));
+                    append_text_layout(
+                        &mut next_text_resources,
+                        &self.text_provider,
+                        &self.font_families,
+                        &self.localization,
+                        &mut next_layout_ids,
+                        &mut text_lifecycle,
+                        &mut text_draw,
+                        &format!("vn.system.option_text.{}", option.id),
+                        &option.key,
+                        58,
+                        y.saturating_add(12),
+                        self.width.saturating_sub(116),
+                        (body_font_size * 0.72).max(16.0),
+                        1,
+                        [255; 4],
+                    )?;
+                }
+                PresentationCommand::Stage(_) => {}
+                PresentationCommand::Extension(extension) => {
+                    return Err(NativeVnHostError::Asset(format!(
+                        "ASTRA_PLAYER_EXTENSION_PROVIDER_UNWIRED: command {} requires provider {}",
+                        extension.command, extension.provider_id
+                    )));
+                }
                 PresentationCommand::Marker { .. } => {}
             }
         }
@@ -1746,12 +1775,10 @@ fn apply_stage_command(
     textures: &BTreeMap<String, TextureFrame>,
     width: u32,
     height: u32,
-    command: &str,
-    attributes: &BTreeMap<String, String>,
+    command: &StageCommand,
 ) -> Result<(), NativeVnHostError> {
     match command {
-        "background" => {
-            let asset_id = required_attribute(attributes, "asset", command)?;
+        StageCommand::Background { asset: asset_id, .. } => {
             if !textures.contains_key(asset_id) {
                 return Err(missing_texture(asset_id));
             }
@@ -1768,8 +1795,12 @@ fn apply_stage_command(
                 },
             );
         }
-        "show" => {
-            let asset_id = required_attribute(attributes, "asset", command)?;
+        StageCommand::Show {
+            id,
+            asset: asset_id,
+            placement,
+            ..
+        } => {
             let frame = textures
                 .get(asset_id)
                 .ok_or_else(|| missing_texture(asset_id))?;
@@ -1777,24 +1808,11 @@ fn apply_stage_command(
             let destination_width = ((destination_height as u64 * frame.width as u64)
                 / frame.height as u64)
                 .min(width as u64) as u32;
-            let x = match attributes.get("at").map(String::as_str) {
-                Some("left") => width / 12,
-                Some("center") => width.saturating_sub(destination_width) / 2,
-                Some("right") | None => width.saturating_sub(destination_width + width / 12),
-                Some(position) => {
-                    return Err(NativeVnHostError::Asset(format!(
-                        "ASTRA_PLAYER_STAGE_POSITION: unsupported character position {position}"
-                    )))
-                }
+            let x = match placement {
+                StagePlacement::Left => width / 12,
+                StagePlacement::Center => width.saturating_sub(destination_width) / 2,
+                StagePlacement::Right => width.saturating_sub(destination_width + width / 12),
             };
-            let id = attributes
-                .get("id")
-                .or_else(|| attributes.get("character"))
-                .ok_or_else(|| {
-                    NativeVnHostError::Asset(
-                        "ASTRA_PLAYER_STAGE_ATTRIBUTE: show requires id or character".to_string(),
-                    )
-                })?;
             let draw_id = format!("vn.scene.character.{id}");
             scene_draw.retain(|draw| !draw_id_is(draw, &draw_id));
             scene_draw.push(SceneCommand::Sprite {
@@ -1811,21 +1829,14 @@ fn apply_stage_command(
                 blend: BlendMode::Alpha,
             });
         }
-        "hide" => {
-            let id = attributes
-                .get("id")
-                .or_else(|| attributes.get("character"))
-                .ok_or_else(|| {
-                    NativeVnHostError::Asset(
-                        "ASTRA_PLAYER_STAGE_ATTRIBUTE: hide requires id or character".to_string(),
-                    )
-                })?;
+        StageCommand::Hide { id, .. } => {
             let draw_id = format!("vn.scene.character.{id}");
             scene_draw.retain(|draw| !draw_id_is(draw, &draw_id));
         }
         unsupported => {
             return Err(NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_PRESENTATION_UNSUPPORTED: stage command {unsupported} has no product renderer binding"
+                "ASTRA_PLAYER_PRESENTATION_UNSUPPORTED: typed stage command {} has no product renderer binding",
+                unsupported.kind()
             )))
         }
     }
@@ -2055,7 +2066,12 @@ fn validate_story_text(
                     keys.insert(system_page_localization_key(*page)?.to_string());
                     keys.insert("system.back".to_string());
                 }
-                PresentationCommand::Stage { .. } | PresentationCommand::Marker { .. } => {}
+                PresentationCommand::SystemOption { option } => {
+                    keys.insert(option.key.clone());
+                }
+                PresentationCommand::Stage(_)
+                | PresentationCommand::Extension(_)
+                | PresentationCommand::Marker { .. } => {}
             },
             _ => {}
         }
@@ -2085,36 +2101,34 @@ fn validate_story_presentation(
         .flat_map(|state| &state.scenes)
         .flat_map(|scene| &scene.commands)
     {
-        let CompiledCommand::Presentation {
-            command:
-                PresentationCommand::Stage {
-                    command,
-                    attributes,
-                },
-            ..
-        } = command
-        else {
+        let CompiledCommand::Presentation { command, .. } = command else {
             continue;
         };
-        match command.as_str() {
-            "background" | "show" => {
-                let asset_id = required_attribute(attributes, "asset", command)?;
-                if !textures.contains_key(asset_id) {
-                    return Err(missing_texture(asset_id));
+        match command {
+            PresentationCommand::Stage(stage) => match stage {
+                StageCommand::Background { asset: asset_id, .. }
+                | StageCommand::Show {
+                    asset: asset_id, ..
+                } => {
+                    if !textures.contains_key(asset_id) {
+                        return Err(missing_texture(asset_id));
+                    }
                 }
-            }
-            "hide" => {
-                if !attributes.contains_key("id") && !attributes.contains_key("character") {
-                    return Err(NativeVnHostError::Asset(
-                        "ASTRA_PLAYER_STAGE_ATTRIBUTE: hide requires id or character".to_string(),
-                    ));
+                StageCommand::Hide { .. } => {}
+                unsupported => {
+                    return Err(NativeVnHostError::Asset(format!(
+                        "ASTRA_PLAYER_PRESENTATION_UNSUPPORTED: typed stage command {} has no product renderer binding",
+                        unsupported.kind()
+                    )))
                 }
-            }
-            unsupported => {
+            },
+            PresentationCommand::Extension(extension) => {
                 return Err(NativeVnHostError::Asset(format!(
-                    "ASTRA_PLAYER_PRESENTATION_UNSUPPORTED: stage command {unsupported} has no product renderer binding"
+                    "ASTRA_PLAYER_EXTENSION_PROVIDER_UNWIRED: command {} requires provider {}",
+                    extension.command, extension.provider_id
                 )))
             }
+            _ => {}
         }
     }
     Ok(())

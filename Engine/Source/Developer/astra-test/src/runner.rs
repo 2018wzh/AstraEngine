@@ -1257,11 +1257,16 @@ impl RunContext {
                     "astra.vn.runtime_step_effect.v2",
                     SchemaVersion::new(2, 0, 0),
                 )
-                .allow(
+                .allow_version(
                     RuntimeOutputDomain::Presentation,
-                    "astra.vn.presentation_command.v1",
+                    "astra.vn.presentation_command.v2",
+                    SchemaVersion::new(2, 0, 0),
                 )
-                .allow(RuntimeOutputDomain::Audio, "astra.vn.audio_command.v1")
+                .allow_version(
+                    RuntimeOutputDomain::Audio,
+                    "astra.vn.audio_command.v2",
+                    SchemaVersion::new(2, 0, 0),
+                )
                 .allow(RuntimeOutputDomain::Await, "astra.runtime.await_id.v1")
                 .allow(RuntimeOutputDomain::Trace, "astra.vn.runtime_step_trace.v1")
                 .allow(RuntimeOutputDomain::Trace, "astra.vn.runtime_state.v1")
@@ -1584,12 +1589,12 @@ impl RunContext {
             let command = command
                 .decode_postcard::<VnPresentationCommand>(
                     RuntimeOutputDomain::Presentation,
-                    "astra.vn.presentation_command.v1",
-                    SchemaVersion::new(1, 0, 0),
+                    "astra.vn.presentation_command.v2",
+                    SchemaVersion::new(2, 0, 0),
                 )
                 .map_err(|err| ScenarioError::Message(err.to_string()))?;
             self.world
-                .emit_presentation(convert_vn_presentation(command));
+                .emit_presentation(convert_vn_presentation(command)?);
         }
         for trace in output
             .outputs
@@ -2021,8 +2026,10 @@ fn parse_skip_mode(value: &str) -> SkipMode {
     }
 }
 
-fn convert_vn_presentation(command: VnPresentationCommand) -> PresentationCommand {
-    match command {
+fn convert_vn_presentation(
+    command: VnPresentationCommand,
+) -> Result<PresentationCommand, ScenarioError> {
+    let converted = match command {
         VnPresentationCommand::Dialogue {
             key,
             speaker,
@@ -2058,18 +2065,49 @@ fn convert_vn_presentation(command: VnPresentationCommand) -> PresentationComman
             .into_iter()
             .collect(),
         },
-        VnPresentationCommand::Stage {
-            command,
-            attributes,
-        } => PresentationCommand::Custom {
-            kind: format!("vn.stage.{command}"),
-            data: attributes
-                .into_iter()
-                .map(|(key, value)| (key, BlackboardValue::String(value)))
-                .collect(),
+        VnPresentationCommand::SystemOption { option } => PresentationCommand::Custom {
+            kind: "vn.system_option.v1".to_string(),
+            data: [
+                ("id".to_string(), BlackboardValue::String(option.id)),
+                ("key".to_string(), BlackboardValue::String(option.key)),
+                ("target".to_string(), BlackboardValue::String(option.target)),
+            ]
+            .into_iter()
+            .collect(),
+        },
+        VnPresentationCommand::Stage(stage) => PresentationCommand::Custom {
+            kind: format!("vn.stage.{}.v2", stage.kind()),
+            data: [(
+                "typed_payload".to_string(),
+                BlackboardValue::Bytes(
+                    postcard::to_allocvec(&stage)
+                        .map_err(|err| ScenarioError::Message(err.to_string()))?,
+                ),
+            )]
+            .into_iter()
+            .collect(),
+        },
+        VnPresentationCommand::Extension(extension) => PresentationCommand::Custom {
+            kind: format!("vn.extension.{}", extension.command),
+            data: [
+                (
+                    "provider_id".to_string(),
+                    BlackboardValue::String(extension.provider_id.clone()),
+                ),
+                (
+                    "typed_payload".to_string(),
+                    BlackboardValue::Bytes(
+                        postcard::to_allocvec(&extension)
+                            .map_err(|err| ScenarioError::Message(err.to_string()))?,
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect(),
         },
         VnPresentationCommand::Marker { id } => PresentationCommand::Marker { name: id },
-    }
+    };
+    Ok(converted)
 }
 
 fn run_plugin_descriptor_gate(diagnostics: &mut Vec<Diagnostic>) -> ScenarioStatus {

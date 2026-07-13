@@ -30,7 +30,7 @@ const MOVIE_WAIT_STORY: &str = r#"
 story main #@id story.main
 state prologue #@id state.prologue
   scene opening #@id scene.opening
-    movie layer:video.opening asset:native-assets/movie/op.webm end:wait fallback:native-assets/movie/op_fallback.png #@id movie.opening
+    movie layer:video.opening asset:asset:/movie/op end:wait fence:movie.opening.end fallback:asset:/movie/op_fallback #@id movie.opening
     text key:opening.after_movie speaker:narrator #@id line.after_movie
 "#;
 

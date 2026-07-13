@@ -8,8 +8,8 @@ fn standard_command_manifest_validates_compiled_presentation_usage() {
 story main #@id story.main
 state prologue #@id state.prologue
   scene opening #@id scene.opening
-    movie layer:video.opening asset:native-assets/movie/op.webm end:wait fallback:native-assets/movie/op_fallback.png #@id movie.opening
-    voice asset:native-assets/voice/hero0001.ogg sync:text #@id voice.hero.0001
+    movie layer:video.opening asset:asset:/movie/op end:wait fence:movie.opening.end fallback:asset:/movie/op_fallback #@id movie.opening
+    voice asset:asset:/voice/hero0001 sync:text #@id voice.hero.0001
     text key:opening.line speaker:hero #@id line.opening
 "#,
     )])
@@ -22,25 +22,19 @@ state prologue #@id state.prologue
 }
 
 #[test]
-fn standard_command_manifest_blocks_missing_movie_fallback() {
-    let compiled = compile_astra_sources([AstraSource::new(
+fn compiler_blocks_missing_movie_fallback_before_manifest_generation() {
+    let error = compile_astra_sources([AstraSource::new(
         "commands.astra",
         r#"
 story main #@id story.main
 state prologue #@id state.prologue
   scene opening #@id scene.opening
-    movie layer:video.opening asset:native-assets/movie/op.webm end:wait #@id movie.opening
+    movie layer:video.opening asset:asset:/movie/op end:wait fence:movie.opening.end #@id movie.opening
 "#,
     )])
-    .unwrap();
+    .unwrap_err();
 
-    let report = VnStandardCommandManifest::standard().validate_usage(&compiled);
-
-    assert!(!report.passed);
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "ASTRA_VN_STANDARD_COMMAND_FALLBACK"));
+    assert_eq!(error.code(), "ASTRA_VN_MOVIE_WAIT_CONTRACT");
 }
 
 #[test]
