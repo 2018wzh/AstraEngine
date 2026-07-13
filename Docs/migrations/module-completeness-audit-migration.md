@@ -77,7 +77,9 @@
 
 **2026-07-13 新增证据：** `Engine/Fixtures/PublicDomainFonts/manifest.json` 固定同一 `google/fonts` revision、OFL license、byte size 和 SHA-256；Noto Sans SC、Noto Sans Arabic、Noto Emoji 与 Poppins 会进入真实 `astra.font_manifest.v1`、Package section 和 VFS resolve 主链。`text_layout.rs` 现覆盖 CJK/假名/ruby、Arabic RTL/组合字符、emoji variation/ZWJ cluster、实际 fallback family、glyph bitmap 和 layout hash。该回归同时暴露并修复了把三通道 subpixel mask 当四通道 RGBA、零 advance 组合 glyph 被误判损坏的问题。
 
-**剩余缺口：** shared layout save/replay continuation 已闭合；Windows GPU glyph atlas/golden 和产品 presentation/release evidence 消费仍未闭合。P1-001 保持开放，不能标记 `RESOLVED`。
+**2026-07-13 Windows 子项：** `WgpuGlyphAtlasRenderer` 已把 renderer-ready glyph command 接到真实 hardware wgpu atlas、vertex/scissor draw、surface present 和 GPU texture readback。`text_surface.rs` 用固定 revision/hash/OFL 的 CJK/假名、Arabic、emoji 字体生成 layout，校验 layout hash、GPU capture hash、变化像素、重复 upload 事务回滚、资源 release、loss/rebuild 后同图，并明确拒绝非文本 command。逻辑 glyph resource 只在 present 成功后提交；测试注入只证明 loss 后 retained-resource rebuild，不伪装成物理 GPU 移除。
+
+**剩余缺口：** shared layout save/replay continuation和 Windows GPU glyph atlas/golden 已闭合；WebGPU glyph consumer、产品 Player presentation/release evidence 消费和完整 SceneCommand GPU renderer 仍未闭合。P1-001 保持开放，不能标记 `RESOLVED`。
 
 **迁移要求：**
 
@@ -129,7 +131,7 @@
 
 **迁移要求：** 为每个 provider 增加 owner、selected/available evidence、真实资源生命周期、device/context loss recovery、bounded queue、取消和 release profile；把 headless/fixture 证据与 E3/E4 产品证据分离，不允许 gate 复用弱证据。
 
-**2026-07-13 修补进度：** 已删除 descriptor-only `WgpuRendererProvider`、graph-hash audio meter、Kira facade 和 Windows 中 `cfg(any())` 遮蔽的旧 renderer；`WgpuPresentationCore` 增加 ordered frame、malformed rollback、resize、context/device recovery policy 与 retained upload rebuild；FilterGraph 阻断 unknown/no-op/target bypass；DecodeRegistry 改为 exact provider/target/profile binding，WMF 保留 diagnostic/sequence rollback。optional `ffmpeg-vcpkg` 已执行真实 MP3/MP4 timestamped stream，覆盖目标设备 resample、seek generation、EOS drain、取消、packet hash、终段 trimming、live byte budget 和单 packet backpressure。Windows profile 只接受精确 `[wmf, ffmpeg]` 软件 fallback 声明；`WindowsNativeMediaSession` 已把 stream 接到 audio-master scheduler、WASAPI 和 wgpu，真实测试覆盖 pause/resume、seek、视觉 capture、非静音 meter、可注入 device-loss recovery、失败清理和 product-profile-bound measured performance report。`astra.performance_budget.v1`/`astra.performance_report.v1` 阻断 sample/identity/budget drift，WASAPI underflow 改按 callback 计数；`astra-release` 已增加 clean checkout 下 budget/report/capability/conformance/Player/package 同 run identity consumer。GPU FilterGraph、Windows font golden、真实 Player 生成的 performance artifact 和正式 reference threshold pass 仍开放，因此 P1-005 保持未关闭。
+**2026-07-13 修补进度：** 已删除 descriptor-only `WgpuRendererProvider`、graph-hash audio meter、Kira facade 和 Windows 中 `cfg(any())` 遮蔽的旧 renderer；`WgpuPresentationCore` 增加 ordered frame、malformed rollback、resize、context/device recovery policy 与 retained upload rebuild；FilterGraph 阻断 unknown/no-op/target bypass；DecodeRegistry 改为 exact provider/target/profile binding，WMF 保留 diagnostic/sequence rollback。optional `ffmpeg-vcpkg` 已执行真实 MP3/MP4 timestamped stream，覆盖目标设备 resample、seek generation、EOS drain、取消、packet hash、终段 trimming、live byte budget 和单 packet backpressure。Windows profile 只接受精确 `[wmf, ffmpeg]` 软件 fallback 声明；`WindowsNativeMediaSession` 已把 stream 接到 audio-master scheduler、WASAPI 和 wgpu，真实测试覆盖 pause/resume、seek、视觉 capture、非静音 meter、可注入 device-loss recovery、失败清理和 product-profile-bound measured performance report。`astra.performance_budget.v1`/`astra.performance_report.v1` 阻断 sample/identity/budget drift，WASAPI underflow 改按 callback 计数；`astra-release` 已增加 clean checkout 下 budget/report/capability/conformance/Player/package 同 run identity consumer。Windows font golden 已由 P1-001 的 hardware glyph 子路径闭合；GPU FilterGraph、真实 Player 生成的 performance artifact 和正式 reference threshold pass 仍开放，因此 P1-005 保持未关闭。
 
 ### P1-006：Workspace 与状态页必须持续阻断未实现 Stage 4/5/7
 
@@ -147,7 +149,7 @@
 
 | UE 能力域 | AstraEngine 当前状态 | 后续闭合条件 |
 | --- | --- | --- |
-| 字体/文本 | 已有 verified package font database、真实 multiscript shaping/raster、fallback、glyph resource、layout identity 和 bounded provider-free replay E2 | 补 Windows GPU glyph atlas/golden、产品 presentation/release evidence 和 E3 |
+| 字体/文本 | 已有 verified package font database、真实 multiscript shaping/raster、fallback、glyph resource、layout identity、bounded provider-free replay E2 和 Windows hardware glyph visual E3 子证据 | 补 WebGPU glyph consumer、产品 presentation/release evidence 和完整跨端 E3 |
 | Editor | 只有设计和 metadata contract | 可创建项目、编辑、PIE、调试、撤销、打包和 release review |
 | 资产规模 | 有 VFS URI、package section、hash 和 cook audit | DDC/cache、增量 cook、依赖图、并发、取消、恢复、超大资产和发布包验证 |
 | 渲染 | 有 headless CPU contract、wgpu provider 代码和部分 host | 资源生命周期、材质/纹理管理、surface/device recovery、GPU budget、真实视觉验收 |
@@ -372,7 +374,7 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 在后续修补完成前，以下结论必须保持：
 
 - EngineCore、Package、Media contract、AstraVN 已实现部分可以继续独立演进，但不能宣称整个引擎达到 UE 级完备。
-- TextLayout 已删除固定宽度实现并建立 shared E2，但仍不能标记为完整字体产品系统；必须补齐 P1-001 的 CJK/Arabic/emoji package、Package/VFS provider 主链和 Windows 视觉/replay/release 证据。
+- TextLayout 已删除固定宽度实现，建立 shared E2 和 Windows hardware glyph visual E3 子证据，但仍不能标记为完整字体产品系统；必须补齐 P1-001 的 WebGPU 与产品 Player presentation/release evidence。
 - Editor、AI/MCP、AstraEMU、AstraRPG 不能从 planned/reopened 改为 DONE，直到存在真实 workspace target、主路径和对应 release evidence。
 - Windows/Web Player 和 TsuiNoSora full playable gate 继续阻断于真实状态推进、完整路线和同 run host evidence。
 - 每一项弱证据都必须在报告中保留其真实等级和用途，不能通过改名或重新包装规避验收。

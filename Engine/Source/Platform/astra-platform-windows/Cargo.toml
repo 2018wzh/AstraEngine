@@ -7,7 +7,10 @@ rust-version.workspace = true
 
 [features]
 default = []
-platform-test-driver = ["astra-platform/platform-test-driver"]
+platform-test-driver = [
+    "astra-platform/platform-test-driver",
+    "astra-platform-general/platform-test-driver",
+]
 ffmpeg-vcpkg = ["astra-media/ffmpeg-vcpkg"]
 
 [dependencies]
@@ -39,3 +42,4 @@ windows = { workspace = true, features = [
 
 [dev-dependencies]
 tempfile.workspace = true
+serde_json.workspace = true

@@ -160,6 +160,21 @@ mod browser {
                     }
                     let _ = reply.send(result);
                 }
+                HostCommand::PresentTextScene { reply, .. } => {
+                    let _ = reply.send(Err(PlatformError::new(
+                        PlatformErrorCode::PlatformNotImplemented,
+                        "surface.present_text_scene",
+                        "Web GPU text scene execution is outside the current implementation scope",
+                    )));
+                }
+                #[cfg(feature = "platform-test-driver")]
+                HostCommand::InjectSurfaceDeviceLoss { reply, .. } => {
+                    let _ = reply.send(Err(PlatformError::new(
+                        PlatformErrorCode::PlatformNotImplemented,
+                        "surface.test.inject_device_loss",
+                        "Web surface device-loss injection is outside the current implementation scope",
+                    )));
+                }
                 HostCommand::CaptureSurface { surface, reply } => {
                     let result = match surfaces.get_mut(surface) {
                         Ok(surface) => capture_surface(surface).await,

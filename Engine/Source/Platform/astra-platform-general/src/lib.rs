@@ -1,6 +1,7 @@
 mod audio;
 mod completion;
 mod gamepad;
+mod glyph_atlas;
 #[cfg(not(target_arch = "wasm32"))]
 mod http_range;
 mod presentation;

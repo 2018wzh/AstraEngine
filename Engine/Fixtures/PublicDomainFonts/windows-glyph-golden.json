@@ -1,0 +1,11 @@
+{
+  "schema": "astra.windows_gpu_glyph_golden.v1",
+  "width": 640,
+  "height": 180,
+  "renderer": "wgpu_hardware.glyph_atlas",
+  "font_fixture_revision": "ec0464b978de222073645d6d3366f3fdf03376d8",
+  "layout_hash": "sha256:7cf2a110ff29aadfec4b82b437f45658c7e2c7aa8ccbc30d510e6b3350bfc661",
+  "capture_hash": "sha256:1c6ebbbc90d15359a9ce0f7b6e13a3c94d38e00f2879bb26b7d1a08265760784",
+  "minimum_changed_pixels": 1000,
+  "background_rgba": [12, 18, 28, 255]
+}

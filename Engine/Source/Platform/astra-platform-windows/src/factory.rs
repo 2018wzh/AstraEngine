@@ -433,6 +433,57 @@ mod windows {
                         }
                         let _ = reply.send(result);
                     }
+                    HostCommand::PresentTextScene {
+                        surface,
+                        frame,
+                        reply,
+                    } => {
+                        let result = self
+                            .surfaces
+                            .get_mut(surface)
+                            .and_then(|surface| surface.present_text_scene(frame));
+                        if result
+                            .as_ref()
+                            .is_err_and(|error| error.code == PlatformErrorCode::ContextLost)
+                        {
+                            let recovered = self
+                                .surfaces
+                                .get_mut(surface)
+                                .and_then(|surface| surface.reconfigure_after_loss())
+                                .is_ok();
+                            for event in astra_platform_general::wgpu_recovery_events(
+                                "wgpu_hardware",
+                                recovered,
+                            ) {
+                                self.emit(event);
+                            }
+                        } else if result
+                            .as_ref()
+                            .is_err_and(|error| error.code == PlatformErrorCode::DeviceLost)
+                        {
+                            let recovered = self
+                                .surfaces
+                                .get_mut(surface)
+                                .and_then(|surface| {
+                                    pollster::block_on(surface.recover_device()).map(|_| ())
+                                })
+                                .is_ok();
+                            for event in astra_platform_general::wgpu_device_recovery_events(
+                                "wgpu_hardware",
+                                recovered,
+                            ) {
+                                self.emit(event);
+                            }
+                        }
+                        let _ = reply.send(result);
+                    }
+                    #[cfg(feature = "platform-test-driver")]
+                    HostCommand::InjectSurfaceDeviceLoss { surface, reply } => {
+                        let result = self.surfaces.get(surface).map(|surface| {
+                            surface.inject_device_loss_for_test();
+                        });
+                        let _ = reply.send(result);
+                    }
                     HostCommand::CaptureSurface { surface, reply } => {
                         let result = self.surfaces.get_mut(surface).and_then(capture_surface);
                         let _ = reply.send(result);

@@ -1,6 +1,6 @@
 # Stage 2 Media + Package Work
 
-Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS 和 release gate。生产完备度审查已将本 Stage 重开为 `IN_PROGRESS`：Package/VFS 权威校验、Cook 批次事务、bounded text layout replay、Windows native media 恢复/资源生命周期、measured performance contract 和 release same-run validator 已完成加固；GPU FilterGraph、Windows font golden、真实 Player performance artifact 与正式 release-reference performance pass 仍在实施。Migration 11 同时重开完整 Headless Platform 完成口径：当前分散的 `ScenarioRunner`、CPU frame、AudioGraph meter 和 Player automation 尚未收束为全功能测试 host。Web 本轮暂缓；Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是本轮完成前置。
+Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS 和 release gate。生产完备度审查已将本 Stage 重开为 `IN_PROGRESS`：Package/VFS 权威校验、Cook 批次事务、bounded text layout replay、Windows hardware glyph golden、Windows native media 恢复/资源生命周期、measured performance contract 和 release same-run validator 已完成加固；GPU FilterGraph、真实 Player performance artifact 与正式 release-reference performance pass 仍在实施。Migration 11 同时重开完整 Headless Platform 完成口径：当前分散的 `ScenarioRunner`、CPU frame、AudioGraph meter 和 Player automation 尚未收束为全功能测试 host。Web 本轮暂缓；Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是本轮完成前置。
 
 ## S2-ASSET-01 AssetId、VFS 基础与 sidecar schema
 
@@ -113,7 +113,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 3. 实现 headless capture provider，输出 deterministic image hash。
 4. 编写 provider eligibility、headless render command 和 hash repeatability 测试。
 
-**Current Evidence:** `cargo test -p astra-media headless_capture` 只证明 reference CPU capture；`cargo test -p astra-platform-windows --test host_backend` 证明 Windows hardware wgpu ordered frame、byte-size rejection、resize、present/readback 和资源释放，`WgpuPresentationCore` 还补入 context/device loss 分类与 retained frame resource rebuild。旧的 descriptor-only `WgpuRendererProvider` 已删除。真实 SceneCommand/glyph atlas product E3 与可注入 device-loss recovery test 尚未闭合。
+**Current Evidence:** `cargo test -p astra-media headless_capture` 只证明 reference CPU capture；`cargo test -p astra-platform-windows --test host_backend --test text_surface --features platform-test-driver` 证明 Windows hardware wgpu ordered RGBA frame，以及真实 glyph command 的 atlas/vertex/scissor draw、surface present、GPU readback、duplicate upload rollback、resource release 和可注入 loss 后 retained-resource rebuild。旧的 descriptor-only `WgpuRendererProvider` 已删除。该路径只接收 text subset；sprite/filter/camera 等完整 SceneCommand product E3、WebGPU 和 formal Player evidence 仍未闭合。
 
 **Linked Test IDs:** `T-S2-MEDIA-01`
 
@@ -134,7 +134,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 3. 实现 bounded layout/raster cache、动态字体事务替换与失效、Alpha8/RGBA glyph、layout identity 和 `TextRenderResourceOwner` 引用生命周期。
 4. 覆盖 Latin/组合字符、ruby、BiDi、wrap、clip、ellipsis、空输入、font/hash/fallback/direction 负向路径以及真实 CPU glyph capture。
 
-**Done Evidence:** `cargo test -p astra-media --test text_layout` 与 `cargo test -p astra-media-core --test scene_compositor` 证明 shared E2 contract 从 verified package/VFS font sections 建库，使用固定 revision/hash/OFL 的 Poppins、Noto Sans SC、Noto Sans Arabic 和 Noto Emoji 执行 Latin/组合字符、CJK/假名/ruby、Arabic RTL、emoji variation/ZWJ cluster 与显式 fallback；subpixel mask、零 advance cluster、动态 cache、layout snapshot/restore、uninterrupted continuation、provider-free replay、drift/budget rollback 和失败 resource mutation 也有负向回归。该证据不包含 Windows GPU glyph atlas visual golden 或产品 presentation/release evidence；这些仍由 P1-001/E3 阻断，不能从 Stage 2 contract 状态外推为完整产品字体能力。
+**Done Evidence:** `cargo test -p astra-media --test text_layout` 与 `cargo test -p astra-media-core --test scene_compositor` 证明 shared E2 contract 从 verified package/VFS font sections 建库，使用固定 revision/hash/OFL 的 Poppins、Noto Sans SC、Noto Sans Arabic 和 Noto Emoji 执行 Latin/组合字符、CJK/假名/ruby、Arabic RTL、emoji variation/ZWJ cluster 与显式 fallback；subpixel mask、零 advance cluster、动态 cache、layout snapshot/restore、uninterrupted continuation、provider-free replay、drift/budget rollback 和失败 resource mutation 也有负向回归。`cargo test -p astra-platform-windows --test text_surface --features platform-test-driver` 进一步绑定同一 layout 到 hardware wgpu glyph atlas/golden，覆盖 GPU capture、变化像素、重复 upload 失败不提交、release 和 loss/rebuild 后 capture identity。P1-001 仍由 WebGPU 与产品 Player presentation/release evidence 阻断，不能从 Windows 子证据外推为完整跨端字体能力。
 
 **Linked Test IDs:** `T-S2-MEDIA-02`
 

@@ -453,6 +453,7 @@ name = "astra-platform"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-media-core",
  "schemars",
  "serde",
  "serde_json",
@@ -475,6 +476,7 @@ name = "astra-platform-general"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-media-core",
  "astra-platform",
  "directories",
  "futures-util",
@@ -546,6 +548,7 @@ dependencies = [
  "gilrs",
  "pollster",
  "rfd",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",

@@ -4,8 +4,10 @@ use std::sync::{
 };
 
 use astra_platform::{
-    CapturedFrame, PlatformError, PlatformErrorCode, PlatformEventKind, RgbaFrame,
+    CapturedFrame, PlatformError, PlatformErrorCode, PlatformEventKind, RgbaFrame, TextSceneFrame,
 };
+
+use crate::glyph_atlas::WgpuGlyphAtlasRenderer;
 
 /// Shared hardware-only WGPU presentation path. Backends own event loops and
 /// surface creation; this core owns adapter policy, RGBA upload, presentation,
@@ -20,10 +22,14 @@ pub struct WgpuPresentationCore {
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
+    glyph_renderer: WgpuGlyphAtlasRenderer,
     last_upload: Option<UploadFrame>,
     last_frame: Option<RgbaFrame>,
+    last_text_frame: Option<TextSceneFrame>,
     last_sequence: Option<u64>,
     device_lost: Arc<AtomicBool>,
+    #[cfg(feature = "platform-test-driver")]
+    test_device_loss: AtomicBool,
 }
 
 pub struct WgpuReadback {
@@ -90,6 +96,7 @@ impl WgpuPresentationCore {
         config.present_mode = wgpu::PresentMode::Fifo;
         surface.configure(&device, &config);
         let (layout, sampler, pipeline) = pipeline(&device, config.format);
+        let glyph_renderer = WgpuGlyphAtlasRenderer::new(&device);
         Ok(Self {
             _instance: instance,
             surface,
@@ -100,10 +107,14 @@ impl WgpuPresentationCore {
             layout,
             sampler,
             pipeline,
+            glyph_renderer,
             last_upload: None,
             last_frame: None,
+            last_text_frame: None,
             last_sequence: None,
             device_lost,
+            #[cfg(feature = "platform-test-driver")]
+            test_device_loss: AtomicBool::new(false),
         })
     }
 
@@ -223,6 +234,45 @@ impl WgpuPresentationCore {
         });
         self.last_sequence = Some(frame.sequence);
         self.last_frame = Some(frame);
+        self.last_text_frame = None;
+        Ok(())
+    }
+
+    pub fn present_text_scene(&mut self, frame: TextSceneFrame) -> Result<(), PlatformError> {
+        self.ensure_device_available("surface.present_text_scene")?;
+        let expected_sequence = match self.last_sequence {
+            Some(sequence) => sequence.checked_add(1).ok_or_else(|| {
+                invalid(
+                    "surface.present_text_scene",
+                    "frame sequence counter overflowed",
+                )
+            })?,
+            None => 1,
+        };
+        if frame.sequence != expected_sequence || frame.width == 0 || frame.height == 0 {
+            return Err(invalid(
+                "surface.present_text_scene",
+                "text frame sequence or dimensions are invalid",
+            ));
+        }
+        if frame.width != self.config.width || frame.height != self.config.height {
+            self.config.width = frame.width;
+            self.config.height = frame.height;
+            self.surface.configure(&self.device, &self.config);
+        }
+        let prepared = self
+            .glyph_renderer
+            .render(&self.device, &self.queue, &frame)?;
+        self.present_texture(&prepared.texture, "surface.present_text_scene")?;
+        let texture = self.glyph_renderer.commit(prepared);
+        self.last_upload = Some(UploadFrame {
+            texture,
+            width: frame.width,
+            height: frame.height,
+        });
+        self.last_sequence = Some(frame.sequence);
+        self.last_frame = None;
+        self.last_text_frame = Some(frame);
         Ok(())
     }
 
@@ -301,6 +351,36 @@ impl WgpuPresentationCore {
         if !self.device_lost.load(Ordering::Acquire) {
             return Ok(false);
         }
+        #[cfg(feature = "platform-test-driver")]
+        if self.test_device_loss.swap(false, Ordering::AcqRel) {
+            self.glyph_renderer.recover(&self.device);
+            self.last_upload = if let Some(frame) = self.last_frame.as_ref() {
+                Some(UploadFrame {
+                    texture: upload_frame(&self.device, &self.queue, frame),
+                    width: frame.width,
+                    height: frame.height,
+                })
+            } else if let Some(frame) = self.last_text_frame.as_ref() {
+                Some(UploadFrame {
+                    texture: self.glyph_renderer.render_retained(
+                        &self.device,
+                        &self.queue,
+                        frame,
+                    )?,
+                    width: frame.width,
+                    height: frame.height,
+                })
+            } else {
+                None
+            };
+            self.device_lost.store(false, Ordering::Release);
+            tracing::info!(
+                event = "platform.wgpu.device.test_recovered",
+                resource_rebuilt = self.last_upload.is_some(),
+                "test driver rebuilt retained resources without replacing the hardware device"
+            );
+            return Ok(true);
+        }
         tracing::warn!(
             event = "platform.wgpu.device.recovery_started",
             "wgpu device recovery started"
@@ -320,11 +400,24 @@ impl WgpuPresentationCore {
         install_device_lost_callback(&device, Arc::clone(&device_lost));
         let (layout, sampler, pipeline) = pipeline(&device, self.config.format);
         self.surface.configure(&device, &self.config);
-        let last_upload = self.last_frame.as_ref().map(|frame| UploadFrame {
-            texture: upload_frame(&device, &queue, frame),
-            width: frame.width,
-            height: frame.height,
-        });
+        self.glyph_renderer.recover(&device);
+        let last_upload = if let Some(frame) = self.last_frame.as_ref() {
+            Some(UploadFrame {
+                texture: upload_frame(&device, &queue, frame),
+                width: frame.width,
+                height: frame.height,
+            })
+        } else if let Some(frame) = self.last_text_frame.as_ref() {
+            Some(UploadFrame {
+                texture: self
+                    .glyph_renderer
+                    .render_retained(&device, &queue, frame)?,
+                width: frame.width,
+                height: frame.height,
+            })
+        } else {
+            None
+        };
         self.device = device;
         self.queue = queue;
         self.layout = layout;
@@ -344,6 +437,12 @@ impl WgpuPresentationCore {
         self.device_lost.load(Ordering::Acquire)
     }
 
+    #[cfg(feature = "platform-test-driver")]
+    pub fn inject_device_loss_for_test(&self) {
+        self.test_device_loss.store(true, Ordering::Release);
+        self.device_lost.store(true, Ordering::Release);
+    }
+
     fn ensure_device_available(&self, operation: &'static str) -> Result<(), PlatformError> {
         if self.is_device_lost() {
             return Err(PlatformError::new(
@@ -361,6 +460,76 @@ impl WgpuPresentationCore {
             .poll(poll_type)
             .map(|_| ())
             .map_err(|_| unavailable("surface.capture", "GPU readback poll failed"))
+    }
+
+    fn present_texture(
+        &self,
+        texture: &wgpu::Texture,
+        operation: &'static str,
+    ) -> Result<(), PlatformError> {
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("astra-platform-text-frame-bind-group"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
+        let output = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(value)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(value) => value,
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::ContextLost,
+                    operation,
+                    "wgpu surface was lost",
+                ));
+            }
+            wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded
+            | wgpu::CurrentSurfaceTexture::Validation => {
+                return Err(unavailable(operation, "surface frame acquisition failed"));
+            }
+        };
+        let output_view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("astra-platform-text-frame-encoder"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("astra-platform-text-frame-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &output_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        self.queue.submit([encoder.finish()]);
+        self.queue.present(output);
+        Ok(())
     }
 }
 
