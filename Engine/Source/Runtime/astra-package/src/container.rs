@@ -1,12 +1,16 @@
 use astra_core::{Hash256, SchemaVersion};
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 const MAGIC: &[u8; 8] = b"ASTRACT2";
 const HEADER_LEN: usize = 40;
 const FOOTER_LEN: usize = 32;
 const ALIGNMENT: u32 = 8;
+const MAX_SECTION_COUNT: usize = 65_536;
+const MAX_TABLE_LEN: usize = 64 * 1024 * 1024;
+const MAX_DECODED_SECTION_LEN: u64 = 1024 * 1024 * 1024;
 pub const CURRENT_CONTAINER_VERSION: SchemaVersion = SchemaVersion::new(1, 0, 0);
 
 #[derive(Debug, Error)]
@@ -415,6 +419,7 @@ fn write_container(
     sections: Vec<SectionPayload>,
     crypto: Option<&dyn ContainerCryptoProvider>,
 ) -> Result<ContainerBlob, ContainerError> {
+    validate_section_payloads(&sections)?;
     let mut stored_payloads = Vec::with_capacity(sections.len());
     let mut entries = Vec::with_capacity(sections.len());
     for section in &sections {
@@ -520,6 +525,16 @@ fn read_container(bytes: &[u8]) -> Result<AstraContainerReader, ContainerError> 
     let section_count =
         u32::from_le_bytes(bytes[16..20].try_into().expect("section count")) as usize;
     let table_len = u64::from_le_bytes(bytes[20..28].try_into().expect("table len")) as usize;
+    if section_count == 0 || section_count > MAX_SECTION_COUNT {
+        return Err(ContainerError::message(
+            "container section count is outside the supported bound",
+        ));
+    }
+    if table_len == 0 || table_len > MAX_TABLE_LEN {
+        return Err(ContainerError::message(
+            "container section table exceeds the supported bound",
+        ));
+    }
     let alignment = u32::from_le_bytes(bytes[28..32].try_into().expect("alignment"));
     if alignment != ALIGNMENT {
         return Err(ContainerError::message(
@@ -555,7 +570,21 @@ fn read_container(bytes: &[u8]) -> Result<AstraContainerReader, ContainerError> 
             "section count does not match table",
         ));
     }
+    let mut ids = BTreeSet::new();
+    let mut ranges = Vec::with_capacity(entries.len());
     for entry in &entries {
+        validate_section_descriptor(
+            &entry.id,
+            &entry.schema,
+            entry.decoded_length,
+            &entry.migration,
+        )?;
+        if !ids.insert(entry.id.as_str()) {
+            return Err(ContainerError::message(format!(
+                "duplicate section id {}",
+                entry.id
+            )));
+        }
         if entry.offset % ALIGNMENT as u64 != 0 {
             return Err(ContainerError::message(format!(
                 "section {} is not aligned",
@@ -572,6 +601,13 @@ fn read_container(bytes: &[u8]) -> Result<AstraContainerReader, ContainerError> 
                 entry.id
             )));
         }
+        if start < table_end {
+            return Err(ContainerError::message(format!(
+                "section {} overlaps the container header or table",
+                entry.id
+            )));
+        }
+        ranges.push((start, end, entry.id.as_str()));
         let stored = &bytes[start..end];
         if Hash256::from_sha256(stored) != entry.stored_hash {
             return Err(ContainerError::message(format!(
@@ -596,6 +632,15 @@ fn read_container(bytes: &[u8]) -> Result<AstraContainerReader, ContainerError> 
                     entry.id
                 )));
             }
+        }
+    }
+    ranges.sort_unstable_by_key(|(start, _, _)| *start);
+    for pair in ranges.windows(2) {
+        if pair[0].1 > pair[1].0 {
+            return Err(ContainerError::message(format!(
+                "section {} overlaps section {}",
+                pair[0].2, pair[1].2
+            )));
         }
     }
     Ok(AstraContainerReader {
@@ -673,9 +718,11 @@ fn encode_payload(codec: &SectionCodec, payload: &[u8]) -> Result<Vec<u8>, Conta
 }
 
 fn decode_payload(entry: &SectionEntry, stored: &[u8]) -> Result<Vec<u8>, ContainerError> {
+    let decoded_len = usize::try_from(entry.decoded_length)
+        .map_err(|_| ContainerError::message("section decoded length exceeds address space"))?;
     let decoded = match entry.codec {
         SectionCodec::Postcard | SectionCodec::Raw => stored.to_vec(),
-        SectionCodec::Zstd => zstd::bulk::decompress(stored, entry.decoded_length as usize)
+        SectionCodec::Zstd => zstd::bulk::decompress(stored, decoded_len)
             .map_err(|err| ContainerError::Zstd(err.to_string()))?,
     };
     if decoded.len() as u64 != entry.decoded_length {
@@ -691,6 +738,67 @@ fn decode_payload(entry: &SectionEntry, stored: &[u8]) -> Result<Vec<u8>, Contai
         )));
     }
     Ok(decoded)
+}
+
+fn validate_section_payloads(sections: &[SectionPayload]) -> Result<(), ContainerError> {
+    if sections.len() > MAX_SECTION_COUNT {
+        return Err(ContainerError::message(
+            "container section count exceeds the supported bound",
+        ));
+    }
+    let mut ids = BTreeSet::new();
+    for section in sections {
+        validate_section_descriptor(
+            &section.id,
+            &section.schema,
+            section.payload.len() as u64,
+            &section.migration,
+        )?;
+        if !ids.insert(section.id.as_str()) {
+            return Err(ContainerError::message(format!(
+                "duplicate section id {}",
+                section.id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_section_descriptor(
+    id: &str,
+    schema: &str,
+    decoded_length: u64,
+    migration: &MigrationPolicy,
+) -> Result<(), ContainerError> {
+    if !is_safe_section_symbol(id) {
+        return Err(ContainerError::message("section id is empty or invalid"));
+    }
+    if !is_safe_section_symbol(schema) {
+        return Err(ContainerError::message(
+            "section schema is empty or invalid",
+        ));
+    }
+    if decoded_length > MAX_DECODED_SECTION_LEN {
+        return Err(ContainerError::message(
+            "section decoded length exceeds the supported bound",
+        ));
+    }
+    if migration.minimum_supported_version > migration.current_version
+        || migration.current_version.major == 0
+    {
+        return Err(ContainerError::message(
+            "section migration policy is invalid for this container version",
+        ));
+    }
+    Ok(())
+}
+
+fn is_safe_section_symbol(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn align(value: u64, alignment: u64) -> u64 {

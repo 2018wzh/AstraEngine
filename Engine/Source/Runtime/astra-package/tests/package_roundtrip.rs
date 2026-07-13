@@ -43,6 +43,50 @@ fn package_roundtrip_verifies_hash_bounds_and_schema_registry() {
 }
 
 #[test]
+fn container_builder_rejects_duplicate_and_invalid_section_authority() {
+    let section = || {
+        SectionPayload::raw(
+            "schema.registry",
+            "astra.schema_registry.v1",
+            b"registry".to_vec(),
+        )
+    };
+    let duplicate = AstraContainerBuilder::new(ContainerKind::Package)
+        .add_section(section())
+        .add_section(section())
+        .write()
+        .unwrap_err();
+    assert!(duplicate.to_string().contains("duplicate section id"));
+
+    for invalid in [
+        SectionPayload::raw("", "astra.schema_registry.v1", vec![]),
+        SectionPayload::raw("schema.registry", "", vec![]),
+        SectionPayload::raw("schema/registry", "astra.schema_registry.v1", vec![]),
+    ] {
+        assert!(AstraContainerBuilder::new(ContainerKind::Package)
+            .add_section(invalid)
+            .write()
+            .is_err());
+    }
+
+    let invalid_migration = SectionPayload::new(
+        "schema.registry",
+        "astra.schema_registry.v1",
+        SchemaVersion::new(1, 0, 0),
+        SectionCodec::Raw,
+        vec![],
+        MigrationPolicy {
+            minimum_supported_version: SchemaVersion::new(2, 0, 0),
+            current_version: SchemaVersion::new(1, 0, 0),
+        },
+    );
+    assert!(AstraContainerBuilder::new(ContainerKind::Package)
+        .add_section(invalid_migration)
+        .write()
+        .is_err());
+}
+
+#[test]
 fn package_roundtrip_zstd_codec_roundtrips_and_encryption_descriptor_requires_provider() {
     let section = SectionPayload::new(
         "media.manifest",

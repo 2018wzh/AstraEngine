@@ -210,6 +210,8 @@
 
 **迁移要求：** 增加 `ResolveContext { target, profile, capability, provider_binding }`，由 resolve 统一过滤 eligibility；validate 必须阻断重复 prefix、layer id、URI/layer/priority 冲突、缺 provider registration 和非法 overlay base。Release gate、runtime reader、Editor preview 和 local mount 必须共用该解析规则。
 
+**2026-07-13 修补进度：** `VfsManifest::resolve` 已强制接收 `ResolveContext`，校验 target/profile eligibility、prefix provider binding 与 capability；manifest validation 阻断重复 prefix/layer/URI-layer/whiteout、entry-layer prefix mismatch、range overflow 和非法 overlay base，resolve 阻断缺候选与同 priority 多权威候选。`vfs_uri.rs` 已覆盖 context bypass 和冲突矩阵。Release validator 和 package runtime reader 接入同一 typed validator 后再关闭 P1-009。
+
 ### P1-010：Astra package container 接受重复 section id，读取时取第一条
 
 **分类：** `SILENT_FAILURE`, `BYPASS`, `DESIGN_GAP`
@@ -219,6 +221,8 @@
 **影响：** package/save section 的 schema、hash、provider policy 或 compiled story 可能出现同名竞争，调用方只读取第一条而不产生 diagnostic，破坏自描述容器和 release gate 的唯一权威来源。
 
 **迁移要求：** builder 在写入时阻断空 id、非法 schema 和重复 id；reader 在读取 table 时阻断重复 id，并增加重复 id、同 hash/不同 payload、不同 schema、加密/未加密混合重复 section 的负向 fixture。Release validator 必须把该 diagnostic 作为 package blocking。
+
+**2026-07-13 修补进度：** container builder 与 reader 已同时校验非空 safe section id/schema、唯一 id、section count/table/decoded-size 上限、migration range、alignment、header/table overlap、section overlap、bounds、stored/decoded hash 和 encryption AAD；Zstd decoded length 使用 checked conversion。`package_roundtrip.rs` 已覆盖 builder duplicate/invalid descriptor/migration。仍需增加 reader 侧恶意 table fixture，并让 `PackageReader` 校验 typed required-section schema registry 后再关闭 P1-010。
 
 ### P1-011：NativeVN release behavior evidence 仍是最短 smoke，不是完整产品行为
 
@@ -251,6 +255,8 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 **证据：** 定向测试 `cargo test -p astra-plugin -p astra-runtime -p astra-package -p astra-asset -p astra-vn-runtime-provider -p astra-player-vn` 全部通过，但现有测试主要覆盖正常 provider registration、单一 package roundtrip、单一 VFS overlay、正常 Runtime tick/save/replay 和单个 NativeVN flow；没有覆盖 `ExtensionRegistry::select`、重复 section id、duplicate layer/prefix、target/profile filtering 或乱序 Runtime tick。
 
 **迁移要求：** 在实现修补前先补齐这些负向测试，确保现有绿色测试不会掩盖冲突输入。测试必须断言稳定 diagnostic code、无部分提交、无状态变化、无错误 report 生成和 package 不可发布。
+
+**2026-07-13 修补进度：** Runtime tick/replay、Plugin binding/lifecycle、VFS graph/context 和 package builder 冲突矩阵已补齐。reader 恶意 table、shared release validator、Cook graph/cancel/atomic commit 和规模测试仍开放，P2-002 暂不关闭。
 
 ### P1-012：workspace verification 不能可靠地区分当前 checkout 与其他 worktree 的构建产物
 

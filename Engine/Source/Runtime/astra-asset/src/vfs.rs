@@ -216,6 +216,14 @@ pub struct VfsManifest {
     pub whiteouts: Vec<VfsWhiteoutEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ResolveContext {
+    pub target: String,
+    pub profile: String,
+    pub capability: String,
+    pub provider_binding: String,
+}
+
 impl VfsManifest {
     pub fn validate(&self) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
@@ -242,10 +250,24 @@ impl VfsManifest {
                     .with_field("prefix", &prefix.prefix),
                 );
             }
-            prefixes.insert(prefix.prefix.as_str(), prefix);
+            if prefixes.insert(prefix.prefix.as_str(), prefix).is_some() {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_VFS_PREFIX_DUPLICATE",
+                        "VFS prefix must be registered exactly once",
+                    )
+                    .with_field("prefix", &prefix.prefix),
+                );
+            }
         }
-        let mut layer_priorities = BTreeMap::new();
+        let mut layers = BTreeMap::new();
         for layer in &self.layers {
+            if !is_safe_symbol(&layer.layer_id) {
+                diagnostics.push(
+                    Diagnostic::blocking("ASTRA_VFS_LAYER_ID", "VFS layer id is invalid")
+                        .with_field("layer_id", &layer.layer_id),
+                );
+            }
             if !prefixes.contains_key(layer.prefix.as_str()) {
                 diagnostics.push(
                     Diagnostic::blocking(
@@ -255,8 +277,41 @@ impl VfsManifest {
                     .with_field("prefix", &layer.prefix),
                 );
             }
-            layer_priorities.insert(layer.layer_id.as_str(), layer.priority);
+            if layers.insert(layer.layer_id.as_str(), layer).is_some() {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_VFS_LAYER_DUPLICATE",
+                        "VFS layer id must be unique",
+                    )
+                    .with_field("layer_id", &layer.layer_id),
+                );
+            }
         }
+        for layer in &self.layers {
+            if let VfsSourceRef::Overlay { base_layer_id } = &layer.source {
+                match layers.get(base_layer_id.as_str()) {
+                    Some(base) if base.prefix == layer.prefix && base.priority < layer.priority => {
+                    }
+                    Some(_) => diagnostics.push(
+                        Diagnostic::blocking(
+                            "ASTRA_VFS_OVERLAY_BASE_INVALID",
+                            "overlay base must use the same prefix and lower priority",
+                        )
+                        .with_field("layer_id", &layer.layer_id)
+                        .with_field("base_layer_id", base_layer_id),
+                    ),
+                    None => diagnostics.push(
+                        Diagnostic::blocking(
+                            "ASTRA_VFS_OVERLAY_BASE_MISSING",
+                            "overlay base layer is not registered",
+                        )
+                        .with_field("layer_id", &layer.layer_id)
+                        .with_field("base_layer_id", base_layer_id),
+                    ),
+                }
+            }
+        }
+        let mut entry_keys = BTreeMap::new();
         for entry in &self.entries {
             if !prefixes.contains_key(entry.uri.prefix()) {
                 diagnostics.push(
@@ -267,7 +322,7 @@ impl VfsManifest {
                     .with_field("vfs_uri", entry.uri.as_str()),
                 );
             }
-            if !layer_priorities.contains_key(entry.layer_id.as_str()) {
+            if !layers.contains_key(entry.layer_id.as_str()) {
                 diagnostics.push(
                     Diagnostic::blocking(
                         "ASTRA_VFS_ENTRY_LAYER",
@@ -275,8 +330,38 @@ impl VfsManifest {
                     )
                     .with_field("layer_id", &entry.layer_id),
                 );
+            } else if layers
+                .get(entry.layer_id.as_str())
+                .is_some_and(|layer| layer.prefix != entry.uri.prefix())
+            {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_VFS_ENTRY_LAYER_PREFIX",
+                        "VFS entry URI prefix does not match its layer prefix",
+                    )
+                    .with_field("vfs_uri", entry.uri.as_str())
+                    .with_field("layer_id", &entry.layer_id),
+                );
+            }
+            if entry.offset.checked_add(entry.size).is_none() {
+                diagnostics.push(
+                    Diagnostic::blocking("ASTRA_VFS_ENTRY_RANGE", "VFS entry byte range overflows")
+                        .with_field("vfs_uri", entry.uri.as_str()),
+                );
+            }
+            let key = (entry.uri.as_str(), entry.layer_id.as_str());
+            if entry_keys.insert(key, entry).is_some() {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_VFS_ENTRY_DUPLICATE",
+                        "VFS URI may appear only once in a layer",
+                    )
+                    .with_field("vfs_uri", entry.uri.as_str())
+                    .with_field("layer_id", &entry.layer_id),
+                );
             }
         }
+        let mut whiteout_keys = BTreeMap::new();
         for whiteout in &self.whiteouts {
             if whiteout.allowlist_id.trim().is_empty() || whiteout.reason.trim().is_empty() {
                 diagnostics.push(
@@ -287,7 +372,7 @@ impl VfsManifest {
                     .with_field("vfs_uri", whiteout.uri.as_str()),
                 );
             }
-            if !layer_priorities.contains_key(whiteout.layer_id.as_str()) {
+            if !layers.contains_key(whiteout.layer_id.as_str()) {
                 diagnostics.push(
                     Diagnostic::blocking(
                         "ASTRA_VFS_WHITEOUT_LAYER",
@@ -295,48 +380,143 @@ impl VfsManifest {
                     )
                     .with_field("layer_id", &whiteout.layer_id),
                 );
+            } else if layers
+                .get(whiteout.layer_id.as_str())
+                .is_some_and(|layer| layer.prefix != whiteout.uri.prefix())
+            {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_VFS_WHITEOUT_LAYER_PREFIX",
+                        "VFS whiteout URI prefix does not match its layer prefix",
+                    )
+                    .with_field("vfs_uri", whiteout.uri.as_str())
+                    .with_field("layer_id", &whiteout.layer_id),
+                );
+            }
+            let key = (whiteout.uri.as_str(), whiteout.layer_id.as_str());
+            if whiteout_keys.insert(key, whiteout).is_some() {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_VFS_WHITEOUT_DUPLICATE",
+                        "VFS whiteout may appear only once per URI and layer",
+                    )
+                    .with_field("vfs_uri", whiteout.uri.as_str())
+                    .with_field("layer_id", &whiteout.layer_id),
+                );
             }
         }
         diagnostics
     }
 
-    pub fn resolve(&self, uri: &VfsUri) -> Result<Option<&VfsManifestEntry>, Vec<Diagnostic>> {
+    pub fn resolve(
+        &self,
+        uri: &VfsUri,
+        context: &ResolveContext,
+    ) -> Result<Option<&VfsManifestEntry>, Vec<Diagnostic>> {
         let diagnostics = self.validate();
         if !diagnostics.is_empty() {
             return Err(diagnostics);
         }
-        let priority_by_layer = self
+        if [
+            &context.target,
+            &context.profile,
+            &context.capability,
+            &context.provider_binding,
+        ]
+        .iter()
+        .any(|value| !is_safe_symbol(value))
+        {
+            return Err(vec![Diagnostic::blocking(
+                "ASTRA_VFS_RESOLVE_CONTEXT",
+                "VFS resolve context contains an invalid identifier",
+            )]);
+        }
+        let prefix = self
+            .prefixes
+            .iter()
+            .find(|prefix| prefix.prefix == uri.prefix())
+            .expect("validated VFS prefix must exist");
+        if prefix.provider_id != context.provider_binding {
+            return Err(vec![Diagnostic::blocking(
+                "ASTRA_VFS_PROVIDER_BINDING_MISMATCH",
+                "VFS resolve provider does not match the explicit binding",
+            )]);
+        }
+        if !prefix
+            .capabilities
+            .iter()
+            .any(|value| value == &context.capability)
+        {
+            return Err(vec![Diagnostic::blocking(
+                "ASTRA_VFS_CAPABILITY_MISMATCH",
+                "VFS resolve capability is not declared by the prefix provider",
+            )]);
+        }
+        let eligible_layers = self
             .layers
             .iter()
+            .filter(|layer| layer.prefix == uri.prefix())
+            .filter(|layer| eligible(&layer.targets, &context.target))
+            .filter(|layer| eligible(&layer.profiles, &context.profile))
             .map(|layer| (layer.layer_id.as_str(), layer.priority))
             .collect::<BTreeMap<_, _>>();
         let whiteout_priority = self
             .whiteouts
             .iter()
             .filter(|whiteout| &whiteout.uri == uri)
-            .filter_map(|whiteout| priority_by_layer.get(whiteout.layer_id.as_str()).copied())
+            .filter(|whiteout| eligible(&whiteout.targets, &context.target))
+            .filter(|whiteout| eligible(&whiteout.profiles, &context.profile))
+            .filter_map(|whiteout| eligible_layers.get(whiteout.layer_id.as_str()).copied())
             .max();
-        let best = self
+        let mut candidates = self
             .entries
             .iter()
             .filter(|entry| &entry.uri == uri)
-            .max_by_key(|entry| {
-                priority_by_layer
+            .filter_map(|entry| {
+                eligible_layers
                     .get(entry.layer_id.as_str())
                     .copied()
-                    .unwrap_or(i32::MIN)
-            });
-        if let (Some(entry), Some(whiteout_priority)) = (best, whiteout_priority) {
-            let entry_priority = priority_by_layer
-                .get(entry.layer_id.as_str())
-                .copied()
-                .unwrap_or(i32::MIN);
-            if whiteout_priority >= entry_priority {
+                    .map(|priority| (entry, priority))
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_unstable_by_key(|(_, priority)| *priority);
+        let Some((best, best_priority)) = candidates.pop() else {
+            if whiteout_priority.is_some() {
+                return Ok(None);
+            }
+            return Err(vec![Diagnostic::blocking(
+                "ASTRA_VFS_RESOLVE_MISSING",
+                "VFS URI has no eligible entry for the resolve context",
+            )]);
+        };
+        if candidates
+            .last()
+            .is_some_and(|(_, priority)| priority == &best_priority)
+        {
+            return Err(vec![Diagnostic::blocking(
+                "ASTRA_VFS_RESOLVE_AMBIGUOUS",
+                "VFS URI has multiple eligible entries at the same priority",
+            )]);
+        }
+        if let Some(whiteout_priority) = whiteout_priority {
+            if whiteout_priority >= best_priority {
                 return Ok(None);
             }
         }
-        Ok(best)
+        Ok(Some(best))
     }
+}
+
+fn eligible(values: &[String], selected: &str) -> bool {
+    values.is_empty() || values.iter().any(|value| value == selected)
+}
+
+fn is_safe_symbol(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

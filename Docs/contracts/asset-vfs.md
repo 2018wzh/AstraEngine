@@ -66,6 +66,13 @@ pub struct VfsManifestEntry {
     pub media_kind: String,
     pub diagnostics: Vec<Diagnostic>,
 }
+
+pub struct ResolveContext {
+    pub target: String,
+    pub profile: String,
+    pub capability: String,
+    pub provider_binding: String,
+}
 ```
 
 `VfsSourceRef` 只允许引用 package section、本地授权 alias、overlay source、memory object 或 legacy pack entry。host root、native handle、payload bytes、商业正文、bytecode 和 provider secret 不能进入 manifest、catalog、save、package、report 或日志。
@@ -82,7 +89,7 @@ VFS 使用 UE 风格 mount graph，而不是一组分散 provider slot：
 | `overlay` | patch、mod、翻译覆盖、调试替换和迁移期 NativeVN asset 覆盖 | 同一 `VfsUri` namespace 覆盖 lower layer；priority、allowlist、base hash 和 reason 必须显式声明 |
 | `memory` | Editor/Tools 的短生命周期 workspace object | 不进入 shipping package；只记录 stable object id、hash 和诊断 |
 
-解析按固定 `(priority, prefix, vfs_uri, layer_id)` 决定，不能依赖插件加载顺序。多个 layer 命中同一 `VfsUri` 时，高 priority 覆盖低 priority；没有 overlay/whiteout 授权的冲突必须 blocking。
+`resolve(uri, context)` 先校验整个 mount graph，再按 context 过滤 target/profile layer，并验证 prefix provider 和 capability 的显式 binding。解析按固定 `(priority, prefix, vfs_uri, layer_id)` 决定，不能依赖插件加载顺序。多个 layer 命中同一 `VfsUri` 时，高 priority 覆盖低 priority；同 priority 多候选、零个 eligible candidate、重复 prefix/layer/URI-layer、非法 overlay base 和未授权 provider/capability 都返回 blocking diagnostic。whiteout 只在自身 target/profile 与 layer 同时 eligible 时产生显式 `None`。
 
 ## Provider Slot
 

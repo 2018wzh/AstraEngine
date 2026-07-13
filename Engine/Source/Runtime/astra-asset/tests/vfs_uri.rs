@@ -1,9 +1,9 @@
 use std::fs;
 
 use astra_asset::{
-    AssetCatalog, AssetCatalogEntry, LocalMountRootSet, VfsBackendKind, VfsCasePolicy,
-    VfsLayerDescriptor, VfsManifest, VfsManifestEntry, VfsPrefixDescriptor, VfsReadWriteMode,
-    VfsSourceRef, VfsUri, VfsWhiteoutEntry,
+    AssetCatalog, AssetCatalogEntry, LocalMountRootSet, ResolveContext, VfsBackendKind,
+    VfsCasePolicy, VfsLayerDescriptor, VfsManifest, VfsManifestEntry, VfsPrefixDescriptor,
+    VfsReadWriteMode, VfsSourceRef, VfsUri, VfsWhiteoutEntry,
 };
 use astra_core::Hash256;
 
@@ -147,10 +147,16 @@ fn vfs_overlayfs_resolves_highest_priority_and_whiteout() {
         }],
     };
 
-    let resolved = manifest.resolve(&uri).unwrap().unwrap();
+    let context = ResolveContext {
+        target: "nativevn-game".to_string(),
+        profile: "classic".to_string(),
+        capability: "package.read".to_string(),
+        provider_binding: "astra.vfs.package".to_string(),
+    };
+    let resolved = manifest.resolve(&uri, &context).unwrap().unwrap();
     assert_eq!(resolved.layer_id, "patch");
     assert_eq!(resolved.hash, hash_new);
-    assert!(manifest.resolve(&hidden).unwrap().is_none());
+    assert!(manifest.resolve(&hidden, &context).unwrap().is_none());
 }
 
 #[test]
@@ -185,4 +191,125 @@ fn vfs_local_reader_uses_host_capability_without_serializing_root() {
     .unwrap();
     assert!(encoded.contains("local:/probe/manifest.json"));
     assert!(!encoded.contains(temp.path().to_string_lossy().as_ref()));
+}
+
+#[test]
+fn vfs_manifest_blocks_duplicate_graph_nodes_and_context_bypass() {
+    let mut duplicate_prefix = package_manifest_fixture();
+    duplicate_prefix
+        .prefixes
+        .push(duplicate_prefix.prefixes[0].clone());
+    assert!(duplicate_prefix
+        .validate()
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_VFS_PREFIX_DUPLICATE"));
+
+    let mut duplicate_layer = package_manifest_fixture();
+    duplicate_layer
+        .layers
+        .push(duplicate_layer.layers[0].clone());
+    assert!(duplicate_layer
+        .validate()
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_VFS_LAYER_DUPLICATE"));
+
+    let mut duplicate_entry = package_manifest_fixture();
+    duplicate_entry
+        .entries
+        .push(duplicate_entry.entries[0].clone());
+    assert!(duplicate_entry
+        .validate()
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_VFS_ENTRY_DUPLICATE"));
+
+    let manifest = package_manifest_fixture();
+    let uri = VfsUri::parse("package:/asset.bin").unwrap();
+    for context in [
+        ResolveContext {
+            target: "other".into(),
+            profile: "release".into(),
+            capability: "package.read".into(),
+            provider_binding: "astra.vfs.package".into(),
+        },
+        ResolveContext {
+            target: "game".into(),
+            profile: "release".into(),
+            capability: "filesystem.read".into(),
+            provider_binding: "astra.vfs.package".into(),
+        },
+        ResolveContext {
+            target: "game".into(),
+            profile: "release".into(),
+            capability: "package.read".into(),
+            provider_binding: "astra.vfs.other".into(),
+        },
+    ] {
+        assert!(manifest.resolve(&uri, &context).is_err());
+    }
+}
+
+#[test]
+fn vfs_resolve_rejects_equal_priority_authority_conflict() {
+    let mut manifest = package_manifest_fixture();
+    manifest.layers.push(VfsLayerDescriptor {
+        layer_id: "second".into(),
+        prefix: "package".into(),
+        priority: 0,
+        source: VfsSourceRef::package_section("asset.second"),
+        targets: vec!["game".into()],
+        profiles: vec!["release".into()],
+    });
+    let mut second = manifest.entries[0].clone();
+    second.layer_id = "second".into();
+    second.source = VfsSourceRef::package_section("asset.second");
+    manifest.entries.push(second);
+    let error = manifest
+        .resolve(
+            &VfsUri::parse("package:/asset.bin").unwrap(),
+            &ResolveContext {
+                target: "game".into(),
+                profile: "release".into(),
+                capability: "package.read".into(),
+                provider_binding: "astra.vfs.package".into(),
+            },
+        )
+        .unwrap_err();
+    assert!(error
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_VFS_RESOLVE_AMBIGUOUS"));
+}
+
+fn package_manifest_fixture() -> VfsManifest {
+    VfsManifest {
+        schema: "astra.asset_vfs_manifest.v1".into(),
+        prefixes: vec![VfsPrefixDescriptor {
+            prefix: "package".into(),
+            provider_id: "astra.vfs.package".into(),
+            backend: VfsBackendKind::Package,
+            case_policy: VfsCasePolicy::CaseSensitive,
+            mode: VfsReadWriteMode::ReadOnly,
+            redaction: "shipping".into(),
+            capabilities: vec!["package.read".into()],
+        }],
+        layers: vec![VfsLayerDescriptor {
+            layer_id: "base".into(),
+            prefix: "package".into(),
+            priority: 0,
+            source: VfsSourceRef::package_section("asset.base"),
+            targets: vec!["game".into()],
+            profiles: vec!["release".into()],
+        }],
+        entries: vec![VfsManifestEntry {
+            uri: VfsUri::parse("package:/asset.bin").unwrap(),
+            layer_id: "base".into(),
+            source: VfsSourceRef::package_section("asset.base"),
+            offset: 0,
+            size: 5,
+            hash: Hash256::from_sha256(b"asset"),
+            codec: None,
+            media_kind: "binary".into(),
+            diagnostics: vec![],
+        }],
+        whiteouts: vec![],
+    }
 }
