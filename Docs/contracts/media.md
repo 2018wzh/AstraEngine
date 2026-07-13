@@ -12,7 +12,7 @@ wgpu 是默认 provider，但不是唯一后端。真实 wgpu owner 是 platform
 
 Decode 只能通过 `DecodeBindingContext { provider_id, target, profile, allow_fallback, allow_reference_provider }` 选择一个显式 provider。Registry 阻断重复 id、无 binding、profile drift、unsupported codec/kind、feature-gated provider、未声明 fallback 和 reference provider 进入 shipping；注册顺序不参与选择。平台 provider 包括 Windows Media Foundation；CPU fallback 包括 Image/Symphonia。`SyntheticPlatformDecodeProvider` 明确为 non-packaged reference provider。DecodeProvider 输出经过 provider/kind/codec/hash 校验的 CPU buffer 或 `MediaSurfaceToken`，public API 不暴露平台 native handle。
 
-桌面 FFmpeg 由 optional `ffmpeg-vcpkg` feature 声明，默认 build 不要求本机 FFmpeg。启用后 provider 必须先完成 native probe，再从受限临时输入执行真实 demux、audio decode/resample 或 video first-frame decode；损坏输入、缺 stream、超预算和未 probe 均产生 blocking diagnostic。当前真实 one-shot decode 已覆盖，但 seek/pause/resume/EOS session 与 A/V sync 尚未闭合，因此仍不能单独作为完整 release fallback 证据。
+桌面 FFmpeg 由 optional `ffmpeg-vcpkg` feature 声明，默认 build 不要求本机 FFmpeg。`astra-release` 和 `astra-cli` 通过同名 feature 透传该能力；要求 FFmpeg 的 profile 必须同时证明 feature 已编译且 native probe 通过，不能再用静态 blocking/warning 代替运行时判断。启用后 provider 从受限临时输入执行真实 demux、audio decode/resample 或 video first-frame decode；损坏输入、缺 stream、超预算和未 probe 均产生 blocking diagnostic。当前真实 one-shot decode 已覆盖，但 seek/pause/resume/EOS session 与 A/V sync 尚未闭合，因此仍不能单独作为完整 release fallback 证据。
 
 Player 从 package 消费 encoded audio 时，必须先通过 `asset.catalog` 与 `asset.vfs_manifest` 得到唯一 package-backed entry，执行 bounded read 和 SHA-256 校验，再按文件签名识别 codec。不能用 asset id、文件名或 provider descriptor 猜测已解码成功。Windows Media Foundation 当前返回 `pcm_s16le:<sample_rate>:<channels>`；Player 必须检查格式字段、采样率、声道、sample budget、sample 截断和 frame alignment，再显式转换为 interleaved `f32`。未知格式、空/越界 stream shape 和不完整 frame 都是 blocking，不能转为空音频成功。
 
@@ -43,7 +43,7 @@ AstraEMU filter preset 复用同一 `FilterGraph`。final-frame preset 作用在
 
 ## AudioGraph
 
-`astra.audio_graph.v2` 独立于视觉 FilterGraph。共享 owner 提供 bounded bus/voice/fade/fence、显式 voice id、play/pause/resume/seek/stop、loop position、fixed-delta tick、事务性 command 和 deterministic snapshot hash；非法 gain、资源 URI、状态迁移、冲突 fade、重复 id、容量和时间溢出都必须在修改状态前失败。真实输出由 platform host 的 bounded audio queue 和 WASAPI callback持有，close/shutdown 必须 drain；graph hash 不是音频 meter，也不能替代真实 callback meter、A/V sync 或听测证据。
+`astra.audio_graph.v2` 独立于视觉 FilterGraph。共享 owner 提供 bounded bus/voice/fade/fence、显式 voice id、play/pause/resume/seek/stop、loop position、fixed-delta tick、事务性 command 和 deterministic snapshot hash；非法 gain、资源 URI、状态迁移、冲突 fade、重复 id、容量和时间溢出都必须在修改状态前失败。真实输出由 platform host 的 bounded audio queue 和 WASAPI callback 持有，close/shutdown 必须 drain；callback 报告 device loss 后 submit/drain 必须立即失败、销毁失效资源并发出 typed `DeviceLost` event，不能继续接受音频。graph hash 不是音频 meter，也不能替代真实 callback meter、A/V sync 或听测证据。
 
 Headless reference output 使用固定采样率、固定声道布局的 PCM S16LE WAV，并保留完整 sample sequence。音频限额、写入失败、静音、削波、声道和时长不匹配都进入 machine-readable diagnostic；不能只记录 peak/RMS 后丢弃实际音频。
 

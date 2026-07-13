@@ -465,6 +465,15 @@ mod windows {
                             .audio_outputs
                             .get_mut(output)
                             .and_then(|resource| resource.submit(packet));
+                        if result
+                            .as_ref()
+                            .is_err_and(|error| error.code == PlatformErrorCode::DeviceLost)
+                        {
+                            let _ = self.audio_outputs.remove(output);
+                            self.emit(PlatformEventKind::DeviceLost {
+                                provider: "windows.wasapi".to_string(),
+                            });
+                        }
                         let _ = reply.send(result);
                     }
                     HostCommand::QueryAudio { output, reply } => {
@@ -476,14 +485,27 @@ mod windows {
                             .audio_outputs
                             .get_mut(output)
                             .and_then(AudioResource::drain);
+                        if result
+                            .as_ref()
+                            .is_err_and(|error| error.code == PlatformErrorCode::DeviceLost)
+                        {
+                            let _ = self.audio_outputs.remove(output);
+                            self.emit(PlatformEventKind::DeviceLost {
+                                provider: "windows.wasapi".to_string(),
+                            });
+                        }
                         let _ = reply.send(result);
                     }
                     HostCommand::CloseAudio { output, reply } => {
-                        let result = self
+                        let drain = self
                             .audio_outputs
                             .get_mut(output)
-                            .and_then(AudioResource::drain)
-                            .and_then(|_| self.audio_outputs.remove(output).map(|_| ()));
+                            .and_then(AudioResource::drain);
+                        let remove = self.audio_outputs.remove(output).map(|_| ());
+                        let result = match (drain, remove) {
+                            (Err(error), _) => Err(error),
+                            (Ok(_), result) => result,
+                        };
                         let _ = reply.send(result);
                     }
                     HostCommand::OpenDecode { kind, reply } => {
@@ -1085,6 +1107,13 @@ mod windows {
         }
 
         fn submit(&mut self, packet: AudioPacket) -> Result<(), PlatformError> {
+            if self.stream_error.load(Ordering::Acquire) {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::DeviceLost,
+                    "audio.submit",
+                    "WASAPI output stream reported a device error",
+                ));
+            }
             if packet.sequence != self.next_sequence
                 || packet.channels != self.channels
                 || packet.samples.is_empty()

@@ -127,6 +127,18 @@ fn public_domain_media_manifest_matches_checked_in_assets() {
     }
 }
 
+#[cfg(not(feature = "ffmpeg-vcpkg"))]
+#[test]
+fn ffmpeg_probe_is_a_structured_blocker_when_feature_is_absent() {
+    assert!(!astra_media::ffmpeg_compiled());
+    match astra_media::probe_ffmpeg_provider().unwrap_err() {
+        astra_media::MediaError::Diagnostics(diagnostics) => assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "ASTRA_FFMPEG_FEATURE_DISABLED")),
+        other => panic!("expected structured FFmpeg diagnostic, got {other:?}"),
+    }
+}
+
 #[test]
 fn symphonia_decode_provider_decodes_public_mp3_to_cpu_pcm() {
     let provider = SymphoniaAudioDecodeProvider;

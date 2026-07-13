@@ -5,6 +5,10 @@ license.workspace = true
 version.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+ffmpeg-vcpkg = ["astra-media/ffmpeg-vcpkg"]
+
 [dependencies]
 astra-asset = { path = "../../Runtime/astra-asset" }
 astra-core = { path = "../../Runtime/astra-core" }

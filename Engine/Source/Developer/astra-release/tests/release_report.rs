@@ -87,6 +87,55 @@ fn release_report_covers_pass_warning_and_blocked_checks() {
         .any(|check| check.id == "package.integrity" && check.status == CheckStatus::Blocked));
 }
 
+fn required_ffmpeg_check() -> astra_release::ReleaseCheckRecord {
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
+        "com.example.ffmpeg-gate",
+        "desktop-release",
+        vec![SectionPayload::raw(
+            "asset.media.fixture",
+            "astra.cooked_asset.v1",
+            b"fixture".to_vec(),
+        )],
+    ))
+    .unwrap();
+    ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "desktop-release".to_string(),
+            require_ffmpeg: true,
+            target: Some("native-smoke-game".to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap()
+        .checks
+        .into_iter()
+        .find(|check| check.id == "media.decode.ffmpeg")
+        .unwrap()
+}
+
+#[cfg(not(feature = "ffmpeg-vcpkg"))]
+#[test]
+fn required_ffmpeg_gate_blocks_when_feature_is_absent() {
+    let check = required_ffmpeg_check();
+    assert_eq!(check.status, CheckStatus::Blocked);
+    assert_eq!(
+        check.diagnostic.unwrap().code,
+        "ASTRA_FFMPEG_FEATURE_DISABLED"
+    );
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+#[test]
+fn required_ffmpeg_gate_passes_only_after_native_probe() {
+    let check = required_ffmpeg_check();
+    assert_eq!(check.status, CheckStatus::Pass);
+    assert!(check
+        .evidence
+        .iter()
+        .any(|item| item.key == "provider_id" && item.value == "astra.decode.ffmpeg"));
+}
+
 #[test]
 fn release_gate_accepts_player_full_playable_only_with_matching_live_report() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(

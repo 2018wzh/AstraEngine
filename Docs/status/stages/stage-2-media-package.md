@@ -157,7 +157,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 3. 把 audio wait/fade/loop 完成事件接入 AwaitToken。
 4. 编写 bus mix、fade completion、loop marker 和 headless meter hash 测试。
 
-**Current Evidence:** `cargo test -p astra-media --test audio_graph` 覆盖 play/pause/resume/seek/stop、loop、fade completion/conflict、invalid command rollback、fixed delta 和 deterministic continuation；`cargo test -p astra-platform-windows --test host_services` 覆盖 bounded WASAPI queue、NaN/sequence rejection、callback meter、drain 和 close drain。DSP/ducking、decode→output streaming、A/V sync、设备切换和性能预算仍未闭合。
+**Current Evidence:** `cargo test -p astra-media --test audio_graph` 覆盖 play/pause/resume/seek/stop、loop、fade completion/conflict、invalid command rollback、fixed delta 和 deterministic continuation；`cargo test -p astra-platform-windows --test host_services` 覆盖 bounded WASAPI queue、NaN/sequence rejection、callback meter、drain 和 close drain。Windows host 在 callback device error 后阻断后续 submit/drain、移除失效 handle 并发出 typed `DeviceLost`；close 即使 drain 失败也释放资源。可注入 device-change 自动化、DSP/ducking、decode→output streaming、A/V sync 和性能预算仍未闭合。
 
 **Linked Test IDs:** `T-S2-MEDIA-03`
 
@@ -203,7 +203,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 3. public API 只返回 CPU buffer 或 MediaSurfaceToken，不暴露 native handle。
 4. 编写 unsupported codec、fallback disabled 和 fallback selected 测试。
 
-**Current Evidence:** `cargo test -p astra-media --test decode_provider` 证明 exact binding、duplicate/missing/profile/reference/fallback blocking、output identity/hash、Symphonia PCM 与 corrupt/truncated input；CC0 fixture manifest 固定 sha256/byte size。Windows WMF 用 MP3/MP4 验证 bounded PCM/BGRA 首帧，平台 host 保留原始 diagnostic code 并在失败后允许同 sequence retry。`cargo test -p astra-media --test decode_provider --features ffmpeg-vcpkg ffmpeg_decode_provider_decodes_real_audio_and_video` 证明 FFmpeg native probe、真实 MP3 decode/resample、真实 MP4 first-frame、未 probe 与损坏 container blocking。seek/pause/resume/EOS session、取消、A/V sync 和 fallback release evidence 尚未闭合，因此不能标记完成。
+**Current Evidence:** `cargo test -p astra-media --test decode_provider` 证明 exact binding、duplicate/missing/profile/reference/fallback blocking、output identity/hash、Symphonia PCM 与 corrupt/truncated input；CC0 fixture manifest 固定 sha256/byte size。Windows WMF 用 MP3/MP4 验证 bounded PCM/BGRA 首帧，平台 host 保留原始 diagnostic code 并在失败后允许同 sequence retry。`cargo test -p astra-media --test decode_provider --features ffmpeg-vcpkg ffmpeg_decode_provider_decodes_real_audio_and_video` 证明 FFmpeg native probe、真实 MP3 decode/resample、真实 MP4 first-frame、未 probe 与损坏 container blocking；`astra-release`/`astra-cli` 同名 feature 会透传 native provider，required gate 只在 native probe 通过后变为 pass。seek/pause/resume/EOS session、取消、A/V sync 和完整 fallback release evidence 尚未闭合，因此不能标记完成。
 
 **Linked Test IDs:** `T-S2-MEDIA-05`
 

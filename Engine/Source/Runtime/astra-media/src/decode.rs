@@ -91,6 +91,24 @@ pub trait DecodeProvider: Send + Sync {
     fn decode(&self, request: &DecodeRequest) -> Result<DecodeResult, MediaError>;
 }
 
+pub const fn ffmpeg_compiled() -> bool {
+    cfg!(feature = "ffmpeg-vcpkg")
+}
+
+pub fn probe_ffmpeg_provider() -> Result<DecodeCapability, MediaError> {
+    #[cfg(feature = "ffmpeg-vcpkg")]
+    {
+        FfmpegDecodeProvider::probe().map(|provider| provider.capability())
+    }
+    #[cfg(not(feature = "ffmpeg-vcpkg"))]
+    {
+        Err(decode_error(
+            "ASTRA_FFMPEG_FEATURE_DISABLED",
+            "this build does not include the ffmpeg-vcpkg provider",
+        ))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DecodeBindingContext {
     pub provider_id: String,

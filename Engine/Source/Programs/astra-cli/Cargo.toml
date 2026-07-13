@@ -5,6 +5,10 @@ license.workspace = true
 version.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+ffmpeg-vcpkg = ["astra-release/ffmpeg-vcpkg"]
+
 [[bin]]
 name = "astra"
 path = "src/main.rs"

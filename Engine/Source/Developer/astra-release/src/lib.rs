@@ -3654,17 +3654,32 @@ fn media_check(require_ffmpeg: bool) -> ReleaseCheckRecord {
     let symphonia = astra_media::SymphoniaAudioDecodeProvider;
     let symphonia_available = symphonia.probe_available();
     if require_ffmpeg {
-        ReleaseCheckRecord {
-            id: "media.decode.ffmpeg".to_string(),
-            domain: ReleaseDomain::Media,
-            status: CheckStatus::Blocked,
-            summary: "desktop-release requires FFmpeg feature but this build did not enable it"
-                .to_string(),
-            diagnostic: Some(Diagnostic::blocking(
-                "ASTRA_MEDIA_FFMPEG_REQUIRED",
-                "FFmpeg decode fallback is feature-gated",
-            )),
-            evidence: vec![evidence("symphonia_available", symphonia_available)],
+        match astra_media::probe_ffmpeg_provider() {
+            Ok(capability) => ReleaseCheckRecord {
+                id: "media.decode.ffmpeg".to_string(),
+                domain: ReleaseDomain::Media,
+                status: CheckStatus::Pass,
+                summary: "required FFmpeg provider was compiled and passed its native probe"
+                    .to_string(),
+                diagnostic: None,
+                evidence: vec![
+                    evidence("provider_id", capability.provider_id),
+                    evidence("codecs", capability.codecs.join(",")),
+                    evidence("packaged_eligible", capability.packaged_eligible),
+                    evidence("symphonia_available", symphonia_available),
+                ],
+            },
+            Err(error) => ReleaseCheckRecord {
+                id: "media.decode.ffmpeg".to_string(),
+                domain: ReleaseDomain::Media,
+                status: CheckStatus::Blocked,
+                summary: "required FFmpeg provider is unavailable".to_string(),
+                diagnostic: Some(ffmpeg_probe_diagnostic(error)),
+                evidence: vec![
+                    evidence("ffmpeg_compiled", astra_media::ffmpeg_compiled()),
+                    evidence("symphonia_available", symphonia_available),
+                ],
+            },
         }
     } else {
         ReleaseCheckRecord {
@@ -3678,7 +3693,26 @@ fn media_check(require_ffmpeg: bool) -> ReleaseCheckRecord {
                 "ASTRA_MEDIA_FFMPEG_OPTIONAL",
                 "FFmpeg feature is not required for this validation profile",
             )),
-            evidence: vec![evidence("symphonia_available", symphonia_available)],
+            evidence: vec![
+                evidence("ffmpeg_compiled", astra_media::ffmpeg_compiled()),
+                evidence("symphonia_available", symphonia_available),
+            ],
+        }
+    }
+}
+
+fn ffmpeg_probe_diagnostic(error: astra_media::MediaError) -> Diagnostic {
+    match error {
+        astra_media::MediaError::Diagnostics(diagnostics) => {
+            diagnostics.into_iter().next().unwrap_or_else(|| {
+                Diagnostic::blocking(
+                    "ASTRA_MEDIA_FFMPEG_PROBE",
+                    "FFmpeg probe failed without a provider diagnostic",
+                )
+            })
+        }
+        astra_media::MediaError::Message(message) => {
+            Diagnostic::blocking("ASTRA_MEDIA_FFMPEG_PROBE", message)
         }
     }
 }

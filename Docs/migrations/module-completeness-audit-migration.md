@@ -127,7 +127,7 @@
 
 **迁移要求：** 为每个 provider 增加 owner、selected/available evidence、真实资源生命周期、device/context loss recovery、bounded queue、取消和 release profile；把 headless/fixture 证据与 E3/E4 产品证据分离，不允许 gate 复用弱证据。
 
-**2026-07-13 修补进度：** 已删除 descriptor-only `WgpuRendererProvider`、graph-hash audio meter 和 Kira facade；`WgpuPresentationCore` 增加 ordered frame、malformed rollback、resize、context/device recovery policy 与 retained upload rebuild；Windows WASAPI 增加 bounded queue、finite sample validation、失败无部分提交和 close drain；FilterGraph 阻断 unknown/no-op/target bypass；DecodeRegistry 改为 exact provider/target/profile binding，WMF 保留 diagnostic/sequence rollback，optional `ffmpeg-vcpkg` 已执行真实 MP3 decode/resample 与 MP4 first-frame，不再返回 hash token。GPU FilterGraph、可注入 device-loss、媒体 session、A/V sync、设备变化、性能预算和 Windows product E3 仍开放，因此 P1-005 保持未关闭。
+**2026-07-13 修补进度：** 已删除 descriptor-only `WgpuRendererProvider`、graph-hash audio meter、Kira facade 和 Windows 中 `cfg(any())` 遮蔽的旧 renderer；`WgpuPresentationCore` 增加 ordered frame、malformed rollback、resize、context/device recovery policy 与 retained upload rebuild；Windows WASAPI 增加 bounded queue、finite sample validation、失败无部分提交、device-error resource invalidation 和 close drain；FilterGraph 阻断 unknown/no-op/target bypass；DecodeRegistry 改为 exact provider/target/profile binding，WMF 保留 diagnostic/sequence rollback，optional `ffmpeg-vcpkg` 已执行真实 MP3 decode/resample 与 MP4 first-frame，不再返回 hash token，`astra-release`/`astra-cli` required gate 也只在 native probe 通过后放行。GPU FilterGraph、可注入 device-loss、媒体 session、A/V sync、设备变化、性能预算和 Windows product E3 仍开放，因此 P1-005 保持未关闭。
 
 ### P1-006：Workspace 与状态页必须持续阻断未实现 Stage 4/5/7
 
