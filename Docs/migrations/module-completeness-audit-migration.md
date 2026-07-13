@@ -186,7 +186,7 @@
 
 **迁移要求：** 引入 typed `EngineModuleSlot`/provider reference 或 host-owned binding token；mount 必须返回错误并验证 registry selection、capability、package/profile eligibility 和 fingerprint。tick 必须明确允许的首 tick、连续 tick、恢复 tick、重复 tick 和 replay tick，非法序列必须返回稳定 diagnostic；`delta_ns`、seed 和 fixed step 的语义必须写入 contract 并有负向测试。
 
-**2026-07-13 修补进度：** Runtime 已改用 `EngineModuleSlot + ValidatedModuleBinding`，显式阻断未选择、非 packaged、slot/package mismatch 和重复挂载；tick 已阻断重复、回退、跳步、非法 delta、seed mismatch 和缺 required slot，并用 tick 前 snapshot 保证错误不部分提交。`Engine/Source/Runtime/astra-runtime/tests/tick_contract.rs` 覆盖上述负向路径。profile/target eligibility 与 fingerprint 仍需随 Plugin binding context 固化，P1-007 暂不关闭。
+**2026-07-13 修补进度：** Runtime 已改用 `EngineModuleSlot + ValidatedModuleBinding`，显式阻断未选择、非 packaged、slot/context mismatch 和重复挂载；binding context 已固化 package、target、profile、capability、engine version 与 rustc/feature/ABI fingerprint。tick 已阻断重复、回退、跳步、非法 delta、seed mismatch 和缺 required slot，并用 tick 前 snapshot 保证错误不部分提交。`runtime.world` 升为 `2.0.0`，旧布局稳定拒绝。`Engine/Source/Runtime/astra-runtime/tests/tick_contract.rs` 覆盖上述负向路径。ordered input/await completion 与 replay mode 尚未合并进单次 typed tick transaction，P1-007 暂不关闭。
 
 ### P1-008：ExtensionRegistry 的公开 `select()` 忽略显式 binding
 
@@ -198,7 +198,7 @@
 
 **迁移要求：** 删除或私有化无 binding 语义的 `select()`；公开选择 API 必须要求 binding context 并返回 selected provider 或 blocking conflict。新增两个 provider、显式选择第二个 provider、重新排序注册顺序和缺 binding 的负向测试，并让 release gate 使用同一选择实现。
 
-**2026-07-13 修补进度：** 无 binding context 的 `ExtensionRegistry::select()` 已删除，provider 注册不再创建隐式默认 binding；`PluginRegistrar::bind_provider` 是唯一公开选择入口，缺 provider、重复或冲突 binding 返回稳定错误，`runtime_binding` 只从显式 selection 生成 Runtime token。target/profile/fingerprint context 尚未全部进入 registry token，P1-008 暂不关闭。
+**2026-07-13 修补进度：** 无 binding context 的 `ExtensionRegistry::select()` 已删除，provider 注册不再创建隐式默认 binding；`PluginRegistrar::bind_provider` 是唯一公开选择入口，缺 provider、capability/fingerprint drift、重复或冲突 binding 返回稳定错误，`runtime_binding` 只从已绑定的 package/target/profile/fingerprint context 生成 Runtime token。两种注册顺序下显式选择第二个 provider 的测试已落地。release validator 与 runtime registry 仍需共享同一 binding DTO/validator，P1-008 暂不关闭。
 
 ### P1-009：VFS resolve 没有 target/profile eligibility，且 layer 冲突可能被静默覆盖
 

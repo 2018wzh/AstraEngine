@@ -36,7 +36,9 @@ impl RuntimeWorld {
 }
 ```
 
-`ValidatedModuleBinding` 只能由显式 registry selection、packaged eligibility、capability 和 package identity 校验生成。重复 slot、token/slot 不一致或 package 不一致必须在修改 world 前失败。`tick` 的首步固定为 `1`，之后每次只能递增 `1`；`seed` 必须等于 session seed，`delta_ns` 必须处于 `1..=1_000_000_000`。重复、回退、跳步、非法 delta、seed mismatch 和缺少 required module 都返回稳定 blocking diagnostic，并保持 snapshot 不变。
+`ValidatedModuleBinding` 只能由显式 registry selection、packaged eligibility、capability、package、target、profile、engine version、rustc/feature/ABI fingerprint 校验生成。上述 identity 由已验证的 `PackageHandle` 固化；重复 slot、token/slot 不一致或任一 identity 不一致必须在修改 world 前失败。`tick` 的首步固定为 `1`，之后每次只能递增 `1`；`seed` 必须等于 session seed，`delta_ns` 必须处于 `1..=1_000_000_000`。重复、回退、跳步、非法 delta、seed mismatch 和缺少 required module 都返回稳定 blocking diagnostic，并保持 snapshot 不变。
+
+`runtime.world` 当前二进制 schema 为 `2.0.0`。旧布局和调用方请求的旧 minimum version 直接返回 `ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED`；本阶段不提供隐藏兼容 adapter。
 
 字段级实现蓝图见 [Runtime API Blueprint](../implementation/runtime-api.md)、[Runtime Execution](../implementation/runtime-execution.md) 和 [StateMachine Action Provider](../implementation/state-machine-action-provider.md)。
 

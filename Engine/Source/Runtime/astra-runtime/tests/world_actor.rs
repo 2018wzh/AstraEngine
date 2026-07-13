@@ -1,7 +1,7 @@
 use astra_core::{SchemaVersion, StableId};
 use astra_runtime::{
-    ActorId, EngineModuleSlot, PackageHandle, RuntimeComponentPayload, RuntimeConfig, RuntimeWorld,
-    SaveRequest, TickInput, ValidatedModuleBinding,
+    ActorId, EngineModuleSlot, ModuleBindingContext, PackageHandle, RuntimeComponentPayload,
+    RuntimeConfig, RuntimeWorld, SaveRequest, TickInput, ValidatedModuleBinding,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +26,15 @@ fn world_actor_creates_component_and_stable_snapshot_hash() {
         slot.clone(),
         "astra.fixture.headless_presentation",
         "presentation.headless",
-        "stage1.headless",
+        ModuleBindingContext {
+            package_id: "stage1.headless".to_string(),
+            target: "headless".to_string(),
+            profile: "test".to_string(),
+            engine_version: env!("CARGO_PKG_VERSION").to_string(),
+            rustc_fingerprint: "rustc-stable".to_string(),
+            feature_fingerprint: "runtime-envelope-v2".to_string(),
+            abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+        },
         true,
         true,
     )

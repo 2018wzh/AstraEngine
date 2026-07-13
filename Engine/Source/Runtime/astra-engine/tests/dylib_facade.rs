@@ -1,7 +1,9 @@
 use astra_engine::{
     core::StableId,
     package::{PackageBuildRequest, PackageBuilder},
-    plugin::{EngineModuleSlot, LoadPhase, PluginRegistrar, RegisteredProvider},
+    plugin::{
+        EngineModuleSlot, LoadPhase, PluginRegistrar, ProviderBindingContext, RegisteredProvider,
+    },
     runtime::{PackageHandle, RuntimeConfig, RuntimeWorld},
 };
 
@@ -31,11 +33,19 @@ fn dylib_facade_reexports_enginecore_public_api() {
         capability: "presentation.headless".to_string(),
         phase: LoadPhase::Runtime,
         packaged: true,
+        engine_version: "0.1.0".to_string(),
+        rustc_fingerprint: "rustc-stable".to_string(),
+        feature_fingerprint: "runtime-envelope-v2".to_string(),
+        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
     });
     registrar
         .bind_provider(
             &EngineModuleSlot("presentation".to_string()),
             "astra.fixture.headless",
+            ProviderBindingContext::from_runtime_package(
+                &PackageHandle::default(),
+                "presentation.headless",
+            ),
         )
         .unwrap();
 

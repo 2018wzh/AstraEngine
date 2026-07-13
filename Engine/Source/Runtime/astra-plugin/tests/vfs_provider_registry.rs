@@ -1,4 +1,6 @@
-use astra_plugin::{EngineModuleSlot, LoadPhase, PluginRegistrar, RegisteredProvider};
+use astra_plugin::{
+    EngineModuleSlot, LoadPhase, PluginRegistrar, ProviderBindingContext, RegisteredProvider,
+};
 
 fn vfs_provider(provider_id: &str, capability: &str) -> RegisteredProvider {
     RegisteredProvider {
@@ -7,7 +9,18 @@ fn vfs_provider(provider_id: &str, capability: &str) -> RegisteredProvider {
         capability: capability.to_string(),
         phase: LoadPhase::Runtime,
         packaged: true,
+        engine_version: "0.1.0".to_string(),
+        rustc_fingerprint: "rustc-stable".to_string(),
+        feature_fingerprint: "runtime-envelope-v2".to_string(),
+        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
     }
+}
+
+fn context(capability: &str) -> ProviderBindingContext {
+    ProviderBindingContext::from_runtime_package(
+        &astra_runtime::PackageHandle::default(),
+        capability,
+    )
 }
 
 #[test]
@@ -37,9 +50,17 @@ fn runtime_provider_registry_keeps_explicit_single_binding_conflicts() {
         capability: "runtime.native_vn".to_string(),
         phase: LoadPhase::Runtime,
         packaged: true,
+        engine_version: "0.1.0".to_string(),
+        rustc_fingerprint: "rustc-stable".to_string(),
+        feature_fingerprint: "runtime-envelope-v2".to_string(),
+        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
     });
     registrar
-        .bind_provider(&slot, "astra.runtime.native_vn")
+        .bind_provider(
+            &slot,
+            "astra.runtime.native_vn",
+            context("runtime.native_vn"),
+        )
         .unwrap();
     registrar.register_provider(RegisteredProvider {
         slot: slot.clone(),
@@ -47,9 +68,17 @@ fn runtime_provider_registry_keeps_explicit_single_binding_conflicts() {
         capability: "runtime.astra_emu".to_string(),
         phase: LoadPhase::Runtime,
         packaged: true,
+        engine_version: "0.1.0".to_string(),
+        rustc_fingerprint: "rustc-stable".to_string(),
+        feature_fingerprint: "runtime-envelope-v2".to_string(),
+        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
     });
     assert!(registrar
-        .bind_provider(&slot, "astra.runtime.astra_emu")
+        .bind_provider(
+            &slot,
+            "astra.runtime.astra_emu",
+            context("runtime.astra_emu"),
+        )
         .unwrap_err()
         .contains("ASTRA_PLUGIN_BINDING_CONFLICT"));
 

@@ -20,34 +20,91 @@ pub struct RegisteredProvider {
     pub capability: String,
     pub phase: LoadPhase,
     pub packaged: bool,
+    pub engine_version: String,
+    pub rustc_fingerprint: String,
+    pub feature_fingerprint: String,
+    pub abi_fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ProviderBindingContext {
+    pub package_id: String,
+    pub target: String,
+    pub profile: String,
+    pub required_capability: String,
+    pub engine_version: String,
+    pub rustc_fingerprint: String,
+    pub feature_fingerprint: String,
+    pub abi_fingerprint: String,
+}
+
+impl ProviderBindingContext {
+    pub fn from_runtime_package(
+        package: &astra_runtime::PackageHandle,
+        required_capability: impl Into<String>,
+    ) -> Self {
+        Self {
+            package_id: package.package_id.clone(),
+            target: package.target.clone(),
+            profile: package.profile.clone(),
+            required_capability: required_capability.into(),
+            engine_version: package.engine_version.clone(),
+            rustc_fingerprint: package.rustc_fingerprint.clone(),
+            feature_fingerprint: package.feature_fingerprint.clone(),
+            abi_fingerprint: package.abi_fingerprint.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+struct SelectedProviderBinding {
+    provider_id: String,
+    context: ProviderBindingContext,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ServiceRegistry {
-    services: BTreeMap<String, String>,
+    services: BTreeMap<String, SelectedProviderBinding>,
 }
 
 impl ServiceRegistry {
-    pub fn bind(&mut self, id: impl Into<String>, provider: impl Into<String>) {
-        self.services.insert(id.into(), provider.into());
+    fn bind(
+        &mut self,
+        id: impl Into<String>,
+        provider_id: impl Into<String>,
+        context: ProviderBindingContext,
+    ) {
+        self.services.insert(
+            id.into(),
+            SelectedProviderBinding {
+                provider_id: provider_id.into(),
+                context,
+            },
+        );
     }
 
     pub fn unregister(&mut self, id: &str, provider: &str) {
         if self
             .services
             .get(id)
-            .is_some_and(|current| current == provider)
+            .is_some_and(|current| current.provider_id == provider)
         {
             self.services.remove(id);
         }
     }
 
     pub fn get(&self, id: &str) -> Option<&str> {
-        self.services.get(id).map(String::as_str)
+        self.services
+            .get(id)
+            .map(|binding| binding.provider_id.as_str())
     }
 
-    pub fn bindings(&self) -> impl Iterator<Item = (&String, &String)> {
+    fn bindings(&self) -> impl Iterator<Item = (&String, &SelectedProviderBinding)> {
         self.services.iter()
+    }
+
+    fn binding(&self, id: &str) -> Option<&SelectedProviderBinding> {
+        self.services.get(id)
     }
 }
 
@@ -107,18 +164,44 @@ impl PluginRegistrar {
         &mut self,
         slot: &EngineModuleSlot,
         provider_id: &str,
+        context: ProviderBindingContext,
     ) -> Result<(), String> {
-        let exists = self
+        let provider = self
             .extensions
             .providers()
             .iter()
-            .any(|provider| &provider.slot == slot && provider.provider_id == provider_id);
-        if !exists {
-            return Err(format!(
+            .find(|provider| &provider.slot == slot && provider.provider_id == provider_id)
+            .ok_or_else(|| format!(
                 "ASTRA_PLUGIN_BINDING_PROVIDER_MISSING: provider {provider_id} is not registered for slot {}",
                 slot.0
-            ));
+            ))?;
+        if provider.capability != context.required_capability {
+            return Err("ASTRA_PLUGIN_BINDING_CAPABILITY_MISMATCH".to_string());
         }
+        if provider.engine_version != context.engine_version
+            || provider.rustc_fingerprint != context.rustc_fingerprint
+            || provider.feature_fingerprint != context.feature_fingerprint
+            || provider.abi_fingerprint != context.abi_fingerprint
+        {
+            return Err("ASTRA_PLUGIN_BINDING_FINGERPRINT_MISMATCH".to_string());
+        }
+        astra_runtime::ValidatedModuleBinding::validate(
+            astra_runtime::EngineModuleSlot(slot.0.clone()),
+            provider.provider_id.clone(),
+            provider.capability.clone(),
+            astra_runtime::ModuleBindingContext {
+                package_id: context.package_id.clone(),
+                target: context.target.clone(),
+                profile: context.profile.clone(),
+                engine_version: context.engine_version.clone(),
+                rustc_fingerprint: context.rustc_fingerprint.clone(),
+                feature_fingerprint: context.feature_fingerprint.clone(),
+                abi_fingerprint: context.abi_fingerprint.clone(),
+            },
+            provider.packaged,
+            true,
+        )
+        .map_err(|error| error.to_string())?;
         if let Some(selected_provider) = self.services.get(&slot.0) {
             let conflict = ExtensionConflict {
                 slot: slot.0.clone(),
@@ -134,7 +217,8 @@ impl PluginRegistrar {
                 slot.0
             ));
         }
-        self.services.bind(slot.0.clone(), provider_id.to_string());
+        self.services
+            .bind(slot.0.clone(), provider_id.to_string(), context);
         Ok(())
     }
 
@@ -149,7 +233,6 @@ impl PluginRegistrar {
     pub fn runtime_binding(
         &self,
         slot: &EngineModuleSlot,
-        package_id: &str,
     ) -> Result<astra_runtime::ValidatedModuleBinding, astra_runtime::RuntimeError> {
         let provider = self.selected_provider(slot).ok_or_else(|| {
             astra_runtime::RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
@@ -157,11 +240,29 @@ impl PluginRegistrar {
                 "runtime module slot has no explicitly selected provider",
             ))
         })?;
+        let context = &self
+            .services
+            .binding(&slot.0)
+            .ok_or_else(|| {
+                astra_runtime::RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
+                    "ASTRA_RUNTIME_MODULE_BINDING_MISSING",
+                    "runtime module slot has no binding context",
+                ))
+            })?
+            .context;
         astra_runtime::ValidatedModuleBinding::validate(
             astra_runtime::EngineModuleSlot(slot.0.clone()),
             provider.provider_id.clone(),
             provider.capability.clone(),
-            package_id,
+            astra_runtime::ModuleBindingContext {
+                package_id: context.package_id.clone(),
+                target: context.target.clone(),
+                profile: context.profile.clone(),
+                engine_version: context.engine_version.clone(),
+                rustc_fingerprint: context.rustc_fingerprint.clone(),
+                feature_fingerprint: context.feature_fingerprint.clone(),
+                abi_fingerprint: context.abi_fingerprint.clone(),
+            },
             provider.packaged,
             true,
         )
@@ -205,9 +306,9 @@ impl PluginRegistrar {
             bindings: self
                 .services
                 .bindings()
-                .map(|(slot, provider_id)| ProviderBinding {
+                .map(|(slot, binding)| ProviderBinding {
                     slot: slot.clone(),
-                    provider_id: provider_id.clone(),
+                    provider_id: binding.provider_id.clone(),
                 })
                 .collect(),
             conflicts: self.extensions.conflicts().to_vec(),

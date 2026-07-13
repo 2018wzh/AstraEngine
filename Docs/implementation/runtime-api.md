@@ -47,7 +47,7 @@ impl RuntimeWorld {
 }
 ```
 
-`mount_module` 只接收 typed slot 和经过 registry selection、packaged eligibility、capability、package identity 校验的 binding token，不接收 provider 字符串或 native handle。缺失必需 slot、重复挂载、slot/token 不一致和 package mismatch 都是 blocking diagnostic。`tick` 在任何 mutation 之前校验连续 fixed step、session seed、delta 范围和 required slot；执行期错误会恢复 tick 前 snapshot，不允许部分提交。
+`mount_module` 只接收 typed slot 和经过 registry selection、packaged eligibility、capability、package/target/profile identity、engine/rustc/feature/ABI fingerprint 校验的 binding token，不接收 provider 字符串或 native handle。缺失必需 slot、重复挂载、slot/token 不一致和 context mismatch 都是 blocking diagnostic。`tick` 在任何 mutation 之前校验连续 fixed step、session seed、delta 范围和 required slot；执行期错误会恢复 tick 前 snapshot，不允许部分提交。
 
 ## State Machine
 

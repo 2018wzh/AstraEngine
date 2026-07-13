@@ -127,6 +127,10 @@ impl PluginLoader {
                 phase: LoadPhase::from_str(&provider.phase.to_string())
                     .map_err(PluginError::Load)?,
                 packaged: provider.packaged,
+                engine_version: descriptor.engine_version.to_string(),
+                rustc_fingerprint: descriptor.rustc_fingerprint.clone(),
+                feature_fingerprint: descriptor.feature_fingerprint.clone(),
+                abi_fingerprint: descriptor.abi_fingerprint.clone(),
             };
             slots.push(provider.slot.0.clone());
             registered_providers.push(provider.clone());
@@ -140,6 +144,10 @@ impl PluginLoader {
                 phase: LoadPhase::from_str(&provider.phase.to_string())
                     .map_err(PluginError::Load)?,
                 packaged: provider.packaged,
+                engine_version: descriptor.engine_version.to_string(),
+                rustc_fingerprint: descriptor.rustc_fingerprint.clone(),
+                feature_fingerprint: descriptor.feature_fingerprint.clone(),
+                abi_fingerprint: descriptor.abi_fingerprint.clone(),
             };
             slots.push(provider.slot.0.clone());
             registered_providers.push(provider.clone());

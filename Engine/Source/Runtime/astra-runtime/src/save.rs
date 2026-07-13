@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::{RuntimeError, RuntimeSnapshot};
 
 const CURRENT: SchemaVersion = CURRENT_CONTAINER_VERSION;
+const RUNTIME_WORLD_CURRENT: SchemaVersion = SchemaVersion::new(2, 0, 0);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SaveBlob(pub Vec<u8>);
@@ -24,7 +25,7 @@ pub struct SaveRequest {
 impl Default for SaveRequest {
     fn default() -> Self {
         Self {
-            minimum_supported_version: CURRENT,
+            minimum_supported_version: RUNTIME_WORLD_CURRENT,
         }
     }
 }
@@ -53,6 +54,11 @@ pub fn write_runtime_save_with_sections(
     request: SaveRequest,
     extra_sections: Vec<SectionPayload>,
 ) -> Result<SaveBlob, RuntimeError> {
+    if request.minimum_supported_version != RUNTIME_WORLD_CURRENT {
+        return Err(RuntimeError::message(
+            "ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED",
+        ));
+    }
     let runtime_payload = postcard::to_allocvec(&snapshot)
         .map_err(|err| RuntimeError::message(format!("encode runtime save: {err}")))?;
     let mut section_ids = BTreeSet::new();
@@ -61,8 +67,8 @@ pub fn write_runtime_save_with_sections(
 
     let mut migration_entries = vec![MigrationManifestEntry {
         schema: "runtime.world".to_string(),
-        minimum_supported_version: request.minimum_supported_version,
-        current_version: CURRENT,
+        minimum_supported_version: RUNTIME_WORLD_CURRENT,
+        current_version: RUNTIME_WORLD_CURRENT,
     }];
     for section in &extra_sections {
         if !section_ids.insert(section.id.clone()) {
@@ -87,10 +93,10 @@ pub fn write_runtime_save_with_sections(
         AstraContainerBuilder::new(ContainerKind::Save).add_section(SectionPayload::new(
             "runtime.world",
             "runtime.world",
-            CURRENT,
+            RUNTIME_WORLD_CURRENT,
             SectionCodec::Postcard,
             runtime_payload,
-            MigrationPolicy::from_minimum(request.minimum_supported_version),
+            MigrationPolicy::current(),
         ));
     for section in extra_sections {
         builder = builder.add_section(section);
@@ -119,6 +125,7 @@ pub fn read_runtime_save(
     if reader.kind() != ContainerKind::Save {
         return Err(RuntimeError::message("container is not a runtime save"));
     }
+    validate_runtime_world_contract(&reader)?;
     let manifest: MigrationManifest = reader
         .decode_postcard("migration.manifest")
         .map_err(|err| RuntimeError::message(err.to_string()))?;
@@ -134,6 +141,20 @@ pub fn read_runtime_save(
     reader
         .decode_postcard("runtime.world")
         .map_err(|err| RuntimeError::message(format!("decode runtime.world: {err}")))
+}
+
+fn validate_runtime_world_contract(reader: &AstraContainerReader) -> Result<(), RuntimeError> {
+    let entry = reader
+        .entries()
+        .iter()
+        .find(|entry| entry.id == "runtime.world")
+        .ok_or_else(|| RuntimeError::message("ASTRA_RUNTIME_SAVE_WORLD_MISSING"))?;
+    if entry.schema != "runtime.world" || entry.version != RUNTIME_WORLD_CURRENT {
+        return Err(RuntimeError::message(
+            "ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED",
+        ));
+    }
+    Ok(())
 }
 
 pub fn read_runtime_save_section<T: DeserializeOwned>(
@@ -169,6 +190,7 @@ fn runtime_save_reader(
     if reader.kind() != ContainerKind::Save {
         return Err(RuntimeError::message("container is not a runtime save"));
     }
+    validate_runtime_world_contract(&reader)?;
     let manifest: MigrationManifest = reader
         .decode_postcard("migration.manifest")
         .map_err(|err| RuntimeError::message(err.to_string()))?;

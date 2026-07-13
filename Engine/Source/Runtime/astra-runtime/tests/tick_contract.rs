@@ -1,5 +1,6 @@
 use astra_runtime::{
-    EngineModuleSlot, PackageHandle, RuntimeConfig, RuntimeWorld, TickInput, ValidatedModuleBinding,
+    EngineModuleSlot, ModuleBindingContext, PackageHandle, RuntimeConfig, RuntimeWorld, TickInput,
+    ValidatedModuleBinding,
 };
 
 fn input(step: u64, seed: u64) -> TickInput {
@@ -7,6 +8,19 @@ fn input(step: u64, seed: u64) -> TickInput {
         fixed_step: step,
         delta_ns: 16_666_667,
         seed,
+    }
+}
+
+fn binding_context(package_id: &str) -> ModuleBindingContext {
+    let package = PackageHandle::default();
+    ModuleBindingContext {
+        package_id: package_id.to_string(),
+        target: package.target,
+        profile: package.profile,
+        engine_version: package.engine_version,
+        rustc_fingerprint: package.rustc_fingerprint,
+        feature_fingerprint: package.feature_fingerprint,
+        abi_fingerprint: package.abi_fingerprint,
     }
 }
 
@@ -77,7 +91,7 @@ fn module_mount_requires_matching_explicit_packaged_binding_and_unique_slot() {
         slot.clone(),
         "astra.fixture.presentation",
         "presentation.headless",
-        "stage1.headless",
+        binding_context("stage1.headless"),
         true,
         false,
     )
@@ -86,7 +100,7 @@ fn module_mount_requires_matching_explicit_packaged_binding_and_unique_slot() {
         slot.clone(),
         "astra.fixture.presentation",
         "presentation.headless",
-        "stage1.headless",
+        binding_context("stage1.headless"),
         false,
         true,
     )
@@ -95,7 +109,7 @@ fn module_mount_requires_matching_explicit_packaged_binding_and_unique_slot() {
         slot.clone(),
         "astra.fixture.presentation",
         "presentation.headless",
-        "other.package",
+        binding_context("other.package"),
         true,
         true,
     )
@@ -106,7 +120,7 @@ fn module_mount_requires_matching_explicit_packaged_binding_and_unique_slot() {
         slot.clone(),
         "astra.fixture.presentation",
         "presentation.headless",
-        "stage1.headless",
+        binding_context("stage1.headless"),
         true,
         true,
     )
@@ -116,7 +130,7 @@ fn module_mount_requires_matching_explicit_packaged_binding_and_unique_slot() {
         slot.clone(),
         "astra.fixture.second",
         "presentation.headless",
-        "stage1.headless",
+        binding_context("stage1.headless"),
         true,
         true,
     )

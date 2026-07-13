@@ -1,10 +1,52 @@
-use astra_core::{Hash256, SchemaMigrationRegistry, SchemaVersion, StableId};
+use astra_core::{Hash256, SchemaVersion, StableId};
+use astra_package::{
+    AstraContainerBuilder, ContainerKind, MigrationPolicy, SectionCodec, SectionPayload,
+};
 use astra_runtime::{
     AwaitKind, AwaitReplayPolicy, AwaitToken, AwaitTokenId, EventId, EventPayload, EventSource,
-    PackageHandle, PlayerInput, PresentationCommand, ProviderReplayOutput, ReplayHashCheckpoint,
-    ReplayTick, RuntimeConfig, RuntimeEvent, RuntimeReplayTranscript, RuntimeWorld, SaveRequest,
-    SerializedEffectEnvelope, TickInput,
+    MigrationManifest, MigrationManifestEntry, PackageHandle, PlayerInput, PresentationCommand,
+    ProviderReplayOutput, ReplayHashCheckpoint, ReplayTick, RuntimeConfig, RuntimeEvent,
+    RuntimeReplayTranscript, RuntimeWorld, SaveBlob, SaveRequest, SerializedEffectEnvelope,
+    TickInput,
 };
+
+#[test]
+fn save_load_rejects_previous_runtime_world_layout_without_hidden_compatibility() {
+    let world = RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let version = SchemaVersion::new(1, 0, 0);
+    let manifest = MigrationManifest {
+        sections: vec![MigrationManifestEntry {
+            schema: "runtime.world".to_string(),
+            minimum_supported_version: version,
+            current_version: version,
+        }],
+    };
+    let blob = AstraContainerBuilder::new(ContainerKind::Save)
+        .add_section(SectionPayload::new(
+            "runtime.world",
+            "runtime.world",
+            version,
+            SectionCodec::Postcard,
+            postcard::to_allocvec(&world.snapshot()).unwrap(),
+            MigrationPolicy::current(),
+        ))
+        .add_section(SectionPayload::new(
+            "migration.manifest",
+            "migration.manifest",
+            version,
+            SectionCodec::Postcard,
+            postcard::to_allocvec(&manifest).unwrap(),
+            MigrationPolicy::current(),
+        ))
+        .write()
+        .unwrap();
+    let mut loaded =
+        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let error = loaded.load(SaveBlob(blob.into_bytes())).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED"));
+}
 
 #[test]
 fn save_replay_loads_hash_and_blocks_missing_migrator() {
@@ -31,24 +73,14 @@ fn save_replay_loads_hash_and_blocks_missing_migrator() {
     loaded.load(save).unwrap();
     assert_eq!(loaded.state_hash(), before);
 
-    let save_needing_migration = world
+    let unsupported = world
         .save(SaveRequest {
             minimum_supported_version: SchemaVersion::new(0, 9, 0),
         })
-        .unwrap();
-    let mut blocked =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
-    assert!(blocked.load(save_needing_migration.clone()).is_err());
-
-    let mut registry = SchemaMigrationRegistry::default();
-    registry.register_identity(
-        "runtime.world",
-        SchemaVersion::new(0, 9, 0),
-        SchemaVersion::new(1, 0, 0),
-    );
-    blocked
-        .load_with_registry(save_needing_migration, &registry)
-        .unwrap();
+        .unwrap_err();
+    assert!(unsupported
+        .to_string()
+        .contains("ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED"));
 }
 
 #[test]

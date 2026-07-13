@@ -1,6 +1,6 @@
 use astra_plugin::{
     EngineModuleSlot, ExtensionConflict, LoadPhase, PluginDependency, PluginRegistrar,
-    RegisteredProvider,
+    ProviderBindingContext, RegisteredProvider,
 };
 
 fn provider(id: &str) -> RegisteredProvider {
@@ -10,7 +10,18 @@ fn provider(id: &str) -> RegisteredProvider {
         capability: "presentation.headless".to_string(),
         phase: LoadPhase::Runtime,
         packaged: true,
+        engine_version: "0.1.0".to_string(),
+        rustc_fingerprint: "rustc-stable".to_string(),
+        feature_fingerprint: "runtime-envelope-v2".to_string(),
+        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
     }
+}
+
+fn context() -> ProviderBindingContext {
+    ProviderBindingContext::from_runtime_package(
+        &astra_runtime::PackageHandle::default(),
+        "presentation.headless",
+    )
 }
 
 #[test]
@@ -21,6 +32,7 @@ fn extension_registry_preserves_explicit_binding_and_reports_conflicts() {
         .bind_provider(
             &EngineModuleSlot("presentation".to_string()),
             "astra.provider.first",
+            context(),
         )
         .unwrap();
 
@@ -39,6 +51,7 @@ fn extension_registry_preserves_explicit_binding_and_reports_conflicts() {
         .bind_provider(
             &EngineModuleSlot("presentation".to_string()),
             "astra.provider.second",
+            context(),
         )
         .unwrap_err();
     assert!(error.contains("ASTRA_PLUGIN_BINDING_CONFLICT"));
@@ -76,4 +89,43 @@ fn extension_registry_preserves_explicit_binding_and_reports_conflicts() {
     assert!(registrar
         .selected_provider(&EngineModuleSlot("presentation".to_string()))
         .is_none());
+}
+
+#[test]
+fn explicit_binding_is_registration_order_independent_and_blocks_context_drift() {
+    for order in [
+        ["astra.provider.first", "astra.provider.second"],
+        ["astra.provider.second", "astra.provider.first"],
+    ] {
+        let mut registrar = PluginRegistrar::default();
+        for id in order {
+            registrar.register_provider(provider(id));
+        }
+        let mut drifted = context();
+        drifted.feature_fingerprint = "wrong-feature".to_string();
+        assert!(registrar
+            .bind_provider(
+                &EngineModuleSlot("presentation".to_string()),
+                "astra.provider.second",
+                drifted,
+            )
+            .unwrap_err()
+            .contains("ASTRA_PLUGIN_BINDING_FINGERPRINT_MISMATCH"));
+        assert!(registrar.services.get("presentation").is_none());
+
+        registrar
+            .bind_provider(
+                &EngineModuleSlot("presentation".to_string()),
+                "astra.provider.second",
+                context(),
+            )
+            .unwrap();
+        assert_eq!(
+            registrar
+                .selected_provider(&EngineModuleSlot("presentation".to_string()))
+                .unwrap()
+                .provider_id,
+            "astra.provider.second"
+        );
+    }
 }

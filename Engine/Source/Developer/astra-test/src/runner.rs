@@ -739,6 +739,8 @@ fn prepare_package_context(
     }
     context.handle = PackageHandle {
         package_id: package_ref.clone(),
+        target: target.clone().unwrap_or_else(|| "unresolved".to_string()),
+        ..PackageHandle::default()
     };
     context
         .release_gate_checks
@@ -780,6 +782,8 @@ fn prepare_package_context(
     {
         context.handle = PackageHandle {
             package_id: manifest.package_id,
+            target: target.clone().unwrap_or_else(|| "unresolved".to_string()),
+            ..PackageHandle::default()
         };
     }
     validate_package_target(&reader, target.as_deref(), &mut context);
@@ -1632,13 +1636,17 @@ impl RunContext {
             .bind_provider(
                 &astra_plugin::EngineModuleSlot("presentation".to_string()),
                 "astra.fixture.headless_presentation",
+                astra_plugin::ProviderBindingContext::from_runtime_package(
+                    self.world.package_handle(),
+                    "presentation.headless",
+                ),
             )
             .map_err(ScenarioError::Message)?;
         if let Some(provider) =
             registrar.selected_provider(&astra_plugin::EngineModuleSlot("presentation".to_string()))
         {
             let slot = provider.slot.clone();
-            let binding = registrar.runtime_binding(&slot, self.world.package_id())?;
+            let binding = registrar.runtime_binding(&slot)?;
             self.world
                 .mount_module(astra_runtime::EngineModuleSlot(slot.0), binding)?;
         }

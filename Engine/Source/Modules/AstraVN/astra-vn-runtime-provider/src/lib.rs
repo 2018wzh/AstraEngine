@@ -261,6 +261,8 @@ impl NativeVnRuntimeProvider {
             },
             PackageHandle {
                 package_id: request.package_hash.clone(),
+                target: request.target_id.clone(),
+                ..PackageHandle::default()
             },
         )
         .map_err(|err| CoreVnError::message(err.to_string()))?;

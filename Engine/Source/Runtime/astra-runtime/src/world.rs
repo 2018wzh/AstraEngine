@@ -47,6 +47,12 @@ pub struct RuntimeConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PackageHandle {
     pub package_id: String,
+    pub target: String,
+    pub profile: String,
+    pub engine_version: String,
+    pub rustc_fingerprint: String,
+    pub feature_fingerprint: String,
+    pub abi_fingerprint: String,
 }
 
 #[derive(
@@ -59,6 +65,23 @@ pub struct ModuleBindingSnapshot {
     pub provider_id: String,
     pub capability: String,
     pub package_id: String,
+    pub target: String,
+    pub profile: String,
+    pub engine_version: String,
+    pub rustc_fingerprint: String,
+    pub feature_fingerprint: String,
+    pub abi_fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModuleBindingContext {
+    pub package_id: String,
+    pub target: String,
+    pub profile: String,
+    pub engine_version: String,
+    pub rustc_fingerprint: String,
+    pub feature_fingerprint: String,
+    pub abi_fingerprint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,13 +95,12 @@ impl ValidatedModuleBinding {
         slot: EngineModuleSlot,
         provider_id: impl Into<String>,
         capability: impl Into<String>,
-        package_id: impl Into<String>,
+        context: ModuleBindingContext,
         packaged: bool,
         explicitly_selected: bool,
     ) -> Result<Self, RuntimeError> {
         let provider_id = provider_id.into();
         let capability = capability.into();
-        let package_id = package_id.into();
         for (code, name, value) in [
             ("ASTRA_RUNTIME_MODULE_SLOT_INVALID", "slot", slot.0.as_str()),
             (
@@ -94,7 +116,37 @@ impl ValidatedModuleBinding {
             (
                 "ASTRA_RUNTIME_MODULE_PACKAGE_INVALID",
                 "package_id",
-                package_id.as_str(),
+                context.package_id.as_str(),
+            ),
+            (
+                "ASTRA_RUNTIME_MODULE_TARGET_INVALID",
+                "target",
+                context.target.as_str(),
+            ),
+            (
+                "ASTRA_RUNTIME_MODULE_PROFILE_INVALID",
+                "profile",
+                context.profile.as_str(),
+            ),
+            (
+                "ASTRA_RUNTIME_MODULE_ENGINE_INVALID",
+                "engine_version",
+                context.engine_version.as_str(),
+            ),
+            (
+                "ASTRA_RUNTIME_MODULE_RUSTC_INVALID",
+                "rustc_fingerprint",
+                context.rustc_fingerprint.as_str(),
+            ),
+            (
+                "ASTRA_RUNTIME_MODULE_FEATURE_INVALID",
+                "feature_fingerprint",
+                context.feature_fingerprint.as_str(),
+            ),
+            (
+                "ASTRA_RUNTIME_MODULE_ABI_INVALID",
+                "abi_fingerprint",
+                context.abi_fingerprint.as_str(),
             ),
         ] {
             if !is_safe_binding_symbol(value) {
@@ -121,7 +173,13 @@ impl ValidatedModuleBinding {
             snapshot: ModuleBindingSnapshot {
                 provider_id,
                 capability,
-                package_id,
+                package_id: context.package_id,
+                target: context.target,
+                profile: context.profile,
+                engine_version: context.engine_version,
+                rustc_fingerprint: context.rustc_fingerprint,
+                feature_fingerprint: context.feature_fingerprint,
+                abi_fingerprint: context.abi_fingerprint,
             },
         })
     }
@@ -147,6 +205,12 @@ impl Default for PackageHandle {
     fn default() -> Self {
         Self {
             package_id: "stage1.headless".to_string(),
+            target: "headless".to_string(),
+            profile: "test".to_string(),
+            engine_version: env!("CARGO_PKG_VERSION").to_string(),
+            rustc_fingerprint: "rustc-stable".to_string(),
+            feature_fingerprint: "runtime-envelope-v2".to_string(),
+            abi_fingerprint: "astra-plugin-abi-v2".to_string(),
         }
     }
 }
@@ -249,6 +313,10 @@ impl RuntimeWorld {
         &self.package.package_id
     }
 
+    pub fn package_handle(&self) -> &PackageHandle {
+        &self.package
+    }
+
     pub fn mount_module(
         &mut self,
         slot: EngineModuleSlot,
@@ -260,10 +328,28 @@ impl RuntimeWorld {
                 "module binding token does not match the requested slot",
             )));
         }
-        if binding.snapshot.package_id != self.package.package_id {
+        let expected_context = ModuleBindingContext {
+            package_id: self.package.package_id.clone(),
+            target: self.package.target.clone(),
+            profile: self.package.profile.clone(),
+            engine_version: self.package.engine_version.clone(),
+            rustc_fingerprint: self.package.rustc_fingerprint.clone(),
+            feature_fingerprint: self.package.feature_fingerprint.clone(),
+            abi_fingerprint: self.package.abi_fingerprint.clone(),
+        };
+        let actual_context = ModuleBindingContext {
+            package_id: binding.snapshot.package_id.clone(),
+            target: binding.snapshot.target.clone(),
+            profile: binding.snapshot.profile.clone(),
+            engine_version: binding.snapshot.engine_version.clone(),
+            rustc_fingerprint: binding.snapshot.rustc_fingerprint.clone(),
+            feature_fingerprint: binding.snapshot.feature_fingerprint.clone(),
+            abi_fingerprint: binding.snapshot.abi_fingerprint.clone(),
+        };
+        if actual_context != expected_context {
             return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_MODULE_PACKAGE_MISMATCH",
-                "module binding token belongs to a different package",
+                "ASTRA_RUNTIME_MODULE_CONTEXT_MISMATCH",
+                "module binding token does not match package target/profile/fingerprint context",
             )));
         }
         if self.mounted_modules.contains_key(&slot.0) {
