@@ -4,3 +4,4 @@ target/
 .tmp/
 .astra-cache/
 Examples/TsuiNoSora/.local/
+.idea
