@@ -1,6 +1,6 @@
 # Stage 2 Media + Package Work
 
-Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS 和 release gate。资产、Cook、Package、headless media、release report、Target manifest、严格 scenario runner、flat StateMachine、Await/Fence 基础以及 `asset.vfs_manifest`/`asset.catalog` package VFS slice 已落地。平台完成边界只覆盖 Windows 和 Web；Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是 Stage 2 完成前置。
+Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS 和 release gate。资产、Cook、Package、局部 headless media contract、release report、Target manifest、严格 scenario runner、flat StateMachine、Await/Fence 基础以及 `asset.vfs_manifest`/`asset.catalog` package VFS slice 已落地。Migration 11 重新打开完整 Headless Platform 完成口径：当前分散的 `ScenarioRunner`、CPU frame、AudioGraph meter 和 Player automation 尚未收束为全功能测试 host。平台完成边界仍只覆盖 Windows 和 Web；Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是 Stage 2 完成前置。
 
 ## S2-ASSET-01 AssetId、VFS 基础与 sidecar schema
 
@@ -309,6 +309,32 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 **Done Evidence:** `cargo test -p astra-test --test native_smoke` 覆盖 native smoke pass、AstraVN sample unsupported action blocked、declared package missing blocked；`cargo test -p astra-cli --test logging` 验证 CLI report/log 分离。
 
 **Linked Test IDs:** `T-S2-SCENARIO-GATE-01`
+
+## Migration 11 Headless Platform 测试后端
+
+[Migration 11](../../migrations/headless-platform-test-backend-migration.md) 已完成文档规划，以下工作项均为 `SPEC_READY`。`S2-MEDIA-01` 与 `S2-MEDIA-03` 保持 `DONE`，只表示局部 renderer/audio contract；九项全部闭合前，Stage 2 Headless 不能恢复完成状态。
+
+| Work ID | Status | Planned boundary | Planned Test ID |
+| --- | --- | --- | --- |
+| `S2-HEADLESS-CONTRACT-01` | `SPEC_READY` | `HostKind`、`HeadlessHostProfile`、`HostLaunchProfile`，保持六平台 `PlatformId` 与发布 profile v2 | `T-S2-HEADLESS-CONTRACT-01` |
+| `S2-HEADLESS-HOST-01` | `SPEC_READY` | `publish = false` 完整 host，覆盖 surface/audio/decode/save/package/input 和 zero-leak lifecycle | `T-S2-HEADLESS-HOST-01` |
+| `S2-HEADLESS-MEDIA-01` | `SPEC_READY` | Media-owned reference providers，真实 `SceneCommand`、glyph、FilterGraph、PNG 和 PCM WAV | `T-S2-HEADLESS-MEDIA-01` |
+| `S2-HEADLESS-INPUT-01` | `SPEC_READY` | 强类型物理输入、固定时间与双向 JSONL；产品语义直调 blocking | `T-S2-HEADLESS-INPUT-01` |
+| `S2-HEADLESS-ARTIFACT-01` | `SPEC_READY` | 全量/检查点/最终/manifest-only retention、显式限额、脱敏 artifact/run report | `T-S2-HEADLESS-ARTIFACT-01` |
+| `S2-HEADLESS-CLI-01` | `SPEC_READY` | 独立 `astra-headless run` 与 `serve --stdio` Developer binary | `T-S2-HEADLESS-CLI-01` |
+| `S2-HEADLESS-TEST-MIGRATION-01` | `SPEC_READY` | 所有 Runtime test 无例外创建 `HeadlessTestContext`，平台无关测试不保留双轨 | `T-S2-HEADLESS-TEST-MIGRATION-01` |
+| `S2-HEADLESS-REVIEW-01` | `SPEC_READY` | 全帧/全音频自动分析、required checkpoint 模型审查、人工容差批准后重跑 | `T-S2-HEADLESS-REVIEW-01` |
+| `S2-HEADLESS-PREFLIGHT-01` | `SPEC_READY` | 同 build/package/input 的 Headless preflight，E2 不替代 Windows/Web E3 | `T-S2-HEADLESS-PREFLIGHT-01` |
+
+Planned Done Evidence 只能在实现存在后执行并登记：
+
+```bash
+cargo test -p astra-platform-headless
+cargo test -p astra-headless
+python Tools/run_cargo_isolated.py test --workspace
+```
+
+当前没有对应 crate、binary、schema 或 report，以上命令不能写成已通过证据。Migration 11 的实现属于大规模测试基础设施迁移，开工前必须创建新分支。
 
 ## S2-PLATFORM-01 Platform capability crate 与分层 probe
 

@@ -24,6 +24,29 @@ astra package validate target/game.astrapkg --profile desktop-release --target n
 astra test run scenarios/full_playthrough.yaml --package target/game.astrapkg --target nativevn-game --headless
 ```
 
+上面的 `--headless` 是当前既有入口。Migration 11 只完成文档规划，尚未提供 `astra-headless`。迁移实施后，旧 flag 将返回明确错误，不保留隐式 alias。
+
+## Planned Headless Platform workflow
+
+Migration 11 完成后的 Developer 入口为独立 binary：
+
+```bash
+astra-headless run \
+  --profile tests/headless/profile.json \
+  --input tests/headless/full-playthrough.jsonl \
+  --artifacts target/headless/full-playthrough
+
+astra-headless serve --stdio \
+  --profile tests/headless/profile.json \
+  --artifacts target/headless/interactive
+```
+
+文件与 stdio 使用同一双向 JSONL 协议。默认保存全部 presented frame PNG 和完整 PCM S16LE WAV；`all`、`checkpoints`、`final`、`manifest-only` 必须显式受 frame、byte、duration 和 artifact count 限额约束。stdout 只输出协议或 report，日志只写 stderr。
+
+产品、Player、样例或 full-playthrough 必须先通过自动比较，再由模型查看 required checkpoint、首尾帧、最大差异帧和失败邻近帧。音频要检查 WAV、波形、频谱、响度、静音、削波、声道和时长；涉及语音内容或音画同步时还要试听。模型不能覆盖自动失败或自行放宽容差。
+
+真实平台验收只能在 `astra.headless_run_report.v1`、`astra.headless_review.v1` 和 `astra.headless_preflight_link.v1` 全部通过后启动。Headless 与真实平台 run 必须绑定同一 build、cooked package、input sequence、scenario、target 和 content identity；Headless 结果不能替代真实窗口、浏览器、音频设备或原生输入证据。
+
 ## 日志命令
 
 `astra` 默认把 machine-readable report 写到 stdout，把日志写到 stderr。需要结构化日志时使用：
@@ -57,6 +80,10 @@ Windows shipping Player 默认使用平台 writable `Saved/Logs` 与 `Saved/Cras
 | `astra.target_validation_report.v1` | Editor/Game/Program target |
 | `astra.platform_capability_report.v2` | declared/available/selected 平台 provider |
 | `astra.platform_host_conformance_report.v1` | build/profile/package/session 绑定的真实 host 生命周期证据 |
+| `astra.headless_artifact_manifest.v1` | planned Headless PNG/WAV 相对路径、hash、尺寸、时长和 provider identity |
+| `astra.headless_run_report.v1` | planned 平台无关 host、输入、产物与自动比较结果 |
+| `astra.headless_review.v1` | planned 模型视觉/音频审查结果 |
+| `astra.headless_preflight_link.v1` | planned Headless 与真实平台 run 的 identity 关联 |
 | `astra.plugin_report.v1` | 插件加载、卸载和 provider |
 | `astra.emu.local_case_report.v1` | AstraEMU Artemis 和后续 family |
 

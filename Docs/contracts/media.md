@@ -6,6 +6,8 @@ Media 分为 Renderer2D、TextLayout、DecodeProvider、FilterGraph、AudioGraph
 
 wgpu 是默认 provider，但不是唯一后端。Renderer2D provider 声明 backend、surface capability、headless support、shader model、target format 和 packaged eligibility。
 
+现有 `HeadlessRenderer` 只证明轻量 CPU contract 和 deterministic frame。Migration 11 planned 完整 Headless Platform 必须显式绑定 Media 层的真实 renderer、font/TextLayout、FilterGraph、AudioGraph 和 decode provider，输出真实 PNG/WAV。state hash 颜色块、矩形变化、空音频、静态 meter 或 synthetic decode 都不能作为完整 Headless 产品证据。
+
 ## DecodeProvider
 
 平台解码优先：AVFoundation、MediaCodec、WebCodecs、Windows Media Foundation 等平台模块先接管可用格式。桌面 fallback 通过 optional `ffmpeg-vcpkg` feature 接入，使用 `ffmpeg-next`/`ffmpeg-sys-next` 的 `vcpkg` crate provider 查找 FFmpeg；默认 build 不要求本机 FFmpeg。DecodeProvider 输出 CPU buffer 或 `MediaSurfaceToken`；public API 不暴露平台 native handle。
@@ -32,6 +34,8 @@ AstraEMU filter preset 复用同一 `FilterGraph`。final-frame preset 作用在
 ## AudioGraph
 
 AudioGraph 独立于视觉 FilterGraph。它处理 bus、voice、BGM、SE、DSP、ducking、fade、loop、latency 和 platform output。Timeline 负责音画同步。
+
+Headless reference output 使用固定采样率、固定声道布局的 PCM S16LE WAV，并保留完整 sample sequence。音频限额、写入失败、静音、削波、声道和时长不匹配都进入 machine-readable diagnostic；不能只记录 peak/RMS 后丢弃实际音频。
 
 ## TextLayout
 

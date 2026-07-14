@@ -30,6 +30,12 @@
 
 `VnPlayerCommand` 可继续服务 headless scenario 和 crate 单元测试，但不得出现在 live-player gate 的输入路径或 evidence 中。
 
+## Headless Preflight
+
+Migration 11 将新增平台无关 `astra.user_input_sequence.v1`。它只包含 focus/resume、keyboard、IME、pointer、wheel、touch、gamepad、固定时间推进、await、checkpoint 和 shutdown；不允许 `advance`、`choose`、`open_system` 或直接 `VnPlayerCommand`。当前 `VnPlayerCommand` 测试路径在迁移完成前仍是既有局部测试能力，不能成为新 Headless backend 的最终入口。
+
+产品、Player、样例和 full-playthrough 在进入 Windows/Web live automation 前，必须先用相同 build、cooked package 和 input sequence 通过 Headless 自动比较与模型审查。`astra.headless_preflight_link.v1` 只负责绑定两次 run，不能把 Headless 的 PNG/WAV、route 或 input transcript冒充 Windows/Web host evidence。
+
 ## Windows Driver
 
 Windows Stage 3 driver 必须启动真实 player 窗口，发现目标窗口并确认 focus。鼠标和键盘输入必须由 Win32 `SendInput` 发送到 player 窗口；输入后必须证明 winit event loop 收到对应 mouse/keyboard event，再由 runtime 推进 dialogue、choice、system page、config、save、load 和 backlog 路径。

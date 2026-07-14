@@ -56,6 +56,8 @@ AstraEMU 还要检查 auto probe、Trusted Luau policy、text redaction 和 Filt
 
 Stage 3 `player.full_playable` 只接受 Windows/Web 平台原生输入自动化证据。Windows 必须有真实 player window focus、Win32 `SendInput` mouse/keyboard、player event loop receipt、window/renderer region hash 变化、AudioGraph meter 与 WASAPI host evidence。Web 必须有真实 browser page、CDP session、`Input.dispatchMouseEvent`、`Input.dispatchKeyEvent`、canvas/screenshot region hash 变化、WebAudio meter 和 route evidence。缺 `player.input_transcript`、缺视觉区域变化、缺音频 meter、缺 host evidence，或发现 `VnPlayerCommand`、`--route-scenario` 自推进、`--dump-dom` route runner、DOM `element.click()`、直接 JS callback、API 可用性 smoke 冒充输入时，`player.full_playable` 必须 blocked。`input.browser`、`input.gamepad`、`input.touch` 只能作为 capability check，不能作为 playable evidence。
 
+Migration 11 完成后，真实产品平台验收还要先通过 `headless.preflight`。它要求同一 build fingerprint、cooked package hash、input sequence hash、scenario、target 和 content identity 的 `astra.headless_run_report.v1`、`astra.headless_review.v1` 与 `astra.headless_preflight_link.v1`。Headless blocked、缺 required artifact/model review 或 identity mismatch 时，不得启动正式平台验收。该 check 仍只提供 E2 前置证据，不能让 `player.full_playable`、Windows/Web host conformance 或 E3 自动通过。
+
 ## Verification Commands
 
 ```bash
@@ -64,5 +66,7 @@ astra package validate target/nativevn.astrapkg --profile desktop-release --targ
 astra test run scenarios/full_playthrough.yaml --package target/nativevn.astrapkg --target nativevn-game --headless
 astra report explain target/release_report.yaml
 ```
+
+上述 `--headless` 是当前入口。planned Migration 11 使用独立 `astra-headless`；实现前不能把 planned preflight 命令写成已通过证据。
 
 完整 check matrix 见 [Release Gate Checks Blueprint](../implementation/release-gate-checks.md)。每个 check 必须声明 id、domain、input、blocking condition、evidence、source_ref 和期望输出。

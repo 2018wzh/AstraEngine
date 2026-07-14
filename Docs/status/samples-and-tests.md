@@ -13,6 +13,8 @@
 | AstraRPG AI Town | Stage 7 planned AI autonomous RPG sample | [AI Town sample](../samples/astra-rpg-ai-town/README.md)、20 NPC、intent validator、committed output、memory ledger、save/load/replay、provider-free replay |
 | AstraRPG CP2020 Local Adapter | Stage 7 planned local-private `rpg.trpg` sample | [CP2020 local adapter](../samples/astra-rpg-cp2020-local-adapter/README.md)、sheet schema、deterministic dice、seat authority、transcript redaction、local content manifest/hash gate |
 
+Migration 11 完成后，所有平台无关 Runtime、Player 和 full-flow 样例都必须先由统一 `HeadlessTestContext` 执行。产品级样例还要产出真实 PNG/WAV、全帧/全音频自动比较、required checkpoint 模型审查和同 build/package/input 的真实平台 preflight link。当前这些能力都是 `SPEC_READY`，现有 headless route/scenario 结果不能冒充新后端证据。
+
 ## AstraEMU Family Samples
 
 每个 family 使用用户本地合法数据，报告只提交 hash 和脱敏 metadata。v1 可用 family 是 Artemis；其他 family 输出 alpha probe report。实现顺序：Artemis、KrKr、BGI、SoftPAL、FVP、Siglus。

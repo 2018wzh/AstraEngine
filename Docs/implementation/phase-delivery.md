@@ -41,7 +41,7 @@ checks:
 
 ## Stage 2：Media + Package
 
-**闭环：** cooked package 可读写，headless capture 稳定，strict scenario runner 不忽略未知 VN action，Windows/Web 平台能力报告覆盖 decode/audio/renderer/storage/package source。Stage 2 当前因 VFS 设计升级重开：已有 AssetId、sidecar、registry、cook、package 和 media evidence 继续保留，但还要补齐 package/local authorized/legacy pack/overlay mount 的统一 contract、reader provider 和 release gate。
+**闭环：** cooked package 可读写，strict scenario runner 不忽略未知 VN action，Windows/Web 平台能力报告覆盖 decode/audio/renderer/storage/package source。Provider URI VFS 已落地；Stage 2 当前由 Migration 11 重新打开 Headless 完成口径。已有 CPU capture、AudioGraph meter 与 media tests 继续保留，但还要补统一测试 host、序列化物理输入、真实 PNG/WAV、全 Runtime test 收束、模型审查和真实平台 preflight。
 
 **Test IDs:** `T-S2-PACKAGE-01`、`T-S2-VFS-01`、`T-S2-MEDIA-01`、`T-S2-MEDIA-05`、`T-S2-RUNTIME-FSM-01`、`T-S2-RUNTIME-AWAIT-01`、`T-S2-SCENARIO-GATE-01`、`T-S2-PLATFORM-01`、`T-S2-TARGET-GATE-01`、`T-S2-GATE-01`、`T-S2-WINDOWS-HOST-01`、`T-S2-WEB-HOST-01`
 

@@ -56,12 +56,12 @@ Runtime 发 command，Media provider 执行 command。Media provider 不写剧�
 
 | Slot | Default | Fallback |
 | --- | --- | --- |
-| Renderer2D | optional `wgpu` provider | headless capture provider |
+| Renderer2D | optional `wgpu` provider | 当前 headless capture provider；Migration 11 planned 完整 CPU reference provider |
 | TextLayout | `cosmic-text` + Swash | missing glyph diagnostic |
 | Image Decode | platform image API | Rust image decoder where profile allows |
 | Audio Decode | platform decoder | Symphonia fallback; FFmpeg optional |
 | Video Decode | AVFoundation/MediaCodec/WebCodecs/WMF | FFmpeg optional |
-| Audio Output | platform output or optional Kira provider | headless meter |
+| Audio Output | platform output or optional Kira provider | 当前 headless meter；Migration 11 planned 完整 PCM S16LE WAV output |
 
 ## Graph Validation
 
@@ -88,3 +88,5 @@ astra package validate target/nativevn.astrapkg --profile desktop-release
 ```
 
 Expected report: stale artifact、provider-ineligible artifact、decode capability gap、graph schema mismatch 都阻断对应 profile。
+
+Migration 11 不改变 Media owner。完整 Headless host 通过显式 binding 组合 renderer、TextLayout、AudioGraph 和 decode provider，输出真实 PNG/WAV；旧 capture hash 与 meter 继续作为局部 contract 证据，不能关闭完整后端。
