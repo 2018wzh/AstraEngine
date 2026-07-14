@@ -3,11 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use astra_core::Diagnostic;
 
 use crate::{
-    lower::ParsedLine, AspectRatio, AudioCue, ExtensionCommandDescriptor, ExtensionFieldKind,
-    ExtensionPresentationCommand, ExtensionValue, FixedScalar, MovieLoopMode, StageBlendMode,
-    StageClipPolicy, StageCommand, StageLayerKind, StagePlacement, StageViewport, TimelineCommand,
-    TimelineSpec, VnAudioBus, VnAudioSync, VnError, VnMovieEndBehavior, VnTimelineJoinPolicy,
-    VnTimelineKeyframe, VnTimelineTrack,
+    lower::ParsedLine, AspectRatio, AudioControl, AudioCue, ExtensionCommandDescriptor,
+    ExtensionFieldKind, ExtensionPresentationCommand, ExtensionValue, FixedScalar, MovieLoopMode,
+    StageBlendMode, StageClipPolicy, StageCommand, StageLayerKind, StagePlacement, StageViewport,
+    TimelineCommand, TimelineSpec, VnAudioBus, VnAudioControlAction, VnAudioSync, VnError,
+    VnMovieEndBehavior, VnTimelineJoinPolicy, VnTimelineKeyframe, VnTimelineTrack,
 };
 
 pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, VnError> {
@@ -121,6 +121,7 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
         "voice" => compile_audio(line, VnAudioBus::Voice),
         "bgm" => compile_audio(line, VnAudioBus::Bgm),
         "se" => compile_audio(line, VnAudioBus::Se),
+        "audio" => compile_audio_control(line),
         "transition" => {
             validate_attrs(line, &["preset", "duration"], &["preset", "duration"])?;
             Ok(StageCommand::Transition {
@@ -164,6 +165,30 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
             .with_field("command", &line.keyword),
         )),
     }
+}
+
+fn compile_audio_control(line: &ParsedLine) -> Result<StageCommand, VnError> {
+    validate_attrs(line, &["action", "target"], &["action", "target"])?;
+    let action = match required(line, "action")? {
+        "pause" => VnAudioControlAction::Pause,
+        "resume" => VnAudioControlAction::Resume,
+        "stop" => VnAudioControlAction::Stop,
+        value => {
+            return Err(VnError::Diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_VN_AUDIO_CONTROL_ACTION",
+                    "audio control action must be pause, resume, or stop",
+                )
+                .with_source(line.source_ref())
+                .with_field("action", value),
+            ));
+        }
+    };
+    Ok(StageCommand::AudioControl(AudioControl {
+        id: line.stable_id(),
+        action,
+        target: symbol(line, "target")?,
+    }))
 }
 
 pub(crate) fn compile_extension_command(

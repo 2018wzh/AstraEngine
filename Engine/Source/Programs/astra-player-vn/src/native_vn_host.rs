@@ -22,7 +22,8 @@ use astra_plugin_abi::{
 };
 use astra_vn_core::{
     CompiledCommand, CompiledStory, PresentationCommand, StageBlendMode, StageClipPolicy,
-    StageCommand, StageLayerKind, SystemPageKind, VnPlayerCommand, VnRunConfig, VnRuntimeState,
+    StageCommand, StageLayerKind, SystemPageKind, TimelineCommand, VnAudioBus,
+    VnAudioControlAction, VnAudioSync, VnPlayerCommand, VnRunConfig, VnRuntimeState,
 };
 use astra_vn_package::{
     decode_compiled_story, load_localization as load_package_localization,
@@ -44,6 +45,7 @@ pub struct NativeVnHostCommandSource {
     command_sequence: u64,
     fixed_step: u64,
     session_seed: u64,
+    next_step_mode: RuntimeStepMode,
     width: u32,
     height: u32,
     textures: BTreeMap<String, TextureFrame>,
@@ -57,8 +59,6 @@ pub struct NativeVnHostCommandSource {
     media_assets: BTreeMap<String, PackagedMediaAsset>,
     pending_audio: Vec<NativeVnAudioOutput>,
     next_media_resource_id: u64,
-    presentation_manifest: VnPresentationProviderManifest,
-    presentation_profile: String,
     stage_director: ProductStageDirector,
     shutdown_started: bool,
 }
@@ -138,13 +138,6 @@ struct NativeVnPlayerSaveEnvelope {
     schema: String,
     payload_hash: Hash256,
     payload: NativeVnPlayerSavePayload,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct VnRuntimeStateSaveEnvelope {
-    schema: String,
-    state_hash: astra_core::Hash128,
-    state: VnRuntimeState,
 }
 
 struct ProductPresentationBinding {
@@ -369,6 +362,7 @@ impl NativeVnHostCommandSource {
             command_sequence: 0,
             fixed_step: 0,
             session_seed: 0,
+            next_step_mode: RuntimeStepMode::Live,
             width,
             height,
             textures: binding.presentation.textures,
@@ -382,8 +376,6 @@ impl NativeVnHostCommandSource {
             media_assets: binding.presentation.media_assets,
             pending_audio: Vec::new(),
             next_media_resource_id: 10_000,
-            presentation_profile: binding.runtime_provider.profile().to_string(),
-            presentation_manifest: binding.presentation.manifest,
             stage_director,
             shutdown_started: false,
         })
@@ -634,7 +626,7 @@ impl NativeVnHostCommandSource {
             session_id: self.session_id.clone(),
             slot: slot.clone(),
         })?;
-        validate_saved_runtime_state(&sections, &runtime_state)?;
+        validate_saved_runtime_state(&sections)?;
         let draw_commands_json = serde_json::to_vec(&self.last_draw)
             .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
         let payload = NativeVnPlayerSavePayload {
@@ -680,7 +672,7 @@ impl NativeVnHostCommandSource {
                     .into(),
             ));
         }
-        validate_saved_runtime_state(&envelope.payload.sections, &envelope.payload.runtime_state)?;
+        validate_saved_runtime_state(&envelope.payload.sections)?;
         let report = self.host.restore(RuntimeRestoreRequest {
             session_id: self.session_id.clone(),
             sections: envelope.payload.sections.sections,
@@ -692,6 +684,9 @@ impl NativeVnHostCommandSource {
                 report.diagnostics.join(",")
             )));
         }
+        self.fixed_step = report.restored_fixed_step;
+        self.session_seed = report.session_seed;
+        self.next_step_mode = RuntimeStepMode::RestoreContinuation;
         if Hash256::from_sha256(&envelope.payload.draw_commands_json)
             != envelope.payload.draw_commands_hash
         {
@@ -940,19 +935,21 @@ impl NativeVnHostCommandSource {
                     .to_string(),
             ));
         }
-        self.fixed_step = self
+        let fixed_step = self
             .fixed_step
             .checked_add(1)
             .ok_or(NativeVnHostError::SequenceOverflow)?;
         let output = self.host.step(RuntimeStepInput {
             session_id: self.session_id.clone(),
-            fixed_step: self.fixed_step,
+            fixed_step,
             delta_ns: 16_666_667,
             session_seed: self.session_seed,
-            mode: RuntimeStepMode::Live,
+            mode: self.next_step_mode,
             action: action.to_string(),
             payload,
         })?;
+        self.fixed_step = fixed_step;
+        self.next_step_mode = RuntimeStepMode::Live;
         let effect = output
             .outputs
             .iter()
@@ -1013,7 +1010,7 @@ impl NativeVnHostCommandSource {
         })?;
         self.last_step_evidence = Some(NativeVnStepEvidence {
             schema: "astra.player_vn_step_evidence.v1".to_string(),
-            fixed_step: self.fixed_step,
+            fixed_step,
             coverage_reached: effect.coverage_reached,
             vn_state_hash_before: effect.state_hash_before_advance,
             vn_state_hash_after: effect.state_hash_after_advance,
@@ -1060,53 +1057,45 @@ impl NativeVnHostCommandSource {
         }
         for envelope in output.outputs.iter().filter(|envelope| {
             envelope.domain == RuntimeOutputDomain::Audio
-                && envelope.schema == "astra.vn.audio_command.v1"
+                && envelope.schema == "astra.vn.audio_command.v2"
         }) {
             let command = envelope
                 .decode_postcard::<astra_vn_core::VnAudioCommand>(
                     RuntimeOutputDomain::Audio,
-                    "astra.vn.audio_command.v1",
-                    SchemaVersion::new(1, 0, 0),
+                    "astra.vn.audio_command.v2",
+                    SchemaVersion::new(2, 0, 0),
                 )
                 .map_err(|error| NativeVnHostError::RuntimeEvidence(error.to_string()))?;
-            if command.command == "audio" {
-                if let Some(action) = command.attributes.get("action") {
-                    if !matches!(action.as_str(), "stop" | "pause" | "resume") {
-                        return Err(NativeVnHostError::Asset(format!(
-                            "ASTRA_PLAYER_AUDIO_CONTROL_UNSUPPORTED: {}",
-                            command.command_id
-                        )));
-                    }
-                    let target = command.attributes.get("target").cloned().ok_or_else(|| {
-                        NativeVnHostError::Asset(format!(
-                            "ASTRA_PLAYER_AUDIO_CONTROL_TARGET_REQUIRED: {}",
-                            command.command_id
-                        ))
-                    })?;
-                    self.pending_audio.push(NativeVnAudioOutput::Control(
-                        NativeVnAudioControlRequest {
-                            command_id: command.command_id,
-                            action: action.clone(),
-                            target,
-                        },
-                    ));
-                    continue;
-                }
-            }
-            let asset_id = command.attributes.get("asset").cloned().ok_or_else(|| {
-                NativeVnHostError::Asset(format!(
-                    "ASTRA_PLAYER_AUDIO_ASSET_REQUIRED: {}",
-                    command.command_id
-                ))
-            })?;
+            let asset_id = command.cue.asset.clone();
             let asset = self.media_assets.get(&asset_id).ok_or_else(|| {
                 NativeVnHostError::Asset(format!("ASTRA_PLAYER_AUDIO_ASSET_MISSING: {asset_id}"))
             })?;
+            let command_kind = match command.cue.bus {
+                VnAudioBus::Voice => "voice",
+                VnAudioBus::Bgm => "bgm",
+                VnAudioBus::Se => "se",
+                VnAudioBus::Movie => "movie",
+            };
+            let mut attributes = BTreeMap::from([
+                ("asset".to_string(), asset_id.clone()),
+                ("loop".to_string(), command.cue.looped.to_string()),
+                ("fade".to_string(), command.cue.fade_ms.to_string()),
+            ]);
+            match &command.cue.sync {
+                VnAudioSync::None => {}
+                VnAudioSync::Text => {
+                    attributes.insert("sync".to_string(), "text".to_string());
+                }
+                VnAudioSync::Fence(fence) => {
+                    attributes.insert("sync".to_string(), "fence".to_string());
+                    attributes.insert("fence".to_string(), fence.clone());
+                }
+            }
             self.pending_audio
                 .push(NativeVnAudioOutput::Start(NativeVnAudioRequest {
                     command_id: command.command_id,
-                    command: command.command,
-                    attributes: command.attributes,
+                    command: command_kind.to_string(),
+                    attributes,
                     asset_id,
                     codec: asset.codec.clone(),
                     encoded_bytes: asset.bytes.clone(),
@@ -1135,12 +1124,28 @@ impl NativeVnHostCommandSource {
         presentation: &[PresentationCommand],
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         let mut next_stage_director = self.stage_director.clone();
+        let mut next_audio_controls = Vec::new();
         for command in presentation {
             if let PresentationCommand::Stage(stage) = command {
                 let outputs = next_stage_director
                     .apply(stage)
                     .map_err(stage_director_error)?;
                 reject_unwired_stage_outputs(&outputs)?;
+                next_audio_controls.extend(outputs.into_iter().filter_map(|output| {
+                    let StageDirectorOutput::AudioControl(control) = output else {
+                        return None;
+                    };
+                    Some(NativeVnAudioOutput::Control(NativeVnAudioControlRequest {
+                        command_id: control.id,
+                        action: match control.action {
+                            VnAudioControlAction::Pause => "pause",
+                            VnAudioControlAction::Resume => "resume",
+                            VnAudioControlAction::Stop => "stop",
+                        }
+                        .to_string(),
+                        target: control.target,
+                    }))
+                }));
             }
         }
         let next_scene_draw = stage_scene_commands(
@@ -1399,6 +1404,7 @@ impl NativeVnHostCommandSource {
         self.live_texture_ids = next_texture_ids;
         self.text_resources = next_text_resources;
         self.live_layout_ids = next_layout_ids;
+        self.pending_audio.extend(next_audio_controls);
         Ok(PlayerHostCommandBatch::new(vec![
             PlayerHostCommand::PresentScene {
                 sequence: self.command_sequence,
@@ -1450,12 +1456,7 @@ fn validate_product_provider_bindings(
             "astra.runtime.native_vn",
             "runtime.native_vn",
         ),
-        (
-            "presentation",
-            "astra.vn.standard_presentation",
-            "presentation.vn.standard",
-        ),
-        ("renderer2d", "astra.renderer2d.wgpu", "renderer2d.wgpu"),
+        ("presentation", "astra.renderer.wgpu", "renderer2d.wgpu"),
     ] {
         let policy_bound = policy
             .get("bindings")
@@ -1522,79 +1523,62 @@ fn validate_product_provider_bindings(
     Ok(())
 }
 
-fn validate_saved_runtime_state(
-    sections: &RuntimeSaveSections,
-    expected_state: &VnRuntimeState,
-) -> Result<(), NativeVnHostError> {
-    let section = sections
-        .sections
-        .iter()
-        .find(|section| section.section_id == "vn.runtime_state")
-        .ok_or_else(|| {
-            NativeVnHostError::Save(
-                "ASTRA_PLAYER_SAVE_RUNTIME_SECTION_MISSING: vn.runtime_state is required".into(),
-            )
-        })?;
-    if section.schema != "astra.vn.runtime_state_save.v1"
-        || section.codec != RuntimeSectionCodec::Postcard
+fn validate_saved_runtime_state(sections: &RuntimeSaveSections) -> Result<(), NativeVnHostError> {
+    let [section] = sections.sections.as_slice() else {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_RUNTIME_SECTION_SET: exactly one runtime.world section is required"
+                .into(),
+        ));
+    };
+    if section.section_id != "runtime.world"
+        || section.schema != "astra.runtime.save_blob.v2"
+        || section.version != SchemaVersion::new(2, 0, 0)
+        || section.codec != RuntimeSectionCodec::Raw
         || Hash256::from_sha256(&section.bytes) != section.hash
     {
         return Err(NativeVnHostError::Save(
             "ASTRA_PLAYER_SAVE_INTEGRITY: runtime section contract or hash mismatch".into(),
         ));
     }
-    let saved: VnRuntimeStateSaveEnvelope =
-        postcard::from_bytes(&section.bytes).map_err(|error| {
-            NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
-        })?;
-    let state_bytes = postcard::to_allocvec(&saved.state)
-        .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
-    if saved.schema != "astra.vn.runtime_state_save.v1"
-        || astra_core::Hash128::from_blake3(&state_bytes) != saved.state_hash
-        || &saved.state != expected_state
-    {
-        return Err(NativeVnHostError::Save(
-            "ASTRA_PLAYER_SAVE_INTEGRITY: runtime state evidence mismatch".into(),
-        ));
-    }
+    astra_runtime::read_runtime_save(
+        &astra_runtime::SaveBlob(section.bytes.clone()),
+        &astra_core::SchemaMigrationRegistry::default(),
+    )
+    .map_err(|error| NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}")))?;
     Ok(())
 }
 
 fn player_timeline_task(
     task: astra_vn_core::VnTimelineTask,
 ) -> Result<PlayerTimelineTask, NativeVnHostError> {
-    let action = match task.attributes.get("action").map(String::as_str) {
-        None | Some("start") => PlayerTimelineTaskAction::Start,
-        Some("cancel") => PlayerTimelineTaskAction::Cancel,
-        Some(action) => {
-            return Err(NativeVnHostError::RuntimeEvidence(format!(
-                "ASTRA_PLAYER_TIMELINE_ACTION_UNSUPPORTED: {action}"
-            )));
+    let (task_id, target, action, duration_ms, fence) = match task.command {
+        TimelineCommand::Start(spec) => {
+            let duration_ms = spec
+                .tracks
+                .iter()
+                .flat_map(|track| track.keyframes.iter())
+                .map(|keyframe| u64::from(keyframe.time_ms))
+                .max();
+            let target = spec.tracks.first().map(|track| track.target.clone());
+            (
+                spec.id,
+                target,
+                PlayerTimelineTaskAction::Start,
+                duration_ms,
+                spec.fence,
+            )
+        }
+        TimelineCommand::Cancel { id, .. } => {
+            (id, None, PlayerTimelineTaskAction::Cancel, None, None)
         }
     };
-    let duration_ms = task
-        .attributes
-        .get("duration")
-        .map(|value| {
-            value.parse::<u64>().map_err(|_| {
-                NativeVnHostError::RuntimeEvidence(format!(
-                    "ASTRA_PLAYER_TIMELINE_DURATION_INVALID: {}",
-                    task.command_id
-                ))
-            })
-        })
-        .transpose()?;
     Ok(PlayerTimelineTask {
         schema: "astra.player_timeline_task.v1".to_string(),
-        task_id: task
-            .attributes
-            .get("id")
-            .cloned()
-            .unwrap_or(task.command_id),
-        target: task.attributes.get("target").cloned(),
+        task_id,
+        target,
         action,
         duration_ms,
-        fence: task.attributes.get("fence").cloned(),
+        fence,
     })
 }
 
@@ -1993,9 +1977,15 @@ fn stage_coordinate_error() -> NativeVnHostError {
 }
 
 fn reject_unwired_stage_outputs(outputs: &[StageDirectorOutput]) -> Result<(), NativeVnHostError> {
-    if let Some(output) = outputs.first() {
+    if let Some(output) = outputs.iter().find(|output| {
+        !matches!(
+            output,
+            StageDirectorOutput::Audio(_) | StageDirectorOutput::AudioControl(_)
+        )
+    }) {
         let domain = match output {
             StageDirectorOutput::Audio(_) => "audio",
+            StageDirectorOutput::AudioControl(_) => "audio_control",
             StageDirectorOutput::Movie(_) => "movie",
             StageDirectorOutput::Effect(_) => "effect",
             StageDirectorOutput::FenceCompleted { .. } => "completion",
@@ -2279,7 +2269,12 @@ fn validate_story_presentation(
                     }
                     StageCommand::Configure { .. }
                     | StageCommand::Hide { .. }
-                    | StageCommand::Move { .. } => {}
+                    | StageCommand::Move { .. }
+                    | StageCommand::Audio(_)
+                    | StageCommand::AudioControl(_)
+                    | StageCommand::Timeline(_)
+                    | StageCommand::Transition { .. }
+                    | StageCommand::Shake { .. } => {}
                     StageCommand::DeclareLayer { blend, .. } => {
                         if *blend != StageBlendMode::Normal {
                             return Err(NativeVnHostError::Asset(

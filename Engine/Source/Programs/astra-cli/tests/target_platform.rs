@@ -382,20 +382,23 @@ targets:
     let policy: serde_json::Value =
         serde_json::from_slice(&package.container().read_section("provider.policy").unwrap())
             .unwrap();
-    assert_eq!(policy["renderer"], "astra.renderer2d.wgpu");
-    assert_eq!(
-        policy["bindings"],
-        serde_json::json!([{
-            "slot": "presentation",
-            "provider_id": "astra.vn.standard_presentation"
-        }, {
-            "slot": "renderer2d",
-            "provider_id": "astra.renderer2d.wgpu"
-        }, {
-            "slot": "game_runtime_provider",
-            "provider_id": "astra.runtime.native_vn"
-        }])
-    );
+    assert_eq!(policy["renderer"], "astra.renderer.wgpu");
+    let bindings = policy["bindings"].as_array().unwrap();
+    assert!(bindings.iter().any(|binding| {
+        binding["slot"] == "presentation"
+            && binding["provider_id"] == "astra.renderer.wgpu"
+            && binding["context"]["required_capability"] == "renderer2d.wgpu"
+    }));
+    assert!(bindings.iter().any(|binding| {
+        binding["slot"] == "vfs_provider"
+            && binding["provider_id"] == "astra.vfs.package"
+            && binding["context"]["required_capability"] == "vfs.backend.package"
+    }));
+    assert!(bindings.iter().any(|binding| {
+        binding["slot"] == "game_runtime_provider"
+            && binding["provider_id"] == "astra.runtime.native_vn"
+            && binding["context"]["required_capability"] == "runtime.native_vn"
+    }));
 
     let registry: serde_json::Value = serde_json::from_slice(
         &package
@@ -409,7 +412,7 @@ targets:
         .unwrap()
         .iter()
         .any(|provider| {
-            provider["provider_id"] == "astra.renderer2d.wgpu"
+            provider["provider_id"] == "astra.renderer.wgpu"
                 && provider["capability"] == "renderer2d.wgpu"
                 && provider["packaged"] == true
         }));
@@ -418,8 +421,8 @@ targets:
         .unwrap()
         .iter()
         .any(|provider| {
-            provider["provider_id"] == "astra.vn.standard_presentation"
-                && provider["capability"] == "presentation.vn.standard"
+            provider["provider_id"] == "astra.vfs.package"
+                && provider["capability"] == "vfs.backend.package"
                 && provider["packaged"] == true
         }));
 

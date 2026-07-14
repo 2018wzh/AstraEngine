@@ -168,6 +168,7 @@ pub enum PlayerInputKind {
     Advance,
     Choose,
     OpenSystem,
+    SystemReturn,
     ReplayVoice,
     Save,
     Load,

@@ -165,8 +165,8 @@ mod browser {
     use super::*;
     use astra_platform::{
         HostLaunchProfile, InputState, PlatformErrorCode, PlatformEventKind, PlatformHostClient,
-        PlatformHostFactory,
-        PointerButton, SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest,
+        PlatformHostFactory, PointerButton, SurfaceHandle, SurfaceRequest, WindowHandle,
+        WindowRequest,
     };
     use astra_player_core::{
         PlatformCommandSink, PlayerActionMap, PlayerHostCommandExecutor, PlayerHostCommandResult,

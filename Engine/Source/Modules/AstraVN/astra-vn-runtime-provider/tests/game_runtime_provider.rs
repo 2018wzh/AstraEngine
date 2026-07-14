@@ -4,8 +4,8 @@ use astra_plugin_abi::{
     GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID,
 };
 use astra_vn_runtime_provider::{
-    compile_astra_sources, AstraSource, NativeVnRuntimeProvider, PresentationCommand, VnRunConfig,
-    VnTimelineTask,
+    compile_astra_sources, AstraSource, NativeVnRuntimeProvider, PresentationCommand,
+    TimelineCommand, VnRunConfig, VnTimelineTask,
 };
 
 const STORY: &str = r#"
@@ -237,7 +237,7 @@ fn native_vn_provider_returns_timeline_tasks_to_the_product_host() {
 story main #@id story.main
 state prologue #@id state.prologue
   scene room #@id scene.room
-    timeline id:intro target:hero join:block fence:timeline.intro.complete duration:120 #@id timeline.intro
+    timeline id:intro target:hero property:opacity keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro
 "#;
     let compiled = compile_astra_sources([AstraSource::new("timeline.astra", story)]).unwrap();
     let mut provider = NativeVnRuntimeProvider::default();
@@ -259,7 +259,10 @@ state prologue #@id state.prologue
     let first = provider
         .step(RuntimeStepInput {
             session_id: open.session_id,
-            fixed_step: 0,
+            fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed: 9,
+            mode: RuntimeStepMode::Live,
             action: "launch_default".to_string(),
             payload: serde_json::json!({}),
         })
@@ -273,9 +276,11 @@ state prologue #@id state.prologue
                 SchemaVersion::new(1, 0, 0),
             )
             .is_ok_and(|task| {
-                task.command == "timeline"
-                    && task.attributes.get("fence").map(String::as_str)
-                        == Some("timeline.intro.complete")
+                matches!(
+                    task.command,
+                    TimelineCommand::Start(spec)
+                        if spec.fence.as_deref() == Some("timeline.intro.complete")
+                )
             })
     }));
 }

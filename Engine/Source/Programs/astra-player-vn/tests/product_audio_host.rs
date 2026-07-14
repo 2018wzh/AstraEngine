@@ -12,39 +12,19 @@ use astra_player_vn::{
     NativeVnAudioControlRequest, NativeVnAudioRequest, NativeVnHostCommandSource,
     NativeVnProductAudioHost, NativeVnProductMediaHost,
 };
-use astra_vn_core::{compile_astra_sources, AstraSource, VnRunConfig};
+mod support;
 
 fn source() -> NativeVnHostCommandSource {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "audio.astra",
+    support::source_for(
         "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line speaker:hero #@id line.one\n",
-    )])
-    .unwrap();
-    NativeVnHostCommandSource::new(
-        compiled,
-        VnRunConfig::classic("zh-Hans"),
-        320,
-        180,
-        PlayerHostResourceId(1),
     )
-    .unwrap()
 }
 
 #[tokio::test]
 async fn shared_product_media_host_completes_timeline_fence_and_presents_runtime_result() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "timeline.astra",
-        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    timeline id:intro target:hero join:block fence:timeline.intro.complete duration:120 #@id timeline.intro\n    text key:line.after #@id line.after\n",
-    )])
-    .unwrap();
-    let mut source = NativeVnHostCommandSource::new(
-        compiled,
-        VnRunConfig::classic("zh-Hans"),
-        320,
-        180,
-        PlayerHostResourceId(1),
-    )
-    .unwrap();
+    let mut source = support::source_for(
+        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    timeline id:intro target:hero property:opacity keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro\n    text key:line.after #@id line.after\n",
+    );
     source.launch().unwrap();
 
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
@@ -52,14 +32,14 @@ async fn shared_product_media_host_completes_timeline_fence_and_presents_runtime
     let native_surface = SurfaceHandle::from_parts(7, 1).unwrap();
     let backend_task = tokio::spawn(async move {
         match backend.next_command().await.unwrap() {
-            HostCommand::PresentRgba {
+            HostCommand::PresentScene {
                 surface,
                 frame,
                 reply,
             } => {
                 assert_eq!(surface, native_surface);
                 assert_eq!((frame.width, frame.height), (320, 180));
-                assert!(!frame.rgba8.is_empty());
+                assert!(!frame.commands.is_empty());
                 reply.send(Ok(())).unwrap();
             }
             command => panic!("unexpected command: {}", command.operation()),
@@ -88,19 +68,9 @@ async fn shared_product_media_host_completes_timeline_fence_and_presents_runtime
 
 #[tokio::test]
 async fn product_media_host_restores_uncommitted_timeline_tasks_after_capacity_failure() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "timeline.astra",
-        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    timeline id:intro target:hero join:block fence:timeline.intro.complete duration:120 #@id timeline.intro\n",
-    )])
-    .unwrap();
-    let mut source = NativeVnHostCommandSource::new(
-        compiled,
-        VnRunConfig::classic("zh-Hans"),
-        320,
-        180,
-        PlayerHostResourceId(1),
-    )
-    .unwrap();
+    let mut source = support::source_for(
+        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    timeline id:intro target:hero property:opacity keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro\n",
+    );
     source.launch().unwrap();
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let (client, _backend, _events) = host_channel(profile, 1, 1).unwrap();

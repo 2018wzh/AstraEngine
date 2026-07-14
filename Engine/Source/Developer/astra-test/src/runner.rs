@@ -1251,29 +1251,8 @@ impl RunContext {
                 hash: Hash256::from_sha256(&compiled_bytes),
                 bytes: compiled_bytes,
             };
-            let schemas = RuntimeHostSchemaRegistry::new()
-                .allow_version(
-                    RuntimeOutputDomain::Effect,
-                    "astra.vn.runtime_step_effect.v2",
-                    SchemaVersion::new(2, 0, 0),
-                )
-                .allow_version(
-                    RuntimeOutputDomain::Presentation,
-                    "astra.vn.presentation_command.v2",
-                    SchemaVersion::new(2, 0, 0),
-                )
-                .allow_version(
-                    RuntimeOutputDomain::Audio,
-                    "astra.vn.audio_command.v2",
-                    SchemaVersion::new(2, 0, 0),
-                )
-                .allow(RuntimeOutputDomain::Await, "astra.runtime.await_id.v1")
-                .allow(RuntimeOutputDomain::Trace, "astra.vn.runtime_step_trace.v1")
-                .allow(RuntimeOutputDomain::Trace, "astra.vn.runtime_state.v1")
-                .allow(
-                    RuntimeOutputDomain::DirtySaveSection,
-                    "astra.runtime.dirty_save_section.v1",
-                );
+            let schemas =
+                RuntimeHostSchemaRegistry::from_descriptor(&NativeVnRuntimeProvider::descriptor());
             let mut host = ProductRuntimeHost::reference_in_process(
                 "astra-test.native-vn",
                 NativeVnRuntimeProvider::default(),
@@ -1454,6 +1433,9 @@ impl RunContext {
                 self.apply_vn(VnPlayerCommand::OpenSystem {
                     page: parse_system_page(&value),
                 })?;
+            }
+            PlayerInputKind::SystemReturn => {
+                self.apply_vn(VnPlayerCommand::ReturnSystem)?;
             }
             PlayerInputKind::ReplayVoice => {
                 let value = input.value.clone().ok_or_else(|| {

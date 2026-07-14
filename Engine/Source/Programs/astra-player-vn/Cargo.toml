@@ -18,6 +18,7 @@ astra-package = { path = "../../Runtime/astra-package" }
 astra-plugin = { path = "../../Runtime/astra-plugin", default-features = false }
 astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi", default-features = false }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
+astra-runtime = { path = "../../Runtime/astra-runtime" }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
 astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider", default-features = false }

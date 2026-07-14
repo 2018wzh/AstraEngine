@@ -630,16 +630,6 @@ impl VnRuntime {
     }
 }
 
-fn bind_presentation_command_id(
-    id: String,
-    mut command: PresentationCommand,
-) -> PresentationCommand {
-    if let PresentationCommand::Stage { attributes, .. } = &mut command {
-        attributes.entry("id".to_string()).or_insert(id);
-    }
-    command
-}
-
 pub fn reduce_vn_step(
     compiled: &CompiledStory,
     state: &VnRuntimeState,

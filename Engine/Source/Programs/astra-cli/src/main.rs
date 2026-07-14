@@ -2033,8 +2033,6 @@ fn build_package_from_cooked(
     request.cook_summary = serde_json::to_vec(&manifest.asset_cook)?;
     request.asset_vfs_manifest = asset_vfs_manifest;
     request.asset_catalog = asset_catalog;
-    request.provider_policy = product_provider_policy(&manifest.profile)?;
-    request.plugin_extension_registry = product_extension_registry()?;
     request.target_manifest = serde_json::to_vec(&package_target_manifest)?;
     request.platform_eligibility = platform_eligibility(&package_target_manifest, target)?;
     request.scenario_refs = serde_json::to_vec(&scenario_refs_manifest_from_cooked(

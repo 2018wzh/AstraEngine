@@ -116,6 +116,21 @@ pub struct AudioCue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+pub enum VnAudioControlAction {
+    Pause,
+    Resume,
+    Stop,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct AudioControl {
+    pub id: String,
+    pub action: VnAudioControlAction,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum VnTimelineJoinPolicy {
     FireAndForget,
     Block,
@@ -212,6 +227,7 @@ pub enum StageCommand {
         fallback: Option<String>,
     },
     Audio(AudioCue),
+    AudioControl(AudioControl),
     Transition {
         preset: String,
         duration_ms: u32,
@@ -248,6 +264,7 @@ impl StageCommand {
                 VnAudioBus::Se => "se",
                 VnAudioBus::Movie => "movie_audio",
             },
+            Self::AudioControl(_) => "audio",
             Self::Transition { .. } => "transition",
             Self::Shake { .. } => "shake",
             Self::Timeline(_) => "timeline",

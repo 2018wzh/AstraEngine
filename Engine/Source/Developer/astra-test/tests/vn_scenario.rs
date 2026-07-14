@@ -124,10 +124,14 @@ locale: zh-Hans
 actions:
   - launch: {}
   - advance: {}
+  - player_input:
+      kind: open_system
+      value: route_chart
+  - player_input:
+      kind: system_return
   - choose: choice.library
-  - advance: {}
   - replay_voice: voice.hero.0002
-  - open_system: route_chart
+  - advance: {}
   - save: slot.auto
   - load: slot.auto
   - replay_from_start: {}
@@ -277,16 +281,18 @@ actions:
   - player_input:
       kind: advance
   - player_input:
+      kind: open_system
+      value: route_chart
+  - player_input:
+      kind: system_return
+  - player_input:
       kind: choose
       value: choice.library
-  - player_input:
-      kind: advance
   - player_input:
       kind: replay_voice
       value: voice.hero.0002
   - player_input:
-      kind: open_system
-      value: route_chart
+      kind: advance
   - player_input:
       kind: save
       slot: slot.auto

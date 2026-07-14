@@ -5,10 +5,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AspectRatio, AudioCue, FixedScalar, MovieLoopMode, StageBlendMode, StageClipPolicy,
-    StageCommand, StageLayerKind, StagePlacement, StageViewport, TimelineCommand, TimelineSpec,
-    VnError, VnMovieEndBehavior, VnPresentationEasing, VnPresentationProviderManifest,
-    VnTimelineJoinPolicy,
+    AspectRatio, AudioControl, AudioCue, FixedScalar, MovieLoopMode, StageBlendMode,
+    StageClipPolicy, StageCommand, StageLayerKind, StagePlacement, StageViewport, TimelineCommand,
+    TimelineSpec, VnError, VnMovieEndBehavior, VnPresentationEasing,
+    VnPresentationProviderManifest, VnTimelineJoinPolicy,
 };
 
 pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v1";
@@ -116,6 +116,7 @@ pub struct ProductStageTransition {
 #[serde(rename_all = "snake_case")]
 pub enum StageDirectorOutput {
     Audio(AudioCue),
+    AudioControl(AudioControl),
     Movie(ProductStageMovie),
     Effect(ProductStageEffect),
     FenceCompleted { kind: String, id: String },
@@ -498,6 +499,9 @@ impl ProductStageDirector {
             }
             StageCommand::Audio(cue) => {
                 return Ok(vec![StageDirectorOutput::Audio(cue.clone())]);
+            }
+            StageCommand::AudioControl(control) => {
+                return Ok(vec![StageDirectorOutput::AudioControl(control.clone())]);
             }
             StageCommand::Transition {
                 preset,

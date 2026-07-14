@@ -614,6 +614,7 @@ dependencies = [
  "astra-player-core",
  "astra-plugin",
  "astra-plugin-abi",
+ "astra-runtime",
  "astra-vn-core",
  "astra-vn-package",
  "astra-vn-presentation",

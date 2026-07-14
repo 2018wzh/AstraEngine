@@ -37,6 +37,7 @@ impl VnStandardCommandManifest {
                 descriptor("voice", "astra.command.voice.v2"),
                 descriptor("bgm", "astra.command.bgm.v2"),
                 descriptor("se", "astra.command.se.v2"),
+                descriptor("audio", "astra.command.audio_control.v2"),
                 descriptor("stage", "astra.command.stage.v2"),
                 descriptor("layer", "astra.command.layer.v2"),
                 descriptor("timeline", "astra.command.timeline.v2"),
