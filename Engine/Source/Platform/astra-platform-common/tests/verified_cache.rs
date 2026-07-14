@@ -2,7 +2,7 @@
 
 use astra_core::Hash256;
 use astra_platform::{PackageCachePolicy, PlatformErrorCode};
-use astra_platform_general::VerifiedPackageCache;
+use astra_platform_common::VerifiedPackageCache;
 
 #[test]
 fn verified_cache_rejects_mismatched_bytes_without_committing_staging() {

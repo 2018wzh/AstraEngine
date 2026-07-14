@@ -44,7 +44,7 @@ mod browser {
         PlatformErrorCode, PlatformEventKind, PlatformHostProfile, PlatformHostSession,
         SaveTransactionHandle, SurfaceHandle, WindowHandle,
     };
-    use astra_platform_general::ResourceTable;
+    use astra_platform_common::ResourceTable;
     use js_sys::{Function, Promise, Reflect};
     use wasm_bindgen::{closure::Closure, JsCast, JsValue};
     use wasm_bindgen_futures::{spawn_local, JsFuture};
@@ -156,7 +156,7 @@ mod browser {
                             .and_then(|surface| surface.reconfigure_after_loss())
                             .is_ok();
                         for event in
-                            astra_platform_general::wgpu_recovery_events("webgpu", recovered)
+                            astra_platform_common::wgpu_recovery_events("webgpu", recovered)
                         {
                             let _ = emitter.emit(event);
                         }
@@ -439,7 +439,7 @@ mod browser {
                     "browser Gamepad API initialization failed",
                 )
             })?;
-            let mapper = astra_platform_general::GamepadMapper::new(0.2)?;
+            let mapper = astra_platform_common::GamepadMapper::new(0.2)?;
             let state = Rc::new(RefCell::new((gamepads, mapper)));
             let gamepad_emitter = emitter.clone();
             let gamepad_callback = Closure::wrap(Box::new(move || {
@@ -491,9 +491,9 @@ mod browser {
         }
     }
 
-    fn raw_gamepad_event(event: gilrs::Event) -> Option<astra_platform_general::RawGamepadEvent> {
+    fn raw_gamepad_event(event: gilrs::Event) -> Option<astra_platform_common::RawGamepadEvent> {
         use astra_platform::GamepadControl;
-        use astra_platform_general::RawGamepadEvent;
+        use astra_platform_common::RawGamepadEvent;
         use gilrs::{Axis, Button, EventType};
 
         let raw_device_id = u32::try_from(usize::from(event.id)).ok()?;
@@ -839,7 +839,7 @@ mod browser {
         }
     }
 
-    type SurfaceResource = astra_platform_general::WgpuPresentationCore;
+    type SurfaceResource = astra_platform_common::WgpuPresentationCore;
 
     #[cfg(target_arch = "wasm32")]
     async fn create_surface(

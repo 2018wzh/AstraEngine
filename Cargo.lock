@@ -473,7 +473,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "astra-platform-general"
+name = "astra-platform-common"
 version = "0.1.0"
 dependencies = [
  "astra-core",
@@ -523,7 +523,7 @@ version = "0.1.0"
 dependencies = [
  "astra-core",
  "astra-platform",
- "astra-platform-general",
+ "astra-platform-common",
  "gilrs",
  "js-sys",
  "rfd",
@@ -544,7 +544,7 @@ dependencies = [
  "astra-core",
  "astra-media",
  "astra-platform",
- "astra-platform-general",
+ "astra-platform-common",
  "cpal",
  "gilrs",
  "pollster",

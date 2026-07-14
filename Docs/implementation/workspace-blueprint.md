@@ -68,8 +68,8 @@ targets = [
 | `astra-platform-macos` | 2 | macOS capability probe 和 host adapter | `astra-platform` | AppKit object crossing public API |
 | `astra-platform-ios` | 2 | iOS capability probe 和 host adapter | `astra-platform` | JIT requirement、UIKit object crossing public API |
 | `astra-platform-android` | 2 | Android capability probe 和 host adapter | `astra-platform` | JVM object crossing public API |
-| `astra-platform-web` | 2 | canvas/DOM、WebGPU、WebAudio、WebCodecs、OPFS 与 fetch/File host adapter | `astra-platform`、`astra-platform-general` | browser object crossing public API |
-| `astra-platform-headless` | 2 planned | `publish = false` 的完整测试 host，执行 surface/audio/decode/save/package/input/artifact lifecycle | `astra-platform`、`astra-platform-general`、显式绑定的 Media providers | shipping target、cooked platform profile、AstraPlayer dependency |
+| `astra-platform-web` | 2 | canvas/DOM、WebGPU、WebAudio、WebCodecs、OPFS 与 fetch/File host adapter | `astra-platform`、`astra-platform-common` | browser object crossing public API |
+| `astra-platform-headless` | 2 planned | `publish = false` 的完整测试 host，执行 surface/audio/decode/save/package/input/artifact lifecycle | `astra-platform`、`astra-platform-common`、显式绑定的 Media providers | shipping target、cooked platform profile、AstraPlayer dependency |
 | `astra-player-web` | 2/3 | 独立 WASM Player；读取 config、package 与 cooked platform profile，通过 shared Player host executor 驱动 AstraVN runtime 和 canvas/WebGPU surface | `astra-package`、`astra-platform-web`、`astra-player-core`、`astra-player-vn` | JavaScript route/runtime implementation；正式 Chrome evidence |
 | `astra-player-vn` | 3 in progress | AstraVN `VnStepOutput` 到平台无关 Player host command 的适配器；Windows/Web 共用 runtime input、deterministic CPU frame 和 present command | `astra-player-core`、`astra-vn-core`、`astra-media-core` | platform handle、AstraRPG rules、正式平台 evidence |
 | `astra-vn-script` | 3 implemented | `.astra` source、parser/compiler、`CompiledStory`、source map、debug symbol、route graph、story/variable/command manifest | `astra-core`, `serde`, `schemars`, `miette` | RuntimeWorld, Luau, Editor UI |

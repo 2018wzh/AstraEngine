@@ -29,7 +29,7 @@ pub struct PlatformHostSession {
 | Crate | 职责 |
 | --- | --- |
 | `astra-platform` | profile、typed handle、async command/event contract、capability v2、conformance schema |
-| `astra-platform-general` | generational resource table、ordered completion、atomic save、hash-bound package range、shared `WgpuPresentationCore`、audio/gamepad mapper、verified cache 与共用 policy |
+| `astra-platform-common` | generational resource table、ordered completion、atomic save、hash-bound package range、shared `WgpuPresentationCore`、audio/gamepad mapper、verified cache 与共用 policy |
 | `astra-platform-windows` | winit event loop、hardware wgpu、WASAPI、WMF、Saved Games、Windows package source；test injection 仅在 `platform-test-driver` |
 | `astra-platform-web` | canvas/DOM、WebGPU、WebAudio、WebCodecs、OPFS、fetch/File source |
 | `astra-platform-headless` | planned `publish = false` 测试 host；完整 service、物理输入和 PNG/WAV artifact 尚未落地 |

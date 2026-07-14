@@ -76,7 +76,7 @@ mod windows {
         PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle, TouchPhase,
         WindowHandle,
     };
-    use astra_platform_general::{
+    use astra_platform_common::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, ResourceTable, SaveTransaction,
         VerifiedPackageCache,
     };
@@ -281,7 +281,7 @@ mod windows {
         package_sources: ResourceTable<PackageSourceResource, PackageSourceHandle>,
         event_sequence: u64,
         gamepads: gilrs::Gilrs,
-        gamepad_mapper: astra_platform_general::GamepadMapper,
+        gamepad_mapper: astra_platform_common::GamepadMapper,
     }
 
     struct PackageHostConfig {
@@ -307,7 +307,7 @@ mod windows {
                 let _ = ready.send(Err(error.clone()));
                 error
             })?;
-            let gamepad_mapper = astra_platform_general::GamepadMapper::new(0.2)?;
+            let gamepad_mapper = astra_platform_common::GamepadMapper::new(0.2)?;
             let (package_completion_tx, package_completion_rx) = std_mpsc::channel();
             Ok(Self {
                 backend,
@@ -412,7 +412,7 @@ mod windows {
                                 .get_mut(surface)
                                 .and_then(|surface| surface.reconfigure_after_loss())
                                 .is_ok();
-                            for event in astra_platform_general::wgpu_recovery_events(
+                            for event in astra_platform_common::wgpu_recovery_events(
                                 "wgpu_hardware",
                                 recovered,
                             ) {
@@ -429,7 +429,7 @@ mod windows {
                                     pollster::block_on(surface.recover_device()).map(|_| ())
                                 })
                                 .is_ok();
-                            for event in astra_platform_general::wgpu_device_recovery_events(
+                            for event in astra_platform_common::wgpu_device_recovery_events(
                                 "wgpu_hardware",
                                 recovered,
                             ) {
@@ -456,7 +456,7 @@ mod windows {
                                 .get_mut(surface)
                                 .and_then(|surface| surface.reconfigure_after_loss())
                                 .is_ok();
-                            for event in astra_platform_general::wgpu_recovery_events(
+                            for event in astra_platform_common::wgpu_recovery_events(
                                 "wgpu_hardware",
                                 recovered,
                             ) {
@@ -473,7 +473,7 @@ mod windows {
                                     pollster::block_on(surface.recover_device()).map(|_| ())
                                 })
                                 .is_ok();
-                            for event in astra_platform_general::wgpu_device_recovery_events(
+                            for event in astra_platform_common::wgpu_device_recovery_events(
                                 "wgpu_hardware",
                                 recovered,
                             ) {
@@ -772,7 +772,7 @@ mod windows {
                 let result = (|| {
                     let cache_root = VerifiedPackageCache::platform_cache_root(&package_id)?;
                     let mut cache = VerifiedPackageCache::open(cache_root, policy)?;
-                    let client = astra_platform_general::HttpRangeClient::from_policies(&policies)?;
+                    let client = astra_platform_common::HttpRangeClient::from_policies(&policies)?;
                     let runtime = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
@@ -942,9 +942,9 @@ mod windows {
         }
     }
 
-    fn raw_gamepad_event(event: gilrs::Event) -> Option<astra_platform_general::RawGamepadEvent> {
+    fn raw_gamepad_event(event: gilrs::Event) -> Option<astra_platform_common::RawGamepadEvent> {
         use astra_platform::GamepadControl;
-        use astra_platform_general::RawGamepadEvent;
+        use astra_platform_common::RawGamepadEvent;
         use gilrs::{Axis, Button, EventType};
 
         let raw_device_id = u32::try_from(usize::from(event.id)).ok()?;
@@ -1048,7 +1048,7 @@ mod windows {
         }
     }
 
-    type SurfaceResource = astra_platform_general::WgpuPresentationCore;
+    type SurfaceResource = astra_platform_common::WgpuPresentationCore;
 
     fn create_surface(
         window: Arc<Window>,
@@ -1078,8 +1078,8 @@ mod windows {
 
     struct AudioResource {
         stream: cpal::Stream,
-        producer: astra_platform_general::NativeAudioProducer,
-        queue_telemetry: astra_platform_general::AudioQueueTelemetryReader,
+        producer: astra_platform_common::NativeAudioProducer,
+        queue_telemetry: astra_platform_common::AudioQueueTelemetryReader,
         meter: Arc<CallbackMeter>,
         stream_error: Arc<AtomicBool>,
         channels: u16,
@@ -1154,7 +1154,7 @@ mod windows {
                     )
                 })?;
             let (producer, consumer, queue_telemetry) =
-                astra_platform_general::NativeAudioQueue::create(capacity)?;
+                astra_platform_common::NativeAudioQueue::create(capacity)?;
             let meter = Arc::new(CallbackMeter::default());
             let stream_error = Arc::new(AtomicBool::new(false));
             let stream = match supported.sample_format() {
@@ -1474,7 +1474,7 @@ mod windows {
     }
 
     fn pop_sample(
-        consumer: &mut astra_platform_general::NativeAudioConsumer,
+        consumer: &mut astra_platform_common::NativeAudioConsumer,
         meter: &CallbackMeter,
     ) -> Option<f32> {
         match consumer.pop_sample() {
@@ -1488,7 +1488,7 @@ mod windows {
 
     fn fill_f32(
         output: &mut [f32],
-        consumer: &mut astra_platform_general::NativeAudioConsumer,
+        consumer: &mut astra_platform_common::NativeAudioConsumer,
         meter: &CallbackMeter,
     ) {
         meter.begin_callback();
@@ -1506,7 +1506,7 @@ mod windows {
 
     fn fill_i16(
         output: &mut [i16],
-        consumer: &mut astra_platform_general::NativeAudioConsumer,
+        consumer: &mut astra_platform_common::NativeAudioConsumer,
         meter: &CallbackMeter,
     ) {
         meter.begin_callback();
@@ -1525,7 +1525,7 @@ mod windows {
 
     fn fill_u16(
         output: &mut [u16],
-        consumer: &mut astra_platform_general::NativeAudioConsumer,
+        consumer: &mut astra_platform_common::NativeAudioConsumer,
         meter: &CallbackMeter,
     ) {
         meter.begin_callback();

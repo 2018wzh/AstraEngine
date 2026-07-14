@@ -1,5 +1,5 @@
 use astra_platform::{PlatformErrorCode, WindowHandle};
-use astra_platform_general::{OrderedCompletionQueue, ResourceTable};
+use astra_platform_common::{OrderedCompletionQueue, ResourceTable};
 
 #[test]
 fn resource_table_rejects_stale_handles_and_reports_leaks() {

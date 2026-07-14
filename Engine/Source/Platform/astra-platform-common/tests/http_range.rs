@@ -1,7 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use astra_platform::{PackageSourcePolicy, PlatformErrorCode};
-use astra_platform_general::HttpRangeClient;
+use astra_platform_common::HttpRangeClient;
 
 #[test]
 fn https_client_requires_an_explicit_allowlist_policy() {
@@ -16,7 +16,7 @@ fn https_client_rejects_unapproved_origin_before_network_access() {
     }])
     .unwrap();
     let temp = tempfile::tempdir().unwrap();
-    let mut cache = astra_platform_general::VerifiedPackageCache::open(
+    let mut cache = astra_platform_common::VerifiedPackageCache::open(
         temp.path(),
         astra_platform::PackageCachePolicy {
             max_entry_bytes: 64,

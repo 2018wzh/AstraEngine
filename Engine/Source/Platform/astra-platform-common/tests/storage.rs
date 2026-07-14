@@ -1,7 +1,7 @@
 use std::fs;
 
 use astra_platform::PlatformErrorCode;
-use astra_platform_general::{AtomicSaveStore, FilePackageSource};
+use astra_platform_common::{AtomicSaveStore, FilePackageSource};
 
 #[test]
 fn save_transaction_commits_reopens_and_aborts_without_partial_files() {

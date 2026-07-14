@@ -63,7 +63,7 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 
 | Work ID | Status | Evidence |
 | --- | --- | --- |
-| `S2-PLATFORM-01` | `IN_PROGRESS` | Migration 8 已落地 async typed-handle contract、`astra-platform-general`、capability v2 与 conformance schema；Windows/Web 同 commit 真实验收尚未闭合，不能恢复 `DONE` |
+| `S2-PLATFORM-01` | `IN_PROGRESS` | Migration 8 已落地 async typed-handle contract、`astra-platform-common`、capability v2 与 conformance schema；Windows/Web 同 commit 真实验收尚未闭合，不能恢复 `DONE` |
 | `S2-HEADLESS-CONTRACT-01` | `DONE` | `HostKind`/`HostLaunchProfile` 保持六平台与 Headless 隔离；`astra.headless_host_profile.v1` 校验 build/package identity、显式 providers、输入/artifact/host limits 和 package sources；native factory拒绝 Headless variant，`cargo test -p astra-platform --test headless_launch_profile` 通过 |
 | `S2-HEADLESS-HOST-01` | `IN_PROGRESS` | contract 已完成；`publish = false` full host、全部 service 和 zero-leak shutdown 尚未落地 |
 | `S2-HEADLESS-MEDIA-01` | `SPEC_READY` | 真实 PNG/WAV 与 Media provider 组合尚未落地 |

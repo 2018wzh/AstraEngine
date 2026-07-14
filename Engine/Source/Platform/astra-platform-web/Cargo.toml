@@ -14,7 +14,7 @@ platform-test-driver = ["astra-platform/platform-test-driver"]
 tracing.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }
 astra-platform = { path = "../astra-platform" }
-astra-platform-general = { path = "../astra-platform-general" }
+astra-platform-common = { path = "../astra-platform-common" }
 tokio.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true

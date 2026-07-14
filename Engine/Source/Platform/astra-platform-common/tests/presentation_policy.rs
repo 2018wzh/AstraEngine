@@ -1,5 +1,5 @@
 use astra_platform::PlatformEventKind;
-use astra_platform_general::{wgpu_device_recovery_events, wgpu_recovery_events};
+use astra_platform_common::{wgpu_device_recovery_events, wgpu_recovery_events};
 
 #[test]
 fn successful_surface_recovery_emits_loss_before_restore() {

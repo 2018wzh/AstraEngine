@@ -1,5 +1,5 @@
 use astra_platform::PlatformErrorCode;
-use astra_platform_general::NativeAudioQueue;
+use astra_platform_common::NativeAudioQueue;
 
 #[test]
 fn native_audio_queue_reports_overflow_and_underflow_without_mutexes() {

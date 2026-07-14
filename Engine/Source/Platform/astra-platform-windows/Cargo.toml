@@ -9,7 +9,7 @@ rust-version.workspace = true
 default = []
 platform-test-driver = [
     "astra-platform/platform-test-driver",
-    "astra-platform-general/platform-test-driver",
+    "astra-platform-common/platform-test-driver",
 ]
 ffmpeg-vcpkg = ["astra-media/ffmpeg-vcpkg"]
 
@@ -18,7 +18,7 @@ tracing.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }
 astra-media = { path = "../../Runtime/astra-media" }
 astra-platform = { path = "../astra-platform" }
-astra-platform-general = { path = "../astra-platform-general" }
+astra-platform-common = { path = "../astra-platform-common" }
 cpal.workspace = true
 gilrs = { workspace = true, features = ["wgi"] }
 rfd.workspace = true

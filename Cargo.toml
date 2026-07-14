@@ -26,7 +26,7 @@ members = [
     "Engine/Source/Runtime/astra-player-core",
     "Engine/Source/Platform/astra-target",
     "Engine/Source/Platform/astra-platform",
-    "Engine/Source/Platform/astra-platform-general",
+    "Engine/Source/Platform/astra-platform-common",
     "Engine/Source/Platform/astra-platform-windows",
     "Engine/Source/Platform/astra-platform-linux",
     "Engine/Source/Platform/astra-platform-macos",
@@ -67,7 +67,11 @@ ffmpeg-next = "8.1"
 futures-util = "0.3"
 hex = "0.4"
 gilrs = { version = "0.11.2", default-features = false }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "webp",
+] }
 indexmap = { version = "2", features = ["serde"] }
 js-sys = "0.3"
 libloading = "0.8"
@@ -79,10 +83,14 @@ proptest = "1.11.0"
 pollster = "0.4"
 proc-macro2 = "1"
 quote = "1"
-reqwest = { version = "0.13.4", default-features = false, features = ["stream"] }
+reqwest = { version = "0.13.4", default-features = false, features = [
+    "stream",
+] }
 rfd = { version = "0.17.2", default-features = false }
 rtrb = "0.3.4"
-rubato = { version = "4", default-features = false, features = ["fft_resampler"] }
+rubato = { version = "4", default-features = false, features = [
+    "fft_resampler",
+] }
 schemars = { version = "0.8", features = ["uuid1"] }
 rowan = "0.16.1"
 semver = { version = "1", features = ["serde"] }
@@ -99,7 +107,11 @@ thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tracing = "0.1"
 tracing-appender = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "fmt",
+    "json",
+] }
 tungstenite = "0.30"
 unicode-segmentation = "1"
 chumsky = "1.0.0-alpha.8"

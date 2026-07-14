@@ -370,7 +370,7 @@ python Tools/run_cargo_isolated.py test --workspace
 4. 缺 SDK、缺 provider、stale handle、队列溢出、device loss 和 shutdown leak 都显式阻断。
 5. Linux、macOS、iOS、Android factory 返回 `PLATFORM_NOT_IMPLEMENTED`，保持 Stage 6。
 
-**Current Evidence:** `cargo test -p astra-platform -p astra-platform-general` 覆盖 contract 和负向门禁。Migration 8 仍等待 Windows/Chrome 同 commit 的完整 conformance 与 Player automation evidence。
+**Current Evidence:** `cargo test -p astra-platform -p astra-platform-common` 覆盖 contract 和负向门禁。Migration 8 仍等待 Windows/Chrome 同 commit 的完整 conformance 与 Player automation evidence。
 
 **Linked Test IDs:** `T-S2-PLATFORM-01`
 

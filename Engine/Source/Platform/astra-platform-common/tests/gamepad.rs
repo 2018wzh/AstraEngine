@@ -1,5 +1,5 @@
 use astra_platform::{GamepadControl, PlatformEventKind};
-use astra_platform_general::{GamepadMapper, RawGamepadEvent};
+use astra_platform_common::{GamepadMapper, RawGamepadEvent};
 
 #[test]
 fn mapper_assigns_session_ids_and_normalizes_axes() {
