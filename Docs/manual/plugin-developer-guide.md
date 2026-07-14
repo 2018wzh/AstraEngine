@@ -26,6 +26,8 @@ manual.md
 
 插件可实现 Renderer2D、TextLayout、AudioOutput、DecodeProvider、AssetImporter、CookProcessor、LuauPolicyBundle、EditorPanel、AiProvider、MCPToolProvider、LegacyFamilyPlugin 或可选 EMUCoreBridge。descriptor、permission、load/unload、provider trait、extension registry 和 report 见 [Provider And Plugin API Blueprint](../implementation/provider-plugin-api.md)。
 
+Migration 12 planned 作品专属 UI component 使用独立 `astra-ui-plugin-abi`，不能通过通用 widget callback 或 Yakui object 穿过 ABI。组件只能挂到 `.astra` 静态 typed slot；Windows dylib 需要 Ed25519 signer allowlist，Web component 需要验证后的 WIT/jco output。native dylib 是进程内受信代码，不应把 host capability 误称为 OS sandbox。完整边界和 hard limit 见 [UI Component Plugin Contract](../contracts/ui-component-plugin.md)。
+
 AiProvider 只服务 Editor 和 MCP host。OpenAI、Ollama、ComfyUI、ONNX Runtime 这类 provider 必须声明 capability、secret handle、data egress、debug trace policy、runtime eligibility 和真实 smoke opt-in。Runtime 不能直接持有 provider，只能通过 `McpAiSession` 消费 typed Intent、generated artifact chunk 和 committed output。
 
 项目自管 ORT custom op sidecar 时，sidecar 只能作为 ModelBundle 的 Asset VFS content entry 被 `astra-ai-onnx` 私有加载。它必须声明平台二进制、hash、license、加载策略和目标运行证据，不能保存或暴露 host object ownership、Actor 指针、RuntimeWorld、Editor widget、GPU/audio native handle、provider trait object 或本地路径。需要访问 Engine 能力时，写普通插件/provider 并走 extension registry。

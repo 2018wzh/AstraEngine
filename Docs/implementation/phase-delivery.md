@@ -61,7 +61,7 @@ Expected report includes `package.integrity`, `target.manifest`, `platform.capab
 
 **闭环：** `.astra + Luau policy` 编译为 CompiledStory，full playthrough 覆盖 commercial baseline、system UI、save/load 和 replay hash；advanced presentation profile 有独立 opt-in scenario。NativeVN 已由 RuntimeWorld `astra.vn.step` action 驱动，FFI instance/session lifecycle 和 package-bound behavior release evidence 已闭合。Stage 3 当前继续 `IN_PROGRESS`：现有 parser/compiler 已校验 canonical 缩进与 option 归属，但 `S3-SCRIPT-01` 和 `S3-SCRIPT-02` 仍需 Lexer、TokenStream、Lossless CST、Typed AST、Semantic Passes、Command Registry、token-level source map、formatter/LSP adapter 和 release conformance；Web live player 与 TsuiNoSora 正式 gate 也未完成。
 
-**Test IDs:** `T-S3-SCRIPT-01`、`T-S3-SCRIPT-02`、`T-S3-LUAU-01`、`T-S3-LUAU-02`、`T-S3-PRESENT-01`、`T-S3-SYSTEM-01`、`T-S3-ADVANCED-01`、`T-S3-SAMPLE-01`、`T-S3-GAME-TARGET-01`、`T-S3-RUNTIME-PROVIDER-01`
+**Test IDs:** `T-S3-SCRIPT-01`、`T-S3-SCRIPT-02`、`T-S3-UI-SCRIPT-01`、`T-S3-UI-EXT-01`、`T-S3-LUAU-01`、`T-S3-LUAU-02`、`T-S3-PRESENT-01`、`T-S3-SYSTEM-01`、`T-S3-ADVANCED-01`、`T-S3-SAMPLE-01`、`T-S3-GAME-TARGET-01`、`T-S3-RUNTIME-PROVIDER-01`
 
 **Sample:** `Examples/NativeVN`、`Examples/NativeVN/scenarios/route_library.yaml`、`Examples/NativeVN/scenarios/route_rooftop.yaml`
 
@@ -106,7 +106,7 @@ Expected report: `astra.editor_report.v1` with source span links for failed chec
 
 **闭环：** Manager 启动 `AstraEmuRuntimeProvider` gameplay runtime，provider 创建并驱动 RuntimeWorld，再通过 `LegacyRuntimeProvider` family facade、auto probe、Trusted Luau、文本翻译、FilterGraph preset、legacy pack VFS mount 和 Artemis 通用 family plugin 通过 gate。其他 family 可以停在 alpha profile，但必须有 probe report。Stage 5 当前按 `REOPENED_SPEC` 对齐 peer gameplay runtime 与 EmulatorCore 状态机映射。
 
-**Test IDs:** `T-S5-GAME-RUNTIME-01`、`T-S5-EMUCORE-SM-01`、`T-S5-LEGACY-VFS-01`、`T-S5-MANAGER-01`、`T-S5-PROGRAM-TARGET-01`、`T-S5-FAMILY-01`、`T-S5-ARTEMIS-01`、`T-S5-FVP-01`、`T-S5-GATE-01`
+**Test IDs:** `T-S5-GAME-RUNTIME-01`、`T-S5-EMUCORE-SM-01`、`T-S5-LEGACY-VFS-01`、`T-S5-MANAGER-01`、`T-S5-MANAGER-UI-01`、`T-S5-PROGRAM-TARGET-01`、`T-S5-FAMILY-01`、`T-S5-ARTEMIS-01`、`T-S5-FVP-01`、`T-S5-GATE-01`
 
 **Sample:** `scenarios/emu/artemis_full_flow.yaml` and local authorized case root
 

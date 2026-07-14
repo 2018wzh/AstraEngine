@@ -6,7 +6,7 @@
 
 1. 选择 `NativeVnRuntimeProvider` template；planned AstraEMU/AstraRPG template 不能创建可发布项目。
 2. 导入背景、角色、语音、BGM、字体和 filter profile。
-3. 编写 `.astra` story，给生产命令添加稳定 `#@id`。
+3. 当前主线编写 `.astra` story，并给生产命令添加稳定 `#@id`。Migration 12 完成后，项目还会用独立 `Ui` source role 编写 `ui_view`/`ui_bind`，不能直接调用 Yakui API。
 4. 选择官方策略包或第三方策略包，在 Plugin Manager 确认 load phase、依赖、权限、命令 provider、Inspector 控件和 Timeline track 都能预览。
 5. 用 Graph/Timeline 查看同一 story IR，不创建第二套运行逻辑。
 6. 在 PIE 中跑 full-flow YAML scenario。
@@ -15,6 +15,8 @@
 Cook 会读取每个 `AssetSidecar.dependencies` 构建依赖图，并把内容缓存写入项目内 ignored `.astra-cache/cook/`。正常的重复 Cook 应在 `astra.cook_manifest.v2.asset_cook` 中出现 cache hit；cache corruption、依赖缺失/cycle、source hash 或 processor version drift 会直接失败。输出先写 sibling staging directory，全部成功后替换目标目录；失败或按 Ctrl+C 取消时保留上一份完整 Cook 结果。不要手工复制 cache artifact 到 package，也不要把 `.astra-cache/` 提交到仓库。
 
 脚本机制、Luau 策略和可视化规则见 [AstraVN Script Spec](../modules/astra-vn-script.md)。演出模型、标准命令和系统 UI 见 [AstraVN Presentation Model](../modules/astra-vn-presentation-model.md)、[AstraVN Standard Command Library](../modules/astra-vn-standard-commands.md) 和 [AstraVN System UI Profile](../modules/astra-vn-system-ui-profile.md)。样例见 [AstraVN Script Sample](../samples/astra-vn-script/README.md) 和 [AstraVN Advanced Presentation Sample](../samples/astra-vn-advanced/README.md)。
+
+Migration 12 计划提供 `astra ui check`、`preview`、`snapshot` 和 `matrix`。这些命令当前尚不存在。实现后，页面开发使用 `.astra` View、Rust schema-bound fixture ViewModel、Luau Controller 和 backend-neutral Theme；preview 必须走真实 Yakui/AstraText/Scene2D，不能把静态图片或固定矩形当成产品证据。
 
 ## AI
 

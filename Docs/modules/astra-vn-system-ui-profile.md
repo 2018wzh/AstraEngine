@@ -2,6 +2,18 @@
 
 System UI 是商业 VN release 的阻断项。AstraVN Core 持有 save/load、config、backlog、read-state、gallery、replay、route chart 和 voice replay 的权威数据；Luau policy 只定义页面流程、样式、动画和可视化扩展。
 
+当前实现仍使用 `SystemUiModel` 固定矩形与 hit-test。Migration 12 planned 主路径改为 `.astra` UI Blueprint + Rust ViewModel + typed Luau Controller + Yakui + AstraText + Scene2D；旧模型只有在 Windows/Web 正式证据闭合后才删除，不能把本页目标误写成已实现。UI 公共边界见 [UI Contract](../contracts/ui.md)。
+
+## UI Blueprint binding
+
+目标脚本入口使用显式 binding：
+
+```astra
+system_page kind:save view:ui.system.save controller:system.save policy:astra.policy.standard theme:astra.vn.theme.classic #@id page.save
+```
+
+Message、Choice 和 System Page 都可以有 command-specific binding；否则依次解析 system-page、surface `ui_bind` 与 profile。解析结果必须唯一。UI 只发送稳定 `option_id`、`slot_id`、`command_id`、`item_id` 或 `node_id` action，不用数组 index 或本地化文本作为身份。
+
 ## SystemStoryManifest
 
 ```rust
@@ -47,6 +59,8 @@ system_stories:
 | Route Chart | route node、edge、choice id、condition、ending | 图布局、hover 详情、jump request | 改写 route graph |
 | Voice Replay | voice ref、speaker、text key、line id、asset availability | 播放 UI、角色筛选 | 播放未授权或缺失 asset |
 | Localization Preview | locale、font fallback、ruby、line wrap、missing key | 并排预览、差异标记 | 把 preview 结果写成 runtime 文本 |
+
+Classic 与 Modern 是两个正式 UI profile。它们共享 Core、save/replay 和 action authority，只切换 Blueprint binding、theme、presentation policy 和 UI session generation。关闭 Modern 后 Core hash 必须不变。
 
 ## Save Slot Metadata
 

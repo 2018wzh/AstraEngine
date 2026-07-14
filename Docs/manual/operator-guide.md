@@ -26,7 +26,7 @@ astra package validate target/game.astrapkg --profile desktop-release --target n
 astra test run scenarios/full_playthrough.yaml --package target/game.astrapkg --target nativevn-game --headless
 ```
 
-上面的 `--headless` 是当前既有入口。Migration 11 只完成文档规划，尚未提供 `astra-headless`。迁移实施后，旧 flag 将返回明确错误，不保留隐式 alias。
+上面的 `--headless` 是当前既有入口。Migration 11 已固化 typed launch/profile contract，但尚未提供完整 `astra-headless` host/binary。迁移完成后，旧 flag 将返回明确错误，不保留隐式 alias。
 
 ## Planned Headless Platform workflow
 

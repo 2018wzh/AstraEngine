@@ -96,6 +96,29 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 
 **Linked Test IDs:** `T-S5-MANAGER-01`
 
+## S5-MANAGER-UI-01 egui Manager 与 runtime overlay
+
+**ID:** `S5-MANAGER-UI-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** AstraEMU Manager、diagnostic/translation/filter overlay 使用 egui，并复用 shared UI input、semantic、resource 和 render contract。
+
+**Depends On:** `S5-MANAGER-01`、`S2-UI-BACKEND-01`、[ADR 0015](../../adr/0015-ui-backend-provider-split.md)
+
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-ui/`、`AstraEMU/Source/Overlay/astra-emu-overlay-ui/` planned target
+
+**Steps:**
+
+1. 使用 egui core 实现 Manager 表单、provider/family、report、日志和 overlay，不让 egui 类型进入 family API。
+2. 复用 Astra physical input、semantic snapshot、Scene2D/resource lifecycle 和 explicit provider binding。
+3. Windows v1 接 AccessKit、IME、clipboard、diagnostic redaction 和 real Manager workflow；Web 留后续 Stage 5/6 profile。
+4. 原版 legacy UI 默认仍由 family presentation 忠实还原；只有显式 modernization profile 才可替换系统 UI。
+
+**Done Evidence:** Windows Manager workflow、overlay input isolation、report redaction、AccessKit 和 provider identity 通过真实程序证据；不能用 AstraVN Yakui fixture 或静态面板关闭本项。
+
+**Linked Test IDs:** `T-S5-MANAGER-UI-01`
+
 ## S5-FAMILY-01 LegacyRuntimeProvider facade
 
 **ID:** `S5-FAMILY-01`

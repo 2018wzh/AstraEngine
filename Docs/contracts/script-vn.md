@@ -38,7 +38,9 @@ pub struct CompiledStory {
 
 Graph 和 Timeline 保存作者元数据，必须能编译到同一 IR。Editor 不能维护第二套 runtime model。`luau_manifest`、`timeline_ir`、`text_effect_ir`、token span、attribute span、macro expansion stack 和 command-level source map 是 migration target，不是当前 implemented contract。
 
-`compile_astra_sources` 只接受 Core 和内置 standard command。扩展命令必须通过 `CompileAstraOptions::bind_extension(ExtensionCommandDescriptor)` 绑定 provider、schema 和逐字段类型；只给 command/provider 字符串的旧入口已经删除。`ExprBytecode`、macro expansion stack 和 package-bound extension provider execution 仍是 migration target，不能写成当前能力。
+`compile_astra_sources` 当前只接受 Core 和内置 standard command。扩展命令必须通过 `CompileAstraOptions::bind_extension(ExtensionCommandDescriptor)` 绑定 provider、schema 和逐字段类型；只给 command/provider 字符串的旧入口已经删除。`ExprBytecode`、macro expansion stack 和 package-bound extension provider execution 仍是 migration target，不能写成当前能力。
+
+Migration 12 会把 Story 与 UI source role 统一到 `compile_astra_project(...) -> CompiledVnProject`，并直接删除公开 `compile_astra_sources`、`compile_astra_sources_with_options` 和旧 `vn.compiled_story` reader。该迁移尚未实现；当前调用者仍使用既有 API，不能提前把新 package shape 写成运行事实。UI role 与 Story role 共享 Lexer/CST/formatter/source-map，但使用独立 Typed AST 和 semantic passes；详细契约见 [UI Contract](ui.md) 与 [ADR 0016](../adr/0016-astravn-script-declared-ui.md)。
 
 ## 商业 VN 基线
 

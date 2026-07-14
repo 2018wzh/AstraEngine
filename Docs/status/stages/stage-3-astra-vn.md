@@ -390,7 +390,7 @@ python Tools/check_docs.py
 
 **Goal:** 完成 save/load、config、backlog、gallery、replay、route chart、voice replay 和 localization preview 的系统 UI 数据模型和 gate。
 
-**Depends On:** `S3-CORE-03`、`S3-LUAU-02`、[AstraVN System UI Profile](../../modules/astra-vn-system-ui-profile.md)
+**Depends On:** `S3-CORE-03`、`S3-LUAU-02`、`S2-UI-BACKEND-01`、`S3-UI-SCRIPT-01`、[AstraVN System UI Profile](../../modules/astra-vn-system-ui-profile.md)
 
 **Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-system/src/system_ui.rs`、`Engine/Source/Modules/AstraVN/astra-vn-package/tests/commercial_baseline.rs`、`Engine/Source/Modules/AstraVN/astra-vn-system/tests/system_controls.rs`、`Engine/Source/Developer/astra-release/tests/release_report.rs`、`Examples/NativeVN/system.astra`
 
@@ -400,10 +400,57 @@ python Tools/check_docs.py
 2. 让 Luau policy 只负责页面流程和视觉策略，Core 继续持有 save/backlog/read-state/voice replay 权威状态。
 3. 实现 system page reachability、return-to-savepoint、migration、gallery/replay unlock source 和 font fallback 检查。
 4. 编写 save/load、config invalid key、backlog voice replay、gallery unlock、route chart 和 localization preview 测试。
+5. Migration 12 完成后删除 `SystemUiModel` 固定矩形 hit-test，让 Classic/Modern 的全部页面只走 `.astra` Blueprint、Rust ViewModel、Luau Controller、Yakui 和 Scene2D。
 
 **Done Evidence:** `cargo test -p astra-vn-package --test commercial_baseline`、`cargo test -p astra-vn-system --test system_controls`、`cargo test -p astra-release --test release_report release_gate_` 和 `cargo test -p astra-test --test vn_scenario` 通过；`vn.system_ui_profile` 会阻断缺入口、缺 policy、缺 `vn.system_ui_profile_manifest`、schema 无 migrator、gallery/replay unlock source 缺失和 localization coverage 缺口，并在通过时输出 page count、unlock source count、localization locale count 和 save migrator evidence。
 
 **Linked Test IDs:** `T-S3-SYSTEM-01`
+
+## S3-UI-SCRIPT-01 AstraVN UI Blueprint 与 Controller
+
+**ID:** `S3-UI-SCRIPT-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 用 `.astra` 声明 backend-neutral View/Binding/Action，以 Rust ViewModel 和 typed Luau Controller 驱动 Yakui。
+
+**Depends On:** `S3-SCRIPT-02`、`S3-LUAU-02`、`S2-UI-BACKEND-01`、[ADR 0016](../../adr/0016-astravn-script-declared-ui.md)
+
+**Target Paths:** `Engine/Source/Modules/AstraVN/astra-vn-script/`、`Engine/Source/Modules/AstraVN/astra-vn-ui/`、`Engine/Source/Modules/AstraVN/astra-vn-ui-yakui/`
+
+**Steps:**
+
+1. 增加 `Story`/`Ui` source role、UI Typed AST、semantic passes 和 `CompiledVnProject`。
+2. 实现 `ui_view`、`ui_bind`、stable semantic id、typed action 和 binding resolver。
+3. 接入生成 `.d.luau`、`luau-analyze` 和可序列化 Controller effect。
+4. 迁移全部 caller/package/target，删除旧 compile API 与 reader。
+
+**Done Evidence:** compiler、Cook、Player、sample、Editor adapter 和 bundle 只使用 `CompiledVnProject`；旧 API/section/target 被明确拒绝，Windows/Web 产品页 evidence 通过。
+
+**Linked Test IDs:** `T-S3-UI-SCRIPT-01`
+
+## S3-UI-EXT-01 UI component plugin ABI
+
+**ID:** `S3-UI-EXT-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 允许作品专属组件挂载到静态 typed slot，同时阻断 Yakui/native handle、未签名 artifact、越界 DTO 和 authority leakage。
+
+**Depends On:** `S1-DYLIB-01`、`S2-UI-BACKEND-01`、`S3-UI-SCRIPT-01`、[UI Component Plugin Contract](../../contracts/ui-component-plugin.md)
+
+**Target Paths:** `Engine/Source/Runtime/astra-ui-plugin-abi/`、`Engine/Plugins/Fixtures/`、Windows/Web Cook 与 bundle path
+
+**Steps:**
+
+1. 定义 provider/session/component lifecycle 和 bounded DTO。
+2. 实现 Windows Ed25519 signer allowlist 与 Web WIT/jco artifact pipeline。
+3. 实现 host capability、用户手势、hard limit 和 failure termination。
+4. 用签名 Windows/Web fixture 验证 ABI；产品页不得依赖 fixture。
+
+**Done Evidence:** lifecycle、signature、fingerprint、permission、bounds、restore、panic/trap/timeout 和 redaction gate 全部通过；失败不 fallback。
+
+**Linked Test IDs:** `T-S3-UI-EXT-01`
 
 ## S3-ADVANCED-01 Advanced presentation opt-in profile
 

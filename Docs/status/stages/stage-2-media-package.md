@@ -1,6 +1,29 @@
 # Stage 2 Media + Package Work
 
-Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS 和 release gate。生产完备度审查已将本 Stage 重开为 `IN_PROGRESS`：Package/VFS 权威校验、Cook 批次事务、bounded text layout replay、Windows hardware glyph golden、Windows native media 恢复/资源生命周期、measured performance contract 和 release same-run validator 已完成加固；GPU FilterGraph、真实 Player performance artifact 与正式 release-reference performance pass 仍在实施。Migration 11 同时重开完整 Headless Platform 完成口径：当前分散的 `ScenarioRunner`、CPU frame、AudioGraph meter 和 Player automation 尚未收束为全功能测试 host。Web 本轮暂缓；Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是本轮完成前置。
+Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS、shared UI backend contract 和 release gate。生产完备度审查已将本 Stage 重开为 `IN_PROGRESS`：Package/VFS 权威校验、Cook 批次事务、bounded text layout replay、Windows hardware glyph golden、Windows native media 恢复/资源生命周期、measured performance contract 和 release same-run validator 已完成加固；GPU FilterGraph、真实 Player performance artifact 与正式 release-reference performance pass 仍在实施。Migration 11 同时重开完整 Headless Platform 完成口径；Migration 12 新增的 shared UI backend、Scene2D/Mesh2D 与 Windows/Web UI evidence 当前仍为 `SPEC_READY`。Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是本轮完成前置。
+
+## S2-UI-BACKEND-01 Shared UI backend 与 Scene2D/Mesh2D
+
+**ID:** `S2-UI-BACKEND-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 实现 backend-neutral UI input、semantic、resource、render contract，并把 AstraVN Yakui 输出接入 Windows/Web `PresentScene` 主路径。
+
+**Depends On:** `S2-MEDIA-01`、`S2-MEDIA-04`、Migration 11、[UI Contract](../../contracts/ui.md)、[Migration 12](../../migrations/astra-ui-backend-split-migration.md)
+
+**Target Paths:** `Engine/Source/Runtime/astra-ui-core/`、`Engine/Source/Runtime/astra-ui-yakui/`、`Engine/Source/Platform/`、`Engine/Source/Runtime/astra-player-core/`
+
+**Steps:**
+
+1. 建立 `UiFrameInput`、`UiInputDisposition`、`UiSemanticSnapshot`、`UiRenderFrame` 与 resource generation。
+2. 扩展 Scene2D/Mesh2D，完成 Windows wgpu、WebGPU、clip、texture transaction 和 context restore。
+3. 接入 Yakui core/widgets，不引入官方 wgpu/winit/app adapter。
+4. 建立 physical input、fixed clock、performance 和 release evidence。
+
+**Done Evidence:** Headless E2、Windows E3、Web E3 使用同 build/profile/package/provider/session，且所有 blocking budget、context restore 与 input consumption gate 通过。
+
+**Linked Test IDs:** `T-S2-UI-BACKEND-01`
 
 ## S2-ASSET-01 AssetId、VFS 基础与 sidecar schema
 

@@ -29,7 +29,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 
 **Goal:** PIE 通过同一 Runtime public API 启动 sample、驱动 input、暂停、恢复和读取 diagnostics。
 
-**Depends On:** `S4-EDITOR-01`、`S3-CORE-03`
+**Depends On:** `S4-EDITOR-01`、`S3-CORE-03`、`S2-UI-BACKEND-01`、`S3-UI-SCRIPT-01`
 
 **Target Paths:** `Editor/Source/Bridge/astra-editor-bridge/src/pie.rs`、`Editor/Tests/pie_bridge.rs` planned target
 
@@ -40,6 +40,7 @@ Stage 4 建立 creator workflow 和 AI/MCP 闭环。Editor 不改变 EngineCore 
 3. 把 Editor input 转成 Runtime PlayerInput，不直接操作 Actor 指针。
 4. 暴露 TickReport、diagnostics、scenario cursor 和 presentation hash。
 5. 编写 PIE launch、pause/resume 和 diagnostic forwarding 测试。
+6. Migration 12 完成后，PIE Viewport 消费 shared UI semantic/render contract，并支持 Blueprint/Controller/Theme hot refresh；Editor shell 仍使用 Qt/QML。
 
 **Done Evidence:** PIE 使用 Runtime API，不依赖 private runtime state。
 

@@ -16,3 +16,7 @@ ADR 记录已经锁定的产品级决策。被替换的旧决策必须在新 ADR
 | [0011](0011-platform-decode-and-renderer-slots.md) | 平台解码优先，Renderer2D provider 可替换 |
 | [0012](0012-astraemu-engine-native-family-plugin.md) | AstraEMU 使用 engine-native family plugin + LegacyRuntimeProvider facade |
 | [0013](0013-astravn-script-frontend-standardization.md) | AstraVN script v1 主线标准化编译器前端，不引入 Cranelift/native codegen |
+| [0014](0014-stable-rust-toolchain-policy.md) | 使用 stable toolchain、lockfile 和构建身份代替未经验证的固定 MSRV |
+| [0015](0015-ui-backend-provider-split.md) | AstraVN 使用 Yakui，AstraEMU 使用 egui，Editor 保持 Qt/QML |
+| [0016](0016-astravn-script-declared-ui.md) | `.astra` 声明 backend-neutral UI，Rust ViewModel 与 Luau Controller 保持权威分层 |
+| [0017](0017-ui-component-plugin-boundary.md) | 独立 UI component ABI、typed slot、签名与资源上限 |

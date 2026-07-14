@@ -2,7 +2,7 @@
 
 本目录只记录已实现代码向新设计对齐的迁移路线。设计页可以覆盖完整未来架构；迁移页不能把尚未存在的 AstraEMU/AstraRPG 代码写成可搬迁对象。
 
-当前落地状态：migration 1–5 已完成 Provider URI Asset VFS、provider selection、AstraVN module/crate split、RuntimeWorld `astra.vn.step` action 和真实 FFI lifecycle。Migration 6 的 lossless frontend 已完成；对应 Stage 3 script work item 仍等待 formal Windows/Web Player evidence。Migration 9 只关闭 shared policy、component effects 与 async runtime host，AstraRPG 产品代码仍留 Stage 7。Migration 11 已落地 typed Headless launch/profile contract，其余 host、artifact、CLI、测试收束、review 和 preflight 仍未完成。当前生产完备度修补按 [模块能力完备度审查](module-completeness-audit-migration.md) 收束。AstraEMU/AstraRPG 只作为后续 provider 设计边界出现；`rpg.trpg` 是 AstraRPG 内部 profile，不是独立迁移对象。
+当前落地状态：migration 1–5 已完成 Provider URI Asset VFS、provider selection、AstraVN module/crate split、RuntimeWorld `astra.vn.step` action 和真实 FFI lifecycle。Migration 6 的 lossless frontend 已完成；对应 Stage 3 script work item 仍等待 formal Windows/Web Player evidence。Migration 9 只关闭 shared policy、component effects 与 async runtime host，AstraRPG 产品代码仍留 Stage 7。Migration 11 已落地 typed Headless launch/profile contract，其余 host、artifact、CLI、测试收束、review 和 preflight 仍未完成。Migration 12 已完成文档设计，Yakui、UI Blueprint、component ABI 和 Windows/Web UI evidence 尚未实现。当前生产完备度修补按 [模块能力完备度审查](module-completeness-audit-migration.md) 收束。AstraEMU/AstraRPG 只作为后续 provider 设计边界出现；`rpg.trpg` 是 AstraRPG 内部 profile，不是独立迁移对象。
 
 ## 执行顺序
 
@@ -18,7 +18,8 @@
 | 8 | [platform-host-migration.md](platform-host-migration.md) | 已完成的 Windows 窗口渲染与音频/解码对齐到 realigned platform-host 统一 Token 抽象 |
 | 9 | [astra-rpg-design-alignment-migration.md](astra-rpg-design-alignment-migration.md) | shared 1–3 `DONE`；AstraRPG、AI Town、`rpg.trpg` 与 CP2020 adapter 留 Stage 7 |
 | 10 | [nativevn-flagship-demo-migration.md](nativevn-flagship-demo-migration.md) | 记录未来 15–20 分钟三终局、中英双语、中文全配音和正式原创资产的旗舰 Demo 产品迁移；本轮不实现 |
-| 11 | [headless-platform-test-backend-migration.md](headless-platform-test-backend-migration.md) | 将分散的 Scenario、headless renderer/audio 和 Player automation 收束到仅供测试的完整 Headless Platform；当前仅完成文档规划 |
+| 11 | [headless-platform-test-backend-migration.md](headless-platform-test-backend-migration.md) | 将分散能力收束到测试专用完整 Headless Platform；typed contract 已固化，full host `IN_PROGRESS`，其余仍开放 |
+| 12 | [astra-ui-backend-split-migration.md](astra-ui-backend-split-migration.md) | AstraVN 迁到 Yakui、`.astra` script-declared UI、Scene2D/Mesh2D 和独立 component ABI；当前为 `SPEC_READY` |
 
 ## 范围边界
 

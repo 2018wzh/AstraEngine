@@ -17,6 +17,7 @@
 | [game-runtime-provider.md](game-runtime-provider.md) | NativeVN、AstraEMU、AstraRPG 同级 gameplay runtime provider 选择层 |
 | [astra-rpg-runtime.md](astra-rpg-runtime.md) | AstraRPG provider、RPG core、`rpg.trpg` profile、AI Town 和 CP2020 local-private adapter |
 | [astra-grammar-ir.md](astra-grammar-ir.md) | `.astra` compiler frontend、lossless CST、typed AST、IR、source map、formatter 和 LSP 准备 |
+| [ui-backend.md](ui-backend.md) | shared UI contract、AstraVN Yakui backend、script-declared UI、Scene2D 和 component ABI |
 | [astra-vn-state-machine.md](astra-vn-state-machine.md) | AstraVN command cursor、wait state、StateMachine action 和演出调度 |
 | [runtime-execution.md](runtime-execution.md) | tick 顺序、EventQueue、AwaitToken/Fence、MutationLog、hash/replay |
 | [luau-policy.md](luau-policy.md) | Luau host API、sandbox、typed policy、pesde、lock/vendor cache |
