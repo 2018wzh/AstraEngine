@@ -291,6 +291,11 @@ impl ReleaseValidator {
                     &request.profile,
                 ));
                 checks.push(target_manifest_check(&package, request.target.as_deref()));
+                checks.push(headless_release_boundary_check(
+                    &package,
+                    request.target.as_deref(),
+                    &request.profile,
+                ));
                 checks.push(cooked_project_input_check(
                     &package,
                     &request.profile,
@@ -2296,6 +2301,115 @@ fn target_manifest_check(package: &PackageReader, selected: Option<&str>) -> Rel
             evidence("target_count", report.target_count),
             evidence("selected_target", selected.unwrap_or("")),
         ],
+    }
+}
+
+fn headless_release_boundary_check(
+    package: &PackageReader,
+    selected: Option<&str>,
+    profile: &str,
+) -> ReleaseCheckRecord {
+    let blocked = |code: &'static str, summary: String, evidence_values| ReleaseCheckRecord {
+        id: "platform.headless_release_boundary".to_string(),
+        domain: ReleaseDomain::Platform,
+        status: CheckStatus::Blocked,
+        summary: summary.clone(),
+        diagnostic: Some(Diagnostic::blocking(code, summary)),
+        evidence: evidence_values,
+    };
+
+    if let Some(entry) = package.container().entries().iter().find(|entry| {
+        entry.schema == astra_platform::HEADLESS_HOST_PROFILE_SCHEMA
+            || entry.schema.starts_with("astra.headless_")
+    }) {
+        return blocked(
+            "ASTRA_HEADLESS_RELEASE_SCHEMA",
+            "Headless schemas are test-only and cannot enter a release package".to_string(),
+            vec![
+                evidence("section", &entry.id),
+                evidence("schema", &entry.schema),
+            ],
+        );
+    }
+
+    if package.has_section("platform.profiles") {
+        match read_json_section(package, "platform.profiles") {
+            Ok(value) if json_contains_headless_release_marker(&value) => {
+                return blocked(
+                    "ASTRA_HEADLESS_RELEASE_PROFILE",
+                    "cooked platform profiles cannot contain a Headless launch profile"
+                        .to_string(),
+                    vec![evidence("section", "platform.profiles")],
+                );
+            }
+            Ok(_) | Err(_) => {}
+        }
+    }
+
+    if release_profile_requires_cooked_project(profile) {
+        let manifest = package
+            .container()
+            .read_bounded("target.manifest", 256 * 1024)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<TargetManifest>(&bytes).ok());
+        if let Some(target) = manifest.as_ref().and_then(|manifest| {
+            selected
+                .and_then(|selected| manifest.find(selected))
+                .or_else(|| manifest.targets.first())
+        }) {
+            let has_headless_platform = target
+                .platforms
+                .iter()
+                .any(|platform| platform.eq_ignore_ascii_case("headless"));
+            let has_headless_binary = target.binary.as_deref().is_some_and(|binary| {
+                matches!(binary, "astra-headless" | "astra_platform_headless")
+            });
+            let has_headless_crate = target.crate_name.as_deref().is_some_and(|crate_name| {
+                matches!(crate_name, "astra-headless" | "astra-platform-headless")
+            });
+            if has_headless_platform || has_headless_binary || has_headless_crate {
+                return blocked(
+                    "ASTRA_HEADLESS_RELEASE_TARGET",
+                    "shipping release targets cannot reference the Headless test host"
+                        .to_string(),
+                    vec![
+                        evidence("target", &target.id),
+                        evidence("profile", profile),
+                    ],
+                );
+            }
+        }
+    }
+
+    ReleaseCheckRecord {
+        id: "platform.headless_release_boundary".to_string(),
+        domain: ReleaseDomain::Platform,
+        status: CheckStatus::Pass,
+        summary: "release inputs are isolated from the Headless test host".to_string(),
+        diagnostic: None,
+        evidence: vec![evidence("profile", profile)],
+    }
+}
+
+fn json_contains_headless_release_marker(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(value) => matches!(
+            value.as_str(),
+            "headless"
+                | "astra-platform-headless"
+                | "astra-headless"
+                | astra_platform::HEADLESS_HOST_PROFILE_SCHEMA
+        ),
+        serde_json::Value::Array(values) => {
+            values.iter().any(json_contains_headless_release_marker)
+        }
+        serde_json::Value::Object(values) => values.iter().any(|(key, value)| {
+            matches!(key.as_str(), "headless" | "headless_profile")
+                || json_contains_headless_release_marker(value)
+        }),
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {
+            false
+        }
     }
 }
 

@@ -62,6 +62,8 @@ Stage 3 `player.full_playable` 只接受 Windows/Web 平台原生输入自动化
 
 Migration 11 完成后，真实产品平台验收还要先通过 `headless.preflight`。它要求同一 build fingerprint、cooked package hash、input sequence hash、scenario、target 和 content identity 的 `astra.headless_run_report.v1`、`astra.headless_review.v1` 与 `astra.headless_preflight_link.v1`。Headless blocked、缺 required artifact/model review 或 identity mismatch 时，不得启动正式平台验收。该 check 仍只提供 E2 前置证据，不能让 `player.full_playable`、Windows/Web host conformance 或 E3 自动通过。
 
+当前 `platform.headless_release_boundary` 已执行 fail-closed 隔离：package section 出现 `astra.headless_*` schema、cooked `platform.profiles` 出现 Headless launch profile，或 shipping release target 引用 `headless` platform、`astra-platform-headless`/`astra-headless` role 时必须 blocking。该检查只证明发布图隔离，不证明 Headless host 已实现。
+
 ## Verification Commands
 
 ```bash

@@ -326,11 +326,11 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 ## Migration 11 Headless Platform 测试后端
 
-[Migration 11](../../migrations/headless-platform-test-backend-migration.md) 已完成文档规划，以下工作项均为 `SPEC_READY`。`S2-MEDIA-01` 与 `S2-MEDIA-03` 保持 `DONE`，只表示局部 renderer/audio contract；九项全部闭合前，Stage 2 Headless 不能恢复完成状态。
+[Migration 11](../../migrations/headless-platform-test-backend-migration.md) 已完成 host contract 与 release 隔离边界，其余工作项仍为 `SPEC_READY`。`S2-MEDIA-01` 与 `S2-MEDIA-03` 保持 `DONE`，只表示局部 renderer/audio contract；完整 host、媒体、输入、产物、CLI、测试收束、review 和 preflight 全部闭合前，Stage 2 Headless 不能恢复完成状态。
 
 | Work ID | Status | Planned boundary | Planned Test ID |
 | --- | --- | --- | --- |
-| `S2-HEADLESS-CONTRACT-01` | `SPEC_READY` | `HostKind`、`HeadlessHostProfile`、`HostLaunchProfile`，保持六平台 `PlatformId` 与发布 profile v2 | `T-S2-HEADLESS-CONTRACT-01` |
+| `S2-HEADLESS-CONTRACT-01` | `DONE` | `HostKind`、`HeadlessHostProfile`、`HostLaunchProfile`，保持六平台 `PlatformId` 与发布 profile v2；Release Gate 阻断 Headless schema、cooked launch profile 与 shipping target 泄漏 | `T-S2-HEADLESS-CONTRACT-01` |
 | `S2-HEADLESS-HOST-01` | `SPEC_READY` | `publish = false` 完整 host，覆盖 surface/audio/decode/save/package/input 和 zero-leak lifecycle | `T-S2-HEADLESS-HOST-01` |
 | `S2-HEADLESS-MEDIA-01` | `SPEC_READY` | Media-owned reference providers，真实 `SceneCommand`、glyph、FilterGraph、PNG 和 PCM WAV | `T-S2-HEADLESS-MEDIA-01` |
 | `S2-HEADLESS-INPUT-01` | `SPEC_READY` | 强类型物理输入、固定时间与双向 JSONL；产品语义直调 blocking | `T-S2-HEADLESS-INPUT-01` |

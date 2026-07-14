@@ -25,6 +25,116 @@ use astra_vn::{
 };
 
 #[test]
+fn release_gate_blocks_headless_profile_schema_in_package() {
+    let mut request = PackageBuildRequest::fixture(
+        "com.example.nativevn",
+        "classic",
+        vec![SectionPayload::raw(
+            "headless.profile",
+            "astra.headless_host_profile.v1",
+            br#"{"schema":"astra.headless_host_profile.v1"}"#.to_vec(),
+        )],
+    );
+    request.target_manifest = nativevn_target_manifest().to_string().into_bytes();
+    let blob = PackageBuilder::build(request).unwrap();
+
+    assert_headless_release_boundary_blocked(
+        blob.into_bytes(),
+        "classic",
+        "nativevn-game",
+        "ASTRA_HEADLESS_RELEASE_SCHEMA",
+    );
+}
+
+#[test]
+fn release_gate_blocks_headless_launch_profile_in_cooked_platform_profiles() {
+    let mut request = PackageBuildRequest::fixture(
+        "com.example.nativevn",
+        "classic",
+        vec![SectionPayload::raw(
+            "platform.profiles",
+            "astra.platform_profiles.v2",
+            serde_json::json!({
+                "schema": "astra.platform_profiles.v2",
+                "profiles": [{
+                    "kind": "headless",
+                    "profile": {"schema": "astra.headless_host_profile.v1"}
+                }]
+            })
+            .to_string()
+            .into_bytes(),
+        )],
+    );
+    request.target_manifest = nativevn_target_manifest().to_string().into_bytes();
+    let blob = PackageBuilder::build(request).unwrap();
+
+    assert_headless_release_boundary_blocked(
+        blob.into_bytes(),
+        "classic",
+        "nativevn-game",
+        "ASTRA_HEADLESS_RELEASE_PROFILE",
+    );
+}
+
+#[test]
+fn shipping_release_target_cannot_declare_headless_platform() {
+    let target = serde_json::json!({
+        "schema": "astra.target_manifest.v1",
+        "targets": [{
+            "id": "nativevn-game",
+            "kind": "game",
+            "crate": "astra-vn",
+            "runtime_provider": "native_vn",
+            "default_profile": "desktop-release",
+            "platforms": ["headless", "windows"],
+            "packaged": true
+        }]
+    });
+    let mut request = PackageBuildRequest::fixture(
+        "com.example.nativevn",
+        "desktop-release",
+        vec![cooked_project_section("desktop-release", "nativevn-game")],
+    );
+    request.target_manifest = target.to_string().into_bytes();
+    let blob = PackageBuilder::build(request).unwrap();
+
+    assert_headless_release_boundary_blocked(
+        blob.into_bytes(),
+        "desktop-release",
+        "nativevn-game",
+        "ASTRA_HEADLESS_RELEASE_TARGET",
+    );
+}
+
+fn assert_headless_release_boundary_blocked(
+    package_bytes: Vec<u8>,
+    profile: &str,
+    target: &str,
+    diagnostic_code: &str,
+) {
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes,
+            profile: profile.to_string(),
+            require_ffmpeg: false,
+            target: Some(target.to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+    let check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "platform.headless_release_boundary")
+        .expect("Headless release boundary check must be present");
+    assert_eq!(check.status, CheckStatus::Blocked);
+    assert_eq!(
+        check.diagnostic.as_ref().map(|diagnostic| diagnostic.code.as_str()),
+        Some(diagnostic_code)
+    );
+}
+
+#[test]
 fn release_report_covers_pass_warning_and_blocked_checks() {
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.nativevn",
