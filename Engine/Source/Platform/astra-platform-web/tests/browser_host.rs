@@ -15,10 +15,13 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 async fn same_game_profile_rejects_a_second_browser_host() {
     let profile = PlatformHostProfile::web_release("nativevn-web", "com.example.web-single");
     let first = astra_platform_web::factory()
-        .start(profile.clone())
+        .start(astra_platform::HostLaunchProfile::platform(profile.clone()))
         .await
         .unwrap();
-    let error = match astra_platform_web::factory().start(profile).await {
+    let error = match astra_platform_web::factory()
+        .start(astra_platform::HostLaunchProfile::platform(profile))
+        .await
+    {
         Ok(_) => panic!("second browser host unexpectedly started"),
         Err(error) => error,
     };
@@ -29,7 +32,10 @@ async fn same_game_profile_rejects_a_second_browser_host() {
 #[wasm_bindgen_test(async)]
 async fn browser_host_owns_canvas_webgpu_present_and_readback() {
     let profile = PlatformHostProfile::web_release("nativevn-web", "com.example.game");
-    let session = astra_platform_web::factory().start(profile).await.unwrap();
+    let session = astra_platform_web::factory()
+        .start(astra_platform::HostLaunchProfile::platform(profile))
+        .await
+        .unwrap();
     let window = session
         .client
         .create_window(WindowRequest {
@@ -75,7 +81,10 @@ async fn browser_host_owns_canvas_webgpu_present_and_readback() {
 #[wasm_bindgen_test(async)]
 async fn browser_host_webaudio_fails_fast_without_user_activation() {
     let profile = PlatformHostProfile::web_release("nativevn-web", "com.example.audio-test");
-    let session = astra_platform_web::factory().start(profile).await.unwrap();
+    let session = astra_platform_web::factory()
+        .start(astra_platform::HostLaunchProfile::platform(profile))
+        .await
+        .unwrap();
     let error = session
         .client
         .open_audio_output(AudioOutputRequest {
@@ -95,7 +104,10 @@ async fn browser_host_webaudio_fails_fast_without_user_activation() {
 #[wasm_bindgen_test(async)]
 async fn browser_host_opfs_commit_reload_and_abort_are_transactional() {
     let profile = PlatformHostProfile::web_release("nativevn-web", "com.example.opfs-test");
-    let session = astra_platform_web::factory().start(profile).await.unwrap();
+    let session = astra_platform_web::factory()
+        .start(astra_platform::HostLaunchProfile::platform(profile))
+        .await
+        .unwrap();
     let transaction = session.client.begin_save("slot_main").await.unwrap();
     session
         .client
@@ -127,7 +139,10 @@ async fn browser_host_opfs_commit_reload_and_abort_are_transactional() {
 async fn browser_host_webcodecs_decodes_encoded_video_chunk() {
     let encoded = encoded_vp8_frame().await;
     let profile = PlatformHostProfile::web_release("nativevn-web", "com.example.codec-test");
-    let session = astra_platform_web::factory().start(profile).await.unwrap();
+    let session = astra_platform_web::factory()
+        .start(astra_platform::HostLaunchProfile::platform(profile))
+        .await
+        .unwrap();
     let decoder = session.client.open_decode(DecodeKind::Video).await.unwrap();
     let output = session
         .client

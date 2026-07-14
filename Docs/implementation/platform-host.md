@@ -2,7 +2,7 @@
 
 平台模块只适配原生能力，不拥有 Runtime 权威状态。Migration 8 当前只产品化 Windows 与 Chrome Web；Linux、macOS、iOS、Android 在 Stage 6 前使用显式 `Unavailable` factory。
 
-Target 绑定见 [Target And Platform Blueprint](target-platform.md)，真实平台迁移状态见 [Migration 8](../migrations/platform-host-migration.md)。平台无关测试后端见 [Migration 11](../migrations/headless-platform-test-backend-migration.md)；该迁移当前只有 `SPEC_READY` 文档，不能作为 host evidence。
+Target 绑定见 [Target And Platform Blueprint](target-platform.md)，native host 状态见 [Migration 8](../migrations/platform-host-migration.md)。平台无关测试后端见 [Migration 11](../migrations/headless-platform-test-backend-migration.md)，生产完备度缺口与收束条件见 [模块能力完备度审查](../migrations/module-completeness-audit-migration.md#p0-004headlessscenariorendereraudio-fixture-和-player-测试仍是分散双轨)。
 
 ## Contract
 
@@ -18,7 +18,7 @@ pub struct PlatformHostSession {
 }
 ```
 
-上面的 `HostLaunchProfile` 是 Migration 11 的 planned contract。当前 factory 与 session 仍直接持有 `PlatformHostProfile`。后续类型形状为 `Platform(PlatformHostProfile)` 与 `Headless(HeadlessHostProfile)`；`PlatformId` 继续只包含六个发布平台。native factory 与 Headless factory 必须拒绝错误 variant，shipping API 只能构造 `Platform` variant。
+`HostLaunchProfile::Platform` 只接受 `astra.platform_host_profile.v2`，`HostLaunchProfile::Headless` 只接受测试专用 `astra.headless_host_profile.v1`。`PlatformId` 不增加 Headless variant。native factory 收到 Headless profile 时在 `host.start` 返回 `InvalidProfile`；Headless factory也必须反向阻断 native profile。Release、Cook 和 shipping Player 继续只接收 `PlatformHostProfile`。
 
 `PlatformHostClient` 通过 Future 提交 window/surface/present/capture、audio、decode、save transaction、package range 和 shutdown 命令。OS/browser event loop 在本地主线程 executor 持有 `!Send` 资源，Tokio 只负责编排。
 
@@ -32,7 +32,7 @@ pub struct PlatformHostSession {
 | `astra-platform-general` | generational resource table、ordered completion、atomic save、hash-bound package range、shared `WgpuPresentationCore`、audio/gamepad mapper、verified cache 与共用 policy |
 | `astra-platform-windows` | winit event loop、hardware wgpu、WASAPI、WMF、Saved Games、Windows package source；test injection 仅在 `platform-test-driver` |
 | `astra-platform-web` | canvas/DOM、WebGPU、WebAudio、WebCodecs、OPFS、fetch/File source |
-| `astra-platform-headless` | Migration 11 planned、`publish = false` 的完整测试 host；真实执行 surface/audio/decode/save/package/input/artifact lifecycle |
+| `astra-platform-headless` | planned `publish = false` 测试 host；完整 service、物理输入和 PNG/WAV artifact 尚未落地 |
 | `astra-player-web` | 独立 WASM Player，读取 config、package 和 cooked platform profile |
 | 其余平台 crate | Stage 6 `PLATFORM_NOT_IMPLEMENTED` factory |
 

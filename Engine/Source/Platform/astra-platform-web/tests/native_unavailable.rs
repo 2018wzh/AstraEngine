@@ -6,7 +6,7 @@ use astra_platform::{PlatformHostFactory, PlatformHostProfile};
 async fn native_process_cannot_construct_a_fake_web_host() {
     let profile = PlatformHostProfile::web_release("nativevn-web", "com.example.game");
     let error = astra_platform_web::factory()
-        .start(profile)
+        .start(astra_platform::HostLaunchProfile::platform(profile))
         .await
         .err()
         .expect("native Web host must be unavailable");

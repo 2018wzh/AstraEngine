@@ -159,7 +159,7 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
     assert_eq!(golden["background_rgba"], serde_json::json!(BACKGROUND));
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.text");
     let host = astra_platform_windows::factory()
-        .start(profile)
+        .start(astra_platform::HostLaunchProfile::platform(profile))
         .await
         .unwrap();
     let window = host

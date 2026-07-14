@@ -2,7 +2,7 @@
 
 本目录只记录已实现代码向新设计对齐的迁移路线。设计页可以覆盖完整未来架构；迁移页不能把尚未存在的 AstraEMU/AstraRPG 代码写成可搬迁对象。
 
-当前落地状态：migration 1–5 已完成 Provider URI Asset VFS、provider selection、AstraVN module/crate split、RuntimeWorld `astra.vn.step` action 和真实 FFI lifecycle。Migration 6 的 lossless frontend 已完成；对应 Stage 3 script work item 仍等待 formal Windows/Web Player evidence。Migration 9 只关闭 shared policy、component effects 与 async runtime host，AstraRPG 产品代码仍留 Stage 7。Migration 11 已完成文档规划，九个 `S2-HEADLESS-*` 工作项均为 `SPEC_READY`，尚无代码或测试证据。AstraEMU/AstraRPG 只作为后续 provider 设计边界出现；`rpg.trpg` 是 AstraRPG 内部 profile，不是独立迁移对象。
+当前落地状态：migration 1–5 已完成 Provider URI Asset VFS、provider selection、AstraVN module/crate split、RuntimeWorld `astra.vn.step` action 和真实 FFI lifecycle。Migration 6 的 lossless frontend 已完成；对应 Stage 3 script work item 仍等待 formal Windows/Web Player evidence。Migration 9 只关闭 shared policy、component effects 与 async runtime host，AstraRPG 产品代码仍留 Stage 7。Migration 11 已落地 typed Headless launch/profile contract，其余 host、artifact、CLI、测试收束、review 和 preflight 仍未完成。当前生产完备度修补按 [模块能力完备度审查](module-completeness-audit-migration.md) 收束。AstraEMU/AstraRPG 只作为后续 provider 设计边界出现；`rpg.trpg` 是 AstraRPG 内部 profile，不是独立迁移对象。
 
 ## 执行顺序
 

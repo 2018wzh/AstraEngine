@@ -140,8 +140,8 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     use astra_core::Hash256;
     use astra_package::{PackageManifest, PackageReader};
     use astra_platform::{
-        InputState, PackageSourceRequest, PlatformEventKind, PlatformHostFactory, PlatformId,
-        PointerButton, SurfaceRequest, WindowRequest,
+        HostLaunchProfile, InputState, PackageSourceRequest, PlatformEventKind,
+        PlatformHostFactory, PlatformId, PointerButton, SurfaceRequest, WindowRequest,
     };
     use astra_player::{
         NativeVnHostCommandSource, PlatformCommandSink, PlayerHostCommandExecutor,
@@ -200,7 +200,9 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         .enable_all()
         .build()?;
     runtime.block_on(async move {
-        let mut session = astra_platform_windows::factory().start(profile).await?;
+        let mut session = astra_platform_windows::factory()
+            .start(HostLaunchProfile::platform(profile))
+            .await?;
         let source = session
             .client
             .open_package(PackageSourceRequest::Bundled {

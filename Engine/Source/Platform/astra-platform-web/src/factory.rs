@@ -1,4 +1,4 @@
-use astra_platform::{HostStartFuture, PlatformHostFactory, PlatformHostProfile};
+use astra_platform::{HostLaunchProfile, HostStartFuture, PlatformHostFactory};
 
 #[cfg(not(target_arch = "wasm32"))]
 use astra_platform::{PlatformError, PlatformErrorCode};
@@ -11,7 +11,7 @@ pub fn factory() -> WebPlatformFactory {
 }
 
 impl PlatformHostFactory for WebPlatformFactory {
-    fn start(&self, profile: PlatformHostProfile) -> HostStartFuture {
+    fn start(&self, profile: HostLaunchProfile) -> HostStartFuture {
         #[cfg(target_arch = "wasm32")]
         {
             Box::pin(browser::start(profile))
@@ -19,7 +19,7 @@ impl PlatformHostFactory for WebPlatformFactory {
         #[cfg(not(target_arch = "wasm32"))]
         {
             Box::pin(async move {
-                let _ = profile;
+                profile.require_platform()?;
                 Err(PlatformError::new(
                     PlatformErrorCode::UnsupportedPlatform,
                     "host.start",
@@ -40,9 +40,9 @@ mod browser {
 
     use astra_platform::{
         host_channel, AudioOutputHandle, CapturedFrame, DecodeSessionHandle, HostCommand,
-        PackageSourceHandle, PlatformBackendChannels, PlatformError, PlatformErrorCode,
-        PlatformEventKind, PlatformHostProfile, PlatformHostSession, SaveTransactionHandle,
-        SurfaceHandle, WindowHandle,
+        HostLaunchProfile, PackageSourceHandle, PlatformBackendChannels, PlatformError,
+        PlatformErrorCode, PlatformEventKind, PlatformHostProfile, PlatformHostSession,
+        SaveTransactionHandle, SurfaceHandle, WindowHandle,
     };
     use astra_platform_general::ResourceTable;
     use js_sys::{Function, Promise, Reflect};
@@ -58,7 +58,10 @@ mod browser {
         WebAudioOutput, WebDecodeSession,
     };
 
-    pub async fn start(profile: PlatformHostProfile) -> Result<PlatformHostSession, PlatformError> {
+    pub async fn start(
+        launch_profile: HostLaunchProfile,
+    ) -> Result<PlatformHostSession, PlatformError> {
+        let profile = launch_profile.require_platform()?.clone();
         tracing::info!(
             event = "platform.web.host.start",
             profile = %profile.id,
@@ -74,7 +77,7 @@ mod browser {
         }
         let instance_lock = WebInstanceLock::acquire(&profile).await?;
         let (client, backend, events) = host_channel(
-            profile.clone(),
+            HostLaunchProfile::platform(profile.clone()),
             profile.limits.command_queue_capacity,
             profile.limits.event_queue_capacity,
         )?;
@@ -89,7 +92,7 @@ mod browser {
         Ok(PlatformHostSession {
             client,
             events,
-            profile,
+            profile: launch_profile,
         })
     }
 

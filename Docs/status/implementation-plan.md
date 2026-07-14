@@ -20,7 +20,7 @@
 | Area | Code status | Evidence |
 | --- | --- | --- |
 | Stage 1 EngineCore | `DONE` | `python Tools/run_cargo_isolated.py test --workspace` 通过；checkout-bound identity绑定 commit/dirty state、workspace manifests、Cargo.lock、toolchain与features，动态 fixture build/load使用同一 target root；Runtime snapshot保存 stable id generator、完整 EventQueue/AwaitQueue/delayed queue、typed component、mutation/effect trace；flat FSM支持 run-to-quiescence和事务回滚；provider-free replay校验 input/await/provider output与逐 tick hash |
-| Stage 2 Media + Package | `IN_PROGRESS` | 生产完备度审查已重开本 Stage。VFS/container/schema/scenario authority、Cook transactional dependency pipeline、bounded text layout replay、Windows hardware glyph golden、Windows native media 设备恢复/队列/资源释放、通用 measured performance contract 和 release same-run validator 已完成；`astra.plugin_extension_registry.v2` / `astra.provider_policy.v2` 已由 Package、Runtime test、Release Gate 和 VFS 共用 typed validator。仍缺 GPU FilterGraph、正式 release-reference performance pass 和真实 Player performance artifact；Migration 11 另行重开完整 Headless Platform 口径：当前没有 `astra-platform-headless`、统一 JSONL 物理输入、真实 PNG/WAV artifact、全 Runtime test 收束、模型审查或真实平台 preflight link；九个 `S2-HEADLESS-*` 均为 `SPEC_READY`。这些缺口关闭前不能恢复 `DONE`。Web 本轮按用户范围暂缓，Linux/macOS/iOS/Android 仍属于 Stage 6 |
+| Stage 2 Media + Package | `IN_PROGRESS` | 生产完备度审查已重开本 Stage。VFS/container/schema/scenario authority、Cook transactional dependency pipeline、bounded text layout replay、Windows hardware glyph golden、Windows native media 设备恢复/队列/资源释放、通用 measured performance contract 和 release same-run validator 已完成；审查项 `P0-004` 的 typed Headless launch/profile contract 已落地，但完整测试 host、PNG/WAV artifact、物理输入、CLI、测试收束、review 和 preflight 仍未完成。GPU FilterGraph、正式 release-reference performance pass 和真实 Player performance artifact同样保持开放；Web 本轮暂缓，Linux/macOS/iOS/Android 仍属于 Stage 6 |
 | Stage 3 AstraVN | `IN_PROGRESS` | Migration 6 frontend 与 Migration 9 shared 1–3 focused implementation 已落地；NativeVN 已收敛为两路线技术样例并移除 SAPI 配音。`S3-SCRIPT-01/02`、presentation、system UI、sample、Windows/Web Player 均等待同一 `.astrapkg` 的 formal native-input evidence。顶层仍由 `S3-TSUI-INTERNAL-DEMO-01`、`S3-TSUI-GATE-01` 和 `S3-FLAGSHIP-DEMO-01` 阻断 |
 | Stage 4 Editor + AI/MCP | `REOPENED_SPEC` | Editor workflow、runtime-provider-aware shell、Plugin Manager、AI provider profile、ONNX ModelBundle、Runtime Director、memory、MCP context 和 AI/MCP gate 已写入文档；`Editor/Source` 和 `Engine/Plugins/Providers/astra-ai-onnx` 尚不存在。Stage 4 因 VFS/GameRuntime contract 重开，Project Wizard、PIE、Debugger 和 Release Gate 必须读取 `RuntimeEditorMetadata`，ONNX ModelBundle、Context Pack、generated artifact 和 MCP package access 需要改为统一 VFS mount evidence |
 | Stage 5 AstraEMU | `REOPENED_SPEC` | `Docs/contracts/astraemu-ipc.md`、`Docs/implementation/astraemu-legacy-runtime-framework.md`、`Docs/implementation/emulator-core-state-machine.md` 和 `Docs/emu` 已写清 `AstraEmuRuntimeProvider`、`LegacyRuntimeProvider` facade、VM 状态机映射、auto probe、Trusted Luau、文本翻译、FilterGraph preset 和 legacy pack VFS mount；`AstraEMU/Source` 尚不存在，不能把 full-family runtime 写成已实现 |
@@ -64,15 +64,15 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | Work ID | Status | Evidence |
 | --- | --- | --- |
 | `S2-PLATFORM-01` | `IN_PROGRESS` | Migration 8 已落地 async typed-handle contract、`astra-platform-general`、capability v2 与 conformance schema；Windows/Web 同 commit 真实验收尚未闭合，不能恢复 `DONE` |
-| `S2-HEADLESS-CONTRACT-01` | `SPEC_READY` | Migration 11 规划 `HostKind`、`HeadlessHostProfile` 与 `HostLaunchProfile`；`PlatformId` 和发布 profile v2 保持六平台，代码尚未实现 |
-| `S2-HEADLESS-HOST-01` | `SPEC_READY` | planned `publish = false` `astra-platform-headless` 尚不存在；surface/audio/decode/save/package/input 与 zero-leak lifecycle 未统一 |
-| `S2-HEADLESS-MEDIA-01` | `SPEC_READY` | planned Media-owned reference providers 与真实 PNG/PCM WAV 输出尚未接入；现有 CPU frame/meter 不能代表完整后端 |
-| `S2-HEADLESS-INPUT-01` | `SPEC_READY` | `astra.user_input_sequence.v1` 与双向 JSONL `astra.headless_protocol.v1` 只有文档，尚无 Rust schema 或 runner |
-| `S2-HEADLESS-ARTIFACT-01` | `SPEC_READY` | PNG/WAV retention、限额、artifact manifest 和 run report 只有文档，尚无产物证据 |
-| `S2-HEADLESS-CLI-01` | `SPEC_READY` | planned `astra-headless run` / `serve --stdio` binary 尚不存在；旧 `--headless` 仍是当前实现入口 |
-| `S2-HEADLESS-TEST-MIGRATION-01` | `SPEC_READY` | 全部 Runtime test 启动 `HeadlessTestContext` 的收束尚未实施，现有直连 provider/mock/scenario 路径继续计为迁移输入 |
-| `S2-HEADLESS-REVIEW-01` | `SPEC_READY` | 全帧/全音频自动比较、模型 checkpoint 审查、人工容差批准与 `astra.headless_review.v1` 尚未实现 |
-| `S2-HEADLESS-PREFLIGHT-01` | `SPEC_READY` | 同 build/package/input 的 Headless→真实平台强制 preflight link 尚未实现，Headless 结果仍不能作为 E3 |
+| `S2-HEADLESS-CONTRACT-01` | `DONE` | `HostKind`/`HostLaunchProfile` 保持六平台与 Headless 隔离；`astra.headless_host_profile.v1` 校验 build/package identity、显式 providers、输入/artifact/host limits 和 package sources；native factory拒绝 Headless variant，`cargo test -p astra-platform --test headless_launch_profile` 通过 |
+| `S2-HEADLESS-HOST-01` | `IN_PROGRESS` | contract 已完成；`publish = false` full host、全部 service 和 zero-leak shutdown 尚未落地 |
+| `S2-HEADLESS-MEDIA-01` | `SPEC_READY` | 真实 PNG/WAV 与 Media provider 组合尚未落地 |
+| `S2-HEADLESS-INPUT-01` | `SPEC_READY` | `astra.user_input_sequence.v1` 已作为 profile-bound schema id 固化；消息 DTO、JSONL runner 和语义快捷命令阻断尚未落地 |
+| `S2-HEADLESS-ARTIFACT-01` | `SPEC_READY` | retention/limit contract 已固化；artifact writer、manifest 和 run report 尚未落地 |
+| `S2-HEADLESS-CLI-01` | `SPEC_READY` | Developer binary 尚未落地 |
+| `S2-HEADLESS-TEST-MIGRATION-01` | `SPEC_READY` | 全 Runtime test 的 `HeadlessTestContext` 收束尚未开始 |
+| `S2-HEADLESS-REVIEW-01` | `SPEC_READY` | 自动比较、模型审查和人工容差批准尚未落地 |
+| `S2-HEADLESS-PREFLIGHT-01` | `SPEC_READY` | Headless→Windows/Web identity link 尚未落地，Headless 仍不能作为 E3 |
 | `S2-WINDOWS-HOST-01` | `IN_PROGRESS` | `host_backend`/`host_services`/`media_session` 已覆盖 real window、hardware wgpu ordered frame、malformed frame rollback、resize、present/readback、WASAPI bounded queue/callback meter/close drain、WMF diagnostic continuity、FFmpeg A/V session、可注入 device-loss recovery 和 product-profile-bound measured report；Release Gate 已校验 conformance/Player/performance identity continuity，正式 release-reference pass 与真实 Player artifact 尚未闭合 |
 | `S2-WINDOWS-WMF-01` | `DONE` | `cargo test -p astra-media decode_provider`；public media manifest 校验固定 sha256，WMF `decode.wmf.audio` 输出 MP3 bounded PCM CPU buffer，`decode.wmf.video_first_frame` 输出 MP4 BGRA 首帧，invalid video 返回 `ASTRA_WMF_DECODE` |
 | `S2-WINDOWS-GATE-01` | `DONE` | `cargo test -p astra-release release_report` and `cargo test -p astra-cli --test target_platform`；缺 required Windows smoke 会阻断 release check |

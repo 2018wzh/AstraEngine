@@ -81,8 +81,9 @@ impl WindowsNativeMediaSession {
             .performance_identity
             .validate()
             .map_err(performance_error)?;
-        if config.performance_identity.target != client.profile().target
-            || config.performance_identity.profile_hash != client.profile().hash()?
+        let platform_profile = client.platform_profile()?;
+        if config.performance_identity.target != platform_profile.target
+            || config.performance_identity.profile_hash != platform_profile.hash()?
         {
             return Err(PlatformError::new(
                 PlatformErrorCode::IntegrityMismatch,
@@ -656,7 +657,7 @@ impl WindowsNativeMediaSession {
         if self.audio.is_some() {
             return Ok(());
         }
-        let capacity = self.client.profile().limits.max_audio_frames;
+        let capacity = self.client.platform_profile()?.limits.max_audio_frames;
         let handle = self
             .client
             .open_audio_output(AudioOutputRequest {

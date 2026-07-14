@@ -233,7 +233,7 @@ async fn player_command_path_presents_packaged_layout_and_records_live_gpu_ident
         PlatformHostProfile::windows_release("nativevn-game", "com.example.player-presentation");
     let profile_hash = profile.hash().unwrap();
     let session = astra_platform_windows::factory()
-        .start(profile)
+        .start(astra_platform::HostLaunchProfile::platform(profile))
         .await
         .unwrap();
     let window = session

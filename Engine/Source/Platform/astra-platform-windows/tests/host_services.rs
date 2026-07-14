@@ -10,7 +10,7 @@ use cpal::traits::{DeviceTrait, HostTrait};
 async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let session = astra_platform_windows::factory()
-        .start(profile)
+        .start(astra_platform::HostLaunchProfile::platform(profile))
         .await
         .expect("start Windows host");
 

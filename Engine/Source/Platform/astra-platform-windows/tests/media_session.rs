@@ -16,7 +16,7 @@ async fn windows_media_session_streams_ffmpeg_to_wasapi_and_wgpu() {
     profile.decode.providers.push("ffmpeg".to_string());
     profile.decode.allow_software = true;
     let host = astra_platform_windows::factory()
-        .start(profile)
+        .start(astra_platform::HostLaunchProfile::platform(profile))
         .await
         .expect("start Windows host");
     let window = host
@@ -38,15 +38,17 @@ async fn windows_media_session_streams_ffmpeg_to_wasapi_and_wgpu() {
         })
         .await
         .unwrap();
-    let performance_budget =
-        astra_platform_windows::windows_media_performance_budget(host.client.profile(), "classic")
-            .unwrap();
+    let performance_budget = astra_platform_windows::windows_media_performance_budget(
+        host.client.platform_profile().unwrap(),
+        "classic",
+    )
+    .unwrap();
     let performance_identity = PerformanceRunIdentity {
         source_revision: "a".repeat(40),
         dirty: true,
-        target: host.client.profile().target.clone(),
+        target: host.client.platform_profile().unwrap().target.clone(),
         profile: "classic".into(),
-        profile_hash: host.client.profile().hash().unwrap(),
+        profile_hash: host.client.platform_profile().unwrap().hash().unwrap(),
         package_hash: Hash256::from_sha256(&fixture_bytes("flower-roar.mp4")).to_string(),
         build_fingerprint: astra_platform::build_fingerprint(
             env!("CARGO_PKG_NAME"),

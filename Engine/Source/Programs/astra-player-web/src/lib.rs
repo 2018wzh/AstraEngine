@@ -164,7 +164,8 @@ pub fn validate_package(
 mod browser {
     use super::*;
     use astra_platform::{
-        InputState, PlatformErrorCode, PlatformEventKind, PlatformHostClient, PlatformHostFactory,
+        HostLaunchProfile, InputState, PlatformErrorCode, PlatformEventKind, PlatformHostClient,
+        PlatformHostFactory,
         PointerButton, SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest,
     };
     use astra_player_core::{
@@ -241,7 +242,7 @@ mod browser {
             audio_meter: None,
         })?;
         let session = astra_platform_web::factory()
-            .start(profile)
+            .start(HostLaunchProfile::platform(profile))
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         let window = session

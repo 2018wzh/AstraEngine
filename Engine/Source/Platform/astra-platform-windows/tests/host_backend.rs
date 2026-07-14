@@ -9,7 +9,7 @@ use astra_platform::{
 async fn windows_host_owns_window_surface_present_capture_and_shutdown() {
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let mut session = astra_platform_windows::factory()
-        .start(profile)
+        .start(astra_platform::HostLaunchProfile::platform(profile))
         .await
         .expect("start Windows host");
     let window = session

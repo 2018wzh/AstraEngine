@@ -482,7 +482,9 @@ fn package_open_blocks_runtime_descriptor_drift_before_provider_creation() {
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 #[tokio::test(flavor = "current_thread")]
 async fn packaged_native_vn_scene_reaches_live_windows_wgpu_and_releases_resources() {
-    use astra_platform::{PlatformHostFactory, PlatformHostProfile, SurfaceRequest, WindowRequest};
+    use astra_platform::{
+        HostLaunchProfile, PlatformHostFactory, PlatformHostProfile, SurfaceRequest, WindowRequest,
+    };
     use astra_player_core::{PlatformCommandSink, PlayerHostCommandExecutor};
 
     let bytes = product_package();
@@ -496,9 +498,8 @@ async fn packaged_native_vn_scene_reaches_live_windows_wgpu_and_releases_resourc
     )
     .unwrap();
     let session = astra_platform_windows::factory()
-        .start(PlatformHostProfile::windows_release(
-            "nativevn-game",
-            "com.example.player",
+        .start(HostLaunchProfile::platform(
+            PlatformHostProfile::windows_release("nativevn-game", "com.example.player"),
         ))
         .await
         .unwrap();

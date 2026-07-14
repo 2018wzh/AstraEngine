@@ -1,10 +1,28 @@
 # AstraEngine 模块能力完备度审查 Migration
 
-**状态：`AUDIT_BASELINE`**
+**状态：`IN_PROGRESS`**
 
 本文是一次面向当前代码的实现完整度审查结果和后续迁移总纲。审查目标不是确认“能编译”或“能跑一个样例”，而是确认设计声明的能力是否在真实 owner/provider、主运行路径、跨平台边界、错误处理、生命周期、测试和 release gate 中闭合。
 
-结论先行：当前仓库已经形成了较完整的 EngineCore、Package/Asset、Media contract、AstraVN runtime provider 和 Windows/Web host 骨架，但还不能宣称达到完整的 UE 级引擎完备度。最明确的已实现但深度不足项是字体/文本布局；最明确的未接入项是 Editor、AI/MCP、AstraEMU 和 AstraRPG；最明确的发布闭环缺口是 Windows/Web Player 的真实可见状态推进和完整路线证据。`DONE` 只能保留在其职责边界和证据标准均满足的工作项上。
+结论先行：当前仓库已经形成较完整的 EngineCore、Package/Asset、字体排版、Windows Media、AstraVN runtime provider 和平台 host 骨架，但还不能宣称达到完整的 UE 级引擎完备度。最紧迫的基础设施缺口不再是字体算法本身，而是分散的 headless/fixture/Scenario 路径尚未收束成完整测试 host，导致 E1/E2 证据仍可能绕开真实 Player service lifecycle。Editor、AI/MCP、AstraEMU 和 AstraRPG 没有产品实现，继续按 design gap 管理。`DONE` 只能保留在职责边界和证据标准均满足的工作项上。
+
+### 2026-07-14 执行范围
+
+本轮先修复根 workspace 中已有代码，不新增 Editor、AI/MCP、AstraEMU、AstraRPG、网络或新发布平台。Web 产品实现暂缓，但 Web 缺口仍保留为 completion blocker，不会改写成已完成。NativeVN 旗舰内容和 TsuiNoSora 商业迁移不在本轮关闭范围；它们依赖的通用 Runtime、Package、Media、Headless、Player 和 Windows 基础设施仍属于本轮。
+
+| Issue | 当前状态 | 本轮处理 |
+| --- | --- | --- |
+| `P0-002` | `PARTIALLY_RESOLVED` | 继续完成通用 stage/frame/await/media 主链；NativeVN 产品 E3 暂不关闭 |
+| `P0-003` | `DEFERRED_SCOPE` | route truth contract 保持 blocking；NativeVN/TsuiNoSora full-route evidence 暂缓 |
+| `P0-004` | `IN_PROGRESS` | typed Headless launch/profile contract 已完成，完整 Headless host 是当前最高优先级 |
+| `P1-001` | `PARTIALLY_RESOLVED` | shared E2 与 Windows glyph 子链已完成；Web 和完整产品 scene 仍开放 |
+| `P1-002`、`P1-003`、`P2-001` 新模块项 | `DESIGN_GAP` | 不新增产品模块，只维持状态与 release 阻断 |
+| `P1-004`、`P1-011` | `DEFERRED_SCOPE` | 通用 Player 基础设施继续修复；NativeVN full behavior/evidence 暂缓 |
+| `P1-005`、`P2-002` | `IN_PROGRESS` | 完整 Headless、Media 生命周期、长流程、恢复和真实 artifact 是当前修补主线 |
+| `P1-006` | `GUARD_ACTIVE` | planned/reopened 状态继续由文档和 gate 约束 |
+| `P1-007` 至 `P1-010`、`P1-012` | `RESOLVED` | 保留回归测试，不重复建设第二套 authority |
+
+执行顺序固定为：先关闭 `P0-004` 的 Headless 基础设施，再补 `P1-005/P2-002` 的媒体、资源和长流程矩阵，然后整合非 Web 的 save/timeline/audio 与 Product Stage/Windows 主路径。最后回填 Stage 2/3 状态；被暂缓的 Web、NativeVN 和 TsuiNoSora 证据仍保持开放。
 
 ## 1. 审查口径
 
@@ -54,10 +72,11 @@
 | 模块/能力域 | 当前真实形态 | 当前结论 |
 | --- | --- | --- |
 | EngineCore Runtime | `astra-runtime`、`astra-core`、`astra-engine` facade、StateMachine、snapshot/replay 和 action provider 已进入 workspace | 基础 runtime 具备 E1/E2；需继续核对长流程、故障恢复、压力和 provider 组合，不能由 native smoke 推断 UE 完备 |
-| Package/Asset/Cook | `astra-package`、`astra-asset`、`astra-cook`、release validator 已存在，且 fixture package 明确用于 dev/headless | contract 和基础 package 链路较完整；发布形态、资源规模、增量 cook、失败恢复和实际 Player 消费仍需 E2/E3 证据 |
+| Package/Asset/Cook | `astra-package`、`astra-asset`、`astra-cook` 和 release validator 已完成 section/schema/VFS authority、typed dependency graph、内容缓存、bounded concurrency、取消和原子提交 | 本轮生产加固已覆盖核心冲突矩阵；真实 Headless/Player package source、长流程和规模 evidence 继续归入 `P0-004/P2-002` |
 | Media contract | `astra-media-core` 提供 Renderer2D/FilterGraph contract、headless CPU executor；这是符合轻量 core 边界的实现 | core 本身不能替代真实 renderer/provider；硬件 surface、设备恢复和完整视觉输出仍由平台/provider 负责 |
-| Text/Font | `CosmicTextLayoutProvider` 存在，但布局使用固定字符宽度，未真正使用 font system/shaping/fallback provider | P1 `MINIMAL_IMPLEMENTATION`、`STATUS_MISMATCH`；当前只能证明布局 DTO/hash 和一个 synthetic CJK/ruby fixture |
-| Windows/Web host | wgpu/WMF/WASAPI/WebCodecs/WebAudio/OPFS 等代码和测试存在；文档仍明确 live route blocker | 状态口径基本诚实；E2/E3 尚未闭合，不能宣称 Player 完整 |
+| Text/Font | verified Package/VFS font database、`cosmic-text` shaping、Swash raster、multiscript fallback、layout replay、Windows hardware glyph atlas/golden 和 Player retained glyph stream 已落地 | 固定宽度假实现已删除；shared E2 和 Windows E3 子证据成立，Web 与完整 product scene 仍阻断 `P1-001` |
+| Platform/Headless | Windows wgpu/WMF/WASAPI 主链已具备真实 owner；本审查项已新增 `HostKind`、`HostLaunchProfile` 和 `astra.headless_host_profile.v1` contract | 完整 `astra-platform-headless`、物理输入、PNG/WAV artifact、统一测试 context、review/preflight 尚不存在，构成 `P0-004` |
+| Web host | WebGPU/WebCodecs/WebAudio/OPFS 等实现存在，但正式用户手势、恢复、完整 Player 和同 run evidence 未闭合 | 本轮暂缓实现，所有 Web completion 条件继续保持 blocking |
 | AstraVN | 多 crate、runtime provider、policy、presentation 和 package/save 代码存在；script frontend 与 live Player 仍重开/进行中 | 已实现范围不能升级为完整 VN 产品；frontend 和真实 Player 是主要闭口 |
 | Editor | `Editor/Source/.gitkeep` 是当前唯一 tracked 文件 | P1 `CONTRACT_ONLY`、`UNWIRED_MAIN_PATH`；Stage 4 不应被当作实现 |
 | AI/MCP | `astra-ai` 源码存在，但不在根 workspace；Copilot 和 TrustedSession 有明确未完成路径 | P1 `UNWIRED_MAIN_PATH`、`FAKE_IMPLEMENTATION`；Stage 4 必须保持 reopened |
@@ -97,7 +116,7 @@
 
 **分类：** `FAKE_IMPLEMENTATION`, `UNWIRED_MAIN_PATH`, `STATUS_MISMATCH`
 
-**证据：** `Engine/Source/Developer/astra-ai/src/editor_copilot.rs:163-175` 的 `generate_inline_hint` 忽略 context，返回一个空内容 hint；`Engine/Source/Developer/astra-ai/src/trusted_session.rs:141-160` 的 `apply_write` 只移除 review 并返回 `Applied`，没有执行 patch、scope 校验、checkpoint、文件事务或 release recheck。根 `Cargo.toml:3-48` 没有 `Engine/Source/Developer/astra-ai` workspace member；`cargo metadata --no-deps` 观察到 workspace package 数为 44，`astra-ai_in_workspace=False`，对根 workspace 执行 `cargo test -p astra-ai` 不能作为正常 workspace 测试路径。
+**证据：** `Engine/Source/Developer/astra-ai/src/editor_copilot.rs:168` 的 `generate_inline_hint` 忽略 context，返回空内容 hint；`Engine/Source/Developer/astra-ai/src/trusted_session.rs:142` 的 `apply_write` 只移除 review 并返回 `Applied`，没有执行 patch、scope 校验、checkpoint、文件事务或 release recheck。根 `Cargo.toml` 没有 `Engine/Source/Developer/astra-ai` workspace member；当前 `cargo metadata --no-deps` 观察到 45 个 workspace package，`astra-ai` 不在其中，根 workspace 不能把 `cargo test -p astra-ai` 当作正常验证路径。
 
 **缺口：** provider profile、真实请求、超时/取消、审计、用户确认、文件范围约束、原子写入、undo/redo、语义校验、save/replay 和 release gate 没有闭合。该源码不能作为 Stage 4 已实现证据。
 
@@ -185,6 +204,26 @@
 **影响：** 任意视觉动画、计时器、窗口变化或错误状态变化都可能让外部标签被记录为 route coverage。输入 consumed trace 只证明宿主消费了按键，不证明该按键推进了指定剧情路线。
 
 **迁移要求：** route coverage 必须来自同一 Player session 的 Runtime/provider route report、terminal/choice state hash 和真实输入序列；`expected_routes` 只能作为待验证期望值，不能成为 report 的事实来源。每个 route 必须关联实际 terminal/choice signature、state/event/presentation hash 和 package/profile/session identity。缺真实 route evidence 必须 blocking。
+
+### P0-004：Headless、Scenario、renderer/audio fixture 和 Player 测试仍是分散双轨
+
+**分类：** `BYPASS`, `FIXTURE_ONLY`, `UNWIRED_MAIN_PATH`, `UE_CAPABILITY_GAP`
+
+**原始证据：** `ScenarioRunner`、`HeadlessRendererProvider`、CPU scene compositor、AudioGraph meter、`PlatformCommandSink` 和 Player automation contract 分别存在，但没有共同的 host/session/resource owner。部分测试直接调用 provider、mock sink 或产品语义命令，不能证明相同 package、输入和 command stream 能通过完整 `PlatformHostClient` 生命周期。Headless 也没有独立身份，容易被静态 hash、synthetic frame 或 fixture report 错误外推成产品证据。
+
+**影响：** Runtime、Media、Player 和 full-flow 测试无法共享统一的窗口/surface、音频、decode、save、package、输入、事件、completion 和 zero-leak shutdown 语义。真实平台验收缺少强制 preflight，失败时也难以区分产品逻辑、媒体输出和平台后端问题。
+
+**2026-07-14 contract 进度：** `astra-platform` 已新增 `HostKind`、`HostLaunchProfile` 和 `astra.headless_host_profile.v1`。`PlatformId` 继续只表示六个发布平台；Headless profile显式绑定 build/package SHA-256、renderer/text/audio/decode/save/package providers、`astra.user_input_sequence.v1`、file/stdio 权限、artifact retention/checkpoint/容量和 host limits。`PlatformHostFactory::start` 现在接收 typed launch profile，native factory在 `host.start` 拒绝 Headless variant。短 hash、未知 schema、缺 provider、空 transport、重复 checkpoint 和零预算均返回 `InvalidProfile`。该证据只关闭 `S2-HEADLESS-CONTRACT-01`，不能外推为完整 Headless host。
+
+**剩余迁移要求：**
+
+1. 建立 `publish = false` 的 `astra-platform-headless`，实现完整 `PlatformHostClient` service、generational handle、ordered event/completion、bounded queue 和 zero-leak shutdown。
+2. renderer、TextLayout、FilterGraph、AudioGraph 和 decode 继续由 Media owner 提供；Headless 组合显式 provider并输出真实 PNG 与 PCM S16LE WAV，不接受颜色块、静态 meter 或 synthetic decode。
+3. 新增双向 JSONL 物理输入协议，只允许 keyboard/IME/pointer/touch/gamepad、固定时间、await/checkpoint 和 shutdown。`advance`、`choose`、`open_system`、直接 `VnPlayerCommand` 和 Runtime mutation 必须 blocking。
+4. artifact manifest/run report只记录相对路径、hash、尺寸、时长、sequence、checkpoint 和 provider identity；超出数量、字节、帧或时长预算立即失败，不能截断后生成 pass。
+5. 所有平台无关 Runtime/Player/full-flow 测试收束到 `HeadlessTestContext`。真实 Windows/Web acceptance 必须先通过同 build/package/input 的 Headless preflight；Headless 最高只计 E2。
+
+**完成条件：** `S2-HEADLESS-HOST/MEDIA/INPUT/ARTIFACT/CLI/TEST-MIGRATION/REVIEW/PREFLIGHT` 全部有代码和负向测试；workspace inventory 不再发现长期直连 headless provider、独立 meter、mock sink、Scenario 私有执行或语义快捷命令；真实平台 gate 会在 preflight identity 不匹配、artifact/review 缺失或 Headless blocked 时拒绝启动。
 
 ### P1-007：Runtime API 与设计 contract 漂移，module mount 和 tick 输入没有完整约束
 
@@ -280,9 +319,9 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 
 **修复状态：** `RESOLVED`。`Tools/run_cargo_isolated.py` 现将 checkout state、workspace manifest、Cargo.lock、Rust toolchain 与 feature/target/profile fingerprint 绑定到独立 target root，并写出 `astra.build_identity.v1`；`astra_plugin::dylib_path` 与 nested fixture build 共同遵循 `CARGO_TARGET_DIR`。identity mismatch、无效 report 和 Cargo 失败均阻断，artifact evidence 只记录相对 path、role、hash 与 byte size。回归由 `T-S1-BUILD-IDENTITY-01` 和隔离 workspace test 覆盖。
 
-**证据：** 本轮第一次 `cargo test --workspace` 的 logging 测试加载了与当前 gate 不匹配的动态 fixture binary，报 `ASTRA_PLUGIN_FEATURE_FINGERPRINT`；显式执行 `cargo build -p headless-presentation-provider` 后，`cargo test -p astra-cli --test logging -- --nocapture` 的 2 个测试通过。随后 workspace 全量执行中的 `astra-observability` coverage 测试加载了内置期望 45 个成员的旧测试二进制，而当前 `Cargo.toml` 和 `logging-coverage.json` 都是 44 个成员；单独重新编译 `cargo test -p astra-observability --test workspace_coverage -- --nocapture` 后通过。设置独立 `CARGO_TARGET_DIR=target/audit-workspace` 的全 workspace 命令在本轮时间窗内未完成，不能作为通过证据。
+**原始触发证据：** 早期审查直接执行共享 target 的 `cargo test --workspace` 时，logging 测试加载了 fingerprint 不匹配的动态 fixture，随后 observability coverage 又加载了成员数量过期的测试二进制。该现象证明按文件存在性复用其他 checkout artifact 会产生假失败或假通过。当前 `Tools/run_cargo_isolated.py` 已绑定 checkout、manifest、lock、toolchain 和 feature identity；2026-07-14 的隔离 workspace test 通过，原始触发条件已进入回归保护。
 
-**影响：** 当前测试命令可能把其他 worktree 的测试二进制、动态插件或 manifest 常量混入本 checkout，导致假失败或假通过。对于需要证明 UE 级完整度的 release gate，这种构建身份不确定性本身就是阻断问题。
+**原始影响：** 修复前的测试命令可能把其他 worktree 的测试二进制、动态插件或 manifest 常量混入当前 checkout，导致假失败或假通过。隔离 runner 已把这种身份不确定性改为 blocking diagnostic；后续只能通过该入口生成 workspace/release evidence。
 
 **迁移要求：** 每个 worktree/checkout 使用包含 workspace manifest hash、Rust toolchain fingerprint 和 feature fingerprint 的独立 target/artifact root；动态 fixture 必须在当前 build fingerprint 不匹配时强制重建，不能只按 DLL 文件存在判断。测试报告必须记录 checkout identity、workspace manifest hash、artifact path role、binary hash 和 dependency lock hash；不匹配时 blocking，不允许继续执行并生成产品 evidence。
 
@@ -290,18 +329,19 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 
 ### P0：发布证据与状态安全边界
 
-1. 保持所有无法达到 E3 的 Player、字体视觉、真实音频和真实平台能力为 blocking/in-progress。
-2. 在 release validator 中继续区分 E0/E1/E2 fixture evidence 与 E3/E4 product evidence。
-3. 对任何空成功、静态 report、直接命令、自推进 route、未执行写入和未声明 fallback 增加负向测试。
-4. 把“同一 commit/package/profile/session” identity continuity 作为跨模块强制条件。
+1. 先关闭 `P0-004`：typed contract 之后依次实现 full host、Media 组合、物理输入、PNG/WAV artifact、Developer CLI、测试收束、review 和 preflight。
+2. 保持所有无法达到 E3 的 Player、字体视觉、真实音频和真实平台能力为 blocking/in-progress；Headless 最高只计 E2。
+3. 在 release validator 中继续区分 E0/E1/E2 fixture evidence 与 E3/E4 product evidence，并阻断 Headless schema/provider/developer artifact 进入 shipping package。
+4. 对空成功、静态 report、直接命令、自推进 route、未执行写入和未声明 fallback 增加负向测试。
+5. 把同一 build/package/input/profile/session identity continuity 作为 Headless preflight 与真实平台验收的强制条件。
 
 ### P1：已存在实现的能力深度补齐
 
-1. 完成 FontProvider 与真实 TextLayout shaping，补齐字体资产、fallback、复杂脚本和视觉验证。
-2. 让 AI crate 进入明确的构建边界；删除空 hint/伪 applied 行为，接入真实 provider、review、transaction、undo 和 replay。
-3. 完成 Windows/Web Player Runtime 接线，证明真实输入导致可见 state progression 和完整 route。
-4. 对 Media/Renderer/Decode/Audio provider 补生命周期、恢复、长流程和真实输出 evidence。
-5. 对 Package/Asset/Cook 补增量、依赖、缓存、取消、恢复、超大资源和实际 Game-only package 消费验证。
+1. 以 Headless service/client 为统一入口，补齐 Media/Renderer/Decode/Audio provider 的生命周期、恢复、长流程、真实输出和资源释放矩阵。
+2. 将现有 Package/Asset/Cook authority、缓存、取消和原子提交接入 Headless package source 与 Game-only consumption，补大输入和恢复测试。
+3. 整合非 Web 的 Runtime await、Product Stage fixed frame、timeline fence、save/load 和 persistent audio，消除 Player 产品路径与测试路径双轨。
+4. 保留字体 shared E2 与 Windows glyph E3 子证据；完整 SceneCommand、GPU FilterGraph、正式 performance artifact 和 Web consumer 未通过前不关闭 `P1-001/P1-005`。
+5. AI/Editor/AstraEMU/AstraRPG 没有现有产品实现，本轮只维持 fail-closed 状态，不用 facade、fixture 或空返回补齐它们。
 
 ### P2：未实现模块与新增 UE 能力设计
 
@@ -318,7 +358,7 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 3. 每个完成项同步更新 `Docs/status/implementation-plan.md`、对应 stage、coverage matrix、stage test matrix、release gate 和 manual。
 4. 对 fixture、synthetic、headless 和 local-private 证据明确标注用途和禁止外推的范围。
 
-第二轮新增的实施顺序必须优先于普通能力扩展：先修复 Player 主路径旁路和 route evidence 来源，再修复 provider selection、Runtime mount/tick、package section 唯一性和 VFS eligibility，最后扩展字体、Editor、AI、EMU、RPG 和 UE 能力域。
+当前实施顺序以 `P0-004` 为首。`P1-007` 至 `P1-010` 已关闭，不再建立第二套 Runtime/provider/package/VFS authority。Headless 基础设施闭合后处理 `P1-005/P2-002`，再整合非 Web 的 Product Stage、save/timeline/audio 与 Windows 主路径。Web、NativeVN full behavior 和 TsuiNoSora 商业证据按本轮范围暂缓，但继续保留 blocking 状态。
 
 ## 5. 后续修补任务格式
 
@@ -353,6 +393,9 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 
 ### Media/Platform/Player
 
+- Headless 使用独立 `HostKind`/profile，完整执行 surface、audio、decode、save、package、input、event、completion 和 shutdown；它不进入 `PlatformId` 或 shipping dependency graph。
+- `astra.user_input_sequence.v1` 只接受物理输入与固定时间控制；语义快捷命令、直接 callback 和 Runtime mutation 必须在 schema/adapter 边界阻断。
+- PNG/WAV artifact 来自真实 SceneCommand/AudioGraph/decode 输出，执行容量门禁、自动比较和 required checkpoint review。
 - 真实 surface、GPU/CPU provider、device/context loss、纹理/音频资源释放和 bounded queue。
 - WMF/WebCodecs/Audio provider 的真实输入输出、seek/pause/resume、错误和 profile-bound fallback。
 - Windows/Web 真实 Player 输入、host consumed trace、视觉变化、音频 meter、route completion 和同 run report。
@@ -364,27 +407,26 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 
 ## 7. 本次审查命令与结果
 
-已执行的定向检查：
+2026-07-14 在 checkout-bound identity 下重新验证当前分支：
 
-- tracked inventory：555 个 tracked 文件，其中 227 个 Rust 文件、211 个 Markdown 文件；`Editor/` 和 `AstraEMU/` 当前各只有 `.gitkeep`。
-- 修补前 `cargo test -p astra-media text_layout -- --nocapture` 只有 1 个 synthetic 测试。当前 `cargo test -p astra-media --test text_layout` 为 5 个生产语义测试，另由 `cargo test -p astra-media-core --test scene_compositor` 覆盖 renderer resource transaction；它们证明 shared E2，不证明尚缺的跨 script package fixture和 Windows E3。
-- `cargo metadata --no-deps --format-version 1`：workspace package 44 个，`astra-ai` 不在 workspace。
-- `cargo test -p astra-ai`：根 workspace 无法将 `astra-ai` 作为 workspace package 测试，证明其当前不是可由主 workspace 验证的产品模块。
-- 首次执行 `cargo test --workspace` 时，`astra-cli` logging 两个测试因已存在的动态 fixture binary 与当前 gate 的 feature fingerprint 不一致而失败；显式执行 `cargo build -p headless-presentation-provider` 后重新执行 `cargo test -p astra-cli --test logging -- --nocapture`，2 个测试通过。该现象说明 fixture 动态库不能只按文件存在判断新鲜度，后续应绑定 source/build fingerprint 或每次验证 binary hash。
-- 定向执行 `cargo test -p astra-plugin -p astra-runtime -p astra-package -p astra-asset -p astra-vn-runtime-provider -p astra-player-vn`：相关正常路径测试全部通过，但新增的冲突矩阵尚未存在，不能据此关闭 P1-007 至 P1-011。
-- `cargo test --workspace` 的第二次执行在 `astra-observability` workspace coverage 测试处因另一构建身份的 45/44 workspace 成员差异失败；单独重新编译该测试通过。独立 `CARGO_TARGET_DIR=target/audit-workspace` 的全 workspace 验证在时间窗内超时，因此本次不能声明 workspace 全量测试通过。
-- 静态扫描：发现 AI 空 hint/伪 applied 路径、固定宽度 text layout、headless/synthetic/minimal package 路径、planned Editor/AstraEMU/AstraRPG 目标和明确的 Player blocker。
+- `cargo check --workspace --all-targets` 通过，证明 `HostLaunchProfile` API 已同步到 native factories、Player 和全部当前测试 target。
+- `cargo test -p astra-platform` 通过；新增 `headless_launch_profile` 的 3 个测试覆盖六平台枚举保持不变、Headless identity/provider/input/artifact limits 和 native factory variant rejection。
+- `python Tools/run_cargo_isolated.py test --workspace` 通过；动态 fixture 与 workspace test 使用同一 checkout-bound target identity。该结果替代早期审查中共享 target 导致的 44/45 crate 假失败记录。
+- `python Tools/check_observability.py` 通过，当前 45 个 workspace crate 均有 classification。
+- `python Tools/check_docs.py`、`cargo fmt --check` 和 `git diff --check` 通过。
+- 完整 `python Tools/run_cargo_isolated.py clippy --workspace --all-targets -- -D warnings` 已在独立构建身份下通过。
 
-本次命令结果只作为审查证据，不把通过的局部测试升级成模块完成结论。
+这些结果证明 typed Headless launch/profile contract 和当前 workspace 没有回归，不证明 `astra-platform-headless`、PNG/WAV、JSONL runner、统一 `HeadlessTestContext` 或 E3 已完成。原始审查中暴露的 shared-target 污染、固定宽度 TextLayout、provider selection、Runtime tick、VFS 和 package authority 问题均已按各自关闭证据修复；仍开放的问题以本页顶部状态表为准。
 
 ## 8. 完成总 migration 的门槛
 
 在后续修补完成前，以下结论必须保持：
 
 - EngineCore、Package、Media contract、AstraVN 已实现部分可以继续独立演进，但不能宣称整个引擎达到 UE 级完备。
-- TextLayout 已删除固定宽度实现，建立 shared E2 与 Windows Player command/release hardware glyph E3 子证据，但仍不能标记为完整字体产品系统；必须补齐 P1-001 的 WebGPU 与 bundled VN 产品主路径。
+- `P0-004` 只有 typed launch/profile contract 完成；完整 Headless host、物理输入、PNG/WAV、CLI、统一测试 context、review 和 preflight 全部闭合前，Stage 2 继续保持 `IN_PROGRESS`。
+- TextLayout 已删除固定宽度实现，建立 shared E2 与 Windows Player command/release hardware glyph E3 子证据，但仍不能标记为完整字体产品系统；WebGPU 与完整 product SceneCommand 主路径继续阻断 `P1-001`。Web 本轮暂缓不等于通过。
 - Editor、AI/MCP、AstraEMU、AstraRPG 不能从 planned/reopened 改为 DONE，直到存在真实 workspace target、主路径和对应 release evidence。
-- Windows/Web Player 和 TsuiNoSora full playable gate 继续阻断于真实状态推进、完整路线和同 run host evidence。
+- Windows/Web Player、NativeVN full behavior 和 TsuiNoSora full playable gate 继续阻断于真实状态推进、完整路线和同 run host evidence；本轮不关闭 NativeVN/TsuiNoSora 产品项。
 - 每一项弱证据都必须在报告中保留其真实等级和用途，不能通过改名或重新包装规避验收。
 
 文档校验命令：

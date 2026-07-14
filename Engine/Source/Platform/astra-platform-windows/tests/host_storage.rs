@@ -14,7 +14,7 @@ async fn windows_host_uses_atomic_saved_games_store_and_hash_bound_bundle_source
 
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.test");
     let session = astra_platform_windows::factory_with_test_roots(&save_root, &bundle_root)
-        .start(profile)
+        .start(astra_platform::HostLaunchProfile::platform(profile))
         .await
         .expect("start host with isolated roots");
 

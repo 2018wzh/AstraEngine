@@ -26,7 +26,7 @@ pub(super) fn initial_buffer_ready(pipeline: &MediaPlaybackPipeline) -> bool {
 }
 
 pub(super) fn validate_profile(client: &PlatformHostClient) -> Result<(), PlatformError> {
-    let profile = client.profile();
+    let profile = client.platform_profile()?;
     if profile.platform != PlatformId::Windows
         || !profile
             .renderer

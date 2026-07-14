@@ -1,6 +1,6 @@
 use astra_platform::{
-    build_fingerprint, PlatformCapabilityReport, PlatformErrorCode, PlatformHostFactory,
-    PlatformHostProfile, PlatformId, SdkStatus, UnavailablePlatformFactory,
+    build_fingerprint, HostLaunchProfile, PlatformCapabilityReport, PlatformErrorCode,
+    PlatformHostFactory, PlatformHostProfile, PlatformId, SdkStatus, UnavailablePlatformFactory,
     PLATFORM_CAPABILITY_REPORT_SCHEMA,
 };
 
@@ -33,7 +33,7 @@ async fn unavailable_factory_never_constructs_a_fake_host() {
     profile.platform = PlatformId::Linux;
     profile.id = "linux-stage6".to_string();
     let error = UnavailablePlatformFactory::new(PlatformId::Linux)
-        .start(profile)
+        .start(HostLaunchProfile::platform(profile))
         .await
         .err()
         .expect("unavailable platform must not start");

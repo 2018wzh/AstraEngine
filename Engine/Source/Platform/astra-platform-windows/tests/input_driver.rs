@@ -10,7 +10,7 @@ use astra_platform::{
 async fn sendinput_driver_reaches_the_platform_host_event_stream() {
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.test");
     let mut session = astra_platform_windows::factory()
-        .start(profile)
+        .start(astra_platform::HostLaunchProfile::platform(profile))
         .await
         .unwrap();
     let window = session

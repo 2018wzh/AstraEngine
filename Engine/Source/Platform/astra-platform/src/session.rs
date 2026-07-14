@@ -13,8 +13,8 @@ use tokio::sync::{mpsc, oneshot};
 use astra_media_core::SceneCommand;
 
 use crate::{
-    validate_host_profile, AudioOutputHandle, DecodeSessionHandle, MediaFrameHandle,
-    PackageSourceHandle, PackageSourcePolicy, PlatformError, PlatformErrorCode,
+    AudioOutputHandle, DecodeSessionHandle, HeadlessHostProfile, HostLaunchProfile,
+    MediaFrameHandle, PackageSourceHandle, PackageSourcePolicy, PlatformError, PlatformErrorCode,
     PlatformHostProfile, SaveTransactionHandle, SurfaceHandle, WindowHandle,
 };
 
@@ -22,7 +22,7 @@ pub type HostStartFuture =
     Pin<Box<dyn Future<Output = Result<PlatformHostSession, PlatformError>> + 'static>>;
 
 pub trait PlatformHostFactory {
-    fn start(&self, profile: PlatformHostProfile) -> HostStartFuture;
+    fn start(&self, profile: HostLaunchProfile) -> HostStartFuture;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -37,9 +37,10 @@ impl UnavailablePlatformFactory {
 }
 
 impl PlatformHostFactory for UnavailablePlatformFactory {
-    fn start(&self, profile: PlatformHostProfile) -> HostStartFuture {
+    fn start(&self, profile: HostLaunchProfile) -> HostStartFuture {
         let platform = self.platform;
         Box::pin(async move {
+            let profile = profile.require_platform()?;
             if profile.platform != platform {
                 return Err(PlatformError::new(
                     PlatformErrorCode::InvalidProfile,
@@ -621,7 +622,7 @@ pub enum PlatformEventKind {
 pub struct PlatformHostClient {
     command_tx: mpsc::Sender<HostCommand>,
     shutdown: Arc<AtomicBool>,
-    profile: Arc<PlatformHostProfile>,
+    profile: Arc<HostLaunchProfile>,
 }
 
 impl PlatformHostClient {
@@ -690,7 +691,7 @@ impl PlatformHostClient {
             frame.width,
             frame.height,
             &frame.rgba8,
-            self.profile.limits.max_frame_bytes,
+            self.profile.limits().max_frame_bytes,
         )?;
         Ok(frame)
     }
@@ -711,7 +712,7 @@ impl PlatformHostClient {
             frame.width,
             frame.height,
             &frame.rgba8,
-            self.profile.limits.max_frame_bytes,
+            self.profile.limits().max_frame_bytes,
         )?;
         self.ensure_running("surface.present_rgba")?;
         let (reply, response) = oneshot::channel();
@@ -730,7 +731,7 @@ impl PlatformHostClient {
         surface: SurfaceHandle,
         frame: SceneFrame,
     ) -> Result<(), PlatformError> {
-        validate_scene_frame(&frame, self.profile.limits.max_frame_bytes)?;
+        validate_scene_frame(&frame, self.profile.limits().max_frame_bytes)?;
         self.ensure_running("surface.present_scene")?;
         let (reply, response) = oneshot::channel();
         self.try_send(HostCommand::PresentScene {
@@ -783,7 +784,7 @@ impl PlatformHostClient {
         if request.sample_rate == 0
             || request.channels == 0
             || request.max_buffered_frames == 0
-            || request.max_buffered_frames > self.profile.limits.max_audio_frames
+            || request.max_buffered_frames > self.profile.limits().max_audio_frames
         {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidState,
@@ -821,7 +822,7 @@ impl PlatformHostClient {
             || packet.channels == 0
             || packet.samples.is_empty()
             || packet.samples.len() % usize::from(packet.channels) != 0
-            || packet.frame_count() > self.profile.limits.max_audio_frames
+            || packet.frame_count() > self.profile.limits().max_audio_frames
             || packet.samples.iter().any(|sample| !sample.is_finite())
         {
             return Err(PlatformError::new(
@@ -955,8 +956,16 @@ impl PlatformHostClient {
         .await
     }
 
-    pub fn profile(&self) -> &PlatformHostProfile {
+    pub fn launch_profile(&self) -> &HostLaunchProfile {
         &self.profile
+    }
+
+    pub fn platform_profile(&self) -> Result<&PlatformHostProfile, PlatformError> {
+        self.profile.require_platform()
+    }
+
+    pub fn headless_profile(&self) -> Result<&HeadlessHostProfile, PlatformError> {
+        self.profile.require_headless()
     }
 
     pub async fn open_decode(
@@ -977,7 +986,7 @@ impl PlatformHostClient {
         if request.sequence == 0
             || request.codec.is_empty()
             || request.bytes.is_empty()
-            || request.bytes.len() > self.profile.limits.max_frame_bytes
+            || request.bytes.len() > self.profile.limits().max_frame_bytes
         {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidState,
@@ -1028,7 +1037,7 @@ impl PlatformHostClient {
         transaction: SaveTransactionHandle,
         bytes: Vec<u8>,
     ) -> Result<(), PlatformError> {
-        if bytes.is_empty() || bytes.len() > self.profile.limits.max_frame_bytes {
+        if bytes.is_empty() || bytes.len() > self.profile.limits().max_frame_bytes {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidState,
                 "save.write",
@@ -1092,7 +1101,7 @@ impl PlatformHostClient {
         let (reply, response) = oneshot::channel();
         self.try_send(HostCommand::ReadSave { slot, reply })?;
         let bytes = response.await.map_err(|_| queue_closed("save.read"))??;
-        if bytes.is_empty() || bytes.len() > self.profile.limits.max_frame_bytes {
+        if bytes.is_empty() || bytes.len() > self.profile.limits().max_frame_bytes {
             return Err(PlatformError::new(
                 PlatformErrorCode::IntegrityMismatch,
                 "save.read",
@@ -1119,7 +1128,7 @@ impl PlatformHostClient {
         offset: u64,
         length: usize,
     ) -> Result<Vec<u8>, PlatformError> {
-        if length == 0 || length > self.profile.limits.max_package_read_bytes {
+        if length == 0 || length > self.profile.limits().max_package_read_bytes {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidState,
                 "package.read_range",
@@ -1330,11 +1339,11 @@ impl PlatformEventEmitter {
 pub struct PlatformHostSession {
     pub client: PlatformHostClient,
     pub events: PlatformEventStream,
-    pub profile: PlatformHostProfile,
+    pub profile: HostLaunchProfile,
 }
 
 pub fn host_channel(
-    profile: PlatformHostProfile,
+    profile: impl Into<HostLaunchProfile>,
     command_capacity: usize,
     event_capacity: usize,
 ) -> Result<
@@ -1345,7 +1354,8 @@ pub fn host_channel(
     ),
     PlatformError,
 > {
-    validate_host_profile(&profile)?;
+    let profile = profile.into();
+    profile.validate()?;
     if command_capacity == 0 || event_capacity == 0 {
         return Err(PlatformError::new(
             PlatformErrorCode::InvalidProfile,
@@ -1573,7 +1583,7 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
 }
 
 fn validate_package_source(
-    profile: &PlatformHostProfile,
+    profile: &HostLaunchProfile,
     source: &PackageSourceRequest,
 ) -> Result<(), PlatformError> {
     let (allowed, expected_hash) = match source {
@@ -1582,7 +1592,7 @@ fn validate_package_source(
             expected_hash,
         } => (
             profile
-                .package_sources
+                .package_sources()
                 .iter()
                 .any(|policy| matches!(policy, PackageSourcePolicy::Bundled))
                 && is_safe_relative_path(relative_path),
@@ -1590,7 +1600,7 @@ fn validate_package_source(
         ),
         PackageSourceRequest::UserAuthorized { expected_hash } => (
             profile
-                .package_sources
+                .package_sources()
                 .iter()
                 .any(|policy| matches!(policy, PackageSourcePolicy::UserAuthorized)),
             expected_hash,
@@ -1598,7 +1608,7 @@ fn validate_package_source(
         PackageSourceRequest::HttpsRange { url, expected_hash } => {
             let origin = https_origin(url);
             let allowed = origin.as_ref().is_some_and(|origin| {
-                profile.package_sources.iter().any(|policy| match policy {
+                profile.package_sources().iter().any(|policy| match policy {
                     PackageSourcePolicy::HttpsRange { allowed_origins } => {
                         allowed_origins.iter().any(|allowed| allowed == origin)
                     }

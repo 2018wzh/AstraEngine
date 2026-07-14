@@ -1,4 +1,4 @@
-use astra_platform::{HostStartFuture, PlatformHostFactory, PlatformHostProfile};
+use astra_platform::{HostLaunchProfile, HostStartFuture, PlatformHostFactory};
 
 #[cfg(not(target_os = "windows"))]
 use astra_platform::{PlatformError, PlatformErrorCode, PlatformId};
@@ -34,7 +34,7 @@ pub fn factory_with_test_roots(
 }
 
 impl PlatformHostFactory for WindowsPlatformFactory {
-    fn start(&self, profile: PlatformHostProfile) -> HostStartFuture {
+    fn start(&self, profile: HostLaunchProfile) -> HostStartFuture {
         #[cfg(target_os = "windows")]
         {
             Box::pin(crate::factory::windows::start(profile, self.roots.clone()))
@@ -42,7 +42,7 @@ impl PlatformHostFactory for WindowsPlatformFactory {
         #[cfg(not(target_os = "windows"))]
         {
             Box::pin(async move {
-                let _ = profile;
+                profile.require_platform()?;
                 Err(PlatformError::new(
                     PlatformErrorCode::UnsupportedPlatform,
                     "host.start",
@@ -70,10 +70,11 @@ mod windows {
     use astra_platform::{
         host_channel, AudioDeviceFormat, AudioMeter, AudioOutputHandle, AudioOutputRequest,
         AudioOutputStatus, AudioPacket, CapturedFrame, DecodeKind, DecodeOutput,
-        DecodeSessionHandle, HostCommand, InputState, PackageSourceHandle, PackageSourceRequest,
-        PlatformBackendChannels, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
-        PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
-        SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowHandle,
+        DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState, PackageSourceHandle,
+        PackageSourceRequest, PlatformBackendChannels, PlatformDecodeRequest, PlatformError,
+        PlatformErrorCode, PlatformEvent, PlatformEventKind, PlatformHostProfile,
+        PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle, TouchPhase,
+        WindowHandle,
     };
     use astra_platform_general::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, ResourceTable, SaveTransaction,
@@ -93,9 +94,10 @@ mod windows {
     };
 
     pub async fn start(
-        profile: PlatformHostProfile,
+        launch_profile: HostLaunchProfile,
         roots: Option<super::HostRoots>,
     ) -> Result<PlatformHostSession, PlatformError> {
+        let profile = launch_profile.require_platform()?.clone();
         if profile.platform != astra_platform::PlatformId::Windows {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidProfile,
@@ -106,8 +108,11 @@ mod windows {
         let command_capacity = profile.limits.command_queue_capacity;
         let event_capacity = profile.limits.event_queue_capacity;
         let instance_guard = SingleInstanceGuard::acquire(&profile)?;
-        let (client, backend, events) =
-            host_channel(profile.clone(), command_capacity, event_capacity)?;
+        let (client, backend, events) = host_channel(
+            HostLaunchProfile::platform(profile.clone()),
+            command_capacity,
+            event_capacity,
+        )?;
         let (ready_tx, ready_rx) = std_mpsc::sync_channel(1);
         let backend_profile = profile.clone();
         thread::Builder::new()
@@ -130,7 +135,7 @@ mod windows {
         Ok(PlatformHostSession {
             client,
             events,
-            profile,
+            profile: launch_profile,
         })
     }
 
