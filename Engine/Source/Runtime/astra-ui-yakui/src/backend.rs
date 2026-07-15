@@ -73,6 +73,14 @@ impl<R: YakuiViewRenderer> AstraYakuiBackend<R> {
             packaged_eligible: true,
         };
         descriptor.validate()?;
+        tracing::info!(
+            event = "ui.backend.create",
+            provider_id = %descriptor.provider_id,
+            provider_version = %descriptor.provider_version,
+            artifact_fingerprint = %descriptor.artifact_fingerprint,
+            capability_count = descriptor.capabilities.len(),
+            "created Yakui UI backend"
+        );
         Ok(Self {
             descriptor,
             yakui: Yakui::new(),
@@ -123,8 +131,16 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
                 "UI generation regressed",
             ));
         }
-        self.live_session
-            .get_or_insert_with(|| request.session_id.clone());
+        if self.live_session.is_none() {
+            tracing::info!(
+                event = "ui.backend.session.start",
+                provider_id = %self.descriptor.provider_id,
+                session_id = %request.session_id,
+                generation = request.generation,
+                "started Yakui UI session"
+            );
+            self.live_session = Some(request.session_id.clone());
+        }
         self.live_generation = request.generation;
         self.yakui.set_surface_size(Vec2::new(
             request.viewport.physical_width as f32,
@@ -206,6 +222,19 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
             diagnostics: view.diagnostics,
         };
         output.validate()?;
+        tracing::trace!(
+            event = "ui.backend.frame.complete",
+            provider_id = %self.descriptor.provider_id,
+            session_id = %request.session_id,
+            generation = request.generation,
+            input_count = request.input.events.len(),
+            action_count = output.actions.len(),
+            semantic_hash = %output.semantics.hash,
+            draw_calls = output.performance.draw_calls,
+            vertices = output.performance.vertices,
+            texture_update_bytes = output.performance.texture_update_bytes,
+            "completed Yakui UI frame"
+        );
         Ok(output)
     }
 
@@ -223,11 +252,25 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
         }
         self.live_generation = generation;
         self.paint.request_full_resync();
+        tracing::info!(
+            event = "ui.backend.context.restore",
+            provider_id = %self.descriptor.provider_id,
+            session_id,
+            generation,
+            "restored Yakui UI render context"
+        );
         Ok(())
     }
 
     fn shutdown(&mut self) -> Result<(), UiValidationError> {
         self.ensure_live()?;
+        tracing::info!(
+            event = "ui.backend.session.shutdown",
+            provider_id = %self.descriptor.provider_id,
+            session_id = self.live_session.as_deref().unwrap_or("none"),
+            generation = self.live_generation,
+            "shut down Yakui UI session"
+        );
         self.shutdown = true;
         self.live_session = None;
         Ok(())

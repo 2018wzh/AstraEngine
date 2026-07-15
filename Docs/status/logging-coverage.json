@@ -5,6 +5,18 @@
       "status": "not_applicable",
       "reason": "pure schema, identifiers, hashes and diagnostic value types"
     },
+    "astra-ui-core": {
+      "status": "not_applicable",
+      "reason": "pure schema and validation contract for backend-neutral UI data"
+    },
+    "astra-ui-yakui": {
+      "status": "instrumented",
+      "reason": "Yakui backend session, frame and render context lifecycle"
+    },
+    "astra-ui-plugin-abi": {
+      "status": "not_applicable",
+      "reason": "pure schema and facade contract for the UI component ABI"
+    },
     "astra-package": {
       "status": "instrumented",
       "reason": "container and package build lifecycle"
@@ -40,6 +52,10 @@
     "astra-vn-policy": {
       "status": "instrumented",
       "reason": "Luau policy runtime lifecycle"
+    },
+    "astra-vn-ui": {
+      "status": "instrumented",
+      "reason": "AstraVN UI controller session state lifecycle"
     },
     "astra-vn-commands": {
       "status": "instrumented",
@@ -185,6 +201,10 @@
       "status": "instrumented",
       "reason": "CLI host and toolchain orchestration"
     },
+    "astra-ui-component-host": {
+      "status": "instrumented",
+      "reason": "isolated UI component host process and protocol lifecycle"
+    },
     "astra-player": {
       "status": "instrumented",
       "reason": "player host and live automation"
@@ -208,6 +228,10 @@
     "vn-extension-provider": {
       "status": "instrumented",
       "reason": "fixture extension provider lifecycle"
+    },
+    "ui-component-provider": {
+      "status": "not_applicable",
+      "reason": "pure fixture facade for signed UI component ABI validation"
     }
   }
 }

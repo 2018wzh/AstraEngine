@@ -113,6 +113,13 @@ impl VnUiSessionState {
         if bytes.len() > MAX_SESSION_STATE_BYTES {
             return Err(VnUiControllerError::StateLimit);
         }
+        tracing::trace!(
+            event = "vn.ui.controller.session_state.apply",
+            effect_count = effects.len(),
+            state_entry_count = next.len(),
+            state_bytes = bytes.len(),
+            "applied AstraVN UI controller session state"
+        );
         self.values = next;
         Ok(())
     }

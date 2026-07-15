@@ -10,7 +10,6 @@ postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 
 [lib]
 doctest = false
