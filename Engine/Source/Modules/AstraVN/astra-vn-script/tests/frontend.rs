@@ -80,6 +80,28 @@ fn semantic_hash_ignores_trivia_and_implicit_command_source_spans() {
 }
 
 #[astra_headless_test::test]
+fn select_items_are_a_typed_widget_property_not_a_repeat_binding() {
+    let story = "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one #@id line.one\n";
+    let ui = "ui_bind surface:message view:ui.config controller:config policy:standard theme:theme.classic #@id bind.config\n\
+ui_view ui.config model:astra.vn.ui_model.config.v1 theme:theme.classic #@id ui.config\n\
+  screen id:root\n\
+    select id:locale value:$model.locale items:$model.available_locales\n\
+      on change -> vn.set_config key:display.language value:$event.value\n";
+
+    let compiled = compile_astra_project(
+        [
+            astra_vn_script::AstraSource::story("story.astra", story),
+            astra_vn_script::AstraSource::ui("ui.astra", ui),
+        ],
+        Default::default(),
+    )
+    .expect("select items should compile without repeat item_key");
+    let select = &compiled.ui_blueprints.views["ui.config"].root.children[0];
+    assert!(select.repeat.is_none());
+    assert!(select.properties.contains_key("items"));
+}
+
+#[astra_headless_test::test]
 fn unknown_command_is_editable_but_requires_explicit_compile_binding() {
     let source = "story main\nstate start\n  scene room\n    studio_fx intensity:2 #@id fx.1\n";
     let parsed = parse_astra_source("unknown.astra", source);

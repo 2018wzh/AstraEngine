@@ -1,0 +1,29 @@
+ui_bind profile:modern surface:message view:ui.message.modern controller:message.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.message.modern
+ui_bind profile:modern surface:choice view:ui.choice.modern controller:choice.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.choice.modern
+
+ui_view ui.message.modern model:astra.vn.ui_model.message.v1 theme:astra.vn.theme.modern #@id ui.message.modern
+  screen id:root background:theme:surface.clear
+    panel id:advance fill:true
+      on activate -> vn.advance
+    nine_slice id:message_panel texture:theme:panel.message.frame min_height:280
+      column id:content
+        row id:header
+          text id:speaker value:$model.speaker_key font_size:28
+          text id:mode value:l10n:system.backlog font_size:18
+        text id:body value:$model.text_key font_size:32 max_lines:5
+        row id:commands
+          button id:backlog min_height:48 text:l10n:system.backlog
+            on activate -> vn.open_system page:"backlog"
+          button id:save min_height:48 text:l10n:system.save
+            on activate -> vn.open_system page:"save"
+          button id:config min_height:48 text:l10n:system.config
+            on activate -> vn.open_system page:"config"
+
+ui_view ui.choice.modern model:astra.vn.ui_model.choice.v1 theme:astra.vn.theme.modern #@id ui.choice.modern
+  screen id:root background:theme:surface.dim
+    nine_slice id:choice_panel texture:theme:panel.choice.frame min_width:760 min_height:420
+      column id:choices
+        text id:prompt value:$model.prompt_key font_size:30
+        virtual_list id:options items:$model.options item_key:option_id overscan:2 item_extent:72
+          button id:option min_height:68 value:$item.text_key enabled:$item.enabled
+            on activate -> vn.choose option_id:$item.option_id

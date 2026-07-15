@@ -10,8 +10,6 @@ ui_bind system_page:replay view:ui.system.replay controller:system.replay policy
 ui_bind system_page:voice_replay view:ui.system.voice_replay controller:system.voice policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.voice.classic
 ui_bind system_page:route_chart view:ui.system.route_chart controller:system.route policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.route.classic
 ui_bind system_page:localization_preview view:ui.system.localization controller:system.localization policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.localization.classic
-ui_bind profile:modern surface:message view:ui.message.classic controller:message.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.message.modern
-ui_bind profile:modern surface:choice view:ui.choice.classic controller:choice.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.choice.modern
 ui_bind profile:modern system_page:title view:ui.system.title controller:system.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.title.modern
 ui_bind profile:modern system_page:save view:ui.system.save controller:system.save.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.save.modern
 ui_bind profile:modern system_page:load view:ui.system.load controller:system.load.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.load.modern
@@ -44,6 +42,14 @@ ui_view ui.system.title model:astra.vn.ui_model.title.v1 theme:astra.vn.theme.cl
     image id:backdrop asset:theme:system.backdrop min_width:1280 min_height:720
     column id:content
       text id:title value:l10n:system.title
+      button id:continue min_height:56 text:l10n:system.continue enabled:$model.can_continue
+        on activate -> vn.return_system
+      button id:config min_height:56 text:l10n:system.config
+        on activate -> vn.open_system page:"config"
+      button id:save min_height:56 text:l10n:system.save
+        on activate -> vn.open_system page:"save"
+      button id:load min_height:56 text:l10n:system.load
+        on activate -> vn.open_system page:"load"
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system
 
@@ -51,8 +57,14 @@ ui_view ui.system.save model:astra.vn.ui_model.save.v1 theme:astra.vn.theme.clas
   screen id:root background:theme:surface.system
     column id:content
       virtual_grid id:slots items:$model.slots item_key:slot_id columns:3 overscan:2 item_extent:220
-        button id:slot min_height:200 value:$item.slot_id
-          on activate -> vn.request_save slot_id:$item.slot_id
+        column id:slot min_height:200 background:theme:panel.button
+          image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:280 min_height:120
+          text id:slot_id value:$item.slot_id
+          text id:title value:$item.title_key
+          text id:timestamp value:$item.timestamp_text
+          text id:playtime value:$item.playtime_text
+          button id:write min_height:56 value:$item.slot_id enabled:$item.can_write
+            on activate -> vn.request_save slot_id:$item.slot_id
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system
 
@@ -60,18 +72,36 @@ ui_view ui.system.load model:astra.vn.ui_model.load.v1 theme:astra.vn.theme.clas
   screen id:root background:theme:surface.system
     column id:content
       virtual_grid id:slots items:$model.slots item_key:slot_id columns:3 overscan:2 item_extent:220
-        button id:slot min_height:200 value:$item.slot_id
-          on activate -> vn.request_load slot_id:$item.slot_id
+        column id:slot min_height:200 background:theme:panel.button
+          image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:280 min_height:120
+          text id:slot_id value:$item.slot_id
+          text id:title value:$item.title_key
+          text id:timestamp value:$item.timestamp_text
+          text id:playtime value:$item.playtime_text
+          button id:read min_height:56 value:$item.slot_id enabled:$item.can_load
+            on activate -> vn.request_load slot_id:$item.slot_id
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system
 
 ui_view ui.system.config model:astra.vn.ui_model.config.v1 theme:astra.vn.theme.classic #@id ui.system.config
   screen id:root background:theme:surface.system
     column id:content
-      slider id:master min_height:56 value:1
+      text id:title value:l10n:system.config
+      text id:master_label value:l10n:system.config.master_volume
+      slider id:master min_height:56 value:$model.master_volume min:0 max:100 step:1
         on change -> vn.set_config key:audio.master value:$event.value
-      text_input id:player_name min_height:56 value:l10n:system.config
-        on change -> vn.set_config key:profile.player_name value:$event.value
+      text id:speed_label value:l10n:system.config.text_speed
+      slider id:text_speed min_height:56 value:$model.text_speed min:0 max:100 step:1
+        on change -> vn.set_config key:text.speed value:$event.value
+      text id:auto_label value:l10n:system.config.auto_delay
+      slider id:auto_delay min_height:56 value:$model.auto_delay_ms min:100 max:10000 step:100
+        on change -> vn.set_config key:auto.delay_ms value:$event.value
+      toggle id:high_contrast min_height:56 value:$model.high_contrast label_key:l10n:system.config.high_contrast
+        on change -> vn.set_config key:display.high_contrast value:$event.value
+      select id:locale min_height:56 value:$model.locale items:$model.available_locales
+        on change -> vn.set_config key:display.language value:$event.value
+      text_input id:player_name min_height:56 value:$model.player_name.value multiline:$model.player_name.multiline max_graphemes:$model.player_name.max_graphemes character_policy:$model.player_name.character_policy
+        on submit -> vn.submit_text input_id:$model.player_name.input_id value:$event.value
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system
 
@@ -80,9 +110,12 @@ ui_view ui.system.backlog model:astra.vn.ui_model.backlog.v1 theme:astra.vn.them
     column id:content
       virtual_list id:entries items:$model.entries item_key:command_id overscan:8 item_extent:72
         row id:entry min_height:68
+          text id:speaker value:$item.speaker_key
           text id:body value:$item.text_key
-          button id:voice min_width:96
+          button id:voice min_width:96 visible:$item.has_voice
             on activate -> vn.replay_voice voice_id:$item.voice_id
+          button id:jump min_width:96 visible:$item.can_jump
+            on activate -> vn.request_backlog_jump command_id:$item.command_id
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system
 
@@ -90,7 +123,10 @@ ui_view ui.system.gallery model:astra.vn.ui_model.gallery.v1 theme:astra.vn.them
   screen id:root background:theme:surface.system
     column id:content
       virtual_grid id:items items:$model.items item_key:item_id columns:4 overscan:2 item_extent:180
-        panel id:item min_height:168
+        column id:item min_height:168 background:theme:panel.button
+          image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:240 min_height:112
+          button id:preview min_height:52 value:$item.label_key enabled:$item.unlocked
+            on activate -> vn.preview_gallery item_id:$item.item_id
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system
 
@@ -115,13 +151,19 @@ ui_view ui.system.voice_replay model:astra.vn.ui_model.voice_replay.v1 theme:ast
 ui_view ui.system.route_chart model:astra.vn.ui_model.route_chart.v1 theme:astra.vn.theme.classic #@id ui.system.route_chart
   screen id:root background:theme:surface.system
     canvas id:chart min_height:800
+    virtual_grid id:nodes items:$model.nodes item_key:node_id columns:4 overscan:2 item_extent:72
+      button id:node min_height:64 value:$item.label_key
+        on activate -> vn.request_route_jump node_id:$item.node_id
     button id:back min_height:56 text:l10n:system.back
       on activate -> vn.return_system
 
 ui_view ui.system.localization model:astra.vn.ui_model.localization_preview.v1 theme:astra.vn.theme.classic #@id ui.system.localization
   screen id:root background:theme:surface.system
     column id:content
-      text id:horizontal value:l10n:system.localization_preview
-      text id:vertical value:l10n:system.localization_preview direction:vertical_right_to_left
+      text id:locale value:$model.locale
+      virtual_list id:entries items:$model.entries item_key:entry_id overscan:4 item_extent:180
+        row id:entry min_height:172
+          text id:horizontal value:$item.text_key direction:left_to_right
+          text id:vertical value:$item.text_key direction:vertical_right_to_left
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system

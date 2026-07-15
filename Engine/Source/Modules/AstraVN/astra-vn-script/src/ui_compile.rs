@@ -374,7 +374,18 @@ fn model_path_allowed(schema: &str, path: &[String]) -> bool {
             matches!(first, Some("choice_id" | "prompt_key" | "options"))
         }
         "astra.vn.ui_model.title.v1" => first == Some("can_continue"),
-        "astra.vn.ui_model.config.v1" => first == Some("values"),
+        "astra.vn.ui_model.config.v1" => matches!(
+            first,
+            Some(
+                "master_volume"
+                    | "text_speed"
+                    | "auto_delay_ms"
+                    | "high_contrast"
+                    | "locale"
+                    | "available_locales"
+                    | "player_name"
+            )
+        ),
         "astra.vn.ui_model.save.v1" | "astra.vn.ui_model.load.v1" => first == Some("slots"),
         "astra.vn.ui_model.backlog.v1" | "astra.vn.ui_model.voice_replay.v1" => {
             first == Some("entries")
@@ -382,7 +393,7 @@ fn model_path_allowed(schema: &str, path: &[String]) -> bool {
         "astra.vn.ui_model.gallery.v1" | "astra.vn.ui_model.replay.v1" => first == Some("items"),
         "astra.vn.ui_model.route_chart.v1" => first == Some("nodes"),
         "astra.vn.ui_model.localization_preview.v1" => {
-            matches!(first, Some("locale" | "keys"))
+            matches!(first, Some("locale" | "entries"))
         }
         "astra.vn.ui_model.text_input.v1" => first == Some("input"),
         "astra.vn.ui_model.system.v1" => true,
@@ -402,6 +413,7 @@ fn item_path_allowed(schema: &str, collection: &str, path: &[String]) -> bool {
                 "slot_id"
                     | "occupied"
                     | "thumbnail_asset"
+                    | "has_thumbnail"
                     | "title_key"
                     | "timestamp_text"
                     | "playtime_text"
@@ -413,13 +425,24 @@ fn item_path_allowed(schema: &str, collection: &str, path: &[String]) -> bool {
         ("astra.vn.ui_model.backlog.v1" | "astra.vn.ui_model.voice_replay.v1", "entries") => {
             matches!(
                 first,
-                Some("command_id" | "text_key" | "speaker_key" | "voice_id" | "can_jump" | "read")
+                Some(
+                    "command_id"
+                        | "text_key"
+                        | "speaker_key"
+                        | "voice_id"
+                        | "has_voice"
+                        | "can_jump"
+                        | "read"
+                )
             )
         }
         ("astra.vn.ui_model.gallery.v1" | "astra.vn.ui_model.replay.v1", "items") => matches!(
             first,
-            Some("item_id" | "label_key" | "thumbnail_asset" | "unlocked")
+            Some("item_id" | "label_key" | "thumbnail_asset" | "has_thumbnail" | "unlocked")
         ),
+        ("astra.vn.ui_model.localization_preview.v1", "entries") => {
+            matches!(first, Some("entry_id" | "text_key"))
+        }
         ("astra.vn.ui_model.route_chart.v1", "nodes") => matches!(
             first,
             Some("node_id" | "label_key" | "terminal" | "reached" | "x_milli" | "y_milli")
@@ -444,27 +467,32 @@ fn parse_node(lines: &[ParsedLine], index: usize) -> Result<(UiNodeBlueprint, us
     let local_id = required_attr(line, "id")?.to_string();
     let mut properties = BTreeMap::new();
     for (key, value) in &line.attrs {
-        if matches!(
-            key.as_str(),
-            "id" | "items" | "item_key" | "overscan" | "component"
-        ) {
+        if key == "id"
+            || key == "component"
+            || (line.keyword != "select"
+                && matches!(key.as_str(), "items" | "item_key" | "overscan"))
+        {
             continue;
         }
         properties.insert(key.clone(), parse_expr(value, line)?);
     }
-    let repeat = if let Some(items) = line.attr("items") {
-        let item_key = required_attr(line, "item_key")?;
-        Some(UiRepeatBinding {
-            items: parse_expr(items, line)?,
-            item_key_path: parse_path(item_key.trim_start_matches("$item."), line)?,
-            overscan: line.attr("overscan").unwrap_or("0").parse().map_err(|_| {
-                diagnostic(
-                    line,
-                    "ASTRA_UI_OVERSCAN",
-                    "overscan must be an unsigned 16-bit integer",
-                )
-            })?,
-        })
+    let repeat = if line.keyword != "select" {
+        line.attr("items")
+            .map(|items| {
+                let item_key = required_attr(line, "item_key")?;
+                Ok::<UiRepeatBinding, VnError>(UiRepeatBinding {
+                    items: parse_expr(items, line)?,
+                    item_key_path: parse_path(item_key.trim_start_matches("$item."), line)?,
+                    overscan: line.attr("overscan").unwrap_or("0").parse().map_err(|_| {
+                        diagnostic(
+                            line,
+                            "ASTRA_UI_OVERSCAN",
+                            "overscan must be an unsigned 16-bit integer",
+                        )
+                    })?,
+                })
+            })
+            .transpose()?
     } else {
         None
     };

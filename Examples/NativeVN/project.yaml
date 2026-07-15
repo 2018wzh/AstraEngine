@@ -76,3 +76,9 @@ package_sections:
     codec: raw
     targets: [nativevn-game]
     profiles: [classic, modern, advanced-vn]
+  - id: vn.localization.ja
+    schema: astra.vn.localization_table.v1
+    path: Localization/ja.json
+    codec: raw
+    targets: [nativevn-game]
+    profiles: [classic, modern, advanced-vn]
