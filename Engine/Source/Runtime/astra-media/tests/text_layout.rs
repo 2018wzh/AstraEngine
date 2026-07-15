@@ -377,6 +377,73 @@ fn licensed_multiscript_fallback_shapes_cjk_arabic_and_emoji_clusters() {
 }
 
 #[astra_headless_test::test]
+fn cjk_vertical_layout_places_columns_ruby_rotated_glyphs_and_tate_chu_yoko() {
+    let provider = CosmicTextLayoutProvider::new(
+        FontBindingContext {
+            target: "windows".into(),
+            profile: "classic".into(),
+            default_locale: "ja".into(),
+        },
+        multiscript_fonts(),
+        TextLayoutConfig::production_defaults(),
+    )
+    .unwrap();
+    for (direction, language) in [
+        (TextDirection::VerticalRightToLeft, "ja"),
+        (TextDirection::VerticalLeftToRight, "zh-Hans"),
+    ] {
+        let mut vertical = request("終12A端");
+        vertical.key = format!("vertical.{language}");
+        vertical.font_families = vec!["Poppins".into(), "Noto Sans SC".into()];
+        vertical.constraint.max_width = 240.0;
+        vertical.constraint.max_height = Some(160.0);
+        vertical.constraint.wrap = WrapPolicy::Glyph;
+        vertical.runs[0] = TextRun {
+            text: "終12A端".into(),
+            language: language.into(),
+            script: Some(if language == "ja" { "Jpan" } else { "Hans" }.into()),
+            direction,
+            ruby: vec![RubySpan {
+                base_range: SourceRange { start: 0, end: 3 },
+                text: "しゅう".into(),
+            }],
+            voice: None,
+        };
+        let layout = provider.layout(&vertical).unwrap();
+        assert!(layout.width >= vertical.constraint.line_height);
+        assert!(layout.height > 0.0);
+        assert_eq!(layout.ruby_boxes.len(), 1);
+        assert!(layout
+            .shaped_runs
+            .iter()
+            .all(|run| run.direction == direction));
+        let glyphs = layout
+            .shaped_runs
+            .iter()
+            .flat_map(|run| &run.glyphs)
+            .collect::<Vec<_>>();
+        let minimum_x = glyphs
+            .iter()
+            .filter_map(|glyph| glyph.render_x)
+            .min()
+            .expect("vertical glyph x") as f32;
+        match direction {
+            TextDirection::VerticalRightToLeft => assert!(minimum_x > 100.0),
+            TextDirection::VerticalLeftToRight => assert!(minimum_x < 100.0),
+            _ => unreachable!(),
+        }
+        assert!(glyphs.iter().any(|glyph| glyph.tate_chu_yoko));
+        assert!(glyphs
+            .iter()
+            .any(|glyph| glyph.rotation_quadrants == 1 && !glyph.tate_chu_yoko));
+        assert!(glyphs
+            .iter()
+            .all(|glyph| glyph.render_x.is_some() && glyph.render_y.is_some()));
+        assert_eq!(layout.hash, provider.layout(&vertical).unwrap().hash);
+    }
+}
+
+#[astra_headless_test::test]
 fn open_font_fixture_manifest_is_revision_hash_and_license_bound() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../Fixtures/PublicDomainFonts");

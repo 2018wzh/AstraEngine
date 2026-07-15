@@ -137,7 +137,17 @@ pub(super) fn layout_uncached(
     }
     let width = lines
         .iter()
-        .map(|line| line.width)
+        .map(|line| {
+            if request
+                .runs
+                .get(line.run_index)
+                .is_some_and(|run| is_vertical(run.direction))
+            {
+                (line.baseline - request.constraint.font_size + line.width).max(0.0)
+            } else {
+                line.width
+            }
+        })
         .chain(ruby_boxes.iter().map(|ruby| ruby.x + ruby.width))
         .fold(0.0, f32::max);
     let height = lines
