@@ -1043,6 +1043,7 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "tracing",
+ "unicode-segmentation",
  "yakui-core",
  "yakui-widgets",
 ]

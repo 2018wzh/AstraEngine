@@ -12,8 +12,8 @@ use yakui_core::WidgetId;
 use yakui_widgets::widgets::{Checkbox, CountGrid, List, Slider, Stack};
 
 use crate::{
-    AstraNodeProps, AstraNodeWidget, VirtualGridState, VirtualListState, YakuiViewOutput,
-    YakuiViewRenderer,
+    AstraNodeProps, AstraNodeWidget, TextCharacterPolicy, TextInputState, VirtualGridState,
+    VirtualListState, YakuiViewOutput, YakuiViewRenderer,
 };
 
 #[derive(Debug, Clone)]
@@ -23,9 +23,11 @@ struct PendingSemantic {
     widget_id: WidgetId,
     role: UiSemanticRole,
     name: Option<String>,
+    value: Option<String>,
     enabled: bool,
     focused: bool,
     actions: BTreeSet<UiSemanticAction>,
+    properties: BTreeMap<String, String>,
 }
 
 pub struct BlueprintYakuiRenderer {
@@ -34,6 +36,9 @@ pub struct BlueprintYakuiRenderer {
     virtual_lists: BTreeMap<String, VirtualListState>,
     virtual_grids: BTreeMap<String, VirtualGridState>,
     accessibility_actions: BTreeMap<String, Vec<(UiEventBinding, Option<UiValue>)>>,
+    text_inputs: BTreeMap<String, TextInputState>,
+    focused_text_input: Option<String>,
+    text_input_consumed_sequences: BTreeSet<u64>,
 }
 
 impl BlueprintYakuiRenderer {
@@ -45,6 +50,9 @@ impl BlueprintYakuiRenderer {
             virtual_lists: BTreeMap::new(),
             virtual_grids: BTreeMap::new(),
             accessibility_actions: BTreeMap::new(),
+            text_inputs: BTreeMap::new(),
+            focused_text_input: None,
+            text_input_consumed_sequences: BTreeSet::new(),
         })
     }
 
@@ -96,7 +104,9 @@ impl BlueprintYakuiRenderer {
                 Color::CLEAR
             });
         let fill_available = matches!(node.widget.as_str(), "screen");
-        let name = property_text(node, frame, item)?;
+        let mut name = property_text(node, frame, item)?;
+        let mut semantic_value = None;
+        let mut semantic_properties = semantic_text_properties(node, frame, item)?;
         let accessible_events = node
             .events
             .iter()
@@ -119,6 +129,45 @@ impl BlueprintYakuiRenderer {
         let parent = Some(semantic_id.as_str());
         let mut child_error = None;
         let mut changed_event = None;
+        let mut submitted_event = None;
+        if node.widget == "text_input" {
+            let multiline = property_bool(node, "multiline", frame, item)?.unwrap_or(false);
+            let max_graphemes =
+                bounded_usize_property(node, "max_graphemes", frame, item, 1_024, 1, 65_536)?;
+            let policy_name = property_string(node, "character_policy", frame, item)?;
+            let policy = TextCharacterPolicy::parse(policy_name.as_deref(), multiline)?;
+            let initial = name.clone().unwrap_or_default();
+            let editor = self
+                .text_inputs
+                .entry(semantic_id.clone())
+                .or_insert(TextInputState::new(initial, max_graphemes)?);
+            if self.focused_text_input.as_deref() == Some(semantic_id.as_str()) {
+                let update = editor.update(&request.input.events, multiline, max_graphemes, policy);
+                self.text_input_consumed_sequences
+                    .extend(update.consumed_sequences);
+                let event_value = UiValue::Map(BTreeMap::from([(
+                    "value".to_string(),
+                    UiValue::String(editor.text().to_string()),
+                )]));
+                if update.changed {
+                    changed_event = Some(event_value.clone());
+                }
+                if update.submitted {
+                    submitted_event = Some(event_value);
+                }
+            }
+            semantic_properties.insert("text.cursor_grapheme".into(), editor.cursor().to_string());
+            semantic_properties.insert("text.multiline".into(), multiline.to_string());
+            if let Some((start, end)) = editor.selection() {
+                semantic_properties.insert("text.selection_start".into(), start.to_string());
+                semantic_properties.insert("text.selection_end".into(), end.to_string());
+            }
+            if let Some(composition) = editor.composition() {
+                semantic_properties.insert("text.composition".into(), composition.to_string());
+            }
+            semantic_value = Some(editor.text().to_string());
+            name = semantic_value.clone();
+        }
         let response = match node.widget.as_str() {
             "row" => AstraNodeWidget::show(props, || {
                 List::row().show(|| {
@@ -243,6 +292,18 @@ impl BlueprintYakuiRenderer {
                 )?);
             }
         }
+        if let Some(event_value) = submitted_event.as_ref() {
+            for event in node.events.iter().filter(|event| event.event == "submit") {
+                actions.push(action_from_event(
+                    event,
+                    &semantic_id,
+                    request,
+                    frame,
+                    item,
+                    Some(event_value),
+                )?);
+            }
+        }
         let role = semantic_role(&node.widget);
         let mut semantic_actions = BTreeSet::new();
         if interactive {
@@ -255,9 +316,11 @@ impl BlueprintYakuiRenderer {
             widget_id: response.id,
             role,
             name,
+            value: semantic_value,
             enabled,
             focused: response.focused,
             actions: semantic_actions,
+            properties: semantic_properties,
         });
         Ok(())
     }
@@ -417,6 +480,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 UiValidationError::invalid("ASTRA_UI_BLUEPRINT_MODEL_DECODE", error.to_string())
             })?;
         frame.validate()?;
+        self.text_input_consumed_sequences.clear();
         let mut actions = Vec::new();
         let mut force_consumed_sequences = BTreeSet::new();
         for input in &request.input.events {
@@ -554,14 +618,32 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                     widget_id: response.id,
                     role: UiSemanticRole::Dialog,
                     name: None,
+                    value: None,
                     enabled: true,
                     focused: response.focused,
                     actions: BTreeSet::from([UiSemanticAction::Focus, UiSemanticAction::Dismiss]),
+                    properties: BTreeMap::new(),
                 });
             }
         });
         if let Some(error) = render_error {
             return Err(error);
+        }
+        self.focused_text_input = self
+            .pending
+            .iter()
+            .find(|pending| pending.role == UiSemanticRole::TextInput && pending.focused)
+            .map(|pending| pending.id.clone());
+        if !frame.modals.is_empty() {
+            force_consumed_sequences.extend(request.input.events.iter().filter_map(|event| {
+                (!matches!(
+                    event.kind,
+                    UiInputEventKind::FixedTime { .. }
+                        | UiInputEventKind::Focus { .. }
+                        | UiInputEventKind::Resize { .. }
+                ))
+                .then_some(event.sequence)
+            }));
         }
         let focus_widget = if let Some(focus_request) = &frame.focus_request {
             let target = self
@@ -599,6 +681,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 })
                 .map(|event| event.sequence)
                 .chain(force_consumed_sequences)
+                .chain(self.text_input_consumed_sequences.iter().copied())
                 .collect(),
             focus_widget,
         })
@@ -635,14 +718,14 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 },
                 name: pending.name.clone(),
                 description: None,
-                value: None,
+                value: pending.value.clone(),
                 enabled: pending.enabled,
                 hidden: false,
                 focused: pending.focused,
                 selected: false,
                 checked: None,
                 actions: pending.actions.clone(),
-                properties: BTreeMap::new(),
+                properties: pending.properties.clone(),
             });
         }
         let root_id = self
@@ -765,6 +848,90 @@ fn property_text(
         }
     }
     Ok(None)
+}
+
+fn property_string(
+    node: &astra_ui_core::UiNodeBlueprint,
+    key: &str,
+    frame: &UiBlueprintFrameModel,
+    item: Option<&UiValue>,
+) -> Result<Option<String>, UiValidationError> {
+    node.properties
+        .get(key)
+        .map(|expr| match evaluate(expr, frame, item, None)? {
+            UiValue::String(value) => Ok(value),
+            _ => Err(UiValidationError::invalid(
+                "ASTRA_UI_PROPERTY_TYPE",
+                format!("property {key} must resolve to string"),
+            )),
+        })
+        .transpose()
+}
+
+fn bounded_usize_property(
+    node: &astra_ui_core::UiNodeBlueprint,
+    key: &str,
+    frame: &UiBlueprintFrameModel,
+    item: Option<&UiValue>,
+    default: usize,
+    min: usize,
+    max: usize,
+) -> Result<usize, UiValidationError> {
+    let Some(value) = property_number(node, key, frame, item)? else {
+        return Ok(default);
+    };
+    if value.fract() != 0.0 || value < min as f32 || value > max as f32 {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_INTEGER_PROPERTY_RANGE",
+            format!("property {key} must be an integer within {min}..={max}"),
+        ));
+    }
+    Ok(value as usize)
+}
+
+fn semantic_text_properties(
+    node: &astra_ui_core::UiNodeBlueprint,
+    frame: &UiBlueprintFrameModel,
+    item: Option<&UiValue>,
+) -> Result<BTreeMap<String, String>, UiValidationError> {
+    let mut properties = BTreeMap::new();
+    if let Some(expr) = node.properties.get("direction") {
+        let UiValue::String(direction) = evaluate(expr, frame, item, None)? else {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_TEXT_DIRECTION_TYPE",
+                "text direction must resolve to a string",
+            ));
+        };
+        if !matches!(
+            direction.as_str(),
+            "auto"
+                | "left_to_right"
+                | "right_to_left"
+                | "vertical_right_to_left"
+                | "vertical_left_to_right"
+        ) {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_TEXT_DIRECTION",
+                "text direction is not supported by AstraText v2",
+            ));
+        }
+        properties.insert("text.direction".into(), direction);
+    }
+    for (source, target, min, max) in [
+        ("max_lines", "text.max_lines", 1.0_f32, 1_024.0_f32),
+        ("font_size", "text.font_size", 6.0_f32, 256.0_f32),
+    ] {
+        if let Some(value) = property_number(node, source, frame, item)? {
+            if value < min || value > max {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_UI_TEXT_METRIC_RANGE",
+                    format!("{source} must be within {min}..={max}"),
+                ));
+            }
+            properties.insert(target.into(), value.to_string());
+        }
+    }
+    Ok(properties)
 }
 
 fn repeat_key(node: &astra_ui_core::UiNodeBlueprint, item: &UiValue) -> Option<String> {

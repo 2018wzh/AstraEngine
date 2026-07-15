@@ -25,9 +25,9 @@ use astra_plugin_abi::{
 };
 use astra_ui_core::{
     UiBackend, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState, UiFrameRequest,
-    UiInputDispositionKind, UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets, UiSemanticRole,
-    UiSemanticSnapshot, UiThemeManifest, UiThemeValue, UiValidationError, UiValue, UiViewport,
-    MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
+    UiInputDispositionKind, UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets, UiSemanticNode,
+    UiSemanticRole, UiSemanticSnapshot, UiThemeManifest, UiThemeValue, UiValidationError, UiValue,
+    UiViewport, MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
 };
 use astra_ui_yakui::{ui_frame_to_scene_commands, AstraYakuiBackend, BlueprintYakuiRenderer};
 use astra_vn_core::{
@@ -2357,9 +2357,9 @@ impl NativeVnHostCommandSource {
             [8, 10, 16, 255],
         ));
         lifecycle.extend(next_scene_draw.iter().cloned());
-        lifecycle.extend(text_draw);
         let ui_draw = ui_frame.map_or_else(Vec::new, |(_, draw)| draw);
         lifecycle.extend(ui_draw.iter().cloned());
+        lifecycle.extend(text_draw);
         self.command_sequence = self
             .command_sequence
             .checked_add(1)
@@ -3107,6 +3107,7 @@ fn append_text_value(
     max_width: u32,
     font_size: f32,
     max_lines: u32,
+    direction: TextDirection,
     rgba: [u8; 4],
 ) -> Result<(), NativeVnHostError> {
     let request = text_request(
@@ -3117,6 +3118,7 @@ fn append_text_value(
         max_width,
         font_size,
         max_lines,
+        direction,
     );
     let layout = provider.layout(&request)?;
     let commands = owner.update_layout(layout_id, &layout, rgba)?;
@@ -3173,6 +3175,15 @@ fn append_ui_semantic_text(
         let width =
             non_negative_coord(node.bounds_points.max.x - node.bounds_points.min.x, "width")?
                 .max(1);
+        let direction = parse_text_direction(node.properties.get("text.direction"))?;
+        let max_lines = parse_bounded_u32_property(node, "text.max_lines", 4, 1, 1_024)?;
+        let font_size = parse_bounded_f32_property(
+            node,
+            "text.font_size",
+            (body_font_size * 0.72).max(16.0),
+            6.0,
+            256.0,
+        )?;
         append_text_value(
             owner,
             provider,
@@ -3187,12 +3198,72 @@ fn append_ui_semantic_text(
             x.saturating_add(8),
             y.saturating_add(8),
             width.saturating_sub(16).max(1),
-            (body_font_size * 0.72).max(16.0),
-            4,
+            font_size,
+            max_lines,
+            direction,
             [255; 4],
         )?;
     }
     Ok(())
+}
+
+fn parse_text_direction(value: Option<&String>) -> Result<TextDirection, NativeVnHostError> {
+    match value.map(String::as_str).unwrap_or("auto") {
+        "auto" => Ok(TextDirection::Auto),
+        "left_to_right" => Ok(TextDirection::LeftToRight),
+        "right_to_left" => Ok(TextDirection::RightToLeft),
+        "vertical_right_to_left" => Ok(TextDirection::VerticalRightToLeft),
+        "vertical_left_to_right" => Ok(TextDirection::VerticalLeftToRight),
+        _ => Err(NativeVnHostError::Asset(
+            "ASTRA_PLAYER_UI_TEXT_DIRECTION: semantic text direction is invalid".into(),
+        )),
+    }
+}
+
+fn parse_bounded_u32_property(
+    node: &UiSemanticNode,
+    key: &str,
+    default: u32,
+    min: u32,
+    max: u32,
+) -> Result<u32, NativeVnHostError> {
+    let Some(value) = node.properties.get(key) else {
+        return Ok(default);
+    };
+    let value = value.parse::<f32>().map_err(|_| {
+        NativeVnHostError::Asset(format!(
+            "ASTRA_PLAYER_UI_TEXT_PROPERTY: semantic property {key} is not numeric"
+        ))
+    })?;
+    if !value.is_finite() || value.fract() != 0.0 || value < min as f32 || value > max as f32 {
+        return Err(NativeVnHostError::Asset(format!(
+            "ASTRA_PLAYER_UI_TEXT_PROPERTY: semantic property {key} is outside {min}..={max}"
+        )));
+    }
+    Ok(value as u32)
+}
+
+fn parse_bounded_f32_property(
+    node: &UiSemanticNode,
+    key: &str,
+    default: f32,
+    min: f32,
+    max: f32,
+) -> Result<f32, NativeVnHostError> {
+    let Some(value) = node.properties.get(key) else {
+        return Ok(default);
+    };
+    let value = value.parse::<f32>().map_err(|_| {
+        NativeVnHostError::Asset(format!(
+            "ASTRA_PLAYER_UI_TEXT_PROPERTY: semantic property {key} is not numeric"
+        ))
+    })?;
+    if !value.is_finite() || value < min || value > max {
+        return Err(NativeVnHostError::Asset(format!(
+            "ASTRA_PLAYER_UI_TEXT_PROPERTY: semantic property {key} is outside {min}..={max}"
+        )));
+    }
+    Ok(value)
 }
 
 fn non_negative_coord(value: f32, field: &str) -> Result<u32, NativeVnHostError> {
@@ -3212,6 +3283,7 @@ fn text_request(
     max_width: u32,
     font_size: f32,
     max_lines: u32,
+    direction: TextDirection,
 ) -> TextLayoutRequest {
     let line_height = font_size * 1.3;
     TextLayoutRequest {
@@ -3220,7 +3292,7 @@ fn text_request(
             text: text.to_string(),
             language: locale.to_string(),
             script: None,
-            direction: TextDirection::Auto,
+            direction,
             ruby: Vec::new(),
             voice: None,
         }],
@@ -3442,6 +3514,7 @@ fn validate_story_text(
             4096,
             28.0,
             16,
+            TextDirection::Auto,
         ))?;
     }
     Ok(())
