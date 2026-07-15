@@ -1,6 +1,6 @@
 use astra_media::{AudioCommand, AudioGraph, AudioVoiceState};
 
-#[test]
+#[astra_headless_test::test]
 fn audio_graph_voice_fade_pause_seek_loop_and_hash_are_semantic() {
     let mut graph = AudioGraph::default();
     graph.apply(AudioCommand::set_bus_gain("bgm", 0.5)).unwrap();
@@ -54,7 +54,7 @@ fn audio_graph_voice_fade_pause_seek_loop_and_hash_are_semantic() {
     assert_eq!(first, second);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn audio_graph_rejects_invalid_and_conflicting_commands_without_partial_state() {
     let mut graph = AudioGraph::default();
     graph
@@ -84,7 +84,7 @@ fn audio_graph_rejects_invalid_and_conflicting_commands_without_partial_state() 
     assert_eq!(graph.deterministic_hash().unwrap(), before_conflict);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn non_looping_voice_completes_and_is_released() {
     let mut graph = AudioGraph::default();
     graph

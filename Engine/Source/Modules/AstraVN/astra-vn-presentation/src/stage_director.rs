@@ -128,6 +128,7 @@ pub struct ProductStageDirector {
     state: ProductStageState,
     tweens: Vec<StageTween>,
     timelines: BTreeMap<String, ActiveTimeline>,
+    completed_timelines: BTreeSet<String>,
     shake: Option<ActiveShake>,
 }
 
@@ -162,6 +163,7 @@ impl ProductStageDirector {
             },
             tweens: Vec::new(),
             timelines: BTreeMap::new(),
+            completed_timelines: BTreeSet::new(),
             shake: None,
         })
     }
@@ -172,6 +174,10 @@ impl ProductStageDirector {
 
     pub fn active_timeline_count(&self) -> usize {
         self.timelines.len()
+    }
+
+    pub fn requires_frame_tick(&self) -> bool {
+        !self.tweens.is_empty() || !self.timelines.is_empty() || self.shake.is_some()
     }
 
     pub fn apply(&mut self, command: &StageCommand) -> Result<Vec<StageDirectorOutput>, VnError> {
@@ -596,10 +602,10 @@ impl ProductStageDirector {
     fn apply_timeline(&mut self, command: &TimelineCommand) -> Result<(), VnError> {
         match command {
             TimelineCommand::Cancel { id, .. } => {
-                if self.timelines.remove(id).is_none() {
+                if self.timelines.remove(id).is_none() && !self.completed_timelines.remove(id) {
                     return Err(stage_error(
                         "ASTRA_VN_STAGE_TIMELINE_UNKNOWN",
-                        "timeline cancel references an inactive timeline",
+                        "timeline cancel references an unknown timeline",
                     ));
                 }
             }
@@ -611,6 +617,7 @@ impl ProductStageDirector {
                         "timeline id is already active",
                     ));
                 }
+                self.completed_timelines.remove(&spec.id);
                 if spec.join == VnTimelineJoinPolicy::ReplaceTarget {
                     let targets = timeline_targets(spec);
                     self.timelines
@@ -710,6 +717,7 @@ impl ProductStageDirector {
             self.apply_timeline_sample(&spec, elapsed_ns)?;
             if complete {
                 self.timelines.remove(&id);
+                self.completed_timelines.insert(id.clone());
                 output.push(StageDirectorOutput::FenceCompleted {
                     kind: "timeline".to_string(),
                     id: spec.fence.unwrap_or(spec.id),

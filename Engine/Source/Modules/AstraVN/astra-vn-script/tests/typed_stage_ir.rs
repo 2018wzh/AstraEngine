@@ -24,7 +24,7 @@ fn first_presentation(command: &str) -> PresentationCommand {
     command.clone()
 }
 
-#[test]
+#[astra_headless_test::test]
 fn standard_commands_lower_to_typed_fixed_point_ir() {
     let command = first_presentation(
         "camera target:main x:-12.5 y:4.25 zoom:1.0625 rotation:0 duration:480 preset:slow_push #@id camera.main",
@@ -45,7 +45,7 @@ fn standard_commands_lower_to_typed_fixed_point_ir() {
     assert_eq!(duration_ms, 480);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn timeline_requires_real_ordered_keyframes_and_blocking_fence() {
     let command = first_presentation(
         "timeline id:tl.enter target:hero property:opacity keyframes:0=0,120=0.5,300=1 join:block fence:tl.enter.done fallback:flat budget_ms:2 #@id timeline.enter",
@@ -74,7 +74,7 @@ fn timeline_requires_real_ordered_keyframes_and_blocking_fence() {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn standard_commands_reject_unknown_fields_and_noncanonical_assets() {
     let unknown = compile_astra_sources([source(
         "show id:hero asset:asset:/character/hero layer:characters opacity:1",
@@ -92,7 +92,7 @@ fn standard_commands_reject_unknown_fields_and_noncanonical_assets() {
     assert_eq!(removed.code(), "ASTRA_VN_COMMAND_UNBOUND");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn extension_commands_require_schema_provider_and_typed_field_contracts() {
     let descriptor = ExtensionCommandDescriptor {
         command: "studio_fx".to_string(),

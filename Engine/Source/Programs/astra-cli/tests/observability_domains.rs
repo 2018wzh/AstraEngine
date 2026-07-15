@@ -1,6 +1,6 @@
 use std::{fs, path::Path, process::Command};
 
-#[test]
+#[astra_headless_test::test]
 fn toolchain_domains_emit_structured_lifecycle_events() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()

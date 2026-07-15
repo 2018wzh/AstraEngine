@@ -20,4 +20,8 @@ tracing.workspace = true
 zstd.workspace = true
 
 [dev-dependencies]
+astra-headless-test = { path = "../../Developer/astra-headless-test" }
 tempfile.workspace = true
+
+[lib]
+doctest = false

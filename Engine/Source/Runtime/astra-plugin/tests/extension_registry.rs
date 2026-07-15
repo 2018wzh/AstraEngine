@@ -24,7 +24,7 @@ fn context() -> ProviderBindingContext {
     )
 }
 
-#[test]
+#[astra_headless_test::test]
 fn extension_registry_preserves_explicit_binding_and_reports_conflicts() {
     let mut registrar = PluginRegistrar::default();
     registrar
@@ -95,7 +95,7 @@ fn extension_registry_preserves_explicit_binding_and_reports_conflicts() {
         .is_none());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn explicit_binding_is_registration_order_independent_and_blocks_context_drift() {
     for order in [
         ["astra.provider.first", "astra.provider.second"],
@@ -134,7 +134,7 @@ fn explicit_binding_is_registration_order_independent_and_blocks_context_drift()
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn provider_registration_rejects_duplicate_and_malformed_identity_without_partial_insert() {
     let mut registrar = PluginRegistrar::default();
     registrar

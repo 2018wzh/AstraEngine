@@ -12,5 +12,9 @@ schemars.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+astra-headless-test = { path = "../../../Developer/astra-headless-test" }
 astra-plugin = { path = "../../../Runtime/astra-plugin" }
 semver.workspace = true
+
+[lib]
+doctest = false

@@ -24,7 +24,7 @@ fn context(capability: &str) -> ProviderBindingContext {
     )
 }
 
-#[test]
+#[astra_headless_test::test]
 fn vfs_provider_registry_allows_multiple_providers_on_single_slot() {
     let mut registrar = PluginRegistrar::default();
     registrar
@@ -47,7 +47,7 @@ fn vfs_provider_registry_allows_multiple_providers_on_single_slot() {
     assert!(snapshot.conflicts.is_empty());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn runtime_provider_registry_keeps_explicit_single_binding_conflicts() {
     let mut registrar = PluginRegistrar::default();
     let slot = EngineModuleSlot("game_runtime_provider".to_string());

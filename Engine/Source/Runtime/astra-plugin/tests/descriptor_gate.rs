@@ -17,7 +17,7 @@ permissions:
 packaged: true
 "#;
 
-#[test]
+#[astra_headless_test::test]
 fn descriptor_gate_rejects_mismatch_and_missing_permission() {
     let descriptor = PluginDescriptor::from_yaml(DESCRIPTOR).unwrap();
     let gate = PluginGate {
@@ -52,7 +52,7 @@ fn descriptor_gate_rejects_mismatch_and_missing_permission() {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn descriptor_gate_rejects_binary_hash_mismatch() {
     let mut descriptor = PluginDescriptor::from_yaml(DESCRIPTOR).unwrap();
     descriptor.binary_hash = Some(Hash256::from_sha256(b"expected"));
@@ -67,7 +67,7 @@ fn descriptor_gate_rejects_binary_hash_mismatch() {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn descriptor_gate_requires_abi_stable_rust() {
     let mut descriptor = PluginDescriptor::from_yaml(DESCRIPTOR).unwrap();
     descriptor.abi_style = "raw_c".to_string();
@@ -88,7 +88,7 @@ fn descriptor_gate_requires_abi_stable_rust() {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn descriptor_gate_rejects_abi_fingerprint_mismatch() {
     let descriptor = PluginDescriptor::from_yaml(DESCRIPTOR).unwrap();
     let gate = PluginGate {

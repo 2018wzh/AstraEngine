@@ -1,0 +1,18 @@
+[package]
+name = "astra-headless-test"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
+astra-headless-test-macros = { path = "../astra-headless-test-macros" }
+serde_json.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+
+[lib]
+doctest = false

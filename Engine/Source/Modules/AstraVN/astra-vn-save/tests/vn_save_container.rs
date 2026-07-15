@@ -22,7 +22,7 @@ state library #@id state.library
     text key:library.followup speaker:hero voice:voice.hero.0002 #@id line.library
 "#;
 
-#[test]
+#[astra_headless_test::test]
 fn vn_state_roundtrips_inside_runtime_save_container() {
     let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
     let mut vn = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();

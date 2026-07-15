@@ -2,7 +2,7 @@ use astra_vn_policy::{
     LuauPolicy, PolicyExecutionBudget, PolicyQueryContext, PolicySnapshotValue, VnPolicyState,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn luau_policy_records_authorized_mutation_trace() {
     let mut policy = LuauPolicy::new().unwrap();
     let mut state = VnPolicyState::default();
@@ -28,7 +28,7 @@ fn luau_policy_records_authorized_mutation_trace() {
     assert_eq!(entry.previous_value, None);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn luau_policy_rolls_back_and_replays_mutation_trace() {
     let mut policy = LuauPolicy::new().unwrap();
     let mut state = VnPolicyState::default();
@@ -81,7 +81,7 @@ fn luau_policy_rolls_back_and_replays_mutation_trace() {
     assert_eq!(replayed.mutation_trace, trace);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn luau_policy_records_command_query_and_trace_capabilities() {
     let mut policy = LuauPolicy::new().unwrap();
     let mut state = VnPolicyState::default();
@@ -163,7 +163,7 @@ fn luau_policy_records_command_query_and_trace_capabilities() {
     assert_eq!(state.trace_events[1].kind, "title.boot");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn luau_policy_blocks_unserializable_command_and_trace_payloads() {
     let mut policy = LuauPolicy::new().unwrap();
     let mut state = VnPolicyState::default();
@@ -195,7 +195,7 @@ fn luau_policy_blocks_unserializable_command_and_trace_payloads() {
     assert!(state.trace_events.is_empty());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn luau_policy_ignores_direct_table_writes_outside_capability_api() {
     let mut policy = LuauPolicy::new().unwrap();
     let mut state = VnPolicyState::default();
@@ -215,7 +215,7 @@ fn luau_policy_ignores_direct_table_writes_outside_capability_api() {
     assert!(state.mutation_trace.is_empty());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn luau_policy_records_serializable_snapshot_values() {
     let mut policy = LuauPolicy::new().unwrap();
     let mut state = VnPolicyState::default();
@@ -237,7 +237,7 @@ fn luau_policy_records_serializable_snapshot_values() {
             && values.get("slot") == Some(&PolicySnapshotValue::Integer(3))));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn luau_policy_blocks_unserializable_snapshot_values() {
     let mut policy = LuauPolicy::new().unwrap();
     let mut state = VnPolicyState::default();

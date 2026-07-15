@@ -124,6 +124,10 @@ pub struct AudioGraph {
     completed_fences: Vec<AudioFence>,
     tick: u64,
     elapsed_ms: u64,
+    #[serde(default)]
+    elapsed_ns: u64,
+    #[serde(default)]
+    sub_ms_ns: u32,
 }
 
 impl Default for AudioGraph {
@@ -154,6 +158,8 @@ impl AudioGraph {
             completed_fences: Vec::new(),
             tick: 0,
             elapsed_ms: 0,
+            elapsed_ns: 0,
+            sub_ms_ns: 0,
         })
     }
 
@@ -346,19 +352,36 @@ impl AudioGraph {
                 "audio tick delta is outside the configured fixed-step budget",
             ));
         }
+        self.tick_ns(u64::from(delta_ms) * 1_000_000)
+    }
+
+    pub fn tick_ns(&mut self, delta_ns: u64) -> Result<(), MediaError> {
+        if delta_ns == 0 || delta_ns > u64::from(self.config.max_tick_delta_ms) * 1_000_000 {
+            return Err(audio_error(
+                "ASTRA_AUDIO_TICK_DELTA",
+                "audio tick delta is outside the configured fixed-step budget",
+            ));
+        }
         let mut next = self.clone();
         next.tick = next
             .tick
             .checked_add(1)
             .ok_or_else(|| audio_error("ASTRA_AUDIO_TICK_OVERFLOW", "audio tick overflowed"))?;
-        next.elapsed_ms = next
-            .elapsed_ms
-            .checked_add(u64::from(delta_ms))
+        next.elapsed_ns = next.elapsed_ns.checked_add(delta_ns).ok_or_else(|| {
+            audio_error("ASTRA_AUDIO_TIME_OVERFLOW", "audio elapsed time overflowed")
+        })?;
+        let accumulated_ns = u64::from(next.sub_ms_ns)
+            .checked_add(delta_ns)
             .ok_or_else(|| {
-                audio_error("ASTRA_AUDIO_TIME_OVERFLOW", "audio elapsed time overflowed")
+                audio_error("ASTRA_AUDIO_TIME_OVERFLOW", "audio remainder overflowed")
             })?;
-        next.advance_fades(u64::from(delta_ms))?;
-        next.advance_voices(u64::from(delta_ms))?;
+        let delta_ms = accumulated_ns / 1_000_000;
+        next.sub_ms_ns = (accumulated_ns % 1_000_000) as u32;
+        next.elapsed_ms = next.elapsed_ns / 1_000_000;
+        if delta_ms != 0 {
+            next.advance_fades(delta_ms)?;
+            next.advance_voices(delta_ms)?;
+        }
         *self = next;
         Ok(())
     }

@@ -31,11 +31,11 @@ Transcript identity 必须由完整 canonical JSON 计算；序列化失败或 a
 4. `astra-player-core` 推进 runtime、presentation、audio graph 和 route state；`PlayerHostCommand::PresentScene` 只转发 renderer-ready glyph/texture/sprite/rect command，不允许 Player CPU raster 或 headless frame 代替平台输出。
 5. 同一次 run 采样 frame/audio/route/input evidence。
 
-`VnPlayerCommand` 可继续服务 headless scenario 和 crate 单元测试，但不得出现在 live-player gate 的输入路径或 evidence 中。
+`VnPlayerCommand` 只允许留在产品内部语义层和明确的局部单元断言，不得作为 Headless、live-player gate 或产品自动化输入。旧 YAML Headless runner 已删除。
 
 ## Headless Preflight
 
-Migration 11 将新增平台无关 `astra.user_input_sequence.v1`。它只包含 focus/resume、keyboard、IME、pointer、wheel、touch、gamepad、固定时间推进、await、checkpoint 和 shutdown；不允许 `advance`、`choose`、`open_system` 或直接 `VnPlayerCommand`。当前 `VnPlayerCommand` 测试路径在迁移完成前仍是既有局部测试能力，不能成为新 Headless backend 的最终入口。
+Migration 11 已实现平台无关 `astra.user_input_sequence.v1`。它只包含 focus/resume、keyboard、IME、pointer、wheel、touch、gamepad、固定时间推进、await、checkpoint 和 shutdown；`advance`、`choose`、`open_system`、直接 `VnPlayerCommand` 和 Runtime mutation 在 schema/adapter 边界阻断。file 与 stdio 现在执行同一物理输入序列并产生等价 manifest/report，损坏 JSONL 和断流会提交 blocked report 后非零退出。
 
 产品、Player、样例和 full-playthrough 在进入 Windows/Web live automation 前，必须先用相同 build、cooked package 和 input sequence 通过 Headless 自动比较与模型审查。`astra.headless_preflight_link.v1` 只负责绑定两次 run，不能把 Headless 的 PNG/WAV、route 或 input transcript冒充 Windows/Web host evidence。
 

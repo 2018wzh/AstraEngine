@@ -13,7 +13,7 @@ state prologue #@id state.prologue
       option key:choice.end -> ending.good #@id choice.end
 "#;
 
-#[test]
+#[astra_headless_test::test]
 fn skip_read_advances_past_read_dialogue_but_stops_at_unread_dialogue() {
     let compiled = compile_astra_sources([AstraSource::new("skip.astra", STORY)]).unwrap();
     let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
@@ -43,7 +43,7 @@ fn skip_read_advances_past_read_dialogue_but_stops_at_unread_dialogue() {
     assert_eq!(runtime.state().cursor.as_ref().unwrap().ordinal, 2);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn skip_read_reaches_choice_when_all_prior_dialogue_is_read() {
     let compiled = compile_astra_sources([AstraSource::new("skip.astra", STORY)]).unwrap();
     let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
@@ -77,7 +77,7 @@ fn skip_read_reaches_choice_when_all_prior_dialogue_is_read() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn replay_ui_snapshot_exposes_backlog_read_state_and_voice_entries() {
     let compiled = compile_astra_sources([AstraSource::new("replay.astra", STORY)]).unwrap();
     let mut runtime = VnRuntime::new(compiled.clone(), VnRunConfig::classic("zh-Hans")).unwrap();
@@ -111,7 +111,7 @@ fn replay_ui_snapshot_exposes_backlog_read_state_and_voice_entries() {
     assert_eq!(loaded.replay_ui_state().state_hash(), hash);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn system_controls_persist_auto_skip_config_and_unlocks_through_save_load() {
     let compiled = compile_astra_sources([AstraSource::new("system.astra", STORY)]).unwrap();
     let mut runtime = VnRuntime::new(compiled.clone(), VnRunConfig::classic("zh-Hans")).unwrap();

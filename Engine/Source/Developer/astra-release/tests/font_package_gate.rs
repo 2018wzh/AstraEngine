@@ -98,7 +98,7 @@ fn font_check(package: Vec<u8>) -> astra_release::ReleaseCheckRecord {
         .unwrap()
 }
 
-#[test]
+#[astra_headless_test::test]
 fn release_gate_validates_package_vfs_font_authority_and_target_drift() {
     let valid = font_check(package_with_font("native-smoke-game"));
     assert_eq!(valid.status, CheckStatus::Pass);

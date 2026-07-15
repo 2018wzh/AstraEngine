@@ -12,7 +12,7 @@ use astra_runtime::{
 };
 use semver::Version;
 
-#[test]
+#[astra_headless_test::test]
 fn ffi_action_provider_registers_executes_and_unloads() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()

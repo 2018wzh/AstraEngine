@@ -145,9 +145,37 @@
       "status": "not_applicable",
       "reason": "proc-macro code generation crate"
     },
-    "astra-test": {
+    "astra-headless-protocol": {
+      "status": "not_applicable",
+      "reason": "pure schema and JSONL framing contract"
+    },
+    "astra-product-host": {
+      "status": "not_applicable",
+      "reason": "pure schema and product orchestration facade"
+    },
+    "astra-platform-headless": {
       "status": "instrumented",
-      "reason": "scenario runner and evidence lifecycle"
+      "reason": "Headless host session and resource lifecycle"
+    },
+    "astra-headless-test": {
+      "status": "not_applicable",
+      "reason": "pure test harness facade with driver-owned observability"
+    },
+    "astra-headless-test-macros": {
+      "status": "not_applicable",
+      "reason": "proc-macro test lifecycle wrapper"
+    },
+    "astra-headless-vn-adapter": {
+      "status": "instrumented",
+      "reason": "NativeVN Headless product adapter lifecycle"
+    },
+    "astra-headless": {
+      "status": "instrumented",
+      "reason": "Headless CLI session, artifact and diagnostic lifecycle"
+    },
+    "astra-test": {
+      "status": "not_applicable",
+      "reason": "pure migration diagnostic facade after ScenarioRunner retirement"
     },
     "astra-observability": {
       "status": "not_applicable",

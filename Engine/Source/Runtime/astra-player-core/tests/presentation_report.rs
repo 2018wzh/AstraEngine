@@ -59,7 +59,7 @@ fn present() -> astra_player_core::PlayerHostCommand {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn live_presentation_report_binds_command_and_capture_identity() {
     let report = PlayerPresentationReport::from_live_capture(
         identity(),
@@ -79,7 +79,7 @@ fn live_presentation_report_binds_command_and_capture_identity() {
     assert!(report.capture_hash.starts_with("sha256:"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn presentation_report_rejects_headless_identity_and_empty_visual_output() {
     let mut headless = identity();
     headless.renderer_provider = "astra.renderer.headless".into();

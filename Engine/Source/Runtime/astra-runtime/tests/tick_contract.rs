@@ -30,7 +30,7 @@ fn binding_context(package_id: &str) -> ModuleBindingContext {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn tick_rejects_duplicate_gap_regression_delta_and_seed_without_mutation() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -69,7 +69,7 @@ fn tick_rejects_duplicate_gap_regression_delta_and_seed_without_mutation() {
     assert_eq!(world.tick(request(input(2, 41))).unwrap().step, 2);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn missing_required_module_blocks_before_step_or_id_state_changes() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -88,7 +88,7 @@ fn missing_required_module_blocks_before_step_or_id_state_changes() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn module_mount_requires_matching_explicit_packaged_binding_and_unique_slot() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
@@ -144,7 +144,7 @@ fn module_mount_requires_matching_explicit_packaged_binding_and_unique_slot() {
     assert!(world.mount_module(slot, duplicate).is_err());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn tick_rejects_invalid_ingress_order_and_mode_without_mutation() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -247,7 +247,7 @@ fn tick_rejects_invalid_ingress_order_and_mode_without_mutation() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn tick_rolls_back_all_prior_ingress_when_provider_output_is_invalid() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {

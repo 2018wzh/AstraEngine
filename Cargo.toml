@@ -24,9 +24,12 @@ members = [
     "Engine/Source/Runtime/astra-plugin-abi",
     "Engine/Source/Runtime/astra-plugin",
     "Engine/Source/Runtime/astra-player-core",
+    "Engine/Source/Runtime/astra-headless-protocol",
+    "Engine/Source/Runtime/astra-product-host",
     "Engine/Source/Platform/astra-target",
     "Engine/Source/Platform/astra-platform",
     "Engine/Source/Platform/astra-platform-common",
+    "Engine/Source/Platform/astra-platform-headless",
     "Engine/Source/Platform/astra-platform-windows",
     "Engine/Source/Platform/astra-platform-linux",
     "Engine/Source/Platform/astra-platform-macos",
@@ -38,8 +41,12 @@ members = [
     "Engine/Source/Developer/astra-property",
     "Engine/Source/Developer/astra-property-derive",
     "Engine/Source/Developer/astra-test",
+    "Engine/Source/Developer/astra-headless-test",
+    "Engine/Source/Developer/astra-headless-test-macros",
+    "Engine/Source/Developer/astra-headless-vn-adapter",
     "Engine/Source/Developer/astra-observability",
     "Engine/Source/Programs/astra-cli",
+    "Engine/Source/Programs/astra-headless",
     "Engine/Source/Programs/astra-player",
     "Engine/Source/Programs/astra-player-vn",
     "Engine/Source/Programs/astra-player-web",
@@ -66,6 +73,7 @@ directories = "6"
 ffmpeg-next = "8.1"
 futures-util = "0.3"
 hex = "0.4"
+hound = "3.5"
 gilrs = { version = "0.11.2", default-features = false }
 image = { version = "0.25", default-features = false, features = [
     "png",
@@ -86,11 +94,13 @@ quote = "1"
 reqwest = { version = "0.13.4", default-features = false, features = [
     "stream",
 ] }
+rcgen = "0.14"
 rfd = { version = "0.17.2", default-features = false }
 rtrb = "0.3.4"
 rubato = { version = "4", default-features = false, features = [
     "fft_resampler",
 ] }
+rustfft = "6.4"
 schemars = { version = "0.8", features = ["uuid1"] }
 rowan = "0.16.1"
 semver = { version = "1", features = ["serde"] }
@@ -105,6 +115,7 @@ ctrlc = "3"
 text-size = "1.1.1"
 thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tokio-rustls = "0.26"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = [

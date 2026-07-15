@@ -264,10 +264,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "asn1-rs"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7f43a50ac4fdca5df8e885c21b835997f0a1cdee65494a6847694a98652d9d8"
+dependencies = [
+ "asn1-rs-derive",
+ "asn1-rs-impl",
+ "displaydoc",
+ "nom",
+ "num-traits",
+ "rusticata-macros",
+ "thiserror 2.0.18",
+ "time",
+]
+
+[[package]]
+name = "asn1-rs-derive"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3109e49b1e4909e9db6515a30c633684d68cdeaa252f215214cb4fa1a5bfee2c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+ "synstructure",
+]
+
+[[package]]
+name = "asn1-rs-impl"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b18050c2cd6fe86c3a76584ef5e0baf286d038cda203eb6223df2cc413565f7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "astra-asset"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "camino",
  "schemars",
  "serde",
@@ -285,6 +325,8 @@ dependencies = [
  "astra-asset",
  "astra-cook",
  "astra-core",
+ "astra-headless-protocol",
+ "astra-headless-test",
  "astra-media",
  "astra-observability",
  "astra-package",
@@ -321,6 +363,7 @@ version = "0.1.0"
 dependencies = [
  "astra-asset",
  "astra-core",
+ "astra-headless-test",
  "astra-package",
  "camino",
  "image",
@@ -338,6 +381,7 @@ dependencies = [
 name = "astra-core"
 version = "0.1.0"
 dependencies = [
+ "astra-headless-test",
  "blake3",
  "hex",
  "miette",
@@ -369,9 +413,92 @@ name = "astra-engine"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-package",
  "astra-plugin",
  "astra-runtime",
+]
+
+[[package]]
+name = "astra-headless"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-headless-protocol",
+ "astra-headless-test",
+ "astra-headless-vn-adapter",
+ "astra-observability",
+ "astra-package",
+ "astra-platform",
+ "astra-platform-headless",
+ "astra-player-vn",
+ "astra-product-host",
+ "clap",
+ "hound",
+ "image",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "astra-headless-protocol"
+version = "0.1.0"
+dependencies = [
+ "astra-headless-test",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "astra-headless-test"
+version = "0.1.0"
+dependencies = [
+ "astra-headless-protocol",
+ "astra-headless-test-macros",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "astra-headless-test-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "astra-headless-vn-adapter"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-headless-protocol",
+ "astra-headless-test",
+ "astra-media",
+ "astra-package",
+ "astra-platform",
+ "astra-platform-headless",
+ "astra-player-core",
+ "astra-player-vn",
+ "astra-product-host",
+ "astra-vn-core",
+ "astra-vn-package",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -380,6 +507,7 @@ version = "0.1.0"
 dependencies = [
  "astra-asset",
  "astra-core",
+ "astra-headless-test",
  "astra-media-core",
  "astra-package",
  "cosmic-text",
@@ -387,6 +515,7 @@ dependencies = [
  "image",
  "js-sys",
  "postcard",
+ "rubato",
  "schemars",
  "serde",
  "serde_json",
@@ -405,6 +534,7 @@ name = "astra-media-core"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "schemars",
  "serde",
  "thiserror 1.0.69",
@@ -416,6 +546,7 @@ name = "astra-observability"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "file-rotate",
  "schemars",
  "serde",
@@ -436,6 +567,7 @@ version = "0.1.0"
 dependencies = [
  "astra-asset",
  "astra-core",
+ "astra-headless-test",
  "astra-plugin-abi",
  "astra-target",
  "postcard",
@@ -491,6 +623,29 @@ dependencies = [
  "tracing",
  "url",
  "wgpu",
+]
+
+[[package]]
+name = "astra-platform-headless"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-headless-protocol",
+ "astra-media",
+ "astra-media-core",
+ "astra-platform",
+ "astra-platform-common",
+ "hound",
+ "image",
+ "rcgen",
+ "reqwest",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "url",
 ]
 
 [[package]]
@@ -564,6 +719,7 @@ version = "0.1.0"
 dependencies = [
  "astra-asset",
  "astra-core",
+ "astra-headless-test",
  "astra-media",
  "astra-media-core",
  "astra-observability",
@@ -589,6 +745,8 @@ name = "astra-player-core"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
+ "astra-media",
  "astra-media-core",
  "astra-platform",
  "rubato",
@@ -606,6 +764,7 @@ version = "0.1.0"
 dependencies = [
  "astra-asset",
  "astra-core",
+ "astra-headless-test",
  "astra-media",
  "astra-media-core",
  "astra-package",
@@ -658,6 +817,7 @@ version = "0.1.0"
 dependencies = [
  "abi_stable",
  "astra-core",
+ "astra-headless-test",
  "astra-plugin-abi",
  "astra-runtime",
  "libloading 0.8.9",
@@ -678,6 +838,7 @@ version = "0.1.0"
 dependencies = [
  "abi_stable",
  "astra-core",
+ "astra-headless-test",
  "postcard",
  "schemars",
  "serde",
@@ -689,6 +850,7 @@ name = "astra-policy"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "mlua",
  "postcard",
  "schemars",
@@ -698,10 +860,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-product-host"
+version = "0.1.0"
+dependencies = [
+ "astra-headless-protocol",
+ "astra-platform",
+ "astra-plugin-abi",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "astra-property"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-property-derive",
  "schemars",
  "serde",
@@ -722,6 +896,8 @@ version = "0.1.0"
 dependencies = [
  "astra-asset",
  "astra-core",
+ "astra-headless-protocol",
+ "astra-headless-test",
  "astra-media",
  "astra-package",
  "astra-platform",
@@ -745,6 +921,7 @@ name = "astra-runtime"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-package",
  "indexmap",
  "postcard",
@@ -773,28 +950,15 @@ name = "astra-test"
 version = "0.1.0"
 dependencies = [
  "astra-core",
- "astra-package",
- "astra-plugin",
- "astra-plugin-abi",
- "astra-runtime",
- "astra-target",
- "astra-vn",
- "astra-vn-runtime-provider",
- "postcard",
  "schemars",
- "semver",
  "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]
 name = "astra-vn"
 version = "0.1.0"
 dependencies = [
+ "astra-headless-test",
  "astra-package",
  "astra-plugin",
  "astra-vn-commands",
@@ -817,6 +981,7 @@ name = "astra-vn-commands"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-vn-script",
  "schemars",
  "serde",
@@ -828,6 +993,7 @@ name = "astra-vn-core"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-vn-presentation",
  "astra-vn-script",
  "postcard",
@@ -841,6 +1007,7 @@ name = "astra-vn-editor"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-vn-script",
  "schemars",
  "serde",
@@ -852,6 +1019,7 @@ name = "astra-vn-package"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-package",
  "astra-vn-commands",
  "astra-vn-plugin",
@@ -871,6 +1039,7 @@ name = "astra-vn-plugin"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-plugin",
  "schemars",
  "semver",
@@ -883,6 +1052,7 @@ name = "astra-vn-policy"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-policy",
  "astra-vn-script",
  "mlua",
@@ -899,6 +1069,7 @@ name = "astra-vn-presentation"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-media-core",
  "astra-vn-script",
  "postcard",
@@ -914,6 +1085,7 @@ version = "0.1.0"
 dependencies = [
  "abi_stable",
  "astra-core",
+ "astra-headless-test",
  "astra-package",
  "astra-plugin",
  "astra-plugin-abi",
@@ -941,6 +1113,7 @@ name = "astra-vn-save"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-package",
  "astra-runtime",
  "astra-vn-core",
@@ -956,6 +1129,7 @@ name = "astra-vn-script"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "blake3",
  "chumsky",
  "hex",
@@ -979,6 +1153,7 @@ name = "astra-vn-system"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-vn-script",
  "schemars",
  "serde",
@@ -1154,6 +1329,9 @@ name = "bit-vec"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b71798fca2c1fe1086445a7258a4bc81e6e49dcd24c8d0dd9a1e57395b603f51"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "bitflags"
@@ -1773,6 +1951,20 @@ name = "data-encoding"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
+
+[[package]]
+name = "der-parser"
+version = "10.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07da5016415d5a3c4dd39b11ed26f915f52fc4e0dc197d87908bc916e51bc1a6"
+dependencies = [
+ "asn1-rs",
+ "displaydoc",
+ "nom",
+ "num-bigint",
+ "num-traits",
+ "rusticata-macros",
+]
 
 [[package]]
 name = "deranged"
@@ -2449,6 +2641,12 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hound"
+version = "3.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 
 [[package]]
 name = "http"
@@ -3312,6 +3510,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-bigint"
+version = "0.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367"
+dependencies = [
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-complex"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3756,6 +3964,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oid-registry"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12f40cff3dde1b6087cc5d5f5d4d65712f34016a03ed60e9c08dcc392736b5b7"
+dependencies = [
+ "asn1-rs",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3856,6 +4073,16 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "pem"
+version = "3.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
+dependencies = [
+ "base64",
+ "serde_core",
+]
 
 [[package]]
 name = "percent-encoding"
@@ -4254,6 +4481,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rcgen"
+version = "0.14.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57f6d249aad744e274e682777a50283a225a32705394ee6d5fcc01efa25e4055"
+dependencies = [
+ "pem",
+ "ring",
+ "rustls-pki-types",
+ "time",
+ "x509-parser",
+ "yasna",
+]
+
+[[package]]
 name = "read-fonts"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4545,6 +4786,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusticata-macros"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "faf0c4a6ece9950b9abdb62b1cfcf2a68b3b67a10ba445b3bb85be2a293d0632"
+dependencies = [
+ "nom",
+]
+
+[[package]]
 name = "rustix"
 version = "0.38.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4577,6 +4827,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c54fcab019b409d04215d3a17cb438fd7fbf192ee61461f20f4fe18704bc138"
 dependencies = [
  "aws-lc-rs",
+ "log",
  "once_cell",
  "rustls-pki-types",
  "rustls-webpki",
@@ -6922,6 +7173,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
+name = "x509-parser"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d43b0f71ce057da06bc0851b23ee24f3f86190b07203dd8f567d0b706a185202"
+dependencies = [
+ "asn1-rs",
+ "data-encoding",
+ "der-parser",
+ "lazy_static",
+ "nom",
+ "oid-registry",
+ "ring",
+ "rusticata-macros",
+ "thiserror 2.0.18",
+ "time",
+]
+
+[[package]]
 name = "xcursor"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6951,6 +7220,16 @@ name = "xml-rs"
 version = "0.8.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ae8337f8a065cfc972643663ea4279e04e7256de865aa66fe25cec5fb912d3f"
+
+[[package]]
+name = "yasna"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5f6765e852b9b4dc8e2a76843e4d64d1cea8e79bcde0b6901aea8e7c7f08282"
+dependencies = [
+ "bit-vec 0.9.1",
+ "time",
+]
 
 [[package]]
 name = "yazi"

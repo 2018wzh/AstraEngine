@@ -8,7 +8,7 @@ use astra_engine::{
     runtime::{PackageHandle, RuntimeConfig, RuntimeWorld},
 };
 
-#[test]
+#[astra_headless_test::test]
 fn dylib_facade_reexports_enginecore_public_api() {
     let world = RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
     assert_eq!(world.snapshot().step, 0);

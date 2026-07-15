@@ -18,7 +18,7 @@ state prologue #@id state.prologue
     text key:line.hello speaker:hero #@id line.hello
 "#;
 
-#[test]
+#[astra_headless_test::test]
 fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
     let registration = NativeVnRuntimeProvider::ffi_registration();
     assert_eq!(registration.provider_id.as_str(), "astra.runtime.native_vn");

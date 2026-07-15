@@ -14,6 +14,11 @@ from pathlib import Path
 CAPABILITY_SCHEMA = "astra.platform_capability_report.v2"
 CONFORMANCE_SCHEMA = "astra.platform_host_conformance_report.v1"
 PLAYER_SCHEMA = "astra.player_automation_report.v1"
+HEADLESS_RUN_SCHEMA = "astra.headless_run_report.v1"
+HEADLESS_REVIEW_BUNDLE_SCHEMA = "astra.headless_review_bundle.v1"
+HEADLESS_REVIEW_SCHEMA = "astra.headless_review.v1"
+PLATFORM_RUN_IDENTITY_SCHEMA = "astra.platform_run_identity.v1"
+PREFLIGHT_LINK_SCHEMA = "astra.headless_preflight_link.v1"
 REQUIRED = {
     "windows": {
         "host.lifecycle", "window.create_destroy", "surface.present_readback",
@@ -56,6 +61,109 @@ def evidence(check: dict, key: str) -> str | None:
         if entry.get("key") == key:
             return entry.get("value")
     return None
+
+
+def validate_headless_review(run_path: Path, bundle_path: Path,
+                             review_path: Path) -> dict:
+    run = load(run_path)
+    bundle = load(bundle_path)
+    review = load(review_path)
+    run_hash = sha256(run_path)
+    errors: list[str] = []
+    if run.get("schema") != HEADLESS_RUN_SCHEMA or run.get("status") != "passed":
+        errors.append("headless.run")
+    if any(not item.get("passed") for item in run.get("checkpoint_results", [])):
+        errors.append("headless.automatic_checkpoint")
+    if bundle.get("schema") != HEADLESS_REVIEW_BUNDLE_SCHEMA:
+        errors.append("headless.bundle.schema")
+    if bundle.get("run_report_hash") != run_hash:
+        errors.append("headless.bundle.run_hash")
+    if bundle.get("manifest_hash") != run.get("manifest_hash"):
+        errors.append("headless.bundle.manifest_hash")
+    if bundle.get("automatic_passed") is not True:
+        errors.append("headless.bundle.automatic")
+    if not bundle.get("selected_frames") or not bundle.get("selected_audio"):
+        errors.append("headless.bundle.artifacts")
+    if review.get("schema") != HEADLESS_REVIEW_SCHEMA:
+        errors.append("headless.review.schema")
+    if review.get("run_report_hash") != run_hash:
+        errors.append("headless.review.run_hash")
+    if review.get("reviewer_kind") not in {"model", "human"}:
+        errors.append("headless.review.kind")
+    if not review.get("reviewer_identity") or not is_sha256(review.get("tool_identity_hash")):
+        errors.append("headless.review.identity")
+    required = set(bundle.get("required_checkpoints", []))
+    verdicts = review.get("checkpoints", [])
+    reviewed = {item.get("checkpoint") for item in verdicts}
+    if not required or reviewed != required or any(not item.get("passed") for item in verdicts):
+        errors.append("headless.review.verdicts")
+    if errors:
+        raise RuntimeError("formal Headless review blocked: " + ",".join(errors))
+    return run
+
+
+def is_sha256(value: object) -> bool:
+    if not isinstance(value, str) or not value.startswith("sha256:"):
+        return False
+    digest = value.removeprefix("sha256:")
+    return len(digest) == 64 and all(character in "0123456789abcdef" for character in digest)
+
+
+def validate_platform_preflight(platform: str, headless: dict, headless_run_path: Path,
+                                identity_path: Path, link_path: Path,
+                                player_path: Path, conformance: dict,
+                                package_hash: str) -> dict:
+    identity = load(identity_path)
+    link = load(link_path)
+    errors: list[str] = []
+    if identity.get("schema") != PLATFORM_RUN_IDENTITY_SCHEMA:
+        errors.append("identity.schema")
+    if identity.get("run_report_hash") != sha256(player_path):
+        errors.append("identity.run_report_hash")
+    expected = {
+        "build_fingerprint": headless.get("build_fingerprint"),
+        "cooked_package_hash": package_hash,
+        "input_sequence_hash": headless.get("input_sequence_hash"),
+        "scenario": headless.get("scenario"),
+        "target": headless.get("target"),
+        "content_identity": headless.get("content_identity"),
+        "profile_id": conformance.get("profile_hash"),
+        "session_id": conformance.get("session_id"),
+    }
+    for field, value in expected.items():
+        if identity.get(field) != value:
+            errors.append(f"identity.{field}")
+    if link.get("schema") != PREFLIGHT_LINK_SCHEMA:
+        errors.append("link.schema")
+    link_expected = {
+        "headless_run_report_hash": sha256(headless_run_path),
+        "platform_run_report_hash": sha256(identity_path),
+        "build_fingerprint": headless.get("build_fingerprint"),
+        "cooked_package_hash": package_hash,
+        "input_sequence_hash": headless.get("input_sequence_hash"),
+        "scenario": headless.get("scenario"),
+        "target": headless.get("target"),
+        "content_identity": headless.get("content_identity"),
+        "headless_profile_id": headless.get("profile_id"),
+        "headless_session_id": headless.get("session_id"),
+        "platform_profile_id": identity.get("profile_id"),
+        "platform_session_id": identity.get("session_id"),
+    }
+    for field, value in link_expected.items():
+        if link.get(field) != value:
+            errors.append(f"link.{field}")
+    if errors:
+        raise RuntimeError(
+            f"{platform} Headless preflight blocked: " + ",".join(errors)
+        )
+    return {
+        "platform": platform,
+        "status": "pass",
+        "identity_hash": sha256(identity_path),
+        "link_hash": sha256(link_path),
+        "profile_id": identity["profile_id"],
+        "session_id": identity["session_id"],
+    }
 
 
 def validate_platform(platform: str, capability: dict, conformance: dict, player: dict,
@@ -123,6 +231,13 @@ def main() -> int:
     parser.add_argument("--web-capability", type=Path, required=True)
     parser.add_argument("--web-conformance", type=Path, required=True)
     parser.add_argument("--web-player", type=Path, required=True)
+    parser.add_argument("--headless-run-report", type=Path, required=True)
+    parser.add_argument("--headless-review-bundle", type=Path, required=True)
+    parser.add_argument("--headless-review", type=Path, required=True)
+    parser.add_argument("--windows-platform-run-identity", type=Path, required=True)
+    parser.add_argument("--windows-preflight-link", type=Path, required=True)
+    parser.add_argument("--web-platform-run-identity", type=Path, required=True)
+    parser.add_argument("--web-preflight-link", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--skip-host-runs", action="store_true")
     args = parser.parse_args()
@@ -130,13 +245,32 @@ def main() -> int:
     if git(root, "status", "--porcelain"):
         raise RuntimeError("formal platform evidence requires a clean worktree")
     commit = git(root, "rev-parse", "HEAD")
+    package_hash = sha256(args.package)
+    headless = validate_headless_review(
+        args.headless_run_report,
+        args.headless_review_bundle,
+        args.headless_review,
+    )
+    windows_conformance = load(args.windows_conformance)
+    web_conformance = load(args.web_conformance)
+    preflights = [
+        validate_platform_preflight(
+            "windows", headless, args.headless_run_report,
+            args.windows_platform_run_identity, args.windows_preflight_link,
+            args.windows_player, windows_conformance, package_hash,
+        ),
+        validate_platform_preflight(
+            "web", headless, args.headless_run_report,
+            args.web_platform_run_identity, args.web_preflight_link,
+            args.web_player, web_conformance, package_hash,
+        ),
+    ]
     if not args.skip_host_runs:
         run(root, ["cargo", "test", "-p", "astra-platform-windows", "--features", "platform-test-driver", "--", "--test-threads=1"])
         run(root, ["wasm-pack", "test", "--headless", "--chrome", "Engine/Source/Platform/astra-platform-web"])
-    package_hash = sha256(args.package)
     reports = [
-        validate_platform("windows", load(args.windows_capability), load(args.windows_conformance), load(args.windows_player), package_hash),
-        validate_platform("web", load(args.web_capability), load(args.web_conformance), load(args.web_player), package_hash),
+        validate_platform("windows", load(args.windows_capability), windows_conformance, load(args.windows_player), package_hash),
+        validate_platform("web", load(args.web_capability), web_conformance, load(args.web_player), package_hash),
     ]
     same_identity = len({(item["profile_hash"], item["build_fingerprint"]) for item in reports}) == 1
     status = "pass" if same_identity and all(item["status"] == "pass" for item in reports) else "blocked"
@@ -146,6 +280,10 @@ def main() -> int:
         "commit": commit,
         "package_hash": package_hash,
         "same_identity": same_identity,
+        "headless_run_report_hash": sha256(args.headless_run_report),
+        "headless_review_bundle_hash": sha256(args.headless_review_bundle),
+        "headless_review_hash": sha256(args.headless_review),
+        "preflights": preflights,
         "platforms": reports,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)

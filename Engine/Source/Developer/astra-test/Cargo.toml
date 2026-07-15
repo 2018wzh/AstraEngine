@@ -7,21 +7,8 @@ rust-version.workspace = true
 
 [dependencies]
 astra-core = { path = "../../Runtime/astra-core" }
-astra-package = { path = "../../Runtime/astra-package" }
-astra-plugin = { path = "../../Runtime/astra-plugin" }
-astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi" }
-astra-runtime = { path = "../../Runtime/astra-runtime" }
-astra-target = { path = "../../Platform/astra-target" }
-astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
-astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }
-postcard.workspace = true
 schemars.workspace = true
-semver.workspace = true
 serde.workspace = true
-serde_json.workspace = true
-serde_yaml.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
 
-[dev-dependencies]
-tempfile.workspace = true
+[lib]
+doctest = false

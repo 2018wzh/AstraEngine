@@ -10,6 +10,7 @@ default = []
 platform-test-driver = ["astra-platform-windows/platform-test-driver"]
 
 [lib]
+doctest = false
 name = "astra_player"
 path = "src/lib.rs"
 
@@ -39,6 +40,7 @@ tempfile.workspace = true
 astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
 
 [dev-dependencies]
+astra-headless-test = { path = "../../Developer/astra-headless-test" }
 tempfile.workspace = true
 astra-asset = { path = "../../Runtime/astra-asset" }
 astra-media = { path = "../../Runtime/astra-media" }

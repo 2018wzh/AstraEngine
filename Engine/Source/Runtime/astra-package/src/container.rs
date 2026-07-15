@@ -820,7 +820,7 @@ fn hex_prefix(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
-    #[test]
+    #[astra_headless_test::test]
     fn reader_rejects_duplicate_ids_from_a_tampered_authority_table() {
         let blob = AstraContainerBuilder::new(ContainerKind::Package)
             .add_section(SectionPayload::raw("alpha", "schema.alpha", b"a".to_vec()))
@@ -842,7 +842,7 @@ mod tests {
         assert!(error.to_string().contains("duplicate section id alpha"));
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn reader_rejects_overlapping_section_ranges() {
         let blob = AstraContainerBuilder::new(ContainerKind::Package)
             .add_section(SectionPayload::raw(

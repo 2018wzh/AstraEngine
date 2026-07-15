@@ -1,0 +1,117 @@
+use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
+
+use astra_headless_protocol::PhysicalInput;
+use astra_platform::PlatformHostClient;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+pub type ProductFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Observation {
+    pub key: String,
+    pub value_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CanonicalAudioSnapshot {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub samples: Vec<f32>,
+}
+
+#[derive(Clone)]
+pub struct ProductOpenRequest {
+    pub package_bytes: Arc<[u8]>,
+    pub profile: String,
+    pub target: String,
+    pub locale: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub max_video_frames: u64,
+    pub max_decode_output_bytes: u64,
+    pub platform: PlatformHostClient,
+}
+
+#[derive(Debug, Error)]
+pub enum ProductHostError {
+    #[error("product adapter binding failed: {0}")]
+    Binding(String),
+    #[error("product adapter rejected physical input: {0}")]
+    Input(String),
+    #[error("product adapter output is invalid: {0}")]
+    Output(String),
+    #[error("product adapter shutdown failed: {0}")]
+    Shutdown(String),
+}
+
+pub trait ProductAdapterFactory: Send + Sync {
+    fn binding_id(&self) -> &str;
+    fn open<'a>(
+        &'a self,
+        request: ProductOpenRequest,
+    ) -> ProductFuture<'a, Result<Box<dyn ProductSession>, ProductHostError>>;
+}
+
+pub trait ProductSession {
+    fn consume<'a>(
+        &'a mut self,
+        tick: u64,
+        input: &'a PhysicalInput,
+    ) -> ProductFuture<'a, Result<Vec<Observation>, ProductHostError>>;
+    fn observations(&self) -> Vec<Observation>;
+    fn capture_frame<'a>(
+        &'a self,
+    ) -> ProductFuture<'a, Result<astra_platform::CapturedFrame, ProductHostError>>;
+    fn capture_audio(&self) -> Result<CanonicalAudioSnapshot, ProductHostError>;
+    fn shutdown<'a>(&'a mut self) -> ProductFuture<'a, Result<(), ProductHostError>>;
+}
+
+#[derive(Default)]
+pub struct ProductAdapterRegistry {
+    factories: BTreeMap<String, Arc<dyn ProductAdapterFactory>>,
+}
+
+impl ProductAdapterRegistry {
+    pub fn register(
+        &mut self,
+        factory: Arc<dyn ProductAdapterFactory>,
+    ) -> Result<(), ProductHostError> {
+        let id = factory.binding_id().to_owned();
+        if !safe_symbol(&id) {
+            return Err(ProductHostError::Binding(
+                "adapter binding id is unsafe".into(),
+            ));
+        }
+        if self.factories.insert(id.clone(), factory).is_some() {
+            return Err(ProductHostError::Binding(format!(
+                "adapter binding {id} is duplicated"
+            )));
+        }
+        Ok(())
+    }
+
+    pub async fn open(
+        &self,
+        binding: &str,
+        request: ProductOpenRequest,
+    ) -> Result<Box<dyn ProductSession>, ProductHostError> {
+        self.factories
+            .get(binding)
+            .ok_or_else(|| {
+                ProductHostError::Binding(format!(
+                    "bound product adapter {binding} is not registered"
+                ))
+            })?
+            .open(request)
+            .await
+    }
+}
+
+fn safe_symbol(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}

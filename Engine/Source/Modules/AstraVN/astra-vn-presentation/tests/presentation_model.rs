@@ -4,7 +4,7 @@ use astra_vn_presentation::{
     TimelineTaskStatus, TimelineTrack, VideoLayerState, VideoLoopMode,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn presentation_tracks_video_audio_and_timeline_lifecycle() {
     let mut stage = StageModel::new(1280, 720);
 
@@ -47,7 +47,7 @@ fn presentation_tracks_video_audio_and_timeline_lifecycle() {
     assert_eq!(timeline.stable_hash().to_hex().len(), 32);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn replace_target_timeline_cancels_conflicting_running_task() {
     let mut stage = StageModel::new(1920, 1080);
 

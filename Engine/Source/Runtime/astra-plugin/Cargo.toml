@@ -24,3 +24,9 @@ serde_yaml.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+astra-headless-test = { path = "../../Developer/astra-headless-test" }
+
+[lib]
+doctest = false

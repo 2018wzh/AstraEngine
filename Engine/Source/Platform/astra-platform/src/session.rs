@@ -172,6 +172,7 @@ pub struct AudioOutputStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecodeKind {
+    Image,
     Audio,
     Video,
 }
@@ -1184,7 +1185,11 @@ impl PlatformHostClient {
             return Err(error);
         }
         match response.await {
-            Ok(result) => result,
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => {
+                self.shutdown.store(false, Ordering::Release);
+                Err(error)
+            }
             Err(_) => {
                 self.shutdown.store(false, Ordering::Release);
                 Err(queue_closed("host.shutdown"))
@@ -1438,6 +1443,8 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
     }
     let mut resource_bytes = 0usize;
     let mut clip_depth = 0usize;
+    let mut transform_depth = 0usize;
+    let mut opacity_depth = 0usize;
     for command in &frame.commands {
         match command {
             SceneCommand::UploadTexture { frame: texture, .. } => {
@@ -1506,7 +1513,9 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                             )
                         })?;
             }
-            SceneCommand::ReleaseResource { .. } | SceneCommand::GlyphRun { .. } => {}
+            SceneCommand::ReleaseResource { .. } | SceneCommand::Clear { .. } => {}
+            SceneCommand::GlyphRun { opacity, .. } | SceneCommand::Glyph { opacity, .. }
+                if opacity.is_finite() && (0.0..=1.0).contains(opacity) => {}
             SceneCommand::Rect { width, height, .. } => {
                 if *width == 0 || *height == 0 {
                     return Err(PlatformError::new(
@@ -1520,7 +1529,6 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                 source,
                 destination,
                 opacity,
-                blend,
                 ..
             } => {
                 if destination.width == 0
@@ -1530,7 +1538,6 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                     })
                     || !opacity.is_finite()
                     || !(0.0..=1.0).contains(opacity)
-                    || *blend != astra_media_core::BlendMode::Alpha
                 {
                     return Err(PlatformError::new(
                         PlatformErrorCode::InvalidState,
@@ -1563,20 +1570,99 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                     "text clip stack underflowed",
                 ));
             }
+            SceneCommand::Texture {
+                frame: texture,
+                destination,
+                opacity,
+                ..
+            }
+            | SceneCommand::VideoFrame {
+                frame: texture,
+                destination,
+                opacity,
+                ..
+            } => {
+                let expected = usize::try_from(texture.width)
+                    .ok()
+                    .and_then(|width| {
+                        usize::try_from(texture.height)
+                            .ok()
+                            .and_then(|height| width.checked_mul(height))
+                    })
+                    .and_then(|pixels| pixels.checked_mul(4));
+                if texture.width == 0
+                    || texture.height == 0
+                    || expected != Some(texture.rgba8.len())
+                    || astra_core::Hash256::from_sha256(&texture.rgba8) != texture.hash
+                    || destination.width == 0
+                    || destination.height == 0
+                    || !opacity.is_finite()
+                    || !(0.0..=1.0).contains(opacity)
+                {
+                    return Err(PlatformError::new(
+                        PlatformErrorCode::IntegrityMismatch,
+                        "surface.present_scene",
+                        "inline media frame geometry, opacity, or content hash is invalid",
+                    ));
+                }
+                resource_bytes =
+                    resource_bytes
+                        .checked_add(texture.rgba8.len())
+                        .ok_or_else(|| {
+                            PlatformError::new(
+                                PlatformErrorCode::InvalidState,
+                                "surface.present_scene",
+                                "scene resource byte count overflowed",
+                            )
+                        })?;
+            }
+            SceneCommand::PushTransform { transform } | SceneCommand::SetCamera { transform }
+                if transform.m11.is_finite()
+                    && transform.m12.is_finite()
+                    && transform.m21.is_finite()
+                    && transform.m22.is_finite()
+                    && transform.tx.is_finite()
+                    && transform.ty.is_finite() =>
+            {
+                if matches!(command, SceneCommand::PushTransform { .. }) {
+                    transform_depth = transform_depth.checked_add(1).ok_or_else(|| {
+                        PlatformError::new(
+                            PlatformErrorCode::InvalidState,
+                            "surface.present_scene",
+                            "transform stack overflowed",
+                        )
+                    })?;
+                }
+            }
+            SceneCommand::PopTransform if transform_depth > 0 => transform_depth -= 1,
+            SceneCommand::PushOpacity { opacity }
+                if opacity.is_finite() && (0.0..=1.0).contains(opacity) =>
+            {
+                opacity_depth = opacity_depth.checked_add(1).ok_or_else(|| {
+                    PlatformError::new(
+                        PlatformErrorCode::InvalidState,
+                        "surface.present_scene",
+                        "opacity stack overflowed",
+                    )
+                })?;
+            }
+            SceneCommand::PopOpacity if opacity_depth > 0 => opacity_depth -= 1,
+            SceneCommand::FilterGraph { graph }
+                if graph.schema == "astra.filter_graph.v1" && !graph.nodes.is_empty() => {}
             _ => {
                 return Err(PlatformError::new(
                     PlatformErrorCode::InvalidState,
                     "surface.present_scene",
-                    "text scene contains a non-text renderer command",
+                    "scene contains an invalid renderer command or unbalanced stack operation",
                 ));
             }
         }
     }
-    if resource_bytes > max_bytes || clip_depth != 0 {
+    if resource_bytes > max_bytes || clip_depth != 0 || transform_depth != 0 || opacity_depth != 0 {
         return Err(PlatformError::new(
             PlatformErrorCode::InvalidState,
             "surface.present_scene",
-            "glyph upload budget or clip stack is invalid",
+            "scene resource budget or command stack is invalid",
         ));
     }
     Ok(())

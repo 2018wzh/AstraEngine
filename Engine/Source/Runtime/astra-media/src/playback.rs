@@ -526,6 +526,6 @@ impl MediaPlaybackSession {
     }
 }
 
-fn playback_error(code: impl Into<String>, message: impl Into<String>) -> MediaError {
+pub(crate) fn playback_error(code: impl Into<String>, message: impl Into<String>) -> MediaError {
     MediaError::Diagnostics(vec![Diagnostic::blocking(code, message)])
 }

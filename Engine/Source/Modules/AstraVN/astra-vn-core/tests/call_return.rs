@@ -16,7 +16,7 @@ state common #@id state.common
     return #@id return.common
 "#;
 
-#[test]
+#[astra_headless_test::test]
 fn runtime_supports_call_return_stack_and_resume_cursor() {
     let compiled =
         compile_astra_sources([AstraSource::new("call_return.astra", CALL_RETURN)]).unwrap();

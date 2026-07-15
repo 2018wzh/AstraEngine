@@ -1,3 +1,4 @@
+/// Canonical decoded PCM owned by the Media layer and reused by Player adapters.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerDecodedAudio {
     pub sample_rate: u32,

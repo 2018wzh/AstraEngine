@@ -7,7 +7,7 @@ struct Effect {
     reached: String,
 }
 
-#[test]
+#[astra_headless_test::test]
 fn runtime_output_envelope_is_bound_to_domain_schema_codec_and_hash() {
     let envelope = RuntimeOutputEnvelope::postcard(
         RuntimeOutputDomain::Effect,

@@ -397,8 +397,19 @@ impl WebDecodeSession {
                 "decode request kind or sequence is invalid",
             ));
         }
+        if request.kind == DecodeKind::Image {
+            return Err(PlatformError::new(
+                PlatformErrorCode::ProviderUnavailable,
+                "decode.submit",
+                "Web platform image decode is not owned by the WebCodecs audio/video session",
+            ));
+        }
         let configuration = serde_json::json!({
-            "kind": match request.kind { DecodeKind::Audio => "audio", DecodeKind::Video => "video" },
+            "kind": match request.kind {
+                DecodeKind::Audio => "audio",
+                DecodeKind::Video => "video",
+                DecodeKind::Image => unreachable!("image decode was rejected above"),
+            },
             "codec": request.codec,
             "sampleRate": request.sample_rate,
             "numberOfChannels": request.channels,

@@ -4,7 +4,7 @@ use astra_plugin::{dylib_path, PluginGate, PluginLoader, PluginRegistrar};
 use astra_vn_plugin::{VnExtensionBinding, VnExtensionManifest};
 use semver::Version;
 
-#[test]
+#[astra_headless_test::test]
 fn standard_vn_extension_manifest_declares_required_bindings() {
     let manifest = VnExtensionManifest::standard();
     let report = manifest.validate_required();
@@ -17,7 +17,7 @@ fn standard_vn_extension_manifest_declares_required_bindings() {
     assert!(manifest.has_binding("astra.vn.release_check_provider"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn missing_vn_extension_binding_blocks_validation() {
     let mut manifest = VnExtensionManifest::standard();
     manifest
@@ -33,7 +33,7 @@ fn missing_vn_extension_binding_blocks_validation() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn duplicate_vn_extension_binding_blocks_validation() {
     let mut manifest = VnExtensionManifest::standard();
     manifest.bindings.push(VnExtensionBinding {
@@ -51,7 +51,7 @@ fn duplicate_vn_extension_binding_blocks_validation() {
         .any(|diagnostic| diagnostic.code == "ASTRA_VN_EXTENSION_BINDING_DUPLICATE"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn vn_extension_manifest_accepts_real_cdylib_provider_fixture() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()

@@ -1,7 +1,7 @@
 use astra_core::Hash256;
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
 
-#[test]
+#[astra_headless_test::test]
 fn package_vfs_mount_writes_vfs_manifest_and_catalog_without_asset_registry() {
     let cooked = SectionPayload::raw(
         "asset.background.opening",

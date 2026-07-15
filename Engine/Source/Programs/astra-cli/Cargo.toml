@@ -46,6 +46,8 @@ tempfile.workspace = true
 ctrlc.workspace = true
 
 [dev-dependencies]
+astra-headless-test = { path = "../../Developer/astra-headless-test" }
+astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [

@@ -2,7 +2,7 @@ use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionP
 use astra_vn_package::decode_compiled_story;
 use astra_vn_script::{compile_astra_sources, AstraSource};
 
-#[test]
+#[astra_headless_test::test]
 fn legacy_compiled_story_schema_requires_recook() {
     let compiled = compile_astra_sources([AstraSource::new(
         "story.astra",

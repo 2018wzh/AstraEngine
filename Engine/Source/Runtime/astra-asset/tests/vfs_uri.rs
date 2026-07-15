@@ -7,7 +7,7 @@ use astra_asset::{
 };
 use astra_core::Hash256;
 
-#[test]
+#[astra_headless_test::test]
 fn vfs_uri_accepts_provider_prefix_and_normalizes_path() {
     let uri = VfsUri::parse("fvp:\\graph_bg\\BG001_000").unwrap();
     assert_eq!(uri.prefix(), "fvp");
@@ -19,7 +19,7 @@ fn vfs_uri_accepts_provider_prefix_and_normalizes_path() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn vfs_uri_rejects_host_paths_escape_and_inline_payload() {
     for value in [
         "package:native-assets/bg.png",
@@ -35,7 +35,7 @@ fn vfs_uri_rejects_host_paths_escape_and_inline_payload() {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn vfs_mount_descriptor_serializes_without_host_root() {
     let manifest = VfsManifest {
         schema: "astra.asset_vfs_manifest.v1".to_string(),
@@ -77,7 +77,7 @@ fn vfs_mount_descriptor_serializes_without_host_root() {
     assert!(manifest.validate().is_empty());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn vfs_overlayfs_resolves_highest_priority_and_whiteout() {
     let hash_old = Hash256::from_sha256(b"old");
     let hash_new = Hash256::from_sha256(b"new");
@@ -159,7 +159,7 @@ fn vfs_overlayfs_resolves_highest_priority_and_whiteout() {
     assert!(manifest.resolve(&hidden, &context).unwrap().is_none());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn vfs_local_reader_uses_host_capability_without_serializing_root() {
     let temp = tempfile::tempdir().unwrap();
     fs::create_dir_all(temp.path().join("probe")).unwrap();
@@ -193,7 +193,7 @@ fn vfs_local_reader_uses_host_capability_without_serializing_root() {
     assert!(!encoded.contains(temp.path().to_string_lossy().as_ref()));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn vfs_manifest_blocks_duplicate_graph_nodes_and_context_bypass() {
     let mut duplicate_prefix = package_manifest_fixture();
     duplicate_prefix
@@ -248,7 +248,7 @@ fn vfs_manifest_blocks_duplicate_graph_nodes_and_context_bypass() {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn vfs_resolve_rejects_equal_priority_authority_conflict() {
     let mut manifest = package_manifest_fixture();
     manifest.layers.push(VfsLayerDescriptor {

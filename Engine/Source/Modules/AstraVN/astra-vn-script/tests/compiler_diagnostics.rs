@@ -1,6 +1,6 @@
 use astra_vn_script::{compile_astra_sources, AstraSource};
 
-#[test]
+#[astra_headless_test::test]
 fn grammar_negative_cases_block_compile() {
     let cases = [
         (
@@ -88,7 +88,7 @@ story system.bad #@id story.system.bad
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn duplicate_explicit_source_ids_block_compile() {
     let err = compile_astra_sources([AstraSource::new(
         "duplicate.astra",
@@ -105,7 +105,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_DUPLICATE_ID");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn undefined_jump_targets_block_compile() {
     let err = compile_astra_sources([AstraSource::new(
         "missing_jump.astra",
@@ -122,7 +122,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_TARGET_UNDEFINED");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn undefined_choice_targets_block_compile() {
     let err = compile_astra_sources([AstraSource::new(
         "missing_choice.astra",
@@ -139,7 +139,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_TARGET_UNDEFINED");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn unreachable_main_states_block_compile() {
     let err = compile_astra_sources([AstraSource::new(
         "unreachable.astra",
@@ -160,7 +160,7 @@ state orphan #@id state.orphan
     assert_eq!(err.code(), "ASTRA_VN_UNREACHABLE_STATE");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn invalid_variable_scope_blocks_compile() {
     let err = compile_astra_sources([AstraSource::new(
         "bad_scope.astra",
@@ -176,7 +176,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_VARIABLE_SCOPE");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn duplicate_text_keys_block_compile() {
     let err = compile_astra_sources([AstraSource::new(
         "duplicate_key.astra",
@@ -193,7 +193,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_TEXT_KEY_DUPLICATE");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn invalid_mutation_number_blocks_compile() {
     let err = compile_astra_sources([AstraSource::new(
         "bad_number.astra",
@@ -209,7 +209,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_MUTATE_VALUE");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn presentation_command_outside_scene_blocks_compile() {
     let err = compile_astra_sources([AstraSource::new(
         "outside_scene.astra",
@@ -223,7 +223,7 @@ voice asset:voice.hero.0001 #@id voice.outside
     assert_eq!(err.code(), "ASTRA_VN_SCENE_CONTEXT");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn option_cannot_bind_across_an_intervening_command() {
     let err = compile_astra_sources([AstraSource::new(
         "detached_option.astra",
@@ -241,7 +241,7 @@ state prologue #@id state.prologue
     assert_eq!(err.code(), "ASTRA_VN_OPTION_CONTEXT");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn structural_indentation_is_part_of_the_canonical_ast() {
     let command_error = compile_astra_sources([AstraSource::new(
         "bad_command_indent.astra",

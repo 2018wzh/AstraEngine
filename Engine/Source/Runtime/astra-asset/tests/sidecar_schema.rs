@@ -3,7 +3,7 @@ use astra_asset::{
 };
 use astra_core::DiagnosticSeverity;
 
-#[test]
+#[astra_headless_test::test]
 fn sidecar_schema_valid_sidecar_roundtrips_and_registers_asset_uri() {
     let yaml = r#"
 schema: astra.asset.v1
@@ -41,7 +41,7 @@ review: accepted
         .is_some());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn sidecar_schema_invalid_sidecar_reports_blocking_diagnostics() {
     let sidecar = AssetSidecar {
         schema: "astra.asset.v1".to_string(),
@@ -84,7 +84,7 @@ fn sidecar_schema_invalid_sidecar_reports_blocking_diagnostics() {
         .any(|diag| diag.code == "ASTRA_ASSET_DEPENDENCY_DUPLICATE"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn sidecar_schema_duplicate_asset_id_blocks_registry_insert() {
     let sidecar = AssetSidecar::new_test(
         "asset:/characters/hero/main",
@@ -100,7 +100,7 @@ fn sidecar_schema_duplicate_asset_id_blocks_registry_insert() {
         .any(|diag| diag.code == "ASTRA_ASSET_DUPLICATE_ID"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn font_sidecar_requires_typed_ordered_unicode_coverage() {
     let valid = AssetSidecar::from_yaml(
         r#"
@@ -140,7 +140,7 @@ review: accepted
         .any(|diagnostic| diagnostic.code == "ASTRA_ASSET_FONT_COVERAGE"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn font_metadata_cannot_be_omitted_or_attached_to_non_font_assets() {
     let mut font = AssetSidecar::new_test("asset:/font/ui", "content/ui.ttf", "font.ttf");
     assert!(font

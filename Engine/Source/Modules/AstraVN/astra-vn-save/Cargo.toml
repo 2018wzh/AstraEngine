@@ -17,4 +17,8 @@ schemars.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+astra-headless-test = { path = "../../../Developer/astra-headless-test" }
 astra-vn-policy = { path = "../astra-vn-policy", features = ["luau-runtime"] }
+
+[lib]
+doctest = false

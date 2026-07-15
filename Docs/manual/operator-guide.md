@@ -9,9 +9,16 @@ Operator 负责构建、打包、平台适配、Release Gate、crash bundle 和 
 ```bash
 python Tools/run_cargo_isolated.py clippy --workspace --all-targets -- -D warnings
 python Tools/run_cargo_isolated.py test --workspace
+python Tools/run_cargo_isolated.py test --workspace --features ffmpeg-vcpkg
 ```
 
 该入口从 commit/dirty state、workspace manifest、Cargo.lock、Rust toolchain 和 feature/target/profile 参数派生独立 target root。target root 内的 `astra-build-identity.json` 使用 `astra.build_identity.v1`，只记录 hash、状态、artifact role、相对路径和 byte size。报告损坏、identity 不一致、动态 fixture 不在同一 target root 或 Cargo 返回非零状态时必须停止，不得改用共享 `target/debug` 继续生成证据。
+
+入口会在 Cargo 启动前清理旧 identity，默认保留最近 3 个 identity，缓存上限为 50 GiB，最长保留 7 天。当前任务、仍有 lease 的并行任务和带 `.pin` 标记的 identity 不参与清理。需要调整策略时，设置 `ASTRA_CARGO_CACHE_MAX_GIB`、`ASTRA_CARGO_CACHE_KEEP` 或 `ASTRA_CARGO_CACHE_MAX_AGE_DAYS`；只执行清理可运行 `python Tools/run_cargo_isolated.py --gc-only`，临时跳过自动清理则在 Cargo 参数前加 `--no-auto-gc`。每次清理都会更新 `target/identity/astra-build-cache-gc.json`；配置无效、协调超时或文件删除失败都会阻断命令。
+
+Windows 的 `ffmpeg-vcpkg` job 要求设置 `VCPKG_ROOT`；driver 会从 `VCPKG_DEFAULT_TRIPLET`（默认 `x64-windows`）解析 release/debug runtime，并只在该隔离命令的子进程 `PATH` 中加入 DLL 目录。目录或 runtime 缺失时命令直接阻断，不复制 DLL，也不退回无视频模式。
+
+CI 的默认 Headless job 必须在 `windows-latest`、`ubuntu-latest` 和 `macos-latest` 分别执行 docs、fmt、isolated clippy/test、test convergence 与 shipping graph 检查。独立 Windows job 从显式 vcpkg root 安装 FFmpeg，并以 `ffmpeg-vcpkg` 同时运行 workspace clippy/test；配置存在不等于 job 已通过，状态页只能引用实际 CI run evidence。
 
 性能验收必须把同一份 build identity 继续传入 `PerformanceRunIdentity`，并补齐 package hash、host profile hash、product profile 和 session id。`astra.performance_report.v1` 为 `blocked` 时，应按 diagnostic 检查 run duration、sample count、threshold 或 identity drift；不要重写报告、删掉慢 sample或在采样后放宽 budget。正式校验使用 `ReleaseValidator::validate_package_with_product_evidence`，同时提交 capability、conformance、Player、budget 和 report。普通 debug test 只验证 recorder、host 与 validator 接线，正式阈值需要 release build 与声明的参考环境。
 
@@ -23,31 +30,66 @@ astra platform probe --platform windows --target nativevn-game --report target/p
 astra cook project.yaml --profile desktop-release --target nativevn-game --out target/cooked
 astra package build target/cooked --target nativevn-game --out target/game.astrapkg
 astra package validate target/game.astrapkg --profile desktop-release --target nativevn-game --platform-report target/platform-windows.yaml
-astra test run scenarios/full_playthrough.yaml --package target/game.astrapkg --target nativevn-game --headless
+astra-headless run --profile tests/headless/profile.json --package target/game.astrapkg --input tests/headless/full-playthrough.jsonl --artifact-root target/headless/full-playthrough --build-identity target/identity/astra-build-identity.json
 ```
 
-上面的 `--headless` 是当前既有入口。Migration 11 已固化 typed launch/profile contract，但尚未提供完整 `astra-headless` host/binary。迁移完成后，旧 flag 将返回明确错误，不保留隐式 alias。
+旧 `astra test run --headless` 已退役并返回 `ASTRA_TEST_HEADLESS_MIGRATED`；它不再读取 YAML、不转发，也不保留隐式 alias。
 
-## Planned Headless Platform workflow
+## Headless Platform workflow
 
-Migration 11 完成后的 Developer 入口为独立 binary：
+Migration 11 的 Developer 入口为独立 binary：
 
 ```bash
 astra-headless run \
   --profile tests/headless/profile.json \
+  --package target/game.astrapkg \
   --input tests/headless/full-playthrough.jsonl \
-  --artifacts target/headless/full-playthrough
+  --artifact-root target/headless/full-playthrough \
+  --build-identity target/identity/astra-build-identity.json
 
 astra-headless serve --stdio \
-  --profile tests/headless/profile.json \
-  --artifacts target/headless/interactive
+  --build-identity target/identity/astra-build-identity.json
+
+astra-headless prepare-review \
+  --run-report target/headless/full-playthrough/run-report.json \
+  --manifest target/headless/full-playthrough/artifact-manifest.json \
+  --artifact-root target/headless/full-playthrough \
+  --output target/headless/full-playthrough/review-bundle.json
+
+astra-headless validate-review \
+  --run-report target/headless/full-playthrough/run-report.json \
+  --bundle target/headless/full-playthrough/review-bundle.json \
+  --review target/headless/full-playthrough/review.json
 ```
 
-文件与 stdio 使用同一双向 JSONL 协议。默认保存全部 presented frame PNG 和完整 PCM S16LE WAV；`all`、`checkpoints`、`final`、`manifest-only` 必须显式受 frame、byte、duration 和 artifact count 限额约束。stdout 只输出协议或 report，日志只写 stderr。
+文件与 stdio 使用同一双向 JSONL 协议。默认保存全部 presented frame PNG 和完整 PCM S16LE WAV；`all`、`checkpoints`、`final`、`manifest-only` 显式受 frame、byte、duration、package 和 artifact count 限额约束。stdout 只输出协议或 report，日志只写 stderr。当前实现仍需通过完整隔离 workspace、FFmpeg feature job 与正式 review/preflight evidence 后才能关闭 Migration 11。
 
-产品、Player、样例或 full-playthrough 必须先通过自动比较，再由模型查看 required checkpoint、首尾帧、最大差异帧和失败邻近帧。音频要检查 WAV、波形、频谱、响度、静音、削波、声道和时长；涉及语音内容或音画同步时还要试听。模型不能覆盖自动失败或自行放宽容差。
+产品、Player、样例或 full-playthrough 必须先通过自动比较，再运行 `prepare-review`。模型或具名人工只能按 bundle 查看 required checkpoint、首尾帧、最大差异帧、失败邻近帧和完整 WAV，不得自行省略条目。音频要检查波形、频谱、响度、静音、削波、声道和时长；涉及语音内容或音画同步时还要试听。完成的 `astra.headless_review.v1` 必须再通过 `validate-review`；模型不能覆盖自动失败或自行放宽容差。
 
-真实平台验收只能在 `astra.headless_run_report.v1`、`astra.headless_review.v1` 和 `astra.headless_preflight_link.v1` 全部通过后启动。Headless 与真实平台 run 必须绑定同一 build、cooked package、input sequence、scenario、target 和 content identity；Headless 结果不能替代真实窗口、浏览器、音频设备或原生输入证据。
+checkpoint 未显式改写时使用固定的受控宽松默认容差。任何自定义容差都要在 config 中绑定 `astra.headless_tolerance_approval.v1` 的相对路径和 SHA-256；approval 只能是具名人工，必须匹配 tolerance-set hash。`astra-headless` 会把完整 checkpoint config hash 写入新 run report。修改 approval、config 或 baseline 后必须重跑，不能复用或编辑旧 report。
+
+真实平台验收只能在 `astra.headless_run_report.v1`、`astra.headless_review_bundle.v1` 和 `astra.headless_review.v1` 全部通过后启动。平台 automation 完成后输出 `astra.platform_run_identity.v1`，再运行 `astra-headless link-preflight --headless-run-report ... --platform-run-identity ... --output ...`。Headless 与真实平台 run 必须绑定同一 build、cooked package、input sequence、scenario、target 和 content identity；`astra.headless_preflight_link.v1` 只建立关联，Headless 结果不能替代真实窗口、浏览器、音频设备或原生输入证据。
+
+正式 Windows/Web 联合验收统一走 `Tools/run_platform_host_acceptance.py`。该入口在启动任何真实 host 命令前先校验 Headless run、review bundle、review、两份 platform run identity 和两份 preflight link；自动失败、review verdict 缺失、artifact hash 漂移或任一 identity 不一致都会在 host 启动前阻断。`--skip-host-runs` 只用于复核已经形成的同 run 证据，不能生成 E3：
+
+```bash
+python Tools/run_platform_host_acceptance.py \
+  --package target/product/game.astrapkg \
+  --headless-run-report target/headless/run-report.json \
+  --headless-review-bundle target/headless/review-bundle.json \
+  --headless-review target/headless/review.json \
+  --windows-platform-run-identity target/windows/platform-run-identity.json \
+  --windows-preflight-link target/windows/headless-preflight-link.json \
+  --web-platform-run-identity target/web/platform-run-identity.json \
+  --web-preflight-link target/web/headless-preflight-link.json \
+  --windows-capability target/windows/capability.json \
+  --windows-conformance target/windows/conformance.json \
+  --windows-player target/windows/player.json \
+  --web-capability target/web/capability.json \
+  --web-conformance target/web/conformance.json \
+  --web-player target/web/player.json \
+  --out target/platform-acceptance.json
+```
 
 会渲染文本的 shipping profile 必须在 `media.manifest` 中设置 `font_manifest_required: true`，并通过 `font_manifest_section` 指向同包内的 `astra.font_manifest.v1`。字体 manifest 的每个条目必须绑定 package VFS URI、provider、target/profile、face index、license、coverage 和内容 hash。验证器不会读取系统字体或 loose file 补齐缺失资源；`media.font_package` blocked 时应修复 package/cook 输入，不能关闭检查或改成 optional。
 
@@ -59,16 +101,16 @@ Windows 字形视觉回归由 `astra.windows_gpu_glyph_golden.v1` 绑定字体 r
 
 ## 日志命令
 
-`astra` 默认把 machine-readable report 写到 stdout，把日志写到 stderr。需要结构化日志时使用：
+`astra-headless` 把 machine-readable protocol/report 写到 stdout，日志固定写到 stderr。通过 `ASTRA_LOG` 调整过滤器：
 
 ```bash
-astra test run scenarios/native_smoke.yaml --headless --format json --log-format json --log-filter astra_runtime=debug,astra_test=debug,astra_plugin=debug
+ASTRA_LOG=astra_headless=debug,astra_platform_headless=debug astra-headless serve --stdio --build-identity target/identity/astra-build-identity.json
 ```
 
-需要落盘时显式传入相对目录；未传目录不会创建日志文件：
+需要落盘时由调用方显式重定向 stderr，protocol stdout 必须保持独立：
 
 ```bash
-astra test run scenarios/native_smoke.yaml --headless --log-dir target/logs --log-max-file-bytes 16777216 --log-max-archives 8 --crash-dir target/crashes
+ASTRA_LOG=debug astra-headless serve --stdio --build-identity target/identity/astra-build-identity.json 2> target/logs/astra-headless.log
 ```
 
 日志只用于排障，不参与 replay、hash、save 或 release 判定。JSON file/ring 使用 `astra.log_event.v1`；低级别异步写入发生背压时，critical path 会写 `observability.queue.saturated` 和累计 `dropped_count`。禁止把商业正文、payload、secret、绝对路径或未筛选的对象 dump 写进日志。
@@ -90,10 +132,10 @@ Windows shipping Player 默认使用平台 writable `Saved/Logs` 与 `Saved/Cras
 | `astra.target_validation_report.v1` | Editor/Game/Program target |
 | `astra.platform_capability_report.v2` | declared/available/selected 平台 provider |
 | `astra.platform_host_conformance_report.v1` | build/profile/package/session 绑定的真实 host 生命周期证据 |
-| `astra.headless_artifact_manifest.v1` | planned Headless PNG/WAV 相对路径、hash、尺寸、时长和 provider identity |
-| `astra.headless_run_report.v1` | planned 平台无关 host、输入、产物与自动比较结果 |
-| `astra.headless_review.v1` | planned 模型视觉/音频审查结果 |
-| `astra.headless_preflight_link.v1` | planned Headless 与真实平台 run 的 identity 关联 |
+| `astra.headless_artifact_manifest.v1` | Headless PNG/WAV 相对路径、hash、尺寸、时长、全流指标和 provider identity |
+| `astra.headless_run_report.v1` | 平台无关 host、输入、产物与自动比较结果 |
+| `astra.headless_review.v1` | 具名模型或人工的视觉/音频审查结果；不能覆盖自动失败 |
+| `astra.headless_preflight_link.v1` | Headless E2 与真实平台 run 的 identity 关联 |
 | `astra.plugin_report.v1` | 插件加载、卸载和 provider |
 | `astra.emu.local_case_report.v1` | AstraEMU Artemis 和后续 family |
 

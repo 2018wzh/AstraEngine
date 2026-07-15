@@ -11,7 +11,7 @@ struct TestComponent {
     count: u32,
 }
 
-#[test]
+#[astra_headless_test::test]
 fn world_actor_creates_component_and_stable_snapshot_hash() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -103,7 +103,7 @@ fn world_actor_creates_component_and_stable_snapshot_hash() {
     assert!(!save.0.is_empty());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn world_actor_rejects_component_for_missing_actor() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
@@ -114,7 +114,7 @@ fn world_actor_rejects_component_for_missing_actor() {
     assert!(err.to_string().contains("ASTRA_RUNTIME_ACTOR_MISSING"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn component_payload_rejects_hash_mismatch() {
     let mut payload = RuntimeComponentPayload::postcard(
         "astra.test.component",

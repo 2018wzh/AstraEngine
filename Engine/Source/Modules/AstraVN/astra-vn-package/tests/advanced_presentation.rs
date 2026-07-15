@@ -15,11 +15,11 @@ state prologue #@id state.prologue
     timeline id:tl.enter action:cancel reason:replace_target #@id timeline.cancel
     movie layer:video_fx asset:asset:/movie/light fallback:asset:/movie/light_fallback #@id movie.light
     voice asset:asset:/voice/hero sync:text #@id voice.hero
-    effect text:line.hello filter:soft_glow fallback:plain_reveal budget_ms:2 #@id effect.reveal
+    effect text:line.hello filter:astra.filter.bloom fallback:filter_missing budget_ms:2 #@id effect.reveal
     text key:hello speaker:hero #@id line.hello
 "#;
 
-#[test]
+#[astra_headless_test::test]
 fn advanced_presentation_manifest_requires_real_evidence() {
     let compiled =
         compile_astra_sources([AstraSource::new("advanced.astra", ADVANCED_STORY)]).unwrap();
@@ -40,7 +40,7 @@ fn advanced_presentation_manifest_requires_real_evidence() {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn advanced_presentation_manifest_blocks_thin_stage() {
     let compiled = compile_astra_sources([AstraSource::new(
         "thin.astra",

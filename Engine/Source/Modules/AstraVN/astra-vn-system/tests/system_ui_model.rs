@@ -1,6 +1,6 @@
 use astra_vn_system::{SystemPageKind, SystemUiAction, SystemUiModel, SystemUiSurface};
 
-#[test]
+#[astra_headless_test::test]
 fn system_ui_model_covers_all_pages_and_choice_hit_testing() {
     for page in [
         SystemPageKind::Title,

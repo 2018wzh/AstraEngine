@@ -58,6 +58,7 @@ pub enum BlendMode {
     Alpha,
     Add,
     Multiply,
+    Screen,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -303,9 +304,9 @@ pub trait Renderer2D {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct HeadlessRendererProvider;
+pub struct CpuRendererProvider;
 
-impl Renderer2DProvider for HeadlessRendererProvider {
+impl Renderer2DProvider for CpuRendererProvider {
     type Renderer = HeadlessRenderer;
 
     fn descriptor(&self) -> RendererDescriptor {
@@ -951,6 +952,15 @@ fn blend_pixel(target: &mut [u8], source: &[u8], opacity: f32, blend: BlendMode)
             for channel in 0..3 {
                 let multiplied = target[channel] as f32 * source[channel] as f32 / 255.0;
                 target[channel] = (target[channel] as f32 * (1.0 - alpha) + multiplied * alpha)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+        }
+        BlendMode::Screen => {
+            for channel in 0..3 {
+                let screened = 255.0
+                    - (255.0 - target[channel] as f32) * (255.0 - source[channel] as f32) / 255.0;
+                target[channel] = (target[channel] as f32 * (1.0 - alpha) + screened * alpha)
                     .round()
                     .clamp(0.0, 255.0) as u8;
             }

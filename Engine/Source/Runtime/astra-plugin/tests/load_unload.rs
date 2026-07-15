@@ -6,7 +6,7 @@ use astra_plugin::{
 };
 use semver::Version;
 
-#[test]
+#[astra_headless_test::test]
 fn load_unload_loads_fixture_cdylib_and_releases_callbacks() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()

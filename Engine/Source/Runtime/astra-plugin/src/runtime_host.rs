@@ -733,6 +733,7 @@ impl ProductRuntimeHost {
             RuntimeOutputDomain::Presentation,
             RuntimeOutputDomain::Audio,
             RuntimeOutputDomain::Await,
+            RuntimeOutputDomain::Observation,
             RuntimeOutputDomain::Trace,
             RuntimeOutputDomain::DirtySaveSection,
         ] {

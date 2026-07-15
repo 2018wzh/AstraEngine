@@ -276,7 +276,7 @@ fn bound_selection() -> ValidatedRuntimeProviderSelection {
         .unwrap()
 }
 
-#[test]
+#[astra_headless_test::test]
 fn bound_host_blocks_request_and_provider_report_identity_drift() {
     let selection = bound_selection();
     let schemas = RuntimeHostSchemaRegistry::from_descriptor(selection.descriptor());
@@ -325,7 +325,7 @@ fn prepare_request() -> RuntimePrepareRequest {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn in_process_host_owns_provider_lifecycle_and_validates_step_envelopes() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
@@ -375,7 +375,7 @@ fn in_process_host_owns_provider_lifecycle_and_validates_step_envelopes() {
     host.destroy().unwrap();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn host_rolls_back_failed_and_malformed_instance_creation() {
     for malformed_report in [false, true] {
         let destroy_calls = Arc::new(AtomicUsize::new(0));
@@ -401,7 +401,7 @@ fn host_rolls_back_failed_and_malformed_instance_creation() {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn duplicate_open_rolls_back_and_blocks_use_until_cleanup() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
@@ -434,7 +434,7 @@ fn duplicate_open_rolls_back_and_blocks_use_until_cleanup() {
     host.destroy().unwrap();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn host_blocks_unknown_step_schema() {
     let mut host = ProductRuntimeHost::reference_in_process(
         "instance",
@@ -466,7 +466,7 @@ fn host_blocks_unknown_step_schema() {
     assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_ENVELOPE_SCHEMA");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn host_blocks_output_count_and_payload_bounds() {
     let schemas = RuntimeHostSchemaRegistry::new()
         .allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1")
@@ -497,7 +497,7 @@ fn host_blocks_output_count_and_payload_bounds() {
     assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_OUTPUT_COUNT");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn host_validates_save_and_restore_sections_before_accepting_state() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
@@ -555,7 +555,7 @@ fn host_validates_save_and_restore_sections_before_accepting_state() {
     host.destroy().unwrap();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn host_rejects_non_monotonic_fixed_steps_and_poisons_the_session() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
@@ -593,7 +593,7 @@ fn host_rejects_non_monotonic_fixed_steps_and_poisons_the_session() {
     assert_eq!(poisoned.code(), "ASTRA_RUNTIME_HOST_SESSION_POISONED");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn host_requires_first_step_one_and_catches_provider_panics() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
@@ -664,7 +664,7 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
     host.destroy().unwrap();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn host_enforces_seed_delta_and_live_provider_replay_boundaries_before_dispatch() {
     let invalid_cases = [
         (0, 1, RuntimeStepMode::Live, "ASTRA_RUNTIME_HOST_DELTA"),
@@ -719,7 +719,7 @@ fn host_enforces_seed_delta_and_live_provider_replay_boundaries_before_dispatch(
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn host_resynchronizes_fixed_step_and_requires_restore_continuation() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
@@ -776,7 +776,7 @@ fn host_resynchronizes_fixed_step_and_requires_restore_continuation() {
     host.destroy().unwrap();
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[astra_headless_test::tokio_test]
 async fn async_host_supports_multiple_sessions_on_one_ordered_provider_worker() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
@@ -821,7 +821,7 @@ async fn async_host_supports_multiple_sessions_on_one_ordered_provider_worker() 
     host.destroy().await.unwrap();
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[astra_headless_test::tokio_test]
 async fn async_host_timeout_poisons_the_provider_instance() {
     let host = AsyncProductRuntimeHost::reference_in_process(
         "instance",

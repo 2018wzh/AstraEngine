@@ -7,7 +7,7 @@ use astra_runtime::{
 };
 use std::collections::BTreeMap;
 
-#[test]
+#[astra_headless_test::test]
 fn state_machine_tick_repeats_hash_for_same_seed_and_input() {
     let left = run_once();
     let right = run_once();
@@ -74,7 +74,7 @@ fn run_once() -> astra_runtime::TickReport {
         .unwrap()
 }
 
-#[test]
+#[astra_headless_test::test]
 fn state_machine_presentation_action_supports_generic_commands() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -139,7 +139,7 @@ fn state_machine_presentation_action_supports_generic_commands() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn state_machine_runs_transition_actions_in_order() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -223,7 +223,7 @@ fn state_machine_runs_transition_actions_in_order() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn action_failure_keeps_machine_state_and_allows_other_machines() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -337,7 +337,7 @@ fn action_failure_keeps_machine_state_and_allows_other_machines() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn validates_state_machine_shape_and_conflicts() {
     let actor = astra_runtime::ActorId(StableId::deterministic_v7(5, 1, 11));
     let start = StableId::deterministic_v7(5, 2, 11);
@@ -398,7 +398,7 @@ fn validates_state_machine_shape_and_conflicts() {
         .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_TRANSITION_CONFLICT"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn terminal_state_marks_machine_completed_and_blocks_future_ticks() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -476,7 +476,7 @@ fn terminal_state_marks_machine_completed_and_blocks_future_ticks() {
     assert_eq!(trace, vec!["astra.core.set_blackboard"]);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn state_machine_runs_transitions_until_it_reaches_a_stable_state() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
@@ -543,7 +543,7 @@ fn state_machine_runs_transitions_until_it_reaches_a_stable_state() {
     assert!(machine.completed);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn state_machine_cycle_blocks_without_committing_partial_progress() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
@@ -613,7 +613,7 @@ fn state_machine_cycle_blocks_without_committing_partial_progress() {
     assert_eq!(world.snapshot().blackboard.get("cycle"), None);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn action_registry_rejects_duplicate_action_ids() {
     let mut registry = ActionRegistry::default();
     registry.register(SetBlackboardAction).unwrap();

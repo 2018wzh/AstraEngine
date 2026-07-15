@@ -11,3 +11,9 @@ astra-core = { path = "../astra-core" }
 schemars.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+astra-headless-test = { path = "../../Developer/astra-headless-test" }
+
+[lib]
+doctest = false

@@ -42,7 +42,7 @@ fn budget() -> PerformanceBudget {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn measured_report_is_identity_bound_and_revalidated() {
     let budget = budget();
     let mut recorder = PerformanceRecorder::new(budget.clone()).unwrap();
@@ -55,7 +55,7 @@ fn measured_report_is_identity_bound_and_revalidated() {
     validate_performance_report(&budget, &identity(), &report).unwrap();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn missing_samples_threshold_drift_and_identity_tamper_block() {
     let budget = budget();
     let mut recorder = PerformanceRecorder::new(budget.clone()).unwrap();
@@ -73,7 +73,7 @@ fn missing_samples_threshold_drift_and_identity_tamper_block() {
     assert!(validate_performance_report(&budget, &identity(), &report).is_err());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn undeclared_or_over_capacity_samples_fail_before_mutating_other_metrics() {
     let mut recorder = PerformanceRecorder::new(budget()).unwrap();
     assert!(recorder.record("media.decode.total_us", 1).is_err());

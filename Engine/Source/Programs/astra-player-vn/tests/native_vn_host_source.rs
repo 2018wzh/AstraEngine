@@ -285,7 +285,7 @@ fn scene_commands(batch: &astra_player_core::PlayerHostCommandBatch) -> &[SceneC
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn packaged_native_vn_source_shapes_localized_text_into_retained_scene_commands() {
     let bytes = product_package();
     let package = PackageReader::open(&bytes).unwrap();
@@ -327,7 +327,7 @@ fn packaged_native_vn_source_shapes_localized_text_into_retained_scene_commands(
     source.shutdown().unwrap();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn packaged_native_vn_stage_uses_product_director_and_package_texture() {
     let bytes = product_package_for(
         r#"
@@ -371,7 +371,7 @@ state start #@id state.start
     source.shutdown().unwrap();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn package_open_blocks_undeclared_localization() {
     let bytes = product_package();
     let package = PackageReader::open(&bytes).unwrap();
@@ -388,8 +388,8 @@ fn package_open_blocks_undeclared_localization() {
     assert!(missing_locale.contains("ASTRA_PLAYER_LOCALE_UNDECLARED"));
 }
 
-#[test]
-fn package_open_blocks_unwired_presentation_commands_before_runtime_step() {
+#[astra_headless_test::test]
+fn package_open_accepts_movie_for_product_media_execution() {
     let bytes = product_package_for(
         r#"
 story main #@id story.main
@@ -400,20 +400,23 @@ state start #@id state.start
 "#,
     );
     let package = PackageReader::open(&bytes).unwrap();
-    let error = match NativeVnHostCommandSource::from_package(
+    let mut source = NativeVnHostCommandSource::from_package(
         &package,
         VnRunConfig::classic("en"),
         640,
         360,
         PlayerHostResourceId(1),
-    ) {
-        Ok(_) => panic!("unwired presentation command must block package open"),
-        Err(error) => error.to_string(),
-    };
-    assert!(error.contains("ASTRA_PLAYER_PRESENTATION_UNSUPPORTED"));
+    )
+    .unwrap();
+    assert!(
+        source.launch().is_err(),
+        "undeclared movie asset must block at execution"
+    );
+    source.release_resources().unwrap();
+    source.shutdown().unwrap();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn package_open_blocks_undeclared_presentation_preset_before_provider_creation() {
     let bytes = product_package_for(
         r#"
@@ -438,7 +441,7 @@ state start #@id state.start
     assert!(error.contains("ASTRA_VN_PRESENTATION_PRESET_UNDECLARED"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn package_open_blocks_runtime_descriptor_drift_before_provider_creation() {
     let bytes = product_package_with_request(STORY, |request| {
         let mut policy: ProviderPolicy = serde_json::from_slice(&request.provider_policy).unwrap();
@@ -461,7 +464,7 @@ fn package_open_blocks_runtime_descriptor_drift_before_provider_creation() {
 }
 
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
-#[tokio::test(flavor = "current_thread")]
+#[astra_headless_test::tokio_test]
 async fn packaged_native_vn_scene_reaches_live_windows_wgpu_and_releases_resources() {
     use astra_platform::{
         HostLaunchProfile, PlatformHostFactory, PlatformHostProfile, SurfaceRequest, WindowRequest,
@@ -532,7 +535,7 @@ async fn packaged_native_vn_scene_reaches_live_windows_wgpu_and_releases_resourc
     session.client.shutdown().await.unwrap();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
     let mut source = source_for(STORY);
 
@@ -557,7 +560,7 @@ fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
@@ -579,7 +582,7 @@ fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn native_vn_source_rejects_tampered_save_before_restore() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
@@ -592,7 +595,7 @@ fn native_vn_source_rejects_tampered_save_before_restore() {
     assert!(error.to_string().contains("ASTRA_PLAYER_SAVE_INTEGRITY"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn native_vn_source_builds_atomic_platform_save_transaction() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
@@ -628,7 +631,7 @@ fn native_vn_source_builds_atomic_platform_save_transaction() {
     ));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn native_vn_source_completes_wait_through_runtime_provider() {
     let story = r#"
 story main #@id story.main
@@ -654,7 +657,7 @@ state start #@id state.start
     source.dispatch_action(PlayerAction::Advance).unwrap();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn native_vn_source_exposes_validated_timeline_tasks_to_player() {
     let story = r#"
 story main #@id story.main
@@ -674,7 +677,7 @@ state start #@id state.start
     assert_eq!(tasks[0].fence.as_deref(), Some("timeline.intro.complete"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn packaged_native_vn_source_exposes_hash_validated_audio_requests() {
     let story = r#"
 story main #@id story.main
@@ -780,7 +783,7 @@ state start #@id state.start
     ));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn packaged_native_vn_source_routes_typed_audio_control_to_product_audio_owner() {
     let mut source = source_for(
         r#"
@@ -803,7 +806,7 @@ state start #@id state.start
     ));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn packaged_player_rejects_headless_presentation_binding() {
     let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
     let sections =
@@ -831,7 +834,7 @@ fn packaged_player_rejects_headless_presentation_binding() {
         .contains("ASTRA_PLAYER_PRESENTATION_PROVIDER_INELIGIBLE"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn packaged_player_accepts_explicit_product_provider_bindings() {
     let bytes = product_package();
     let package = astra_package::PackageReader::open(&bytes).unwrap();

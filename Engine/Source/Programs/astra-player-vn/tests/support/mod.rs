@@ -16,7 +16,16 @@ use astra_vn_package::{package_sections_for_story, PLAYER_LOCALE_CONFIG_SCHEMA};
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 
 pub fn source_for(story: &str) -> NativeVnHostCommandSource {
-    let package_bytes = product_package(story);
+    source_from_package(product_package_with_video(story, None))
+}
+
+pub fn source_for_video(story: &str) -> NativeVnHostCommandSource {
+    let mut bytes = vec![0, 0, 0, 16];
+    bytes.extend_from_slice(b"ftypisom0000");
+    source_from_package(product_package_with_video(story, Some(bytes)))
+}
+
+fn source_from_package(package_bytes: Vec<u8>) -> NativeVnHostCommandSource {
     let package = PackageReader::open(&package_bytes).unwrap();
     NativeVnHostCommandSource::from_package(
         &package,
@@ -28,7 +37,12 @@ pub fn source_for(story: &str) -> NativeVnHostCommandSource {
     .unwrap()
 }
 
-fn product_package(story: &str) -> Vec<u8> {
+#[allow(dead_code)]
+pub fn product_package(story: &str) -> Vec<u8> {
+    product_package_with_video(story, None)
+}
+
+fn product_package_with_video(story: &str, video: Option<Vec<u8>>) -> Vec<u8> {
     let compiled = compile_astra_sources([AstraSource::new("main.astra", story)]).unwrap();
     let mut sections =
         package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
@@ -41,6 +55,23 @@ fn product_package(story: &str) -> Vec<u8> {
         "astra.cooked_asset.v1",
         font.clone(),
     ));
+    let video_hash = video.as_ref().map(|bytes| Hash256::from_sha256(bytes));
+    let video_fallback = include_bytes!(
+        "../../../../../../Examples/NativeVN/Assets/Backgrounds/apartment-night.png"
+    );
+    let video_fallback_hash = Hash256::from_sha256(video_fallback);
+    if let Some(bytes) = &video {
+        sections.push(SectionPayload::raw(
+            "asset.video.intro",
+            "astra.cooked_asset.v1",
+            bytes.clone(),
+        ));
+        sections.push(SectionPayload::raw(
+            "asset.video.intro_fallback",
+            "astra.cooked_asset.v1",
+            video_fallback.to_vec(),
+        ));
+    }
     sections.push(SectionPayload::raw(
         "media.font_manifest",
         FONT_PACKAGE_MANIFEST_SCHEMA,
@@ -94,6 +125,41 @@ fn product_package(story: &str) -> Vec<u8> {
 
     let mut request = PackageBuildRequest::fixture("com.example.player.audio", "classic", sections);
     bind_product_provider_authority(&mut request);
+    let mut vfs_entries = vec![serde_json::json!({
+        "vfs_uri": "package:/fonts/ui.ttf",
+        "layer_id": "package.base",
+        "source": {"kind": "package_section", "section_id": "asset.font.ui"},
+        "offset": 0,
+        "size": font.len(),
+        "hash": font_hash,
+        "codec": "raw",
+        "media_kind": "font",
+        "diagnostics": []
+    })];
+    if let (Some(bytes), Some(hash)) = (&video, video_hash) {
+        vfs_entries.push(serde_json::json!({
+            "vfs_uri": "package:/video/intro.mp4",
+            "layer_id": "package.base",
+            "source": {"kind": "package_section", "section_id": "asset.video.intro"},
+            "offset": 0,
+            "size": bytes.len(),
+            "hash": hash,
+            "codec": "raw",
+            "media_kind": "video/mp4",
+            "diagnostics": []
+        }));
+        vfs_entries.push(serde_json::json!({
+            "vfs_uri": "package:/video/intro-fallback.png",
+            "layer_id": "package.base",
+            "source": {"kind": "package_section", "section_id": "asset.video.intro_fallback"},
+            "offset": 0,
+            "size": video_fallback.len(),
+            "hash": video_fallback_hash,
+            "codec": "raw",
+            "media_kind": "image/png",
+            "diagnostics": []
+        }));
+    }
     request.asset_vfs_manifest = serde_json::to_vec(&serde_json::json!({
         "schema": "astra.asset_vfs_manifest.v1",
         "prefixes": [{
@@ -113,31 +179,42 @@ fn product_package(story: &str) -> Vec<u8> {
             "targets": ["nativevn-game"],
             "profiles": ["classic"]
         }],
-        "entries": [{
-            "vfs_uri": "package:/fonts/ui.ttf",
-            "layer_id": "package.base",
-            "source": {"kind": "package_section", "section_id": "asset.font.ui"},
-            "offset": 0,
-            "size": font.len(),
-            "hash": font_hash,
-            "codec": "raw",
-            "media_kind": "font",
-            "diagnostics": []
-        }],
+        "entries": vfs_entries,
         "whiteouts": []
     }))
     .unwrap();
-    request.asset_catalog = serde_json::to_vec(&serde_json::json!({
-        "schema": "astra.asset_catalog.v1",
-        "assets": [{
-            "asset_id": "asset:/font/ui",
-            "vfs_uri": "package:/fonts/ui.ttf",
-            "media_kind": "font",
-            "tags": ["ui"],
+    let mut catalog_assets = vec![serde_json::json!({
+        "asset_id": "asset:/font/ui",
+        "vfs_uri": "package:/fonts/ui.ttf",
+        "media_kind": "font",
+        "tags": ["ui"],
+        "bundle_id": "classic",
+        "chunk_id": "base",
+        "profiles": ["classic"]
+    })];
+    if video.is_some() {
+        catalog_assets.push(serde_json::json!({
+            "asset_id": "asset:/video/intro",
+            "vfs_uri": "package:/video/intro.mp4",
+            "media_kind": "video/mp4",
+            "tags": ["video.mp4"],
             "bundle_id": "classic",
             "chunk_id": "base",
             "profiles": ["classic"]
-        }]
+        }));
+        catalog_assets.push(serde_json::json!({
+            "asset_id": "asset:/video/intro-fallback",
+            "vfs_uri": "package:/video/intro-fallback.png",
+            "media_kind": "image/png",
+            "tags": ["fallback.frame"],
+            "bundle_id": "classic",
+            "chunk_id": "base",
+            "profiles": ["classic"]
+        }));
+    }
+    request.asset_catalog = serde_json::to_vec(&serde_json::json!({
+        "schema": "astra.asset_catalog.v1",
+        "assets": catalog_assets
     }))
     .unwrap();
     PackageBuilder::build(request).unwrap().into_bytes()

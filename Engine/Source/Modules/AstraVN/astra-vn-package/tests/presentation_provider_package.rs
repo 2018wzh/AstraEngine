@@ -13,7 +13,7 @@ fn compiled_story() -> astra_vn_script::CompiledStory {
     .unwrap()
 }
 
-#[test]
+#[astra_headless_test::test]
 fn package_persists_profile_bound_presentation_policy() {
     let sections = package_sections_for_story(
         &compiled_story(),
@@ -42,7 +42,7 @@ fn package_persists_profile_bound_presentation_policy() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn legacy_presentation_policy_requires_recook() {
     let legacy = astra_vn_package::VnPresentationProviderManifest::standard();
     let section = SectionPayload::postcard(

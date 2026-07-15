@@ -6,6 +6,7 @@ version.workspace = true
 rust-version.workspace = true
 
 [lib]
+doctest = false
 crate-type = ["rlib", "dylib"]
 
 [dependencies]
@@ -13,3 +14,6 @@ astra-core = { path = "../astra-core" }
 astra-package = { path = "../astra-package" }
 astra-plugin = { path = "../astra-plugin" }
 astra-runtime = { path = "../astra-runtime" }
+
+[dev-dependencies]
+astra-headless-test = { path = "../../Developer/astra-headless-test" }

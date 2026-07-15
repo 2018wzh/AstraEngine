@@ -19,7 +19,7 @@ state common #@id state.common
     return #@id return.common
 "#;
 
-#[test]
+#[astra_headless_test::test]
 fn graph_timeline_metadata_roundtrips_command_ids_to_source_map() {
     let compiled = compile_astra_sources([AstraSource::new("story.astra", STORY)]).unwrap();
     let metadata = EditorVisualMetadata {

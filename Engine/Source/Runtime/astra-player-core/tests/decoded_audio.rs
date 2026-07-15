@@ -1,6 +1,6 @@
 use astra_player_core::PlayerDecodedAudio;
 
-#[test]
+#[astra_headless_test::test]
 fn decoded_pcm_s16le_is_converted_to_interleaved_f32() {
     let bytes = [i16::MIN, 0, i16::MAX, 16384]
         .into_iter()
@@ -18,7 +18,7 @@ fn decoded_pcm_s16le_is_converted_to_interleaved_f32() {
     assert!((audio.samples[3] - 0.500_015).abs() < 0.0001);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn decoded_audio_rejects_truncation_alignment_and_capacity() {
     assert!(PlayerDecodedAudio::parse("pcm_s16le:48000:2", &[0], 16)
         .unwrap_err()
@@ -36,7 +36,7 @@ fn decoded_audio_rejects_truncation_alignment_and_capacity() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn decoded_audio_rejects_unknown_format_and_invalid_stream_shape() {
     assert!(PlayerDecodedAudio::parse("pcm_f64:48000:2", &[], 16)
         .unwrap_err()

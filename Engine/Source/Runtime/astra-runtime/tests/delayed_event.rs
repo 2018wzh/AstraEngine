@@ -3,7 +3,7 @@ use astra_runtime::{
     TickRequest,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn delayed_events_drain_in_due_tick_sequence_order() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
@@ -26,7 +26,7 @@ fn delayed_events_drain_in_due_tick_sequence_order() {
     assert_eq!(kinds, vec!["timer.first", "timer.second"]);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn delayed_events_survive_save_load_before_due_tick() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();

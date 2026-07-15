@@ -101,7 +101,7 @@ impl CookProcessor for PanicProcessor {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn batch_cook_validates_graph_uses_content_cache_and_commits_atomically() {
     let temp = tempfile::tempdir().unwrap();
     let cache = FileCookCache::new(temp.path().join("cache"));
@@ -173,7 +173,7 @@ fn batch_cook_validates_graph_uses_content_cache_and_commits_atomically() {
         .all(|artifact| artifact.get("payload").is_none()));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn batch_cook_rejects_graph_errors_cancellation_and_corrupt_cache() {
     let temp = tempfile::tempdir().unwrap();
     let cache_root = temp.path().join("cache");
@@ -252,7 +252,7 @@ fn batch_cook_rejects_graph_errors_cancellation_and_corrupt_cache() {
         .contains("complete cook identity"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn batch_cook_rejects_zero_concurrency_and_processor_version_drift() {
     let registry = registry();
     let executor = CookBatchExecutor::new(&registry, None);
@@ -319,7 +319,7 @@ fn batch_cook_rejects_zero_concurrency_and_processor_version_drift() {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn batch_cook_cancels_in_flight_and_contains_processor_panics() {
     let started = Arc::new(AtomicBool::new(false));
     let mut registry = CookProcessorRegistry::default();
@@ -373,7 +373,7 @@ fn batch_cook_cancels_in_flight_and_contains_processor_panics() {
     assert!(error.to_string().contains("ASTRA_COOK_WORKER_PANIC"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn batch_cook_handles_many_nodes_and_large_payload_with_stable_incremental_identity() {
     let temp = tempfile::tempdir().unwrap();
     let cache = FileCookCache::new(temp.path().join("cache"));

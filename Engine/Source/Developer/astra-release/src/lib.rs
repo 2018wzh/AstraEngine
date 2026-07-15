@@ -4,6 +4,7 @@ use astra_asset::{AssetCatalog, ResolveContext, VfsManifest, VfsSourceRef, VfsUr
 use astra_core::{
     validate_performance_report, Diagnostic, Hash256, PerformanceBudget, PerformanceReport,
 };
+use astra_headless_protocol::{PreflightLink, ReviewBundle, ReviewRecord, RunReport, RunStatus};
 use astra_media::{
     CosmicTextLayoutProvider, FontBindingContext, FontPackageManifest, TextLayoutConfig,
     FONT_PACKAGE_MANIFEST_SCHEMA,
@@ -60,6 +61,18 @@ pub struct PackageValidateRequest {
 pub struct ProductPerformanceEvidence {
     pub budget: PerformanceBudget,
     pub report: PerformanceReport,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeadlessFormalEvidence {
+    pub run_report: RunReport,
+    pub run_report_hash: String,
+    pub review_bundle: ReviewBundle,
+    pub review_bundle_hash: String,
+    pub review: ReviewRecord,
+    pub review_hash: String,
+    pub preflight_link: PreflightLink,
+    pub platform_run_report_hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -176,6 +189,21 @@ impl ReleaseValidator {
         conformance_report: Option<PlatformHostConformanceReport>,
         player_report: Option<PlayerAutomationReport>,
     ) -> Result<ReleaseReport, ReleaseError> {
+        self.validate_package_with_headless_preflight(
+            request,
+            conformance_report,
+            player_report,
+            None,
+        )
+    }
+
+    pub fn validate_package_with_headless_preflight(
+        &self,
+        request: PackageValidateRequest,
+        conformance_report: Option<PlatformHostConformanceReport>,
+        player_report: Option<PlayerAutomationReport>,
+        headless: Option<HeadlessFormalEvidence>,
+    ) -> Result<ReleaseReport, ReleaseError> {
         let capability_report = request.platform_report.clone();
         let require_platform_report = request.require_platform_report;
         let target = request.target.clone();
@@ -185,6 +213,13 @@ impl ReleaseValidator {
             capability_report.as_ref(),
             conformance_report.as_ref(),
             &report.package_hash,
+            require_platform_report,
+        ));
+        report.checks.push(headless_preflight_check(
+            headless.as_ref(),
+            &report.package_hash,
+            target.as_deref(),
+            &profile,
             require_platform_report,
         ));
         if let Some(player_report) = player_report {
@@ -260,6 +295,7 @@ impl ReleaseValidator {
                         evidence("package_hash", &package_hash),
                     ],
                 });
+                checks.push(headless_shipping_isolation_check(&package));
                 for section in [
                     "schema.registry",
                     "cook.summary",
@@ -385,6 +421,319 @@ impl ReleaseValidator {
             ),
         }
         Ok(report)
+    }
+}
+
+fn headless_shipping_isolation_check(package: &PackageReader) -> ReleaseCheckRecord {
+    const FORBIDDEN: [&str; 8] = [
+        "astra.headless_host_profile.v1",
+        "astra.headless_protocol.v1",
+        "astra.user_input_sequence.v1",
+        "astra.headless_artifact_manifest.v1",
+        "astra.headless_run_report.v1",
+        "astra.headless_review.v1",
+        "astra.headless_preflight_link.v1",
+        "astra-platform-headless",
+    ];
+    let mut violation = None;
+    for entry in package.container().entries() {
+        if entry.id.to_ascii_lowercase().contains("headless") {
+            violation = Some(format!("section id {} is test-only", entry.id));
+            break;
+        }
+        if entry.encryption.is_none() && entry.decoded_length <= 1024 * 1024 {
+            if let Ok(bytes) = package.container().read_section(&entry.id) {
+                if FORBIDDEN.iter().any(|needle| {
+                    bytes
+                        .windows(needle.len())
+                        .any(|window| window == needle.as_bytes())
+                }) {
+                    violation = Some(format!(
+                        "section {} contains a test-only Headless identity",
+                        entry.id
+                    ));
+                    break;
+                }
+            }
+        }
+    }
+    let passed = violation.is_none();
+    ReleaseCheckRecord {
+        id: "shipping.headless_isolation".to_string(),
+        domain: ReleaseDomain::Platform,
+        status: if passed {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Blocked
+        },
+        summary: if passed {
+            "shipping package excludes Headless test schemas and providers".to_string()
+        } else {
+            violation.unwrap_or_else(|| "Headless isolation failed".to_string())
+        },
+        diagnostic: (!passed).then(|| {
+            Diagnostic::blocking(
+                "ASTRA_RELEASE_HEADLESS_FORBIDDEN",
+                "Headless test identities cannot enter a shipping package",
+            )
+        }),
+        evidence: vec![evidence("forbidden_identity_count", FORBIDDEN.len())],
+    }
+}
+
+fn headless_preflight_check(
+    headless: Option<&HeadlessFormalEvidence>,
+    package_hash: &str,
+    target: Option<&str>,
+    profile: &str,
+    required: bool,
+) -> ReleaseCheckRecord {
+    let failure = if !required {
+        None
+    } else if let Some(headless) = headless {
+        let run = &headless.run_report;
+        let bundle = &headless.review_bundle;
+        let review = &headless.review;
+        let link = &headless.preflight_link;
+        let expected_target = target.unwrap_or_default();
+        if run.validate().is_err()
+            || run.status != RunStatus::Passed
+            || run
+                .checkpoint_results
+                .iter()
+                .any(|checkpoint| !checkpoint.passed)
+            || !full_sha256(&headless.run_report_hash)
+            || !full_sha256(&headless.review_bundle_hash)
+            || !full_sha256(&headless.review_hash)
+            || run.package_hash != package_hash
+        {
+            Some("Headless run report is blocked or contains failed checkpoints")
+        } else if bundle.validate().is_err()
+            || bundle.run_report_hash != headless.run_report_hash
+            || !bundle.automatic_passed
+            || run.checkpoint_results.iter().any(|checkpoint| {
+                !bundle
+                    .required_checkpoints
+                    .iter()
+                    .any(|required| required == &checkpoint.id)
+            })
+        {
+            Some("Headless review bundle is missing, mismatched, or incomplete")
+        } else if review.validate().is_err()
+            || review.run_report_hash != headless.run_report_hash
+            || review.checkpoints.is_empty()
+            || review.checkpoints.iter().any(|verdict| !verdict.passed)
+            || run.checkpoint_results.iter().any(|checkpoint| {
+                !review
+                    .checkpoints
+                    .iter()
+                    .any(|verdict| verdict.checkpoint == checkpoint.id && verdict.passed)
+            })
+        {
+            Some("Headless review is missing, mismatched, or failed")
+        } else if link.validate().is_err()
+            || link.headless_run_report_hash != headless.run_report_hash
+            || link.platform_run_report_hash != headless.platform_run_report_hash
+            || link.cooked_package_hash != package_hash
+            || link.build_fingerprint != run.build_fingerprint
+            || link.input_sequence_hash != run.input_sequence_hash
+            || link.scenario != run.scenario
+            || link.target != run.target
+            || link.content_identity != run.content_identity
+            || link.headless_profile_id != run.profile_id
+            || link.headless_session_id != run.session_id
+            || link.target != expected_target
+            || link.headless_profile_id.is_empty()
+            || link.headless_session_id.is_empty()
+            || link.platform_profile_id.is_empty()
+            || link.platform_session_id.is_empty()
+            || link.scenario.is_empty()
+            || link.content_identity.is_empty()
+            || link.input_sequence_hash.is_empty()
+            || link.build_fingerprint.is_empty()
+        {
+            Some("Headless preflight identity link is incomplete or mismatched")
+        } else {
+            None
+        }
+    } else {
+        Some("formal platform release requires Headless E2 preflight and review evidence")
+    };
+    ReleaseCheckRecord {
+        id: "platform.headless_preflight".into(),
+        domain: ReleaseDomain::Platform,
+        status: if failure.is_some() {
+            CheckStatus::Blocked
+        } else {
+            CheckStatus::Pass
+        },
+        summary: failure
+            .unwrap_or(if required {
+                "Headless E2 preflight is identity-linked to the formal platform run"
+            } else {
+                "Headless preflight is not required for this non-formal validation"
+            })
+            .to_string(),
+        diagnostic: failure.map(|message| {
+            Diagnostic::blocking("ASTRA_RELEASE_HEADLESS_PREFLIGHT_REQUIRED", message)
+        }),
+        evidence: vec![
+            evidence("required", required),
+            evidence("profile", profile),
+            evidence("package_hash", package_hash),
+        ],
+    }
+}
+
+fn full_sha256(value: &str) -> bool {
+    value
+        .strip_prefix("sha256:")
+        .is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+#[cfg(test)]
+mod headless_preflight_tests {
+    use astra_headless_protocol::{
+        CheckpointResult, PreflightLink, ReviewArtifactRole, ReviewArtifactSelection, ReviewBundle,
+        ReviewRecord, ReviewVerdict, ReviewerKind, RunReport, RunStatus,
+        HEADLESS_PREFLIGHT_LINK_SCHEMA, HEADLESS_REVIEW_BUNDLE_SCHEMA, HEADLESS_REVIEW_SCHEMA,
+        HEADLESS_RUN_REPORT_SCHEMA,
+    };
+
+    use super::{headless_preflight_check, CheckStatus, HeadlessFormalEvidence};
+
+    fn hash(label: &str) -> String {
+        astra_core::Hash256::from_sha256(label.as_bytes()).to_string()
+    }
+
+    fn evidence() -> HeadlessFormalEvidence {
+        let run_hash = hash("run-report");
+        let platform_hash = hash("platform-report");
+        let package_hash = hash("package");
+        let build = hash("build");
+        let input = hash("input");
+        HeadlessFormalEvidence {
+            run_report: RunReport {
+                schema: HEADLESS_RUN_REPORT_SCHEMA.into(),
+                run_id: "run.one".into(),
+                build_fingerprint: build.clone(),
+                package_hash: package_hash.clone(),
+                input_sequence_hash: input.clone(),
+                checkpoint_config_hash: hash("checkpoint-config"),
+                profile_id: "headless.profile".into(),
+                session_id: "headless.session".into(),
+                scenario: "full.route".into(),
+                target: "nativevn-game".into(),
+                content_identity: "content.v1".into(),
+                status: RunStatus::Passed,
+                manifest_hash: hash("manifest"),
+                frame_count: 1,
+                audio_frame_count: 800,
+                duration_ns: 16_666_667,
+                completed_sequence: 3,
+                checkpoint_results: vec![CheckpointResult {
+                    id: "required.final".into(),
+                    passed: true,
+                    observation_hash: hash("observation"),
+                    image_metrics: None,
+                    audio_metrics: None,
+                }],
+                diagnostics: Vec::new(),
+            },
+            run_report_hash: run_hash.clone(),
+            review_bundle: ReviewBundle {
+                schema: HEADLESS_REVIEW_BUNDLE_SCHEMA.into(),
+                run_report_hash: run_hash.clone(),
+                manifest_hash: hash("manifest"),
+                automatic_passed: true,
+                selected_frames: vec![ReviewArtifactSelection {
+                    role: ReviewArtifactRole::RequiredCheckpoint,
+                    relative_path: "checkpoints/required.final.png".into(),
+                    sha256: hash("frame"),
+                    sequence: Some(3),
+                    checkpoint: Some("required.final".into()),
+                }],
+                selected_audio: vec![ReviewArtifactSelection {
+                    role: ReviewArtifactRole::FullAudio,
+                    relative_path: "audio/output.wav".into(),
+                    sha256: hash("audio"),
+                    sequence: None,
+                    checkpoint: None,
+                }],
+                required_checkpoints: vec!["required.final".into()],
+            },
+            review_bundle_hash: hash("review-bundle"),
+            review: ReviewRecord {
+                schema: HEADLESS_REVIEW_SCHEMA.into(),
+                run_report_hash: run_hash.clone(),
+                reviewer_kind: ReviewerKind::Model,
+                reviewer_identity: "review-model-v1".into(),
+                tool_identity_hash: hash("review-tool"),
+                checkpoints: vec![ReviewVerdict {
+                    checkpoint: "required.final".into(),
+                    passed: true,
+                    diagnostic_codes: Vec::new(),
+                }],
+            },
+            review_hash: hash("review"),
+            preflight_link: PreflightLink {
+                schema: HEADLESS_PREFLIGHT_LINK_SCHEMA.into(),
+                headless_run_report_hash: run_hash,
+                platform_run_report_hash: platform_hash.clone(),
+                build_fingerprint: build,
+                cooked_package_hash: package_hash,
+                input_sequence_hash: input,
+                scenario: "full.route".into(),
+                target: "nativevn-game".into(),
+                content_identity: "content.v1".into(),
+                headless_profile_id: "headless.profile".into(),
+                headless_session_id: "headless.session".into(),
+                platform_profile_id: "windows.profile".into(),
+                platform_session_id: "windows.session".into(),
+            },
+            platform_run_report_hash: platform_hash,
+        }
+    }
+
+    #[astra_headless_test::test]
+    fn formal_preflight_requires_complete_identity_continuity() {
+        let valid = evidence();
+        let package_hash = valid.run_report.package_hash.clone();
+        assert_eq!(
+            headless_preflight_check(
+                Some(&valid),
+                &package_hash,
+                Some("nativevn-game"),
+                "formal-release",
+                true,
+            )
+            .status,
+            CheckStatus::Pass
+        );
+        assert_eq!(
+            headless_preflight_check(
+                None,
+                &package_hash,
+                Some("nativevn-game"),
+                "formal-release",
+                true,
+            )
+            .status,
+            CheckStatus::Blocked
+        );
+        let mut mismatched = valid;
+        mismatched.preflight_link.input_sequence_hash = hash("different-input");
+        assert_eq!(
+            headless_preflight_check(
+                Some(&mismatched),
+                &package_hash,
+                Some("nativevn-game"),
+                "formal-release",
+                true,
+            )
+            .status,
+            CheckStatus::Blocked
+        );
     }
 }
 
@@ -2337,8 +2686,7 @@ fn headless_release_boundary_check(
             Ok(value) if json_contains_headless_release_marker(&value) => {
                 return blocked(
                     "ASTRA_HEADLESS_RELEASE_PROFILE",
-                    "cooked platform profiles cannot contain a Headless launch profile"
-                        .to_string(),
+                    "cooked platform profiles cannot contain a Headless launch profile".to_string(),
                     vec![evidence("section", "platform.profiles")],
                 );
             }
@@ -2370,12 +2718,8 @@ fn headless_release_boundary_check(
             if has_headless_platform || has_headless_binary || has_headless_crate {
                 return blocked(
                     "ASTRA_HEADLESS_RELEASE_TARGET",
-                    "shipping release targets cannot reference the Headless test host"
-                        .to_string(),
-                    vec![
-                        evidence("target", &target.id),
-                        evidence("profile", profile),
-                    ],
+                    "shipping release targets cannot reference the Headless test host".to_string(),
+                    vec![evidence("target", &target.id), evidence("profile", profile)],
                 );
             }
         }

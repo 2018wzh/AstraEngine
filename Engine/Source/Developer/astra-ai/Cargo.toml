@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[lib]
+doctest = false
+
 [dependencies]
 astra-core = { path = "../../Runtime/astra-core" }
 astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi" }

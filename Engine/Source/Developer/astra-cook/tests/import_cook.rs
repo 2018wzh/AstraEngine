@@ -5,7 +5,7 @@ use astra_cook::{
 };
 use image::{ImageBuffer, Rgba};
 
-#[test]
+#[astra_headless_test::test]
 fn import_cook_classifies_fresh_stale_and_blocked_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("hero.png");

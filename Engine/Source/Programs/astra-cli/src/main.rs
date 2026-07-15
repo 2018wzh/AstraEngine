@@ -27,11 +27,13 @@ use astra_platform::{
     PlatformHostConformanceReport, PlatformHostProfile, PlatformId,
 };
 use astra_player_core::PlayerAutomationReport;
-use astra_release::{PackageValidateRequest, ReleaseReport, ReleaseValidator};
+use astra_release::{
+    HeadlessFormalEvidence, PackageValidateRequest, ReleaseReport, ReleaseValidator,
+};
 use astra_target::{
     validate_manifest, TargetKind, TargetManifest, TargetValidationReport, TargetValidationStatus,
 };
-use astra_test::{ScenarioReport, ScenarioRunOptions, ScenarioRunner};
+use astra_test::ScenarioReport;
 use astra_vn::{
     compile_astra_sources, compile_astra_sources_with_options, format_astra_source,
     load_player_locale_config, package_sections_for_story, AstraSource, CompileAstraOptions,
@@ -41,7 +43,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
-use tracing::{debug, info};
+use tracing::info;
 
 type CliError = Box<dyn std::error::Error + Send + Sync>;
 const WEB_PLAYER_LOADER: &[u8] =
@@ -166,6 +168,14 @@ enum PackageCommand {
         report: Option<PathBuf>,
         #[arg(long)]
         player_automation_report: Option<PathBuf>,
+        #[arg(long)]
+        headless_run_report: Option<PathBuf>,
+        #[arg(long)]
+        headless_review_bundle: Option<PathBuf>,
+        #[arg(long)]
+        headless_review: Option<PathBuf>,
+        #[arg(long)]
+        headless_preflight_link: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = ReportFormat::Yaml)]
         format: ReportFormat,
     },
@@ -413,6 +423,10 @@ fn main() -> Result<(), CliError> {
                 platform_conformance_report,
                 report,
                 player_automation_report,
+                headless_run_report,
+                headless_review_bundle,
+                headless_review,
+                headless_preflight_link,
                 format,
             } => {
                 let bytes = fs::read(package)?;
@@ -421,8 +435,15 @@ fn main() -> Result<(), CliError> {
                     read_platform_conformance_report(platform_conformance_report.as_deref())?;
                 let player_report =
                     read_player_automation_report(player_automation_report.as_deref())?;
+                let headless = read_headless_formal_evidence(
+                    headless_run_report.as_deref(),
+                    headless_review_bundle.as_deref(),
+                    headless_review.as_deref(),
+                    headless_preflight_link.as_deref(),
+                    player_automation_report.as_deref(),
+                )?;
                 let require_platform_report = release_profile_requires_platform_report(&profile);
-                let release_report = ReleaseValidator.validate_package_with_platform_evidence(
+                let release_report = ReleaseValidator.validate_package_with_headless_preflight(
                     PackageValidateRequest {
                         package_bytes: bytes,
                         profile,
@@ -433,6 +454,7 @@ fn main() -> Result<(), CliError> {
                     },
                     platform_conformance_report,
                     player_report,
+                    headless,
                 )?;
                 let encoded = encode_release_report(&release_report, format)?;
                 if let Some(path) = report {
@@ -446,59 +468,12 @@ fn main() -> Result<(), CliError> {
             }
         },
         Command::Test {
-            command:
-                TestCommand::Run {
-                    scenario,
-                    headless,
-                    target,
-                    profile,
-                    platform,
-                    package,
-                    report,
-                    format,
-                },
+            command: TestCommand::Run { headless, .. },
         } => {
             if !headless {
-                return Err("Stage 1 scenario runner requires --headless".into());
+                return Err("ASTRA_TEST_RUN_RETIRED: YAML product scenarios are retired; use Rust Headless tests for semantic coverage or astra-headless with astra.user_input_sequence.v1 for product automation".into());
             }
-            info!(
-                headless,
-                target = target.as_deref().unwrap_or(""),
-                profile = profile.as_deref().unwrap_or(""),
-                package = package.as_ref().map(|_| "provided").unwrap_or(""),
-                format = ?format,
-                has_report_path = report.is_some(),
-                "cli.test.run"
-            );
-            let scenario_report = ScenarioRunner::run_file_with_options(
-                scenario,
-                ScenarioRunOptions {
-                    package,
-                    target,
-                    platform,
-                    profile,
-                    headless,
-                },
-            )?;
-            let encoded = encode_report(&scenario_report, format)?;
-            if let Some(path) = report {
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                fs::write(path, &encoded)?;
-                info!(
-                    schema = %scenario_report.schema,
-                    status = ?scenario_report.status,
-                    "cli.report.write"
-                );
-            } else {
-                debug!(
-                    schema = %scenario_report.schema,
-                    status = ?scenario_report.status,
-                    "cli.report.stdout"
-                );
-                println!("{encoded}");
-            }
+            return Err("ASTRA_TEST_HEADLESS_MIGRATED: astra test run --headless no longer aliases the Headless backend; invoke astra-headless run with JSONL physical input".into());
         }
         Command::Report {
             command: ReportCommand::Explain { report },
@@ -601,13 +576,6 @@ fn init_logging(cli: &Cli) -> Result<ObservabilityGuard, CliError> {
     Ok(init_host(config)?)
 }
 
-fn encode_report(report: &ScenarioReport, format: ReportFormat) -> Result<String, CliError> {
-    Ok(match format {
-        ReportFormat::Json => serde_json::to_string_pretty(report)?,
-        ReportFormat::Yaml => serde_yaml::to_string(report)?,
-    })
-}
-
 fn encode_release_report(report: &ReleaseReport, format: ReportFormat) -> Result<String, CliError> {
     Ok(match format {
         ReportFormat::Json => serde_json::to_string_pretty(report)?,
@@ -688,6 +656,49 @@ fn read_platform_conformance_report(
     };
     let text = fs::read_to_string(path)?;
     Ok(Some(serde_yaml::from_str(&text)?))
+}
+
+fn read_headless_formal_evidence(
+    run: Option<&Path>,
+    bundle: Option<&Path>,
+    review: Option<&Path>,
+    link: Option<&Path>,
+    platform_run: Option<&Path>,
+) -> Result<Option<HeadlessFormalEvidence>, CliError> {
+    if [
+        run.is_some(),
+        bundle.is_some(),
+        review.is_some(),
+        link.is_some(),
+    ]
+    .iter()
+    .all(|value| !value)
+    {
+        return Ok(None);
+    }
+    let (run, bundle, review, link, platform_run) = match (run, bundle, review, link, platform_run) {
+        (Some(run), Some(bundle), Some(review), Some(link), Some(platform_run)) => {
+            (run, bundle, review, link, platform_run)
+        }
+        _ => {
+            return Err("ASTRA_RELEASE_HEADLESS_EVIDENCE_INCOMPLETE: run, review bundle, review, preflight link, and player automation report must be supplied together".into())
+        }
+    };
+    let run_bytes = fs::read(run)?;
+    let bundle_bytes = fs::read(bundle)?;
+    let review_bytes = fs::read(review)?;
+    let link_bytes = fs::read(link)?;
+    let platform_bytes = fs::read(platform_run)?;
+    Ok(Some(HeadlessFormalEvidence {
+        run_report: serde_json::from_slice(&run_bytes)?,
+        run_report_hash: Hash256::from_sha256(&run_bytes).to_string(),
+        review_bundle: serde_json::from_slice(&bundle_bytes)?,
+        review_bundle_hash: Hash256::from_sha256(&bundle_bytes).to_string(),
+        review: serde_json::from_slice(&review_bytes)?,
+        review_hash: Hash256::from_sha256(&review_bytes).to_string(),
+        preflight_link: serde_json::from_slice(&link_bytes)?,
+        platform_run_report_hash: Hash256::from_sha256(&platform_bytes).to_string(),
+    }))
 }
 
 fn read_player_automation_report(
@@ -1020,7 +1031,9 @@ fn atomic_replace_directory(
         .unwrap_or_else(|| Path::new("."));
     let staging_path = staging.keep();
     if !destination.exists() {
-        if let Err(error) = fs::rename(&staging_path, destination) {
+        if let Err(error) =
+            rename_directory_with_transient_retry(&staging_path, destination, "commit")
+        {
             let _ = fs::remove_dir_all(&staging_path);
             return Err(format!("ASTRA_COOK_COMMIT_SWAP: {error}").into());
         }
@@ -1031,10 +1044,11 @@ fn atomic_replace_directory(
         .and_then(|name| name.to_str())
         .ok_or("ASTRA_COOK_COMMIT_PATH: staging directory name is invalid")?;
     let backup = parent.join(format!("{staging_name}.backup"));
-    fs::rename(destination, &backup)
+    rename_directory_with_transient_retry(destination, &backup, "backup")
         .map_err(|error| format!("ASTRA_COOK_COMMIT_BACKUP: {error}"))?;
-    if let Err(error) = fs::rename(&staging_path, destination) {
-        let rollback = fs::rename(&backup, destination);
+    if let Err(error) = rename_directory_with_transient_retry(&staging_path, destination, "commit")
+    {
+        let rollback = rename_directory_with_transient_retry(&backup, destination, "rollback");
         let _ = fs::remove_dir_all(&staging_path);
         return match rollback {
             Ok(()) => Err(format!("ASTRA_COOK_COMMIT_SWAP: {error}").into()),
@@ -1061,6 +1075,36 @@ fn atomic_replace_directory(
         };
     }
     Ok(())
+}
+
+fn rename_directory_with_transient_retry(
+    source: &Path,
+    destination: &Path,
+    operation: &'static str,
+) -> std::io::Result<()> {
+    const RETRY_DELAYS_MS: [u64; 5] = [10, 20, 40, 80, 160];
+    for (index, delay_ms) in RETRY_DELAYS_MS.into_iter().enumerate() {
+        match fs::rename(source, destination) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::WouldBlock
+                ) =>
+            {
+                tracing::warn!(
+                    event = "filesystem.atomic_directory_rename.retry",
+                    operation,
+                    attempt = index + 1,
+                    error_kind = ?error.kind(),
+                    "atomic directory rename encountered a transient filesystem lock"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    fs::rename(source, destination)
 }
 
 fn cook_project_into(
@@ -2393,7 +2437,7 @@ fn build_standalone_bundle(
         artifacts,
     )?;
     let staging_path = staging.keep();
-    if let Err(error) = fs::rename(&staging_path, out) {
+    if let Err(error) = rename_directory_with_transient_retry(&staging_path, out, "bundle_commit") {
         let cleanup = fs::remove_dir_all(&staging_path);
         return Err(format!(
             "ASTRA_BUNDLE_COMMIT_FAILED: {error}; staging_cleanup={}",

@@ -5,7 +5,7 @@ use astra_policy::{
     PolicyBundleSourceEntry, PolicyCommandRecord, PolicyExecutionBudget, PolicyValue, PolicyVm,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn policy_value_roundtrips_and_rejects_excessive_depth() {
     let value = PolicyValue::Object(BTreeMap::from([(
         "nested".to_string(),
@@ -20,7 +20,7 @@ fn policy_value_roundtrips_and_rejects_excessive_depth() {
     assert!(value.validate_depth(2).is_ok());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn policy_snapshot_restores_state_and_serialized_command_records() {
     let mut vm = PolicyVm::new(PolicyExecutionBudget::default()).unwrap();
     vm.set_state("theme", PolicyValue::String("classic".into()))
@@ -45,14 +45,14 @@ fn policy_snapshot_restores_state_and_serialized_command_records() {
     assert_eq!(restored.snapshot().commands.len(), 1);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn policy_vm_owns_the_shared_sandbox_and_budget() {
     let vm = PolicyVm::new(PolicyExecutionBudget::default()).unwrap();
     assert!(vm.eval_bool("return io == nil and os == nil").unwrap());
     assert_eq!(vm.budget(), PolicyExecutionBudget::default());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn policy_budget_rejects_zero_or_unbounded_configuration() {
     assert!(PolicyExecutionBudget::default().validate().is_ok());
     assert!(PolicyExecutionBudget {
@@ -69,7 +69,7 @@ fn policy_budget_rejects_zero_or_unbounded_configuration() {
     .is_err());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn sandbox_removes_host_escape_globals() {
     let lua = create_sandboxed_lua(PolicyExecutionBudget::default()).unwrap();
     let denied: bool = lua
@@ -81,7 +81,7 @@ fn sandbox_removes_host_escape_globals() {
     assert!(denied);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn bundle_cache_is_hash_bound_and_path_safe() {
     let source = "return true";
     let hash = astra_core::Hash256::from_sha256(source.as_bytes()).to_string();

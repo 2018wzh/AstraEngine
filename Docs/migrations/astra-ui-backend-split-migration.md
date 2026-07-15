@@ -2,7 +2,7 @@
 
 本页只定义从当前 `SystemUiModel`、`CompiledStory` 和固定 UI 命中路径迁到生产级 AstraVN UI 的实施顺序。架构真源见 [UI Contract](../contracts/ui.md)、[UI Component Plugin Contract](../contracts/ui-component-plugin.md)、[UI Backend 实施规格](../implementation/ui-backend.md) 与 ADR 0014–0017。
 
-Migration 12 当前状态为 `SPEC_READY`。本页存在不代表 Yakui、UI Blueprint、component ABI、Windows/Web UI evidence 或产品系统页已经实现。Migration 11 的 typed Headless launch/profile contract 已在 master；其余 Headless host/artifact/review/preflight 工作仍按 Migration 11 状态推进，不能由本 migration 绕过。
+Migration 12 当前状态为 `SPEC_READY`。本页存在不代表 Yakui、UI Blueprint、component ABI、Windows/Web UI evidence 或产品系统页已经实现。Migration 11 的 typed launch/profile、Headless host、artifact 与 review/preflight gate 已进入实现阶段；完整 evidence 尚未闭合，不能由本 migration 绕过。
 
 ## 迁移边界
 

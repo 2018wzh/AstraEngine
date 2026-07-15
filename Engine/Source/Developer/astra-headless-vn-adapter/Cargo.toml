@@ -1,0 +1,31 @@
+[package]
+name = "astra-headless-vn-adapter"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+astra-core = { path = "../../Runtime/astra-core" }
+astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
+astra-media = { path = "../../Runtime/astra-media" }
+astra-package = { path = "../../Runtime/astra-package" }
+astra-platform = { path = "../../Platform/astra-platform" }
+astra-player-core = { path = "../../Runtime/astra-player-core" }
+astra-player-vn = { path = "../../Programs/astra-player-vn", features = ["headless-test-fixtures"] }
+astra-product-host = { path = "../../Runtime/astra-product-host" }
+astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
+astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+astra-headless-test = { path = "../astra-headless-test" }
+astra-platform-headless = { path = "../../Platform/astra-platform-headless" }
+tempfile.workspace = true
+tokio.workspace = true
+
+[lib]
+doctest = false

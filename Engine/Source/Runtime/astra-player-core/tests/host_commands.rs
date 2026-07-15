@@ -3,7 +3,7 @@ use astra_player_core::{
     PlayerHostCommandError, PlayerHostResourceId,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn standard_action_map_exposes_real_backlog_key() {
     assert_eq!(
         PlayerActionMap::standard().keyboard("KeyB"),
@@ -13,7 +13,7 @@ fn standard_action_map_exposes_real_backlog_key() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn command_batch_requires_strictly_increasing_sequences() {
     let error = PlayerHostCommandBatch::new(vec![
         PlayerHostCommand::BeginSave {
@@ -31,7 +31,7 @@ fn command_batch_requires_strictly_increasing_sequences() {
     assert_eq!(error, PlayerHostCommandError::SequenceNotStrictlyIncreasing);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn decode_request_sequence_is_independent_from_command_order() {
     let command = PlayerHostCommand::Decode {
         sequence: 9,

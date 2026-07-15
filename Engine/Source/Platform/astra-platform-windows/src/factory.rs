@@ -1597,6 +1597,7 @@ mod windows {
                 )
             })?;
             let kind = match request.kind {
+                DecodeKind::Image => astra_media::DecodeKind::Image,
                 DecodeKind::Audio => astra_media::DecodeKind::Audio,
                 DecodeKind::Video => astra_media::DecodeKind::Video,
             };

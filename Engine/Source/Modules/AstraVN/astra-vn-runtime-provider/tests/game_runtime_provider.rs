@@ -22,7 +22,7 @@ state library #@id state.library
     text key:line.library speaker:hero #@id line.library
 "#;
 
-#[test]
+#[astra_headless_test::test]
 fn native_vn_provider_descriptor_declares_game_runtime_slot_contract() {
     let descriptor = NativeVnRuntimeProvider::descriptor();
 
@@ -37,7 +37,7 @@ fn native_vn_provider_descriptor_declares_game_runtime_slot_contract() {
         .contains(&"runtime_provider.native_vn".to_string()));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn native_vn_provider_steps_compiled_story_through_runtime_session() {
     let compiled = compile_astra_sources([AstraSource::new("story.astra", STORY)]).unwrap();
     let mut provider = NativeVnRuntimeProvider::default();
@@ -231,7 +231,7 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
     assert_eq!(shutdown.status, "shutdown");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn native_vn_provider_returns_timeline_tasks_to_the_product_host() {
     let story = r#"
 story main #@id story.main

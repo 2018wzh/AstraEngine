@@ -26,7 +26,7 @@ pub struct PlayerMixedAudio {
 }
 
 #[derive(Debug, Clone)]
-pub struct PlayerPersistentAudioMixer {
+pub struct PersistentAudioMixer {
     sample_rate: u32,
     channels: u16,
     max_voices: usize,
@@ -126,7 +126,7 @@ struct PlayerAudioVoice {
     paused: bool,
 }
 
-impl PlayerPersistentAudioMixer {
+impl PersistentAudioMixer {
     pub fn new(
         sample_rate: u32,
         channels: u16,

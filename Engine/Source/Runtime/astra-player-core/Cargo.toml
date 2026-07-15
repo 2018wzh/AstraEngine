@@ -9,6 +9,7 @@ rust-version.workspace = true
 tracing.workspace = true
 astra-core = { path = "../astra-core" }
 astra-media-core = { path = "../astra-media-core" }
+astra-media = { path = "../astra-media" }
 astra-platform = { path = "../../Platform/astra-platform" }
 schemars.workspace = true
 serde.workspace = true
@@ -17,4 +18,8 @@ rubato.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+astra-headless-test = { path = "../../Developer/astra-headless-test" }
 tokio.workspace = true
+
+[lib]
+doctest = false

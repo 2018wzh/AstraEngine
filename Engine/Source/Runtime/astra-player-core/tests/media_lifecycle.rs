@@ -107,7 +107,7 @@ fn decode_plan() -> PlayerDecodeLifecyclePlan {
     }
 }
 
-#[tokio::test]
+#[astra_headless_test::tokio_test]
 async fn decode_lifecycle_closes_after_submit_failure() {
     let mut executor = PlayerHostCommandExecutor::new(LifecycleSink {
         fail_operation: Some("decode.submit"),
@@ -127,7 +127,7 @@ async fn decode_lifecycle_closes_after_submit_failure() {
     );
 }
 
-#[tokio::test]
+#[astra_headless_test::tokio_test]
 async fn decode_lifecycle_returns_validated_buffer_after_close() {
     let mut executor = PlayerHostCommandExecutor::new(LifecycleSink {
         fail_operation: None,
@@ -148,7 +148,7 @@ async fn decode_lifecycle_returns_validated_buffer_after_close() {
     );
 }
 
-#[tokio::test]
+#[astra_headless_test::tokio_test]
 async fn audio_lifecycle_drains_and_closes_with_same_run_meter() {
     let output = PlayerHostResourceId(20);
     let plan = PlayerAudioLifecyclePlan {
@@ -194,7 +194,7 @@ async fn audio_lifecycle_drains_and_closes_with_same_run_meter() {
     );
 }
 
-#[tokio::test]
+#[astra_headless_test::tokio_test]
 async fn audio_lifecycle_rejects_invalid_submit_result_and_closes() {
     let output = PlayerHostResourceId(20);
     let plan = PlayerAudioLifecyclePlan {

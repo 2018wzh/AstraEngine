@@ -9,7 +9,7 @@ use astra_media::{
     VoiceReplayRef, WrapPolicy, FONT_PACKAGE_MANIFEST_SCHEMA,
 };
 use astra_media_core::{
-    HeadlessRendererProvider, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest,
+    CpuRendererProvider, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest,
     SceneCommand,
 };
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
@@ -197,7 +197,7 @@ fn replay_binding(provider: &CosmicTextLayoutProvider) -> TextLayoutBindingIdent
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn shaped_clusters_fonts_ruby_voice_and_glyph_bitmaps_reach_renderer() {
     let provider = provider();
     let mut request = request("AV cafe\u{301} office");
@@ -238,7 +238,7 @@ fn shaped_clusters_fonts_ruby_voice_and_glyph_bitmaps_reach_renderer() {
         }));
     assert!(layout.diagnostics.is_empty());
 
-    let mut renderer = HeadlessRendererProvider
+    let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {
             width: 320,
             height: 96,
@@ -291,7 +291,7 @@ fn shaped_clusters_fonts_ruby_voice_and_glyph_bitmaps_reach_renderer() {
     assert_eq!(stats.hits, 1);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn licensed_multiscript_fallback_shapes_cjk_arabic_and_emoji_clusters() {
     let provider = CosmicTextLayoutProvider::new(
         FontBindingContext {
@@ -376,7 +376,7 @@ fn licensed_multiscript_fallback_shapes_cjk_arabic_and_emoji_clusters() {
     assert_eq!(layout.hash, provider.layout(&request).unwrap().hash);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn open_font_fixture_manifest_is_revision_hash_and_license_bound() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../Fixtures/PublicDomainFonts");
@@ -405,7 +405,7 @@ fn open_font_fixture_manifest_is_revision_hash_and_license_bound() {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn wrap_ellipsis_and_source_clusters_are_semantic() {
     let provider = provider();
     let mut request = request("A very long production text line with multiple words and clusters");
@@ -430,7 +430,7 @@ fn wrap_ellipsis_and_source_clusters_are_semantic() {
         .all(|glyph| glyph.source.end <= request.runs[0].text.len()));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn bidi_empty_input_and_clip_policy_are_explicit() {
     let provider = provider();
     let empty = provider.layout(&request("")).unwrap();
@@ -465,7 +465,7 @@ fn bidi_empty_input_and_clip_policy_are_explicit() {
         .any(|command| matches!(command, SceneCommand::PopClip)));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn font_binding_hash_direction_and_fallback_fail_fast() {
     let bytes = include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/Poppins-Regular.ttf")
         .to_vec();
@@ -502,7 +502,7 @@ fn font_binding_hash_direction_and_fallback_fail_fast() {
         .contains("ASTRA_TEXT_DIRECTION"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn font_replacement_is_transactional_and_invalidates_layout_cache() {
     let provider = provider();
     let request = request("cache identity");
@@ -540,7 +540,7 @@ fn font_replacement_is_transactional_and_invalidates_layout_cache() {
     assert_eq!(provider.cache_stats().unwrap(), before_failure);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn verified_package_vfs_is_the_font_database_authority() {
     let font_bytes =
         include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/Poppins-Regular.ttf")
@@ -645,7 +645,7 @@ fn verified_package_vfs_is_the_font_database_authority() {
         .contains("ASTRA_TEXT_PACKAGE_MANIFEST_IDENTITY"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn multiscript_fallback_database_is_loaded_from_verified_package_sections() {
     let mut fonts = multiscript_fonts();
     for font in &mut fonts {
@@ -756,7 +756,7 @@ fn multiscript_fallback_database_is_loaded_from_verified_package_sections() {
     assert_eq!(layout.hash, provider.layout(&mixed).unwrap().hash);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn layout_snapshot_restore_and_provider_free_replay_are_deterministic() {
     let provider = provider();
     let binding = replay_binding(&provider);
@@ -820,7 +820,7 @@ fn layout_snapshot_restore_and_provider_free_replay_are_deterministic() {
         .is_err());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn layout_replay_blocks_request_provider_and_payload_drift_without_advancing() {
     let provider = provider();
     let binding = replay_binding(&provider);
@@ -872,7 +872,7 @@ fn layout_replay_blocks_request_provider_and_payload_drift_without_advancing() {
     assert!(error.to_string().contains("ASTRA_TEXT_REPLAY_RECORD"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn layout_replay_enforces_record_and_snapshot_budgets_transactionally() {
     let provider = provider();
     let binding = replay_binding(&provider);

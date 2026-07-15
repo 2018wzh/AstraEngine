@@ -712,6 +712,7 @@ pub enum RuntimeOutputDomain {
     Presentation,
     Audio,
     Await,
+    Observation,
     Trace,
     DirtySaveSection,
 }
@@ -1101,7 +1102,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn runtime_provider_abi_registers_descriptor_and_entrypoints() {
         let descriptor = ProductRuntimeDescriptor {
             runtime_id: NATIVE_VN_RUNTIME_ID.to_string(),

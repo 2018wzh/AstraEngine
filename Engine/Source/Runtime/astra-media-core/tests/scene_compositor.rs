@@ -1,12 +1,12 @@
 use astra_core::Hash256;
 use astra_media_core::{
-    BlendMode, DrawCommand, GlyphBitmap, GlyphBitmapFormat, HeadlessRendererProvider, RectI,
+    BlendMode, CpuRendererProvider, DrawCommand, GlyphBitmap, GlyphBitmapFormat, RectI,
     RenderTargetFormat, Renderer2DProvider, RendererCreateRequest, TextureFrame, Transform2D,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn cpu_reference_compositor_executes_texture_glyph_clip_transform_and_blend() {
-    let mut renderer = HeadlessRendererProvider
+    let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {
             width: 8,
             height: 8,
@@ -64,9 +64,9 @@ fn cpu_reference_compositor_executes_texture_glyph_clip_transform_and_blend() {
     assert_eq!(pixel(1, 1), &[0, 0, 32, 255]);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn scene_resources_are_uploaded_reused_cropped_and_released_explicitly() {
-    let mut renderer = HeadlessRendererProvider
+    let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {
             width: 2,
             height: 1,
@@ -116,9 +116,9 @@ fn scene_resources_are_uploaded_reused_cropped_and_released_explicitly() {
     assert!(missing.to_string().contains("ASTRA_MEDIA_RESOURCE_UNKNOWN"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn compositor_blocks_corrupt_texture_and_unbalanced_state() {
-    let mut renderer = HeadlessRendererProvider
+    let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {
             width: 2,
             height: 2,
@@ -150,9 +150,9 @@ fn compositor_blocks_corrupt_texture_and_unbalanced_state() {
         .contains("ASTRA_MEDIA_CLIP_STACK"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn resource_updates_are_transactional_and_color_glyphs_preserve_rgba() {
-    let mut renderer = HeadlessRendererProvider
+    let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {
             width: 1,
             height: 1,

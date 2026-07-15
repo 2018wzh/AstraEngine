@@ -6,6 +6,7 @@ version.workspace = true
 rust-version.workspace = true
 
 [lib]
+doctest = false
 crate-type = ["rlib", "dylib"]
 
 [dependencies]
@@ -22,6 +23,7 @@ astra-vn-script = { path = "../astra-vn-script" }
 astra-vn-system = { path = "../astra-vn-system" }
 
 [dev-dependencies]
+astra-headless-test = { path = "../../../Developer/astra-headless-test" }
 astra-package = { path = "../../../Runtime/astra-package" }
 astra-plugin = { path = "../../../Runtime/astra-plugin" }
 semver.workspace = true

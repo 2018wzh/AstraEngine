@@ -1,6 +1,6 @@
 use std::{fs, process::Command};
 
-#[test]
+#[astra_headless_test::test]
 fn player_host_uses_shared_stable_logging_pipeline() {
     let logs = tempfile::tempdir().unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_astra-player"))

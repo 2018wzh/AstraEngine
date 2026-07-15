@@ -1,6 +1,6 @@
 use astra_vn_policy::{LuauPolicy, PolicyExecutionBudget, PolicyQueryContext, VnPolicyState};
 
-#[test]
+#[astra_headless_test::test]
 fn luau_policy_blocks_removed_authority_bypass_api() {
     let mut policy = LuauPolicy::new().unwrap();
     let mut state = VnPolicyState::default();
@@ -22,7 +22,7 @@ fn luau_policy_blocks_removed_authority_bypass_api() {
     assert_eq!(state.var("project", "affinity"), None);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn luau_policy_blocks_file_and_module_escape_attempts() {
     let mut policy = LuauPolicy::new().unwrap();
     let mut state = VnPolicyState::default();
@@ -34,7 +34,7 @@ fn luau_policy_blocks_file_and_module_escape_attempts() {
     assert_eq!(err.code(), "ASTRA_VN_LUAU_SANDBOX");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn luau_policy_blocks_execution_past_the_deterministic_budget() {
     let mut policy = LuauPolicy::new().unwrap();
     let mut state = VnPolicyState::default();

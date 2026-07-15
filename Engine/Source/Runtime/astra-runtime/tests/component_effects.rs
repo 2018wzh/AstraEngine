@@ -108,7 +108,7 @@ fn tick(world: &mut RuntimeWorld) -> astra_runtime::TickReport {
         .unwrap()
 }
 
-#[test]
+#[astra_headless_test::test]
 fn replace_component_supports_exact_component_id_selection() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
@@ -142,7 +142,7 @@ fn replace_component_supports_exact_component_id_selection() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn patch_component_map_supports_actor_schema_selection() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
@@ -182,7 +182,7 @@ fn patch_component_map_supports_actor_schema_selection() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn failed_patch_rolls_back_prior_effect_and_preserves_other_machine() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
@@ -248,7 +248,7 @@ fn failed_patch_rolls_back_prior_effect_and_preserves_other_machine() {
         .any(|machine| machine.completed));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn selector_rejects_duplicate_actor_schema_targets() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();

@@ -32,16 +32,15 @@ fn headless_profile_is_identity_bound_and_separate_from_platform_id() {
 fn malformed_headless_identity_limits_and_transport_fail_closed() {
     let valid =
         HeadlessHostProfile::reference("nativevn-game", "com.example.game", hash('a'), hash('b'));
-    let mutations: [fn(&mut HeadlessHostProfile); 6] = [
+    let mutations: [fn(&mut HeadlessHostProfile); 8] = [
         |profile| profile.package_hash = "sha256:short".to_string(),
         |profile| profile.input.max_messages = 0,
-        |profile| {
-            profile.input.allow_file = false;
-            profile.input.allow_stdio = false;
-        },
+        |profile| profile.input.transports.clear(),
         |profile| profile.artifacts.max_total_bytes = 0,
         |profile| profile.artifacts.required_checkpoints = vec!["same".into(), "same".into()],
         |profile| profile.providers.renderer.clear(),
+        |profile| profile.max_decode_output_bytes = 0,
+        |profile| profile.max_video_frames = 0,
     ];
     for mutate in mutations {
         let mut profile = valid.clone();
@@ -50,6 +49,24 @@ fn malformed_headless_identity_limits_and_transport_fail_closed() {
         assert_eq!(error.code, PlatformErrorCode::InvalidProfile);
         assert_eq!(error.operation, "headless.profile.validate");
     }
+}
+
+#[test]
+fn legacy_v1_provider_shape_is_not_deserialized() {
+    let json = serde_json::json!({
+        "schema": "astra.headless_host_profile.v1",
+        "id": "legacy",
+        "target": "nativevn-game",
+        "package_id": "com.example.game",
+        "build_fingerprint": hash('a'),
+        "package_hash": hash('b'),
+        "providers": { "renderer": "cpu_reference", "text": "cosmic_text_cpu", "audio": "old", "decode": "old", "save": "old", "package": "old" },
+        "input": { "schema": "astra.headless_input_policy.v1", "protocol_schema": "astra.user_input_sequence.v1", "max_messages": 1, "max_tick": 1, "allow_file": true, "allow_stdio": true, "allow_realtime": false },
+        "artifacts": { "namespace": "legacy", "retention": "all", "max_artifacts": 1, "max_total_bytes": 1, "max_frames": 1, "max_audio_frames": 1, "max_duration_ns": 1, "required_checkpoints": [] },
+        "package_sources": ["bundled"],
+        "limits": { "command_queue_capacity": 1, "event_queue_capacity": 1, "max_frame_bytes": 1, "max_audio_frames": 1, "max_package_read_bytes": 1 }
+    });
+    assert!(serde_json::from_value::<HeadlessHostProfile>(json).is_err());
 }
 
 #[tokio::test]

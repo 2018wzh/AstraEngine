@@ -13,3 +13,9 @@ astra-vn-script = { path = "../astra-vn-script" }
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+astra-headless-test = { path = "../../../Developer/astra-headless-test" }
+
+[lib]
+doctest = false

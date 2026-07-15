@@ -349,21 +349,21 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 ## Migration 11 Headless Platform 测试后端
 
-[Migration 11](../../migrations/headless-platform-test-backend-migration.md) 已完成 host contract 与 release 隔离边界，其余工作项仍为 `SPEC_READY`。`S2-MEDIA-01` 与 `S2-MEDIA-03` 保持 `DONE`，只表示局部 renderer/audio contract；完整 host、媒体、输入、产物、CLI、测试收束、review 和 preflight 全部闭合前，Stage 2 Headless 不能恢复完成状态。
+[Migration 11](../../migrations/headless-platform-test-backend-migration.md) 已进入实现阶段。`S2-MEDIA-01` 与 `S2-MEDIA-03` 保持 `DONE`，只表示局部 renderer/audio contract；其余 Headless 工作项必须等隔离全测、跨平台 job 和正式 evidence 通过后才能关闭。
 
 | Work ID | Status | Planned boundary | Planned Test ID |
 | --- | --- | --- | --- |
-| `S2-HEADLESS-CONTRACT-01` | `DONE` | `HostKind`、`HeadlessHostProfile`、`HostLaunchProfile`，保持六平台 `PlatformId` 与发布 profile v2；Release Gate 阻断 Headless schema、cooked launch profile 与 shipping target 泄漏 | `T-S2-HEADLESS-CONTRACT-01` |
-| `S2-HEADLESS-HOST-01` | `SPEC_READY` | `publish = false` 完整 host，覆盖 surface/audio/decode/save/package/input 和 zero-leak lifecycle | `T-S2-HEADLESS-HOST-01` |
-| `S2-HEADLESS-MEDIA-01` | `SPEC_READY` | Media-owned reference providers，真实 `SceneCommand`、glyph、FilterGraph、PNG 和 PCM WAV | `T-S2-HEADLESS-MEDIA-01` |
-| `S2-HEADLESS-INPUT-01` | `SPEC_READY` | 强类型物理输入、固定时间与双向 JSONL；产品语义直调 blocking | `T-S2-HEADLESS-INPUT-01` |
-| `S2-HEADLESS-ARTIFACT-01` | `SPEC_READY` | 全量/检查点/最终/manifest-only retention、显式限额、脱敏 artifact/run report | `T-S2-HEADLESS-ARTIFACT-01` |
-| `S2-HEADLESS-CLI-01` | `SPEC_READY` | 独立 `astra-headless run` 与 `serve --stdio` Developer binary | `T-S2-HEADLESS-CLI-01` |
-| `S2-HEADLESS-TEST-MIGRATION-01` | `SPEC_READY` | 所有 Runtime test 无例外创建 `HeadlessTestContext`，平台无关测试不保留双轨 | `T-S2-HEADLESS-TEST-MIGRATION-01` |
-| `S2-HEADLESS-REVIEW-01` | `SPEC_READY` | 全帧/全音频自动分析、required checkpoint 模型审查、人工容差批准后重跑 | `T-S2-HEADLESS-REVIEW-01` |
-| `S2-HEADLESS-PREFLIGHT-01` | `SPEC_READY` | 同 build/package/input 的 Headless preflight，E2 不替代 Windows/Web E3 | `T-S2-HEADLESS-PREFLIGHT-01` |
+| `S2-HEADLESS-CONTRACT-01` | `DONE` | `HostKind`、`HeadlessHostProfile`、`HostLaunchProfile`，保持六平台 `PlatformId` 与发布 profile v2 | `T-S2-HEADLESS-CONTRACT-01` |
+| `S2-HEADLESS-HOST-01` | `IN_PROGRESS` | `publish = false` 完整 host 与 Windows 隔离 workspace runtime 已通过；仍待 Linux、macOS matrix | `T-S2-HEADLESS-HOST-01` |
+| `S2-HEADLESS-MEDIA-01` | `IN_PROGRESS` | Media-owned CPU renderer/mixer、真实 image/Symphonia decode、PNG/WAV、完整音频分析与显式 FFmpeg Windows job 已通过；仍待跨平台 matrix | `T-S2-HEADLESS-MEDIA-01` |
+| `S2-HEADLESS-INPUT-01` | `IN_PROGRESS` | 强类型物理输入、固定时间、双向 JSONL 与 NativeVN adapter 已落地，等待全流程 evidence | `T-S2-HEADLESS-INPUT-01` |
+| `S2-HEADLESS-ARTIFACT-01` | `IN_PROGRESS` | retention、限额、原子 manifest/report 与比较器已落地，等待失败事务矩阵 evidence | `T-S2-HEADLESS-ARTIFACT-01` |
+| `S2-HEADLESS-CLI-01` | `IN_PROGRESS` | `astra-headless run`、`serve --stdio`、bootstrap 与旧 alias diagnostic 已落地 | `T-S2-HEADLESS-CLI-01` |
+| `S2-HEADLESS-TEST-MIGRATION-01` | `IN_PROGRESS` | 当前 408 个受控测试使用 `HeadlessTestContext`，38 个受控 library target 禁用绕过 lifecycle 的 doctest；Windows 全 workspace 与 feature job 已通过，仍待 Linux、macOS CI inventory | `T-S2-HEADLESS-TEST-MIGRATION-01` |
+| `S2-HEADLESS-REVIEW-01` | `IN_PROGRESS` | 自动比较与 review schema/gate 已落地，正式具名 review evidence 尚待生成 | `T-S2-HEADLESS-REVIEW-01` |
+| `S2-HEADLESS-PREFLIGHT-01` | `IN_PROGRESS` | formal release preflight check 已落地，真实 Windows/Web identity-linked evidence 尚待生成 | `T-S2-HEADLESS-PREFLIGHT-01` |
 
-Planned Done Evidence 只能在实现存在后执行并登记：
+以下命令是关闭 Migration 11 前必须登记的 Done Evidence：
 
 ```bash
 cargo test -p astra-platform-headless
@@ -371,7 +371,7 @@ cargo test -p astra-headless
 python Tools/run_cargo_isolated.py test --workspace
 ```
 
-当前没有对应 crate、binary、schema 或 report，以上命令不能写成已通过证据。Migration 11 的实现属于大规模测试基础设施迁移，开工前必须创建新分支。
+对应 crate、binary、schema 和 report 已接入 workspace，但尚未取得完整运行证据，不能把这些命令写成已通过。实现工作在独立分支进行，合入前仍须满足全量门禁。
 
 ## S2-PLATFORM-01 Platform capability crate 与分层 probe
 

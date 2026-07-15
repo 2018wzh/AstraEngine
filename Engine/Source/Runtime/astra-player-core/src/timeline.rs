@@ -45,11 +45,29 @@ struct ActiveTimelineTask {
     deadline_ms: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlayerTimelineSchedulerSnapshot {
+    pub schema: String,
+    pub capacity: usize,
+    pub last_time_ms: Option<u64>,
+    pub active: Vec<PlayerTimelineTaskSnapshot>,
+    pub completed: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlayerTimelineTaskSnapshot {
+    pub task_id: String,
+    pub target: String,
+    pub fence: Option<String>,
+    pub deadline_ms: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct PlayerTimelineScheduler {
     capacity: usize,
     last_time_ms: Option<u64>,
     active: BTreeMap<String, ActiveTimelineTask>,
+    completed: std::collections::BTreeSet<String>,
 }
 
 impl PlayerTimelineScheduler {
@@ -58,11 +76,85 @@ impl PlayerTimelineScheduler {
             capacity,
             last_time_ms: None,
             active: BTreeMap::new(),
+            completed: std::collections::BTreeSet::new(),
         }
     }
 
     pub fn active_count(&self) -> usize {
         self.active.len()
+    }
+
+    pub fn snapshot(&self) -> PlayerTimelineSchedulerSnapshot {
+        PlayerTimelineSchedulerSnapshot {
+            schema: "astra.player_timeline_scheduler_snapshot.v1".into(),
+            capacity: self.capacity,
+            last_time_ms: self.last_time_ms,
+            active: self
+                .active
+                .values()
+                .map(|task| PlayerTimelineTaskSnapshot {
+                    task_id: task.task_id.clone(),
+                    target: task.target.clone(),
+                    fence: task.fence.clone(),
+                    deadline_ms: task.deadline_ms,
+                })
+                .collect(),
+            completed: self.completed.iter().cloned().collect(),
+        }
+    }
+
+    pub fn restore(snapshot: PlayerTimelineSchedulerSnapshot) -> Result<Self, PlayerTimelineError> {
+        if snapshot.schema != "astra.player_timeline_scheduler_snapshot.v1"
+            || snapshot.capacity == 0
+            || snapshot.active.len() > snapshot.capacity
+        {
+            return Err(PlayerTimelineError::new(
+                "ASTRA_PLAYER_TIMELINE_SNAPSHOT_INVALID",
+                "timeline scheduler snapshot schema or capacity is invalid",
+            ));
+        }
+        let mut active = BTreeMap::new();
+        for task in snapshot.active {
+            validate_symbol(&task.task_id, "task id")?;
+            if task.target.trim().is_empty()
+                || active
+                    .insert(
+                        task.task_id.clone(),
+                        ActiveTimelineTask {
+                            task_id: task.task_id,
+                            target: task.target,
+                            fence: task.fence,
+                            deadline_ms: task.deadline_ms,
+                        },
+                    )
+                    .is_some()
+            {
+                return Err(PlayerTimelineError::new(
+                    "ASTRA_PLAYER_TIMELINE_SNAPSHOT_INVALID",
+                    "timeline scheduler snapshot contains an invalid or duplicate task",
+                ));
+            }
+        }
+        let completed = snapshot
+            .completed
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        if completed
+            .iter()
+            .any(|task| validate_symbol(task, "completed task id").is_err())
+            || completed.iter().any(|task| active.contains_key(task))
+        {
+            return Err(PlayerTimelineError::new(
+                "ASTRA_PLAYER_TIMELINE_SNAPSHOT_INVALID",
+                "timeline scheduler snapshot has invalid completed task state",
+            ));
+        }
+        Ok(Self {
+            capacity: snapshot.capacity,
+            last_time_ms: snapshot.last_time_ms,
+            active,
+            completed,
+        })
     }
 
     pub fn schedule(
@@ -92,6 +184,7 @@ impl PlayerTimelineScheduler {
                         "timeline scheduler capacity is exhausted",
                     ));
                 }
+                self.completed.remove(&task.task_id);
                 let target = task.target.ok_or_else(|| {
                     PlayerTimelineError::new(
                         "ASTRA_PLAYER_TIMELINE_TARGET_REQUIRED",
@@ -124,12 +217,16 @@ impl PlayerTimelineScheduler {
                 Ok(Vec::new())
             }
             PlayerTimelineTaskAction::Cancel => {
-                let active = self.active.remove(&task.task_id).ok_or_else(|| {
-                    PlayerTimelineError::new(
+                let Some(active) = self.active.remove(&task.task_id) else {
+                    if self.completed.remove(&task.task_id) {
+                        self.last_time_ms = Some(now_ms);
+                        return Ok(Vec::new());
+                    }
+                    return Err(PlayerTimelineError::new(
                         "ASTRA_PLAYER_TIMELINE_TASK_MISSING",
-                        "timeline cancel references an inactive task",
-                    )
-                })?;
+                        "timeline cancel references an unknown task",
+                    ));
+                };
                 self.last_time_ms = Some(now_ms);
                 Ok(vec![completion(
                     active,
@@ -162,6 +259,7 @@ impl PlayerTimelineScheduler {
                 PlayerTimelineCompletionKind::Completed,
                 now_ms,
             ));
+            self.completed.insert(id);
         }
         self.last_time_ms = Some(now_ms);
         Ok(completed)

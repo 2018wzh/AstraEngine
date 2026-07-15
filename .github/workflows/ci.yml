@@ -5,11 +5,11 @@ on:
   pull_request:
 
 jobs:
-  stage1:
+  headless-platform:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,33 @@ jobs:
         run: python Tools/run_cargo_isolated.py clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: python Tools/run_cargo_isolated.py test --workspace
-      - name: Native smoke
-        run: python Tools/run_cargo_isolated.py run -p astra-cli -- test run scenarios/native_smoke.yaml --headless --report target/reports/stage1.yaml
-      - name: Explain report
-        run: python Tools/run_cargo_isolated.py run -p astra-cli -- report explain target/reports/stage1.yaml
+      - name: Headless convergence
+        run: python Tools/check_headless_test_convergence.py
+      - name: Shipping dependency isolation
+        run: python Tools/check_headless_shipping_graph.py
+      - name: Headless acceptance tooling
+        run: python -m unittest Tools.tests.test_run_cargo_isolated Tools.tests.test_run_platform_host_acceptance
+
+  headless-video-ffmpeg:
+    runs-on: windows-latest
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows
+      VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Checkout vcpkg
+        run: git clone --depth 1 https://github.com/microsoft/vcpkg.git vcpkg
+      - name: Bootstrap vcpkg
+        run: .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+      - name: Install FFmpeg
+        run: .\vcpkg\vcpkg.exe install ffmpeg:x64-windows --clean-after-build
+      - name: Clippy with FFmpeg
+        run: python Tools/run_cargo_isolated.py clippy --workspace --all-targets --features ffmpeg-vcpkg -- -D warnings
+      - name: Test with FFmpeg
+        run: python Tools/run_cargo_isolated.py test --workspace --features ffmpeg-vcpkg

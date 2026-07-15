@@ -11,7 +11,7 @@ state prologue #@id state.prologue
     text key:opening.after_movie speaker:narrator #@id line.after_movie
 "#;
 
-#[test]
+#[astra_headless_test::test]
 fn movie_end_wait_blocks_cursor_and_resumes_from_serializable_fence() {
     let compiled =
         compile_astra_sources([AstraSource::new("movie_wait.astra", MOVIE_WAIT_STORY)]).unwrap();

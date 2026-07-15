@@ -3,7 +3,7 @@ use astra_core::{
     SchemaMigrationRegistry, SchemaVersion, SourceSpan, StableId, StableIdGenerator,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn core_types() {
     stable_id_roundtrips_as_uuid_string();
     deterministic_v7_generator_repeats();
@@ -13,7 +13,7 @@ fn core_types() {
     result_type_carries_core_error();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn stable_id_roundtrips_as_uuid_string() {
     let id = StableId::parse("018f10fb-4e00-7000-8000-00000000002a").unwrap();
     let encoded = serde_json::to_string(&id).unwrap();
@@ -21,7 +21,7 @@ fn stable_id_roundtrips_as_uuid_string() {
     assert_eq!(serde_json::from_str::<StableId>(&encoded).unwrap(), id);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn deterministic_v7_generator_repeats() {
     let mut left = StableIdGenerator::new(42);
     let mut right = StableIdGenerator::new(42);
@@ -31,7 +31,7 @@ fn deterministic_v7_generator_repeats() {
     assert_eq!(left.next_id(), right.next_id());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn diagnostic_serializes_machine_readable_fields() {
     let diag = Diagnostic::blocking("ASTRA_TEST", "blocked")
         .with_source(SourceSpan::new("scenario", 3, 4, 5))
@@ -41,7 +41,7 @@ fn diagnostic_serializes_machine_readable_fields() {
     assert_eq!(diag.severity, DiagnosticSeverity::Blocking);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn schema_versions_order_and_migration_chain_is_checked() {
     let current = SchemaVersion::new(1, 0, 0);
     let older = SchemaVersion::new(0, 9, 0);
@@ -59,7 +59,7 @@ fn schema_versions_order_and_migration_chain_is_checked() {
         .unwrap();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn hashes_are_repeatable_and_hex_encoded() {
     let left = Hash128::from_blake3(b"runtime");
     let right = Hash128::from_blake3(b"runtime");
@@ -70,7 +70,7 @@ fn hashes_are_repeatable_and_hex_encoded() {
     assert_eq!(sha.to_hex().len(), 64);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn result_type_carries_core_error() {
     let result: AstraResult<()> = Err(AstraError::message("failed"));
     assert!(result.is_err());

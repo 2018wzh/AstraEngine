@@ -96,7 +96,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn scenario_manifest_binds_normalized_path_to_exact_section_identity() {
         package_with_manifest(ScenarioRefsManifest {
             schema: "astra.scenario_refs.v2".to_string(),
@@ -126,7 +126,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn scenario_manifest_rejects_duplicate_path_or_section_authority() {
         let duplicate = valid_reference();
         let mut duplicate_path = duplicate.clone();

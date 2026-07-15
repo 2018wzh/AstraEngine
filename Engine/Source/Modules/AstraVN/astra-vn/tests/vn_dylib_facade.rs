@@ -4,7 +4,7 @@ use astra_vn::{
     SystemStoryManifest, VnPlayerCommand, VnRunConfig, VnRuntime,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn vn_dylib_facade_reexports_runtime_story_and_package_api() {
     let compiled = compile_astra_sources([AstraSource::new(
         "facade.astra",

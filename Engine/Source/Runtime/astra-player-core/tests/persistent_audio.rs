@@ -1,6 +1,6 @@
+use astra_media::PersistentAudioMixer;
 use astra_player_core::{
-    PlayerAudioQueueController, PlayerDecodedAudio, PlayerPersistentAudioMixer,
-    PlayerPersistentVoiceSpec,
+    PlayerAudioQueueController, PlayerDecodedAudio, PlayerPersistentVoiceSpec,
 };
 
 fn stereo(samples: Vec<f32>) -> PlayerDecodedAudio {
@@ -11,7 +11,7 @@ fn stereo(samples: Vec<f32>) -> PlayerDecodedAudio {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn queue_controller_primes_startup_then_blocks_new_underflow() {
     let mut queue = PlayerAudioQueueController::new(4_096, 1_024).unwrap();
     assert_eq!(queue.observe(0, 128).unwrap(), 1_024);
@@ -24,7 +24,7 @@ fn queue_controller_primes_startup_then_blocks_new_underflow() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn decoded_audio_converts_mono_and_resamples_with_a_bounded_sinc_filter() {
     let source = PlayerDecodedAudio {
         sample_rate: 44_100,
@@ -46,7 +46,7 @@ fn decoded_audio_converts_mono_and_resamples_with_a_bounded_sinc_filter() {
         .all(|frame| (frame[0] - frame[1]).abs() < f32::EPSILON));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn decoded_audio_rejects_unproven_surround_mapping_and_output_overflow() {
     let surround = PlayerDecodedAudio {
         sample_rate: 48_000,
@@ -66,9 +66,9 @@ fn decoded_audio_rejects_unproven_surround_mapping_and_output_overflow() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn persistent_mixer_loops_and_clamps_real_samples() {
-    let mut mixer = PlayerPersistentAudioMixer::new(48_000, 2, 4, 16).unwrap();
+    let mut mixer = PersistentAudioMixer::new(48_000, 2, 4, 16).unwrap();
     mixer
         .start_voice(PlayerPersistentVoiceSpec {
             id: "bgm.main".into(),
@@ -86,9 +86,9 @@ fn persistent_mixer_loops_and_clamps_real_samples() {
     assert_eq!(mixer.active_voice_count(), 1);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn persistent_mixer_fades_per_frame_and_completes_one_shot() {
-    let mut mixer = PlayerPersistentAudioMixer::new(48_000, 2, 4, 16).unwrap();
+    let mut mixer = PersistentAudioMixer::new(48_000, 2, 4, 16).unwrap();
     mixer
         .start_voice(PlayerPersistentVoiceSpec {
             id: "se.scan".into(),
@@ -109,9 +109,9 @@ fn persistent_mixer_fades_per_frame_and_completes_one_shot() {
     assert_eq!(mixer.active_voice_count(), 0);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn persistent_mixer_rejects_duplicate_format_and_budget_bypasses() {
-    let mut mixer = PlayerPersistentAudioMixer::new(48_000, 2, 1, 4).unwrap();
+    let mut mixer = PersistentAudioMixer::new(48_000, 2, 1, 4).unwrap();
     let voice = PlayerPersistentVoiceSpec {
         id: "bgm.main".into(),
         bus: "bgm".into(),
@@ -147,9 +147,9 @@ fn persistent_mixer_rejects_duplicate_format_and_budget_bypasses() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn persistent_mixer_pause_resume_and_stop_preserve_cursor_and_owner() {
-    let mut mixer = PlayerPersistentAudioMixer::new(48_000, 2, 4, 16).unwrap();
+    let mut mixer = PersistentAudioMixer::new(48_000, 2, 4, 16).unwrap();
     mixer
         .start_voice(PlayerPersistentVoiceSpec {
             id: "bgm.main".into(),

@@ -6,7 +6,7 @@ struct ExpandSmoke {
     value: String,
 }
 
-#[test]
+#[astra_headless_test::test]
 fn derive_output_exposes_metadata_without_global_registry() {
     let metadata = ExpandSmoke::property_metadata();
     assert_eq!(metadata.fields[0].name, "value");

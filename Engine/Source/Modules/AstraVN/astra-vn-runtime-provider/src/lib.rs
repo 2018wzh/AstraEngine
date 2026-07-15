@@ -209,6 +209,11 @@ impl NativeVnRuntimeProvider {
                 ),
                 output_schema(RuntimeOutputDomain::Audio, "astra.vn.audio_command.v2", 2),
                 output_schema(RuntimeOutputDomain::Await, "astra.runtime.await_id.v1", 1),
+                output_schema(
+                    RuntimeOutputDomain::Observation,
+                    "astra.product.observation.v1",
+                    1,
+                ),
                 output_schema(RuntimeOutputDomain::Effect, "astra.vn.timeline_task.v1", 1),
                 output_schema(
                     RuntimeOutputDomain::Trace,
@@ -576,6 +581,17 @@ impl NativeVnRuntimeProvider {
             )
             .map_err(|err| CoreVnError::message(err.to_string()))?,
         ];
+        let observations = vec![RuntimeOutputEnvelope::postcard(
+            RuntimeOutputDomain::Observation,
+            "astra.product.observation.v1",
+            SchemaVersion::new(1, 0, 0),
+            &NativeVnStepTrace {
+                runtime_state_hash: tick.state_hash.to_string(),
+                runtime_event_hash: tick.event_hash.to_string(),
+                runtime_presentation_hash: tick.presentation_hash.to_string(),
+            },
+        )
+        .map_err(|err| CoreVnError::message(err.to_string()))?];
         let dirty_save_sections = vec![RuntimeOutputEnvelope::postcard(
             RuntimeOutputDomain::DirtySaveSection,
             "astra.runtime.dirty_save_section.v1",
@@ -596,6 +612,7 @@ impl NativeVnRuntimeProvider {
                 .chain(audio)
                 .chain(timeline)
                 .chain(awaits)
+                .chain(observations)
                 .chain(trace)
                 .chain(dirty_save_sections)
                 .collect(),

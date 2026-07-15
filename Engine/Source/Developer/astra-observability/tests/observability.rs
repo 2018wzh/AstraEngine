@@ -29,7 +29,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
 #[global_allocator]
 static GLOBAL_ALLOCATOR: CountingAllocator = CountingAllocator;
 
-#[test]
+#[astra_headless_test::test]
 fn host_pipeline_writes_stable_bounded_redacted_logs_and_crash_tail() {
     let root = tempdir().unwrap();
     let log_dir = root.path().join("logs");

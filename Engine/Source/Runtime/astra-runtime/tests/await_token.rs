@@ -4,7 +4,7 @@ use astra_runtime::{
     PackageHandle, RuntimeConfig, RuntimeWorld, TickIngress, TickInput, TickRequest,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn await_token_orders_out_of_order_results() {
     let left = run_with_order([2, 1]);
     let right = run_with_order([1, 2]);
@@ -74,7 +74,7 @@ fn token_for(value: u64, token_a: AwaitTokenId, token_b: AwaitTokenId) -> AwaitT
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn await_token_is_serializable() {
     let token = AwaitToken {
         token_id: AwaitTokenId(StableId::deterministic_v7(1, 1, 1)),
@@ -87,7 +87,7 @@ fn await_token_is_serializable() {
     assert!(!encoded.is_empty());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn await_timeout_materializes_deterministic_result() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -150,7 +150,7 @@ fn await_timeout_materializes_deterministic_result() {
     assert!(world.snapshot().awaits.pending().is_empty());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn unknown_and_duplicate_await_results_are_diagnostic_only() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -224,7 +224,7 @@ fn unknown_and_duplicate_await_results_are_diagnostic_only() {
     assert_eq!(await_events[0].payload.kind, "await.completed");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn await_replay_policy_rejects_invalid_tokens_and_live_timeout_results() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {

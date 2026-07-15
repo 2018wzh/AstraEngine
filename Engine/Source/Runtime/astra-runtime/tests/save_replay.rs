@@ -10,7 +10,7 @@ use astra_runtime::{
     SerializedEffectEnvelope, TickIngress, TickInput, TickRequest,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn save_load_rejects_previous_runtime_world_layout_without_hidden_compatibility() {
     let world = RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
     let version = SchemaVersion::new(1, 0, 0);
@@ -48,7 +48,7 @@ fn save_load_rejects_previous_runtime_world_layout_without_hidden_compatibility(
         .contains("ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn save_replay_loads_hash_and_blocks_missing_migrator() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -86,7 +86,7 @@ fn save_replay_loads_hash_and_blocks_missing_migrator() {
         .contains("ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn restored_world_requires_exactly_one_restore_continuation_tick() {
     let config = RuntimeConfig {
         seed: 17,
@@ -141,7 +141,7 @@ fn restored_world_requires_exactly_one_restore_continuation_tick() {
         .contains("ASTRA_RUNTIME_TICK_MODE_INVALID"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn replay_rejects_old_schema_and_live_output_without_partial_world_changes() {
     let config = RuntimeConfig {
         seed: 37,
@@ -216,7 +216,7 @@ fn replay_rejects_old_schema_and_live_output_without_partial_world_changes() {
     assert_eq!(postcard::to_allocvec(&world.snapshot()).unwrap(), original);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn save_load_rejects_footer_hash_mismatch() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
@@ -236,7 +236,7 @@ fn save_load_rejects_footer_hash_mismatch() {
     assert!(loaded.load(save).is_err());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn save_load_continues_the_stable_id_sequence() {
     let config = RuntimeConfig {
         seed: 23,
@@ -265,7 +265,7 @@ fn save_load_continues_the_stable_id_sequence() {
     assert_eq!(restored.state_hash(), uninterrupted.state_hash());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn save_load_preserves_pending_events_trace_and_sequence() {
     let config = RuntimeConfig {
         seed: 29,
@@ -320,7 +320,7 @@ fn save_load_preserves_pending_events_trace_and_sequence() {
     assert_eq!(trace[1].sequence, 1);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn replay_consumes_checkpoint_and_ordered_player_input_transcript() {
     let config = RuntimeConfig {
         seed: 31,
@@ -370,7 +370,7 @@ fn replay_consumes_checkpoint_and_ordered_player_input_transcript() {
     assert_eq!(report.presentation_hash, expected.presentation_hash);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn replay_applies_hash_validated_provider_output_without_a_live_provider() {
     let config = RuntimeConfig {
         seed: 37,
@@ -447,7 +447,7 @@ fn replay_applies_hash_validated_provider_output_without_a_live_provider() {
     assert_eq!(replayed.snapshot().awaits.pending().len(), 1);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn replay_blocks_provider_output_payload_hash_mismatch() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();

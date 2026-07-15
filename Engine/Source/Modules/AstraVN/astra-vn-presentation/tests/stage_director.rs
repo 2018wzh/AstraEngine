@@ -58,7 +58,7 @@ fn show_hero(director: &mut ProductStageDirector) {
         .unwrap();
 }
 
-#[test]
+#[astra_headless_test::test]
 fn stage_director_applies_profile_bound_tween_without_partial_failure() {
     let mut director = director();
     let initial = director.state().stable_hash().unwrap();
@@ -86,7 +86,7 @@ fn stage_director_applies_profile_bound_tween_without_partial_failure() {
     assert_eq!(director.state().entities["hero"].opacity, FixedScalar::ONE);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn stage_director_timeline_snapshot_restore_matches_uninterrupted_run() {
     let manifest = VnPresentationProviderManifest::standard();
     let mut uninterrupted = ProductStageDirector::new(
@@ -143,7 +143,7 @@ fn stage_director_timeline_snapshot_restore_matches_uninterrupted_run() {
     )));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn stage_director_rejects_invalid_tick_and_timeline_without_mutation() {
     let mut director = director();
     configure(&mut director);

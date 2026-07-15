@@ -6,7 +6,7 @@ Media 分为 Renderer2D、TextLayout、DecodeProvider、FilterGraph、AudioGraph
 
 wgpu 是默认 provider，但不是唯一后端。真实 wgpu owner 是 platform host 的 `WgpuPresentationCore`；`astra-media` 不再用只返回 descriptor 的 facade 冒充 renderer。Windows host 持有 hardware adapter、device、surface、upload/readback resource 和 frame sequence，显式处理 resize、context loss、device loss、资源重建与失败事件。Headless CPU provider只用于 E1/E2 reference，不具备 shipping eligibility。
 
-现有 `HeadlessRenderer` 只证明轻量 CPU contract 和 deterministic frame。Migration 11 planned 完整 Headless Platform 必须显式绑定 Media 层的真实 renderer、font/TextLayout、FilterGraph、AudioGraph 和 decode provider，输出真实 PNG/WAV。state hash 颜色块、矩形变化、空音频、静态 meter 或 synthetic decode 都不能作为完整 Headless 产品证据。
+Migration 11 的 `CpuRendererProvider`、`ProductionAudioMixer`、Image/Symphonia decode 和 Headless artifact recorder 已接入统一 host，能够输出真实 PNG 与 PCM S16LE WAV。完整产品证据仍须绑定 package、物理输入、provider、checkpoint 和 run identity；state hash 颜色块、矩形变化、空音频、静态 meter 或 synthetic decode 均不计入验收。
 
 ## DecodeProvider
 

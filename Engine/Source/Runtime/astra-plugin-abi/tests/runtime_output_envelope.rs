@@ -4,7 +4,7 @@ use astra_plugin_abi::{
     RuntimeOutputEnvelope, RuntimeOutputSchemaDescriptor, RuntimeStepOutput,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn step_output_uses_one_versioned_envelope_stream() {
     let envelope = RuntimeOutputEnvelope::postcard(
         RuntimeOutputDomain::Effect,
@@ -24,7 +24,7 @@ fn step_output_uses_one_versioned_envelope_stream() {
     assert_eq!(output.outputs[0].version, SchemaVersion::new(1, 0, 0));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn provider_descriptor_declares_every_allowed_output_schema() {
     let descriptor = ProductRuntimeDescriptor {
         runtime_id: "test".into(),
@@ -44,7 +44,7 @@ fn provider_descriptor_declares_every_allowed_output_schema() {
     assert_eq!(descriptor.output_schemas.len(), 1);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn envelope_rejects_a_wrong_schema_version() {
     let envelope = RuntimeOutputEnvelope::postcard(
         RuntimeOutputDomain::Trace,

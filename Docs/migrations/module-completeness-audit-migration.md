@@ -75,7 +75,7 @@
 | Package/Asset/Cook | `astra-package`、`astra-asset`、`astra-cook` 和 release validator 已完成 section/schema/VFS authority、typed dependency graph、内容缓存、bounded concurrency、取消和原子提交 | 本轮生产加固已覆盖核心冲突矩阵；真实 Headless/Player package source、长流程和规模 evidence 继续归入 `P0-004/P2-002` |
 | Media contract | `astra-media-core` 提供 Renderer2D/FilterGraph contract、headless CPU executor；这是符合轻量 core 边界的实现 | core 本身不能替代真实 renderer/provider；硬件 surface、设备恢复和完整视觉输出仍由平台/provider 负责 |
 | Text/Font | verified Package/VFS font database、`cosmic-text` shaping、Swash raster、multiscript fallback、layout replay、Windows hardware glyph atlas/golden 和 Player retained glyph stream 已落地 | 固定宽度假实现已删除；shared E2 和 Windows E3 子证据成立，Web 与完整 product scene 仍阻断 `P1-001` |
-| Platform/Headless | Windows wgpu/WMF/WASAPI 主链已具备真实 owner；本审查项已新增 `HostKind`、`HostLaunchProfile` 和 `astra.headless_host_profile.v1` contract | 完整 `astra-platform-headless`、物理输入、PNG/WAV artifact、统一测试 context、review/preflight 尚不存在，构成 `P0-004` |
+| Platform/Headless | Windows wgpu/WMF/WASAPI 主链已有真实 owner；Migration 11 已接入 `astra-platform-headless`、物理输入 JSONL、PNG/WAV artifact、统一测试 context 与 review/preflight gate | 隔离 workspace、FFmpeg feature job、Windows/Linux/macOS matrix 和正式 identity-linked evidence 尚未闭合，继续构成 `P0-004` |
 | Web host | WebGPU/WebCodecs/WebAudio/OPFS 等实现存在，但正式用户手势、恢复、完整 Player 和同 run evidence 未闭合 | 本轮暂缓实现，所有 Web completion 条件继续保持 blocking |
 | AstraVN | 多 crate、runtime provider、policy、presentation 和 package/save 代码存在；script frontend 与 live Player 仍重开/进行中 | 已实现范围不能升级为完整 VN 产品；frontend 和真实 Player 是主要闭口 |
 | Editor | `Editor/Source/.gitkeep` 是当前唯一 tracked 文件 | P1 `CONTRACT_ONLY`、`UNWIRED_MAIN_PATH`；Stage 4 不应被当作实现 |

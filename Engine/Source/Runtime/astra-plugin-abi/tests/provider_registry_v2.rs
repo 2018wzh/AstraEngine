@@ -85,7 +85,7 @@ fn registry_and_policy() -> (PluginExtensionRegistrySnapshot, ProviderPolicy) {
     (registry, policy)
 }
 
-#[test]
+#[astra_headless_test::test]
 fn v2_registry_closes_policy_provider_and_package_identity() {
     let (registry, policy) = registry_and_policy();
     assert_eq!(
@@ -116,7 +116,7 @@ fn v2_registry_closes_policy_provider_and_package_identity() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn v2_registry_blocks_hash_capability_fingerprint_and_policy_drift() {
     let (registry, policy) = registry_and_policy();
 
@@ -166,7 +166,7 @@ fn v2_registry_blocks_hash_capability_fingerprint_and_policy_drift() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn v2_registry_blocks_duplicate_slot_and_context_drift() {
     let (mut registry, mut policy) = registry_and_policy();
     registry.bindings.push(registry.bindings[0].clone());

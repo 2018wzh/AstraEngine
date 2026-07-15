@@ -2,7 +2,7 @@ use std::path::Path;
 
 use astra_plugin::dylib_path_for_target;
 
-#[test]
+#[astra_headless_test::test]
 fn dylib_path_resolves_relative_cargo_target_dir_from_workspace_root() {
     let root = Path::new("workspace");
     let path = dylib_path_for_target(
@@ -28,7 +28,7 @@ fn dylib_path_resolves_relative_cargo_target_dir_from_workspace_root() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn dylib_path_preserves_absolute_cargo_target_dir() {
     let root = Path::new("workspace");
     let target = if cfg!(target_os = "windows") {
@@ -42,7 +42,7 @@ fn dylib_path_preserves_absolute_cargo_target_dir() {
     assert_eq!(path.parent().unwrap(), target.join("release"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn dylib_path_defaults_to_workspace_target_directory() {
     let root = Path::new("workspace");
     let path = dylib_path_for_target(root, None, "debug", "fixture_provider");

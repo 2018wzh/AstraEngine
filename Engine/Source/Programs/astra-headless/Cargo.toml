@@ -1,0 +1,35 @@
+[package]
+name = "astra-headless"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+default = []
+ffmpeg-vcpkg = ["astra-platform-headless/ffmpeg-vcpkg"]
+
+[dependencies]
+astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
+astra-core = { path = "../../Runtime/astra-core" }
+astra-observability = { path = "../../Developer/astra-observability" }
+astra-platform = { path = "../../Platform/astra-platform" }
+astra-platform-headless = { path = "../../Platform/astra-platform-headless" }
+astra-package = { path = "../../Runtime/astra-package" }
+astra-product-host = { path = "../../Runtime/astra-product-host" }
+astra-player-vn = { path = "../astra-player-vn" }
+astra-headless-vn-adapter = { path = "../../Developer/astra-headless-vn-adapter" }
+clap.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+image.workspace = true
+hound.workspace = true
+rustfft.workspace = true
+
+[dev-dependencies]
+astra-headless-test = { path = "../../Developer/astra-headless-test" }
+tempfile.workspace = true

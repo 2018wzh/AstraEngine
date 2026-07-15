@@ -1,10 +1,9 @@
 use astra_media::{
-    CpuFilterExecutor, DrawCommand, FilterGraph, FilterNode, FilterParam, FilterTarget,
-    FilterValidator, HeadlessRendererProvider, RenderTargetFormat, Renderer2DProvider,
-    RendererCreateRequest,
+    CpuFilterExecutor, CpuRendererProvider, DrawCommand, FilterGraph, FilterNode, FilterParam,
+    FilterTarget, FilterValidator, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn filter_graph_validates_typed_nodes_and_fallback_diagnostics() {
     let graph = FilterGraph {
         schema: "astra.filter_graph.v1".to_string(),
@@ -57,9 +56,9 @@ fn filter_graph_validates_typed_nodes_and_fallback_diagnostics() {
         .any(|diag| diag.code == "ASTRA_FILTER_UNSUPPORTED"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn cpu_filter_executor_runs_deterministic_filter_graph_on_real_frame() {
-    let provider = HeadlessRendererProvider;
+    let provider = CpuRendererProvider;
     let mut renderer = provider
         .create(RendererCreateRequest {
             width: 8,
@@ -101,9 +100,9 @@ fn cpu_filter_executor_runs_deterministic_filter_graph_on_real_frame() {
     assert_eq!(&first.bytes[hero_pixel..hero_pixel + 4], &[73, 83, 93, 255]);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn cpu_filter_executor_blocks_undeclared_fallback_target_bypass_and_corrupt_frame() {
-    let provider = HeadlessRendererProvider;
+    let provider = CpuRendererProvider;
     let mut renderer = provider
         .create(RendererCreateRequest {
             width: 4,

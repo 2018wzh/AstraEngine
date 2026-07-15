@@ -24,6 +24,8 @@ pub struct PlatformHostSession {
 
 所有资源使用不可序列化的 `{slot, generation}` typed handle：`WindowHandle`、`SurfaceHandle`、`AudioOutputHandle`、`DecodeSessionHandle`、`MediaFrameHandle`、`SaveTransactionHandle` 与 `PackageSourceHandle`。stale handle、重复 close、越界 range、乱序 completion、队列溢出和 shutdown leak 必须显式报错。
 
+Headless 的 `HttpsRange` source 只接受 allowlist 中不含 credential/fragment 的 HTTPS URL，禁止 redirect 与压缩传输。后端要求严格 `206 Content-Range`，在 open 阶段按有界 block 扫描完整对象并绑定 package hash，read 阶段重新请求并校验覆盖区间的 block identity；不支持 byte range 的服务端直接阻断。
+
 ## Crate Split
 
 | Crate | 职责 |
@@ -32,7 +34,7 @@ pub struct PlatformHostSession {
 | `astra-platform-common` | generational resource table、ordered completion、atomic save、hash-bound package range、shared `WgpuPresentationCore`、audio/gamepad mapper、verified cache 与共用 policy |
 | `astra-platform-windows` | winit event loop、hardware wgpu、WASAPI、WMF、Saved Games、Windows package source；test injection 仅在 `platform-test-driver` |
 | `astra-platform-web` | canvas/DOM、WebGPU、WebAudio、WebCodecs、OPFS、fetch/File source |
-| `astra-platform-headless` | planned `publish = false` 测试 host；完整 service、物理输入和 PNG/WAV artifact 尚未落地 |
+| `astra-platform-headless` | `publish = false` 测试 host 已实现完整 service、物理输入编排和 PNG/WAV artifact；隔离全测与正式 evidence 尚待闭合 |
 | `astra-player-web` | 独立 WASM Player，读取 config、package 和 cooked platform profile |
 | 其余平台 crate | Stage 6 `PLATFORM_NOT_IMPLEMENTED` factory |
 
@@ -42,7 +44,7 @@ pub struct PlatformHostSession {
 
 Windows release 要求 `wgpu_hardware`、`wmf`、`wasapi`、`saved_games`。Web release 只支持 Chrome，固定要求 `webgpu`、`webcodecs`、`webaudio`、`opfs`，不配置 fallback。
 
-Headless 不写入 `project.yaml.platform_profiles` 或 cooked `platform.profiles`。planned `astra.headless_host_profile.v1` 只供测试 harness 与 Developer 工具使用，声明 provider binding、JSONL 输入协议、artifact policy、限额和 build/package identity。Release Gate、shipping target 或 AstraPlayer 发现该 schema、Headless provider id 或 Developer binary role时必须阻断。
+Headless 不写入 `project.yaml.platform_profiles` 或 cooked `platform.profiles`。`astra.headless_host_profile.v1` 只供测试 harness 与 Developer 工具使用，声明 provider binding、JSONL 输入协议、artifact policy、限额和 build/package identity。Release Gate、shipping target 或 AstraPlayer 发现该 schema、Headless provider id 或 Developer binary role时必须阻断。
 
 ## Reports And Gate
 

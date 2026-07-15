@@ -11,6 +11,10 @@ use crate::{
 pub const HEADLESS_HOST_PROFILE_SCHEMA: &str = "astra.headless_host_profile.v1";
 pub const HEADLESS_INPUT_POLICY_SCHEMA: &str = "astra.headless_input_policy.v1";
 pub const USER_INPUT_SEQUENCE_SCHEMA: &str = "astra.user_input_sequence.v1";
+pub const HEADLESS_PROTOCOL_SCHEMA: &str = "astra.headless_protocol.v1";
+pub const HEADLESS_TICK_DURATION_NS: u64 = 16_666_667;
+pub const HEADLESS_AUDIO_SAMPLE_RATE: u32 = 48_000;
+pub const HEADLESS_AUDIO_CHANNELS: u16 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -29,27 +33,41 @@ pub enum HeadlessArtifactRetention {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct HeadlessProviderBindings {
     pub renderer: String,
     pub text: String,
-    pub audio: String,
-    pub decode: String,
+    pub audio_mixer: String,
+    pub image_decode: String,
+    pub audio_decode: String,
+    pub video_decode: String,
     pub save: String,
     pub package: String,
+    pub product_adapter: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct HeadlessInputPolicy {
     pub schema: String,
     pub protocol_schema: String,
     pub max_messages: u64,
     pub max_tick: u64,
-    pub allow_file: bool,
-    pub allow_stdio: bool,
-    pub allow_realtime: bool,
+    pub transports: BTreeSet<HeadlessTransport>,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum HeadlessTransport {
+    File,
+    Stdio,
+    RealtimeCli,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct HeadlessArtifactPolicy {
     pub namespace: String,
     pub retention: HeadlessArtifactRetention,
@@ -62,17 +80,31 @@ pub struct HeadlessArtifactPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct HeadlessHostProfile {
     pub schema: String,
     pub id: String,
     pub target: String,
+    pub product_profile: String,
     pub package_id: String,
     pub build_fingerprint: String,
     pub package_hash: String,
+    pub viewport_width: u32,
+    pub viewport_height: u32,
+    pub tick_duration_ns: u64,
+    pub frame_format: String,
+    pub image_artifact_format: String,
+    pub audio_sample_rate: u32,
+    pub audio_channels: u16,
+    pub audio_sample_format: String,
+    pub audio_artifact_format: String,
     pub providers: HeadlessProviderBindings,
     pub input: HeadlessInputPolicy,
     pub artifacts: HeadlessArtifactPolicy,
     pub package_sources: Vec<PackageSourcePolicy>,
+    pub max_package_bytes: u64,
+    pub max_decode_output_bytes: u64,
+    pub max_video_frames: u64,
     pub limits: HostLimits,
 }
 
@@ -87,25 +119,38 @@ impl HeadlessHostProfile {
             schema: HEADLESS_HOST_PROFILE_SCHEMA.to_string(),
             id: "headless-reference".to_string(),
             target: target.into(),
+            product_profile: "classic".to_string(),
             package_id: package_id.into(),
             build_fingerprint: build_fingerprint.into(),
             package_hash: package_hash.into(),
+            viewport_width: 1280,
+            viewport_height: 720,
             providers: HeadlessProviderBindings {
                 renderer: "cpu_reference".to_string(),
                 text: "cosmic_text_cpu".to_string(),
-                audio: "audio_graph_cpu".to_string(),
-                decode: "symphonia".to_string(),
-                save: "transactional_memory".to_string(),
-                package: "verified_memory".to_string(),
+                audio_mixer: "audio_graph_cpu".to_string(),
+                image_decode: "image_cpu".to_string(),
+                audio_decode: "symphonia".to_string(),
+                video_decode: "disabled".to_string(),
+                save: "transactional_file".to_string(),
+                package: "verified_bounded".to_string(),
+                product_adapter: "astra.native_vn".to_string(),
             },
+            tick_duration_ns: HEADLESS_TICK_DURATION_NS,
+            frame_format: "rgba8_srgb".to_string(),
+            image_artifact_format: "png".to_string(),
+            audio_sample_rate: HEADLESS_AUDIO_SAMPLE_RATE,
+            audio_channels: HEADLESS_AUDIO_CHANNELS,
+            audio_sample_format: "pcm_s16le".to_string(),
+            audio_artifact_format: "wav".to_string(),
             input: HeadlessInputPolicy {
                 schema: HEADLESS_INPUT_POLICY_SCHEMA.to_string(),
                 protocol_schema: USER_INPUT_SEQUENCE_SCHEMA.to_string(),
                 max_messages: 100_000,
                 max_tick: 10_000_000,
-                allow_file: true,
-                allow_stdio: true,
-                allow_realtime: false,
+                transports: [HeadlessTransport::File, HeadlessTransport::Stdio]
+                    .into_iter()
+                    .collect(),
             },
             artifacts: HeadlessArtifactPolicy {
                 namespace: "headless-run".to_string(),
@@ -118,6 +163,9 @@ impl HeadlessHostProfile {
                 required_checkpoints: Vec::new(),
             },
             package_sources: vec![PackageSourcePolicy::Bundled],
+            max_package_bytes: 8 * 1024 * 1024 * 1024,
+            max_decode_output_bytes: 512 * 1024 * 1024,
+            max_video_frames: 18_000,
             limits: HostLimits::default(),
         }
     }
@@ -240,9 +288,38 @@ pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(
             "headless profile or input schema is unsupported",
         ));
     }
+    if profile.tick_duration_ns != HEADLESS_TICK_DURATION_NS
+        || profile.frame_format != "rgba8_srgb"
+        || profile.image_artifact_format != "png"
+        || profile.audio_sample_rate != HEADLESS_AUDIO_SAMPLE_RATE
+        || profile.audio_channels != HEADLESS_AUDIO_CHANNELS
+        || profile.audio_sample_format != "pcm_s16le"
+        || profile.audio_artifact_format != "wav"
+    {
+        return Err(invalid_headless_profile(
+            "headless canonical media or time format was changed",
+        ));
+    }
+    let viewport_bytes = usize::try_from(profile.viewport_width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(profile.viewport_height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(4));
+    if profile.viewport_width == 0
+        || profile.viewport_height == 0
+        || viewport_bytes.is_none_or(|bytes| bytes > profile.limits.max_frame_bytes)
+    {
+        return Err(invalid_headless_profile(
+            "headless viewport is invalid or exceeds frame limits",
+        ));
+    }
     for (field, value) in [
         ("id", profile.id.as_str()),
         ("target", profile.target.as_str()),
+        ("product_profile", profile.product_profile.as_str()),
         ("package_id", profile.package_id.as_str()),
         ("artifact_namespace", profile.artifacts.namespace.as_str()),
     ] {
@@ -267,10 +344,16 @@ pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(
     let providers = [
         ("renderer", profile.providers.renderer.as_str()),
         ("text", profile.providers.text.as_str()),
-        ("audio", profile.providers.audio.as_str()),
-        ("decode", profile.providers.decode.as_str()),
+        ("audio_mixer", profile.providers.audio_mixer.as_str()),
+        ("image_decode", profile.providers.image_decode.as_str()),
+        ("audio_decode", profile.providers.audio_decode.as_str()),
+        ("video_decode", profile.providers.video_decode.as_str()),
         ("save", profile.providers.save.as_str()),
         ("package", profile.providers.package.as_str()),
+        (
+            "product_adapter",
+            profile.providers.product_adapter.as_str(),
+        ),
     ];
     for (field, provider) in providers {
         if !is_safe_identifier(provider) {
@@ -282,7 +365,7 @@ pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(
     }
     if profile.input.max_messages == 0
         || profile.input.max_tick == 0
-        || (!profile.input.allow_file && !profile.input.allow_stdio)
+        || profile.input.transports.is_empty()
     {
         return Err(invalid_headless_profile(
             "headless input policy has no bounded transport",
@@ -310,9 +393,14 @@ pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(
             "headless required checkpoints are unsafe or duplicated",
         ));
     }
-    if profile.package_sources.is_empty() {
+    if profile.package_sources.is_empty()
+        || profile.max_package_bytes == 0
+        || profile.max_decode_output_bytes == 0
+        || profile.max_video_frames == 0
+        || profile.max_package_bytes < profile.limits.max_package_read_bytes as u64
+    {
         return Err(invalid_headless_profile(
-            "headless profile must declare at least one package source",
+            "headless profile package source or package byte limit is invalid",
         ));
     }
     validate_headless_package_sources(&profile.package_sources)?;

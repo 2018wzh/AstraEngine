@@ -2,7 +2,7 @@ use astra_vn_policy::{
     LuauPolicy, VnPolicyBundleManifest, VnPolicyBundleSourceCache, VnPolicyState,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn standard_policy_bundle_carries_source_cache_and_executes() {
     let manifest = VnPolicyBundleManifest::standard();
     let cache = VnPolicyBundleSourceCache::standard();
@@ -28,7 +28,7 @@ fn standard_policy_bundle_carries_source_cache_and_executes() {
         .any(|entry| entry.kind == "policy.loaded"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn standard_policy_bundle_blocks_source_cache_hash_mismatch() {
     let manifest = VnPolicyBundleManifest::standard();
     let mut cache = VnPolicyBundleSourceCache::standard();

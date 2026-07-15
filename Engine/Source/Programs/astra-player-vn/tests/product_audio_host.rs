@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use astra_core::Hash256;
 use astra_platform::{
-    host_channel, AudioMeter, AudioOutputFormat, AudioOutputHandle, AudioOutputState, HostCommand,
-    PlatformHostProfile, SurfaceHandle,
+    host_channel, AudioMeter, AudioOutputFormat, AudioOutputHandle, AudioOutputState, DecodeKind,
+    DecodeOutput, DecodeSessionHandle, HostCommand, PlatformHostProfile, SurfaceHandle,
 };
 use astra_player_core::{
     PlatformCommandSink, PlayerDecodedAudio, PlayerHostCommandExecutor, PlayerHostResourceId,
@@ -20,7 +20,7 @@ fn source() -> NativeVnHostCommandSource {
     )
 }
 
-#[tokio::test]
+#[astra_headless_test::tokio_test]
 async fn shared_product_media_host_completes_timeline_fence_and_presents_runtime_result() {
     let mut source = support::source_for(
         "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    timeline id:intro target:hero property:opacity keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro\n    text key:line.after #@id line.after\n",
@@ -66,7 +66,7 @@ async fn shared_product_media_host_completes_timeline_fence_and_presents_runtime
     backend_task.await.unwrap();
 }
 
-#[tokio::test]
+#[astra_headless_test::tokio_test]
 async fn product_media_host_restores_uncommitted_timeline_tasks_after_capacity_failure() {
     let mut source = support::source_for(
         "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    timeline id:intro target:hero property:opacity keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro\n",
@@ -88,7 +88,119 @@ async fn product_media_host_restores_uncommitted_timeline_tasks_after_capacity_f
     assert_eq!(tasks[0].task_id, "intro");
 }
 
-#[tokio::test]
+#[astra_headless_test::tokio_test]
+async fn product_media_host_presents_every_video_frame_and_restores_by_asset_identity() {
+    let mut source = support::source_for_video(
+        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    stage viewport:320x180 safe_area:16:9 #@id stage.main\n    layer id:video kind:video z:100 blend:normal clip:stage #@id layer.video\n    movie layer:video asset:asset:/video/intro loop:true end:wait fence:movie.intro.end fallback:asset:/video/intro-fallback #@id movie.intro\n    text key:line.after #@id line.after\n",
+    );
+    source.launch().unwrap();
+    let first = vec![1, 2, 3, 255];
+    let second = vec![4, 5, 6, 255];
+    let stream = astra_media::DecodedVideoStream {
+        schema: astra_media::DECODED_VIDEO_STREAM_SCHEMA.into(),
+        duration_us: 40_000,
+        frames: vec![
+            astra_media::DecodedVideoFrame {
+                sequence: 1,
+                pts_us: 0,
+                duration_us: 20_000,
+                width: 1,
+                height: 1,
+                content_hash: Hash256::from_sha256(&first),
+                bgra8: first,
+            },
+            astra_media::DecodedVideoFrame {
+                sequence: 2,
+                pts_us: 20_000,
+                duration_us: 20_000,
+                width: 1,
+                height: 1,
+                content_hash: Hash256::from_sha256(&second),
+                bgra8: second,
+            },
+        ],
+    };
+    let encoded = stream.encode(2, 1_024).unwrap();
+    let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
+    let (client, mut backend, _events) = host_channel(profile, 16, 16).unwrap();
+    let decode = DecodeSessionHandle::from_parts(9, 1).unwrap();
+    let surface = SurfaceHandle::from_parts(7, 1).unwrap();
+    let backend_task = tokio::spawn(async move {
+        for expected_cycle in 0..2 {
+            match backend.next_command().await.unwrap() {
+                HostCommand::OpenDecode { kind, reply } => {
+                    assert_eq!(kind, DecodeKind::Video);
+                    reply.send(Ok(decode)).unwrap();
+                }
+                command => panic!("unexpected command: {}", command.operation()),
+            }
+            match backend.next_command().await.unwrap() {
+                HostCommand::Decode { request, reply, .. } => {
+                    assert_eq!(request.kind, DecodeKind::Video);
+                    reply
+                        .send(Ok(DecodeOutput::CpuBuffer {
+                            format: "postcard:astra.decoded_video_stream.v1".into(),
+                            hash: Hash256::from_sha256(&encoded).to_string(),
+                            bytes: encoded.clone(),
+                        }))
+                        .unwrap();
+                }
+                command => panic!("unexpected command: {}", command.operation()),
+            }
+            match backend.next_command().await.unwrap() {
+                HostCommand::CloseDecode { reply, .. } => reply.send(Ok(())).unwrap(),
+                command => panic!("unexpected command: {}", command.operation()),
+            }
+            match backend.next_command().await.unwrap() {
+                HostCommand::PresentScene { frame, reply, .. } => {
+                    assert!(!frame.commands.is_empty());
+                    reply.send(Ok(())).unwrap();
+                }
+                command => panic!(
+                    "unexpected command in video cycle {expected_cycle}: {}",
+                    command.operation()
+                ),
+            }
+        }
+        match backend.next_command().await.unwrap() {
+            HostCommand::PresentScene { frame, reply, .. } => {
+                assert!(!frame.commands.is_empty());
+                reply.send(Ok(())).unwrap();
+            }
+            command => panic!("unexpected completion command: {}", command.operation()),
+        }
+    });
+    let mut sink = PlatformCommandSink::new(client);
+    sink.bind_surface(PlayerHostResourceId(1), surface).unwrap();
+    let mut executor = PlayerHostCommandExecutor::new(sink);
+    let mut media = NativeVnProductMediaHost::default();
+    media
+        .process(&mut source, &mut executor, 0, Vec::new())
+        .await
+        .unwrap();
+    assert!(media.is_active());
+    let snapshot = media.snapshot();
+    let mut restored = NativeVnProductMediaHost::default();
+    restored.restore(snapshot).unwrap();
+    restored
+        .poll_and_process(&mut source, &mut executor, 20)
+        .await
+        .unwrap();
+    assert!(restored.has_active_video());
+    assert!(restored.skip_active_videos(&mut source));
+    restored
+        .poll_and_process(&mut source, &mut executor, 21)
+        .await
+        .unwrap();
+    assert!(!restored.has_active_video());
+    assert_ne!(
+        source.pending_wait().map(|wait| wait.fence.as_str()),
+        Some("movie.intro.end")
+    );
+    backend_task.await.unwrap();
+}
+
+#[astra_headless_test::tokio_test]
 async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let (client, mut backend, _events) = host_channel(profile, 16, 16).unwrap();
@@ -135,7 +247,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
             HostCommand::SubmitAudio { packet, reply, .. } => {
                 assert_eq!(packet.sequence, 1);
                 assert_eq!(packet.channels, 2);
-                assert_eq!(packet.frame_count(), 1_024);
+                assert_eq!(packet.frame_count(), 800);
                 reply.send(Ok(())).unwrap();
             }
             command => panic!("unexpected command: {}", command.operation()),
@@ -187,6 +299,9 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
         .await
         .unwrap();
     assert_eq!(host.last_meter().unwrap().underflow_count, 64);
+    let snapshot = host.snapshot();
+    host.restore(snapshot).unwrap();
+    assert!(host.is_active());
     host.control(
         &NativeVnAudioControlRequest {
             command_id: "audio.pause".into(),

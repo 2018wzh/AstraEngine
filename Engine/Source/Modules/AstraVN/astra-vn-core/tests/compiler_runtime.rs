@@ -32,7 +32,7 @@ story system.title #@id system.title
     option key:system.start -> story.main:state.prologue #@id system.start
 "#;
 
-#[test]
+#[astra_headless_test::test]
 fn compiles_route_graph_source_map_and_stable_hash() {
     let compiled = compile_astra_sources([
         AstraSource::new("main.astra", MAIN),
@@ -56,7 +56,7 @@ fn compiles_route_graph_source_map_and_stable_hash() {
     assert_eq!(compiled.story_hash.to_hex().len(), 32);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn compiled_story_exposes_story_variable_and_command_manifests() {
     let compiled = compile_astra_sources([AstraSource::new("main.astra", MAIN)]).unwrap();
 
@@ -85,7 +85,7 @@ fn compiled_story_exposes_story_variable_and_command_manifests() {
             && command.source.as_ref().unwrap().line == 6));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn compiled_story_exposes_system_story_manifest() {
     let compiled = compile_astra_sources([
         AstraSource::new("main.astra", MAIN),
@@ -108,7 +108,7 @@ fn compiled_story_exposes_system_story_manifest() {
     assert_eq!(title.policy.as_deref(), Some("astra.policy.standard"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
     let compiled = compile_astra_sources([AstraSource::new("main.astra", MAIN)]).unwrap();
     let mut runtime = VnRuntime::new(compiled.clone(), VnRunConfig::classic("zh-Hans")).unwrap();
@@ -175,7 +175,7 @@ fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
     assert_eq!(loaded.state_hash(), saved_hash);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn reducer_advances_from_an_explicit_runtime_state_without_hidden_session_state() {
     let compiled = compile_astra_sources([AstraSource::new("main.astra", MAIN)]).unwrap();
     let mut runtime = VnRuntime::new(compiled.clone(), VnRunConfig::classic("zh-Hans")).unwrap();
@@ -197,7 +197,7 @@ fn reducer_advances_from_an_explicit_runtime_state_without_hidden_session_state(
     assert_eq!(runtime.state().pending_choice, None);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn system_story_uses_a_separate_stack_and_explicit_return() {
     let compiled = compile_astra_sources([
         AstraSource::new("main.astra", MAIN),

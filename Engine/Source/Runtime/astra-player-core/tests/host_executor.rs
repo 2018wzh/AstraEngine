@@ -50,7 +50,7 @@ impl PlayerHostCommandSink for RecordingSink {
     }
 }
 
-#[tokio::test]
+#[astra_headless_test::tokio_test]
 async fn executor_preserves_command_order_and_logical_results() {
     let batch = PlayerHostCommandBatch::new(vec![
         PlayerHostCommand::BeginSave {
@@ -70,7 +70,7 @@ async fn executor_preserves_command_order_and_logical_results() {
     assert_eq!(results.len(), 2);
 }
 
-#[tokio::test]
+#[astra_headless_test::tokio_test]
 async fn save_transaction_aborts_after_write_failure() {
     let transaction = PlayerHostResourceId(9);
     let batch = |command| PlayerHostCommandBatch::new(vec![command]).unwrap();

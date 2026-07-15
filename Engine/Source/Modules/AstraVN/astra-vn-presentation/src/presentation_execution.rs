@@ -1,8 +1,8 @@
 use astra_core::{Diagnostic, Hash256};
 use astra_media_core::{
-    BlendMode, CpuFilterExecutor, DrawCommand, FilterExecutionReport, FilterGraph,
-    HeadlessRendererProvider, MediaError, RectI, RenderTargetFormat, Renderer2DProvider,
-    RendererCreateRequest, TextureFrame, Transform2D,
+    BlendMode, CpuFilterExecutor, CpuRendererProvider, DrawCommand, FilterExecutionReport,
+    FilterGraph, MediaError, RectI, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest,
+    TextureFrame, Transform2D,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -48,7 +48,7 @@ impl VnHeadlessPresentationExecutor {
         request: VnPresentationExecutionRequest,
     ) -> Result<VnPresentationExecutionReport, VnError> {
         validate_stage(&request.stage)?;
-        let renderer_provider = HeadlessRendererProvider;
+        let renderer_provider = CpuRendererProvider;
         let renderer_descriptor = renderer_provider.descriptor();
         let mut renderer = renderer_provider
             .create(RendererCreateRequest {

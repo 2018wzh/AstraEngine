@@ -1020,7 +1020,7 @@ mod windows_live {
 mod host_trace_tests {
     use super::{parse_player_host_traces, parse_scenario_input_plan, ScenarioInputAction};
 
-    #[test]
+    #[astra_headless_test::test]
     fn scenario_input_plan_uses_declared_actions_instead_of_expected_route_count() {
         let yaml = br#"
 schema: astra.scenario.v1
@@ -1049,7 +1049,7 @@ actions:
         );
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn scenario_input_plan_blocks_media_completion_bypass() {
         let yaml = br#"
 schema: astra.scenario.v1
@@ -1062,7 +1062,7 @@ actions:
         assert!(error.contains("ASTRA_PLAYER_AUTOMATION_MEDIA_COMPLETION_REQUIRED"));
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn route_coverage_is_parsed_from_runtime_evidence_not_expected_labels() {
         let stderr = concat!(
             "event=astra.player.input.consumed player_sequence=17 kind=keyboard\n",
@@ -1094,7 +1094,7 @@ actions:
         assert!(traces[0].trace_hash.starts_with("sha256:"));
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn visual_change_without_runtime_route_trace_produces_no_coverage() {
         let stderr = "event=astra.player.input.consumed player_sequence=2 kind=keyboard\n";
 
