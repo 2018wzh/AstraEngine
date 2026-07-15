@@ -1,11 +1,15 @@
-use std::{env, fs, path::PathBuf, thread, time::Duration};
+use std::{env, path::PathBuf, thread, time::Duration};
 
+#[cfg(target_os = "windows")]
 use astra_core::Hash256;
+use astra_observability::{init_host, ConsoleFormat, HostObservabilityConfig, HostRole};
+#[cfg(target_os = "windows")]
 use astra_observability::{
-    init_host, install_windows_crash_reporter, ConsoleFormat, CrashArtifactRef,
-    CrashBundleManifestV1, CrashReportingMode, HostObservabilityConfig, HostRole,
+    install_windows_crash_reporter, CrashArtifactRef, CrashBundleManifestV1, CrashReportingMode,
     WindowsCrashReporterConfig, CRASH_BUNDLE_SCHEMA,
 };
+#[cfg(target_os = "windows")]
+use std::fs;
 
 type ReporterError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -312,6 +316,7 @@ fn write_dump_and_manifest(
     Err("native minidump capture is only available on Windows".into())
 }
 
+#[cfg(target_os = "windows")]
 fn read_log_tail(log_file: Option<&std::path::Path>) -> Result<Vec<u8>, std::io::Error> {
     const MAX_TAIL_BYTES: usize = 4 * 1024 * 1024;
     let Some(log_file) = log_file else {
@@ -464,6 +469,26 @@ fn close_watch_resources(
 }
 
 #[cfg(not(target_os = "windows"))]
-fn watch_process(_config: WatchConfig) -> Result<(), ReporterError> {
+fn watch_process(config: WatchConfig) -> Result<(), ReporterError> {
+    let WatchConfig {
+        pid,
+        session_id,
+        crash_dir,
+        log_file,
+        mapping,
+        ready_event,
+        request_event,
+        complete_event,
+    } = config;
+    drop((
+        pid,
+        session_id,
+        crash_dir,
+        log_file,
+        mapping,
+        ready_event,
+        request_event,
+        complete_event,
+    ));
     Err("Windows crash watch mode is unavailable on this platform".into())
 }
