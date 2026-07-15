@@ -625,6 +625,9 @@ fn package_build_includes_target_filtered_tsuinosora_sections() {
     let case_dir = unique_case_dir(root, "tsuinosora-package-sections");
     let project = case_dir.join("project.yaml");
     let scripts = case_dir.join("Scripts");
+    let ui = case_dir.join("UI");
+    let controllers = case_dir.join("Controllers");
+    let themes = case_dir.join("Themes");
     let localization = case_dir.join("Localization");
     let fonts = case_dir.join("Assets/Fonts");
     let package_sections = case_dir.join("PackageSections");
@@ -632,6 +635,9 @@ fn package_build_includes_target_filtered_tsuinosora_sections() {
     let package = case_dir.join("tsuinosora.astrapkg");
 
     fs::create_dir_all(&scripts).unwrap();
+    fs::create_dir_all(&ui).unwrap();
+    fs::create_dir_all(&controllers).unwrap();
+    fs::create_dir_all(&themes).unwrap();
     fs::create_dir_all(&localization).unwrap();
     fs::create_dir_all(&fonts).unwrap();
     fs::create_dir_all(&package_sections).unwrap();
@@ -640,6 +646,21 @@ fn package_build_includes_target_filtered_tsuinosora_sections() {
         fs::read_to_string(root.join("Examples/NativeVN/Scripts/main.astra")).unwrap(),
     )
     .unwrap();
+    for name in ["classic.astra", "modern.astra"] {
+        fs::copy(root.join("Examples/NativeVN/UI").join(name), ui.join(name)).unwrap();
+    }
+    fs::copy(
+        root.join("Examples/NativeVN/Controllers/standard_ui.luau"),
+        controllers.join("standard_ui.luau"),
+    )
+    .unwrap();
+    for name in ["classic.json", "modern.json"] {
+        fs::copy(
+            root.join("Examples/NativeVN/Themes").join(name),
+            themes.join(name),
+        )
+        .unwrap();
+    }
     fs::copy(
         root.join("Examples/NativeVN/Localization/en.json"),
         localization.join("en.json"),
@@ -682,6 +703,13 @@ nativevn:
   default_locale: en
   sources:
     - Scripts
+  ui_sources:
+    - UI
+  controllers:
+    - Controllers/standard_ui.luau
+  themes:
+    - Themes/classic.json
+    - Themes/modern.json
   profiles: [classic, modern]
   asset_roots: [Assets]
   display:
@@ -1513,7 +1541,8 @@ fn nativevn_sample_cooks_packages_validates_and_runs_full_playthrough() {
     assert_eq!(locale_config["schema"], "astra.player_locale_config.v1");
     assert_eq!(locale_config["default_locale"], "en");
     assert_eq!(locale_config["available_locales"][0], "en");
-    assert_eq!(locale_config["available_locales"][1], "zh-Hans");
+    assert_eq!(locale_config["available_locales"][1], "ja");
+    assert_eq!(locale_config["available_locales"][2], "zh-Hans");
 
     let validate_output = Command::new(env!("CARGO_BIN_EXE_astra"))
         .args([

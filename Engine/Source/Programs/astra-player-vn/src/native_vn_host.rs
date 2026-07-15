@@ -1212,6 +1212,13 @@ impl NativeVnHostCommandSource {
         events: Vec<UiInputEvent>,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         let fallback_events = events.clone();
+        if !self.has_active_ui_surface() {
+            return if let Some(command) = self.bubbled_ui_command(&fallback_events) {
+                self.command(command)
+            } else {
+                self.present_current_scene(self.ui_draw.clone())
+            };
+        }
         let (output, ui_draw) = self.render_ui(events)?;
         if output.actions.len() > 1 {
             return Err(NativeVnHostError::Input(
@@ -1231,6 +1238,14 @@ impl NativeVnHostCommandSource {
             }
         }
         self.present_current_scene(ui_draw)
+    }
+
+    fn has_active_ui_surface(&self) -> bool {
+        self.runtime_state.as_ref().is_some_and(|state| {
+            state.pending_choice.is_some()
+                || !state.system_stack.is_empty()
+                || state.pending_wait.as_ref().map(|wait| wait.kind) == Some(VnWaitKind::Dialogue)
+        })
     }
 
     fn bubbled_ui_command(&self, events: &[UiInputEvent]) -> Option<VnPlayerCommand> {
