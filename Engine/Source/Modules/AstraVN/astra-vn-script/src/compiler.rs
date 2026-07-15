@@ -5,7 +5,7 @@ use astra_core::{Diagnostic, DiagnosticSeverity, Hash128, SourceRef};
 use crate::{
     lower::{lower_sources_from_cst, ParsedLine},
     stage_compile::{compile_extension_command, compile_stage_command},
-    AstraSource, AstraSourceRole, ChoiceOption, CommandManifest, CommandManifestEntry,
+    AstraSource, AstraSourceRole, BranchOp, ChoiceOption, CommandManifest, CommandManifestEntry,
     CommandProvider, CommandRegistry, CommandSourceMap, CompiledCommand, CompiledStory,
     CompiledVnProject, ExtensionCommandDescriptor, MutationOp, PresentationCommand, RouteEdge,
     RouteGraph, RouteNode, Scene, State, Story, StoryManifest, StoryManifestEntry, SystemPageKind,
@@ -57,6 +57,7 @@ fn compile_bound_sources(
             "choice" => builder.push_choice(line)?,
             "option" => builder.push_option(line)?,
             "jump" => builder.push_jump(line)?,
+            "branch" => builder.push_branch(line)?,
             "call" => builder.push_call(line)?,
             "return" => builder.push_return(line)?,
             "mutate" => builder.push_mutate(line)?,
@@ -474,6 +475,69 @@ impl CompileBuilder {
         Ok(())
     }
 
+    fn push_branch(&mut self, line: &ParsedLine) -> Result<(), VnError> {
+        let path = required_attr(line, "path")?;
+        let (scope, key) = path.split_once('.').ok_or_else(|| {
+            VnError::diagnostic("ASTRA_VN_BRANCH_PATH", "branch path needs scope.key")
+        })?;
+        if !is_allowed_variable_scope(scope) {
+            return Err(VnError::Diagnostic(
+                Diagnostic::blocking("ASTRA_VN_VARIABLE_SCOPE", "variable scope is not allowed")
+                    .with_source(line.source_ref())
+                    .with_field("scope", scope)
+                    .with_field("allowed", "project,global,temp,system"),
+            ));
+        }
+        if key.is_empty() {
+            return Err(VnError::Diagnostic(
+                Diagnostic::blocking("ASTRA_VN_BRANCH_PATH", "branch variable key is empty")
+                    .with_source(line.source_ref()),
+            ));
+        }
+        let op = match required_attr(line, "op")?.as_str() {
+            "eq" => BranchOp::Eq,
+            "not_eq" => BranchOp::NotEq,
+            "less" => BranchOp::Less,
+            "less_eq" => BranchOp::LessEq,
+            "greater" => BranchOp::Greater,
+            "greater_eq" => BranchOp::GreaterEq,
+            op => {
+                return Err(VnError::Diagnostic(
+                    Diagnostic::blocking("ASTRA_VN_BRANCH_OP", "branch operator is not supported")
+                        .with_source(line.source_ref())
+                        .with_field("operator", op)
+                        .with_field("allowed", "eq,not_eq,less,less_eq,greater,greater_eq"),
+                ));
+            }
+        };
+        let raw_value = required_attr(line, "value")?;
+        let value = raw_value.parse::<i64>().map_err(|error| {
+            VnError::Diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_VN_BRANCH_VALUE",
+                    "branch comparison value must be an integer",
+                )
+                .with_source(line.source_ref())
+                .with_field("value", raw_value)
+                .with_field("error", error.to_string()),
+            )
+        })?;
+        let then_target = required_attr(line, "then")?;
+        let else_target = required_attr(line, "else")?;
+        self.current_scene_mut()?
+            .commands
+            .push(CompiledCommand::Branch {
+                id: line.stable_id(),
+                scope: scope.to_string(),
+                key: key.to_string(),
+                op,
+                value,
+                then_target,
+                else_target,
+            });
+        Ok(())
+    }
+
     fn push_call(&mut self, line: &ParsedLine) -> Result<(), VnError> {
         let target = line
             .args
@@ -648,7 +712,9 @@ impl CompileBuilder {
     fn variable_manifest(&self) -> VariableManifest {
         let mut scopes = BTreeMap::<String, VariableScopeManifest>::new();
         for command in self.commands() {
-            if let CompiledCommand::Mutate { scope, key, .. } = command {
+            if let CompiledCommand::Mutate { scope, key, .. }
+            | CompiledCommand::Branch { scope, key, .. } = command
+            {
                 scopes
                     .entry(scope.clone())
                     .or_insert_with(|| VariableScopeManifest {
@@ -716,6 +782,15 @@ impl CompileBuilder {
                     }
                     CompiledCommand::Jump { id, target } => {
                         self.validate_target_ref(&state_ids, id, target, TargetKind::Jump)?;
+                    }
+                    CompiledCommand::Branch {
+                        id,
+                        then_target,
+                        else_target,
+                        ..
+                    } => {
+                        self.validate_target_ref(&state_ids, id, then_target, TargetKind::Branch)?;
+                        self.validate_target_ref(&state_ids, id, else_target, TargetKind::Branch)?;
                     }
                     CompiledCommand::Call { id, target } => {
                         self.validate_target_ref(&state_ids, id, target, TargetKind::Call)?;
@@ -840,6 +915,14 @@ impl CompileBuilder {
                 CompiledCommand::Jump { target, .. } | CompiledCommand::Call { target, .. } => {
                     targets.push(resolve_target(target, state_ids));
                 }
+                CompiledCommand::Branch {
+                    then_target,
+                    else_target,
+                    ..
+                } => {
+                    targets.push(resolve_target(then_target, state_ids));
+                    targets.push(resolve_target(else_target, state_ids));
+                }
                 _ => {}
             }
         }
@@ -891,6 +974,26 @@ impl CompileBuilder {
                             label: target.clone(),
                             terminal: !state_ids.contains(&target),
                         });
+                    }
+                    CompiledCommand::Branch {
+                        id,
+                        then_target,
+                        else_target,
+                        ..
+                    } => {
+                        for (suffix, target) in [("then", then_target), ("else", else_target)] {
+                            let target = resolve_target(target, &state_ids);
+                            edges.push(RouteEdge {
+                                from: state.id.clone(),
+                                to: target.clone(),
+                                trigger: format!("{id}.{suffix}"),
+                            });
+                            nodes.entry(target.clone()).or_insert(RouteNode {
+                                id: target.clone(),
+                                label: target.clone(),
+                                terminal: !state_ids.contains(&target),
+                            });
+                        }
                     }
                     _ => {}
                 }
@@ -981,6 +1084,7 @@ fn semantic_story(compiled: &CompiledStory) -> CompiledStory {
                     CompiledCommand::Dialogue { id, .. }
                     | CompiledCommand::Choice { id, .. }
                     | CompiledCommand::Jump { id, .. }
+                    | CompiledCommand::Branch { id, .. }
                     | CompiledCommand::Call { id, .. }
                     | CompiledCommand::Return { id }
                     | CompiledCommand::Mutate { id, .. }
@@ -1012,18 +1116,20 @@ fn duplicate_id_diagnostic(id: &str, line: &ParsedLine) -> VnError {
 enum TargetKind {
     Choice,
     Jump,
+    Branch,
     Call,
 }
 
 impl TargetKind {
     fn allows_terminal(self) -> bool {
-        matches!(self, Self::Choice | Self::Jump)
+        matches!(self, Self::Choice | Self::Jump | Self::Branch)
     }
 
     fn as_str(self) -> &'static str {
         match self {
             Self::Choice => "choice",
             Self::Jump => "jump",
+            Self::Branch => "branch",
             Self::Call => "call",
         }
     }
@@ -1042,6 +1148,7 @@ fn command_manifest_identity(command: &CompiledCommand) -> (&str, &'static str) 
         CompiledCommand::Dialogue { id, .. } => (id, "dialogue"),
         CompiledCommand::Choice { id, .. } => (id, "choice"),
         CompiledCommand::Jump { id, .. } => (id, "jump"),
+        CompiledCommand::Branch { id, .. } => (id, "branch"),
         CompiledCommand::Call { id, .. } => (id, "call"),
         CompiledCommand::Return { id } => (id, "return"),
         CompiledCommand::Mutate { id, .. } => (id, "mutate"),

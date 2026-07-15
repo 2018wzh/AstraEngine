@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.director_story_graph_report.v1.json",
+  "title": "TsuiNoSora Director Story Graph Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "status", "movie_count", "node_count", "scene_count", "choice_count",
+    "terminal_count", "conditional_node_count", "frame_action_binding_count",
+    "used_action_script_count", "flow_counts", "story_graph_sha256", "diagnostics", "redaction"
+  ],
+  "properties": {
+    "schema": { "const": "tsuinosora.director_story_graph_report.v1" },
+    "status": { "enum": ["pass", "blocked"] },
+    "movie_count": { "type": "integer", "minimum": 0 },
+    "node_count": { "type": "integer", "minimum": 0 },
+    "scene_count": { "type": "integer", "minimum": 0 },
+    "choice_count": { "type": "integer", "minimum": 0 },
+    "terminal_count": { "type": "integer", "minimum": 0 },
+    "conditional_node_count": { "type": "integer", "minimum": 0 },
+    "frame_action_binding_count": { "type": "integer", "minimum": 0 },
+    "used_action_script_count": { "type": "integer", "minimum": 0 },
+    "flow_counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "story_graph_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "diagnostics": { "type": "array", "items": { "type": "object" } },
+    "redaction": { "type": "object", "additionalProperties": { "type": "string" } }
+  }
+}

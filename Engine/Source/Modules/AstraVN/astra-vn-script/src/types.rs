@@ -169,6 +169,15 @@ pub enum CompiledCommand {
         id: String,
         target: String,
     },
+    Branch {
+        id: String,
+        scope: String,
+        key: String,
+        op: BranchOp,
+        value: i64,
+        then_target: String,
+        else_target: String,
+    },
     Call {
         id: String,
         target: String,
@@ -212,6 +221,17 @@ pub enum MutationOp {
     Set,
     Add,
     Sub,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BranchOp {
+    Eq,
+    NotEq,
+    Less,
+    LessEq,
+    Greater,
+    GreaterEq,
 }
 
 #[derive(
@@ -495,6 +515,7 @@ pub enum VnRouteFlagKind {
     Launch,
     Choice,
     Jump,
+    Branch,
     Call,
     Return,
 }

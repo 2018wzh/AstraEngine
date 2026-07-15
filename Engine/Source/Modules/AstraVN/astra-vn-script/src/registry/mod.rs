@@ -29,6 +29,7 @@ impl Default for CommandRegistry {
             "choice",
             "option",
             "jump",
+            "branch",
             "call",
             "return",
             "mutate",

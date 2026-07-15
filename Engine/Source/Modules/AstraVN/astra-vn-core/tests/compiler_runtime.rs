@@ -91,6 +91,104 @@ fn compiled_story_exposes_story_variable_and_command_manifests() {
 }
 
 #[astra_headless_test::test]
+fn branch_is_typed_in_route_graph_and_selects_from_runtime_variables() {
+    const BRANCHING: &str = r#"
+story main #@id story.main
+
+state start #@id state.start
+  scene start #@id scene.start
+    mutate project.day = 2 #@id set.day
+    branch path:project.day op:greater_eq value:2 then:reached else:missed #@id branch.day
+
+state reached #@id state.reached
+  scene reached #@id scene.reached
+    text key:reached #@id line.reached
+
+state missed #@id state.missed
+  scene missed #@id scene.missed
+    text key:missed #@id line.missed
+"#;
+    let compiled = compile_astra_project(
+        [AstraSource::story("branching.astra", BRANCHING)],
+        Default::default(),
+    )
+    .unwrap();
+
+    assert!(compiled
+        .route_graph
+        .edges
+        .iter()
+        .any(|edge| edge.from == "state.start"
+            && edge.to == "state.reached"
+            && edge.trigger == "branch.day.then"));
+    assert!(compiled
+        .route_graph
+        .edges
+        .iter()
+        .any(|edge| edge.from == "state.start"
+            && edge.to == "state.missed"
+            && edge.trigger == "branch.day.else"));
+    assert!(compiled
+        .variable_manifest
+        .scopes
+        .get("project")
+        .unwrap()
+        .keys
+        .contains("day"));
+
+    let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("ja")).unwrap();
+    let output = runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".to_string(),
+            state_id: "state.start".to_string(),
+        })
+        .unwrap();
+    assert!(matches!(
+        output.presentation.last(),
+        Some(PresentationCommand::Dialogue { key, .. }) if key == "reached"
+    ));
+    assert!(runtime
+        .state()
+        .route_flags
+        .values()
+        .any(|flag| flag.source == "branch.day" && flag.target == "state.reached"));
+}
+
+#[astra_headless_test::test]
+fn branch_rejects_an_uninitialized_variable() {
+    const BRANCHING: &str = r#"
+story main #@id story.main
+
+state start #@id state.start
+  scene start #@id scene.start
+    branch path:project.day op:eq value:0 then:reached else:missed #@id branch.day
+
+state reached #@id state.reached
+  scene reached #@id scene.reached
+    text key:reached #@id line.reached
+
+state missed #@id state.missed
+  scene missed #@id scene.missed
+    text key:missed #@id line.missed
+"#;
+    let compiled = compile_astra_project(
+        [AstraSource::story("branching.astra", BRANCHING)],
+        Default::default(),
+    )
+    .unwrap();
+    let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("ja")).unwrap();
+    let error = runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".to_string(),
+            state_id: "state.start".to_string(),
+        })
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_VN_BRANCH_VARIABLE_MISSING"));
+}
+
+#[astra_headless_test::test]
 fn compiled_story_exposes_system_story_manifest() {
     let compiled = compile_astra_project(
         [

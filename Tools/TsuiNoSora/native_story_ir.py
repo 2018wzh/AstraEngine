@@ -32,6 +32,7 @@ SUPPORTED_COMMANDS = {
     "wait",
     "mutate",
     "jump",
+    "branch",
     "call",
     "return",
 }
@@ -245,6 +246,14 @@ def _command_payload_valid(command: dict) -> bool:
         ) and len({option["option_id"] for option in options}) == len(options)
     if kind in {"jump", "call"}:
         return _safe(command.get("target"))
+    if kind == "branch":
+        return (
+            _safe(command.get("path"))
+            and command.get("op") in {"eq", "not_eq", "less", "less_eq", "greater", "greater_eq"}
+            and isinstance(command.get("value"), int)
+            and _safe(command.get("then_target"))
+            and _safe(command.get("else_target"))
+        )
     if kind == "return":
         return True
     if kind == "mutate":
@@ -270,6 +279,17 @@ def _validate_command_links(commands: dict[str, dict], state_ids: set[str], diag
             for option in command["options"]:
                 if option["target"] not in state_ids:
                     diagnostics.append(_diagnostic("TSUI_NATIVE_STORY_TARGET_MISSING", "choice target state does not exist", command_id=command["command_id"], option_id=option["option_id"]))
+        if command["kind"] == "branch":
+            for field in ("then_target", "else_target"):
+                if command[field] not in state_ids:
+                    diagnostics.append(
+                        _diagnostic(
+                            "TSUI_NATIVE_STORY_TARGET_MISSING",
+                            "branch target state does not exist",
+                            command_id=command["command_id"],
+                            target_field=field,
+                        )
+                    )
         voice_id = command.get("voice_command_id")
         if voice_id is not None and (voice_id not in commands or commands[voice_id]["kind"] != "voice"):
             diagnostics.append(_diagnostic("TSUI_NATIVE_STORY_VOICE_LINK_INVALID", "text voice command must resolve to a voice command", command_id=command["command_id"]))
@@ -354,6 +374,11 @@ def _render_command(command: dict, strings: dict[str, str]) -> list[str]:
         return lines
     if kind in {"jump", "call"}:
         return [f"{prefix}{kind} target:{command['target']} {stable}"]
+    if kind == "branch":
+        return [
+            f"{prefix}branch path:{command['path']} op:{command['op']} value:{command['value']} "
+            f"then:{command['then_target']} else:{command['else_target']} {stable}"
+        ]
     if kind == "return":
         return [f"{prefix}return {stable}"]
     if kind == "mutate":

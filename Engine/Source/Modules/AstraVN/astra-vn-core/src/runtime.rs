@@ -3,12 +3,12 @@ use std::collections::BTreeSet;
 use astra_core::Hash128;
 
 use crate::{
-    resolve_target, AudioCue, BacklogEntry, BacklogLayoutMetadata, ChoiceOption, CompiledCommand,
-    CompiledStory, MutationOp, PendingChoice, PresentationCommand, SkipMode, StageCommand,
-    SystemUnlockKind, TimelineCommand, VnAudioBus, VnAudioSync, VnCallFrame, VnCommandCursor,
-    VnCoverage, VnError, VnMovieEndBehavior, VnPlayerCommand, VnReplayUiState, VnRouteFlag,
-    VnRouteFlagKind, VnRunConfig, VnRuntimeState, VnSaveBlob, VnStepOutput, VnSystemFrame,
-    VnTimelineJoinPolicy, VnWaitKind, VnWaitState, VoiceReplayEntry,
+    resolve_target, AudioCue, BacklogEntry, BacklogLayoutMetadata, BranchOp, ChoiceOption,
+    CompiledCommand, CompiledStory, MutationOp, PendingChoice, PresentationCommand, SkipMode,
+    StageCommand, SystemUnlockKind, TimelineCommand, VnAudioBus, VnAudioSync, VnCallFrame,
+    VnCommandCursor, VnCoverage, VnError, VnMovieEndBehavior, VnPlayerCommand, VnReplayUiState,
+    VnRouteFlag, VnRouteFlagKind, VnRunConfig, VnRuntimeState, VnSaveBlob, VnStepOutput,
+    VnSystemFrame, VnTimelineJoinPolicy, VnWaitKind, VnWaitState, VoiceReplayEntry,
 };
 
 #[derive(Debug, Clone)]
@@ -422,6 +422,50 @@ impl VnRuntime {
                         return Ok(());
                     }
                 }
+                CompiledCommand::Branch {
+                    id,
+                    scope,
+                    key,
+                    op,
+                    value,
+                    then_target,
+                    else_target,
+                } => {
+                    self.advance_cursor()?;
+                    let actual = self
+                        .state
+                        .variables
+                        .get(&scope)
+                        .and_then(|variables| variables.get(&key))
+                        .copied()
+                        .ok_or_else(|| {
+                            VnError::diagnostic(
+                                "ASTRA_VN_BRANCH_VARIABLE_MISSING",
+                                format!(
+                                    "branch command {id} requires initialized variable {scope}.{key}"
+                                ),
+                            )
+                        })?;
+                    let condition = match op {
+                        BranchOp::Eq => actual == value,
+                        BranchOp::NotEq => actual != value,
+                        BranchOp::Less => actual < value,
+                        BranchOp::LessEq => actual <= value,
+                        BranchOp::Greater => actual > value,
+                        BranchOp::GreaterEq => actual >= value,
+                    };
+                    let target = if condition { then_target } else { else_target };
+                    let target = self.resolve_runtime_target(&target);
+                    self.record_route_flag(VnRouteFlagKind::Branch, &id, &target);
+                    self.reach(&target, reached);
+                    if self.compiled.states.contains_key(&target) {
+                        let story_id = self.story_for_state(&target)?;
+                        self.state.cursor = Some(self.cursor_for(&story_id, &target, 0)?);
+                    } else {
+                        self.state.cursor = None;
+                        return Ok(());
+                    }
+                }
                 CompiledCommand::Call { id, target } => {
                     self.advance_cursor()?;
                     let return_to = self.state.cursor.clone().ok_or_else(|| {
@@ -770,6 +814,7 @@ fn compiled_command_id(command: &CompiledCommand) -> String {
         CompiledCommand::Dialogue { id, .. }
         | CompiledCommand::Choice { id, .. }
         | CompiledCommand::Jump { id, .. }
+        | CompiledCommand::Branch { id, .. }
         | CompiledCommand::Call { id, .. }
         | CompiledCommand::Return { id }
         | CompiledCommand::Mutate { id, .. }
@@ -858,6 +903,7 @@ fn route_flag_kind_id(kind: VnRouteFlagKind) -> &'static str {
         VnRouteFlagKind::Launch => "launch",
         VnRouteFlagKind::Choice => "choice",
         VnRouteFlagKind::Jump => "jump",
+        VnRouteFlagKind::Branch => "branch",
         VnRouteFlagKind::Call => "call",
         VnRouteFlagKind::Return => "return",
     }

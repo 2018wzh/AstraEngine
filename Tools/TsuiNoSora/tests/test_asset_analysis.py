@@ -192,6 +192,48 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertIn("TSUI_NATIVE_STORY_COMMAND_INVALID", {item["code"] for item in report["diagnostics"]})
             self.assertFalse((output / "Scripts").exists())
 
+    def test_native_story_ir_renders_typed_branch_and_validates_both_targets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = native_story_ir_fixture()
+            commands = payload["stories"][0]["states"][0]["scenes"][0]["commands"]
+            commands.insert(
+                0,
+                {
+                    "command_id": "branch.day",
+                    "handler_id": "handler.start",
+                    "kind": "branch",
+                    "path": "project.day",
+                    "op": "greater_eq",
+                    "value": 2,
+                    "then_target": "ending.good",
+                    "else_target": "opening",
+                },
+            )
+            payload["coverage"]["command_count"] += 1
+            ir = root / "native_story_ir.json"
+            output = root / "output"
+            ir.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            report = convert_native_story_ir(ir, output)
+            story = (output / "Scripts" / "main.astra").read_text(encoding="utf-8")
+            self.assertEqual(report["status"], "pass")
+            self.assertIn(
+                "branch path:project.day op:greater_eq value:2 then:ending.good else:opening",
+                story,
+            )
+
+            commands[0]["else_target"] = "missing.state"
+            ir.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            blocked = convert_native_story_ir(ir, root / "blocked")
+            self.assertEqual(blocked["status"], "blocked")
+            self.assertTrue(
+                any(
+                    diagnostic["code"] == "TSUI_NATIVE_STORY_TARGET_MISSING"
+                    for diagnostic in blocked["diagnostics"]
+                )
+            )
+
     def test_native_story_ir_rejects_semantic_shortcut_automation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -28,6 +28,7 @@ from director_score import DirectorScoreError, decode_director_v7_score
 from director_story_source import DirectorStorySourceError, build_director_story_source
 from director_scene_dsl import DirectorSceneDslError, build_scene_dsl_ir
 from director_lingo import DirectorLingoError, build_lingo_ir
+from director_story_graph import DirectorStoryGraphError, build_story_graph
 
 
 IMAGE_EXTS = {".png"}
@@ -7070,6 +7071,7 @@ def run_demo_slice_gate(config_path: Path | str) -> dict:
             "director_story_source": "reports/director_story_source_report.json" if story_source_report else "",
             "director_scene_dsl": "reports/director_scene_dsl_report.json" if story_source_report else "",
             "director_lingo": "reports/director_lingo_report.json" if story_source_report else "",
+            "director_story_graph": "reports/director_story_graph_report.json" if story_source_report else "",
             "local_gate": "reports/local_gate_report.json" if local_report else "",
             "stage3_gate": "reports/stage3_gate_report.json" if local_report else "",
             "nativevn_package_input": nativevn_package_input,
@@ -7223,8 +7225,46 @@ def _run_director_story_source_from_demo_config(config: dict) -> dict | None:
         else:
             _write_json(work_root / "private" / "director_lingo_ir.json", lingo_ir)
         _write_json(work_root / "reports" / "director_lingo_report.json", lingo_report)
+        if scene_report["status"] == "pass" and lingo_report["status"] == "pass":
+            try:
+                story_graph, graph_report = build_story_graph(detailed, scene_dsl, lingo_ir)
+            except DirectorStoryGraphError as exc:
+                graph_report = _blocked_story_graph_report(str(exc))
+                report["status"] = "blocked"
+                report["diagnostics"].extend(graph_report["diagnostics"])
+            else:
+                _write_json(work_root / "private" / "director_story_graph.json", story_graph)
+        else:
+            graph_report = _blocked_story_graph_report(
+                "story graph requires passing scene DSL and Lingo IR"
+            )
+        _write_json(work_root / "reports" / "director_story_graph_report.json", graph_report)
     _write_json(work_root / "reports" / "director_story_source_report.json", report)
     return report
+
+
+def _blocked_story_graph_report(message: str) -> dict:
+    return {
+        "schema": "tsuinosora.director_story_graph_report.v1",
+        "status": "blocked",
+        "movie_count": 0,
+        "node_count": 0,
+        "scene_count": 0,
+        "choice_count": 0,
+        "terminal_count": 0,
+        "conditional_node_count": 0,
+        "frame_action_binding_count": 0,
+        "used_action_script_count": 0,
+        "flow_counts": {},
+        "story_graph_sha256": "sha256:" + "0" * 64,
+        "diagnostics": [{"code": "TSUI_DIRECTOR_STORY_GRAPH_BLOCKED", "message": message}],
+        "redaction": {
+            "paths": "alias_or_report_relative_only",
+            "payload": "omitted",
+            "commercial_text": "private_ir_only",
+            "script_source": "private_ir_only",
+        },
+    }
 
 
 def build_projectorrays_full_dump_report(work_root: Path | str, dump_roots: list[tuple[str, Path]]) -> dict:
