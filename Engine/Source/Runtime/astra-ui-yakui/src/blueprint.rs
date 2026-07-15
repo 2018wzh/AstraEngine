@@ -563,7 +563,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         if let Some(error) = render_error {
             return Err(error);
         }
-        if let Some(focus_request) = &frame.focus_request {
+        let focus_widget = if let Some(focus_request) = &frame.focus_request {
             let target = self
                 .pending
                 .iter()
@@ -580,8 +580,10 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                     "focus target is disabled or not focusable",
                 ));
             }
-            _yakui.request_focus(Some(target.widget_id));
-        }
+            Some(target.widget_id)
+        } else {
+            None
+        };
         Ok(YakuiViewOutput {
             actions,
             repaint_after_ns: None,
@@ -598,6 +600,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 .map(|event| event.sequence)
                 .chain(force_consumed_sequences)
                 .collect(),
+            focus_widget,
         })
     }
 

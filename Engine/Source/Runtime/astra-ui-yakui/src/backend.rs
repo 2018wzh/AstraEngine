@@ -7,7 +7,7 @@ use astra_ui_core::{
     UiPerformanceSample, UiSemanticSnapshot, UiValidationError, ValidateUi,
 };
 use yakui_core::geometry::Vec2;
-use yakui_core::Yakui;
+use yakui_core::{WidgetId, Yakui};
 
 use crate::{AstraYakuiInputRouter, YakuiPaintConverter};
 
@@ -17,6 +17,7 @@ pub struct YakuiViewOutput {
     pub diagnostics: Vec<Diagnostic>,
     pub instantiated_nodes: u32,
     pub force_consumed_sequences: BTreeSet<u64>,
+    pub focus_widget: Option<WidgetId>,
 }
 
 pub trait YakuiViewRenderer: Send {
@@ -137,7 +138,12 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
             dispositions.push(self.input.route(&mut self.yakui, event)?);
         }
         self.yakui.start();
-        let view = self.renderer.build(&mut self.yakui, &request)?;
+        let view = self.renderer.build(&mut self.yakui, &request);
+        self.yakui.finish();
+        let view = view?;
+        if let Some(widget_id) = view.focus_widget {
+            self.yakui.request_focus(Some(widget_id));
+        }
         for disposition in &mut dispositions {
             if view
                 .force_consumed_sequences
@@ -146,7 +152,6 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
                 disposition.disposition = astra_ui_core::UiInputDispositionKind::Consumed;
             }
         }
-        self.yakui.finish();
         let semantics = self.renderer.semantics(&self.yakui, &request)?;
         let update_layout_ns = update_started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
 
