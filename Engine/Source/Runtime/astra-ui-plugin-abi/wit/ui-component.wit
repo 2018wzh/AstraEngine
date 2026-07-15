@@ -1,0 +1,11 @@
+package astra:ui-component@1.0.0;
+
+world ui-component {
+  export invoke: func(
+    version: u16,
+    sequence: u64,
+    deadline-ns: u64,
+    payload-hash: list<u8>,
+    payload: list<u8>,
+  ) -> tuple<u16, u64, list<u8>, list<u8>, option<string>>;
+}

@@ -309,6 +309,7 @@ def build_identity(
     rustc_version: str,
     cargo_args: Iterable[str],
     untracked_files: Iterable[tuple[str, bytes]] = (),
+    ui_toolchain: dict[str, object] | None = None,
 ) -> dict[str, object]:
     root = root.resolve()
     lock_path = root / "Cargo.lock"
@@ -329,6 +330,7 @@ def build_identity(
         "workspace_manifest_hash": _manifest_hash(root),
         "dependency_lock_hash": _sha256(lock_path.read_bytes()),
         "toolchain_fingerprint": _sha256(rustc_version.encode("utf-8")),
+        "ui_toolchain": ui_toolchain or {"status": "not_configured"},
         "feature_fingerprint": _sha256(
             json.dumps(
                 _feature_arguments(cargo_args),
@@ -437,7 +439,59 @@ def _current_identity(root: pathlib.Path, cargo_args: Iterable[str]) -> dict[str
         rustc_version=rustc_version,
         cargo_args=cargo_args,
         untracked_files=_untracked_files(root),
+        ui_toolchain=_ui_toolchain_identity(root),
     )
+
+
+def _ui_toolchain_identity(root: pathlib.Path) -> dict[str, object] | None:
+    lock_path = root / "Tools" / "ui-toolchain-lock.json"
+    if not lock_path.is_file():
+        return None
+    report_path = root / ".tmp" / "ui-toolchain" / "preflight.json"
+    if not report_path.is_file():
+        raise ValueError("ASTRA_UI_TOOLCHAIN_PREFLIGHT_MISSING")
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"ASTRA_UI_TOOLCHAIN_PREFLIGHT_INVALID: {error}") from error
+    if report.get("schema") != "astra.ui_toolchain_preflight.v1":
+        raise ValueError("ASTRA_UI_TOOLCHAIN_PREFLIGHT_SCHEMA_INVALID")
+    if report.get("lock_sha256") != _sha256(lock_path.read_bytes()):
+        raise ValueError("ASTRA_UI_TOOLCHAIN_PREFLIGHT_STALE")
+    if report.get("controller_analysis") != "passed":
+        raise ValueError("ASTRA_UI_TOOLCHAIN_LUAU_ANALYSIS_NOT_PASSED")
+    tools = report.get("tools")
+    if not isinstance(tools, dict) or set(tools) != {"node", "luau_analyze", "jco"}:
+        raise ValueError("ASTRA_UI_TOOLCHAIN_PREFLIGHT_TOOLS_INVALID")
+    claimed_hash = report.pop("report_hash", None)
+    canonical = json.dumps(report, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    actual_hash = _sha256(canonical)
+    if claimed_hash != actual_hash:
+        raise ValueError("ASTRA_UI_TOOLCHAIN_PREFLIGHT_HASH_INVALID")
+    return {
+        "lock_sha256": report["lock_sha256"],
+        "target": report.get("target"),
+        "tools": tools,
+        "supply_chain": report.get("supply_chain"),
+        "preflight_hash": actual_hash,
+    }
+
+
+def _prepare_ui_toolchain(root: pathlib.Path) -> None:
+    lock_path = root / "Tools" / "ui-toolchain-lock.json"
+    if not lock_path.is_file():
+        return
+    command = [
+        sys.executable,
+        str(root / "Tools" / "bootstrap_ui_toolchain.py"),
+        "--output",
+        str(root / ".tmp" / "ui-toolchain" / "preflight.json"),
+    ]
+    completed = subprocess.run(command, cwd=root, text=True, capture_output=True)
+    if completed.returncode:
+        raise ValueError(
+            "ASTRA_UI_TOOLCHAIN_PREFLIGHT_FAILED: " + completed.stderr.strip()
+        )
 
 
 def _write_report(path: pathlib.Path, report: dict[str, object]) -> None:
@@ -630,6 +684,7 @@ def main(argv: list[str]) -> int:
         return 2
     root = pathlib.Path(__file__).resolve().parents[1]
     try:
+        _prepare_ui_toolchain(root)
         identity = _current_identity(root, argv)
     except (OSError, subprocess.CalledProcessError, UnicodeDecodeError, ValueError) as error:
         print(f"ASTRA_BUILD_IDENTITY_FAILED: {error}", file=sys.stderr)

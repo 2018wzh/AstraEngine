@@ -1,0 +1,9 @@
+{
+  "name": "astra-ui-component-web-toolchain",
+  "private": true,
+  "version": "0.0.0",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@bytecodealliance/jco": "1.25.2"
+  }
+}

@@ -50,6 +50,8 @@ const WEB_PLAYER_LOADER: &[u8] =
     include_bytes!("../../astra-player-web/web/astra-player-loader.js");
 const WEB_AUDIO_WORKLET: &[u8] =
     include_bytes!("../../astra-player-web/web/astra-audio-worklet.js");
+const WEB_UI_COMPONENT_HOST: &[u8] =
+    include_bytes!("../../astra-player-web/web/astra-ui-component-host.js");
 
 #[derive(Parser)]
 #[command(name = "astra")]
@@ -2807,6 +2809,15 @@ fn build_standalone_bundle_into(
                 "astra-audio-worklet.js",
                 "web_audio_worklet",
                 WEB_AUDIO_WORKLET,
+            ));
+            fs::write(
+                out.join("astra-ui-component-host.js"),
+                WEB_UI_COMPONENT_HOST,
+            )?;
+            files.push(bundle_file(
+                "astra-ui-component-host.js",
+                "web_ui_component_host",
+                WEB_UI_COMPONENT_HOST,
             ));
 
             for (source, destination, role, missing) in [

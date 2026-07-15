@@ -1,0 +1,29 @@
+{
+  "schema": "astra.ui_toolchain_lock.v1",
+  "node": {
+    "version": "25.8.2",
+    "targets": {
+      "windows-x86_64": {
+        "executable_sha256": "sha256:f8d22c62786c547dc76b15c744e86c0ac1fe9dc38f2e0610dbad4d2b223a4544"
+      }
+    }
+  },
+  "luau": {
+    "version": "0.722",
+    "license": "MIT",
+    "targets": {
+      "windows-x86_64": {
+        "url": "https://github.com/luau-lang/luau/releases/download/0.722/luau-windows.zip",
+        "archive_sha256": "sha256:e4959151b92ed4f8d822588dea0f3eb72e4b96d5568b2eea32a0a8452488c82b",
+        "analyzer_sha256": "sha256:ab03367ecb61409ddec2914f6dbc8857af1b79ce0b54af228b3d6b7660e1d778",
+        "analyzer_path": "luau-analyze.exe"
+      }
+    }
+  },
+  "jco": {
+    "package": "@bytecodealliance/jco",
+    "version": "1.25.2",
+    "integrity": "sha512-r9ch8vqtDkBxXtN5KzAEYpz+hjGCW+cQhc2b71U21DMuewE5HrTCI7X826gfL/1oU0ibsSpGodJV5YkwolH9Jg==",
+    "license": "(Apache-2.0 WITH LLVM-exception)"
+  }
+}
