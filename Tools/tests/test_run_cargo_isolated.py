@@ -15,6 +15,28 @@ import run_cargo_isolated
 
 
 class CargoIsolationTests(unittest.TestCase):
+    def test_ui_component_fixture_is_built_only_for_host_target_tests(self):
+        self.assertTrue(
+            run_cargo_isolated._test_requires_ui_component_fixture(
+                ["test", "--workspace"]
+            )
+        )
+        self.assertTrue(
+            run_cargo_isolated._test_requires_ui_component_fixture(
+                ["test", "-p", "astra-ui-component-host"]
+            )
+        )
+        self.assertFalse(
+            run_cargo_isolated._test_requires_ui_component_fixture(
+                ["test", "-p", "astra-vn-ui"]
+            )
+        )
+        self.assertFalse(
+            run_cargo_isolated._test_requires_ui_component_fixture(
+                ["test", "--workspace", "--target", "wasm32-unknown-unknown"]
+            )
+        )
+
     def test_identity_binds_checkout_manifest_lock_toolchain_and_features(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

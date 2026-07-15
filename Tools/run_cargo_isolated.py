@@ -193,6 +193,44 @@ def _headless_feature_arguments(cargo_args: Iterable[str]) -> list[str]:
     return selected
 
 
+def _test_requires_ui_component_fixture(cargo_args: Iterable[str]) -> bool:
+    args = list(cargo_args)
+    if not args or args[0] != "test" or "--target" in args:
+        return False
+    if "--workspace" in args:
+        return True
+    packages: list[str] = []
+    index = 0
+    while index < len(args):
+        if args[index] in {"-p", "--package"} and index + 1 < len(args):
+            packages.append(args[index + 1])
+            index += 1
+        index += 1
+    return not packages or "astra-ui-component-host" in packages
+
+
+def _prepare_ui_component_test_environment(
+    *, root: pathlib.Path, cargo_args: list[str], environment: dict[str, str]
+) -> None:
+    if not _test_requires_ui_component_fixture(cargo_args):
+        return
+    build = subprocess.run(
+        [
+            "cargo",
+            "build",
+            "-p",
+            "astra-ui-component-host",
+            "-p",
+            "ui-component-provider",
+        ],
+        cwd=root,
+        env=environment,
+        check=False,
+    )
+    if build.returncode != 0:
+        raise ValueError("ASTRA_UI_COMPONENT_FIXTURE_BUILD_FAILED")
+
+
 def _configure_ffmpeg_runtime(
     cargo_args: Iterable[str], environment: dict[str, str]
 ) -> None:
@@ -725,6 +763,9 @@ def main(argv: list[str]) -> int:
                 report_path=report_path,
                 cargo_args=argv,
                 environment=environment,
+            )
+            _prepare_ui_component_test_environment(
+                root=root, cargo_args=argv, environment=environment
             )
         except ValueError as error:
             report["status"] = "blocked"
