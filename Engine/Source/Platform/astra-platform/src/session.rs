@@ -1560,6 +1560,53 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
             SceneCommand::ReleaseResource { .. } | SceneCommand::Clear { .. } => {}
             SceneCommand::GlyphRun { opacity, .. } | SceneCommand::Glyph { opacity, .. }
                 if opacity.is_finite() && (0.0..=1.0).contains(opacity) => {}
+            SceneCommand::Mesh2D {
+                id,
+                vertices,
+                indices,
+                material,
+                texture_id,
+                opacity,
+                ..
+            } => {
+                let material_binding_valid = matches!(
+                    (material, texture_id),
+                    (astra_media_core::MeshMaterial2D::Solid, None)
+                        | (
+                            astra_media_core::MeshMaterial2D::ColorTexture
+                                | astra_media_core::MeshMaterial2D::GlyphMask,
+                            Some(_)
+                        )
+                );
+                let vertices_valid = !vertices.is_empty()
+                    && vertices.len() <= 250_000
+                    && vertices.iter().all(|vertex| {
+                        vertex.position.iter().all(|value| value.is_finite())
+                            && vertex.uv.iter().all(|value| value.is_finite())
+                            && vertex.premultiplied_rgba[0] <= vertex.premultiplied_rgba[3]
+                            && vertex.premultiplied_rgba[1] <= vertex.premultiplied_rgba[3]
+                            && vertex.premultiplied_rgba[2] <= vertex.premultiplied_rgba[3]
+                    });
+                let indices_valid = !indices.is_empty()
+                    && indices.len() <= 750_000
+                    && indices.len().is_multiple_of(3)
+                    && indices
+                        .iter()
+                        .all(|index| (*index as usize) < vertices.len());
+                if id.is_empty()
+                    || !opacity.is_finite()
+                    || !(0.0..=1.0).contains(opacity)
+                    || !material_binding_valid
+                    || !vertices_valid
+                    || !indices_valid
+                {
+                    return Err(PlatformError::new(
+                        PlatformErrorCode::InvalidState,
+                        "surface.present_scene",
+                        "indexed mesh geometry, material, color, or opacity is invalid",
+                    ));
+                }
+            }
             SceneCommand::Rect { width, height, .. } => {
                 if *width == 0 || *height == 0 {
                     return Err(PlatformError::new(
