@@ -1,0 +1,19 @@
+[package]
+name = "astra-vn-ui"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+astra-core = { path = "../../../Runtime/astra-core" }
+astra-ui-core = { path = "../../../Runtime/astra-ui-core" }
+astra-vn-core = { path = "../astra-vn-core" }
+astra-vn-script = { path = "../astra-vn-script" }
+astra-vn-system = { path = "../astra-vn-system" }
+postcard.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+unicode-segmentation.workspace = true

@@ -24,7 +24,7 @@ use astra_plugin_abi::{
 };
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
 use astra_vn::{
-    decode_compiled_story, load_player_locale_config, load_presentation_provider_manifest,
+    decode_compiled_project, load_player_locale_config, load_presentation_provider_manifest,
     NativeVnRuntimeProvider, SystemStoryManifest, SystemStoryValidationStatus,
     VnAdvancedPresentationManifest, VnCommercialBaselineManifest, VnExtensionManifest,
     VnPolicyBundleManifest, VnPolicyBundleSourceCache, VnProfileManifest,
@@ -1623,7 +1623,7 @@ fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckReco
 fn native_vn_behavioral_evidence(
     package: &PackageReader,
 ) -> Result<Vec<ReleaseEvidence>, (&'static str, String)> {
-    let compiled = decode_compiled_story(package).map_err(|err| {
+    let compiled = decode_compiled_project(package).map_err(|err| {
         (
             "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PACKAGE",
             format!("decode vn.compiled_story for provider conformance: {err}"),
@@ -3029,7 +3029,7 @@ fn vn_locale_config_check(package: &PackageReader) -> ReleaseCheckRecord {
 }
 
 fn vn_compiled_story_check(package: &PackageReader, profile: &str) -> ReleaseCheckRecord {
-    let compiled = match decode_compiled_story(package) {
+    let compiled = match decode_compiled_project(package) {
         Ok(compiled) => compiled,
         Err(err) => {
             return ReleaseCheckRecord {
@@ -3349,7 +3349,7 @@ fn vn_standard_commands_check(package: &PackageReader, profile: &str) -> Release
             };
         }
     };
-    let compiled = match decode_compiled_story(package) {
+    let compiled = match decode_compiled_project(package) {
         Ok(compiled) => compiled,
         Err(err) => {
             return ReleaseCheckRecord {

@@ -3,7 +3,6 @@ name = "astra-player-web"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
-rust-version.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -19,6 +18,7 @@ astra-platform = { path = "../../Platform/astra-platform" }
 astra-platform-web = { path = "../../Platform/astra-platform-web" }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
 astra-player-vn = { path = "../astra-player-vn" }
+astra-ui-core = { path = "../../Runtime/astra-ui-core" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
 astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
 serde.workspace = true

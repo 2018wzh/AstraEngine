@@ -1,9 +1,12 @@
-use astra_vn_package::{compile_astra_sources, AstraSource, VnCommercialBaselineManifest};
+use astra_vn_package::{compile_astra_project, AstraSource, VnCommercialBaselineManifest};
 
 #[astra_headless_test::test]
 fn commercial_baseline_manifest_detects_required_vn_features() {
-    let compiled =
-        compile_astra_sources([AstraSource::new("baseline.astra", baseline_story())]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("baseline.astra", baseline_story())],
+        Default::default(),
+    )
+    .unwrap();
 
     let manifest = VnCommercialBaselineManifest::from_compiled(&compiled);
     let report = manifest.validate_required();
@@ -15,15 +18,18 @@ fn commercial_baseline_manifest_detects_required_vn_features() {
 
 #[astra_headless_test::test]
 fn commercial_baseline_manifest_blocks_incomplete_fixture() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "baseline.astra",
-        r#"
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "baseline.astra",
+            r#"
 story main #@id story.main
 state prologue #@id state.prologue
   scene room #@id scene.room
     text key:hello speaker:narrator #@id line.hello
 "#,
-    )])
+        )],
+        Default::default(),
+    )
     .unwrap();
 
     let report = VnCommercialBaselineManifest::from_compiled(&compiled).validate_required();

@@ -40,6 +40,7 @@ fn commands() -> Vec<SceneCommand> {
                 resource_id: "glyph:test".into(),
                 x: 0,
                 y: 0,
+                rotation_quadrants: 0,
             }],
             rgba: [255; 4],
             opacity: 1.0,

@@ -1,0 +1,85 @@
+use std::collections::BTreeMap;
+
+use astra_ui_core::{
+    validate_serialized_size, UiValue, MAX_EFFECTS_PER_CALL, MAX_SESSION_STATE_BYTES,
+};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::VnUiAction;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VnUiControllerSnapshot {
+    None,
+    Session,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VnUiControllerEffect {
+    Forward {
+        action: VnUiAction,
+    },
+    OpenModal {
+        view_id: String,
+        model: UiValue,
+    },
+    CloseModal,
+    Focus {
+        semantic_id: String,
+    },
+    SetSessionState {
+        key: String,
+        value: UiValue,
+    },
+    Animation {
+        target_id: String,
+        preset_id: String,
+    },
+    Trace {
+        event: String,
+        fields: BTreeMap<String, String>,
+    },
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum VnUiControllerError {
+    #[error("ASTRA_VN_UI_CONTROLLER_EFFECT_LIMIT: controller returned too many effects")]
+    EffectLimit,
+    #[error("ASTRA_VN_UI_CONTROLLER_STATE_LIMIT: controller session state exceeds 1 MiB")]
+    StateLimit,
+    #[error("ASTRA_VN_UI_CONTROLLER_VALUE: controller returned an invalid value")]
+    InvalidValue,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct VnUiSessionState {
+    values: BTreeMap<String, UiValue>,
+}
+
+impl VnUiSessionState {
+    pub fn values(&self) -> &BTreeMap<String, UiValue> {
+        &self.values
+    }
+
+    pub fn apply(&mut self, effects: &[VnUiControllerEffect]) -> Result<(), VnUiControllerError> {
+        if effects.len() > MAX_EFFECTS_PER_CALL {
+            return Err(VnUiControllerError::EffectLimit);
+        }
+        let mut next = self.values.clone();
+        for effect in effects {
+            if let VnUiControllerEffect::SetSessionState { key, value } = effect {
+                validate_serialized_size(value).map_err(|_| VnUiControllerError::InvalidValue)?;
+                next.insert(key.clone(), value.clone());
+            }
+        }
+        let bytes = postcard::to_allocvec(&next).map_err(|_| VnUiControllerError::InvalidValue)?;
+        if bytes.len() > MAX_SESSION_STATE_BYTES {
+            return Err(VnUiControllerError::StateLimit);
+        }
+        self.values = next;
+        Ok(())
+    }
+}

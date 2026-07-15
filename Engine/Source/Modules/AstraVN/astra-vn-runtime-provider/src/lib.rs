@@ -115,12 +115,9 @@ impl ProductRuntimeProvider for NativeVnRuntimeProvider {
     }
 
     fn open(&mut self, request: RuntimeOpenRequest) -> Result<RuntimeOpenReport, String> {
-        let compiled_section = required_restore_section(
-            &request.sections,
-            "vn.compiled_story",
-            "astra.vn.compiled_story",
-        )
-        .map_err(|err| err.to_string())?;
+        let compiled_section =
+            required_restore_section(&request.sections, "vn.story", "astra.vn.story")
+                .map_err(|err| err.to_string())?;
         let compiled: CoreCompiledStory =
             postcard::from_bytes(&compiled_section.bytes).map_err(|err| err.to_string())?;
         let config = VnRunConfig {
@@ -240,7 +237,7 @@ impl NativeVnRuntimeProvider {
         if request
             .section_ids
             .iter()
-            .all(|section| section != "vn.compiled_story")
+            .all(|section| section != "vn.story")
         {
             diagnostics.push("ASTRA_NATIVE_VN_COMPILED_STORY_MISSING".to_string());
         }
@@ -273,10 +270,11 @@ impl NativeVnRuntimeProvider {
 
     pub fn open_compiled_story(
         &mut self,
-        compiled: CoreCompiledStory,
+        compiled: impl Into<CoreCompiledStory>,
         config: VnRunConfig,
         request: RuntimeOpenRequest,
     ) -> Result<RuntimeOpenReport, CoreVnError> {
+        let compiled = compiled.into();
         tracing::info!(
             event = "vn.provider.session.open.start",
             target_id = %request.target_id,
@@ -1211,7 +1209,15 @@ fn required_restore_section_with_codec<'a>(
 
 fn native_vn_package_sections() -> Vec<String> {
     [
-        "vn.compiled_story",
+        "vn.compiled_project",
+        "vn.story",
+        "vn.ui_blueprint_bundle",
+        "vn.ui_binding_manifest",
+        "vn.ui_source_map",
+        "vn.ui_controller_manifest",
+        "vn.ui_theme_manifest",
+        "vn.ui_backend_manifest",
+        "vn.ui_component_manifest",
         "vn.profile_manifest",
         "vn.policy_bundle_manifest",
         "vn.extension_manifest",
@@ -1306,11 +1312,8 @@ extern "C" fn ffi_probe(payload: RVec<u8>) -> FfiRuntimeProviderResult {
 #[cfg(feature = "ffi")]
 extern "C" fn ffi_open(payload: RVec<u8>) -> FfiRuntimeProviderResult {
     ffi_instance_json(payload, |provider, request: RuntimeOpenRequest| {
-        let compiled_section = required_restore_section(
-            &request.sections,
-            "vn.compiled_story",
-            "astra.vn.compiled_story",
-        )?;
+        let compiled_section =
+            required_restore_section(&request.sections, "vn.story", "astra.vn.story")?;
         let compiled: CoreCompiledStory = postcard::from_bytes(&compiled_section.bytes)?;
         let config = VnRunConfig {
             profile: request.profile.clone(),

@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use astra_core::{Diagnostic, Hash128, SourceRef};
+use astra_core::{Diagnostic, Hash128, Hash256, SourceRef};
+use astra_ui_core::{UiBindingManifest, UiBlueprintBundle};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -11,26 +12,63 @@ use crate::VnError;
 pub struct AstraSource {
     pub path: String,
     pub text: String,
+    pub role: AstraSourceRole,
 }
 
 impl AstraSource {
-    pub fn new(path: impl Into<String>, text: impl Into<String>) -> Self {
+    pub fn story(path: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
             path: path.into(),
             text: text.into(),
+            role: AstraSourceRole::Story,
+        }
+    }
+
+    pub fn ui(path: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            text: text.into(),
+            role: AstraSourceRole::Ui,
         }
     }
 }
 
-impl From<(&str, &str)> for AstraSource {
-    fn from((path, text): (&str, &str)) -> Self {
-        Self::new(path, text)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AstraSourceRole {
+    Story,
+    Ui,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CompiledVnProject {
+    pub schema: String,
+    pub project_hash: Hash256,
+    pub story: CompiledStory,
+    pub ui_blueprints: UiBlueprintBundle,
+    pub ui_bindings: UiBindingManifest,
+    pub ui_source_map: BTreeMap<String, SourceRef>,
+    pub controller_ids: BTreeSet<String>,
+    pub theme_ids: BTreeSet<String>,
+    pub component_ids: BTreeSet<String>,
+}
+
+impl std::ops::Deref for CompiledVnProject {
+    type Target = CompiledStory;
+
+    fn deref(&self) -> &Self::Target {
+        &self.story
     }
 }
 
-impl From<(String, String)> for AstraSource {
-    fn from((path, text): (String, String)) -> Self {
-        Self::new(path, text)
+impl std::ops::DerefMut for CompiledVnProject {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.story
+    }
+}
+
+impl From<CompiledVnProject> for CompiledStory {
+    fn from(project: CompiledVnProject) -> Self {
+        project.story
     }
 }
 

@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 
 use astra_vn_script::{
-    compile_astra_sources, compile_astra_sources_with_options, AstraSource, CompileAstraOptions,
-    CompiledCommand, ExtensionCommandDescriptor, ExtensionFieldContract, ExtensionFieldKind,
-    ExtensionValue, PresentationCommand, StageCommand, TimelineCommand, VnTimelineJoinPolicy,
+    compile_astra_project, AstraSource, CompileAstraProjectOptions, CompiledCommand,
+    ExtensionCommandDescriptor, ExtensionFieldContract, ExtensionFieldKind, ExtensionValue,
+    PresentationCommand, StageCommand, TimelineCommand, VnTimelineJoinPolicy,
 };
 
 fn source(command: &str) -> AstraSource {
-    AstraSource::new(
+    AstraSource::story(
         "typed.astra",
         format!(
             "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    {command}\n"
@@ -16,7 +16,7 @@ fn source(command: &str) -> AstraSource {
 }
 
 fn first_presentation(command: &str) -> PresentationCommand {
-    let compiled = compile_astra_sources([source(command)]).unwrap();
+    let compiled = compile_astra_project([source(command)], Default::default()).unwrap();
     let command = &compiled.states["state.start"].scenes[0].commands[0];
     let CompiledCommand::Presentation { command, .. } = command else {
         panic!("expected presentation command")
@@ -63,7 +63,7 @@ fn timeline_requires_real_ordered_keyframes_and_blocking_fence() {
         "timeline id:tl target:hero property:opacity keyframes:0=0,0=1 join:block fence:tl.done budget_ms:2",
         "timeline id:tl target:hero property:opacity keyframes:0=0,100=1 join:block budget_ms:2",
     ] {
-        let error = compile_astra_sources([source(invalid)]).unwrap_err();
+        let error = compile_astra_project([source(invalid)], Default::default()).unwrap_err();
         assert!(
             matches!(
                 error.code(),
@@ -76,19 +76,26 @@ fn timeline_requires_real_ordered_keyframes_and_blocking_fence() {
 
 #[astra_headless_test::test]
 fn standard_commands_reject_unknown_fields_and_noncanonical_assets() {
-    let unknown = compile_astra_sources([source(
-        "show id:hero asset:asset:/character/hero layer:characters opacity:1",
-    )])
+    let unknown = compile_astra_project(
+        [source(
+            "show id:hero asset:asset:/character/hero layer:characters opacity:1",
+        )],
+        Default::default(),
+    )
     .unwrap_err();
     assert_eq!(unknown.code(), "ASTRA_VN_STAGE_ATTRIBUTE_UNKNOWN");
 
-    let path = compile_astra_sources([source(
-        "show id:hero asset:native-assets/hero.png layer:characters",
-    )])
+    let path = compile_astra_project(
+        [source(
+            "show id:hero asset:native-assets/hero.png layer:characters",
+        )],
+        Default::default(),
+    )
     .unwrap_err();
     assert_eq!(path.code(), "ASTRA_VN_STAGE_ATTRIBUTE_INVALID");
 
-    let removed = compile_astra_sources([source("task id:legacy")]).unwrap_err();
+    let removed =
+        compile_astra_project([source("task id:legacy")], Default::default()).unwrap_err();
     assert_eq!(removed.code(), "ASTRA_VN_COMMAND_UNBOUND");
 }
 
@@ -115,9 +122,9 @@ fn extension_commands_require_schema_provider_and_typed_field_contracts() {
             ),
         ]),
     };
-    let compiled = compile_astra_sources_with_options(
+    let compiled = compile_astra_project(
         [source("studio_fx intensity:1.25 enabled:true #@id fx.1")],
-        CompileAstraOptions::default().bind_extension(descriptor.clone()),
+        CompileAstraProjectOptions::default().bind_extension(descriptor.clone()),
     )
     .unwrap();
     let CompiledCommand::Presentation {
@@ -140,9 +147,9 @@ fn extension_commands_require_schema_provider_and_typed_field_contracts() {
         "studio_fx intensity:fast enabled:true",
         "studio_fx intensity:1.25 enabled:true hidden:yes",
     ] {
-        let error = compile_astra_sources_with_options(
+        let error = compile_astra_project(
             [source(invalid)],
-            CompileAstraOptions::default().bind_extension(descriptor.clone()),
+            CompileAstraProjectOptions::default().bind_extension(descriptor.clone()),
         )
         .unwrap_err();
         assert!(matches!(
@@ -153,9 +160,9 @@ fn extension_commands_require_schema_provider_and_typed_field_contracts() {
         ));
     }
 
-    let conflict = compile_astra_sources_with_options(
+    let conflict = compile_astra_project(
         [source("studio_fx intensity:1 enabled:true")],
-        CompileAstraOptions::default()
+        CompileAstraProjectOptions::default()
             .bind_extension(descriptor.clone())
             .bind_extension(descriptor.clone()),
     )
@@ -164,11 +171,11 @@ fn extension_commands_require_schema_provider_and_typed_field_contracts() {
 
     let mut standard_override = descriptor;
     standard_override.command = "show".to_string();
-    let conflict = compile_astra_sources_with_options(
+    let conflict = compile_astra_project(
         [source(
             "show id:hero asset:asset:/character/hero layer:characters",
         )],
-        CompileAstraOptions::default().bind_extension(standard_override),
+        CompileAstraProjectOptions::default().bind_extension(standard_override),
     )
     .unwrap_err();
     assert_eq!(conflict.code(), "ASTRA_VN_COMMAND_BINDING_CONFLICT");

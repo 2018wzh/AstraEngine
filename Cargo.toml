@@ -6,6 +6,9 @@ members = [
     "Engine/Source/Runtime/astra-asset",
     "Engine/Source/Runtime/astra-media-core",
     "Engine/Source/Runtime/astra-media",
+    "Engine/Source/Runtime/astra-ui-core",
+    "Engine/Source/Runtime/astra-ui-yakui",
+    "Engine/Source/Runtime/astra-ui-plugin-abi",
     "Engine/Source/Runtime/astra-policy",
     "Engine/Source/Modules/AstraVN/astra-vn-script",
     "Engine/Source/Modules/AstraVN/astra-vn-presentation",
@@ -13,6 +16,7 @@ members = [
     "Engine/Source/Modules/AstraVN/astra-vn-policy",
     "Engine/Source/Modules/AstraVN/astra-vn-commands",
     "Engine/Source/Modules/AstraVN/astra-vn-system",
+    "Engine/Source/Modules/AstraVN/astra-vn-ui",
     "Engine/Source/Modules/AstraVN/astra-vn-save",
     "Engine/Source/Modules/AstraVN/astra-vn-package",
     "Engine/Source/Modules/AstraVN/astra-vn-plugin",
@@ -51,6 +55,7 @@ members = [
     "Engine/Source/Programs/astra-player-vn",
     "Engine/Source/Programs/astra-player-web",
     "Engine/Source/Programs/astra-crash-reporter",
+    "Engine/Source/Programs/astra-ui-component-host",
     "Engine/Plugins/Fixtures/headless-presentation-provider",
     "Engine/Plugins/Fixtures/vn-extension-provider",
 ]
@@ -67,13 +72,14 @@ base64 = "0.22"
 blake3 = "1"
 camino = { version = "1", features = ["serde1"] }
 clap = { version = "4", features = ["derive"] }
-cosmic-text = "0.19"
+cosmic-text = "=0.18.2"
 cpal = "0.17"
 directories = "6"
 ffmpeg-next = "8.1"
 futures-util = "0.3"
 hex = "0.4"
 hound = "3.5"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
 gilrs = { version = "0.11.2", default-features = false }
 image = { version = "0.25", default-features = false, features = [
     "png",
@@ -128,6 +134,7 @@ unicode-segmentation = "1"
 chumsky = "1.0.0-alpha.8"
 insta = "1.48.0"
 file-rotate = "0.8"
+fast-srgb8 = "1"
 time = { version = "0.3", features = ["formatting"] }
 uuid = { version = "1", features = ["serde"] }
 url = "2"
@@ -139,4 +146,6 @@ web-sys = "0.3"
 windows = { version = "0.62", default-features = false }
 winit = "0.30"
 wgpu = "30"
+yakui-core = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }
+yakui-widgets = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }
 zstd = "0.13"

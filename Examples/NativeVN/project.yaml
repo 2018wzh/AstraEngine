@@ -1,4 +1,4 @@
-schema: astra.project.v1
+schema: astra.target_manifest.v2
 id: com.example.nativevn
 platform_profiles:
   windows-release:
@@ -40,12 +40,15 @@ targets:
     crate: astra-vn
     default_profile: advanced-vn
     runtime_provider: native_vn
+    ui_provider: astra.ui.yakui
     platforms: [headless, windows, web]
     packaged: true
 nativevn:
   default_locale: en
   sources:
     - Scripts
+  ui_sources:
+    - UI
   profiles: [classic, modern, advanced-vn]
   asset_roots: [Assets]
   display:

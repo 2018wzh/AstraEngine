@@ -20,7 +20,7 @@ use astra_release::{
     ReleaseValidator,
 };
 use astra_vn::{
-    compile_astra_sources, package_sections_for_story, AstraSource, PLAYER_LOCALE_CONFIG_SCHEMA,
+    compile_astra_project, package_sections_for_project, AstraSource, PLAYER_LOCALE_CONFIG_SCHEMA,
     VN_LOCALIZATION_TABLE_SCHEMA,
 };
 
@@ -1197,13 +1197,14 @@ fn release_gate_blocks_package_target_manifests_with_editor_descriptors() {
         )],
     );
     request.target_manifest = serde_json::json!({
-        "schema": "astra.target_manifest.v1",
+        "schema": "astra.target_manifest.v2",
         "targets": [
             {
                 "id": "native-smoke-game",
                 "kind": "game",
                 "crate": "astra-runtime",
                 "runtime_provider": "native_vn",
+                "ui_provider": "astra.ui.yakui",
                 "default_profile": "desktop-release",
                 "platforms": ["windows"],
                 "packaged": true
@@ -1249,12 +1250,13 @@ fn release_gate_requires_nativevn_sections_for_classic_profile() {
     let blob = package_with_target_manifest(
         "classic",
         serde_json::json!({
-            "schema": "astra.target_manifest.v1",
+            "schema": "astra.target_manifest.v2",
             "targets": [{
                 "id": "nativevn-game",
                 "kind": "game",
                 "crate": "astra-vn",
                 "runtime_provider": "native_vn",
+                "ui_provider": "astra.ui.yakui",
                 "default_profile": "classic",
                 "platforms": ["windows", "web"],
                 "packaged": true
@@ -1282,23 +1284,27 @@ fn release_gate_requires_nativevn_sections_for_classic_profile() {
 
 #[astra_headless_test::test]
 fn release_gate_accepts_nativevn_sections_for_classic_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
     let mut sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     append_valid_locale_sections(&mut sections);
     let blob = package_with_target_manifest(
         "classic",
         serde_json::json!({
-            "schema": "astra.target_manifest.v1",
+            "schema": "astra.target_manifest.v2",
             "targets": [{
                 "id": "nativevn-game",
                 "kind": "game",
                 "crate": "astra-vn",
                 "runtime_provider": "native_vn",
+                "ui_provider": "astra.ui.yakui",
                 "default_profile": "classic",
                 "platforms": ["windows", "web"],
                 "packaged": true
@@ -1362,13 +1368,16 @@ fn release_gate_accepts_nativevn_sections_for_classic_profile() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_missing_or_duplicate_nativevn_localization() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
     let sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     let missing =
         package_with_target_manifest("classic", nativevn_target_manifest(), sections.clone());
     let report = ReleaseValidator
@@ -1432,13 +1441,16 @@ fn release_gate_blocks_missing_or_duplicate_nativevn_localization() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_missing_policy_bundle_for_classic_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
     let mut sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     sections.retain(|section| section.id != "vn.policy_bundle_manifest");
     let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
 
@@ -1467,13 +1479,16 @@ fn release_gate_blocks_missing_policy_bundle_for_classic_profile() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_missing_policy_bundle_source_cache_for_classic_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
     let mut sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     sections.retain(|section| section.id != "vn.policy_bundle_source_cache");
     let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
 
@@ -1502,13 +1517,16 @@ fn release_gate_blocks_missing_policy_bundle_source_cache_for_classic_profile() 
 
 #[astra_headless_test::test]
 fn release_gate_blocks_missing_standard_command_manifest_for_classic_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
     let mut sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     sections.retain(|section| section.id != "vn.standard_command_manifest");
     let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
 
@@ -1537,13 +1555,13 @@ fn release_gate_blocks_missing_standard_command_manifest_for_classic_profile() {
 
 #[astra_headless_test::test]
 fn compiler_blocks_unknown_standard_command_before_release_packaging() {
-    let error = compile_astra_sources([AstraSource::new(
+    let error = compile_astra_project([AstraSource::story(
         "main.astra",
         format!(
             "{}\nstate extra #@id state.extra\n  scene extra #@id scene.extra\n    warp asset:native-assets/effect/warp.json #@id command.warp\n",
             nativevn_story_with_system_pages()
         ),
-    )])
+    )], Default::default())
     .unwrap_err();
 
     assert_eq!(error.code(), "ASTRA_VN_COMMAND_UNBOUND");
@@ -1551,13 +1569,16 @@ fn compiler_blocks_unknown_standard_command_before_release_packaging() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_missing_presentation_provider_manifest_for_classic_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
     let mut sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     sections.retain(|section| section.id != "vn.presentation_provider_manifest");
     let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
 
@@ -1586,13 +1607,16 @@ fn release_gate_blocks_missing_presentation_provider_manifest_for_classic_profil
 
 #[astra_headless_test::test]
 fn release_gate_blocks_missing_commercial_baseline_manifest_for_classic_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
     let mut sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     sections.retain(|section| section.id != "vn.commercial_baseline_manifest");
     let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
 
@@ -1621,18 +1645,21 @@ fn release_gate_blocks_missing_commercial_baseline_manifest_for_classic_profile(
 
 #[astra_headless_test::test]
 fn release_gate_blocks_incomplete_commercial_baseline_for_classic_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        r#"
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            r#"
 story main #@id story.main
 state prologue #@id state.prologue
   scene room #@id scene.room
     text key:hello speaker:narrator #@id line.hello
 "#,
-    )])
+        )],
+        Default::default(),
+    )
     .unwrap();
     let sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
 
     let report = ReleaseValidator
@@ -1660,13 +1687,16 @@ state prologue #@id state.prologue
 
 #[astra_headless_test::test]
 fn release_gate_blocks_missing_vn_extension_bindings_for_classic_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
     let mut sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     sections.retain(|section| section.id != "vn.extension_manifest");
     let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
 
@@ -1695,14 +1725,17 @@ fn release_gate_blocks_missing_vn_extension_bindings_for_classic_profile() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_compiled_story_without_command_manifest() {
-    let mut compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let mut compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
     compiled.command_manifest.commands.clear();
     let sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
 
     let report = ReleaseValidator
@@ -1730,18 +1763,21 @@ fn release_gate_blocks_compiled_story_without_command_manifest() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_missing_system_story_manifest_for_classic_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        r#"
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            r#"
 story main #@id story.main
 state prologue #@id state.prologue
   scene room #@id scene.room
     text key:hello speaker:narrator #@id line.hello
 "#,
-    )])
+        )],
+        Default::default(),
+    )
     .unwrap();
     let sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
 
     let report = ReleaseValidator
@@ -1770,9 +1806,13 @@ state prologue #@id state.prologue
 #[astra_headless_test::test]
 fn release_gate_blocks_system_story_entries_without_policy() {
     let source = nativevn_story_with_system_pages().replace(" policy:astra.policy.standard", "");
-    let compiled = compile_astra_sources([AstraSource::new("main.astra", source)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("main.astra", source)],
+        Default::default(),
+    )
+    .unwrap();
     let sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
 
     let report = ReleaseValidator
@@ -1800,13 +1840,16 @@ fn release_gate_blocks_system_story_entries_without_policy() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_missing_system_ui_profile_manifest() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
     let mut sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     sections.retain(|section| section.id != "vn.system_ui_profile_manifest");
     let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
 
@@ -1835,13 +1878,16 @@ fn release_gate_blocks_missing_system_ui_profile_manifest() {
 
 #[astra_headless_test::test]
 fn release_gate_accepts_system_story_manifest_for_classic_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
     let sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     let blob = package_with_target_manifest("classic", nativevn_target_manifest(), sections);
 
     let report = ReleaseValidator
@@ -1869,12 +1915,15 @@ fn release_gate_accepts_system_story_manifest_for_classic_profile() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_missing_tsuinosora_sections_for_tsuinosora_target() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let sections = package_sections_for_story(
+    let sections = package_sections_for_project(
         &compiled,
         &["classic".to_string()],
         "tsuinosora-internal-game",
@@ -1907,12 +1956,15 @@ fn release_gate_blocks_missing_tsuinosora_sections_for_tsuinosora_target() {
 
 #[astra_headless_test::test]
 fn release_gate_accepts_tsuinosora_sections_for_classic_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["classic".to_string()],
         "tsuinosora-internal-game",
@@ -1954,12 +2006,15 @@ fn release_gate_accepts_tsuinosora_sections_for_classic_profile() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_tsuinosora_reference_hash_mismatch() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["classic".to_string()],
         "tsuinosora-internal-game",
@@ -2022,12 +2077,15 @@ fn release_gate_blocks_tsuinosora_reference_hash_mismatch() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_tsuinosora_asset_quarantine() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["classic".to_string()],
         "tsuinosora-internal-game",
@@ -2061,12 +2119,15 @@ fn release_gate_blocks_tsuinosora_asset_quarantine() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_empty_tsuinosora_asset_analysis() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["classic".to_string()],
         "tsuinosora-internal-game",
@@ -2121,12 +2182,15 @@ fn release_gate_blocks_empty_tsuinosora_asset_analysis() {
 
 #[astra_headless_test::test]
 fn release_gate_requires_tsuinosora_modern_profile_report() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["classic".to_string(), "modern".to_string()],
         "tsuinosora-internal-game",
@@ -2156,12 +2220,15 @@ fn release_gate_requires_tsuinosora_modern_profile_report() {
         .unwrap();
     assert_eq!(missing.status, CheckStatus::Blocked);
 
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["classic".to_string(), "modern".to_string()],
         "tsuinosora-internal-game",
@@ -2186,12 +2253,15 @@ fn release_gate_requires_tsuinosora_modern_profile_report() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_tsuinosora_conversion_route_gap() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["classic".to_string()],
         "tsuinosora-internal-game",
@@ -2242,12 +2312,15 @@ fn release_gate_blocks_tsuinosora_conversion_route_gap() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_tsuinosora_conversion_without_resource_evidence() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["classic".to_string()],
         "tsuinosora-internal-game",
@@ -2313,12 +2386,15 @@ fn release_gate_blocks_tsuinosora_conversion_without_resource_evidence() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_tsuinosora_conversion_resource_without_hash_evidence() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["classic".to_string()],
         "tsuinosora-internal-game",
@@ -2389,12 +2465,15 @@ fn release_gate_blocks_tsuinosora_conversion_resource_without_hash_evidence() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_tsuinosora_report_path_leak() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["classic".to_string()],
         "tsuinosora-internal-game",
@@ -2450,12 +2529,15 @@ fn release_gate_blocks_tsuinosora_report_path_leak() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_tsuinosora_report_payload_field_leak() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["classic".to_string()],
         "tsuinosora-internal-game",
@@ -2520,12 +2602,15 @@ fn release_gate_blocks_tsuinosora_report_payload_field_leak() {
 
 #[astra_headless_test::test]
 fn release_gate_requires_tsuinosora_manual_signoff_for_release_profile() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["desktop-release".to_string()],
         "tsuinosora-internal-game",
@@ -2560,12 +2645,15 @@ fn release_gate_requires_tsuinosora_manual_signoff_for_release_profile() {
         "ASTRA_TSUI_SECTION_MISSING"
     );
 
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["desktop-release".to_string()],
         "tsuinosora-internal-game",
@@ -2597,12 +2685,15 @@ fn release_gate_requires_tsuinosora_manual_signoff_for_release_profile() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_incomplete_tsuinosora_manual_signoff_check_set() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["desktop-release".to_string()],
         "tsuinosora-internal-game",
@@ -2658,12 +2749,15 @@ fn release_gate_blocks_incomplete_tsuinosora_manual_signoff_check_set() {
 
 #[astra_headless_test::test]
 fn release_gate_requires_tsuinosora_manual_signoff_check_id_field() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "main.astra",
-        nativevn_story_with_system_pages(),
-    )])
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "main.astra",
+            nativevn_story_with_system_pages(),
+        )],
+        Default::default(),
+    )
     .unwrap();
-    let mut sections = package_sections_for_story(
+    let mut sections = package_sections_for_project(
         &compiled,
         &["desktop-release".to_string()],
         "tsuinosora-internal-game",
@@ -2779,12 +2873,13 @@ fn package_with_target_manifest(
 
 fn nativevn_target_manifest() -> serde_json::Value {
     serde_json::json!({
-        "schema": "astra.target_manifest.v1",
+        "schema": "astra.target_manifest.v2",
         "targets": [{
             "id": "nativevn-game",
             "kind": "game",
             "crate": "astra-vn",
             "runtime_provider": "native_vn",
+            "ui_provider": "astra.ui.yakui",
             "default_profile": "classic",
             "platforms": ["windows", "web"],
             "packaged": true
@@ -2794,12 +2889,13 @@ fn nativevn_target_manifest() -> serde_json::Value {
 
 fn tsuinosora_target_manifest() -> serde_json::Value {
     serde_json::json!({
-        "schema": "astra.target_manifest.v1",
+        "schema": "astra.target_manifest.v2",
         "targets": [{
             "id": "tsuinosora-internal-game",
             "kind": "game",
             "crate": "astra-vn",
             "runtime_provider": "native_vn",
+            "ui_provider": "astra.ui.yakui",
             "default_profile": "classic",
             "platforms": ["headless", "windows", "web"],
             "packaged": true

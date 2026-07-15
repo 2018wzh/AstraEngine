@@ -1,5 +1,5 @@
 use astra_vn_system::{
-    compile_astra_sources, AstraSource, SystemPageKind, SystemStoryManifest,
+    compile_astra_project, AstraSource, SystemPageKind, SystemStoryManifest,
     SystemStoryValidationStatus, VnSystemUiProfileManifest,
 };
 
@@ -44,7 +44,11 @@ state localization_preview #@id state.system.localization_preview
 
 #[astra_headless_test::test]
 fn system_story_manifest_validates_required_entries_and_sources() {
-    let compiled = compile_astra_sources([AstraSource::new("system.astra", SYSTEM_STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("system.astra", SYSTEM_STORY)],
+        Default::default(),
+    )
+    .unwrap();
 
     let manifest = SystemStoryManifest::from_compiled(&compiled).unwrap();
     let required = SystemStoryManifest::commercial_required_pages();
@@ -73,7 +77,11 @@ fn system_story_manifest_validates_required_entries_and_sources() {
 
 #[astra_headless_test::test]
 fn system_ui_profile_manifest_validates_migration_unlock_and_localization() {
-    let compiled = compile_astra_sources([AstraSource::new("system.astra", SYSTEM_STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("system.astra", SYSTEM_STORY)],
+        Default::default(),
+    )
+    .unwrap();
     let manifest = VnSystemUiProfileManifest::from_compiled(&compiled, vec!["zh-Hans".to_string()]);
 
     let report = manifest.validate();

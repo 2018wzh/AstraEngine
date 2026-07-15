@@ -1,0 +1,18 @@
+[package]
+name = "astra-ui-yakui"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+astra-core = { path = "../astra-core" }
+astra-media-core = { path = "../astra-media-core" }
+astra-ui-core = { path = "../astra-ui-core" }
+fast-srgb8.workspace = true
+postcard.workspace = true
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+yakui-core.workspace = true
+yakui-widgets.workspace = true

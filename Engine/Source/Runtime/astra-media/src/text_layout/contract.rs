@@ -122,6 +122,8 @@ pub enum TextDirection {
     Auto,
     LeftToRight,
     RightToLeft,
+    VerticalRightToLeft,
+    VerticalLeftToRight,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -217,6 +219,10 @@ pub struct ShapedGlyph {
     pub resource_id: Option<String>,
     pub render_x: Option<i32>,
     pub render_y: Option<i32>,
+    /// Clockwise quarter turns already applied to the glyph bitmap.
+    pub rotation_quadrants: u8,
+    /// True when a short horizontal digit run occupies one vertical em cell.
+    pub tate_chu_yoko: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -297,6 +303,7 @@ impl TextLayoutResult {
                     resource_id: glyph.resource_id.clone()?,
                     x: glyph.render_x?,
                     y: glyph.render_y?,
+                    rotation_quadrants: glyph.rotation_quadrants,
                 })
             })
             .collect()

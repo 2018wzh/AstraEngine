@@ -12,9 +12,9 @@ use astra_media_core::{
     TextureFrame, Transform2D,
 };
 use astra_player_core::{
-    PlayerAction, PlayerAudioLifecyclePlan, PlayerDecodeKind, PlayerDecodeLifecyclePlan,
-    PlayerDecodedAudio, PlayerHostCommand, PlayerHostCommandBatch, PlayerHostCommandError,
-    PlayerHostResourceId, PlayerSaveTransactionPlan, PlayerTimelineTask, PlayerTimelineTaskAction,
+    PlayerAudioLifecyclePlan, PlayerDecodeKind, PlayerDecodeLifecyclePlan, PlayerDecodedAudio,
+    PlayerHostCommand, PlayerHostCommandBatch, PlayerHostCommandError, PlayerHostResourceId,
+    PlayerSaveTransactionPlan, PlayerTimelineTask, PlayerTimelineTaskAction,
 };
 use astra_plugin::{ProductRuntimeHost, RuntimeHostError, RuntimeHostSchemaRegistry};
 use astra_plugin_abi::{
@@ -23,18 +23,27 @@ use astra_plugin_abi::{
     RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepInput, RuntimeStepMode,
     ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
 };
+use astra_ui_core::{
+    UiBackend, UiBlueprintFrameModel, UiButtonState, UiFrameRequest, UiInputDispositionKind,
+    UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets, UiSemanticRole, UiSemanticSnapshot,
+    UiThemeManifest, UiThemeValue, UiValidationError, UiValue, UiViewport,
+};
+use astra_ui_yakui::{ui_frame_to_scene_commands, AstraYakuiBackend, BlueprintYakuiRenderer};
 use astra_vn_core::{
     CompiledCommand, CompiledStory, MovieLoopMode, PresentationCommand, StageBlendMode,
     StageClipPolicy, StageCommand, StageLayerKind, SystemPageKind, TimelineCommand, VnAudioBus,
-    VnAudioControlAction, VnAudioSync, VnPlayerCommand, VnRunConfig, VnRuntimeState,
+    VnAudioControlAction, VnAudioSync, VnPlayerCommand, VnRunConfig, VnRuntimeState, VnWaitKind,
 };
 use astra_vn_package::{
-    decode_compiled_story, load_localization as load_package_localization,
-    load_player_locale_config, load_presentation_provider_manifest, ProductStageDirector,
-    ProductStageState, StageDirectorOutput, VnLocalizationTable, VnPresentationProviderManifest,
+    decode_compiled_project, load_localization as load_package_localization,
+    load_player_locale_config, load_presentation_provider_manifest, CompiledVnProject,
+    ProductStageDirector, ProductStageState, StageDirectorOutput, VnLocalizationTable,
+    VnPresentationProviderManifest,
 };
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
-use astra_vn_system::{SystemUiAction, SystemUiModel};
+use astra_vn_ui::{
+    model_to_ui_value, resolve_binding, VnUiBindingError, VnUiBindingRequest, VnUiModelContext,
+};
 
 pub struct NativeVnHostCommandSource {
     host: ProductRuntimeHost,
@@ -66,6 +75,15 @@ pub struct NativeVnHostCommandSource {
     next_media_resource_id: u64,
     stage_director: ProductStageDirector,
     restored_product_media_snapshot: Option<Vec<u8>>,
+    story: CompiledStory,
+    ui_blueprints: astra_ui_core::UiBlueprintBundle,
+    ui_bindings: astra_ui_core::UiBindingManifest,
+    ui_backend: AstraYakuiBackend<BlueprintYakuiRenderer>,
+    ui_theme: UiThemeManifest,
+    ui_profile: String,
+    ui_generation: u64,
+    ui_input_sequence: u64,
+    ui_draw: Vec<SceneCommand>,
     shutdown_started: bool,
 }
 
@@ -196,7 +214,7 @@ impl NativeVnHostCommandSource {
                 runtime_provider.profile()
             )));
         }
-        let compiled = decode_compiled_story(package)
+        let compiled = decode_compiled_project(package)
             .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
         let textures = load_package_textures(package)?;
         let media_assets = load_package_media_assets(package)?;
@@ -268,28 +286,29 @@ impl NativeVnHostCommandSource {
     }
 
     fn open(
-        compiled: CompiledStory,
+        compiled: CompiledVnProject,
         config: VnRunConfig,
         width: u32,
         height: u32,
         surface: PlayerHostResourceId,
         binding: ProductPackageBinding,
     ) -> Result<Self, NativeVnHostError> {
-        if compiled.story_manifest.stories.is_empty() {
+        if compiled.story.story_manifest.stories.is_empty() {
             return Err(NativeVnHostError::EmptyStory);
         }
         let terminal_routes = compiled
+            .story
             .route_graph
             .nodes
             .iter()
             .filter(|node| node.terminal)
             .map(|node| node.id.clone())
             .collect();
-        let compiled_bytes = postcard::to_allocvec(&compiled)
+        let compiled_bytes = postcard::to_allocvec(&compiled.story)
             .map_err(|err| NativeVnHostError::Serialize(err.to_string()))?;
         let compiled_section = RuntimeSectionPayload {
-            section_id: "vn.compiled_story".to_string(),
-            schema: "astra.vn.compiled_story".to_string(),
+            section_id: "vn.story".to_string(),
+            schema: "astra.vn.story".to_string(),
             version: SchemaVersion::default(),
             codec: RuntimeSectionCodec::Postcard,
             hash: Hash256::from_sha256(&compiled_bytes),
@@ -302,6 +321,10 @@ impl NativeVnHostCommandSource {
         )
         .map_err(stage_director_error)?;
         let runtime_provider = &binding.runtime_provider;
+        let ui_profile = config.profile.clone();
+        let ui_theme = builtin_ui_theme(&ui_profile)?;
+        let ui_renderer = BlueprintYakuiRenderer::new(compiled.ui_blueprints.clone())?;
+        let ui_backend = AstraYakuiBackend::new(ui_renderer, compiled.project_hash)?;
         let schemas = RuntimeHostSchemaRegistry::from_descriptor(runtime_provider.descriptor());
         if runtime_provider.provider_id() != NATIVE_VN_PROVIDER_ID {
             return Err(NativeVnHostError::Package(format!(
@@ -403,6 +426,15 @@ impl NativeVnHostCommandSource {
             next_media_resource_id: 10_000,
             stage_director,
             restored_product_media_snapshot: None,
+            story: compiled.story,
+            ui_blueprints: compiled.ui_blueprints,
+            ui_bindings: compiled.ui_bindings,
+            ui_backend,
+            ui_theme,
+            ui_profile,
+            ui_generation: 1,
+            ui_input_sequence: 0,
+            ui_draw: Vec::new(),
             shutdown_started: false,
         })
     }
@@ -1022,79 +1054,238 @@ impl NativeVnHostCommandSource {
         self.step("launch_default", serde_json::json!({}))
     }
 
-    pub fn dispatch_action(
+    pub fn dispatch_ui_event(
         &mut self,
-        action: PlayerAction,
+        kind: UiInputEventKind,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        let command = match action {
-            PlayerAction::Advance => {
-                if self
-                    .runtime_state
-                    .as_ref()
-                    .is_some_and(|state| state.pending_choice.is_some())
+        let event = self.next_ui_event(kind)?;
+        self.dispatch_ui_events(vec![event])
+    }
+
+    fn next_ui_event(&mut self, kind: UiInputEventKind) -> Result<UiInputEvent, NativeVnHostError> {
+        self.ui_input_sequence = self
+            .ui_input_sequence
+            .checked_add(1)
+            .ok_or(NativeVnHostError::SequenceOverflow)?;
+        Ok(UiInputEvent {
+            sequence: self.ui_input_sequence,
+            kind,
+        })
+    }
+
+    fn dispatch_ui_events(
+        &mut self,
+        events: Vec<UiInputEvent>,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        let fallback_events = events.clone();
+        let (output, ui_draw) = self.render_ui(events)?;
+        if output.actions.len() > 1 {
+            return Err(NativeVnHostError::Input(
+                "ASTRA_PLAYER_UI_ACTION_AMBIGUOUS: one input frame emitted multiple actions".into(),
+            ));
+        }
+        if let Some(action) = output.actions.first() {
+            return self.dispatch_ui_action(action);
+        }
+        let consumed = output
+            .dispositions
+            .iter()
+            .any(|item| item.disposition == UiInputDispositionKind::Consumed);
+        if !consumed {
+            if let Some(command) = self.bubbled_ui_command(&fallback_events) {
+                return self.command(command);
+            }
+        }
+        self.present_current_scene(ui_draw)
+    }
+
+    fn bubbled_ui_command(&self, events: &[UiInputEvent]) -> Option<VnPlayerCommand> {
+        let state = self.runtime_state.as_ref()?;
+        for event in events.iter().rev() {
+            match &event.kind {
+                UiInputEventKind::Keyboard {
+                    logical_key,
+                    state: UiButtonState::Pressed,
+                    ..
+                } if state.pending_choice.is_none()
+                    && state.system_stack.is_empty()
+                    && matches!(logical_key.as_str(), "Enter" | " " | "Space") =>
                 {
-                    return Err(NativeVnHostError::Input(
-                        "ASTRA_PLAYER_CHOICE_REQUIRED: advance cannot select a choice".into(),
-                    ));
+                    return Some(VnPlayerCommand::Advance);
                 }
-                VnPlayerCommand::Advance
+                UiInputEventKind::Navigation {
+                    action: astra_ui_core::UiNavigationAction::Activate,
+                } if state.pending_choice.is_none() && state.system_stack.is_empty() => {
+                    return Some(VnPlayerCommand::Advance);
+                }
+                UiInputEventKind::Navigation {
+                    action: astra_ui_core::UiNavigationAction::Cancel,
+                } if !state.system_stack.is_empty() => {
+                    return Some(VnPlayerCommand::ReturnSystem);
+                }
+                _ => {}
             }
-            PlayerAction::ChooseIndex { index } => {
-                let option_id = self
-                    .runtime_state
-                    .as_ref()
-                    .and_then(|state| state.pending_choice.as_ref())
-                    .and_then(|choice| choice.options.get(index))
-                    .map(|option| option.id.clone())
-                    .ok_or_else(|| {
-                        NativeVnHostError::Input(
-                            "ASTRA_PLAYER_CHOICE_INDEX: choice index is unavailable".into(),
-                        )
-                    })?;
-                VnPlayerCommand::Choose { option_id }
-            }
-            PlayerAction::OpenSystemPage { page } => VnPlayerCommand::OpenSystem {
-                page: astra_vn_core::SystemPageKind::parse(&page),
+        }
+        None
+    }
+
+    fn dispatch_ui_action(
+        &mut self,
+        action: &astra_ui_core::UiActionEnvelope,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        let command = match action.action_id.as_str() {
+            "vn.advance" => VnPlayerCommand::Advance,
+            "vn.choose" => VnPlayerCommand::Choose {
+                option_id: ui_string_argument(action, "option_id")?.to_string(),
             },
-            PlayerAction::Back => VnPlayerCommand::ReturnSystem,
+            "vn.open_system" => VnPlayerCommand::OpenSystem {
+                page: SystemPageKind::parse(ui_string_argument(action, "page")?),
+            },
+            "vn.return_system" => VnPlayerCommand::ReturnSystem,
+            "vn.set_config" => VnPlayerCommand::SetConfig {
+                key: ui_string_argument(action, "key")?.to_string(),
+                value: ui_scalar_argument(action, "value")?,
+            },
+            "vn.replay_voice" => VnPlayerCommand::ReplayVoice {
+                voice: ui_string_argument(action, "voice_id")?.to_string(),
+            },
+            unsupported => {
+                return Err(NativeVnHostError::Input(format!(
+                    "ASTRA_PLAYER_UI_ACTION_UNSUPPORTED: action {unsupported} is not routed by the product host"
+                )))
+            }
         };
         self.command(command)
     }
 
-    pub fn dispatch_pointer(
+    fn present_current_scene(
         &mut self,
-        x: f64,
-        y: f64,
+        ui_draw: Vec<SceneCommand>,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        let mut commands = vec![SceneCommand::rect(
+            "vn.frame.clear",
+            0,
+            0,
+            self.width,
+            self.height,
+            [8, 10, 16, 255],
+        )];
+        commands.extend(self.scene_draw.iter().cloned());
+        commands.extend(ui_draw);
+        self.ui_draw = commands.clone();
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::PresentScene {
+                sequence: self.next_command_sequence()?,
+                surface: self.surface,
+                width: self.width,
+                height: self.height,
+                clear_rgba: [8, 10, 16, 255],
+                commands,
+            },
+        ])?)
+    }
+
+    fn render_ui(
+        &mut self,
+        events: Vec<UiInputEvent>,
+    ) -> Result<(astra_ui_core::UiFrameOutput, Vec<SceneCommand>), NativeVnHostError> {
         let state = self.runtime_state.as_ref().ok_or_else(|| {
             NativeVnHostError::Input("ASTRA_PLAYER_STATE: runtime has not launched".into())
         })?;
-        let model = if let Some(choice) = &state.pending_choice {
-            SystemUiModel::choice(self.width, self.height, choice.options.len())
+        let localization_keys = self
+            .localization
+            .strings
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        let context = VnUiModelContext {
+            runtime: state,
+            story: &self.story,
+            save_slots: &[],
+            localization_keys: &localization_keys,
+        };
+        let (surface, system_page, model) = if state.pending_choice.is_some() {
+            ("choice", None, model_to_ui_value(&context.build_choice()?)?)
         } else if let Some(frame) = state.system_stack.last() {
-            SystemUiModel::system(frame.page, self.width, self.height).ok_or_else(|| {
-                NativeVnHostError::Input("ASTRA_PLAYER_SYSTEM_PAGE: unknown system page".into())
-            })?
+            let page_model = context.build_system_page(frame.page);
+            (
+                "system",
+                Some(system_page_binding_key(frame.page)?),
+                page_model.to_ui_value()?,
+            )
         } else {
-            SystemUiModel::message(self.width, self.height)
+            (
+                "message",
+                None,
+                model_to_ui_value(&context.build_message()?)?,
+            )
         };
-        let action = model.hit_test(x, y).cloned().ok_or_else(|| {
-            NativeVnHostError::Input("ASTRA_PLAYER_HIT_TEST: pointer did not hit a control".into())
-        })?;
-        let action = match action {
-            SystemUiAction::Advance => PlayerAction::Advance,
-            SystemUiAction::ChooseIndex { index } => PlayerAction::ChooseIndex { index },
-            SystemUiAction::Open { surface } => PlayerAction::OpenSystemPage {
-                page: format!("{surface:?}").to_lowercase(),
+        let binding = resolve_binding(
+            &self.ui_bindings,
+            VnUiBindingRequest {
+                command_id: state
+                    .pending_wait
+                    .as_ref()
+                    .map(|wait| wait.command_id.as_str()),
+                system_page,
+                surface: Some(surface),
+                profile: &self.ui_profile,
             },
-            SystemUiAction::Back => PlayerAction::Back,
-            SystemUiAction::Activate { control_id } => {
-                return Err(NativeVnHostError::Input(format!(
-                    "ASTRA_PLAYER_CONTROL_UNBOUND: {control_id}"
-                )))
-            }
+        )?
+        .clone();
+        let view = self
+            .ui_blueprints
+            .views
+            .get(&binding.view_id)
+            .ok_or_else(|| {
+                NativeVnHostError::Input(format!(
+                    "ASTRA_PLAYER_UI_VIEW_MISSING: view {} is not packaged",
+                    binding.view_id
+                ))
+            })?;
+        let frame = UiBlueprintFrameModel {
+            schema: "astra.ui_blueprint_frame_model.v1".to_string(),
+            view_id: binding.view_id,
+            model,
+            state: UiValue::Map(BTreeMap::new()),
+            localization: self.localization.strings.clone(),
         };
-        self.dispatch_action(action)
+        let model_payload = postcard::to_allocvec(&frame)
+            .map_err(|error| NativeVnHostError::Serialize(error.to_string()))?;
+        let request = UiFrameRequest {
+            schema: "astra.ui_frame_request.v1".to_string(),
+            session_id: format!("vn.ui.{}", self.session_id.0),
+            generation: self.ui_generation,
+            viewport: UiViewport {
+                physical_width: self.width,
+                physical_height: self.height,
+                scale_factor: 1.0,
+                font_scale: 1.0,
+                safe_area_points: UiInsets {
+                    left: 0.0,
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: 0.0,
+                },
+            },
+            fixed_time_ns: self.fixed_step.saturating_mul(16_666_667),
+            input: UiInputFrame {
+                schema: "astra.ui_input_frame.v1".to_string(),
+                events,
+            },
+            theme: self.ui_theme.clone(),
+            model_schema: view.model_schema.clone(),
+            model_payload,
+        };
+        let output = self.ui_backend.render_frame(request)?;
+        if !output.diagnostics.is_empty() {
+            return Err(NativeVnHostError::Input(format!(
+                "ASTRA_PLAYER_UI_DIAGNOSTIC: UI frame returned {} diagnostics",
+                output.diagnostics.len()
+            )));
+        }
+        let draw = ui_frame_to_scene_commands(&output.render)?;
+        Ok((output, draw))
     }
 
     pub fn release_resources(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
@@ -1505,16 +1696,19 @@ impl NativeVnHostCommandSource {
                         2,
                         [245, 245, 248, 255],
                     )?;
-                    let model = SystemUiModel::choice(self.width, self.height, options.len());
-                    for (index, (option, control)) in
-                        options.iter().zip(model.controls.iter()).enumerate()
-                    {
+                    let option_height = 64u32;
+                    let total_height = option_height.saturating_mul(options.len() as u32);
+                    let first_y = self.height.saturating_sub(total_height) / 2;
+                    for (index, option) in options.iter().enumerate() {
+                        let control_x = self.width / 6;
+                        let control_y = first_y.saturating_add(index as u32 * option_height);
+                        let control_width = self.width.saturating_mul(2) / 3;
                         panel_draw.push(SceneCommand::rect(
                             format!("vn.choice.{}", option.id),
-                            control.bounds.x,
-                            control.bounds.y,
-                            control.bounds.width,
-                            control.bounds.height.saturating_sub(4),
+                            control_x,
+                            control_y,
+                            control_width,
+                            option_height.saturating_sub(4),
                             [30, 48, 70, 245],
                         ));
                         append_text_layout(
@@ -1527,9 +1721,9 @@ impl NativeVnHostCommandSource {
                             &mut text_draw,
                             &format!("vn.choice.option.{index}"),
                             &option.key,
-                            control.bounds.x.saturating_add(12),
-                            control.bounds.y.saturating_add(10),
-                            control.bounds.width.saturating_sub(24),
+                            control_x.saturating_add(12),
+                            control_y.saturating_add(10),
+                            control_width.saturating_sub(24),
                             (body_font_size * 0.82).max(16.0),
                             1,
                             [255, 255, 255, 255],
@@ -1537,12 +1731,6 @@ impl NativeVnHostCommandSource {
                     }
                 }
                 PresentationCommand::SystemPage { page } => {
-                    let model =
-                        SystemUiModel::system(*page, self.width, self.height).ok_or_else(|| {
-                            NativeVnHostError::Input(
-                                "ASTRA_PLAYER_SYSTEM_PAGE: unknown system page".into(),
-                            )
-                        })?;
                     panel_draw.push(SceneCommand::rect(
                         "vn.system.panel",
                         0,
@@ -1568,33 +1756,6 @@ impl NativeVnHostCommandSource {
                         1,
                         [220, 230, 255, 255],
                     )?;
-                    for control in model.controls {
-                        panel_draw.push(SceneCommand::rect(
-                            format!("vn.system.control.{}", control.id),
-                            control.bounds.x,
-                            control.bounds.y,
-                            control.bounds.width,
-                            control.bounds.height,
-                            [38, 58, 84, 255],
-                        ));
-                        append_text_layout(
-                            &mut next_text_resources,
-                            &self.text_provider,
-                            &self.font_families,
-                            &self.localization,
-                            &mut next_layout_ids,
-                            &mut text_lifecycle,
-                            &mut text_draw,
-                            &format!("vn.system.control_text.{}", control.id),
-                            "system.back",
-                            control.bounds.x.saturating_add(16),
-                            control.bounds.y.saturating_add(12),
-                            control.bounds.width.saturating_sub(32),
-                            (body_font_size * 0.72).max(16.0),
-                            1,
-                            [255; 4],
-                        )?;
-                    }
                 }
                 PresentationCommand::SystemOption { option } => {
                     let y = 180u32.saturating_add((next_layout_ids.len() as u32) * 64);
@@ -1634,6 +1795,28 @@ impl NativeVnHostCommandSource {
                 PresentationCommand::Marker { .. } => {}
             }
         }
+        let ui_frame = if self.runtime_state.as_ref().is_some_and(|state| {
+            state.pending_choice.is_some()
+                || !state.system_stack.is_empty()
+                || state.pending_wait.as_ref().map(|wait| wait.kind) == Some(VnWaitKind::Dialogue)
+        }) {
+            Some(self.render_ui(Vec::new())?)
+        } else {
+            None
+        };
+        if let Some((output, _)) = &ui_frame {
+            append_ui_semantic_text(
+                &mut next_text_resources,
+                &self.text_provider,
+                &self.font_families,
+                &self.localization,
+                &mut next_layout_ids,
+                &mut text_lifecycle,
+                &mut text_draw,
+                &output.semantics,
+                body_font_size,
+            )?;
+        }
         for layout_id in self.live_layout_ids.difference(&next_layout_ids) {
             text_lifecycle.extend(next_text_resources.remove_layout(layout_id)?);
         }
@@ -1649,6 +1832,8 @@ impl NativeVnHostCommandSource {
         lifecycle.extend(next_scene_draw.iter().cloned());
         lifecycle.extend(panel_draw);
         lifecycle.extend(text_draw);
+        let ui_draw = ui_frame.map_or_else(Vec::new, |(_, draw)| draw);
+        lifecycle.extend(ui_draw.iter().cloned());
         self.command_sequence = self
             .command_sequence
             .checked_add(1)
@@ -1666,6 +1851,7 @@ impl NativeVnHostCommandSource {
         self.live_texture_ids = next_texture_ids;
         self.text_resources = next_text_resources;
         self.live_layout_ids = next_layout_ids;
+        self.ui_draw = ui_draw;
         self.pending_audio.extend(next_audio_controls);
         Ok(PlayerHostCommandBatch::new(vec![
             PlayerHostCommand::PresentScene {
@@ -2397,10 +2583,49 @@ fn append_text_layout(
     rgba: [u8; 4],
 ) -> Result<(), NativeVnHostError> {
     let text = resolve_localized(localization, localization_key)?;
-    let request = text_request(
+    append_text_value(
+        owner,
+        provider,
+        font_families,
+        &localization.locale,
+        layout_ids,
+        lifecycle,
+        draw,
+        layout_id,
         localization_key,
         text,
-        &localization.locale,
+        x,
+        y,
+        max_width,
+        font_size,
+        max_lines,
+        rgba,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_text_value(
+    owner: &mut TextRenderResourceOwner,
+    provider: &CosmicTextLayoutProvider,
+    font_families: &[String],
+    locale: &str,
+    layout_ids: &mut BTreeSet<String>,
+    lifecycle: &mut Vec<SceneCommand>,
+    draw: &mut Vec<SceneCommand>,
+    layout_id: &str,
+    key: &str,
+    text: &str,
+    x: u32,
+    y: u32,
+    max_width: u32,
+    font_size: f32,
+    max_lines: u32,
+    rgba: [u8; 4],
+) -> Result<(), NativeVnHostError> {
+    let request = text_request(
+        key,
+        text,
+        locale,
         font_families,
         max_width,
         font_size,
@@ -2422,6 +2647,74 @@ fn append_text_layout(
         )));
     }
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_ui_semantic_text(
+    owner: &mut TextRenderResourceOwner,
+    provider: &CosmicTextLayoutProvider,
+    font_families: &[String],
+    localization: &VnLocalizationTable,
+    layout_ids: &mut BTreeSet<String>,
+    lifecycle: &mut Vec<SceneCommand>,
+    draw: &mut Vec<SceneCommand>,
+    semantics: &UiSemanticSnapshot,
+    body_font_size: f32,
+) -> Result<(), NativeVnHostError> {
+    for node in &semantics.nodes {
+        if !matches!(
+            node.role,
+            UiSemanticRole::Text
+                | UiSemanticRole::Button
+                | UiSemanticRole::Toggle
+                | UiSemanticRole::Slider
+                | UiSemanticRole::Select
+                | UiSemanticRole::TextInput
+        ) {
+            continue;
+        }
+        let Some(name) = node.name.as_deref() else {
+            continue;
+        };
+        let text = localization
+            .strings
+            .get(name)
+            .map(String::as_str)
+            .unwrap_or(name);
+        let x = non_negative_coord(node.bounds_points.min.x, "x")?;
+        let y = non_negative_coord(node.bounds_points.min.y, "y")?;
+        let width =
+            non_negative_coord(node.bounds_points.max.x - node.bounds_points.min.x, "width")?
+                .max(1);
+        append_text_value(
+            owner,
+            provider,
+            font_families,
+            &localization.locale,
+            layout_ids,
+            lifecycle,
+            draw,
+            &format!("ui.text.{}", node.id),
+            name,
+            text,
+            x.saturating_add(8),
+            y.saturating_add(8),
+            width.saturating_sub(16).max(1),
+            (body_font_size * 0.72).max(16.0),
+            4,
+            [255; 4],
+        )?;
+    }
+    Ok(())
+}
+
+fn non_negative_coord(value: f32, field: &str) -> Result<u32, NativeVnHostError> {
+    if !value.is_finite() || value < 0.0 || value > u32::MAX as f32 {
+        return Err(NativeVnHostError::Asset(format!(
+            "ASTRA_PLAYER_UI_TEXT_BOUNDS: semantic {field} is outside render bounds"
+        )));
+    }
+    Ok(value.round() as u32)
 }
 
 fn text_request(
@@ -2523,6 +2816,97 @@ fn system_page_localization_key(page: SystemPageKind) -> Result<&'static str, Na
             "ASTRA_PLAYER_SYSTEM_PAGE: unknown system page".to_string(),
         )),
     }
+}
+
+fn system_page_binding_key(page: SystemPageKind) -> Result<&'static str, NativeVnHostError> {
+    match page {
+        SystemPageKind::Title => Ok("title"),
+        SystemPageKind::Save => Ok("save"),
+        SystemPageKind::Load => Ok("load"),
+        SystemPageKind::Config => Ok("config"),
+        SystemPageKind::Gallery => Ok("gallery"),
+        SystemPageKind::Replay => Ok("replay"),
+        SystemPageKind::VoiceReplay => Ok("voice_replay"),
+        SystemPageKind::RouteChart => Ok("route_chart"),
+        SystemPageKind::Backlog => Ok("backlog"),
+        SystemPageKind::LocalizationPreview => Ok("localization_preview"),
+        SystemPageKind::Unknown => Err(NativeVnHostError::Input(
+            "ASTRA_PLAYER_SYSTEM_PAGE: unknown system page has no UI binding".into(),
+        )),
+    }
+}
+
+fn ui_string_argument<'a>(
+    action: &'a astra_ui_core::UiActionEnvelope,
+    name: &str,
+) -> Result<&'a str, NativeVnHostError> {
+    match action.arguments.get(name) {
+        Some(UiValue::String(value)) if !value.is_empty() => Ok(value),
+        _ => Err(NativeVnHostError::Input(format!(
+            "ASTRA_PLAYER_UI_ACTION_ARGUMENT: action {} requires string argument {name}",
+            action.action_id
+        ))),
+    }
+}
+
+fn ui_scalar_argument(
+    action: &astra_ui_core::UiActionEnvelope,
+    name: &str,
+) -> Result<String, NativeVnHostError> {
+    match action.arguments.get(name) {
+        Some(UiValue::String(value)) => Ok(value.clone()),
+        Some(UiValue::Bool(value)) => Ok(value.to_string()),
+        Some(UiValue::Integer(value)) => Ok(value.to_string()),
+        Some(UiValue::Number(value)) if value.is_finite() => Ok(value.to_string()),
+        _ => Err(NativeVnHostError::Input(format!(
+            "ASTRA_PLAYER_UI_ACTION_ARGUMENT: action {} requires scalar argument {name}",
+            action.action_id
+        ))),
+    }
+}
+
+fn builtin_ui_theme(profile: &str) -> Result<UiThemeManifest, UiValidationError> {
+    let modern = profile == "modern";
+    let mut theme = UiThemeManifest {
+        schema: "astra.ui_theme_manifest.v1".to_string(),
+        id: if modern {
+            "astra.vn.theme.modern"
+        } else {
+            "astra.vn.theme.classic"
+        }
+        .to_string(),
+        parent: None,
+        tokens: BTreeMap::from([
+            (
+                "surface.clear".to_string(),
+                UiThemeValue::Color([0, 0, 0, 0]),
+            ),
+            (
+                "surface.dim".to_string(),
+                UiThemeValue::Color([8, 12, 22, 180]),
+            ),
+            (
+                "surface.system".to_string(),
+                UiThemeValue::Color(if modern {
+                    [18, 30, 50, 246]
+                } else {
+                    [12, 18, 30, 252]
+                }),
+            ),
+            (
+                "panel.message".to_string(),
+                UiThemeValue::Color(if modern {
+                    [24, 54, 82, 228]
+                } else {
+                    [18, 22, 34, 236]
+                }),
+            ),
+        ]),
+        high_contrast_tokens: BTreeMap::new(),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash()?;
+    Ok(theme)
 }
 
 fn resolve_localized<'a>(
@@ -2709,6 +3093,10 @@ pub enum NativeVnHostError {
     Media(#[from] MediaError),
     #[error(transparent)]
     Command(#[from] PlayerHostCommandError),
+    #[error(transparent)]
+    Ui(#[from] UiValidationError),
+    #[error(transparent)]
+    UiBinding(#[from] VnUiBindingError),
     #[error("presentation serialization failed: {0}")]
     Serialize(String),
     #[error("package validation failed: {0}")]

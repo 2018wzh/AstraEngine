@@ -169,10 +169,13 @@ mod browser {
         WindowRequest,
     };
     use astra_player_core::{
-        PlatformCommandSink, PlayerActionMap, PlayerHostCommandExecutor, PlayerHostCommandResult,
+        PlatformCommandSink, PlayerHostCommandExecutor, PlayerHostCommandResult,
         PlayerHostResourceId,
     };
     use astra_player_vn::{NativeVnHostCommandSource, NativeVnProductMediaHost};
+    use astra_ui_core::{
+        UiButtonState, UiInputEventKind, UiPoint, UiPointerButton as AstraUiPointerButton,
+    };
     use astra_vn_core::VnRunConfig;
     use futures_util::future::{select, Either};
     use futures_util::FutureExt;
@@ -291,7 +294,6 @@ mod browser {
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         let client = session.client.clone();
         let mut events = session.events;
-        let action_map = PlayerActionMap::standard();
         spawn_local(async move {
             let mut pointer = (0.0_f64, 0.0_f64);
             let mut media = NativeVnProductMediaHost::default();
@@ -336,43 +338,18 @@ mod browser {
                 let player_sequence = event.sequence;
                 match event.kind {
                     PlatformEventKind::WindowClosed { .. } => {
-                        let shutdown = async {
-                            let batch =
-                                vn.release_resources().map_err(|error| error.to_string())?;
-                            executor
-                                .execute_batch(batch)
-                                .await
-                                .map_err(|error| error.to_string())?;
-                            vn.shutdown().map_err(|error| error.to_string())?;
-                            client
-                                .destroy_surface(surface)
-                                .await
-                                .map_err(|error| error.to_string())?;
-                            client
-                                .destroy_window(window)
-                                .await
-                                .map_err(|error| error.to_string())?;
-                            client.shutdown().await.map_err(|error| error.to_string())
-                        }
-                        .await;
-                        if let Err(error) = shutdown {
-                            tracing::error!(
-                                event = "player.web.shutdown.failed",
-                                diagnostic_code = "ASTRA_PLAYER_SHUTDOWN",
-                                error = %error,
-                                "Web Player shutdown failed"
-                            );
-                        }
                         PLAYER.with(|player| *player.borrow_mut() = None);
                         break;
                     }
                     PlatformEventKind::Keyboard {
                         physical_key,
-                        state: InputState::Pressed,
+                        logical_key,
+                        state,
+                        repeat,
                         ..
                     } => {
-                        user_activated = true;
-                        if physical_key == "F5" {
+                        user_activated |= state == InputState::Pressed;
+                        if state == InputState::Pressed && physical_key == "F5" {
                             save_transaction_id = match save_transaction_id.checked_add(1) {
                                 Some(value) => value,
                                 None => {
@@ -419,7 +396,7 @@ mod browser {
                             }
                             continue;
                         }
-                        if physical_key == "F9" {
+                        if state == InputState::Pressed && physical_key == "F9" {
                             if let Err(error) =
                                 execute_web_load(&mut vn, &mut executor, "slot.quick").await
                             {
@@ -450,10 +427,16 @@ mod browser {
                             }
                             continue;
                         }
-                        let Some(action) = action_map.keyboard(&physical_key) else {
-                            continue;
-                        };
-                        let batch = match vn.dispatch_action(action) {
+                        let batch = match vn.dispatch_ui_event(UiInputEventKind::Keyboard {
+                            logical_key: logical_key.unwrap_or_else(|| physical_key.clone()),
+                            physical_key,
+                            state: match state {
+                                InputState::Pressed => UiButtonState::Pressed,
+                                InputState::Released => UiButtonState::Released,
+                            },
+                            repeat,
+                            modifiers: 0,
+                        }) {
                             Ok(batch) => batch,
                             Err(error) => {
                                 tracing::error!(
@@ -509,14 +492,45 @@ mod browser {
                             break;
                         }
                     }
-                    PlatformEventKind::PointerMoved { x, y, .. } => pointer = (x, y),
-                    PlatformEventKind::PointerButton {
-                        button: PointerButton::Primary,
-                        state: InputState::Pressed,
-                        ..
-                    } => {
-                        user_activated = true;
-                        let batch = match vn.dispatch_pointer(pointer.0, pointer.1) {
+                    PlatformEventKind::PointerMoved { x, y, .. } => {
+                        pointer = (x, y);
+                        let batch = match vn.dispatch_ui_event(UiInputEventKind::PointerMove {
+                            position: UiPoint {
+                                x: x as f32,
+                                y: y as f32,
+                            },
+                        }) {
+                            Ok(batch) => batch,
+                            Err(error) => {
+                                tracing::error!(event = "player.web.runtime.pointer_move_failed", diagnostic_code = "ASTRA_PLAYER_UI_INPUT", error = %error, "Web Player pointer move failed");
+                                break;
+                            }
+                        };
+                        if let Err(error) = executor.execute_batch(batch).await {
+                            tracing::error!(event = "player.web.host_command.failed", diagnostic_code = "ASTRA_PLAYER_HOST_COMMAND", error = %error, "Web Player host command failed");
+                            break;
+                        }
+                    }
+                    PlatformEventKind::PointerButton { button, state, .. } => {
+                        user_activated |= state == InputState::Pressed;
+                        let batch = match vn.dispatch_ui_event(UiInputEventKind::PointerButton {
+                            position: UiPoint {
+                                x: pointer.0 as f32,
+                                y: pointer.1 as f32,
+                            },
+                            button: match button {
+                                PointerButton::Primary => AstraUiPointerButton::Primary,
+                                PointerButton::Secondary => AstraUiPointerButton::Secondary,
+                                PointerButton::Middle => AstraUiPointerButton::Middle,
+                                PointerButton::Back => AstraUiPointerButton::Back,
+                                PointerButton::Forward => AstraUiPointerButton::Forward,
+                                PointerButton::Other(value) => AstraUiPointerButton::Other(value),
+                            },
+                            state: match state {
+                                InputState::Pressed => UiButtonState::Pressed,
+                                InputState::Released => UiButtonState::Released,
+                            },
+                        }) {
                             Ok(batch) => batch,
                             Err(error) => {
                                 tracing::error!(
@@ -580,6 +594,18 @@ mod browser {
                     error = %error,
                     "Web Player media cleanup failed"
                 );
+            }
+            match vn.release_resources() {
+                Ok(batch) => {
+                    if let Err(error) = executor.execute_batch(batch).await {
+                        tracing::error!(event = "player.web.shutdown.failed", diagnostic_code = "ASTRA_PLAYER_SHUTDOWN", error = %error, "Web Player resource release failed");
+                    } else if let Err(error) = vn.shutdown() {
+                        tracing::error!(event = "player.web.shutdown.failed", diagnostic_code = "ASTRA_PLAYER_SHUTDOWN", error = %error, "Web Player runtime shutdown failed");
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(event = "player.web.shutdown.failed", diagnostic_code = "ASTRA_PLAYER_SHUTDOWN", error = %error, "Web Player resource release planning failed")
+                }
             }
             let _ = client.destroy_surface(surface).await;
             let _ = client.destroy_window(window).await;

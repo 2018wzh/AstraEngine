@@ -1,5 +1,5 @@
 use astra_vn_editor::{
-    compile_astra_sources, AstraSource, EditorVisualMetadata, GraphNodeMetadata,
+    compile_astra_project, AstraSource, EditorVisualMetadata, GraphNodeMetadata,
     TimelineTrackMetadata,
 };
 
@@ -21,7 +21,11 @@ state common #@id state.common
 
 #[astra_headless_test::test]
 fn graph_timeline_metadata_roundtrips_command_ids_to_source_map() {
-    let compiled = compile_astra_sources([AstraSource::new("story.astra", STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("story.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
     let metadata = EditorVisualMetadata {
         schema: "astra.vn.editor_visual_metadata.v1".to_string(),
         graph_nodes: vec![

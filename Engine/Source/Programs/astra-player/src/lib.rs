@@ -487,7 +487,7 @@ impl BundleContext {
     ) -> Result<Vec<ScenarioHostInput>, PlayerAutomationError> {
         let package_bytes = fs::read(&self.package_path)?;
         let package = astra_package::PackageReader::open(&package_bytes)?;
-        let compiled = astra_vn_package::decode_compiled_story(&package)?;
+        let compiled = astra_vn_package::decode_compiled_project(&package)?;
         let mut option_indexes = std::collections::BTreeMap::new();
         for state in compiled.states.values() {
             for scene in &state.scenes {

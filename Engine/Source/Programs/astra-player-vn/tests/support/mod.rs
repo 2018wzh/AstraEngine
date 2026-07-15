@@ -11,9 +11,37 @@ use astra_plugin_abi::{
     ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
     PROVIDER_POLICY_SCHEMA,
 };
-use astra_vn_core::{compile_astra_sources, AstraSource, VnRunConfig};
-use astra_vn_package::{package_sections_for_story, PLAYER_LOCALE_CONFIG_SCHEMA};
+use astra_vn_core::{compile_astra_project, AstraSource, VnRunConfig};
+use astra_vn_package::{package_sections_for_project, PLAYER_LOCALE_CONFIG_SCHEMA};
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
+
+const TEST_UI: &str = r#"
+ui_bind surface:message view:ui.test.message controller:test.message policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.message
+ui_bind surface:choice view:ui.test.choice controller:test.choice policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.choice
+ui_bind system_page:title view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.title
+ui_bind system_page:save view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.save
+ui_bind system_page:load view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.load
+ui_bind system_page:config view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.config
+ui_bind system_page:backlog view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.backlog
+ui_bind system_page:gallery view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.gallery
+ui_bind system_page:replay view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.replay
+ui_bind system_page:voice_replay view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.voice
+ui_bind system_page:route_chart view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.route
+ui_bind system_page:localization_preview view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.localization
+ui_view ui.test.message model:astra.vn.ui_model.message.v1 theme:astra.vn.theme.classic #@id ui.test.message
+  screen id:root
+    panel id:advance fill:true
+      on activate -> vn.advance
+ui_view ui.test.choice model:astra.vn.ui_model.choice.v1 theme:astra.vn.theme.classic #@id ui.test.choice
+  screen id:root
+    virtual_list id:options items:$model.options item_key:option_id overscan:2 item_extent:48
+      button id:option min_height:44 value:$item.text_key
+        on activate -> vn.choose option_id:$item.option_id
+ui_view ui.test.system model:astra.vn.ui_model.system.v1 theme:astra.vn.theme.classic #@id ui.test.system
+  screen id:root
+    button id:back min_height:48
+      on activate -> vn.return_system
+"#;
 
 pub fn source_for(story: &str) -> NativeVnHostCommandSource {
     source_from_package(product_package_with_video(story, None))
@@ -43,9 +71,16 @@ pub fn product_package(story: &str) -> Vec<u8> {
 }
 
 fn product_package_with_video(story: &str, video: Option<Vec<u8>>) -> Vec<u8> {
-    let compiled = compile_astra_sources([AstraSource::new("main.astra", story)]).unwrap();
+    let compiled = compile_astra_project(
+        [
+            AstraSource::story("main.astra", story),
+            AstraSource::ui("test-ui.astra", TEST_UI),
+        ],
+        Default::default(),
+    )
+    .unwrap();
     let mut sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     let font =
         include_bytes!("../../../../../../Examples/NativeVN/Assets/Fonts/Poppins-Regular.ttf")
             .to_vec();
@@ -280,12 +315,13 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
     })
     .unwrap();
     request.target_manifest = serde_json::to_vec(&serde_json::json!({
-        "schema": "astra.target_manifest.v1",
+        "schema": "astra.target_manifest.v2",
         "targets": [{
             "id": "nativevn-game",
             "kind": "game",
             "crate": "astra-vn",
             "runtime_provider": "native_vn",
+            "ui_provider": "astra.ui.yakui",
             "default_profile": "classic",
             "platforms": ["windows", "web"],
             "packaged": true

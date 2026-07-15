@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const TARGET_MANIFEST_SCHEMA: &str = "astra.target_manifest.v1";
+pub const TARGET_MANIFEST_SCHEMA: &str = "astra.target_manifest.v2";
 pub const TARGET_VALIDATION_SCHEMA: &str = "astra.target_validation_report.v1";
 
 #[derive(Debug, Error)]
@@ -35,6 +35,8 @@ pub struct TargetDescriptor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_profile: Option<String>,
@@ -52,6 +54,7 @@ impl TargetDescriptor {
             kind: TargetKind::Game,
             crate_name: Some("astra-runtime".to_string()),
             runtime_provider: Some("native_vn".to_string()),
+            ui_provider: Some("astra.ui.yakui".to_string()),
             binary: None,
             default_profile: Some("desktop-release".to_string()),
             platforms: vec![
@@ -149,7 +152,7 @@ pub fn validate_manifest(
     if manifest.schema != TARGET_MANIFEST_SCHEMA {
         diagnostics.push(Diagnostic::blocking(
             "ASTRA_TARGET_SCHEMA",
-            "target manifest schema must be astra.target_manifest.v1",
+            "target manifest schema must be astra.target_manifest.v2",
         ));
     }
     if manifest.legacy_runtime_field {
@@ -281,6 +284,17 @@ fn validate_target(target: &TargetDescriptor, diagnostics: &mut Vec<Diagnostic>)
                     .with_field("target", &target.id),
                 );
             }
+            if target.runtime_provider.as_deref() == Some("native_vn")
+                && target.ui_provider.as_deref() != Some("astra.ui.yakui")
+            {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_TARGET_UI_PROVIDER",
+                        "native_vn game target requires the unique ui_provider astra.ui.yakui",
+                    )
+                    .with_field("target", &target.id),
+                );
+            }
             if target.platforms.is_empty() {
                 diagnostics.push(
                     Diagnostic::blocking("ASTRA_TARGET_PLATFORMS", "game target needs platforms")
@@ -351,6 +365,7 @@ targets:
     kind: game
     crate: astra-vn
     runtime_provider: native_vn
+    ui_provider: astra.ui.yakui
     default_profile: desktop-release
     platforms: [windows, linux, macos, ios, android, web]
     packaged: true
@@ -375,6 +390,7 @@ targets:
             kind: TargetKind::Game,
             crate_name: None,
             runtime_provider: None,
+            ui_provider: None,
             binary: None,
             default_profile: None,
             platforms: Vec::new(),

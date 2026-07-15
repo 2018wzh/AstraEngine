@@ -1,5 +1,5 @@
 use astra_vn_core::{
-    compile_astra_sources, AstraSource, PresentationCommand, SkipMode, SystemUnlockKind,
+    compile_astra_project, AstraSource, PresentationCommand, SkipMode, SystemUnlockKind,
     VnPlayerCommand, VnRunConfig, VnRuntime,
 };
 
@@ -15,7 +15,11 @@ state prologue #@id state.prologue
 
 #[astra_headless_test::test]
 fn skip_read_advances_past_read_dialogue_but_stops_at_unread_dialogue() {
-    let compiled = compile_astra_sources([AstraSource::new("skip.astra", STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("skip.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
     let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
 
     runtime
@@ -45,7 +49,11 @@ fn skip_read_advances_past_read_dialogue_but_stops_at_unread_dialogue() {
 
 #[astra_headless_test::test]
 fn skip_read_reaches_choice_when_all_prior_dialogue_is_read() {
-    let compiled = compile_astra_sources([AstraSource::new("skip.astra", STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("skip.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
     let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
 
     runtime
@@ -79,7 +87,11 @@ fn skip_read_reaches_choice_when_all_prior_dialogue_is_read() {
 
 #[astra_headless_test::test]
 fn replay_ui_snapshot_exposes_backlog_read_state_and_voice_entries() {
-    let compiled = compile_astra_sources([AstraSource::new("replay.astra", STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("replay.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
     let mut runtime = VnRuntime::new(compiled.clone(), VnRunConfig::classic("zh-Hans")).unwrap();
 
     runtime
@@ -113,7 +125,11 @@ fn replay_ui_snapshot_exposes_backlog_read_state_and_voice_entries() {
 
 #[astra_headless_test::test]
 fn system_controls_persist_auto_skip_config_and_unlocks_through_save_load() {
-    let compiled = compile_astra_sources([AstraSource::new("system.astra", STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("system.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
     let mut runtime = VnRuntime::new(compiled.clone(), VnRunConfig::classic("zh-Hans")).unwrap();
 
     runtime

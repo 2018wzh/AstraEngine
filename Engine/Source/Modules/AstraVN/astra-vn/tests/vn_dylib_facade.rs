@@ -1,20 +1,23 @@
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader};
 use astra_vn::{
-    compile_astra_sources, package_sections_for_story, AstraSource, StageModel,
+    compile_astra_project, package_sections_for_project, AstraSource, StageModel,
     SystemStoryManifest, VnPlayerCommand, VnRunConfig, VnRuntime,
 };
 
 #[astra_headless_test::test]
 fn vn_dylib_facade_reexports_runtime_story_and_package_api() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "facade.astra",
-        r#"
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "facade.astra",
+            r#"
 story main #@id story.main
 state prologue #@id state.prologue
   scene room #@id scene.room
     text key:hello speaker:narrator #@id line.hello
 "#,
-    )])
+        )],
+        Default::default(),
+    )
     .unwrap();
 
     let mut runtime = VnRuntime::new(compiled.clone(), VnRunConfig::classic("zh-Hans")).unwrap();
@@ -32,7 +35,7 @@ state prologue #@id state.prologue
     assert_eq!(system_manifest.schema, "astra.vn.system_story_manifest.v1");
 
     let sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "facade-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "facade-game").unwrap();
     let blob = PackageBuilder::build(PackageBuildRequest::fixture(
         "com.example.facade",
         "classic",

@@ -1,8 +1,7 @@
 use astra_vn_script::{
-    compile_astra_sources, compile_astra_sources_with_options, format_astra_source,
-    parse_astra_source, CompileAstraOptions, ExtensionCommandDescriptor, ExtensionFieldContract,
-    ExtensionFieldKind, FormatOptions, ScriptLanguageService, SemanticPass, SyntaxKind,
-    SEMANTIC_PASS_ORDER,
+    compile_astra_project, format_astra_source, parse_astra_source, CompileAstraProjectOptions,
+    ExtensionCommandDescriptor, ExtensionFieldContract, ExtensionFieldKind, FormatOptions,
+    ScriptLanguageService, SemanticPass, SyntaxKind, SEMANTIC_PASS_ORDER,
 };
 use std::collections::BTreeMap;
 
@@ -63,8 +62,19 @@ fn semantic_hash_ignores_trivia_and_implicit_command_source_spans() {
     let compact = "story main\nstate start\n  scene room\n    text key:hello\n";
     let with_trivia =
         "# comment\nstory   main\n\nstate start\n  scene room\n    text   key:hello # comment\n";
-    let left = compile_astra_sources([("story.astra", compact).into()]).unwrap();
-    let right = compile_astra_sources([("story.astra", with_trivia).into()]).unwrap();
+    let left = compile_astra_project(
+        [astra_vn_script::AstraSource::story("story.astra", compact)],
+        Default::default(),
+    )
+    .unwrap();
+    let right = compile_astra_project(
+        [astra_vn_script::AstraSource::story(
+            "story.astra",
+            with_trivia,
+        )],
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(left.story_hash, right.story_hash);
     assert_ne!(left.source_map.hash, right.source_map.hash);
 }
@@ -78,16 +88,16 @@ fn unknown_command_is_editable_but_requires_explicit_compile_binding() {
         .iter()
         .any(|diagnostic| diagnostic.code == "ASTRA_VN_UNKNOWN_COMMAND"));
 
-    let error = compile_astra_sources_with_options(
-        [("unknown.astra", source)],
-        CompileAstraOptions::default(),
+    let error = compile_astra_project(
+        [astra_vn_script::AstraSource::story("unknown.astra", source)],
+        CompileAstraProjectOptions::default(),
     )
     .unwrap_err();
     assert_eq!(error.code(), "ASTRA_VN_COMMAND_UNBOUND");
 
-    let compiled = compile_astra_sources_with_options(
-        [("unknown.astra", source)],
-        CompileAstraOptions::default().bind_extension(ExtensionCommandDescriptor {
+    let compiled = compile_astra_project(
+        [astra_vn_script::AstraSource::story("unknown.astra", source)],
+        CompileAstraProjectOptions::default().bind_extension(ExtensionCommandDescriptor {
             command: "studio_fx".to_string(),
             provider_id: "studio.presentation".to_string(),
             schema: "studio.presentation.fx.v1".to_string(),
@@ -101,7 +111,7 @@ fn unknown_command_is_editable_but_requires_explicit_compile_binding() {
         }),
     )
     .unwrap();
-    assert_eq!(compiled.schema, "astra.vn.compiled_story");
+    assert_eq!(compiled.schema, "astra.vn.compiled_project.v1");
 }
 
 #[astra_headless_test::test]
@@ -113,8 +123,12 @@ fn standard_audio_control_is_bound_without_an_extension_bypass() {
         .iter()
         .any(|diagnostic| diagnostic.code == "ASTRA_VN_UNKNOWN_COMMAND"));
 
-    let compiled = compile_astra_sources([("audio.astra", source).into()]).unwrap();
-    assert_eq!(compiled.schema, "astra.vn.compiled_story");
+    let compiled = compile_astra_project(
+        [astra_vn_script::AstraSource::story("audio.astra", source)],
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(compiled.schema, "astra.vn.compiled_project.v1");
 }
 
 #[astra_headless_test::test]

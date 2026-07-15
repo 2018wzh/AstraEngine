@@ -5,11 +5,11 @@ use astra_core::{Diagnostic, DiagnosticSeverity, Hash128, SourceRef};
 use crate::{
     lower::{lower_sources_from_cst, ParsedLine},
     stage_compile::{compile_extension_command, compile_stage_command},
-    AstraSource, ChoiceOption, CommandManifest, CommandManifestEntry, CommandProvider,
-    CommandRegistry, CommandSourceMap, CompiledCommand, CompiledStory, ExtensionCommandDescriptor,
-    MutationOp, PresentationCommand, RouteEdge, RouteGraph, RouteNode, Scene, State, Story,
-    StoryManifest, StoryManifestEntry, SystemPageKind, SystemStoryManifest, VariableManifest,
-    VariableScopeManifest, VnError,
+    AstraSource, AstraSourceRole, ChoiceOption, CommandManifest, CommandManifestEntry,
+    CommandProvider, CommandRegistry, CommandSourceMap, CompiledCommand, CompiledStory,
+    CompiledVnProject, ExtensionCommandDescriptor, MutationOp, PresentationCommand, RouteEdge,
+    RouteGraph, RouteNode, Scene, State, Story, StoryManifest, StoryManifestEntry, SystemPageKind,
+    SystemStoryManifest, VariableManifest, VariableScopeManifest, VnError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,13 +37,6 @@ fn trace_pass(pass: SemanticPass) {
         pass = ?pass,
         "AstraVN semantic pass started"
     );
-}
-
-pub fn compile_astra_sources<I>(sources: I) -> Result<CompiledStory, VnError>
-where
-    I: IntoIterator<Item = AstraSource>,
-{
-    compile_astra_sources_with_options(sources, CompileAstraOptions::default())
 }
 
 fn compile_bound_sources(
@@ -165,20 +158,20 @@ fn source_ref_for_span(path: &str, text: &str, span: crate::TextSpan) -> SourceR
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct CompileAstraOptions {
+pub struct CompileAstraProjectOptions {
     extension_bindings: Vec<ExtensionCommandDescriptor>,
 }
 
-impl CompileAstraOptions {
+impl CompileAstraProjectOptions {
     pub fn bind_extension(mut self, descriptor: ExtensionCommandDescriptor) -> Self {
         self.extension_bindings.push(descriptor);
         self
     }
 }
 
-pub fn compile_astra_sources_with_options<I, S>(
+fn compile_story_sources_with_options<I, S>(
     sources: I,
-    options: CompileAstraOptions,
+    options: CompileAstraProjectOptions,
 ) -> Result<CompiledStory, VnError>
 where
     I: IntoIterator<Item = S>,
@@ -202,6 +195,34 @@ where
         registry.bind_extension(descriptor)?;
     }
     compile_bound_sources(sources, &registry)
+}
+
+pub fn compile_astra_project<I, S>(
+    sources: I,
+    options: CompileAstraProjectOptions,
+) -> Result<CompiledVnProject, VnError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<AstraSource>,
+{
+    let sources: Vec<AstraSource> = sources.into_iter().map(Into::into).collect();
+    let story_sources: Vec<AstraSource> = sources
+        .iter()
+        .filter(|source| source.role == AstraSourceRole::Story)
+        .cloned()
+        .collect();
+    let ui_sources: Vec<AstraSource> = sources
+        .iter()
+        .filter(|source| source.role == AstraSourceRole::Ui)
+        .cloned()
+        .collect();
+    if story_sources.is_empty() {
+        return Err(VnError::message(
+            "ASTRA_VN_STORY_SOURCE_MISSING: project requires at least one Story source",
+        ));
+    }
+    let story = compile_story_sources_with_options(story_sources, options)?;
+    crate::ui_compile::compile_project_ui(story, &ui_sources)
 }
 
 #[derive(Default)]

@@ -3,7 +3,6 @@ name = "astra-core"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
-rust-version.workspace = true
 
 [dependencies]
 blake3.workspace = true

@@ -1,8 +1,10 @@
 use astra_observability::{init_host, ConsoleFormat, HostObservabilityConfig, HostRole};
 use astra_player::{WebCdpInputHost, WindowsLiveAutomationRequest, WindowsSendInputHost};
 #[cfg(target_os = "windows")]
-use astra_player_core::{PlayerActionMap, PlayerHostCommandResult};
-use astra_player_core::{PlayerAutomationScript, PlayerInputTranscript, PlayerPlatform};
+use astra_player_core::PlayerActionMap;
+use astra_player_core::{
+    PlayerAutomationScript, PlayerHostCommandResult, PlayerInputTranscript, PlayerPlatform,
+};
 use std::{env, fs, path::PathBuf};
 
 type PlayerCliError = Box<dyn std::error::Error + Send + Sync>;
@@ -140,12 +142,13 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     use astra_package::{PackageManifest, PackageReader};
     use astra_platform::{
         HostLaunchProfile, InputState, PackageSourceRequest, PlatformEventKind,
-        PlatformHostFactory, PlatformId, PointerButton, SurfaceRequest, WindowRequest,
+        PlatformHostFactory, PlatformId, SurfaceRequest, WindowRequest,
     };
     use astra_player::{
         NativeVnHostCommandSource, PlatformCommandSink, PlayerHostCommandExecutor,
         PlayerHostResourceId,
     };
+    use astra_ui_core::{UiInputEventKind, UiPoint, UiTouchPhase};
     use astra_vn_core::VnRunConfig;
     use serde::Deserialize;
 
@@ -268,7 +271,6 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                     error.to_string(),
                 )
             })?;
-        let action_map = PlayerActionMap::standard();
         let mut pointer = (0.0_f64, 0.0_f64);
         let mut save_transaction_id = 1000_u64;
         let timeline_clock = std::time::Instant::now();
@@ -294,15 +296,16 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                     }
                 };
                 let player_sequence = event.sequence;
-                match event.kind {
+                let ui_input = match event.kind {
                     PlatformEventKind::WindowClosed { window: closed } if closed == window => break,
                     PlatformEventKind::Keyboard {
                         window: input_window,
                         physical_key,
-                        state: InputState::Pressed,
-                        ..
+                        logical_key,
+                        state,
+                        repeat,
                     } if input_window == window => {
-                        if physical_key == "F5" {
+                        if state == InputState::Pressed && physical_key == "F5" {
                             save_transaction_id =
                                 save_transaction_id.checked_add(1).ok_or_else(|| {
                                     astra_platform::PlatformError::new(
@@ -326,7 +329,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                             );
                             continue;
                         }
-                        if physical_key == "F9" {
+                        if state == InputState::Pressed && physical_key == "F9" {
                             execute_platform_load(&mut vn, &mut executor, "slot.quick").await?;
                             tracing::info!(
                                 event = "astra.player.save.restored",
@@ -336,68 +339,112 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                             );
                             continue;
                         }
-                        let Some(action) = action_map.keyboard(&physical_key) else {
-                            continue;
-                        };
-                        let batch = vn.dispatch_action(action).map_err(|error| {
-                            astra_platform::PlatformError::new(
-                                astra_platform::PlatformErrorCode::InvalidState,
-                                "player.runtime.input",
-                                error.to_string(),
-                            )
-                        })?;
-                        executor.execute_batch(batch).await.map_err(|error| {
-                            astra_platform::PlatformError::new(
-                                astra_platform::PlatformErrorCode::InvalidState,
-                                "player.host.execute",
-                                error.to_string(),
-                            )
-                        })?;
-                        media
-                            .process(
-                                &mut vn,
-                                &mut executor,
-                                timeline_clock.elapsed().as_millis() as u64,
-                                Vec::new(),
-                            )
-                            .await?;
-                        log_consumed_vn_step(player_sequence, "keyboard", &vn)?;
+                        Some(UiInputEventKind::Keyboard {
+                            logical_key: logical_key.unwrap_or_else(|| physical_key.clone()),
+                            physical_key,
+                            state: ui_button_state(state),
+                            repeat,
+                            modifiers: 0,
+                        })
                     }
                     PlatformEventKind::PointerMoved {
                         window: input_window,
                         x,
                         y,
-                    } if input_window == window => pointer = (x, y),
+                    } if input_window == window => {
+                        pointer = (x, y);
+                        Some(UiInputEventKind::PointerMove {
+                            position: UiPoint {
+                                x: x as f32,
+                                y: y as f32,
+                            },
+                        })
+                    }
                     PlatformEventKind::PointerButton {
                         window: input_window,
-                        button: PointerButton::Primary,
-                        state: InputState::Pressed,
-                    } if input_window == window => {
-                        let batch = vn.dispatch_pointer(pointer.0, pointer.1).map_err(|error| {
-                            astra_platform::PlatformError::new(
-                                astra_platform::PlatformErrorCode::InvalidState,
-                                "player.runtime.hit_test",
-                                error.to_string(),
-                            )
-                        })?;
-                        executor.execute_batch(batch).await.map_err(|error| {
-                            astra_platform::PlatformError::new(
-                                astra_platform::PlatformErrorCode::InvalidState,
-                                "player.host.execute",
-                                error.to_string(),
-                            )
-                        })?;
-                        media
-                            .process(
-                                &mut vn,
-                                &mut executor,
-                                timeline_clock.elapsed().as_millis() as u64,
-                                Vec::new(),
-                            )
-                            .await?;
-                        log_consumed_vn_step(player_sequence, "pointer", &vn)?;
+                        button,
+                        state,
+                    } if input_window == window => Some(UiInputEventKind::PointerButton {
+                        position: UiPoint {
+                            x: pointer.0 as f32,
+                            y: pointer.1 as f32,
+                        },
+                        button: ui_pointer_button(button),
+                        state: ui_button_state(state),
+                    }),
+                    PlatformEventKind::MouseWheel {
+                        window: input_window,
+                        delta_x,
+                        delta_y,
+                    } if input_window == window => Some(UiInputEventKind::Wheel {
+                        delta_points: UiPoint {
+                            x: delta_x,
+                            y: delta_y,
+                        },
+                    }),
+                    PlatformEventKind::ImePreedit {
+                        window: input_window,
+                        text,
+                        cursor,
+                    } if input_window == window => Some(UiInputEventKind::ImePreedit {
+                        text,
+                        cursor_start: cursor.map(|value| value.0 as u32),
+                        cursor_end: cursor.map(|value| value.1 as u32),
+                    }),
+                    PlatformEventKind::ImeCommit {
+                        window: input_window,
+                        text,
+                    } if input_window == window => Some(UiInputEventKind::ImeCommit { text }),
+                    PlatformEventKind::Touch {
+                        window: input_window,
+                        id,
+                        x,
+                        y,
+                        phase,
+                    } if input_window == window => Some(UiInputEventKind::Touch {
+                        device_id: 0,
+                        contact_id: id,
+                        position: UiPoint {
+                            x: x as f32,
+                            y: y as f32,
+                        },
+                        phase: match phase {
+                            astra_platform::TouchPhase::Started => UiTouchPhase::Started,
+                            astra_platform::TouchPhase::Moved => UiTouchPhase::Moved,
+                            astra_platform::TouchPhase::Ended => UiTouchPhase::Ended,
+                            astra_platform::TouchPhase::Cancelled => UiTouchPhase::Cancelled,
+                        },
+                    }),
+                    PlatformEventKind::GamepadInput { control, value, .. } if value > 0.5 => {
+                        gamepad_navigation(control)
+                            .map(|action| UiInputEventKind::Navigation { action })
                     }
-                    _ => {}
+                    _ => None,
+                };
+                if let Some(kind) = ui_input {
+                    let batch = vn.dispatch_ui_event(kind).map_err(|error| {
+                        astra_platform::PlatformError::new(
+                            astra_platform::PlatformErrorCode::InvalidState,
+                            "player.runtime.ui_input",
+                            error.to_string(),
+                        )
+                    })?;
+                    executor.execute_batch(batch).await.map_err(|error| {
+                        astra_platform::PlatformError::new(
+                            astra_platform::PlatformErrorCode::InvalidState,
+                            "player.host.execute",
+                            error.to_string(),
+                        )
+                    })?;
+                    media
+                        .process(
+                            &mut vn,
+                            &mut executor,
+                            timeline_clock.elapsed().as_millis() as u64,
+                            Vec::new(),
+                        )
+                        .await?;
+                    log_consumed_vn_step(player_sequence, "physical_ui", &vn)?;
                 }
             }
             Ok(())
@@ -445,6 +492,45 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         Ok::<(), astra_platform::PlatformError>(())
     })?;
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn ui_button_state(state: astra_platform::InputState) -> astra_ui_core::UiButtonState {
+    match state {
+        astra_platform::InputState::Pressed => astra_ui_core::UiButtonState::Pressed,
+        astra_platform::InputState::Released => astra_ui_core::UiButtonState::Released,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn ui_pointer_button(button: astra_platform::PointerButton) -> astra_ui_core::UiPointerButton {
+    match button {
+        astra_platform::PointerButton::Primary => astra_ui_core::UiPointerButton::Primary,
+        astra_platform::PointerButton::Secondary => astra_ui_core::UiPointerButton::Secondary,
+        astra_platform::PointerButton::Middle => astra_ui_core::UiPointerButton::Middle,
+        astra_platform::PointerButton::Back => astra_ui_core::UiPointerButton::Back,
+        astra_platform::PointerButton::Forward => astra_ui_core::UiPointerButton::Forward,
+        astra_platform::PointerButton::Other(value) => astra_ui_core::UiPointerButton::Other(value),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn gamepad_navigation(
+    control: astra_platform::GamepadControl,
+) -> Option<astra_ui_core::UiNavigationAction> {
+    use astra_platform::GamepadControl;
+    use astra_ui_core::UiNavigationAction;
+    match control {
+        GamepadControl::DpadUp => Some(UiNavigationAction::Up),
+        GamepadControl::DpadDown => Some(UiNavigationAction::Down),
+        GamepadControl::DpadLeft => Some(UiNavigationAction::Left),
+        GamepadControl::DpadRight => Some(UiNavigationAction::Right),
+        GamepadControl::South => Some(UiNavigationAction::Activate),
+        GamepadControl::East => Some(UiNavigationAction::Cancel),
+        GamepadControl::LeftShoulder => Some(UiNavigationAction::PagePrevious),
+        GamepadControl::RightShoulder => Some(UiNavigationAction::PageNext),
+        _ => None,
+    }
 }
 
 #[cfg(target_os = "windows")]

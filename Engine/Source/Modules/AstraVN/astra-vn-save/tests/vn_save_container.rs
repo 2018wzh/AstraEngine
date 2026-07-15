@@ -3,7 +3,7 @@ use astra_runtime::{
 };
 use astra_vn_policy::{LuauPolicy, PolicySnapshotValue, VnPolicyState};
 use astra_vn_save::{
-    compile_astra_sources, policy_state_save_section, read_runtime_save_policy_state,
+    compile_astra_project, policy_state_save_section, read_runtime_save_policy_state,
     read_runtime_save_vn_state, runtime_state_save_section, AstraSource, VnPlayerCommand,
     VnRunConfig, VnRuntime,
 };
@@ -24,7 +24,11 @@ state library #@id state.library
 
 #[astra_headless_test::test]
 fn vn_state_roundtrips_inside_runtime_save_container() {
-    let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("main.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
     let mut vn = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
     vn.apply(VnPlayerCommand::Launch {
         story_id: "story.main".to_string(),

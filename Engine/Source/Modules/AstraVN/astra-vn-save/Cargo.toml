@@ -3,7 +3,6 @@ name = "astra-vn-save"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
-rust-version.workspace = true
 
 [dependencies]
 tracing.workspace = true

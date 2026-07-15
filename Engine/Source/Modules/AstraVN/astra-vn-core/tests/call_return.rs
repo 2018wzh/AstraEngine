@@ -1,4 +1,4 @@
-use astra_vn_core::{compile_astra_sources, AstraSource, VnPlayerCommand, VnRunConfig, VnRuntime};
+use astra_vn_core::{compile_astra_project, AstraSource, VnPlayerCommand, VnRunConfig, VnRuntime};
 
 const CALL_RETURN: &str = r#"
 story main #@id story.main
@@ -18,8 +18,11 @@ state common #@id state.common
 
 #[astra_headless_test::test]
 fn runtime_supports_call_return_stack_and_resume_cursor() {
-    let compiled =
-        compile_astra_sources([AstraSource::new("call_return.astra", CALL_RETURN)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("call_return.astra", CALL_RETURN)],
+        Default::default(),
+    )
+    .unwrap();
     let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
 
     runtime

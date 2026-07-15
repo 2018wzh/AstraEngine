@@ -24,7 +24,7 @@ const REQUIRED_SECTIONS: &[(&str, &str)] = &[
         "astra.plugin_dependency_graph.v1",
     ),
     ("module.fingerprint", "astra.module_fingerprint.v1"),
-    ("target.manifest", "astra.target_manifest.v1"),
+    ("target.manifest", "astra.target_manifest.v2"),
     ("release.summary", "astra.release_summary.v1"),
     ("scenario.refs", "astra.scenario_refs.v2"),
     ("platform.eligibility", "astra.platform_eligibility.v1"),

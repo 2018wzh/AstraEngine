@@ -1,4 +1,4 @@
-use astra_vn_package::{compile_astra_sources, AstraSource, VnAdvancedPresentationManifest};
+use astra_vn_package::{compile_astra_project, AstraSource, VnAdvancedPresentationManifest};
 
 const ADVANCED_STORY: &str = r#"
 story main #@id story.main
@@ -21,8 +21,11 @@ state prologue #@id state.prologue
 
 #[astra_headless_test::test]
 fn advanced_presentation_manifest_requires_real_evidence() {
-    let compiled =
-        compile_astra_sources([AstraSource::new("advanced.astra", ADVANCED_STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("advanced.astra", ADVANCED_STORY)],
+        Default::default(),
+    )
+    .unwrap();
     let manifest = VnAdvancedPresentationManifest::from_compiled(&compiled, "advanced-vn");
     let report = manifest.validate_required();
 
@@ -42,15 +45,18 @@ fn advanced_presentation_manifest_requires_real_evidence() {
 
 #[astra_headless_test::test]
 fn advanced_presentation_manifest_blocks_thin_stage() {
-    let compiled = compile_astra_sources([AstraSource::new(
-        "thin.astra",
-        r#"
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "thin.astra",
+            r#"
 story main #@id story.main
 state prologue #@id state.prologue
   scene opening #@id scene.opening
     text key:hello #@id line.hello
 "#,
-    )])
+        )],
+        Default::default(),
+    )
     .unwrap();
     let manifest = VnAdvancedPresentationManifest::from_compiled(&compiled, "advanced-vn");
     let report = manifest.validate_required();

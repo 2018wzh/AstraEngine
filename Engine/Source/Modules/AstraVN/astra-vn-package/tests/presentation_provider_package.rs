@@ -1,21 +1,21 @@
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
 use astra_vn_package::{
-    load_presentation_provider_manifest, package_sections_for_story,
+    load_presentation_provider_manifest, package_sections_for_project,
     VN_PRESENTATION_PROVIDER_MANIFEST_SCHEMA,
 };
-use astra_vn_script::{compile_astra_sources, AstraSource};
+use astra_vn_script::{compile_astra_project, AstraSource};
 
-fn compiled_story() -> astra_vn_script::CompiledStory {
-    compile_astra_sources([AstraSource::new(
+fn compiled_story() -> astra_vn_script::CompiledVnProject {
+    compile_astra_project([AstraSource::story(
         "story.astra",
         "story main\nstate start\n  scene room\n    background asset:asset:/bg layer:bg preset:soft_fade duration:300\n",
-    )])
+    )], Default::default())
     .unwrap()
 }
 
 #[astra_headless_test::test]
 fn package_persists_profile_bound_presentation_policy() {
-    let sections = package_sections_for_story(
+    let sections = package_sections_for_project(
         &compiled_story(),
         &["classic".to_string(), "advanced-vn".to_string()],
         "game",

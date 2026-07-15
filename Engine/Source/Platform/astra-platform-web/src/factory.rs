@@ -163,12 +163,30 @@ mod browser {
                     }
                     let _ = reply.send(result);
                 }
-                HostCommand::PresentScene { reply, .. } => {
-                    let _ = reply.send(Err(PlatformError::new(
-                        PlatformErrorCode::PlatformNotImplemented,
-                        "surface.present_scene",
-                        "Web GPU scene execution is outside the current implementation scope",
-                    )));
+                HostCommand::PresentScene {
+                    surface,
+                    frame,
+                    reply,
+                } => {
+                    let result = match surfaces.get_mut(surface) {
+                        Ok(surface) => surface.present_scene(frame),
+                        Err(error) => Err(error),
+                    };
+                    if result
+                        .as_ref()
+                        .is_err_and(|error| error.code == PlatformErrorCode::ContextLost)
+                    {
+                        let recovered = surfaces
+                            .get_mut(surface)
+                            .and_then(|surface| surface.reconfigure_after_loss())
+                            .is_ok();
+                        for event in
+                            astra_platform_common::wgpu_recovery_events("webgpu", recovered)
+                        {
+                            let _ = emitter.emit(event);
+                        }
+                    }
+                    let _ = reply.send(result);
                 }
                 #[cfg(feature = "platform-test-driver")]
                 HostCommand::InjectSurfaceDeviceLoss { reply, .. } => {

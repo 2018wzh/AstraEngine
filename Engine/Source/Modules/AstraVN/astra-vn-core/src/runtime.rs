@@ -18,7 +18,8 @@ pub struct VnRuntime {
 }
 
 impl VnRuntime {
-    pub fn new(compiled: CompiledStory, config: VnRunConfig) -> Result<Self, VnError> {
+    pub fn new(compiled: impl Into<CompiledStory>, config: VnRunConfig) -> Result<Self, VnError> {
+        let compiled = compiled.into();
         tracing::info!(
             event = "vn.runtime.create",
             profile = %config.profile,
@@ -49,7 +50,11 @@ impl VnRuntime {
         })
     }
 
-    pub fn from_state(compiled: CompiledStory, state: VnRuntimeState) -> Result<Self, VnError> {
+    pub fn from_state(
+        compiled: impl Into<CompiledStory>,
+        state: VnRuntimeState,
+    ) -> Result<Self, VnError> {
+        let compiled = compiled.into();
         if state.schema != "astra.vn.runtime_state.v1" {
             return Err(VnError::diagnostic(
                 "ASTRA_VN_RUNTIME_STATE_SCHEMA",

@@ -35,9 +35,9 @@ use astra_target::{
 };
 use astra_test::ScenarioReport;
 use astra_vn::{
-    compile_astra_sources, compile_astra_sources_with_options, format_astra_source,
-    load_player_locale_config, package_sections_for_story, AstraSource, CompileAstraOptions,
-    FormatOptions, PlayerLocaleConfig, PLAYER_LOCALE_CONFIG_SCHEMA,
+    compile_astra_project, format_astra_source, load_player_locale_config,
+    package_sections_for_project, AstraSource, CompileAstraProjectOptions, FormatOptions,
+    PlayerLocaleConfig, PLAYER_LOCALE_CONFIG_SCHEMA,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 use schemars::JsonSchema;
@@ -292,7 +292,7 @@ fn main() -> Result<(), CliError> {
             ScriptCommand::Check { sources } => {
                 let sources = read_astra_sources(&sources)?;
                 let compiled =
-                    compile_astra_sources_with_options(sources, CompileAstraOptions::default())?;
+                    compile_astra_project(sources, CompileAstraProjectOptions::default())?;
                 println!(
                     "{}",
                     serde_json::json!({
@@ -334,7 +334,7 @@ fn main() -> Result<(), CliError> {
                     let original = sources
                         .iter()
                         .map(|path| {
-                            Ok(AstraSource::new(
+                            Ok(AstraSource::story(
                                 path.to_string_lossy(),
                                 fs::read_to_string(path)?,
                             ))
@@ -349,13 +349,13 @@ fn main() -> Result<(), CliError> {
                                 .map_or_else(
                                     || source.clone(),
                                     |(_, _, text)| {
-                                        AstraSource::new(source.path.clone(), text.clone())
+                                        AstraSource::story(source.path.clone(), text.clone())
                                     },
                                 )
                         })
                         .collect::<Vec<_>>();
-                    let before = compile_astra_sources(original)?;
-                    let after = compile_astra_sources(formatted)?;
+                    let before = compile_astra_project(original, Default::default())?;
+                    let after = compile_astra_project(formatted, Default::default())?;
                     if before.story_hash != after.story_hash {
                         return Err("ASTRA_SCRIPT_FORMAT_SEMANTIC_CHANGE: formatter changed compiled semantics".into());
                     }
@@ -531,7 +531,7 @@ fn read_astra_sources(paths: &[PathBuf]) -> Result<Vec<AstraSource>, CliError> {
                 )
                 .into());
             }
-            Ok(AstraSource::new(
+            Ok(AstraSource::story(
                 path.to_string_lossy(),
                 fs::read_to_string(path)?,
             ))
@@ -1367,19 +1367,30 @@ fn cook_nativevn_sections(
     cancellation: &CookCancellationToken,
 ) -> Result<(Vec<CookedArtifactRef>, CookSummaryManifest), CliError> {
     cancellation.check_cancelled()?;
-    let source_paths = nativevn_source_paths(project, project_dir)?;
+    let source_paths = nativevn_source_paths(project, project_dir, "sources", "Scripts")?;
     if source_paths.is_empty() {
         return Err("nativevn project must declare at least one .astra source".into());
     }
     let mut sources = Vec::with_capacity(source_paths.len());
     for source in source_paths {
         let source_text = fs::read_to_string(project_dir.join(&source))?;
-        sources.push(AstraSource::new(
+        sources.push(AstraSource::story(
             normalize_relative_path(&source),
             source_text,
         ));
     }
-    let compiled = compile_astra_sources(sources)?;
+    let ui_source_paths = nativevn_source_paths(project, project_dir, "ui_sources", "UI")?;
+    if ui_source_paths.is_empty() {
+        return Err("nativevn project must declare at least one UI .astra source".into());
+    }
+    for source in ui_source_paths {
+        let source_text = fs::read_to_string(project_dir.join(&source))?;
+        sources.push(AstraSource::ui(
+            normalize_relative_path(&source),
+            source_text,
+        ));
+    }
+    let compiled = compile_astra_project(sources, Default::default())?;
     let mut profiles = string_list(
         project
             .get("nativevn")
@@ -1392,7 +1403,7 @@ fn cook_nativevn_sections(
         profiles.push(profile.to_string());
     }
 
-    let sections = package_sections_for_story(&compiled, &profiles, target)?;
+    let sections = package_sections_for_project(&compiled, &profiles, target)?;
     let section_dir = out.join("sections");
     fs::create_dir_all(&section_dir)?;
     let mut artifacts = Vec::new();
@@ -1920,17 +1931,22 @@ fn cook_project_package_sections(
 fn nativevn_source_paths(
     project: &serde_yaml::Value,
     project_dir: &std::path::Path,
+    field: &str,
+    default_directory: &str,
 ) -> Result<Vec<PathBuf>, CliError> {
     let mut sources = string_list(
         project
             .get("nativevn")
-            .and_then(|nativevn| nativevn.get("sources")),
+            .and_then(|nativevn| nativevn.get(field)),
     );
-    if sources.is_empty() {
+    if sources.is_empty() && field == "sources" {
         sources = string_list(project.get("scripts"));
     }
     if sources.is_empty() {
-        sources.push("Scripts".to_string());
+        let default = project_dir.join(default_directory);
+        if default.is_dir() {
+            sources.push(default_directory.to_string());
+        }
     }
 
     let mut paths = Vec::new();

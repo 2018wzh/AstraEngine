@@ -8,7 +8,7 @@ use astra_plugin_abi::{
     RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeShutdownReport,
     RuntimeStepInput, RuntimeStepMode, RuntimeStepOutput, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
 };
-use astra_vn_runtime_provider::{compile_astra_sources, AstraSource, NativeVnRuntimeProvider};
+use astra_vn_runtime_provider::{compile_astra_project, AstraSource, NativeVnRuntimeProvider};
 use serde::{de::DeserializeOwned, Serialize};
 
 const STORY: &str = r#"
@@ -48,7 +48,11 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
     );
     assert_eq!(created.status, "created");
 
-    let compiled = compile_astra_sources([AstraSource::new("ffi_story.astra", STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("ffi_story.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
     let compiled_bytes = postcard::to_allocvec(&compiled).unwrap();
     let open = invoke_call::<_, RuntimeOpenReport>(
         registration.open,

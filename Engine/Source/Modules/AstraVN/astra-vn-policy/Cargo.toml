@@ -3,7 +3,6 @@ name = "astra-vn-policy"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
-rust-version.workspace = true
 
 [features]
 default = ["luau-runtime"]

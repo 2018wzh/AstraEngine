@@ -1,5 +1,5 @@
 use astra_vn_core::{
-    compile_astra_sources, AstraSource, VnPlayerCommand, VnRunConfig, VnRuntime, VnWaitKind,
+    compile_astra_project, AstraSource, VnPlayerCommand, VnRunConfig, VnRuntime, VnWaitKind,
 };
 
 const MOVIE_WAIT_STORY: &str = r#"
@@ -13,8 +13,11 @@ state prologue #@id state.prologue
 
 #[astra_headless_test::test]
 fn movie_end_wait_blocks_cursor_and_resumes_from_serializable_fence() {
-    let compiled =
-        compile_astra_sources([AstraSource::new("movie_wait.astra", MOVIE_WAIT_STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("movie_wait.astra", MOVIE_WAIT_STORY)],
+        Default::default(),
+    )
+    .unwrap();
     let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
 
     let output = runtime

@@ -5,15 +5,16 @@ use astra_media::{
 };
 use astra_media_core::SceneCommand;
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
-use astra_player_core::{PlayerAction, PlayerHostCommand, PlayerHostResourceId};
+use astra_player_core::{PlayerHostCommand, PlayerHostResourceId};
 use astra_player_vn::{NativeVnAudioOutput, NativeVnHostCommandSource};
 use astra_plugin_abi::{
     LoadPhase, PluginExtensionRegistrySnapshot, ProviderBinding, ProviderBindingContext,
     ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
     PROVIDER_POLICY_SCHEMA,
 };
-use astra_vn_core::{compile_astra_sources, AstraSource, VnRunConfig};
-use astra_vn_package::{package_sections_for_story, PLAYER_LOCALE_CONFIG_SCHEMA};
+use astra_ui_core::{UiButtonState, UiInputEventKind};
+use astra_vn_core::{compile_astra_project, AstraSource, VnRunConfig};
+use astra_vn_package::{package_sections_for_project, PLAYER_LOCALE_CONFIG_SCHEMA};
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 
 const STORY: &str = r#"
@@ -22,6 +23,27 @@ state start #@id state.start
   scene room #@id scene.room
     text key:line.one speaker:hero #@id line.one
     text key:line.two speaker:hero #@id line.two
+"#;
+
+const TEST_UI: &str = r#"
+ui_bind surface:message view:ui.test.message controller:test.message policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.message
+ui_bind surface:choice view:ui.test.choice controller:test.choice policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.choice
+ui_bind system_page:save view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.save
+ui_bind system_page:load view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.load
+ui_bind system_page:config view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.config
+ui_view ui.test.message model:astra.vn.ui_model.message.v1 theme:astra.vn.theme.classic #@id ui.test.message
+  screen id:root
+    panel id:advance fill:true
+      on activate -> vn.advance
+ui_view ui.test.choice model:astra.vn.ui_model.choice.v1 theme:astra.vn.theme.classic #@id ui.test.choice
+  screen id:root
+    virtual_list id:options items:$model.options item_key:option_id overscan:2 item_extent:48
+      button id:option min_height:44 value:$item.text_key
+        on activate -> vn.choose option_id:$item.option_id
+ui_view ui.test.system model:astra.vn.ui_model.system.v1 theme:astra.vn.theme.classic #@id ui.test.system
+  screen id:root
+    button id:back min_height:48
+      on activate -> vn.return_system
 "#;
 
 fn product_package() -> Vec<u8> {
@@ -45,13 +67,32 @@ fn source_for(story: &str) -> NativeVnHostCommandSource {
     .unwrap()
 }
 
+fn advance(source: &mut NativeVnHostCommandSource) -> astra_player_core::PlayerHostCommandBatch {
+    source
+        .dispatch_ui_event(UiInputEventKind::Keyboard {
+            logical_key: "Enter".to_string(),
+            physical_key: "Enter".to_string(),
+            state: UiButtonState::Pressed,
+            repeat: false,
+            modifiers: 0,
+        })
+        .unwrap()
+}
+
 fn product_package_with_request(
     story: &str,
     mutate: impl FnOnce(&mut PackageBuildRequest),
 ) -> Vec<u8> {
-    let compiled = compile_astra_sources([AstraSource::new("main.astra", story)]).unwrap();
+    let compiled = compile_astra_project(
+        [
+            AstraSource::story("main.astra", story),
+            AstraSource::ui("test-ui.astra", TEST_UI),
+        ],
+        Default::default(),
+    )
+    .unwrap();
     let mut sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     let font = include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/Poppins-Regular.ttf")
         .to_vec();
     let font_hash = Hash256::from_sha256(&font);
@@ -257,12 +298,13 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
     })
     .unwrap();
     request.target_manifest = serde_json::to_vec(&serde_json::json!({
-        "schema": "astra.target_manifest.v1",
+        "schema": "astra.target_manifest.v2",
         "targets": [{
             "id": "nativevn-game",
             "kind": "game",
             "crate": "astra-vn",
             "runtime_provider": "native_vn",
+            "ui_provider": "astra.ui.yakui",
             "default_profile": "classic",
             "platforms": ["windows", "web"],
             "packaged": true
@@ -299,7 +341,7 @@ fn packaged_native_vn_source_shapes_localized_text_into_retained_scene_commands(
     .unwrap();
 
     let first = source.launch().unwrap();
-    let second = source.dispatch_action(PlayerAction::Advance).unwrap();
+    let second = advance(&mut source);
     for commands in [scene_commands(&first), scene_commands(&second)] {
         assert!(commands
             .iter()
@@ -550,8 +592,8 @@ fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
     assert!(evidence.runtime_presentation_hash.starts_with("hash128:"));
     assert_eq!(evidence.current_state_id.as_deref(), Some("state.start"));
 
-    source.dispatch_action(PlayerAction::Advance).unwrap();
-    source.dispatch_action(PlayerAction::Advance).unwrap();
+    advance(&mut source);
+    advance(&mut source);
     let terminal = source.last_step_evidence().expect("terminal evidence");
     assert!(
         !terminal.terminal_route_ids.is_empty(),
@@ -564,10 +606,10 @@ fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
 fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
-    source.dispatch_action(PlayerAction::Advance).unwrap();
+    advance(&mut source);
     let saved = source.save("slot.main").unwrap();
 
-    source.dispatch_action(PlayerAction::Advance).unwrap();
+    advance(&mut source);
     let uninterrupted = source
         .last_step_evidence()
         .unwrap()
@@ -575,7 +617,7 @@ fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
         .clone();
 
     source.restore(&saved).unwrap();
-    source.dispatch_action(PlayerAction::Advance).unwrap();
+    advance(&mut source);
     assert_eq!(
         source.last_step_evidence().unwrap().vn_state_hash_after,
         uninterrupted
@@ -654,7 +696,7 @@ state start #@id state.start
         source.last_step_evidence().unwrap().vn_state_hash_after,
         before
     );
-    source.dispatch_action(PlayerAction::Advance).unwrap();
+    advance(&mut source);
 }
 
 #[astra_headless_test::test]
@@ -808,9 +850,13 @@ state start #@id state.start
 
 #[astra_headless_test::test]
 fn packaged_player_rejects_headless_presentation_binding() {
-    let compiled = compile_astra_sources([AstraSource::new("main.astra", STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("main.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
     let sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     let request = astra_package::PackageBuildRequest::fixture(
         "com.example.player-binding",
         "classic",

@@ -1,0 +1,21 @@
+[package]
+name = "astra-ui-component-host"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+astra-observability = { path = "../../Developer/astra-observability" }
+astra-core = { path = "../../Runtime/astra-core" }
+astra-ui-plugin-abi = { path = "../../Runtime/astra-ui-plugin-abi" }
+abi_stable.workspace = true
+libloading.workspace = true
+postcard.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[[bin]]
+name = "astra-ui-component-host"
+path = "src/main.rs"

@@ -3,7 +3,6 @@ name = "astra-player-vn"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
-rust-version.workspace = true
 
 [features]
 default = []
@@ -19,6 +18,8 @@ astra-package = { path = "../../Runtime/astra-package" }
 astra-plugin = { path = "../../Runtime/astra-plugin", default-features = false }
 astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi", default-features = false }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
+astra-ui-core = { path = "../../Runtime/astra-ui-core" }
+astra-ui-yakui = { path = "../../Runtime/astra-ui-yakui" }
 astra-runtime = { path = "../../Runtime/astra-runtime" }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
@@ -26,6 +27,7 @@ astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-pro
 astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
 astra-vn-presentation = { path = "../../Modules/AstraVN/astra-vn-presentation" }
 astra-vn-system = { path = "../../Modules/AstraVN/astra-vn-system" }
+astra-vn-ui = { path = "../../Modules/AstraVN/astra-vn-ui" }
 image.workspace = true
 postcard.workspace = true
 serde.workspace = true

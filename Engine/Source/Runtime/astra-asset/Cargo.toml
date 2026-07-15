@@ -3,7 +3,6 @@ name = "astra-asset"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
-rust-version.workspace = true
 
 [dependencies]
 astra-core = { path = "../astra-core" }

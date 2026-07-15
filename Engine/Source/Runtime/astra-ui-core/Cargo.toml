@@ -1,0 +1,14 @@
+[package]
+name = "astra-ui-core"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+astra-core = { path = "../astra-core" }
+postcard.workspace = true
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+

@@ -4,7 +4,7 @@ use astra_plugin_abi::{
     GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID,
 };
 use astra_vn_runtime_provider::{
-    compile_astra_sources, AstraSource, NativeVnRuntimeProvider, PresentationCommand,
+    compile_astra_project, AstraSource, NativeVnRuntimeProvider, PresentationCommand,
     TimelineCommand, VnRunConfig, VnTimelineTask,
 };
 
@@ -39,7 +39,11 @@ fn native_vn_provider_descriptor_declares_game_runtime_slot_contract() {
 
 #[astra_headless_test::test]
 fn native_vn_provider_steps_compiled_story_through_runtime_session() {
-    let compiled = compile_astra_sources([AstraSource::new("story.astra", STORY)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("story.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
     let mut provider = NativeVnRuntimeProvider::default();
     let open = provider
         .open_compiled_story(
@@ -239,7 +243,11 @@ state prologue #@id state.prologue
   scene room #@id scene.room
     timeline id:intro target:hero property:opacity keyframes:0=0,120=1 join:block fence:timeline.intro.complete budget_ms:2 #@id timeline.intro
 "#;
-    let compiled = compile_astra_sources([AstraSource::new("timeline.astra", story)]).unwrap();
+    let compiled = compile_astra_project(
+        [AstraSource::story("timeline.astra", story)],
+        Default::default(),
+    )
+    .unwrap();
     let mut provider = NativeVnRuntimeProvider::default();
     let open = provider
         .open_compiled_story(

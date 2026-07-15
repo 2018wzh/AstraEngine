@@ -11,6 +11,7 @@ mod stage;
 mod stage_compile;
 pub mod syntax;
 mod types;
+mod ui_compile;
 
 pub use compiler::*;
 pub use error::*;

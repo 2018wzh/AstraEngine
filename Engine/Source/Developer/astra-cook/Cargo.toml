@@ -3,7 +3,6 @@ name = "astra-cook"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
-rust-version.workspace = true
 
 [dependencies]
 astra-asset = { path = "../../Runtime/astra-asset" }

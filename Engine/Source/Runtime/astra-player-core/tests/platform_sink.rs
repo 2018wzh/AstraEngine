@@ -164,6 +164,7 @@ async fn platform_sink_forwards_renderer_ready_glyph_commands_without_cpu_frames
                 resource_id: "glyph:test".into(),
                 x: 4,
                 y: 5,
+                rotation_quadrants: 0,
             }],
             rgba: [255; 4],
             opacity: 1.0,

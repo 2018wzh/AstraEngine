@@ -171,6 +171,22 @@ pub struct GlyphBitmap {
     pub hash: Hash256,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MeshVertex2D {
+    pub position: [f32; 2],
+    pub uv: [f32; 2],
+    /// Premultiplied sRGBA color.
+    pub premultiplied_rgba: [u8; 4],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MeshMaterial2D {
+    Solid,
+    ColorTexture,
+    GlyphMask,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SceneCommand {
@@ -197,6 +213,15 @@ pub enum SceneCommand {
         id: String,
         glyphs: Vec<GlyphInstance>,
         rgba: [u8; 4],
+        opacity: f32,
+        blend: BlendMode,
+    },
+    Mesh2D {
+        id: String,
+        vertices: Vec<MeshVertex2D>,
+        indices: Vec<u32>,
+        material: MeshMaterial2D,
+        texture_id: Option<String>,
         opacity: f32,
         blend: BlendMode,
     },
@@ -260,6 +285,7 @@ pub struct GlyphInstance {
     pub resource_id: String,
     pub x: i32,
     pub y: i32,
+    pub rotation_quadrants: u8,
 }
 
 pub type DrawCommand = SceneCommand;
@@ -450,11 +476,50 @@ impl Renderer2D for HeadlessRenderer {
                             instance.x,
                             instance.y,
                             glyph,
+                            instance.rotation_quadrants,
                             *rgba,
                             *opacity * opacities.last().copied().unwrap_or(1.0),
                             *blend,
                         )?;
                     }
+                }
+                DrawCommand::Mesh2D {
+                    vertices,
+                    indices,
+                    material,
+                    texture_id,
+                    opacity,
+                    blend,
+                    ..
+                } => {
+                    let texture = match (material, texture_id) {
+                        (MeshMaterial2D::Solid, None) => None,
+                        (MeshMaterial2D::ColorTexture | MeshMaterial2D::GlyphMask, Some(id)) => {
+                            Some(textures.get(id).ok_or_else(|| {
+                                MediaError::message(
+                                    "ASTRA_MEDIA_RESOURCE_UNKNOWN: mesh texture is not uploaded",
+                                )
+                            })?)
+                        }
+                        _ => {
+                            return Err(MediaError::message(
+                                "ASTRA_MEDIA_MESH_MATERIAL: mesh material and texture mismatch",
+                            ));
+                        }
+                    };
+                    draw_mesh(
+                        &mut bytes,
+                        width,
+                        height,
+                        *clips.last().expect("clip stack is initialized"),
+                        current_transform(camera, &transforms),
+                        vertices,
+                        indices,
+                        *material,
+                        texture,
+                        *opacity * opacities.last().copied().unwrap_or(1.0),
+                        *blend,
+                    )?;
                 }
                 DrawCommand::Clear { rgba } => {
                     for pixel in bytes.chunks_exact_mut(4) {
@@ -528,6 +593,7 @@ impl Renderer2D for HeadlessRenderer {
                         *x,
                         *y,
                         glyph,
+                        0,
                         *rgba,
                         *opacity * opacities.last().copied().unwrap_or(1.0),
                         *blend,
@@ -829,6 +895,7 @@ fn draw_glyph(
     x: i32,
     y: i32,
     glyph: &GlyphBitmap,
+    rotation_quadrants: u8,
     rgba: [u8; 4],
     opacity: f32,
     blend: BlendMode,
@@ -862,17 +929,229 @@ fn draw_glyph(
         hash: Hash256::from_sha256(&rgba8),
         rgba8,
     };
+    let frame = rotate_texture_clockwise(frame, rotation_quadrants % 4);
     draw_texture(
         target,
         target_width,
         target_height,
         clip,
         transform,
-        RectI::new(x, y, glyph.width, glyph.height),
+        RectI::new(x, y, frame.width, frame.height),
         &frame,
         opacity,
         blend,
     )
+}
+
+fn rotate_texture_clockwise(mut frame: TextureFrame, quadrants: u8) -> TextureFrame {
+    for _ in 0..quadrants {
+        let source_width = frame.width as usize;
+        let source_height = frame.height as usize;
+        let mut rotated = vec![0_u8; frame.rgba8.len()];
+        for source_y in 0..source_height {
+            for source_x in 0..source_width {
+                let target_x = source_height - source_y - 1;
+                let target_y = source_x;
+                let source = (source_y * source_width + source_x) * 4;
+                let target = (target_y * source_height + target_x) * 4;
+                rotated[target..target + 4].copy_from_slice(&frame.rgba8[source..source + 4]);
+            }
+        }
+        frame = TextureFrame {
+            width: frame.height,
+            height: frame.width,
+            hash: Hash256::from_sha256(&rotated),
+            rgba8: rotated,
+        };
+    }
+    frame
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_mesh(
+    target: &mut [u8],
+    target_width: usize,
+    target_height: usize,
+    clip: RectI,
+    transform: Transform2D,
+    vertices: &[MeshVertex2D],
+    indices: &[u32],
+    material: MeshMaterial2D,
+    texture: Option<&TextureFrame>,
+    opacity: f32,
+    blend: BlendMode,
+) -> Result<(), MediaError> {
+    validate_opacity(opacity)?;
+    if vertices.is_empty() || indices.is_empty() || indices.len() % 3 != 0 {
+        return Err(MediaError::message(
+            "ASTRA_MEDIA_MESH_TOPOLOGY: mesh requires triangle-list vertices and indices",
+        ));
+    }
+    if vertices.len() > 250_000 || indices.len() > 750_000 {
+        return Err(MediaError::message(
+            "ASTRA_MEDIA_MESH_BUDGET: mesh exceeds vertex or index budget",
+        ));
+    }
+    if indices
+        .iter()
+        .any(|index| *index as usize >= vertices.len())
+    {
+        return Err(MediaError::message(
+            "ASTRA_MEDIA_MESH_INDEX: mesh index is outside the vertex buffer",
+        ));
+    }
+    if let Some(texture) = texture {
+        validate_texture(texture)?;
+    }
+    let transformed = vertices
+        .iter()
+        .map(|vertex| {
+            if vertex.position.iter().any(|value| !value.is_finite())
+                || vertex.uv.iter().any(|value| !value.is_finite())
+                || vertex.premultiplied_rgba[..3]
+                    .iter()
+                    .any(|channel| *channel > vertex.premultiplied_rgba[3])
+            {
+                return Err(MediaError::message(
+                    "ASTRA_MEDIA_MESH_VERTEX: mesh vertex is invalid or not premultiplied",
+                ));
+            }
+            let (x, y) = transform.point(vertex.position[0], vertex.position[1]);
+            Ok(MeshVertex2D {
+                position: [x, y],
+                ..*vertex
+            })
+        })
+        .collect::<Result<Vec<_>, MediaError>>()?;
+
+    for triangle in indices.chunks_exact(3) {
+        let a = transformed[triangle[0] as usize];
+        let b = transformed[triangle[1] as usize];
+        let c = transformed[triangle[2] as usize];
+        let area = edge(a.position, b.position, c.position);
+        if area.abs() < f32::EPSILON {
+            continue;
+        }
+        let min_x = a.position[0].min(b.position[0]).min(c.position[0]).floor() as i32;
+        let min_y = a.position[1].min(b.position[1]).min(c.position[1]).floor() as i32;
+        let max_x = a.position[0].max(b.position[0]).max(c.position[0]).ceil() as i32;
+        let max_y = a.position[1].max(b.position[1]).max(c.position[1]).ceil() as i32;
+        let clip_x0 = clip.x.max(0).max(min_x);
+        let clip_y0 = clip.y.max(0).max(min_y);
+        let clip_x1 = (clip.x + clip.width as i32)
+            .min(target_width as i32)
+            .min(max_x);
+        let clip_y1 = (clip.y + clip.height as i32)
+            .min(target_height as i32)
+            .min(max_y);
+        for y in clip_y0..clip_y1 {
+            for x in clip_x0..clip_x1 {
+                let point = [x as f32 + 0.5, y as f32 + 0.5];
+                let wa = edge(b.position, c.position, point) / area;
+                let wb = edge(c.position, a.position, point) / area;
+                let wc = 1.0 - wa - wb;
+                let epsilon = -1.0e-5;
+                if wa < epsilon || wb < epsilon || wc < epsilon {
+                    continue;
+                }
+                let uv = [
+                    wa * a.uv[0] + wb * b.uv[0] + wc * c.uv[0],
+                    wa * a.uv[1] + wb * b.uv[1] + wc * c.uv[1],
+                ];
+                let mut color = [0u8; 4];
+                for channel in 0..4 {
+                    color[channel] = (wa * a.premultiplied_rgba[channel] as f32
+                        + wb * b.premultiplied_rgba[channel] as f32
+                        + wc * c.premultiplied_rgba[channel] as f32)
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
+                }
+                if let Some(texture) = texture {
+                    let texel = sample_texture(texture, uv);
+                    match material {
+                        MeshMaterial2D::ColorTexture => {
+                            for channel in 0..4 {
+                                color[channel] =
+                                    ((color[channel] as u16 * texel[channel] as u16) / 255) as u8;
+                            }
+                        }
+                        MeshMaterial2D::GlyphMask => {
+                            let mask = texel[3];
+                            for channel in 0..4 {
+                                color[channel] =
+                                    ((color[channel] as u16 * mask as u16) / 255) as u8;
+                            }
+                        }
+                        MeshMaterial2D::Solid => unreachable!("solid mesh has no texture"),
+                    }
+                }
+                let offset = (y as usize * target_width + x as usize) * 4;
+                blend_premultiplied_pixel(&mut target[offset..offset + 4], color, opacity, blend);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn edge(a: [f32; 2], b: [f32; 2], point: [f32; 2]) -> f32 {
+    (point[0] - a[0]) * (b[1] - a[1]) - (point[1] - a[1]) * (b[0] - a[0])
+}
+
+fn sample_texture(frame: &TextureFrame, uv: [f32; 2]) -> [u8; 4] {
+    let x = (uv[0].clamp(0.0, 1.0) * (frame.width.saturating_sub(1)) as f32).round() as usize;
+    let y = (uv[1].clamp(0.0, 1.0) * (frame.height.saturating_sub(1)) as f32).round() as usize;
+    let offset = (y * frame.width as usize + x) * 4;
+    frame.rgba8[offset..offset + 4]
+        .try_into()
+        .expect("validated RGBA texture has complete texels")
+}
+
+fn blend_premultiplied_pixel(target: &mut [u8], source: [u8; 4], opacity: f32, blend: BlendMode) {
+    let source_alpha = source[3] as f32 / 255.0 * opacity;
+    let target_alpha = target[3] as f32 / 255.0;
+    let output_alpha = source_alpha + target_alpha * (1.0 - source_alpha);
+    match blend {
+        BlendMode::Alpha => {
+            for channel in 0..3 {
+                let source_premultiplied = source[channel] as f32 / 255.0 * opacity;
+                let target_premultiplied = target[channel] as f32 / 255.0 * target_alpha;
+                let output_premultiplied =
+                    source_premultiplied + target_premultiplied * (1.0 - source_alpha);
+                target[channel] = if output_alpha > 0.0 {
+                    (output_premultiplied / output_alpha * 255.0)
+                        .round()
+                        .clamp(0.0, 255.0) as u8
+                } else {
+                    0
+                };
+            }
+        }
+        BlendMode::Add => {
+            for channel in 0..3 {
+                target[channel] = target[channel]
+                    .saturating_add((source[channel] as f32 * opacity).round() as u8);
+            }
+        }
+        BlendMode::Multiply => {
+            let straight = if source_alpha > 0.0 {
+                [
+                    (source[0] as f32 * opacity / source_alpha).clamp(0.0, 255.0),
+                    (source[1] as f32 * opacity / source_alpha).clamp(0.0, 255.0),
+                    (source[2] as f32 * opacity / source_alpha).clamp(0.0, 255.0),
+                ]
+            } else {
+                [0.0; 3]
+            };
+            for channel in 0..3 {
+                let multiplied = target[channel] as f32 * straight[channel] / 255.0;
+                target[channel] = (target[channel] as f32 * (1.0 - source_alpha)
+                    + multiplied * source_alpha)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    target[3] = (output_alpha * 255.0).round().clamp(0.0, 255.0) as u8;
 }
 
 fn transformed_bounds(transform: Transform2D, rect: RectI) -> Result<RectI, MediaError> {

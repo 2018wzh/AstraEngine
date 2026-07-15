@@ -494,6 +494,7 @@ targets:
     crate: astra-vn
     default_profile: desktop-release
     runtime_provider: native_vn
+    ui_provider: astra.ui.yakui
     platforms: [windows, linux]
     packaged: true
   - id: sample-editor
@@ -665,6 +666,7 @@ targets:
     crate: astra-vn
     default_profile: classic
     runtime_provider: native_vn
+    ui_provider: astra.ui.yakui
     platforms: [headless, windows, web]
     packaged: true
   - id: tsuinosora-patch-game
@@ -672,6 +674,7 @@ targets:
     crate: astra-vn
     default_profile: classic
     runtime_provider: native_vn
+    ui_provider: astra.ui.yakui
     platforms: [headless, windows, web]
     packaged: true
 nativevn:
@@ -2569,6 +2572,7 @@ targets:
     crate: astra-vn
     default_profile: classic
     runtime_provider: native_vn
+    ui_provider: astra.ui.yakui
     platforms: [headless, windows, web]
     packaged: true
   - id: tsuinosora-patch-game
@@ -2576,6 +2580,7 @@ targets:
     crate: astra-vn
     default_profile: classic
     runtime_provider: native_vn
+    ui_provider: astra.ui.yakui
     platforms: [headless, windows, web]
     packaged: true
 nativevn:

@@ -77,12 +77,13 @@ impl PackageBuildRequest {
                 "modules": []
             })),
             target_manifest: json_bytes(serde_json::json!({
-                "schema": "astra.target_manifest.v1",
+                "schema": "astra.target_manifest.v2",
                 "targets": [{
                     "id": "native-smoke-game",
                     "kind": "game",
                     "crate": "astra-runtime",
                     "runtime_provider": "native_vn",
+                    "ui_provider": "astra.ui.yakui",
                     "default_profile": "desktop-release",
                     "platforms": ["windows", "linux", "macos", "ios", "android", "web"],
                     "packaged": true
@@ -404,7 +405,7 @@ impl PackageBuilder {
             ),
             SectionPayload::raw(
                 "target.manifest",
-                "astra.target_manifest.v1",
+                "astra.target_manifest.v2",
                 request.target_manifest,
             ),
             SectionPayload::raw(

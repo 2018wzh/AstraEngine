@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use astra_media_core::{
-    BlendMode, GlyphBitmap, GlyphBitmapFormat, RectI, SceneCommand, TextureFrame,
+    BlendMode, GlyphBitmap, GlyphBitmapFormat, MeshMaterial2D, MeshVertex2D, RectI, SceneCommand,
+    TextureFrame,
 };
 use astra_platform::{PlatformError, PlatformErrorCode, SceneFrame};
 use wgpu::util::DeviceExt;
@@ -79,6 +80,19 @@ struct DrawRun {
     rgba: [u8; 4],
     opacity: f32,
     clip: RectI,
+}
+
+struct MeshRun {
+    vertices: Vec<MeshVertex2D>,
+    indices: Vec<u32>,
+    texture_id: Option<String>,
+    opacity: f32,
+    clip: RectI,
+}
+
+enum DrawPrimitive {
+    Quads(DrawRun),
+    Mesh(MeshRun),
 }
 
 struct DrawBatch {
@@ -246,7 +260,7 @@ impl WgpuGlyphAtlasRenderer {
                         });
                         drawn_resources.insert(glyph.resource_id.clone());
                     }
-                    draw_runs.push(DrawRun {
+                    draw_runs.push(DrawPrimitive::Quads(DrawRun {
                         quads,
                         rgba: *rgba,
                         opacity: *opacity,
@@ -256,7 +270,7 @@ impl WgpuGlyphAtlasRenderer {
                             frame.width,
                             frame.height,
                         )),
-                    });
+                    }));
                 }
                 SceneCommand::Sprite {
                     id,
@@ -287,7 +301,7 @@ impl WgpuGlyphAtlasRenderer {
                     validate_source_rect(source, texture.width, texture.height)?;
                     validate_destination(*destination)?;
                     drawn_resources.insert(texture_id.clone());
-                    draw_runs.push(DrawRun {
+                    draw_runs.push(DrawPrimitive::Quads(DrawRun {
                         quads: vec![DrawQuad {
                             source: QuadSource::Resource {
                                 resource_id: texture_id.clone(),
@@ -303,7 +317,7 @@ impl WgpuGlyphAtlasRenderer {
                             frame.width,
                             frame.height,
                         )),
-                    });
+                    }));
                 }
                 SceneCommand::Rect {
                     id,
@@ -321,7 +335,7 @@ impl WgpuGlyphAtlasRenderer {
                     {
                         return Err(invalid("rectangle identity or dimensions are invalid"));
                     }
-                    draw_runs.push(DrawRun {
+                    draw_runs.push(DrawPrimitive::Quads(DrawRun {
                         quads: vec![DrawQuad {
                             source: QuadSource::White,
                             destination: RectI::new(*x as i32, *y as i32, *width, *height),
@@ -334,7 +348,82 @@ impl WgpuGlyphAtlasRenderer {
                             frame.width,
                             frame.height,
                         )),
-                    });
+                    }));
+                }
+                SceneCommand::Mesh2D {
+                    id,
+                    vertices,
+                    indices,
+                    material,
+                    texture_id,
+                    opacity,
+                    blend,
+                } => {
+                    if id.is_empty()
+                        || id.len() > 256
+                        || !run_ids.insert(id.clone())
+                        || !opacity.is_finite()
+                        || !(0.0..=1.0).contains(opacity)
+                        || *blend != BlendMode::Alpha
+                        || vertices.is_empty()
+                        || indices.is_empty()
+                        || indices.len() % 3 != 0
+                    {
+                        return Err(invalid(
+                            "mesh identity, topology, opacity, or blend is invalid",
+                        ));
+                    }
+                    if vertices.len() > 250_000
+                        || indices.len() > 750_000
+                        || indices
+                            .iter()
+                            .any(|index| *index as usize >= vertices.len())
+                        || vertices.iter().any(|vertex| {
+                            !vertex.position.into_iter().all(f32::is_finite)
+                                || !vertex.uv.into_iter().all(f32::is_finite)
+                                || vertex.premultiplied_rgba[..3]
+                                    .iter()
+                                    .any(|channel| *channel > vertex.premultiplied_rgba[3])
+                        })
+                    {
+                        return Err(invalid("mesh vertex or index payload is invalid"));
+                    }
+                    let resolved_texture = match (material, texture_id) {
+                        (MeshMaterial2D::Solid, None) => None,
+                        (
+                            MeshMaterial2D::ColorTexture | MeshMaterial2D::GlyphMask,
+                            Some(resource_id),
+                        ) => {
+                            match resources.get(resource_id) {
+                                Some(AtlasResource::Texture(_)) => {}
+                                Some(AtlasResource::Glyph(_)) => {
+                                    return Err(invalid(
+                                        "mesh references a glyph resource as texture",
+                                    ));
+                                }
+                                None => {
+                                    return Err(invalid(
+                                        "mesh references a resource that is not live",
+                                    ))
+                                }
+                            }
+                            drawn_resources.insert(resource_id.clone());
+                            Some(resource_id.clone())
+                        }
+                        _ => return Err(invalid("mesh material and texture binding mismatch")),
+                    };
+                    draw_runs.push(DrawPrimitive::Mesh(MeshRun {
+                        vertices: vertices.clone(),
+                        indices: indices.clone(),
+                        texture_id: resolved_texture,
+                        opacity: *opacity,
+                        clip: clip_stack.last().copied().unwrap_or(RectI::new(
+                            0,
+                            0,
+                            frame.width,
+                            frame.height,
+                        )),
+                    }));
                 }
                 _ => {
                     return Err(invalid(
@@ -372,7 +461,7 @@ impl WgpuGlyphAtlasRenderer {
                 },
             ],
         });
-        let (vertex_bytes, batches) = build_vertices(frame, &draw_runs, &packed_atlas)?;
+        let (vertex_bytes, batches) = build_vertices(frame, &draw_runs, &packed_atlas, &resources)?;
         let vertex_buffer = (!vertex_bytes.is_empty()).then(|| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("astra-glyph-vertex-buffer"),
@@ -617,12 +706,10 @@ fn build_atlas_pixels(
 
 fn resource_pixel(resource: &AtlasResource, column: usize, row: usize) -> [u8; 4] {
     match resource {
-        AtlasResource::Glyph(glyph) if glyph.format == GlyphBitmapFormat::Alpha8 => [
-            255,
-            255,
-            255,
-            glyph.pixels[row * glyph.width as usize + column],
-        ],
+        AtlasResource::Glyph(glyph) if glyph.format == GlyphBitmapFormat::Alpha8 => {
+            let alpha = glyph.pixels[row * glyph.width as usize + column];
+            [alpha, alpha, alpha, alpha]
+        }
         AtlasResource::Glyph(glyph) => {
             let source = (row * glyph.width as usize + column) * 4;
             [
@@ -689,75 +776,149 @@ fn upload_atlas(
 
 fn build_vertices(
     frame: &SceneFrame,
-    runs: &[DrawRun],
+    runs: &[DrawPrimitive],
     atlas: &PackedAtlas,
+    resources: &BTreeMap<String, AtlasResource>,
 ) -> Result<(Vec<u8>, Vec<DrawBatch>), PlatformError> {
     let mut bytes = Vec::new();
     let mut batches = Vec::new();
     let mut vertex_count = 0u32;
-    for run in runs {
-        if run.clip.width == 0 || run.clip.height == 0 {
+    for primitive in runs {
+        let clip = match primitive {
+            DrawPrimitive::Quads(run) => run.clip,
+            DrawPrimitive::Mesh(run) => run.clip,
+        };
+        if clip.width == 0 || clip.height == 0 {
             continue;
         }
         let first_vertex = vertex_count;
-        let color = [
-            srgb_byte_to_linear(run.rgba[0]),
-            srgb_byte_to_linear(run.rgba[1]),
-            srgb_byte_to_linear(run.rgba[2]),
-            (f32::from(run.rgba[3]) / 255.0) * run.opacity,
-        ];
-        for quad in &run.quads {
-            let left = quad.destination.x as f32;
-            let top = quad.destination.y as f32;
-            let right = left + quad.destination.width as f32;
-            let bottom = top + quad.destination.height as f32;
-            let (u0, v0, u1, v1) = match &quad.source {
-                QuadSource::Resource {
-                    resource_id,
-                    source,
-                } => {
-                    let placement = atlas
-                        .placements
-                        .get(resource_id)
-                        .ok_or_else(|| invalid("draw resource has no atlas placement"))?;
-                    let source_right = source.x as u32 + source.width;
-                    let source_bottom = source.y as u32 + source.height;
-                    (
-                        (placement.x + source.x as u32) as f32 / atlas.width as f32,
-                        (placement.y + source.y as u32) as f32 / atlas.height as f32,
-                        (placement.x + source_right) as f32 / atlas.width as f32,
-                        (placement.y + source_bottom) as f32 / atlas.height as f32,
-                    )
+        match primitive {
+            DrawPrimitive::Quads(run) => {
+                let color = straight_to_premultiplied_linear(run.rgba, run.opacity);
+                for quad in &run.quads {
+                    let left = quad.destination.x as f32;
+                    let top = quad.destination.y as f32;
+                    let right = left + quad.destination.width as f32;
+                    let bottom = top + quad.destination.height as f32;
+                    let (u0, v0, u1, v1) = match &quad.source {
+                        QuadSource::Resource {
+                            resource_id,
+                            source,
+                        } => {
+                            let placement = atlas
+                                .placements
+                                .get(resource_id)
+                                .ok_or_else(|| invalid("draw resource has no atlas placement"))?;
+                            let source_right = source.x as u32 + source.width;
+                            let source_bottom = source.y as u32 + source.height;
+                            (
+                                (placement.x + source.x as u32) as f32 / atlas.width as f32,
+                                (placement.y + source.y as u32) as f32 / atlas.height as f32,
+                                (placement.x + source_right) as f32 / atlas.width as f32,
+                                (placement.y + source_bottom) as f32 / atlas.height as f32,
+                            )
+                        }
+                        QuadSource::White => {
+                            let u = 0.5 / atlas.width as f32;
+                            let v = 0.5 / atlas.height as f32;
+                            (u, v, u, v)
+                        }
+                    };
+                    for (x, y, u, v) in [
+                        (left, top, u0, v0),
+                        (right, top, u1, v0),
+                        (right, bottom, u1, v1),
+                        (left, top, u0, v0),
+                        (right, bottom, u1, v1),
+                        (left, bottom, u0, v1),
+                    ] {
+                        push_vertex(&mut bytes, x, y, u, v, color, frame.width, frame.height);
+                        vertex_count = vertex_count
+                            .checked_add(1)
+                            .ok_or_else(|| invalid("scene vertex count overflowed"))?;
+                    }
                 }
-                QuadSource::White => {
-                    let u = 0.5 / atlas.width as f32;
-                    let v = 0.5 / atlas.height as f32;
-                    (u, v, u, v)
+            }
+            DrawPrimitive::Mesh(run) => {
+                let texture_mapping = run
+                    .texture_id
+                    .as_ref()
+                    .map(|resource_id| {
+                        let resource = resources
+                            .get(resource_id)
+                            .ok_or_else(|| invalid("mesh texture resource is missing"))?;
+                        let placement = atlas
+                            .placements
+                            .get(resource_id)
+                            .ok_or_else(|| invalid("mesh texture has no atlas placement"))?;
+                        Ok::<_, PlatformError>((placement, resource.width(), resource.height()))
+                    })
+                    .transpose()?;
+                for index in &run.indices {
+                    let vertex = &run.vertices[*index as usize];
+                    let (u, v) = if let Some((placement, width, height)) = texture_mapping {
+                        (
+                            (placement.x as f32 + vertex.uv[0] * width as f32) / atlas.width as f32,
+                            (placement.y as f32 + vertex.uv[1] * height as f32)
+                                / atlas.height as f32,
+                        )
+                    } else {
+                        (0.5 / atlas.width as f32, 0.5 / atlas.height as f32)
+                    };
+                    push_vertex(
+                        &mut bytes,
+                        vertex.position[0],
+                        vertex.position[1],
+                        u,
+                        v,
+                        premultiplied_linear(vertex.premultiplied_rgba, run.opacity),
+                        frame.width,
+                        frame.height,
+                    );
+                    vertex_count = vertex_count
+                        .checked_add(1)
+                        .ok_or_else(|| invalid("scene vertex count overflowed"))?;
                 }
-            };
-            for (x, y, u, v) in [
-                (left, top, u0, v0),
-                (right, top, u1, v0),
-                (right, bottom, u1, v1),
-                (left, top, u0, v0),
-                (right, bottom, u1, v1),
-                (left, bottom, u0, v1),
-            ] {
-                push_vertex(&mut bytes, x, y, u, v, color, frame.width, frame.height);
-                vertex_count = vertex_count
-                    .checked_add(1)
-                    .ok_or_else(|| invalid("glyph vertex count overflowed"))?;
             }
         }
         if vertex_count > first_vertex {
             batches.push(DrawBatch {
                 first_vertex,
                 vertex_count: vertex_count - first_vertex,
-                clip: run.clip,
+                clip,
             });
         }
     }
     Ok((bytes, batches))
+}
+
+fn premultiplied_linear(rgba: [u8; 4], opacity: f32) -> [f32; 4] {
+    let alpha = f32::from(rgba[3]) / 255.0;
+    let convert = |value: u8| {
+        if alpha == 0.0 {
+            0.0
+        } else {
+            srgb_byte_to_linear(((f32::from(value) / alpha).min(255.0)).round() as u8)
+                * alpha
+                * opacity
+        }
+    };
+    [
+        convert(rgba[0]),
+        convert(rgba[1]),
+        convert(rgba[2]),
+        alpha * opacity,
+    ]
+}
+
+fn straight_to_premultiplied_linear(rgba: [u8; 4], opacity: f32) -> [f32; 4] {
+    let alpha = f32::from(rgba[3]) / 255.0 * opacity;
+    [
+        srgb_byte_to_linear(rgba[0]) * alpha,
+        srgb_byte_to_linear(rgba[1]) * alpha,
+        srgb_byte_to_linear(rgba[2]) * alpha,
+        alpha,
+    ]
 }
 
 fn srgb_byte_to_linear(value: u8) -> f32 {
@@ -871,7 +1032,7 @@ fn create_pipeline(
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),

@@ -1,0 +1,19 @@
+[package]
+name = "astra-ui-plugin-abi"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[features]
+default = ["ffi"]
+ffi = []
+
+[dependencies]
+abi_stable.workspace = true
+astra-core = { path = "../astra-core" }
+astra-ui-core = { path = "../astra-ui-core" }
+ed25519-dalek.workspace = true
+postcard.workspace = true
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true

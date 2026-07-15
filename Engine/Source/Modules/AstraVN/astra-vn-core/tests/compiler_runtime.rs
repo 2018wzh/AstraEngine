@@ -1,5 +1,5 @@
 use astra_vn_core::{
-    compile_astra_sources, reduce_vn_step, AstraSource, PresentationCommand, SystemPageKind,
+    compile_astra_project, reduce_vn_step, AstraSource, PresentationCommand, SystemPageKind,
     VnPlayerCommand, VnRunConfig, VnRuntime, VnWaitKind,
 };
 
@@ -34,10 +34,13 @@ story system.title #@id system.title
 
 #[astra_headless_test::test]
 fn compiles_route_graph_source_map_and_stable_hash() {
-    let compiled = compile_astra_sources([
-        AstraSource::new("main.astra", MAIN),
-        AstraSource::new("system.astra", SYSTEM),
-    ])
+    let compiled = compile_astra_project(
+        [
+            AstraSource::story("main.astra", MAIN),
+            AstraSource::story("system.astra", SYSTEM),
+        ],
+        Default::default(),
+    )
     .unwrap();
 
     assert_eq!(compiled.schema, "astra.vn.compiled_story");
@@ -58,7 +61,9 @@ fn compiles_route_graph_source_map_and_stable_hash() {
 
 #[astra_headless_test::test]
 fn compiled_story_exposes_story_variable_and_command_manifests() {
-    let compiled = compile_astra_sources([AstraSource::new("main.astra", MAIN)]).unwrap();
+    let compiled =
+        compile_astra_project([AstraSource::story("main.astra", MAIN)], Default::default())
+            .unwrap();
 
     assert_eq!(compiled.story_manifest.schema, "astra.vn.story_manifest.v1");
     assert!(compiled
@@ -87,10 +92,13 @@ fn compiled_story_exposes_story_variable_and_command_manifests() {
 
 #[astra_headless_test::test]
 fn compiled_story_exposes_system_story_manifest() {
-    let compiled = compile_astra_sources([
-        AstraSource::new("main.astra", MAIN),
-        AstraSource::new("system.astra", SYSTEM),
-    ])
+    let compiled = compile_astra_project(
+        [
+            AstraSource::story("main.astra", MAIN),
+            AstraSource::story("system.astra", SYSTEM),
+        ],
+        Default::default(),
+    )
     .unwrap();
 
     assert_eq!(
@@ -110,7 +118,9 @@ fn compiled_story_exposes_system_story_manifest() {
 
 #[astra_headless_test::test]
 fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
-    let compiled = compile_astra_sources([AstraSource::new("main.astra", MAIN)]).unwrap();
+    let compiled =
+        compile_astra_project([AstraSource::story("main.astra", MAIN)], Default::default())
+            .unwrap();
     let mut runtime = VnRuntime::new(compiled.clone(), VnRunConfig::classic("zh-Hans")).unwrap();
 
     let first = runtime
@@ -177,7 +187,9 @@ fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
 
 #[astra_headless_test::test]
 fn reducer_advances_from_an_explicit_runtime_state_without_hidden_session_state() {
-    let compiled = compile_astra_sources([AstraSource::new("main.astra", MAIN)]).unwrap();
+    let compiled =
+        compile_astra_project([AstraSource::story("main.astra", MAIN)], Default::default())
+            .unwrap();
     let mut runtime = VnRuntime::new(compiled.clone(), VnRunConfig::classic("zh-Hans")).unwrap();
     runtime
         .apply(VnPlayerCommand::Launch {
@@ -199,10 +211,13 @@ fn reducer_advances_from_an_explicit_runtime_state_without_hidden_session_state(
 
 #[astra_headless_test::test]
 fn system_story_uses_a_separate_stack_and_explicit_return() {
-    let compiled = compile_astra_sources([
-        AstraSource::new("main.astra", MAIN),
-        AstraSource::new("system.astra", SYSTEM),
-    ])
+    let compiled = compile_astra_project(
+        [
+            AstraSource::story("main.astra", MAIN),
+            AstraSource::story("system.astra", SYSTEM),
+        ],
+        Default::default(),
+    )
     .unwrap();
     let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
     runtime

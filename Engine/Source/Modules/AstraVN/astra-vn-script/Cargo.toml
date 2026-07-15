@@ -3,10 +3,10 @@ name = "astra-vn-script"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
-rust-version.workspace = true
 
 [dependencies]
 astra-core = { path = "../../../Runtime/astra-core" }
+astra-ui-core = { path = "../../../Runtime/astra-ui-core" }
 blake3.workspace = true
 hex.workspace = true
 indexmap.workspace = true
