@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.director_scene_dsl_report.v1.json",
+  "title": "TsuiNoSora Director Scene DSL Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "source_scene_count",
+    "converted_scene_count",
+    "source_line_count",
+    "operation_counts",
+    "termination_counts",
+    "scene_dsl_sha256",
+    "diagnostics",
+    "redaction"
+  ],
+  "properties": {
+    "schema": { "const": "tsuinosora.director_scene_dsl_report.v1" },
+    "status": { "enum": ["pass", "blocked"] },
+    "source_scene_count": { "type": "integer", "minimum": 0 },
+    "converted_scene_count": { "type": "integer", "minimum": 0 },
+    "source_line_count": { "type": "integer", "minimum": 0 },
+    "operation_counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "termination_counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "scene_dsl_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "diagnostics": { "type": "array", "items": { "type": "object" } },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  }
+}

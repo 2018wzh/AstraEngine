@@ -1057,21 +1057,27 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertNotIn("private-audio-payload", encoded)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
-    def test_projectorrays_converter_parses_vwsc_score_metadata_without_frame_payload(self):
+    def test_projectorrays_converter_decodes_vwsc_score_frames_without_frame_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             dump = root / "full-dump"
             work = root / "work"
             dump.mkdir()
+            frame = (
+                (7).to_bytes(2, "big")
+                + (1).to_bytes(2, "big")
+                + (54).to_bytes(2, "big")
+                + (10).to_bytes(1, "big")
+            )
             detail0 = (
-                (24).to_bytes(4, "big")
+                (20 + len(frame)).to_bytes(4, "big")
                 + (20).to_bytes(4, "big")
-                + (3).to_bytes(4, "big")
+                + (1).to_bytes(4, "big")
                 + (13).to_bytes(2, "big")
                 + (48).to_bytes(2, "big")
                 + (120).to_bytes(2, "big")
-                + (0).to_bytes(2, "big")
-                + b"HEAD"
+                + (1).to_bytes(2, "big")
+                + frame
             )
             detail1 = b"private-frame-data"
             payload = (
@@ -1079,10 +1085,11 @@ class AssetAnalysisTests(unittest.TestCase):
                 + (-3).to_bytes(4, "big", signed=True)
                 + (12).to_bytes(4, "big")
                 + (2).to_bytes(4, "big")
-                + (2).to_bytes(4, "big")
+                + (3).to_bytes(4, "big")
                 + len(detail1).to_bytes(4, "big")
                 + (0).to_bytes(4, "big")
                 + len(detail0).to_bytes(4, "big")
+                + (len(detail0) + len(detail1)).to_bytes(4, "big")
                 + detail0
                 + detail1
             )
@@ -1097,9 +1104,10 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertEqual(conversion["status"], "pass")
             self.assertEqual(conversion["resources"][0]["conversion_method"], "projectorrays_vwsc_score_metadata")
             self.assertEqual(native_payload["detail_entry_count"], 2)
-            self.assertEqual(native_payload["score_header"]["num_frames"], 3)
+            self.assertEqual(native_payload["score_header"]["num_frames"], 1)
+            self.assertEqual(native_payload["score_ir"]["decoded_frame_count"], 1)
+            self.assertEqual(native_payload["score_ir"]["frames"][0]["main"]["tempo"], 10)
             self.assertNotIn("private-frame-data", encoded)
-            self.assertNotIn("HEAD", encoded)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
     def test_projectorrays_converter_records_xmed_metadata_without_payload(self):

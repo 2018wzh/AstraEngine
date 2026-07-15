@@ -24,6 +24,10 @@ from pathlib import Path
 
 from projectorrays_json import loads_projectorrays_json
 from native_story_ir import convert_native_story_ir
+from director_score import DirectorScoreError, decode_director_v7_score
+from director_story_source import DirectorStorySourceError, build_director_story_source
+from director_scene_dsl import DirectorSceneDslError, build_scene_dsl_ir
+from director_lingo import DirectorLingoError, build_lingo_ir
 
 
 IMAGE_EXTS = {".png"}
@@ -7003,6 +7007,7 @@ def run_demo_slice_gate(config_path: Path | str) -> dict:
 
     local_report = None
     projectorrays_report = None
+    story_source_report = None
     diagnostics = list(config_diagnostics)
     if not diagnostics:
         projectorrays_report = _run_projectorrays_from_demo_config(config)
@@ -7015,6 +7020,10 @@ def run_demo_slice_gate(config_path: Path | str) -> dict:
                         "message": "ProjectorRays reader evidence is configured but did not pass",
                     }
                 )
+    if not diagnostics:
+        story_source_report = _run_director_story_source_from_demo_config(config)
+        if story_source_report and story_source_report.get("status") != "pass":
+            diagnostics.extend(story_source_report.get("diagnostics", []))
     if not diagnostics:
         configured_unpacked_root = Path(str(config["unpacked_root"])) if config.get("unpacked_root") else None
         if (
@@ -7058,6 +7067,9 @@ def run_demo_slice_gate(config_path: Path | str) -> dict:
         },
         "reports": {
             "projectorrays_reader": "reports/projectorrays_reader_report.json" if projectorrays_report else "",
+            "director_story_source": "reports/director_story_source_report.json" if story_source_report else "",
+            "director_scene_dsl": "reports/director_scene_dsl_report.json" if story_source_report else "",
+            "director_lingo": "reports/director_lingo_report.json" if story_source_report else "",
             "local_gate": "reports/local_gate_report.json" if local_report else "",
             "stage3_gate": "reports/stage3_gate_report.json" if local_report else "",
             "nativevn_package_input": nativevn_package_input,
@@ -7110,6 +7122,109 @@ def _run_projectorrays_from_demo_config(config: dict) -> dict | None:
             config_path.unlink()
         except OSError:
             pass
+
+
+def _run_director_story_source_from_demo_config(config: dict) -> dict | None:
+    roots = config.get("projectorrays_full_dump_roots")
+    if not roots:
+        return None
+    work_root = Path(str(config.get("local_work_root", "")))
+    dump_roots = [
+        (str(item.get("alias", "")), Path(str(item.get("path", ""))))
+        for item in roots
+        if isinstance(item, dict)
+    ]
+    if {alias for alias, _ in dump_roots} != {"root", "data", "casts"}:
+        return None
+    try:
+        detailed, report = build_director_story_source(work_root, dump_roots)
+    except DirectorStorySourceError as exc:
+        report = {
+            "schema": "tsuinosora.director_story_source_report.v1",
+            "status": "blocked",
+            "movie_count": 0,
+            "frame_count": 0,
+            "label_count": 0,
+            "out_of_score_label_count": 0,
+            "label_action_binding_count": 0,
+            "frame_action_binding_count": 0,
+            "scene_text_binding_count": 0,
+            "named_text_member_count": 0,
+            "script_resource_count": 0,
+            "story_source_sha256": "sha256:" + "0" * 64,
+            "movie_coverage": [],
+            "diagnostics": [
+                {
+                    "code": "TSUI_DIRECTOR_STORY_SOURCE_BLOCKED",
+                    "message": str(exc),
+                }
+            ],
+            "redaction": {
+                "paths": "alias_or_report_relative_only",
+                "payload": "omitted",
+                "commercial_text": "omitted",
+                "script_source": "omitted",
+            },
+        }
+    else:
+        _write_json(work_root / "private" / "director_story_source.json", detailed)
+        try:
+            scene_dsl, scene_report = build_scene_dsl_ir(detailed)
+        except DirectorSceneDslError as exc:
+            scene_report = {
+                "schema": "tsuinosora.director_scene_dsl_report.v1",
+                "status": "blocked",
+                "source_scene_count": report["scene_text_binding_count"],
+                "converted_scene_count": 0,
+                "source_line_count": 0,
+                "operation_counts": {},
+                "termination_counts": {},
+                "scene_dsl_sha256": "sha256:" + "0" * 64,
+                "diagnostics": [
+                    {"code": "TSUI_DIRECTOR_SCENE_DSL_BLOCKED", "message": str(exc)}
+                ],
+                "redaction": {
+                    "paths": "alias_or_report_relative_only",
+                    "payload": "omitted",
+                    "commercial_text": "private_ir_only",
+                },
+            }
+            report["status"] = "blocked"
+            report["diagnostics"].extend(scene_report["diagnostics"])
+        else:
+            _write_json(work_root / "private" / "director_scene_dsl.json", scene_dsl)
+        _write_json(work_root / "reports" / "director_scene_dsl_report.json", scene_report)
+        converted_resources = _read_json(work_root / "reports" / "projectorrays_converted_resources.json")
+        try:
+            lingo_ir, lingo_report = build_lingo_ir(work_root, converted_resources)
+        except DirectorLingoError as exc:
+            lingo_report = {
+                "schema": "tsuinosora.director_lingo_report.v1",
+                "status": "blocked",
+                "source_resource_count": 0,
+                "converted_resource_count": 0,
+                "handler_count": 0,
+                "source_line_count": 0,
+                "encoding_counts": {},
+                "statement_counts": {},
+                "lingo_ir_sha256": "sha256:" + "0" * 64,
+                "diagnostics": [
+                    {"code": "TSUI_DIRECTOR_LINGO_BLOCKED", "message": str(exc)}
+                ],
+                "redaction": {
+                    "paths": "alias_or_report_relative_only",
+                    "payload": "omitted",
+                    "commercial_text": "private_ir_only",
+                    "script_source": "private_ir_only",
+                },
+            }
+            report["status"] = "blocked"
+            report["diagnostics"].extend(lingo_report["diagnostics"])
+        else:
+            _write_json(work_root / "private" / "director_lingo_ir.json", lingo_ir)
+        _write_json(work_root / "reports" / "director_lingo_report.json", lingo_report)
+    _write_json(work_root / "reports" / "director_story_source_report.json", report)
+    return report
 
 
 def build_projectorrays_full_dump_report(work_root: Path | str, dump_roots: list[tuple[str, Path]]) -> dict:
@@ -8638,7 +8753,8 @@ def _convert_projectorrays_vwsc_chunk(
     source_relative_path: str,
     diagnostics: list[dict],
 ) -> dict | None:
-    parsed = _parse_projectorrays_vwsc(source.read_bytes())
+    payload = source.read_bytes()
+    parsed = _parse_projectorrays_vwsc(payload)
     role = PROJECTORRAYS_REQUIRED_CHUNK_ROLES["VWSC"]
     if parsed is None:
         diagnostics.append(
@@ -8649,6 +8765,20 @@ def _convert_projectorrays_vwsc_chunk(
                 "chunk_fourcc": "VWSC",
                 "role": role,
                 "message": "ProjectorRays VWSC chunk did not match the supported Director 6 score metadata layout",
+            }
+        )
+        return None
+    try:
+        score_ir = decode_director_v7_score(payload)
+    except DirectorScoreError as exc:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_VWSC_FRAME_DECODE_FAILED",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": "VWSC",
+                "role": role,
+                "message": str(exc),
             }
         )
         return None
@@ -8667,6 +8797,7 @@ def _convert_projectorrays_vwsc_chunk(
             "frame_data_offset": parsed["frame_data_offset"],
             "zero_size_detail_count": parsed["zero_size_detail_count"],
             "score_header": parsed["score_header"],
+            "score_ir": score_ir,
             "index_hash": parsed["index_hash"],
             "detail_section_hash": parsed["detail_section_hash"],
             "redaction": {
