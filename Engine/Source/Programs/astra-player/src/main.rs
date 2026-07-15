@@ -1,9 +1,8 @@
 use astra_observability::{init_host, ConsoleFormat, HostObservabilityConfig, HostRole};
 use astra_player::{WebCdpInputHost, WindowsLiveAutomationRequest, WindowsSendInputHost};
-use astra_player_core::{
-    PlayerActionMap, PlayerAutomationScript, PlayerHostCommandResult, PlayerInputTranscript,
-    PlayerPlatform,
-};
+#[cfg(target_os = "windows")]
+use astra_player_core::{PlayerActionMap, PlayerHostCommandResult};
+use astra_player_core::{PlayerAutomationScript, PlayerInputTranscript, PlayerPlatform};
 use std::{env, fs, path::PathBuf};
 
 type PlayerCliError = Box<dyn std::error::Error + Send + Sync>;
