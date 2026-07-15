@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     UiActionEnvelope, UiInputDisposition, UiInputFrame, UiRenderFrame, UiSemanticSnapshot,
-    UiThemeManifest, UiValidationError, UiViewport, ValidateUi,
+    UiThemeManifest, UiValidationError, UiViewport, ValidateUi, MAX_NODES_PER_VIEW,
+    MAX_TEXTURE_BYTES,
 };
 
 #[derive(
@@ -149,6 +150,44 @@ impl ValidateUi for UiFrameOutput {
             return Err(UiValidationError::invalid(
                 "ASTRA_UI_FRAME_IDENTITY",
                 "render and semantic frame identity mismatch",
+            ));
+        }
+        let texture_update_bytes = self
+            .render
+            .textures
+            .uploads
+            .iter()
+            .map(|upload| upload.pixels.len() as u64)
+            .sum::<u64>();
+        let vertices = self
+            .render
+            .primitives
+            .iter()
+            .map(|primitive| primitive.vertices.len() as u64)
+            .sum::<u64>();
+        if self.performance.draw_calls as usize != self.render.primitives.len()
+            || u64::from(self.performance.vertices) != vertices
+            || self.performance.texture_update_bytes != texture_update_bytes
+        {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_PERFORMANCE_COUNTER_MISMATCH",
+                "performance counters do not match the validated render frame",
+            ));
+        }
+        if self.performance.active_texture_bytes > MAX_TEXTURE_BYTES as u64
+            || self.performance.instantiated_nodes > MAX_NODES_PER_VIEW as u32
+        {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_PERFORMANCE_RESOURCE_LIMIT",
+                "performance resource counters exceed the UI hard limits",
+            ));
+        }
+        if self.performance.update_layout_ns > 60_000_000_000
+            || self.performance.paint_conversion_ns > 60_000_000_000
+        {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_PERFORMANCE_DURATION_LIMIT",
+                "performance duration counter exceeds the bounded sample range",
             ));
         }
         crate::validate_serialized_size(self)
