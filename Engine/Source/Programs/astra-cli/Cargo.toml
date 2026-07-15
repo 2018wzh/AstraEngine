@@ -35,6 +35,7 @@ astra-ui-plugin-abi = { path = "../../Runtime/astra-ui-plugin-abi" }
 astra-test = { path = "../../Developer/astra-test" }
 astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
 astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }
+base64.workspace = true
 clap.workspace = true
 image.workspace = true
 hex.workspace = true

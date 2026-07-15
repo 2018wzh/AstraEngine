@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import pathlib
@@ -107,6 +108,33 @@ def main() -> int:
     )
     run([str(pathlib.Path(shutil.which("node") or "node")), str(smoke)], output)
     smoke.unlink()
+    bundle_files = []
+    for path in sorted(item for item in es_module.rglob("*") if item.is_file()):
+        relative = path.relative_to(es_module).as_posix()
+        data = path.read_bytes()
+        bundle_files.append(
+            {
+                "path": relative,
+                "sha256": digest(path),
+                "byte_size": len(data),
+                "base64": base64.b64encode(data).decode("ascii"),
+            }
+        )
+    bindings = next(
+        item["path"]
+        for item in bundle_files
+        if item["path"].endswith(".js") and not item["path"].endswith(".d.js")
+    )
+    web_artifact = {
+        "schema": "astra.ui_component_web_artifact.v1",
+        "bindings": bindings,
+        "files": bundle_files,
+    }
+    web_artifact_path = output / "astra-ui-component-web-artifact.json"
+    web_artifact_path.write_text(
+        json.dumps(web_artifact, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
     report: dict[str, object] = {
         "schema": "astra.ui_component_web_bundle.v1",
         "input": {
@@ -118,6 +146,11 @@ def main() -> int:
         },
         "limits": {"dto_bytes": 4 * 1024 * 1024, "memory_bytes": 64 * 1024 * 1024},
         "artifacts": artifacts,
+        "signed_artifact": {
+            "path": web_artifact_path.name,
+            "sha256": digest(web_artifact_path),
+            "byte_size": web_artifact_path.stat().st_size,
+        },
     }
     canonical = json.dumps(report, sort_keys=True, separators=(",", ":")).encode()
     report["bundle_hash"] = "sha256:" + hashlib.sha256(canonical).hexdigest()

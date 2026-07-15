@@ -457,6 +457,7 @@ dependencies = [
  "astra-ui-plugin-abi",
  "astra-vn",
  "astra-vn-runtime-provider",
+ "base64",
  "clap",
  "ctrlc",
  "hex",
