@@ -28,6 +28,7 @@ struct PendingSemantic {
     value: Option<String>,
     enabled: bool,
     focused: bool,
+    checked: Option<bool>,
     actions: BTreeSet<UiSemanticAction>,
     properties: BTreeMap<String, String>,
 }
@@ -41,6 +42,7 @@ pub struct BlueprintYakuiRenderer {
     text_inputs: BTreeMap<String, TextInputState>,
     focused_text_input: Option<String>,
     text_input_consumed_sequences: BTreeSet<u64>,
+    accessibility_dispatched_events: BTreeSet<(String, String)>,
     image_resources: BTreeMap<String, TextureFrame>,
     managed_textures: BTreeMap<String, ManagedTextureId>,
 }
@@ -57,6 +59,7 @@ impl BlueprintYakuiRenderer {
             text_inputs: BTreeMap::new(),
             focused_text_input: None,
             text_input_consumed_sequences: BTreeSet::new(),
+            accessibility_dispatched_events: BTreeSet::new(),
             image_resources: BTreeMap::new(),
             managed_textures: BTreeMap::new(),
         })
@@ -121,7 +124,7 @@ impl BlueprintYakuiRenderer {
         let accessible_events = node
             .events
             .iter()
-            .filter(|event| event.event == "activate")
+            .filter(|event| matches!(event.event.as_str(), "activate" | "change" | "submit"))
             .cloned()
             .map(|event| (event, item.cloned()))
             .collect::<Vec<_>>();
@@ -141,6 +144,7 @@ impl BlueprintYakuiRenderer {
         let mut child_error = None;
         let mut changed_event = None;
         let mut submitted_event = None;
+        let mut semantic_checked = None;
         if node.widget == "text_input" {
             let multiline = property_bool(node, "multiline", frame, item)?.unwrap_or(false);
             let max_graphemes =
@@ -169,6 +173,17 @@ impl BlueprintYakuiRenderer {
             }
             semantic_properties.insert("text.cursor_grapheme".into(), editor.cursor().to_string());
             semantic_properties.insert("text.multiline".into(), multiline.to_string());
+            semantic_properties.insert("text.max_graphemes".into(), max_graphemes.to_string());
+            semantic_properties.insert(
+                "text.character_policy".into(),
+                policy_name.unwrap_or_else(|| {
+                    if multiline {
+                        "any".to_string()
+                    } else {
+                        "single_line".to_string()
+                    }
+                }),
+            );
             if let Some((start, end)) = editor.selection() {
                 semantic_properties.insert("text.selection_start".into(), start.to_string());
                 semantic_properties.insert("text.selection_end".into(), end.to_string());
@@ -272,6 +287,13 @@ impl BlueprintYakuiRenderer {
                     ));
                 }
                 let step = property_number(node, "step", frame, item)?.map(f64::from);
+                semantic_properties.insert("range.value".into(), value.to_string());
+                semantic_properties.insert("range.min".into(), min.to_string());
+                semantic_properties.insert("range.max".into(), max.to_string());
+                semantic_properties.insert(
+                    "range.step".into(),
+                    step.unwrap_or((max - min) / 100.0).to_string(),
+                );
                 AstraNodeWidget::show(props, || {
                     let slider = Slider {
                         value,
@@ -292,6 +314,7 @@ impl BlueprintYakuiRenderer {
             }
             "toggle" => {
                 let checked = property_bool(node, "checked", frame, item)?.unwrap_or(false);
+                semantic_checked = Some(checked);
                 AstraNodeWidget::show(props, || {
                     let next = Checkbox::new(checked).show().checked;
                     if next != checked {
@@ -332,15 +355,20 @@ impl BlueprintYakuiRenderer {
             }
         }
         if let Some(event_value) = changed_event.as_ref() {
-            for event in node.events.iter().filter(|event| event.event == "change") {
-                actions.push(action_from_event(
-                    event,
-                    &semantic_id,
-                    request,
-                    frame,
-                    item,
-                    Some(event_value),
-                )?);
+            if !self
+                .accessibility_dispatched_events
+                .contains(&(semantic_id.clone(), "change".into()))
+            {
+                for event in node.events.iter().filter(|event| event.event == "change") {
+                    actions.push(action_from_event(
+                        event,
+                        &semantic_id,
+                        request,
+                        frame,
+                        item,
+                        Some(event_value),
+                    )?);
+                }
             }
         }
         if let Some(event_value) = submitted_event.as_ref() {
@@ -359,7 +387,20 @@ impl BlueprintYakuiRenderer {
         let mut semantic_actions = BTreeSet::new();
         if interactive {
             semantic_actions.insert(UiSemanticAction::Focus);
-            semantic_actions.insert(UiSemanticAction::Activate);
+            match role {
+                UiSemanticRole::Slider => {
+                    semantic_actions.insert(UiSemanticAction::Increment);
+                    semantic_actions.insert(UiSemanticAction::Decrement);
+                    semantic_actions.insert(UiSemanticAction::SetValue);
+                }
+                UiSemanticRole::TextInput => {
+                    semantic_actions.insert(UiSemanticAction::SetValue);
+                    semantic_actions.insert(UiSemanticAction::Activate);
+                }
+                _ => {
+                    semantic_actions.insert(UiSemanticAction::Activate);
+                }
+            }
         }
         self.pending.push(PendingSemantic {
             id: semantic_id,
@@ -370,6 +411,7 @@ impl BlueprintYakuiRenderer {
             value: semantic_value,
             enabled,
             focused: response.focused,
+            checked: semantic_checked,
             actions: semantic_actions,
             properties: semantic_properties,
         });
@@ -532,41 +574,185 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
             })?;
         frame.validate()?;
         self.text_input_consumed_sequences.clear();
+        self.accessibility_dispatched_events.clear();
         let mut actions = Vec::new();
         let mut force_consumed_sequences = BTreeSet::new();
+        let mut accessibility_focus_request = None;
         for input in &request.input.events {
             if let UiInputEventKind::AccessibilityAction {
                 semantic_id,
                 action,
-                value: _,
+                value,
             } = &input.kind
             {
-                if action != "activate" && action != "invoke" {
-                    return Err(UiValidationError::invalid(
-                        "ASTRA_UI_ACCESSIBILITY_ACTION_UNSUPPORTED",
-                        "accessibility action is not supported by the semantic target",
-                    ));
-                }
                 let bindings = self.accessibility_actions.get(semantic_id).ok_or_else(|| {
                     UiValidationError::invalid(
                         "ASTRA_UI_ACCESSIBILITY_TARGET_MISSING",
                         "accessibility target does not exist in the live semantic generation",
                     )
                 })?;
-                if bindings.len() != 1 {
+                let previous = self
+                    .pending
+                    .iter()
+                    .find(|pending| &pending.id == semantic_id)
+                    .ok_or_else(|| {
+                        UiValidationError::invalid(
+                            "ASTRA_UI_ACCESSIBILITY_TARGET_STALE",
+                            "accessibility target is absent from the live semantic generation",
+                        )
+                    })?;
+                let (event_name, event_value) = match action.as_str() {
+                    "focus" => {
+                        if !previous.actions.contains(&UiSemanticAction::Focus) {
+                            return Err(UiValidationError::invalid(
+                                "ASTRA_UI_ACCESSIBILITY_FOCUS_UNSUPPORTED",
+                                "semantic target does not support focus",
+                            ));
+                        }
+                        accessibility_focus_request = Some(semantic_id.clone());
+                        force_consumed_sequences.insert(input.sequence);
+                        continue;
+                    }
+                    "activate" | "invoke" if previous.role == UiSemanticRole::Toggle => (
+                        "change",
+                        Some(UiValue::Map(BTreeMap::from([
+                            (
+                                "checked".into(),
+                                UiValue::Bool(!previous.checked.unwrap_or(false)),
+                            ),
+                            (
+                                "value".into(),
+                                UiValue::Bool(!previous.checked.unwrap_or(false)),
+                            ),
+                        ]))),
+                    ),
+                    "activate" | "invoke" => ("activate", None),
+                    "increment" | "decrement" if previous.role == UiSemanticRole::Slider => {
+                        let current = semantic_number(previous, "range.value")?;
+                        let min = semantic_number(previous, "range.min")?;
+                        let max = semantic_number(previous, "range.max")?;
+                        let step = semantic_number(previous, "range.step")?;
+                        let next = if action == "increment" {
+                            (current + step).min(max)
+                        } else {
+                            (current - step).max(min)
+                        };
+                        (
+                            "change",
+                            Some(UiValue::Map(BTreeMap::from([(
+                                "value".into(),
+                                UiValue::Number(next),
+                            )]))),
+                        )
+                    }
+                    "set_value" if previous.role == UiSemanticRole::Slider => {
+                        let next = value
+                            .as_deref()
+                            .ok_or_else(|| {
+                                UiValidationError::invalid(
+                                    "ASTRA_UI_ACCESSIBILITY_VALUE_MISSING",
+                                    "slider set_value requires a numeric value",
+                                )
+                            })?
+                            .parse::<f64>()
+                            .map_err(|_| {
+                                UiValidationError::invalid(
+                                    "ASTRA_UI_ACCESSIBILITY_VALUE_INVALID",
+                                    "slider accessibility value is not numeric",
+                                )
+                            })?;
+                        let min = semantic_number(previous, "range.min")?;
+                        let max = semantic_number(previous, "range.max")?;
+                        if !next.is_finite() || next < min || next > max {
+                            return Err(UiValidationError::invalid(
+                                "ASTRA_UI_ACCESSIBILITY_VALUE_RANGE",
+                                "slider accessibility value is outside its range",
+                            ));
+                        }
+                        (
+                            "change",
+                            Some(UiValue::Map(BTreeMap::from([(
+                                "value".into(),
+                                UiValue::Number(next),
+                            )]))),
+                        )
+                    }
+                    "set_value" if previous.role == UiSemanticRole::TextInput => {
+                        let next = value.as_deref().ok_or_else(|| {
+                            UiValidationError::invalid(
+                                "ASTRA_UI_ACCESSIBILITY_VALUE_MISSING",
+                                "text input set_value requires a string value",
+                            )
+                        })?;
+                        let editor = self.text_inputs.get_mut(semantic_id).ok_or_else(|| {
+                            UiValidationError::invalid(
+                                "ASTRA_UI_TEXT_INPUT_STATE_MISSING",
+                                "text input accessibility state is unavailable",
+                            )
+                        })?;
+                        let max_graphemes = previous
+                            .properties
+                            .get("text.max_graphemes")
+                            .and_then(|value| value.parse::<usize>().ok())
+                            .ok_or_else(|| {
+                                UiValidationError::invalid(
+                                    "ASTRA_UI_TEXT_INPUT_ACCESSIBILITY_METADATA",
+                                    "text input max_graphemes metadata is invalid",
+                                )
+                            })?;
+                        let multiline = previous
+                            .properties
+                            .get("text.multiline")
+                            .and_then(|value| value.parse::<bool>().ok())
+                            .ok_or_else(|| {
+                                UiValidationError::invalid(
+                                    "ASTRA_UI_TEXT_INPUT_ACCESSIBILITY_METADATA",
+                                    "text input multiline metadata is invalid",
+                                )
+                            })?;
+                        let policy = TextCharacterPolicy::parse(
+                            previous
+                                .properties
+                                .get("text.character_policy")
+                                .map(String::as_str),
+                            multiline,
+                        )?;
+                        editor.replace_value(next, max_graphemes, policy)?;
+                        (
+                            "change",
+                            Some(UiValue::Map(BTreeMap::from([(
+                                "value".into(),
+                                UiValue::String(next.to_string()),
+                            )]))),
+                        )
+                    }
+                    _ => {
+                        return Err(UiValidationError::invalid(
+                            "ASTRA_UI_ACCESSIBILITY_ACTION_UNSUPPORTED",
+                            "accessibility action is not supported by the semantic target",
+                        ));
+                    }
+                };
+                let matching = bindings
+                    .iter()
+                    .filter(|(binding, _)| binding.event == event_name)
+                    .collect::<Vec<_>>();
+                if matching.len() != 1 {
                     return Err(UiValidationError::invalid(
                         "ASTRA_UI_ACCESSIBILITY_ACTION_AMBIGUOUS",
-                        "accessibility target must map to exactly one activate action",
+                        "accessibility action must map to exactly one typed event binding",
                     ));
                 }
-                let (binding, item) = &bindings[0];
+                let (binding, item) = matching[0];
+                self.accessibility_dispatched_events
+                    .insert((semantic_id.clone(), event_name.into()));
                 actions.push(action_from_event(
                     binding,
                     semantic_id,
                     request,
                     &frame,
                     item.as_ref(),
-                    None,
+                    event_value.as_ref(),
                 )?);
                 force_consumed_sequences.insert(input.sequence);
             }
@@ -701,6 +887,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                     value: None,
                     enabled: true,
                     focused: response.focused,
+                    checked: None,
                     actions: BTreeSet::from([UiSemanticAction::Focus, UiSemanticAction::Dismiss]),
                     properties: BTreeMap::new(),
                 });
@@ -725,7 +912,10 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 .then_some(event.sequence)
             }));
         }
-        let focus_widget = if let Some(focus_request) = &frame.focus_request {
+        let focus_request = accessibility_focus_request
+            .as_ref()
+            .or(frame.focus_request.as_ref());
+        let focus_widget = if let Some(focus_request) = focus_request {
             let target = self
                 .pending
                 .iter()
@@ -803,7 +993,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 hidden: false,
                 focused: pending.focused,
                 selected: false,
-                checked: None,
+                checked: pending.checked,
                 actions: pending.actions.clone(),
                 properties: pending.properties.clone(),
             });
@@ -846,6 +1036,27 @@ fn semantic_role(widget: &str) -> UiSemanticRole {
         "canvas" => UiSemanticRole::Canvas,
         _ => UiSemanticRole::Group,
     }
+}
+
+fn semantic_number(semantic: &PendingSemantic, key: &str) -> Result<f64, UiValidationError> {
+    semantic
+        .properties
+        .get(key)
+        .ok_or_else(|| {
+            UiValidationError::invalid(
+                "ASTRA_UI_ACCESSIBILITY_RANGE_METADATA",
+                format!("semantic target is missing {key}"),
+            )
+        })?
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .ok_or_else(|| {
+            UiValidationError::invalid(
+                "ASTRA_UI_ACCESSIBILITY_RANGE_METADATA",
+                format!("semantic target has invalid {key}"),
+            )
+        })
 }
 
 fn viewport_height_points(request: &UiFrameRequest) -> f32 {
@@ -1013,6 +1224,7 @@ fn property_text(
             return match value {
                 UiValue::String(value) => Ok(Some(value)),
                 UiValue::Null => Ok(None),
+                _ if key == "value" && node.widget != "text" => continue,
                 _ => Err(UiValidationError::invalid(
                     "ASTRA_UI_TEXT_PROPERTY_TYPE",
                     "text property must resolve to string",

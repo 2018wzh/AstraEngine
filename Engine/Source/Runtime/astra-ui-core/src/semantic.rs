@@ -73,6 +73,117 @@ pub struct UiSemanticSnapshot {
     pub hash: Hash256,
 }
 
+/// Redacted accessibility evidence. Human-readable commercial strings and
+/// bounds deliberately remain in the live snapshot and never enter reports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct UiAccessibilityReportNode {
+    pub id: String,
+    pub role: UiSemanticRole,
+    pub enabled: bool,
+    pub action_hash: Hash256,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct UiAccessibilityReport {
+    pub schema: String,
+    pub provider: String,
+    pub generation: u64,
+    pub semantic_snapshot_hash: Hash256,
+    pub nodes: Vec<UiAccessibilityReportNode>,
+    pub result: String,
+    pub hash: Hash256,
+}
+
+impl UiAccessibilityReport {
+    pub fn from_snapshot(
+        provider: impl Into<String>,
+        result: impl Into<String>,
+        snapshot: &UiSemanticSnapshot,
+    ) -> Result<Self, UiValidationError> {
+        snapshot.validate()?;
+        let nodes = snapshot
+            .nodes
+            .iter()
+            .map(|node| {
+                postcard::to_allocvec(&node.actions)
+                    .map(|bytes| UiAccessibilityReportNode {
+                        id: node.id.clone(),
+                        role: node.role,
+                        enabled: node.enabled,
+                        action_hash: Hash256::from_sha256(&bytes),
+                    })
+                    .map_err(|error| {
+                        UiValidationError::invalid(
+                            "ASTRA_UI_ACCESSIBILITY_REPORT_ENCODE",
+                            error.to_string(),
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut report = Self {
+            schema: "astra.ui_accessibility_report.v1".into(),
+            provider: provider.into(),
+            generation: snapshot.generation,
+            semantic_snapshot_hash: snapshot.hash,
+            nodes,
+            result: result.into(),
+            hash: Hash256::from_sha256(&[]),
+        };
+        report.hash = report.compute_hash()?;
+        report.validate()?;
+        Ok(report)
+    }
+
+    fn compute_hash(&self) -> Result<Hash256, UiValidationError> {
+        let mut value = self.clone();
+        value.hash = Hash256::from_sha256(&[]);
+        postcard::to_allocvec(&value)
+            .map(|bytes| Hash256::from_sha256(&bytes))
+            .map_err(|error| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_ACCESSIBILITY_REPORT_ENCODE",
+                    error.to_string(),
+                )
+            })
+    }
+}
+
+impl ValidateUi for UiAccessibilityReport {
+    fn validate(&self) -> Result<(), UiValidationError> {
+        if self.schema != "astra.ui_accessibility_report.v1" {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_ACCESSIBILITY_REPORT_SCHEMA",
+                "accessibility report schema is invalid",
+            ));
+        }
+        validate_id("accessibility.provider", &self.provider)?;
+        validate_id("accessibility.result", &self.result)?;
+        if self.nodes.is_empty() || self.nodes.len() > MAX_NODES_PER_VIEW {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_ACCESSIBILITY_REPORT_NODE_LIMIT",
+                "accessibility report node count is invalid",
+            ));
+        }
+        let mut ids = BTreeSet::new();
+        for node in &self.nodes {
+            validate_id("accessibility.node.id", &node.id)?;
+            if !ids.insert(node.id.as_str()) {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_UI_ACCESSIBILITY_REPORT_DUPLICATE_ID",
+                    "accessibility report contains duplicate node ids",
+                ));
+            }
+        }
+        if self.compute_hash()? != self.hash {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_ACCESSIBILITY_REPORT_HASH",
+                "accessibility report hash mismatch",
+            ));
+        }
+        crate::validate_serialized_size(self)
+    }
+}
+
 impl UiSemanticSnapshot {
     pub fn compute_hash(&self) -> Result<Hash256, UiValidationError> {
         #[derive(Serialize)]

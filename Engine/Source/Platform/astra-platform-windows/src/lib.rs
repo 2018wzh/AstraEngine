@@ -61,3 +61,5 @@ pub fn probe(target: Option<&str>) -> PlatformCapabilityReport {
         )
     }
 }
+#[cfg(target_os = "windows")]
+mod accessibility;

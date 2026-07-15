@@ -14,3 +14,7 @@ tracing.workspace = true
 
 [lib]
 doctest = false
+
+[dev-dependencies]
+astra-headless-test = { path = "../../Developer/astra-headless-test" }
+serde_json.workspace = true

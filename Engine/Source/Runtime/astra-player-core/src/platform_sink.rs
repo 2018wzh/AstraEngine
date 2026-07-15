@@ -303,6 +303,7 @@ impl PlatformCommandSink {
                 height,
                 clear_rgba,
                 commands,
+                semantics,
             } => {
                 let handle = lookup(&self.surfaces, surface, "surface.present_scene")?;
                 self.client
@@ -314,6 +315,7 @@ impl PlatformCommandSink {
                             height: *height,
                             clear_rgba: *clear_rgba,
                             commands: commands.clone(),
+                            semantics: semantics.clone(),
                         },
                     )
                     .await?;

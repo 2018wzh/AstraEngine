@@ -96,6 +96,9 @@ pub struct SceneFrame {
     pub height: u32,
     pub clear_rgba: [u8; 4],
     pub commands: Vec<SceneCommand>,
+    /// Backend-neutral accessibility tree synchronized with this visual frame.
+    /// Platform mirrors must route actions back through `PlatformEventKind`.
+    pub semantics: Option<astra_ui_core::UiSemanticSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -600,6 +603,12 @@ pub enum PlatformEventKind {
         x: f64,
         y: f64,
         phase: TouchPhase,
+    },
+    AccessibilityAction {
+        window: WindowHandle,
+        semantic_id: String,
+        action: String,
+        value: Option<String>,
     },
     GamepadConnected {
         device_id: u32,
@@ -1447,6 +1456,15 @@ fn validate_rgba_frame(
 }
 
 fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), PlatformError> {
+    if let Some(semantics) = &frame.semantics {
+        astra_ui_core::ValidateUi::validate(semantics).map_err(|error| {
+            PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "surface.present_scene",
+                format!("accessibility semantic snapshot is invalid: {error}"),
+            )
+        })?;
+    }
     let output_bytes = usize::try_from(frame.width)
         .ok()
         .and_then(|width| {

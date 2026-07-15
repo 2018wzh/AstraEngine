@@ -201,6 +201,7 @@ async fn platform_sink_forwards_renderer_ready_glyph_commands_without_cpu_frames
                 width: 64,
                 height: 32,
                 clear_rgba: [3, 5, 8, 255],
+                semantics: None,
                 commands,
             }])
             .unwrap(),

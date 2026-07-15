@@ -220,6 +220,7 @@ pub enum PlayerHostCommand {
         height: u32,
         clear_rgba: [u8; 4],
         commands: Vec<astra_media_core::SceneCommand>,
+        semantics: Option<astra_ui_core::UiSemanticSnapshot>,
     },
     CaptureSurface {
         sequence: u64,

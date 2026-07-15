@@ -265,6 +265,7 @@ async fn player_command_path_presents_packaged_layout_and_records_live_gpu_ident
         width: WIDTH,
         height: HEIGHT,
         clear_rgba: BACKGROUND,
+        semantics: None,
         commands: commands.clone(),
     };
     let results = executor

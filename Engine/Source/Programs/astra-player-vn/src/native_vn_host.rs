@@ -1058,6 +1058,7 @@ impl NativeVnHostCommandSource {
         self.active_ui_controller = None;
         self.ui_modals.clear();
         self.pending_ui_focus = None;
+        self.ui_semantics = None;
         self.ui_animations.clear();
         self.ui_generation = self
             .ui_generation
@@ -1078,6 +1079,7 @@ impl NativeVnHostCommandSource {
                 height: self.height,
                 clear_rgba: [8, 10, 16, 255],
                 commands: self.last_draw.clone(),
+                semantics: None,
             },
         ])?)
     }
@@ -1686,6 +1688,7 @@ impl NativeVnHostCommandSource {
                 height: self.height,
                 clear_rgba: [8, 10, 16, 255],
                 commands,
+                semantics: self.ui_semantics.clone(),
             },
         ])?)
     }
@@ -2004,6 +2007,7 @@ impl NativeVnHostCommandSource {
                 height: self.height,
                 clear_rgba: [0, 0, 0, 255],
                 commands,
+                semantics: None,
             },
         ])?)
     }
@@ -2388,6 +2392,7 @@ impl NativeVnHostCommandSource {
                 height: self.height,
                 clear_rgba: [8, 10, 16, 255],
                 commands: lifecycle,
+                semantics: self.ui_semantics.clone(),
             },
         ])?)
     }

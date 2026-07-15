@@ -177,6 +177,7 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
                 width: 2,
                 height: 2,
                 clear_rgba: [0, 0, 0, 255],
+                semantics: None,
                 commands: vec![astra_media_core::SceneCommand::rect(
                     "real-rect",
                     0,

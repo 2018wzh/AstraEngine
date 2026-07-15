@@ -67,6 +67,8 @@ version = "0.1.0"
 rust-version = "1.85"
 
 [workspace.dependencies]
+accesskit = "=0.24.1"
+accesskit_winit = { version = "=0.33.1", default-features = false, features = ["rwh_06"] }
 abi_stable = "0.11"
 base64 = "0.22"
 blake3 = "1"

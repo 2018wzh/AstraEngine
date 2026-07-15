@@ -56,6 +56,7 @@ fn present() -> astra_player_core::PlayerHostCommand {
         width: 2,
         height: 2,
         clear_rgba: [0; 4],
+        semantics: None,
         commands: commands(),
     }
 }

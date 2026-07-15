@@ -14,6 +14,7 @@ tracing.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }
 astra-platform = { path = "../astra-platform" }
 astra-platform-common = { path = "../astra-platform-common" }
+astra-ui-core = { path = "../../Runtime/astra-ui-core" }
 tokio.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true

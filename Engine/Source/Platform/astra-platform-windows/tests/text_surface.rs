@@ -202,6 +202,7 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
                 width: WIDTH,
                 height: HEIGHT,
                 clear_rgba: BACKGROUND,
+                semantics: None,
                 commands,
             },
         )
@@ -233,6 +234,7 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
                 width: WIDTH,
                 height: HEIGHT,
                 clear_rgba: BACKGROUND,
+                semantics: None,
                 commands: retained_commands.clone(),
             },
         )
@@ -247,6 +249,7 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
                 width: WIDTH,
                 height: HEIGHT,
                 clear_rgba: BACKGROUND,
+                semantics: None,
                 commands: retained_commands,
             },
         )
@@ -264,6 +267,7 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
                 width: WIDTH,
                 height: HEIGHT,
                 clear_rgba: BACKGROUND,
+                semantics: None,
                 commands: vec![duplicate_upload],
             },
         )
@@ -285,6 +289,7 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
                 width: WIDTH,
                 height: HEIGHT,
                 clear_rgba: BACKGROUND,
+                semantics: None,
                 commands: vec![SceneCommand::PushTransform {
                     transform: Transform2D::IDENTITY,
                 }],
@@ -303,6 +308,7 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
                 width: WIDTH,
                 height: HEIGHT,
                 clear_rgba: BACKGROUND,
+                semantics: None,
                 commands: releases,
             },
         )
@@ -353,6 +359,7 @@ async fn exercise_scene_atlas(client: &PlatformHostClient, surface: SurfaceHandl
                 width: 128,
                 height: 64,
                 clear_rgba: [0, 0, 0, 255],
+                semantics: None,
                 commands: first_commands,
             },
         )
@@ -372,6 +379,7 @@ async fn exercise_scene_atlas(client: &PlatformHostClient, surface: SurfaceHandl
                 width: 128,
                 height: 64,
                 clear_rgba: [0, 0, 0, 255],
+                semantics: None,
                 commands: draws.clone(),
             },
         )
@@ -386,6 +394,7 @@ async fn exercise_scene_atlas(client: &PlatformHostClient, surface: SurfaceHandl
                 width: 128,
                 height: 64,
                 clear_rgba: [0, 0, 0, 255],
+                semantics: None,
                 commands: draws,
             },
         )
@@ -402,6 +411,7 @@ async fn exercise_scene_atlas(client: &PlatformHostClient, surface: SurfaceHandl
                 width: 128,
                 height: 64,
                 clear_rgba: [0, 0, 0, 255],
+                semantics: None,
                 commands: vec![SceneCommand::ReleaseResource {
                     resource_id: "texture:solid-red".into(),
                 }],

@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use astra_core::Hash256;
 use astra_ui_core::{
     UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiCapability,
-    UiFrameRequest, UiInputFrame, UiInsets, UiNodeBlueprint, UiRepeatBinding, UiSemanticRole,
+    UiEventBinding, UiFrameRequest, UiInputDispositionKind, UiInputEvent, UiInputEventKind,
+    UiInputFrame, UiInsets, UiNodeBlueprint, UiRepeatBinding, UiSemanticAction, UiSemanticRole,
     UiThemeManifest, UiThemeValue, UiValue, UiValueExpr, UiViewBlueprint, UiViewport,
 };
 use astra_ui_yakui::{AstraYakuiBackend, BlueprintYakuiRenderer};
@@ -217,4 +218,127 @@ fn ten_thousand_items_instantiate_only_visible_rows() {
             .len(),
         output.semantics.nodes.len()
     );
+}
+
+#[astra_headless_test::test]
+fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
+    let mut slider = node("volume", "slider");
+    for (name, value) in [("value", 0.5), ("min", 0.0), ("max", 1.0), ("step", 0.1)] {
+        slider.properties.insert(
+            name.into(),
+            UiValueExpr::Literal {
+                value: UiValue::Number(value),
+            },
+        );
+    }
+    slider.events.push(UiEventBinding {
+        event: "change".into(),
+        action_id: "vn.set_config".into(),
+        arguments: BTreeMap::from([(
+            "value".into(),
+            UiValueExpr::Binding {
+                root: astra_ui_core::UiBindingRoot::Event,
+                path: vec!["value".into()],
+            },
+        )]),
+    });
+    let mut root = node("root", "screen");
+    root.children.push(slider);
+    let view = UiViewBlueprint {
+        id: "ui.config".into(),
+        source_id: "ui.config".into(),
+        model_schema: "model.config.v1".into(),
+        theme_id: "theme.classic".into(),
+        required_capabilities: Vec::new(),
+        root,
+    };
+    let mut bundle = UiBlueprintBundle {
+        schema: "astra.ui_blueprint_bundle.v1".into(),
+        views: BTreeMap::from([(view.id.clone(), view)]),
+        hash: Hash256::from_sha256(&[]),
+    };
+    bundle.hash = bundle.compute_hash().expect("bundle hash");
+    let mut theme = UiThemeManifest {
+        schema: "astra.ui_theme_manifest.v1".into(),
+        id: "theme.classic".into(),
+        parent: None,
+        tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
+        high_contrast_tokens: BTreeMap::new(),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash().expect("theme hash");
+    let frame = UiBlueprintFrameModel {
+        schema: "astra.ui_blueprint_frame_model.v1".into(),
+        view_id: "ui.config".into(),
+        model: UiValue::Map(BTreeMap::new()),
+        state: UiValue::Map(BTreeMap::new()),
+        modals: Vec::new(),
+        focus_request: None,
+        localization: BTreeMap::new(),
+    };
+    let request = |events| UiFrameRequest {
+        schema: "astra.ui_frame_request.v1".into(),
+        session_id: "session.accessibility".into(),
+        generation: 1,
+        viewport: UiViewport {
+            physical_width: 1280,
+            physical_height: 720,
+            scale_factor: 1.0,
+            font_scale: 1.0,
+            safe_area_points: UiInsets {
+                left: 0.0,
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+            },
+        },
+        fixed_time_ns: 0,
+        input: UiInputFrame {
+            schema: "astra.ui_input_frame.v1".into(),
+            events,
+        },
+        theme: theme.clone(),
+        model_schema: "model.config.v1".into(),
+        model_payload: postcard::to_allocvec(&frame).expect("frame encode"),
+    };
+    let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
+    let mut backend =
+        AstraYakuiBackend::new(renderer, Hash256::from_sha256(b"test")).expect("backend");
+    let first = backend
+        .render_frame(request(Vec::new()))
+        .expect("first frame");
+    let slider = first
+        .semantics
+        .nodes
+        .iter()
+        .find(|node| node.id == "root/volume")
+        .expect("slider semantics");
+    assert!(slider.actions.contains(&UiSemanticAction::Increment));
+    assert!(slider.actions.contains(&UiSemanticAction::SetValue));
+
+    let second = backend
+        .render_frame(request(vec![UiInputEvent {
+            sequence: 1,
+            kind: UiInputEventKind::AccessibilityAction {
+                semantic_id: "root/volume".into(),
+                action: "increment".into(),
+                value: None,
+            },
+        }]))
+        .expect("accessibility frame");
+    assert_eq!(second.dispositions.len(), 1);
+    assert_eq!(
+        second.dispositions[0].disposition,
+        UiInputDispositionKind::Consumed
+    );
+    assert_eq!(second.actions.len(), 1);
+    assert_eq!(second.actions[0].action_id, "vn.set_config");
+    let UiValue::Number(value) = second.actions[0]
+        .arguments
+        .get("value")
+        .expect("range action value")
+    else {
+        panic!("range action value must be numeric");
+    };
+    assert!((value - 0.6).abs() < 1e-6);
 }

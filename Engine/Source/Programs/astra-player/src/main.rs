@@ -418,6 +418,16 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                         gamepad_navigation(control)
                             .map(|action| UiInputEventKind::Navigation { action })
                     }
+                    PlatformEventKind::AccessibilityAction {
+                        window: input_window,
+                        semantic_id,
+                        action,
+                        value,
+                    } if input_window == window => Some(UiInputEventKind::AccessibilityAction {
+                        semantic_id,
+                        action,
+                        value,
+                    }),
                     _ => None,
                 };
                 if let Some(kind) = ui_input {

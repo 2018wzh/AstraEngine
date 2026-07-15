@@ -66,6 +66,7 @@ mod windows {
         time::{Duration, Instant},
     };
 
+    use crate::accessibility::WindowsAccessibilityBridge;
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
         host_channel, AudioDeviceFormat, AudioMeter, AudioOutputHandle, AudioOutputRequest,
@@ -265,7 +266,9 @@ mod windows {
         ready: Option<std_mpsc::SyncSender<Result<(), PlatformError>>>,
         windows: ResourceTable<Arc<Window>, WindowHandle>,
         window_ids: BTreeMap<WindowId, WindowHandle>,
+        accessibility: BTreeMap<WindowId, WindowsAccessibilityBridge>,
         surfaces: ResourceTable<SurfaceResource, SurfaceHandle>,
+        surface_windows: BTreeMap<SurfaceHandle, WindowId>,
         audio_outputs: ResourceTable<AudioResource, AudioOutputHandle>,
         decode_sessions: ResourceTable<DecodeResource, DecodeSessionHandle>,
         save_store: AtomicSaveStore,
@@ -314,7 +317,9 @@ mod windows {
                 ready: Some(ready),
                 windows: ResourceTable::new("window"),
                 window_ids: BTreeMap::new(),
+                accessibility: BTreeMap::new(),
                 surfaces: ResourceTable::new("surface"),
+                surface_windows: BTreeMap::new(),
                 audio_outputs: ResourceTable::new("audio_output"),
                 decode_sessions: ResourceTable::new("decode_session"),
                 save_store,
@@ -365,7 +370,7 @@ mod windows {
                     HostCommand::CreateWindow { request, reply } => {
                         let attributes = WindowAttributes::default()
                             .with_title(request.title)
-                            .with_visible(request.visible)
+                            .with_visible(false)
                             .with_inner_size(winit::dpi::PhysicalSize::new(
                                 request.width,
                                 request.height,
@@ -379,11 +384,22 @@ mod windows {
                                 let id = window.id();
                                 let handle = self.windows.insert(window)?;
                                 self.window_ids.insert(id, handle);
+                                let native = self.windows.get(handle)?.clone();
+                                self.accessibility.insert(
+                                    id,
+                                    WindowsAccessibilityBridge::new(
+                                        event_loop,
+                                        native.as_ref(),
+                                        handle,
+                                    ),
+                                );
+                                native.set_visible(request.visible);
                                 Ok(handle)
                             });
                         let _ = reply.send(result);
                     }
                     HostCommand::CreateSurface { request, reply } => {
+                        let window_id = self.windows.get(request.window).map(|window| window.id());
                         let result = self
                             .windows
                             .get(request.window)
@@ -392,6 +408,9 @@ mod windows {
                                 create_surface(window, request.width, request.height)
                             })
                             .and_then(|surface| self.surfaces.insert(surface));
+                        if let (Ok(surface), Ok(window_id)) = (&result, window_id) {
+                            self.surface_windows.insert(*surface, window_id);
+                        }
                         let _ = reply.send(result);
                     }
                     HostCommand::PresentRgba {
@@ -443,10 +462,32 @@ mod windows {
                         frame,
                         reply,
                     } => {
+                        let semantics = frame.semantics.clone();
                         let result = self
                             .surfaces
                             .get_mut(surface)
                             .and_then(|surface| surface.present_scene(frame));
+                        let result = result.and_then(|()| {
+                            let Some(semantics) = semantics.as_ref() else {
+                                return Ok(());
+                            };
+                            let window_id =
+                                self.surface_windows.get(&surface).ok_or_else(|| {
+                                    host_error(
+                                        "accessibility.windows.update",
+                                        "surface is not bound to a window",
+                                    )
+                                })?;
+                            self.accessibility
+                                .get_mut(window_id)
+                                .ok_or_else(|| {
+                                    host_error(
+                                        "accessibility.windows.update",
+                                        "window accessibility bridge is unavailable",
+                                    )
+                                })?
+                                .update(semantics)
+                        });
                         if result
                             .as_ref()
                             .is_err_and(|error| error.code == PlatformErrorCode::ContextLost)
@@ -494,11 +535,13 @@ mod windows {
                         let _ = reply.send(result);
                     }
                     HostCommand::DestroySurface { surface, reply } => {
+                        self.surface_windows.remove(&surface);
                         let result = self.surfaces.remove(surface).map(|_| ());
                         let _ = reply.send(result);
                     }
                     HostCommand::DestroyWindow { window, reply } => {
                         let result = self.windows.remove(window).map(|window| {
+                            self.accessibility.remove(&window.id());
                             self.window_ids.remove(&window.id());
                         });
                         let _ = reply.send(result);
@@ -821,6 +864,12 @@ mod windows {
             let Some(window) = self.window_ids.get(&window_id).copied() else {
                 return;
             };
+            if let (Ok(native), Some(bridge)) = (
+                self.windows.get(window),
+                self.accessibility.get_mut(&window_id),
+            ) {
+                bridge.process_event(native.as_ref(), &event);
+            }
             let kind =
                 match event {
                     WindowEvent::Focused(focused) => {
@@ -896,6 +945,19 @@ mod windows {
         fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
             self.process_package_completions();
             self.process_commands(event_loop);
+            let accessibility_actions = self
+                .accessibility
+                .values_mut()
+                .flat_map(WindowsAccessibilityBridge::drain_actions)
+                .collect::<Vec<_>>();
+            for request in accessibility_actions {
+                self.emit(PlatformEventKind::AccessibilityAction {
+                    window: request.window,
+                    semantic_id: request.semantic_id,
+                    action: request.action,
+                    value: request.value,
+                });
+            }
             self.poll_gamepad();
             event_loop.set_control_flow(ControlFlow::WaitUntil(
                 Instant::now() + Duration::from_millis(4),

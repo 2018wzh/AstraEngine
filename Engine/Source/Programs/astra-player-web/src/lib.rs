@@ -614,6 +614,50 @@ mod browser {
                             break;
                         }
                     }
+                    PlatformEventKind::AccessibilityAction {
+                        semantic_id,
+                        action,
+                        value,
+                        ..
+                    } => {
+                        let batch = match vn.dispatch_ui_event(
+                            UiInputEventKind::AccessibilityAction {
+                                semantic_id,
+                                action,
+                                value,
+                            },
+                        ) {
+                            Ok(batch) => batch,
+                            Err(error) => {
+                                tracing::error!(event = "player.web.accessibility.input_failed", diagnostic_code = "ASTRA_PLAYER_ACCESSIBILITY_INPUT", error = %error, "Web accessibility action failed");
+                                break;
+                            }
+                        };
+                        if let Err(error) = executor.execute_batch(batch).await {
+                            tracing::error!(event = "player.web.accessibility.command_failed", diagnostic_code = "ASTRA_PLAYER_ACCESSIBILITY_COMMAND", error = %error, "Web accessibility command failed");
+                            break;
+                        }
+                        if let Err(error) = execute_web_ui_host_request(
+                            &mut vn,
+                            &mut executor,
+                            &mut save_transaction_id,
+                        )
+                        .await
+                        {
+                            tracing::error!(event = "player.web.accessibility.host_request_failed", diagnostic_code = "ASTRA_PLAYER_ACCESSIBILITY_HOST_REQUEST", error = %error, "Web accessibility host request failed");
+                            break;
+                        }
+                        if let Err(error) = log_web_consumed_step(
+                            player_sequence,
+                            "accessibility",
+                            &evidence_identity,
+                            &vn,
+                            &media,
+                        ) {
+                            tracing::error!(event = "player.web.accessibility.evidence_failed", diagnostic_code = "ASTRA_PLAYER_ACCESSIBILITY_EVIDENCE", error = %error, "Web accessibility evidence was unavailable");
+                            break;
+                        }
+                    }
                     _ => {}
                 }
             }

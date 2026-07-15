@@ -99,6 +99,34 @@ impl TextInputState {
         self.composition.as_deref()
     }
 
+    pub fn replace_value(
+        &mut self,
+        value: &str,
+        max_graphemes: usize,
+        policy: TextCharacterPolicy,
+    ) -> Result<bool, UiValidationError> {
+        let filtered = value
+            .graphemes(true)
+            .filter(|grapheme| policy.accepts(grapheme))
+            .collect::<String>();
+        if filtered.graphemes(true).count() > max_graphemes || filtered != value {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_TEXT_INPUT_ACCESSIBILITY_VALUE",
+                "accessibility value violates the text input character or length policy",
+            ));
+        }
+        if self.text == value {
+            return Ok(false);
+        }
+        self.push_undo();
+        self.text.clear();
+        self.text.push_str(value);
+        self.cursor = self.grapheme_count();
+        self.selection_anchor = None;
+        self.composition = None;
+        Ok(true)
+    }
+
     pub fn update(
         &mut self,
         events: &[UiInputEvent],
