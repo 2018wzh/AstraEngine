@@ -486,6 +486,7 @@ impl NativeVnHeadlessSession {
     }
 
     fn refresh_observations(&mut self) -> Result<(), ProductHostError> {
+        let ui_performance = self.source()?.ui_performance_report();
         let evidence = self
             .source
             .as_ref()
@@ -511,6 +512,7 @@ impl NativeVnHeadlessSession {
             hashed_observation("vn.terminal_routes", &evidence.terminal_route_ids)?,
             hashed_observation("media.active_video", &self.media.has_active_video())?,
             hashed_observation("media.active_voice", &self.media.has_active_voice())?,
+            hashed_observation("ui.performance_report", &ui_performance)?,
         ];
         Ok(())
     }

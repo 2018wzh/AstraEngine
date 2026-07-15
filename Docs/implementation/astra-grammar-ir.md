@@ -28,7 +28,7 @@ where
     I: IntoIterator<Item = AstraSource>;
 ```
 
-Migration 12 planned frontend extension 不复用 line parser，也不把 Yakui API 放进 grammar。它为 source 增加显式 `Story`/`Ui` role，共享现有 lossless token/CST/formatter/LSP 基础，新增 UI Typed AST、`ui_view`、`ui_bind`、`ui_component` 和独立 semantic passes。完成时唯一产品入口改为 `compile_astra_project(...) -> CompiledVnProject`，旧公开 compile API 与旧 package reader直接删除。当前实现仍以 `CompiledStory` 为边界，不能把 planned project root 当成现状。
+Migration 12 frontend 不复用旧 line parser，也不把 Yakui API 放进 grammar。source 使用显式 `Story`/`Ui` role，共享 lossless token/CST/formatter/source-map 基础，并使用 UI Typed AST、`ui_view`、`ui_bind`、`ui_component` 和独立 semantic passes。唯一产品入口是 `compile_astra_project(...) -> CompiledVnProject`，旧公开 compile API 与旧 package reader 已删除。
 
 Baseline 已覆盖 story、state、scene、text、choice、option、jump、call、return、mutate、system page、wait、presentation command、route target、main reachability、text key duplicate、source id duplicate 和基础 source map。它仍不是最终 frontend：它不保留完整 trivia、comment、blank line、token byte range、attribute span、lossless CST、error recovery 或 macro expansion stack。
 

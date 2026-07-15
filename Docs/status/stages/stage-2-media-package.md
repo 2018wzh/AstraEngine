@@ -1,12 +1,12 @@
 # Stage 2 Media + Package Work
 
-Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS、shared UI backend contract 和 release gate。生产完备度审查已将本 Stage 重开为 `IN_PROGRESS`：Package/VFS 权威校验、Cook 批次事务、bounded text layout replay、Windows hardware glyph golden、Windows native media 恢复/资源生命周期、measured performance contract 和 release same-run validator 已完成加固；GPU FilterGraph、真实 Player performance artifact 与正式 release-reference performance pass 仍在实施。Migration 11 同时重开完整 Headless Platform 完成口径；Migration 12 新增的 shared UI backend、Scene2D/Mesh2D 与 Windows/Web UI evidence 当前仍为 `SPEC_READY`。Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是本轮完成前置。
+Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS、shared UI backend contract 和 release gate。生产完备度审查已将本 Stage 重开为 `IN_PROGRESS`：Package/VFS 权威校验、Cook 批次事务、bounded text layout replay、Windows hardware glyph golden、Windows native media 恢复/资源生命周期、measured performance contract 和 release same-run validator 已完成加固；GPU FilterGraph、真实 Player performance artifact 与正式 release-reference performance pass 仍在实施。Migration 12 的 shared UI backend、Scene2D/Mesh2D 与 Headless E2 已落地，Windows/Web UI E3 尚待最终闭合。Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是本轮完成前置。
 
 ## S2-UI-BACKEND-01 Shared UI backend 与 Scene2D/Mesh2D
 
 **ID:** `S2-UI-BACKEND-01`
 
-**Status:** `SPEC_READY`
+**Status:** `IN_PROGRESS`
 
 **Goal:** 实现 backend-neutral UI input、semantic、resource、render contract，并把 AstraVN Yakui 输出接入 Windows/Web `PresentScene` 主路径。
 

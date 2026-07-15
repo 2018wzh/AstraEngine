@@ -400,7 +400,7 @@ python Tools/check_docs.py
 2. 让 Luau policy 只负责页面流程和视觉策略，Core 继续持有 save/backlog/read-state/voice replay 权威状态。
 3. 实现 system page reachability、return-to-savepoint、migration、gallery/replay unlock source 和 font fallback 检查。
 4. 编写 save/load、config invalid key、backlog voice replay、gallery unlock、route chart 和 localization preview 测试。
-5. Migration 12 完成后删除 `SystemUiModel` 固定矩形 hit-test，让 Classic/Modern 的全部页面只走 `.astra` Blueprint、Rust ViewModel、Luau Controller、Yakui 和 Scene2D。
+5. Classic/Modern 的全部页面只走 `.astra` Blueprint、Rust ViewModel、Luau Controller、Yakui 和 Scene2D；旧固定矩形 hit-test 已删除。
 
 **Done Evidence:** `cargo test -p astra-vn-package --test commercial_baseline`、`cargo test -p astra-vn-system --test system_controls`、`cargo test -p astra-release --test release_report release_gate_` 和 `cargo test -p astra-test --test vn_scenario` 通过；`vn.system_ui_profile` 会阻断缺入口、缺 policy、缺 `vn.system_ui_profile_manifest`、schema 无 migrator、gallery/replay unlock source 缺失和 localization coverage 缺口，并在通过时输出 page count、unlock source count、localization locale count 和 save migrator evidence。
 
@@ -410,7 +410,7 @@ python Tools/check_docs.py
 
 **ID:** `S3-UI-SCRIPT-01`
 
-**Status:** `SPEC_READY`
+**Status:** `IN_PROGRESS`
 
 **Goal:** 用 `.astra` 声明 backend-neutral View/Binding/Action，以 Rust ViewModel 和 typed Luau Controller 驱动 Yakui。
 
@@ -433,7 +433,7 @@ python Tools/check_docs.py
 
 **ID:** `S3-UI-EXT-01`
 
-**Status:** `SPEC_READY`
+**Status:** `IN_PROGRESS`
 
 **Goal:** 允许作品专属组件挂载到静态 typed slot，同时阻断 Yakui/native handle、未签名 artifact、越界 DTO 和 authority leakage。
 

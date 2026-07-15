@@ -1,8 +1,8 @@
 # Migration 12：AstraVN Yakui UI 与 Script-declared UI 迁移
 
-本页只定义从当前 `SystemUiModel`、`CompiledStory` 和固定 UI 命中路径迁到生产级 AstraVN UI 的实施顺序。架构真源见 [UI Contract](../contracts/ui.md)、[UI Component Plugin Contract](../contracts/ui-component-plugin.md)、[UI Backend 实施规格](../implementation/ui-backend.md) 与 ADR 0014–0017。
+本页记录从旧固定 UI 命中路径迁到生产级 AstraVN UI 的实施顺序。架构真源见 [UI Contract](../contracts/ui.md)、[UI Component Plugin Contract](../contracts/ui-component-plugin.md)、[UI Backend 实施规格](../implementation/ui-backend.md) 与 ADR 0014–0017。
 
-Migration 12 当前状态为 `SPEC_READY`。本页存在不代表 Yakui、UI Blueprint、component ABI、Windows/Web UI evidence 或产品系统页已经实现。Migration 11 的 typed launch/profile、Headless host、artifact 与 review/preflight gate 已进入实现阶段；完整 evidence 尚未闭合，不能由本 migration 绕过。
+Migration 12 当前状态为 `IN_PROGRESS`。backend-neutral contract、Yakui adapter、Script UI、AstraText、Scene2D Mesh、产品 ViewModel、Classic/Modern profile、签名 component host 与 Headless E2 主路径已经落地；最终 workspace gate、Windows/Web E3、性能与无障碍正式 evidence 尚未闭合。在这些 evidence 通过前不得标记 `DONE`。
 
 ## 迁移边界
 
