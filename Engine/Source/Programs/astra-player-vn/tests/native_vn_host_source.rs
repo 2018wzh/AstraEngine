@@ -308,6 +308,25 @@ fn controller_on_open_focuses_a_stable_semantic_target() {
     source.shutdown().expect("shutdown");
 }
 
+#[astra_headless_test::test]
+fn product_source_records_bounded_ui_performance_samples() {
+    let mut source = source_for(STORY);
+    source.launch().unwrap();
+    for frame in 0..30 {
+        source
+            .dispatch_ui_event(UiInputEventKind::FixedTime {
+                time_ns: frame * 16_666_667,
+            })
+            .unwrap();
+    }
+    let report = source.ui_performance_report();
+    assert_eq!(report.schema, "astra.ui_performance_report.v1");
+    assert_eq!(report.sample_count, 31);
+    assert!(report.peak_draw_calls <= 128);
+    assert!(report.peak_vertices <= 250_000);
+    assert!(report.peak_active_texture_bytes <= 64 * 1024 * 1024);
+}
+
 fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
     let specs = [
         ("presentation", "astra.renderer.wgpu", "renderer2d.wgpu"),

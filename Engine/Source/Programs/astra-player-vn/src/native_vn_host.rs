@@ -25,9 +25,10 @@ use astra_plugin_abi::{
 };
 use astra_ui_core::{
     UiBackend, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState, UiFrameRequest,
-    UiInputDispositionKind, UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets, UiSemanticNode,
-    UiSemanticRole, UiSemanticSnapshot, UiThemeManifest, UiThemeValue, UiValidationError, UiValue,
-    UiViewport, MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
+    UiInputDispositionKind, UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets,
+    UiPerformanceBudget, UiPerformanceGate, UiPerformanceReport, UiSemanticNode, UiSemanticRole,
+    UiSemanticSnapshot, UiThemeManifest, UiThemeValue, UiValidationError, UiValue, UiViewport,
+    MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
 };
 use astra_ui_yakui::{ui_frame_to_scene_commands, AstraYakuiBackend, BlueprintYakuiRenderer};
 use astra_vn_core::{
@@ -110,6 +111,7 @@ pub struct NativeVnHostCommandSource {
     ui_modals: Vec<ActiveUiModal>,
     pending_ui_focus: Option<String>,
     ui_animations: BTreeMap<String, ActiveUiAnimation>,
+    ui_performance: UiPerformanceGate,
     shutdown_started: bool,
 }
 
@@ -499,12 +501,17 @@ impl NativeVnHostCommandSource {
             ui_modals: Vec::new(),
             pending_ui_focus: None,
             ui_animations: BTreeMap::new(),
+            ui_performance: UiPerformanceGate::new(UiPerformanceBudget::production()),
             shutdown_started: false,
         })
     }
 
     pub fn last_step_evidence(&self) -> Option<&NativeVnStepEvidence> {
         self.last_step_evidence.as_ref()
+    }
+
+    pub fn ui_performance_report(&self) -> UiPerformanceReport {
+        self.ui_performance.report()
     }
 
     pub fn session_id(&self) -> &str {
@@ -1945,6 +1952,7 @@ impl NativeVnHostCommandSource {
             model_schema: view.model_schema.clone(),
             model_payload,
         };
+        let stable_frame = request.input.events.is_empty() && !active_changed;
         let mut output = self.ui_backend.render_frame(request)?;
         if !output.diagnostics.is_empty() {
             return Err(NativeVnHostError::Input(format!(
@@ -1952,6 +1960,8 @@ impl NativeVnHostCommandSource {
                 output.diagnostics.len()
             )));
         }
+        self.ui_performance
+            .record(output.performance.clone(), stable_frame)?;
         let draw = ui_frame_to_scene_commands(&output.render)?;
         if self
             .ui_animations
