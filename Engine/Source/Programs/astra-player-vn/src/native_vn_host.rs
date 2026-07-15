@@ -1716,7 +1716,7 @@ impl NativeVnHostCommandSource {
         let (surface, system_page, model) = if state.pending_choice.is_some() {
             ("choice", None, model_to_ui_value(&context.build_choice()?)?)
         } else if let Some(frame) = state.system_stack.last() {
-            let page_model = context.build_system_page(frame.page);
+            let page_model = context.build_system_page(frame.page)?;
             (
                 "system",
                 Some(system_page_binding_key(frame.page)?),
@@ -3393,6 +3393,7 @@ fn default_save_slots() -> BTreeMap<String, SaveSlotViewModel> {
                     slot_id,
                     occupied: false,
                     thumbnail_asset: None,
+                    has_thumbnail: false,
                     title_key: None,
                     timestamp_text: None,
                     playtime_text: None,

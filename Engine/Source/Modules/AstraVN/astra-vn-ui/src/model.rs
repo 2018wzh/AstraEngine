@@ -36,6 +36,7 @@ pub struct SaveSlotViewModel {
     pub slot_id: String,
     pub occupied: bool,
     pub thumbnail_asset: Option<String>,
+    pub has_thumbnail: bool,
     pub title_key: Option<String>,
     pub timestamp_text: Option<String>,
     pub playtime_text: Option<String>,
@@ -50,6 +51,7 @@ pub struct BacklogEntryViewModel {
     pub text_key: String,
     pub speaker_key: Option<String>,
     pub voice_id: Option<String>,
+    pub has_voice: bool,
     pub can_jump: bool,
     pub read: bool,
 }
@@ -59,6 +61,7 @@ pub struct UnlockItemViewModel {
     pub item_id: String,
     pub label_key: String,
     pub thumbnail_asset: Option<String>,
+    pub has_thumbnail: bool,
     pub unlocked: bool,
 }
 
@@ -82,26 +85,68 @@ pub struct TextInputViewModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ConfigViewModel {
+    pub master_volume: i64,
+    pub text_speed: i64,
+    pub auto_delay_ms: i64,
+    pub high_contrast: bool,
+    pub locale: String,
+    pub available_locales: Vec<String>,
+    pub player_name: TextInputViewModel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LocalizationEntryViewModel {
+    pub entry_id: String,
+    pub text_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VnUiPageModel {
-    Title { can_continue: bool },
-    Config { values: BTreeMap<String, String> },
-    Save { slots: Vec<SaveSlotViewModel> },
-    Load { slots: Vec<SaveSlotViewModel> },
-    Backlog { entries: Vec<BacklogEntryViewModel> },
-    Gallery { items: Vec<UnlockItemViewModel> },
-    Replay { items: Vec<UnlockItemViewModel> },
-    VoiceReplay { entries: Vec<BacklogEntryViewModel> },
-    RouteChart { nodes: Vec<RouteNodeViewModel> },
-    LocalizationPreview { locale: String, keys: Vec<String> },
-    TextInput { input: TextInputViewModel },
+    Title {
+        can_continue: bool,
+    },
+    Config {
+        config: ConfigViewModel,
+    },
+    Save {
+        slots: Vec<SaveSlotViewModel>,
+    },
+    Load {
+        slots: Vec<SaveSlotViewModel>,
+    },
+    Backlog {
+        entries: Vec<BacklogEntryViewModel>,
+    },
+    Gallery {
+        items: Vec<UnlockItemViewModel>,
+    },
+    Replay {
+        items: Vec<UnlockItemViewModel>,
+    },
+    VoiceReplay {
+        entries: Vec<BacklogEntryViewModel>,
+    },
+    RouteChart {
+        nodes: Vec<RouteNodeViewModel>,
+    },
+    LocalizationPreview {
+        locale: String,
+        entries: Vec<LocalizationEntryViewModel>,
+    },
+    TextInput {
+        input: TextInputViewModel,
+    },
 }
 
 impl VnUiPageModel {
     pub fn to_ui_value(&self) -> Result<UiValue, UiValidationError> {
         let value = match self {
             Self::Title { can_continue } => serde_json::json!({ "can_continue": can_continue }),
-            Self::Config { values } => serde_json::json!({ "values": values }),
+            Self::Config { config } => serde_json::to_value(config).map_err(|error| {
+                UiValidationError::invalid("ASTRA_VN_UI_CONFIG_ENCODE", error.to_string())
+            })?,
             Self::Save { slots } | Self::Load { slots } => serde_json::json!({ "slots": slots }),
             Self::Backlog { entries } | Self::VoiceReplay { entries } => {
                 serde_json::json!({ "entries": entries })
@@ -110,8 +155,8 @@ impl VnUiPageModel {
                 serde_json::json!({ "items": items })
             }
             Self::RouteChart { nodes } => serde_json::json!({ "nodes": nodes }),
-            Self::LocalizationPreview { locale, keys } => {
-                serde_json::json!({ "locale": locale, "keys": keys })
+            Self::LocalizationPreview { locale, entries } => {
+                serde_json::json!({ "locale": locale, "entries": entries })
             }
             Self::TextInput { input } => serde_json::json!({ "input": input }),
         };
@@ -171,13 +216,16 @@ impl VnUiModelContext<'_> {
         })
     }
 
-    pub fn build_system_page(&self, page: SystemPageKind) -> VnUiPageModel {
-        match page {
+    pub fn build_system_page(
+        &self,
+        page: SystemPageKind,
+    ) -> Result<VnUiPageModel, UiValidationError> {
+        Ok(match page {
             SystemPageKind::Title => VnUiPageModel::Title {
                 can_continue: self.runtime.cursor.is_some(),
             },
             SystemPageKind::Config => VnUiPageModel::Config {
-                values: self.runtime.system.config.clone(),
+                config: self.config_model()?,
             },
             SystemPageKind::Save => VnUiPageModel::Save {
                 slots: self.save_slots.to_vec(),
@@ -198,6 +246,7 @@ impl VnUiModelContext<'_> {
                         item_id: id.clone(),
                         label_key: id.clone(),
                         thumbnail_asset: None,
+                        has_thumbnail: false,
                         unlocked: true,
                     })
                     .collect(),
@@ -212,6 +261,7 @@ impl VnUiModelContext<'_> {
                         item_id: id.clone(),
                         label_key: id.clone(),
                         thumbnail_asset: None,
+                        has_thumbnail: false,
                         unlocked: true,
                     })
                     .collect(),
@@ -226,6 +276,7 @@ impl VnUiModelContext<'_> {
                         text_key: entry.line_key.clone(),
                         speaker_key: entry.speaker.clone(),
                         voice_id: Some(entry.voice.clone()),
+                        has_voice: true,
                         can_jump: false,
                         read: true,
                     })
@@ -251,10 +302,58 @@ impl VnUiModelContext<'_> {
             SystemPageKind::LocalizationPreview | SystemPageKind::Unknown => {
                 VnUiPageModel::LocalizationPreview {
                     locale: self.runtime.locale.clone(),
-                    keys: self.localization_keys.to_vec(),
+                    entries: self
+                        .localization_keys
+                        .iter()
+                        .enumerate()
+                        .map(|(index, key)| LocalizationEntryViewModel {
+                            entry_id: format!("locale.{index}"),
+                            text_key: key.clone(),
+                        })
+                        .collect(),
                 }
             }
-        }
+        })
+    }
+
+    fn config_model(&self) -> Result<ConfigViewModel, UiValidationError> {
+        Ok(ConfigViewModel {
+            master_volume: config_integer(
+                &self.runtime.system.config,
+                "audio.master",
+                100,
+                0,
+                100,
+            )?,
+            text_speed: config_integer(&self.runtime.system.config, "text.speed", 50, 0, 100)?,
+            auto_delay_ms: config_integer(
+                &self.runtime.system.config,
+                "auto.delay_ms",
+                1200,
+                100,
+                10_000,
+            )?,
+            high_contrast: config_bool(
+                &self.runtime.system.config,
+                "display.high_contrast",
+                false,
+            )?,
+            locale: self.runtime.locale.clone(),
+            available_locales: vec!["en".into(), "zh-Hans".into(), "ja".into()],
+            player_name: TextInputViewModel {
+                input_id: "profile.player_name".into(),
+                value: self
+                    .runtime
+                    .system
+                    .config
+                    .get("profile.player_name")
+                    .cloned()
+                    .unwrap_or_default(),
+                multiline: false,
+                max_graphemes: 32,
+                character_policy: "single_line".into(),
+            },
+        })
     }
 
     fn backlog(&self) -> Vec<BacklogEntryViewModel> {
@@ -266,11 +365,53 @@ impl VnUiModelContext<'_> {
                 text_key: entry.key.clone(),
                 speaker_key: entry.speaker.clone(),
                 voice_id: entry.voice.clone(),
+                has_voice: entry.voice.is_some(),
                 can_jump: entry.read,
                 read: entry.read,
             })
             .collect()
     }
+}
+
+fn config_integer(
+    values: &BTreeMap<String, String>,
+    key: &str,
+    default: i64,
+    min: i64,
+    max: i64,
+) -> Result<i64, UiValidationError> {
+    let Some(raw) = values.get(key) else {
+        return Ok(default);
+    };
+    let value = raw.parse::<i64>().map_err(|_| {
+        UiValidationError::invalid(
+            "ASTRA_VN_UI_CONFIG_INTEGER",
+            format!("config key {key} is not a valid integer"),
+        )
+    })?;
+    if !(min..=max).contains(&value) {
+        return Err(UiValidationError::invalid(
+            "ASTRA_VN_UI_CONFIG_RANGE",
+            format!("config key {key} is outside {min}..={max}"),
+        ));
+    }
+    Ok(value)
+}
+
+fn config_bool(
+    values: &BTreeMap<String, String>,
+    key: &str,
+    default: bool,
+) -> Result<bool, UiValidationError> {
+    let Some(raw) = values.get(key) else {
+        return Ok(default);
+    };
+    raw.parse::<bool>().map_err(|_| {
+        UiValidationError::invalid(
+            "ASTRA_VN_UI_CONFIG_BOOL",
+            format!("config key {key} is not a valid boolean"),
+        )
+    })
 }
 
 pub fn model_to_ui_value<T: Serialize>(model: &T) -> Result<UiValue, UiValidationError> {
@@ -307,5 +448,32 @@ fn json_to_ui_value(value: serde_json::Value) -> Result<UiValue, UiValidationErr
             .map(|(key, value)| Ok((key, json_to_ui_value(value)?)))
             .collect::<Result<BTreeMap<_, _>, _>>()
             .map(UiValue::Map),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{config_bool, config_integer};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn config_values_are_schema_checked_instead_of_silently_clamped() {
+        let values = BTreeMap::from([
+            ("volume".to_owned(), "101".to_owned()),
+            ("contrast".to_owned(), "enabled".to_owned()),
+        ]);
+
+        let range = config_integer(&values, "volume", 50, 0, 100).unwrap_err();
+        assert_eq!(range.code(), "ASTRA_VN_UI_CONFIG_RANGE");
+
+        let boolean = config_bool(&values, "contrast", false).unwrap_err();
+        assert_eq!(boolean.code(), "ASTRA_VN_UI_CONFIG_BOOL");
+    }
+
+    #[test]
+    fn missing_config_values_use_declared_schema_defaults() {
+        let values = BTreeMap::new();
+        assert_eq!(config_integer(&values, "volume", 50, 0, 100).unwrap(), 50);
+        assert!(config_bool(&values, "contrast", true).unwrap());
     }
 }
