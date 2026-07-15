@@ -1,5 +1,7 @@
 use astra_observability::{init_host, ConsoleFormat, HostObservabilityConfig, HostRole};
-use astra_player::{WebCdpInputHost, WindowsLiveAutomationRequest, WindowsSendInputHost};
+use astra_player::{
+    WebCdpInputHost, WebLiveAutomationRequest, WindowsLiveAutomationRequest, WindowsSendInputHost,
+};
 #[cfg(target_os = "windows")]
 use astra_player_core::{
     PlayerAutomationScript, PlayerHostCommandResult, PlayerInputTranscript, PlayerPlatform,
@@ -36,6 +38,9 @@ fn main() -> Result<(), PlayerCliError> {
     let mut script = None;
     let mut transcript = None;
     let mut windows_bundle = None;
+    let mut web_bundle = None;
+    let mut browser_executable = None;
+    let mut web_headless = false;
     let mut visual_comparison_report = None;
     let mut host_conformance_report = None;
     let mut output_report = None;
@@ -75,6 +80,9 @@ fn main() -> Result<(), PlayerCliError> {
             "--script" => script = args.next().map(PathBuf::from),
             "--transcript" => transcript = args.next().map(PathBuf::from),
             "--windows-bundle" => windows_bundle = args.next().map(PathBuf::from),
+            "--web-bundle" => web_bundle = args.next().map(PathBuf::from),
+            "--browser-executable" => browser_executable = args.next().map(PathBuf::from),
+            "--web-headless" => web_headless = true,
             "--visual-comparison-report" => {
                 visual_comparison_report = args.next().map(PathBuf::from)
             }
@@ -106,9 +114,12 @@ fn main() -> Result<(), PlayerCliError> {
     tracing::info!(event = "player.host.start", "AstraPlayer host started");
     if show_help {
         println!(
-            "Usage:\n  astra-player --script <automation.json> --transcript <transcript.json>\n  astra-player --windows-bundle <dir> --visual-comparison-report <report.json> --host-conformance-report <report.json> [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--output-trace-log <trace.log>] [--timeout-ms <ms>] [--log-filter <filter>] [--log-format compact|json] [--log-dir <dir>]"
+            "Usage:\n  astra-player --script <automation.json> --transcript <transcript.json>\n  astra-player --windows-bundle <dir> --visual-comparison-report <report.json> --host-conformance-report <report.json> [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--output-trace-log <trace.log>] [--timeout-ms <ms>]\n  astra-player --web-bundle <dir> --browser-executable <chromium> --visual-comparison-report <report.json> --host-conformance-report <report.json> [--web-headless] [--output-report <report.json>] [--output-script <script.json>] [--output-transcript <transcript.json>] [--timeout-ms <ms>] [--log-filter <filter>] [--log-format compact|json] [--log-dir <dir>]"
         );
         return Ok(());
+    }
+    if windows_bundle.is_some() && web_bundle.is_some() {
+        return Err("--windows-bundle and --web-bundle are mutually exclusive".into());
     }
     if let Some(bundle_dir) = windows_bundle {
         let comparison = visual_comparison_report.ok_or("missing --visual-comparison-report")?;
@@ -119,6 +130,35 @@ fn main() -> Result<(), PlayerCliError> {
             host_conformance_report: conformance,
             timeout_ms,
             trace_log: output_trace_log,
+        })?;
+        if let Some(path) = output_script {
+            write_json(path, &run.script)?;
+        }
+        if let Some(path) = output_transcript {
+            write_json(path, &run.transcript)?;
+        }
+        let report_json = serde_json::to_string_pretty(&run.report)?;
+        if let Some(path) = output_report {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(path, report_json.as_bytes())?;
+        }
+        println!("{report_json}");
+        return Ok(());
+    }
+    if let Some(bundle_dir) = web_bundle {
+        let comparison = visual_comparison_report.ok_or("missing --visual-comparison-report")?;
+        let conformance = host_conformance_report.ok_or("missing --host-conformance-report")?;
+        let browser_executable =
+            browser_executable.ok_or("missing --browser-executable for Web automation")?;
+        let run = WebCdpInputHost.run_live_bundle(WebLiveAutomationRequest {
+            bundle_dir,
+            browser_executable,
+            visual_comparison_report: comparison,
+            host_conformance_report: conformance,
+            headless: web_headless,
+            timeout_ms,
         })?;
         if let Some(path) = output_script {
             write_json(path, &run.script)?;

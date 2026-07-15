@@ -19,4 +19,8 @@ fn player_host_uses_shared_stable_logging_pipeline() {
     assert!(log.contains("\"schema\":\"astra.log_event.v1\""));
     assert!(log.contains("\"event\":\"player.host.start\""));
     assert!(log.contains("\"process_role\":\"player\""));
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("--web-bundle"));
+    assert!(help.contains("--browser-executable"));
+    assert!(help.contains("--web-headless"));
 }
