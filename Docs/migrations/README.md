@@ -2,7 +2,7 @@
 
 本目录只记录已实现代码向新设计对齐的迁移路线。设计页可以覆盖完整未来架构；迁移页不能把尚未存在的 AstraEMU/AstraRPG 代码写成可搬迁对象。
 
-当前落地状态：migration 1–5 已完成 Provider URI Asset VFS、provider selection、AstraVN module/crate split、RuntimeWorld `astra.vn.step` action 和真实 FFI lifecycle。Migration 6 的 lossless frontend 已完成；对应 Stage 3 script work item 仍等待 formal Windows/Web Player evidence。Migration 9 只关闭 shared policy、component effects 与 async runtime host，AstraRPG 产品代码仍留 Stage 7。Migration 11 的 contract、host、artifact、CLI、测试 lifecycle、review/preflight gate 已进入实现验证，除 contract 外保持 `IN_PROGRESS`，仍等待全量隔离验证与正式 evidence。Migration 12 已完成文档设计，Yakui、UI Blueprint、component ABI 和 Windows/Web UI evidence 尚未实现。当前生产完备度修补按 [模块能力完备度审查](module-completeness-audit-migration.md) 收束。
+当前落地状态：migration 1–5 已完成 Provider URI Asset VFS、provider selection、AstraVN module/crate split、RuntimeWorld `astra.vn.step` action 和真实 FFI lifecycle。Migration 6 的 lossless frontend 已完成；对应 Stage 3 script work item 仍等待 formal Windows/Web Player evidence。Migration 9 只关闭 shared policy、component effects 与 async runtime host，AstraRPG 产品代码仍留 Stage 7。Migration 11 已固化到主线，尚未闭合的正式平台 evidence 继续按状态页追踪。Migration 12 已进入实施验证：Yakui、UI Blueprint、AstraText、Scene2D、component ABI 和开发期 UI CLI 已落地，状态保持 `IN_PROGRESS`，等待全量隔离门禁与 Windows/Web E3。当前生产完备度修补按 [模块能力完备度审查](module-completeness-audit-migration.md) 收束。
 
 ## 执行顺序
 
@@ -19,7 +19,7 @@
 | 9 | [astra-rpg-design-alignment-migration.md](astra-rpg-design-alignment-migration.md) | shared 1–3 `DONE`；AstraRPG、AI Town、`rpg.trpg` 与 CP2020 adapter 留 Stage 7 |
 | 10 | [nativevn-flagship-demo-migration.md](nativevn-flagship-demo-migration.md) | 记录未来 15–20 分钟三终局、中英双语、中文全配音和正式原创资产的旗舰 Demo 产品迁移；本轮不实现 |
 | 11 | [headless-platform-test-backend-migration.md](headless-platform-test-backend-migration.md) | 将分散能力收束到测试专用完整 Headless Platform；typed contract 已固化，full host `IN_PROGRESS`，其余仍开放 |
-| 12 | [astra-ui-backend-split-migration.md](astra-ui-backend-split-migration.md) | AstraVN 迁到 Yakui、`.astra` script-declared UI、Scene2D/Mesh2D 和独立 component ABI；当前为 `SPEC_READY` |
+| 12 | [astra-ui-backend-split-migration.md](astra-ui-backend-split-migration.md) | AstraVN 迁到 Yakui、`.astra` script-declared UI、Scene2D/Mesh2D 和独立 component ABI；当前为 `IN_PROGRESS`，等待正式 E3 |
 
 ## 范围边界
 

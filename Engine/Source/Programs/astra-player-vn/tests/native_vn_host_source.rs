@@ -12,7 +12,7 @@ use astra_plugin_abi::{
     ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
     PROVIDER_POLICY_SCHEMA,
 };
-use astra_ui_core::{UiButtonState, UiInputEventKind};
+use astra_ui_core::{UiButtonState, UiInputEventKind, UiInsets, UiViewport, ValidateUi};
 use astra_vn_core::{compile_astra_project, AstraSource, CompileAstraProjectOptions, VnRunConfig};
 use astra_vn_package::{package_sections_for_project, PLAYER_LOCALE_CONFIG_SCHEMA};
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
@@ -325,6 +325,55 @@ fn product_source_records_bounded_ui_performance_samples() {
     assert!(report.peak_draw_calls <= 128);
     assert!(report.peak_vertices <= 250_000);
     assert!(report.peak_active_texture_bytes <= 64 * 1024 * 1024);
+}
+
+#[astra_headless_test::test]
+fn product_source_persists_resize_scale_and_text_across_repaints() {
+    let mut source = source_for(STORY);
+    source.launch().unwrap();
+    let resized = source
+        .dispatch_ui_event(UiInputEventKind::Resize {
+            viewport: UiViewport {
+                physical_width: 640,
+                physical_height: 360,
+                scale_factor: 2.0,
+                font_scale: 1.0,
+                safe_area_points: UiInsets {
+                    left: 0.0,
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: 0.0,
+                },
+            },
+        })
+        .unwrap();
+    assert!(scene_commands(&resized)
+        .iter()
+        .any(|command| matches!(command, SceneCommand::GlyphRun { .. })));
+
+    let repaint = source
+        .dispatch_ui_event(UiInputEventKind::FixedTime {
+            time_ns: 33_333_334,
+        })
+        .unwrap();
+    assert!(scene_commands(&repaint)
+        .iter()
+        .any(|command| matches!(command, SceneCommand::GlyphRun { .. })));
+
+    let semantics = source.ui_semantics().expect("semantic snapshot");
+    semantics.validate().unwrap();
+    let root = semantics
+        .nodes
+        .iter()
+        .find(|node| node.id == semantics.root_id)
+        .expect("semantic root");
+    assert_eq!(root.bounds_points.min.x, 0.0);
+    assert_eq!(root.bounds_points.min.y, 0.0);
+    assert_eq!(root.bounds_points.max.x, 320.0);
+    assert_eq!(root.bounds_points.max.y, 180.0);
+
+    source.release_resources().unwrap();
+    source.shutdown().unwrap();
 }
 
 fn bind_product_provider_authority(request: &mut PackageBuildRequest) {

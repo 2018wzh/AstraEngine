@@ -12,7 +12,9 @@ pub struct AstraNodeProps {
     pub min_size: Vec2,
     pub fill: Color,
     pub interactive: bool,
-    pub fill_available: bool,
+    pub fill_width: bool,
+    pub fill_height: bool,
+    pub loose_children: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +54,9 @@ impl Widget for AstraNodeWidget {
                 min_size: Vec2::ZERO,
                 fill: Color::CLEAR,
                 interactive: false,
-                fill_available: false,
+                fill_width: false,
+                fill_height: false,
+                loose_children: false,
             },
             pressed: false,
             clicked_semantic_id: None,
@@ -73,11 +77,19 @@ impl Widget for AstraNodeWidget {
     fn layout(&self, mut ctx: LayoutContext<'_>, constraints: Constraints) -> Vec2 {
         let node = ctx.dom.get_current();
         let mut size = self.props.min_size;
+        let child_constraints = if self.props.loose_children {
+            Constraints::loose(constraints.max)
+        } else {
+            constraints
+        };
         for child in &node.children {
-            size = size.max(ctx.calculate_layout(*child, constraints));
+            size = size.max(ctx.calculate_layout(*child, child_constraints));
         }
-        if self.props.fill_available {
-            size = constraints.max;
+        if self.props.fill_width && constraints.max.x.is_finite() {
+            size.x = constraints.max.x;
+        }
+        if self.props.fill_height && constraints.max.y.is_finite() {
+            size.y = constraints.max.y;
         }
         constraints.constrain_min(size)
     }

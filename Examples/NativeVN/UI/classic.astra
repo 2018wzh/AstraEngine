@@ -25,9 +25,9 @@ ui_view ui.message.classic model:astra.vn.ui_model.message.v1 theme:astra.vn.the
   screen id:root background:theme:surface.clear
     panel id:advance fill:true
       on activate -> vn.advance
-    column id:message_panel background:theme:panel.message min_height:260
-      text id:speaker value:$model.speaker_key
-      text id:body value:$model.text_key
+    column id:message_panel background:theme:panel.message min_height:260 fill_width:true anchor:bottom
+      text id:speaker value:$model.speaker_key font_size:24 max_lines:1
+      text id:body value:$model.text_key font_size:30 max_lines:5
 
 ui_view ui.choice.classic model:astra.vn.ui_model.choice.v1 theme:astra.vn.theme.classic #@id ui.choice.classic
   screen id:root background:theme:surface.dim

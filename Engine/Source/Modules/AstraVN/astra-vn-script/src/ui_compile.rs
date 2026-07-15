@@ -699,6 +699,8 @@ fn validate_widget_properties(line: &ParsedLine) -> Result<(), VnError> {
         "min_width",
         "min_height",
         "fill",
+        "fill_width",
+        "fill_height",
         "background",
         "grow",
         "anchor",

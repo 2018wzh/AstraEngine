@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::Arc;
 
 use astra_asset::{AssetCatalog, VfsManifest, VfsSourceRef};
 use astra_core::{Hash256, SchemaVersion};
@@ -28,9 +29,12 @@ use astra_ui_core::{
     UiInputDispositionKind, UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets,
     UiPerformanceBudget, UiPerformanceGate, UiPerformanceReport, UiSemanticNode, UiSemanticRole,
     UiSemanticSnapshot, UiThemeManifest, UiThemeValue, UiValidationError, UiValue, UiViewport,
-    MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
+    ValidateUi, MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
 };
-use astra_ui_yakui::{ui_frame_to_scene_commands, AstraYakuiBackend, BlueprintYakuiRenderer};
+use astra_ui_yakui::{
+    ui_frame_to_scene_commands, AstraTextMeasureRequest, AstraTextMeasureResult, AstraTextMeasurer,
+    AstraYakuiBackend, BlueprintYakuiRenderer,
+};
 use astra_vn_core::{
     CompiledCommand, CompiledStory, MovieLoopMode, PresentationCommand, StageBlendMode,
     StageClipPolicy, StageCommand, StageLayerKind, SystemPageKind, TimelineCommand, VnAudioBus,
@@ -65,7 +69,7 @@ pub struct NativeVnHostCommandSource {
     host: ProductRuntimeHost,
     session_id: GameRuntimeSessionId,
     runtime_state: Option<VnRuntimeState>,
-    text_provider: CosmicTextLayoutProvider,
+    text_provider: Arc<CosmicTextLayoutProvider>,
     font_families: Vec<String>,
     text_resources: TextRenderResourceOwner,
     localization: VnLocalizationTable,
@@ -76,6 +80,7 @@ pub struct NativeVnHostCommandSource {
     next_step_mode: RuntimeStepMode,
     width: u32,
     height: u32,
+    ui_viewport: UiViewport,
     textures: BTreeMap<String, TextureFrame>,
     live_texture_ids: BTreeSet<String>,
     live_layout_ids: BTreeSet<String>,
@@ -213,7 +218,7 @@ struct ProductPresentationBinding {
     textures: BTreeMap<String, TextureFrame>,
     media_assets: BTreeMap<String, PackagedMediaAsset>,
     localization: VnLocalizationTable,
-    text_provider: CosmicTextLayoutProvider,
+    text_provider: Arc<CosmicTextLayoutProvider>,
     font_families: Vec<String>,
     manifest: VnPresentationProviderManifest,
 }
@@ -269,7 +274,7 @@ impl NativeVnHostCommandSource {
         }
         let localization = load_package_localization(package, &config.locale, 16 * 1024 * 1024)
             .map_err(|error| NativeVnHostError::Localization(error.to_string()))?;
-        let text_provider = CosmicTextLayoutProvider::from_package(
+        let text_provider = Arc::new(CosmicTextLayoutProvider::from_package(
             package,
             "media.font_manifest",
             FontBindingContext {
@@ -278,7 +283,7 @@ impl NativeVnHostCommandSource {
                 default_locale: config.locale.clone(),
             },
             TextLayoutConfig::production_defaults(),
-        )?;
+        )?);
         let font_families = text_provider
             .identity()?
             .fonts
@@ -355,8 +360,14 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_UI_THEME_MISSING: compiled project has no packaged UI theme".into(),
             ));
         }
+        let ui_text_measurer = Arc::new(NativeUiTextMeasurer {
+            provider: Arc::clone(&binding.presentation.text_provider),
+            font_families: binding.presentation.font_families.clone(),
+            locale: binding.presentation.localization.locale.clone(),
+        });
         let ui_renderer = BlueprintYakuiRenderer::new(compiled.ui_blueprints.clone())?
-            .with_image_resources(binding.presentation.textures.clone());
+            .with_image_resources(binding.presentation.textures.clone())
+            .with_text_measurer(ui_text_measurer);
         let ui_backend = AstraYakuiBackend::new(ui_renderer, compiled.project_hash)?;
         let mut ui_controller_host = LuauUiControllerHost::with_default_budget()
             .map_err(|error| NativeVnHostError::Package(error.to_string()))?;
@@ -466,6 +477,18 @@ impl NativeVnHostCommandSource {
             next_step_mode: RuntimeStepMode::Live,
             width,
             height,
+            ui_viewport: UiViewport {
+                physical_width: width,
+                physical_height: height,
+                scale_factor: 1.0,
+                font_scale: 1.0,
+                safe_area_points: UiInsets {
+                    left: 0.0,
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: 0.0,
+                },
+            },
             textures: binding.presentation.textures,
             live_texture_ids: BTreeSet::new(),
             live_layout_ids: BTreeSet::new(),
@@ -1218,6 +1241,7 @@ impl NativeVnHostCommandSource {
         &mut self,
         events: Vec<UiInputEvent>,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        self.apply_ui_resize_events(&events)?;
         let fallback_events = events.clone();
         if !self.has_active_ui_surface() {
             return if let Some(command) = self.bubbled_ui_command(&fallback_events) {
@@ -1245,6 +1269,35 @@ impl NativeVnHostCommandSource {
             }
         }
         self.present_current_scene(ui_draw)
+    }
+
+    fn apply_ui_resize_events(&mut self, events: &[UiInputEvent]) -> Result<(), NativeVnHostError> {
+        let Some(viewport) = events.iter().rev().find_map(|event| match &event.kind {
+            UiInputEventKind::Resize { viewport } => Some(viewport),
+            _ => None,
+        }) else {
+            return Ok(());
+        };
+        viewport.validate()?;
+        let mut next_stage_director = self.stage_director.clone();
+        next_stage_director
+            .resize_viewport(astra_vn_package::StageViewport {
+                width: viewport.physical_width,
+                height: viewport.physical_height,
+            })
+            .map_err(stage_director_error)?;
+        let next_scene_draw = stage_scene_commands(
+            next_stage_director.state(),
+            &self.textures,
+            viewport.physical_width,
+            viewport.physical_height,
+        )?;
+        self.width = viewport.physical_width;
+        self.height = viewport.physical_height;
+        self.ui_viewport = viewport.clone();
+        self.stage_director = next_stage_director;
+        self.scene_draw = next_scene_draw;
+        Ok(())
     }
 
     fn has_active_ui_surface(&self) -> bool {
@@ -1931,18 +1984,7 @@ impl NativeVnHostCommandSource {
             schema: "astra.ui_frame_request.v1".to_string(),
             session_id: format!("vn.ui.{}", self.session_id.0),
             generation: self.ui_generation,
-            viewport: UiViewport {
-                physical_width: self.width,
-                physical_height: self.height,
-                scale_factor: 1.0,
-                font_scale: 1.0,
-                safe_area_points: UiInsets {
-                    left: 0.0,
-                    top: 0.0,
-                    right: 0.0,
-                    bottom: 0.0,
-                },
-            },
+            viewport: self.ui_viewport.clone(),
             fixed_time_ns: self.fixed_step.saturating_mul(16_666_667),
             input: UiInputFrame {
                 schema: "astra.ui_input_frame.v1".to_string(),
@@ -1963,6 +2005,30 @@ impl NativeVnHostCommandSource {
         self.ui_performance
             .record(output.performance.clone(), stable_frame)?;
         let draw = ui_frame_to_scene_commands(&output.render)?;
+        let mut next_text_resources = self.text_resources.clone();
+        let mut next_layout_ids = BTreeSet::new();
+        let mut text_lifecycle = Vec::new();
+        let mut text_draw = Vec::new();
+        let body_font_size = (self.height as f32 / 30.0).clamp(18.0, 34.0);
+        append_ui_semantic_text(
+            &mut next_text_resources,
+            &self.text_provider,
+            &self.font_families,
+            &self.localization,
+            &mut next_layout_ids,
+            &mut text_lifecycle,
+            &mut text_draw,
+            &output.semantics,
+            body_font_size,
+        )?;
+        for layout_id in self.live_layout_ids.difference(&next_layout_ids) {
+            text_lifecycle.extend(next_text_resources.remove_layout(layout_id)?);
+        }
+        let mut composed_draw = text_lifecycle;
+        composed_draw.extend(draw);
+        composed_draw.extend(text_draw);
+        self.text_resources = next_text_resources;
+        self.live_layout_ids = next_layout_ids;
         if self
             .ui_animations
             .values()
@@ -1993,7 +2059,7 @@ impl NativeVnHostCommandSource {
             },
         );
         self.active_ui_controller = Some(active);
-        Ok((output, draw))
+        Ok((output, composed_draw))
     }
 
     pub fn release_resources(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
@@ -2331,11 +2397,6 @@ impl NativeVnHostCommandSource {
             });
         }
 
-        let mut next_text_resources = self.text_resources.clone();
-        let mut next_layout_ids = BTreeSet::new();
-        let mut text_lifecycle = Vec::new();
-        let mut text_draw = Vec::new();
-        let body_font_size = (self.height as f32 / 30.0).clamp(18.0, 34.0);
         for command in presentation {
             match command {
                 PresentationCommand::Dialogue { .. }
@@ -2361,23 +2422,15 @@ impl NativeVnHostCommandSource {
         } else {
             None
         };
-        if let Some((output, _)) = &ui_frame {
-            append_ui_semantic_text(
-                &mut next_text_resources,
-                &self.text_provider,
-                &self.font_families,
-                &self.localization,
-                &mut next_layout_ids,
-                &mut text_lifecycle,
-                &mut text_draw,
-                &output.semantics,
-                body_font_size,
-            )?;
+        if ui_frame.is_none() && !self.live_layout_ids.is_empty() {
+            let mut next_text_resources = self.text_resources.clone();
+            let layout_ids = self.live_layout_ids.iter().cloned().collect::<Vec<_>>();
+            for layout_id in layout_ids {
+                lifecycle.extend(next_text_resources.remove_layout(&layout_id)?);
+            }
+            self.text_resources = next_text_resources;
+            self.live_layout_ids.clear();
         }
-        for layout_id in self.live_layout_ids.difference(&next_layout_ids) {
-            text_lifecycle.extend(next_text_resources.remove_layout(layout_id)?);
-        }
-        lifecycle.extend(text_lifecycle);
         lifecycle.push(SceneCommand::rect(
             "vn.frame.clear",
             0,
@@ -2389,7 +2442,6 @@ impl NativeVnHostCommandSource {
         lifecycle.extend(next_scene_draw.iter().cloned());
         let ui_draw = ui_frame.map_or_else(Vec::new, |(_, draw)| draw);
         lifecycle.extend(ui_draw.iter().cloned());
-        lifecycle.extend(text_draw);
         self.command_sequence = self
             .command_sequence
             .checked_add(1)
@@ -2405,8 +2457,6 @@ impl NativeVnHostCommandSource {
         self.scene_draw = next_scene_draw;
         self.stage_director = next_stage_director;
         self.live_texture_ids = next_texture_ids;
-        self.text_resources = next_text_resources;
-        self.live_layout_ids = next_layout_ids;
         self.ui_draw = ui_draw;
         self.pending_audio.extend(next_audio_controls);
         Ok(PlayerHostCommandBatch::new(vec![
@@ -3236,6 +3286,40 @@ fn append_ui_semantic_text(
         )?;
     }
     Ok(())
+}
+
+struct NativeUiTextMeasurer {
+    provider: Arc<CosmicTextLayoutProvider>,
+    font_families: Vec<String>,
+    locale: String,
+}
+
+impl AstraTextMeasurer for NativeUiTextMeasurer {
+    fn measure(
+        &self,
+        request: &AstraTextMeasureRequest,
+    ) -> Result<AstraTextMeasureResult, UiValidationError> {
+        let direction = parse_text_direction(Some(&request.direction)).map_err(|error| {
+            UiValidationError::invalid("ASTRA_UI_TEXT_DIRECTION", error.to_string())
+        })?;
+        let layout_request = text_request(
+            &format!("ui.measure.{}", request.semantic_id),
+            &request.text,
+            &self.locale,
+            &self.font_families,
+            request.max_width.max(1.0).round() as u32,
+            request.font_size,
+            request.max_lines,
+            direction,
+        );
+        let measurement = self.provider.measure(&layout_request).map_err(|error| {
+            UiValidationError::invalid("ASTRA_UI_TEXT_MEASURE", error.to_string())
+        })?;
+        Ok(AstraTextMeasureResult {
+            width: measurement.width,
+            height: measurement.height,
+        })
+    }
 }
 
 fn parse_text_direction(value: Option<&String>) -> Result<TextDirection, NativeVnHostError> {

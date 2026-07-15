@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use astra_core::Hash256;
 use astra_media_core::TextureFrame;
@@ -10,12 +11,15 @@ use astra_ui_core::{
 };
 use yakui_core::geometry::{Color, UVec2, Vec2};
 use yakui_core::paint::{Texture, TextureFormat};
-use yakui_core::{ManagedTextureId, WidgetId};
-use yakui_widgets::widgets::{Checkbox, CountGrid, Image, List, NineSlice, Pad, Slider, Stack};
+use yakui_core::{Alignment, CrossAxisAlignment, MainAxisSize, ManagedTextureId, WidgetId};
+use yakui_widgets::widgets::{
+    Align, Checkbox, CountGrid, Image, List, NineSlice, Pad, Slider, Stack,
+};
 
 use crate::{
-    AstraNodeProps, AstraNodeWidget, BoundedLru, TextCharacterPolicy, TextInputState,
-    VirtualGridState, VirtualListState, YakuiViewOutput, YakuiViewRenderer,
+    AstraNodeProps, AstraNodeWidget, AstraTextMeasureRequest, AstraTextMeasurer, BoundedLru,
+    TextCharacterPolicy, TextInputState, VirtualGridState, VirtualListState, YakuiViewOutput,
+    YakuiViewRenderer,
 };
 
 const MAX_MANAGED_IMAGE_TEXTURES: usize = 128;
@@ -47,6 +51,7 @@ pub struct BlueprintYakuiRenderer {
     accessibility_dispatched_events: BTreeSet<(String, String)>,
     image_resources: BTreeMap<String, TextureFrame>,
     managed_textures: BoundedLru<String, ManagedTextureId>,
+    text_measurer: Option<Arc<dyn AstraTextMeasurer>>,
 }
 
 impl BlueprintYakuiRenderer {
@@ -64,7 +69,13 @@ impl BlueprintYakuiRenderer {
             accessibility_dispatched_events: BTreeSet::new(),
             image_resources: BTreeMap::new(),
             managed_textures: BoundedLru::new(MAX_MANAGED_IMAGE_TEXTURES, MAX_TEXTURE_BYTES)?,
+            text_measurer: None,
         })
+    }
+
+    pub fn with_text_measurer(mut self, measurer: Arc<dyn AstraTextMeasurer>) -> Self {
+        self.text_measurer = Some(measurer);
+        self
     }
 
     pub fn with_image_resources(mut self, resources: BTreeMap<String, TextureFrame>) -> Self {
@@ -188,28 +199,77 @@ impl BlueprintYakuiRenderer {
                 )
             })?);
         }
-        let min_width = property_number(node, "min_width", frame, item)?.unwrap_or_else(|| {
+        let mut name = property_text(node, frame, item)?;
+        let mut min_width = property_number(node, "min_width", frame, item)?.unwrap_or_else(|| {
             if interactive {
                 180.0
             } else {
                 0.0
             }
         });
-        let min_height = property_number(node, "min_height", frame, item)?.unwrap_or_else(|| {
-            if interactive {
-                48.0
-            } else {
-                0.0
-            }
-        });
-        let fill =
-            property_color(node, "background", frame, item, request).unwrap_or(if interactive {
-                Color::rgba(38, 58, 84, 255)
-            } else {
-                Color::CLEAR
+        let mut min_height =
+            property_number(node, "min_height", frame, item)?.unwrap_or_else(|| {
+                if interactive {
+                    48.0
+                } else {
+                    0.0
+                }
             });
-        let fill_available = matches!(node.widget.as_str(), "screen");
-        let mut name = property_text(node, frame, item)?;
+        let default_fill = if matches!(
+            node.widget.as_str(),
+            "button" | "select" | "toggle" | "slider" | "text_input"
+        ) {
+            Color::rgba(38, 58, 84, 255)
+        } else {
+            Color::CLEAR
+        };
+        let fill = property_color(node, "background", frame, item, request).unwrap_or(default_fill);
+        if let Some(text_key) = name.as_deref() {
+            let text = frame
+                .localization
+                .get(text_key)
+                .map(String::as_str)
+                .unwrap_or(text_key);
+            let max_width = viewport_width_points(request).max(1.0);
+            let font_size = property_number(node, "font_size", frame, item)?
+                .unwrap_or_else(|| default_ui_font_size(request));
+            let max_lines = bounded_u32_property(node, "max_lines", frame, item, 4, 1, 1_024)?;
+            let direction = property_string(node, "direction", frame, item)?
+                .unwrap_or_else(|| "auto".to_string());
+            let measurer = self.text_measurer.as_ref().ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_TEXT_MEASURER_MISSING",
+                    "text-bearing widgets require the AstraText measurement provider",
+                )
+            })?;
+            let measured = measurer.measure(&AstraTextMeasureRequest {
+                semantic_id: semantic_id.clone(),
+                text: text.to_string(),
+                max_width: (max_width - 16.0).max(1.0),
+                font_size,
+                max_lines,
+                direction,
+            })?;
+            if !measured.width.is_finite()
+                || !measured.height.is_finite()
+                || measured.width < 0.0
+                || measured.height <= 0.0
+            {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_UI_TEXT_MEASURE_INVALID",
+                    "AstraText returned invalid UI layout metrics",
+                ));
+            }
+            min_width = min_width.max(measured.width + 16.0);
+            min_height = min_height.max(measured.height + 16.0);
+        }
+        let fill_layout = property_bool(node, "fill", frame, item)?.unwrap_or(false);
+        let fill_width = fill_layout
+            || property_bool(node, "fill_width", frame, item)?.unwrap_or(false)
+            || node.widget == "screen";
+        let fill_height = fill_layout
+            || property_bool(node, "fill_height", frame, item)?.unwrap_or(false)
+            || node.widget == "screen";
         let mut semantic_value = None;
         let mut semantic_properties = semantic_text_properties(node, frame, item)?;
         let accessible_events = node
@@ -228,7 +288,12 @@ impl BlueprintYakuiRenderer {
             min_size: Vec2::new(min_width, min_height),
             fill,
             interactive,
-            fill_available,
+            fill_width,
+            fill_height,
+            loose_children: matches!(
+                node.widget.as_str(),
+                "screen" | "stack" | "modal" | "canvas"
+            ),
         };
         let children = node.children.clone();
         let parent = Some(semantic_id.as_str());
@@ -285,142 +350,164 @@ impl BlueprintYakuiRenderer {
             semantic_value = Some(editor.text().to_string());
             name = semantic_value.clone();
         }
-        let response = match node.widget.as_str() {
-            "row" => AstraNodeWidget::show(props, || {
-                List::row().show(|| {
-                    child_error = self
-                        .render_children(&children, parent, frame, item, request, actions)
-                        .err();
-                });
-            }),
-            "column" | "scroll" => AstraNodeWidget::show(props, || {
-                List::column().show(|| {
-                    child_error = self
-                        .render_children(&children, parent, frame, item, request, actions)
-                        .err();
-                });
-            }),
-            "virtual_list" => AstraNodeWidget::show(props, || {
-                List::column().show(|| {
-                    child_error = self
-                        .render_virtual_list(node, parent, frame, request, actions)
-                        .err();
-                });
-            }),
-            "virtual_grid" => {
-                let columns = property_number(node, "columns", frame, item)?
-                    .unwrap_or(1.0)
-                    .round()
-                    .clamp(1.0, 256.0) as usize;
-                AstraNodeWidget::show(props, || {
-                    CountGrid::col(columns).show(|| {
-                        child_error = self
-                            .render_virtual_grid(node, parent, frame, request, actions)
-                            .err();
-                    });
-                })
-            }
-            "stack" | "modal" | "screen" | "canvas" => AstraNodeWidget::show(props, || {
-                Stack::new().show(|| {
-                    child_error = self
-                        .render_children(&children, parent, frame, item, request, actions)
-                        .err();
-                });
-            }),
-            "image" => {
-                let asset = required_visual_asset(node, frame, item, request)?;
-                let texture = *self.managed_textures.get(&asset).ok_or_else(|| {
-                    UiValidationError::invalid(
-                        "ASTRA_UI_IMAGE_RESOURCE_UNBOUND",
-                        format!("image asset {asset} was not registered for this UI generation"),
-                    )
-                })?;
-                AstraNodeWidget::show(props, || {
-                    Image::new(texture, Vec2::new(min_width.max(1.0), min_height.max(1.0))).show();
-                })
-            }
-            "nine_slice" => {
-                let (asset, border) = required_nine_slice(node, frame, item, request)?;
-                let texture = *self.managed_textures.get(&asset).ok_or_else(|| {
-                    UiValidationError::invalid(
-                        "ASTRA_UI_NINE_SLICE_RESOURCE_UNBOUND",
-                        format!(
-                            "nine-slice asset {asset} was not registered for this UI generation"
-                        ),
-                    )
-                })?;
-                AstraNodeWidget::show(props, || {
-                    NineSlice::new(
-                        texture,
-                        Pad {
-                            left: border[0],
-                            top: border[1],
-                            right: border[2],
-                            bottom: border[3],
-                        },
-                        1.0,
-                    )
-                    .show(|| {
+        let build_widget = || -> Result<_, UiValidationError> {
+            Ok(match node.widget.as_str() {
+                "row" => AstraNodeWidget::show(props, || {
+                    List::row().main_axis_size(MainAxisSize::Min).show(|| {
                         child_error = self
                             .render_children(&children, parent, frame, item, request, actions)
                             .err();
                     });
-                })
-            }
-            "slider" => {
-                let value = property_number(node, "value", frame, item)?.unwrap_or(0.0) as f64;
-                let min = property_number(node, "min", frame, item)?.unwrap_or(0.0) as f64;
-                let max = property_number(node, "max", frame, item)?.unwrap_or(1.0) as f64;
-                if min >= max || value < min || value > max {
-                    return Err(UiValidationError::invalid(
-                        "ASTRA_UI_SLIDER_RANGE",
-                        "slider requires min < max and a value inside the range",
-                    ));
+                }),
+                "column" | "scroll" => AstraNodeWidget::show(props, || {
+                    List::column()
+                        .main_axis_size(MainAxisSize::Min)
+                        .cross_axis_alignment(CrossAxisAlignment::Stretch)
+                        .show(|| {
+                            child_error = self
+                                .render_children(&children, parent, frame, item, request, actions)
+                                .err();
+                        });
+                }),
+                "virtual_list" => AstraNodeWidget::show(props, || {
+                    List::column().show(|| {
+                        child_error = self
+                            .render_virtual_list(node, parent, frame, request, actions)
+                            .err();
+                    });
+                }),
+                "virtual_grid" => {
+                    let columns = property_number(node, "columns", frame, item)?
+                        .unwrap_or(1.0)
+                        .round()
+                        .clamp(1.0, 256.0) as usize;
+                    AstraNodeWidget::show(props, || {
+                        CountGrid::col(columns).show(|| {
+                            child_error = self
+                                .render_virtual_grid(node, parent, frame, request, actions)
+                                .err();
+                        });
+                    })
                 }
-                let step = property_number(node, "step", frame, item)?.map(f64::from);
-                semantic_properties.insert("range.value".into(), value.to_string());
-                semantic_properties.insert("range.min".into(), min.to_string());
-                semantic_properties.insert("range.max".into(), max.to_string());
-                semantic_properties.insert(
-                    "range.step".into(),
-                    step.unwrap_or((max - min) / 100.0).to_string(),
-                );
-                AstraNodeWidget::show(props, || {
-                    let slider = Slider {
-                        value,
-                        min,
-                        max,
-                        step,
+                "stack" | "modal" | "screen" | "canvas" => AstraNodeWidget::show(props, || {
+                    Stack::new().show(|| {
+                        child_error = self
+                            .render_children(&children, parent, frame, item, request, actions)
+                            .err();
+                    });
+                }),
+                "image" => {
+                    let asset = required_visual_asset(node, frame, item, request)?;
+                    let texture = *self.managed_textures.get(&asset).ok_or_else(|| {
+                        UiValidationError::invalid(
+                            "ASTRA_UI_IMAGE_RESOURCE_UNBOUND",
+                            format!(
+                                "image asset {asset} was not registered for this UI generation"
+                            ),
+                        )
+                    })?;
+                    AstraNodeWidget::show(props, || {
+                        Image::new(texture, Vec2::new(min_width.max(1.0), min_height.max(1.0)))
+                            .show();
+                    })
+                }
+                "nine_slice" => {
+                    let (asset, border) = required_nine_slice(node, frame, item, request)?;
+                    let texture = *self.managed_textures.get(&asset).ok_or_else(|| {
+                        UiValidationError::invalid(
+                            "ASTRA_UI_NINE_SLICE_RESOURCE_UNBOUND",
+                            format!(
+                            "nine-slice asset {asset} was not registered for this UI generation"
+                        ),
+                        )
+                    })?;
+                    AstraNodeWidget::show(props, || {
+                        NineSlice::new(
+                            texture,
+                            Pad {
+                                left: border[0],
+                                top: border[1],
+                                right: border[2],
+                                bottom: border[3],
+                            },
+                            1.0,
+                        )
+                        .show(|| {
+                            child_error = self
+                                .render_children(&children, parent, frame, item, request, actions)
+                                .err();
+                        });
+                    })
+                }
+                "slider" => {
+                    let value = property_number(node, "value", frame, item)?.unwrap_or(0.0) as f64;
+                    let min = property_number(node, "min", frame, item)?.unwrap_or(0.0) as f64;
+                    let max = property_number(node, "max", frame, item)?.unwrap_or(1.0) as f64;
+                    if min >= max || value < min || value > max {
+                        return Err(UiValidationError::invalid(
+                            "ASTRA_UI_SLIDER_RANGE",
+                            "slider requires min < max and a value inside the range",
+                        ));
                     }
-                    .show();
-                    if let Some(next) = slider.value {
-                        if (next - value).abs() > f64::EPSILON {
-                            changed_event = Some(UiValue::Map(BTreeMap::from([(
-                                "value".to_string(),
-                                UiValue::Number(next),
-                            )])));
+                    let step = property_number(node, "step", frame, item)?.map(f64::from);
+                    semantic_properties.insert("range.value".into(), value.to_string());
+                    semantic_properties.insert("range.min".into(), min.to_string());
+                    semantic_properties.insert("range.max".into(), max.to_string());
+                    semantic_properties.insert(
+                        "range.step".into(),
+                        step.unwrap_or((max - min) / 100.0).to_string(),
+                    );
+                    AstraNodeWidget::show(props, || {
+                        let slider = Slider {
+                            value,
+                            min,
+                            max,
+                            step,
                         }
-                    }
-                })
-            }
-            "toggle" => {
-                let checked = property_bool(node, "checked", frame, item)?.unwrap_or(false);
-                semantic_checked = Some(checked);
-                AstraNodeWidget::show(props, || {
-                    let next = Checkbox::new(checked).show().checked;
-                    if next != checked {
-                        changed_event = Some(UiValue::Map(BTreeMap::from([
-                            ("checked".to_string(), UiValue::Bool(next)),
-                            ("value".to_string(), UiValue::Bool(next)),
-                        ])));
-                    }
-                })
-            }
-            _ => AstraNodeWidget::show(props, || {
-                child_error = self
-                    .render_children(&children, parent, frame, item, request, actions)
-                    .err();
-            }),
+                        .show();
+                        if let Some(next) = slider.value {
+                            if (next - value).abs() > f64::EPSILON {
+                                changed_event = Some(UiValue::Map(BTreeMap::from([(
+                                    "value".to_string(),
+                                    UiValue::Number(next),
+                                )])));
+                            }
+                        }
+                    })
+                }
+                "toggle" => {
+                    let checked = property_bool(node, "checked", frame, item)?.unwrap_or(false);
+                    semantic_checked = Some(checked);
+                    AstraNodeWidget::show(props, || {
+                        let next = Checkbox::new(checked).show().checked;
+                        if next != checked {
+                            changed_event = Some(UiValue::Map(BTreeMap::from([
+                                ("checked".to_string(), UiValue::Bool(next)),
+                                ("value".to_string(), UiValue::Bool(next)),
+                            ])));
+                        }
+                    })
+                }
+                _ => AstraNodeWidget::show(props, || {
+                    child_error = self
+                        .render_children(&children, parent, frame, item, request, actions)
+                        .err();
+                }),
+            })
+        };
+        let anchor = property_string(node, "anchor", frame, item)?;
+        let response = if let Some(anchor) = anchor {
+            let alignment = parse_alignment(&anchor)?;
+            let mut response = None;
+            Align::new(alignment).show(|| response = Some(build_widget()));
+            response.ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_ALIGNMENT_LAYOUT",
+                    "Yakui did not build the aligned Astra widget",
+                )
+            })??
+        } else {
+            build_widget()?
         };
         if let Some(error) = child_error {
             return Err(error);
@@ -631,7 +718,9 @@ fn virtual_leading_space(node: &astra_ui_core::UiNodeBlueprint, extent: f32) {
             min_size: Vec2::new(0.0, extent),
             fill: Color::CLEAR,
             interactive: false,
-            fill_available: false,
+            fill_width: false,
+            fill_height: false,
+            loose_children: false,
         },
         || {},
     );
@@ -963,7 +1052,9 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                         min_size: Vec2::ZERO,
                         fill: Color::rgba(0, 0, 0, 96),
                         interactive: true,
-                        fill_available: true,
+                        fill_width: true,
+                        fill_height: true,
+                        loose_children: true,
                     },
                     || {
                         child_error = self
@@ -1067,7 +1158,6 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         yakui: &yakui_core::Yakui,
         request: &UiFrameRequest,
     ) -> Result<UiSemanticSnapshot, UiValidationError> {
-        let scale = request.viewport.scale_factor * request.viewport.font_scale;
         let mut nodes = Vec::with_capacity(self.pending.len());
         for pending in &self.pending {
             let layout = yakui.layout_dom().get(pending.widget_id).ok_or_else(|| {
@@ -1083,12 +1173,12 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 role: pending.role,
                 bounds_points: UiRect {
                     min: UiPoint {
-                        x: rect.pos().x / scale,
-                        y: rect.pos().y / scale,
+                        x: rect.pos().x,
+                        y: rect.pos().y,
                     },
                     max: UiPoint {
-                        x: (rect.pos().x + rect.size().x) / scale,
-                        y: (rect.pos().y + rect.size().y) / scale,
+                        x: rect.pos().x + rect.size().x,
+                        y: rect.pos().y + rect.size().y,
                     },
                 },
                 name: pending.name.clone(),
@@ -1167,6 +1257,54 @@ fn semantic_number(semantic: &PendingSemantic, key: &str) -> Result<f64, UiValid
 fn viewport_height_points(request: &UiFrameRequest) -> f32 {
     request.viewport.physical_height as f32
         / (request.viewport.scale_factor * request.viewport.font_scale)
+}
+
+fn viewport_width_points(request: &UiFrameRequest) -> f32 {
+    request.viewport.physical_width as f32
+        / (request.viewport.scale_factor * request.viewport.font_scale)
+}
+
+fn default_ui_font_size(_request: &UiFrameRequest) -> f32 {
+    20.0
+}
+
+fn bounded_u32_property(
+    node: &astra_ui_core::UiNodeBlueprint,
+    key: &str,
+    frame: &UiBlueprintFrameModel,
+    item: Option<&UiValue>,
+    default: u32,
+    min: u32,
+    max: u32,
+) -> Result<u32, UiValidationError> {
+    let Some(value) = property_number(node, key, frame, item)? else {
+        return Ok(default);
+    };
+    if value.fract() != 0.0 || value < min as f32 || value > max as f32 {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_INTEGER_PROPERTY_RANGE",
+            format!("property {key} must be an integer within {min}..={max}"),
+        ));
+    }
+    Ok(value as u32)
+}
+
+fn parse_alignment(value: &str) -> Result<Alignment, UiValidationError> {
+    match value {
+        "top" | "top_left" => Ok(Alignment::TOP_LEFT),
+        "top_center" => Ok(Alignment::TOP_CENTER),
+        "top_right" => Ok(Alignment::TOP_RIGHT),
+        "center_left" => Ok(Alignment::CENTER_LEFT),
+        "center" => Ok(Alignment::CENTER),
+        "center_right" => Ok(Alignment::CENTER_RIGHT),
+        "bottom" | "bottom_left" => Ok(Alignment::BOTTOM_LEFT),
+        "bottom_center" => Ok(Alignment::BOTTOM_CENTER),
+        "bottom_right" => Ok(Alignment::BOTTOM_RIGHT),
+        _ => Err(UiValidationError::invalid(
+            "ASTRA_UI_ALIGNMENT",
+            "anchor must be a registered Astra alignment token",
+        )),
+    }
 }
 
 fn property_bool(

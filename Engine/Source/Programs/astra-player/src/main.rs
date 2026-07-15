@@ -165,7 +165,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         NativeVnHostCommandSource, PlatformCommandSink, PlayerHostCommandExecutor,
         PlayerHostResourceId,
     };
-    use astra_ui_core::{UiInputEventKind, UiPoint, UiTouchPhase};
+    use astra_ui_core::{UiInputEventKind, UiInsets, UiPoint, UiTouchPhase, UiViewport};
     use astra_vn_core::VnRunConfig;
     use serde::Deserialize;
 
@@ -318,6 +318,27 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                 let player_sequence = event.sequence;
                 let ui_input = match event.kind {
                     PlatformEventKind::WindowClosed { window: closed } if closed == window => break,
+                    PlatformEventKind::WindowResized {
+                        window: resized,
+                        width,
+                        height,
+                        scale_factor,
+                    } if resized == window && width > 0 && height > 0 => {
+                        Some(UiInputEventKind::Resize {
+                            viewport: UiViewport {
+                                physical_width: width,
+                                physical_height: height,
+                                scale_factor: scale_factor as f32,
+                                font_scale: 1.0,
+                                safe_area_points: UiInsets {
+                                    left: 0.0,
+                                    top: 0.0,
+                                    right: 0.0,
+                                    bottom: 0.0,
+                                },
+                            },
+                        })
+                    }
                     PlatformEventKind::Keyboard {
                         window: input_window,
                         physical_key,

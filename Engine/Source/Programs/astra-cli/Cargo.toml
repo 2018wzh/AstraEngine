@@ -20,6 +20,7 @@ astra-media = { path = "../../Runtime/astra-media" }
 astra-cook = { path = "../../Developer/astra-cook" }
 astra-package = { path = "../../Runtime/astra-package" }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
+astra-player-vn = { path = "../astra-player-vn" }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-platform-android = { path = "../../Platform/astra-platform-android" }
 astra-platform-ios = { path = "../../Platform/astra-platform-ios" }

@@ -449,6 +449,7 @@ dependencies = [
  "astra-platform-web",
  "astra-platform-windows",
  "astra-player-core",
+ "astra-player-vn",
  "astra-plugin-abi",
  "astra-release",
  "astra-target",

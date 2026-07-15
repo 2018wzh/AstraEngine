@@ -6,7 +6,7 @@ use astra_ui_core::{
     UiActionEnvelope, UiBackend, UiBackendDescriptor, UiCapability, UiFrameOutput, UiFrameRequest,
     UiPerformanceSample, UiSemanticSnapshot, UiValidationError, ValidateUi,
 };
-use yakui_core::geometry::Vec2;
+use yakui_core::geometry::{Rect, Vec2};
 use yakui_core::{WidgetId, Yakui};
 
 use crate::{AstraYakuiInputRouter, YakuiPaintConverter};
@@ -129,6 +129,13 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
         self.yakui.set_surface_size(Vec2::new(
             request.viewport.physical_width as f32,
             request.viewport.physical_height as f32,
+        ));
+        self.yakui.set_unscaled_viewport(Rect::from_pos_size(
+            Vec2::ZERO,
+            Vec2::new(
+                request.viewport.physical_width as f32,
+                request.viewport.physical_height as f32,
+            ),
         ));
         self.yakui
             .set_scale_factor(request.viewport.scale_factor * request.viewport.font_scale);

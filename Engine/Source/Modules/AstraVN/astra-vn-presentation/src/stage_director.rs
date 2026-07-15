@@ -172,6 +172,15 @@ impl ProductStageDirector {
         &self.state
     }
 
+    pub fn resize_viewport(&mut self, viewport: StageViewport) -> Result<(), VnError> {
+        validate_viewport(viewport)?;
+        let mut next = self.clone();
+        next.state.viewport = viewport;
+        next.validate_state()?;
+        *self = next;
+        Ok(())
+    }
+
     pub fn active_timeline_count(&self) -> usize {
         self.timelines.len()
     }

@@ -292,6 +292,24 @@ fn shaped_clusters_fonts_ruby_voice_and_glyph_bitmaps_reach_renderer() {
 }
 
 #[astra_headless_test::test]
+fn measurement_reuses_the_authoritative_layout_cache_without_glyph_clone_contract() {
+    let provider = provider();
+    let request = request("measure this line");
+    let measured = provider.measure(&request).unwrap();
+    let stats_after_measure = provider.cache_stats().unwrap();
+    assert_eq!(stats_after_measure.entries, 1);
+    assert_eq!(stats_after_measure.misses, 1);
+
+    let layout = provider.layout(&request).unwrap();
+    assert_eq!(measured.width, layout.width);
+    assert_eq!(measured.height, layout.height);
+    assert_eq!(measured.hash, layout.hash);
+    let stats_after_layout = provider.cache_stats().unwrap();
+    assert_eq!(stats_after_layout.misses, 1);
+    assert_eq!(stats_after_layout.hits, 1);
+}
+
+#[astra_headless_test::test]
 fn licensed_multiscript_fallback_shapes_cjk_arabic_and_emoji_clusters() {
     let provider = CosmicTextLayoutProvider::new(
         FontBindingContext {

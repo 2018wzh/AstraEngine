@@ -430,7 +430,7 @@ fn append_raw_layout(
                             .is_some_and(|family| family == &face.family)
                 })
             {
-                tracing::warn!(
+                tracing::debug!(
                     target: "astra_media::text",
                     event = "text.font.fallback",
                     family = %face.family,

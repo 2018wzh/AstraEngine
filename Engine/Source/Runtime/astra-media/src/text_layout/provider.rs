@@ -320,6 +320,50 @@ impl TextLayoutProvider for CosmicTextLayoutProvider {
         Ok(result)
     }
 
+    fn measure(&self, request: &TextLayoutRequest) -> Result<TextLayoutMeasurement, MediaError> {
+        super::validation::validate_request(request, &self.config)?;
+        let mut state = self.lock_state()?;
+        validate_family_chain(request, &state)?;
+        let cache_key = request_cache_key(request, &state.fonts)?;
+        state.access_sequence = state.access_sequence.checked_add(1).ok_or_else(|| {
+            MediaError::message("ASTRA_TEXT_CACHE_SEQUENCE: cache sequence overflow")
+        })?;
+        let access_sequence = state.access_sequence;
+        if state.layout_cache.contains_key(&cache_key) {
+            let measurement = {
+                let entry = state.layout_cache.get_mut(&cache_key).ok_or_else(|| {
+                    MediaError::message("ASTRA_TEXT_CACHE_STATE: cached layout disappeared")
+                })?;
+                entry.last_access = access_sequence;
+                TextLayoutMeasurement::from(&entry.result)
+            };
+            state.hits += 1;
+            return Ok(measurement);
+        }
+        state.misses += 1;
+        let result = layout_uncached(request, &mut state, &self.context, &self.config)?;
+        let measurement = TextLayoutMeasurement::from(&result);
+        if state.layout_cache.len() == self.config.max_cache_entries {
+            let oldest = state
+                .layout_cache
+                .iter()
+                .min_by_key(|(key, value)| (value.last_access, **key))
+                .map(|(key, _)| *key)
+                .ok_or_else(|| {
+                    MediaError::message("ASTRA_TEXT_CACHE_STATE: cache eviction had no candidate")
+                })?;
+            state.layout_cache.remove(&oldest);
+        }
+        state.layout_cache.insert(
+            cache_key,
+            CacheEntry {
+                result,
+                last_access: access_sequence,
+            },
+        );
+        Ok(measurement)
+    }
+
     fn layout_hash(&self, request: &TextLayoutRequest) -> Result<Hash256, MediaError> {
         Ok(self.layout(request)?.hash)
     }

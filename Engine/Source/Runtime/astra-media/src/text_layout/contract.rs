@@ -501,9 +501,33 @@ pub struct TextLayoutCacheStats {
     pub misses: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TextLayoutMeasurement {
+    pub width: f32,
+    pub height: f32,
+    pub clipped: bool,
+    pub ellipsized: bool,
+    pub hash: Hash256,
+}
+
 pub trait TextLayoutProvider {
     fn identity(&self) -> Result<TextLayoutProviderIdentity, MediaError>;
     fn request_hash(&self, request: &TextLayoutRequest) -> Result<Hash256, MediaError>;
     fn layout(&self, request: &TextLayoutRequest) -> Result<TextLayoutResult, MediaError>;
+    fn measure(&self, request: &TextLayoutRequest) -> Result<TextLayoutMeasurement, MediaError> {
+        Ok(TextLayoutMeasurement::from(&self.layout(request)?))
+    }
     fn layout_hash(&self, request: &TextLayoutRequest) -> Result<Hash256, MediaError>;
+}
+
+impl From<&TextLayoutResult> for TextLayoutMeasurement {
+    fn from(result: &TextLayoutResult) -> Self {
+        Self {
+            width: result.width,
+            height: result.height,
+            clipped: result.clipped,
+            ellipsized: result.ellipsized,
+            hash: result.hash,
+        }
+    }
 }

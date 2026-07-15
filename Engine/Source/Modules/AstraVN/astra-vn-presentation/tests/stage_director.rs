@@ -87,6 +87,34 @@ fn stage_director_applies_profile_bound_tween_without_partial_failure() {
 }
 
 #[astra_headless_test::test]
+fn stage_director_resizes_transactionally_without_losing_live_state() {
+    let mut director = director();
+    configure(&mut director);
+    show_hero(&mut director);
+    director.tick(300_000_000).unwrap();
+
+    director
+        .resize_viewport(StageViewport {
+            width: 2560,
+            height: 1440,
+        })
+        .unwrap();
+    assert_eq!(director.state().viewport.width, 2560);
+    assert_eq!(director.state().viewport.height, 1440);
+    assert!(director.state().entities.contains_key("hero"));
+
+    let stable = director.state().stable_hash().unwrap();
+    let error = director
+        .resize_viewport(StageViewport {
+            width: 0,
+            height: 1440,
+        })
+        .unwrap_err();
+    assert_eq!(error.code(), "ASTRA_VN_STAGE_VIEWPORT");
+    assert_eq!(director.state().stable_hash().unwrap(), stable);
+}
+
+#[astra_headless_test::test]
 fn stage_director_timeline_snapshot_restore_matches_uninterrupted_run() {
     let manifest = VnPresentationProviderManifest::standard();
     let mut uninterrupted = ProductStageDirector::new(

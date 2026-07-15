@@ -174,7 +174,8 @@ mod browser {
     };
     use astra_player_vn::{NativeVnHostCommandSource, NativeVnProductMediaHost};
     use astra_ui_core::{
-        UiButtonState, UiInputEventKind, UiPoint, UiPointerButton as AstraUiPointerButton,
+        UiButtonState, UiInputEventKind, UiInsets, UiPoint,
+        UiPointerButton as AstraUiPointerButton, UiViewport,
     };
     use astra_vn_core::VnRunConfig;
     use futures_util::future::{select, Either};
@@ -340,6 +341,37 @@ mod browser {
                     PlatformEventKind::WindowClosed { .. } => {
                         PLAYER.with(|player| *player.borrow_mut() = None);
                         break;
+                    }
+                    PlatformEventKind::WindowResized {
+                        width,
+                        height,
+                        scale_factor,
+                        ..
+                    } if width > 0 && height > 0 => {
+                        let batch = match vn.dispatch_ui_event(UiInputEventKind::Resize {
+                            viewport: UiViewport {
+                                physical_width: width,
+                                physical_height: height,
+                                scale_factor: scale_factor as f32,
+                                font_scale: 1.0,
+                                safe_area_points: UiInsets {
+                                    left: 0.0,
+                                    top: 0.0,
+                                    right: 0.0,
+                                    bottom: 0.0,
+                                },
+                            },
+                        }) {
+                            Ok(batch) => batch,
+                            Err(error) => {
+                                tracing::error!(event = "player.web.runtime.resize_failed", diagnostic_code = "ASTRA_PLAYER_UI_RESIZE", error = %error, "Web Player resize transaction failed");
+                                break;
+                            }
+                        };
+                        if let Err(error) = executor.execute_batch(batch).await {
+                            tracing::error!(event = "player.web.host_command.failed", diagnostic_code = "ASTRA_PLAYER_HOST_COMMAND", error = %error, "Web Player resized frame execution failed");
+                            break;
+                        }
                     }
                     PlatformEventKind::Keyboard {
                         physical_key,

@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{validate_string, UiValidationError, ValidateUi};
 
+pub const MAX_UI_VIEWPORT_DIMENSION: u32 = 16_384;
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UiPoint {
     pub x: f32,
@@ -49,6 +51,14 @@ impl ValidateUi for UiViewport {
             return Err(UiValidationError::invalid(
                 "ASTRA_UI_VIEWPORT_EMPTY",
                 "viewport dimensions must be positive",
+            ));
+        }
+        if self.physical_width > MAX_UI_VIEWPORT_DIMENSION
+            || self.physical_height > MAX_UI_VIEWPORT_DIMENSION
+        {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_VIEWPORT_LIMIT",
+                "viewport dimensions exceed the UI product limit",
             ));
         }
         if !(self.scale_factor.is_finite() && self.scale_factor > 0.0) {
