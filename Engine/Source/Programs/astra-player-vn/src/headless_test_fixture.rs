@@ -11,9 +11,38 @@ use astra_plugin_abi::{
     ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
     PROVIDER_POLICY_SCHEMA,
 };
-use astra_vn_core::{compile_astra_sources, AstraSource, VnRunConfig};
-use astra_vn_package::{package_sections_for_story, PLAYER_LOCALE_CONFIG_SCHEMA};
+use astra_vn_core::{compile_astra_project, AstraSource, CompileAstraProjectOptions, VnRunConfig};
+use astra_vn_package::{package_sections_for_project, PLAYER_LOCALE_CONFIG_SCHEMA};
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
+
+const TEST_UI: &str = r#"
+ui_bind surface:message view:ui.test.message controller:test.message policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.message
+ui_bind surface:choice view:ui.test.choice controller:test.choice policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.choice
+ui_bind system_page:title view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.title
+ui_bind system_page:save view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.save
+ui_bind system_page:load view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.load
+ui_bind system_page:config view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.config
+ui_bind system_page:backlog view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.backlog
+ui_bind system_page:gallery view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.gallery
+ui_bind system_page:replay view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.replay
+ui_bind system_page:voice_replay view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.voice
+ui_bind system_page:route_chart view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.route
+ui_bind system_page:localization_preview view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.localization
+ui_view ui.test.message model:astra.vn.ui_model.message.v1 theme:astra.vn.theme.classic #@id ui.test.message
+  screen id:root
+    panel id:advance fill:true
+      on activate -> vn.advance
+    text id:body value:$model.text_key
+ui_view ui.test.choice model:astra.vn.ui_model.choice.v1 theme:astra.vn.theme.classic #@id ui.test.choice
+  screen id:root
+    virtual_list id:options items:$model.options item_key:option_id overscan:2 item_extent:48
+      button id:option min_height:44 value:$item.text_key
+        on activate -> vn.choose option_id:$item.option_id
+ui_view ui.test.system model:astra.vn.ui_model.system.v1 theme:astra.vn.theme.classic #@id ui.test.system
+  screen id:root
+    button id:back min_height:48
+      on activate -> vn.return_system
+"#;
 
 #[allow(dead_code)]
 pub fn source_for(story: &str) -> NativeVnHostCommandSource {
@@ -30,9 +59,16 @@ pub fn source_for(story: &str) -> NativeVnHostCommandSource {
 }
 
 pub fn product_package(story: &str) -> Vec<u8> {
-    let compiled = compile_astra_sources([AstraSource::new("main.astra", story)]).unwrap();
+    let compiled = compile_astra_project(
+        [
+            AstraSource::story("main.astra", story),
+            AstraSource::ui("test-ui.astra", TEST_UI),
+        ],
+        test_compile_options(),
+    )
+    .unwrap();
     let mut sections =
-        package_sections_for_story(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
+        package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
     let font = include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/Poppins-Regular.ttf")
         .to_vec();
     let font_hash = Hash256::from_sha256(&font);
@@ -145,6 +181,48 @@ pub fn product_package(story: &str) -> Vec<u8> {
     }))
     .unwrap();
     PackageBuilder::build(request).unwrap().into_bytes()
+}
+
+fn test_compile_options() -> CompileAstraProjectOptions {
+    let mut theme = astra_ui_core::UiThemeManifest {
+        schema: "astra.ui_theme_manifest.v1".into(),
+        id: "astra.vn.theme.classic".into(),
+        parent: None,
+        tokens: [(
+            "surface.system".into(),
+            astra_ui_core::UiThemeValue::Color([0, 0, 0, 255]),
+        )]
+        .into_iter()
+        .collect(),
+        high_contrast_tokens: Default::default(),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash().unwrap();
+    let source = test_controller_source();
+    let mut options = CompileAstraProjectOptions::default().with_ui_theme(theme);
+    for id in ["test.message", "test.choice", "test.system"] {
+        options = options.with_ui_controller_source(id, source.clone());
+    }
+    options
+}
+
+fn test_controller_source() -> String {
+    r#"
+local controllers = {
+  { "test.message", "ui.test.message", "astra.vn.ui_model.message.v1" },
+  { "test.choice", "ui.test.choice", "astra.vn.ui_model.choice.v1" },
+  { "test.system", "ui.test.system", "astra.vn.ui_model.system.v1" },
+}
+for _, definition in controllers do
+  astra.ui.controller.register(definition[1], {
+    schema = "astra.vn.ui_controller.v1", view = definition[2],
+    model_schema = definition[3], snapshot = "none",
+  }, { on_action = function(_, _, action)
+    return { astra.ui.effect.forward(action) }
+  end })
+end
+"#
+    .to_string()
 }
 
 fn bind_product_provider_authority(request: &mut PackageBuildRequest) {

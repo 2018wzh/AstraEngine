@@ -1150,6 +1150,25 @@ fn blend_premultiplied_pixel(target: &mut [u8], source: [u8; 4], opacity: f32, b
                     .clamp(0.0, 255.0) as u8;
             }
         }
+        BlendMode::Screen => {
+            let straight = if source_alpha > 0.0 {
+                [
+                    (source[0] as f32 * opacity / source_alpha).clamp(0.0, 255.0),
+                    (source[1] as f32 * opacity / source_alpha).clamp(0.0, 255.0),
+                    (source[2] as f32 * opacity / source_alpha).clamp(0.0, 255.0),
+                ]
+            } else {
+                [0.0; 3]
+            };
+            for channel in 0..3 {
+                let screened =
+                    255.0 - (255.0 - target[channel] as f32) * (255.0 - straight[channel]) / 255.0;
+                target[channel] = (target[channel] as f32 * (1.0 - source_alpha)
+                    + screened * source_alpha)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+        }
     }
     target[3] = (output_alpha * 255.0).round().clamp(0.0, 255.0) as u8;
 }

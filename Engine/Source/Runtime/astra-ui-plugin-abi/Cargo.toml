@@ -17,3 +17,6 @@ postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+
+[lib]
+doctest = false

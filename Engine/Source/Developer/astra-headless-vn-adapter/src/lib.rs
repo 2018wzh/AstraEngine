@@ -3,12 +3,14 @@ use astra_headless_protocol::{ButtonState, GamepadControl, PhysicalInput, TouchP
 use astra_package::PackageReader;
 use astra_platform::{SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest};
 use astra_player_core::{
-    PlatformCommandSink, PlayerAction, PlayerActionMap, PlayerHostCommandExecutor,
-    PlayerHostCommandResult, PlayerHostResourceId,
+    PlatformCommandSink, PlayerHostCommandExecutor, PlayerHostCommandResult, PlayerHostResourceId,
 };
 use astra_product_host::{
     CanonicalAudioSnapshot, Observation, ProductAdapterFactory, ProductFuture, ProductHostError,
     ProductOpenRequest, ProductSession,
+};
+use astra_ui_core::{
+    UiButtonState, UiInputEventKind, UiNavigationAction, UiPoint, UiPointerButton, UiTouchPhase,
 };
 use astra_vn_core::VnRunConfig;
 
@@ -107,7 +109,6 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 source: Some(source),
                 executor,
                 media,
-                action_map: PlayerActionMap::standard(),
                 pointer: (0.0, 0.0),
                 viewport: (request.width, request.height),
                 next_save_transaction: 1_000,
@@ -127,7 +128,6 @@ struct NativeVnHeadlessSession {
     source: Option<NativeVnHostCommandSource>,
     executor: PlayerHostCommandExecutor<PlatformCommandSink>,
     media: NativeVnProductMediaHost,
-    action_map: PlayerActionMap,
     pointer: (f64, f64),
     viewport: (u32, u32),
     next_save_transaction: u64,
@@ -160,7 +160,11 @@ impl ProductSession for NativeVnHeadlessSession {
             }
             match input {
                 PhysicalInput::Resume => self.resumed = true,
-                PhysicalInput::Focus { focused } => self.focused = *focused,
+                PhysicalInput::Focus { focused } => {
+                    self.focused = *focused;
+                    self.dispatch_ui(UiInputEventKind::Focus { focused: *focused })
+                        .await?;
+                }
                 PhysicalInput::Keyboard {
                     physical_key,
                     state: ButtonState::Pressed,
@@ -173,40 +177,83 @@ impl ProductSession for NativeVnHeadlessSession {
                 } if physical_key == "F9" => self.load("slot-quick").await?,
                 PhysicalInput::Keyboard {
                     physical_key,
-                    state: ButtonState::Pressed,
-                    ..
+                    logical_key,
+                    state,
+                    repeat,
                 } => {
-                    if let Some(action) = self.action_map.keyboard(physical_key) {
-                        self.dispatch(action).await?;
-                    }
+                    self.dispatch_ui(UiInputEventKind::Keyboard {
+                        logical_key: logical_key.clone().unwrap_or_else(|| physical_key.clone()),
+                        physical_key: physical_key.clone(),
+                        state: ui_button_state(*state),
+                        repeat: *repeat,
+                        modifiers: 0,
+                    })
+                    .await?
                 }
                 PhysicalInput::PointerMove { x, y } => {
                     self.pointer = (
                         normalized(*x, self.viewport.0),
                         normalized(*y, self.viewport.1),
                     );
+                    self.dispatch_ui(UiInputEventKind::PointerMove {
+                        position: ui_point(self.pointer),
+                    })
+                    .await?;
                 }
-                PhysicalInput::PointerButton {
-                    button: astra_headless_protocol::PointerButton::Primary,
-                    state: ButtonState::Pressed,
-                } => self.dispatch_pointer().await?,
+                PhysicalInput::PointerButton { button, state } => {
+                    self.dispatch_ui(UiInputEventKind::PointerButton {
+                        position: ui_point(self.pointer),
+                        button: ui_pointer_button(*button),
+                        state: ui_button_state(*state),
+                    })
+                    .await?
+                }
+                PhysicalInput::Wheel { delta_x, delta_y } => {
+                    self.dispatch_ui(UiInputEventKind::Wheel {
+                        delta_points: UiPoint {
+                            x: *delta_x as f32,
+                            y: *delta_y as f32,
+                        },
+                    })
+                    .await?
+                }
                 PhysicalInput::Touch {
-                    x,
-                    y,
-                    phase: TouchPhase::Started,
-                    ..
+                    id, x, y, phase, ..
                 } => {
                     self.pointer = (
                         normalized(*x, self.viewport.0),
                         normalized(*y, self.viewport.1),
                     );
-                    self.dispatch_pointer().await?;
+                    self.dispatch_ui(UiInputEventKind::Touch {
+                        device_id: 0,
+                        contact_id: *id,
+                        position: ui_point(self.pointer),
+                        phase: ui_touch_phase(*phase),
+                    })
+                    .await?;
                 }
-                PhysicalInput::GamepadInput {
-                    control: GamepadControl::South,
-                    value,
-                    ..
-                } if *value > 0 => self.dispatch(PlayerAction::Advance).await?,
+                PhysicalInput::GamepadInput { control, value, .. } if *value > 0 => {
+                    if let Some(action) = ui_navigation_action(*control) {
+                        self.dispatch_ui(UiInputEventKind::Navigation { action })
+                            .await?;
+                    }
+                }
+                PhysicalInput::ImePreedit {
+                    text,
+                    cursor_start,
+                    cursor_end,
+                } => {
+                    self.dispatch_ui(UiInputEventKind::ImePreedit {
+                        text: text.clone(),
+                        cursor_start: *cursor_start,
+                        cursor_end: *cursor_end,
+                    })
+                    .await?
+                }
+                PhysicalInput::ImeCommit { text } => {
+                    self.dispatch_ui(UiInputEventKind::ImeCommit { text: text.clone() })
+                        .await?
+                }
                 PhysicalInput::AdvanceTicks { .. } => {}
                 PhysicalInput::Shutdown => {
                     return Err(ProductHostError::Input(
@@ -300,8 +347,21 @@ impl NativeVnHeadlessSession {
             .ok_or_else(|| ProductHostError::Input("product session is shut down".into()))
     }
 
-    async fn dispatch(&mut self, action: PlayerAction) -> Result<(), ProductHostError> {
-        if matches!(action, PlayerAction::Advance) && self.media.has_active_video() {
+    async fn dispatch_ui(&mut self, event: UiInputEventKind) -> Result<(), ProductHostError> {
+        let activates = matches!(
+            &event,
+            UiInputEventKind::Keyboard {
+                logical_key,
+                state: UiButtonState::Pressed,
+                ..
+            } if matches!(logical_key.as_str(), "Enter" | " " | "Space")
+        ) || matches!(
+            &event,
+            UiInputEventKind::Navigation {
+                action: UiNavigationAction::Activate
+            }
+        );
+        if activates && self.media.has_active_video() {
             let source = self
                 .source
                 .as_mut()
@@ -312,20 +372,7 @@ impl NativeVnHeadlessSession {
         }
         let batch = self
             .source()?
-            .dispatch_action(action)
-            .map_err(|error| ProductHostError::Input(error.to_string()))?;
-        self.executor
-            .execute_batch(batch)
-            .await
-            .map_err(|error| ProductHostError::Input(error.to_string()))?;
-        Ok(())
-    }
-
-    async fn dispatch_pointer(&mut self) -> Result<(), ProductHostError> {
-        let pointer = self.pointer;
-        let batch = self
-            .source()?
-            .dispatch_pointer(pointer.0, pointer.1)
+            .dispatch_ui_event(event)
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
         self.executor
             .execute_batch(batch)
@@ -483,6 +530,54 @@ fn hashed_observation(
 
 fn normalized(value: u16, extent: u32) -> f64 {
     f64::from(value) * f64::from(extent.saturating_sub(1)) / 65_535.0
+}
+
+fn ui_point(pointer: (f64, f64)) -> UiPoint {
+    UiPoint {
+        x: pointer.0 as f32,
+        y: pointer.1 as f32,
+    }
+}
+
+fn ui_button_state(state: ButtonState) -> UiButtonState {
+    match state {
+        ButtonState::Pressed => UiButtonState::Pressed,
+        ButtonState::Released => UiButtonState::Released,
+    }
+}
+
+fn ui_pointer_button(button: astra_headless_protocol::PointerButton) -> UiPointerButton {
+    match button {
+        astra_headless_protocol::PointerButton::Primary => UiPointerButton::Primary,
+        astra_headless_protocol::PointerButton::Secondary => UiPointerButton::Secondary,
+        astra_headless_protocol::PointerButton::Middle => UiPointerButton::Middle,
+        astra_headless_protocol::PointerButton::Back => UiPointerButton::Back,
+        astra_headless_protocol::PointerButton::Forward => UiPointerButton::Forward,
+        astra_headless_protocol::PointerButton::Other => UiPointerButton::Other(0),
+    }
+}
+
+fn ui_touch_phase(phase: TouchPhase) -> UiTouchPhase {
+    match phase {
+        TouchPhase::Started => UiTouchPhase::Started,
+        TouchPhase::Moved => UiTouchPhase::Moved,
+        TouchPhase::Ended => UiTouchPhase::Ended,
+        TouchPhase::Cancelled => UiTouchPhase::Cancelled,
+    }
+}
+
+fn ui_navigation_action(control: GamepadControl) -> Option<UiNavigationAction> {
+    match control {
+        GamepadControl::South => Some(UiNavigationAction::Activate),
+        GamepadControl::East => Some(UiNavigationAction::Cancel),
+        GamepadControl::DpadUp => Some(UiNavigationAction::Up),
+        GamepadControl::DpadDown => Some(UiNavigationAction::Down),
+        GamepadControl::DpadLeft => Some(UiNavigationAction::Left),
+        GamepadControl::DpadRight => Some(UiNavigationAction::Right),
+        GamepadControl::LeftShoulder => Some(UiNavigationAction::PagePrevious),
+        GamepadControl::RightShoulder => Some(UiNavigationAction::PageNext),
+        _ => None,
+    }
 }
 
 fn canonical_ms(tick: u64) -> Result<u64, ProductHostError> {

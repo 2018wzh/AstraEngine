@@ -1,8 +1,41 @@
 use astra_core::Hash256;
 use astra_media_core::{
-    BlendMode, CpuRendererProvider, DrawCommand, GlyphBitmap, GlyphBitmapFormat, RectI,
-    RenderTargetFormat, Renderer2DProvider, RendererCreateRequest, TextureFrame, Transform2D,
+    BlendMode, CpuRendererProvider, DrawCommand, GlyphBitmap, GlyphBitmapFormat, MeshMaterial2D,
+    MeshVertex2D, RectI, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest,
+    TextureFrame, Transform2D,
 };
+
+#[astra_headless_test::test]
+fn cpu_reference_compositor_screens_premultiplied_ui_meshes() {
+    let mut renderer = CpuRendererProvider
+        .create(RendererCreateRequest {
+            width: 1,
+            height: 1,
+            format: RenderTargetFormat::Rgba8Srgb,
+            profile: "mesh-screen".into(),
+        })
+        .unwrap();
+    let vertex = |position| MeshVertex2D {
+        position,
+        uv: [0.0, 0.0],
+        premultiplied_rgba: [128, 64, 32, 128],
+    };
+    let frame = renderer
+        .capture_frame(&[
+            DrawCommand::clear([64, 128, 192, 255]),
+            DrawCommand::Mesh2D {
+                id: "screen-mesh".into(),
+                vertices: vec![vertex([0.0, 0.0]), vertex([2.0, 0.0]), vertex([0.0, 2.0])],
+                indices: vec![0, 1, 2],
+                material: MeshMaterial2D::Solid,
+                texture_id: None,
+                opacity: 1.0,
+                blend: BlendMode::Screen,
+            },
+        ])
+        .unwrap();
+    assert_eq!(frame.bytes, vec![160, 160, 200, 255]);
+}
 
 #[astra_headless_test::test]
 fn cpu_reference_compositor_executes_texture_glyph_clip_transform_and_blend() {

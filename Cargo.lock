@@ -519,6 +519,7 @@ dependencies = [
  "astra-player-core",
  "astra-player-vn",
  "astra-product-host",
+ "astra-ui-core",
  "astra-vn-core",
  "astra-vn-package",
  "serde",
@@ -1033,6 +1034,7 @@ name = "astra-ui-yakui"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-media-core",
  "astra-ui-core",
  "fast-srgb8",
@@ -1260,6 +1262,7 @@ name = "astra-vn-ui"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-test",
  "astra-ui-core",
  "astra-vn-core",
  "astra-vn-script",

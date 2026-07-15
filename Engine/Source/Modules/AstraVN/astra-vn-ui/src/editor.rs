@@ -338,7 +338,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn editing_preserves_grapheme_boundaries_and_history() {
         let mut editor =
             PlainTextEditor::new(policy(TextInputMode::MultiLine), "a🇯🇵é".into()).expect("editor");
@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(editor.text(), "aé");
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn ime_commit_and_character_policy_fail_fast() {
         let mut editor =
             PlainTextEditor::new(policy(TextInputMode::SingleLine), String::new()).expect("editor");

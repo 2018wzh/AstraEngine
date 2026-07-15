@@ -15,6 +15,7 @@ astra-platform = { path = "../../Platform/astra-platform" }
 astra-player-core = { path = "../../Runtime/astra-player-core" }
 astra-player-vn = { path = "../../Programs/astra-player-vn", features = ["headless-test-fixtures"] }
 astra-product-host = { path = "../../Runtime/astra-product-host" }
+astra-ui-core = { path = "../../Runtime/astra-ui-core" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
 astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
 serde.workspace = true

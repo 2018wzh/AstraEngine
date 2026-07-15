@@ -21,7 +21,7 @@ fn node(id: &str, widget: &str) -> UiNodeBlueprint {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn ten_thousand_items_instantiate_only_visible_rows() {
     let mut item = node("entry", "button");
     item.properties.insert(

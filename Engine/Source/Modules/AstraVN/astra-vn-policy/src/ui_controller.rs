@@ -338,7 +338,7 @@ fn runtime_error(error: mlua::Error) -> LuauUiControllerError {
 mod tests {
     use super::*;
 
-    #[test]
+    #[astra_headless_test::test]
     fn controller_runs_in_fresh_sandbox_and_returns_typed_effects() {
         let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
         host.register_source(
@@ -370,7 +370,7 @@ astra.ui.controller.register("controller.test", {
         assert!(session.values().is_empty());
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn snapshot_none_controller_cannot_write_session_state() {
         let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
         host.register_source(
