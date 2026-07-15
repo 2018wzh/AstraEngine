@@ -16,7 +16,10 @@ pub use media_session::*;
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 pub use test_driver::*;
 
-use astra_platform::{build_fingerprint, PlatformCapabilityReport, PlatformHostProfile};
+use astra_platform::{build_fingerprint, PlatformCapabilityReport};
+
+#[cfg(target_os = "windows")]
+use astra_platform::PlatformHostProfile;
 
 #[cfg(not(target_os = "windows"))]
 use astra_platform::{PlatformId, SdkStatus};
