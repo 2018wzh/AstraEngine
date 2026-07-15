@@ -94,11 +94,8 @@ pub fn package_sections_for_project(
         )?,
         SectionPayload::postcard(
             "vn.ui_theme_manifest",
-            "astra.vn.ui_theme_manifest.v1",
-            &VnUiIdManifest {
-                schema: "astra.vn.ui_theme_manifest.v1".to_string(),
-                ids: project.theme_ids.clone(),
-            },
+            "astra.ui_theme_bundle.v1",
+            &project.themes,
         )?,
         SectionPayload::postcard(
             "vn.ui_backend_manifest",
@@ -246,7 +243,7 @@ pub fn decode_compiled_project(
     let controllers: VnUiIdManifest = package
         .container()
         .decode_postcard("vn.ui_controller_manifest")?;
-    let themes: VnUiIdManifest = package
+    let themes: BTreeMap<String, astra_ui_core::UiThemeManifest> = package
         .container()
         .decode_postcard("vn.ui_theme_manifest")?;
     let components: VnUiIdManifest = package
@@ -260,6 +257,22 @@ pub fn decode_compiled_project(
             "ASTRA_VN_COMPILED_PROJECT_HASH: project section hashes do not match the root",
         ));
     }
+    let project_hash = Hash256::from_sha256(
+        &postcard::to_allocvec(&(
+            story.story_hash,
+            ui_blueprints.hash,
+            ui_bindings.hash,
+            &themes,
+        ))
+        .map_err(|error| {
+            ContainerError::message(format!("ASTRA_VN_COMPILED_PROJECT_ENCODE: {error}"))
+        })?,
+    );
+    if project_hash != root.project_hash {
+        return Err(ContainerError::message(
+            "ASTRA_VN_COMPILED_PROJECT_HASH: project root hash does not cover the packaged sections",
+        ));
+    }
     Ok(CompiledVnProject {
         schema: "astra.vn.compiled_project.v1".to_string(),
         project_hash: root.project_hash,
@@ -268,7 +281,8 @@ pub fn decode_compiled_project(
         ui_bindings,
         ui_source_map,
         controller_ids: controllers.ids,
-        theme_ids: themes.ids,
+        theme_ids: themes.keys().cloned().collect(),
+        themes,
         component_ids: components.ids,
     })
 }

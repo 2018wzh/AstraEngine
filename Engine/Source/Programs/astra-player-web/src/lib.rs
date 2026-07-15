@@ -459,6 +459,16 @@ mod browser {
                             );
                             break;
                         }
+                        if let Err(error) = execute_web_ui_host_request(
+                            &mut vn,
+                            &mut executor,
+                            &mut save_transaction_id,
+                        )
+                        .await
+                        {
+                            tracing::error!(event = "player.web.ui_host_request.failed", diagnostic_code = "ASTRA_PLAYER_UI_HOST_REQUEST", error = %error, "Web Player UI host request failed");
+                            break;
+                        }
                         if let Err(error) = media
                             .process(
                                 &mut vn,
@@ -510,6 +520,16 @@ mod browser {
                             tracing::error!(event = "player.web.host_command.failed", diagnostic_code = "ASTRA_PLAYER_HOST_COMMAND", error = %error, "Web Player host command failed");
                             break;
                         }
+                        if let Err(error) = execute_web_ui_host_request(
+                            &mut vn,
+                            &mut executor,
+                            &mut save_transaction_id,
+                        )
+                        .await
+                        {
+                            tracing::error!(event = "player.web.ui_host_request.failed", diagnostic_code = "ASTRA_PLAYER_UI_HOST_REQUEST", error = %error, "Web Player UI host request failed");
+                            break;
+                        }
                     }
                     PlatformEventKind::PointerButton { button, state, .. } => {
                         user_activated |= state == InputState::Pressed;
@@ -549,6 +569,16 @@ mod browser {
                                 error = %error,
                                 "Web Player host command failed"
                             );
+                            break;
+                        }
+                        if let Err(error) = execute_web_ui_host_request(
+                            &mut vn,
+                            &mut executor,
+                            &mut save_transaction_id,
+                        )
+                        .await
+                        {
+                            tracing::error!(event = "player.web.ui_host_request.failed", diagnostic_code = "ASTRA_PLAYER_UI_HOST_REQUEST", error = %error, "Web Player UI host request failed");
                             break;
                         }
                         if let Err(error) = media
@@ -621,6 +651,39 @@ mod browser {
         });
         tracing::info!(event = "player.web.ready", "Web Player host is ready");
         Ok(())
+    }
+
+    async fn execute_web_ui_host_request(
+        source: &mut NativeVnHostCommandSource,
+        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
+        save_transaction_id: &mut u64,
+    ) -> Result<(), astra_platform::PlatformError> {
+        let Some(request) = source.take_ui_host_request() else {
+            return Ok(());
+        };
+        match request {
+            astra_player_vn::VnUiHostRequest::Save { slot_id } => {
+                *save_transaction_id = save_transaction_id.checked_add(1).ok_or_else(|| {
+                    web_player_error(
+                        "player.save.transaction",
+                        "ASTRA_PLAYER_SAVE_TRANSACTION_OVERFLOW",
+                    )
+                })?;
+                execute_web_save(
+                    source,
+                    executor,
+                    &slot_id,
+                    PlayerHostResourceId(*save_transaction_id),
+                )
+                .await?;
+                source
+                    .mark_save_committed(&slot_id)
+                    .map_err(|error| web_player_error("player.save.commit_state", error))
+            }
+            astra_player_vn::VnUiHostRequest::Load { slot_id } => {
+                execute_web_load(source, executor, &slot_id).await
+            }
+        }
     }
 
     async fn execute_web_save(

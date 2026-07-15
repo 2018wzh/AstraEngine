@@ -30,6 +30,7 @@ astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
 astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi" }
 astra-release = { path = "../../Developer/astra-release" }
 astra-target = { path = "../../Platform/astra-target" }
+astra-ui-core = { path = "../../Runtime/astra-ui-core" }
 astra-test = { path = "../../Developer/astra-test" }
 astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
 astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }

@@ -368,6 +368,7 @@ dependencies = [
  "astra-release",
  "astra-target",
  "astra-test",
+ "astra-ui-core",
  "astra-vn",
  "astra-vn-runtime-provider",
  "clap",

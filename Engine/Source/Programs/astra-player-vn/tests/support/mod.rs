@@ -11,7 +11,7 @@ use astra_plugin_abi::{
     ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
     PROVIDER_POLICY_SCHEMA,
 };
-use astra_vn_core::{compile_astra_project, AstraSource, VnRunConfig};
+use astra_vn_core::{compile_astra_project, AstraSource, CompileAstraProjectOptions, VnRunConfig};
 use astra_vn_package::{package_sections_for_project, PLAYER_LOCALE_CONFIG_SCHEMA};
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 
@@ -32,6 +32,7 @@ ui_view ui.test.message model:astra.vn.ui_model.message.v1 theme:astra.vn.theme.
   screen id:root
     panel id:advance fill:true
       on activate -> vn.advance
+    text id:body value:$model.text_key
 ui_view ui.test.choice model:astra.vn.ui_model.choice.v1 theme:astra.vn.theme.classic #@id ui.test.choice
   screen id:root
     virtual_list id:options items:$model.options item_key:option_id overscan:2 item_extent:48
@@ -76,7 +77,7 @@ fn product_package_with_video(story: &str, video: Option<Vec<u8>>) -> Vec<u8> {
             AstraSource::story("main.astra", story),
             AstraSource::ui("test-ui.astra", TEST_UI),
         ],
-        Default::default(),
+        test_compile_options(),
     )
     .unwrap();
     let mut sections =
@@ -253,6 +254,24 @@ fn product_package_with_video(story: &str, video: Option<Vec<u8>>) -> Vec<u8> {
     }))
     .unwrap();
     PackageBuilder::build(request).unwrap().into_bytes()
+}
+
+fn test_compile_options() -> CompileAstraProjectOptions {
+    let mut theme = astra_ui_core::UiThemeManifest {
+        schema: "astra.ui_theme_manifest.v1".into(),
+        id: "astra.vn.theme.classic".into(),
+        parent: None,
+        tokens: [(
+            "surface.system".into(),
+            astra_ui_core::UiThemeValue::Color([0, 0, 0, 255]),
+        )]
+        .into_iter()
+        .collect(),
+        high_contrast_tokens: Default::default(),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash().unwrap();
+    CompileAstraProjectOptions::default().with_ui_theme(theme)
 }
 
 fn bind_product_provider_authority(request: &mut PackageBuildRequest) {

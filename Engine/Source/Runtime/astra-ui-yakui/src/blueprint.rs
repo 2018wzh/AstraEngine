@@ -33,6 +33,7 @@ pub struct BlueprintYakuiRenderer {
     pending: Vec<PendingSemantic>,
     virtual_lists: BTreeMap<String, VirtualListState>,
     virtual_grids: BTreeMap<String, VirtualGridState>,
+    accessibility_actions: BTreeMap<String, Vec<(UiEventBinding, Option<UiValue>)>>,
 }
 
 impl BlueprintYakuiRenderer {
@@ -43,6 +44,7 @@ impl BlueprintYakuiRenderer {
             pending: Vec::new(),
             virtual_lists: BTreeMap::new(),
             virtual_grids: BTreeMap::new(),
+            accessibility_actions: BTreeMap::new(),
         })
     }
 
@@ -95,6 +97,17 @@ impl BlueprintYakuiRenderer {
             });
         let fill_available = matches!(node.widget.as_str(), "screen");
         let name = property_text(node, frame, item)?;
+        let accessible_events = node
+            .events
+            .iter()
+            .filter(|event| event.event == "activate")
+            .cloned()
+            .map(|event| (event, item.cloned()))
+            .collect::<Vec<_>>();
+        if !accessible_events.is_empty() {
+            self.accessibility_actions
+                .insert(semantic_id.clone(), accessible_events);
+        }
         let props = AstraNodeProps {
             semantic_id: semantic_id.clone(),
             min_size: Vec2::new(min_width, min_height),
@@ -249,6 +262,10 @@ impl BlueprintYakuiRenderer {
         state.set_item_count(values.len())?;
         state.set_viewport_extent(viewport_height_points(request))?;
         let range = state.visible_range();
+        let leading = state.visible_leading_extent(range);
+        if leading > 0.0 {
+            virtual_leading_space(node, leading);
+        }
         for value in &values[range.start..range.end] {
             for child in &node.children {
                 self.render_node(child, parent_id, frame, Some(value), request, actions)?;
@@ -294,6 +311,10 @@ impl BlueprintYakuiRenderer {
                 )?);
         state.configure(values.len(), columns, viewport_height_points(request))?;
         let range = state.visible_items();
+        let leading = state.visible_leading_extent(range);
+        if leading > 0.0 {
+            virtual_leading_space(node, leading);
+        }
         for value in &values[range.start..range.end] {
             for child in &node.children {
                 self.render_node(child, parent_id, frame, Some(value), request, actions)?;
@@ -301,6 +322,19 @@ impl BlueprintYakuiRenderer {
         }
         Ok(())
     }
+}
+
+fn virtual_leading_space(node: &astra_ui_core::UiNodeBlueprint, extent: f32) {
+    let _ = AstraNodeWidget::show(
+        AstraNodeProps {
+            semantic_id: format!("{}.virtual-leading", node.local_id),
+            min_size: Vec2::new(0.0, extent),
+            fill: Color::CLEAR,
+            interactive: false,
+            fill_available: false,
+        },
+        || {},
+    );
 }
 
 impl YakuiViewRenderer for BlueprintYakuiRenderer {
@@ -314,6 +348,44 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 UiValidationError::invalid("ASTRA_UI_BLUEPRINT_MODEL_DECODE", error.to_string())
             })?;
         frame.validate()?;
+        let mut actions = Vec::new();
+        let mut force_consumed_sequences = BTreeSet::new();
+        for input in &request.input.events {
+            if let UiInputEventKind::AccessibilityAction {
+                semantic_id,
+                action,
+                value: _,
+            } = &input.kind
+            {
+                if action != "activate" && action != "invoke" {
+                    return Err(UiValidationError::invalid(
+                        "ASTRA_UI_ACCESSIBILITY_ACTION_UNSUPPORTED",
+                        "accessibility action is not supported by the semantic target",
+                    ));
+                }
+                let bindings = self.accessibility_actions.get(semantic_id).ok_or_else(|| {
+                    UiValidationError::invalid(
+                        "ASTRA_UI_ACCESSIBILITY_TARGET_MISSING",
+                        "accessibility target does not exist in the live semantic generation",
+                    )
+                })?;
+                if bindings.len() != 1 {
+                    return Err(UiValidationError::invalid(
+                        "ASTRA_UI_ACCESSIBILITY_ACTION_AMBIGUOUS",
+                        "accessibility target must map to exactly one activate action",
+                    ));
+                }
+                let (binding, item) = &bindings[0];
+                actions.push(action_from_event(
+                    binding,
+                    semantic_id,
+                    request,
+                    &frame,
+                    item.as_ref(),
+                )?);
+                force_consumed_sequences.insert(input.sequence);
+            }
+        }
         for event in &request.input.events {
             if let UiInputEventKind::Wheel { delta_points } = event.kind {
                 for state in self.virtual_lists.values_mut() {
@@ -342,7 +414,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
             ));
         }
         self.pending.clear();
-        let mut actions = Vec::new();
+        self.accessibility_actions.clear();
         self.render_node(&view.root, None, &frame, None, request, &mut actions)?;
         Ok(YakuiViewOutput {
             actions,
@@ -358,6 +430,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                         && (!self.virtual_lists.is_empty() || !self.virtual_grids.is_empty())
                 })
                 .map(|event| event.sequence)
+                .chain(force_consumed_sequences)
                 .collect(),
         })
     }

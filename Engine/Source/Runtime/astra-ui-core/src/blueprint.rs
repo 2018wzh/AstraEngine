@@ -309,7 +309,15 @@ pub struct UiBindingManifest {
     pub system_page_bindings: BTreeMap<String, UiViewBinding>,
     pub surface_bindings: BTreeMap<String, UiViewBinding>,
     pub profile_bindings: BTreeMap<String, UiViewBinding>,
+    pub profile_scoped_bindings: BTreeMap<String, UiProfileScopedBindings>,
     pub hash: Hash256,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct UiProfileScopedBindings {
+    pub command_bindings: BTreeMap<String, UiViewBinding>,
+    pub system_page_bindings: BTreeMap<String, UiViewBinding>,
+    pub surface_bindings: BTreeMap<String, UiViewBinding>,
 }
 
 impl UiBindingManifest {
@@ -320,6 +328,7 @@ impl UiBindingManifest {
             &self.system_page_bindings,
             &self.surface_bindings,
             &self.profile_bindings,
+            &self.profile_scoped_bindings,
         ))
         .map_err(|error| {
             UiValidationError::invalid("ASTRA_UI_BINDING_ENCODE", error.to_string())
@@ -345,6 +354,19 @@ impl ValidateUi for UiBindingManifest {
             for (key, binding) in bindings {
                 validate_id("binding.key", key)?;
                 binding.validate()?;
+            }
+        }
+        for (profile, scoped) in &self.profile_scoped_bindings {
+            validate_id("binding.profile", profile)?;
+            for bindings in [
+                &scoped.command_bindings,
+                &scoped.system_page_bindings,
+                &scoped.surface_bindings,
+            ] {
+                for (key, binding) in bindings {
+                    validate_id("binding.key", key)?;
+                    binding.validate()?;
+                }
             }
         }
         if self.compute_hash()? != self.hash {

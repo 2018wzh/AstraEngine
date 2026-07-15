@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use astra_core::{Diagnostic, Hash128, Hash256, SourceRef};
-use astra_ui_core::{UiBindingManifest, UiBlueprintBundle};
+use astra_ui_core::{UiBindingManifest, UiBlueprintBundle, UiThemeManifest};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +49,7 @@ pub struct CompiledVnProject {
     pub ui_source_map: BTreeMap<String, SourceRef>,
     pub controller_ids: BTreeSet<String>,
     pub theme_ids: BTreeSet<String>,
+    pub themes: BTreeMap<String, UiThemeManifest>,
     pub component_ids: BTreeSet<String>,
 }
 

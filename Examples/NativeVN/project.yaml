@@ -49,6 +49,8 @@ nativevn:
     - Scripts
   ui_sources:
     - UI
+  ui_themes:
+    - Themes
   profiles: [classic, modern, advanced-vn]
   asset_roots: [Assets]
   display:

@@ -156,6 +156,11 @@ impl VirtualListState {
         self.visible_range().len()
     }
 
+    pub fn visible_leading_extent(&mut self, range: VisibleRange) -> f32 {
+        self.item_offset(range.start)
+            .map_or(0.0, |offset| (offset - self.scroll_offset).max(0.0))
+    }
+
     fn rebuild_prefix(&mut self) {
         if self.dirty_from >= self.extents.len() && self.prefix.len() == self.extents.len() + 1 {
             return;
@@ -243,6 +248,13 @@ impl VirtualGridState {
 
     pub fn instantiated_count(&mut self) -> usize {
         self.visible_items().len()
+    }
+
+    pub fn visible_leading_extent(&mut self, range: VisibleRange) -> f32 {
+        let row = range.start / self.columns;
+        self.list
+            .item_offset(row)
+            .map_or(0.0, |offset| (offset - self.list.scroll_offset).max(0.0))
     }
 }
 

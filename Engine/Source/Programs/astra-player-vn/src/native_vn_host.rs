@@ -26,7 +26,7 @@ use astra_plugin_abi::{
 use astra_ui_core::{
     UiBackend, UiBlueprintFrameModel, UiButtonState, UiFrameRequest, UiInputDispositionKind,
     UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets, UiSemanticRole, UiSemanticSnapshot,
-    UiThemeManifest, UiThemeValue, UiValidationError, UiValue, UiViewport,
+    UiThemeManifest, UiValidationError, UiValue, UiViewport,
 };
 use astra_ui_yakui::{ui_frame_to_scene_commands, AstraYakuiBackend, BlueprintYakuiRenderer};
 use astra_vn_core::{
@@ -42,8 +42,15 @@ use astra_vn_package::{
 };
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 use astra_vn_ui::{
-    model_to_ui_value, resolve_binding, VnUiBindingError, VnUiBindingRequest, VnUiModelContext,
+    model_to_ui_value, resolve_binding, SaveSlotViewModel, VnUiBindingError, VnUiBindingRequest,
+    VnUiModelContext,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VnUiHostRequest {
+    Save { slot_id: String },
+    Load { slot_id: String },
+}
 
 pub struct NativeVnHostCommandSource {
     host: ProductRuntimeHost,
@@ -79,11 +86,14 @@ pub struct NativeVnHostCommandSource {
     ui_blueprints: astra_ui_core::UiBlueprintBundle,
     ui_bindings: astra_ui_core::UiBindingManifest,
     ui_backend: AstraYakuiBackend<BlueprintYakuiRenderer>,
-    ui_theme: UiThemeManifest,
+    ui_themes: BTreeMap<String, UiThemeManifest>,
     ui_profile: String,
     ui_generation: u64,
     ui_input_sequence: u64,
     ui_draw: Vec<SceneCommand>,
+    ui_semantics: Option<UiSemanticSnapshot>,
+    ui_save_slots: BTreeMap<String, SaveSlotViewModel>,
+    pending_ui_host_request: Option<VnUiHostRequest>,
     shutdown_started: bool,
 }
 
@@ -322,7 +332,11 @@ impl NativeVnHostCommandSource {
         .map_err(stage_director_error)?;
         let runtime_provider = &binding.runtime_provider;
         let ui_profile = config.profile.clone();
-        let ui_theme = builtin_ui_theme(&ui_profile)?;
+        if compiled.themes.is_empty() {
+            return Err(NativeVnHostError::Package(
+                "ASTRA_PLAYER_UI_THEME_MISSING: compiled project has no packaged UI theme".into(),
+            ));
+        }
         let ui_renderer = BlueprintYakuiRenderer::new(compiled.ui_blueprints.clone())?;
         let ui_backend = AstraYakuiBackend::new(ui_renderer, compiled.project_hash)?;
         let schemas = RuntimeHostSchemaRegistry::from_descriptor(runtime_provider.descriptor());
@@ -430,11 +444,14 @@ impl NativeVnHostCommandSource {
             ui_blueprints: compiled.ui_blueprints,
             ui_bindings: compiled.ui_bindings,
             ui_backend,
-            ui_theme,
+            ui_themes: compiled.themes,
             ui_profile,
             ui_generation: 1,
             ui_input_sequence: 0,
             ui_draw: Vec::new(),
+            ui_semantics: None,
+            ui_save_slots: default_save_slots(),
+            pending_ui_host_request: None,
             shutdown_started: false,
         })
     }
@@ -502,6 +519,26 @@ impl NativeVnHostCommandSource {
                 Err(error)
             }
         }
+    }
+
+    pub fn take_ui_host_request(&mut self) -> Option<VnUiHostRequest> {
+        self.pending_ui_host_request.take()
+    }
+
+    pub fn ui_semantics(&self) -> Option<&UiSemanticSnapshot> {
+        self.ui_semantics.as_ref()
+    }
+
+    pub fn mark_save_committed(&mut self, slot_id: &str) -> Result<(), NativeVnHostError> {
+        let slot = self.ui_save_slots.get_mut(slot_id).ok_or_else(|| {
+            NativeVnHostError::Save(format!(
+                "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
+            ))
+        })?;
+        slot.occupied = true;
+        slot.can_load = true;
+        slot.migration_status = "current".to_string();
+        Ok(())
     }
 
     pub fn pending_wait(&self) -> Option<&astra_vn_core::VnWaitState> {
@@ -1149,6 +1186,36 @@ impl NativeVnHostCommandSource {
             "vn.replay_voice" => VnPlayerCommand::ReplayVoice {
                 voice: ui_string_argument(action, "voice_id")?.to_string(),
             },
+            "vn.request_save" | "vn.request_load" => {
+                let slot_id = ui_string_argument(action, "slot_id")?.to_string();
+                let slot = self.ui_save_slots.get(&slot_id).ok_or_else(|| {
+                    NativeVnHostError::Input(format!(
+                        "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
+                    ))
+                })?;
+                if action.action_id == "vn.request_save" && !slot.can_write {
+                    return Err(NativeVnHostError::Input(format!(
+                        "ASTRA_PLAYER_SAVE_SLOT_READ_ONLY: {slot_id}"
+                    )));
+                }
+                if action.action_id == "vn.request_load" && (!slot.occupied || !slot.can_load) {
+                    return Err(NativeVnHostError::Input(format!(
+                        "ASTRA_PLAYER_SAVE_SLOT_EMPTY: {slot_id}"
+                    )));
+                }
+                if self.pending_ui_host_request.is_some() {
+                    return Err(NativeVnHostError::Input(
+                        "ASTRA_PLAYER_UI_HOST_REQUEST_CONFLICT: a host request is already pending"
+                            .into(),
+                    ));
+                }
+                self.pending_ui_host_request = Some(if action.action_id == "vn.request_save" {
+                    VnUiHostRequest::Save { slot_id }
+                } else {
+                    VnUiHostRequest::Load { slot_id }
+                });
+                return self.present_current_scene(self.ui_draw.clone());
+            }
             unsupported => {
                 return Err(NativeVnHostError::Input(format!(
                     "ASTRA_PLAYER_UI_ACTION_UNSUPPORTED: action {unsupported} is not routed by the product host"
@@ -1198,10 +1265,11 @@ impl NativeVnHostCommandSource {
             .keys()
             .cloned()
             .collect::<Vec<_>>();
+        let save_slots = self.ui_save_slots.values().cloned().collect::<Vec<_>>();
         let context = VnUiModelContext {
             runtime: state,
             story: &self.story,
-            save_slots: &[],
+            save_slots: &save_slots,
             localization_keys: &localization_keys,
         };
         let (surface, system_page, model) = if state.pending_choice.is_some() {
@@ -1243,6 +1311,12 @@ impl NativeVnHostCommandSource {
                     binding.view_id
                 ))
             })?;
+        let theme = self.ui_themes.get(&binding.theme_id).ok_or_else(|| {
+            NativeVnHostError::Input(format!(
+                "ASTRA_PLAYER_UI_THEME_MISSING: binding references unpackaged theme {}",
+                binding.theme_id
+            ))
+        })?;
         let frame = UiBlueprintFrameModel {
             schema: "astra.ui_blueprint_frame_model.v1".to_string(),
             view_id: binding.view_id,
@@ -1273,7 +1347,7 @@ impl NativeVnHostCommandSource {
                 schema: "astra.ui_input_frame.v1".to_string(),
                 events,
             },
-            theme: self.ui_theme.clone(),
+            theme: theme.clone(),
             model_schema: view.model_schema.clone(),
             model_payload,
         };
@@ -1285,6 +1359,7 @@ impl NativeVnHostCommandSource {
             )));
         }
         let draw = ui_frame_to_scene_commands(&output.render)?;
+        self.ui_semantics = Some(output.semantics.clone());
         Ok((output, draw))
     }
 
@@ -1626,165 +1701,13 @@ impl NativeVnHostCommandSource {
         let mut next_layout_ids = BTreeSet::new();
         let mut text_lifecycle = Vec::new();
         let mut text_draw = Vec::new();
-        let mut panel_draw = Vec::new();
         let body_font_size = (self.height as f32 / 30.0).clamp(18.0, 34.0);
         for command in presentation {
             match command {
-                PresentationCommand::Dialogue { key, speaker, .. } => {
-                    let panel_height = (self.height / 3).max(64);
-                    panel_draw.push(SceneCommand::rect(
-                        "vn.dialogue.panel",
-                        24,
-                        self.height.saturating_sub(panel_height + 24),
-                        self.width.saturating_sub(48),
-                        panel_height,
-                        [18, 22, 34, 236],
-                    ));
-                    if let Some(speaker) = speaker {
-                        let localization_key = format!("speaker.{speaker}");
-                        append_text_layout(
-                            &mut next_text_resources,
-                            &self.text_provider,
-                            &self.font_families,
-                            &self.localization,
-                            &mut next_layout_ids,
-                            &mut text_lifecycle,
-                            &mut text_draw,
-                            "vn.dialogue.speaker",
-                            &localization_key,
-                            42,
-                            self.height.saturating_sub(panel_height + 12),
-                            self.width.saturating_sub(84),
-                            (body_font_size * 0.78).max(16.0),
-                            1,
-                            [120, 210, 255, 255],
-                        )?;
-                    }
-                    append_text_layout(
-                        &mut next_text_resources,
-                        &self.text_provider,
-                        &self.font_families,
-                        &self.localization,
-                        &mut next_layout_ids,
-                        &mut text_lifecycle,
-                        &mut text_draw,
-                        "vn.dialogue.body",
-                        key,
-                        42,
-                        self.height.saturating_sub(panel_height.saturating_sub(42)),
-                        self.width.saturating_sub(84),
-                        body_font_size,
-                        4,
-                        [245, 245, 248, 255],
-                    )?;
-                }
-                PresentationCommand::Choice { key, options } => {
-                    append_text_layout(
-                        &mut next_text_resources,
-                        &self.text_provider,
-                        &self.font_families,
-                        &self.localization,
-                        &mut next_layout_ids,
-                        &mut text_lifecycle,
-                        &mut text_draw,
-                        "vn.choice.prompt",
-                        key,
-                        42,
-                        32,
-                        self.width.saturating_sub(84),
-                        body_font_size,
-                        2,
-                        [245, 245, 248, 255],
-                    )?;
-                    let option_height = 64u32;
-                    let total_height = option_height.saturating_mul(options.len() as u32);
-                    let first_y = self.height.saturating_sub(total_height) / 2;
-                    for (index, option) in options.iter().enumerate() {
-                        let control_x = self.width / 6;
-                        let control_y = first_y.saturating_add(index as u32 * option_height);
-                        let control_width = self.width.saturating_mul(2) / 3;
-                        panel_draw.push(SceneCommand::rect(
-                            format!("vn.choice.{}", option.id),
-                            control_x,
-                            control_y,
-                            control_width,
-                            option_height.saturating_sub(4),
-                            [30, 48, 70, 245],
-                        ));
-                        append_text_layout(
-                            &mut next_text_resources,
-                            &self.text_provider,
-                            &self.font_families,
-                            &self.localization,
-                            &mut next_layout_ids,
-                            &mut text_lifecycle,
-                            &mut text_draw,
-                            &format!("vn.choice.option.{index}"),
-                            &option.key,
-                            control_x.saturating_add(12),
-                            control_y.saturating_add(10),
-                            control_width.saturating_sub(24),
-                            (body_font_size * 0.82).max(16.0),
-                            1,
-                            [255, 255, 255, 255],
-                        )?;
-                    }
-                }
-                PresentationCommand::SystemPage { page } => {
-                    panel_draw.push(SceneCommand::rect(
-                        "vn.system.panel",
-                        0,
-                        0,
-                        self.width,
-                        self.height,
-                        [12, 18, 30, 252],
-                    ));
-                    append_text_layout(
-                        &mut next_text_resources,
-                        &self.text_provider,
-                        &self.font_families,
-                        &self.localization,
-                        &mut next_layout_ids,
-                        &mut text_lifecycle,
-                        &mut text_draw,
-                        "vn.system.title",
-                        system_page_localization_key(*page)?,
-                        42,
-                        96,
-                        self.width.saturating_sub(84),
-                        (body_font_size * 1.25).min(42.0),
-                        1,
-                        [220, 230, 255, 255],
-                    )?;
-                }
-                PresentationCommand::SystemOption { option } => {
-                    let y = 180u32.saturating_add((next_layout_ids.len() as u32) * 64);
-                    panel_draw.push(SceneCommand::rect(
-                        format!("vn.system.option.{}", option.id),
-                        42,
-                        y,
-                        self.width.saturating_sub(84),
-                        54,
-                        [38, 58, 84, 255],
-                    ));
-                    append_text_layout(
-                        &mut next_text_resources,
-                        &self.text_provider,
-                        &self.font_families,
-                        &self.localization,
-                        &mut next_layout_ids,
-                        &mut text_lifecycle,
-                        &mut text_draw,
-                        &format!("vn.system.option_text.{}", option.id),
-                        &option.key,
-                        58,
-                        y.saturating_add(12),
-                        self.width.saturating_sub(116),
-                        (body_font_size * 0.72).max(16.0),
-                        1,
-                        [255; 4],
-                    )?;
-                }
+                PresentationCommand::Dialogue { .. }
+                | PresentationCommand::Choice { .. }
+                | PresentationCommand::SystemPage { .. }
+                | PresentationCommand::SystemOption { .. } => {}
                 PresentationCommand::Stage(_) => {}
                 PresentationCommand::Extension(extension) => {
                     return Err(NativeVnHostError::Asset(format!(
@@ -1830,7 +1753,6 @@ impl NativeVnHostCommandSource {
             [8, 10, 16, 255],
         ));
         lifecycle.extend(next_scene_draw.iter().cloned());
-        lifecycle.extend(panel_draw);
         lifecycle.extend(text_draw);
         let ui_draw = ui_frame.map_or_else(Vec::new, |(_, draw)| draw);
         lifecycle.extend(ui_draw.iter().cloned());
@@ -2565,45 +2487,6 @@ fn scene_texture_ids(draw: &[SceneCommand]) -> BTreeSet<String> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn append_text_layout(
-    owner: &mut TextRenderResourceOwner,
-    provider: &CosmicTextLayoutProvider,
-    font_families: &[String],
-    localization: &VnLocalizationTable,
-    layout_ids: &mut BTreeSet<String>,
-    lifecycle: &mut Vec<SceneCommand>,
-    draw: &mut Vec<SceneCommand>,
-    layout_id: &str,
-    localization_key: &str,
-    x: u32,
-    y: u32,
-    max_width: u32,
-    font_size: f32,
-    max_lines: u32,
-    rgba: [u8; 4],
-) -> Result<(), NativeVnHostError> {
-    let text = resolve_localized(localization, localization_key)?;
-    append_text_value(
-        owner,
-        provider,
-        font_families,
-        &localization.locale,
-        layout_ids,
-        lifecycle,
-        draw,
-        layout_id,
-        localization_key,
-        text,
-        x,
-        y,
-        max_width,
-        font_size,
-        max_lines,
-        rgba,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
 fn append_text_value(
     owner: &mut TextRenderResourceOwner,
     provider: &CosmicTextLayoutProvider,
@@ -2818,6 +2701,28 @@ fn system_page_localization_key(page: SystemPageKind) -> Result<&'static str, Na
     }
 }
 
+fn default_save_slots() -> BTreeMap<String, SaveSlotViewModel> {
+    (1..=24)
+        .map(|index| {
+            let slot_id = format!("slot.{index:02}");
+            (
+                slot_id.clone(),
+                SaveSlotViewModel {
+                    slot_id,
+                    occupied: false,
+                    thumbnail_asset: None,
+                    title_key: None,
+                    timestamp_text: None,
+                    playtime_text: None,
+                    can_write: true,
+                    can_load: false,
+                    migration_status: "empty".to_string(),
+                },
+            )
+        })
+        .collect()
+}
+
 fn system_page_binding_key(page: SystemPageKind) -> Result<&'static str, NativeVnHostError> {
     match page {
         SystemPageKind::Title => Ok("title"),
@@ -2863,50 +2768,6 @@ fn ui_scalar_argument(
             action.action_id
         ))),
     }
-}
-
-fn builtin_ui_theme(profile: &str) -> Result<UiThemeManifest, UiValidationError> {
-    let modern = profile == "modern";
-    let mut theme = UiThemeManifest {
-        schema: "astra.ui_theme_manifest.v1".to_string(),
-        id: if modern {
-            "astra.vn.theme.modern"
-        } else {
-            "astra.vn.theme.classic"
-        }
-        .to_string(),
-        parent: None,
-        tokens: BTreeMap::from([
-            (
-                "surface.clear".to_string(),
-                UiThemeValue::Color([0, 0, 0, 0]),
-            ),
-            (
-                "surface.dim".to_string(),
-                UiThemeValue::Color([8, 12, 22, 180]),
-            ),
-            (
-                "surface.system".to_string(),
-                UiThemeValue::Color(if modern {
-                    [18, 30, 50, 246]
-                } else {
-                    [12, 18, 30, 252]
-                }),
-            ),
-            (
-                "panel.message".to_string(),
-                UiThemeValue::Color(if modern {
-                    [24, 54, 82, 228]
-                } else {
-                    [18, 22, 34, 236]
-                }),
-            ),
-        ]),
-        high_contrast_tokens: BTreeMap::new(),
-        content_hash: Hash256::from_sha256(&[]),
-    };
-    theme.content_hash = theme.compute_hash()?;
-    Ok(theme)
 }
 
 fn resolve_localized<'a>(

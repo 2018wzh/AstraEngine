@@ -1390,7 +1390,46 @@ fn cook_nativevn_sections(
             source_text,
         ));
     }
-    let compiled = compile_astra_project(sources, Default::default())?;
+    let theme_paths = nativevn_theme_paths(project, project_dir)?;
+    if theme_paths.is_empty() {
+        return Err("nativevn project must declare at least one UI theme manifest".into());
+    }
+    let mut compile_options = CompileAstraProjectOptions::default();
+    for theme_path in theme_paths {
+        let text = fs::read_to_string(project_dir.join(&theme_path))?;
+        #[derive(serde::Deserialize)]
+        struct UiThemeSource {
+            schema: String,
+            id: String,
+            #[serde(default)]
+            parent: Option<String>,
+            tokens: std::collections::BTreeMap<String, astra_ui_core::UiThemeValue>,
+            #[serde(default)]
+            high_contrast_tokens: std::collections::BTreeMap<String, astra_ui_core::UiThemeValue>,
+        }
+        let source: UiThemeSource = match theme_path.extension().and_then(std::ffi::OsStr::to_str) {
+            Some("json") => serde_json::from_str(&text)?,
+            Some("yaml" | "yml") => serde_yaml::from_str(&text)?,
+            _ => {
+                return Err(format!(
+                    "ASTRA_UI_THEME_FORMAT: {} must use .json, .yaml, or .yml",
+                    normalize_relative_path(&theme_path)
+                )
+                .into())
+            }
+        };
+        let mut theme = astra_ui_core::UiThemeManifest {
+            schema: source.schema,
+            id: source.id,
+            parent: source.parent,
+            tokens: source.tokens,
+            high_contrast_tokens: source.high_contrast_tokens,
+            content_hash: astra_core::Hash256::from_sha256(&[]),
+        };
+        theme.content_hash = theme.compute_hash()?;
+        compile_options = compile_options.with_ui_theme(theme);
+    }
+    let compiled = compile_astra_project(sources, compile_options)?;
     let mut profiles = string_list(
         project
             .get("nativevn")
@@ -1962,6 +2001,54 @@ fn nativevn_source_paths(
     paths.sort_by_key(|path| normalize_relative_path(path));
     paths.dedup_by(|left, right| normalize_relative_path(left) == normalize_relative_path(right));
     Ok(paths)
+}
+
+fn nativevn_theme_paths(
+    project: &serde_yaml::Value,
+    project_dir: &std::path::Path,
+) -> Result<Vec<PathBuf>, CliError> {
+    let mut sources = string_list(
+        project
+            .get("nativevn")
+            .and_then(|nativevn| nativevn.get("ui_themes")),
+    );
+    if sources.is_empty() && project_dir.join("Themes").is_dir() {
+        sources.push("Themes".to_string());
+    }
+    let mut paths = Vec::new();
+    for source in sources {
+        let relative = validate_project_relative_path(&source)?;
+        let absolute = project_dir.join(&relative);
+        if absolute.is_dir() {
+            collect_ui_theme_sources(project_dir, &absolute, &mut paths)?;
+        } else {
+            paths.push(relative);
+        }
+    }
+    paths.sort_by_key(|path| normalize_relative_path(path));
+    paths.dedup_by(|left, right| normalize_relative_path(left) == normalize_relative_path(right));
+    Ok(paths)
+}
+
+fn collect_ui_theme_sources(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), CliError> {
+    let mut entries = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_ui_theme_sources(root, &path, out)?;
+        } else if matches!(
+            path.extension().and_then(|ext| ext.to_str()),
+            Some("json" | "yaml" | "yml")
+        ) {
+            out.push(path.strip_prefix(root)?.to_path_buf());
+        }
+    }
+    Ok(())
 }
 
 fn collect_astra_sources(

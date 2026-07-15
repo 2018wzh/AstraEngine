@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use astra_core::{DiagnosticSeverity, Hash256, SourceRef};
 use astra_ui_core::{
     UiBindingManifest, UiBindingRoot, UiBlueprintBundle, UiCapability, UiEventBinding,
-    UiNodeBlueprint, UiRepeatBinding, UiValue, UiValueExpr, UiViewBinding, UiViewBlueprint,
-    ValidateUi,
+    UiNodeBlueprint, UiProfileScopedBindings, UiRepeatBinding, UiThemeManifest, UiValue,
+    UiValueExpr, UiViewBinding, UiViewBlueprint, ValidateUi,
 };
 
 use crate::lower::{lower_sources_from_cst, ParsedLine};
@@ -13,6 +13,7 @@ use crate::{AstraSource, CompiledStory, CompiledVnProject, VnError};
 pub(crate) fn compile_project_ui(
     story: CompiledStory,
     sources: &[AstraSource],
+    ui_themes: Vec<UiThemeManifest>,
 ) -> Result<CompiledVnProject, VnError> {
     for source in sources {
         let parsed = crate::parse_astra_source(source.path.clone(), &source.text);
@@ -32,10 +33,20 @@ pub(crate) fn compile_project_ui(
     let mut system_page_bindings = BTreeMap::new();
     let mut surface_bindings = BTreeMap::new();
     let mut profile_bindings = BTreeMap::new();
+    let mut profile_scoped_bindings = BTreeMap::<String, UiProfileScopedBindings>::new();
     let mut source_map = BTreeMap::new();
     let mut controller_ids = BTreeSet::new();
     let mut theme_ids = BTreeSet::new();
     let mut component_ids = BTreeSet::new();
+    let mut themes = BTreeMap::new();
+    for theme in ui_themes {
+        theme.validate().map_err(ui_error)?;
+        if themes.insert(theme.id.clone(), theme).is_some() {
+            return Err(VnError::message(
+                "ASTRA_UI_THEME_DUPLICATE: theme id is already registered",
+            ));
+        }
+    }
     let mut index = 0usize;
     while index < lines.len() {
         let line = &lines[index];
@@ -63,12 +74,30 @@ pub(crate) fn compile_project_ui(
                 let binding = parse_binding(line)?;
                 controller_ids.insert(binding.controller_id.clone());
                 theme_ids.insert(binding.theme_id.clone());
-                let (kind, key) = binding_key(line)?;
-                let duplicate = match kind {
-                    "command" => command_bindings.insert(key, binding).is_some(),
-                    "system_page" => system_page_bindings.insert(key, binding).is_some(),
-                    "surface" => surface_bindings.insert(key, binding).is_some(),
-                    "profile" => profile_bindings.insert(key, binding).is_some(),
+                let (kind, key, profile) = binding_key(line)?;
+                let duplicate = match (profile, kind) {
+                    (Some(profile), "command") => profile_scoped_bindings
+                        .entry(profile)
+                        .or_default()
+                        .command_bindings
+                        .insert(key, binding)
+                        .is_some(),
+                    (Some(profile), "system_page") => profile_scoped_bindings
+                        .entry(profile)
+                        .or_default()
+                        .system_page_bindings
+                        .insert(key, binding)
+                        .is_some(),
+                    (Some(profile), "surface") => profile_scoped_bindings
+                        .entry(profile)
+                        .or_default()
+                        .surface_bindings
+                        .insert(key, binding)
+                        .is_some(),
+                    (None, "command") => command_bindings.insert(key, binding).is_some(),
+                    (None, "system_page") => system_page_bindings.insert(key, binding).is_some(),
+                    (None, "surface") => surface_bindings.insert(key, binding).is_some(),
+                    (None, "profile") => profile_bindings.insert(key, binding).is_some(),
                     _ => unreachable!(),
                 };
                 if duplicate {
@@ -107,11 +136,28 @@ pub(crate) fn compile_project_ui(
         theme_ids.insert(view.theme_id.clone());
         collect_component_ids(&view.root, &mut component_ids);
     }
+    if !views.is_empty() {
+        for theme_id in &theme_ids {
+            if !themes.contains_key(theme_id) {
+                return Err(VnError::diagnostic(
+                    "ASTRA_UI_THEME_MISSING",
+                    format!("UI references unregistered theme {theme_id}"),
+                ));
+            }
+        }
+    }
     for binding in command_bindings
         .values()
         .chain(system_page_bindings.values())
         .chain(surface_bindings.values())
         .chain(profile_bindings.values())
+        .chain(profile_scoped_bindings.values().flat_map(|scoped| {
+            scoped
+                .command_bindings
+                .values()
+                .chain(scoped.system_page_bindings.values())
+                .chain(scoped.surface_bindings.values())
+        }))
     {
         if !views.contains_key(&binding.view_id) {
             return Err(VnError::diagnostic(
@@ -136,11 +182,12 @@ pub(crate) fn compile_project_ui(
         system_page_bindings,
         surface_bindings,
         profile_bindings,
+        profile_scoped_bindings,
         hash: Hash256::from_sha256(&[]),
     };
     ui_bindings.hash = hash_bindings(&ui_bindings)?;
     ui_bindings.validate().map_err(ui_error)?;
-    let project_hash = hash_project(&story, &ui_blueprints, &ui_bindings)?;
+    let project_hash = hash_project(&story, &ui_blueprints, &ui_bindings, &themes)?;
     Ok(CompiledVnProject {
         schema: "astra.vn.compiled_project.v1".to_string(),
         project_hash,
@@ -150,6 +197,7 @@ pub(crate) fn compile_project_ui(
         ui_source_map: source_map,
         controller_ids,
         theme_ids,
+        themes,
         component_ids,
     })
 }
@@ -192,8 +240,176 @@ fn parse_view(lines: &[ParsedLine], index: usize) -> Result<(UiViewBlueprint, us
         required_capabilities: required_capabilities.into_iter().collect(),
         root,
     };
+    validate_view_bindings(&view)?;
     view.validate().map_err(ui_error)?;
     Ok((view, next))
+}
+
+fn validate_view_bindings(view: &UiViewBlueprint) -> Result<(), VnError> {
+    if !is_known_model_schema(&view.model_schema) {
+        return Err(VnError::diagnostic(
+            "ASTRA_UI_MODEL_SCHEMA_UNKNOWN",
+            format!(
+                "UI view references unknown model schema {}",
+                view.model_schema
+            ),
+        ));
+    }
+    validate_node_bindings(&view.root, &view.model_schema, None)
+}
+
+fn is_known_model_schema(schema: &str) -> bool {
+    matches!(
+        schema,
+        "astra.vn.ui_model.message.v1"
+            | "astra.vn.ui_model.choice.v1"
+            | "astra.vn.ui_model.title.v1"
+            | "astra.vn.ui_model.config.v1"
+            | "astra.vn.ui_model.save.v1"
+            | "astra.vn.ui_model.load.v1"
+            | "astra.vn.ui_model.backlog.v1"
+            | "astra.vn.ui_model.gallery.v1"
+            | "astra.vn.ui_model.replay.v1"
+            | "astra.vn.ui_model.voice_replay.v1"
+            | "astra.vn.ui_model.route_chart.v1"
+            | "astra.vn.ui_model.localization_preview.v1"
+            | "astra.vn.ui_model.text_input.v1"
+            | "astra.vn.ui_model.system.v1"
+    )
+}
+
+fn validate_node_bindings(
+    node: &UiNodeBlueprint,
+    model_schema: &str,
+    inherited_item_collection: Option<&str>,
+) -> Result<(), VnError> {
+    let item_collection = node
+        .repeat
+        .as_ref()
+        .and_then(|repeat| match &repeat.items {
+            UiValueExpr::Binding {
+                root: UiBindingRoot::Model,
+                path,
+            } => path.first().map(String::as_str),
+            _ => None,
+        })
+        .or(inherited_item_collection);
+    for expr in node
+        .properties
+        .values()
+        .chain(
+            node.events
+                .iter()
+                .flat_map(|event| event.arguments.values()),
+        )
+        .chain(node.repeat.iter().map(|repeat| &repeat.items))
+    {
+        validate_bound_expr(expr, model_schema, item_collection)?;
+    }
+    for child in &node.children {
+        validate_node_bindings(child, model_schema, item_collection)?;
+    }
+    Ok(())
+}
+
+fn validate_bound_expr(
+    expr: &UiValueExpr,
+    model_schema: &str,
+    item_collection: Option<&str>,
+) -> Result<(), VnError> {
+    let UiValueExpr::Binding { root, path } = expr else {
+        return Ok(());
+    };
+    let valid = match root {
+        UiBindingRoot::Model => model_path_allowed(model_schema, path),
+        UiBindingRoot::Item => item_collection
+            .is_some_and(|collection| item_path_allowed(model_schema, collection, path)),
+        UiBindingRoot::Event => path.as_slice() == ["value"] || path.as_slice() == ["node_id"],
+        UiBindingRoot::State => !path.is_empty(),
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(VnError::diagnostic(
+            "ASTRA_UI_TYPED_BINDING_PATH",
+            format!(
+                "binding path {:?} is not declared by model schema {model_schema}",
+                path
+            ),
+        ))
+    }
+}
+
+fn model_path_allowed(schema: &str, path: &[String]) -> bool {
+    let first = path.first().map(String::as_str);
+    match schema {
+        "astra.vn.ui_model.message.v1" => matches!(
+            first,
+            Some(
+                "command_id"
+                    | "text_key"
+                    | "speaker_key"
+                    | "voice_id"
+                    | "auto_enabled"
+                    | "skip_mode"
+            )
+        ),
+        "astra.vn.ui_model.choice.v1" => {
+            matches!(first, Some("choice_id" | "prompt_key" | "options"))
+        }
+        "astra.vn.ui_model.title.v1" => first == Some("can_continue"),
+        "astra.vn.ui_model.config.v1" => first == Some("values"),
+        "astra.vn.ui_model.save.v1" | "astra.vn.ui_model.load.v1" => first == Some("slots"),
+        "astra.vn.ui_model.backlog.v1" | "astra.vn.ui_model.voice_replay.v1" => {
+            first == Some("entries")
+        }
+        "astra.vn.ui_model.gallery.v1" | "astra.vn.ui_model.replay.v1" => first == Some("items"),
+        "astra.vn.ui_model.route_chart.v1" => first == Some("nodes"),
+        "astra.vn.ui_model.localization_preview.v1" => {
+            matches!(first, Some("locale" | "keys"))
+        }
+        "astra.vn.ui_model.text_input.v1" => first == Some("input"),
+        "astra.vn.ui_model.system.v1" => true,
+        _ => false,
+    }
+}
+
+fn item_path_allowed(schema: &str, collection: &str, path: &[String]) -> bool {
+    let first = path.first().map(String::as_str);
+    match (schema, collection) {
+        ("astra.vn.ui_model.choice.v1", "options") => {
+            matches!(first, Some("option_id" | "text_key" | "enabled"))
+        }
+        ("astra.vn.ui_model.save.v1" | "astra.vn.ui_model.load.v1", "slots") => matches!(
+            first,
+            Some(
+                "slot_id"
+                    | "occupied"
+                    | "thumbnail_asset"
+                    | "title_key"
+                    | "timestamp_text"
+                    | "playtime_text"
+                    | "can_write"
+                    | "can_load"
+                    | "migration_status"
+            )
+        ),
+        ("astra.vn.ui_model.backlog.v1" | "astra.vn.ui_model.voice_replay.v1", "entries") => {
+            matches!(
+                first,
+                Some("command_id" | "text_key" | "speaker_key" | "voice_id" | "can_jump" | "read")
+            )
+        }
+        ("astra.vn.ui_model.gallery.v1" | "astra.vn.ui_model.replay.v1", "items") => matches!(
+            first,
+            Some("item_id" | "label_key" | "thumbnail_asset" | "unlocked")
+        ),
+        ("astra.vn.ui_model.route_chart.v1", "nodes") => matches!(
+            first,
+            Some("node_id" | "label_key" | "terminal" | "reached" | "x_milli" | "y_milli")
+        ),
+        _ => false,
+    }
 }
 
 fn parse_node(lines: &[ParsedLine], index: usize) -> Result<(UiNodeBlueprint, usize), VnError> {
@@ -260,6 +476,7 @@ fn parse_node(lines: &[ParsedLine], index: usize) -> Result<(UiNodeBlueprint, us
             ));
         }
         if child.keyword == "on" {
+            validate_widget_event(&node.widget, child)?;
             node.events.push(parse_event(child)?);
             next += 1;
         } else {
@@ -310,21 +527,27 @@ fn parse_binding(line: &ParsedLine) -> Result<UiViewBinding, VnError> {
     })
 }
 
-fn binding_key(line: &ParsedLine) -> Result<(&'static str, String), VnError> {
+fn binding_key(line: &ParsedLine) -> Result<(&'static str, String, Option<String>), VnError> {
     let mut found = Vec::new();
-    for kind in ["command", "system_page", "surface", "profile"] {
+    for kind in ["command", "system_page", "surface"] {
         if let Some(value) = line.attr(kind) {
             found.push((kind, value.to_string()));
+        }
+    }
+    if found.is_empty() {
+        if let Some(profile) = line.attr("profile") {
+            return Ok(("profile", profile.to_string(), None));
         }
     }
     if found.len() != 1 {
         return Err(diagnostic(
             line,
             "ASTRA_UI_BINDING_KEY",
-            "ui_bind requires exactly one of command/system_page/surface/profile",
+            "ui_bind requires exactly one of command/system_page/surface, or a profile fallback",
         ));
     }
-    Ok(found.remove(0))
+    let (kind, key) = found.remove(0);
+    Ok((kind, key, line.attr("profile").map(str::to_string)))
 }
 
 fn parse_expr(value: &str, line: &ParsedLine) -> Result<UiValueExpr, VnError> {
@@ -425,6 +648,27 @@ fn validate_widget(line: &ParsedLine) -> Result<(), VnError> {
     }
 }
 
+fn validate_widget_event(widget: &str, line: &ParsedLine) -> Result<(), VnError> {
+    let event = line.args.first().map(String::as_str).unwrap_or_default();
+    let allowed: &[&str] = match widget {
+        "button" | "panel" | "semantic_region" | "image" | "nine_slice" => &["activate"],
+        "slider" | "toggle" | "select" => &["change", "activate"],
+        "text_input" => &["change", "submit", "activate"],
+        "modal" => &["dismiss"],
+        "canvas" => &["activate", "node_activate", "node_hover"],
+        _ => &[],
+    };
+    if allowed.contains(&event) {
+        Ok(())
+    } else {
+        Err(diagnostic(
+            line,
+            "ASTRA_UI_WIDGET_EVENT_UNSUPPORTED",
+            &format!("widget {widget} does not expose event {event}"),
+        ))
+    }
+}
+
 fn validate_action(
     line: &ParsedLine,
     action: &str,
@@ -454,6 +698,20 @@ fn validate_action(
             line,
             "ASTRA_UI_ACTION_ARGUMENT_MISSING",
             &format!("action {action} requires argument {missing}"),
+        ));
+    }
+    let optional: &[&str] = match action {
+        "ui.open_modal" => &["model"],
+        _ => &[],
+    };
+    if let Some(unexpected) = arguments
+        .keys()
+        .find(|name| !required.contains(&name.as_str()) && !optional.contains(&name.as_str()))
+    {
+        return Err(diagnostic(
+            line,
+            "ASTRA_UI_ACTION_ARGUMENT_UNKNOWN",
+            &format!("action {action} does not declare argument {unexpected}"),
         ));
     }
     Ok(())
@@ -513,11 +771,13 @@ fn hash_project(
     story: &CompiledStory,
     blueprints: &UiBlueprintBundle,
     bindings: &UiBindingManifest,
+    themes: &BTreeMap<String, UiThemeManifest>,
 ) -> Result<Hash256, VnError> {
     Ok(Hash256::from_sha256(&postcard::to_allocvec(&(
         story.story_hash,
         blueprints.hash,
         bindings.hash,
+        themes,
     ))?))
 }
 

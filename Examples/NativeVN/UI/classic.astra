@@ -10,6 +10,18 @@ ui_bind system_page:replay view:ui.system.replay controller:system.replay policy
 ui_bind system_page:voice_replay view:ui.system.voice_replay controller:system.voice policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.voice.classic
 ui_bind system_page:route_chart view:ui.system.route_chart controller:system.route policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.route.classic
 ui_bind system_page:localization_preview view:ui.system.localization controller:system.localization policy:astra.policy.standard theme:astra.vn.theme.classic #@id ui.bind.localization.classic
+ui_bind profile:modern surface:message view:ui.message.classic controller:message.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.message.modern
+ui_bind profile:modern surface:choice view:ui.choice.classic controller:choice.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.choice.modern
+ui_bind profile:modern system_page:title view:ui.system.title controller:system.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.title.modern
+ui_bind profile:modern system_page:save view:ui.system.save controller:system.save.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.save.modern
+ui_bind profile:modern system_page:load view:ui.system.load controller:system.load.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.load.modern
+ui_bind profile:modern system_page:config view:ui.system.config controller:system.config.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.config.modern
+ui_bind profile:modern system_page:backlog view:ui.system.backlog controller:system.backlog.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.backlog.modern
+ui_bind profile:modern system_page:gallery view:ui.system.gallery controller:system.gallery.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.gallery.modern
+ui_bind profile:modern system_page:replay view:ui.system.replay controller:system.replay.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.replay.modern
+ui_bind profile:modern system_page:voice_replay view:ui.system.voice_replay controller:system.voice.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.voice.modern
+ui_bind profile:modern system_page:route_chart view:ui.system.route_chart controller:system.route.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.route.modern
+ui_bind profile:modern system_page:localization_preview view:ui.system.localization controller:system.localization.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.localization.modern
 
 ui_view ui.message.classic model:astra.vn.ui_model.message.v1 theme:astra.vn.theme.classic #@id ui.message.classic
   screen id:root background:theme:surface.clear
@@ -30,7 +42,7 @@ ui_view ui.choice.classic model:astra.vn.ui_model.choice.v1 theme:astra.vn.theme
 ui_view ui.system.title model:astra.vn.ui_model.title.v1 theme:astra.vn.theme.classic #@id ui.system.title
   screen id:root background:theme:surface.system
     column id:content
-      text id:title value:$model.title
+      text id:title value:l10n:system.title
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system
 
@@ -84,17 +96,17 @@ ui_view ui.system.gallery model:astra.vn.ui_model.gallery.v1 theme:astra.vn.them
 ui_view ui.system.replay model:astra.vn.ui_model.replay.v1 theme:astra.vn.theme.classic #@id ui.system.replay
   screen id:root background:theme:surface.system
     column id:content
-      virtual_list id:items items:$model.items item_key:replay_id overscan:4 item_extent:64
-        button id:item min_height:60 value:$item.label
-          on activate -> vn.start_replay replay_id:$item.replay_id
+      virtual_list id:items items:$model.items item_key:item_id overscan:4 item_extent:64
+        button id:item min_height:60 value:$item.label_key
+          on activate -> vn.start_replay replay_id:$item.item_id
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system
 
 ui_view ui.system.voice_replay model:astra.vn.ui_model.voice_replay.v1 theme:astra.vn.theme.classic #@id ui.system.voice_replay
   screen id:root background:theme:surface.system
     column id:content
-      virtual_list id:items items:$model.items item_key:voice_id overscan:4 item_extent:64
-        button id:item min_height:60 value:$item.label
+      virtual_list id:items items:$model.entries item_key:command_id overscan:4 item_extent:64
+        button id:item min_height:60 value:$item.text_key
           on activate -> vn.replay_voice voice_id:$item.voice_id
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system
@@ -108,7 +120,7 @@ ui_view ui.system.route_chart model:astra.vn.ui_model.route_chart.v1 theme:astra
 ui_view ui.system.localization model:astra.vn.ui_model.localization_preview.v1 theme:astra.vn.theme.classic #@id ui.system.localization
   screen id:root background:theme:surface.system
     column id:content
-      text id:horizontal value:$model.horizontal_preview
-      text id:vertical value:$model.vertical_preview direction:vertical_right_to_left
+      text id:horizontal value:l10n:system.localization_preview
+      text id:vertical value:l10n:system.localization_preview direction:vertical_right_to_left
       button id:back min_height:56 text:l10n:system.back
         on activate -> vn.return_system

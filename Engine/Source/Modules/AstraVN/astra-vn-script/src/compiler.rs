@@ -160,11 +160,17 @@ fn source_ref_for_span(path: &str, text: &str, span: crate::TextSpan) -> SourceR
 #[derive(Debug, Clone, Default)]
 pub struct CompileAstraProjectOptions {
     extension_bindings: Vec<ExtensionCommandDescriptor>,
+    ui_themes: Vec<astra_ui_core::UiThemeManifest>,
 }
 
 impl CompileAstraProjectOptions {
     pub fn bind_extension(mut self, descriptor: ExtensionCommandDescriptor) -> Self {
         self.extension_bindings.push(descriptor);
+        self
+    }
+
+    pub fn with_ui_theme(mut self, theme: astra_ui_core::UiThemeManifest) -> Self {
+        self.ui_themes.push(theme);
         self
     }
 }
@@ -221,8 +227,9 @@ where
             "ASTRA_VN_STORY_SOURCE_MISSING: project requires at least one Story source",
         ));
     }
+    let ui_themes = options.ui_themes.clone();
     let story = compile_story_sources_with_options(story_sources, options)?;
-    crate::ui_compile::compile_project_ui(story, &ui_sources)
+    crate::ui_compile::compile_project_ui(story, &ui_sources, ui_themes)
 }
 
 #[derive(Default)]
