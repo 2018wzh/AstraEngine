@@ -1,0 +1,25 @@
+story system #@id story.system
+
+state title #@id state.system.title
+  scene title #@id scene.system.title
+    system_page kind:title policy:tsui.policy.ui #@id page.title
+
+state quick_panel #@id state.system.quick_panel
+  scene quick_panel #@id scene.system.quick_panel
+    system_page kind:quick_panel policy:tsui.policy.ui #@id page.quick_panel
+
+state save #@id state.system.save
+  scene save #@id scene.system.save
+    system_page kind:save policy:tsui.policy.ui #@id page.save
+
+state load #@id state.system.load
+  scene load #@id scene.system.load
+    system_page kind:load policy:tsui.policy.ui #@id page.load
+
+state config #@id state.system.config
+  scene config #@id scene.system.config
+    system_page kind:config policy:tsui.policy.ui #@id page.config
+
+state backlog #@id state.system.backlog
+  scene backlog #@id scene.system.backlog
+    system_page kind:backlog policy:tsui.policy.ui #@id page.backlog

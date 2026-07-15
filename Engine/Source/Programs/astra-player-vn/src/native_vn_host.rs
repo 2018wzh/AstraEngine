@@ -1264,6 +1264,9 @@ impl NativeVnHostCommandSource {
             .iter()
             .any(|item| item.disposition == UiInputDispositionKind::Consumed);
         if !consumed {
+            if let Some(action) = self.bubbled_ui_action(&fallback_events, output.semantics.hash) {
+                return self.dispatch_ui_action(&action);
+            }
             if let Some(command) = self.bubbled_ui_command(&fallback_events) {
                 return self.command(command);
             }
@@ -1338,6 +1341,48 @@ impl NativeVnHostCommandSource {
         None
     }
 
+    fn bubbled_ui_action(
+        &self,
+        events: &[UiInputEvent],
+        semantic_snapshot_hash: astra_core::Hash256,
+    ) -> Option<astra_ui_core::UiActionEnvelope> {
+        let state = self.runtime_state.as_ref()?;
+        if !state.system_stack.is_empty() || state.pending_choice.is_some() {
+            return None;
+        }
+        let event = events.iter().rev().find(|event| {
+            matches!(
+                event.kind,
+                UiInputEventKind::PointerButton {
+                    button: astra_ui_core::UiPointerButton::Secondary,
+                    state: UiButtonState::Pressed,
+                    ..
+                }
+            )
+        })?;
+        let page = if self.ui_profile == "modern" {
+            "quick_panel"
+        } else {
+            "save"
+        };
+        tracing::debug!(
+            event = "vn.ui.secondary_shortcut",
+            input_sequence = event.sequence,
+            semantic_target_id = "root",
+            page,
+            profile = %self.ui_profile,
+            "secondary pointer input resolved through the UI action router"
+        );
+        Some(astra_ui_core::UiActionEnvelope {
+            schema: "astra.ui_action_envelope.v1".into(),
+            input_sequence: event.sequence,
+            semantic_target_id: "root".into(),
+            action_id: "vn.open_system".into(),
+            arguments: BTreeMap::from([("page".into(), UiValue::String(page.into()))]),
+            semantic_snapshot_hash,
+        })
+    }
+
     fn dispatch_ui_action(
         &mut self,
         action: &astra_ui_core::UiActionEnvelope,
@@ -1398,10 +1443,29 @@ impl NativeVnHostCommandSource {
                     )
                 })?,
             },
+            "vn.set_auto" => VnUiAction::SetAuto {
+                enabled: ui_bool_argument(action, "enabled")?,
+            },
+            "vn.set_skip" => VnUiAction::SetSkip {
+                mode: match ui_string_argument(action, "mode")? {
+                    "none" => astra_vn_core::SkipMode::None,
+                    "read" => astra_vn_core::SkipMode::Read,
+                    "all" => astra_vn_core::SkipMode::All,
+                    _ => {
+                        return Err(NativeVnHostError::Input(
+                            "ASTRA_PLAYER_UI_ACTION_ARGUMENT: skip mode must be none, read or all"
+                                .into(),
+                        ))
+                    }
+                },
+            },
             "vn.replay_voice" => VnUiAction::ReplayVoice {
                 voice_id: ui_string_argument(action, "voice_id")?.to_string(),
             },
             "vn.request_save" => VnUiAction::RequestSave {
+                slot_id: ui_string_argument(action, "slot_id")?.to_string(),
+            },
+            "vn.request_save_confirmed" => VnUiAction::RequestSaveConfirmed {
                 slot_id: ui_string_argument(action, "slot_id")?.to_string(),
             },
             "vn.request_load" => VnUiAction::RequestLoad {
@@ -1464,10 +1528,15 @@ impl NativeVnHostCommandSource {
                 key,
                 value: ui_value_to_scalar(&value)?,
             },
+            VnUiAction::SetAuto { enabled } => VnPlayerCommand::SetAuto { enabled },
+            VnUiAction::SetSkip { mode } => VnPlayerCommand::SetSkip { mode },
             VnUiAction::ReplayVoice { voice_id } => {
                 VnPlayerCommand::ReplayVoice { voice: voice_id }
             }
             VnUiAction::RequestSave { slot_id } => {
+                return self.queue_ui_save_request(slot_id, true)
+            }
+            VnUiAction::RequestSaveConfirmed { slot_id } => {
                 return self.queue_ui_save_request(slot_id, true)
             }
             VnUiAction::RequestLoad { slot_id } => {
@@ -3480,6 +3549,7 @@ fn translate_text_command(
 fn system_page_localization_key(page: SystemPageKind) -> Result<&'static str, NativeVnHostError> {
     match page {
         SystemPageKind::Title => Ok("system.title"),
+        SystemPageKind::QuickPanel => Ok("system.quick_panel"),
         SystemPageKind::Save => Ok("system.save"),
         SystemPageKind::Load => Ok("system.load"),
         SystemPageKind::Config => Ok("system.config"),
@@ -3521,6 +3591,7 @@ fn default_save_slots() -> BTreeMap<String, SaveSlotViewModel> {
 fn system_page_binding_key(page: SystemPageKind) -> Result<&'static str, NativeVnHostError> {
     match page {
         SystemPageKind::Title => Ok("title"),
+        SystemPageKind::QuickPanel => Ok("quick_panel"),
         SystemPageKind::Save => Ok("save"),
         SystemPageKind::Load => Ok("load"),
         SystemPageKind::Config => Ok("config"),
@@ -3544,6 +3615,19 @@ fn ui_string_argument<'a>(
         Some(UiValue::String(value)) if !value.is_empty() => Ok(value),
         _ => Err(NativeVnHostError::Input(format!(
             "ASTRA_PLAYER_UI_ACTION_ARGUMENT: action {} requires string argument {name}",
+            action.action_id
+        ))),
+    }
+}
+
+fn ui_bool_argument(
+    action: &astra_ui_core::UiActionEnvelope,
+    name: &str,
+) -> Result<bool, NativeVnHostError> {
+    match action.arguments.get(name) {
+        Some(UiValue::Bool(value)) => Ok(*value),
+        _ => Err(NativeVnHostError::Input(format!(
+            "ASTRA_PLAYER_UI_ACTION_ARGUMENT: action {} requires boolean argument {name}",
             action.action_id
         ))),
     }

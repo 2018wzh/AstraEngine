@@ -12,7 +12,9 @@ use astra_plugin_abi::{
     ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
     PROVIDER_POLICY_SCHEMA,
 };
-use astra_ui_core::{UiButtonState, UiInputEventKind, UiInsets, UiViewport, ValidateUi};
+use astra_ui_core::{
+    UiButtonState, UiInputEventKind, UiInsets, UiPointerButton, UiViewport, ValidateUi,
+};
 use astra_vn_core::{compile_astra_project, AstraSource, CompileAstraProjectOptions, VnRunConfig};
 use astra_vn_package::{package_sections_for_project, PLAYER_LOCALE_CONFIG_SCHEMA};
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
@@ -78,6 +80,51 @@ fn advance(source: &mut NativeVnHostCommandSource) -> astra_player_core::PlayerH
             modifiers: 0,
         })
         .unwrap()
+}
+
+#[astra_headless_test::test]
+fn secondary_pointer_opens_system_ui_without_advancing_dialogue() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    text key:line.one speaker:hero #@id line.one
+
+story system #@id story.system
+state save #@id state.system.save
+  scene save #@id scene.system.save
+    system_page kind:save #@id page.save
+"#;
+    let mut source = source_for(story);
+    source.launch().expect("launch");
+    let wait_before = source
+        .pending_wait()
+        .expect("dialogue wait")
+        .command_id
+        .clone();
+
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerButton {
+            button: UiPointerButton::Secondary,
+            state: UiButtonState::Pressed,
+            position: astra_ui_core::UiPoint { x: 12.0, y: 12.0 },
+        })
+        .expect("secondary pointer dispatch");
+
+    assert_eq!(
+        source.pending_wait().expect("system page wait").command_id,
+        "page.save"
+    );
+    assert_ne!(source.pending_wait().unwrap().command_id, wait_before);
+    assert!(source
+        .ui_semantics()
+        .expect("system semantics")
+        .nodes
+        .iter()
+        .any(|node| node.id == "root/back"));
+
+    source.release_resources().expect("release");
+    source.shutdown().expect("shutdown");
 }
 
 fn product_package_with_request(
@@ -147,7 +194,9 @@ fn product_package_with_request(
                 "line.one":"First production line.",
                 "line.two":"Second production line.",
                 "line.after":"Line after wait.",
-                "speaker.hero":"Hero"
+                "speaker.hero":"Hero",
+                "system.back":"Back",
+                "system.save":"Save"
             }
         }"#
         .to_vec(),

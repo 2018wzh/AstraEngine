@@ -2,6 +2,8 @@
 
 本页定义 TsuiNoSora modernization sample 的脱敏 report schema。字段约束转换器、VFS 插件和 release gate。当前仓库已有 `Tools/TsuiNoSora/tsuinosora_tools.py` 的公开 synthetic/local helper slice，能生成 inventory、direct-readable extract preflight、Director `imap`/`mmap` resource map preflight、受限 `XFIR` RIFF/RIFX exact wrapper reader、Director `KEY*`/`CAS*` cast map preflight、Director `Lctx`/`Lnam`/`Lscr` Lingo map preflight、受限 RIFF/RIFX readable chunk report、cast source map report、script source map report、route graph report、visual reference、visual screenshot capture/comparison、Asset analysis、conversion、modern profile、mount policy、stage3 gate、local gate 和 NativeVN package input report；公开 synthetic patch Web bundle 已能读取脱敏 mount policy 并输出 `player.patch_direct_read` route check。完整商业 Director/Shockwave cast parser/source-map reader、完整 payload 转换和真实本地 patch direct-read 仍未完成。
 
+产品项目生成不再接受 route metadata 或 synthetic story。唯一入口是 ignored 私有 `native_story_ir.json`，schema 为 `tsuinosora.native_story_ir.v1`；生成器同时输出脱敏 `tsuinosora.full_conversion_coverage_report.v1`。coverage report 只记录 source kind、command/media kind、hash、计数、coverage 状态和 diagnostic，不记录正文、脚本、资源 payload 或本地路径。任一 source、handler、command、route、terminal、choice、media 或 wait 未转换时，NativeVN project 写出必须阻断。
+
 ## Redaction Rules
 
 所有 report 必须遵守：

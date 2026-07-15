@@ -1,0 +1,23 @@
+{
+  "schema": "astra.vn.localization_table.v1",
+  "locale": "ja",
+  "strings": {
+    "system.title": "終ノ空",
+    "system.continue": "続きから",
+    "system.back": "戻る",
+    "system.quick_panel": "クイックパネル",
+    "system.save": "セーブ",
+    "system.load": "ロード",
+    "system.backlog": "バックログ",
+    "system.auto": "オート",
+    "system.skip_read": "既読スキップ",
+    "system.config": "設定",
+    "system.config.master_volume": "音量",
+    "system.config.text_speed": "文字速度",
+    "system.config.auto_delay": "オート待ち時間",
+    "system.config.high_contrast": "ハイコントラスト",
+    "ui.save.confirm_overwrite": "このセーブを上書きしますか？",
+    "ui.common.cancel": "キャンセル",
+    "ui.common.confirm": "確認"
+  }
+}

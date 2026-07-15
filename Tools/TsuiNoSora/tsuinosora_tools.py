@@ -22,6 +22,9 @@ import zlib
 from collections import deque
 from pathlib import Path
 
+from projectorrays_json import loads_projectorrays_json
+from native_story_ir import convert_native_story_ir
+
 
 IMAGE_EXTS = {".png"}
 AUDIO_EXTS = {".wav", ".ogg", ".flac", ".mp3"}
@@ -7176,7 +7179,7 @@ def build_projectorrays_full_dump_report(work_root: Path | str, dump_roots: list
             elif ext == ".json":
                 json_chunk_count += 1
                 try:
-                    value = _read_json(path)
+                    value = loads_projectorrays_json(path.read_text(encoding="utf-8"))
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     diagnostics.append(
                         {
@@ -7600,7 +7603,20 @@ def _convert_projectorrays_binary_chunk(
             }
         )
         return None
-    metadata_shape = _projectorrays_metadata_shape_from_text(metadata_text)
+    try:
+        metadata_value = loads_projectorrays_json(metadata_text)
+    except json.JSONDecodeError:
+        diagnostics.append(
+            {
+                "code": "TSUI_PROJECTORRAYS_CONVERT_JSON_INVALID",
+                "source_alias": alias,
+                "source_relative_path": source_relative_path,
+                "chunk_fourcc": chunk_fourcc,
+                "message": "ProjectorRays paired metadata JSON could not be parsed",
+            }
+        )
+        return None
+    metadata_shape = _projectorrays_metadata_shape(metadata_value)
     if metadata_shape is None:
         diagnostics.append(
             {
@@ -9274,30 +9290,13 @@ def _read_projectorrays_lscr_metadata(path: Path) -> dict | None:
     except UnicodeDecodeError:
         return None
     try:
-        value = json.loads(text)
+        value = loads_projectorrays_json(text)
     except json.JSONDecodeError:
-        return _recover_projectorrays_lscr_numeric_metadata(text)
+        return None
     if isinstance(value, dict):
         value["_metadata_source"] = "projectorrays_json"
         return value
     return None
-
-
-def _recover_projectorrays_lscr_numeric_metadata(text: str) -> dict | None:
-    values = {}
-    for field in ("scriptNumber", "castID"):
-        matches = re.findall(rf'"{field}"\s*:\s*(-?\d+)', text)
-        if len(matches) != 1:
-            return None
-        values[field] = int(matches[0])
-    if values["scriptNumber"] < 0 or values["castID"] <= 0:
-        return None
-    return {
-        "scriptNumber": values["scriptNumber"],
-        "castID": values["castID"],
-        "_metadata_source": "projectorrays_json_numeric_recovery",
-    }
-
 
 def _build_projectorrays_script_source_index(root: Path) -> dict[tuple[tuple[str, ...], int, str], list[dict]]:
     index: dict[tuple[tuple[str, ...], int, str], list[dict]] = {}
@@ -9610,7 +9609,7 @@ def _projectorrays_director_version_for_scope(root: Path, scope: tuple[str, ...]
         return None
     for path in sorted(chunk_dir.glob("DRCF-*.json")):
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
+            value = loads_projectorrays_json(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
             continue
         if isinstance(value, dict) and isinstance(value.get("directorVersion"), int):
@@ -9826,26 +9825,14 @@ def _projectorrays_native_audio_path(alias: str, source_relative_path: str, exte
 
 def _projectorrays_metadata_shape_from_text(text: str) -> dict | None:
     try:
-        value = json.loads(text)
+        value = loads_projectorrays_json(text)
     except json.JSONDecodeError:
-        return _malformed_projectorrays_json_shape(text)
+        return None
     if not isinstance(value, dict):
         return None
     shape = _projectorrays_metadata_shape(value)
     shape["parse_status"] = "valid_json"
     return shape
-
-
-def _malformed_projectorrays_json_shape(text: str) -> dict:
-    return {
-        "parse_status": "malformed_json",
-        "byte_size": len(text.encode("utf-8")),
-        "quoted_key_count": len(re.findall(r'"[A-Za-z0-9_.-]+"\s*:', text)),
-        "number_token_count": len(re.findall(r"(?<![A-Za-z0-9_.-])-?\d+(?![A-Za-z0-9_.-])", text)),
-        "object_marker_count": text.count("{"),
-        "array_marker_count": text.count("["),
-    }
-
 
 def _projectorrays_metadata_shape(value: dict) -> dict:
     counts = _json_shape_counts(value)
@@ -11066,9 +11053,14 @@ def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | Non
     work_root = Path(work_root)
     reports_root = work_root / "reports"
     nativevn_root = work_root / "nativevn"
-    routes = routes or _routes_from_conversion_report(reports_root / "conversion_report.json")
     diagnostics = []
-    route_diagnostics = _nativevn_route_diagnostics(routes) if routes else []
+    if routes is not None:
+        diagnostics.append(
+            {
+                "code": "TSUI_NATIVEVN_EXPLICIT_ROUTE_INPUT_RETIRED",
+                "message": "NativeVN story and route coverage must come from the typed private story IR",
+            }
+        )
 
     conversion_report = _read_json(reports_root / "conversion_report.json")
     asset_analysis = _read_json(reports_root / "asset_analysis.json")
@@ -11086,44 +11078,43 @@ def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | Non
                 "message": "NativeVN package input requires a passing asset analysis report",
             }
         )
-    if not routes:
+    for generated_dir in ("Scripts", "Localization", "Automation"):
+        path = nativevn_root / generated_dir
+        if path.exists():
+            shutil.rmtree(path)
+    story_report = convert_native_story_ir(work_root / "private" / "native_story_ir.json", nativevn_root)
+    _write_json(reports_root / "full_conversion_coverage_report.json", story_report)
+    if story_report.get("status") != "pass":
         diagnostics.append(
             {
-                "code": "TSUI_NATIVEVN_ROUTES_MISSING",
-                "message": "NativeVN package input requires at least one covered route",
+                "code": "TSUI_NATIVEVN_FULL_STORY_CONVERSION_BLOCKED",
+                "message": "NativeVN package input requires complete typed story conversion coverage",
             }
         )
-    diagnostics.extend(route_diagnostics)
 
-    scripts_root = nativevn_root / "Scripts"
     section_root = nativevn_root / "PackageSections"
-    scenario_root = nativevn_root / "scenarios"
     section_root.mkdir(parents=True, exist_ok=True)
 
     section_specs = _write_nativevn_section_inputs(reports_root, section_root)
-    scenario_refs = []
     wrote_story_inputs = not diagnostics
     if wrote_story_inputs:
-        scripts_root.mkdir(parents=True, exist_ok=True)
-        scenario_root.mkdir(parents=True, exist_ok=True)
         _copy_native_assets_to_nativevn(work_root, nativevn_root, conversion_report)
-        scenario_refs = _write_nativevn_scenarios(scenario_root, routes)
-        (scripts_root / "main.astra").write_text(_render_nativevn_story(routes), encoding="utf-8")
+        _copy_tsuinosora_ui_template(nativevn_root)
         (nativevn_root / "project.yaml").write_text(
-            _render_nativevn_project(section_specs, scenario_refs),
+            _render_nativevn_project(section_specs, []),
             encoding="utf-8",
         )
-    files = _nativevn_package_input_files(nativevn_root, section_specs, scenario_refs)
+    files = _nativevn_package_input_files(nativevn_root, section_specs, [])
 
     report = {
         "schema": "tsuinosora.nativevn_package_input_report.v1",
         "status": "blocked" if diagnostics or _report_has_path_leak(section_specs) or _report_has_path_leak(files) else "pass",
         "project_root": "local_work_root/nativevn",
         "project": "nativevn/project.yaml" if wrote_story_inputs else "",
-        "story": "nativevn/Scripts/main.astra" if wrote_story_inputs else "",
+        "story_source_count": len([item for item in story_report.get("generated_files", []) if str(item.get("relative_path", "")).startswith("Scripts/")]),
         "section_count": len(section_specs),
-        "scenario_count": len(scenario_refs),
-        "route_count": len(routes),
+        "physical_input_sequence_count": len([item for item in story_report.get("generated_files", []) if str(item.get("relative_path", "")).startswith("Automation/")]),
+        "route_count": story_report.get("counts", {}).get("routes", 0),
         "files": files,
         "diagnostics": diagnostics,
         "redaction": {
@@ -11168,6 +11159,30 @@ def _copy_native_assets_to_nativevn(work_root: Path, nativevn_root: Path, conver
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         _write_asset_sidecar(target, native_path, resource)
+
+
+def _copy_tsuinosora_ui_template(nativevn_root: Path) -> None:
+    template_root = Path(__file__).resolve().parents[2] / "Examples" / "TsuiNoSora" / "ProjectTemplate"
+    if not template_root.is_dir():
+        raise FileNotFoundError("TsuiNoSora UI project template is missing")
+    for source in sorted(path for path in template_root.rglob("*") if path.is_file()):
+        relative = source.relative_to(template_root)
+        target = nativevn_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    localization_root = nativevn_root / "Localization"
+    source_locale_path = localization_root / "ja.json"
+    if not source_locale_path.is_file():
+        raise FileNotFoundError("typed story conversion did not produce the Japanese localization table")
+    source_locale = _read_json(source_locale_path)
+    system_ja = _read_json(localization_root / "ja.system.json")
+    collisions = set(source_locale.get("strings", {})) & set(system_ja.get("strings", {}))
+    if collisions:
+        raise ValueError("system localization keys collide with converted story keys")
+    source_locale["strings"].update(system_ja["strings"])
+    _write_json(source_locale_path, source_locale)
+    for locale in ("zh-Hans", "en"):
+        shutil.copy2(localization_root / f"{locale}.system.json", localization_root / f"{locale}.json")
 
 
 def _write_asset_sidecar(asset_path: Path, native_path: str, resource: dict) -> None:
@@ -11305,11 +11320,23 @@ def _nativevn_route_diagnostics(routes: list[dict]) -> list[dict]:
 def _nativevn_package_input_files(nativevn_root: Path, section_specs: list[dict], scenario_refs: list[str]) -> list[dict]:
     records = []
     project_path = nativevn_root / "project.yaml"
-    story_path = nativevn_root / "Scripts" / "main.astra"
     if project_path.exists():
         records.append(_nativevn_file_record(project_path, "project", "nativevn/project.yaml"))
-    if story_path.exists():
-        records.append(_nativevn_file_record(story_path, "story", "nativevn/Scripts/main.astra"))
+    source_roles = {
+        "Scripts": "story",
+        "UI": "ui_blueprint",
+        "Themes": "ui_theme",
+        "Controllers": "ui_controller",
+        "Localization": "localization",
+        "Automation": "physical_input_sequence",
+        "Profiles": "profile_manifest",
+    }
+    for directory, role in source_roles.items():
+        root = nativevn_root / directory
+        if root.exists():
+            for path in sorted(item for item in root.rglob("*") if item.is_file()):
+                relative = path.relative_to(nativevn_root).as_posix()
+                records.append(_nativevn_file_record(path, role, f"nativevn/{relative}"))
     for spec in section_specs:
         record = _nativevn_file_record(nativevn_root / spec["path"], "package_section", f"nativevn/{spec['path']}")
         record["section_id"] = spec["id"]
@@ -12546,6 +12573,14 @@ def _write_nativevn_section_inputs(reports_root: Path, section_root: Path) -> li
             [],
         ),
         (
+            "tsuinosora.full_conversion_coverage",
+            "tsuinosora.full_conversion_coverage_report.v1",
+            "full_conversion_coverage_report.json",
+            "full_conversion_coverage_report.json",
+            [],
+            [],
+        ),
+        (
             "tsuinosora.mount_policy",
             "tsuinosora.mount_policy.v1",
             "mount_policy.tsuinosora-internal-game.json",
@@ -12633,196 +12668,37 @@ def _is_forbidden_tsuinosora_package_section_key(key: str, path: list[str]) -> b
     }
 
 
-def _write_nativevn_scenarios(scenario_root: Path, routes: list[dict]) -> list[str]:
-    refs = []
-    for target, platforms in [
-        ("tsuinosora-internal-game", ["headless", "windows", "web"]),
-        ("tsuinosora-patch-game", ["headless", "windows", "web"]),
-    ]:
-        for profile in ["classic", "modern"]:
-            for platform in platforms:
-                for route in routes:
-                    route_id = _safe_identifier(route.get("route_id", "classic.main"))
-                    file_name = f"{target}.{profile}.{platform}.{route_id}.json"
-                    scenario = _nativevn_scenario(target, profile, platform, route)
-                    _write_json(scenario_root / file_name, scenario)
-                    refs.append(f"scenarios/{file_name}")
-    return refs
-
-
-def _nativevn_scenario(target: str, profile: str, platform: str, route: dict) -> dict:
-    route_id = route.get("route_id", "classic.main")
-    terminal = route.get("terminal", f"ending.{_safe_identifier(route_id)}")
-    choices = _route_choice_ids(route, route_id)
-    actions = [
-        {"launch": {}},
-        {"player_input": {"kind": "complete_wait", "value": "movie.opening.end"}},
-        {"player_input": {"kind": "complete_wait", "value": "voice.opening.end"}},
-        {"player_input": {"kind": "advance"}},
-    ]
-    for index, choice in enumerate(choices):
-        actions.append({"player_input": {"kind": "choose", "value": choice}})
-        if index + 1 < len(choices):
-            actions.append({"player_input": {"kind": "advance"}})
-    actions.extend(
-        [
-            {"player_input": {"kind": "complete_wait", "value": "voice.opening.end"}},
-            {"player_input": {"kind": "advance"}},
-            {"player_input": {"kind": "replay_voice", "value": "voice.narrator.0001"}},
-            {"player_input": {"kind": "open_system", "value": "route_chart"}},
-            {"player_input": {"kind": "save", "slot": "slot.demo"}},
-            {"player_input": {"kind": "load", "slot": "slot.demo"}},
-            {"replay_from_start": {}},
-        ]
-    )
-    scenario = {
-        "schema": "astra.scenario.v1",
-        "stage": "stage3-astra-vn",
-        "target": target,
-        "profile": profile,
-        "platform": platform,
-        "generated_route_id": route_id,
-        "seed": 42,
-        "mount_aliases": {
-            "original": "original_install_root",
-            "remake": "remake_install_root.optional",
-        },
-        "actions": actions,
-        "assertions": [
-            {
-                "coverage": {
-                    "routes": [terminal],
-                    "backlog_keys": ["tsui.prologue", f"tsui.{_safe_identifier(route_id)}.line"],
-                    "read_state": ["line.tsui.prologue", f"line.{_safe_identifier(route_id)}.line"],
-                    "voice_replay": ["voice.narrator.0001"],
-                }
-            },
-            {"replay_hash_match": True},
-            {"no_blocking_diagnostics": True},
-        ],
-    }
-    mount_assets, _ = _route_mount_assets(target, platform, route, route_id)
-    if mount_assets:
-        scenario["mount_assets"] = mount_assets
-    return scenario
-
-
-def _render_nativevn_story(routes: list[dict]) -> str:
-    covered_routes = routes or [{"route_id": "classic.main", "terminal": "ending.classic_main"}]
-    lines = [
-        "story main #@id story.main",
-        "",
-        "state prologue #@id state.prologue",
-        "  scene opening #@id scene.opening",
-        "    movie layer:video.opening asset:native-assets/movies/opening.webm end:wait fallback:native-assets/backgrounds/opening_fallback.png #@id movie.opening",
-        "    voice asset:native-assets/voice/narrator0001.ogg sync:text #@id voice.opening",
-        "    text key:tsui.prologue speaker:narrator #@id line.tsui.prologue",
-        "    choice key:tsui.route #@id choice.tsui.route",
-    ]
-    for route in covered_routes:
-        route_id = _safe_identifier(route.get("route_id", "classic.main"))
-        choices = _route_choice_ids(route, str(route.get("route_id", "classic.main")))
-        first_target = _route_choice_state(route_id, 1) if len(choices) > 1 else f"route_{route_id}"
-        lines.append(f"      option key:{choices[0]} -> {first_target} #@id choice.{route_id}.001")
-    for route in covered_routes:
-        route_id = _safe_identifier(route.get("route_id", "classic.main"))
-        choices = _route_choice_ids(route, str(route.get("route_id", "classic.main")))
-        for index, choice in enumerate(choices[1:], start=1):
-            state = _route_choice_state(route_id, index)
-            next_state = (
-                _route_choice_state(route_id, index + 1)
-                if index + 1 < len(choices)
-                else f"route_{route_id}"
-            )
-            choice_id = _safe_identifier(choice)
-            lines.extend(
-                [
-                    "",
-                    f"state {state} #@id state.{state}",
-                    f"  scene {state} #@id scene.{state}",
-                    f"    text key:tsui.{route_id}.choice_{index:03d} speaker:narrator #@id line.{route_id}.choice_{index:03d}",
-                    f"    choice key:tsui.{route_id}.choice_{index:03d} #@id choice.{route_id}.{index + 1:03d}",
-                    f"      option key:{choice} -> {next_state} #@id choice.{route_id}.{index + 1:03d}.{choice_id}",
-                ]
-            )
-        state = f"route_{route_id}"
-        terminal = route.get("terminal", f"ending.{route_id}")
-        lines.extend(
-            [
-                "",
-                f"state {state} #@id state.{state}",
-                f"  scene {state} #@id scene.{state}",
-                f"    bgm asset:native-assets/bgm/{route_id}.ogg loop:true #@id bgm.{route_id}",
-                f"    se asset:native-assets/se/page.ogg #@id se.{route_id}",
-                f"    wait fence:voice.opening.end #@id wait.{route_id}.route_pause",
-                f"    text key:tsui.{route_id}.line speaker:narrator voice:voice.narrator.0001 #@id line.{route_id}.line",
-                f"    jump {terminal} #@id jump.{route_id}",
-            ]
-        )
-    lines.extend(_system_story_lines())
-    return "\n".join(lines) + "\n"
-
-
-def _route_choice_ids(route: dict, route_id: str) -> list[str]:
-    choices = []
-    for raw_choice in route.get("choices", []) or []:
-        choice = str(raw_choice).strip()
-        if choice and _is_safe_symbol(choice) and choice not in choices:
-            choices.append(choice)
-    return choices or [f"choice.{_safe_identifier(route_id)}"]
-
-
-def _route_choice_state(route_id: str, index: int) -> str:
-    return f"route_{route_id}_choice_{index:03d}"
-
-
-def _system_story_lines() -> list[str]:
-    lines = ["", "story system #@id story.system"]
-    for page in [
-        "title",
-        "save",
-        "load",
-        "config",
-        "gallery",
-        "replay",
-        "voice_replay",
-        "route_chart",
-        "backlog",
-        "localization_preview",
-    ]:
-        lines.extend(
-            [
-                "",
-                f"state {page} #@id state.system.{page}",
-                f"  scene {page} #@id scene.system.{page}",
-                f"    system_page kind:{page} policy:astra.policy.standard #@id page.{page}",
-            ]
-        )
-    return lines
-
-
 def _render_nativevn_project(section_specs: list[dict], scenario_refs: list[str]) -> str:
     lines = [
-        "schema: astra.project.v1",
+        "schema: astra.target_manifest.v2",
         "id: com.example.tsuinosora.stage3",
         "targets:",
         "  - id: tsuinosora-internal-game",
         "    kind: game",
         "    crate: astra-vn",
         "    runtime_provider: native_vn",
-        "    default_profile: classic",
+        "    default_profile: modern",
+        "    ui_provider: astra.ui.yakui",
         "    platforms: [headless, windows, web]",
         "    packaged: true",
         "  - id: tsuinosora-patch-game",
         "    kind: game",
         "    crate: astra-vn",
         "    runtime_provider: native_vn",
-        "    default_profile: classic",
+        "    default_profile: modern",
+        "    ui_provider: astra.ui.yakui",
         "    platforms: [headless, windows, web]",
         "    packaged: true",
         "nativevn:",
         "  sources:",
         "    - Scripts",
+        "  default_locale: ja",
+        "  ui_sources:",
+        "    - UI",
+        "  ui_themes:",
+        "    - Themes",
+        "  ui_controllers:",
+        "    - Controllers",
         "  profiles: [classic, modern]",
         "  display:",
         "    original_resolution:",
@@ -12861,6 +12737,29 @@ def _render_nativevn_project(section_specs: list[dict], scenario_refs: list[str]
                 lines.append("    targets: [" + ", ".join(spec["targets"]) + "]")
             if spec.get("profiles"):
                 lines.append("    profiles: [" + ", ".join(spec["profiles"]) + "]")
+    else:
+        lines.append("package_sections:")
+    for locale in ("ja", "zh-Hans", "en"):
+        lines.extend(
+            [
+                f"  - id: vn.localization.{locale}",
+                "    schema: astra.vn.localization_table.v1",
+                f"    path: Localization/{locale}.json",
+                "    codec: raw",
+                "    targets: [tsuinosora-internal-game, tsuinosora-patch-game]",
+                "    profiles: [classic, modern]",
+            ]
+        )
+    lines.extend(
+        [
+            "  - id: tsuinosora.ui_profiles",
+            "    schema: tsuinosora.ui_profile_manifest.v1",
+            "    path: Profiles/ui_profiles.json",
+            "    codec: raw",
+            "    targets: [tsuinosora-internal-game, tsuinosora-patch-game]",
+            "    profiles: [classic, modern]",
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 

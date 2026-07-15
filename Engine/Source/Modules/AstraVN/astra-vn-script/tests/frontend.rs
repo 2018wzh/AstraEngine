@@ -109,6 +109,134 @@ fn select_items_are_a_typed_widget_property_not_a_repeat_binding() {
     assert!(select.properties.contains_key("items"));
 }
 
+#[astra_headless_test::test]
+fn quick_panel_system_page_and_actions_compile_as_typed_ui_contracts() {
+    let story = concat!(
+        "story system #@id story.system\n",
+        "state quick #@id state.quick\n",
+        "  scene quick #@id scene.quick\n",
+        "    system_page kind:quick_panel #@id page.quick\n",
+    );
+    let ui = concat!(
+        "ui_bind system_page:quick_panel view:ui.quick controller:quick policy:standard ",
+        "theme:theme.classic #@id bind.quick\n",
+        "ui_view ui.quick model:astra.vn.ui_model.quick_panel.v1 ",
+        "theme:theme.classic #@id ui.quick\n",
+        "  screen id:root\n",
+        "    toggle id:auto checked:$model.auto_enabled\n",
+        "      on change -> vn.set_auto enabled:$event.value\n",
+        "    button id:skip\n",
+        "      on activate -> vn.set_skip mode:\"read\"\n",
+    );
+    let controller = r#"
+astra.ui.controller.register("quick", {
+  schema = "astra.vn.ui_controller.v1",
+  view = "ui.quick",
+  model_schema = "astra.vn.ui_model.quick_panel.v1",
+  snapshot = "session",
+}, {
+  on_action = function(_, _, action)
+    return { astra.ui.effect.forward(action) }
+  end,
+})
+"#;
+
+    let compiled = compile_astra_project(
+        [
+            astra_vn_script::AstraSource::story("system.astra", story),
+            astra_vn_script::AstraSource::ui("quick.astra", ui),
+        ],
+        CompileAstraProjectOptions::default()
+            .with_ui_theme(test_theme())
+            .with_ui_controller_source("quick", controller),
+    )
+    .expect("quick panel contracts should compile");
+
+    assert!(compiled.ui_blueprints.views.contains_key("ui.quick"));
+    assert_eq!(
+        compiled.ui_bindings.system_page_bindings["quick_panel"].view_id,
+        "ui.quick"
+    );
+}
+
+#[astra_headless_test::test]
+fn tsuinosora_classic_and_modern_ui_template_compiles_as_one_project() {
+    const CLASSIC_UI: &str =
+        include_str!("../../../../../../Examples/TsuiNoSora/ProjectTemplate/UI/classic.astra");
+    const MODERN_UI: &str =
+        include_str!("../../../../../../Examples/TsuiNoSora/ProjectTemplate/UI/modern.astra");
+    const SYSTEM_STORY: &str =
+        include_str!("../../../../../../Examples/TsuiNoSora/ProjectTemplate/Scripts/system.astra");
+    const CONTROLLERS: &str = include_str!(
+        "../../../../../../Examples/TsuiNoSora/ProjectTemplate/Controllers/tsui_ui.luau"
+    );
+    const CLASSIC_THEME: &str =
+        include_str!("../../../../../../Examples/TsuiNoSora/ProjectTemplate/Themes/classic.json");
+    const MODERN_THEME: &str =
+        include_str!("../../../../../../Examples/TsuiNoSora/ProjectTemplate/Themes/modern.json");
+
+    let mut options = CompileAstraProjectOptions::default()
+        .with_ui_theme(theme_from_source(CLASSIC_THEME))
+        .with_ui_theme(theme_from_source(MODERN_THEME));
+    for id in [
+        "tsui.message.classic",
+        "tsui.choice.classic",
+        "tsui.system.title.classic",
+        "tsui.system.save.classic",
+        "tsui.system.load.classic",
+        "tsui.message.modern",
+        "tsui.choice.modern",
+        "tsui.system.title.modern",
+        "tsui.system.quick_panel.modern",
+        "tsui.system.save.modern",
+        "tsui.system.load.modern",
+        "tsui.system.config.modern",
+        "tsui.system.backlog.modern",
+    ] {
+        options = options.with_ui_controller_source(id, CONTROLLERS);
+    }
+
+    let compiled = compile_astra_project(
+        [
+            astra_vn_script::AstraSource::story("system.astra", SYSTEM_STORY),
+            astra_vn_script::AstraSource::ui("classic.astra", CLASSIC_UI),
+            astra_vn_script::AstraSource::ui("modern.astra", MODERN_UI),
+        ],
+        options,
+    )
+    .expect("the checked-in TsuiNoSora UI template must compile");
+
+    assert_eq!(compiled.ui_blueprints.views.len(), 14);
+    assert!(compiled
+        .ui_blueprints
+        .views
+        .contains_key("ui.tsui.modern.quick_panel"));
+}
+
+fn theme_from_source(source: &str) -> UiThemeManifest {
+    let value: serde_json::Value = serde_json::from_str(source).expect("theme JSON");
+    let object = value.as_object().expect("theme object");
+    let mut theme = UiThemeManifest {
+        schema: object["schema"].as_str().unwrap().to_string(),
+        id: object["id"].as_str().unwrap().to_string(),
+        parent: object
+            .get("parent")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        tokens: serde_json::from_value(object["tokens"].clone()).expect("theme tokens"),
+        high_contrast_tokens: serde_json::from_value(
+            object
+                .get("high_contrast_tokens")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({})),
+        )
+        .expect("high contrast tokens"),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash().expect("theme hash");
+    theme
+}
+
 fn test_theme() -> UiThemeManifest {
     let mut theme = UiThemeManifest {
         schema: "astra.ui_theme_manifest.v1".into(),

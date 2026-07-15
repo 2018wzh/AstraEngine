@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.full_conversion_coverage_report.v1.json",
+  "title": "TsuiNoSora full conversion coverage report",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "status", "counts", "command_kind_counts", "diagnostics", "redaction"],
+  "properties": {
+    "schema": { "const": "tsuinosora.full_conversion_coverage_report.v1" },
+    "status": { "enum": ["pass", "blocked"] },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_resources", "script_handlers", "commands", "routes", "terminals", "choices", "media_commands", "wait_commands"],
+      "properties": {
+        "source_resources": { "type": "integer", "minimum": 0 },
+        "script_handlers": { "type": "integer", "minimum": 0 },
+        "commands": { "type": "integer", "minimum": 0 },
+        "routes": { "type": "integer", "minimum": 0 },
+        "terminals": { "type": "integer", "minimum": 0 },
+        "choices": { "type": "integer", "minimum": 0 },
+        "media_commands": { "type": "integer", "minimum": 0 },
+        "wait_commands": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "command_kind_counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^TSUI_[A-Z0-9_]+$" },
+          "message": { "type": "string" }
+        }
+      }
+    },
+    "generated_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relative_path", "sha256", "byte_size"],
+        "properties": {
+          "relative_path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "byte_size": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

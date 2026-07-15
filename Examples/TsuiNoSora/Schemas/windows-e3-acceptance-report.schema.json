@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.windows_e3_acceptance_report.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "run_identity", "checks", "diagnostics"],
+  "properties": {
+    "schema": { "const": "tsuinosora.windows_e3_acceptance_report.v1" },
+    "status": { "enum": ["pass", "blocked"] },
+    "run_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["build_hash", "package_hash", "profile", "session_hash"],
+      "properties": {
+        "build_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "package_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "profile": { "enum": ["classic", "modern"] },
+        "session_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": { "enum": ["pass", "blocked", "not_run"] },
+      "required": ["physical_input", "visible_state_change", "audio_meter", "route_evidence", "save_restore", "system_ui", "visual_review"]
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^TSUI_[A-Z0-9_]+$" },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,60 @@
+ui_bind profile:classic surface:message view:ui.tsui.classic.message controller:tsui.message.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.message
+ui_bind profile:classic surface:choice view:ui.tsui.classic.choice controller:tsui.choice.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.choice
+ui_bind profile:classic system_page:title view:ui.tsui.classic.title controller:tsui.system.title.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.title
+ui_bind profile:classic system_page:save view:ui.tsui.classic.save controller:tsui.system.save.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.save
+ui_bind profile:classic system_page:load view:ui.tsui.classic.load controller:tsui.system.load.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.load
+
+ui_view ui.tsui.classic.message model:astra.vn.ui_model.message.v1 theme:tsui.theme.classic #@id ui.tsui.classic.message
+  screen id:root background:theme:surface.sky
+    image id:frame asset:theme:frame.classic min_width:800 min_height:600
+    panel id:advance fill:true
+      on activate -> vn.advance
+    row id:dialogue anchor:bottom min_height:104 fill_width:true background:theme:surface.paper
+      panel id:speaker min_width:128 background:theme:surface.speaker
+        text id:speaker_text value:$model.speaker_key font_size:20 max_lines:1
+      text id:body value:$model.text_key font_size:22 max_lines:4
+
+ui_view ui.tsui.classic.choice model:astra.vn.ui_model.choice.v1 theme:tsui.theme.classic #@id ui.tsui.classic.choice
+  screen id:root background:theme:surface.sky
+    image id:frame asset:theme:frame.classic min_width:800 min_height:600
+    column id:choices anchor:center background:theme:surface.paper min_width:560
+      text id:prompt value:$model.prompt_key font_size:22
+      virtual_list id:options items:$model.options item_key:option_id overscan:2 item_extent:48
+        button id:option min_height:44 value:$item.text_key
+          on activate -> vn.choose option_id:$item.option_id
+
+ui_view ui.tsui.classic.title model:astra.vn.ui_model.title.v1 theme:tsui.theme.classic #@id ui.tsui.classic.title
+  screen id:root background:theme:surface.sky
+    image id:frame asset:theme:frame.classic min_width:800 min_height:600
+    column id:menu anchor:center background:theme:surface.paper min_width:320
+      text id:title value:l10n:system.title font_size:28
+      button id:continue text:l10n:system.continue enabled:$model.can_continue min_height:48
+        on activate -> vn.return_system
+      button id:load text:l10n:system.load min_height:48
+        on activate -> vn.open_system page:"load"
+
+ui_view ui.tsui.classic.save model:astra.vn.ui_model.save.v1 theme:tsui.theme.classic #@id ui.tsui.classic.save
+  screen id:root background:theme:surface.sky
+    column id:paper anchor:center background:theme:surface.paper min_width:640
+      text id:title value:l10n:system.save font_size:24
+      virtual_list id:slots items:$model.slots item_key:slot_id overscan:3 item_extent:42
+        row id:slot min_height:40
+          text id:number value:$item.slot_id min_width:100
+          text id:timestamp value:$item.timestamp_text
+          button id:write value:$item.slot_id enabled:$item.can_write min_width:120
+            on activate -> vn.request_save slot_id:$item.slot_id
+      button id:back text:l10n:system.back min_height:44
+        on activate -> vn.return_system
+
+ui_view ui.tsui.classic.load model:astra.vn.ui_model.load.v1 theme:tsui.theme.classic #@id ui.tsui.classic.load
+  screen id:root background:theme:surface.sky
+    column id:paper anchor:center background:theme:surface.paper min_width:640
+      text id:title value:l10n:system.load font_size:24
+      virtual_list id:slots items:$model.slots item_key:slot_id overscan:3 item_extent:42
+        row id:slot min_height:40
+          text id:number value:$item.slot_id min_width:100
+          text id:timestamp value:$item.timestamp_text
+          button id:read value:$item.slot_id enabled:$item.can_load min_width:120
+            on activate -> vn.request_load slot_id:$item.slot_id
+      button id:back text:l10n:system.back min_height:44
+        on activate -> vn.return_system

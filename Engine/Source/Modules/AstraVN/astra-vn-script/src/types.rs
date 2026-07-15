@@ -220,6 +220,7 @@ pub enum MutationOp {
 #[serde(rename_all = "snake_case")]
 pub enum SystemPageKind {
     Title,
+    QuickPanel,
     Save,
     Load,
     Config,
@@ -236,6 +237,7 @@ impl SystemPageKind {
     pub fn parse(value: &str) -> Self {
         match value {
             "title" => Self::Title,
+            "quick_panel" => Self::QuickPanel,
             "save" => Self::Save,
             "load" => Self::Load,
             "config" => Self::Config,

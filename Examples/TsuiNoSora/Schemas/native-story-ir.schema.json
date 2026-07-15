@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.native_story_ir.v1.json",
+  "title": "TsuiNoSora private NativeVN story conversion IR",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "source_locale", "sources", "handlers", "stories", "routes", "coverage"],
+  "properties": {
+    "schema": { "const": "tsuinosora.native_story_ir.v1" },
+    "source_locale": { "const": "ja" },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "relative_path", "sha256", "kind"],
+        "properties": {
+          "source_id": { "$ref": "#/$defs/symbol" },
+          "relative_path": { "$ref": "#/$defs/relativePath" },
+          "sha256": { "$ref": "#/$defs/sha256" },
+          "kind": { "$ref": "#/$defs/symbol" }
+        }
+      }
+    },
+    "handlers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["handler_id", "source_id", "status"],
+        "properties": {
+          "handler_id": { "$ref": "#/$defs/symbol" },
+          "source_id": { "$ref": "#/$defs/symbol" },
+          "status": { "const": "converted" }
+        }
+      }
+    },
+    "stories": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/story" }
+    },
+    "routes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/route" }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "source_count", "handler_count", "command_count", "route_count"],
+      "properties": {
+        "status": { "const": "complete" },
+        "source_count": { "type": "integer", "minimum": 1 },
+        "handler_count": { "type": "integer", "minimum": 1 },
+        "command_count": { "type": "integer", "minimum": 1 },
+        "route_count": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "symbol": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "relativePath": { "type": "string", "pattern": "^(?![A-Za-z]:|/|.*(?:^|/)\\.\\.(?:/|$)).+$" },
+    "symbolList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/symbol" }
+    },
+    "story": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["story_id", "states"],
+      "properties": {
+        "story_id": { "$ref": "#/$defs/symbol" },
+        "states": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["state_id", "scenes"],
+            "properties": {
+              "state_id": { "$ref": "#/$defs/symbol" },
+              "scenes": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["scene_id", "commands"],
+                  "properties": {
+                    "scene_id": { "$ref": "#/$defs/symbol" },
+                    "commands": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": { "$ref": "#/$defs/command" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "required": ["command_id", "handler_id", "kind"],
+      "properties": {
+        "command_id": { "$ref": "#/$defs/symbol" },
+        "handler_id": { "$ref": "#/$defs/symbol" },
+        "kind": {
+          "enum": ["background", "show", "hide", "bgm", "se", "voice", "movie", "transition", "text", "choice", "wait", "mutate", "jump", "call", "return"]
+        }
+      }
+    },
+    "route": {
+      "type": "object",
+      "required": ["route_id", "terminal_id", "command_ids", "choice_ids", "input_events"],
+      "properties": {
+        "route_id": { "$ref": "#/$defs/symbol" },
+        "terminal_id": { "$ref": "#/$defs/symbol" },
+        "command_ids": { "$ref": "#/$defs/symbolList" },
+        "choice_ids": { "$ref": "#/$defs/symbolList" },
+        "input_events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tick", "event"],
+            "properties": {
+              "tick": { "type": "integer", "minimum": 0 },
+              "event": {
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": {
+                    "enum": ["resume", "focus", "keyboard", "ime_preedit", "ime_commit", "pointer_move", "pointer_button", "wheel", "touch", "gamepad_connection", "gamepad_input", "advance_ticks", "await", "checkpoint", "shutdown"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

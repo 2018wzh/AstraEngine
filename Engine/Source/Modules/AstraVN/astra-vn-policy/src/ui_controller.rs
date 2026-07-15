@@ -531,6 +531,46 @@ astra.ui.controller.register("controller.test", {
     }
 
     #[astra_headless_test::test]
+    fn tsuinosora_modern_save_controller_requires_overwrite_confirmation() {
+        let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
+        host.register_source(include_str!(
+            "../../../../../../Examples/TsuiNoSora/ProjectTemplate/Controllers/tsui_ui.luau"
+        ))
+        .expect("register TsuiNoSora controllers");
+        let slot = UiValue::Map(BTreeMap::from([
+            ("slot_id".into(), UiValue::String("slot.01".into())),
+            ("occupied".into(), UiValue::Bool(true)),
+        ]));
+        let model = UiValue::Map(BTreeMap::from([(
+            "slots".into(),
+            UiValue::List(vec![slot]),
+        )]));
+
+        let effects = host
+            .invoke_action(
+                "tsui.system.save.modern",
+                "astra.vn.ui_model.save.v1",
+                &model,
+                &VnUiAction::RequestSave {
+                    slot_id: "slot.01".into(),
+                },
+                &mut VnUiSessionState::default(),
+            )
+            .expect("invoke save controller");
+
+        assert_eq!(
+            effects,
+            vec![VnUiControllerEffect::OpenModal {
+                view_id: "ui.tsui.modern.save_confirm".into(),
+                model: UiValue::Map(BTreeMap::from([(
+                    "slot_id".into(),
+                    UiValue::String("slot.01".into()),
+                )])),
+            }]
+        );
+    }
+
+    #[astra_headless_test::test]
     fn snapshot_none_controller_cannot_write_session_state() {
         let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
         host.register_source(

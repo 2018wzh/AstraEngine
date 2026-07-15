@@ -35,14 +35,195 @@ from tsuinosora_tools import (  # noqa: E402
     run_local_gate,
     write_demo_slice_config_template,
     write_nativevn_package_input,
-    _render_nativevn_story,
     _normalize_visual_capture_image,
     _resolve_visual_capture_launch_command,
     _visual_capture_launch_environment,
 )
+from projectorrays_json import loads_projectorrays_json  # noqa: E402
+from native_story_ir import convert_native_story_ir  # noqa: E402
+
+
+def native_story_ir_fixture():
+    commands = [
+        {
+            "command_id": "line.opening",
+            "handler_id": "handler.start",
+            "kind": "text",
+            "text": "private opening text",
+            "speaker_id": "narrator",
+        },
+        {
+            "command_id": "choice.route",
+            "handler_id": "handler.start",
+            "kind": "choice",
+            "prompt": "private prompt",
+            "options": [
+                {
+                    "option_id": "choice.route.good",
+                    "text": "private choice",
+                    "target": "ending.good",
+                }
+            ],
+        },
+    ]
+    return {
+        "schema": "tsuinosora.native_story_ir.v1",
+        "source_locale": "ja",
+        "sources": [
+            {
+                "source_id": "source.movie.main",
+                "relative_path": "data/main.dir",
+                "sha256": "a" * 64,
+                "kind": "director_movie",
+            }
+        ],
+        "handlers": [
+            {
+                "handler_id": "handler.start",
+                "source_id": "source.movie.main",
+                "status": "converted",
+            }
+        ],
+        "stories": [
+            {
+                "story_id": "main",
+                "states": [
+                    {"state_id": "opening", "scenes": [{"scene_id": "opening", "commands": commands}]},
+                    {
+                        "state_id": "ending.good",
+                        "scenes": [
+                            {
+                                "scene_id": "ending.good",
+                                "commands": [
+                                    {
+                                        "command_id": "line.ending.good",
+                                        "handler_id": "handler.start",
+                                        "kind": "text",
+                                        "text": "private ending text",
+                                    },
+                                    {
+                                        "command_id": "jump.ending.good",
+                                        "handler_id": "handler.start",
+                                        "kind": "jump",
+                                        "target": "ending.good",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            }
+        ],
+        "routes": [
+            {
+                "route_id": "route.good",
+                "terminal_id": "ending.good",
+                "choice_ids": ["choice.route.good"],
+                "command_ids": ["line.opening", "choice.route", "line.ending.good"],
+                "input_events": [
+                    {"tick": 0, "event": {"type": "resume"}},
+                    {"tick": 1, "event": {"type": "focus", "focused": True}},
+                    {
+                        "tick": 2,
+                        "event": {
+                            "type": "keyboard",
+                            "physical_key": "Enter",
+                            "logical_key": "Enter",
+                            "state": "pressed",
+                            "repeat": False,
+                        },
+                    },
+                    {"tick": 3, "event": {"type": "shutdown"}},
+                ],
+            }
+        ],
+        "coverage": {
+            "status": "complete",
+            "source_count": 1,
+            "handler_count": 1,
+            "command_count": 4,
+            "route_count": 1,
+        },
+    }
+
+
+def write_native_story_ir_fixture(work: Path) -> Path:
+    path = work / "private" / "native_story_ir.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(native_story_ir_fixture(), ensure_ascii=False), encoding="utf-8")
+    return path
 
 
 class AssetAnalysisTests(unittest.TestCase):
+    def test_native_story_ir_generates_split_story_localization_and_physical_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ir = root / "native_story_ir.json"
+            output = root / "output"
+            ir.write_text(json.dumps(native_story_ir_fixture(), ensure_ascii=False), encoding="utf-8")
+
+            report = convert_native_story_ir(ir, output)
+            encoded_report = json.dumps(report, ensure_ascii=False, sort_keys=True)
+            story = (output / "Scripts" / "main.astra").read_text(encoding="utf-8")
+            localization = json.loads((output / "Localization" / "ja.json").read_text(encoding="utf-8"))
+            input_lines = (output / "Automation" / "route.good.jsonl").read_text(encoding="utf-8").splitlines()
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["counts"]["commands"], 4)
+            self.assertIn("text key:story.line.opening", story)
+            self.assertIn("option key:story.choice.route.option.choice.route.good", story)
+            self.assertEqual(localization["strings"]["story.line.opening"], "private opening text")
+            self.assertTrue(all(json.loads(line)["schema"] == "astra.user_input_sequence.v1" for line in input_lines))
+            self.assertNotIn("private opening text", encoded_report)
+            self.assertNotIn(tmp.replace("\\", "/"), encoded_report.replace("\\", "/"))
+
+    def test_native_story_ir_blocks_unknown_command_without_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = native_story_ir_fixture()
+            payload["stories"][0]["states"][0]["scenes"][0]["commands"][0]["kind"] = "unknown"
+            ir = root / "native_story_ir.json"
+            output = root / "output"
+            ir.write_text(json.dumps(payload), encoding="utf-8")
+
+            report = convert_native_story_ir(ir, output)
+
+            self.assertEqual(report["status"], "blocked")
+            self.assertIn("TSUI_NATIVE_STORY_COMMAND_INVALID", {item["code"] for item in report["diagnostics"]})
+            self.assertFalse((output / "Scripts").exists())
+
+    def test_native_story_ir_rejects_semantic_shortcut_automation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = native_story_ir_fixture()
+            payload["routes"][0]["input_events"] = [
+                {"tick": 0, "event": {"type": "choose", "option_id": "choice.route.good"}},
+                {"tick": 1, "event": {"type": "shutdown"}},
+            ]
+            ir = root / "native_story_ir.json"
+            output = root / "output"
+            ir.write_text(json.dumps(payload), encoding="utf-8")
+
+            report = convert_native_story_ir(ir, output)
+
+            self.assertEqual(report["status"], "blocked")
+            self.assertIn("TSUI_NATIVE_STORY_ROUTE_INPUT_INVALID", {item["code"] for item in report["diagnostics"]})
+
+    def test_projectorrays_json_codec_accepts_only_proven_extended_escapes(self):
+        value = loads_projectorrays_json(r'{"vertical":"line\vbreak","byte":"\x81\x40","slash":"\\v"}')
+
+        self.assertEqual(value["vertical"], "line\vbreak")
+        self.assertEqual(value["byte"], "\u0081@")
+        self.assertEqual(value["slash"], "\\v")
+
+    def test_projectorrays_json_codec_rejects_malformed_hex_escape(self):
+        with self.assertRaises(json.JSONDecodeError):
+            loads_projectorrays_json(r'{"bad":"\xG0"}')
+
+    def test_projectorrays_json_codec_does_not_repair_unrelated_invalid_json(self):
+        with self.assertRaises(json.JSONDecodeError):
+            loads_projectorrays_json('{"missing": true,}')
+
     def test_demo_config_template_uses_repo_relative_private_layout(self):
         template = demo_slice_config_template()
         encoded = json.dumps(template, sort_keys=True)
@@ -251,7 +432,7 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertNotIn("scriptSrcText", native_text)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
-    def test_projectorrays_converter_accepts_malformed_json_as_redacted_metadata_shape(self):
+    def test_projectorrays_converter_blocks_unproven_json_escape(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             dump = root / "full-dump"
@@ -265,15 +446,14 @@ class AssetAnalysisTests(unittest.TestCase):
             )
 
             conversion = convert_projectorrays_resources(work, [("data", dump)])
-            native = work / "native-assets" / "projectorrays" / "data" / "CASt-1.json"
-            native_text = native.read_text(encoding="utf-8")
             encoded = json.dumps(conversion, sort_keys=True)
 
-            self.assertEqual(conversion["status"], "pass")
-            self.assertEqual(conversion["converted_count"], 1)
-            self.assertIn('"parse_status": "malformed_json"', native_text)
-            self.assertNotIn("private", native_text)
-            self.assertNotIn("bad\\escape", native_text)
+            self.assertEqual(conversion["status"], "blocked")
+            self.assertEqual(conversion["converted_count"], 0)
+            self.assertIn(
+                "TSUI_PROJECTORRAYS_CONVERT_JSON_INVALID",
+                {diagnostic["code"] for diagnostic in conversion["diagnostics"]},
+            )
             self.assertNotIn("private", encoded)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
@@ -1085,7 +1265,7 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertNotIn("private parent script text", encoded)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
-    def test_projectorrays_converter_recovers_lscr_numeric_metadata_from_malformed_json(self):
+    def test_projectorrays_converter_blocks_malformed_lscr_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             dump = root / "full-dump"
@@ -1107,12 +1287,12 @@ class AssetAnalysisTests(unittest.TestCase):
             conversion = convert_projectorrays_resources(work, [("data", dump)])
             encoded = json.dumps(conversion, sort_keys=True)
 
-            self.assertEqual(conversion["status"], "pass")
-            self.assertEqual(conversion["converted_count"], 1)
-            resource = conversion["resources"][0]
-            self.assertEqual(resource["cast_member_id"], 42)
-            self.assertEqual(resource["script_number"], 7)
-            self.assertEqual(resource["metadata_source"], "projectorrays_json_numeric_recovery")
+            self.assertEqual(conversion["status"], "blocked")
+            self.assertEqual(conversion["converted_count"], 0)
+            self.assertIn(
+                "TSUI_PROJECTORRAYS_CONVERT_LSCR_METADATA_INVALID",
+                {diagnostic["code"] for diagnostic in conversion["diagnostics"]},
+            )
             self.assertNotIn("private\\qscript", encoded)
             self.assertNotIn("private script text", encoded)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
@@ -4549,6 +4729,7 @@ class AssetAnalysisTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            write_native_story_ir_fixture(work)
             report = run_local_gate(
                 original_root=original,
                 work_root=work,
@@ -4629,6 +4810,7 @@ class AssetAnalysisTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            write_native_story_ir_fixture(work)
             report = run_demo_slice_gate(config)
             encoded = json.dumps(report, sort_keys=True)
             nativevn_report = json.loads(
@@ -4688,6 +4870,7 @@ class AssetAnalysisTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            write_native_story_ir_fixture(work)
             report = run_demo_slice_gate(config)
             encoded = json.dumps(report, sort_keys=True)
 
@@ -4761,6 +4944,7 @@ class AssetAnalysisTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            write_native_story_ir_fixture(work)
             report = run_demo_slice_gate(config)
             asset_report = json.loads((work / "reports" / "asset_analysis.json").read_text(encoding="utf-8"))
             native_report = json.loads(
@@ -4777,23 +4961,6 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertNotIn("TSUI_EXTRACT_DIRECTOR_XFIR_READER_REQUIRED", {d["code"] for d in report["diagnostics"]})
             self.assertNotIn("commercial route script omitted", encoded)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
-
-    def test_nativevn_story_uses_unique_route_wait_ids(self):
-        story = _render_nativevn_story(
-            [
-                {"route_id": "classic.a", "terminal": "ending.a", "coverage": "covered"},
-                {"route_id": "classic.b", "terminal": "ending.b", "coverage": "covered"},
-            ]
-        )
-        ids = [
-            line.split("#@id ", 1)[1].split()[0]
-            for line in story.splitlines()
-            if "#@id " in line
-        ]
-
-        self.assertEqual(len(ids), len(set(ids)))
-        self.assertIn("wait.classic_a.route_pause", ids)
-        self.assertIn("wait.classic_b.route_pause", ids)
 
     def test_internal_demo_bundle_builds_artifacts_but_blocks_without_live_report(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -5095,6 +5262,7 @@ class AssetAnalysisTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        write_native_story_ir_fixture(work)
         return root, config, work
 
     def test_demo_slice_gate_blocks_explicit_routes_in_private_config(self):
@@ -5178,6 +5346,7 @@ class AssetAnalysisTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            write_native_story_ir_fixture(work)
             report = run_local_gate(
                 original_root=original,
                 work_root=work,
@@ -5245,6 +5414,7 @@ class AssetAnalysisTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            write_native_story_ir_fixture(work)
             report = run_local_gate(
                 original_root=original,
                 work_root=work,
@@ -5268,47 +5438,16 @@ class AssetAnalysisTests(unittest.TestCase):
             )
             conversion = json.loads((work / "reports" / "conversion_report.json").read_text(encoding="utf-8"))
             story = (work / "nativevn" / "Scripts" / "main.astra").read_text(encoding="utf-8")
-            internal_scenario = json.loads(
-                (
-                    work
-                    / "nativevn"
-                    / "scenarios"
-                    / "tsuinosora-internal-game.classic.headless.classic_main.json"
-                ).read_text(encoding="utf-8")
-            )
-            patch_windows = json.loads(
-                (
-                    work
-                    / "nativevn"
-                    / "scenarios"
-                    / "tsuinosora-patch-game.classic.windows.classic_main.json"
-                ).read_text(encoding="utf-8")
-            )
+            input_lines = (work / "nativevn" / "Automation" / "route.good.jsonl").read_text(encoding="utf-8").splitlines()
             encoded = json.dumps(report, sort_keys=True)
-            choose_values = [
-                action["player_input"]["value"]
-                for action in internal_scenario["actions"]
-                if action.get("player_input", {}).get("kind") == "choose"
-            ]
 
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["route_count"], 1)
             self.assertEqual(nativevn_report["route_count"], 1)
             self.assertEqual(conversion["routes"][0]["choices"], ["choice.start"])
             self.assertEqual(conversion["routes"][0]["mount_assets"][0]["path"], "native-assets/backgrounds/bg.png")
-            self.assertIn("option key:choice.start", story)
-            self.assertNotIn("option key:choice.classic_main", story)
-            self.assertEqual(choose_values, ["choice.start"])
-            self.assertEqual(patch_windows["mount_assets"][0]["path"], "native-assets/backgrounds/bg.png")
-            self.assertEqual(patch_windows["mount_assets"][0]["role"], "background")
-            self.assertTrue(
-                (
-                    work
-                    / "nativevn"
-                    / "scenarios"
-                    / "tsuinosora-internal-game.classic.headless.classic_main.json"
-                ).exists()
-            )
+            self.assertIn("choice.route.good", story)
+            self.assertTrue(all(json.loads(line)["schema"] == "astra.user_input_sequence.v1" for line in input_lines))
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
     def test_nativevn_package_input_writes_project_sections_and_scenarios(self):
@@ -5362,7 +5501,8 @@ class AssetAnalysisTests(unittest.TestCase):
                     }
                 ],
             )
-            report = write_nativevn_package_input(work, routes)
+            write_native_story_ir_fixture(work)
+            report = write_nativevn_package_input(work)
             encoded = json.dumps(report, sort_keys=True)
             project = (work / "nativevn" / "project.yaml").read_text(encoding="utf-8")
             story = (work / "nativevn" / "Scripts" / "main.astra").read_text(encoding="utf-8")
@@ -5374,7 +5514,8 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertIn("project", file_roles)
             self.assertIn("story", file_roles)
             self.assertIn("package_section", file_roles)
-            self.assertIn("scenario_ref", file_roles)
+            self.assertIn("physical_input_sequence", file_roles)
+            self.assertIn("ui_blueprint", file_roles)
             for entry in report["files"]:
                 self.assertTrue(entry["path"].startswith("nativevn/"))
                 self.assertTrue(entry["sha256"].startswith("sha256:"))
@@ -5392,43 +5533,12 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertIn("package_sections:", project)
             self.assertIn("tsuinosora.reference_evidence", project)
             self.assertIn("targets: [tsuinosora-patch-game]", project)
-            self.assertIn("choice.classic_main", story)
+            self.assertIn("choice.route.good", story)
             self.assertTrue((work / "nativevn" / "PackageSections" / "asset_analysis.json").exists())
             self.assertTrue((work / "nativevn" / "native-assets" / "backgrounds" / "bg.png.astra-asset.yaml").exists())
-            self.assertTrue(
-                (
-                    work
-                    / "nativevn"
-                    / "scenarios"
-                    / "tsuinosora-internal-game.classic.web.classic_main.json"
-                ).exists()
-            )
-            self.assertTrue(
-                (
-                    work
-                    / "nativevn"
-                    / "scenarios"
-                    / "tsuinosora-patch-game.classic.web.classic_main.json"
-                ).exists()
-            )
-            patch_windows = json.loads(
-                (
-                    work
-                    / "nativevn"
-                    / "scenarios"
-                    / "tsuinosora-patch-game.classic.windows.classic_main.json"
-                ).read_text(encoding="utf-8")
-            )
-            patch_web = json.loads(
-                (
-                    work
-                    / "nativevn"
-                    / "scenarios"
-                    / "tsuinosora-patch-game.classic.web.classic_main.json"
-                ).read_text(encoding="utf-8")
-            )
-            self.assertEqual(patch_windows["mount_assets"][0]["route_id"], "classic.main")
-            self.assertNotIn("mount_assets", patch_web)
+            self.assertTrue((work / "nativevn" / "Automation" / "route.good.jsonl").exists())
+            self.assertIn("default_profile: modern", project)
+            self.assertIn("ui_provider: astra.ui.yakui", project)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
     def test_nativevn_package_input_preserves_route_choices_in_story_and_scenario(self):
@@ -5476,27 +5586,18 @@ class AssetAnalysisTests(unittest.TestCase):
                     }
                 ],
             )
-            report = write_nativevn_package_input(work, routes)
-            story = (work / "nativevn" / "Scripts" / "main.astra").read_text(encoding="utf-8")
-            scenario = json.loads(
-                (
-                    work
-                    / "nativevn"
-                    / "scenarios"
-                    / "tsuinosora-internal-game.classic.headless.classic_main.json"
-                ).read_text(encoding="utf-8")
+            payload = native_story_ir_fixture()
+            payload["stories"][0]["states"][0]["scenes"][0]["commands"][1]["options"].append(
+                {"option_id": "choice.route.confirm", "text": "private confirmation", "target": "ending.good"}
             )
-            choose_values = [
-                action["player_input"]["value"]
-                for action in scenario["actions"]
-                if action.get("player_input", {}).get("kind") == "choose"
-            ]
+            payload["routes"][0]["choice_ids"].append("choice.route.confirm")
+            write_native_story_ir_fixture(work).write_text(json.dumps(payload), encoding="utf-8")
+            report = write_nativevn_package_input(work)
+            story = (work / "nativevn" / "Scripts" / "main.astra").read_text(encoding="utf-8")
 
             self.assertEqual(report["status"], "pass")
-            self.assertIn("option key:choice.start", story)
-            self.assertIn("option key:choice.confirm", story)
-            self.assertNotIn("option key:choice.classic_main", story)
-            self.assertEqual(choose_values, ["choice.start", "choice.confirm"])
+            self.assertIn("choice.route.good", story)
+            self.assertIn("choice.route.confirm", story)
 
     def test_nativevn_package_input_blocks_duplicate_choices_from_explicit_routes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -5557,12 +5658,12 @@ class AssetAnalysisTests(unittest.TestCase):
 
             self.assertEqual(report["status"], "blocked")
             self.assertEqual(report["project"], "")
-            self.assertEqual(report["story"], "")
-            self.assertEqual(report["scenario_count"], 0)
+            self.assertEqual(report["story_source_count"], 0)
+            self.assertEqual(report["physical_input_sequence_count"], 0)
             self.assertNotIn("project", {entry["role"] for entry in report["files"]})
             self.assertNotIn("story", {entry["role"] for entry in report["files"]})
             self.assertIn(
-                "TSUI_NATIVEVN_ROUTE_DUPLICATE_CHOICE",
+                "TSUI_NATIVEVN_EXPLICIT_ROUTE_INPUT_RETIRED",
                 {diagnostic["code"] for diagnostic in report["diagnostics"]},
             )
             self.assertFalse((work / "nativevn" / "Scripts" / "main.astra").exists())
@@ -5639,12 +5740,9 @@ class AssetAnalysisTests(unittest.TestCase):
 
             self.assertEqual(report["status"], "blocked")
             self.assertEqual(report["project"], "")
-            self.assertEqual(report["story"], "")
-            self.assertEqual(report["scenario_count"], 0)
-            self.assertIn("TSUI_NATIVEVN_ROUTE_ID_INVALID", codes)
-            self.assertIn("TSUI_NATIVEVN_ROUTE_COVERAGE_INVALID", codes)
-            self.assertIn("TSUI_NATIVEVN_ROUTE_CHOICE_INVALID", codes)
-            self.assertIn("TSUI_NATIVEVN_ROUTE_CONFLICT", codes)
+            self.assertEqual(report["story_source_count"], 0)
+            self.assertEqual(report["physical_input_sequence_count"], 0)
+            self.assertIn("TSUI_NATIVEVN_EXPLICIT_ROUTE_INPUT_RETIRED", codes)
             self.assertFalse((work / "nativevn" / "project.yaml").exists())
 
 

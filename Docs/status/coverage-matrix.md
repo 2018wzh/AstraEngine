@@ -1,5 +1,7 @@
 # Implementation Coverage Matrix
 
+TsuiNoSora 当前覆盖边界：严格 ProjectorRays JSON codec、2527/2527 binary resource conversion、`tsuinosora.native_story_ir.v1` validator/generator、Classic/Modern Yakui UI template 和 Player secondary-input action routing 已有局部测试；完整 `VWSC`/Lingo 到 typed IR、私有 package、Headless 全路线、Windows E3、Web E2 bundle 和模型视觉验收仍为 blocking。旧 route metadata synthetic story、旧 scenario refs 和旧 worktree bundle 不计入当前 coverage。
+
 | 模块 | Design | Contract | Public API | Data Format | Test Scenario | Release Gate | Manual |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | EngineCore | [module](../modules/engine-core.md) | [runtime](../contracts/runtime.md) | `Engine/Source/Runtime/astra-runtime` implemented, `Engine/Source/Runtime/astra-engine` Rust dylib facade implemented | shared `astra-package` save container；RuntimeSnapshot 包含 StableId generator、typed component、完整 Event/Await/Delayed queue、mutation/effect trace；`RuntimeReplayTranscript` 包含 input/await/provider output/checkpoint | `astra-cli` retired-alias diagnostic test, `cargo test -p astra-runtime --test state_machine_tick`, `cargo test -p astra-runtime --test await_token`, `cargo test -p astra-runtime --test save_replay`, `cargo test -p astra-runtime --test trigger_event`, `cargo test -p astra-engine dylib_facade` | runtime determinism, run-to-quiescence flat StateMachine transaction, Await replay policy, save/load continuation, provider-free replay, structured logs, Rust dylib facade；旧 YAML smoke 已迁成 Rust tests | [operator](../manual/operator-guide.md) |

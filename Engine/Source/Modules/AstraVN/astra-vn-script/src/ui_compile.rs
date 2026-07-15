@@ -280,6 +280,7 @@ fn is_known_model_schema(schema: &str) -> bool {
         "astra.vn.ui_model.message.v1"
             | "astra.vn.ui_model.choice.v1"
             | "astra.vn.ui_model.title.v1"
+            | "astra.vn.ui_model.quick_panel.v1"
             | "astra.vn.ui_model.config.v1"
             | "astra.vn.ui_model.save.v1"
             | "astra.vn.ui_model.load.v1"
@@ -374,6 +375,9 @@ fn model_path_allowed(schema: &str, path: &[String]) -> bool {
             matches!(first, Some("choice_id" | "prompt_key" | "options"))
         }
         "astra.vn.ui_model.title.v1" => first == Some("can_continue"),
+        "astra.vn.ui_model.quick_panel.v1" => {
+            matches!(first, Some("auto_enabled" | "skip_mode"))
+        }
         "astra.vn.ui_model.config.v1" => matches!(
             first,
             Some(
@@ -803,8 +807,13 @@ fn validate_action(
         "vn.advance" | "vn.return_system" | "ui.close_modal" => &[],
         "vn.choose" => &["option_id"],
         "vn.open_system" => &["page"],
-        "vn.request_save" | "vn.request_load" | "vn.request_delete_save" => &["slot_id"],
+        "vn.request_save"
+        | "vn.request_save_confirmed"
+        | "vn.request_load"
+        | "vn.request_delete_save" => &["slot_id"],
         "vn.set_config" => &["key", "value"],
+        "vn.set_auto" => &["enabled"],
+        "vn.set_skip" => &["mode"],
         "vn.replay_voice" => &["voice_id"],
         "vn.start_replay" => &["replay_id"],
         "vn.preview_gallery" => &["item_id"],

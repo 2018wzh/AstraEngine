@@ -107,6 +107,10 @@ pub enum VnUiPageModel {
     Title {
         can_continue: bool,
     },
+    QuickPanel {
+        auto_enabled: bool,
+        skip_mode: SkipMode,
+    },
     Config {
         config: ConfigViewModel,
     },
@@ -144,6 +148,10 @@ impl VnUiPageModel {
     pub fn to_ui_value(&self) -> Result<UiValue, UiValidationError> {
         let value = match self {
             Self::Title { can_continue } => serde_json::json!({ "can_continue": can_continue }),
+            Self::QuickPanel {
+                auto_enabled,
+                skip_mode,
+            } => serde_json::json!({ "auto_enabled": auto_enabled, "skip_mode": skip_mode }),
             Self::Config { config } => serde_json::to_value(config).map_err(|error| {
                 UiValidationError::invalid("ASTRA_VN_UI_CONFIG_ENCODE", error.to_string())
             })?,
@@ -223,6 +231,10 @@ impl VnUiModelContext<'_> {
         Ok(match page {
             SystemPageKind::Title => VnUiPageModel::Title {
                 can_continue: self.runtime.cursor.is_some(),
+            },
+            SystemPageKind::QuickPanel => VnUiPageModel::QuickPanel {
+                auto_enabled: self.runtime.system.auto_enabled,
+                skip_mode: self.runtime.system.skip_mode,
             },
             SystemPageKind::Config => VnUiPageModel::Config {
                 config: self.config_model()?,

@@ -1,0 +1,128 @@
+ui_bind profile:modern surface:message view:ui.tsui.modern.message controller:tsui.message.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.message
+ui_bind profile:modern surface:choice view:ui.tsui.modern.choice controller:tsui.choice.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.choice
+ui_bind profile:modern system_page:title view:ui.tsui.modern.title controller:tsui.system.title.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.title
+ui_bind profile:modern system_page:quick_panel view:ui.tsui.modern.quick_panel controller:tsui.system.quick_panel.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.quick_panel
+ui_bind profile:modern system_page:save view:ui.tsui.modern.save controller:tsui.system.save.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.save
+ui_bind profile:modern system_page:load view:ui.tsui.modern.load controller:tsui.system.load.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.load
+ui_bind profile:modern system_page:config view:ui.tsui.modern.config controller:tsui.system.config.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.config
+ui_bind profile:modern system_page:backlog view:ui.tsui.modern.backlog controller:tsui.system.backlog.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.backlog
+
+ui_view ui.tsui.modern.message model:astra.vn.ui_model.message.v1 theme:tsui.theme.modern #@id ui.tsui.modern.message
+  screen id:root background:theme:surface.sky
+    image id:frame asset:theme:frame.classic min_width:800 min_height:600
+    panel id:advance fill:true
+      on activate -> vn.advance
+    row id:dialogue anchor:bottom min_height:112 fill_width:true background:theme:surface.paper
+      panel id:speaker min_width:132 background:theme:surface.speaker
+        text id:speaker_text value:$model.speaker_key font_size:20 max_lines:1
+      text id:body value:$model.text_key font_size:22 max_lines:4
+
+ui_view ui.tsui.modern.choice model:astra.vn.ui_model.choice.v1 theme:tsui.theme.modern #@id ui.tsui.modern.choice
+  screen id:root background:theme:surface.dim
+    column id:choices anchor:center background:theme:surface.paper min_width:580
+      text id:prompt value:$model.prompt_key font_size:22
+      virtual_list id:options items:$model.options item_key:option_id overscan:2 item_extent:52
+        button id:option min_height:48 value:$item.text_key enabled:$item.enabled
+          on activate -> vn.choose option_id:$item.option_id
+
+ui_view ui.tsui.modern.quick_panel model:astra.vn.ui_model.quick_panel.v1 theme:tsui.theme.modern #@id ui.tsui.modern.quick_panel
+  modal id:root background:theme:surface.paper
+    row id:commands min_height:64
+      button id:save text:l10n:system.save min_width:92
+        on activate -> vn.open_system page:"save"
+      button id:load text:l10n:system.load min_width:92
+        on activate -> vn.open_system page:"load"
+      button id:backlog text:l10n:system.backlog min_width:92
+        on activate -> vn.open_system page:"backlog"
+      toggle id:auto label_key:l10n:system.auto value:$model.auto_enabled min_width:92
+        on change -> vn.set_auto enabled:$event.value
+      button id:skip_read text:l10n:system.skip_read min_width:92
+        on activate -> vn.set_skip mode:"read"
+      button id:config text:l10n:system.config min_width:92
+        on activate -> vn.open_system page:"config"
+      button id:return text:l10n:system.back min_width:92
+        on activate -> vn.return_system
+
+ui_view ui.tsui.modern.title model:astra.vn.ui_model.title.v1 theme:tsui.theme.modern #@id ui.tsui.modern.title
+  screen id:root background:theme:surface.sky
+    image id:frame asset:theme:frame.classic min_width:800 min_height:600
+    column id:menu anchor:center background:theme:surface.paper min_width:340
+      text id:title value:l10n:system.title font_size:30
+      button id:continue text:l10n:system.continue enabled:$model.can_continue min_height:48
+        on activate -> vn.return_system
+      button id:load text:l10n:system.load min_height:48
+        on activate -> vn.open_system page:"load"
+      button id:config text:l10n:system.config min_height:48
+        on activate -> vn.open_system page:"config"
+
+ui_view ui.tsui.modern.save model:astra.vn.ui_model.save.v1 theme:tsui.theme.modern #@id ui.tsui.modern.save
+  screen id:root background:theme:surface.sky
+    column id:content background:theme:surface.paper
+      text id:title value:l10n:system.save font_size:26
+      virtual_grid id:slots items:$model.slots item_key:slot_id columns:2 overscan:2 item_extent:220
+        column id:slot background:theme:surface.card min_height:208
+          image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:280 min_height:120
+          text id:number value:$item.slot_id
+          text id:timestamp value:$item.timestamp_text
+          text id:playtime value:$item.playtime_text
+          button id:write value:$item.slot_id enabled:$item.can_write min_height:44
+            on activate -> vn.request_save slot_id:$item.slot_id
+      button id:back text:l10n:system.back min_height:44
+        on activate -> vn.return_system
+
+ui_view ui.tsui.modern.save_confirm model:astra.vn.ui_model.system.v1 theme:tsui.theme.modern #@id ui.tsui.modern.save_confirm
+  modal id:confirm background:theme:surface.paper
+    column id:content
+      text id:message value:l10n:ui.save.confirm_overwrite
+      row id:actions
+        button id:cancel text:l10n:ui.common.cancel min_height:44
+          on activate -> ui.close_modal
+        button id:accept text:l10n:ui.common.confirm min_height:44
+          on activate -> vn.request_save_confirmed slot_id:$model.slot_id
+
+ui_view ui.tsui.modern.load model:astra.vn.ui_model.load.v1 theme:tsui.theme.modern #@id ui.tsui.modern.load
+  screen id:root background:theme:surface.sky
+    column id:content background:theme:surface.paper
+      text id:title value:l10n:system.load font_size:26
+      virtual_grid id:slots items:$model.slots item_key:slot_id columns:2 overscan:2 item_extent:220
+        column id:slot background:theme:surface.card min_height:208
+          image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:280 min_height:120
+          text id:number value:$item.slot_id
+          text id:timestamp value:$item.timestamp_text
+          text id:playtime value:$item.playtime_text
+          button id:read value:$item.slot_id enabled:$item.can_load min_height:44
+            on activate -> vn.request_load slot_id:$item.slot_id
+      button id:back text:l10n:system.back min_height:44
+        on activate -> vn.return_system
+
+ui_view ui.tsui.modern.config model:astra.vn.ui_model.config.v1 theme:tsui.theme.modern #@id ui.tsui.modern.config
+  screen id:root background:theme:surface.sky
+    column id:content background:theme:surface.paper min_width:620
+      text id:title value:l10n:system.config font_size:26
+      text id:master_label value:l10n:system.config.master_volume
+      slider id:master value:$model.master_volume min:0 max:100 step:1 min_height:48
+        on change -> vn.set_config key:audio.master value:$event.value
+      text id:speed_label value:l10n:system.config.text_speed
+      slider id:text_speed value:$model.text_speed min:0 max:100 step:1 min_height:48
+        on change -> vn.set_config key:text.speed value:$event.value
+      text id:auto_label value:l10n:system.config.auto_delay
+      slider id:auto_delay value:$model.auto_delay_ms min:100 max:10000 step:100 min_height:48
+        on change -> vn.set_config key:auto.delay_ms value:$event.value
+      toggle id:contrast value:$model.high_contrast label_key:l10n:system.config.high_contrast min_height:48
+        on change -> vn.set_config key:display.high_contrast value:$event.value
+      select id:locale value:$model.locale items:$model.available_locales min_height:48
+        on change -> vn.set_config key:display.language value:$event.value
+      button id:back text:l10n:system.back min_height:44
+        on activate -> vn.return_system
+
+ui_view ui.tsui.modern.backlog model:astra.vn.ui_model.backlog.v1 theme:tsui.theme.modern #@id ui.tsui.modern.backlog
+  screen id:root background:theme:surface.sky
+    column id:content background:theme:surface.paper
+      text id:title value:l10n:system.backlog font_size:26
+      virtual_list id:entries items:$model.entries item_key:command_id overscan:8 item_extent:88
+        row id:entry min_height:84 background:theme:surface.card
+          panel id:speaker min_width:120 background:theme:surface.speaker
+            text id:speaker_text value:$item.speaker_key
+          text id:body value:$item.text_key
+      button id:back text:l10n:system.back min_height:44
+        on activate -> vn.return_system

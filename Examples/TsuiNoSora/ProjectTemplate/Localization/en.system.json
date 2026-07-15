@@ -1,0 +1,23 @@
+{
+  "schema": "astra.vn.localization_table.v1",
+  "locale": "en",
+  "strings": {
+    "system.title": "Tsui no Sora",
+    "system.continue": "Continue",
+    "system.back": "Back",
+    "system.quick_panel": "Quick Panel",
+    "system.save": "Save",
+    "system.load": "Load",
+    "system.backlog": "Backlog",
+    "system.auto": "Auto",
+    "system.skip_read": "Skip Read",
+    "system.config": "Config",
+    "system.config.master_volume": "Master Volume",
+    "system.config.text_speed": "Text Speed",
+    "system.config.auto_delay": "Auto Delay",
+    "system.config.high_contrast": "High Contrast",
+    "ui.save.confirm_overwrite": "Overwrite this save?",
+    "ui.common.cancel": "Cancel",
+    "ui.common.confirm": "Confirm"
+  }
+}

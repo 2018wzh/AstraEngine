@@ -1,0 +1,23 @@
+{
+  "schema": "astra.vn.localization_table.v1",
+  "locale": "zh-Hans",
+  "strings": {
+    "system.title": "终之空",
+    "system.continue": "继续",
+    "system.back": "返回",
+    "system.quick_panel": "快捷面板",
+    "system.save": "保存",
+    "system.load": "读取",
+    "system.backlog": "历史记录",
+    "system.auto": "自动播放",
+    "system.skip_read": "跳过已读",
+    "system.config": "设置",
+    "system.config.master_volume": "主音量",
+    "system.config.text_speed": "文字速度",
+    "system.config.auto_delay": "自动播放等待",
+    "system.config.high_contrast": "高对比度",
+    "ui.save.confirm_overwrite": "覆盖此存档吗？",
+    "ui.common.cancel": "取消",
+    "ui.common.confirm": "确认"
+  }
+}
