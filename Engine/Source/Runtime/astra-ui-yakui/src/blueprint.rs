@@ -100,12 +100,7 @@ impl BlueprintYakuiRenderer {
                     "virtual collection requires items and item_key",
                 )
             })?;
-            let UiValue::List(values) = evaluate(&repeat.items, frame, item, None)? else {
-                return Err(UiValidationError::invalid(
-                    "ASTRA_UI_REPEAT_TYPE",
-                    "virtual collection items must resolve to a list",
-                ));
-            };
+            let values = evaluate_collection(&repeat.items, frame, item)?;
             let range = if node.widget == "virtual_list" {
                 let item_extent =
                     property_number(node, "item_extent", frame, item)?.unwrap_or(56.0);
@@ -155,13 +150,8 @@ impl BlueprintYakuiRenderer {
                         "repeat node lost its validated binding",
                     )
                 })?;
-                let UiValue::List(values) = evaluate(&repeat.items, frame, item, None)? else {
-                    return Err(UiValidationError::invalid(
-                        "ASTRA_UI_REPEAT_TYPE",
-                        "repeat items binding must resolve to a list",
-                    ));
-                };
-                for value in &values {
+                let values = evaluate_collection(&repeat.items, frame, item)?;
+                for value in values {
                     self.collect_visual_assets(child, frame, Some(value), request, output)?;
                 }
             } else {
@@ -538,15 +528,9 @@ impl BlueprintYakuiRenderer {
                         "repeat node lost its validated binding",
                     ));
                 };
-                let values = evaluate(&repeat.items, frame, item, None)?;
-                let UiValue::List(values) = values else {
-                    return Err(UiValidationError::invalid(
-                        "ASTRA_UI_REPEAT_TYPE",
-                        "repeat items binding must resolve to a list",
-                    ));
-                };
+                let values = evaluate_collection(&repeat.items, frame, item)?;
                 for value in values {
-                    self.render_node(child, parent_id, frame, Some(&value), request, actions)?;
+                    self.render_node(child, parent_id, frame, Some(value), request, actions)?;
                 }
             } else {
                 self.render_node(child, parent_id, frame, item, request, actions)?;
@@ -569,12 +553,7 @@ impl BlueprintYakuiRenderer {
                 "virtual list requires items and item_key",
             )
         })?;
-        let UiValue::List(values) = evaluate(&repeat.items, frame, None, None)? else {
-            return Err(UiValidationError::invalid(
-                "ASTRA_UI_REPEAT_TYPE",
-                "virtual list items must resolve to a list",
-            ));
-        };
+        let values = evaluate_collection(&repeat.items, frame, None)?;
         let item_extent = property_number(node, "item_extent", frame, None)?.unwrap_or(56.0);
         let state =
             self.virtual_lists
@@ -614,12 +593,7 @@ impl BlueprintYakuiRenderer {
                 "virtual grid requires items and item_key",
             )
         })?;
-        let UiValue::List(values) = evaluate(&repeat.items, frame, None, None)? else {
-            return Err(UiValidationError::invalid(
-                "ASTRA_UI_REPEAT_TYPE",
-                "virtual grid items must resolve to a list",
-            ));
-        };
+        let values = evaluate_collection(&repeat.items, frame, None)?;
         let columns = property_number(node, "columns", frame, None)?
             .unwrap_or(1.0)
             .round()
@@ -1572,6 +1546,53 @@ fn evaluate(
             }),
         UiValueExpr::AssetRef { asset_id } => Ok(UiValue::String(asset_id.clone())),
         UiValueExpr::ThemeToken { token } => Ok(UiValue::String(token.clone())),
+    }
+}
+
+fn evaluate_collection<'a>(
+    expr: &'a UiValueExpr,
+    frame: &'a UiBlueprintFrameModel,
+    item: Option<&'a UiValue>,
+) -> Result<&'a [UiValue], UiValidationError> {
+    let value = match expr {
+        UiValueExpr::Literal { value } => value,
+        UiValueExpr::Binding { root, path } => {
+            let root = match root {
+                UiBindingRoot::Model => &frame.model,
+                UiBindingRoot::State => &frame.state,
+                UiBindingRoot::Item => item.ok_or_else(|| {
+                    UiValidationError::invalid(
+                        "ASTRA_UI_ITEM_SCOPE",
+                        "item collection binding outside repeat",
+                    )
+                })?,
+                UiBindingRoot::Event => {
+                    return Err(UiValidationError::invalid(
+                        "ASTRA_UI_EVENT_SCOPE",
+                        "event binding cannot provide a retained collection",
+                    ));
+                }
+            };
+            lookup(root, path).ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_BINDING_PATH",
+                    "collection binding path does not exist",
+                )
+            })?
+        }
+        _ => {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_REPEAT_BINDING",
+                "repeat items must use a literal or retained model/item/state binding",
+            ));
+        }
+    };
+    match value {
+        UiValue::List(values) => Ok(values),
+        _ => Err(UiValidationError::invalid(
+            "ASTRA_UI_REPEAT_TYPE",
+            "repeat items binding must resolve to a list",
+        )),
     }
 }
 
