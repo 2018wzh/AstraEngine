@@ -1,3 +1,5 @@
+use astra_core::Hash256;
+use astra_ui_core::{UiThemeManifest, UiThemeValue};
 use astra_vn_script::{
     compile_astra_project, format_astra_source, parse_astra_source, CompileAstraProjectOptions,
     ExtensionCommandDescriptor, ExtensionFieldContract, ExtensionFieldKind, FormatOptions,
@@ -82,23 +84,57 @@ fn semantic_hash_ignores_trivia_and_implicit_command_source_spans() {
 #[astra_headless_test::test]
 fn select_items_are_a_typed_widget_property_not_a_repeat_binding() {
     let story = "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line.one #@id line.one\n";
-    let ui = "ui_bind surface:message view:ui.config controller:config policy:standard theme:theme.classic #@id bind.config\n\
-ui_view ui.config model:astra.vn.ui_model.config.v1 theme:theme.classic #@id ui.config\n\
-  screen id:root\n\
-    select id:locale value:$model.locale items:$model.available_locales\n\
-      on change -> vn.set_config key:display.language value:$event.value\n";
+    let ui = concat!(
+        "ui_bind surface:message view:ui.config controller:config policy:standard ",
+        "theme:theme.classic #@id bind.config\n",
+        "ui_view ui.config model:astra.vn.ui_model.config.v1 ",
+        "theme:theme.classic #@id ui.config\n",
+        "  screen id:root\n",
+        "    select id:locale value:$model.locale items:$model.available_locales\n",
+        "      on change -> vn.set_config key:display.language value:$event.value\n",
+    );
 
     let compiled = compile_astra_project(
         [
             astra_vn_script::AstraSource::story("story.astra", story),
             astra_vn_script::AstraSource::ui("ui.astra", ui),
         ],
-        Default::default(),
+        CompileAstraProjectOptions::default()
+            .with_ui_theme(test_theme())
+            .with_ui_controller_source("config", test_controller_source()),
     )
     .expect("select items should compile without repeat item_key");
     let select = &compiled.ui_blueprints.views["ui.config"].root.children[0];
     assert!(select.repeat.is_none());
     assert!(select.properties.contains_key("items"));
+}
+
+fn test_theme() -> UiThemeManifest {
+    let mut theme = UiThemeManifest {
+        schema: "astra.ui_theme_manifest.v1".into(),
+        id: "theme.classic".into(),
+        parent: None,
+        tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
+        high_contrast_tokens: BTreeMap::new(),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash().expect("theme hash");
+    theme
+}
+
+fn test_controller_source() -> &'static str {
+    r#"
+astra.ui.controller.register("config", {
+  schema = "astra.vn.ui_controller.v1",
+  view = "ui.config",
+  model_schema = "astra.vn.ui_model.config.v1",
+  snapshot = "none",
+}, {
+  on_action = function(_, _, action)
+    return { astra.ui.effect.forward(action) }
+  end,
+})
+"#
 }
 
 #[astra_headless_test::test]
