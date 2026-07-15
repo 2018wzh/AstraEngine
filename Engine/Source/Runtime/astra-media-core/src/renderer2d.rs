@@ -982,7 +982,7 @@ fn draw_mesh(
     blend: BlendMode,
 ) -> Result<(), MediaError> {
     validate_opacity(opacity)?;
-    if vertices.is_empty() || indices.is_empty() || indices.len() % 3 != 0 {
+    if vertices.is_empty() || indices.is_empty() || !indices.len().is_multiple_of(3) {
         return Err(MediaError::message(
             "ASTRA_MEDIA_MESH_TOPOLOGY: mesh requires triangle-list vertices and indices",
         ));
@@ -1059,8 +1059,8 @@ fn draw_mesh(
                     wa * a.uv[1] + wb * b.uv[1] + wc * c.uv[1],
                 ];
                 let mut color = [0u8; 4];
-                for channel in 0..4 {
-                    color[channel] = (wa * a.premultiplied_rgba[channel] as f32
+                for (channel, output) in color.iter_mut().enumerate() {
+                    *output = (wa * a.premultiplied_rgba[channel] as f32
                         + wb * b.premultiplied_rgba[channel] as f32
                         + wc * c.premultiplied_rgba[channel] as f32)
                         .round()
@@ -1070,16 +1070,14 @@ fn draw_mesh(
                     let texel = sample_texture(texture, uv);
                     match material {
                         MeshMaterial2D::ColorTexture => {
-                            for channel in 0..4 {
-                                color[channel] =
-                                    ((color[channel] as u16 * texel[channel] as u16) / 255) as u8;
+                            for (channel, texel_channel) in color.iter_mut().zip(texel) {
+                                *channel = ((*channel as u16 * texel_channel as u16) / 255) as u8;
                             }
                         }
                         MeshMaterial2D::GlyphMask => {
                             let mask = texel[3];
-                            for channel in 0..4 {
-                                color[channel] =
-                                    ((color[channel] as u16 * mask as u16) / 255) as u8;
+                            for channel in &mut color {
+                                *channel = ((*channel as u16 * mask as u16) / 255) as u8;
                             }
                         }
                         MeshMaterial2D::Solid => unreachable!("solid mesh has no texture"),
