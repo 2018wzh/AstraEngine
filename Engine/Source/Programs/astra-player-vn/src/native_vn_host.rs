@@ -353,7 +353,8 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_UI_THEME_MISSING: compiled project has no packaged UI theme".into(),
             ));
         }
-        let ui_renderer = BlueprintYakuiRenderer::new(compiled.ui_blueprints.clone())?;
+        let ui_renderer = BlueprintYakuiRenderer::new(compiled.ui_blueprints.clone())?
+            .with_image_resources(binding.presentation.textures.clone());
         let ui_backend = AstraYakuiBackend::new(ui_renderer, compiled.project_hash)?;
         let mut ui_controller_host = LuauUiControllerHost::with_default_budget()
             .map_err(|error| NativeVnHostError::Package(error.to_string()))?;

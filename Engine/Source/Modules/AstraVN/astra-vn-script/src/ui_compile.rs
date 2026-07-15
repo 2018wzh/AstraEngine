@@ -653,15 +653,94 @@ fn validate_widget(line: &ParsedLine) -> Result<(), VnError> {
         "spacer",
         "component_slot",
     ];
-    if WIDGETS.contains(&line.keyword.as_str()) {
-        Ok(())
-    } else {
-        Err(diagnostic(
+    if !WIDGETS.contains(&line.keyword.as_str()) {
+        return Err(diagnostic(
             line,
             "ASTRA_UI_WIDGET_UNKNOWN",
             "widget is not registered in the v1 UI schema",
-        ))
+        ));
     }
+    validate_widget_properties(line)
+}
+
+fn validate_widget_properties(line: &ParsedLine) -> Result<(), VnError> {
+    const COMMON: &[&str] = &[
+        "id",
+        "visible",
+        "enabled",
+        "min_width",
+        "min_height",
+        "fill",
+        "background",
+        "grow",
+        "anchor",
+        "align",
+        "gap",
+        "padding",
+        "style",
+    ];
+    const REPEAT: &[&str] = &["items", "item_key", "overscan", "item_extent"];
+    let widget_properties: &[&str] = match line.keyword.as_str() {
+        "text" => &[
+            "text",
+            "value",
+            "text_key",
+            "direction",
+            "max_lines",
+            "font_size",
+        ],
+        "button" => &["text", "value", "text_key", "label_key", "selected"],
+        "slider" => &["value", "min", "max", "step", "label_key"],
+        "toggle" => &["checked", "label_key", "value"],
+        "select" => &["value", "items", "label_key", "item_key"],
+        "text_input" => &[
+            "value",
+            "multiline",
+            "max_graphemes",
+            "character_policy",
+            "direction",
+            "max_lines",
+            "font_size",
+        ],
+        "image" => &["asset", "texture", "fit", "opacity"],
+        "nine_slice" => &["asset", "texture", "opacity"],
+        "virtual_list" => REPEAT,
+        "virtual_grid" => &["items", "item_key", "overscan", "item_extent", "columns"],
+        "canvas" => &["nodes", "edges"],
+        "component_slot" => &["component"],
+        "screen" | "row" | "column" | "stack" | "panel" | "scroll" | "modal"
+        | "semantic_region" | "spacer" => &[],
+        _ => &[],
+    };
+    if let Some((name, _)) = line.attrs.iter().find(|(name, _)| {
+        !COMMON.contains(&name.as_str()) && !widget_properties.contains(&name.as_str())
+    }) {
+        return Err(diagnostic(
+            line,
+            "ASTRA_UI_WIDGET_PROPERTY_UNKNOWN",
+            &format!("widget {} does not declare property {name}", line.keyword),
+        ));
+    }
+    if matches!(line.keyword.as_str(), "image" | "nine_slice")
+        && line.attr("asset").is_none()
+        && line.attr("texture").is_none()
+    {
+        return Err(diagnostic(
+            line,
+            "ASTRA_UI_WIDGET_ASSET_REQUIRED",
+            &format!("widget {} requires asset or texture", line.keyword),
+        ));
+    }
+    if matches!(line.keyword.as_str(), "virtual_list" | "virtual_grid")
+        && (line.attr("items").is_none() || line.attr("item_key").is_none())
+    {
+        return Err(diagnostic(
+            line,
+            "ASTRA_UI_WIDGET_REPEAT_REQUIRED",
+            &format!("widget {} requires items and item_key", line.keyword),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_widget_event(widget: &str, line: &ParsedLine) -> Result<(), VnError> {

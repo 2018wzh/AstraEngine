@@ -7,6 +7,7 @@
     "surface.system": { "color": [12, 18, 30, 252] },
     "panel.message": { "color": [18, 22, 34, 236] },
     "panel.button": { "color": [38, 58, 84, 255] },
+    "system.backdrop": { "asset": "asset:/background/apartment-night" },
     "text.body": { "color": [245, 245, 248, 255] }
   },
   "high_contrast_tokens": {

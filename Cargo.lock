@@ -1021,6 +1021,7 @@ version = "0.1.0"
 dependencies = [
  "abi_stable",
  "astra-core",
+ "astra-headless-test",
  "astra-ui-core",
  "ed25519-dalek",
  "postcard",

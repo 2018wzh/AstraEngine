@@ -1,15 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use astra_core::Hash256;
+use astra_media_core::TextureFrame;
 use astra_ui_core::{
     UiActionEnvelope, UiBindingRoot, UiBlueprintBundle, UiBlueprintFrameModel, UiEventBinding,
     UiFrameRequest, UiInputEventKind, UiPoint, UiRect, UiSemanticAction, UiSemanticNode,
     UiSemanticRole, UiSemanticSnapshot, UiThemeValue, UiValidationError, UiValue, UiValueExpr,
     ValidateUi,
 };
-use yakui_core::geometry::{Color, Vec2};
-use yakui_core::WidgetId;
-use yakui_widgets::widgets::{Checkbox, CountGrid, List, Slider, Stack};
+use yakui_core::geometry::{Color, UVec2, Vec2};
+use yakui_core::paint::{Texture, TextureFormat};
+use yakui_core::{ManagedTextureId, WidgetId};
+use yakui_widgets::widgets::{Checkbox, CountGrid, Image, List, NineSlice, Pad, Slider, Stack};
 
 use crate::{
     AstraNodeProps, AstraNodeWidget, TextCharacterPolicy, TextInputState, VirtualGridState,
@@ -39,6 +41,8 @@ pub struct BlueprintYakuiRenderer {
     text_inputs: BTreeMap<String, TextInputState>,
     focused_text_input: Option<String>,
     text_input_consumed_sequences: BTreeSet<u64>,
+    image_resources: BTreeMap<String, TextureFrame>,
+    managed_textures: BTreeMap<String, ManagedTextureId>,
 }
 
 impl BlueprintYakuiRenderer {
@@ -53,7 +57,14 @@ impl BlueprintYakuiRenderer {
             text_inputs: BTreeMap::new(),
             focused_text_input: None,
             text_input_consumed_sequences: BTreeSet::new(),
+            image_resources: BTreeMap::new(),
+            managed_textures: BTreeMap::new(),
         })
+    }
+
+    pub fn with_image_resources(mut self, resources: BTreeMap<String, TextureFrame>) -> Self {
+        self.image_resources = resources;
+        self
     }
 
     fn render_node(
@@ -210,6 +221,46 @@ impl BlueprintYakuiRenderer {
                         .err();
                 });
             }),
+            "image" => {
+                let asset = required_visual_asset(node, request)?;
+                let texture = *self.managed_textures.get(&asset).ok_or_else(|| {
+                    UiValidationError::invalid(
+                        "ASTRA_UI_IMAGE_RESOURCE_UNBOUND",
+                        format!("image asset {asset} was not registered for this UI generation"),
+                    )
+                })?;
+                AstraNodeWidget::show(props, || {
+                    Image::new(texture, Vec2::new(min_width.max(1.0), min_height.max(1.0))).show();
+                })
+            }
+            "nine_slice" => {
+                let (asset, border) = required_nine_slice(node, request)?;
+                let texture = *self.managed_textures.get(&asset).ok_or_else(|| {
+                    UiValidationError::invalid(
+                        "ASTRA_UI_NINE_SLICE_RESOURCE_UNBOUND",
+                        format!(
+                            "nine-slice asset {asset} was not registered for this UI generation"
+                        ),
+                    )
+                })?;
+                AstraNodeWidget::show(props, || {
+                    NineSlice::new(
+                        texture,
+                        Pad {
+                            left: border[0],
+                            top: border[1],
+                            right: border[2],
+                            bottom: border[3],
+                        },
+                        1.0,
+                    )
+                    .show(|| {
+                        child_error = self
+                            .render_children(&children, parent, frame, item, request, actions)
+                            .err();
+                    });
+                })
+            }
             "slider" => {
                 let value = property_number(node, "value", frame, item)?.unwrap_or(0.0) as f64;
                 let min = property_number(node, "min", frame, item)?.unwrap_or(0.0) as f64;
@@ -472,7 +523,7 @@ fn virtual_leading_space(node: &astra_ui_core::UiNodeBlueprint, extent: f32) {
 impl YakuiViewRenderer for BlueprintYakuiRenderer {
     fn build(
         &mut self,
-        _yakui: &mut yakui_core::Yakui,
+        yakui: &mut yakui_core::Yakui,
         request: &UiFrameRequest,
     ) -> Result<YakuiViewOutput, UiValidationError> {
         let frame: UiBlueprintFrameModel =
@@ -546,6 +597,35 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 "ASTRA_UI_BLUEPRINT_MODEL_SCHEMA",
                 "frame model schema does not match the selected view",
             ));
+        }
+        let mut required_assets = BTreeSet::new();
+        collect_visual_assets(&view.root, request, &mut required_assets)?;
+        for modal in &frame.modals {
+            let modal_view = self.bundle.views.get(&modal.view_id).ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_MODAL_VIEW_MISSING",
+                    "modal view is absent from the packaged blueprint bundle",
+                )
+            })?;
+            collect_visual_assets(&modal_view.root, request, &mut required_assets)?;
+        }
+        for asset in required_assets {
+            if self.managed_textures.contains_key(&asset) {
+                continue;
+            }
+            let frame = self.image_resources.get(&asset).ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_IMAGE_RESOURCE_MISSING",
+                    format!("UI blueprint references unavailable packaged asset {asset}"),
+                )
+            })?;
+            let texture = Texture::new(
+                TextureFormat::Rgba8Srgb,
+                UVec2::new(frame.width, frame.height),
+                frame.rgba8.clone(),
+            );
+            self.managed_textures
+                .insert(asset, yakui.add_texture(texture));
         }
         self.pending.clear();
         self.accessibility_actions.clear();
@@ -827,6 +907,99 @@ fn property_color(
     };
     let _ = (frame, item);
     Some(Color::rgba(*r, *g, *b, *a))
+}
+
+fn visual_token<'a>(node: &'a astra_ui_core::UiNodeBlueprint) -> Option<&'a UiValueExpr> {
+    node.properties
+        .get("asset")
+        .or_else(|| node.properties.get("texture"))
+}
+
+fn required_visual_asset(
+    node: &astra_ui_core::UiNodeBlueprint,
+    request: &UiFrameRequest,
+) -> Result<String, UiValidationError> {
+    let expr = visual_token(node).ok_or_else(|| {
+        UiValidationError::invalid(
+            "ASTRA_UI_IMAGE_ASSET_REQUIRED",
+            "image widget requires an asset or texture property",
+        )
+    })?;
+    match expr {
+        UiValueExpr::AssetRef { asset_id } => Ok(asset_id.clone()),
+        UiValueExpr::ThemeToken { token } => match request.theme.tokens.get(token) {
+            Some(UiThemeValue::Asset(asset)) | Some(UiThemeValue::NineSlice { asset, .. }) => {
+                Ok(asset.clone())
+            }
+            _ => Err(UiValidationError::invalid(
+                "ASTRA_UI_IMAGE_THEME_TOKEN",
+                "image theme token must resolve to Asset or NineSlice",
+            )),
+        },
+        _ => Err(UiValidationError::invalid(
+            "ASTRA_UI_IMAGE_ASSET_TYPE",
+            "image asset must be an AssetRef or theme token",
+        )),
+    }
+}
+
+fn required_nine_slice(
+    node: &astra_ui_core::UiNodeBlueprint,
+    request: &UiFrameRequest,
+) -> Result<(String, [f32; 4]), UiValidationError> {
+    let expr = visual_token(node).ok_or_else(|| {
+        UiValidationError::invalid(
+            "ASTRA_UI_NINE_SLICE_ASSET_REQUIRED",
+            "nine_slice widget requires a texture theme token",
+        )
+    })?;
+    let (asset, border) = match expr {
+        UiValueExpr::ThemeToken { token } => match request.theme.tokens.get(token) {
+            Some(UiThemeValue::NineSlice { asset, border }) => (asset.clone(), *border),
+            _ => {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_UI_NINE_SLICE_THEME_TOKEN",
+                    "nine_slice theme token must resolve to NineSlice",
+                ));
+            }
+        },
+        _ => {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_NINE_SLICE_ASSET_TYPE",
+                "nine_slice texture must be a theme token",
+            ));
+        }
+    };
+    if border
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
+    {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_NINE_SLICE_BORDER",
+            "nine-slice border must be finite and non-negative",
+        ));
+    }
+    Ok((asset, border))
+}
+
+fn collect_visual_assets(
+    node: &astra_ui_core::UiNodeBlueprint,
+    request: &UiFrameRequest,
+    output: &mut BTreeSet<String>,
+) -> Result<(), UiValidationError> {
+    match node.widget.as_str() {
+        "image" => {
+            output.insert(required_visual_asset(node, request)?);
+        }
+        "nine_slice" => {
+            output.insert(required_nine_slice(node, request)?.0);
+        }
+        _ => {}
+    }
+    for child in &node.children {
+        collect_visual_assets(child, request, output)?;
+    }
+    Ok(())
 }
 
 fn property_text(

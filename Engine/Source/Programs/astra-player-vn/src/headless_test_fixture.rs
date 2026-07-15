@@ -285,12 +285,13 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
     })
     .unwrap();
     request.target_manifest = serde_json::to_vec(&serde_json::json!({
-        "schema": "astra.target_manifest.v1",
+        "schema": "astra.target_manifest.v2",
         "targets": [{
             "id": "nativevn-game",
             "kind": "game",
             "crate": "astra-vn",
             "runtime_provider": "native_vn",
+            "ui_provider": "astra.ui.yakui",
             "default_profile": "classic",
             "platforms": ["windows", "web"],
             "packaged": true

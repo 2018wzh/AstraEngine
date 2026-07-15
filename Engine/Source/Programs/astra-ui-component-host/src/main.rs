@@ -45,12 +45,7 @@ fn run() -> Result<(), UiComponentError> {
     let embedded_bytes = (module.manifest_postcard())().to_vec();
     let embedded: UiComponentManifest = postcard::from_bytes(&embedded_bytes)
         .map_err(|error| UiComponentError::Codec(error.to_string()))?;
-    if embedded != manifest {
-        return Err(UiComponentError::Invalid(
-            "ASTRA_UI_COMPONENT_EMBEDDED_MANIFEST: embedded manifest differs from signed sidecar"
-                .to_string(),
-        ));
-    }
+    manifest.verify_embedded_descriptor(&embedded)?;
 
     let (request_tx, request_rx) = mpsc::channel::<WorkerRequest>();
     std::thread::spawn(move || worker_loop(library, module, request_rx));

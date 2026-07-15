@@ -41,6 +41,7 @@ ui_view ui.choice.classic model:astra.vn.ui_model.choice.v1 theme:astra.vn.theme
 
 ui_view ui.system.title model:astra.vn.ui_model.title.v1 theme:astra.vn.theme.classic #@id ui.system.title
   screen id:root background:theme:surface.system
+    image id:backdrop asset:theme:system.backdrop min_width:1280 min_height:720
     column id:content
       text id:title value:l10n:system.title
       button id:back min_height:56 text:l10n:system.back

@@ -122,10 +122,35 @@ impl UiComponentManifest {
         .map_err(|_| UiComponentError::Signature)
     }
 
+    /// Verifies the descriptor exported by the dylib without creating an
+    /// impossible self-referential artifact hash. The embedded descriptor must
+    /// deliberately leave the artifact hash and signature empty; the signed
+    /// sidecar remains the sole trust authority for those fields.
+    pub fn verify_embedded_descriptor(&self, embedded: &Self) -> Result<(), UiComponentError> {
+        embedded.validate_unsigned()?;
+        if embedded.artifact_hash != Hash256::from_bytes([0; 32]) || !embedded.signature.is_empty()
+        {
+            return Err(UiComponentError::Invalid(
+                "ASTRA_UI_COMPONENT_EMBEDDED_TRUST_FIELDS: embedded descriptor must not claim artifact trust"
+                    .to_string(),
+            ));
+        }
+        let mut expected = self.clone();
+        expected.artifact_hash = Hash256::from_bytes([0; 32]);
+        expected.signature.clear();
+        if &expected != embedded {
+            return Err(UiComponentError::Invalid(
+                "ASTRA_UI_COMPONENT_EMBEDDED_MANIFEST: embedded descriptor differs from signed sidecar identity"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     fn validate_unsigned(&self) -> Result<(), UiComponentError> {
         if self.schema != UI_COMPONENT_MANIFEST_SCHEMA
-            || self.component_id.trim().is_empty()
-            || self.signer_id.trim().is_empty()
+            || !safe_id(&self.component_id)
+            || !safe_id(&self.signer_id)
             || self.input_schema != "astra.ui_component_request.v1"
             || self.output_schema != "astra.ui_component_response.v1"
         {
@@ -136,6 +161,25 @@ impl UiComponentManifest {
         if self.capabilities.len() > 64 || self.capabilities.iter().any(|value| value.len() > 256) {
             return Err(UiComponentError::Invalid(
                 "ASTRA_UI_COMPONENT_CAPABILITY_LIMIT: capability set exceeds limits".to_string(),
+            ));
+        }
+        for value in [
+            &self.component_version,
+            &self.engine_version,
+            &self.rustc_fingerprint,
+            &self.feature_fingerprint,
+            &self.abi_fingerprint,
+        ] {
+            if value.is_empty() || value.len() > 256 {
+                return Err(UiComponentError::Invalid(
+                    "ASTRA_UI_COMPONENT_FINGERPRINT: version and fingerprint fields must contain 1..=256 bytes"
+                        .to_string(),
+                ));
+            }
+        }
+        if self.capabilities.iter().any(|value| !safe_id(value)) {
+            return Err(UiComponentError::Invalid(
+                "ASTRA_UI_COMPONENT_CAPABILITY_ID: capability is not a safe identifier".to_string(),
             ));
         }
         Ok(())
@@ -163,8 +207,24 @@ pub enum UiComponentRequest {
 impl UiComponentRequest {
     pub fn validate(&self) -> Result<(), UiComponentError> {
         match self {
-            Self::Open { initial_state, .. }
-            | Self::Restore {
+            Self::Open {
+                session_id,
+                component_id,
+                initial_state,
+            } => {
+                if !safe_id(session_id) || !safe_id(component_id) {
+                    return Err(UiComponentError::Invalid(
+                        "ASTRA_UI_COMPONENT_OPEN_ID: session and component IDs must be safe identifiers"
+                            .to_string(),
+                    ));
+                }
+                if initial_state.len() > MAX_SESSION_STATE_BYTES {
+                    return Err(UiComponentError::Invalid(
+                        "ASTRA_UI_COMPONENT_STATE_LIMIT: session state exceeds 1 MiB".to_string(),
+                    ));
+                }
+            }
+            Self::Restore {
                 state: initial_state,
             } => {
                 if initial_state.len() > MAX_SESSION_STATE_BYTES {
@@ -241,7 +301,9 @@ impl UiComponentResponse {
                     "ASTRA_UI_COMPONENT_STATE_LIMIT: session state exceeds 1 MiB".to_string(),
                 ));
             }
-            Self::Failed { code, message } if code.len() > 256 || message.len() > 4096 => {
+            Self::Failed { code, message }
+                if !safe_id(code) || code.len() > 256 || message.len() > 4096 =>
+            {
                 return Err(UiComponentError::Invalid(
                     "ASTRA_UI_COMPONENT_DIAGNOSTIC_LIMIT: diagnostic exceeds limits".to_string(),
                 ));
@@ -266,7 +328,10 @@ pub struct UiComponentFrame {
 
 impl UiComponentFrame {
     pub fn encode<W: Write>(&self, writer: &mut W) -> Result<(), UiComponentError> {
-        if self.payload.len() > UI_COMPONENT_MAX_FRAME_BYTES || self.deadline_ns == 0 {
+        if self.payload.len() > UI_COMPONENT_MAX_FRAME_BYTES
+            || self.deadline_ns == 0
+            || self.sequence == 0
+        {
             return Err(UiComponentError::Invalid(
                 "ASTRA_UI_COMPONENT_FRAME_LIMIT: invalid payload length or deadline".to_string(),
             ));
@@ -301,7 +366,7 @@ impl UiComponentFrame {
         let sequence = read_u64(reader)?;
         let deadline_ns = read_u64(reader)?;
         let length = read_u32(reader)? as usize;
-        if length > UI_COMPONENT_MAX_FRAME_BYTES || deadline_ns == 0 {
+        if length > UI_COMPONENT_MAX_FRAME_BYTES || deadline_ns == 0 || sequence == 0 {
             return Err(UiComponentError::Invalid(
                 "ASTRA_UI_COMPONENT_FRAME_LIMIT: invalid payload length or deadline".to_string(),
             ));
@@ -322,6 +387,16 @@ impl UiComponentFrame {
             payload,
         })
     }
+}
+
+fn safe_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 256
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':' | b'/')
+        })
+        && !value.contains("..")
+        && !value.starts_with('/')
 }
 
 fn validate_postcard_size<T: Serialize>(value: &T) -> Result<(), UiComponentError> {
@@ -392,4 +467,74 @@ impl RootModule for UiComponentModuleRef {
     const BASE_NAME: &'static str = "astra_ui_component_module";
     const NAME: &'static str = "astra-ui-component";
     const VERSION_STRINGS: VersionStrings = abi_stable::package_version_strings!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn descriptor(artifact_hash: Hash256) -> UiComponentManifest {
+        UiComponentManifest {
+            schema: UI_COMPONENT_MANIFEST_SCHEMA.into(),
+            component_id: "fixture.component".into(),
+            component_version: "1.0.0".into(),
+            signer_id: "fixture.test_signer".into(),
+            engine_version: "test".into(),
+            rustc_fingerprint: "rustc.test".into(),
+            feature_fingerprint: "features.test".into(),
+            abi_fingerprint: "abi.test".into(),
+            artifact_hash,
+            input_schema: "astra.ui_component_request.v1".into(),
+            output_schema: "astra.ui_component_response.v1".into(),
+            capabilities: BTreeSet::from(["ui.render_frame".into()]),
+            signature: Vec::new(),
+        }
+    }
+
+    #[astra_headless_test::test]
+    fn signed_manifest_binds_artifact_and_embedded_descriptor() {
+        let artifact = b"test-only component artifact";
+        let signing = SigningKey::from_bytes(&[7; 32]);
+        let mut manifest = descriptor(Hash256::from_sha256(artifact));
+        manifest.sign(&signing).expect("sign");
+        manifest
+            .verify(
+                artifact,
+                &BTreeMap::from([(
+                    "fixture.test_signer".into(),
+                    signing.verifying_key().to_bytes(),
+                )]),
+            )
+            .expect("verify");
+        let embedded = descriptor(Hash256::from_bytes([0; 32]));
+        manifest
+            .verify_embedded_descriptor(&embedded)
+            .expect("embedded descriptor");
+        assert!(manifest.verify(b"different", &BTreeMap::new()).is_err());
+    }
+
+    #[astra_headless_test::test]
+    fn framed_ipc_rejects_hash_and_sequence_corruption() {
+        let frame = UiComponentFrame {
+            kind: 1,
+            sequence: 1,
+            deadline_ns: 1_000_000,
+            payload: vec![1, 2, 3],
+        };
+        let mut bytes = Vec::new();
+        frame.encode(&mut bytes).expect("encode");
+        assert_eq!(
+            UiComponentFrame::decode(&mut bytes.as_slice()).expect("decode"),
+            frame
+        );
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        assert!(UiComponentFrame::decode(&mut bytes.as_slice()).is_err());
+
+        let invalid = UiComponentFrame {
+            sequence: 0,
+            ..frame
+        };
+        assert!(invalid.encode(&mut Vec::new()).is_err());
+    }
 }
