@@ -31,11 +31,13 @@ astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi" }
 astra-release = { path = "../../Developer/astra-release" }
 astra-target = { path = "../../Platform/astra-target" }
 astra-ui-core = { path = "../../Runtime/astra-ui-core" }
+astra-ui-plugin-abi = { path = "../../Runtime/astra-ui-plugin-abi" }
 astra-test = { path = "../../Developer/astra-test" }
 astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
 astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }
 clap.workspace = true
 image.workspace = true
+hex.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

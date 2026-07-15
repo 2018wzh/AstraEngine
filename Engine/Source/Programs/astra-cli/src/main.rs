@@ -36,8 +36,9 @@ use astra_target::{
 use astra_test::ScenarioReport;
 use astra_vn::{
     compile_astra_project, format_astra_source, load_player_locale_config,
-    package_sections_for_project, AstraSource, CompileAstraProjectOptions, FormatOptions,
-    PlayerLocaleConfig, PLAYER_LOCALE_CONFIG_SCHEMA,
+    package_sections_for_project_with_components, AstraSource, CompileAstraProjectOptions,
+    FormatOptions, PlayerLocaleConfig, VnUiComponentArtifactInput, VnUiComponentTarget,
+    PLAYER_LOCALE_CONFIG_SCHEMA,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 use schemars::JsonSchema;
@@ -1460,7 +1461,13 @@ fn cook_nativevn_sections(
         profiles.push(profile.to_string());
     }
 
-    let sections = package_sections_for_project(&compiled, &profiles, target)?;
+    let component_artifacts = nativevn_ui_component_artifacts(project, project_dir)?;
+    let sections = package_sections_for_project_with_components(
+        &compiled,
+        &profiles,
+        target,
+        &component_artifacts,
+    )?;
     let section_dir = out.join("sections");
     fs::create_dir_all(&section_dir)?;
     let mut artifacts = Vec::new();
@@ -2079,6 +2086,94 @@ fn nativevn_controller_paths(
     paths.sort_by_key(|path| normalize_relative_path(path));
     paths.dedup_by(|left, right| normalize_relative_path(left) == normalize_relative_path(right));
     Ok(paths)
+}
+
+fn nativevn_ui_component_artifacts(
+    project: &serde_yaml::Value,
+    project_dir: &std::path::Path,
+) -> Result<Vec<VnUiComponentArtifactInput>, CliError> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ComponentTargetSource {
+        manifest: String,
+        artifact: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ComponentSource {
+        id: String,
+        signer_public_key: String,
+        windows: ComponentTargetSource,
+        web: ComponentTargetSource,
+    }
+
+    let Some(value) = project
+        .get("nativevn")
+        .and_then(|nativevn| nativevn.get("ui_components"))
+    else {
+        return Ok(Vec::new());
+    };
+    let sources: Vec<ComponentSource> = serde_yaml::from_value(value.clone())?;
+    let mut ids = std::collections::BTreeSet::new();
+    let mut result = Vec::with_capacity(sources.len().saturating_mul(2));
+    for source in sources {
+        if !ids.insert(source.id.clone()) {
+            return Err("ASTRA_UI_COMPONENT_PROJECT_DUPLICATE: component id is duplicated".into());
+        }
+        if source.signer_public_key.len() != 64
+            || !source
+                .signer_public_key
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err("ASTRA_UI_COMPONENT_SIGNER_KEY: signer_public_key must be 64 lowercase hex characters".into());
+        }
+        let public_bytes = hex::decode(&source.signer_public_key).map_err(|_| {
+            "ASTRA_UI_COMPONENT_SIGNER_KEY: signer_public_key must be 64 lowercase hex characters"
+        })?;
+        let public_key: [u8; 32] = public_bytes.try_into().map_err(|_| {
+            "ASTRA_UI_COMPONENT_SIGNER_KEY: signer_public_key must encode exactly 32 bytes"
+        })?;
+        for (target, target_source) in [
+            (VnUiComponentTarget::Windows, source.windows),
+            (VnUiComponentTarget::Web, source.web),
+        ] {
+            let manifest_path = validate_project_relative_path(&target_source.manifest)?;
+            let artifact_path = validate_project_relative_path(&target_source.artifact)?;
+            let manifest_text = fs::read_to_string(project_dir.join(&manifest_path))?;
+            let manifest: astra_ui_plugin_abi::UiComponentManifest =
+                match manifest_path.extension().and_then(std::ffi::OsStr::to_str) {
+                    Some("json") => serde_json::from_str(&manifest_text)?,
+                    Some("yaml" | "yml") => serde_yaml::from_str(&manifest_text)?,
+                    _ => {
+                        return Err(
+                            "ASTRA_UI_COMPONENT_MANIFEST_FORMAT: manifest must use JSON or YAML"
+                                .into(),
+                        )
+                    }
+                };
+            if manifest.component_id != source.id {
+                return Err(
+                    "ASTRA_UI_COMPONENT_PROJECT_IDENTITY: source id differs from signed manifest"
+                        .into(),
+                );
+            }
+            let artifact = fs::read(project_dir.join(artifact_path))?;
+            if artifact.is_empty() || artifact.len() > 64 * 1024 * 1024 {
+                return Err(
+                    "ASTRA_UI_COMPONENT_ARTIFACT_SIZE: artifact must contain 1..=64 MiB".into(),
+                );
+            }
+            result.push(VnUiComponentArtifactInput {
+                target,
+                manifest,
+                artifact,
+                signer_public_key: public_key,
+            });
+        }
+    }
+    Ok(result)
 }
 
 fn collect_sources_with_extension(
