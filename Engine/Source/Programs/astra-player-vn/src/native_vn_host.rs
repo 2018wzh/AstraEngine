@@ -3191,7 +3191,7 @@ fn append_text_value(
     direction: TextDirection,
     rgba: [u8; 4],
 ) -> Result<(), NativeVnHostError> {
-    let request = text_request(
+    let request = text_request(TextRequestSpec {
         key,
         text,
         locale,
@@ -3200,7 +3200,7 @@ fn append_text_value(
         font_size,
         max_lines,
         direction,
-    );
+    });
     let layout = provider.layout(&request)?;
     let commands = owner.update_layout(layout_id, &layout, rgba)?;
     for command in commands {
@@ -3302,16 +3302,17 @@ impl AstraTextMeasurer for NativeUiTextMeasurer {
         let direction = parse_text_direction(Some(&request.direction)).map_err(|error| {
             UiValidationError::invalid("ASTRA_UI_TEXT_DIRECTION", error.to_string())
         })?;
-        let layout_request = text_request(
-            &format!("ui.measure.{}", request.semantic_id),
-            &request.text,
-            &self.locale,
-            &self.font_families,
-            request.max_width.max(1.0).round() as u32,
-            request.font_size,
-            request.max_lines,
+        let key = format!("ui.measure.{}", request.semantic_id);
+        let layout_request = text_request(TextRequestSpec {
+            key: &key,
+            text: &request.text,
+            locale: &self.locale,
+            font_families: &self.font_families,
+            max_width: request.max_width.max(1.0).round() as u32,
+            font_size: request.font_size,
+            max_lines: request.max_lines,
             direction,
-        );
+        });
         let measurement = self.provider.measure(&layout_request).map_err(|error| {
             UiValidationError::invalid("ASTRA_UI_TEXT_MEASURE", error.to_string())
         })?;
@@ -3390,37 +3391,39 @@ fn non_negative_coord(value: f32, field: &str) -> Result<u32, NativeVnHostError>
     Ok(value.round() as u32)
 }
 
-fn text_request(
-    key: &str,
-    text: &str,
-    locale: &str,
-    font_families: &[String],
+struct TextRequestSpec<'a> {
+    key: &'a str,
+    text: &'a str,
+    locale: &'a str,
+    font_families: &'a [String],
     max_width: u32,
     font_size: f32,
     max_lines: u32,
     direction: TextDirection,
-) -> TextLayoutRequest {
-    let line_height = font_size * 1.3;
+}
+
+fn text_request(spec: TextRequestSpec<'_>) -> TextLayoutRequest {
+    let line_height = spec.font_size * 1.3;
     TextLayoutRequest {
-        key: key.to_string(),
+        key: spec.key.to_string(),
         runs: vec![TextRun {
-            text: text.to_string(),
-            language: locale.to_string(),
+            text: spec.text.to_string(),
+            language: spec.locale.to_string(),
             script: None,
-            direction,
+            direction: spec.direction,
             ruby: Vec::new(),
             voice: None,
         }],
         constraint: LayoutConstraint {
-            max_width: max_width.max(1) as f32,
-            max_height: Some(line_height * max_lines.max(1) as f32),
-            max_lines: Some(max_lines.max(1)),
-            font_size,
+            max_width: spec.max_width.max(1) as f32,
+            max_height: Some(line_height * spec.max_lines.max(1) as f32),
+            max_lines: Some(spec.max_lines.max(1)),
+            font_size: spec.font_size,
             line_height,
             wrap: WrapPolicy::WordOrGlyph,
             overflow: OverflowPolicy::EllipsisEnd,
         },
-        font_families: font_families.to_vec(),
+        font_families: spec.font_families.to_vec(),
         features: Vec::new(),
     }
 }
@@ -3622,16 +3625,17 @@ fn validate_story_text(
     }
     for key in keys {
         let text = resolve_localized(localization, &key)?;
-        provider.layout(&text_request(
-            &format!("preflight.{key}"),
+        let request_key = format!("preflight.{key}");
+        provider.layout(&text_request(TextRequestSpec {
+            key: &request_key,
             text,
-            &localization.locale,
+            locale: &localization.locale,
             font_families,
-            4096,
-            28.0,
-            16,
-            TextDirection::Auto,
-        ))?;
+            max_width: 4096,
+            font_size: 28.0,
+            max_lines: 16,
+            direction: TextDirection::Auto,
+        }))?;
     }
     Ok(())
 }

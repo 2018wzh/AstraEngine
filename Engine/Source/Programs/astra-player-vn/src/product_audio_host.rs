@@ -360,7 +360,7 @@ impl NativeVnProductAudioHost {
             .next_packet_sequence
             .checked_add(1)
             .ok_or_else(|| player_platform_error("player.audio.submit", "sequence overflowed"))?;
-        if self.next_packet_sequence % 120 == 0 {
+        if self.next_packet_sequence.is_multiple_of(120) {
             tracing::info!(
                 event = "astra.player.audio.timeline_progress",
                 packet_sequence = self.next_packet_sequence,

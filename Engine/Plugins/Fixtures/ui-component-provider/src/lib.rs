@@ -104,7 +104,7 @@ extern "C" fn frame(payload: RVec<u8>) -> FfiUiComponentResult {
             };
             semantics.hash = semantics.compute_hash().expect("fixture semantic hash");
             UiComponentResponse::Frame {
-                render: UiRenderFrame {
+                render: Box::new(UiRenderFrame {
                     schema: "astra.ui_render_frame.v1".into(),
                     session_id: request.session_id,
                     generation: request.generation,
@@ -115,8 +115,8 @@ extern "C" fn frame(payload: RVec<u8>) -> FfiUiComponentResult {
                         full_resync: false,
                     },
                     primitives: Vec::new(),
-                },
-                semantics,
+                }),
+                semantics: Box::new(semantics),
                 actions: Vec::new(),
             }
         }

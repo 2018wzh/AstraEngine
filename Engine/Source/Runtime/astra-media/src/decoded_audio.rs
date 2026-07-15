@@ -208,7 +208,7 @@ fn map_channels(
 }
 
 fn decode_s16le(bytes: &[u8], max_samples: usize) -> Result<Vec<f32>, PlayerAudioContractError> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(PlayerAudioContractError::new(
             "ASTRA_PLAYER_AUDIO_PCM_TRUNCATED",
             "decoded PCM payload ends inside a sample",

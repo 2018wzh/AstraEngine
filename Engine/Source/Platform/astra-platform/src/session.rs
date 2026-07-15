@@ -838,7 +838,10 @@ impl PlatformHostClient {
         if packet.sequence == 0
             || packet.channels == 0
             || packet.samples.is_empty()
-            || packet.samples.len() % usize::from(packet.channels) != 0
+            || !packet
+                .samples
+                .len()
+                .is_multiple_of(usize::from(packet.channels))
             || packet.frame_count() > self.profile.limits().max_audio_frames
             || packet.samples.iter().any(|sample| !sample.is_finite())
         {

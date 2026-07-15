@@ -1292,7 +1292,10 @@ mod windows {
             if packet.sequence != self.next_sequence
                 || packet.channels != self.channels
                 || packet.samples.is_empty()
-                || packet.samples.len() % usize::from(packet.channels) != 0
+                || !packet
+                    .samples
+                    .len()
+                    .is_multiple_of(usize::from(packet.channels))
                 || packet.samples.iter().any(|sample| !sample.is_finite())
             {
                 return Err(PlatformError::new(
@@ -1409,7 +1412,7 @@ mod windows {
             let consumed_samples = self.queue_telemetry.snapshot();
             let channels = u64::from(self.channels);
             if consumed_samples.sample_count > self.submitted_samples
-                || self.submitted_samples % channels != 0
+                || !self.submitted_samples.is_multiple_of(channels)
             {
                 return Err(PlatformError::new(
                     PlatformErrorCode::IntegrityMismatch,

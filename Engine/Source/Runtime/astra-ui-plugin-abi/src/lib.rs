@@ -195,7 +195,7 @@ pub enum UiComponentRequest {
         initial_state: Vec<u8>,
     },
     Frame {
-        request: UiFrameRequest,
+        request: Box<UiFrameRequest>,
     },
     Snapshot,
     Restore {
@@ -247,8 +247,8 @@ impl UiComponentRequest {
 pub enum UiComponentResponse {
     Opened,
     Frame {
-        render: UiRenderFrame,
-        semantics: UiSemanticSnapshot,
+        render: Box<UiRenderFrame>,
+        semantics: Box<UiSemanticSnapshot>,
         actions: Vec<UiActionEnvelope>,
     },
     Snapshot {

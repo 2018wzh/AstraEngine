@@ -28,7 +28,7 @@ fn signed_component_process_supports_frame_snapshot_restore_and_shutdown() {
     );
     let frame = process
         .invoke(UiComponentRequest::Frame {
-            request: frame_request(),
+            request: Box::new(frame_request()),
         })
         .expect("frame");
     let UiComponentResponse::Frame {

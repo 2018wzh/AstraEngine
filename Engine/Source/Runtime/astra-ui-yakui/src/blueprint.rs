@@ -200,21 +200,20 @@ impl BlueprintYakuiRenderer {
             })?);
         }
         let mut name = property_text(node, frame, item)?;
-        let mut min_width = property_number(node, "min_width", frame, item)?.unwrap_or_else(|| {
+        let mut min_width = property_number(node, "min_width", frame, item)?.unwrap_or({
             if interactive {
                 180.0
             } else {
                 0.0
             }
         });
-        let mut min_height =
-            property_number(node, "min_height", frame, item)?.unwrap_or_else(|| {
-                if interactive {
-                    48.0
-                } else {
-                    0.0
-                }
-            });
+        let mut min_height = property_number(node, "min_height", frame, item)?.unwrap_or({
+            if interactive {
+                48.0
+            } else {
+                0.0
+            }
+        });
         let default_fill = if matches!(
             node.widget.as_str(),
             "button" | "select" | "toggle" | "slider" | "text_input"
@@ -1363,7 +1362,7 @@ fn property_color(
     Some(Color::rgba(*r, *g, *b, *a))
 }
 
-fn visual_token<'a>(node: &'a astra_ui_core::UiNodeBlueprint) -> Option<&'a UiValueExpr> {
+fn visual_token(node: &astra_ui_core::UiNodeBlueprint) -> Option<&UiValueExpr> {
     node.properties
         .get("asset")
         .or_else(|| node.properties.get("texture"))

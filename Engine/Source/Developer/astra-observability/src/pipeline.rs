@@ -318,7 +318,7 @@ where
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
                 let dropped = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
-                if dropped == 1 || dropped % 1024 == 0 {
+                if dropped == 1 || dropped.is_multiple_of(1024) {
                     self.record_drop_warning(dropped);
                 }
             }

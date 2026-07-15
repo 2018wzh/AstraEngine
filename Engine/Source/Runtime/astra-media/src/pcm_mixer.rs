@@ -24,7 +24,9 @@ impl PcmAsset {
         samples: Vec<f32>,
     ) -> Result<Self, MediaError> {
         if samples.is_empty()
-            || samples.len() % usize::from(CANONICAL_CHANNELS) != 0
+            || !samples
+                .len()
+                .is_multiple_of(usize::from(CANONICAL_CHANNELS))
             || samples.iter().any(|sample| !sample.is_finite())
             || Hash256::from_sha256(&pcm_bytes(&samples)) != hash
         {
