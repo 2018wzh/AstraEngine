@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
-use astra_ui_core::{
-    validate_serialized_size, UiValue, MAX_EFFECTS_PER_CALL, MAX_SESSION_STATE_BYTES,
-};
+use astra_ui_core::{UiValue, ValidateUi, MAX_EFFECTS_PER_CALL, MAX_SESSION_STATE_BYTES};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -36,6 +34,13 @@ impl VnUiControllerManifest {
 pub enum VnUiControllerSnapshot {
     None,
     Session,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VnUiControllerUpdate {
+    pub fixed_time_ns: u64,
+    pub delta_ns: u64,
+    pub generation: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -95,15 +100,45 @@ impl VnUiSessionState {
         let mut next = self.values.clone();
         for effect in effects {
             if let VnUiControllerEffect::SetSessionState { key, value } = effect {
-                validate_serialized_size(value).map_err(|_| VnUiControllerError::InvalidValue)?;
+                value
+                    .validate()
+                    .map_err(|_| VnUiControllerError::InvalidValue)?;
                 next.insert(key.clone(), value.clone());
             }
         }
+        UiValue::Map(next.clone())
+            .validate()
+            .map_err(|_| VnUiControllerError::InvalidValue)?;
         let bytes = postcard::to_allocvec(&next).map_err(|_| VnUiControllerError::InvalidValue)?;
         if bytes.len() > MAX_SESSION_STATE_BYTES {
             return Err(VnUiControllerError::StateLimit);
         }
         self.values = next;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[astra_headless_test::test]
+    fn session_state_application_is_atomic() {
+        let mut state = VnUiSessionState::default();
+        let effects = vec![
+            VnUiControllerEffect::SetSessionState {
+                key: "valid".into(),
+                value: UiValue::Bool(true),
+            },
+            VnUiControllerEffect::SetSessionState {
+                key: String::new(),
+                value: UiValue::Bool(false),
+            },
+        ];
+        assert_eq!(
+            state.apply(&effects),
+            Err(VnUiControllerError::InvalidValue)
+        );
+        assert!(state.values().is_empty());
     }
 }
