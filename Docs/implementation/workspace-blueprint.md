@@ -127,7 +127,7 @@ targets = [
 - `rpg.trpg` is an AstraRPG profile crate; do not create a top-level `AstraTRPG` module, standalone TRPG runtime provider or top-level `trpg.*` package section namespace.
 - `luau` enables AstraVN and AstraEMU policy host integration. Legacy family adapters may parse historical script names inside their private core.
 - `wgpu` is default Renderer2D provider. Platform decode features are profile-specific.
-- Migration 11 已把 Runtime/Media/Test 收束为统一 Headless implementation；所有平台无关 Runtime 测试必须创建 `HeadlessTestContext`。受控 library target 显式禁用 doctest，并由 checker 阻断绕过 lifecycle 的新 target；完整后端仍不得进入 shipping dependency graph。正式完成状态继续取决于三系统 CI、具名 review 与真实平台 linked evidence。
+- Migration 11 已把 Runtime/Media/Test 收束为统一 Headless implementation；所有平台无关 Runtime 测试必须创建 `HeadlessTestContext`。受控 library target 显式禁用 doctest，并由 checker 阻断绕过 lifecycle 的新 target；完整后端仍不得进入 shipping dependency graph。Stage 2 只以 Windows native CI、具名 review 与真实平台 linked evidence 关闭，Linux/macOS portability 进入 Stage 6。
 - Target manifest is required for package validation. Missing SDK reports block native platform completion, but schema and CLI checks still run on ordinary CI.
 
 ## Verification

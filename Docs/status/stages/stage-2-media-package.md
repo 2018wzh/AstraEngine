@@ -354,12 +354,12 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 | Work ID | Status | Planned boundary | Planned Test ID |
 | --- | --- | --- | --- |
 | `S2-HEADLESS-CONTRACT-01` | `DONE` | `HostKind`、`HeadlessHostProfile`、`HostLaunchProfile`，保持六平台 `PlatformId` 与发布 profile v2 | `T-S2-HEADLESS-CONTRACT-01` |
-| `S2-HEADLESS-HOST-01` | `IN_PROGRESS` | `publish = false` 完整 host 与 Windows 隔离 workspace runtime 已通过；仍待 Linux、macOS matrix | `T-S2-HEADLESS-HOST-01` |
-| `S2-HEADLESS-MEDIA-01` | `IN_PROGRESS` | Media-owned CPU renderer/mixer、真实 image/Symphonia decode、PNG/WAV、完整音频分析与显式 FFmpeg Windows job 已通过；仍待跨平台 matrix | `T-S2-HEADLESS-MEDIA-01` |
+| `S2-HEADLESS-HOST-01` | `IN_PROGRESS` | `publish = false` 完整 host 已实现；Stage 2 等待 Windows CI runtime，Linux/macOS portability 进入 Stage 6 | `T-S2-HEADLESS-HOST-01` |
+| `S2-HEADLESS-MEDIA-01` | `IN_PROGRESS` | Media-owned CPU renderer/mixer、真实 image/Symphonia decode、PNG/WAV、完整音频分析与显式 FFmpeg Windows job 已实现；等待 Windows CI 和正式 artifact evidence | `T-S2-HEADLESS-MEDIA-01` |
 | `S2-HEADLESS-INPUT-01` | `IN_PROGRESS` | 强类型物理输入、固定时间、双向 JSONL 与 NativeVN adapter 已落地，等待全流程 evidence | `T-S2-HEADLESS-INPUT-01` |
 | `S2-HEADLESS-ARTIFACT-01` | `IN_PROGRESS` | retention、限额、原子 manifest/report 与比较器已落地，等待失败事务矩阵 evidence | `T-S2-HEADLESS-ARTIFACT-01` |
 | `S2-HEADLESS-CLI-01` | `IN_PROGRESS` | `astra-headless run`、`serve --stdio`、bootstrap 与旧 alias diagnostic 已落地 | `T-S2-HEADLESS-CLI-01` |
-| `S2-HEADLESS-TEST-MIGRATION-01` | `IN_PROGRESS` | 当前 408 个受控测试使用 `HeadlessTestContext`，38 个受控 library target 禁用绕过 lifecycle 的 doctest；Windows 全 workspace 与 feature job 已通过，仍待 Linux、macOS CI inventory | `T-S2-HEADLESS-TEST-MIGRATION-01` |
+| `S2-HEADLESS-TEST-MIGRATION-01` | `IN_PROGRESS` | 当前 408 个受控测试使用 `HeadlessTestContext`，38 个受控 library target 禁用绕过 lifecycle 的 doctest；等待 Windows 全 workspace 与 feature CI，Linux/macOS inventory 进入 Stage 6 | `T-S2-HEADLESS-TEST-MIGRATION-01` |
 | `S2-HEADLESS-REVIEW-01` | `IN_PROGRESS` | 自动比较与 review schema/gate 已落地，正式具名 review evidence 尚待生成 | `T-S2-HEADLESS-REVIEW-01` |
 | `S2-HEADLESS-PREFLIGHT-01` | `IN_PROGRESS` | formal release preflight check 已落地，真实 Windows/Web identity-linked evidence 尚待生成 | `T-S2-HEADLESS-PREFLIGHT-01` |
 

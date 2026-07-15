@@ -1,6 +1,38 @@
 # Stage 6 Platform Completion Work
 
-Stage 6 收纳 Stage 2 之外的平台完成项。Windows 和 Web 属于 Stage 2 完成边界；Linux、macOS、iOS 和 Android 保持 `SPEC_READY`，等 AstraVN Core、Editor gate 和平台发布路径稳定后再进入真实 SDK、launcher、surface、media、save、resume 和 player input automation 验收。本页不把 capability crate 编译通过写成 host 完成，也不把 API 可用性写成可玩证据。
+Stage 6 收纳 Stage 2 之外的平台完成项。Windows 和 Web 属于 Stage 2 完成边界；Migration 11 的 Stage 2 Headless 也只验收 Windows native。Linux、macOS、iOS 和 Android 保持 `SPEC_READY`，等 AstraVN Core、Editor gate 和平台发布路径稳定后再进入真实 SDK、launcher、surface、media、save、resume 和 player input automation 验收；Linux/macOS Headless 的本机 CI、runtime 与 artifact portability 在本阶段独立关闭。本页不把 capability crate 编译通过写成 host 完成，也不把 API 可用性写成可玩证据。
+
+## S6-LINUX-HEADLESS-01 Linux Headless portability
+
+**ID:** `S6-LINUX-HEADLESS-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 在 Linux native 环境复核 Migration 11 Headless 的完整 host、JSONL、真实 PNG/WAV、decode、transactional save、bounded package source、artifact、review bundle、统一测试 inventory 与 zero-leak shutdown，不以只编译通过替代 runtime evidence。
+
+**Depends On:** `S2-HEADLESS-TEST-MIGRATION-01`
+
+**Target Paths:** `Engine/Source/Platform/astra-platform-headless/`、`Engine/Source/Programs/astra-headless/`、`.github/workflows/ci.yml`
+
+**Planned Gate:** 独立 Linux native CI 必须执行默认 workspace test、Headless convergence、shipping graph 和公开产品 artifact run；视频 provider 另设显式 FFmpeg job。缺系统依赖、link/runtime failure 或 artifact identity drift 都必须 blocking。
+
+**Linked Test IDs:** `T-S6-LINUX-HEADLESS-01`
+
+## S6-MACOS-HEADLESS-01 macOS Headless portability
+
+**ID:** `S6-MACOS-HEADLESS-01`
+
+**Status:** `SPEC_READY`
+
+**Goal:** 在 macOS native 环境复核 Migration 11 Headless 的完整 host、JSONL、真实 PNG/WAV、decode、transactional save、bounded package source、artifact、review bundle、统一测试 inventory 与 zero-leak shutdown。
+
+**Depends On:** `S2-HEADLESS-TEST-MIGRATION-01`
+
+**Target Paths:** `Engine/Source/Platform/astra-platform-headless/`、`Engine/Source/Programs/astra-headless/`、`.github/workflows/ci.yml`
+
+**Planned Gate:** 独立 macOS native CI 必须执行默认 workspace test、Headless convergence、shipping graph 和公开产品 artifact run；不得用 Windows report、cross compile 或静态 schema 代替 macOS runtime evidence。
+
+**Linked Test IDs:** `T-S6-MACOS-HEADLESS-01`
 
 ## S6-LINUX-HOST-01 Linux host completion
 

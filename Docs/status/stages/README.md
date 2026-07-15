@@ -9,7 +9,7 @@
 | [stage-3-astra-vn.md](stage-3-astra-vn.md) | AstraVN module layout、多功能 crate 拆分、facade-only `astra-vn` Rust dylib、`NativeVnRuntimeProvider`、`.astra`、AstraVN Core、Game target、Luau policy、standard commands、system UI、full playthrough 和 Windows/Web live player automation |
 | [stage-4-editor-ai-mcp.md](stage-4-editor-ai-mcp.md) | Editor target、Editor workflow、PIE、Release Gate UI、Runtime AI 和 MCP |
 | [stage-5-astra-emu.md](stage-5-astra-emu.md) | Program target、AstraEMU Manager、`AstraEmuRuntimeProvider`、LegacyRuntimeProvider facade、EmulatorCore 状态机映射、legacy pack VFS、auto probe、Trusted Luau、文本翻译和 FilterGraph preset |
-| [stage-6-platform-completion.md](stage-6-platform-completion.md) | Linux、macOS、iOS 和 Android host completion 与 player input automation |
+| [stage-6-platform-completion.md](stage-6-platform-completion.md) | Linux、macOS、iOS 和 Android host completion、player input automation，以及 Linux/macOS Headless native portability |
 | [stage-7-astra-rpg.md](stage-7-astra-rpg.md) | `AstraRpgRuntimeProvider`、RPG core、AI Town、`rpg.trpg` profile 和 CP2020 local-private adapter |
 | [stage-8-astra-rpg-network.md](stage-8-astra-rpg-network.md) | AstraRPG Server/Client protocol、seat sync、transcript sync 和 network replay gate |
 | [stage-test-matrix.md](stage-test-matrix.md) | Stage 1-8 工作项对应的测试项目 |

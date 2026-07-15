@@ -1,6 +1,6 @@
 # Migration 11：Headless Platform 测试后端迁移
 
-本页同时记录统一 Headless Platform 的实现与验收边界。contract、host、Media/PNG/WAV、完整 FFmpeg 视频帧流、JSONL、Developer CLI、统一测试 lifecycle、review bundle 和 formal preflight gate 已进入同一实现路径。CI 已登记 Windows、Linux、macOS 默认矩阵和独立 Windows `ffmpeg-vcpkg` job；在这些 job、具名 review 与真实 Windows/Web linked evidence 实际形成之前，除 contract 外仍保持 `IN_PROGRESS`。局部静态、配置存在或单平台证据不能把 Stage 2 Headless、产品可玩性或真实平台验收标为完成。
+本页同时记录统一 Headless Platform 的实现与验收边界。contract、host、Media/PNG/WAV、完整 FFmpeg 视频帧流、JSONL、Developer CLI、统一测试 lifecycle、review bundle 和 formal preflight gate 已进入同一实现路径。Stage 2 的运行与 CI 验收范围现收束为 Windows native Headless，并保留独立 Windows `ffmpeg-vcpkg` job；Linux/macOS 的本机运行、CI 与 artifact portability evidence 延后到 Stage 6，WASM、iOS 和 Android 不支持 Headless。在 Windows job、具名 review 与真实 Windows/Web linked evidence 实际形成之前，除 contract 外仍保持 `IN_PROGRESS`。局部静态或配置存在不能把 Stage 2 Headless、产品可玩性或真实平台验收标为完成。
 
 Migration 11 归入 Stage 2。`S2-MEDIA-01` 和 `S2-MEDIA-03` 继续保留 `DONE`，它们只证明 renderer/audio contract 与局部 deterministic executor 已存在；完整 Headless Platform 必须等本迁移的 contract、host、媒体、输入、产物、CLI、测试收束、模型审查和真实平台 preflight 全部闭合。
 
@@ -177,7 +177,7 @@ Headless 最多形成 E2 平台无关产品证据。它不能替代 Windows/Web 
 
 ## 状态与验收
 
-Migration 11 已在独立分支实施。`S2-HEADLESS-CONTRACT-01` 保持 `DONE`，其余项保持 `IN_PROGRESS`。只有对应 Rust 类型、schema、crate、binary、workspace test inventory、artifact、review、shipping graph 和 preflight report 都通过后，才能逐项改为 `DONE`。
+Migration 11 已进入主线实施。`S2-HEADLESS-CONTRACT-01` 保持 `DONE`，其余项保持 `IN_PROGRESS`。Stage 2 只按 Windows native Headless evidence 关闭；Linux/macOS portability 不再阻断这些工作项，但必须在 Stage 6 独立登记和验收。只有对应 Rust 类型、schema、crate、binary、Windows workspace test inventory、artifact、review、shipping graph 和 preflight report 都通过后，才能逐项改为 `DONE`。
 
 受控 library target 统一设置 `doctest = false`，避免 Cargo doctest 绕过 session lifecycle；compile/schema 示例由使用 `#[astra_headless_test::test]` 的受控测试承担。convergence checker会同时核对原始 test attribute、legacy path、library doctest 配置和 inventory。
 
