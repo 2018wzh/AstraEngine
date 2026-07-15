@@ -189,6 +189,63 @@ state missed #@id state.missed
 }
 
 #[astra_headless_test::test]
+fn choice_availability_is_evaluated_from_authoritative_variables() {
+    const GUARDED: &str = r#"
+story main #@id story.main
+
+state start #@id state.start
+  scene start #@id scene.start
+    mutate project.selected = 1 #@id set.selected
+    choice key:prompt #@id choice.prompt
+      option key:first target:first when:project.selected,not_eq,1 #@id option.first
+      option key:second target:second when:project.selected,eq,1 #@id option.second
+
+state first #@id state.first
+  scene first #@id scene.first
+    text key:first #@id line.first
+
+state second #@id state.second
+  scene second #@id scene.second
+    text key:second #@id line.second
+"#;
+    let compiled = compile_astra_project(
+        [AstraSource::story("guarded.astra", GUARDED)],
+        Default::default(),
+    )
+    .unwrap();
+    let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("ja")).unwrap();
+    runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".to_string(),
+            state_id: "state.start".to_string(),
+        })
+        .unwrap();
+    let pending = runtime.state().pending_choice.as_ref().unwrap();
+    assert!(!pending.enabled_option_ids.contains("option.first"));
+    assert!(pending.enabled_option_ids.contains("option.second"));
+
+    let error = runtime
+        .apply(VnPlayerCommand::Choose {
+            option_id: "option.first".to_string(),
+        })
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_VN_CHOICE_OPTION_DISABLED"));
+    assert!(runtime.state().pending_choice.is_some());
+
+    let output = runtime
+        .apply(VnPlayerCommand::Choose {
+            option_id: "option.second".to_string(),
+        })
+        .unwrap();
+    assert!(matches!(
+        output.presentation.last(),
+        Some(PresentationCommand::Dialogue { key, .. }) if key == "second"
+    ));
+}
+
+#[astra_headless_test::test]
 fn compiled_story_exposes_system_story_manifest() {
     let compiled = compile_astra_project(
         [

@@ -213,6 +213,16 @@ pub struct ChoiceOption {
     pub id: String,
     pub key: String,
     pub target: String,
+    #[serde(default)]
+    pub enabled_when: Option<VariableCondition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VariableCondition {
+    pub scope: String,
+    pub key: String,
+    pub op: BranchOp,
+    pub value: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -591,6 +601,7 @@ pub struct PendingChoice {
     pub choice_id: String,
     pub key: String,
     pub options: Vec<ChoiceOption>,
+    pub enabled_option_ids: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

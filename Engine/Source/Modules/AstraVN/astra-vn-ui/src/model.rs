@@ -218,7 +218,7 @@ impl VnUiModelContext<'_> {
                 .map(|option| ChoiceOptionViewModel {
                     option_id: option.id.clone(),
                     text_key: option.key.clone(),
-                    enabled: true,
+                    enabled: choice.enabled_option_ids.contains(&option.id),
                 })
                 .collect(),
         })

@@ -9,7 +9,7 @@ use crate::{
     CommandProvider, CommandRegistry, CommandSourceMap, CompiledCommand, CompiledStory,
     CompiledVnProject, ExtensionCommandDescriptor, MutationOp, PresentationCommand, RouteEdge,
     RouteGraph, RouteNode, Scene, State, Story, StoryManifest, StoryManifestEntry, SystemPageKind,
-    SystemStoryManifest, VariableManifest, VariableScopeManifest, VnError,
+    SystemStoryManifest, VariableCondition, VariableManifest, VariableScopeManifest, VnError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -435,10 +435,15 @@ impl CompileBuilder {
     }
 
     fn push_option(&mut self, line: &ParsedLine) -> Result<(), VnError> {
+        let enabled_when = line
+            .attr("when")
+            .map(|value| parse_variable_condition(line, value))
+            .transpose()?;
         let option = ChoiceOption {
             id: line.stable_id(),
             key: required_attr(line, "key")?,
             target: required_attr(line, "target")?,
+            enabled_when,
         };
         let commands = &mut self.current_scene_mut()?.commands;
         if let Some(CompiledCommand::Choice { options, .. }) = commands.last_mut() {
@@ -722,6 +727,20 @@ impl CompileBuilder {
                     })
                     .keys
                     .insert(key.clone());
+            }
+            if let CompiledCommand::Choice { options, .. } = command {
+                for condition in options
+                    .iter()
+                    .filter_map(|option| option.enabled_when.as_ref())
+                {
+                    scopes
+                        .entry(condition.scope.clone())
+                        .or_insert_with(|| VariableScopeManifest {
+                            keys: BTreeSet::new(),
+                        })
+                        .keys
+                        .insert(condition.key.clone());
+                }
             }
         }
         VariableManifest {
@@ -1102,6 +1121,70 @@ fn required_attr(line: &ParsedLine, key: &str) -> Result<String, VnError> {
     line.attr(key)
         .map(str::to_string)
         .ok_or_else(|| VnError::diagnostic("ASTRA_VN_ATTR_MISSING", format!("{key} is missing")))
+}
+
+fn parse_variable_condition(line: &ParsedLine, value: &str) -> Result<VariableCondition, VnError> {
+    let parts = value.split(',').collect::<Vec<_>>();
+    if parts.len() != 3 {
+        return Err(VnError::Diagnostic(
+            Diagnostic::blocking(
+                "ASTRA_VN_CHOICE_CONDITION",
+                "choice condition must use path,operator,integer",
+            )
+            .with_source(line.source_ref()),
+        ));
+    }
+    let (scope, key) = parts[0].split_once('.').ok_or_else(|| {
+        VnError::Diagnostic(
+            Diagnostic::blocking(
+                "ASTRA_VN_CHOICE_CONDITION",
+                "choice condition path needs scope.key",
+            )
+            .with_source(line.source_ref()),
+        )
+    })?;
+    if !is_allowed_variable_scope(scope) || key.is_empty() {
+        return Err(VnError::Diagnostic(
+            Diagnostic::blocking(
+                "ASTRA_VN_CHOICE_CONDITION",
+                "choice condition variable path is invalid",
+            )
+            .with_source(line.source_ref()),
+        ));
+    }
+    let op = match parts[1] {
+        "eq" => BranchOp::Eq,
+        "not_eq" => BranchOp::NotEq,
+        "less" => BranchOp::Less,
+        "less_eq" => BranchOp::LessEq,
+        "greater" => BranchOp::Greater,
+        "greater_eq" => BranchOp::GreaterEq,
+        _ => {
+            return Err(VnError::Diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_VN_CHOICE_CONDITION",
+                    "choice condition operator is unsupported",
+                )
+                .with_source(line.source_ref()),
+            ));
+        }
+    };
+    let parsed = parts[2].parse::<i64>().map_err(|error| {
+        VnError::Diagnostic(
+            Diagnostic::blocking(
+                "ASTRA_VN_CHOICE_CONDITION",
+                "choice condition value must be an integer",
+            )
+            .with_source(line.source_ref())
+            .with_field("error", error.to_string()),
+        )
+    })?;
+    Ok(VariableCondition {
+        scope: scope.to_string(),
+        key: key.to_string(),
+        op,
+        value: parsed,
+    })
 }
 
 fn duplicate_id_diagnostic(id: &str, line: &ParsedLine) -> VnError {

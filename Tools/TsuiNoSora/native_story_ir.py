@@ -242,6 +242,7 @@ def _command_payload_valid(command: dict) -> bool:
             and isinstance(option.get("text"), str)
             and bool(option["text"])
             and _safe(option.get("target"))
+            and _condition_valid(option.get("enabled_when"))
             for option in options
         ) and len({option["option_id"] for option in options}) == len(options)
     if kind in {"jump", "call"}:
@@ -370,7 +371,16 @@ def _render_command(command: dict, strings: dict[str, str]) -> list[str]:
         for option in command["options"]:
             option_key = f"story.{command_id}.option.{option['option_id']}"
             strings[option_key] = option["text"]
-            lines.append(f"      option key:{option_key} -> {option['target']} #@id {option['option_id']}")
+            enabled_when = ""
+            if option.get("enabled_when") is not None:
+                condition = option["enabled_when"]
+                enabled_when = (
+                    f" when:{condition['path']},{condition['op']},{condition['value']}"
+                )
+            lines.append(
+                f"      option key:{option_key} target:{option['target']}{enabled_when} "
+                f"#@id {option['option_id']}"
+            )
         return lines
     if kind in {"jump", "call"}:
         return [f"{prefix}{kind} target:{command['target']} {stable}"]
@@ -487,6 +497,15 @@ def _safe_asset(value) -> bool:
 
 def _optional_safe(value) -> bool:
     return value is None or _safe(value)
+
+
+def _condition_valid(value) -> bool:
+    return value is None or (
+        isinstance(value, dict)
+        and _safe(value.get("path"))
+        and value.get("op") in {"eq", "not_eq", "less", "less_eq", "greater", "greater_eq"}
+        and isinstance(value.get("value"), int)
+    )
 
 
 def _relative(value) -> bool:

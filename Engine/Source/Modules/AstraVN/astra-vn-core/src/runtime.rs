@@ -396,10 +396,21 @@ impl VnRuntime {
                 }
                 CompiledCommand::Choice { id, key, options } => {
                     self.advance_cursor()?;
+                    let enabled_option_ids = options
+                        .iter()
+                        .map(|option| {
+                            self.choice_option_enabled(option)
+                                .map(|enabled| (option.id.clone(), enabled))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                        .into_iter()
+                        .filter_map(|(id, enabled)| enabled.then_some(id))
+                        .collect();
                     self.state.pending_choice = Some(PendingChoice {
                         choice_id: id.clone(),
                         key: key.clone(),
                         options: options.clone(),
+                        enabled_option_ids,
                     });
                     presentation.push(PresentationCommand::Choice { key, options });
                     self.state.pending_wait = Some(VnWaitState::new(
@@ -588,6 +599,12 @@ impl VnRuntime {
                     format!("choice option {option_id} is not available"),
                 )
             })?;
+        if !pending.enabled_option_ids.contains(&option.id) {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_CHOICE_OPTION_DISABLED",
+                format!("choice option {} is disabled", option.id),
+            ));
+        }
         let target = self.resolve_runtime_target(&option.target);
         self.state.pending_choice = None;
         self.state.pending_wait = None;
@@ -612,6 +629,35 @@ impl VnRuntime {
             .iter()
             .flat_map(|scene| &scene.commands)
             .nth(cursor.ordinal)
+    }
+
+    fn choice_option_enabled(&self, option: &ChoiceOption) -> Result<bool, VnError> {
+        let Some(condition) = &option.enabled_when else {
+            return Ok(true);
+        };
+        let actual = self
+            .state
+            .variables
+            .get(&condition.scope)
+            .and_then(|variables| variables.get(&condition.key))
+            .copied()
+            .ok_or_else(|| {
+                VnError::diagnostic(
+                    "ASTRA_VN_CHOICE_VARIABLE_MISSING",
+                    format!(
+                        "choice option {} requires initialized variable {}.{}",
+                        option.id, condition.scope, condition.key
+                    ),
+                )
+            })?;
+        Ok(match condition.op {
+            BranchOp::Eq => actual == condition.value,
+            BranchOp::NotEq => actual != condition.value,
+            BranchOp::Less => actual < condition.value,
+            BranchOp::LessEq => actual <= condition.value,
+            BranchOp::Greater => actual > condition.value,
+            BranchOp::GreaterEq => actual >= condition.value,
+        })
     }
 
     fn jump_to_state(
