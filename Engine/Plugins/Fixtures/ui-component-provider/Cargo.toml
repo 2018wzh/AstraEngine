@@ -1,0 +1,16 @@
+[package]
+name = "ui-component-provider"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+abi_stable.workspace = true
+astra-core = { path = "../../../Source/Runtime/astra-core" }
+astra-ui-core = { path = "../../../Source/Runtime/astra-ui-core" }
+astra-ui-plugin-abi = { path = "../../../Source/Runtime/astra-ui-plugin-abi", features = ["ffi"] }
+postcard.workspace = true

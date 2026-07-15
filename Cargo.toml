@@ -58,6 +58,7 @@ members = [
     "Engine/Source/Programs/astra-ui-component-host",
     "Engine/Plugins/Fixtures/headless-presentation-provider",
     "Engine/Plugins/Fixtures/vn-extension-provider",
+    "Engine/Plugins/Fixtures/ui-component-provider",
 ]
 
 [workspace.package]
