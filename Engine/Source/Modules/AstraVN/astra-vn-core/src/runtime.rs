@@ -178,7 +178,77 @@ impl VnRuntime {
                 self.state.system.skip_mode = mode;
             }
             VnPlayerCommand::SetConfig { key, value } => {
+                validate_system_value("config key", &key, 256)?;
+                validate_system_value("config value", &value, 16_384)?;
                 self.state.system.config.insert(key, value);
+            }
+            VnPlayerCommand::StartReplay { replay_id } => {
+                if !self.state.system.replay_unlocks.contains(&replay_id) {
+                    return Err(VnError::diagnostic(
+                        "ASTRA_VN_REPLAY_LOCKED",
+                        format!("replay {replay_id} is not unlocked"),
+                    ));
+                }
+                self.jump_to_state(&replay_id, "replay", &mut reached)?;
+                self.run_until_blocked(&mut presentation, &mut reached)?;
+            }
+            VnPlayerCommand::PreviewGallery { item_id } => {
+                if !self.state.system.gallery_unlocks.contains(&item_id) {
+                    return Err(VnError::diagnostic(
+                        "ASTRA_VN_GALLERY_LOCKED",
+                        format!("gallery item {item_id} is not unlocked"),
+                    ));
+                }
+                presentation.push(PresentationCommand::Marker {
+                    id: format!("gallery.preview.{item_id}"),
+                });
+            }
+            VnPlayerCommand::JumpRoute { node_id } => {
+                if !self
+                    .compiled
+                    .route_graph
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == node_id)
+                    || !self.state.route_coverage.contains(&node_id)
+                {
+                    return Err(VnError::diagnostic(
+                        "ASTRA_VN_ROUTE_JUMP_DENIED",
+                        format!("route node {node_id} is not a reached route destination"),
+                    ));
+                }
+                self.jump_to_state(&node_id, "route_chart", &mut reached)?;
+                self.run_until_blocked(&mut presentation, &mut reached)?;
+            }
+            VnPlayerCommand::JumpBacklog { command_id } => {
+                if !self
+                    .state
+                    .backlog
+                    .iter()
+                    .any(|entry| entry.command_id == command_id && entry.read)
+                {
+                    return Err(VnError::diagnostic(
+                        "ASTRA_VN_BACKLOG_JUMP_DENIED",
+                        format!("backlog command {command_id} is absent or unread"),
+                    ));
+                }
+                let (story_id, state_id, ordinal) = self.command_location(&command_id)?;
+                self.state.cursor = Some(self.cursor_for(&story_id, &state_id, ordinal)?);
+                self.state.call_stack.clear();
+                self.state.system_stack.clear();
+                self.state.pending_choice = None;
+                self.state.pending_wait = None;
+                self.record_route_flag(VnRouteFlagKind::Jump, "backlog", &state_id);
+                self.reach(&state_id, &mut reached);
+                self.run_until_blocked(&mut presentation, &mut reached)?;
+            }
+            VnPlayerCommand::SubmitText { input_id, value } => {
+                validate_system_value("text input id", &input_id, 256)?;
+                validate_system_value("text input value", &value, 16_384)?;
+                self.state
+                    .system
+                    .config
+                    .insert(format!("text_input.{input_id}"), value);
             }
             VnPlayerCommand::Unlock { kind, id } => match kind {
                 SystemUnlockKind::Gallery => {
@@ -500,6 +570,56 @@ impl VnRuntime {
             .nth(cursor.ordinal)
     }
 
+    fn jump_to_state(
+        &mut self,
+        state_id: &str,
+        source: &str,
+        reached: &mut BTreeSet<String>,
+    ) -> Result<(), VnError> {
+        let story_id = self.story_for_state(state_id)?;
+        self.state.cursor = Some(self.cursor_for(&story_id, state_id, 0)?);
+        self.state.call_stack.clear();
+        self.state.system_stack.clear();
+        self.state.pending_choice = None;
+        self.state.pending_wait = None;
+        self.record_route_flag(VnRouteFlagKind::Jump, source, state_id);
+        self.reach(state_id, reached);
+        Ok(())
+    }
+
+    fn command_location(&self, command_id: &str) -> Result<(String, String, usize), VnError> {
+        let entry = self
+            .compiled
+            .command_manifest
+            .commands
+            .iter()
+            .find(|entry| entry.id == command_id)
+            .ok_or_else(|| {
+                VnError::diagnostic(
+                    "ASTRA_VN_BACKLOG_COMMAND_MISSING",
+                    format!("backlog command {command_id} is not compiled"),
+                )
+            })?;
+        let state = self.compiled.states.get(&entry.state_id).ok_or_else(|| {
+            VnError::diagnostic(
+                "ASTRA_VN_BACKLOG_STATE_MISSING",
+                format!("backlog command {command_id} references a missing state"),
+            )
+        })?;
+        let ordinal = state
+            .scenes
+            .iter()
+            .flat_map(|scene| &scene.commands)
+            .position(|command| compiled_command_id(command) == command_id)
+            .ok_or_else(|| {
+                VnError::diagnostic(
+                    "ASTRA_VN_BACKLOG_COMMAND_LOCATION",
+                    format!("backlog command {command_id} is absent from its compiled state"),
+                )
+            })?;
+        Ok((entry.story_id.clone(), entry.state_id.clone(), ordinal))
+    }
+
     fn cursor_for(
         &self,
         story_id: &str,
@@ -795,4 +915,17 @@ fn required_typed_fence(command_id: &str, fence: Option<&str>) -> Result<String,
             format!("typed presentation command {command_id} is missing its required fence"),
         )
     })
+}
+
+fn validate_system_value(label: &str, value: &str, max_bytes: usize) -> Result<(), VnError> {
+    if value.trim().is_empty()
+        || value.len() > max_bytes
+        || value.chars().any(|character| character.is_control())
+    {
+        return Err(VnError::diagnostic(
+            "ASTRA_VN_SYSTEM_VALUE_INVALID",
+            format!("{label} must be non-empty, bounded, and contain no control characters"),
+        ));
+    }
+    Ok(())
 }

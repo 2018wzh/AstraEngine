@@ -54,8 +54,8 @@ mod browser {
     };
 
     use crate::services::{
-        commit_save, preferred_audio_output_format, read_save, PackageBytes, SaveTransaction,
-        WebAudioOutput, WebDecodeSession,
+        commit_save, delete_save, preferred_audio_output_format, read_save, PackageBytes,
+        SaveTransaction, WebAudioOutput, WebDecodeSession,
     };
 
     pub async fn start(
@@ -332,6 +332,9 @@ mod browser {
                 }
                 HostCommand::ReadSave { slot, reply } => {
                     let _ = reply.send(read_save(&profile.package_id, &slot).await);
+                }
+                HostCommand::DeleteSave { slot, reply } => {
+                    let _ = reply.send(delete_save(&profile.package_id, &slot).await);
                 }
                 HostCommand::OpenPackage { source, reply } => {
                     let result = PackageBytes::open(

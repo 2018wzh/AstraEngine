@@ -13,6 +13,17 @@ state prologue #@id state.prologue
       option key:choice.end -> ending.good #@id choice.end
 "#;
 
+const ROUTE_STORY: &str = r#"
+story main #@id story.main
+state route.one #@id state.route.one
+  scene first #@id scene.first
+    text key:line.route.one speaker:narrator window:main #@id line.route.one
+    jump state.route.two #@id jump.route.two
+state route.two #@id state.route.two
+  scene second #@id scene.second
+    text key:line.route.two speaker:narrator window:main #@id line.route.two
+"#;
+
 #[astra_headless_test::test]
 fn skip_read_advances_past_read_dialogue_but_stops_at_unread_dialogue() {
     let compiled = compile_astra_project(
@@ -171,4 +182,127 @@ fn system_controls_persist_auto_skip_config_and_unlocks_through_save_load() {
         Some("instant")
     );
     assert!(loaded.state().system.gallery_unlocks.contains("cg.opening"));
+}
+
+#[astra_headless_test::test]
+fn product_ui_requests_are_core_validated_and_use_stable_ids() {
+    let compiled = compile_astra_project(
+        [AstraSource::story("routes.astra", ROUTE_STORY)],
+        Default::default(),
+    )
+    .unwrap();
+    let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("ja")).unwrap();
+
+    runtime
+        .apply(VnPlayerCommand::Unlock {
+            kind: SystemUnlockKind::Gallery,
+            id: "cg.opening".into(),
+        })
+        .unwrap();
+    runtime
+        .apply(VnPlayerCommand::Unlock {
+            kind: SystemUnlockKind::Replay,
+            id: "state.route.two".into(),
+        })
+        .unwrap();
+    let gallery = runtime
+        .apply(VnPlayerCommand::PreviewGallery {
+            item_id: "cg.opening".into(),
+        })
+        .unwrap();
+    assert!(matches!(
+        gallery.presentation.as_slice(),
+        [PresentationCommand::Marker { id }] if id == "gallery.preview.cg.opening"
+    ));
+    assert!(runtime
+        .apply(VnPlayerCommand::PreviewGallery {
+            item_id: "cg.locked".into(),
+        })
+        .is_err());
+
+    runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".into(),
+            state_id: "state.route.one".into(),
+        })
+        .unwrap();
+    assert!(runtime
+        .apply(VnPlayerCommand::JumpRoute {
+            node_id: "state.route.two".into(),
+        })
+        .is_err());
+    runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".into(),
+            state_id: "state.route.two".into(),
+        })
+        .unwrap();
+    runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".into(),
+            state_id: "state.route.one".into(),
+        })
+        .unwrap();
+    runtime
+        .apply(VnPlayerCommand::JumpRoute {
+            node_id: "state.route.two".into(),
+        })
+        .unwrap();
+    assert_eq!(
+        runtime.state().cursor.as_ref().unwrap().state_id,
+        "state.route.two"
+    );
+
+    runtime
+        .apply(VnPlayerCommand::StartReplay {
+            replay_id: "state.route.two".into(),
+        })
+        .unwrap();
+    runtime
+        .apply(VnPlayerCommand::SubmitText {
+            input_id: "player_name".into(),
+            value: "柘榴".into(),
+        })
+        .unwrap();
+    assert_eq!(
+        runtime
+            .state()
+            .system
+            .config
+            .get("text_input.player_name")
+            .map(String::as_str),
+        Some("柘榴")
+    );
+}
+
+#[astra_headless_test::test]
+fn backlog_jump_rejects_missing_entries_and_restores_compiled_command_location() {
+    let compiled = compile_astra_project(
+        [AstraSource::story("backlog.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
+    let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
+    runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".into(),
+            state_id: "state.prologue".into(),
+        })
+        .unwrap();
+    assert!(runtime
+        .apply(VnPlayerCommand::JumpBacklog {
+            command_id: "line.missing".into(),
+        })
+        .is_err());
+    runtime
+        .apply(VnPlayerCommand::JumpBacklog {
+            command_id: "line.a".into(),
+        })
+        .unwrap();
+    let cursor = runtime.state().cursor.as_ref().unwrap();
+    assert_eq!(
+        runtime.state().pending_wait.as_ref().unwrap().command_id,
+        "line.a"
+    );
+    assert_eq!(cursor.ordinal, 1);
 }

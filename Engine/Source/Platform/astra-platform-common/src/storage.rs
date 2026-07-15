@@ -45,6 +45,12 @@ impl AtomicSaveStore {
         validate_slot(slot)?;
         fs::read(self.root.join(format!("{slot}.astrasave"))).map_err(|_| io_error("save.read"))
     }
+
+    pub fn delete(&self, slot: &str) -> Result<(), PlatformError> {
+        validate_slot(slot)?;
+        fs::remove_file(self.root.join(format!("{slot}.astrasave")))
+            .map_err(|_| io_error("save.delete"))
+    }
 }
 
 #[derive(Debug)]
@@ -187,9 +193,9 @@ impl FilePackageSource {
 fn validate_slot(slot: &str) -> Result<(), PlatformError> {
     if slot.is_empty()
         || slot.len() > 128
-        || !slot
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        || !slot.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
     {
         return Err(PlatformError::new(
             PlatformErrorCode::PermissionDenied,

@@ -683,6 +683,19 @@ mod browser {
             astra_player_vn::VnUiHostRequest::Load { slot_id } => {
                 execute_web_load(source, executor, &slot_id).await
             }
+            astra_player_vn::VnUiHostRequest::Delete { slot_id } => {
+                executor
+                    .execute_batch(
+                        source.delete_save(&slot_id).map_err(|error| {
+                            web_player_error("player.save.delete.prepare", error)
+                        })?,
+                    )
+                    .await
+                    .map_err(|error| web_player_error("player.save.delete", error))?;
+                source
+                    .mark_save_deleted(&slot_id)
+                    .map_err(|error| web_player_error("player.save.delete_state", error))
+            }
         }
     }
 

@@ -557,6 +557,20 @@ pub(crate) async fn read_save(package_id: &str, slot: &str) -> Result<Vec<u8>, P
     Ok(Uint8Array::new(&value).to_vec())
 }
 
+pub(crate) async fn delete_save(package_id: &str, slot: &str) -> Result<(), PlatformError> {
+    let function = Function::new_with_args(
+        "packageId, slot",
+        "return (async () => { const root = await navigator.storage.getDirectory(); const dir = await root.getDirectoryHandle(packageId); await dir.removeEntry(slot + '.save'); })();",
+    );
+    await_promise(function.call2(
+        &JsValue::NULL,
+        &JsValue::from_str(package_id),
+        &JsValue::from_str(slot),
+    ))
+    .await?;
+    Ok(())
+}
+
 async fn fetch_bytes(path: &str) -> Result<Vec<u8>, PlatformError> {
     let window = web_sys::window().ok_or_else(|| js_error("package.open"))?;
     let response = JsFuture::from(window.fetch_with_str(path))

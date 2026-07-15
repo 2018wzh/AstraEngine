@@ -27,6 +27,8 @@ async fn windows_host_uses_atomic_saved_games_store_and_hash_bound_bundle_source
     let save_hash = session.client.commit_save(transaction).await.unwrap();
     assert!(save_hash.starts_with("sha256:"));
     assert_eq!(session.client.read_save("slot-1").await.unwrap(), [9, 8, 7]);
+    session.client.delete_save("slot-1").await.unwrap();
+    assert!(session.client.read_save("slot-1").await.is_err());
 
     let source = session
         .client

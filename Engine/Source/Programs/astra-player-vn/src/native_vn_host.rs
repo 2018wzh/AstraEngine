@@ -57,6 +57,7 @@ use crate::ui_session::{
 pub enum VnUiHostRequest {
     Save { slot_id: String },
     Load { slot_id: String },
+    Delete { slot_id: String },
 }
 
 pub struct NativeVnHostCommandSource {
@@ -583,6 +584,22 @@ impl NativeVnHostCommandSource {
         slot.occupied = true;
         slot.can_load = true;
         slot.migration_status = "current".to_string();
+        Ok(())
+    }
+
+    pub fn mark_save_deleted(&mut self, slot_id: &str) -> Result<(), NativeVnHostError> {
+        let slot = self.ui_save_slots.get_mut(slot_id).ok_or_else(|| {
+            NativeVnHostError::Input(format!(
+                "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
+            ))
+        })?;
+        slot.occupied = false;
+        slot.can_load = false;
+        slot.thumbnail_asset = None;
+        slot.title_key = None;
+        slot.timestamp_text = None;
+        slot.playtime_text = None;
+        slot.migration_status = "empty".to_string();
         Ok(())
     }
 
@@ -1130,6 +1147,24 @@ impl NativeVnHostCommandSource {
         ])?)
     }
 
+    pub fn delete_save(
+        &mut self,
+        slot: impl Into<String>,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        let slot = slot.into();
+        if slot.trim().is_empty() {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_SLOT_INVALID: save slot must not be empty".into(),
+            ));
+        }
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::DeleteSave {
+                sequence: self.next_command_sequence()?,
+                slot,
+            },
+        ])?)
+    }
+
     fn next_command_sequence(&mut self) -> Result<u64, NativeVnHostError> {
         self.command_sequence = self
             .command_sequence
@@ -1229,6 +1264,45 @@ impl NativeVnHostCommandSource {
         &mut self,
         action: &astra_ui_core::UiActionEnvelope,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        if action.action_id.starts_with("ui.") {
+            let controller = self.active_ui_controller.clone().ok_or_else(|| {
+                NativeVnHostError::Input(
+                    "ASTRA_PLAYER_UI_CONTROLLER_CONTEXT: local action arrived without a live controller context"
+                        .into(),
+                )
+            })?;
+            let effect = match action.action_id.as_str() {
+                "ui.open_modal" => VnUiControllerEffect::OpenModal {
+                    view_id: ui_string_argument(action, "view_id")?.to_string(),
+                    model: action
+                        .arguments
+                        .get("model")
+                        .cloned()
+                        .unwrap_or_else(|| UiValue::Map(BTreeMap::new())),
+                },
+                "ui.close_modal" => VnUiControllerEffect::CloseModal,
+                "ui.set_state" => VnUiControllerEffect::SetSessionState {
+                    key: ui_string_argument(action, "key")?.to_string(),
+                    value: action.arguments.get("value").cloned().ok_or_else(|| {
+                        NativeVnHostError::Input(
+                            "ASTRA_PLAYER_UI_ACTION_ARGUMENT: value is missing".into(),
+                        )
+                    })?,
+                },
+                unsupported => {
+                    return Err(NativeVnHostError::Input(format!(
+                        "ASTRA_PLAYER_UI_LOCAL_ACTION_UNSUPPORTED: action {unsupported} is not registered"
+                    )))
+                }
+            };
+            self.ui_controller_sessions
+                .entry(controller.controller_id.clone())
+                .or_default()
+                .apply(std::slice::from_ref(&effect))
+                .map_err(|error| NativeVnHostError::Input(error.to_string()))?;
+            self.apply_ui_controller_effects(&controller.controller_id, vec![effect], false)?;
+            return self.present_current_scene(self.ui_draw.clone());
+        }
         let typed_action = match action.action_id.as_str() {
             "vn.advance" => VnUiAction::Advance,
             "vn.choose" => VnUiAction::Choose {
@@ -1254,6 +1328,25 @@ impl NativeVnHostCommandSource {
             },
             "vn.request_load" => VnUiAction::RequestLoad {
                 slot_id: ui_string_argument(action, "slot_id")?.to_string(),
+            },
+            "vn.request_delete_save" => VnUiAction::RequestDeleteSave {
+                slot_id: ui_string_argument(action, "slot_id")?.to_string(),
+            },
+            "vn.start_replay" => VnUiAction::StartReplay {
+                replay_id: ui_string_argument(action, "replay_id")?.to_string(),
+            },
+            "vn.preview_gallery" => VnUiAction::PreviewGallery {
+                item_id: ui_string_argument(action, "item_id")?.to_string(),
+            },
+            "vn.request_route_jump" => VnUiAction::RequestRouteJump {
+                node_id: ui_string_argument(action, "node_id")?.to_string(),
+            },
+            "vn.request_backlog_jump" => VnUiAction::RequestBacklogJump {
+                command_id: ui_string_argument(action, "command_id")?.to_string(),
+            },
+            "vn.submit_text" => VnUiAction::SubmitText {
+                input_id: ui_string_argument(action, "input_id")?.to_string(),
+                value: ui_string_argument(action, "value")?.to_string(),
             },
             unsupported => {
                 return Err(NativeVnHostError::Input(format!(
@@ -1293,17 +1386,26 @@ impl NativeVnHostCommandSource {
                 key,
                 value: ui_value_to_scalar(&value)?,
             },
-            VnUiAction::ReplayVoice { voice_id } => VnPlayerCommand::ReplayVoice { voice: voice_id },
+            VnUiAction::ReplayVoice { voice_id } => {
+                VnPlayerCommand::ReplayVoice { voice: voice_id }
+            }
             VnUiAction::RequestSave { slot_id } => {
                 return self.queue_ui_save_request(slot_id, true)
             }
             VnUiAction::RequestLoad { slot_id } => {
                 return self.queue_ui_save_request(slot_id, false)
             }
-            unsupported => {
-                return Err(NativeVnHostError::Input(format!(
-                    "ASTRA_PLAYER_UI_ACTION_UNSUPPORTED: action {unsupported:?} is not routed by the product host"
-                )))
+            VnUiAction::RequestDeleteSave { slot_id } => {
+                return self.queue_ui_delete_request(slot_id)
+            }
+            VnUiAction::StartReplay { replay_id } => VnPlayerCommand::StartReplay { replay_id },
+            VnUiAction::PreviewGallery { item_id } => VnPlayerCommand::PreviewGallery { item_id },
+            VnUiAction::RequestRouteJump { node_id } => VnPlayerCommand::JumpRoute { node_id },
+            VnUiAction::RequestBacklogJump { command_id } => {
+                VnPlayerCommand::JumpBacklog { command_id }
+            }
+            VnUiAction::SubmitText { input_id, value } => {
+                VnPlayerCommand::SubmitText { input_id, value }
             }
         };
         self.command(command)
@@ -1534,6 +1636,29 @@ impl NativeVnHostCommandSource {
         } else {
             VnUiHostRequest::Load { slot_id }
         });
+        self.present_current_scene(self.ui_draw.clone())
+    }
+
+    fn queue_ui_delete_request(
+        &mut self,
+        slot_id: String,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        let slot = self.ui_save_slots.get(&slot_id).ok_or_else(|| {
+            NativeVnHostError::Input(format!(
+                "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
+            ))
+        })?;
+        if !slot.occupied {
+            return Err(NativeVnHostError::Input(format!(
+                "ASTRA_PLAYER_SAVE_SLOT_EMPTY: {slot_id}"
+            )));
+        }
+        if self.pending_ui_host_request.is_some() {
+            return Err(NativeVnHostError::Input(
+                "ASTRA_PLAYER_UI_HOST_REQUEST_BUSY: another save operation is pending".into(),
+            ));
+        }
+        self.pending_ui_host_request = Some(VnUiHostRequest::Delete { slot_id });
         self.present_current_scene(self.ui_draw.clone())
     }
 

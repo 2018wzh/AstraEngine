@@ -707,6 +707,11 @@ pub enum VnPlayerCommand {
     SetAuto { enabled: bool },
     SetSkip { mode: SkipMode },
     SetConfig { key: String, value: String },
+    StartReplay { replay_id: String },
+    PreviewGallery { item_id: String },
+    JumpRoute { node_id: String },
+    JumpBacklog { command_id: String },
+    SubmitText { input_id: String, value: String },
     Unlock { kind: SystemUnlockKind, id: String },
     CompleteWait { fence: String },
 }

@@ -18,6 +18,16 @@ fn save_transaction_commits_reopens_and_aborts_without_partial_files() {
     replacement.write(&[5, 6]).unwrap();
     replacement.commit().unwrap();
     assert_eq!(store.read("slot-1").unwrap(), [5, 6]);
+    store.delete("slot-1").unwrap();
+    assert_eq!(
+        store.read("slot-1").unwrap_err().code,
+        PlatformErrorCode::Io
+    );
+
+    let mut dotted = store.begin("slot.01").unwrap();
+    dotted.write(&[7]).unwrap();
+    dotted.commit().unwrap();
+    assert_eq!(store.read("slot.01").unwrap(), [7]);
 
     let mut aborted = store.begin("slot-2").unwrap();
     aborted.write(&[9, 9]).unwrap();

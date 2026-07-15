@@ -567,6 +567,9 @@ impl HostState {
             HostCommand::ReadSave { slot, reply } => {
                 let _ = reply.send(self.save_store.read(&slot));
             }
+            HostCommand::DeleteSave { slot, reply } => {
+                let _ = reply.send(self.save_store.delete(&slot));
+            }
             HostCommand::OpenPackage { source, reply } => {
                 let result = self.open_package(source).await;
                 let _ = reply.send(result);

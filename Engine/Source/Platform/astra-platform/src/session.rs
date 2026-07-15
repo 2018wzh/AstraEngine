@@ -334,6 +334,10 @@ pub enum HostCommand {
         slot: String,
         reply: oneshot::Sender<Result<Vec<u8>, PlatformError>>,
     },
+    DeleteSave {
+        slot: String,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
     OpenPackage {
         source: PackageSourceRequest,
         reply: oneshot::Sender<Result<PackageSourceHandle, PlatformError>>,
@@ -386,6 +390,7 @@ impl HostCommand {
             Self::CommitSave { .. } => "save.commit",
             Self::AbortSave { .. } => "save.abort",
             Self::ReadSave { .. } => "save.read",
+            Self::DeleteSave { .. } => "save.delete",
             Self::OpenPackage { .. } => "package.open",
             Self::ReadPackageRange { .. } => "package.read_range",
             Self::ClosePackage { .. } => "package.close",
@@ -406,6 +411,7 @@ impl HostCommand {
             | Self::CloseAudio { reply, .. }
             | Self::CloseDecode { reply, .. }
             | Self::WriteSave { reply, .. }
+            | Self::DeleteSave { reply, .. }
             | Self::AbortSave { reply, .. }
             | Self::ClosePackage { reply, .. }
             | Self::Shutdown { reply } => reply.send(result),
@@ -462,6 +468,7 @@ impl HostCommand {
             Self::CommitSave { reply, .. } => send_error!(reply),
             Self::AbortSave { reply, .. } => send_error!(reply),
             Self::ReadSave { reply, .. } => send_error!(reply),
+            Self::DeleteSave { reply, .. } => send_error!(reply),
             Self::OpenPackage { reply, .. } => send_error!(reply),
             Self::ReadPackageRange { reply, .. } => send_error!(reply),
             Self::ClosePackage { reply, .. } => send_error!(reply),
@@ -1112,6 +1119,25 @@ impl PlatformHostClient {
         Ok(bytes)
     }
 
+    pub async fn delete_save(&self, slot: impl Into<String>) -> Result<(), PlatformError> {
+        let slot = slot.into();
+        if !is_safe_slot(&slot) {
+            return Err(PlatformError::new(
+                PlatformErrorCode::PermissionDenied,
+                "save.delete",
+                "save slot must be a safe relative symbol",
+            ));
+        }
+        self.ensure_running("save.delete")?;
+        let (reply, response) = oneshot::channel();
+        self.send_unit(
+            HostCommand::DeleteSave { slot, reply },
+            response,
+            "save.delete",
+        )
+        .await
+    }
+
     pub async fn open_package(
         &self,
         source: PackageSourceRequest,
@@ -1724,9 +1750,9 @@ fn validate_package_source(
 fn is_safe_slot(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
-        && value
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
 }
 
 fn is_safe_relative_path(value: &str) -> bool {

@@ -1107,12 +1107,17 @@ fn vn_event_kind(command: &CoreVnPlayerCommand) -> &'static str {
         CoreVnPlayerCommand::SetAuto { .. } => "system.auto",
         CoreVnPlayerCommand::SetSkip { .. } => "system.skip",
         CoreVnPlayerCommand::SetConfig { .. } => "system.config",
+        CoreVnPlayerCommand::StartReplay { .. } => "system.replay.start",
+        CoreVnPlayerCommand::PreviewGallery { .. } => "system.gallery.preview",
+        CoreVnPlayerCommand::JumpRoute { .. } => "system.route.jump",
+        CoreVnPlayerCommand::JumpBacklog { .. } => "system.backlog.jump",
+        CoreVnPlayerCommand::SubmitText { .. } => "system.text.submit",
         CoreVnPlayerCommand::Unlock { .. } => "system.unlock",
         CoreVnPlayerCommand::CompleteWait { .. } => "await.completed",
     }
 }
 
-fn vn_runtime_event_kinds() -> [&'static str; 11] {
+fn vn_runtime_event_kinds() -> [&'static str; 16] {
     [
         "vn.launch",
         "player.advance",
@@ -1123,6 +1128,11 @@ fn vn_runtime_event_kinds() -> [&'static str; 11] {
         "system.auto",
         "system.skip",
         "system.config",
+        "system.replay.start",
+        "system.gallery.preview",
+        "system.route.jump",
+        "system.backlog.jump",
+        "system.text.submit",
         "system.unlock",
         "await.completed",
     ]
@@ -1135,6 +1145,12 @@ fn command_resolves_wait(command: &CoreVnPlayerCommand, wait: Option<VnWaitKind>
             | (CoreVnPlayerCommand::Choose { .. }, Some(VnWaitKind::Choice))
             | (
                 CoreVnPlayerCommand::ReturnSystem,
+                Some(VnWaitKind::SystemPage)
+            )
+            | (
+                CoreVnPlayerCommand::StartReplay { .. }
+                    | CoreVnPlayerCommand::JumpRoute { .. }
+                    | CoreVnPlayerCommand::JumpBacklog { .. },
                 Some(VnWaitKind::SystemPage)
             )
             | (

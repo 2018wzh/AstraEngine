@@ -150,6 +150,10 @@ pub enum PlayerHostCommand {
         sequence: u64,
         slot: String,
     },
+    DeleteSave {
+        sequence: u64,
+        slot: String,
+    },
     OpenAudio {
         sequence: u64,
         output: PlayerHostResourceId,
@@ -234,6 +238,7 @@ impl PlayerHostCommand {
             | Self::CommitSave { sequence, .. }
             | Self::AbortSave { sequence, .. }
             | Self::ReadSave { sequence, .. }
+            | Self::DeleteSave { sequence, .. }
             | Self::OpenAudio { sequence, .. }
             | Self::QueryAudioFormat { sequence }
             | Self::SubmitAudio { sequence, .. }

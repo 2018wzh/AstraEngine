@@ -1,7 +1,6 @@
 use astra_observability::{init_host, ConsoleFormat, HostObservabilityConfig, HostRole};
 use astra_player::{WebCdpInputHost, WindowsLiveAutomationRequest, WindowsSendInputHost};
 #[cfg(target_os = "windows")]
-use astra_player_core::PlayerActionMap;
 use astra_player_core::{
     PlayerAutomationScript, PlayerHostCommandResult, PlayerInputTranscript, PlayerPlatform,
 };
@@ -460,6 +459,19 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                             }
                             astra_player::VnUiHostRequest::Load { slot_id } => {
                                 execute_platform_load(&mut vn, &mut executor, &slot_id).await?;
+                            }
+                            astra_player::VnUiHostRequest::Delete { slot_id } => {
+                                executor
+                                    .execute_batch(vn.delete_save(&slot_id).map_err(|error| {
+                                        player_platform_error("player.save.delete.prepare", error)
+                                    })?)
+                                    .await
+                                    .map_err(|error| {
+                                        player_platform_error("player.save.delete", error)
+                                    })?;
+                                vn.mark_save_deleted(&slot_id).map_err(|error| {
+                                    player_platform_error("player.save.delete_state", error)
+                                })?;
                             }
                         }
                     }

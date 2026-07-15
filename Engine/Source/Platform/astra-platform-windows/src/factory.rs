@@ -664,6 +664,9 @@ mod windows {
                     HostCommand::ReadSave { slot, reply } => {
                         let _ = reply.send(self.save_store.read(&slot));
                     }
+                    HostCommand::DeleteSave { slot, reply } => {
+                        let _ = reply.send(self.save_store.delete(&slot));
+                    }
                     HostCommand::OpenPackage { source, reply } => {
                         let result = match source {
                             PackageSourceRequest::Bundled {

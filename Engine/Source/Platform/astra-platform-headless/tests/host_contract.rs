@@ -120,6 +120,11 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
     client.write_save(save, b"state".to_vec()).await.unwrap();
     assert_eq!(client.commit_save(save).await.unwrap(), hash(b"state"));
     assert_eq!(client.read_save("slot-a").await.unwrap(), b"state");
+    client.delete_save("slot-a").await.unwrap();
+    assert_eq!(
+        client.read_save("slot-a").await.unwrap_err().code,
+        PlatformErrorCode::Io
+    );
     let aborted = client.begin_save("slot-aborted").await.unwrap();
     client
         .write_save(aborted, b"discarded".to_vec())
