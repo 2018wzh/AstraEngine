@@ -36,9 +36,9 @@ use astra_target::{
 use astra_test::ScenarioReport;
 use astra_vn::{
     compile_astra_project, format_astra_source, load_player_locale_config,
-    package_sections_for_project_with_components, AstraSource, CompileAstraProjectOptions,
-    FormatOptions, PlayerLocaleConfig, VnUiComponentArtifactInput, VnUiComponentTarget,
-    PLAYER_LOCALE_CONFIG_SCHEMA,
+    load_ui_component_artifact, package_sections_for_project_with_components, AstraSource,
+    CompileAstraProjectOptions, FormatOptions, PlayerLocaleConfig, VnUiComponentArtifactInput,
+    VnUiComponentBundleManifest, VnUiComponentTarget, PLAYER_LOCALE_CONFIG_SCHEMA,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 use schemars::JsonSchema;
@@ -150,6 +150,8 @@ enum PackageCommand {
         windows_player: Option<PathBuf>,
         #[arg(long)]
         crash_reporter: Option<PathBuf>,
+        #[arg(long)]
+        ui_component_host: Option<PathBuf>,
         #[arg(long)]
         web_player_wasm: Option<PathBuf>,
         #[arg(long)]
@@ -398,6 +400,7 @@ fn main() -> Result<(), CliError> {
                 platform,
                 windows_player,
                 crash_reporter,
+                ui_component_host,
                 web_player_wasm,
                 web_player_glue,
                 format,
@@ -405,6 +408,7 @@ fn main() -> Result<(), CliError> {
                 let artifacts = BundleArtifactInputs {
                     windows_player,
                     crash_reporter,
+                    ui_component_host,
                     web_player_wasm,
                     web_player_glue,
                 };
@@ -836,6 +840,7 @@ struct StandaloneBundleManifest {
 struct BundleArtifactInputs {
     windows_player: Option<PathBuf>,
     crash_reporter: Option<PathBuf>,
+    ui_component_host: Option<PathBuf>,
     web_player_wasm: Option<PathBuf>,
     web_player_glue: Option<PathBuf>,
 }
@@ -2796,6 +2801,7 @@ fn build_standalone_bundle_into(
             &scenario_bytes,
         ));
     }
+    let ui_components = bundle_ui_components(&reader, out, platform, artifacts, &mut files)?;
 
     let entrypoint = match platform {
         PlatformId::Windows => {
@@ -2855,6 +2861,7 @@ fn build_standalone_bundle_into(
                 platform_name,
                 &display_config,
                 &locale_config,
+                ui_components.as_ref(),
             )?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
@@ -2885,6 +2892,7 @@ fn build_standalone_bundle_into(
                 platform_name,
                 &display_config,
                 &locale_config,
+                ui_components.as_ref(),
             )?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
@@ -3016,12 +3024,126 @@ fn validate_web_player_glue(bytes: &[u8]) -> Result<(), CliError> {
     Ok(())
 }
 
+fn bundle_ui_components(
+    reader: &PackageReader,
+    out: &Path,
+    platform: PlatformId,
+    artifacts: &BundleArtifactInputs,
+    files: &mut Vec<StandaloneBundleFile>,
+) -> Result<Option<serde_json::Value>, CliError> {
+    let bundle: VnUiComponentBundleManifest = reader
+        .container()
+        .decode_postcard("vn.ui_component_manifest")?;
+    if bundle.schema != "astra.vn.ui_component_bundle.v1" {
+        return Err("ASTRA_UI_COMPONENT_BUNDLE_SCHEMA: package must be re-cooked".into());
+    }
+    if bundle.ids.is_empty() {
+        if !bundle.bindings.is_empty() {
+            return Err(
+                "ASTRA_UI_COMPONENT_BUNDLE_IDENTITY: empty declaration has bindings".into(),
+            );
+        }
+        return Ok(None);
+    }
+    if bundle.bindings.len() != bundle.ids.len() {
+        return Err("ASTRA_UI_COMPONENT_BUNDLE_IDENTITY: declaration/binding count differs".into());
+    }
+
+    let mut allowlist = BTreeMap::new();
+    for binding in &bundle.bindings {
+        if !bundle.ids.contains(&binding.component_id)
+            || allowlist
+                .insert(binding.signer_id.clone(), binding.signer_public_key)
+                .is_some_and(|key| key != binding.signer_public_key)
+        {
+            return Err(
+                "ASTRA_UI_COMPONENT_ALLOWLIST_CONFLICT: signer identity is ambiguous".into(),
+            );
+        }
+    }
+    let root = out.join("ui-components");
+    fs::create_dir_all(&root)?;
+    let allowlist_bytes = postcard::to_allocvec(&allowlist)?;
+    let allowlist_path = "ui-components/allowlist.postcard";
+    fs::write(out.join(allowlist_path), &allowlist_bytes)?;
+    files.push(bundle_file(
+        allowlist_path,
+        "ui_component_allowlist",
+        &allowlist_bytes,
+    ));
+
+    let target = match platform {
+        PlatformId::Windows => VnUiComponentTarget::Windows,
+        PlatformId::Web => VnUiComponentTarget::Web,
+        _ => return Err("ASTRA_UI_COMPONENT_PLATFORM: components require Windows or Web".into()),
+    };
+    let mut entries = Vec::new();
+    for component_id in &bundle.ids {
+        let loaded = load_ui_component_artifact(reader, component_id, target, &allowlist)?;
+        let component_root = format!("ui-components/{component_id}");
+        let manifest_path = format!("{component_root}/manifest.postcard");
+        let artifact_extension = if platform == PlatformId::Windows {
+            "dll"
+        } else {
+            "wasm"
+        };
+        let artifact_path = format!("{component_root}/component.{artifact_extension}");
+        let manifest_bytes = postcard::to_allocvec(&loaded.manifest)?;
+        fs::create_dir_all(out.join(&component_root))?;
+        fs::write(out.join(&manifest_path), &manifest_bytes)?;
+        fs::write(out.join(&artifact_path), &loaded.artifact)?;
+        files.push(bundle_file(
+            &manifest_path,
+            "ui_component_manifest",
+            &manifest_bytes,
+        ));
+        files.push(bundle_file(
+            &artifact_path,
+            "ui_component_artifact",
+            &loaded.artifact,
+        ));
+        entries.push(serde_json::json!({
+            "id": component_id,
+            "manifest": manifest_path,
+            "artifact": artifact_path,
+            "artifact_hash": loaded.manifest.artifact_hash.to_string(),
+            "signer_id": loaded.manifest.signer_id,
+        }));
+    }
+
+    let host = if platform == PlatformId::Windows {
+        let source = artifacts
+            .ui_component_host
+            .as_deref()
+            .ok_or("Windows bundle with UI components requires --ui-component-host")?;
+        let bytes = fs::read(source)?;
+        if bytes.is_empty() {
+            return Err("ASTRA_UI_COMPONENT_HOST_EMPTY: host executable is empty".into());
+        }
+        let path = "AstraUiComponentHost.exe";
+        fs::write(out.join(path), &bytes)?;
+        make_executable(&out.join(path))?;
+        files.push(bundle_file(path, "ui_component_host", &bytes));
+        Some(path)
+    } else {
+        None
+    };
+    Ok(Some(serde_json::json!({
+        "schema": "astra.player_ui_components.v1",
+        "host": host,
+        "allowlist": allowlist_path,
+        "deadline_ms": 100,
+        "components": entries,
+    })))
+}
+
 fn player_config_bytes(
     target: &str,
     profile: &str,
     platform_name: &str,
     display_config: &Option<PlayerDisplayConfig>,
     locale_config: &PlayerLocaleConfig,
+    ui_components: Option<&serde_json::Value>,
 ) -> Result<Vec<u8>, CliError> {
     let observability = if platform_name == "windows" {
         serde_json::json!({
@@ -3049,6 +3171,9 @@ fn player_config_bytes(
     });
     if let Some(display) = display_config {
         config["display"] = serde_json::to_value(display)?;
+    }
+    if let Some(components) = ui_components {
+        config["ui_components"] = components.clone();
     }
     serde_json::to_vec_pretty(&config).map_err(Into::into)
 }

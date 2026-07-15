@@ -39,6 +39,7 @@ pub struct VnUiComponentBinding {
     pub web_manifest_section: String,
     pub web_artifact_section: String,
     pub signer_id: String,
+    pub signer_public_key: [u8; 32],
     pub signer_key_fingerprint: Hash256,
 }
 
@@ -325,6 +326,7 @@ fn build_component_sections(
             web_manifest_section: web_manifest,
             web_artifact_section: web_artifact,
             signer_id: windows.manifest.signer_id.clone(),
+            signer_public_key: windows.signer_public_key,
             signer_key_fingerprint: Hash256::from_sha256(&windows.signer_public_key),
         });
     }
@@ -391,6 +393,7 @@ pub fn load_ui_component_artifact(
             .get(&binding.signer_id)
             .map(|key| Hash256::from_sha256(key))
             != Some(binding.signer_key_fingerprint)
+        || signer_allowlist.get(&binding.signer_id) != Some(&binding.signer_public_key)
     {
         return Err(ContainerError::message(
             "ASTRA_VN_UI_COMPONENT_BINDING_IDENTITY: component signer or identity differs from package binding",

@@ -38,6 +38,8 @@ tempfile.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
+astra-ui-component-host = { path = "../astra-ui-component-host" }
+astra-ui-plugin-abi = { path = "../../Runtime/astra-ui-plugin-abi" }
 
 [dev-dependencies]
 astra-headless-test = { path = "../../Developer/astra-headless-test" }
