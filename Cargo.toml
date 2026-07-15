@@ -95,7 +95,7 @@ reqwest = { version = "0.13.4", default-features = false, features = [
     "stream",
 ] }
 rcgen = "0.14"
-rfd = { version = "0.17.2", default-features = false }
+rfd = { version = "0.17.2", default-features = false, features = ["wayland", "xdg-portal"] }
 rtrb = "0.3.4"
 rubato = { version = "4", default-features = false, features = [
     "fft_resampler",
