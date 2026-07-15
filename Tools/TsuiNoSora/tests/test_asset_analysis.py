@@ -39,7 +39,7 @@ from tsuinosora_tools import (  # noqa: E402
     _resolve_visual_capture_launch_command,
     _visual_capture_launch_environment,
 )
-from projectorrays_json import loads_projectorrays_json  # noqa: E402
+from projectorrays_json import decode_projectorrays_byte_text, loads_projectorrays_json  # noqa: E402
 from native_story_ir import convert_native_story_ir  # noqa: E402
 
 
@@ -257,6 +257,16 @@ class AssetAnalysisTests(unittest.TestCase):
         self.assertEqual(value["vertical"], "line\vbreak")
         self.assertEqual(value["byte"], "\u0081@")
         self.assertEqual(value["slash"], "\\v")
+
+    def test_projectorrays_explicitly_decodes_cp932_metadata_fields(self):
+        encoded = loads_projectorrays_json(r'{"name":"\x91\xcc\x88\xe7"}')["name"]
+        decoded = decode_projectorrays_byte_text(encoded, "cp932")
+
+        self.assertEqual(decoded.encode("cp932"), bytes.fromhex("91cc88e7"))
+
+    def test_projectorrays_cp932_metadata_decode_fails_closed(self):
+        with self.assertRaises(ValueError):
+            decode_projectorrays_byte_text("\u0081", "cp932")
 
     def test_projectorrays_json_codec_rejects_malformed_hex_escape(self):
         with self.assertRaises(json.JSONDecodeError):

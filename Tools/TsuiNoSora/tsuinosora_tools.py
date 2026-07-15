@@ -27,8 +27,10 @@ from native_story_ir import convert_native_story_ir
 from director_score import DirectorScoreError, decode_director_v7_score
 from director_story_source import DirectorStorySourceError, build_director_story_source
 from director_scene_dsl import DirectorSceneDslError, build_scene_dsl_ir
+from director_scene_semantics import DirectorSceneSemanticError, build_scene_semantic_ir
 from director_lingo import DirectorLingoError, build_lingo_ir
 from director_story_graph import DirectorStoryGraphError, build_story_graph
+from director_asset_bindings import DirectorAssetBindingError, build_asset_binding_ir
 
 
 IMAGE_EXTS = {".png"}
@@ -7070,6 +7072,8 @@ def run_demo_slice_gate(config_path: Path | str) -> dict:
             "projectorrays_reader": "reports/projectorrays_reader_report.json" if projectorrays_report else "",
             "director_story_source": "reports/director_story_source_report.json" if story_source_report else "",
             "director_scene_dsl": "reports/director_scene_dsl_report.json" if story_source_report else "",
+            "director_scene_semantics": "reports/director_scene_semantic_report.json" if story_source_report else "",
+            "director_asset_bindings": "reports/director_asset_binding_report.json" if story_source_report else "",
             "director_lingo": "reports/director_lingo_report.json" if story_source_report else "",
             "director_story_graph": "reports/director_story_graph_report.json" if story_source_report else "",
             "local_gate": "reports/local_gate_report.json" if local_report else "",
@@ -7196,6 +7200,47 @@ def _run_director_story_source_from_demo_config(config: dict) -> dict | None:
         else:
             _write_json(work_root / "private" / "director_scene_dsl.json", scene_dsl)
         _write_json(work_root / "reports" / "director_scene_dsl_report.json", scene_report)
+        if scene_report["status"] == "pass":
+            try:
+                scene_semantics, semantic_report = build_scene_semantic_ir(scene_dsl)
+            except DirectorSceneSemanticError as exc:
+                semantic_report = _blocked_scene_semantic_report(str(exc))
+                report["status"] = "blocked"
+                report["diagnostics"].extend(semantic_report["diagnostics"])
+            else:
+                _write_json(work_root / "private" / "director_scene_semantics.json", scene_semantics)
+        else:
+            semantic_report = _blocked_scene_semantic_report(
+                "scene semantics require a passing scene DSL"
+            )
+        _write_json(work_root / "reports" / "director_scene_semantic_report.json", semantic_report)
+        if semantic_report["status"] == "pass":
+            converted_resources = _read_json(
+                work_root / "reports" / "projectorrays_converted_resources.json"
+            )
+            try:
+                asset_bindings, asset_binding_report = build_asset_binding_ir(
+                    detailed,
+                    scene_semantics,
+                    converted_resources,
+                )
+            except DirectorAssetBindingError as exc:
+                asset_binding_report = _blocked_asset_binding_report(str(exc))
+                report["status"] = "blocked"
+                report["diagnostics"].extend(asset_binding_report["diagnostics"])
+            else:
+                _write_json(
+                    work_root / "private" / "director_asset_bindings.json",
+                    asset_bindings,
+                )
+        else:
+            asset_binding_report = _blocked_asset_binding_report(
+                "asset bindings require passing scene semantics"
+            )
+        _write_json(
+            work_root / "reports" / "director_asset_binding_report.json",
+            asset_binding_report,
+        )
         converted_resources = _read_json(work_root / "reports" / "projectorrays_converted_resources.json")
         try:
             lingo_ir, lingo_report = build_lingo_ir(work_root, converted_resources)
@@ -7225,7 +7270,12 @@ def _run_director_story_source_from_demo_config(config: dict) -> dict | None:
         else:
             _write_json(work_root / "private" / "director_lingo_ir.json", lingo_ir)
         _write_json(work_root / "reports" / "director_lingo_report.json", lingo_report)
-        if scene_report["status"] == "pass" and lingo_report["status"] == "pass":
+        if (
+            scene_report["status"] == "pass"
+            and semantic_report["status"] == "pass"
+            and asset_binding_report["status"] == "pass"
+            and lingo_report["status"] == "pass"
+        ):
             try:
                 story_graph, graph_report = build_story_graph(detailed, scene_dsl, lingo_ir)
             except DirectorStoryGraphError as exc:
@@ -7263,6 +7313,43 @@ def _blocked_story_graph_report(message: str) -> dict:
             "payload": "omitted",
             "commercial_text": "private_ir_only",
             "script_source": "private_ir_only",
+        },
+    }
+
+
+def _blocked_scene_semantic_report(message: str) -> dict:
+    return {
+        "schema": "tsuinosora.director_scene_semantic_report.v1",
+        "status": "blocked",
+        "scene_count": 0,
+        "source_operation_count": 0,
+        "semantic_operation_count": 0,
+        "semantic_kind_counts": {},
+        "scene_semantic_sha256": "sha256:" + "0" * 64,
+        "diagnostics": [{"code": "TSUI_DIRECTOR_SCENE_SEMANTIC_BLOCKED", "message": message}],
+        "redaction": {
+            "paths": "alias_or_report_relative_only",
+            "payload": "omitted",
+            "commercial_text": "private_ir_only",
+        },
+    }
+
+
+def _blocked_asset_binding_report(message: str) -> dict:
+    return {
+        "schema": "tsuinosora.director_asset_binding_report.v1",
+        "status": "blocked",
+        "scene_count": 0,
+        "reference_count": 0,
+        "unique_asset_count": 0,
+        "binding_kind_counts": {},
+        "asset_binding_sha256": "sha256:" + "0" * 64,
+        "diagnostics": [{"code": "TSUI_DIRECTOR_ASSET_BINDING_BLOCKED", "message": message}],
+        "redaction": {
+            "paths": "report_relative_only",
+            "payload": "omitted",
+            "commercial_text": "private_ir_only",
+            "member_names": "private_ir_only",
         },
     }
 

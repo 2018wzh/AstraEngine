@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from director_score import DirectorScoreError, decode_director_v7_score
-from projectorrays_json import loads_projectorrays_json
+from projectorrays_json import decode_projectorrays_byte_text, loads_projectorrays_json
 
 
 class DirectorStorySourceError(ValueError):
@@ -42,6 +42,21 @@ def build_director_story_source(
             raise DirectorStorySourceError(f"ProjectorRays dump root is missing for alias {alias}")
 
     scripts = _script_index(work_root, converted.get("resources", []))
+    external_casts: dict[str, list[dict]] = {}
+    for cast_id in ("GENERAL", "CHARS", "FONT", "GLOBALS", "AUDIO"):
+        cast_root = roots["casts"] / cast_id / cast_id
+        members = _read_cast_members(cast_root)
+        external_casts[cast_id] = [
+            {
+                "name": name,
+                "cast_member": candidate["cast_member"],
+                "resource_id": candidate["resource_id"],
+                "cast_type": candidate["cast_type"],
+                "children": candidate["children"],
+            }
+            for name, candidates in members.items()
+            for candidate in candidates
+        ]
     movies: list[dict] = []
     label_action_bindings = 0
     frame_action_bindings = 0
@@ -73,6 +88,7 @@ def build_director_story_source(
 
     detailed = {
         "schema": "tsuinosora.director_story_source.v1",
+        "external_casts": external_casts,
         "movies": sorted(movies, key=lambda item: item["movie_id"]),
     }
     detailed_hash = _hash_json(detailed)
@@ -136,6 +152,17 @@ def _read_movie(
         for candidate in candidates
         if candidate.get("text") is not None
     ]
+    named_cast_members = [
+        {
+            "name": name,
+            "cast_member": candidate["cast_member"],
+            "resource_id": candidate["resource_id"],
+            "cast_type": candidate["cast_type"],
+            "children": candidate["children"],
+        }
+        for name, candidates in cast_members.items()
+        for candidate in candidates
+    ]
 
     frame_actions: list[dict] = []
     action_by_frame: dict[int, dict] = {}
@@ -198,6 +225,7 @@ def _read_movie(
         "score_source_sha256": f"sha256:{sha256(score_path.read_bytes()).hexdigest()}",
         "score": score,
         "cast_libraries": libraries,
+        "cast_members": named_cast_members,
         "text_members": text_members,
         "frame_actions": frame_actions,
         "labels": result_labels,
@@ -323,13 +351,12 @@ def _read_cast_members(movie_dir: Path) -> dict[str, list[dict]]:
             raise DirectorStorySourceError("Director CASt metadata is invalid")
         cast_metadata[resource_id] = value
 
-    child_bindings: dict[int, tuple[int, str]] = {}
+    child_bindings: dict[int, list[tuple[int, str]]] = defaultdict(list)
     for key_path in movie_dir.rglob("KEY_-*.bin"):
         for child, parent, fourcc in _read_key_table(key_path):
-            if fourcc == "STXT":
-                if parent in child_bindings:
-                    raise DirectorStorySourceError("text cast member has multiple STXT children")
-                child_bindings[parent] = (child, fourcc)
+            binding = (child, fourcc)
+            if binding not in child_bindings[parent]:
+                child_bindings[parent].append(binding)
     text_paths = {_resource_id(path, "STXT"): path for path in movie_dir.rglob("STXT-*.bin")}
 
     by_name: dict[str, list[dict]] = defaultdict(list)
@@ -342,14 +369,25 @@ def _read_cast_members(movie_dir: Path) -> dict[str, list[dict]]:
         name = metadata["info"].get("name")
         if not isinstance(name, str):
             raise DirectorStorySourceError("Director cast member name is invalid")
+        try:
+            name = decode_projectorrays_byte_text(name, "cp932")
+        except ValueError as exc:
+            raise DirectorStorySourceError("Director cast member name is not valid CP932") from exc
         record = {
             "cast_member": member,
             "resource_id": resource_id,
             "cast_type": metadata.get("type"),
+            "children": [
+                {"resource_id": child, "fourcc": fourcc}
+                for child, fourcc in child_bindings.get(resource_id, [])
+            ],
             "text": None,
         }
-        child = child_bindings.get(resource_id)
-        if child is not None:
+        text_children = [child for child in child_bindings.get(resource_id, []) if child[1] == "STXT"]
+        if len(text_children) > 1:
+            raise DirectorStorySourceError("text cast member has multiple STXT children")
+        if text_children:
+            child = text_children[0]
             text_path = text_paths.get(child[0])
             if text_path is None:
                 raise DirectorStorySourceError("STXT child binding has no resource")

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.director_asset_binding_report.v1.json",
+  "title": "TsuiNoSora Director Asset Binding Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "scene_count",
+    "reference_count",
+    "unique_asset_count",
+    "binding_kind_counts",
+    "asset_binding_sha256",
+    "diagnostics",
+    "redaction"
+  ],
+  "properties": {
+    "schema": { "const": "tsuinosora.director_asset_binding_report.v1" },
+    "status": { "enum": ["pass", "blocked"] },
+    "scene_count": { "type": "integer", "minimum": 0 },
+    "reference_count": { "type": "integer", "minimum": 0 },
+    "unique_asset_count": { "type": "integer", "minimum": 0 },
+    "binding_kind_counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+    "asset_binding_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "diagnostics": { "type": "array", "items": { "type": "object" } },
+    "redaction": { "type": "object", "additionalProperties": { "type": "string" } }
+  }
+}

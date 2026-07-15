@@ -21,6 +21,25 @@ def loads_projectorrays_json(text: str):
     return json.loads(_normalize_projectorrays_escapes(text))
 
 
+def decode_projectorrays_byte_text(value: str, encoding: str = "cp932") -> str:
+    """Decode a ProjectorRays byte-escaped field with an explicit source codec.
+
+    ProjectorRays represents non-ASCII bytes as ``\\xHH`` in some metadata
+    fields. ``loads_projectorrays_json`` deliberately preserves those bytes as
+    U+00HH so generic JSON parsing remains lossless. Callers must opt in for
+    fields whose source contract identifies a concrete text encoding.
+    """
+
+    if not isinstance(value, str):
+        raise TypeError("ProjectorRays byte text must be a string")
+    if any(ord(character) > 0xFF for character in value):
+        return value
+    try:
+        return bytes(ord(character) for character in value).decode(encoding)
+    except (LookupError, UnicodeDecodeError) as exc:
+        raise ValueError(f"ProjectorRays byte text is not valid {encoding}") from exc
+
+
 def _normalize_projectorrays_escapes(text: str) -> str:
     output: list[str] = []
     in_string = False
