@@ -31,7 +31,7 @@ fn native_vn_provider_descriptor_declares_game_runtime_slot_contract() {
     assert_eq!(descriptor.provider_id, NATIVE_VN_PROVIDER_ID);
     assert!(descriptor
         .package_sections
-        .contains(&"vn.compiled_story".to_string()));
+        .contains(&"vn.story".to_string()));
     assert!(descriptor
         .release_checks
         .contains(&"runtime_provider.native_vn".to_string()));

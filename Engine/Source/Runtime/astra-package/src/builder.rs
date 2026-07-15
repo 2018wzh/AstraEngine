@@ -172,7 +172,7 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
             supported_targets: vec!["game".to_string()],
             capabilities: vec!["runtime.native_vn".to_string()],
             package_sections: [
-                "vn.compiled_story",
+                "vn.story",
                 "vn.profile_manifest",
                 "vn.policy_bundle_manifest",
                 "vn.extension_manifest",

@@ -9,7 +9,7 @@ use astra_ui_core::{
 };
 use yakui_core::geometry::{Color, Vec2};
 use yakui_core::WidgetId;
-use yakui_widgets::widgets::{CountGrid, List, Stack};
+use yakui_widgets::widgets::{Checkbox, CountGrid, List, Slider, Stack};
 
 use crate::{
     AstraNodeProps, AstraNodeWidget, VirtualGridState, VirtualListState, YakuiViewOutput,
@@ -118,6 +118,7 @@ impl BlueprintYakuiRenderer {
         let children = node.children.clone();
         let parent = Some(semantic_id.as_str());
         let mut child_error = None;
+        let mut changed_event = None;
         let response = match node.widget.as_str() {
             "row" => AstraNodeWidget::show(props, || {
                 List::row().show(|| {
@@ -160,6 +161,47 @@ impl BlueprintYakuiRenderer {
                         .err();
                 });
             }),
+            "slider" => {
+                let value = property_number(node, "value", frame, item)?.unwrap_or(0.0) as f64;
+                let min = property_number(node, "min", frame, item)?.unwrap_or(0.0) as f64;
+                let max = property_number(node, "max", frame, item)?.unwrap_or(1.0) as f64;
+                if min >= max || value < min || value > max {
+                    return Err(UiValidationError::invalid(
+                        "ASTRA_UI_SLIDER_RANGE",
+                        "slider requires min < max and a value inside the range",
+                    ));
+                }
+                let step = property_number(node, "step", frame, item)?.map(f64::from);
+                AstraNodeWidget::show(props, || {
+                    let slider = Slider {
+                        value,
+                        min,
+                        max,
+                        step,
+                    }
+                    .show();
+                    if let Some(next) = slider.value {
+                        if (next - value).abs() > f64::EPSILON {
+                            changed_event = Some(UiValue::Map(BTreeMap::from([(
+                                "value".to_string(),
+                                UiValue::Number(next),
+                            )])));
+                        }
+                    }
+                })
+            }
+            "toggle" => {
+                let checked = property_bool(node, "checked", frame, item)?.unwrap_or(false);
+                AstraNodeWidget::show(props, || {
+                    let next = Checkbox::new(checked).show().checked;
+                    if next != checked {
+                        changed_event = Some(UiValue::Map(BTreeMap::from([
+                            ("checked".to_string(), UiValue::Bool(next)),
+                            ("value".to_string(), UiValue::Bool(next)),
+                        ])));
+                    }
+                })
+            }
             _ => AstraNodeWidget::show(props, || {
                 child_error = self
                     .render_children(&children, parent, frame, item, request, actions)
@@ -171,7 +213,34 @@ impl BlueprintYakuiRenderer {
         }
         if let Some(clicked_id) = response.clicked_semantic_id.as_deref() {
             for event in node.events.iter().filter(|event| event.event == "activate") {
-                actions.push(action_from_event(event, clicked_id, request, frame, item)?);
+                actions.push(action_from_event(
+                    event, clicked_id, request, frame, item, None,
+                )?);
+            }
+            if node.widget == "select" {
+                let value = next_select_value(node, frame, item)?;
+                for event in node.events.iter().filter(|event| event.event == "change") {
+                    actions.push(action_from_event(
+                        event,
+                        clicked_id,
+                        request,
+                        frame,
+                        item,
+                        Some(&value),
+                    )?);
+                }
+            }
+        }
+        if let Some(event_value) = changed_event.as_ref() {
+            for event in node.events.iter().filter(|event| event.event == "change") {
+                actions.push(action_from_event(
+                    event,
+                    &semantic_id,
+                    request,
+                    frame,
+                    item,
+                    Some(event_value),
+                )?);
             }
         }
         let role = semantic_role(&node.widget);
@@ -382,6 +451,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                     request,
                     &frame,
                     item.as_ref(),
+                    None,
                 )?);
                 force_consumed_sequences.insert(input.sequence);
             }
@@ -623,12 +693,56 @@ fn repeat_key(node: &astra_ui_core::UiNodeBlueprint, item: &UiValue) -> Option<S
     }
 }
 
+fn next_select_value(
+    node: &astra_ui_core::UiNodeBlueprint,
+    frame: &UiBlueprintFrameModel,
+    item: Option<&UiValue>,
+) -> Result<UiValue, UiValidationError> {
+    let items = node.properties.get("items").ok_or_else(|| {
+        UiValidationError::invalid("ASTRA_UI_SELECT_ITEMS", "select requires an items list")
+    })?;
+    let UiValue::List(items) = evaluate(items, frame, item, None)? else {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_SELECT_ITEMS_TYPE",
+            "select items must resolve to a list",
+        ));
+    };
+    if items.is_empty() {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_SELECT_ITEMS_EMPTY",
+            "select items must not be empty",
+        ));
+    }
+    let current = node
+        .properties
+        .get("value")
+        .map(|expr| evaluate(expr, frame, item, None))
+        .transpose()?
+        .unwrap_or(UiValue::Null);
+    let values = items
+        .iter()
+        .map(|entry| match entry {
+            UiValue::Map(map) => map.get("id").cloned().ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_SELECT_ITEM_ID",
+                    "select object items require a stable id",
+                )
+            }),
+            value => Ok(value.clone()),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let current_index = values.iter().position(|value| value == &current);
+    let next = values[(current_index.map_or(0, |index| index + 1)) % values.len()].clone();
+    Ok(UiValue::Map(BTreeMap::from([("value".to_string(), next)])))
+}
+
 fn action_from_event(
     event: &UiEventBinding,
     target: &str,
     request: &UiFrameRequest,
     frame: &UiBlueprintFrameModel,
     item: Option<&UiValue>,
+    event_value: Option<&UiValue>,
 ) -> Result<UiActionEnvelope, UiValidationError> {
     let input_sequence = request
         .input
@@ -638,7 +752,7 @@ fn action_from_event(
         .unwrap_or(0);
     let mut arguments = BTreeMap::new();
     for (name, expr) in &event.arguments {
-        arguments.insert(name.clone(), evaluate(expr, frame, item, None)?);
+        arguments.insert(name.clone(), evaluate(expr, frame, item, event_value)?);
     }
     Ok(UiActionEnvelope {
         schema: "astra.ui_action_envelope.v1".into(),

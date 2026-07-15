@@ -161,6 +161,7 @@ fn source_ref_for_span(path: &str, text: &str, span: crate::TextSpan) -> SourceR
 pub struct CompileAstraProjectOptions {
     extension_bindings: Vec<ExtensionCommandDescriptor>,
     ui_themes: Vec<astra_ui_core::UiThemeManifest>,
+    ui_controller_sources: BTreeMap<String, String>,
 }
 
 impl CompileAstraProjectOptions {
@@ -171,6 +172,16 @@ impl CompileAstraProjectOptions {
 
     pub fn with_ui_theme(mut self, theme: astra_ui_core::UiThemeManifest) -> Self {
         self.ui_themes.push(theme);
+        self
+    }
+
+    pub fn with_ui_controller_source(
+        mut self,
+        controller_id: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Self {
+        self.ui_controller_sources
+            .insert(controller_id.into(), source.into());
         self
     }
 }
@@ -228,8 +239,9 @@ where
         ));
     }
     let ui_themes = options.ui_themes.clone();
+    let ui_controller_sources = options.ui_controller_sources.clone();
     let story = compile_story_sources_with_options(story_sources, options)?;
-    crate::ui_compile::compile_project_ui(story, &ui_sources, ui_themes)
+    crate::ui_compile::compile_project_ui(story, &ui_sources, ui_themes, ui_controller_sources)
 }
 
 #[derive(Default)]
@@ -603,7 +615,7 @@ impl CompileBuilder {
         let command_manifest = self.command_manifest();
         let route_graph = self.route_graph();
         let compiled = CompiledStory {
-            schema: "astra.vn.compiled_story".to_string(),
+            schema: "astra.vn.story".to_string(),
             story_hash: Hash128::from_bytes([0; 16]),
             story_manifest,
             variable_manifest,

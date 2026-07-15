@@ -1110,7 +1110,7 @@ mod tests {
             provider_id: NATIVE_VN_PROVIDER_ID.to_string(),
             supported_targets: vec!["game".to_string()],
             capabilities: vec!["runtime.native_vn".to_string()],
-            package_sections: vec!["vn.compiled_story".to_string()],
+            package_sections: vec!["vn.story".to_string()],
             release_checks: vec!["runtime_provider.native_vn".to_string()],
             output_schemas: Vec::new(),
         };

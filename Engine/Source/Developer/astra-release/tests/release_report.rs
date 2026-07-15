@@ -26,17 +26,15 @@ use astra_vn::{
 
 #[astra_headless_test::test]
 fn release_gate_blocks_headless_profile_schema_in_package() {
-    let mut request = PackageBuildRequest::fixture(
-        "com.example.nativevn",
+    let blob = package_with_target_manifest(
         "classic",
+        nativevn_target_manifest(),
         vec![SectionPayload::raw(
             "headless.profile",
             "astra.headless_host_profile.v1",
             br#"{"schema":"astra.headless_host_profile.v1"}"#.to_vec(),
         )],
     );
-    request.target_manifest = nativevn_target_manifest().to_string().into_bytes();
-    let blob = PackageBuilder::build(request).unwrap();
 
     assert_headless_release_boundary_blocked(
         blob.into_bytes(),
@@ -48,9 +46,9 @@ fn release_gate_blocks_headless_profile_schema_in_package() {
 
 #[astra_headless_test::test]
 fn release_gate_blocks_headless_launch_profile_in_cooked_platform_profiles() {
-    let mut request = PackageBuildRequest::fixture(
-        "com.example.nativevn",
+    let blob = package_with_target_manifest(
         "classic",
+        nativevn_target_manifest(),
         vec![SectionPayload::raw(
             "platform.profiles",
             "astra.platform_profiles.v2",
@@ -65,8 +63,6 @@ fn release_gate_blocks_headless_launch_profile_in_cooked_platform_profiles() {
             .into_bytes(),
         )],
     );
-    request.target_manifest = nativevn_target_manifest().to_string().into_bytes();
-    let blob = PackageBuilder::build(request).unwrap();
 
     assert_headless_release_boundary_blocked(
         blob.into_bytes(),
@@ -79,12 +75,13 @@ fn release_gate_blocks_headless_launch_profile_in_cooked_platform_profiles() {
 #[astra_headless_test::test]
 fn shipping_release_target_cannot_declare_headless_platform() {
     let target = serde_json::json!({
-        "schema": "astra.target_manifest.v1",
+        "schema": "astra.target_manifest.v2",
         "targets": [{
             "id": "nativevn-game",
             "kind": "game",
             "crate": "astra-vn",
             "runtime_provider": "native_vn",
+            "ui_provider": "astra.ui.yakui",
             "default_profile": "desktop-release",
             "platforms": ["headless", "windows"],
             "packaged": true
@@ -96,6 +93,7 @@ fn shipping_release_target_cannot_declare_headless_platform() {
         vec![cooked_project_section("desktop-release", "nativevn-game")],
     );
     request.target_manifest = target.to_string().into_bytes();
+    bind_request_to_target(&mut request, "nativevn-game", "desktop-release", true);
     let blob = PackageBuilder::build(request).unwrap();
 
     assert_headless_release_boundary_blocked(
@@ -1279,7 +1277,7 @@ fn release_gate_requires_nativevn_sections_for_classic_profile() {
     assert!(report
         .checks
         .iter()
-        .any(|check| check.id == "vn.compiled_story" && check.status == CheckStatus::Blocked));
+        .any(|check| check.id == "vn.compiled_project" && check.status == CheckStatus::Blocked));
 }
 
 #[astra_headless_test::test]
@@ -1327,7 +1325,7 @@ fn release_gate_accepts_nativevn_sections_for_classic_profile() {
     assert!(report
         .checks
         .iter()
-        .any(|check| check.id == "vn.compiled_story" && check.status == CheckStatus::Pass));
+        .any(|check| check.id == "vn.compiled_project" && check.status == CheckStatus::Pass));
     assert!(report
         .checks
         .iter()
@@ -1752,7 +1750,7 @@ fn release_gate_blocks_compiled_story_without_command_manifest() {
     let check = report
         .checks
         .iter()
-        .find(|check| check.id == "vn.compiled_story")
+        .find(|check| check.id == "vn.compiled_project")
         .unwrap();
     assert_eq!(check.status, CheckStatus::Blocked);
     assert_eq!(
@@ -2818,7 +2816,7 @@ fn package_with_target_manifest(
     let mut request = PackageBuildRequest::fixture("com.example.nativevn", profile, vec![]);
     let has_compiled_story = sections
         .iter()
-        .any(|section| section.id == "vn.compiled_story");
+        .any(|section| section.id == "vn.compiled_project");
     for section in sections {
         match section.id.as_str() {
             "asset.vfs_manifest" => request.asset_vfs_manifest = section.payload,
@@ -2840,6 +2838,17 @@ fn package_with_target_manifest(
         .and_then(|targets| targets.iter().find(|target| target["kind"] == "game"))
         .and_then(|target| target["id"].as_str())
         .expect("test target manifest must contain a game target");
+    bind_request_to_target(&mut request, target_id, profile, has_compiled_story);
+    request.target_manifest = target_manifest.to_string().into_bytes();
+    PackageBuilder::build(request).unwrap()
+}
+
+fn bind_request_to_target(
+    request: &mut PackageBuildRequest,
+    target_id: &str,
+    profile: &str,
+    use_native_vn: bool,
+) {
     let mut policy: astra_plugin_abi::ProviderPolicy =
         serde_json::from_slice(&request.provider_policy).unwrap();
     let mut registry: astra_plugin_abi::PluginExtensionRegistrySnapshot =
@@ -2861,14 +2870,12 @@ fn package_with_target_manifest(
         .collect::<Vec<_>>();
     policy.profile = profile.to_string();
     policy.bindings = bindings.clone();
-    if has_compiled_story {
+    if use_native_vn {
         policy.runtime_provider = astra_vn::NativeVnRuntimeProvider::descriptor();
     }
     registry.bindings = bindings;
     request.provider_policy = serde_json::to_vec(&policy).unwrap();
     request.plugin_extension_registry = serde_json::to_vec(&registry).unwrap();
-    request.target_manifest = target_manifest.to_string().into_bytes();
-    PackageBuilder::build(request).unwrap()
 }
 
 fn nativevn_target_manifest() -> serde_json::Value {

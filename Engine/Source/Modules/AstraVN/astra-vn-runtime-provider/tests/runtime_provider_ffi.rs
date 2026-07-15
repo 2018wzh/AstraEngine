@@ -34,7 +34,7 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
             target_id: "nativevn-game".to_string(),
             profile: "classic".to_string(),
             package_hash: "sha256:fixture".to_string(),
-            section_ids: vec!["vn.compiled_story".to_string()],
+            section_ids: vec!["vn.story".to_string()],
         },
     );
     assert_eq!(prepare.status, "pass");
@@ -53,7 +53,7 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
         Default::default(),
     )
     .unwrap();
-    let compiled_bytes = postcard::to_allocvec(&compiled).unwrap();
+    let compiled_bytes = postcard::to_allocvec(&compiled.story).unwrap();
     let open = invoke_call::<_, RuntimeOpenReport>(
         registration.open,
         &instance_id,
@@ -64,8 +64,8 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
             seed: 41,
             package_hash: "sha256:fixture".to_string(),
             sections: vec![RuntimeSectionPayload {
-                section_id: "vn.compiled_story".to_string(),
-                schema: "astra.vn.compiled_story".to_string(),
+                section_id: "vn.story".to_string(),
+                schema: "astra.vn.story".to_string(),
                 version: SchemaVersion::default(),
                 codec: RuntimeSectionCodec::Postcard,
                 hash: Hash256::from_sha256(&compiled_bytes),

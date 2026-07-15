@@ -29,6 +29,12 @@ pub struct VnUiIdManifest {
     pub ids: BTreeSet<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct VnUiControllerBundle {
+    pub schema: String,
+    pub sources: BTreeMap<String, String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnUiBackendManifest {
     pub schema: String,
@@ -87,9 +93,9 @@ pub fn package_sections_for_project(
         SectionPayload::postcard(
             "vn.ui_controller_manifest",
             "astra.vn.ui_controller_manifest.v1",
-            &VnUiIdManifest {
+            &VnUiControllerBundle {
                 schema: "astra.vn.ui_controller_manifest.v1".to_string(),
-                ids: project.controller_ids.clone(),
+                sources: project.controller_sources.clone(),
             },
         )?,
         SectionPayload::postcard(
@@ -220,11 +226,6 @@ pub fn load_presentation_provider_manifest(
 pub fn decode_compiled_project(
     package: &PackageReader,
 ) -> Result<CompiledVnProject, ContainerError> {
-    if package.has_section("vn.compiled_story") {
-        return Err(ContainerError::message(
-            "ASTRA_VN_RECOOK_REQUIRED: vn.compiled_story is removed; project must be re-cooked",
-        ));
-    }
     let root: VnCompiledProjectRoot = package.container().decode_postcard("vn.compiled_project")?;
     if root.schema != "astra.vn.compiled_project_root.v1" || root.ui_provider != "astra.ui.yakui" {
         return Err(ContainerError::message(
@@ -240,7 +241,7 @@ pub fn decode_compiled_project(
         .decode_postcard("vn.ui_binding_manifest")?;
     let ui_source_map: BTreeMap<String, SourceRef> =
         package.container().decode_postcard("vn.ui_source_map")?;
-    let controllers: VnUiIdManifest = package
+    let controllers: VnUiControllerBundle = package
         .container()
         .decode_postcard("vn.ui_controller_manifest")?;
     let themes: BTreeMap<String, astra_ui_core::UiThemeManifest> = package
@@ -263,6 +264,7 @@ pub fn decode_compiled_project(
             ui_blueprints.hash,
             ui_bindings.hash,
             &themes,
+            &controllers.sources,
         ))
         .map_err(|error| {
             ContainerError::message(format!("ASTRA_VN_COMPILED_PROJECT_ENCODE: {error}"))
@@ -280,7 +282,8 @@ pub fn decode_compiled_project(
         ui_blueprints,
         ui_bindings,
         ui_source_map,
-        controller_ids: controllers.ids,
+        controller_ids: controllers.sources.keys().cloned().collect(),
+        controller_sources: controllers.sources,
         theme_ids: themes.keys().cloned().collect(),
         themes,
         component_ids: components.ids,

@@ -65,7 +65,7 @@ fn package_vfs_mount_writes_vfs_manifest_and_catalog_without_asset_registry() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|section| section == "vn.compiled_story"));
+        .any(|section| section == "vn.story"));
 
     let registry: serde_json::Value = serde_json::from_slice(
         &package

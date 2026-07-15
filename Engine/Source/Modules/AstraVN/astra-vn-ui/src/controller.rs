@@ -9,6 +9,28 @@ use thiserror::Error;
 
 use crate::VnUiAction;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VnUiControllerManifest {
+    pub schema: String,
+    pub id: String,
+    pub view: String,
+    pub model_schema: String,
+    pub snapshot: VnUiControllerSnapshot,
+}
+
+impl VnUiControllerManifest {
+    pub fn validate(&self) -> Result<(), VnUiControllerError> {
+        if self.schema != "astra.vn.ui_controller.v1"
+            || self.id.trim().is_empty()
+            || self.view.trim().is_empty()
+            || self.model_schema.trim().is_empty()
+        {
+            return Err(VnUiControllerError::Manifest);
+        }
+        astra_ui_core::validate_serialized_size(self).map_err(|_| VnUiControllerError::Manifest)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VnUiControllerSnapshot {
@@ -46,6 +68,8 @@ pub enum VnUiControllerEffect {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum VnUiControllerError {
+    #[error("ASTRA_VN_UI_CONTROLLER_MANIFEST: controller manifest is invalid")]
+    Manifest,
     #[error("ASTRA_VN_UI_CONTROLLER_EFFECT_LIMIT: controller returned too many effects")]
     EffectLimit,
     #[error("ASTRA_VN_UI_CONTROLLER_STATE_LIMIT: controller session state exceeds 1 MiB")]

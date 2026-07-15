@@ -40,10 +40,11 @@ use astra_vn_package::{
     ProductStageDirector, ProductStageState, StageDirectorOutput, VnLocalizationTable,
     VnPresentationProviderManifest,
 };
+use astra_vn_policy::LuauUiControllerHost;
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 use astra_vn_ui::{
-    model_to_ui_value, resolve_binding, SaveSlotViewModel, VnUiBindingError, VnUiBindingRequest,
-    VnUiModelContext,
+    model_to_ui_value, resolve_binding, SaveSlotViewModel, VnUiAction, VnUiBindingError,
+    VnUiBindingRequest, VnUiControllerEffect, VnUiModelContext, VnUiSessionState,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +95,9 @@ pub struct NativeVnHostCommandSource {
     ui_semantics: Option<UiSemanticSnapshot>,
     ui_save_slots: BTreeMap<String, SaveSlotViewModel>,
     pending_ui_host_request: Option<VnUiHostRequest>,
+    ui_controller_host: LuauUiControllerHost,
+    ui_controller_sessions: BTreeMap<String, VnUiSessionState>,
+    active_ui_controller: Option<(String, String, UiValue)>,
     shutdown_started: bool,
 }
 
@@ -339,6 +343,28 @@ impl NativeVnHostCommandSource {
         }
         let ui_renderer = BlueprintYakuiRenderer::new(compiled.ui_blueprints.clone())?;
         let ui_backend = AstraYakuiBackend::new(ui_renderer, compiled.project_hash)?;
+        let mut ui_controller_host = LuauUiControllerHost::with_default_budget()
+            .map_err(|error| NativeVnHostError::Package(error.to_string()))?;
+        let mut unique_controller_sources = compiled
+            .controller_sources
+            .values()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        for source in std::mem::take(&mut unique_controller_sources) {
+            ui_controller_host
+                .register_source(source)
+                .map_err(|error| NativeVnHostError::Package(error.to_string()))?;
+        }
+        let registered_controller_ids = ui_controller_host
+            .manifests()
+            .map(|manifest| manifest.id.clone())
+            .collect::<BTreeSet<_>>();
+        if registered_controller_ids != compiled.controller_ids {
+            return Err(NativeVnHostError::Package(
+                "ASTRA_PLAYER_UI_CONTROLLER_SET: packaged controller source set does not match bindings"
+                    .into(),
+            ));
+        }
         let schemas = RuntimeHostSchemaRegistry::from_descriptor(runtime_provider.descriptor());
         if runtime_provider.provider_id() != NATIVE_VN_PROVIDER_ID {
             return Err(NativeVnHostError::Package(format!(
@@ -452,6 +478,9 @@ impl NativeVnHostCommandSource {
             ui_semantics: None,
             ui_save_slots: default_save_slots(),
             pending_ui_host_request: None,
+            ui_controller_host,
+            ui_controller_sessions: BTreeMap::new(),
+            active_ui_controller: None,
             shutdown_started: false,
         })
     }
@@ -1170,59 +1199,133 @@ impl NativeVnHostCommandSource {
         &mut self,
         action: &astra_ui_core::UiActionEnvelope,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        let command = match action.action_id.as_str() {
-            "vn.advance" => VnPlayerCommand::Advance,
-            "vn.choose" => VnPlayerCommand::Choose {
+        let typed_action = match action.action_id.as_str() {
+            "vn.advance" => VnUiAction::Advance,
+            "vn.choose" => VnUiAction::Choose {
                 option_id: ui_string_argument(action, "option_id")?.to_string(),
             },
-            "vn.open_system" => VnPlayerCommand::OpenSystem {
+            "vn.open_system" => VnUiAction::OpenSystem {
                 page: SystemPageKind::parse(ui_string_argument(action, "page")?),
             },
-            "vn.return_system" => VnPlayerCommand::ReturnSystem,
-            "vn.set_config" => VnPlayerCommand::SetConfig {
+            "vn.return_system" => VnUiAction::ReturnSystem,
+            "vn.set_config" => VnUiAction::SetConfig {
                 key: ui_string_argument(action, "key")?.to_string(),
-                value: ui_scalar_argument(action, "value")?,
+                value: action.arguments.get("value").cloned().ok_or_else(|| {
+                    NativeVnHostError::Input(
+                        "ASTRA_PLAYER_UI_ACTION_ARGUMENT: value is missing".into(),
+                    )
+                })?,
             },
-            "vn.replay_voice" => VnPlayerCommand::ReplayVoice {
-                voice: ui_string_argument(action, "voice_id")?.to_string(),
+            "vn.replay_voice" => VnUiAction::ReplayVoice {
+                voice_id: ui_string_argument(action, "voice_id")?.to_string(),
             },
-            "vn.request_save" | "vn.request_load" => {
-                let slot_id = ui_string_argument(action, "slot_id")?.to_string();
-                let slot = self.ui_save_slots.get(&slot_id).ok_or_else(|| {
-                    NativeVnHostError::Input(format!(
-                        "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
-                    ))
-                })?;
-                if action.action_id == "vn.request_save" && !slot.can_write {
-                    return Err(NativeVnHostError::Input(format!(
-                        "ASTRA_PLAYER_SAVE_SLOT_READ_ONLY: {slot_id}"
-                    )));
-                }
-                if action.action_id == "vn.request_load" && (!slot.occupied || !slot.can_load) {
-                    return Err(NativeVnHostError::Input(format!(
-                        "ASTRA_PLAYER_SAVE_SLOT_EMPTY: {slot_id}"
-                    )));
-                }
-                if self.pending_ui_host_request.is_some() {
-                    return Err(NativeVnHostError::Input(
-                        "ASTRA_PLAYER_UI_HOST_REQUEST_CONFLICT: a host request is already pending"
-                            .into(),
-                    ));
-                }
-                self.pending_ui_host_request = Some(if action.action_id == "vn.request_save" {
-                    VnUiHostRequest::Save { slot_id }
-                } else {
-                    VnUiHostRequest::Load { slot_id }
-                });
-                return self.present_current_scene(self.ui_draw.clone());
-            }
+            "vn.request_save" => VnUiAction::RequestSave {
+                slot_id: ui_string_argument(action, "slot_id")?.to_string(),
+            },
+            "vn.request_load" => VnUiAction::RequestLoad {
+                slot_id: ui_string_argument(action, "slot_id")?.to_string(),
+            },
             unsupported => {
                 return Err(NativeVnHostError::Input(format!(
                     "ASTRA_PLAYER_UI_ACTION_UNSUPPORTED: action {unsupported} is not routed by the product host"
                 )))
             }
         };
+        let (controller_id, model_schema, model) = self.active_ui_controller.clone().ok_or_else(|| {
+            NativeVnHostError::Input(
+                "ASTRA_PLAYER_UI_CONTROLLER_CONTEXT: action arrived without a live controller context"
+                    .into(),
+            )
+        })?;
+        let effects = self
+            .ui_controller_host
+            .invoke_action(
+                &controller_id,
+                &model_schema,
+                &model,
+                &typed_action,
+                self.ui_controller_sessions
+                    .entry(controller_id.clone())
+                    .or_default(),
+            )
+            .map_err(|error| NativeVnHostError::Input(error.to_string()))?;
+        let mut forwarded = None;
+        for effect in effects {
+            match effect {
+                VnUiControllerEffect::Forward { action } if forwarded.is_none() => {
+                    forwarded = Some(action);
+                }
+                VnUiControllerEffect::Trace { .. } | VnUiControllerEffect::SetSessionState { .. } => {}
+                _ => {
+                    return Err(NativeVnHostError::Input(
+                        "ASTRA_PLAYER_UI_CONTROLLER_EFFECT_UNSUPPORTED: controller effect is not implemented by the product session"
+                            .into(),
+                    ))
+                }
+            }
+        }
+        let action = forwarded.ok_or_else(|| {
+            NativeVnHostError::Input(
+                "ASTRA_PLAYER_UI_CONTROLLER_FORWARD_MISSING: controller consumed a product action without a forward effect"
+                    .into(),
+            )
+        })?;
+        let command = match action {
+            VnUiAction::Advance => VnPlayerCommand::Advance,
+            VnUiAction::Choose { option_id } => VnPlayerCommand::Choose { option_id },
+            VnUiAction::OpenSystem { page } => VnPlayerCommand::OpenSystem { page },
+            VnUiAction::ReturnSystem => VnPlayerCommand::ReturnSystem,
+            VnUiAction::SetConfig { key, value } => VnPlayerCommand::SetConfig {
+                key,
+                value: ui_value_to_scalar(&value)?,
+            },
+            VnUiAction::ReplayVoice { voice_id } => VnPlayerCommand::ReplayVoice { voice: voice_id },
+            VnUiAction::RequestSave { slot_id } => {
+                return self.queue_ui_save_request(slot_id, true)
+            }
+            VnUiAction::RequestLoad { slot_id } => {
+                return self.queue_ui_save_request(slot_id, false)
+            }
+            unsupported => {
+                return Err(NativeVnHostError::Input(format!(
+                    "ASTRA_PLAYER_UI_ACTION_UNSUPPORTED: action {unsupported:?} is not routed by the product host"
+                )))
+            }
+        };
         self.command(command)
+    }
+
+    fn queue_ui_save_request(
+        &mut self,
+        slot_id: String,
+        saving: bool,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        let slot = self.ui_save_slots.get(&slot_id).ok_or_else(|| {
+            NativeVnHostError::Input(format!(
+                "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
+            ))
+        })?;
+        if saving && !slot.can_write {
+            return Err(NativeVnHostError::Input(format!(
+                "ASTRA_PLAYER_SAVE_SLOT_READ_ONLY: {slot_id}"
+            )));
+        }
+        if !saving && (!slot.occupied || !slot.can_load) {
+            return Err(NativeVnHostError::Input(format!(
+                "ASTRA_PLAYER_SAVE_SLOT_EMPTY: {slot_id}"
+            )));
+        }
+        if self.pending_ui_host_request.is_some() {
+            return Err(NativeVnHostError::Input(
+                "ASTRA_PLAYER_UI_HOST_REQUEST_CONFLICT: a host request is already pending".into(),
+            ));
+        }
+        self.pending_ui_host_request = Some(if saving {
+            VnUiHostRequest::Save { slot_id }
+        } else {
+            VnUiHostRequest::Load { slot_id }
+        });
+        self.present_current_scene(self.ui_draw.clone())
     }
 
     fn present_current_scene(
@@ -1317,6 +1420,26 @@ impl NativeVnHostCommandSource {
                 binding.theme_id
             ))
         })?;
+        let controller_manifest = self
+            .ui_controller_host
+            .manifest(&binding.controller_id)
+            .ok_or_else(|| {
+                NativeVnHostError::Input(format!(
+                    "ASTRA_PLAYER_UI_CONTROLLER_MISSING: controller {} is not packaged",
+                    binding.controller_id
+                ))
+            })?;
+        if controller_manifest.view != binding.view_id
+            || controller_manifest.model_schema != view.model_schema
+        {
+            return Err(NativeVnHostError::Input(
+                "ASTRA_PLAYER_UI_CONTROLLER_BINDING: controller manifest does not match the selected view"
+                    .into(),
+            ));
+        }
+        let active_model = model.clone();
+        let active_controller_id = binding.controller_id.clone();
+        let active_model_schema = view.model_schema.clone();
         let frame = UiBlueprintFrameModel {
             schema: "astra.ui_blueprint_frame_model.v1".to_string(),
             view_id: binding.view_id,
@@ -1360,6 +1483,7 @@ impl NativeVnHostCommandSource {
         }
         let draw = ui_frame_to_scene_commands(&output.render)?;
         self.ui_semantics = Some(output.semantics.clone());
+        self.active_ui_controller = Some((active_controller_id, active_model_schema, active_model));
         Ok((output, draw))
     }
 
@@ -2754,19 +2878,15 @@ fn ui_string_argument<'a>(
     }
 }
 
-fn ui_scalar_argument(
-    action: &astra_ui_core::UiActionEnvelope,
-    name: &str,
-) -> Result<String, NativeVnHostError> {
-    match action.arguments.get(name) {
-        Some(UiValue::String(value)) => Ok(value.clone()),
-        Some(UiValue::Bool(value)) => Ok(value.to_string()),
-        Some(UiValue::Integer(value)) => Ok(value.to_string()),
-        Some(UiValue::Number(value)) if value.is_finite() => Ok(value.to_string()),
-        _ => Err(NativeVnHostError::Input(format!(
-            "ASTRA_PLAYER_UI_ACTION_ARGUMENT: action {} requires scalar argument {name}",
-            action.action_id
-        ))),
+fn ui_value_to_scalar(value: &UiValue) -> Result<String, NativeVnHostError> {
+    match value {
+        UiValue::String(value) => Ok(value.clone()),
+        UiValue::Bool(value) => Ok(value.to_string()),
+        UiValue::Integer(value) => Ok(value.to_string()),
+        UiValue::Number(value) if value.is_finite() => Ok(value.to_string()),
+        _ => Err(NativeVnHostError::Input(
+            "ASTRA_PLAYER_UI_ACTION_ARGUMENT: config value must be scalar".into(),
+        )),
     }
 }
 

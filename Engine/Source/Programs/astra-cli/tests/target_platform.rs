@@ -1457,7 +1457,7 @@ fn nativevn_sample_cooks_packages_validates_and_runs_full_playthrough() {
     for section in [
         "compiled.project",
         "player.display_config",
-        "vn.compiled_story",
+        "vn.story",
         "vn.profile_manifest",
         "vn.standard_command_manifest",
         "vn.presentation_provider_manifest",

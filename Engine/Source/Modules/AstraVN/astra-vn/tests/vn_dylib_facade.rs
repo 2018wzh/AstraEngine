@@ -43,7 +43,8 @@ state prologue #@id state.prologue
     ))
     .unwrap();
     let reader = PackageReader::open(blob.as_bytes()).unwrap();
-    assert!(reader.has_section("vn.compiled_story"));
+    assert!(reader.has_section("vn.compiled_project"));
+    assert!(reader.has_section("vn.story"));
     assert!(reader.has_section("vn.profile_manifest"));
     assert!(reader.has_section("vn.system_story_manifest"));
 }

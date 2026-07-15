@@ -10,8 +10,10 @@ luau-runtime = ["astra-policy/luau-runtime", "dep:mlua"]
 
 [dependencies]
 astra-core = { path = "../../../Runtime/astra-core" }
+astra-ui-core = { path = "../../../Runtime/astra-ui-core" }
 astra-policy = { path = "../../../Runtime/astra-policy", default-features = false }
 astra-vn-script = { path = "../astra-vn-script" }
+astra-vn-ui = { path = "../astra-vn-ui" }
 mlua = { workspace = true, optional = true }
 postcard.workspace = true
 schemars.workspace = true

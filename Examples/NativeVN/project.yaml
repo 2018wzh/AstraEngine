@@ -51,6 +51,8 @@ nativevn:
     - UI
   ui_themes:
     - Themes
+  ui_controllers:
+    - Controllers
   profiles: [classic, modern, advanced-vn]
   asset_roots: [Assets]
   display:

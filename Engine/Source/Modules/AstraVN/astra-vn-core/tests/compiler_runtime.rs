@@ -43,7 +43,7 @@ fn compiles_route_graph_source_map_and_stable_hash() {
     )
     .unwrap();
 
-    assert_eq!(compiled.schema, "astra.vn.compiled_story");
+    assert_eq!(compiled.schema, "astra.vn.story");
     assert_eq!(compiled.stories.len(), 2);
     assert_eq!(compiled.route_graph.nodes.len(), 5);
     assert!(compiled

@@ -48,6 +48,7 @@ pub struct CompiledVnProject {
     pub ui_bindings: UiBindingManifest,
     pub ui_source_map: BTreeMap<String, SourceRef>,
     pub controller_ids: BTreeSet<String>,
+    pub controller_sources: BTreeMap<String, String>,
     pub theme_ids: BTreeSet<String>,
     pub themes: BTreeMap<String, UiThemeManifest>,
     pub component_ids: BTreeSet<String>,

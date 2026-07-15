@@ -14,6 +14,7 @@ pub(crate) fn compile_project_ui(
     story: CompiledStory,
     sources: &[AstraSource],
     ui_themes: Vec<UiThemeManifest>,
+    controller_sources: BTreeMap<String, String>,
 ) -> Result<CompiledVnProject, VnError> {
     for source in sources {
         let parsed = crate::parse_astra_source(source.path.clone(), &source.text);
@@ -146,6 +147,14 @@ pub(crate) fn compile_project_ui(
             }
         }
     }
+    if controller_ids != controller_sources.keys().cloned().collect() {
+        return Err(VnError::message(
+            "ASTRA_UI_CONTROLLER_SOURCE_SET: every bound controller requires exactly one validated source",
+        ));
+    }
+    for source in controller_sources.values() {
+        astra_ui_core::validate_ui_source_text(source).map_err(ui_error)?;
+    }
     for binding in command_bindings
         .values()
         .chain(system_page_bindings.values())
@@ -187,7 +196,13 @@ pub(crate) fn compile_project_ui(
     };
     ui_bindings.hash = hash_bindings(&ui_bindings)?;
     ui_bindings.validate().map_err(ui_error)?;
-    let project_hash = hash_project(&story, &ui_blueprints, &ui_bindings, &themes)?;
+    let project_hash = hash_project(
+        &story,
+        &ui_blueprints,
+        &ui_bindings,
+        &themes,
+        &controller_sources,
+    )?;
     Ok(CompiledVnProject {
         schema: "astra.vn.compiled_project.v1".to_string(),
         project_hash,
@@ -196,6 +211,7 @@ pub(crate) fn compile_project_ui(
         ui_bindings,
         ui_source_map: source_map,
         controller_ids,
+        controller_sources,
         theme_ids,
         themes,
         component_ids,
@@ -772,12 +788,14 @@ fn hash_project(
     blueprints: &UiBlueprintBundle,
     bindings: &UiBindingManifest,
     themes: &BTreeMap<String, UiThemeManifest>,
+    controller_sources: &BTreeMap<String, String>,
 ) -> Result<Hash256, VnError> {
     Ok(Hash256::from_sha256(&postcard::to_allocvec(&(
         story.story_hash,
         blueprints.hash,
         bindings.hash,
         themes,
+        controller_sources,
     ))?))
 }
 

@@ -1429,6 +1429,22 @@ fn cook_nativevn_sections(
         theme.content_hash = theme.compute_hash()?;
         compile_options = compile_options.with_ui_theme(theme);
     }
+    let controller_paths = nativevn_controller_paths(project, project_dir)?;
+    if controller_paths.is_empty() {
+        return Err("nativevn project must declare at least one UI controller source".into());
+    }
+    let mut controller_host = astra_vn::LuauUiControllerHost::with_default_budget()?;
+    for controller_path in controller_paths {
+        let source = fs::read_to_string(project_dir.join(&controller_path))?;
+        controller_host.register_source(source)?;
+    }
+    for manifest in controller_host.manifests() {
+        let source = controller_host
+            .source(&manifest.id)
+            .ok_or("ASTRA_UI_CONTROLLER_SOURCE_IDENTITY: validated controller source is missing")?;
+        compile_options =
+            compile_options.with_ui_controller_source(manifest.id.clone(), source.to_string());
+    }
     let compiled = compile_astra_project(sources, compile_options)?;
     let mut profiles = string_list(
         project
@@ -2028,6 +2044,58 @@ fn nativevn_theme_paths(
     paths.sort_by_key(|path| normalize_relative_path(path));
     paths.dedup_by(|left, right| normalize_relative_path(left) == normalize_relative_path(right));
     Ok(paths)
+}
+
+fn nativevn_controller_paths(
+    project: &serde_yaml::Value,
+    project_dir: &std::path::Path,
+) -> Result<Vec<PathBuf>, CliError> {
+    let mut sources = string_list(
+        project
+            .get("nativevn")
+            .and_then(|nativevn| nativevn.get("ui_controllers")),
+    );
+    if sources.is_empty() && project_dir.join("Controllers").is_dir() {
+        sources.push("Controllers".to_string());
+    }
+    let mut paths = Vec::new();
+    for source in sources {
+        let relative = validate_project_relative_path(&source)?;
+        let absolute = project_dir.join(&relative);
+        if absolute.is_dir() {
+            collect_sources_with_extension(project_dir, &absolute, "luau", &mut paths)?;
+        } else if relative
+            .extension()
+            .and_then(|extension| extension.to_str())
+            == Some("luau")
+        {
+            paths.push(relative);
+        } else {
+            return Err("ASTRA_UI_CONTROLLER_FORMAT: controller source must use .luau".into());
+        }
+    }
+    paths.sort_by_key(|path| normalize_relative_path(path));
+    paths.dedup_by(|left, right| normalize_relative_path(left) == normalize_relative_path(right));
+    Ok(paths)
+}
+
+fn collect_sources_with_extension(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    extension: &str,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), CliError> {
+    let mut entries = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_sources_with_extension(root, &path, extension, out)?;
+        } else if path.extension().and_then(|value| value.to_str()) == Some(extension) {
+            out.push(path.strip_prefix(root)?.to_path_buf());
+        }
+    }
+    Ok(())
 }
 
 fn collect_ui_theme_sources(

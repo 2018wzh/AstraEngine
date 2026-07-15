@@ -4,9 +4,13 @@
 mod luau;
 mod policy_bundle;
 mod state;
+#[cfg(feature = "luau-runtime")]
+mod ui_controller;
 
 pub use astra_vn_script::*;
 #[cfg(feature = "luau-runtime")]
 pub use luau::*;
 pub use policy_bundle::*;
 pub use state::*;
+#[cfg(feature = "luau-runtime")]
+pub use ui_controller::*;

@@ -1557,7 +1557,8 @@ fn runtime_provider_native_vn_check(package: &PackageReader) -> ReleaseCheckReco
     }
     let package_sections = &descriptor.package_sections;
     let required_sections = [
-        "vn.compiled_story",
+        "vn.compiled_project",
+        "vn.story",
         "vn.profile_manifest",
         "vn.policy_bundle_manifest",
         "vn.extension_manifest",
@@ -1626,18 +1627,18 @@ fn native_vn_behavioral_evidence(
     let compiled = decode_compiled_project(package).map_err(|err| {
         (
             "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PACKAGE",
-            format!("decode vn.compiled_story for provider conformance: {err}"),
+            format!("decode vn.compiled_project for provider conformance: {err}"),
         )
     })?;
     let locale = load_player_locale_config(package)
         .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_LOCALE", err.to_string()))?
         .default_locale;
     let selection = package.runtime_provider_selection();
-    let compiled_bytes = postcard::to_allocvec(&compiled)
+    let compiled_bytes = postcard::to_allocvec(&compiled.story)
         .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PACKAGE", err.to_string()))?;
     let compiled_section = astra_plugin_abi::RuntimeSectionPayload {
-        section_id: "vn.compiled_story".to_string(),
-        schema: "astra.vn.compiled_story".to_string(),
+        section_id: "vn.story".to_string(),
+        schema: "astra.vn.story".to_string(),
         version: astra_core::SchemaVersion::default(),
         codec: astra_plugin_abi::RuntimeSectionCodec::Postcard,
         hash: Hash256::from_sha256(&compiled_bytes),
@@ -2969,13 +2970,13 @@ fn vn_checks(
     selected_target: Option<&str>,
 ) -> Vec<ReleaseCheckRecord> {
     if !release_profile_requires_vn(profile)
-        && !package.has_section("vn.compiled_story")
+        && !package.has_section("vn.compiled_project")
         && !package.has_section("vn.profile_manifest")
     {
         return Vec::new();
     }
     let mut checks = vec![
-        vn_compiled_story_check(package, profile),
+        vn_compiled_project_check(package, profile),
         vn_locale_config_check(package),
         vn_profile_manifest_check(package, profile, selected_target),
         vn_policy_bundle_check(package, profile),
@@ -3028,32 +3029,33 @@ fn vn_locale_config_check(package: &PackageReader) -> ReleaseCheckRecord {
     }
 }
 
-fn vn_compiled_story_check(package: &PackageReader, profile: &str) -> ReleaseCheckRecord {
+fn vn_compiled_project_check(package: &PackageReader, profile: &str) -> ReleaseCheckRecord {
     let compiled = match decode_compiled_project(package) {
         Ok(compiled) => compiled,
         Err(err) => {
             return ReleaseCheckRecord {
-                id: "vn.compiled_story".to_string(),
+                id: "vn.compiled_project".to_string(),
                 domain: ReleaseDomain::Vn,
                 status: CheckStatus::Blocked,
-                summary: "vn.compiled_story section is missing or invalid".to_string(),
+                summary: "vn.compiled_project root or child section is missing or invalid"
+                    .to_string(),
                 diagnostic: Some(Diagnostic::blocking(
-                    "ASTRA_VN_COMPILED_STORY",
+                    "ASTRA_VN_COMPILED_PROJECT",
                     err.to_string(),
                 )),
                 evidence: vec![
-                    evidence("section", "vn.compiled_story"),
+                    evidence("section", "vn.compiled_project"),
                     evidence("profile", profile),
                 ],
             };
         }
     };
-    if compiled.schema != "astra.vn.compiled_story"
-        || compiled.stories.is_empty()
-        || compiled.states.is_empty()
+    if compiled.schema != "astra.vn.compiled_project.v1"
+        || compiled.story.stories.is_empty()
+        || compiled.story.states.is_empty()
     {
         return ReleaseCheckRecord {
-            id: "vn.compiled_story".to_string(),
+            id: "vn.compiled_project".to_string(),
             domain: ReleaseDomain::Vn,
             status: CheckStatus::Blocked,
             summary: "compiled VN story does not contain runnable story/state data".to_string(),
@@ -3061,7 +3063,7 @@ fn vn_compiled_story_check(package: &PackageReader, profile: &str) -> ReleaseChe
                 "ASTRA_VN_COMPILED_STORY_SHAPE",
                 "compiled VN story needs schema, stories and states",
             )),
-            evidence: vec![evidence("section", "vn.compiled_story")],
+            evidence: vec![evidence("section", "vn.compiled_project")],
         };
     }
     if compiled.story_manifest.schema != "astra.vn.story_manifest.v1"
@@ -3076,7 +3078,7 @@ fn vn_compiled_story_check(package: &PackageReader, profile: &str) -> ReleaseChe
             .any(|command| command.source.is_none())
     {
         return ReleaseCheckRecord {
-            id: "vn.compiled_story".to_string(),
+            id: "vn.compiled_project".to_string(),
             domain: ReleaseDomain::Vn,
             status: CheckStatus::Blocked,
             summary: "compiled VN story is missing manifest/source-map evidence".to_string(),
@@ -3085,7 +3087,7 @@ fn vn_compiled_story_check(package: &PackageReader, profile: &str) -> ReleaseChe
                 "compiled VN story must include story, variable and command manifests with command source refs",
             )),
             evidence: vec![
-                evidence("section", "vn.compiled_story"),
+                evidence("section", "vn.compiled_project"),
                 evidence("story_manifest_count", compiled.story_manifest.stories.len()),
                 evidence("variable_scope_count", compiled.variable_manifest.scopes.len()),
                 evidence("command_manifest_count", compiled.command_manifest.commands.len()),
@@ -3093,10 +3095,11 @@ fn vn_compiled_story_check(package: &PackageReader, profile: &str) -> ReleaseChe
         };
     }
     ReleaseCheckRecord {
-        id: "vn.compiled_story".to_string(),
+        id: "vn.compiled_project".to_string(),
         domain: ReleaseDomain::Vn,
         status: CheckStatus::Pass,
-        summary: "compiled VN story is present and decodable".to_string(),
+        summary: "compiled VN project root and all authoritative child sections are valid"
+            .to_string(),
         diagnostic: None,
         evidence: vec![
             evidence("story_hash", compiled.story_hash),
@@ -3356,13 +3359,13 @@ fn vn_standard_commands_check(package: &PackageReader, profile: &str) -> Release
                 id: "vn.standard_commands".to_string(),
                 domain: ReleaseDomain::Vn,
                 status: CheckStatus::Blocked,
-                summary: "vn.compiled_story is required to validate standard command usage"
+                summary: "vn.compiled_project is required to validate standard command usage"
                     .to_string(),
                 diagnostic: Some(Diagnostic::blocking(
                     "ASTRA_VN_COMPILED_STORY",
                     err.to_string(),
                 )),
-                evidence: vec![evidence("section", "vn.compiled_story")],
+                evidence: vec![evidence("section", "vn.compiled_project")],
             };
         }
     };

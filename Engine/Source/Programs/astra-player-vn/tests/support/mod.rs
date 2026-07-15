@@ -271,7 +271,34 @@ fn test_compile_options() -> CompileAstraProjectOptions {
         content_hash: Hash256::from_sha256(&[]),
     };
     theme.content_hash = theme.compute_hash().unwrap();
-    CompileAstraProjectOptions::default().with_ui_theme(theme)
+    test_controller_options(CompileAstraProjectOptions::default().with_ui_theme(theme))
+}
+
+fn test_controller_options(mut options: CompileAstraProjectOptions) -> CompileAstraProjectOptions {
+    let source = test_controller_source();
+    for id in ["test.message", "test.choice", "test.system"] {
+        options = options.with_ui_controller_source(id, source.clone());
+    }
+    options
+}
+
+fn test_controller_source() -> String {
+    r#"
+local controllers = {
+  { "test.message", "ui.test.message", "astra.vn.ui_model.message.v1" },
+  { "test.choice", "ui.test.choice", "astra.vn.ui_model.choice.v1" },
+  { "test.system", "ui.test.system", "astra.vn.ui_model.system.v1" },
+}
+for _, definition in controllers do
+  astra.ui.controller.register(definition[1], {
+    schema = "astra.vn.ui_controller.v1", view = definition[2],
+    model_schema = definition[3], snapshot = "none",
+  }, { on_action = function(_, _, action)
+    return { astra.ui.effect.forward(action) }
+  end })
+end
+"#
+    .to_string()
 }
 
 fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
