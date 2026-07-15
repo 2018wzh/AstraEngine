@@ -6,7 +6,7 @@ use astra_ui_core::{
     UiActionEnvelope, UiBindingRoot, UiBlueprintBundle, UiBlueprintFrameModel, UiEventBinding,
     UiFrameRequest, UiInputEventKind, UiPoint, UiRect, UiSemanticAction, UiSemanticNode,
     UiSemanticRole, UiSemanticSnapshot, UiThemeValue, UiValidationError, UiValue, UiValueExpr,
-    ValidateUi,
+    ValidateUi, MAX_TEXTURE_BYTES,
 };
 use yakui_core::geometry::{Color, UVec2, Vec2};
 use yakui_core::paint::{Texture, TextureFormat};
@@ -14,9 +14,11 @@ use yakui_core::{ManagedTextureId, WidgetId};
 use yakui_widgets::widgets::{Checkbox, CountGrid, Image, List, NineSlice, Pad, Slider, Stack};
 
 use crate::{
-    AstraNodeProps, AstraNodeWidget, TextCharacterPolicy, TextInputState, VirtualGridState,
-    VirtualListState, YakuiViewOutput, YakuiViewRenderer,
+    AstraNodeProps, AstraNodeWidget, BoundedLru, TextCharacterPolicy, TextInputState,
+    VirtualGridState, VirtualListState, YakuiViewOutput, YakuiViewRenderer,
 };
+
+const MAX_MANAGED_IMAGE_TEXTURES: usize = 128;
 
 #[derive(Debug, Clone)]
 struct PendingSemantic {
@@ -44,7 +46,7 @@ pub struct BlueprintYakuiRenderer {
     text_input_consumed_sequences: BTreeSet<u64>,
     accessibility_dispatched_events: BTreeSet<(String, String)>,
     image_resources: BTreeMap<String, TextureFrame>,
-    managed_textures: BTreeMap<String, ManagedTextureId>,
+    managed_textures: BoundedLru<String, ManagedTextureId>,
 }
 
 impl BlueprintYakuiRenderer {
@@ -61,13 +63,112 @@ impl BlueprintYakuiRenderer {
             text_input_consumed_sequences: BTreeSet::new(),
             accessibility_dispatched_events: BTreeSet::new(),
             image_resources: BTreeMap::new(),
-            managed_textures: BTreeMap::new(),
+            managed_textures: BoundedLru::new(MAX_MANAGED_IMAGE_TEXTURES, MAX_TEXTURE_BYTES)?,
         })
     }
 
     pub fn with_image_resources(mut self, resources: BTreeMap<String, TextureFrame>) -> Self {
         self.image_resources = resources;
         self
+    }
+
+    fn collect_visual_assets(
+        &mut self,
+        node: &astra_ui_core::UiNodeBlueprint,
+        frame: &UiBlueprintFrameModel,
+        item: Option<&UiValue>,
+        request: &UiFrameRequest,
+        output: &mut BTreeSet<String>,
+    ) -> Result<(), UiValidationError> {
+        if !property_bool(node, "visible", frame, item)?.unwrap_or(true) {
+            return Ok(());
+        }
+        match node.widget.as_str() {
+            "image" => {
+                output.insert(required_visual_asset(node, frame, item, request)?);
+            }
+            "nine_slice" => {
+                output.insert(required_nine_slice(node, frame, item, request)?.0);
+            }
+            _ => {}
+        }
+
+        if matches!(node.widget.as_str(), "virtual_list" | "virtual_grid") {
+            let repeat = node.repeat.as_ref().ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_VIRTUAL_REPEAT_MISSING",
+                    "virtual collection requires items and item_key",
+                )
+            })?;
+            let UiValue::List(values) = evaluate(&repeat.items, frame, item, None)? else {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_UI_REPEAT_TYPE",
+                    "virtual collection items must resolve to a list",
+                ));
+            };
+            let range = if node.widget == "virtual_list" {
+                let item_extent =
+                    property_number(node, "item_extent", frame, item)?.unwrap_or(56.0);
+                let state = self.virtual_lists.entry(node.local_id.clone()).or_insert(
+                    VirtualListState::new(
+                        values.len(),
+                        item_extent,
+                        viewport_height_points(request),
+                        repeat.overscan as usize,
+                    )?,
+                );
+                state.set_item_count(values.len())?;
+                state.set_viewport_extent(viewport_height_points(request))?;
+                state.visible_range()
+            } else {
+                let columns = property_number(node, "columns", frame, item)?
+                    .unwrap_or(1.0)
+                    .round()
+                    .clamp(1.0, 256.0) as usize;
+                let row_extent =
+                    property_number(node, "item_extent", frame, item)?.unwrap_or(180.0);
+                let state = self.virtual_grids.entry(node.local_id.clone()).or_insert(
+                    VirtualGridState::new(
+                        values.len(),
+                        columns,
+                        row_extent,
+                        viewport_height_points(request),
+                        repeat.overscan as usize,
+                    )?,
+                );
+                state.configure(values.len(), columns, viewport_height_points(request))?;
+                state.visible_items()
+            };
+            for value in &values[range.start..range.end] {
+                for child in &node.children {
+                    self.collect_visual_assets(child, frame, Some(value), request, output)?;
+                }
+            }
+            return Ok(());
+        }
+
+        for child in &node.children {
+            if child.repeat.is_some() {
+                let repeat = child.repeat.as_ref().ok_or_else(|| {
+                    UiValidationError::invalid(
+                        "ASTRA_UI_REPEAT_STATE",
+                        "repeat node lost its validated binding",
+                    )
+                })?;
+                let UiValue::List(values) = evaluate(&repeat.items, frame, item, None)? else {
+                    return Err(UiValidationError::invalid(
+                        "ASTRA_UI_REPEAT_TYPE",
+                        "repeat items binding must resolve to a list",
+                    ));
+                };
+                for value in &values {
+                    self.collect_visual_assets(child, frame, Some(value), request, output)?;
+                }
+            } else {
+                self.collect_visual_assets(child, frame, item, request, output)?;
+            }
+        }
+        Ok(())
     }
 
     fn render_node(
@@ -237,7 +338,7 @@ impl BlueprintYakuiRenderer {
                 });
             }),
             "image" => {
-                let asset = required_visual_asset(node, request)?;
+                let asset = required_visual_asset(node, frame, item, request)?;
                 let texture = *self.managed_textures.get(&asset).ok_or_else(|| {
                     UiValidationError::invalid(
                         "ASTRA_UI_IMAGE_RESOURCE_UNBOUND",
@@ -249,7 +350,7 @@ impl BlueprintYakuiRenderer {
                 })
             }
             "nine_slice" => {
-                let (asset, border) = required_nine_slice(node, request)?;
+                let (asset, border) = required_nine_slice(node, frame, item, request)?;
                 let texture = *self.managed_textures.get(&asset).ok_or_else(|| {
                     UiValidationError::invalid(
                         "ASTRA_UI_NINE_SLICE_RESOURCE_UNBOUND",
@@ -785,18 +886,44 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
             ));
         }
         let mut required_assets = BTreeSet::new();
-        collect_visual_assets(&view.root, request, &mut required_assets)?;
+        self.collect_visual_assets(&view.root, &frame, None, request, &mut required_assets)?;
         for modal in &frame.modals {
-            let modal_view = self.bundle.views.get(&modal.view_id).ok_or_else(|| {
-                UiValidationError::invalid(
-                    "ASTRA_UI_MODAL_VIEW_MISSING",
-                    "modal view is absent from the packaged blueprint bundle",
-                )
-            })?;
-            collect_visual_assets(&modal_view.root, request, &mut required_assets)?;
+            let modal_view = self
+                .bundle
+                .views
+                .get(&modal.view_id)
+                .cloned()
+                .ok_or_else(|| {
+                    UiValidationError::invalid(
+                        "ASTRA_UI_MODAL_VIEW_MISSING",
+                        "modal view is absent from the packaged blueprint bundle",
+                    )
+                })?;
+            let modal_frame = UiBlueprintFrameModel {
+                schema: frame.schema.clone(),
+                view_id: modal.view_id.clone(),
+                model: modal.model.clone(),
+                state: modal.state.clone(),
+                modals: Vec::new(),
+                focus_request: None,
+                localization: frame.localization.clone(),
+            };
+            self.collect_visual_assets(
+                &modal_view.root,
+                &modal_frame,
+                None,
+                request,
+                &mut required_assets,
+            )?;
+        }
+        if required_assets.len() > MAX_MANAGED_IMAGE_TEXTURES {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_IMAGE_VISIBLE_BUDGET",
+                "visible UI images exceed the bounded live texture cache",
+            ));
         }
         for asset in required_assets {
-            if self.managed_textures.contains_key(&asset) {
+            if self.managed_textures.get(&asset).is_some() {
                 continue;
             }
             let frame = self.image_resources.get(&asset).ok_or_else(|| {
@@ -810,8 +937,11 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 UVec2::new(frame.width, frame.height),
                 frame.rgba8.clone(),
             );
-            self.managed_textures
-                .insert(asset, yakui.add_texture(texture));
+            let byte_len = frame.rgba8.len();
+            let managed = yakui.add_texture(texture);
+            for (_, evicted) in self.managed_textures.insert(asset, managed, byte_len)? {
+                yakui.paint_dom().textures_mut().remove(evicted);
+            }
         }
         self.pending.clear();
         self.accessibility_actions.clear();
@@ -941,6 +1071,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
             repaint_after_ns: None,
             diagnostics: Vec::new(),
             instantiated_nodes: self.pending.len() as u32,
+            active_texture_bytes: self.managed_textures.current_bytes() as u64,
             force_consumed_sequences: request
                 .input
                 .events
@@ -1128,6 +1259,8 @@ fn visual_token<'a>(node: &'a astra_ui_core::UiNodeBlueprint) -> Option<&'a UiVa
 
 fn required_visual_asset(
     node: &astra_ui_core::UiNodeBlueprint,
+    frame: &UiBlueprintFrameModel,
+    item: Option<&UiValue>,
     request: &UiFrameRequest,
 ) -> Result<String, UiValidationError> {
     let expr = visual_token(node).ok_or_else(|| {
@@ -1147,15 +1280,20 @@ fn required_visual_asset(
                 "image theme token must resolve to Asset or NineSlice",
             )),
         },
-        _ => Err(UiValidationError::invalid(
-            "ASTRA_UI_IMAGE_ASSET_TYPE",
-            "image asset must be an AssetRef or theme token",
-        )),
+        _ => match evaluate(expr, frame, item, None)? {
+            UiValue::String(asset) if !asset.trim().is_empty() => Ok(asset),
+            _ => Err(UiValidationError::invalid(
+                "ASTRA_UI_IMAGE_ASSET_TYPE",
+                "image asset must resolve to a non-empty AssetRef",
+            )),
+        },
     }
 }
 
 fn required_nine_slice(
     node: &astra_ui_core::UiNodeBlueprint,
+    frame: &UiBlueprintFrameModel,
+    item: Option<&UiValue>,
     request: &UiFrameRequest,
 ) -> Result<(String, [f32; 4]), UiValidationError> {
     let expr = visual_token(node).ok_or_else(|| {
@@ -1174,12 +1312,15 @@ fn required_nine_slice(
                 ));
             }
         },
-        _ => {
-            return Err(UiValidationError::invalid(
-                "ASTRA_UI_NINE_SLICE_ASSET_TYPE",
-                "nine_slice texture must be a theme token",
-            ));
-        }
+        _ => match evaluate(expr, frame, item, None)? {
+            UiValue::String(asset) if !asset.trim().is_empty() => (asset, [0.0; 4]),
+            _ => {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_UI_NINE_SLICE_ASSET_TYPE",
+                    "nine_slice texture must resolve to a theme token or AssetRef",
+                ));
+            }
+        },
     };
     if border
         .iter()
@@ -1191,26 +1332,6 @@ fn required_nine_slice(
         ));
     }
     Ok((asset, border))
-}
-
-fn collect_visual_assets(
-    node: &astra_ui_core::UiNodeBlueprint,
-    request: &UiFrameRequest,
-    output: &mut BTreeSet<String>,
-) -> Result<(), UiValidationError> {
-    match node.widget.as_str() {
-        "image" => {
-            output.insert(required_visual_asset(node, request)?);
-        }
-        "nine_slice" => {
-            output.insert(required_nine_slice(node, request)?.0);
-        }
-        _ => {}
-    }
-    for child in &node.children {
-        collect_visual_assets(child, request, output)?;
-    }
-    Ok(())
 }
 
 fn property_text(

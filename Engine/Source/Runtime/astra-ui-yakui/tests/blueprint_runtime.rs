@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use astra_core::Hash256;
+use astra_media_core::TextureFrame;
 use astra_ui_core::{
     UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiCapability,
     UiEventBinding, UiFrameRequest, UiInputDispositionKind, UiInputEvent, UiInputEventKind,
@@ -217,6 +218,169 @@ fn ten_thousand_items_instantiate_only_visible_rows() {
             .collect::<BTreeSet<_>>()
             .len(),
         output.semantics.nodes.len()
+    );
+}
+
+#[astra_headless_test::test]
+fn thousand_gallery_images_are_virtualized_and_bounded_by_lru() {
+    let mut image = node("thumbnail", "image");
+    image.properties.insert(
+        "asset".into(),
+        UiValueExpr::Binding {
+            root: astra_ui_core::UiBindingRoot::Item,
+            path: vec!["thumbnail_asset".into()],
+        },
+    );
+    for key in ["min_width", "min_height"] {
+        image.properties.insert(
+            key.into(),
+            UiValueExpr::Literal {
+                value: UiValue::Number(64.0),
+            },
+        );
+    }
+    let mut grid = node("gallery", "virtual_grid");
+    grid.properties.insert(
+        "columns".into(),
+        UiValueExpr::Literal {
+            value: UiValue::Integer(4),
+        },
+    );
+    grid.properties.insert(
+        "item_extent".into(),
+        UiValueExpr::Literal {
+            value: UiValue::Number(96.0),
+        },
+    );
+    grid.repeat = Some(UiRepeatBinding {
+        items: UiValueExpr::Binding {
+            root: astra_ui_core::UiBindingRoot::Model,
+            path: vec!["items".into()],
+        },
+        item_key_path: vec!["item_id".into()],
+        overscan: 2,
+    });
+    grid.children.push(image);
+    let mut root = node("root", "screen");
+    root.children.push(grid);
+    let view = UiViewBlueprint {
+        id: "ui.gallery".into(),
+        source_id: "ui.gallery".into(),
+        model_schema: "astra.vn.ui_model.gallery.v1".into(),
+        theme_id: "theme.classic".into(),
+        required_capabilities: vec![UiCapability::VirtualGrid],
+        root,
+    };
+    let mut bundle = UiBlueprintBundle {
+        schema: "astra.ui_blueprint_bundle.v1".into(),
+        views: BTreeMap::from([(view.id.clone(), view)]),
+        hash: Hash256::from_sha256(&[]),
+    };
+    bundle.hash = bundle.compute_hash().expect("bundle hash");
+
+    let mut theme = UiThemeManifest {
+        schema: "astra.ui_theme_manifest.v1".into(),
+        id: "theme.classic".into(),
+        parent: None,
+        tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
+        high_contrast_tokens: BTreeMap::new(),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash().expect("theme hash");
+    let items = (0..1_000)
+        .map(|index| {
+            UiValue::Map(BTreeMap::from([
+                (
+                    "item_id".into(),
+                    UiValue::String(format!("gallery.{index}")),
+                ),
+                (
+                    "thumbnail_asset".into(),
+                    UiValue::String(format!("fixture.thumbnail.{index}")),
+                ),
+            ]))
+        })
+        .collect();
+    let frame = UiBlueprintFrameModel {
+        schema: "astra.ui_blueprint_frame_model.v1".into(),
+        view_id: "ui.gallery".into(),
+        model: UiValue::Map(BTreeMap::from([("items".into(), UiValue::List(items))])),
+        state: UiValue::Map(BTreeMap::new()),
+        modals: Vec::new(),
+        focus_request: None,
+        localization: BTreeMap::new(),
+    };
+    let resources = (0..1_000)
+        .map(|index| {
+            let rgba8 = vec![index as u8, 64, 128, 255];
+            (
+                format!("fixture.thumbnail.{index}"),
+                TextureFrame {
+                    width: 1,
+                    height: 1,
+                    hash: Hash256::from_sha256(&rgba8),
+                    rgba8,
+                },
+            )
+        })
+        .collect();
+    let encoded = postcard::to_allocvec(&frame).expect("frame encode");
+    let request = |sequence: u64, wheel: bool| UiFrameRequest {
+        schema: "astra.ui_frame_request.v1".into(),
+        session_id: "session.gallery".into(),
+        generation: sequence + 1,
+        viewport: UiViewport {
+            physical_width: 1280,
+            physical_height: 720,
+            scale_factor: 1.0,
+            font_scale: 1.0,
+            safe_area_points: UiInsets {
+                left: 0.0,
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+            },
+        },
+        fixed_time_ns: sequence * 16_666_667,
+        input: UiInputFrame {
+            schema: "astra.ui_input_frame.v1".into(),
+            events: wheel
+                .then_some(UiInputEvent {
+                    sequence,
+                    kind: UiInputEventKind::Wheel {
+                        delta_points: astra_ui_core::UiPoint { x: 0.0, y: -720.0 },
+                    },
+                })
+                .into_iter()
+                .collect(),
+        },
+        theme: theme.clone(),
+        model_schema: "astra.vn.ui_model.gallery.v1".into(),
+        model_payload: encoded.clone(),
+    };
+    let renderer = BlueprintYakuiRenderer::new(bundle)
+        .expect("renderer")
+        .with_image_resources(resources);
+    let mut backend =
+        AstraYakuiBackend::new(renderer, Hash256::from_sha256(b"test")).expect("backend");
+    let first = backend
+        .render_frame(request(0, false))
+        .expect("first frame");
+    assert!(first.performance.instantiated_nodes <= 64);
+    assert!(first.performance.active_texture_bytes <= 128 * 4);
+
+    let mut observed_release = false;
+    for sequence in 1..40 {
+        let output = backend
+            .render_frame(request(sequence, true))
+            .expect("scrolled frame");
+        assert!(output.performance.instantiated_nodes <= 64);
+        assert!(output.performance.active_texture_bytes <= 128 * 4);
+        observed_release |= !output.render.textures.releases.is_empty();
+    }
+    assert!(
+        observed_release,
+        "bounded gallery LRU must release old textures"
     );
 }
 

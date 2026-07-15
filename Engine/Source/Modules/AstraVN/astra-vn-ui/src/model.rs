@@ -456,7 +456,7 @@ mod tests {
     use super::{config_bool, config_integer};
     use std::collections::BTreeMap;
 
-    #[test]
+    #[astra_headless_test::test]
     fn config_values_are_schema_checked_instead_of_silently_clamped() {
         let values = BTreeMap::from([
             ("volume".to_owned(), "101".to_owned()),
@@ -470,7 +470,7 @@ mod tests {
         assert_eq!(boolean.code(), "ASTRA_VN_UI_CONFIG_BOOL");
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn missing_config_values_use_declared_schema_defaults() {
         let values = BTreeMap::new();
         assert_eq!(config_integer(&values, "volume", 50, 0, 100).unwrap(), 50);

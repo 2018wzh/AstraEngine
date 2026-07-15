@@ -16,6 +16,7 @@ pub struct YakuiViewOutput {
     pub repaint_after_ns: Option<u64>,
     pub diagnostics: Vec<Diagnostic>,
     pub instantiated_nodes: u32,
+    pub active_texture_bytes: u64,
     pub force_consumed_sequences: BTreeSet<u64>,
     pub focus_widget: Option<WidgetId>,
 }
@@ -189,7 +190,7 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
                 texture_update_bytes,
                 draw_calls: render.primitives.len() as u32,
                 vertices,
-                active_texture_bytes: 0,
+                active_texture_bytes: view.active_texture_bytes,
                 instantiated_nodes: view.instantiated_nodes,
             },
             render,

@@ -25,6 +25,7 @@ tempfile.workspace = true
 [lib]
 name = "astra_ui_component_host"
 path = "src/lib.rs"
+doctest = false
 
 [[bin]]
 name = "astra-ui-component-host"
