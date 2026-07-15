@@ -31,8 +31,20 @@ pub struct UiBlueprintFrameModel {
     pub view_id: String,
     pub model: UiValue,
     pub state: UiValue,
+    pub modals: Vec<UiBlueprintModalFrameModel>,
+    pub focus_request: Option<String>,
     pub localization: BTreeMap<String, String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct UiBlueprintModalFrameModel {
+    pub view_id: String,
+    pub model_schema: String,
+    pub model: UiValue,
+    pub state: UiValue,
+}
+
+pub const MAX_MODAL_DEPTH: usize = 8;
 
 impl ValidateUi for UiBlueprintFrameModel {
     fn validate(&self) -> Result<(), UiValidationError> {
@@ -45,6 +57,21 @@ impl ValidateUi for UiBlueprintFrameModel {
         validate_id("blueprint_frame.view_id", &self.view_id)?;
         self.model.validate()?;
         self.state.validate()?;
+        if self.modals.len() > MAX_MODAL_DEPTH {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_MODAL_DEPTH",
+                format!("modal stack exceeds {MAX_MODAL_DEPTH}"),
+            ));
+        }
+        for modal in &self.modals {
+            validate_id("blueprint_frame.modal.view_id", &modal.view_id)?;
+            validate_id("blueprint_frame.modal.model_schema", &modal.model_schema)?;
+            modal.model.validate()?;
+            modal.state.validate()?;
+        }
+        if let Some(focus_request) = &self.focus_request {
+            validate_id("blueprint_frame.focus_request", focus_request)?;
+        }
         for (key, value) in &self.localization {
             validate_id("blueprint_frame.localization_key", key)?;
             validate_string("blueprint_frame.localization_value", value)?;

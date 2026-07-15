@@ -485,7 +485,103 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         }
         self.pending.clear();
         self.accessibility_actions.clear();
-        self.render_node(&view.root, None, &frame, None, request, &mut actions)?;
+        let root_id = view.root.local_id.clone();
+        let mut render_error = None;
+        Stack::new().show(|| {
+            if let Err(error) =
+                self.render_node(&view.root, None, &frame, None, request, &mut actions)
+            {
+                render_error = Some(error);
+                return;
+            }
+            for (index, modal) in frame.modals.iter().enumerate() {
+                let modal_view = match self.bundle.views.get(&modal.view_id).cloned() {
+                    Some(view) => view,
+                    None => {
+                        render_error = Some(UiValidationError::invalid(
+                            "ASTRA_UI_MODAL_VIEW_MISSING",
+                            "modal view is absent from the packaged blueprint bundle",
+                        ));
+                        return;
+                    }
+                };
+                if modal_view.model_schema != modal.model_schema {
+                    render_error = Some(UiValidationError::invalid(
+                        "ASTRA_UI_MODAL_MODEL_SCHEMA",
+                        "modal model schema does not match its packaged view",
+                    ));
+                    return;
+                }
+                let modal_frame = UiBlueprintFrameModel {
+                    schema: frame.schema.clone(),
+                    view_id: modal.view_id.clone(),
+                    model: modal.model.clone(),
+                    state: modal.state.clone(),
+                    modals: Vec::new(),
+                    focus_request: None,
+                    localization: frame.localization.clone(),
+                };
+                let semantic_id = format!("{root_id}/modal.{index}");
+                let mut child_error = None;
+                let response = AstraNodeWidget::show(
+                    AstraNodeProps {
+                        semantic_id: semantic_id.clone(),
+                        min_size: Vec2::ZERO,
+                        fill: Color::rgba(0, 0, 0, 96),
+                        interactive: true,
+                        fill_available: true,
+                    },
+                    || {
+                        child_error = self
+                            .render_node(
+                                &modal_view.root,
+                                Some(&semantic_id),
+                                &modal_frame,
+                                None,
+                                request,
+                                &mut actions,
+                            )
+                            .err();
+                    },
+                );
+                if let Some(error) = child_error {
+                    render_error = Some(error);
+                    return;
+                }
+                self.pending.push(PendingSemantic {
+                    id: semantic_id,
+                    parent_id: Some(root_id.clone()),
+                    widget_id: response.id,
+                    role: UiSemanticRole::Dialog,
+                    name: None,
+                    enabled: true,
+                    focused: response.focused,
+                    actions: BTreeSet::from([UiSemanticAction::Focus, UiSemanticAction::Dismiss]),
+                });
+            }
+        });
+        if let Some(error) = render_error {
+            return Err(error);
+        }
+        if let Some(focus_request) = &frame.focus_request {
+            let target = self
+                .pending
+                .iter()
+                .find(|pending| &pending.id == focus_request)
+                .ok_or_else(|| {
+                    UiValidationError::invalid(
+                        "ASTRA_UI_FOCUS_TARGET_MISSING",
+                        "focus target does not exist in the rendered semantic generation",
+                    )
+                })?;
+            if !target.enabled || !target.actions.contains(&UiSemanticAction::Focus) {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_UI_FOCUS_TARGET_INVALID",
+                    "focus target is disabled or not focusable",
+                ));
+            }
+            _yakui.request_focus(Some(target.widget_id));
+        }
         Ok(YakuiViewOutput {
             actions,
             repaint_after_ns: None,

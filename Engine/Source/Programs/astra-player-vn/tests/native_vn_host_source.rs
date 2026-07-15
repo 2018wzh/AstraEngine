@@ -273,15 +273,39 @@ local controllers = {
   { "test.system", "ui.test.system", "astra.vn.ui_model.system.v1" },
 }
 for _, definition in controllers do
+  local handlers = { on_action = function(_, _, action)
+    return { astra.ui.effect.forward(action) }
+  end }
+  if definition[1] == "test.message" then
+    handlers.on_open = function()
+      return { astra.ui.effect.focus("root/advance") }
+    end
+  end
   astra.ui.controller.register(definition[1], {
     schema = "astra.vn.ui_controller.v1", view = definition[2],
     model_schema = definition[3], snapshot = "none",
-  }, { on_action = function(_, _, action)
-    return { astra.ui.effect.forward(action) }
-  end })
+  }, handlers)
 end
 "#
     .to_string()
+}
+
+#[astra_headless_test::test]
+fn controller_on_open_focuses_a_stable_semantic_target() {
+    let mut source = source_for(STORY);
+    source.launch().expect("launch");
+    source
+        .dispatch_ui_event(UiInputEventKind::FixedTime {
+            time_ns: 16_666_667,
+        })
+        .expect("second UI frame");
+    let semantics = source.ui_semantics().expect("semantic snapshot");
+    assert!(semantics
+        .nodes
+        .iter()
+        .any(|node| node.id == "root/advance" && node.focused));
+    source.release_resources().expect("release");
+    source.shutdown().expect("shutdown");
 }
 
 fn bind_product_provider_authority(request: &mut PackageBuildRequest) {

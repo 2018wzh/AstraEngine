@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use astra_asset::{AssetCatalog, VfsManifest, VfsSourceRef};
 use astra_core::{Hash256, SchemaVersion};
@@ -24,9 +24,10 @@ use astra_plugin_abi::{
     ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
 };
 use astra_ui_core::{
-    UiBackend, UiBlueprintFrameModel, UiButtonState, UiFrameRequest, UiInputDispositionKind,
-    UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets, UiSemanticRole, UiSemanticSnapshot,
-    UiThemeManifest, UiValidationError, UiValue, UiViewport,
+    UiBackend, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState, UiFrameRequest,
+    UiInputDispositionKind, UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets, UiSemanticRole,
+    UiSemanticSnapshot, UiThemeManifest, UiThemeValue, UiValidationError, UiValue, UiViewport,
+    MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
 };
 use astra_ui_yakui::{ui_frame_to_scene_commands, AstraYakuiBackend, BlueprintYakuiRenderer};
 use astra_vn_core::{
@@ -44,7 +45,12 @@ use astra_vn_policy::LuauUiControllerHost;
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 use astra_vn_ui::{
     model_to_ui_value, resolve_binding, SaveSlotViewModel, VnUiAction, VnUiBindingError,
-    VnUiBindingRequest, VnUiControllerEffect, VnUiModelContext, VnUiSessionState,
+    VnUiBindingRequest, VnUiControllerEffect, VnUiControllerUpdate, VnUiModelContext,
+    VnUiSessionState,
+};
+
+use crate::ui_session::{
+    controller_state_value, ActiveUiAnimation, ActiveUiController, ActiveUiModal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +103,12 @@ pub struct NativeVnHostCommandSource {
     pending_ui_host_request: Option<VnUiHostRequest>,
     ui_controller_host: LuauUiControllerHost,
     ui_controller_sessions: BTreeMap<String, VnUiSessionState>,
-    active_ui_controller: Option<(String, String, UiValue)>,
+    base_ui_instance_id: Option<String>,
+    base_ui_theme_id: Option<String>,
+    active_ui_controller: Option<ActiveUiController>,
+    ui_modals: Vec<ActiveUiModal>,
+    pending_ui_focus: Option<String>,
+    ui_animations: BTreeMap<String, ActiveUiAnimation>,
     shutdown_started: bool,
 }
 
@@ -480,7 +491,12 @@ impl NativeVnHostCommandSource {
             pending_ui_host_request: None,
             ui_controller_host,
             ui_controller_sessions: BTreeMap::new(),
+            base_ui_instance_id: None,
+            base_ui_theme_id: None,
             active_ui_controller: None,
+            ui_modals: Vec::new(),
+            pending_ui_focus: None,
+            ui_animations: BTreeMap::new(),
             shutdown_started: false,
         })
     }
@@ -1018,6 +1034,20 @@ impl NativeVnHostCommandSource {
         self.last_draw = draw_commands;
         self.last_step_evidence = Some(envelope.payload.step_evidence);
         self.restored_product_media_snapshot = envelope.payload.product_media_snapshot_json;
+        self.ui_controller_sessions.clear();
+        self.base_ui_instance_id = None;
+        self.base_ui_theme_id = None;
+        self.active_ui_controller = None;
+        self.ui_modals.clear();
+        self.pending_ui_focus = None;
+        self.ui_animations.clear();
+        self.ui_generation = self
+            .ui_generation
+            .checked_add(1)
+            .ok_or(NativeVnHostError::SequenceOverflow)?;
+        self.ui_backend
+            .context_restored(&format!("vn.ui.{}", self.session_id.0), self.ui_generation)
+            .map_err(NativeVnHostError::Ui)?;
         self.command_sequence = self
             .command_sequence
             .checked_add(1)
@@ -1231,7 +1261,7 @@ impl NativeVnHostCommandSource {
                 )))
             }
         };
-        let (controller_id, model_schema, model) = self.active_ui_controller.clone().ok_or_else(|| {
+        let controller = self.active_ui_controller.clone().ok_or_else(|| {
             NativeVnHostError::Input(
                 "ASTRA_PLAYER_UI_CONTROLLER_CONTEXT: action arrived without a live controller context"
                     .into(),
@@ -1240,36 +1270,20 @@ impl NativeVnHostCommandSource {
         let effects = self
             .ui_controller_host
             .invoke_action(
-                &controller_id,
-                &model_schema,
-                &model,
+                &controller.controller_id,
+                &controller.model_schema,
+                &controller.model,
                 &typed_action,
                 self.ui_controller_sessions
-                    .entry(controller_id.clone())
+                    .entry(controller.controller_id.clone())
                     .or_default(),
             )
             .map_err(|error| NativeVnHostError::Input(error.to_string()))?;
-        let mut forwarded = None;
-        for effect in effects {
-            match effect {
-                VnUiControllerEffect::Forward { action } if forwarded.is_none() => {
-                    forwarded = Some(action);
-                }
-                VnUiControllerEffect::Trace { .. } | VnUiControllerEffect::SetSessionState { .. } => {}
-                _ => {
-                    return Err(NativeVnHostError::Input(
-                        "ASTRA_PLAYER_UI_CONTROLLER_EFFECT_UNSUPPORTED: controller effect is not implemented by the product session"
-                            .into(),
-                    ))
-                }
-            }
-        }
-        let action = forwarded.ok_or_else(|| {
-            NativeVnHostError::Input(
-                "ASTRA_PLAYER_UI_CONTROLLER_FORWARD_MISSING: controller consumed a product action without a forward effect"
-                    .into(),
-            )
-        })?;
+        let forwarded =
+            self.apply_ui_controller_effects(&controller.controller_id, effects, true)?;
+        let Some(action) = forwarded else {
+            return self.present_current_scene(self.ui_draw.clone());
+        };
         let command = match action {
             VnUiAction::Advance => VnPlayerCommand::Advance,
             VnUiAction::Choose { option_id } => VnPlayerCommand::Choose { option_id },
@@ -1293,6 +1307,201 @@ impl NativeVnHostCommandSource {
             }
         };
         self.command(command)
+    }
+
+    fn apply_ui_controller_effects(
+        &mut self,
+        origin_controller_id: &str,
+        effects: Vec<VnUiControllerEffect>,
+        allow_forward: bool,
+    ) -> Result<Option<VnUiAction>, NativeVnHostError> {
+        let mut queue = effects
+            .into_iter()
+            .map(|effect| (origin_controller_id.to_string(), effect))
+            .collect::<VecDeque<_>>();
+        let mut processed = 0usize;
+        let mut forwarded = None;
+        while let Some((controller_id, effect)) = queue.pop_front() {
+            processed += 1;
+            if processed > MAX_EFFECTS_PER_CALL {
+                return Err(NativeVnHostError::Input(
+                    "ASTRA_PLAYER_UI_CONTROLLER_EFFECT_LIMIT: recursive controller effects exceeded the per-call limit"
+                        .into(),
+                ));
+            }
+            match effect {
+                VnUiControllerEffect::Forward { action } if allow_forward => {
+                    if forwarded.replace(action).is_some() {
+                        return Err(NativeVnHostError::Input(
+                            "ASTRA_PLAYER_UI_CONTROLLER_FORWARD_DUPLICATE: an action callback may forward at most one product action"
+                                .into(),
+                        ));
+                    }
+                }
+                VnUiControllerEffect::Forward { .. } => {
+                    return Err(NativeVnHostError::Input(
+                        "ASTRA_PLAYER_UI_CONTROLLER_FORWARD_AUTHORITY: lifecycle callbacks cannot forward product actions"
+                            .into(),
+                    ));
+                }
+                VnUiControllerEffect::OpenModal { view_id, model } => {
+                    if self.ui_modals.len() >= MAX_MODAL_DEPTH {
+                        return Err(NativeVnHostError::Input(format!(
+                            "ASTRA_PLAYER_UI_MODAL_DEPTH: modal stack exceeds {MAX_MODAL_DEPTH}"
+                        )));
+                    }
+                    let view = self.ui_blueprints.views.get(&view_id).ok_or_else(|| {
+                        NativeVnHostError::Input(format!(
+                            "ASTRA_PLAYER_UI_MODAL_VIEW_MISSING: view {view_id} is not packaged"
+                        ))
+                    })?;
+                    if self.base_ui_theme_id.as_deref() != Some(view.theme_id.as_str()) {
+                        return Err(NativeVnHostError::Input(format!(
+                            "ASTRA_PLAYER_UI_MODAL_THEME: modal view {view_id} must use the active profile theme"
+                        )));
+                    }
+                    let matching = self
+                        .ui_controller_host
+                        .manifests()
+                        .filter(|manifest| manifest.view == view_id)
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if matching.len() != 1 {
+                        return Err(NativeVnHostError::Input(format!(
+                            "ASTRA_PLAYER_UI_MODAL_CONTROLLER_BINDING: view {view_id} resolves to {} controllers instead of exactly one",
+                            matching.len()
+                        )));
+                    }
+                    let manifest = matching.into_iter().next().ok_or_else(|| {
+                        NativeVnHostError::Input(
+                            "ASTRA_PLAYER_UI_MODAL_CONTROLLER_BINDING: modal controller disappeared"
+                                .into(),
+                        )
+                    })?;
+                    if manifest.model_schema != view.model_schema {
+                        return Err(NativeVnHostError::Input(
+                            "ASTRA_PLAYER_UI_MODAL_MODEL_SCHEMA: modal controller and view schemas differ"
+                                .into(),
+                        ));
+                    }
+                    let instance_id = format!(
+                        "modal.{}.{}.{}",
+                        self.ui_generation,
+                        self.ui_modals.len(),
+                        view_id
+                    );
+                    let modal = ActiveUiModal {
+                        instance_id,
+                        controller_id: manifest.id.clone(),
+                        view_id,
+                        model_schema: manifest.model_schema.clone(),
+                        model,
+                    };
+                    self.ui_modals.push(modal.clone());
+                    let open_effects = self
+                        .ui_controller_host
+                        .invoke_open(
+                            &modal.controller_id,
+                            &modal.model_schema,
+                            &modal.model,
+                            self.ui_controller_sessions
+                                .entry(modal.controller_id.clone())
+                                .or_default(),
+                        )
+                        .map_err(|error| NativeVnHostError::Input(error.to_string()))?;
+                    queue.extend(
+                        open_effects
+                            .into_iter()
+                            .map(|effect| (modal.controller_id.clone(), effect)),
+                    );
+                }
+                VnUiControllerEffect::CloseModal => {
+                    if self.ui_modals.pop().is_none() {
+                        return Err(NativeVnHostError::Input(
+                            "ASTRA_PLAYER_UI_MODAL_UNDERFLOW: close_modal requires a live modal"
+                                .into(),
+                        ));
+                    }
+                    self.pending_ui_focus = None;
+                    self.ui_animations.clear();
+                }
+                VnUiControllerEffect::Focus { semantic_id } => {
+                    if self
+                        .pending_ui_focus
+                        .as_ref()
+                        .is_some_and(|pending| pending != &semantic_id)
+                    {
+                        return Err(NativeVnHostError::Input(
+                            "ASTRA_PLAYER_UI_FOCUS_CONFLICT: one effect transaction requested multiple focus targets"
+                                .into(),
+                        ));
+                    }
+                    self.pending_ui_focus = Some(semantic_id);
+                }
+                VnUiControllerEffect::SetSessionState { .. } => {}
+                VnUiControllerEffect::Animation {
+                    target_id,
+                    preset_id,
+                } => {
+                    let controller = self
+                        .ui_controller_host
+                        .manifest(&controller_id)
+                        .ok_or_else(|| {
+                            NativeVnHostError::Input(
+                                "ASTRA_PLAYER_UI_ANIMATION_CONTROLLER: origin controller is not registered"
+                                    .into(),
+                            )
+                        })?;
+                    let view = self
+                        .ui_blueprints
+                        .views
+                        .get(&controller.view)
+                        .ok_or_else(|| {
+                            NativeVnHostError::Input(
+                                "ASTRA_PLAYER_UI_ANIMATION_VIEW: origin view is not packaged"
+                                    .into(),
+                            )
+                        })?;
+                    let theme = self.ui_themes.get(&view.theme_id).ok_or_else(|| {
+                        NativeVnHostError::Input(
+                            "ASTRA_PLAYER_UI_ANIMATION_THEME: origin theme is not packaged".into(),
+                        )
+                    })?;
+                    let motion = theme.tokens.get(&preset_id).ok_or_else(|| {
+                        NativeVnHostError::Input(format!(
+                            "ASTRA_PLAYER_UI_ANIMATION_PRESET: preset {preset_id} is absent from theme {}",
+                            theme.id
+                        ))
+                    })?;
+                    let UiThemeValue::Motion { duration_ms, .. } = motion else {
+                        return Err(NativeVnHostError::Input(
+                            "ASTRA_PLAYER_UI_ANIMATION_PRESET: animation preset must reference a motion token"
+                                .into(),
+                        ));
+                    };
+                    let fixed_time_ns = self.fixed_step.saturating_mul(16_666_667);
+                    self.ui_animations.insert(
+                        target_id.clone(),
+                        ActiveUiAnimation {
+                            target_id,
+                            preset_id,
+                            started_at_ns: fixed_time_ns,
+                            duration_ns: u64::from(*duration_ms).saturating_mul(1_000_000),
+                        },
+                    );
+                }
+                VnUiControllerEffect::Trace { event, fields } => {
+                    tracing::debug!(
+                        target: "astra_player_vn::ui_controller",
+                        event = "vn.ui.controller.trace",
+                        controller_id = %controller_id,
+                        controller_event = %event,
+                        field_count = fields.len()
+                    );
+                }
+            }
+        }
+        Ok(forwarded)
     }
 
     fn queue_ui_save_request(
@@ -1408,18 +1617,23 @@ impl NativeVnHostCommandSource {
             .ui_blueprints
             .views
             .get(&binding.view_id)
+            .cloned()
             .ok_or_else(|| {
                 NativeVnHostError::Input(format!(
                     "ASTRA_PLAYER_UI_VIEW_MISSING: view {} is not packaged",
                     binding.view_id
                 ))
             })?;
-        let theme = self.ui_themes.get(&binding.theme_id).ok_or_else(|| {
-            NativeVnHostError::Input(format!(
-                "ASTRA_PLAYER_UI_THEME_MISSING: binding references unpackaged theme {}",
-                binding.theme_id
-            ))
-        })?;
+        let theme = self
+            .ui_themes
+            .get(&binding.theme_id)
+            .cloned()
+            .ok_or_else(|| {
+                NativeVnHostError::Input(format!(
+                    "ASTRA_PLAYER_UI_THEME_MISSING: binding references unpackaged theme {}",
+                    binding.theme_id
+                ))
+            })?;
         let controller_manifest = self
             .ui_controller_host
             .manifest(&binding.controller_id)
@@ -1434,17 +1648,130 @@ impl NativeVnHostCommandSource {
         {
             return Err(NativeVnHostError::Input(
                 "ASTRA_PLAYER_UI_CONTROLLER_BINDING: controller manifest does not match the selected view"
-                    .into(),
+                .into(),
             ));
         }
+        let instance_source = state
+            .pending_wait
+            .as_ref()
+            .map(|wait| wait.command_id.clone())
+            .unwrap_or_else(|| {
+                system_page
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| surface.to_owned())
+            });
+        let instance_id = format!(
+            "{}.{}.{}.{}",
+            self.ui_generation, binding.view_id, binding.controller_id, instance_source
+        );
         let active_model = model.clone();
         let active_controller_id = binding.controller_id.clone();
         let active_model_schema = view.model_schema.clone();
+        let active_view_id = view.id.clone();
+        let active_changed = self
+            .base_ui_instance_id
+            .as_ref()
+            .is_none_or(|active| active != &instance_id);
+        if active_changed {
+            self.ui_modals.clear();
+            self.pending_ui_focus = None;
+            self.ui_animations.clear();
+            self.base_ui_instance_id = Some(instance_id.clone());
+        }
+        self.base_ui_theme_id = Some(binding.theme_id.clone());
+        let lifecycle_effects = if active_changed {
+            self.ui_controller_host.invoke_open(
+                &active_controller_id,
+                &active_model_schema,
+                &active_model,
+                self.ui_controller_sessions
+                    .entry(active_controller_id.clone())
+                    .or_default(),
+            )
+        } else {
+            self.ui_controller_host.invoke_update(
+                &active_controller_id,
+                &active_model_schema,
+                &active_model,
+                &VnUiControllerUpdate {
+                    fixed_time_ns: self.fixed_step.saturating_mul(16_666_667),
+                    delta_ns: 16_666_667,
+                    generation: self.ui_generation,
+                },
+                self.ui_controller_sessions
+                    .entry(active_controller_id.clone())
+                    .or_default(),
+            )
+        }
+        .map_err(|error| NativeVnHostError::Input(error.to_string()))?;
+        self.apply_ui_controller_effects(&active_controller_id, lifecycle_effects, false)?;
+
+        let modal_updates = self.ui_modals.clone();
+        for modal in modal_updates {
+            if !self
+                .ui_modals
+                .iter()
+                .any(|live| live.instance_id == modal.instance_id)
+            {
+                continue;
+            }
+            let effects = self
+                .ui_controller_host
+                .invoke_update(
+                    &modal.controller_id,
+                    &modal.model_schema,
+                    &modal.model,
+                    &VnUiControllerUpdate {
+                        fixed_time_ns: self.fixed_step.saturating_mul(16_666_667),
+                        delta_ns: 16_666_667,
+                        generation: self.ui_generation,
+                    },
+                    self.ui_controller_sessions
+                        .entry(modal.controller_id.clone())
+                        .or_default(),
+                )
+                .map_err(|error| NativeVnHostError::Input(error.to_string()))?;
+            self.apply_ui_controller_effects(&modal.controller_id, effects, false)?;
+        }
+
+        let fixed_time_ns = self.fixed_step.saturating_mul(16_666_667);
+        let state_value = controller_state_value(
+            self.ui_controller_sessions
+                .entry(active_controller_id.clone())
+                .or_default()
+                .values(),
+            self.ui_animations.values().map(|animation| {
+                (
+                    animation.target_id.clone(),
+                    animation.progress_millionths(fixed_time_ns),
+                )
+            }),
+        );
+        let modal_frames = self
+            .ui_modals
+            .iter()
+            .map(|modal| {
+                let state = self
+                    .ui_controller_sessions
+                    .get(&modal.controller_id)
+                    .map(VnUiSessionState::values)
+                    .cloned()
+                    .unwrap_or_default();
+                UiBlueprintModalFrameModel {
+                    view_id: modal.view_id.clone(),
+                    model_schema: modal.model_schema.clone(),
+                    model: modal.model.clone(),
+                    state: controller_state_value(&state, std::iter::empty()),
+                }
+            })
+            .collect::<Vec<_>>();
         let frame = UiBlueprintFrameModel {
             schema: "astra.ui_blueprint_frame_model.v1".to_string(),
             view_id: binding.view_id,
             model,
-            state: UiValue::Map(BTreeMap::new()),
+            state: state_value,
+            modals: modal_frames,
+            focus_request: self.pending_ui_focus.take(),
             localization: self.localization.strings.clone(),
         };
         let model_payload = postcard::to_allocvec(&frame)
@@ -1470,11 +1797,11 @@ impl NativeVnHostCommandSource {
                 schema: "astra.ui_input_frame.v1".to_string(),
                 events,
             },
-            theme: theme.clone(),
+            theme,
             model_schema: view.model_schema.clone(),
             model_payload,
         };
-        let output = self.ui_backend.render_frame(request)?;
+        let mut output = self.ui_backend.render_frame(request)?;
         if !output.diagnostics.is_empty() {
             return Err(NativeVnHostError::Input(format!(
                 "ASTRA_PLAYER_UI_DIAGNOSTIC: UI frame returned {} diagnostics",
@@ -1482,8 +1809,36 @@ impl NativeVnHostCommandSource {
             )));
         }
         let draw = ui_frame_to_scene_commands(&output.render)?;
+        if self
+            .ui_animations
+            .values()
+            .any(|animation| animation.progress_millionths(fixed_time_ns) < 1_000_000)
+        {
+            output.repaint_after_ns = Some(
+                output
+                    .repaint_after_ns
+                    .unwrap_or(16_666_667)
+                    .min(16_666_667),
+            );
+        }
         self.ui_semantics = Some(output.semantics.clone());
-        self.active_ui_controller = Some((active_controller_id, active_model_schema, active_model));
+        let active = self.ui_modals.last().map_or(
+            ActiveUiController {
+                instance_id,
+                controller_id: active_controller_id,
+                view_id: active_view_id,
+                model_schema: active_model_schema,
+                model: active_model,
+            },
+            |modal| ActiveUiController {
+                instance_id: modal.instance_id.clone(),
+                controller_id: modal.controller_id.clone(),
+                view_id: modal.view_id.clone(),
+                model_schema: modal.model_schema.clone(),
+                model: modal.model.clone(),
+            },
+        );
+        self.active_ui_controller = Some(active);
         Ok((output, draw))
     }
 
