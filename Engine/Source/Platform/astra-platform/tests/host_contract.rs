@@ -57,6 +57,14 @@ fn release_profiles_lock_selected_providers_without_hidden_fallbacks() {
     assert_eq!(linux.save.providers, ["xdg_data"]);
     assert!(validate_host_profile(&linux).is_ok());
 
+    let macos = PlatformHostProfile::macos_release("nativevn-game", "com.example.game");
+    assert_eq!(macos.platform, PlatformId::Macos);
+    assert_eq!(macos.renderer.providers, ["wgpu_metal"]);
+    assert_eq!(macos.decode.providers, ["avfoundation"]);
+    assert_eq!(macos.audio.providers, ["coreaudio"]);
+    assert_eq!(macos.save.providers, ["application_support"]);
+    assert!(validate_host_profile(&macos).is_ok());
+
     let web = PlatformHostProfile::web_release("nativevn-web", "com.example.game");
     assert_eq!(web.platform, PlatformId::Web);
     assert_eq!(web.renderer.providers, ["webgpu"]);

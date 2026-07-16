@@ -5,5 +5,44 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-tracing.workspace = true
+astra-core = { path = "../../Runtime/astra-core" }
 astra-platform = { path = "../astra-platform" }
+
+[features]
+default = []
+platform-test-driver = [
+    "astra-platform/platform-test-driver",
+    "astra-platform-common/platform-test-driver",
+]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+astra-media = { path = "../../Runtime/astra-media" }
+astra-platform-common = { path = "../astra-platform-common" }
+astra-ui-core = { path = "../../Runtime/astra-ui-core" }
+accesskit.workspace = true
+accesskit_winit.workspace = true
+cpal.workspace = true
+directories.workspace = true
+gilrs.workspace = true
+libc.workspace = true
+objc2.workspace = true
+objc2-av-foundation = { workspace = true, features = [
+    "AVAsset",
+    "AVAssetReader",
+    "AVAssetReaderOutput",
+    "AVAssetTrack",
+    "AVMediaFormat",
+] }
+objc2-core-media = { workspace = true, features = ["CMBlockBuffer", "CMSampleBuffer", "objc2-core-video"] }
+objc2-core-video = { workspace = true, features = ["CVPixelBuffer"] }
+objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSError", "NSString", "NSURL"] }
+pollster.workspace = true
+rfd.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+wgpu.workspace = true
+winit = { workspace = true, features = ["rwh_06"] }
+
+[dev-dependencies]
+serde_json.workspace = true

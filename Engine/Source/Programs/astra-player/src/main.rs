@@ -1,7 +1,7 @@
 use astra_observability::{init_host, ConsoleFormat, HostObservabilityConfig, HostRole};
 use astra_player::{
-    LinuxUinputHost, WebCdpInputHost, WebLiveAutomationRequest, WindowsLiveAutomationRequest,
-    WindowsSendInputHost,
+    LinuxUinputHost, MacosCgEventHost, WebCdpInputHost, WebLiveAutomationRequest,
+    WindowsLiveAutomationRequest, WindowsSendInputHost,
 };
 use astra_player_core::{
     PlayerAutomationScript, PlayerHostCommandResult, PlayerInputTranscript, PlayerPlatform,
@@ -188,13 +188,14 @@ fn main() -> Result<(), PlayerCliError> {
     let report = match script.platform {
         PlayerPlatform::Windows => WindowsSendInputHost.build_report(&script, &transcript),
         PlayerPlatform::Linux => LinuxUinputHost.build_report(&script, &transcript),
+        PlayerPlatform::Macos => MacosCgEventHost.build_report(&script, &transcript),
         PlayerPlatform::Web => WebCdpInputHost.build_report(&script, &transcript),
     };
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn run_bundled_game() -> Result<(), PlayerCliError> {
     use astra_core::Hash256;
     use astra_package::{PackageManifest, PackageReader};
@@ -221,7 +222,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         #[cfg(target_os = "windows")]
         #[serde(default)]
         ui_components: Option<UiComponentsConfig>,
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         #[serde(default)]
         ui_components: Option<serde_json::Value>,
     }
@@ -231,22 +232,31 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         profiles: Vec<serde_json::Value>,
     }
 
-    let config: Config = serde_json::from_slice(&fs::read("AstraPlayer.config.json")?)?;
-    let expected_platform = if cfg!(target_os = "windows") {
-        "windows"
-    } else {
-        "linux"
+    #[cfg(target_os = "macos")]
+    let resource_root = std::env::current_exe()?
+        .parent()
+        .and_then(std::path::Path::parent)
+        .map(|contents| contents.join("Resources"))
+        .ok_or("macOS app resource directory is unavailable")?;
+    #[cfg(not(target_os = "macos"))]
+    let resource_root = PathBuf::from(".");
+    let config: Config =
+        serde_json::from_slice(&fs::read(resource_root.join("AstraPlayer.config.json"))?)?;
+    let expected_platform = match () {
+        _ if cfg!(target_os = "windows") => "windows",
+        _ if cfg!(target_os = "macos") => "macos",
+        _ => "linux",
     };
     if config.schema != "astra.player_config.v2" || config.platform != expected_platform {
         return Err("Player config does not match the native platform".into());
     }
     #[cfg(target_os = "windows")]
     let mut ui_component_processes = open_ui_component_processes(config.ui_components.as_ref())?;
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     if config.ui_components.is_some() {
-        return Err("Linux Player UI components are not implemented".into());
+        return Err("native Player UI components are not implemented on this platform".into());
     }
-    let package_bytes = fs::read(&config.package)?;
+    let package_bytes = fs::read(resource_root.join(&config.package))?;
     let package_hash = Hash256::from_sha256(&package_bytes).to_string();
     let package = PackageReader::open(&package_bytes)?;
     let manifest: PackageManifest = package.container().decode_postcard("package.manifest")?;
@@ -269,19 +279,18 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         .into_iter()
         .find(|profile| {
             profile.platform
-                == if cfg!(target_os = "windows") {
-                    PlatformId::Windows
-                } else {
-                    PlatformId::Linux
+                == match () {
+                    _ if cfg!(target_os = "windows") => PlatformId::Windows,
+                    _ if cfg!(target_os = "macos") => PlatformId::Macos,
+                    _ => PlatformId::Linux,
                 }
                 && profile.target == config.target
                 && profile.package_id == manifest.package_id
         })
         .ok_or("package does not contain a matching native platform profile")?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    runtime.block_on(async move {
+    #[cfg(target_os = "macos")]
+    let (mut runner, factory) = astra_platform_macos::main_thread_host()?;
+    let player = async move {
         #[cfg(target_os = "windows")]
         let factory = astra_platform_windows::factory();
         #[cfg(target_os = "linux")]
@@ -649,7 +658,14 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                 .map_err(|error| player_platform_error("player.ui_component.shutdown", error))?;
         }
         Ok::<(), astra_platform::PlatformError>(())
-    })?;
+    };
+    #[cfg(target_os = "macos")]
+    runner.run(player)??;
+    #[cfg(not(target_os = "macos"))]
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(player)?;
     Ok(())
 }
 
@@ -886,7 +902,7 @@ fn log_consumed_vn_step(
     Ok(())
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 fn run_bundled_game() -> Result<(), PlayerCliError> {
     Err("native AstraPlayer bundle host is unavailable on this platform".into())
 }

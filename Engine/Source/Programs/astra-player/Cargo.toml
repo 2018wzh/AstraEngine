@@ -9,6 +9,7 @@ default = []
 platform-test-driver = [
     "astra-platform-windows/platform-test-driver",
     "astra-platform-linux/platform-test-driver",
+    "astra-platform-macos/platform-test-driver",
 ]
 
 [lib]
@@ -46,6 +47,9 @@ astra-ui-plugin-abi = { path = "../../Runtime/astra-ui-plugin-abi" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 astra-platform-linux = { path = "../../Platform/astra-platform-linux" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+astra-platform-macos = { path = "../../Platform/astra-platform-macos" }
 
 [dev-dependencies]
 astra-headless-test = { path = "../../Developer/astra-headless-test" }

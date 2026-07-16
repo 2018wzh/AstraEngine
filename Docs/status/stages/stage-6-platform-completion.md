@@ -1,6 +1,6 @@
 # Stage 6 Platform Completion Work
 
-Stage 6 收纳 Stage 2 之外的平台完成项。Linux host 与 packaged Player 已进入 `IN_PROGRESS`；macOS、iOS 和 Android 保持 `SPEC_READY`。Linux/macOS Headless 的本机 CI、runtime 与 artifact portability 在本阶段独立关闭。本页不把 capability crate 编译通过写成 host 完成，也不把 API 可用性写成可玩证据。
+Stage 6 收纳 Stage 2 之外的平台完成项。Linux、macOS host 与 packaged Player 已进入 `IN_PROGRESS`；iOS 和 Android 保持 `SPEC_READY`。Linux/macOS Headless 的本机 CI、runtime 与 artifact portability 在本阶段独立关闭。本页不把 capability crate 编译通过写成 host 完成，也不把 API 可用性写成可玩证据。
 
 ## S6-LINUX-HEADLESS-01 Linux Headless portability
 
@@ -82,6 +82,10 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Linux host 与 packaged Player
 
 **Target Paths:** `Engine/Source/Platform/astra-platform-macos/`、`Docs/platforms/desktop.md`
 
+**Current Evidence:** `astra-platform-macos` 已有显式主线程 runner/factory、typed resource lifecycle、Metal-only wgpu、CoreAudio/cpal、AVFoundation CPU decode、Application Support save、package cache 和 macOS packaged Player。CLI 可生成 macOS 13 Universal 2 `.app`，并把 codesign/notarization 留作外部 blocking check。当前未取得 osxcross 或真机 evidence。
+
+**Planned Gate:** required checks 以 `required_conformance_checks(PlatformId::Macos)` 为准。必须补 AppKit lifecycle、Metal present/readback、CGEvent/IME/gamepad、ScreenCaptureKit、AccessKit、CoreAudio meter、AVFoundation fixtures、save reopen、package、zero-leak、签名与公证 evidence。
+
 **Planned Gate:** required smoke 暂定 `windowed_smoke` 和 `decode.avfoundation`。release profile 必须读取真实 platform report，不接受环境变量伪造 SDK evidence。
 
 **Linked Test IDs:** `T-S6-MACOS-HOST-01`
@@ -97,6 +101,8 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Linux host 与 packaged Player
 **Depends On:** `S6-MACOS-HOST-01`、`S3-PLAYER-AUTOMATION-01`
 
 **Target Paths:** `Engine/Source/Platform/astra-platform-macos/`、`Engine/Source/Programs/astra-player/` planned target、`Docs/platforms/desktop.md`
+
+**Current Evidence:** packaged Player 已接入 macOS profile、主线程 host runner、package、Runtime/provider、presentation、audio 和 save 主循环。`PlayerPlatform::Macos` 已锁定 CGEvent input source 与 `player_host.trace` consumption；当前没有真机自动化 report。
 
 **Planned Gate:** `player.full_playable.macos` 必须读取 macOS host report 和 live input transcript；缺 native input、frame region change、CoreAudio meter、App Support save evidence 或 route evidence 时 blocking。
 

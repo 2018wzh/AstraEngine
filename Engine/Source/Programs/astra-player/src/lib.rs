@@ -19,6 +19,8 @@ pub const LINUX_UINPUT_MOUSE: &str = "uinput.mouse";
 pub const LINUX_UINPUT_KEYBOARD: &str = "uinput.keyboard";
 pub const LINUX_UINPUT_TOUCH: &str = "uinput.touch";
 pub const LINUX_UINPUT_GAMEPAD: &str = "uinput.gamepad";
+pub const MACOS_CGEVENT_MOUSE: &str = "cgevent.mouse";
+pub const MACOS_CGEVENT_KEYBOARD: &str = "cgevent.keyboard";
 pub const WEB_CDP_MOUSE: &str = "cdp.mouse";
 pub const WEB_CDP_KEYBOARD: &str = "cdp.keyboard";
 
@@ -266,6 +268,23 @@ impl LinuxUinputHost {
 
     pub fn supports(script: &PlayerAutomationScript) -> bool {
         script.platform == PlayerPlatform::Linux
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MacosCgEventHost;
+
+impl MacosCgEventHost {
+    pub fn build_report(
+        &self,
+        script: &PlayerAutomationScript,
+        transcript: &PlayerInputTranscript,
+    ) -> PlayerAutomationReport {
+        PlayerAutomationValidator.validate(script, transcript)
+    }
+
+    pub fn supports(script: &PlayerAutomationScript) -> bool {
+        script.platform == PlayerPlatform::Macos
     }
 }
 

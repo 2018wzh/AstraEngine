@@ -290,7 +290,26 @@ pub fn required_conformance_checks(platform: PlatformId) -> &'static [&'static s
             "package.hash_range",
             "resource.zero_leaks",
         ],
-        PlatformId::Macos | PlatformId::Ios | PlatformId::Android => &[],
+        PlatformId::Macos => &[
+            "host.lifecycle",
+            "runtime.macos_13",
+            "window.appkit_create_destroy",
+            "surface.metal_present_readback",
+            "surface.screencapturekit",
+            "input.cgevent_consumption",
+            "input.ime_consumption",
+            "input.gamepad_consumption",
+            "accessibility.accesskit",
+            "audio.coreaudio_output_meter",
+            "decode.avfoundation",
+            "save.application_support_atomic_reopen",
+            "package.user_authorized",
+            "package.hash_range",
+            "distribution.codesign",
+            "distribution.notarization",
+            "resource.zero_leaks",
+        ],
+        PlatformId::Ios | PlatformId::Android => &[],
     }
 }
 

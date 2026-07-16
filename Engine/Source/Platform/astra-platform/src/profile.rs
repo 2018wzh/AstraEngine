@@ -102,6 +102,26 @@ struct PlatformHostProfileV1 {
 }
 
 impl PlatformHostProfile {
+    pub fn macos_release(target: impl Into<String>, package_id: impl Into<String>) -> Self {
+        Self {
+            schema: PLATFORM_HOST_PROFILE_SCHEMA.to_string(),
+            id: "macos-release".to_string(),
+            platform: PlatformId::Macos,
+            target: target.into(),
+            package_id: package_id.into(),
+            renderer: ProviderPolicy::required("wgpu_metal"),
+            decode: ProviderPolicy::required("avfoundation"),
+            audio: ProviderPolicy::required("coreaudio"),
+            save: ProviderPolicy::required("application_support"),
+            package_sources: vec![
+                PackageSourcePolicy::Bundled,
+                PackageSourcePolicy::UserAuthorized,
+            ],
+            limits: HostLimits::default(),
+            package_cache: PackageCachePolicy::default(),
+        }
+    }
+
     pub fn linux_steam_sniper_release(
         target: impl Into<String>,
         package_id: impl Into<String>,
@@ -355,7 +375,13 @@ fn validate_release_provider_policy(profile: &PlatformHostProfile) -> Result<(),
         PlatformId::Windows => ["wgpu_hardware", "wmf", "wasapi", "saved_games"],
         PlatformId::Linux => ["wgpu_vulkan", "gstreamer", "alsa", "xdg_data"],
         PlatformId::Web => ["webgpu", "webcodecs", "webaudio", "opfs"],
-        PlatformId::Macos | PlatformId::Ios | PlatformId::Android => return Ok(()),
+        PlatformId::Macos => [
+            "wgpu_metal",
+            "avfoundation",
+            "coreaudio",
+            "application_support",
+        ],
+        PlatformId::Ios | PlatformId::Android => return Ok(()),
     };
     for ((field, policy), required) in [
         ("renderer", &profile.renderer),
@@ -394,6 +420,13 @@ fn validate_release_provider_policy(profile: &PlatformHostProfile) -> Result<(),
             PlatformErrorCode::InvalidProfile,
             "profile.validate",
             "Linux release only supports the Steam Runtime sniper profile",
+        ));
+    }
+    if profile.platform == PlatformId::Macos && profile.id != "macos-release" {
+        return Err(PlatformError::new(
+            PlatformErrorCode::InvalidProfile,
+            "profile.validate",
+            "macOS release only supports the macos-release profile",
         ));
     }
     Ok(())

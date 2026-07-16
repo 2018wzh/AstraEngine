@@ -214,6 +214,8 @@ enum PackageCommand {
         #[arg(long)]
         linux_player: Option<PathBuf>,
         #[arg(long)]
+        macos_player: Option<PathBuf>,
+        #[arg(long)]
         crash_reporter: Option<PathBuf>,
         #[arg(long)]
         ui_component_host: Option<PathBuf>,
@@ -466,6 +468,7 @@ fn main() -> Result<(), CliError> {
                 platform,
                 windows_player,
                 linux_player,
+                macos_player,
                 crash_reporter,
                 ui_component_host,
                 web_player_wasm,
@@ -475,6 +478,7 @@ fn main() -> Result<(), CliError> {
                 let artifacts = BundleArtifactInputs {
                     windows_player,
                     linux_player,
+                    macos_player,
                     crash_reporter,
                     ui_component_host,
                     web_player_wasm,
@@ -1311,6 +1315,7 @@ struct StandaloneBundleManifest {
 struct BundleArtifactInputs {
     windows_player: Option<PathBuf>,
     linux_player: Option<PathBuf>,
+    macos_player: Option<PathBuf>,
     crash_reporter: Option<PathBuf>,
     ui_component_host: Option<PathBuf>,
     web_player_wasm: Option<PathBuf>,
@@ -3248,7 +3253,7 @@ fn build_standalone_bundle_into(
         "package",
         &package_bytes,
     )];
-    let mount_policy = bundle_mount_policy(&reader, out, &mut files)?;
+    let mut mount_policy = bundle_mount_policy(&reader, out, &mut files)?;
     let mut bundle_checks = Vec::new();
     let mut crash_reporter_ref = None;
     for scenario_ref in &scenario_bindings {
@@ -3374,6 +3379,94 @@ fn build_standalone_bundle_into(
             ));
             entrypoint.to_string()
         }
+        PlatformId::Macos => {
+            let player_source = artifacts.macos_player.as_deref().ok_or(
+                "macOS bundle requires --macos-player pointing to a Universal 2 astra-player",
+            )?;
+            let player_bytes = fs::read(player_source)?;
+            validate_universal_macho(&player_bytes)?;
+            let contents = out.join("Contents");
+            let macos = contents.join("MacOS");
+            let resources = contents.join("Resources");
+            fs::create_dir_all(&macos)?;
+            fs::create_dir_all(&resources)?;
+            fs::rename(out.join("package"), resources.join("package"))?;
+            for scenario in &scenario_bindings {
+                let relative = validate_bundle_relative_path(&scenario.path)?;
+                let source = out.join(&relative);
+                if source.is_file() {
+                    let destination = resources.join(&relative);
+                    if let Some(parent) = destination.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::rename(source, destination)?;
+                }
+            }
+            if let Some(path) = mount_policy.as_mut() {
+                let relative = validate_bundle_relative_path(path)?;
+                let source = out.join(&relative);
+                if source.is_file() {
+                    let destination = resources.join(&relative);
+                    if let Some(parent) = destination.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::rename(source, destination)?;
+                }
+                *path = format!("Contents/Resources/{path}");
+            }
+            for file in &mut files {
+                file.path = format!("Contents/Resources/{}", file.path);
+            }
+            let entrypoint = "Contents/MacOS/astra-player";
+            let entrypoint_path = out.join(entrypoint);
+            fs::write(&entrypoint_path, &player_bytes)?;
+            make_executable(&entrypoint_path)?;
+            files.push(bundle_file(
+                entrypoint,
+                "macos_universal_player",
+                &player_bytes,
+            ));
+            let config = player_config_bytes(
+                target,
+                profile,
+                platform_name,
+                &display_config,
+                &locale_config,
+                ui_components.as_ref(),
+            )?;
+            fs::write(resources.join("AstraPlayer.config.json"), &config)?;
+            files.push(bundle_file(
+                "Contents/Resources/AstraPlayer.config.json",
+                "player_config",
+                &config,
+            ));
+            let plist = macos_info_plist(&package_manifest.package_id);
+            fs::write(contents.join("Info.plist"), plist.as_bytes())?;
+            files.push(bundle_file(
+                "Contents/Info.plist",
+                "macos_info_plist",
+                plist.as_bytes(),
+            ));
+            bundle_checks.extend([
+                PlayerLaunchCheck {
+                    id: "macos.universal2".into(),
+                    status: "pass".into(),
+                },
+                PlayerLaunchCheck {
+                    id: "macos.codesign".into(),
+                    status: "required_external".into(),
+                },
+                PlayerLaunchCheck {
+                    id: "macos.notarization".into(),
+                    status: "required_external".into(),
+                },
+                PlayerLaunchCheck {
+                    id: "crash_reporter.not_applicable".into(),
+                    status: "pass".into(),
+                },
+            ]);
+            entrypoint.to_string()
+        }
         PlatformId::Web => {
             let entrypoint = "index.html";
             let index = br#"<!doctype html>
@@ -3452,7 +3545,7 @@ fn build_standalone_bundle_into(
             }
             entrypoint.to_string()
         }
-        PlatformId::Macos | PlatformId::Ios | PlatformId::Android => {
+        PlatformId::Ios | PlatformId::Android => {
             return Err(format!("standalone bundle platform {platform_name} is Stage 6").into());
         }
     };
@@ -3464,10 +3557,20 @@ fn build_standalone_bundle_into(
         platform: platform_name.to_string(),
         entrypoint,
         package_hash: Hash256::from_sha256(&package_bytes).to_string(),
-        package: "package/nativevn.astrapkg".to_string(),
+        package: if platform == PlatformId::Macos {
+            "Contents/Resources/package/nativevn.astrapkg".to_string()
+        } else {
+            "package/nativevn.astrapkg".to_string()
+        },
         scenario_refs: scenario_bindings
             .into_iter()
-            .map(|scenario| scenario.path)
+            .map(|scenario| {
+                if platform == PlatformId::Macos {
+                    format!("Contents/Resources/{}", scenario.path)
+                } else {
+                    scenario.path
+                }
+            })
             .collect(),
         mount_policy,
         observability: BundleObservabilityEvidence {
@@ -3903,6 +4006,38 @@ fn make_executable(path: &std::path::Path) -> Result<(), CliError> {
     Ok(())
 }
 
+fn validate_universal_macho(bytes: &[u8]) -> Result<(), CliError> {
+    const FAT_MAGIC: u32 = 0xcafebabe;
+    const CPU_X86_64: u32 = 0x01000007;
+    const CPU_ARM64: u32 = 0x0100000c;
+    if bytes.len() < 8 || u32::from_be_bytes(bytes[0..4].try_into()?) != FAT_MAGIC {
+        return Err("ASTRA_MACOS_UNIVERSAL_REQUIRED: player is not a fat Mach-O".into());
+    }
+    let count = usize::try_from(u32::from_be_bytes(bytes[4..8].try_into()?))?;
+    let table_end = 8usize
+        .checked_add(
+            count
+                .checked_mul(20)
+                .ok_or("Mach-O architecture table overflow")?,
+        )
+        .filter(|end| *end <= bytes.len())
+        .ok_or("Mach-O architecture table is truncated")?;
+    let mut architectures = std::collections::BTreeSet::new();
+    for record in bytes[8..table_end].chunks_exact(20) {
+        architectures.insert(u32::from_be_bytes(record[0..4].try_into()?));
+    }
+    if !architectures.contains(&CPU_X86_64) || !architectures.contains(&CPU_ARM64) {
+        return Err("ASTRA_MACOS_UNIVERSAL_REQUIRED: x86_64 and arm64 slices are required".into());
+    }
+    Ok(())
+}
+
+fn macos_info_plist(bundle_id: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>CFBundleDevelopmentRegion</key><string>en</string>\n<key>CFBundleExecutable</key><string>astra-player</string>\n<key>CFBundleIdentifier</key><string>{bundle_id}</string>\n<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>\n<key>CFBundleName</key><string>AstraPlayer</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n<key>LSMinimumSystemVersion</key><string>13.0</string>\n<key>NSHighResolutionCapable</key><true/>\n</dict></plist>\n"
+    )
+}
+
 fn platform_id_name(platform: PlatformId) -> &'static str {
     match platform {
         PlatformId::Windows => "windows",
@@ -3973,5 +4108,17 @@ mod ui_cli_tests {
         for forbidden in ["rgba", "glyphs", "frame", "vertices", "indices"] {
             assert!(!encoded.to_string().contains(forbidden));
         }
+    }
+
+    #[astra_headless_test::test]
+    fn macos_bundle_requires_both_universal_slices() {
+        let mut binary = vec![0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 2];
+        for cpu in [0x01000007_u32, 0x0100000c] {
+            binary.extend_from_slice(&cpu.to_be_bytes());
+            binary.extend_from_slice(&[0; 16]);
+        }
+        assert!(validate_universal_macho(&binary).is_ok());
+        binary[7] = 1;
+        assert!(validate_universal_macho(&binary).is_err());
     }
 }

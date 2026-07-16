@@ -1,6 +1,6 @@
 # Platform Host Blueprint
 
-平台模块只适配原生能力，不拥有 Runtime 权威状态。Migration 8 当前产品化 Windows 与 Chrome Web；Linux 在 Stage 6 进入 `IN_PROGRESS`，macOS、iOS、Android 继续使用显式 `Unavailable` factory。
+平台模块只适配原生能力，不拥有 Runtime 权威状态。Migration 8 当前产品化 Windows 与 Chrome Web；Linux 和 macOS 在 Stage 6 进入 `IN_PROGRESS`，iOS、Android 继续使用显式 `Unavailable` factory。
 
 Target 绑定见 [Target And Platform Blueprint](target-platform.md)，native host 状态见 [Migration 8](../migrations/platform-host-migration.md)。平台无关测试后端见 [Migration 11](../migrations/headless-platform-test-backend-migration.md)，生产完备度缺口与收束条件见 [模块能力完备度审查](../migrations/module-completeness-audit-migration.md#p0-004headlessscenariorendereraudio-fixture-和-player-测试仍是分散双轨)。
 
@@ -36,7 +36,7 @@ Headless 的 `HttpsRange` source 只接受 allowlist 中不含 credential/fragme
 | `astra-platform-web` | canvas/DOM、WebGPU、WebAudio、WebCodecs、OPFS、fetch/File source |
 | `astra-platform-headless` | `publish = false` 测试 host 已实现完整 service、物理输入编排和 PNG/WAV artifact；隔离全测与正式 evidence 尚待闭合 |
 | `astra-player-web` | 独立 WASM Player，读取 config、package 和 cooked platform profile |
-| 其余平台 crate | Stage 6 `PLATFORM_NOT_IMPLEMENTED` factory |
+| iOS、Android crate | Stage 6 `PLATFORM_NOT_IMPLEMENTED` factory |
 
 ## Platform Profiles
 
