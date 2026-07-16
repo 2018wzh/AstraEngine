@@ -188,20 +188,20 @@ def _run_route(
         str(build_identity),
     ]
     try:
-        completed = subprocess.run(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-            timeout=timeout_seconds,
-        )
+        # Route traces can be hundreds of megabytes. Stream them directly to
+        # private evidence files so parallel coverage never buffers commercial
+        # playthrough traces in the matrix coordinator's memory.
+        with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+            completed = subprocess.run(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=stdout,
+                stderr=stderr,
+                check=False,
+                timeout=timeout_seconds,
+            )
     except subprocess.TimeoutExpired as error:
-        stdout_path.write_bytes(error.stdout or b"")
-        stderr_path.write_bytes(error.stderr or b"")
         raise RouteMatrixError(f"{contract.route_id} exceeded the route timeout") from error
-    stdout_path.write_bytes(completed.stdout)
-    stderr_path.write_bytes(completed.stderr)
     if completed.returncode != 0:
         raise RouteMatrixError(f"{contract.route_id} exited with code {completed.returncode}")
 
