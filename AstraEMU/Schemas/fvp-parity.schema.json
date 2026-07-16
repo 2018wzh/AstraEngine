@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FvpParityEvidence",
+  "type": "object",
+  "required": [
+    "astra_trace_hash",
+    "compared_event_count",
+    "diagnostic_codes",
+    "fixture_hash",
+    "fixture_id",
+    "reference_trace_hash",
+    "rfvp_revision",
+    "schema",
+    "status"
+  ],
+  "properties": {
+    "astra_trace_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "compared_event_count": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "diagnostic_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "first_divergence_sequence": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "fixture_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "fixture_id": {
+      "type": "string"
+    },
+    "reference_trace_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "rfvp_revision": {
+      "type": "string"
+    },
+    "schema": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TranslationProfile",
+  "type": "object",
+  "required": [
+    "body_limit_bytes",
+    "context_sentences",
+    "endpoint",
+    "endpoint_kind",
+    "model",
+    "profile_id",
+    "protocol",
+    "secret_reference",
+    "target_language",
+    "timeout_ms"
+  ],
+  "properties": {
+    "body_limit_bytes": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "context_sentences": {
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0.0
+    },
+    "endpoint": {
+      "type": "string"
+    },
+    "endpoint_kind": {
+      "$ref": "#/definitions/TranslationEndpointKind"
+    },
+    "model": {
+      "type": "string"
+    },
+    "profile_id": {
+      "type": "string"
+    },
+    "protocol": {
+      "$ref": "#/definitions/TranslationProtocol"
+    },
+    "secret_reference": {
+      "type": "string"
+    },
+    "target_language": {
+      "type": "string"
+    },
+    "timeout_ms": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "TranslationEndpointKind": {
+      "type": "string",
+      "enum": [
+        "ecnu",
+        "open_ai",
+        "third_party"
+      ]
+    },
+    "TranslationProtocol": {
+      "type": "string",
+      "enum": [
+        "responses",
+        "chat_completions"
+      ]
+    }
+  }
+}

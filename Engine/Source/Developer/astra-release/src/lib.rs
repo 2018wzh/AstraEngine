@@ -35,6 +35,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod emu;
+
 const TSUI_REFERENCE_TITLE_HASH: &str =
     "sha256:3799183a831bdbdc144e1bc9e06dffd831417d436338a1daf04b45bc35624bca";
 const TSUI_REFERENCE_GAME_HASH: &str =
@@ -126,6 +128,7 @@ pub enum ReleaseDomain {
     Platform,
     Player,
     Vn,
+    Emu,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -407,6 +410,11 @@ impl ReleaseValidator {
                     request.target.as_deref(),
                 ));
                 checks.extend(tsuinosora_checks(
+                    &package,
+                    &request.profile,
+                    request.target.as_deref(),
+                ));
+                checks.extend(emu::emu_release_checks(
                     &package,
                     &request.profile,
                     request.target.as_deref(),

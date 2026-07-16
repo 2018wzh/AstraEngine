@@ -1,10 +1,10 @@
 # Creator Manual
 
-创作者先在 Project Wizard 选择 gameplay runtime provider。当前可用模板由 `NativeVnRuntimeProvider` 提供；AstraEMU 和 AstraRPG 仍是 planned provider，只显示不可用诊断和接入边界。选择 NativeVN 后，创作者导入资产，编写 `.astra`，选择 Luau 策略包，用 Graph/Timeline 调整演出，在 PIE 中调试，最后 Cook、Package、Release Gate。需要扩展项目时，通过 Plugin Manager 启用插件并处理依赖诊断。
+创作者先在 Project Wizard 选择 gameplay runtime provider。NativeVN 由 `NativeVnRuntimeProvider` 提供；旧 VN case 由独立 AstraEMU Manager 和 package-bound `AstraEmuRuntimeProvider` 打开，不进入 Editor 的 `.astra` 创作链路。AstraRPG 仍是 planned provider。选择 NativeVN 后，创作者导入资产，编写 `.astra`，选择 Luau 策略包，用 Graph/Timeline 调整演出，在 PIE 中调试，最后 Cook、Package、Release Gate。需要扩展项目时，通过 Plugin Manager 启用插件并处理依赖诊断。
 
 ## 最短流程
 
-1. 选择 `NativeVnRuntimeProvider` template；planned AstraEMU/AstraRPG template 不能创建可发布项目。
+1. NativeVN 项目选择 `NativeVnRuntimeProvider` template；AstraEMU case 通过 Manager Library 的显式授权、probe 和 family profile 管理，不创建 Editor project；planned AstraRPG template 不能创建可发布项目。
 2. 导入背景、角色、语音、BGM、字体和 filter profile。
 3. 编写 `.astra` Story 与独立 `Ui` source role，并给生产命令和 UI 节点添加稳定 `#@id`。UI 使用 `ui_view`/`ui_bind` 声明 Astra 自有语义，不能直接调用 Yakui API。
 4. 选择官方策略包或第三方策略包，在 Plugin Manager 确认 load phase、依赖、权限、命令 provider、Inspector 控件和 Timeline track 都能预览。

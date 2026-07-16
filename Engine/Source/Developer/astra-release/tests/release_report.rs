@@ -2,6 +2,7 @@ use astra_core::{
     Hash256, PerformanceBudget, PerformanceMetricBudget, PerformanceRecorder,
     PerformanceRunIdentity, PerformanceThresholds, PerformanceUnit, PERFORMANCE_BUDGET_SCHEMA,
 };
+use astra_emu_manager_core::EmuReleaseManifestV1;
 use astra_package::{
     AstraContainerBuilder, ContainerKind, PackageBuildRequest, PackageBuilder, PackageManifest,
     SectionPayload, CURRENT_CONTAINER_VERSION,
@@ -42,6 +43,47 @@ fn release_gate_blocks_headless_profile_schema_in_package() {
         "nativevn-game",
         "ASTRA_HEADLESS_RELEASE_SCHEMA",
     );
+}
+
+#[astra_headless_test::test]
+fn astra_emu_release_manifest_cannot_omit_bound_evidence_sections() {
+    let manifest = EmuReleaseManifestV1 {
+        schema: "astra.emu.release_manifest.v1".into(),
+        runtime_provider_id: "astra.runtime.astraemu".into(),
+        family_id: "fvp".into(),
+        family_provider_id: "astra.emu.family.fvp".into(),
+        ui_provider_id: "astra.emu.ui.slint".into(),
+        required_platforms: vec!["windows".into(), "android-x86_64".into()],
+        evidence_sections: Default::default(),
+    };
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
+        "com.example.astraemu",
+        "fvp-v1",
+        vec![SectionPayload::postcard(
+            "emu.release_manifest",
+            "astra.emu.release_manifest.v1",
+            &manifest,
+        )
+        .unwrap()],
+    ))
+    .unwrap();
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "fvp-v1".into(),
+            require_ffmpeg: false,
+            target: None,
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+    let manifest_check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "emu.release_manifest")
+        .expect("AstraEMU manifest check must be emitted");
+    assert_eq!(manifest_check.status, CheckStatus::Blocked);
+    assert_eq!(manifest_check.domain, ReleaseDomain::Emu);
 }
 
 #[astra_headless_test::test]
@@ -87,9 +129,9 @@ fn shipping_release_target_cannot_declare_headless_platform() {
             "packaged": true
         }]
     });
-    let mut request = PackageBuildRequest::fixture(
-        "com.example.nativevn",
+    let blob = package_with_target_manifest(
         "desktop-release",
+        target,
         vec![cooked_project_section("desktop-release", "nativevn-game")],
     );
     request.target_manifest = target.to_string().into_bytes();

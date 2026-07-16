@@ -73,7 +73,9 @@ pub(crate) fn compare_audio_samples(
         expected_hash,
         "ASTRA_HEADLESS_AUDIO_BASELINE_HASH_MISMATCH",
     )?;
-    if actual_samples.len() % 2 != 0 || actual_samples.iter().any(|sample| !sample.is_finite()) {
+    if !actual_samples.len().is_multiple_of(2)
+        || actual_samples.iter().any(|sample| !sample.is_finite())
+    {
         return Err("ASTRA_HEADLESS_AUDIO_SNAPSHOT_INVALID".into());
     }
     let actual = actual_samples
@@ -145,7 +147,7 @@ fn read_wav(bytes: &[u8]) -> Result<(u32, u16, Vec<f64>), String> {
         .map(|sample| sample.map(|value| f64::from(value) / 32768.0))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("ASTRA_HEADLESS_WAV_SAMPLE_INVALID: {error}"))?;
-    if samples.len() % usize::from(spec.channels) != 0 {
+    if !samples.len().is_multiple_of(usize::from(spec.channels)) {
         return Err("ASTRA_HEADLESS_WAV_ALIGNMENT_INVALID".into());
     }
     Ok((spec.sample_rate, spec.channels, samples))

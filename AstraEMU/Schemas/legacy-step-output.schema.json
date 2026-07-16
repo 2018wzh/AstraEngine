@@ -1,0 +1,623 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LegacyStepOutput",
+  "type": "object",
+  "required": [
+    "coverage",
+    "diagnostics",
+    "effects",
+    "state_hash",
+    "status",
+    "trace",
+    "waits"
+  ],
+  "properties": {
+    "coverage": {
+      "$ref": "#/definitions/LegacyCoverageDelta"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/LegacyDiagnostic"
+      }
+    },
+    "effects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/LegacyEffect"
+      }
+    },
+    "state_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "status": {
+      "$ref": "#/definitions/LegacyRuntimeStatus"
+    },
+    "trace": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/LegacyTraceEntry"
+      }
+    },
+    "waits": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/LegacyWaitRequest"
+      }
+    }
+  },
+  "definitions": {
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    },
+    "LegacyCoverageDelta": {
+      "type": "object",
+      "required": [
+        "audio_commands",
+        "contexts",
+        "instructions",
+        "presentation_commands",
+        "syscalls",
+        "text_events"
+      ],
+      "properties": {
+        "audio_commands": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "contexts": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          }
+        },
+        "instructions": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "presentation_commands": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "syscalls": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "text_events": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "LegacyDiagnostic": {
+      "type": "object",
+      "required": [
+        "code",
+        "message",
+        "severity",
+        "subject"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      }
+    },
+    "LegacyEffect": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "runtime_event"
+          ],
+          "properties": {
+            "runtime_event": {
+              "type": "object",
+              "required": [
+                "event",
+                "payload",
+                "sequence"
+              ],
+              "properties": {
+                "event": {
+                  "type": "string"
+                },
+                "payload": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0.0
+                  }
+                },
+                "sequence": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "presentation"
+          ],
+          "properties": {
+            "presentation": {
+              "type": "object",
+              "required": [
+                "command",
+                "payload",
+                "sequence"
+              ],
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "payload": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0.0
+                  }
+                },
+                "sequence": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "audio"
+          ],
+          "properties": {
+            "audio": {
+              "type": "object",
+              "required": [
+                "command",
+                "payload",
+                "sequence"
+              ],
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "payload": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0.0
+                  }
+                },
+                "sequence": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "text_capture"
+          ],
+          "properties": {
+            "text_capture": {
+              "type": "object",
+              "required": [
+                "byte_len",
+                "lease_id",
+                "sequence",
+                "source_ref",
+                "text_hash"
+              ],
+              "properties": {
+                "byte_len": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0.0
+                },
+                "lease_id": {
+                  "type": "string"
+                },
+                "sequence": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                },
+                "source_ref": {
+                  "type": "string"
+                },
+                "speaker_hash": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/definitions/Hash256"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "text_hash": {
+                  "$ref": "#/definitions/Hash256"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "set_blackboard"
+          ],
+          "properties": {
+            "set_blackboard": {
+              "type": "object",
+              "required": [
+                "key",
+                "sequence",
+                "value"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "sequence": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                },
+                "value": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0.0
+                  }
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "schedule_event"
+          ],
+          "properties": {
+            "schedule_event": {
+              "type": "object",
+              "required": [
+                "due_tick",
+                "event",
+                "payload",
+                "sequence"
+              ],
+              "properties": {
+                "due_tick": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                },
+                "event": {
+                  "type": "string"
+                },
+                "payload": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0.0
+                  }
+                },
+                "sequence": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "snapshot_dirty"
+          ],
+          "properties": {
+            "snapshot_dirty": {
+              "type": "object",
+              "required": [
+                "section_id",
+                "sequence"
+              ],
+              "properties": {
+                "section_id": {
+                  "type": "string"
+                },
+                "sequence": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "LegacyRuntimeStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "awaiting",
+        "terminal",
+        "faulted"
+      ]
+    },
+    "LegacyTraceEntry": {
+      "type": "object",
+      "required": [
+        "context_id",
+        "opcode",
+        "pc",
+        "sequence"
+      ],
+      "properties": {
+        "action": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "context_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "opcode": {
+          "type": "string"
+        },
+        "pc": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "yield_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "LegacyWaitRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "frame"
+          ],
+          "properties": {
+            "frame": {
+              "type": "object",
+              "required": [
+                "frames",
+                "token_id"
+              ],
+              "properties": {
+                "frames": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0.0
+                },
+                "token_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "time"
+          ],
+          "properties": {
+            "time": {
+              "type": "object",
+              "required": [
+                "milliseconds",
+                "token_id"
+              ],
+              "properties": {
+                "milliseconds": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0.0
+                },
+                "token_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "object",
+              "required": [
+                "mask",
+                "token_id"
+              ],
+              "properties": {
+                "mask": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                },
+                "token_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "media_fence"
+          ],
+          "properties": {
+            "media_fence": {
+              "type": "object",
+              "required": [
+                "media_id",
+                "token_id"
+              ],
+              "properties": {
+                "media_id": {
+                  "type": "string"
+                },
+                "token_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "presentation_fence"
+          ],
+          "properties": {
+            "presentation_fence": {
+              "type": "object",
+              "required": [
+                "fence_id",
+                "token_id"
+              ],
+              "properties": {
+                "fence_id": {
+                  "type": "string"
+                },
+                "token_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "provider_completion"
+          ],
+          "properties": {
+            "provider_completion": {
+              "type": "object",
+              "required": [
+                "request_id",
+                "token_id"
+              ],
+              "properties": {
+                "request_id": {
+                  "type": "string"
+                },
+                "token_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "family_opaque"
+          ],
+          "properties": {
+            "family_opaque": {
+              "type": "object",
+              "required": [
+                "payload_hash",
+                "token_id",
+                "wait_kind"
+              ],
+              "properties": {
+                "payload_hash": {
+                  "$ref": "#/definitions/Hash256"
+                },
+                "token_id": {
+                  "type": "string"
+                },
+                "wait_kind": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

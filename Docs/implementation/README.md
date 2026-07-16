@@ -40,7 +40,7 @@
 | [platform-host.md](platform-host.md) | 六平台 host trait、capability report、profile gate |
 | [astraemu-legacy-runtime-framework.md](astraemu-legacy-runtime-framework.md) | AstraEMU LegacyRuntimeProvider、session、auto probe、Trusted Luau、文本翻译、filter preset 和 release gate |
 | [emulator-core-state-machine.md](emulator-core-state-machine.md) | EmulatorCore 复用 RuntimeWorld/StateMachine/VFS 的旧 VM 映射、scheduler 和 family 样板 |
-| [astraemu-artemis-core.md](astraemu-artemis-core.md) | Artemis v1 engine-native family plugin、probe、snapshot、report |
+| [astraemu-artemis-core.md](astraemu-artemis-core.md) | Artemis 后续 family blueprint、probe、snapshot、report |
 | [release-gate-report.md](release-gate-report.md) | machine-readable report、blocking checks、证据格式 |
 | [release-gate-checks.md](release-gate-checks.md) | release check id、domain、输入、阻断条件和 evidence |
 
@@ -48,7 +48,7 @@
 
 - Rust 类型是 schema 真源。实现后由 `serde` + `schemars` 生成 JSON Schema，文档字段名必须跟 Rust 类型一致。
 - 每个 Stage 必须产出可运行命令、machine-readable report 和测试证据。
-- 全系列 v1 必须覆盖 EngineCore、AstraVN、AstraEditor、AstraPlatform、AstraEMU；AstraEMU v1 family 是 Artemis。AstraRPG 属于 Stage 7 planned extension，Stage 8 再接 Server/Client protocol。
+- 全系列 v1 必须覆盖 EngineCore、AstraVN、AstraEditor、AstraPlatform、AstraEMU；AstraEMU v1 首发 family 是 FVP，Artemis 延后。AstraRPG 属于 Stage 7 planned extension，Stage 8 再接 Server/Client protocol。
 - 玩法类型通过 `ProductRuntimeProvider`/`GameRuntimeProvider` 显式绑定；AstraVN、AstraEMU 和后续 AstraRPG 是同级 provider。
 - TRPG 玩法通过 AstraRPG 的 `rpg.trpg` profile 接入，不创建独立顶层 `AstraTRPG` 模块或 provider。
 - AstraVN policy 统一使用 Luau。AstraEMU 研究文档中的 Lua/TJS 是 legacy engine 事实，不作为 AstraVN policy 术语。

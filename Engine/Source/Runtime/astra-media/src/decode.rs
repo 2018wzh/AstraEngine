@@ -100,6 +100,124 @@ pub const fn ffmpeg_compiled() -> bool {
     cfg!(feature = "ffmpeg-vcpkg")
 }
 
+#[cfg(windows)]
+pub fn decode_windows_video_stream(
+    bytes: &[u8],
+    max_frames: u64,
+    max_bytes: u64,
+) -> Result<crate::DecodedVideoStream, MediaError> {
+    wmf_decode::decode_video_stream(bytes, max_frames, max_bytes)
+}
+
+/// Incremental Media Foundation video decoder. The encoded source stays owned
+/// by the MF byte stream while decoded frames are released one at a time, so a
+/// caller can enforce a small presentation ring instead of retaining the full
+/// decoded movie.
+pub struct WindowsVideoStreamDecoder {
+    #[cfg(windows)]
+    inner: wmf_decode::IncrementalVideoDecoder,
+}
+
+impl WindowsVideoStreamDecoder {
+    pub fn next_frame(&mut self) -> Result<Option<crate::DecodedVideoFrame>, MediaError> {
+        #[cfg(windows)]
+        {
+            self.inner.next_frame().map_err(wmf_decode::decode_error)
+        }
+        #[cfg(not(windows))]
+        {
+            Err(decode_error(
+                "ASTRA_WMF_PLATFORM_UNAVAILABLE",
+                "Media Foundation video stream decode is only available on Windows",
+            ))
+        }
+    }
+}
+
+pub fn open_windows_video_stream(
+    bytes: &[u8],
+    max_frames: u64,
+    max_bytes: u64,
+) -> Result<WindowsVideoStreamDecoder, MediaError> {
+    #[cfg(windows)]
+    {
+        Ok(WindowsVideoStreamDecoder {
+            inner: wmf_decode::IncrementalVideoDecoder::open(bytes, max_frames, max_bytes)
+                .map_err(wmf_decode::decode_error)?,
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (bytes, max_frames, max_bytes);
+        Err(decode_error(
+            "ASTRA_WMF_PLATFORM_UNAVAILABLE",
+            "Media Foundation video stream decode is only available on Windows",
+        ))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowsDecodedAudioChunk {
+    pub pts_us: u64,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub pcm_s16le: Vec<u8>,
+}
+
+pub struct WindowsAudioStreamDecoder {
+    #[cfg(windows)]
+    inner: wmf_decode::IncrementalAudioDecoder,
+}
+
+impl WindowsAudioStreamDecoder {
+    pub fn next_chunk(&mut self) -> Result<Option<WindowsDecodedAudioChunk>, MediaError> {
+        #[cfg(windows)]
+        {
+            self.inner.next_chunk().map_err(wmf_decode::decode_error)
+        }
+        #[cfg(not(windows))]
+        {
+            Err(decode_error(
+                "ASTRA_WMF_PLATFORM_UNAVAILABLE",
+                "Media Foundation audio stream decode is only available on Windows",
+            ))
+        }
+    }
+}
+
+pub fn open_windows_audio_stream(
+    bytes: &[u8],
+    max_samples: u64,
+) -> Result<WindowsAudioStreamDecoder, MediaError> {
+    #[cfg(windows)]
+    {
+        Ok(WindowsAudioStreamDecoder {
+            inner: wmf_decode::IncrementalAudioDecoder::open(bytes, max_samples)
+                .map_err(wmf_decode::decode_error)?,
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (bytes, max_samples);
+        Err(decode_error(
+            "ASTRA_WMF_PLATFORM_UNAVAILABLE",
+            "Media Foundation audio stream decode is only available on Windows",
+        ))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn decode_windows_video_stream(
+    _bytes: &[u8],
+    _max_frames: u64,
+    _max_bytes: u64,
+) -> Result<crate::DecodedVideoStream, MediaError> {
+    Err(decode_error(
+        "ASTRA_WMF_PLATFORM_UNAVAILABLE",
+        "Media Foundation video stream decode is only available on Windows",
+    ))
+}
+
 pub fn probe_ffmpeg_provider() -> Result<DecodeCapability, MediaError> {
     #[cfg(feature = "ffmpeg-vcpkg")]
     {
@@ -748,8 +866,8 @@ mod wmf_decode {
     };
 
     use super::{
-        DecodeKind, DecodeOutput, DecodeRequest, DecodeResult, MediaError, MAX_DECODED_AUDIO_BYTES,
-        MAX_DECODED_VIDEO_FRAME_BYTES,
+        DecodeKind, DecodeOutput, DecodeRequest, DecodeResult, MediaError,
+        WindowsDecodedAudioChunk, MAX_DECODED_AUDIO_BYTES, MAX_DECODED_VIDEO_FRAME_BYTES,
     };
 
     pub(super) fn startup() -> Result<WmfSession, MediaError> {
@@ -799,11 +917,23 @@ mod wmf_decode {
         })
     }
 
+    pub(super) fn decode_video_stream(
+        bytes: &[u8],
+        max_frames: u64,
+        max_bytes: u64,
+    ) -> Result<crate::DecodedVideoStream, MediaError> {
+        let _session = startup()?;
+        let stream =
+            decode_video_stream_inner(bytes, max_frames, max_bytes).map_err(decode_error)?;
+        stream.validate(max_frames, max_bytes)?;
+        Ok(stream)
+    }
+
     pub(super) fn blocking(code: &'static str, message: impl Into<String>) -> MediaError {
         MediaError::Diagnostics(vec![Diagnostic::blocking(code, message.into())])
     }
 
-    fn decode_error(err: WindowsError) -> MediaError {
+    pub(super) fn decode_error(err: WindowsError) -> MediaError {
         blocking(
             "ASTRA_WMF_DECODE",
             format!("Media Foundation decode failed: {err}"),
@@ -821,6 +951,248 @@ mod wmf_decode {
         bgra: Vec<u8>,
         width: u32,
         height: u32,
+    }
+
+    pub(super) struct IncrementalVideoDecoder {
+        reader: windows::Win32::Media::MediaFoundation::IMFSourceReader,
+        stream_index: u32,
+        width: u32,
+        height: u32,
+        expected_frame_bytes: usize,
+        max_frames: u64,
+        max_bytes: u64,
+        emitted_frames: u64,
+        emitted_bytes: u64,
+        previous_pts_us: Option<u64>,
+        eof: bool,
+        // Must be dropped after every Media Foundation interface above.
+        _session: WmfSession,
+    }
+
+    pub(super) struct IncrementalAudioDecoder {
+        reader: windows::Win32::Media::MediaFoundation::IMFSourceReader,
+        stream_index: u32,
+        sample_rate: u32,
+        channels: u16,
+        max_samples: u64,
+        emitted_samples: u64,
+        previous_pts_us: Option<u64>,
+        eof: bool,
+        // Must be dropped after every Media Foundation interface above.
+        _session: WmfSession,
+    }
+
+    impl IncrementalAudioDecoder {
+        pub(super) fn open(bytes: &[u8], max_samples: u64) -> windows::core::Result<Self> {
+            unsafe {
+                if max_samples == 0 {
+                    return Err(wmf_error("audio stream decode budget is empty"));
+                }
+                let session = WmfSession::new()?;
+                let reader = source_reader_from_bytes(bytes)?;
+                let stream_index = MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
+                let media_type = media_type(&MFMediaType_Audio, &MFAudioFormat_PCM)?;
+                reader.SetCurrentMediaType(stream_index, None, &media_type)?;
+                let current_type = reader.GetCurrentMediaType(stream_index)?;
+                let sample_rate = attribute_u32(&current_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND)
+                    .filter(|value| (8_000..=384_000).contains(value))
+                    .ok_or_else(|| wmf_error("audio decode reported an invalid sample rate"))?;
+                let channels = attribute_u32(&current_type, &MF_MT_AUDIO_NUM_CHANNELS)
+                    .and_then(|value| u16::try_from(value).ok())
+                    .filter(|value| (1..=8).contains(value))
+                    .ok_or_else(|| wmf_error("audio decode reported an invalid channel count"))?;
+                Ok(Self {
+                    reader,
+                    stream_index,
+                    sample_rate,
+                    channels,
+                    max_samples,
+                    emitted_samples: 0,
+                    previous_pts_us: None,
+                    eof: false,
+                    _session: session,
+                })
+            }
+        }
+
+        pub(super) fn next_chunk(
+            &mut self,
+        ) -> windows::core::Result<Option<WindowsDecodedAudioChunk>> {
+            if self.eof {
+                return Ok(None);
+            }
+            unsafe {
+                loop {
+                    let mut flags = 0;
+                    let mut timestamp_100ns = 0_i64;
+                    let mut sample = None;
+                    self.reader.ReadSample(
+                        self.stream_index,
+                        0,
+                        None,
+                        Some(&mut flags),
+                        Some(&mut timestamp_100ns),
+                        Some(&mut sample),
+                    )?;
+                    if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+                        self.eof = true;
+                        return Ok(None);
+                    }
+                    let Some(sample) = sample else {
+                        continue;
+                    };
+                    let pcm_s16le = sample_bytes(&sample)?;
+                    let frame_bytes = usize::from(self.channels) * 2;
+                    if pcm_s16le.is_empty()
+                        || pcm_s16le.len() > MAX_DECODED_AUDIO_BYTES
+                        || !pcm_s16le.len().is_multiple_of(frame_bytes)
+                        || timestamp_100ns < 0
+                    {
+                        return Err(wmf_error(
+                            "audio decode produced an invalid PCM chunk or timestamp",
+                        ));
+                    }
+                    let chunk_samples = u64::try_from(pcm_s16le.len() / 2)
+                        .map_err(|_| wmf_error("decoded audio sample count overflowed"))?;
+                    let emitted_samples = self
+                        .emitted_samples
+                        .checked_add(chunk_samples)
+                        .filter(|value| *value <= self.max_samples)
+                        .ok_or_else(|| wmf_error("decoded audio exceeds the sample budget"))?;
+                    let pts_us = timestamp_100ns as u64 / 10;
+                    if self
+                        .previous_pts_us
+                        .is_some_and(|previous| pts_us < previous)
+                    {
+                        return Err(wmf_error("decoded audio timestamps are not ordered"));
+                    }
+                    self.emitted_samples = emitted_samples;
+                    self.previous_pts_us = Some(pts_us);
+                    return Ok(Some(WindowsDecodedAudioChunk {
+                        pts_us,
+                        sample_rate: self.sample_rate,
+                        channels: self.channels,
+                        pcm_s16le,
+                    }));
+                }
+            }
+        }
+    }
+
+    impl IncrementalVideoDecoder {
+        pub(super) fn open(
+            bytes: &[u8],
+            max_frames: u64,
+            max_bytes: u64,
+        ) -> windows::core::Result<Self> {
+            unsafe {
+                if max_frames == 0 || max_bytes == 0 {
+                    return Err(wmf_error("video stream decode budget is empty"));
+                }
+                let session = WmfSession::new()?;
+                let reader = source_reader_from_bytes(bytes)?;
+                let stream_index = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
+                let media_type = media_type(&MFMediaType_Video, &MFVideoFormat_RGB32)?;
+                reader.SetCurrentMediaType(stream_index, None, &media_type)?;
+                let current_type = reader.GetCurrentMediaType(stream_index)?;
+                let Some((width, height)) = attribute_frame_size(&current_type) else {
+                    return Err(wmf_error("video decode did not report a frame size"));
+                };
+                let expected_frame_bytes = usize::try_from(width)
+                    .ok()
+                    .and_then(|width| {
+                        usize::try_from(height)
+                            .ok()
+                            .and_then(|height| width.checked_mul(height))
+                    })
+                    .and_then(|pixels| pixels.checked_mul(4))
+                    .ok_or_else(|| wmf_error("video frame dimensions overflowed"))?;
+                if expected_frame_bytes == 0 || expected_frame_bytes > MAX_DECODED_VIDEO_FRAME_BYTES
+                {
+                    return Err(wmf_error(
+                        "video frame exceeds the bounded CPU buffer limit",
+                    ));
+                }
+                Ok(Self {
+                    reader,
+                    stream_index,
+                    width,
+                    height,
+                    expected_frame_bytes,
+                    max_frames,
+                    max_bytes,
+                    emitted_frames: 0,
+                    emitted_bytes: 0,
+                    previous_pts_us: None,
+                    eof: false,
+                    _session: session,
+                })
+            }
+        }
+
+        pub(super) fn next_frame(
+            &mut self,
+        ) -> windows::core::Result<Option<crate::DecodedVideoFrame>> {
+            if self.eof {
+                return Ok(None);
+            }
+            unsafe {
+                loop {
+                    let mut flags = 0;
+                    let mut timestamp_100ns = 0_i64;
+                    let mut sample = None;
+                    self.reader.ReadSample(
+                        self.stream_index,
+                        0,
+                        None,
+                        Some(&mut flags),
+                        Some(&mut timestamp_100ns),
+                        Some(&mut sample),
+                    )?;
+                    if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+                        self.eof = true;
+                        return Ok(None);
+                    }
+                    let Some(sample) = sample else {
+                        continue;
+                    };
+                    let frame_bytes = sample_bytes(&sample)?;
+                    if frame_bytes.len() < self.expected_frame_bytes || timestamp_100ns < 0 {
+                        return Err(wmf_error(
+                            "video decode produced a partial frame or invalid timestamp",
+                        ));
+                    }
+                    if self.emitted_frames >= self.max_frames {
+                        return Err(wmf_error("decoded video exceeds the frame budget"));
+                    }
+                    let next_bytes = self
+                        .emitted_bytes
+                        .checked_add(self.expected_frame_bytes as u64)
+                        .filter(|value| *value <= self.max_bytes)
+                        .ok_or_else(|| wmf_error("decoded video exceeds the byte budget"))?;
+                    let pts_us = timestamp_100ns as u64 / 10;
+                    if self
+                        .previous_pts_us
+                        .is_some_and(|previous| pts_us < previous)
+                    {
+                        return Err(wmf_error("decoded video timestamps are not ordered"));
+                    }
+                    self.emitted_frames += 1;
+                    self.emitted_bytes = next_bytes;
+                    self.previous_pts_us = Some(pts_us);
+                    let bgra8 = frame_bytes[..self.expected_frame_bytes].to_vec();
+                    return Ok(Some(crate::DecodedVideoFrame {
+                        sequence: self.emitted_frames,
+                        pts_us,
+                        duration_us: 0,
+                        width: self.width,
+                        height: self.height,
+                        content_hash: Hash256::from_sha256(&bgra8),
+                        bgra8,
+                    }));
+                }
+            }
+        }
     }
 
     pub(super) struct WmfSession {
@@ -963,6 +1335,114 @@ mod wmf_decode {
                 }
             }
             Err(wmf_error("video decode produced no BGRA frame"))
+        }
+    }
+
+    fn decode_video_stream_inner(
+        bytes: &[u8],
+        max_frames: u64,
+        max_bytes: u64,
+    ) -> windows::core::Result<crate::DecodedVideoStream> {
+        unsafe {
+            if max_frames == 0 || max_bytes == 0 {
+                return Err(wmf_error("video stream decode budget is empty"));
+            }
+            let reader = source_reader_from_bytes(bytes)?;
+            let stream_index = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
+            let media_type = media_type(&MFMediaType_Video, &MFVideoFormat_RGB32)?;
+            reader.SetCurrentMediaType(stream_index, None, &media_type)?;
+            let current_type = reader.GetCurrentMediaType(stream_index)?;
+            let Some((width, height)) = attribute_frame_size(&current_type) else {
+                return Err(wmf_error("video decode did not report a frame size"));
+            };
+            let expected_frame_bytes = usize::try_from(width)
+                .ok()
+                .and_then(|width| {
+                    usize::try_from(height)
+                        .ok()
+                        .and_then(|height| width.checked_mul(height))
+                })
+                .and_then(|pixels| pixels.checked_mul(4))
+                .ok_or_else(|| wmf_error("video frame dimensions overflowed"))?;
+            if expected_frame_bytes == 0 || expected_frame_bytes > MAX_DECODED_VIDEO_FRAME_BYTES {
+                return Err(wmf_error(
+                    "video frame exceeds the bounded CPU buffer limit",
+                ));
+            }
+            let mut raw = Vec::new();
+            let mut total_bytes = 0_u64;
+            loop {
+                let mut flags = 0;
+                let mut timestamp_100ns = 0_i64;
+                let mut sample = None;
+                reader.ReadSample(
+                    stream_index,
+                    0,
+                    None,
+                    Some(&mut flags),
+                    Some(&mut timestamp_100ns),
+                    Some(&mut sample),
+                )?;
+                if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+                    break;
+                }
+                let Some(sample) = sample else {
+                    continue;
+                };
+                let frame_bytes = sample_bytes(&sample)?;
+                if frame_bytes.len() < expected_frame_bytes || timestamp_100ns < 0 {
+                    return Err(wmf_error(
+                        "video decode produced a partial frame or invalid timestamp",
+                    ));
+                }
+                if raw.len() as u64 >= max_frames {
+                    return Err(wmf_error("decoded video exceeds the frame budget"));
+                }
+                total_bytes = total_bytes
+                    .checked_add(expected_frame_bytes as u64)
+                    .filter(|value| *value <= max_bytes)
+                    .ok_or_else(|| wmf_error("decoded video exceeds the byte budget"))?;
+                raw.push((
+                    timestamp_100ns as u64 / 10,
+                    frame_bytes[..expected_frame_bytes].to_vec(),
+                ));
+            }
+            if raw.is_empty() {
+                return Err(wmf_error("video decode produced no frames"));
+            }
+            let fallback_duration_us = raw
+                .windows(2)
+                .filter_map(|pair| pair[1].0.checked_sub(pair[0].0))
+                .find(|duration| *duration > 0)
+                .unwrap_or(33_334);
+            let duration_us = raw
+                .last()
+                .and_then(|last| last.0.checked_add(fallback_duration_us))
+                .ok_or_else(|| wmf_error("video duration overflowed"))?;
+            let mut decoded_frames = Vec::with_capacity(raw.len());
+            for index in 0..raw.len() {
+                let pts_us = raw[index].0;
+                let next_pts = raw.get(index + 1).map_or(duration_us, |frame| frame.0);
+                let duration = next_pts
+                    .checked_sub(pts_us)
+                    .filter(|value| *value > 0)
+                    .unwrap_or(fallback_duration_us);
+                let bgra8 = std::mem::take(&mut raw[index].1);
+                decoded_frames.push(crate::DecodedVideoFrame {
+                    sequence: index as u64 + 1,
+                    pts_us,
+                    duration_us: duration.min(duration_us - pts_us),
+                    width,
+                    height,
+                    content_hash: Hash256::from_sha256(&bgra8),
+                    bgra8,
+                });
+            }
+            Ok(crate::DecodedVideoStream {
+                schema: crate::DECODED_VIDEO_STREAM_SCHEMA.into(),
+                duration_us,
+                frames: decoded_frames,
+            })
         }
     }
 

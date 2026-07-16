@@ -8,7 +8,7 @@ Migration 12 当前状态为 `IN_PROGRESS`。backend-neutral contract、Yakui ad
 
 本 migration 实现 AstraVN Yakui shipping backend、shared UI contract、`.astra` UI frontend、Luau Controller、Scene2D/Mesh2D 输出、component ABI、产品页、开发工具和 Windows/Web gate。
 
-AstraEMU Manager/overlay 使用 egui 的决策写入 Stage 5 设计，但不在本 migration 创建 AstraEMU 产品代码。Editor 保持 Qt/QML；只更新 PIE 对 shared runtime UI contract 的依赖。iOS/Android 只关闭共享 touch contract 和 Headless semantic evidence，真实设备仍属 Stage 6。
+AstraEMU Manager/overlay 使用 Slint 1.17.1 的决策写入 Stage 5 设计，但不在本 migration 创建 AstraEMU 产品代码。AstraEMU host 使用 winit 0.30 与 wgpu 29.0.4 的同设备 underlay/overlay 合成；Editor 保持 Qt/QML，只更新 PIE 对 shared runtime UI contract 的依赖。iOS/Android 只关闭共享 touch contract 和 Headless semantic evidence，真实设备仍属 Stage 6。
 
 ## Step 0：工具链与依赖 preflight
 

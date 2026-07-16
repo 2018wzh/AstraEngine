@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UiHostIdentityEvidence",
+  "type": "object",
+  "required": [
+    "build_identity_hash",
+    "cpu_frame_readback",
+    "cross_device_texture_copy",
+    "package_hash",
+    "platform",
+    "program_target_id",
+    "renderer_adapter_hash",
+    "schema",
+    "session_id_hash",
+    "shared_device_queue",
+    "slint_license_mode",
+    "slint_version",
+    "wgpu_version",
+    "winit_version"
+  ],
+  "properties": {
+    "build_identity_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "cpu_frame_readback": {
+      "type": "boolean"
+    },
+    "cross_device_texture_copy": {
+      "type": "boolean"
+    },
+    "package_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "platform": {
+      "type": "string"
+    },
+    "program_target_id": {
+      "type": "string"
+    },
+    "renderer_adapter_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "schema": {
+      "type": "string"
+    },
+    "session_id_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "shared_device_queue": {
+      "type": "boolean"
+    },
+    "slint_license_mode": {
+      "type": "string"
+    },
+    "slint_version": {
+      "type": "string"
+    },
+    "wgpu_version": {
+      "type": "string"
+    },
+    "winit_version": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    }
+  }
+}

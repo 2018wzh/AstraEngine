@@ -1093,7 +1093,10 @@ async fn capture_checkpoint(
     let audio = product.capture_audio().map_err(|error| error.to_string())?;
     if audio.sample_rate != 48_000
         || audio.channels != 2
-        || audio.samples.len() % usize::from(audio.channels) != 0
+        || !audio
+            .samples
+            .len()
+            .is_multiple_of(usize::from(audio.channels))
         || audio.samples.iter().any(|sample| !sample.is_finite())
     {
         return Err("ASTRA_HEADLESS_CHECKPOINT_AUDIO_FORMAT_INVALID".into());

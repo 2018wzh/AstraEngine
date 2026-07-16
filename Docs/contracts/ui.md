@@ -70,7 +70,7 @@ UI frame 进入现有 renderer-ready `PresentScene`/Scene2D 主路径。Migratio
 
 ## Text
 
-正式文本由 Astra TextLayout 负责 font database、asset hash、fallback、grapheme、shaping、line break、CJK kinsoku、ruby、vertical glyph substitution、tate-chu-yoko、vertical ruby、clip 和 ellipsis。Yakui/egui 只分配容器并提供交互。
+正式文本由 Astra TextLayout 负责 font database、asset hash、fallback、grapheme、shaping、line break、CJK kinsoku、ruby、vertical glyph substitution、tate-chu-yoko、vertical ruby、clip 和 ellipsis。Yakui/Slint 只分配容器并提供交互。
 
 Migration 12 formal matrix 是 `zh-Hans`、`ja`、`en` 的横排，以及 `zh-Hans`/`ja` 的 CJK 竖排。BiDi/RTL 继续作为实现和 conformance 工作，未列入本 migration 的 release closure，不能据此标为 `DONE`。
 
@@ -106,4 +106,3 @@ formal release profile 的 blocking budget：
 ## Release evidence
 
 至少输出：`ui.backend.binding`、`ui.backend.capabilities`、`ui.input.consumption`、`ui.semantic_snapshot`、`ui.render_frame`、`ui.resource_restore`、`ui.text_layout`、`ui.theme`、`ui.performance`、`ui.accessibility` 和 `ui.visual_matrix`。Windows/Web 必须绑定同一 build/profile/package/provider/session；Headless 只形成 E2 preflight，不替代 E3。
-

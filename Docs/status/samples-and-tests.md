@@ -17,7 +17,7 @@
 
 ## AstraEMU Family Samples
 
-每个 family 使用用户本地合法数据，报告只提交 hash 和脱敏 metadata。v1 可用 family 是 Artemis；其他 family 输出 alpha probe report。实现顺序：Artemis、KrKr、BGI、SoftPAL、FVP、Siglus。
+每个 family 使用用户本地合法数据，报告只提交 alias、hash、offset、size 和脱敏 metadata。v1 首发 family 是 FVP；其他 family 输出 alpha probe report。默认 auto-probe 顺序仍是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori，显式 case profile 始终优先。
 
 ## Scenario Format
 

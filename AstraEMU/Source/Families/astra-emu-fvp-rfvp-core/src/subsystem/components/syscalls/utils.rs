@@ -1,0 +1,470 @@
+#[cfg(feature = "no_std")]
+use alloc::{
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+use std::sync::Mutex;
+
+use anyhow::Result;
+
+use crate::script::Variant;
+use crate::subsystem::world::GameData;
+
+use super::{get_var, Syscaller};
+
+lazy_static::lazy_static! {
+    static ref EXIT_DIALOG_STATE: Mutex<ExitDialogState> = Mutex::new(ExitDialogState::default());
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ExitDialogState {
+    pending_request: bool,
+}
+
+pub fn request_exit_dialog() {
+    let mut state = EXIT_DIALOG_STATE.lock().unwrap();
+    state.pending_request = true;
+}
+
+pub fn take_pending_exit_dialog_request() -> bool {
+    let mut state = EXIT_DIALOG_STATE.lock().unwrap();
+    let pending = state.pending_request;
+    state.pending_request = false;
+    pending
+}
+
+pub fn debug_message(
+    _game_data: &mut GameData,
+    message: &Variant,
+    var: &Variant,
+) -> Result<Variant> {
+    let msg = match message {
+        Variant::String(message) | Variant::ConstString(message, _) => message.clone(),
+        _ => {
+            log::error!("debug_message: Invalid message type");
+            return Ok(Variant::Nil);
+        }
+    };
+
+    log::info!("DEBUG => {}: {:?}", msg, var);
+    Ok(Variant::Nil)
+}
+
+pub fn break_point(_game_data: &mut GameData) -> Result<Variant> {
+    log::info!("Break point");
+    Ok(Variant::Nil)
+}
+
+pub fn float_to_int(_game_data: &mut GameData, value: &Variant) -> Result<Variant> {
+    let value = if let Variant::Float(value) = value {
+        *value as i32
+    } else {
+        log::warn!("float_to_int: Invalid value type");
+        return Ok(Variant::Int(0));
+    };
+
+    Ok(Variant::Int(value))
+}
+
+pub fn int_to_text(_game_data: &mut GameData, value: &Variant, width: &Variant) -> Result<Variant> {
+    let value = if let Variant::Int(value) = value {
+        *value
+    } else {
+        log::error!("int_to_text: Invalid value type");
+        return Ok(Variant::Nil);
+    };
+
+    let width = if let Variant::Int(width) = width {
+        *width
+    } else {
+        log::error!("int_to_text: Invalid width type");
+        return Ok(Variant::Nil);
+    };
+
+    // pad with zeros to the left
+    let value = format!("{:0width$}", value, width = width as usize);
+    Ok(Variant::String(value))
+}
+
+pub fn rand(_game_data: &mut GameData) -> Result<Variant> {
+    Ok(Variant::Float(crate::platform_random::next_f32()))
+}
+
+pub fn system_project_dir(_game_data: &mut GameData, _dir: &Variant) -> Result<Variant> {
+    Ok(Variant::Nil)
+}
+
+pub fn system_at_skipname(
+    _game_data: &mut GameData,
+    _arg0: &Variant,
+    _arg1: &Variant,
+) -> Result<Variant> {
+    Ok(Variant::Nil)
+}
+
+/// WindowMode(mode)
+///
+/// Reverse-engineered behavior from the original engine:
+///
+/// - `0`: set internal `render_flag = 0`, return `0`
+/// - `1`: set internal `render_flag = 1`, return `1`
+/// - `-1`: if exact game-resolution exclusive fullscreen is supported, set
+///   `render_flag = 2` and return `-1`; otherwise leave the mode unchanged and return `1`
+/// - `2`: query current mode, with script-visible remap `2 -> -1` and `3 -> -2`
+/// - `3`: query support for the `-1` mode
+/// - `4`: set `is_first_frame = true`
+/// - `5`: set `is_first_frame = false`
+/// - `6`: query `is_first_frame`
+///
+/// Important restriction from reverse engineering: the original `WindowMode` implementation
+/// only proves normal production of internal render flags `0`, `1`, and `2`. The query
+/// remap for internal `3 -> -2` exists, but its real producer / display semantics are not
+/// closed here, so this port does not assign any special rendering behavior to `render_flag==3`.
+pub fn window_mode(game_data: &mut GameData, mode: &Variant) -> Result<Variant> {
+    let v = match mode {
+        Variant::Int(m) => *m,
+        _ => {
+            log::error!("window_mode: invalid mode type");
+            return Ok(Variant::Nil);
+        }
+    };
+
+    // Original engine accepts -1..6 (inclusive).
+    if v < -1 || v > 6 {
+        log::error!("window_mode: invalid mode value {v}");
+        return Ok(Variant::Nil);
+    }
+
+    // Mobile hosts are always fullscreen at the OS level. We preserve the script-visible
+    // behavior by exposing the WindowMode(1) semantics: fullscreen host surface with
+    // aspect-preserving game presentation.
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        match v {
+            0 | 1 | -1 => {
+                game_data.set_can_fullscreen(true);
+                game_data.set_render_flag_local(1);
+                return Ok(Variant::Int(1));
+            }
+            2 => return Ok(Variant::Int(1)),
+            3 => return Ok(Variant::True),
+            _ => {}
+        }
+    }
+
+    match v {
+        0 => {
+            // Windowed
+            game_data.set_render_flag(0);
+            Ok(Variant::Int(0))
+        }
+        1 => {
+            // Non-exclusive fullscreen. Presentation stays aspect-preserving.
+            game_data.set_render_flag(1);
+            Ok(Variant::Int(1))
+        }
+        -1 => {
+            // Exact game-resolution exclusive fullscreen. Only enter when support was proven.
+            if game_data.get_can_fullscreen() {
+                game_data.set_render_flag(2);
+                Ok(Variant::Int(-1))
+            } else {
+                Ok(Variant::Int(1))
+            }
+        }
+        2 => {
+            // Query current mode. Script-visible mapping: render_flag 2 -> -1, 3 -> -2.
+            let rf = game_data.get_render_flag();
+            let out = match rf {
+                2 => -1,
+                3 => -2,
+                _ => rf,
+            };
+            Ok(Variant::Int(out))
+        }
+        3 => {
+            // Query fullscreen capability.
+            if game_data.get_can_fullscreen() {
+                Ok(Variant::True)
+            } else {
+                Ok(Variant::Nil)
+            }
+        }
+        4 => {
+            // Enables the original WM_ACTIVATEAPP focus-loss fallback path.
+            game_data.set_is_first_frame(true);
+            Ok(Variant::Nil)
+        }
+        5 => {
+            // Disables the original WM_ACTIVATEAPP focus-loss fallback path.
+            game_data.set_is_first_frame(false);
+            Ok(Variant::Nil)
+        }
+        6 => {
+            // Query the WM_ACTIVATEAPP focus-loss fallback flag.
+            if game_data.get_is_first_frame() {
+                Ok(Variant::True)
+            } else {
+                Ok(Variant::Nil)
+            }
+        }
+        _ => Ok(Variant::Nil),
+    }
+}
+
+pub fn title_menu(_game_data: &mut GameData, _title: &Variant) -> Result<Variant> {
+    Ok(Variant::Nil)
+}
+
+pub fn exit_mode(game_data: &mut GameData, mode: &Variant) -> Result<Variant> {
+    let mode = match mode {
+        Variant::Int(mode) => *mode,
+        _ => {
+            log::error!("exit_mode: Invalid mode type");
+            return Ok(Variant::True);
+        }
+    };
+
+    if mode == 0 {
+        if game_data.get_close_pending() {
+            game_data.set_close_pending(false);
+            return Ok(Variant::True);
+        }
+    } else if mode == 1 {
+        game_data.set_close_immediate(true);
+    } else if mode == 2 {
+        game_data.set_close_immediate(false);
+    } else if mode == 3 {
+        game_data.set_lock_scripter(true);
+        game_data.set_last_current_thread(game_data.get_current_thread());
+        game_data.set_main_thread_exited(false);
+        game_data.thread_wrapper.should_break();
+    } else if mode == 4 {
+        game_data.set_lock_scripter(false);
+        game_data.set_main_thread_exited(false);
+    }
+
+    Ok(Variant::Nil)
+}
+
+pub struct DebugMessage;
+impl Syscaller for DebugMessage {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        debug_message(game_data, get_var!(args, 0), get_var!(args, 1))
+    }
+}
+
+unsafe impl Send for DebugMessage {}
+unsafe impl Sync for DebugMessage {}
+
+pub struct BreakPoint;
+impl Syscaller for BreakPoint {
+    fn call(&self, game_data: &mut GameData, _args: Vec<Variant>) -> Result<Variant> {
+        break_point(game_data)
+    }
+}
+
+unsafe impl Send for BreakPoint {}
+unsafe impl Sync for BreakPoint {}
+
+pub struct FloatToInt;
+impl Syscaller for FloatToInt {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        float_to_int(game_data, get_var!(args, 0))
+    }
+}
+
+unsafe impl Send for FloatToInt {}
+unsafe impl Sync for FloatToInt {}
+
+pub struct IntToText;
+impl Syscaller for IntToText {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        int_to_text(game_data, get_var!(args, 0), get_var!(args, 1))
+    }
+}
+
+unsafe impl Send for IntToText {}
+unsafe impl Sync for IntToText {}
+
+pub struct Rand;
+impl Syscaller for Rand {
+    fn call(&self, game_data: &mut GameData, _args: Vec<Variant>) -> Result<Variant> {
+        rand(game_data)
+    }
+}
+
+unsafe impl Send for Rand {}
+unsafe impl Sync for Rand {}
+
+pub struct SysProjFolder;
+impl Syscaller for SysProjFolder {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        system_project_dir(game_data, get_var!(args, 0))
+    }
+}
+
+unsafe impl Send for SysProjFolder {}
+unsafe impl Sync for SysProjFolder {}
+
+pub struct SysAtSkipName;
+impl Syscaller for SysAtSkipName {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        system_at_skipname(game_data, get_var!(args, 0), get_var!(args, 1))
+    }
+}
+
+unsafe impl Send for SysAtSkipName {}
+unsafe impl Sync for SysAtSkipName {}
+
+pub struct WindowMode;
+impl Syscaller for WindowMode {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        window_mode(game_data, get_var!(args, 0))
+    }
+}
+
+unsafe impl Send for WindowMode {}
+unsafe impl Sync for WindowMode {}
+
+pub struct ExitMode;
+impl Syscaller for ExitMode {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        let mode = get_var!(args, 0);
+        exit_mode(game_data, mode)
+    }
+}
+
+unsafe impl Send for ExitMode {}
+unsafe impl Sync for ExitMode {}
+
+pub struct TitleMenu;
+impl Syscaller for TitleMenu {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        title_menu(game_data, get_var!(args, 0))
+    }
+}
+
+unsafe impl Send for TitleMenu {}
+unsafe impl Sync for TitleMenu {}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_int_to_text() {
+        let result = int_to_text(
+            &mut GameData::default(),
+            &Variant::Int(42),
+            &Variant::Int(5),
+        )
+        .unwrap();
+        crate::trace::syscall(format_args!("Result: {:?}", result));
+    }
+}
+
+/// Debmess(level, msg)
+/// IDA SYSCALL_SPECS: argc=2
+pub struct Debmess;
+impl Syscaller for Debmess {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        // Reuse DebugMessage implementation if present.
+        DebugMessage.call(game_data, args)
+    }
+}
+
+/// nullsub_2(...)
+/// Used by auto-generated syscall specs for no-op placeholders.
+pub struct nullsub_2;
+impl Syscaller for nullsub_2 {
+    fn call(&self, _game_data: &mut GameData, _args: Vec<Variant>) -> Result<Variant> {
+        Ok(Variant::Nil)
+    }
+}
+
+/// DissolveWait()
+/// IDA SYSCALL_SPECS: argc=1
+pub struct DissolveWait;
+impl Syscaller for DissolveWait {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        // IDA: DissolveWait has two observable modes depending on the argument type:
+        //   - DissolveWait(nil): returns true if dissolve-wait is active (used as a polling predicate).
+        //   - DissolveWait(non-nil): blocks the current context until dissolve completes.
+        //
+        // We approximate the engine's `dis_wait` flag as "any dissolve transition in progress".
+        use crate::subsystem::resources::motion_manager::DissolveType;
+
+        let dissolve_type = game_data.motion_manager.get_dissolve_type();
+        let dissolve2_transitioning = game_data.motion_manager.is_dissolve2_transitioning();
+        let dis_wait = !(dissolve_type == DissolveType::None
+            || dissolve_type == DissolveType::Static)
+            || dissolve2_transitioning;
+
+        let arg0 = args.get(0).unwrap_or(&Variant::Nil);
+        if arg0.is_nil() {
+            return Ok(if dis_wait {
+                Variant::True
+            } else {
+                Variant::Nil
+            });
+        }
+
+        if dis_wait {
+            game_data.thread_wrapper.dissolve_wait();
+        }
+        Ok(Variant::Nil)
+    }
+}
+
+/// ExitDialog()
+/// IDA SYSCALL_SPECS: argc=0
+///
+/// Original engines showed a native MessageBox Yes/No prompt and, on Yes,
+/// posted a window message that continued the normal close path. In rfvp we do
+/// not prompt here; we treat ExitDialog as an immediate confirmed exit request
+/// and let the existing app/main-loop close path consume it.
+pub struct ExitDialog;
+impl Syscaller for ExitDialog {
+    fn call(&self, game_data: &mut GameData, _args: Vec<Variant>) -> Result<Variant> {
+        request_exit_dialog();
+        game_data.thread_wrapper.should_break();
+        Ok(Variant::Nil)
+    }
+}
+
+/// MenuMessSkip()
+/// IDA SYSCALL_SPECS: argc=1
+pub struct MenuMessSkip;
+impl Syscaller for MenuMessSkip {
+    fn call(&self, _game_data: &mut GameData, _args: Vec<Variant>) -> Result<Variant> {
+        Ok(Variant::Nil)
+    }
+}
+
+/// A named fail-fast handler for catalog entries whose observable behavior has not been implemented.
+/// Missing release coverage must terminate the session rather than silently returning `Nil`.
+pub struct UnimplementedNamed {
+    name: &'static str,
+}
+
+impl UnimplementedNamed {
+    pub fn new(name: &'static str) -> Self {
+        Self { name }
+    }
+}
+
+impl Syscaller for UnimplementedNamed {
+    fn call(&self, _game_data: &mut GameData, _args: Vec<Variant>) -> Result<Variant> {
+        anyhow::bail!("RFVP_SYSCALL_NOT_IMPLEMENTED:{}", self.name)
+    }
+
+    fn is_implemented(&self) -> bool {
+        false
+    }
+}
+
+unsafe impl Send for UnimplementedNamed {}
+unsafe impl Sync for UnimplementedNamed {}

@@ -446,7 +446,7 @@ fn append_raw_layout(
                     .with_field("asset_id", &face.asset_id),
                 );
             }
-            let direction = if glyph.level.number() % 2 == 0 {
+            let direction = if glyph.level.number().is_multiple_of(2) {
                 TextDirection::LeftToRight
             } else {
                 TextDirection::RightToLeft

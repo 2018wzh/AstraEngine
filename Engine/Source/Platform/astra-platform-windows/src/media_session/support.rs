@@ -47,7 +47,7 @@ pub(super) fn validate_profile(client: &PlatformHostClient) -> Result<(), Platfo
 }
 
 pub(super) fn pcm_s16_to_f32(bytes: &[u8]) -> Result<Vec<f32>, PlatformError> {
-    if bytes.is_empty() || bytes.len() % 2 != 0 {
+    if bytes.is_empty() || !bytes.len().is_multiple_of(2) {
         return Err(PlatformError::new(
             PlatformErrorCode::IntegrityMismatch,
             "media.audio_convert",
@@ -61,7 +61,7 @@ pub(super) fn pcm_s16_to_f32(bytes: &[u8]) -> Result<Vec<f32>, PlatformError> {
 }
 
 pub(super) fn bgra_to_rgba(bytes: &[u8]) -> Result<Vec<u8>, PlatformError> {
-    if bytes.is_empty() || bytes.len() % 4 != 0 {
+    if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
         return Err(PlatformError::new(
             PlatformErrorCode::IntegrityMismatch,
             "media.video_convert",

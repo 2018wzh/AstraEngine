@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TranslationEvidence",
+  "type": "object",
+  "required": [
+    "consent_present",
+    "endpoint_identity_hash",
+    "error_codes",
+    "latency_ms_total",
+    "model_identity_hash",
+    "persistent_cache_enabled",
+    "provider_identity",
+    "redaction_status",
+    "request_count",
+    "schema",
+    "source_hashes"
+  ],
+  "properties": {
+    "consent_present": {
+      "type": "boolean"
+    },
+    "endpoint_identity_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "error_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "latency_ms_total": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "model_identity_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "persistent_cache_enabled": {
+      "type": "boolean"
+    },
+    "provider_identity": {
+      "type": "string"
+    },
+    "redaction_status": {
+      "type": "string"
+    },
+    "request_count": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "schema": {
+      "type": "string"
+    },
+    "source_hashes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Hash256"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    }
+  }
+}

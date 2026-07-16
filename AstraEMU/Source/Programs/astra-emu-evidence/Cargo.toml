@@ -1,0 +1,28 @@
+[package]
+name = "astra-emu-evidence"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "astra-emu-evidence"
+path = "src/main.rs"
+
+[dependencies]
+astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-emu-manager-core = { path = "../../Manager/astra-emu-manager-core" }
+astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
+postcard.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }
+tempfile.workspace = true

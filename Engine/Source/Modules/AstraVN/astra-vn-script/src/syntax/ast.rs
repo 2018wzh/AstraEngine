@@ -148,7 +148,7 @@ fn parse_line(
         return;
     }
     let indent = raw.bytes().take_while(|byte| *byte == b' ').count();
-    if raw[..raw.len().min(indent + 1)].contains('\t') || indent % 2 != 0 {
+    if raw[..raw.len().min(indent + 1)].contains('\t') || !indent.is_multiple_of(2) {
         diagnostics.push(diagnostic(
             path,
             line,

@@ -127,7 +127,7 @@ impl ArtifactRecorder {
         sequence: u64,
         samples: &[f32],
     ) -> Result<(), PlatformError> {
-        if samples.len() % 2 != 0 {
+        if !samples.len().is_multiple_of(2) {
             return Err(integrity(
                 "artifact.wav",
                 "stereo samples are not frame aligned",
@@ -181,7 +181,7 @@ impl ArtifactRecorder {
     }
 
     pub(crate) fn validate_audio_timeline(&self, sample_count: usize) -> Result<(), PlatformError> {
-        if sample_count % 2 != 0 {
+        if !sample_count.is_multiple_of(2) {
             return Err(integrity(
                 "artifact.wav",
                 "stereo samples are not frame aligned",

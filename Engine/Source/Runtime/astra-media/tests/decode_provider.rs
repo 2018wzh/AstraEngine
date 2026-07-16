@@ -229,6 +229,78 @@ fn windows_wmf_decode_provider_decodes_public_mp4_first_frame_to_bgra() {
 
 #[cfg(windows)]
 #[astra_headless_test::test]
+fn windows_wmf_full_stream_decoder_enforces_frame_and_byte_budgets() {
+    let bytes = fixture_bytes("flower.mp4");
+    let frame_limited =
+        astra_media::decode_windows_video_stream(&bytes, 1, 64 * 1024 * 1024).unwrap_err();
+    assert_wmf_diagnostic(frame_limited);
+    let malformed =
+        astra_media::decode_windows_video_stream(b"not an mp4", 64, 64 * 1024 * 1024).unwrap_err();
+    assert_wmf_diagnostic(malformed);
+}
+
+#[cfg(windows)]
+fn assert_wmf_diagnostic(error: astra_media::MediaError) {
+    match error {
+        astra_media::MediaError::Diagnostics(diagnostics) => assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "ASTRA_WMF_DECODE")),
+        other => panic!("expected WMF diagnostic, got {other:?}"),
+    }
+}
+
+#[cfg(windows)]
+#[astra_headless_test::test]
+fn windows_wmf_incremental_stream_releases_frames_and_enforces_running_budget() {
+    let bytes = fixture_bytes("flower.mp4");
+    let mut decoder =
+        astra_media::open_windows_video_stream(&bytes, 3, 3 * 64 * 1024 * 1024).unwrap();
+    let first = decoder.next_frame().unwrap().unwrap();
+    let second = decoder.next_frame().unwrap().unwrap();
+    assert_eq!(first.sequence, 1);
+    assert_eq!(second.sequence, 2);
+    assert!(second.pts_us >= first.pts_us);
+    assert_eq!(
+        first.content_hash,
+        astra_core::Hash256::from_sha256(&first.bgra8)
+    );
+
+    let mut limited = astra_media::open_windows_video_stream(&bytes, 1, 64 * 1024 * 1024).unwrap();
+    assert!(limited.next_frame().unwrap().is_some());
+    let error = limited.next_frame().unwrap_err();
+    match error {
+        astra_media::MediaError::Diagnostics(diagnostics) => assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "ASTRA_WMF_DECODE")),
+        other => panic!("expected WMF diagnostic, got {other:?}"),
+    }
+}
+
+#[cfg(windows)]
+#[astra_headless_test::test]
+fn windows_wmf_incremental_audio_releases_ordered_bounded_pcm_chunks() {
+    let bytes = fixture_bytes("flower.mp4");
+    let mut decoder = astra_media::open_windows_audio_stream(&bytes, 1_000_000).unwrap();
+    let first = decoder.next_chunk().unwrap().unwrap();
+    let second = decoder.next_chunk().unwrap().unwrap();
+    assert!((8_000..=384_000).contains(&first.sample_rate));
+    assert!((1..=8).contains(&first.channels));
+    assert!(!first.pcm_s16le.is_empty());
+    assert_eq!(first.pcm_s16le.len() % (usize::from(first.channels) * 2), 0);
+    assert!(second.pts_us >= first.pts_us);
+
+    let mut limited = astra_media::open_windows_audio_stream(&bytes, 1).unwrap();
+    let error = limited.next_chunk().unwrap_err();
+    match error {
+        astra_media::MediaError::Diagnostics(diagnostics) => assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "ASTRA_WMF_DECODE")),
+        other => panic!("expected WMF diagnostic, got {other:?}"),
+    }
+}
+
+#[cfg(windows)]
+#[astra_headless_test::test]
 fn windows_wmf_decode_provider_video_without_transform_reports_blocking_diagnostic() {
     let provider = astra_media::WindowsMediaFoundationDecodeProvider::probe().unwrap();
     let err = provider

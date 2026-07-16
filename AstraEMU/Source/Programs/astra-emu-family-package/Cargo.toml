@@ -1,0 +1,25 @@
+[package]
+name = "astra-emu-family-package"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "astra-emu-family-package"
+path = "src/main.rs"
+
+[dependencies]
+astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+astra-emu-manager-core = { path = "../../Manager/astra-emu-manager-core" }
+astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
+clap.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+object.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

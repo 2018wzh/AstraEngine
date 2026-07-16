@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TranslationConsent",
+  "type": "object",
+  "required": [
+    "endpoint",
+    "granted_at_unix_ms",
+    "model",
+    "provider_identity"
+  ],
+  "properties": {
+    "endpoint": {
+      "type": "string"
+    },
+    "granted_at_unix_ms": {
+      "type": "integer",
+      "format": "int64"
+    },
+    "model": {
+      "type": "string"
+    },
+    "provider_identity": {
+      "type": "string"
+    }
+  }
+}

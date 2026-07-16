@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EmuReleaseManifestV1",
+  "type": "object",
+  "required": [
+    "evidence_sections",
+    "family_id",
+    "family_provider_id",
+    "required_platforms",
+    "runtime_provider_id",
+    "schema",
+    "ui_provider_id"
+  ],
+  "properties": {
+    "evidence_sections": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "family_id": {
+      "type": "string"
+    },
+    "family_provider_id": {
+      "type": "string"
+    },
+    "required_platforms": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "runtime_provider_id": {
+      "type": "string"
+    },
+    "schema": {
+      "type": "string"
+    },
+    "ui_provider_id": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

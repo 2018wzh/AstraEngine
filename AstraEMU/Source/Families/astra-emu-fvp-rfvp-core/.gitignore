@@ -1,0 +1,7 @@
+/target
+/video_player/testcase/image
+/testcase
+*.log
+1.log
+/src/subsystem/resources/fonts/*.ttf
+/src/subsystem/resources/fonts/*.TTF

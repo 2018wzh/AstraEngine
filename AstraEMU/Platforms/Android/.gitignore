@@ -1,0 +1,4 @@
+.gradle/
+generated/
+app/build/
+build/

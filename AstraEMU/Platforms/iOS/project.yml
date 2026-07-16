@@ -1,0 +1,30 @@
+name: AstraEMU
+
+options:
+  bundleIdPrefix: dev.astraengine
+  deploymentTarget:
+    iOS: "15.0"
+
+settings:
+  base:
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    GENERATE_INFOPLIST_FILE: NO
+    PRODUCT_NAME: AstraEMU
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    TARGETED_DEVICE_FAMILY: "1,2"
+
+targets:
+  AstraEMU:
+    type: application
+    platform: iOS
+    info:
+      path: Info.plist
+    sources: []
+    postCompileScripts:
+      - name: Build signed Rust executable
+        basedOnDependencyAnalysis: false
+        script: |
+          /usr/bin/env bash "$SRCROOT/build_for_ios_with_cargo.bash" astra-emu-manager
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)

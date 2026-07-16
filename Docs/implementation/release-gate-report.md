@@ -54,7 +54,7 @@ checks:
 - full headless scenario
 - platform eligibility
 - AI provider-free replay
-- EMU Artemis full-flow, redaction and trace
+- EMU FVP full-flow, rfvp parity, syscall coverage, snapshot/replay, redaction and trace
 
 Domain/check matrix 见 [release-gate-checks.md](release-gate-checks.md)。
 
@@ -85,4 +85,4 @@ cargo test -p astra-release ai_mcp_gate
 cargo test -p astra-release emu_gate
 ```
 
-Expected: missing audit, provider replay, migration gap, Luau snapshot error and Artemis redaction failure all block release.
+Expected: missing audit, provider replay, migration gap, Luau snapshot error and FVP parity/redaction failure all block release.

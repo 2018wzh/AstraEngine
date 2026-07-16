@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EmuPlatformRunEvidenceV1",
+  "type": "object",
+  "required": [
+    "architecture",
+    "audio_meter_hash",
+    "build_identity_hash",
+    "consumed_input_trace_hash",
+    "diagnostic_codes",
+    "evidence_level",
+    "host_kind",
+    "input_sequence_hash",
+    "lifecycle_steps",
+    "package_hash",
+    "platform",
+    "profile_hash",
+    "route_terminal_hash",
+    "schema",
+    "session_id_hash",
+    "status",
+    "visual_trace_hash"
+  ],
+  "properties": {
+    "architecture": {
+      "type": "string"
+    },
+    "audio_meter_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "build_identity_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "consumed_input_trace_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "diagnostic_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_level": {
+      "type": "string"
+    },
+    "host_kind": {
+      "type": "string"
+    },
+    "input_sequence_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "lifecycle_steps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "package_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "platform": {
+      "type": "string"
+    },
+    "profile_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "route_terminal_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "schema": {
+      "type": "string"
+    },
+    "session_id_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "status": {
+      "type": "string"
+    },
+    "visual_trace_hash": {
+      "$ref": "#/definitions/Hash256"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    }
+  }
+}

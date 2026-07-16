@@ -1,0 +1,3365 @@
+use anyhow::{Context, Result};
+use std::{
+    collections::HashMap,
+    fs::File,
+    path::{Path, PathBuf},
+    slice::Windows,
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
+};
+
+use crate::platform_time::{Duration, Instant};
+use crate::{
+    script::{
+        global::GLOBAL,
+        parser::{Nls, Parser},
+        Variant,
+    },
+    subsystem::resources::thread_manager::ThreadManager,
+    utils::ani::{self, icondir_to_custom_cursor, CursorBundle},
+};
+use glam::{mat4, vec3, vec4, Mat4};
+use image::{imageops::FilterType, RgbaImage};
+use regex::Regex;
+use wgpu::util::DeviceExt;
+
+use winit::{
+    dpi::{PhysicalPosition, PhysicalSize, Size},
+    window::CustomCursor,
+};
+use winit::{
+    event::{Event, MouseButton, MouseScrollDelta, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
+    window::{Window, WindowAttributes},
+};
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+use winit::platform::pump_events::{EventLoopExtPumpEvents, PumpStatus};
+
+#[cfg(target_arch = "wasm32")]
+use winit::platform::web::WindowAttributesExtWebSys;
+
+use crate::rendering::render_tree::RenderTree;
+use crate::vm_worker::VmWorker;
+
+use crate::rfvp_render::vertices::{PosVertex, VertexSource};
+use crate::rfvp_render::{BindGroupLayouts, GpuCommonResources, Pipelines, RenderTarget};
+use crate::subsystem::scene::{Scene, SceneAction, SceneMachine};
+use crate::subsystem::scheduler::Scheduler;
+use crate::subsystem::world::GameData;
+use crate::{config::app_config::AppConfig, subsystem::event_handler::update_input_events};
+
+#[cfg(any(target_os = "ios", target_os = "android"))]
+use std::{ffi::c_void, ptr::NonNull};
+
+#[cfg(target_os = "android")]
+extern "C" {
+    fn ANativeWindow_acquire(window: *mut c_void);
+    fn ANativeWindow_release(window: *mut c_void);
+}
+
+#[cfg(target_os = "ios")]
+use winit::raw_window_handle::{
+    DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
+    RawWindowHandle, UiKitDisplayHandle, UiKitWindowHandle, WindowHandle,
+};
+
+#[cfg(target_os = "android")]
+use winit::raw_window_handle::{
+    AndroidDisplayHandle, AndroidNdkWindowHandle, DisplayHandle, HandleError, HasDisplayHandle,
+    HasWindowHandle, RawDisplayHandle, RawWindowHandle, WindowHandle,
+};
+
+use crate::debug_ui::log_ring::{self, LogRing};
+use crate::debug_ui::{
+    self,
+    hud::{DebugHud, HudInput, HudSnapshot},
+};
+use crate::exit_confirm_ui::{ExitConfirmOutcome, ExitConfirmUi};
+use crate::legacy_save_load_ui::LegacySaveLoadUi;
+use crate::rendering::gpu_prim::GpuPrimRenderer;
+use crate::subsystem::components::syscalls::legacy::{
+    legacy_save_load_menu_visible, set_legacy_save_load_menu_visible,
+    take_pending_save_load_request,
+};
+use crate::subsystem::components::syscalls::utils::take_pending_exit_dialog_request;
+use crate::subsystem::resources::motion_manager::DissolveType;
+
+// ----------------------------
+// GameData lock helpers
+// ----------------------------
+#[inline]
+fn gd_read<'a>(gd: &'a Arc<RwLock<Box<GameData>>>) -> RwLockReadGuard<'a, Box<GameData>> {
+    match gd.read() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+#[inline]
+fn gd_write<'a>(gd: &'a Arc<RwLock<Box<GameData>>>) -> RwLockWriteGuard<'a, Box<GameData>> {
+    match gd.write() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn find_exact_game_video_mode(
+    window: &Window,
+    game_size: (u32, u32),
+) -> Option<winit::monitor::VideoModeHandle> {
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    {
+        let monitor = window
+            .current_monitor()
+            .or_else(|| window.primary_monitor())?;
+        return monitor.video_modes().find(|mode| {
+            let size = mode.size();
+            size.width == game_size.0 && size.height == game_size.1
+        });
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        let _ = (window, game_size);
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WindowedRestoreState {
+    size: PhysicalSize<u32>,
+    pos: Option<PhysicalPosition<i32>>,
+}
+
+pub struct App {
+    config: AppConfig,
+    game_data: Arc<RwLock<Box<GameData>>>,
+    title: String,
+    vm_worker: VmWorker,
+    pending_vm_frame_ms: u64,
+    pending_vm_frame_ms_valid: bool,
+    scheduler: Scheduler,
+    layer_machine: SceneMachine,
+    window: Option<Arc<Window>>,
+
+    /// Scale factor provided by the host when no winit window exists (iOS host mode).
+    native_scale_factor: f64,
+
+    /// When true, the app is driven by an external host via `PumpInstance::pump()`.
+    /// In this mode we must never block inside winit's event pumping.
+    pump_mode: bool,
+
+    // WindowMode support
+    windowed_restore: Option<WindowedRestoreState>,
+    last_fullscreen_flag: i32,
+
+    render_target: RenderTarget,
+    resources: Arc<GpuCommonResources>,
+    surface: wgpu::Surface<'static>,
+    surface_config: wgpu::SurfaceConfiguration,
+
+    // Mobile hosts may need to recreate surfaces (Android SurfaceView lifecycle).
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    wgpu_instance: Option<wgpu::Instance>,
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    wgpu_adapter: Option<wgpu::Adapter>,
+
+    #[cfg(target_os = "android")]
+    android_native_window: Option<NonNull<c_void>>,
+
+    prim_renderer: GpuPrimRenderer,
+    virtual_size: (u32, u32),
+    render_tree: RenderTree,
+    dissolve_vertex_buffer: wgpu::Buffer,
+    dissolve_index_buffer: wgpu::Buffer,
+    dissolve_num_indices: u32,
+
+    // ----------------------------
+    // Debug HUD (FVP_TEST=1)
+    // ----------------------------
+    debug_hud: Option<DebugHud>,
+    hud_window: Option<Arc<Window>>,
+    hud_surface: Option<wgpu::Surface<'static>>,
+    hud_surface_config: Option<wgpu::SurfaceConfiguration>,
+    hud_visible: bool,
+    debug_ring: Arc<LogRing>,
+    debug_frame_no: u64,
+    last_dt_ms: f32,
+    hud_cursor_pos: Option<(f64, f64)>,
+    hud_pointer_down: bool,
+    hud_scroll_delta_y: f32,
+    // Tracks dissolve completion on the main thread so we can wake contexts
+    // waiting on DISSOLVE_WAIT immediately via an EngineEvent.
+    last_dissolve_type: DissolveType,
+    last_dissolve2_transitioning: bool,
+    legacy_save_load_ui: LegacySaveLoadUi,
+    exit_confirm_ui: ExitConfirmUi,
+    builtin_exit_ui_enabled: bool,
+    pending_app_exit: bool,
+}
+
+impl App {
+    #[allow(dead_code)]
+    pub fn app() -> Box<AppBuilder> {
+        let app_config = AppConfig::default();
+        App::app_with_config(app_config)
+    }
+
+    pub fn app_with_config(app_config: AppConfig) -> Box<AppBuilder> {
+        crate::utils::logger::Logger::init_logging(app_config.logger_config.clone());
+
+        // iOS has a small main-thread stack; avoid formatting the full config with Debug here.
+        #[cfg(not(target_os = "ios"))]
+        log::info!(
+            "Starting the app, with the following configuration \\n {:?}",
+            app_config
+        );
+        #[cfg(target_os = "ios")]
+        log::info!("Starting the app");
+
+        AppBuilder::new_boxed(app_config)
+    }
+
+    fn setup(&mut self) {
+        self.initialize_internal_resources();
+        {
+            let mut gd = gd_write(&self.game_data);
+            self.layer_machine
+                .apply_scene_action(SceneAction::Start, &mut **gd);
+            let current = gd.get_current_cursor_index();
+            if current != 0 && gd.has_cursor(current) {
+                gd.switch_cursor(current);
+            } else if gd.has_cursor(1) {
+                gd.set_current_cursor_index(0);
+                gd.switch_cursor(1);
+            } else {
+                gd.set_current_cursor_index(0);
+                gd.window_mut().set_cursor_kind(0);
+            }
+        }
+    }
+
+    fn initialize_internal_resources(&mut self) {
+        let mut gd = gd_write(&self.game_data);
+
+        if let Some(window) = self.window.as_ref() {
+            gd.set_window(crate::subsystem::resources::window::Window::new(
+                (window.inner_size().width, window.inner_size().height),
+                window.scale_factor(),
+            ));
+        } else {
+            // Host-driven mode (iOS/Android): there is no winit window.
+            // Keep script-visible window size in the *virtual* coordinate space.
+            // Presentation scaling / letterboxing is handled separately in the render pass.
+            let (w, h) = (self.virtual_size.0.max(1), self.virtual_size.1.max(1));
+            gd.set_window(crate::subsystem::resources::window::Window::new(
+                (w, h),
+                1.0,
+            ));
+        }
+    }
+    fn current_hidpi_scale(&self) -> f32 {
+        self.window
+            .as_ref()
+            .map(|w| w.scale_factor() as f32)
+            .unwrap_or(self.native_scale_factor as f32)
+            .max(1.0)
+    }
+
+    fn desired_render_target_backing_size(&self) -> (u32, u32) {
+        let scale = self.current_hidpi_scale();
+        let w = ((self.virtual_size.0.max(1) as f32) * scale)
+            .round()
+            .max(self.virtual_size.0.max(1) as f32) as u32;
+        let h = ((self.virtual_size.1.max(1) as f32) * scale)
+            .round()
+            .max(self.virtual_size.1.max(1) as f32) as u32;
+        (w.max(1), h.max(1))
+    }
+
+    fn sync_render_target_backing(&mut self) {
+        let desired = self.desired_render_target_backing_size();
+        if self.render_target.backing_size() != desired {
+            self.render_target = RenderTarget::new(
+                &self.resources,
+                self.virtual_size,
+                desired,
+                Some("Window RenderTarget"),
+            );
+        }
+    }
+    fn window(&self) -> &Arc<Window> {
+        self.window.as_ref().expect("No window found")
+    }
+
+    fn debug_title(&mut self, x: i32, y: i32) {
+        let title = self.title.clone();
+        let (x, y, down, up) = {
+            let gd = gd_read(&self.game_data);
+            (
+                gd.inputs_manager.get_cursor_x(),
+                gd.inputs_manager.get_cursor_y(),
+                self.debug_keydown(),
+                self.debug_keyup(),
+            )
+        };
+        if let Ok(test) = std::env::var("DEBUG") {
+            if test == *"1" {
+                let title = format!("{} | {},{} | down {}, up {} | ", title, x, y, down, up);
+                if let Some(w) = self.window.as_mut() {
+                    w.set_title(&title);
+                }
+            }
+        }
+    }
+
+    fn debug_keydown(&self) -> String {
+        let gd = gd_read(&self.game_data);
+        gd.inputs_manager.get_hud_down().to_string()
+    }
+
+    fn debug_keyup(&self) -> String {
+        let gd = gd_read(&self.game_data);
+        gd.inputs_manager.get_hud_up().to_string()
+    }
+
+    fn apply_exit_confirm_outcome(&mut self, outcome: ExitConfirmOutcome) {
+        match outcome {
+            ExitConfirmOutcome::Confirmed => {
+                let mut gd = gd_write(&self.game_data);
+                if gd.get_close_immediate() {
+                    self.pending_app_exit = true;
+                } else {
+                    gd.set_close_pending(true);
+                }
+            }
+            ExitConfirmOutcome::Cancelled => {}
+        }
+    }
+
+    fn request_exit_dialog_ui_or_confirm(&mut self) {
+        if self.builtin_exit_ui_enabled {
+            self.exit_confirm_ui.open();
+        } else {
+            self.apply_exit_confirm_outcome(ExitConfirmOutcome::Confirmed);
+        }
+    }
+
+    fn handle_event(&mut self, event: Event<()>, loopd: &winit::event_loop::ActiveEventLoop) {
+        // NOTE: In pump-mode we must not block inside winit, because the host (SwiftUI/Android/iOS)
+        // drives the app by repeatedly calling `rfvp_pump_step()`.
+        if self.pump_mode {
+            loopd.set_control_flow(ControlFlow::Poll);
+        } else {
+            loopd.set_control_flow(ControlFlow::Wait);
+        }
+
+        match event {
+            Event::WindowEvent {
+                ref event,
+                window_id,
+            } if window_id == self.window.as_mut().unwrap().id() => {
+                match event {
+                    WindowEvent::CloseRequested => {
+                        self.request_exit_dialog_ui_or_confirm();
+                    }
+                    WindowEvent::Focused(_focused) => {
+                        // Do not introduce WindowMode side effects on focus changes.
+                        // Input focus transitions are handled in update_input_events().
+                    }
+                    WindowEvent::Resized(physical_size) => {
+                        gd_write(&self.game_data)
+                            .window_mut()
+                            .set_dimensions(physical_size.width, physical_size.height);
+
+                        // Update swapchain configuration.
+                        self.surface_config.width = physical_size.width.max(1);
+                        self.surface_config.height = physical_size.height.max(1);
+                        self.surface
+                            .configure(&self.resources.device, &self.surface_config);
+                    }
+                    WindowEvent::ScaleFactorChanged { .. } => {
+                        // self.renderer.as_mut().unwrap().resize(
+                        //     self.window.as_ref().expect("Missing window").inner_size(),
+                        //     *scale_factor,
+                        // );
+                    }
+                    WindowEvent::RedrawRequested => {
+                        // Drive the simulation from redraws so we do not busy-spin.
+                        // The VM is cooperative and now advances until script/syscall yield points
+                        // such as WAIT/SLEEP/NEXT/ShouldBreak, matching the original engine style.
+                        let (frame_ms, notify_dissolve_done) = self.next_frame();
+
+                        // Wake dissolve waiters before advancing the VM for this frame.
+                        if notify_dissolve_done {
+                            self.vm_worker.send_dissolve_done_sync();
+                        }
+
+                        // Run the script VM before rendering so scene changes become visible immediately.
+                        let _rep = self.vm_worker.send_frame_ms_sync(frame_ms);
+
+                        // Apply WindowMode/Cursor requests that may have been issued during the VM tick.
+                        self.apply_window_mode_requests();
+                        self.update_cursor();
+
+                        self.pending_vm_frame_ms_valid = false;
+
+                        {
+                            let mut gd = gd_write(&self.game_data);
+                            self.layer_machine
+                                .apply_scene_action(SceneAction::EndFrame, &mut **gd);
+                        }
+                        if let Err(e) = self.render_frame() {
+                            log::error!("render_frame: {e:?}");
+                        }
+
+                        // Clear per-frame transient input signals only after the VM had a
+                        // chance to observe them (InputGetDown/InputGetUp/InputGetRepeat/Wheel).
+                        gd_write(&self.game_data).inputs_manager.frame_reset();
+                    }
+                    WindowEvent::KeyboardInput { event, .. } => {
+                        if !self.legacy_save_load_ui.is_active()
+                            && !self.exit_confirm_ui.is_active()
+                            && event.state == winit::event::ElementState::Pressed
+                            && !event.repeat
+                        {
+                            match event.physical_key {
+                                PhysicalKey::Code(KeyCode::F2) => {
+                                    self.toggle_hud_window();
+                                }
+                                PhysicalKey::Code(KeyCode::F11) => {
+                                    // Fallback toggler (useful when a title does not expose a UI affordance
+                                    // to return from fullscreen).
+                                    let mut gd = gd_write(&self.game_data);
+                                    let cur = gd.get_render_flag();
+                                    let last = if self.last_fullscreen_flag == 1
+                                        || self.last_fullscreen_flag == 2
+                                    {
+                                        self.last_fullscreen_flag
+                                    } else {
+                                        1
+                                    };
+                                    let next = if cur == 1 || cur == 2 { 0 } else { last };
+                                    gd.set_render_flag(next);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                let consumed_by_exit_modal = self.exit_confirm_ui.handle_window_event(
+                    event,
+                    (self.surface_config.width, self.surface_config.height),
+                    self.virtual_size,
+                );
+                if let Some(outcome) = self.exit_confirm_ui.take_outcome() {
+                    self.apply_exit_confirm_outcome(outcome);
+                }
+                if self.exit_confirm_ui.is_active() || consumed_by_exit_modal {
+                    // Exit confirm is modal; do not forward input into the game while it is open.
+                } else {
+                    let consumed_by_legacy_modal = {
+                        let mut gd = gd_write(&self.game_data);
+                        self.legacy_save_load_ui.handle_window_event(
+                            event,
+                            (self.surface_config.width, self.surface_config.height),
+                            self.virtual_size,
+                            &mut **gd,
+                        )
+                    };
+                    if !consumed_by_legacy_modal {
+                        let mut gd = gd_write(&self.game_data);
+                        update_input_events(
+                            event,
+                            &mut **gd,
+                            (self.surface_config.width, self.surface_config.height),
+                            self.virtual_size,
+                        );
+                    } else if !self.legacy_save_load_ui.is_active() {
+                        set_legacy_save_load_menu_visible(false);
+                    }
+                }
+            }
+            Event::WindowEvent {
+                ref event,
+                window_id,
+            } if self.hud_window.as_ref().map(|w| w.id()) == Some(window_id) => {
+                match event {
+                    WindowEvent::CloseRequested => {
+                        self.set_hud_visible(false);
+                    }
+                    WindowEvent::CursorMoved { position, .. } => {
+                        self.hud_cursor_pos = Some((position.x, position.y));
+                    }
+                    WindowEvent::CursorLeft { .. } => {
+                        self.hud_cursor_pos = None;
+                    }
+                    WindowEvent::MouseInput { state, button, .. } => {
+                        if *button == MouseButton::Left {
+                            self.hud_pointer_down = state.is_pressed();
+                        }
+                    }
+                    WindowEvent::MouseWheel { delta, .. } => {
+                        // Store a per-frame scroll delta (in points). Roughly match egui's
+                        // usual "line" scroll scale.
+                        match delta {
+                            MouseScrollDelta::LineDelta(_, y) => {
+                                self.hud_scroll_delta_y += *y * 24.0;
+                            }
+                            MouseScrollDelta::PixelDelta(pos) => {
+                                let ppp = self
+                                    .hud_window
+                                    .as_ref()
+                                    .map(|w| w.scale_factor() as f32)
+                                    .unwrap_or(1.0);
+                                self.hud_scroll_delta_y += (pos.y as f32) / ppp.max(0.5);
+                            }
+                        }
+                    }
+                    WindowEvent::Resized(physical_size) => {
+                        if let (Some(surf), Some(cfg)) =
+                            (self.hud_surface.as_ref(), self.hud_surface_config.as_mut())
+                        {
+                            cfg.width = physical_size.width.max(1);
+                            cfg.height = physical_size.height.max(1);
+                            surf.configure(&self.resources.device, cfg);
+                        }
+                    }
+                    WindowEvent::RedrawRequested => {
+                        if self.hud_visible {
+                            if let Err(e) = self.render_hud_frame() {
+                                log::error!("render_hud_frame: {e:?}");
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Event::AboutToWait => {
+                if self.pending_app_exit {
+                    loopd.exit();
+                    return;
+                }
+
+                // ExitMode(3): after the main script context exits, terminate the host loop.
+                let (should_exit, main_exited) = {
+                    let gd = gd_read(&self.game_data);
+                    (gd.get_lock_scripter(), gd.get_main_thread_exited())
+                };
+                if should_exit && main_exited {
+                    loopd.exit();
+                    return;
+                }
+
+                // Schedule the next redraw. This keeps the event loop responsive while
+                // avoiding a hard-coded FPS cap.
+                self.window.as_mut().unwrap().request_redraw();
+
+                if self.hud_visible {
+                    if let Some(w) = self.hud_window.as_ref() {
+                        w.request_redraw();
+                    }
+                }
+            }
+            _ => (),
+        }
+    }
+
+    fn run(mut self: Box<Self>, event_loop: EventLoop<()>) {
+        let _result = event_loop.run(move |event, loopd| {
+            self.handle_event(event, loopd);
+        });
+    }
+
+    fn next_frame(&mut self) -> (u64, bool) {
+        let mut notify_dissolve_done = false;
+        let frame_ms: u64;
+
+        let text_render_scale = self
+            .window
+            .as_ref()
+            .map(|w| w.scale_factor() as f32)
+            .unwrap_or(self.native_scale_factor as f32)
+            .max(1.0);
+        let pending_exit_dialog = take_pending_exit_dialog_request();
+        let pending_save_load = take_pending_save_load_request();
+
+        if pending_exit_dialog {
+            self.request_exit_dialog_ui_or_confirm();
+        }
+
+        {
+            // Take the write lock once and never re-lock inside this scope.
+            // IMPORTANT: avoid borrowing fields via the RwLockWriteGuard multiple times; always
+            // project through a single &mut GameData binding.
+            let mut gd_guard = gd_write(&self.game_data);
+            let gd = &mut *gd_guard;
+            gd.motion_manager
+                .text_manager
+                .set_render_scale(text_render_scale);
+
+            let frame_duration = gd.time_mut_ref().frame();
+            let frame_us = frame_duration.as_micros() as u64;
+
+            frame_ms = if frame_us == 0 {
+                0
+            } else {
+                // Ceil to milliseconds to avoid starving script timers on sub-ms frames.
+                (frame_us + 999) / 1000
+            };
+            gd.timer_manager.tick(frame_ms.min(u32::MAX as u64) as u32);
+
+            let prev_dissolve = self.last_dissolve_type;
+            let prev_dissolve2 = self.last_dissolve2_transitioning;
+
+            // IMPORTANT: refresh input BEFORE running any scene/VM logic for this frame.
+            //
+            // The VM polls InputGetState/InputGetDown/InputGetUp during scheduler.execute().
+            // If we refresh after executing the VM and then clear transient bits via
+            // inputs_manager.frame_reset() at end-of-frame, edge-triggered clicks will never
+            // be observable (they would be computed after the VM ran and then cleared before
+            // the next VM tick). Title scripts may still work because they often rely on
+            // InputGetEvent, which uses a separate ring buffer.
+            gd.inputs_manager.begin_frame();
+
+            if let Some(req) = pending_save_load {
+                self.legacy_save_load_ui.open(req, gd);
+                set_legacy_save_load_menu_visible(true);
+            }
+            if self.legacy_save_load_ui.is_active() && !legacy_save_load_menu_visible() {
+                self.legacy_save_load_ui.close();
+            }
+            if self.exit_confirm_ui.is_active() || self.legacy_save_load_ui.is_active() {
+                gd.set_halt(true);
+            }
+
+            // Movie update must run even when the VM/scheduler is halted for modal playback.
+            let mut video_tick_failed = false;
+            {
+                let (video_manager, motion_manager) =
+                    (&mut gd.video_manager, &mut gd.motion_manager);
+                if let Err(e) = video_manager.tick(motion_manager) {
+                    log::error!("VideoPlayerManager::tick failed: {:?}", e);
+                    video_tick_failed = true;
+                }
+            }
+            if video_tick_failed {
+                {
+                    let (video_manager, motion_manager) =
+                        (&mut gd.video_manager, &mut gd.motion_manager);
+                    video_manager.stop(motion_manager);
+                }
+                gd.set_halt(false);
+            }
+
+            let modal_movie = gd.video_manager.is_modal_active();
+
+            if !modal_movie
+                && !self.legacy_save_load_ui.is_active()
+                && !self.exit_confirm_ui.is_active()
+            {
+                self.layer_machine
+                    .apply_scene_action(SceneAction::Update, gd);
+                self.scheduler.execute(gd);
+                self.layer_machine
+                    .apply_scene_action(SceneAction::LateUpdate, gd);
+            }
+
+            // If a dissolve finished on this frame, wake contexts waiting on DISSOLVE_WAIT
+            // on the VM thread. We only emit the event on the transition to None/Static.
+            let cur_dissolve = gd.motion_manager.get_dissolve_type();
+            if (prev_dissolve != DissolveType::None && prev_dissolve != DissolveType::Static)
+                && (cur_dissolve == DissolveType::None || cur_dissolve == DissolveType::Static)
+            {
+                notify_dissolve_done = true;
+            }
+
+            // Dissolve2 completion should also wake contexts waiting on DISSOLVE_WAIT.
+            let cur_dissolve2 = gd.motion_manager.is_dissolve2_transitioning();
+            if prev_dissolve2 && !cur_dissolve2 {
+                notify_dissolve_done = true;
+            }
+            self.last_dissolve2_transitioning = cur_dissolve2;
+            self.last_dissolve_type = cur_dissolve;
+
+            gd.set_current_thread(0);
+
+            if gd.get_halt() {
+                // Preserve halt while a modal Movie or compatibility layer is active.
+                if !gd.video_manager.is_modal_active()
+                    && !self.legacy_save_load_ui.is_active()
+                    && !self.exit_confirm_ui.is_active()
+                {
+                    gd.set_halt(false);
+                }
+            }
+        }
+
+        self.last_dt_ms = frame_ms as f32;
+        self.debug_frame_no = self.debug_frame_no.wrapping_add(1);
+
+        (frame_ms, notify_dissolve_done)
+    }
+
+    fn apply_window_mode_requests(&mut self) {
+        use winit::window::Fullscreen;
+
+        let requested = {
+            let mut gd = gd_write(&self.game_data);
+            gd.take_pending_render_flag()
+        };
+        let Some(flag) = requested else {
+            return;
+        };
+
+        let Some(w) = self.window.as_ref() else {
+            // Host-driven iOS mode can run without a winit window; ignore WindowMode requests.
+            return;
+        };
+
+        match flag {
+            0 => {
+                w.set_fullscreen(None);
+                w.set_decorations(true);
+                w.set_maximized(false);
+
+                if let Some(st) = self.windowed_restore.take() {
+                    w.request_inner_size(st.size);
+                    if let Some(pos) = st.pos {
+                        let _ = w.set_outer_position(pos);
+                    }
+                }
+            }
+            1 => {
+                self.last_fullscreen_flag = 1;
+                if self.windowed_restore.is_none() {
+                    let size = w.inner_size();
+                    let pos = w.outer_position().ok();
+                    self.windowed_restore = Some(WindowedRestoreState { size, pos });
+                }
+                let monitor = w.current_monitor();
+                w.set_fullscreen(Some(Fullscreen::Borderless(monitor)));
+            }
+            2 => {
+                if let Some(mode) = find_exact_game_video_mode(w, self.virtual_size) {
+                    self.last_fullscreen_flag = 2;
+                    if self.windowed_restore.is_none() {
+                        let size = w.inner_size();
+                        let pos = w.outer_position().ok();
+                        self.windowed_restore = Some(WindowedRestoreState { size, pos });
+                    }
+                    w.set_fullscreen(Some(Fullscreen::Exclusive(mode)));
+                } else {
+                    // Reverse-engineered behavior requires exact support for the exclusive path.
+                    // Do not silently reinterpret render_flag=2 as another fullscreen mode.
+                    log::error!("WindowMode(-1): exact exclusive mode is unavailable during apply; restoring windowed mode");
+                    w.set_fullscreen(None);
+                    w.set_decorations(true);
+                    w.set_maximized(false);
+                    if let Some(st) = self.windowed_restore.take() {
+                        w.request_inner_size(st.size);
+                        if let Some(pos) = st.pos {
+                            let _ = w.set_outer_position(pos);
+                        }
+                    }
+                    let mut gd = gd_write(&self.game_data);
+                    gd.set_render_flag_local(0);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn virtual_to_window_cursor_pos(
+        &self,
+        vx: i32,
+        vy: i32,
+        _render_flag: i32,
+    ) -> PhysicalPosition<f64> {
+        let sw = self.surface_config.width.max(1) as f64;
+        let sh = self.surface_config.height.max(1) as f64;
+        let vw = self.virtual_size.0.max(1) as f64;
+        let vh = self.virtual_size.1.max(1) as f64;
+
+        let vx = vx.clamp(0, (vw as i32).saturating_sub(1)) as f64;
+        let vy = vy.clamp(0, (vh as i32).saturating_sub(1)) as f64;
+
+        let scale = (sw / vw).min(sh / vh);
+        let dst_w = vw * scale;
+        let dst_h = vh * scale;
+        let off_x = (sw - dst_w) * 0.5;
+        let off_y = (sh - dst_h) * 0.5;
+        let px = off_x + (vx + 0.5) * scale;
+        let py = off_y + (vy + 0.5) * scale;
+        PhysicalPosition::new(px, py)
+    }
+
+    fn update_cursor(&mut self) {
+        let (
+            cursor_frame,
+            pending_cursor_kind,
+            pending_cursor_visible,
+            pending_cursor_pos,
+            render_flag,
+        ) = {
+            let mut gd = gd_write(&self.game_data);
+            let frame = gd.update_cursor();
+            let cursor_kind = *gd.window_ref().new_cursor();
+            let visible = gd.window_ref().new_cursor_visible();
+            let pos = gd.window_ref().new_cursor_pos();
+            let render_flag = gd.get_render_flag();
+            (frame, cursor_kind, visible, pos, render_flag)
+        };
+
+        let window_cursor_pos = pending_cursor_pos
+            .map(|(vx, vy)| self.virtual_to_window_cursor_pos(vx, vy, render_flag));
+
+        let Some(w) = self.window.as_mut() else {
+            // iOS host mode does not use winit cursors.
+            return;
+        };
+        if let Some(frame) = cursor_frame {
+            w.set_cursor(frame);
+        } else if let Some(icon) = pending_cursor_kind {
+            w.set_cursor(icon);
+        }
+        if let Some(visible) = pending_cursor_visible {
+            w.set_cursor_visible(visible);
+        }
+        if let Some(pos) = window_cursor_pos {
+            let _ = w.set_cursor_position(pos);
+        }
+        {
+            let mut gd = gd_write(&self.game_data);
+            let mut window = gd.window_mut();
+            window.reset_future_settings()
+        }
+    }
+
+    fn render_frame(&mut self) -> anyhow::Result<()> {
+        self.sync_render_target_backing();
+
+        // Commit a pending SaveWrite using a prepared in-memory payload (local_saved),
+        // without capturing the current frame. This matches the original engine's
+        // SaveCreate(fnid=3) + SaveWrite(slot) two-phase save flow.
+        {
+            let mut gd = gd_write(&self.game_data);
+            let nls = gd.get_nls();
+            if let Ok(true) = gd.save_manager.try_commit_local_savedata(nls.clone()) {
+                gd.save_manager.consume_save_write_result();
+            }
+        }
+
+        {
+            let mut gd = gd_write(&self.game_data);
+            for graph_id in gd.motion_manager.take_pending_gpu_graph_unloads() {
+                self.prim_renderer.remove_graph_cache(graph_id);
+            }
+            let surface_size = (self.surface_config.width, self.surface_config.height);
+            self.legacy_save_load_ui.update(
+                &self.resources,
+                &mut **gd,
+                self.virtual_size,
+                surface_size,
+            );
+            self.exit_confirm_ui
+                .update(&self.resources, self.virtual_size, surface_size);
+        }
+
+        let dissolve_color: Option<glam::Vec4>;
+        let dissolve2_color: Option<glam::Vec4>;
+        {
+            let gd = gd_read(&self.game_data);
+
+            // Build primitive draw list and upload any modified GraphBuffs to the GPU.
+            self.prim_renderer
+                .rebuild(&self.resources, &gd.motion_manager);
+
+            let frame_no = self.debug_frame_no;
+            if crate::trace::should_dump_prim_tree(frame_no) {
+                let tree = gd.motion_manager.debug_dump_prim_tree(
+                    crate::trace::prim_tree_max_nodes(),
+                    crate::trace::prim_tree_max_depth(),
+                );
+                crate::trace::dump(
+                    crate::trace::TraceKind::PrimTree,
+                    &format!("prim_tree frame={}", frame_no),
+                    &tree,
+                );
+            }
+            if crate::trace::should_dump_motion(frame_no) {
+                let ms = gd
+                    .motion_manager
+                    .debug_dump_motion_state(crate::trace::motion_max());
+                crate::trace::dump(
+                    crate::trace::TraceKind::Motion,
+                    &format!("motion frame={}", frame_no),
+                    &ms,
+                );
+            }
+
+            let dissolve_type = gd.motion_manager.get_dissolve_type();
+            dissolve_color = match dissolve_type {
+                DissolveType::None => None,
+
+                // Colored dissolve is a pure full-screen color overlay.
+                DissolveType::Static
+                | DissolveType::ColoredFadeIn
+                | DissolveType::ColoredFadeOut => {
+                    let alpha = gd.motion_manager.get_dissolve_alpha();
+                    crate::trace::motion(format_args!("Global dissolve alpha: {}", alpha));
+                    if alpha > 0.0 {
+                        let cid = gd.motion_manager.get_dissolve_color_id() as u8;
+                        let c = gd.motion_manager.color_manager.get_entry(cid);
+                        Some(vec4(
+                            c.get_r() as f32 / 255.0,
+                            c.get_g() as f32 / 255.0,
+                            c.get_b() as f32 / 255.0,
+                            (c.get_a() as f32 / 255.0) * alpha,
+                        ))
+                    } else {
+                        None
+                    }
+                }
+
+                // Mask dissolve (wait=4/5/6) is not a solid color quad in the original engine.
+                // It uses the 8-bit mask texture with alpha-test / blend states.
+                // Until a dedicated mask dissolve pipeline is implemented, do not draw a solid
+                // overlay here (otherwise it appears as a "white mask" over HUD/text).
+                DissolveType::MaskFadeIn
+                | DissolveType::MaskFadeInOut
+                | DissolveType::MaskFadeOut => None,
+            };
+
+            // Dissolve2 is a pure full-screen color fade used by engine-internal flows
+            // (save/load/transition), rendered between root=0 and the overlay/custom root.
+            let alpha2 = gd.motion_manager.get_dissolve2_alpha();
+            dissolve2_color = if alpha2 > 0.0 {
+                let cid = gd.motion_manager.get_dissolve2_color_id() as u8;
+                let c = gd.motion_manager.color_manager.get_entry(cid);
+                Some(vec4(
+                    c.get_r() as f32 / 255.0,
+                    c.get_g() as f32 / 255.0,
+                    c.get_b() as f32 / 255.0,
+                    (c.get_a() as f32 / 255.0) * alpha2,
+                ))
+            } else {
+                None
+            };
+        }
+
+        // Save thumbnail capture request (resolved after the virtual pass).
+        let save_capture = {
+            let gd = gd_read(&self.game_data);
+            gd.save_manager.pending_save_capture()
+        };
+
+        let mut encoder =
+            self.resources
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("rfvp frame encoder"),
+                });
+
+        // Pass 1: render primitives into the virtual render target.
+        {
+            let mut pass = self
+                .render_target
+                .begin_srgb_render_pass(&mut encoder, Some("rfvp virtual pass"));
+
+            let proj = self.render_target.projection_matrix();
+
+            // Match original engine draw order:
+            //   1) root=0 prim tree
+            //   2) dissolve (mask/color)
+            //   3) dissolve2 (full-screen color fade)
+            //   4) overlay/custom root prim tree
+            self.prim_renderer.draw_virtual_root0(
+                &mut pass,
+                &self.resources.pipelines.sprite,
+                proj,
+            );
+
+            let mk_fill_src = || VertexSource::VertexIndexBuffer {
+                vertex_buffer: &self.dissolve_vertex_buffer,
+                index_buffer: &self.dissolve_index_buffer,
+                indices: 0..self.dissolve_num_indices,
+                instances: 0..1,
+            };
+
+            // Global dissolve overlay (rendered in virtual space).
+            if let Some(color) = dissolve_color {
+                self.resources
+                    .pipelines
+                    .fill
+                    .draw(&mut pass, mk_fill_src(), proj, color);
+            }
+
+            // Engine dissolve2 overlay (rendered in virtual space).
+            if let Some(color) = dissolve2_color {
+                self.resources
+                    .pipelines
+                    .fill
+                    .draw(&mut pass, mk_fill_src(), proj, color);
+            }
+
+            self.prim_renderer.draw_virtual_overlay(
+                &mut pass,
+                &self.resources.pipelines.sprite,
+                proj,
+            );
+        }
+
+        // If a SaveWrite is pending, capture the current virtual render target to CPU.
+        let save_readback = save_capture.map(|_| {
+            self.render_target
+                .encode_readback_rgba8(&self.resources.device, &mut encoder)
+        });
+
+        // Pass 2: present to the swapchain with aspect-preserving scaling.
+        let output = match self.surface.get_current_texture() {
+            Ok(o) => o,
+            Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
+                // Recreate swapchain.
+                self.surface
+                    .configure(&self.resources.device, &self.surface_config);
+
+                return Ok(());
+            }
+            Err(wgpu::SurfaceError::Timeout) => {
+                // Skip a frame.
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(e.into());
+            }
+        };
+
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("rfvp present pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            // Present the virtual render target into the swapchain while preserving aspect ratio.
+            // Coordinate system: origin at top-left, x right, y down.
+            //
+            // We first scale the virtual space into surface pixel space, then map surface pixels
+            // into NDC via the same top-left-origin projection convention used in the virtual pass.
+            let vw = self.virtual_size.0.max(1) as f32;
+            let vh = self.virtual_size.1.max(1) as f32;
+            let sw = self.surface_config.width.max(1) as f32;
+            let sh = self.surface_config.height.max(1) as f32;
+
+            // Reverse-engineered WindowMode behavior only proves aspect-preserving presentation
+            // for the normal host-backed path. Do not assign any special presentation semantics to
+            // internal render_flag==3; it is only exposed by the query remap (3 -> -2).
+            let s = (sw / vw).min(sh / vh);
+            let dst_w = vw * s;
+            let dst_h = vh * s;
+            let scale_x = s;
+            let scale_y = s;
+            let off_x = (sw - dst_w) * 0.5;
+            let off_y = (sh - dst_h) * 0.5;
+
+            let proj_surface = mat4(
+                vec4(2.0 / sw, 0.0, 0.0, 0.0),
+                vec4(0.0, -2.0 / sh, 0.0, 0.0),
+                vec4(0.0, 0.0, 1.0, 0.0),
+                vec4(-1.0, 1.0, 0.0, 1.0),
+            );
+            let to_surface_px = Mat4::from_translation(vec3(off_x, off_y, 0.0))
+                * Mat4::from_scale(vec3(scale_x, scale_y, 1.0));
+
+            let present_m = proj_surface * to_surface_px;
+
+            self.resources.pipelines.sprite_screen.draw(
+                &mut pass,
+                self.render_target.vertex_source(),
+                self.render_target.bind_group(),
+                present_m,
+            );
+            self.legacy_save_load_ui.draw(
+                &mut pass,
+                &self.resources.pipelines.sprite_screen,
+                proj_surface,
+            );
+            self.exit_confirm_ui.draw(
+                &mut pass,
+                &self.resources.pipelines.sprite_screen,
+                proj_surface,
+            );
+        }
+
+        self.resources.queue.submit(Some(encoder.finish()));
+
+        if let (Some(readback), Some((slot, thumb_w, thumb_h))) = (save_readback, save_capture) {
+            let src_w = readback.width.max(1);
+            let src_h = readback.height.max(1);
+            let rgba = readback.map_to_rgba8(&self.resources.device);
+
+            let thumb_rgba = if thumb_w > 0 && thumb_h > 0 && (thumb_w != src_w || thumb_h != src_h)
+            {
+                let expected_len = (src_w as usize)
+                    .saturating_mul(src_h as usize)
+                    .saturating_mul(4);
+                if rgba.len() == expected_len {
+                    let img = RgbaImage::from_raw(src_w, src_h, rgba)
+                        .expect("save capture readback length already validated");
+                    let resized =
+                        image::imageops::resize(&img, thumb_w, thumb_h, FilterType::Triangle);
+                    resized.into_raw()
+                } else {
+                    rgba
+                }
+            } else {
+                rgba
+            };
+
+            let mut gd = gd_write(&self.game_data);
+            let nls = gd.get_nls();
+            let state_snap = crate::subsystem::save_state::SaveStateSnapshotV1::capture(&mut gd);
+
+            if slot == u32::MAX {
+                // SaveCreate(3, nil/int): prepare local_saved payload in memory.
+                gd.save_manager.finalize_local_savedata_prepare(
+                    nls.clone(),
+                    thumb_w,
+                    thumb_h,
+                    &thumb_rgba,
+                    Some(&state_snap),
+                )?;
+
+                // If a SaveWrite was already requested (SaveCreate(3, slot) form), commit now.
+                if gd.save_manager.try_commit_local_savedata(nls.clone())? {
+                    gd.save_manager.consume_save_write_result();
+                }
+            } else {
+                // Fallback path: capture the current frame and write immediately.
+                gd.save_manager.finalize_save_write(
+                    nls,
+                    thumb_w,
+                    thumb_h,
+                    &thumb_rgba,
+                    Some(&state_snap),
+                )?;
+                gd.save_manager.consume_save_write_result();
+            }
+        }
+
+        output.present();
+
+        Ok(())
+    }
+
+    fn set_hud_visible(&mut self, visible: bool) {
+        self.hud_visible = visible;
+        if let Some(w) = self.hud_window.as_ref() {
+            w.set_visible(visible);
+            if visible {
+                w.request_redraw();
+            }
+        }
+    }
+
+    fn toggle_hud_window(&mut self) {
+        let new_visible = !self.hud_visible;
+        self.set_hud_visible(new_visible);
+    }
+
+    fn render_hud_frame(&mut self) -> anyhow::Result<()> {
+        let (hud_surface, hud_cfg, hud_window) = match (
+            self.hud_surface.as_ref(),
+            self.hud_surface_config.as_ref(),
+            self.hud_window.as_ref(),
+        ) {
+            (Some(s), Some(c), Some(w)) => (s, c, w),
+            _ => return Ok(()),
+        };
+
+        let output = match hud_surface.get_current_texture() {
+            Ok(o) => o,
+            Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
+                hud_surface.configure(&self.resources.device, hud_cfg);
+                return Ok(());
+            }
+            Err(wgpu::SurfaceError::Timeout) => {
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder =
+            self.resources
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("rfvp hud encoder"),
+                });
+
+        // Clear HUD window to black.
+        {
+            let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("hud clear"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+        }
+
+        if let Some(hud) = self.debug_hud.as_mut() {
+            let snap = {
+                let gd = gd_read(&self.game_data);
+                let graphs = gd.motion_manager.graphs();
+
+                let prim_tiles_enabled = std::env::var("RFVP_HUD_PRIM_TILES").as_deref() == Ok("1")
+                    || std::env::var("RFVP_TRACE_PRIM_TILES").as_deref() == Ok("1");
+
+                let prim_tiles = if prim_tiles_enabled {
+                    self.prim_renderer.debug_tiles().to_vec()
+                } else {
+                    Vec::new()
+                };
+
+                // Debug-only: ensure that graphs referenced by prim tiles are uploaded so the HUD can
+                // show real thumbnails (when CPU pixels exist).
+                if !prim_tiles.is_empty() {
+                    self.prim_renderer
+                        .debug_force_upload_tiles(self.resources.as_ref(), graphs);
+                }
+
+                // Texture list: show state, not just file names. This helps identify "not loaded"
+                // cases (no cpu pixels / not ready).
+                let list_max: usize = std::env::var("RFVP_HUD_TEXTURE_LIST_MAX")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(200);
+                let list_all = std::env::var("RFVP_HUD_TEXTURE_LIST_ALL").as_deref() == Ok("1");
+
+                let mut textures: Vec<String> = Vec::new();
+                textures.reserve(list_max.min(graphs.len()));
+
+                let mut with_path = 0usize;
+                let mut ready = 0usize;
+                let mut cpu = 0usize;
+                for (i, g) in graphs.iter().enumerate() {
+                    if !g.texture_path.is_empty() {
+                        with_path += 1;
+                    }
+                    if g.texture_ready {
+                        ready += 1;
+                    }
+                    if g.texture.is_some() {
+                        cpu += 1;
+                    }
+
+                    let interesting =
+                        g.texture_ready || g.texture.is_some() || !g.texture_path.is_empty();
+                    if !list_all && !interesting {
+                        continue;
+                    }
+                    if textures.len() >= list_max {
+                        continue;
+                    }
+                    let path = if g.texture_path.is_empty() {
+                        "<none>"
+                    } else {
+                        g.texture_path.as_str()
+                    };
+                    textures.push(format!(
+                        "[{:04}] ready={} cpu={} gen={} size={}x{} path={}",
+                        i,
+                        if g.texture_ready { 1 } else { 0 },
+                        if g.texture.is_some() { 1 } else { 0 },
+                        g.generation,
+                        g.width,
+                        g.height,
+                        path
+                    ));
+                }
+
+                textures.insert(0, format!(
+                    "graphs: total={} with_path={} ready={} cpu_img={} (set RFVP_HUD_TEXTURE_LIST_ALL=1 to show empty slots)",
+                    graphs.len(), with_path, ready, cpu
+                ));
+
+                let text_lines = gd.motion_manager.text_manager.debug_lines();
+
+                // Input summary (keys/mouse) to quickly diagnose "auto click" and key state.
+                let input_line = {
+                    const NAMES: [&str; 26] = [
+                        "Shift", "Ctrl", "LClick", "RClick", "MouseL", "MouseR", "Esc", "Enter",
+                        "Space", "Up", "Down", "Left", "Right", "F1", "F2", "F3", "F4", "F5", "F6",
+                        "F7", "F8", "F9", "F10", "F11", "F12", "Tab",
+                    ];
+
+                    let fmt_bits = |bits: u32| -> String {
+                        if bits == 0 {
+                            return "-".to_string();
+                        }
+                        let mut parts: Vec<&'static str> = Vec::new();
+                        for (i, name) in NAMES.iter().enumerate() {
+                            if ((bits >> i) & 1) != 0 {
+                                parts.push(*name);
+                            }
+                        }
+                        if parts.is_empty() {
+                            "-".to_string()
+                        } else {
+                            parts.join("|")
+                        }
+                    };
+
+                    let im = &gd.inputs_manager;
+                    let state = im.get_input_state();
+                    let down = im.get_input_down();
+                    let up = im.get_input_up();
+                    let rep = im.get_repeat();
+                    let wheel = im.get_wheel_value();
+                    let cin = im.get_cursor_in();
+                    let cx = im.get_cursor_x();
+                    let cy = im.get_cursor_y();
+
+                    format!(
+                        "input: state=[{}]  down=[{}]  up=[{}]  repeat=0x{:08X}  cursor_in={}  cursor=({}, {})  wheel={}",
+                        fmt_bits(state),
+                        fmt_bits(down),
+                        fmt_bits(up),
+                        rep,
+                        if cin { 1 } else { 0 },
+                        cx,
+                        cy,
+                        wheel
+                    )
+                };
+
+                HudSnapshot {
+                    frame_no: self.debug_frame_no,
+                    dt_ms: self.last_dt_ms,
+                    input_line,
+                    render: self.prim_renderer.stats(),
+                    se: gd.se_player_ref().debug_summary(),
+                    bgm: gd.bgm_player_ref().debug_summary(),
+                    vm: gd.debug_vm_ref().clone(),
+                    textures,
+                    text_slots: gd.motion_manager.text_manager.debug_lines(),
+                    text_lines,
+                    prim_tiles,
+                }
+            };
+
+            if !snap.prim_tiles.is_empty() {
+                hud.sync_prim_tile_textures(
+                    &self.resources.device,
+                    &self.prim_renderer,
+                    &snap.prim_tiles,
+                );
+            }
+
+            let ws = hud_window.inner_size();
+            let ppp = hud_window.scale_factor() as f32;
+            let pointer_pos = self
+                .hud_cursor_pos
+                .map(|(x, y)| (x as f32 / ppp.max(0.5), y as f32 / ppp.max(0.5)));
+            let inp = HudInput {
+                pointer_pos,
+                pointer_down: self.hud_pointer_down,
+                scroll_delta_y: self.hud_scroll_delta_y,
+            };
+            // Scroll is a per-frame delta.
+            self.hud_scroll_delta_y = 0.0;
+            hud.prepare_frame((ws.width, ws.height), ppp, &snap, Some(inp));
+            hud.render(
+                &self.resources.device,
+                &self.resources.queue,
+                &mut encoder,
+                &view,
+            );
+        }
+
+        self.resources.queue.submit(Some(encoder.finish()));
+
+        output.present();
+
+        Ok(())
+    }
+    pub fn find_hcb(game_path: impl AsRef<Path>) -> Result<PathBuf> {
+        let mut path = game_path.as_ref().to_path_buf();
+        path.push("*.hcb");
+
+        let matches: Vec<_> = glob::glob(&path.to_string_lossy())?.flatten().collect();
+
+        if matches.is_empty() {
+            anyhow::bail!(
+                "No hcb file found in the game directory: {}",
+                game_path.as_ref().display()
+            );
+        }
+
+        Ok(matches[0].to_path_buf())
+    }
+
+    /// Step the engine once in a host-driven environment (e.g. SwiftUI/UIKit on iOS).
+    ///
+    /// The host is responsible for calling this at a stable cadence (e.g. via CADisplayLink).
+    ///
+    /// Returns `true` if the engine requested exit.
+    pub fn host_step(&mut self, dt_ms: u32) -> bool {
+        // Exit once the main script thread is done and the engine requested shutdown.
+        {
+            let gd = gd_read(&self.game_data);
+            if gd.get_lock_scripter() && gd.get_main_thread_exited() {
+                return true;
+            }
+        }
+
+        // Host mode must preserve the desktop redraw semantics:
+        // - always run `next_frame()` when the frame is not pending
+        // - but allow the host to inject an external dt (iOS/Android runloop)
+        //
+        // IMPORTANT: `next_frame()` owns the per-frame engine side-effects (input begin_frame,
+        // cursor/window bookkeeping, motion updates, etc.). Bypassing it will make the engine
+        // appear "stuck" (no input, no audio events, no scene updates) even though the VM thread
+        // is ticking.
+        if !self.pending_vm_frame_ms_valid && dt_ms != 0 {
+            // Inject dt for the *next* frame.
+            {
+                let mut gd = gd_write(&self.game_data);
+                gd.time_mut_ref()
+                    .set_external_delta(Duration::from_millis(dt_ms as u64));
+            }
+        }
+
+        let (frame_ms, notify_dissolve_done) = self.next_frame();
+
+        if notify_dissolve_done {
+            self.vm_worker.send_dissolve_done_sync();
+        }
+
+        let _rep = self.vm_worker.send_frame_ms_sync(frame_ms);
+
+        self.apply_window_mode_requests();
+        self.update_cursor();
+
+        self.pending_vm_frame_ms_valid = false;
+
+        {
+            let mut gd = gd_write(&self.game_data);
+            self.layer_machine
+                .apply_scene_action(SceneAction::EndFrame, &mut *gd);
+        }
+
+        if let Err(e) = self.render_frame() {
+            log::error!("host_step: render_frame failed: {e:?}");
+        }
+
+        {
+            let mut gd = gd_write(&self.game_data);
+            gd.inputs_manager.frame_reset();
+        }
+
+        false
+    }
+
+    /// Resize the presentation surface in host-driven mode.
+    pub fn host_resize(&mut self, surface_width: u32, surface_height: u32) {
+        // Host-driven surfaces are configured in physical pixels.
+        // iOS touch input still arrives in UIKit points and is converted separately in host_touch().
+        let w = surface_width.max(1);
+        let h = surface_height.max(1);
+
+        self.surface_config.width = w;
+        self.surface_config.height = h;
+        self.surface
+            .configure(&self.resources.device, &self.surface_config);
+
+        // iOS host-mode renders at a fixed virtual resolution and presents into a
+        // surface with letterboxing/stretched fullscreen. Script-visible "window"
+        // dimensions must stay in the *virtual* coordinate space (used by effects
+        // like snow / hit-tests).
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        {
+            let mut gd = gd_write(&self.game_data);
+            gd.window_mut().set_dimensions(w, h);
+        }
+    }
+
+    /// Resize the presentation surface using physical pixels (Android host mode).
+    #[cfg(target_os = "android")]
+    pub fn host_resize_px(&mut self, surface_width_px: u32, surface_height_px: u32) {
+        let w = surface_width_px.max(1);
+        let h = surface_height_px.max(1);
+        self.surface_config.width = w;
+        self.surface_config.height = h;
+        self.surface
+            .configure(&self.resources.device, &self.surface_config);
+    }
+
+    #[cfg(target_os = "ios")]
+    fn ios_points_to_virtual_cursor(&self, x_points: f64, y_points: f64) -> (i32, i32, bool) {
+        let scale = self.native_scale_factor.max(0.5);
+        let px = x_points * scale;
+        let py = y_points * scale;
+
+        let (sw_u, sh_u) = (
+            self.surface_config.width.max(1),
+            self.surface_config.height.max(1),
+        );
+        let (vw_u, vh_u) = (self.virtual_size.0.max(1), self.virtual_size.1.max(1));
+
+        let sw = sw_u as f64;
+        let sh = sh_u as f64;
+        let vw = vw_u as f64;
+        let vh = vh_u as f64;
+
+        let scale = (sw / vw).min(sh / vh);
+        let dst_w = vw * scale;
+        let dst_h = vh * scale;
+        let off_x = (sw - dst_w) * 0.5;
+        let off_y = (sh - dst_h) * 0.5;
+
+        let in_content = px >= off_x && px < (off_x + dst_w) && py >= off_y && py < (off_y + dst_h);
+        let mut vx = ((px - off_x) / scale) as i32;
+        let mut vy = ((py - off_y) / scale) as i32;
+        if in_content {
+            let max_x = (vw as i32).saturating_sub(1);
+            let max_y = (vh as i32).saturating_sub(1);
+            vx = vx.clamp(0, max_x);
+            vy = vy.clamp(0, max_y);
+        }
+
+        (vx, vy, in_content)
+    }
+
+    /// Inject a single-finger touch event from an iOS host.
+    ///
+    /// `phase`:
+    /// - 0 = began
+    /// - 1 = moved
+    /// - 2 = ended
+    /// - 3 = cancelled
+    #[cfg(target_os = "ios")]
+    pub fn host_touch(&mut self, phase: i32, x_points: f64, y_points: f64) {
+        use crate::subsystem::resources::input_manager::KeyCode;
+
+        let scale = self.native_scale_factor.max(0.5);
+        let px = x_points * scale;
+        let py = y_points * scale;
+
+        if self.exit_confirm_ui.is_active() {
+            let consumed = self.exit_confirm_ui.handle_touch(
+                phase,
+                px,
+                py,
+                (self.surface_config.width, self.surface_config.height),
+                self.virtual_size,
+            );
+            if let Some(outcome) = self.exit_confirm_ui.take_outcome() {
+                self.apply_exit_confirm_outcome(outcome);
+            }
+            if consumed || self.exit_confirm_ui.is_active() {
+                return;
+            }
+        }
+
+        if self.legacy_save_load_ui.is_active() {
+            let mut gd = gd_write(&self.game_data);
+            let consumed = self.legacy_save_load_ui.handle_touch(
+                phase,
+                px,
+                py,
+                (self.surface_config.width, self.surface_config.height),
+                self.virtual_size,
+                &mut **gd,
+            );
+            if consumed || self.legacy_save_load_ui.is_active() {
+                return;
+            }
+        }
+
+        let (sw_u, sh_u) = (
+            self.surface_config.width.max(1),
+            self.surface_config.height.max(1),
+        );
+        let (vw_u, vh_u) = (self.virtual_size.0.max(1), self.virtual_size.1.max(1));
+
+        let sw = sw_u as f64;
+        let sh = sh_u as f64;
+        let vw = vw_u as f64;
+        let vh = vh_u as f64;
+
+        // Update input state under the same lock as the desktop event path.
+        {
+            let mut gd = gd_write(&self.game_data);
+            // Map surface physical pixels -> virtual game pixels using the same keep-aspect
+            // content rectangle as the presentation pass.
+            let scale = (sw / vw).min(sh / vh);
+            let dst_w = vw * scale;
+            let dst_h = vh * scale;
+            let off_x = (sw - dst_w) * 0.5;
+            let off_y = (sh - dst_h) * 0.5;
+
+            let in_content =
+                px >= off_x && px < (off_x + dst_w) && py >= off_y && py < (off_y + dst_h);
+            let mut vx = ((px - off_x) / scale) as i32;
+            let mut vy = ((py - off_y) / scale) as i32;
+            if in_content {
+                let max_x = (vw as i32).saturating_sub(1);
+                let max_y = (vh as i32).saturating_sub(1);
+                vx = vx.clamp(0, max_x);
+                vy = vy.clamp(0, max_y);
+            }
+
+            gd.inputs_manager.notify_mouse_move(vx, vy);
+            gd.inputs_manager.set_mouse_in(in_content);
+
+            match phase {
+                0 => gd.inputs_manager.notify_mouse_down(KeyCode::MouseLeft),
+                2 | 3 => gd.inputs_manager.notify_mouse_up(KeyCode::MouseLeft),
+                _ => {}
+            }
+        }
+
+        // Wake the VM for touch edges only. Move events are coalesced by the per-frame path;
+        // waking the VM for every move floods Android/iOS during drags.
+        if matches!(phase, 0 | 2 | 3) {
+            self.vm_worker.send_input_signal();
+        }
+    }
+
+    /// Inject a mouse-button event from an iOS host.
+    ///
+    /// `button`: 0 = left, 1 = right.
+    /// `phase`: 0 = down, 1 = move, 2 = up, 3 = cancel/up.
+    #[cfg(target_os = "ios")]
+    pub fn host_mouse_button_ios(&mut self, button: i32, phase: i32, x_points: f64, y_points: f64) {
+        use crate::subsystem::resources::input_manager::KeyCode;
+
+        if button == 0 {
+            self.host_touch(phase, x_points, y_points);
+            return;
+        }
+
+        let keycode = match button {
+            1 => KeyCode::MouseRight,
+            _ => return,
+        };
+
+        if self.exit_confirm_ui.is_active() || self.legacy_save_load_ui.is_active() {
+            return;
+        }
+
+        let (vx, vy, in_content) = self.ios_points_to_virtual_cursor(x_points, y_points);
+        {
+            let mut gd = gd_write(&self.game_data);
+            gd.inputs_manager.notify_mouse_move(vx, vy);
+            gd.inputs_manager.set_mouse_in(in_content);
+
+            match phase {
+                0 => gd.inputs_manager.notify_mouse_down(keycode.clone()),
+                2 | 3 => gd.inputs_manager.notify_mouse_up(keycode.clone()),
+                _ => {}
+            }
+        }
+
+        if matches!(phase, 0 | 2 | 3) {
+            self.vm_worker.send_input_signal();
+        }
+    }
+
+    /// Inject a mouse-wheel event from an iOS host.
+    ///
+    /// `delta` uses the same sign convention as InputManager::notify_mouse_wheel.
+    #[cfg(target_os = "ios")]
+    pub fn host_mouse_wheel_ios(&mut self, delta: i32, x_points: f64, y_points: f64) {
+        if delta == 0 {
+            return;
+        }
+
+        if self.exit_confirm_ui.is_active() || self.legacy_save_load_ui.is_active() {
+            return;
+        }
+
+        let (vx, vy, in_content) = self.ios_points_to_virtual_cursor(x_points, y_points);
+        {
+            let mut gd = gd_write(&self.game_data);
+            gd.inputs_manager.notify_mouse_move(vx, vy);
+            gd.inputs_manager.set_mouse_in(in_content);
+            gd.inputs_manager.notify_mouse_wheel(delta);
+        }
+
+        self.vm_worker.send_input_signal();
+    }
+
+    /// Inject a key event from an iOS host.
+    ///
+    /// `key`: 0 = Escape.
+    /// `phase`: 0 = down, 2 = up, 3 = cancel/up.
+    #[cfg(target_os = "ios")]
+    pub fn host_key_ios(&mut self, key: i32, phase: i32) {
+        use winit::keyboard::{Key, NamedKey};
+
+        let key_value = match key {
+            0 => Key::Named(NamedKey::Escape),
+            _ => return,
+        };
+
+        if self.exit_confirm_ui.is_active() || self.legacy_save_load_ui.is_active() {
+            return;
+        }
+
+        {
+            let mut gd = gd_write(&self.game_data);
+            match phase {
+                0 => gd.inputs_manager.notify_keydown(key_value.clone(), false),
+                2 | 3 => gd.inputs_manager.notify_keyup(key_value.clone()),
+                _ => {}
+            }
+        }
+
+        if matches!(phase, 0 | 2 | 3) {
+            self.vm_worker.send_input_signal();
+        }
+    }
+
+    /// Inject a single-finger touch event from an Android host.
+    ///
+    /// `phase`:
+    /// - 0 = began
+    /// - 1 = moved
+    /// - 2 = ended
+    /// - 3 = cancelled
+    #[cfg(target_os = "android")]
+    pub fn host_touch_android(&mut self, phase: i32, x_px: f64, y_px: f64) {
+        use crate::subsystem::resources::input_manager::KeyCode;
+
+        let px = x_px;
+        let py = y_px;
+
+        if self.exit_confirm_ui.is_active() {
+            let consumed = self.exit_confirm_ui.handle_touch(
+                phase,
+                px,
+                py,
+                (self.surface_config.width, self.surface_config.height),
+                self.virtual_size,
+            );
+            if let Some(outcome) = self.exit_confirm_ui.take_outcome() {
+                self.apply_exit_confirm_outcome(outcome);
+            }
+            if consumed || self.exit_confirm_ui.is_active() {
+                return;
+            }
+        }
+
+        if self.legacy_save_load_ui.is_active() {
+            let mut gd = gd_write(&self.game_data);
+            let consumed = self.legacy_save_load_ui.handle_touch(
+                phase,
+                px,
+                py,
+                (self.surface_config.width, self.surface_config.height),
+                self.virtual_size,
+                &mut **gd,
+            );
+            if consumed || self.legacy_save_load_ui.is_active() {
+                return;
+            }
+        }
+
+        let (sw_u, sh_u) = (
+            self.surface_config.width.max(1),
+            self.surface_config.height.max(1),
+        );
+        let (vw_u, vh_u) = (self.virtual_size.0.max(1), self.virtual_size.1.max(1));
+
+        let sw = sw_u as f64;
+        let sh = sh_u as f64;
+        let vw = vw_u as f64;
+        let vh = vh_u as f64;
+
+        {
+            let mut gd = gd_write(&self.game_data);
+            let scale = (sw / vw).min(sh / vh);
+            let dst_w = vw * scale;
+            let dst_h = vh * scale;
+            let off_x = (sw - dst_w) * 0.5;
+            let off_y = (sh - dst_h) * 0.5;
+
+            let in_content =
+                px >= off_x && px < (off_x + dst_w) && py >= off_y && py < (off_y + dst_h);
+            let mut vx = ((px - off_x) / scale) as i32;
+            let mut vy = ((py - off_y) / scale) as i32;
+            if in_content {
+                let max_x = (vw as i32).saturating_sub(1);
+                let max_y = (vh as i32).saturating_sub(1);
+                vx = vx.clamp(0, max_x);
+                vy = vy.clamp(0, max_y);
+            }
+
+            gd.inputs_manager.notify_mouse_move(vx, vy);
+            gd.inputs_manager.set_mouse_in(in_content);
+
+            match phase {
+                0 => gd.inputs_manager.notify_mouse_down(KeyCode::MouseLeft),
+                2 | 3 => gd.inputs_manager.notify_mouse_up(KeyCode::MouseLeft),
+                _ => {}
+            }
+        }
+
+        if matches!(phase, 0 | 2 | 3) {
+            self.vm_worker.send_input_signal();
+        }
+    }
+
+    /// Recreate the presentation surface from a new `ANativeWindow*`.
+    #[cfg(target_os = "android")]
+    pub fn host_set_surface_android(
+        &mut self,
+        native_window: NonNull<c_void>,
+        width_px: u32,
+        height_px: u32,
+    ) {
+        let Some(instance) = self.wgpu_instance.as_ref() else {
+            log::error!("host_set_surface_android: missing wgpu_instance");
+            return;
+        };
+        let Some(adapter) = self.wgpu_adapter.as_ref() else {
+            log::error!("host_set_surface_android: missing wgpu_adapter");
+            return;
+        };
+
+        // Hold a reference to the new ANativeWindow for the lifetime of the new wgpu Surface.
+        unsafe {
+            ANativeWindow_acquire(native_window.as_ptr());
+        }
+
+        struct AndroidSurfaceTarget {
+            window: NonNull<c_void>,
+        }
+
+        // SAFETY: The handle is only used to build the surface on the calling thread.
+        unsafe impl Send for AndroidSurfaceTarget {}
+        unsafe impl Sync for AndroidSurfaceTarget {}
+
+        impl HasWindowHandle for AndroidSurfaceTarget {
+            fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+                let mut wh = AndroidNdkWindowHandle::new(self.window);
+                // SAFETY: `wh` is valid for the duration of this call.
+                Ok(unsafe { WindowHandle::borrow_raw(RawWindowHandle::AndroidNdk(wh)) })
+            }
+        }
+
+        impl HasDisplayHandle for AndroidSurfaceTarget {
+            fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+                let dh = AndroidDisplayHandle::new();
+                // SAFETY: `dh` is valid for the duration of this call.
+                Ok(unsafe { DisplayHandle::borrow_raw(RawDisplayHandle::Android(dh)) })
+            }
+        }
+
+        let target = AndroidSurfaceTarget {
+            window: native_window,
+        };
+
+        let new_surface = match instance.create_surface(&target) {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("host_set_surface_android: create_surface failed: {e:?}");
+                unsafe {
+                    ANativeWindow_release(native_window.as_ptr());
+                }
+                return;
+            }
+        };
+
+        let new_surface: wgpu::Surface<'static> = unsafe {
+            std::mem::transmute::<wgpu::Surface<'_>, wgpu::Surface<'static>>(new_surface)
+        };
+
+        self.surface = new_surface;
+
+        let caps = self.surface.get_capabilities(adapter);
+        if !caps.formats.is_empty() {
+            let preferred = self.surface_config.format;
+            self.surface_config.format = caps
+                .formats
+                .iter()
+                .copied()
+                .find(|f| *f == preferred)
+                .unwrap_or(caps.formats[0]);
+        }
+        if !caps.alpha_modes.is_empty() {
+            self.surface_config.alpha_mode = caps.alpha_modes[0];
+        }
+
+        self.surface_config.width = width_px.max(1);
+        self.surface_config.height = height_px.max(1);
+        self.surface
+            .configure(&self.resources.device, &self.surface_config);
+
+        // Store the window pointer for the lifetime of the Surface and release the previous one.
+        let old = self.android_native_window.replace(native_window);
+        if let Some(old) = old {
+            unsafe {
+                ANativeWindow_release(old.as_ptr());
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+impl Drop for App {
+    fn drop(&mut self) {
+        {
+            let gd = gd_read(&self.game_data);
+            if let Err(e) = crate::subsystem::global_savedata::save_global_savedata_v1(&gd) {
+                log::error!("Failed to save global savedata on exit: {:#}", e);
+            }
+        }
+        if let Some(w) = self.android_native_window.take() {
+            unsafe {
+                ANativeWindow_release(w.as_ptr());
+            }
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+impl Drop for App {
+    fn drop(&mut self) {
+        let gd = gd_read(&self.game_data);
+        if let Err(e) = crate::subsystem::global_savedata::save_global_savedata_v1(&gd) {
+            log::error!("Failed to save global savedata on exit: {:#}", e);
+        }
+    }
+}
+
+pub struct AppBuilder {
+    config: AppConfig,
+    scheduler: Scheduler,
+    scene: Option<Box<dyn Scene>>,
+    world: Box<GameData>,
+    title: String,
+    size: (u32, u32),
+    parser: Parser,
+    script_engine: ThreadManager,
+}
+
+impl AppBuilder {
+    fn new(config: AppConfig) -> Self {
+        // `AppBuilder` itself is small, but `GameData` is large. If we keep `GameData` inline,
+        // returning / passing `AppBuilder` by value can force the compiler to reserve a large
+        // sret/return slot on the stack (especially problematic on iOS/Android where the main
+        // thread stack is ~1MB). Keep `GameData` on the heap from the beginning.
+        let world: Box<GameData> = {
+            let mut boxed: Box<std::mem::MaybeUninit<GameData>> = Box::new_uninit();
+            unsafe {
+                crate::subsystem::world::GameData::init_default_in_place(boxed.as_mut_ptr().cast());
+                // Convert `Box<MaybeUninit<GameData>>` to `Box<GameData>` without creating a
+                // large temporary on the stack.
+                let raw: *mut GameData = Box::into_raw(boxed).cast();
+                Box::from_raw(raw)
+            }
+        };
+
+        Self {
+            config,
+            scheduler: Default::default(),
+            scene: Default::default(),
+            world,
+            title: Default::default(),
+            size: Default::default(),
+            parser: Default::default(),
+            script_engine: Default::default(),
+        }
+    }
+
+    /// Construct a builder on the heap.
+    ///
+    /// Note: `AppBuilder` is now small (it holds `GameData` behind a `Box`), so this is just a
+    /// convenience wrapper.
+    pub fn new_boxed(config: AppConfig) -> Box<Self> {
+        Box::new(Self::new(config))
+    }
+
+    /// Specify a system to add to the scheduler.
+    pub fn with_system(mut self, system: fn(&mut GameData)) -> Self {
+        self.scheduler.add_system(system);
+        self
+    }
+
+    /// Add a normal game layer to the pile. Every layer added before in the pile will be called
+    pub fn with_scene<T: Scene + Default + 'static>(mut self) -> Self {
+        self.scene = Some(Box::<T>::default());
+        self
+    }
+
+    pub fn with_vfs(mut self, nls: Nls) -> anyhow::Result<Self> {
+        self.world.vfs = crate::subsystem::resources::vfs::Vfs::new(nls)?;
+        Ok(self)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn with_wasm_vfs(mut self, vfs: crate::subsystem::resources::vfs::Vfs) -> Self {
+        self.world.vfs = vfs;
+        self
+    }
+
+    pub fn with_window_title(mut self, title: &str) -> Self {
+        self.title = title.to_owned();
+        self
+    }
+
+    pub fn with_window_size(mut self, size: (u32, u32)) -> Self {
+        self.size = size;
+        self
+    }
+
+    pub fn with_script_engine(mut self, script_engine: ThreadManager) -> Self {
+        self.script_engine = script_engine;
+        self
+    }
+
+    pub fn with_parser(mut self, parser: Parser) -> Self {
+        self.parser = parser;
+        self
+    }
+
+    pub fn with_system_font(mut self, enabled: bool) -> Self {
+        self.world
+            .fontface_manager
+            .set_system_font_fallback_enabled(enabled);
+        self
+    }
+
+    async fn init_render(
+        window: Arc<Window>,
+        hud_window: Option<Arc<Window>>,
+        virtual_size: (u32, u32),
+    ) -> (
+        Arc<GpuCommonResources>,
+        RenderTarget,
+        wgpu::Surface<'static>,
+        wgpu::SurfaceConfiguration,
+        Option<(wgpu::Surface<'static>, wgpu::SurfaceConfiguration)>,
+    ) {
+        let size = window.inner_size();
+        #[cfg(target_arch = "wasm32")]
+        let backends = wgpu::Backends::GL;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let backends = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::all());
+
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends,
+            ..Default::default()
+        });
+
+        // Main surface
+        let surface = {
+            let s = instance.create_surface(window.as_ref()).unwrap();
+            unsafe { std::mem::transmute::<wgpu::Surface<'_>, wgpu::Surface<'static>>(s) }
+        };
+
+        // Optional HUD surface (same Instance/Adapter)
+        let hud_surface: Option<wgpu::Surface<'static>> = hud_window.as_ref().map(|w| {
+            let s = instance.create_surface(w.as_ref()).unwrap();
+            unsafe { std::mem::transmute::<wgpu::Surface<'_>, wgpu::Surface<'static>>(s) }
+        });
+
+        let adapter = wgpu::util::initialize_adapter_from_env_or_default(&instance, Some(&surface))
+            .await
+            .unwrap();
+
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: None,
+                    #[cfg(not(target_arch = "wasm32"))]
+                    required_features: wgpu::Features::PUSH_CONSTANTS,
+                    #[cfg(target_arch = "wasm32")]
+                    required_features: wgpu::Features::empty(),
+                    #[cfg(not(target_arch = "wasm32"))]
+                    required_limits: {
+                        let mut limits = wgpu::Limits::downlevel_webgl2_defaults()
+                            .using_resolution(adapter.limits());
+
+                        // The renderer uses <= 80 bytes of push constants today.
+                        // Requesting 256 will fail on some Android/Vulkan drivers (including some emulators).
+                        limits.max_push_constant_size = 80;
+
+                        limits
+                    },
+
+                    #[cfg(target_arch = "wasm32")]
+                    required_limits: adapter.limits(),
+                },
+                None,
+            )
+            .await
+            .expect("Failed to create device");
+
+        let swapchain_capabilities = surface.get_capabilities(&adapter);
+        let swapchain_format = swapchain_capabilities.formats[0];
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: swapchain_format,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: swapchain_capabilities.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+
+        surface.configure(&device, &config);
+
+        let hud_bundle = if let (Some(hs), Some(hw)) = (hud_surface, hud_window.as_ref()) {
+            let hs_caps = hs.get_capabilities(&adapter);
+            let hud_format = hs_caps
+                .formats
+                .iter()
+                .copied()
+                .find(|f| *f == swapchain_format)
+                .unwrap_or(hs_caps.formats[0]);
+            let hud_size = hw.inner_size();
+            let hud_cfg = wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format: hud_format,
+                width: hud_size.width.max(1),
+                height: hud_size.height.max(1),
+                present_mode: wgpu::PresentMode::Fifo,
+                alpha_mode: hs_caps.alpha_modes[0],
+                view_formats: vec![],
+                desired_maximum_frame_latency: 2,
+            };
+            hs.configure(&device, &hud_cfg);
+            Some((hs, hud_cfg))
+        } else {
+            None
+        };
+
+        let queue = Arc::new(queue);
+
+        let bind_group_layouts = BindGroupLayouts::new(&device);
+
+        let pipelines = Pipelines::new(&device, &queue, &bind_group_layouts, swapchain_format);
+
+        let resources = Arc::new(GpuCommonResources {
+            device,
+            queue,
+            render_buffer_size: RwLock::new(virtual_size),
+            bind_group_layouts,
+            pipelines,
+        });
+
+        let render_target = RenderTarget::new(
+            &resources,
+            virtual_size,
+            virtual_size,
+            Some("Window RenderTarget"),
+        );
+
+        (resources, render_target, surface, config, hud_bundle)
+    }
+
+    #[cfg(target_os = "ios")]
+    async fn init_render_ios(
+        ui_view: NonNull<c_void>,
+        surface_size: (u32, u32),
+        virtual_size: (u32, u32),
+    ) -> (
+        wgpu::Instance,
+        wgpu::Adapter,
+        Arc<GpuCommonResources>,
+        RenderTarget,
+        wgpu::Surface<'static>,
+        wgpu::SurfaceConfiguration,
+    ) {
+        struct IosSurfaceTarget {
+            view: NonNull<c_void>,
+        }
+
+        unsafe impl Send for IosSurfaceTarget {}
+        unsafe impl Sync for IosSurfaceTarget {}
+
+        impl HasWindowHandle for IosSurfaceTarget {
+            fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+                let wh = UiKitWindowHandle::new(self.view);
+                // SAFETY: `view` is owned by the host and guaranteed to outlive the surface.
+                Ok(unsafe { WindowHandle::borrow_raw(RawWindowHandle::UiKit(wh)) })
+            }
+        }
+
+        impl HasDisplayHandle for IosSurfaceTarget {
+            fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+                let dh = UiKitDisplayHandle::new();
+                // SAFETY: UIKit display handle has no borrowed pointers.
+                Ok(unsafe { DisplayHandle::borrow_raw(RawDisplayHandle::UiKit(dh)) })
+            }
+        }
+
+        let (sw, sh) = (surface_size.0.max(1), surface_size.1.max(1));
+        let backends = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::all());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends,
+            ..Default::default()
+        });
+
+        let surface = {
+            let target = IosSurfaceTarget { view: ui_view };
+            let s = instance.create_surface(&target).unwrap();
+            unsafe { std::mem::transmute::<wgpu::Surface<'_>, wgpu::Surface<'static>>(s) }
+        };
+
+        let adapter = wgpu::util::initialize_adapter_from_env_or_default(&instance, Some(&surface))
+            .await
+            .unwrap();
+
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: None,
+                    required_features: wgpu::Features::PUSH_CONSTANTS,
+                    required_limits: wgpu::Limits {
+                        max_push_constant_size: 80,
+                        // The renderer uses <= 80 bytes of push constants today.
+                        // Requesting 256 will fail on some Android/Vulkan drivers (including some emulators).
+                        ..wgpu::Limits::downlevel_webgl2_defaults()
+                            .using_resolution(adapter.limits())
+                    },
+                },
+                None,
+            )
+            .await
+            .expect("Failed to create device");
+
+        let swapchain_capabilities = surface.get_capabilities(&adapter);
+        let swapchain_format = swapchain_capabilities.formats[0];
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: swapchain_format,
+            width: sw,
+            height: sh,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: swapchain_capabilities.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &config);
+
+        let queue = Arc::new(queue);
+
+        let bind_group_layouts = BindGroupLayouts::new(&device);
+
+        let pipelines = Pipelines::new(&device, &queue, &bind_group_layouts, swapchain_format);
+
+        let resources = Arc::new(GpuCommonResources {
+            device,
+            queue,
+            render_buffer_size: RwLock::new(virtual_size),
+            bind_group_layouts,
+            pipelines,
+        });
+
+        let render_target = RenderTarget::new(
+            &resources,
+            virtual_size,
+            virtual_size,
+            Some("iOS RenderTarget"),
+        );
+
+        (instance, adapter, resources, render_target, surface, config)
+    }
+
+    #[cfg(target_os = "android")]
+    async fn init_render_android(
+        native_window: NonNull<c_void>,
+        surface_size_px: (u32, u32),
+        virtual_size: (u32, u32),
+    ) -> (
+        wgpu::Instance,
+        wgpu::Adapter,
+        Arc<GpuCommonResources>,
+        RenderTarget,
+        wgpu::Surface<'static>,
+        wgpu::SurfaceConfiguration,
+    ) {
+        struct AndroidSurfaceTarget {
+            window: NonNull<c_void>,
+        }
+
+        unsafe impl Send for AndroidSurfaceTarget {}
+        unsafe impl Sync for AndroidSurfaceTarget {}
+
+        impl HasWindowHandle for AndroidSurfaceTarget {
+            fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+                let wh = AndroidNdkWindowHandle::new(self.window);
+                Ok(unsafe { WindowHandle::borrow_raw(RawWindowHandle::AndroidNdk(wh)) })
+            }
+        }
+
+        impl HasDisplayHandle for AndroidSurfaceTarget {
+            fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+                let dh = AndroidDisplayHandle::new();
+                Ok(unsafe { DisplayHandle::borrow_raw(RawDisplayHandle::Android(dh)) })
+            }
+        }
+
+        let (sw, sh) = (surface_size_px.0.max(1), surface_size_px.1.max(1));
+        let backends = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::all());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends,
+            ..Default::default()
+        });
+
+        let surface = {
+            let target = AndroidSurfaceTarget {
+                window: native_window,
+            };
+            let s = instance.create_surface(&target).unwrap();
+            unsafe { std::mem::transmute::<wgpu::Surface<'_>, wgpu::Surface<'static>>(s) }
+        };
+
+        let adapter = wgpu::util::initialize_adapter_from_env_or_default(&instance, Some(&surface))
+            .await
+            .unwrap();
+
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: None,
+                    required_features: wgpu::Features::PUSH_CONSTANTS,
+                    required_limits: wgpu::Limits {
+                        max_push_constant_size: 80,
+                        // The renderer uses <= 80 bytes of push constants today.
+                        // Requesting 256 will fail on some Android/Vulkan drivers (including some emulators).
+                        ..wgpu::Limits::downlevel_webgl2_defaults()
+                            .using_resolution(adapter.limits())
+                    },
+                },
+                None,
+            )
+            .await
+            .expect("Failed to create device");
+
+        let swapchain_capabilities = surface.get_capabilities(&adapter);
+        let swapchain_format = swapchain_capabilities.formats[0];
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: swapchain_format,
+            width: sw,
+            height: sh,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: swapchain_capabilities.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &config);
+
+        let queue = Arc::new(queue);
+
+        let bind_group_layouts = BindGroupLayouts::new(&device);
+
+        let pipelines = Pipelines::new(&device, &queue, &bind_group_layouts, swapchain_format);
+
+        let resources = Arc::new(GpuCommonResources {
+            device,
+            queue,
+            render_buffer_size: RwLock::new(virtual_size),
+            bind_group_layouts,
+            pipelines,
+        });
+
+        let render_target = RenderTarget::new(
+            &resources,
+            virtual_size,
+            virtual_size,
+            Some("Android RenderTarget"),
+        );
+
+        (instance, adapter, resources, render_target, surface, config)
+    }
+
+    /// Build the application and return an owned event loop + app.
+    ///
+    /// This is used by both the classic blocking `run()` and the "pump" mode used by GUI hosts
+    /// (e.g. SwiftUI launchers) that already own the platform main loop.
+    pub fn build(mut self) -> anyhow::Result<Box<BuiltApp>> {
+        let event_loop = EventLoop::new().context("Event loop could not be created")?;
+        event_loop.set_control_flow(ControlFlow::Poll);
+
+        let wc = self
+            .config
+            .window_config
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("The window configuration has not been found"))?;
+
+        let window_builder: WindowAttributes = wc.into(&self.config);
+        let window = event_loop
+            .create_window(window_builder)
+            .context("An error occured while building the main game window")?;
+
+        let window = Arc::new(window);
+
+        // WindowMode(3) in the original engine reflects whether an exact game-resolution
+        // exclusive fullscreen mode is available.
+        self.world
+            .set_can_fullscreen(find_exact_game_video_mode(&window, self.size).is_some());
+
+        // Debug HUD window (created hidden, toggled via F2).
+        let hud_window: Option<Arc<Window>> =
+            if debug_ui::enabled() && !cfg!(any(target_os = "ios", target_os = "android")) {
+                let ms = window.inner_size();
+                let attrs = WindowAttributes::default()
+                    .with_title("rfvp HUD")
+                    .with_inner_size(Size::Physical(PhysicalSize::new(
+                        ms.width.max(1),
+                        ms.height.max(1),
+                    )))
+                    .with_resizable(true)
+                    .with_visible(false);
+                let w = event_loop
+                    .create_window(attrs)
+                    .context("An error occured while building the HUD window")?;
+                Some(Arc::new(w))
+            } else {
+                None
+            };
+
+        self.add_late_internal_systems_to_schedule();
+
+        // let renderer_state =
+        //     futures::executor::block_on(RendererState::new(window.clone()));
+
+        let (resources, render_target, surface, surface_config, hud_bundle) =
+            futures::executor::block_on(AppBuilder::init_render(
+                window.clone(),
+                hud_window.clone(),
+                self.size,
+            ));
+
+        let entry_point = self.parser.get_entry_point();
+        let non_volatile_global_count = self.parser.get_non_volatile_global_count();
+        let volatile_global_count = self.parser.get_volatile_global_count();
+        GLOBAL
+            .lock()
+            .unwrap()
+            .init_with(non_volatile_global_count, volatile_global_count);
+        if let Err(e) = self.world.fontface_manager.init_fontface() {
+            log::error!("Failed to scan font directory: {:#}", e);
+        }
+        if let Err(e) =
+            crate::subsystem::global_savedata::try_load_global_savedata_v1(&mut self.world)
+        {
+            log::error!("Failed to load global savedata: {:#}", e);
+        }
+
+        self.script_engine.start_main(entry_point);
+        self.world.nls = self.parser.nls.clone();
+
+        let mut cursor_table = HashMap::new();
+        if let Ok(cursor_paths) = self.world.vfs.find_ani() {
+            let re = Regex::new(r"^([a-zA-Z_]+)(\d+)$").unwrap();
+            for path in &cursor_paths {
+                // split cursor1.ani into `cursor` and `1`
+                let filename = path.file_stem().unwrap_or_default().to_string_lossy();
+
+                if let Some(caps) = re.captures(&filename) {
+                    let prefix = caps[1].to_string();
+                    let number = caps[2].to_string();
+
+                    if let Ok(index) = number.parse::<u32>() {
+                        let Ok(file) = File::open(path) else {
+                            log::error!("Failed to open cursor : {}", path.display());
+                            continue;
+                        };
+                        if let Ok(cursor) = ani::Decoder::new(file).decode() {
+                            let mut failed = false;
+                            let mut sources = vec![];
+                            for frame in &cursor.frames {
+                                match icondir_to_custom_cursor(frame) {
+                                    Ok(s) => {
+                                        sources.push(s);
+                                    }
+                                    Err(e) => {
+                                        log::error!("{:#?}", e);
+                                        failed = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if failed {
+                                log::error!("Failed to load icon : {}", path.display());
+                                continue;
+                            }
+
+                            let mut new_cursors = vec![];
+                            for s in sources {
+                                let c = event_loop.create_custom_cursor(s);
+                                new_cursors.push(c);
+                            }
+
+                            let cb = CursorBundle {
+                                animated_cursor: cursor,
+                                frames: new_cursors,
+                                current_frame: 0,
+                                last_update: Instant::now(),
+                            };
+
+                            log::info!("loaded ANI cursor slot {} from {}", index, path.display());
+                            cursor_table.insert(index, cb);
+                        }
+                    }
+                } else {
+                    continue;
+                }
+            }
+        }
+
+        log::info!("ANI cursor table size: {}", cursor_table.len());
+        self.world.set_cursor_table(cursor_table);
+
+        // Fullscreen quad used for dissolve overlays (virtual space, pixel coordinates).
+        let (dissolve_vertex_buffer, dissolve_index_buffer, dissolve_num_indices) = {
+            let w = self.size.0.max(1) as f32;
+            let h = self.size.1.max(1) as f32;
+            let vertices: [PosVertex; 4] = [
+                PosVertex {
+                    position: vec3(0.0, 0.0, 0.0),
+                },
+                PosVertex {
+                    position: vec3(w, 0.0, 0.0),
+                },
+                PosVertex {
+                    position: vec3(w, h, 0.0),
+                },
+                PosVertex {
+                    position: vec3(0.0, h, 0.0),
+                },
+            ];
+            let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+
+            let vb = resources
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("rfvp dissolve quad VB"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let ib = resources
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("rfvp dissolve quad IB"),
+                    contents: bytemuck::cast_slice(&indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+            (vb, ib, indices.len() as u32)
+        };
+
+        let builtin_exit_ui_enabled = self
+            .parser
+            .get_all_syscalls()
+            .values()
+            .any(|syscall| syscall.name == "ConfigEtc");
+        let game_data = Arc::new(RwLock::new(self.world));
+        let debug_ring = log_ring::get().unwrap_or_else(|| log_ring::init(4096));
+        let vm_worker = VmWorker::spawn(game_data.clone(), self.parser, self.script_engine);
+
+        let (hud_surface, hud_surface_config) = match hud_bundle {
+            Some((s, c)) => (Some(s), Some(c)),
+            None => (None, None),
+        };
+
+        let hud_surface_format = hud_surface_config
+            .as_ref()
+            .map(|c| c.format)
+            .unwrap_or(surface_config.format);
+
+        // NOTE: iOS main-thread stack is small. Avoid constructing large `App` values on the stack.
+        // Initialize `App` directly on the heap, then run `setup()`.
+        let prim_renderer = GpuPrimRenderer::new(resources.clone(), self.size);
+        // Share a single MS Gothic font instance with both UIs to avoid
+        // re-parsing the embedded TTF (Font::clone is a refcount bump).
+        let ui_font = gd_read(&game_data)
+            .fontface_manager
+            .get_font(crate::subsystem::resources::text_manager::FONTFACE_MS_GOTHIC);
+        let legacy_save_load_ui = LegacySaveLoadUi::new(&resources, self.size, ui_font.clone());
+        let exit_confirm_ui = ExitConfirmUi::new(&resources, self.size, ui_font);
+        let layer_machine = SceneMachine {
+            current_scene: self.scene,
+        };
+        let render_tree = RenderTree::new();
+        let debug_hud = if debug_ui::enabled() {
+            Some(DebugHud::new(
+                &resources.device,
+                hud_surface_format,
+                debug_ring.clone(),
+            ))
+        } else {
+            None
+        };
+
+        let mut app: Box<App> = {
+            use std::mem::MaybeUninit;
+            use std::ptr;
+
+            // Build the `App` directly on the heap to avoid a large stack frame.
+            // (iOS main-thread stack is ~1MB; a large struct literal can overflow it.)
+            let mut boxed = Box::<MaybeUninit<App>>::new_uninit();
+            unsafe {
+                // `MaybeUninit<T>` is `repr(transparent)`, so this cast is sound.
+                let p: *mut App = boxed.as_mut_ptr().cast();
+
+                ptr::addr_of_mut!((*p).config).write(self.config);
+                ptr::addr_of_mut!((*p).game_data).write(game_data);
+                ptr::addr_of_mut!((*p).title).write(self.title);
+                ptr::addr_of_mut!((*p).scheduler).write(self.scheduler);
+                ptr::addr_of_mut!((*p).layer_machine).write(layer_machine);
+                ptr::addr_of_mut!((*p).window).write(Some(window.clone()));
+                ptr::addr_of_mut!((*p).native_scale_factor).write(window.scale_factor());
+                ptr::addr_of_mut!((*p).pump_mode).write(false);
+                ptr::addr_of_mut!((*p).windowed_restore).write(None);
+                ptr::addr_of_mut!((*p).last_fullscreen_flag).write(1);
+
+                ptr::addr_of_mut!((*p).vm_worker).write(vm_worker);
+                ptr::addr_of_mut!((*p).pending_vm_frame_ms).write(0);
+                ptr::addr_of_mut!((*p).pending_vm_frame_ms_valid).write(false);
+
+                ptr::addr_of_mut!((*p).render_target).write(render_target);
+                ptr::addr_of_mut!((*p).resources).write(resources.clone());
+                ptr::addr_of_mut!((*p).surface).write(surface);
+                ptr::addr_of_mut!((*p).surface_config).write(surface_config);
+
+                #[cfg(any(target_os = "ios", target_os = "android"))]
+                {
+                    ptr::addr_of_mut!((*p).wgpu_instance).write(None);
+                    ptr::addr_of_mut!((*p).wgpu_adapter).write(None);
+                }
+                ptr::addr_of_mut!((*p).prim_renderer).write(prim_renderer);
+                ptr::addr_of_mut!((*p).virtual_size).write(self.size);
+                ptr::addr_of_mut!((*p).render_tree).write(render_tree);
+
+                ptr::addr_of_mut!((*p).dissolve_vertex_buffer).write(dissolve_vertex_buffer);
+                ptr::addr_of_mut!((*p).dissolve_index_buffer).write(dissolve_index_buffer);
+                ptr::addr_of_mut!((*p).dissolve_num_indices).write(dissolve_num_indices);
+                ptr::addr_of_mut!((*p).last_dissolve_type).write(DissolveType::None);
+                ptr::addr_of_mut!((*p).last_dissolve2_transitioning).write(false);
+                ptr::addr_of_mut!((*p).legacy_save_load_ui).write(legacy_save_load_ui);
+                ptr::addr_of_mut!((*p).exit_confirm_ui).write(exit_confirm_ui);
+                ptr::addr_of_mut!((*p).builtin_exit_ui_enabled).write(builtin_exit_ui_enabled);
+                ptr::addr_of_mut!((*p).pending_app_exit).write(false);
+
+                ptr::addr_of_mut!((*p).debug_hud).write(debug_hud);
+                ptr::addr_of_mut!((*p).hud_window).write(hud_window.clone());
+                ptr::addr_of_mut!((*p).hud_surface).write(hud_surface);
+                ptr::addr_of_mut!((*p).hud_surface_config).write(hud_surface_config);
+                ptr::addr_of_mut!((*p).hud_visible).write(false);
+
+                ptr::addr_of_mut!((*p).debug_ring).write(debug_ring.clone());
+                ptr::addr_of_mut!((*p).debug_frame_no).write(0);
+                ptr::addr_of_mut!((*p).last_dt_ms).write(0.0);
+                ptr::addr_of_mut!((*p).hud_cursor_pos).write(None);
+                ptr::addr_of_mut!((*p).hud_pointer_down).write(false);
+                ptr::addr_of_mut!((*p).hud_scroll_delta_y).write(0.0);
+
+                // Convert `Box<MaybeUninit<App>>` into `Box<App>` without relying on
+                // `Box::assume_init()` (may be unavailable on older toolchains).
+                let raw: *mut App = Box::into_raw(boxed).cast();
+                Box::from_raw(raw)
+            }
+        };
+
+        app.setup();
+        app.update_cursor();
+
+        // Kick the first frame for pump-mode hosts.
+        if let Some(w) = app.window.as_ref() {
+            w.request_redraw();
+        }
+
+        Ok(Box::new(BuiltApp { event_loop, app }))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn build_web(mut self, canvas_id: &str) -> anyhow::Result<Box<BuiltApp>> {
+        use wasm_bindgen::JsCast;
+
+        let event_loop = EventLoop::new().context("Event loop could not be created")?;
+        event_loop.set_control_flow(ControlFlow::Poll);
+
+        let wc = self
+            .config
+            .window_config
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("The window configuration has not been found"))?;
+
+        let document = web_sys::window()
+            .and_then(|w| w.document())
+            .ok_or_else(|| anyhow::anyhow!("browser document is unavailable"))?;
+        let canvas = document
+            .get_element_by_id(canvas_id)
+            .ok_or_else(|| anyhow::anyhow!("canvas element not found: {}", canvas_id))?
+            .dyn_into::<web_sys::HtmlCanvasElement>()
+            .map_err(|_| anyhow::anyhow!("element is not a canvas: {}", canvas_id))?;
+
+        let window_builder: WindowAttributes = {
+            let attrs: WindowAttributes = wc.into(&self.config);
+            attrs.with_canvas(Some(canvas))
+        };
+        let window = event_loop
+            .create_window(window_builder)
+            .context("An error occured while building the web game window")?;
+
+        let window = Arc::new(window);
+        self.world.set_can_fullscreen(false);
+
+        self.add_late_internal_systems_to_schedule();
+
+        let (resources, render_target, surface, surface_config, _hud_bundle) =
+            AppBuilder::init_render(window.clone(), None, self.size).await;
+
+        let entry_point = self.parser.get_entry_point();
+        let non_volatile_global_count = self.parser.get_non_volatile_global_count();
+        let volatile_global_count = self.parser.get_volatile_global_count();
+        GLOBAL
+            .lock()
+            .unwrap()
+            .init_with(non_volatile_global_count, volatile_global_count);
+
+        if let Err(e) = self.world.fontface_manager.init_fontface() {
+            log::error!("Failed to scan font directory: {:#}", e);
+        }
+
+        self.script_engine.start_main(entry_point);
+        self.world.nls = self.parser.nls.clone();
+        self.world.set_cursor_table(HashMap::new());
+
+        let (dissolve_vertex_buffer, dissolve_index_buffer, dissolve_num_indices) = {
+            let w = self.size.0.max(1) as f32;
+            let h = self.size.1.max(1) as f32;
+            let vertices: [PosVertex; 4] = [
+                PosVertex {
+                    position: vec3(0.0, 0.0, 0.0),
+                },
+                PosVertex {
+                    position: vec3(w, 0.0, 0.0),
+                },
+                PosVertex {
+                    position: vec3(w, h, 0.0),
+                },
+                PosVertex {
+                    position: vec3(0.0, h, 0.0),
+                },
+            ];
+            let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+
+            let vb = resources
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("rfvp dissolve quad VB"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let ib = resources
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("rfvp dissolve quad IB"),
+                    contents: bytemuck::cast_slice(&indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+            (vb, ib, indices.len() as u32)
+        };
+
+        let builtin_exit_ui_enabled = self
+            .parser
+            .get_all_syscalls()
+            .values()
+            .any(|syscall| syscall.name == "ConfigEtc");
+        let game_data = Arc::new(RwLock::new(self.world));
+        let debug_ring = log_ring::get().unwrap_or_else(|| log_ring::init(4096));
+        let vm_worker = VmWorker::spawn(game_data.clone(), self.parser, self.script_engine);
+
+        let prim_renderer = GpuPrimRenderer::new(resources.clone(), self.size);
+        // Share a single MS Gothic font instance with both UIs to avoid
+        // re-parsing the embedded TTF (Font::clone is a refcount bump).
+        let ui_font = gd_read(&game_data)
+            .fontface_manager
+            .get_font(crate::subsystem::resources::text_manager::FONTFACE_MS_GOTHIC);
+        let legacy_save_load_ui = LegacySaveLoadUi::new(&resources, self.size, ui_font.clone());
+        let exit_confirm_ui = ExitConfirmUi::new(&resources, self.size, ui_font);
+        let layer_machine = SceneMachine {
+            current_scene: self.scene,
+        };
+        let render_tree = RenderTree::new();
+
+        let mut app: Box<App> = {
+            use std::mem::MaybeUninit;
+            use std::ptr;
+
+            let mut boxed = Box::<MaybeUninit<App>>::new_uninit();
+            unsafe {
+                let p: *mut App = boxed.as_mut_ptr().cast();
+
+                ptr::addr_of_mut!((*p).config).write(self.config);
+                ptr::addr_of_mut!((*p).game_data).write(game_data);
+                ptr::addr_of_mut!((*p).title).write(self.title);
+                ptr::addr_of_mut!((*p).scheduler).write(self.scheduler);
+                ptr::addr_of_mut!((*p).layer_machine).write(layer_machine);
+                ptr::addr_of_mut!((*p).window).write(Some(window.clone()));
+                ptr::addr_of_mut!((*p).native_scale_factor).write(window.scale_factor());
+                ptr::addr_of_mut!((*p).pump_mode).write(false);
+                ptr::addr_of_mut!((*p).windowed_restore).write(None);
+                ptr::addr_of_mut!((*p).last_fullscreen_flag).write(1);
+
+                ptr::addr_of_mut!((*p).vm_worker).write(vm_worker);
+                ptr::addr_of_mut!((*p).pending_vm_frame_ms).write(0);
+                ptr::addr_of_mut!((*p).pending_vm_frame_ms_valid).write(false);
+
+                ptr::addr_of_mut!((*p).render_target).write(render_target);
+                ptr::addr_of_mut!((*p).resources).write(resources.clone());
+                ptr::addr_of_mut!((*p).surface).write(surface);
+                ptr::addr_of_mut!((*p).surface_config).write(surface_config);
+
+                ptr::addr_of_mut!((*p).prim_renderer).write(prim_renderer);
+                ptr::addr_of_mut!((*p).virtual_size).write(self.size);
+                ptr::addr_of_mut!((*p).render_tree).write(render_tree);
+
+                ptr::addr_of_mut!((*p).dissolve_vertex_buffer).write(dissolve_vertex_buffer);
+                ptr::addr_of_mut!((*p).dissolve_index_buffer).write(dissolve_index_buffer);
+                ptr::addr_of_mut!((*p).dissolve_num_indices).write(dissolve_num_indices);
+                ptr::addr_of_mut!((*p).last_dissolve_type).write(DissolveType::None);
+                ptr::addr_of_mut!((*p).last_dissolve2_transitioning).write(false);
+                ptr::addr_of_mut!((*p).legacy_save_load_ui).write(legacy_save_load_ui);
+                ptr::addr_of_mut!((*p).exit_confirm_ui).write(exit_confirm_ui);
+                ptr::addr_of_mut!((*p).builtin_exit_ui_enabled).write(builtin_exit_ui_enabled);
+                ptr::addr_of_mut!((*p).pending_app_exit).write(false);
+
+                ptr::addr_of_mut!((*p).debug_hud).write(None);
+                ptr::addr_of_mut!((*p).hud_window).write(None);
+                ptr::addr_of_mut!((*p).hud_surface).write(None);
+                ptr::addr_of_mut!((*p).hud_surface_config).write(None);
+                ptr::addr_of_mut!((*p).hud_visible).write(false);
+
+                ptr::addr_of_mut!((*p).debug_ring).write(debug_ring.clone());
+                ptr::addr_of_mut!((*p).debug_frame_no).write(0);
+                ptr::addr_of_mut!((*p).last_dt_ms).write(0.0);
+                ptr::addr_of_mut!((*p).hud_cursor_pos).write(None);
+                ptr::addr_of_mut!((*p).hud_pointer_down).write(false);
+                ptr::addr_of_mut!((*p).hud_scroll_delta_y).write(0.0);
+
+                let raw: *mut App = Box::into_raw(boxed).cast();
+                Box::from_raw(raw)
+            }
+        };
+
+        app.setup();
+
+        if let Some(w) = app.window.as_ref() {
+            w.request_redraw();
+        }
+
+        Ok(Box::new(BuiltApp { event_loop, app }))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn run_web(self, canvas_id: &str) -> anyhow::Result<()> {
+        let built = self.build_web(canvas_id).await?;
+        built.run();
+        Ok(())
+    }
+
+    /// Classic blocking run (winit owns the main loop).
+    pub fn run(self) {
+        let built = self.build().expect("failed to build rfvp app");
+        built.run();
+    }
+
+    /// Build an instance that can be driven by `pump_events`.
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    pub fn build_pump(self) -> anyhow::Result<PumpInstance> {
+        Ok(self.build()?.into_pump())
+    }
+
+    /// Build an instance for iOS host-driven mode.
+    ///
+    /// The host (SwiftUI/UIKit) owns the platform main loop and provides a UIKit view that is
+    /// backed by a CAMetalLayer.
+    #[cfg(target_os = "ios")]
+    pub fn build_ios(
+        mut self,
+        ui_view: NonNull<c_void>,
+        surface_size: (u32, u32),
+        native_scale_factor: f64,
+    ) -> anyhow::Result<Box<App>> {
+        // Mobile is always fullscreen.
+        self.world.set_can_fullscreen(true);
+        self.world.set_render_flag_local(1);
+
+        self.add_late_internal_systems_to_schedule();
+
+        let scale = if native_scale_factor.is_finite() && native_scale_factor > 0.0 {
+            native_scale_factor
+        } else {
+            1.0
+        };
+        let surface_size_px = (surface_size.0.max(1), surface_size.1.max(1));
+
+        let (instance, adapter, resources, render_target, surface, surface_config) =
+            futures::executor::block_on(AppBuilder::init_render_ios(
+                ui_view,
+                surface_size_px,
+                self.size,
+            ));
+
+        let entry_point = self.parser.get_entry_point();
+        let non_volatile_global_count = self.parser.get_non_volatile_global_count();
+        let volatile_global_count = self.parser.get_volatile_global_count();
+        GLOBAL
+            .lock()
+            .unwrap()
+            .init_with(non_volatile_global_count, volatile_global_count);
+        if let Err(e) = self.world.fontface_manager.init_fontface() {
+            log::error!("Failed to scan font directory: {:#}", e);
+        }
+        if let Err(e) =
+            crate::subsystem::global_savedata::try_load_global_savedata_v1(&mut self.world)
+        {
+            log::error!("Failed to load global savedata: {:#}", e);
+        }
+
+        self.script_engine.start_main(entry_point);
+        self.world.nls = self.parser.nls.clone();
+
+        // Cursor animations are not used in iOS host-mode.
+        self.world.set_cursor_table(HashMap::new());
+
+        // Fullscreen quad used for dissolve overlays (virtual space, pixel coordinates).
+        let (dissolve_vertex_buffer, dissolve_index_buffer, dissolve_num_indices) = {
+            let w = self.size.0.max(1) as f32;
+            let h = self.size.1.max(1) as f32;
+            let vertices: [PosVertex; 4] = [
+                PosVertex {
+                    position: vec3(0.0, 0.0, 0.0),
+                },
+                PosVertex {
+                    position: vec3(w, 0.0, 0.0),
+                },
+                PosVertex {
+                    position: vec3(w, h, 0.0),
+                },
+                PosVertex {
+                    position: vec3(0.0, h, 0.0),
+                },
+            ];
+            let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+
+            let vb = resources
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("rfvp dissolve quad VB"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let ib = resources
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("rfvp dissolve quad IB"),
+                    contents: bytemuck::cast_slice(&indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+            (vb, ib, indices.len() as u32)
+        };
+
+        let builtin_exit_ui_enabled = self
+            .parser
+            .get_all_syscalls()
+            .values()
+            .any(|syscall| syscall.name == "ConfigEtc");
+        let game_data = Arc::new(RwLock::new(self.world));
+        let debug_ring = log_ring::get().unwrap_or_else(|| log_ring::init(4096));
+        let vm_worker = VmWorker::spawn(game_data.clone(), self.parser, self.script_engine);
+
+        let prim_renderer = GpuPrimRenderer::new(resources.clone(), self.size);
+        // Share a single MS Gothic font instance with both UIs to avoid
+        // re-parsing the embedded TTF (Font::clone is a refcount bump).
+        let ui_font = gd_read(&game_data)
+            .fontface_manager
+            .get_font(crate::subsystem::resources::text_manager::FONTFACE_MS_GOTHIC);
+        let legacy_save_load_ui = LegacySaveLoadUi::new(&resources, self.size, ui_font.clone());
+        let exit_confirm_ui = ExitConfirmUi::new(&resources, self.size, ui_font);
+        let layer_machine = SceneMachine {
+            current_scene: self.scene,
+        };
+        let render_tree = RenderTree::new();
+
+        // NOTE: iOS main-thread stack is small. Avoid constructing large `App` values on the stack.
+        let mut app: Box<App> = {
+            use std::mem::MaybeUninit;
+            use std::ptr;
+
+            let mut boxed = Box::<MaybeUninit<App>>::new_uninit();
+            unsafe {
+                let p: *mut App = boxed.as_mut_ptr().cast();
+
+                ptr::addr_of_mut!((*p).config).write(self.config);
+                ptr::addr_of_mut!((*p).game_data).write(game_data);
+                ptr::addr_of_mut!((*p).title).write(self.title);
+                ptr::addr_of_mut!((*p).scheduler).write(self.scheduler);
+                ptr::addr_of_mut!((*p).layer_machine).write(layer_machine);
+                ptr::addr_of_mut!((*p).window).write(None);
+                ptr::addr_of_mut!((*p).native_scale_factor).write(scale);
+                ptr::addr_of_mut!((*p).pump_mode).write(true);
+                ptr::addr_of_mut!((*p).windowed_restore).write(None);
+                ptr::addr_of_mut!((*p).last_fullscreen_flag).write(1);
+
+                ptr::addr_of_mut!((*p).vm_worker).write(vm_worker);
+                ptr::addr_of_mut!((*p).pending_vm_frame_ms).write(0);
+                ptr::addr_of_mut!((*p).pending_vm_frame_ms_valid).write(false);
+
+                ptr::addr_of_mut!((*p).render_target).write(render_target);
+                ptr::addr_of_mut!((*p).resources).write(resources.clone());
+                ptr::addr_of_mut!((*p).surface).write(surface);
+                ptr::addr_of_mut!((*p).surface_config).write(surface_config);
+
+                #[cfg(any(target_os = "ios", target_os = "android"))]
+                {
+                    ptr::addr_of_mut!((*p).wgpu_instance).write(Some(instance));
+                    ptr::addr_of_mut!((*p).wgpu_adapter).write(Some(adapter));
+                }
+
+                #[cfg(target_os = "android")]
+                {
+                    ptr::addr_of_mut!((*p).android_native_window).write(Some(native_window));
+                }
+                ptr::addr_of_mut!((*p).prim_renderer).write(prim_renderer);
+                ptr::addr_of_mut!((*p).virtual_size).write(self.size);
+                ptr::addr_of_mut!((*p).render_tree).write(render_tree);
+
+                ptr::addr_of_mut!((*p).dissolve_vertex_buffer).write(dissolve_vertex_buffer);
+                ptr::addr_of_mut!((*p).dissolve_index_buffer).write(dissolve_index_buffer);
+                ptr::addr_of_mut!((*p).dissolve_num_indices).write(dissolve_num_indices);
+                ptr::addr_of_mut!((*p).last_dissolve_type).write(DissolveType::None);
+                ptr::addr_of_mut!((*p).last_dissolve2_transitioning).write(false);
+                ptr::addr_of_mut!((*p).legacy_save_load_ui).write(legacy_save_load_ui);
+                ptr::addr_of_mut!((*p).exit_confirm_ui).write(exit_confirm_ui);
+                ptr::addr_of_mut!((*p).builtin_exit_ui_enabled).write(builtin_exit_ui_enabled);
+                ptr::addr_of_mut!((*p).pending_app_exit).write(false);
+
+                // HUD is disabled in iOS host mode.
+                ptr::addr_of_mut!((*p).debug_hud).write(None);
+                ptr::addr_of_mut!((*p).hud_window).write(None);
+                ptr::addr_of_mut!((*p).hud_surface).write(None);
+                ptr::addr_of_mut!((*p).hud_surface_config).write(None);
+                ptr::addr_of_mut!((*p).hud_visible).write(false);
+
+                ptr::addr_of_mut!((*p).debug_ring).write(debug_ring.clone());
+                ptr::addr_of_mut!((*p).debug_frame_no).write(0);
+                ptr::addr_of_mut!((*p).last_dt_ms).write(0.0);
+                ptr::addr_of_mut!((*p).hud_cursor_pos).write(None);
+                ptr::addr_of_mut!((*p).hud_pointer_down).write(false);
+                ptr::addr_of_mut!((*p).hud_scroll_delta_y).write(0.0);
+
+                let raw: *mut App = Box::into_raw(boxed).cast();
+                Box::from_raw(raw)
+            }
+        };
+
+        app.setup();
+        Ok(app)
+    }
+
+    /// Build an instance for Android host-driven mode.
+    ///
+    /// The host (Kotlin/Java + SurfaceView/TextureView) owns the platform main loop and provides an
+    /// `ANativeWindow*` pointer (backed by a Vulkan/Metal backend through wgpu).
+    #[cfg(target_os = "android")]
+    pub fn build_android(
+        mut self,
+        native_window: NonNull<c_void>,
+        surface_size_px: (u32, u32),
+        native_scale_factor: f64,
+    ) -> anyhow::Result<Box<App>> {
+        // Mobile is always fullscreen.
+        self.world.set_can_fullscreen(true);
+        self.world.set_render_flag_local(1);
+
+        self.add_late_internal_systems_to_schedule();
+
+        let scale = if native_scale_factor.is_finite() && native_scale_factor > 0.0 {
+            native_scale_factor
+        } else {
+            1.0
+        };
+
+        // Keep a strong reference to the ANativeWindow across the wgpu Surface lifetime.
+        // Android may destroy/recreate the Java Surface/ANativeWindow asynchronously; if we don't
+        // acquire/release explicitly, wgpu can end up using a freed window (tagged-pointer abort).
+        unsafe {
+            ANativeWindow_acquire(native_window.as_ptr());
+        }
+
+        let (instance, adapter, resources, render_target, surface, surface_config) =
+            futures::executor::block_on(AppBuilder::init_render_android(
+                native_window,
+                surface_size_px,
+                self.size,
+            ));
+
+        let entry_point = self.parser.get_entry_point();
+        let non_volatile_global_count = self.parser.get_non_volatile_global_count();
+        let volatile_global_count = self.parser.get_volatile_global_count();
+        GLOBAL
+            .lock()
+            .unwrap()
+            .init_with(non_volatile_global_count, volatile_global_count);
+        if let Err(e) = self.world.fontface_manager.init_fontface() {
+            log::error!("Failed to scan font directory: {:#}", e);
+        }
+        if let Err(e) =
+            crate::subsystem::global_savedata::try_load_global_savedata_v1(&mut self.world)
+        {
+            log::error!("Failed to load global savedata: {:#}", e);
+        }
+
+        self.script_engine.start_main(entry_point);
+        self.world.nls = self.parser.nls.clone();
+
+        // Cursor animations are not used in Android host-mode.
+        self.world.set_cursor_table(HashMap::new());
+
+        // Fullscreen quad used for dissolve overlays (virtual space, pixel coordinates).
+        let (dissolve_vertex_buffer, dissolve_index_buffer, dissolve_num_indices) = {
+            let w = self.size.0.max(1) as f32;
+            let h = self.size.1.max(1) as f32;
+            let vertices: [PosVertex; 4] = [
+                PosVertex {
+                    position: vec3(0.0, 0.0, 0.0),
+                },
+                PosVertex {
+                    position: vec3(w, 0.0, 0.0),
+                },
+                PosVertex {
+                    position: vec3(w, h, 0.0),
+                },
+                PosVertex {
+                    position: vec3(0.0, h, 0.0),
+                },
+            ];
+            let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+
+            let vb = resources
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("rfvp dissolve quad VB"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let ib = resources
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("rfvp dissolve quad IB"),
+                    contents: bytemuck::cast_slice(&indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+            (vb, ib, indices.len() as u32)
+        };
+
+        let builtin_exit_ui_enabled = self
+            .parser
+            .get_all_syscalls()
+            .values()
+            .any(|syscall| syscall.name == "ConfigEtc");
+        let game_data = Arc::new(RwLock::new(self.world));
+        let debug_ring = log_ring::get().unwrap_or_else(|| log_ring::init(4096));
+        let vm_worker = VmWorker::spawn(game_data.clone(), self.parser, self.script_engine);
+
+        let prim_renderer = GpuPrimRenderer::new(resources.clone(), self.size);
+        // Share a single MS Gothic font instance with both UIs to avoid
+        // re-parsing the embedded TTF (Font::clone is a refcount bump).
+        let ui_font = gd_read(&game_data)
+            .fontface_manager
+            .get_font(crate::subsystem::resources::text_manager::FONTFACE_MS_GOTHIC);
+        let legacy_save_load_ui = LegacySaveLoadUi::new(&resources, self.size, ui_font.clone());
+        let exit_confirm_ui = ExitConfirmUi::new(&resources, self.size, ui_font);
+        let layer_machine = SceneMachine {
+            current_scene: self.scene,
+        };
+        let render_tree = RenderTree::new();
+
+        // Avoid constructing large `App` values on the stack.
+        let mut app: Box<App> = {
+            use std::mem::MaybeUninit;
+            use std::ptr;
+
+            let mut boxed = Box::<MaybeUninit<App>>::new_uninit();
+            unsafe {
+                let p: *mut App = boxed.as_mut_ptr().cast();
+
+                ptr::addr_of_mut!((*p).config).write(self.config);
+                ptr::addr_of_mut!((*p).game_data).write(game_data);
+                ptr::addr_of_mut!((*p).title).write(self.title);
+                ptr::addr_of_mut!((*p).scheduler).write(self.scheduler);
+                ptr::addr_of_mut!((*p).layer_machine).write(layer_machine);
+                ptr::addr_of_mut!((*p).window).write(None);
+                ptr::addr_of_mut!((*p).native_scale_factor).write(scale);
+                ptr::addr_of_mut!((*p).pump_mode).write(true);
+                ptr::addr_of_mut!((*p).windowed_restore).write(None);
+                ptr::addr_of_mut!((*p).last_fullscreen_flag).write(1);
+
+                ptr::addr_of_mut!((*p).vm_worker).write(vm_worker);
+                ptr::addr_of_mut!((*p).pending_vm_frame_ms).write(0);
+                ptr::addr_of_mut!((*p).pending_vm_frame_ms_valid).write(false);
+
+                ptr::addr_of_mut!((*p).render_target).write(render_target);
+                ptr::addr_of_mut!((*p).resources).write(resources.clone());
+                ptr::addr_of_mut!((*p).surface).write(surface);
+                ptr::addr_of_mut!((*p).surface_config).write(surface_config);
+
+                #[cfg(any(target_os = "ios", target_os = "android"))]
+                {
+                    ptr::addr_of_mut!((*p).wgpu_instance).write(Some(instance));
+                    ptr::addr_of_mut!((*p).wgpu_adapter).write(Some(adapter));
+                }
+
+                #[cfg(target_os = "android")]
+                {
+                    ptr::addr_of_mut!((*p).android_native_window).write(Some(native_window));
+                }
+
+                ptr::addr_of_mut!((*p).prim_renderer).write(prim_renderer);
+                ptr::addr_of_mut!((*p).virtual_size).write(self.size);
+                ptr::addr_of_mut!((*p).render_tree).write(render_tree);
+
+                ptr::addr_of_mut!((*p).dissolve_vertex_buffer).write(dissolve_vertex_buffer);
+                ptr::addr_of_mut!((*p).dissolve_index_buffer).write(dissolve_index_buffer);
+                ptr::addr_of_mut!((*p).dissolve_num_indices).write(dissolve_num_indices);
+                ptr::addr_of_mut!((*p).last_dissolve_type).write(DissolveType::None);
+                ptr::addr_of_mut!((*p).last_dissolve2_transitioning).write(false);
+                ptr::addr_of_mut!((*p).legacy_save_load_ui).write(legacy_save_load_ui);
+                ptr::addr_of_mut!((*p).exit_confirm_ui).write(exit_confirm_ui);
+                ptr::addr_of_mut!((*p).builtin_exit_ui_enabled).write(builtin_exit_ui_enabled);
+                ptr::addr_of_mut!((*p).pending_app_exit).write(false);
+
+                // HUD is disabled in Android host mode.
+                ptr::addr_of_mut!((*p).debug_hud).write(None);
+                ptr::addr_of_mut!((*p).hud_window).write(None);
+                ptr::addr_of_mut!((*p).hud_surface).write(None);
+                ptr::addr_of_mut!((*p).hud_surface_config).write(None);
+                ptr::addr_of_mut!((*p).hud_visible).write(false);
+
+                ptr::addr_of_mut!((*p).debug_ring).write(debug_ring.clone());
+                ptr::addr_of_mut!((*p).debug_frame_no).write(0);
+                ptr::addr_of_mut!((*p).last_dt_ms).write(0.0);
+                ptr::addr_of_mut!((*p).hud_cursor_pos).write(None);
+                ptr::addr_of_mut!((*p).hud_pointer_down).write(false);
+                ptr::addr_of_mut!((*p).hud_scroll_delta_y).write(0.0);
+
+                let raw: *mut App = Box::into_raw(boxed).cast();
+                Box::from_raw(raw)
+            }
+        };
+
+        app.setup();
+        Ok(app)
+    }
+
+    fn add_late_internal_systems_to_schedule(&mut self) {}
+}
+
+/// A fully-built application bundle.
+pub struct BuiltApp {
+    pub event_loop: EventLoop<()>,
+    pub app: Box<App>,
+}
+
+impl BuiltApp {
+    pub fn run(self) {
+        self.app.run(self.event_loop);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    pub fn into_pump(self) -> PumpInstance {
+        let BuiltApp {
+            event_loop,
+            mut app,
+        } = self;
+        app.pump_mode = true;
+        PumpInstance { event_loop, app }
+    }
+}
+
+/// A pump-driven instance (for GUI hosts that already own the platform event loop).
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+pub struct PumpInstance {
+    event_loop: EventLoop<()>,
+    app: Box<App>,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+impl PumpInstance {
+    /// Pump window/system events and drive one iteration of the application.
+    ///
+    /// Returns `PumpStatus::Exit` once the app requests termination.
+    pub fn pump(&mut self, timeout: Duration) -> PumpStatus {
+        // Ensure the app keeps producing frames even if the host pumps without OS input.
+        if let Some(w) = self.app.window.as_ref() {
+            w.request_redraw();
+        }
+        if self.app.hud_visible {
+            if let Some(w) = self.app.hud_window.as_ref() {
+                w.request_redraw();
+            }
+        }
+
+        self.event_loop.pump_events(Some(timeout), |event, loopd| {
+            self.app.handle_event(event, loopd);
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn test_find_hcb() {
+        let filepath = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/testcase"));
+
+        let hcb_path = App::find_hcb(filepath).unwrap();
+        log::info!("{:?}", hcb_path);
+    }
+}

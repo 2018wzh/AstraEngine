@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LegacyFamilyPluginDescriptor",
+  "type": "object",
+  "required": [
+    "abi_fingerprint",
+    "engine_version",
+    "family_id",
+    "feature_fingerprint",
+    "license",
+    "permissions",
+    "plugin_id",
+    "provider_id",
+    "report_redaction",
+    "rustc_fingerprint",
+    "supported_formats"
+  ],
+  "properties": {
+    "abi_fingerprint": {
+      "type": "string"
+    },
+    "engine_version": {
+      "type": "string"
+    },
+    "family_id": {
+      "$ref": "#/definitions/FamilyId"
+    },
+    "feature_fingerprint": {
+      "type": "string"
+    },
+    "license": {
+      "type": "string"
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "plugin_id": {
+      "type": "string"
+    },
+    "provider_id": {
+      "type": "string"
+    },
+    "report_redaction": {
+      "type": "string"
+    },
+    "rustc_fingerprint": {
+      "type": "string"
+    },
+    "supported_formats": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "FamilyId": {
+      "type": "string"
+    }
+  }
+}

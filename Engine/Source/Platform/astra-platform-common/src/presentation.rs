@@ -64,7 +64,6 @@ impl WgpuPresentationCore {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
-                apply_limit_buckets: false,
             })
             .await
             .map_err(|_| unavailable("surface.create", "hardware adapter is unavailable"))?;
@@ -226,7 +225,7 @@ impl WgpuPresentationCore {
             pass.draw(0..3, 0..1);
         }
         self.queue.submit([encoder.finish()]);
-        self.queue.present(output);
+        output.present();
         self.last_upload = Some(UploadFrame {
             texture,
             width: frame.width,
@@ -525,7 +524,7 @@ impl WgpuPresentationCore {
             pass.draw(0..3, 0..1);
         }
         self.queue.submit([encoder.finish()]);
-        self.queue.present(output);
+        output.present();
         Ok(())
     }
 }
@@ -572,11 +571,7 @@ impl WgpuReadback {
         .map_err(|_| invalid("surface.capture", "frame row is too large"))?;
         let padded = usize::try_from(self.padded_row)
             .map_err(|_| invalid("surface.capture", "padded frame row is too large"))?;
-        let mapped = self
-            .buffer
-            .slice(..)
-            .get_mapped_range()
-            .map_err(|_| unavailable("surface.capture", "GPU readback range is unavailable"))?;
+        let mapped = self.buffer.slice(..).get_mapped_range();
         let mut rgba8 = Vec::with_capacity(row * self.height as usize);
         for value in mapped.chunks_exact(padded).take(self.height as usize) {
             rgba8.extend_from_slice(&value[..row]);

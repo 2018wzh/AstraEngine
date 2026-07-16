@@ -1,0 +1,33 @@
+[package]
+name = "astra-emu-manager-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+abi_stable.workspace = true
+astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }
+astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi" }
+astra-runtime = { path = "../../../../Engine/Source/Runtime/astra-runtime" }
+blake3.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+libloading.workspace = true
+mlua.workspace = true
+postcard.workspace = true
+rusqlite.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }

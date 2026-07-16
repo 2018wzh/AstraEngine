@@ -225,6 +225,50 @@
       "status": "instrumented",
       "reason": "Windows crash reporter handshake and dump lifecycle"
     },
+    "astra-emu-family-api": {
+      "status": "not_applicable",
+      "reason": "pure ABI-safe descriptor, session, effect, VFS and redaction DTO contract"
+    },
+    "astra-emu-fvp-rfvp-core": {
+      "status": "instrumented",
+      "reason": "FVP VM tick and context execution lifecycle"
+    },
+    "astra-emu-fvp": {
+      "status": "instrumented",
+      "reason": "FVP provider session, step, media and snapshot lifecycle"
+    },
+    "astra-emu-manager-core": {
+      "status": "instrumented",
+      "reason": "Library, family loading and RuntimeWorld provider lifecycle"
+    },
+    "astra-emu-translation-openai-compatible": {
+      "status": "instrumented",
+      "reason": "translation request, retry and circuit-breaker lifecycle"
+    },
+    "astra-emu-manager-ui-slint": {
+      "status": "not_applicable",
+      "reason": "pure Slint ViewModel and bounded UI adapter with host-owned lifecycle"
+    },
+    "astra-emu-manager": {
+      "status": "instrumented",
+      "reason": "Manager host, platform source, renderer, audio and input lifecycle"
+    },
+    "astra-emu-cli": {
+      "status": "instrumented",
+      "reason": "explicit native launch and headless provider/session/artifact lifecycle"
+    },
+    "astra-emu-schema": {
+      "status": "not_applicable",
+      "reason": "pure JSON Schema generator over Rust schema source types"
+    },
+    "astra-emu-evidence": {
+      "status": "instrumented",
+      "reason": "release evidence validation and section encoding lifecycle"
+    },
+    "astra-emu-family-package": {
+      "status": "instrumented",
+      "reason": "native family identity validation and signing lifecycle"
+    },
     "headless-presentation-provider": {
       "status": "instrumented",
       "reason": "fixture provider lifecycle"

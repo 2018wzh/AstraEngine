@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TrustedLuauEvidenceV1",
+  "type": "object",
+  "required": [
+    "capability_ids",
+    "commercial_payload_present",
+    "denied_capability_ids",
+    "deterministic_effect_hash",
+    "evaluated_script_hashes",
+    "local_path_present",
+    "policy_id",
+    "schema",
+    "status",
+    "violation_codes"
+  ],
+  "properties": {
+    "capability_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "commercial_payload_present": {
+      "type": "boolean"
+    },
+    "denied_capability_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deterministic_effect_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "evaluated_script_hashes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Hash256"
+      }
+    },
+    "local_path_present": {
+      "type": "boolean"
+    },
+    "policy_id": {
+      "type": "string"
+    },
+    "schema": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "violation_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    }
+  }
+}

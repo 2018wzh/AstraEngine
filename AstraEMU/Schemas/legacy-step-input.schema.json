@@ -1,0 +1,180 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LegacyStepInput",
+  "type": "object",
+  "required": [
+    "await_results",
+    "budget",
+    "delta_ns",
+    "input_edges",
+    "mode",
+    "provider_results",
+    "session_seed",
+    "tick_index"
+  ],
+  "properties": {
+    "await_results": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/LegacyAwaitResult"
+      }
+    },
+    "budget": {
+      "$ref": "#/definitions/LegacyStepBudget"
+    },
+    "delta_ns": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "input_edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/LegacyInputEdge"
+      }
+    },
+    "mode": {
+      "$ref": "#/definitions/LegacyReplayMode"
+    },
+    "provider_results": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/LegacyProviderResult"
+      }
+    },
+    "session_seed": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "tick_index": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    },
+    "LegacyAwaitResult": {
+      "type": "object",
+      "required": [
+        "payload_hash",
+        "sequence",
+        "status",
+        "token_id"
+      ],
+      "properties": {
+        "payload_hash": {
+          "$ref": "#/definitions/Hash256"
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "status": {
+          "type": "string"
+        },
+        "token_id": {
+          "type": "string"
+        }
+      }
+    },
+    "LegacyInputEdge": {
+      "type": "object",
+      "required": [
+        "control",
+        "pressed",
+        "sequence",
+        "value"
+      ],
+      "properties": {
+        "control": {
+          "type": "string"
+        },
+        "pressed": {
+          "type": "boolean"
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "value": {
+          "type": "number",
+          "format": "float"
+        }
+      }
+    },
+    "LegacyProviderResult": {
+      "type": "object",
+      "required": [
+        "payload_hash",
+        "provider_id",
+        "request_id",
+        "sequence",
+        "status"
+      ],
+      "properties": {
+        "payload_hash": {
+          "$ref": "#/definitions/Hash256"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "status": {
+          "type": "string"
+        }
+      }
+    },
+    "LegacyReplayMode": {
+      "type": "string",
+      "enum": [
+        "live",
+        "restore_continuation"
+      ]
+    },
+    "LegacyStepBudget": {
+      "type": "object",
+      "required": [
+        "max_effects",
+        "max_instructions",
+        "max_trace_entries"
+      ],
+      "properties": {
+        "max_effects": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "max_instructions": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "max_trace_entries": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}

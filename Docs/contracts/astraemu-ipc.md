@@ -62,6 +62,21 @@ pub trait LegacyRuntimeProvider {
         snapshot: LegacySnapshotEnvelopeRef,
     ) -> ProviderResult<LegacyRestoreReport>;
 
+    fn take_ephemeral_text(
+        &mut self,
+        ctx: &LegacyRuntimeHostCtx,
+        session: &LegacyRuntimeSessionId,
+        lease_id: &str,
+    ) -> ProviderResult<Option<LegacyEphemeralText>>;
+
+    fn read_session_resource(
+        &mut self,
+        ctx: &LegacyRuntimeHostCtx,
+        session: &LegacyRuntimeSessionId,
+        resource_uri: &str,
+        max_bytes: u64,
+    ) -> ProviderResult<Vec<u8>>;
+
     fn shutdown(
         &self,
         ctx: LegacyRuntimeHostCtx,
@@ -69,6 +84,8 @@ pub trait LegacyRuntimeProvider {
     ) -> ProviderResult<LegacyShutdownReport>;
 }
 ```
+
+`take_ephemeral_text` 与 ABI v3 的 `read_session_resource` 都是 out-of-band host channel，不是 deterministic output。前者是单次 plaintext lease，后者让 family session 解析 `.bin` 等 virtual VFS 后把有界 media bytes 交给 host decoder。两者都禁止进入 effect、RuntimeWorld、save/replay、report、log 或 package；`read_session_resource` 还必须校验 session/context、规范化 URI、最大 byte bound 和 poisoned state，host 不得失败后改读 raw filesystem。
 
 `open` 返回 `LegacyRuntimeSessionId`。session 持有 family 私有 VM state、resource resolver、legacy presentation/audio state、await state、snapshot cursor 和 trace cursor。Manager 可以并行 probe 多个 case，也可以在测试里同时打开多个 session；provider 必须用 session id 隔离状态。
 
@@ -119,7 +136,7 @@ pub struct EmuFilterPresetBinding {
 }
 ```
 
-默认 auto probe 顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori。用户 profile 可以覆盖最终 family。Luau 是唯一用户脚本语言；旧 Lua/TJS 只描述 family 内部 legacy 事实。Trusted script 可以提交 `LegacyEffect`、Blackboard、input 或 tag intent，但这些 intent 必须在 fixed tick 边界进入 Runtime。脚本请求未授权 key 提取、商业保护处理或访问控制规避时，Manager 隔离禁用该脚本，并继续以无补丁模式运行 case。
+默认 auto probe 顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori。用户 profile 可以覆盖最终 family。Luau 是唯一用户脚本语言；旧 Lua/TJS 只描述 family 内部 legacy 事实。Trusted script 可以提交 `LegacyEffect`、Blackboard、input 或 tag intent，但这些 intent 必须在 fixed tick 边界进入 Runtime。脚本请求未授权 key 提取、商业保护处理或访问控制规避时，Manager 隔离禁用该脚本；只有 case profile 已显式允许无补丁启动时才能继续，否则启动被阻断。
 
 Text dump 默认只写 hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才能保存全文 dump。翻译 overlay 是非权威 UI 状态，不进入 replay hash。Filter preset 复用 `FilterGraph`；family 缺少 layer metadata 时，只启用 final-frame preset 并输出 diagnostic。
 
@@ -221,7 +238,7 @@ Patch、翻译覆盖和本地调试替换走 `overlay` mount。未声明 overlay
 
 ## Family 顺序
 
-v1 可用 family 是 Artemis。后续按通用性排序扩展：KrKr/KAG/TJS、BGI/Ethornell、SoftPAL、FVP、Siglus、Minori。所有 family 复用同一 `LegacyRuntimeProvider` contract、VFS mount contract 和 release gate；私有格式知识留在 family session 内，不反向扩展 EngineCore 对象模型。
+v1 首发 family 是 FVP。Artemis 与 KrKr/KAG/TJS、BGI/Ethornell、SoftPAL、Siglus、Minori 作为后续 family。所有 family 复用同一 `LegacyRuntimeProvider` contract、VFS mount contract 和 release gate；私有格式知识留在 family session 内，不反向扩展 EngineCore 对象模型。
 
 ## Report
 

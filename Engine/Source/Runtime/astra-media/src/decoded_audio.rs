@@ -43,7 +43,7 @@ impl PlayerDecodedAudio {
                 ));
             }
         };
-        if samples.len() % usize::from(channels) != 0 {
+        if !samples.len().is_multiple_of(usize::from(channels)) {
             return Err(PlayerAudioContractError::new(
                 "ASTRA_PLAYER_AUDIO_FRAME_ALIGNMENT",
                 "decoded audio samples do not contain complete frames",

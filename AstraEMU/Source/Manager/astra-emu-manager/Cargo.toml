@@ -1,0 +1,57 @@
+[package]
+name = "astra-emu-manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+doctest = false
+
+[[bin]]
+name = "astra-emu-manager"
+path = "src/main.rs"
+
+[dependencies]
+astra-emu-manager-core = { path = "../astra-emu-manager-core" }
+astra-emu-manager-ui-slint = { path = "../astra-emu-manager-ui-slint" }
+astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }
+astra-emu-translation-openai-compatible = { path = "../../Providers/astra-emu-translation-openai-compatible" }
+astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
+astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }
+astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi" }
+astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
+cpal.workspace = true
+rtrb.workspace = true
+tokio.workspace = true
+directories.workspace = true
+image.workspace = true
+hex.workspace = true
+postcard.workspace = true
+pollster.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+slint = { workspace = true, features = ["std", "compat-1-2", "accessibility", "backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-29", "unstable-winit-030"] }
+thiserror.workspace = true
+tracing.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity.workspace = true
+jni.workspace = true
+ndk.workspace = true
+slint = { workspace = true, features = ["backend-android-activity-06"] }
+
+[target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
+gilrs = { workspace = true, features = ["wgi"] }
+rfd.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[build-dependencies]
+sha2.workspace = true

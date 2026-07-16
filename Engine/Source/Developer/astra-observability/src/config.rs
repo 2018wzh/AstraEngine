@@ -13,6 +13,7 @@ pub const DEFAULT_MAX_CRASH_BUNDLES: usize = 10;
 pub enum HostRole {
     Cli,
     Player,
+    Manager,
     CrashReporter,
     Test,
 }
@@ -22,6 +23,7 @@ impl HostRole {
         match self {
             Self::Cli => "cli",
             Self::Player => "player",
+            Self::Manager => "manager",
             Self::CrashReporter => "crash_reporter",
             Self::Test => "test",
         }

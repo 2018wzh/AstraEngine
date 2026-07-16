@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EmuCaseProfile",
+  "type": "object",
+  "required": [
+    "case_fingerprint",
+    "compatibility_profile",
+    "family_id",
+    "fixed_delta_ns",
+    "mount_set_id",
+    "permission_policy_id",
+    "schema",
+    "script_uri"
+  ],
+  "properties": {
+    "case_fingerprint": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "compatibility_profile": {
+      "type": "string"
+    },
+    "family_id": {
+      "type": "string"
+    },
+    "family_options": {
+      "default": {},
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "fixed_delta_ns": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "mount_set_id": {
+      "type": "string"
+    },
+    "permission_policy_id": {
+      "type": "string"
+    },
+    "schema": {
+      "type": "string"
+    },
+    "script_uri": {
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    }
+  }
+}

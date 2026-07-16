@@ -37,6 +37,8 @@ astra-emu-family-*
 
 统一管理能力放在 Manager 上，不把 RetroArch/libretro 风格 core ABI 引进 family 层。Manager 先按 `FamilyAutoProbePolicy` 调用各 family `probe`，默认顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori；用户 profile 可以覆盖最终选择。probe 只记录 marker、confidence、blocker、skipped reason 和 override reason，不执行商业脚本。
 
+ABI v3 增加 session-bound、bounded `read_session_resource` host channel。它只解决 family virtual VFS 与通用媒体 host 之间的资源交付：family 负责 archive/path 语义，Manager 和 Headless 负责 decode/playback。资源 bytes 不属于 DTO observable state，禁止序列化、记录或进入任何 evidence；失败必须保留稳定 diagnostic，不能退回 raw desktop VFS 猜测路径。
+
 Trusted Luau 是 Manager host API，不是 EngineCore public API。Trusted Project Profile 可以打开 read-only VFS mount、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 effect intent。脚本只能提交 deterministic `LegacyEffect`、Blackboard、input 或 tag intent，host adapter 在 fixed tick 边界应用。脚本请求未授权 key 提取、商业保护处理、访问控制规避、raw filesystem/network/system call 或 native handle 时，Manager 隔离禁用脚本，并写入 redacted diagnostic。
 
 `TextCapturePipeline` 消费 `LegacyEffect::TextCapture`。默认 report 只存 hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才写全文 dump。`TranslationProvider` 由 Plugin Manager 显式绑定，`translate_batch` 必须实现，`translate_stream` 是可选 capability。DeepL-style provider 走 batch fallback；LLM provider 可以通过 Stage 4 的 MCP session 和 provider profile streaming 更新 overlay。翻译 overlay 非权威，不进入 replay hash；术语表和角色上下文可以读取授权的 runtime memory。
@@ -143,4 +145,4 @@ Release Gate checks:
 - Report redaction omits payload, screenshots, audio samples, full script text, private absolute paths, key material and provider secrets.
 - Replay hash matches recorded input and provider results.
 
-The framework is a planned Stage 5 target. Current docs and research tools do not mean AstraEMU runtime code already exists.
+该 framework 的 ABI-safe DTO、FVP provider、`AstraEmuRuntimeProvider`、RuntimeWorld lifecycle、Manager Library/auto-probe/Trusted Luau/translation/FilterGraph 与 release evidence validator 已进入 workspace。Stage 5 仍是 `IN_PROGRESS`：现有 unit/E2 和 sanitized differential golden 不能证明完整 media parity、正式签名包或 Windows/Android E3，其他 family 也不能按本页 blueprint 计为已实现。

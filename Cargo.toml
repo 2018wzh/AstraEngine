@@ -60,13 +60,30 @@ members = [
     "Engine/Plugins/Fixtures/headless-presentation-provider",
     "Engine/Plugins/Fixtures/vn-extension-provider",
     "Engine/Plugins/Fixtures/ui-component-provider",
+    "AstraEMU/Source/FamilyApi/astra-emu-family-api",
+    "AstraEMU/Source/Families/astra-emu-fvp-rfvp-core",
+    "AstraEMU/Source/Families/astra-emu-fvp",
+    "AstraEMU/Source/Manager/astra-emu-manager-core",
+    "AstraEMU/Source/Providers/astra-emu-translation-openai-compatible",
+    "AstraEMU/Source/Manager/astra-emu-manager-ui-slint",
+    "AstraEMU/Source/Manager/astra-emu-manager",
+    "AstraEMU/Source/Programs/astra-emu-schema",
+    "AstraEMU/Source/Programs/astra-emu-evidence",
+    "AstraEMU/Source/Programs/astra-emu-family-package",
+    "AstraEMU/Source/Programs/astra-emu-cli",
+]
+exclude = [
+    "AstraEMU/Source/Families/anzu-hal",
+    "AstraEMU/Source/Families/na_mpeg2_decoder",
+    "AstraEMU/Source/Families/na_wmv_player",
+    "AstraEMU/Source/Families/rfvp-bitmap",
 ]
 
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
+rust-version = "1.92"
 version = "0.1.0"
-rust-version = "1.85"
 
 [workspace.dependencies]
 accesskit = "=0.24.1"
@@ -81,11 +98,12 @@ clap = { version = "4", features = ["derive"] }
 cosmic-text = "=0.18.2"
 cpal = "0.17"
 directories = "6"
+ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["fast"] }
+encoding_rs = "0.8"
 ffmpeg-next = "8.1"
 futures-util = "0.3"
 hex = "0.4"
 hound = "3.5"
-ed25519-dalek = { version = "2", features = ["rand_core"] }
 evdev = "=0.13.2"
 gilrs = { version = "0.11.2", default-features = false }
 gstreamer = "=0.24.2"
@@ -97,6 +115,10 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 indexmap = { version = "2", features = ["serde"] }
 js-sys = "0.3"
+jni = "0.21.1"
+android-activity = { version = "0.6.1", features = ["native-activity", "game-activity"] }
+ndk = "0.9.0"
+object = { version = "0.37.3", default-features = false, features = ["read"] }
 libloading = "0.8"
 libc = "0.2"
 logos = "0.16.1"
@@ -113,6 +135,8 @@ pollster = "0.4"
 proc-macro2 = "1"
 quote = "1"
 reqwest = { version = "0.13.4", default-features = false, features = [
+    "json",
+    "rustls",
     "stream",
 ] }
 rcgen = "0.14"
@@ -124,11 +148,14 @@ rubato = { version = "4", default-features = false, features = [
 rustfft = "6.4"
 schemars = { version = "0.8", features = ["uuid1"] }
 rowan = "0.16.1"
+rusqlite = { version = "=0.40.1", default-features = false, features = ["bundled"] }
 semver = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10"
+slint = { version = "=1.17.1", default-features = false }
+slint-build = "=1.17.1"
 symphonia = { version = "0.6", features = ["all"] }
 syn = { version = "2", features = ["full"] }
 tempfile = "3"
@@ -160,12 +187,10 @@ wasmparser = "0.253"
 web-sys = "0.3"
 windows = { version = "0.62", default-features = false }
 winit = { version = "0.30", default-features = false }
+keyring = "=4.1.5"
 wgpu = "30"
 yakui-core = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }
 yakui-widgets = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }
 zstd = "0.13"
-android-activity = { version = "0.6.1", features = ["game-activity"] }
-jni = "0.22.4"
-ndk = "0.9.0"
 ndk-sys = "0.6.0"
 oboe = "0.6.1"

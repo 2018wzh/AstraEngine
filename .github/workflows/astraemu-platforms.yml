@@ -1,0 +1,118 @@
+name: AstraEMU platforms
+
+on:
+  push:
+    paths:
+      - "AstraEMU/**"
+      - "Engine/Source/Runtime/**"
+      - "Engine/Source/Platform/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/astraemu-platforms.yml"
+  pull_request:
+    paths:
+      - "AstraEMU/**"
+      - "Engine/Source/Runtime/**"
+      - "Engine/Source/Platform/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/astraemu-platforms.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  ASTRA_EMU_FAMILY_SIGNING_KEY_HEX: 9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60
+  ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX: d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a
+  ASTRA_EMU_FAMILY_SIGNER_ID: astra.ci.fixture.family
+
+jobs:
+  linux-host-e2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Install native host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
+      - name: Check Linux Manager and FVP
+        run: cargo clippy -p astra-emu-manager -p astra-emu-fvp --all-targets -- -D warnings
+      - name: Differential VM parity against pinned rfvp
+        run: python Tools/verify_fvp_parity.py
+
+  apple-host-e2:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+          components: clippy
+      - name: Check macOS Manager and FVP
+        run: cargo clippy -p astra-emu-manager -p astra-emu-fvp --all-targets -- -D warnings
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate iOS project
+        working-directory: AstraEMU/Platforms/iOS
+        run: xcodegen generate
+      - name: Build signed-registry iOS simulator package
+        working-directory: AstraEMU/Platforms/iOS
+        run: |
+          xcodebuild \
+            -project AstraEMU.xcodeproj \
+            -scheme AstraEMU \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            ARCHS=arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+  android-package-e2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - name: Install Android API 36 and NDK r28
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;28.0.13004108"
+      - name: Create ephemeral CI APK identity
+        run: |
+          keytool -genkeypair -noprompt \
+            -keystore "$RUNNER_TEMP/astraemu-ci.jks" \
+            -storepass astraemu-ci -keypass astraemu-ci \
+            -alias astraemu-ci -keyalg RSA -keysize 3072 -validity 1 \
+            -dname "CN=AstraEMU CI Fixture"
+          keytool -exportcert \
+            -keystore "$RUNNER_TEMP/astraemu-ci.jks" \
+            -storepass astraemu-ci -alias astraemu-ci \
+            -file "$RUNNER_TEMP/astraemu-ci.der"
+          echo "ASTRA_EMU_ANDROID_APK_SIGNER_SHA256=sha256.$(sha256sum "$RUNNER_TEMP/astraemu-ci.der" | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
+          echo "ASTRA_EMU_ANDROID_KEYSTORE=$RUNNER_TEMP/astraemu-ci.jks" >> "$GITHUB_ENV"
+          echo "ASTRA_EMU_ANDROID_KEYSTORE_PASSWORD=astraemu-ci" >> "$GITHUB_ENV"
+          echo "ASTRA_EMU_ANDROID_KEY_ALIAS=astraemu-ci" >> "$GITHUB_ENV"
+          echo "ASTRA_EMU_ANDROID_KEY_PASSWORD=astraemu-ci" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.0.13004108" >> "$GITHUB_ENV"
+      - name: Build and verify both Android ABIs
+        run: python Tools/build_astraemu_android.py --output .tmp/android-ci-package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: astraemu-android-e2
+          path: |
+            .tmp/android-ci-package/astraemu-release.apk
+            .tmp/android-ci-package/android-package-evidence.json
+          if-no-files-found: error

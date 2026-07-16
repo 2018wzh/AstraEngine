@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FvpSyscallCoverageEvidence",
+  "type": "object",
+  "required": [
+    "covered_syscall_ids",
+    "diagnostic_codes",
+    "missing_syscall_ids",
+    "opcode_counts",
+    "release_syscall_total",
+    "rfvp_revision",
+    "schema",
+    "status"
+  ],
+  "properties": {
+    "covered_syscall_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "diagnostic_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "full_flow_hash": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Hash256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "missing_syscall_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "opcode_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0.0
+      }
+    },
+    "release_syscall_total": {
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
+    },
+    "rfvp_revision": {
+      "type": "string"
+    },
+    "schema": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    }
+  }
+}

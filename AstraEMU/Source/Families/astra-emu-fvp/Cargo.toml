@@ -1,0 +1,38 @@
+[package]
+name = "astra-emu-fvp"
+version.workspace = true
+edition.workspace = true
+license = "MPL-2.0"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+doctest = false
+
+[dependencies]
+abi_stable.workspace = true
+anyhow = "1"
+astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+astra-emu-fvp-rfvp-core = { path = "../astra-emu-fvp-rfvp-core", features = ["host-command-audio", "host-command-video"] }
+bincode = "1.3"
+encoding_rs.workspace = true
+postcard.workspace = true
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+wmv-decoder = { path = "../na_wmv_player" }
+na_mpeg2_decoder = { path = "../na_mpeg2_decoder" }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[build-dependencies]
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+serde_json.workspace = true
+sha2.workspace = true
+
+[package.metadata.astra]
+upstream = "https://github.com/xmoezzz/rfvp"
+upstream_revision = "657747252eb0d2c5fb4a340695ce6906c2d45133"
+license_notice = "THIRD_PARTY_NOTICES.md"

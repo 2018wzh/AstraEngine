@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AndroidNativePluginManifest",
+  "type": "object",
+  "required": [
+    "abi",
+    "apk_signer_digest",
+    "family_base_identity_hash",
+    "family_id",
+    "library_file_name",
+    "library_hash",
+    "min_api",
+    "package_name",
+    "schema",
+    "target_api",
+    "version_code"
+  ],
+  "properties": {
+    "abi": {
+      "type": "string"
+    },
+    "apk_signer_digest": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "family_base_identity_hash": {
+      "description": "Hash of the canonical family identity before the Android native-manifest hash is attached. This deliberately avoids a circular hash dependency: the signed family manifest binds this native manifest, while this field binds the invariant family/plugin/provider/binary identity.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Hash256"
+        }
+      ]
+    },
+    "family_id": {
+      "type": "string"
+    },
+    "library_file_name": {
+      "type": "string"
+    },
+    "library_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "min_api": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "package_name": {
+      "type": "string"
+    },
+    "schema": {
+      "type": "string"
+    },
+    "target_api": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "version_code": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    }
+  }
+}

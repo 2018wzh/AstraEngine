@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LegacySnapshotEnvelope",
+  "type": "object",
+  "required": [
+    "case_fingerprint",
+    "family_id",
+    "family_sections",
+    "fixed_step",
+    "redaction_status",
+    "runtime_cursor",
+    "schema_version",
+    "session_id",
+    "session_seed"
+  ],
+  "properties": {
+    "case_fingerprint": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "family_id": {
+      "$ref": "#/definitions/FamilyId"
+    },
+    "family_sections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/LegacySnapshotSection"
+      }
+    },
+    "fixed_step": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "redaction_status": {
+      "type": "string"
+    },
+    "runtime_cursor": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "schema_version": {
+      "$ref": "#/definitions/SchemaVersion"
+    },
+    "session_id": {
+      "$ref": "#/definitions/LegacyRuntimeSessionId"
+    },
+    "session_seed": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "FamilyId": {
+      "type": "string"
+    },
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    },
+    "LegacyRuntimeSessionId": {
+      "type": "string"
+    },
+    "LegacySnapshotSection": {
+      "type": "object",
+      "required": [
+        "bytes",
+        "hash",
+        "schema",
+        "section_id",
+        "version"
+      ],
+      "properties": {
+        "bytes": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0.0
+          }
+        },
+        "hash": {
+          "$ref": "#/definitions/Hash256"
+        },
+        "schema": {
+          "type": "string"
+        },
+        "section_id": {
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/definitions/SchemaVersion"
+        }
+      }
+    },
+    "SchemaVersion": {
+      "type": "object",
+      "required": [
+        "major",
+        "minor",
+        "patch"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "minor": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "patch": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}

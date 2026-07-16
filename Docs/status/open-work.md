@@ -25,7 +25,7 @@
 ## P2
 
 - Runtime Director committed output、AI provider profiles、Pack/VFS-backed ONNX ModelBundle、runtime memory、Trusted session audit、MCP Context Pack、command allowlist。
-- AstraEMU Manager RuntimeWorld bridge、`LegacyRuntimeProvider` facade、auto probe、Trusted Luau、文本翻译、FilterGraph preset 和 Artemis full-flow。
+- AstraEMU FVP 的完整 media/full-flow parity、FilterGraph visual golden、正式 desktop/mobile code-sign identity，以及 Windows/Android E3 和 Android arm64 真机证据。MP4 A/V 已使用双 incremental WMF SourceReader 并按 PTS 合并；VM/parser differential golden、Manager 音频/影片执行、翻译 overlay、final-frame GPU filter、Android dynamic registration 与 iOS static-registry package scaffold 已落地，不能据此外推真实设备通过。
 - AstraRPG Stage 7：shared `astra-policy`、`AstraRpgRuntimeProvider`、RPG core/policy、AI Town 20 NPC gate、`rpg.trpg` profile、CP2020 local-private adapter 和 `rpg.*` release gate。
 - AstraRPG Stage 8：`rpg.net.*` Server/Client protocol、seat sync、transcript sync、redacted network audit 和 provider-free network replay。
 - iOS/Android 真实 SDK probe、launcher、platform decode、storage/package source、resume 和 no-JIT gate 已移到 Stage 6。

@@ -1,6 +1,6 @@
 # AstraEMU Artemis Family Plugin Blueprint
 
-Artemis 是 AstraEMU v1 的首个可用 family。目标是通用 Artemis engine-native family plugin：覆盖 PFS/PF6/PF8、boot、text/tag、legacy Lua bridge、presentation/media、snapshot 和 local case report。所有样例和报告只使用合法本地数据、synthetic fixtures 和脱敏 metadata。
+Artemis 是 FVP v1 之后的 follow-up family blueprint，不是首发 gate。目标是通用 Artemis engine-native family plugin：覆盖 PFS/PF6/PF8、boot、text/tag、legacy Lua bridge、presentation/media、snapshot 和 local case report。当前页面描述契约与研究准备度，不代表 workspace 已有 Artemis provider。所有样例和报告只使用合法本地数据、synthetic fixtures 和脱敏 metadata。
 
 ## Runtime Boundary
 

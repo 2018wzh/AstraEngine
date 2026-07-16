@@ -1,0 +1,581 @@
+import { AboutSlint, Button, CheckBox, ComboBox, LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
+
+export struct GameCard {
+    case-id: string,
+    title: string,
+    family: string,
+    cover-uri: string,
+    cover: image,
+    diagnostic: string,
+}
+
+global Tokens {
+    out property <color> background: #111318;
+    out property <color> surface: #1a1d24;
+    out property <color> surface-raised: #232832;
+    out property <color> primary: #91caff;
+    out property <color> on-primary: #05233a;
+    out property <color> text: #e4e7ec;
+    out property <color> text-muted: #aeb5c2;
+    out property <color> danger: #ffb4ab;
+    out property <length> radius: 12px;
+    out property <length> spacing: 12px;
+}
+
+component CoverCard inherits Rectangle {
+    in property <GameCard> game;
+    callback activated(string);
+    background: Tokens.surface-raised;
+    border-radius: Tokens.radius;
+    border-width: card-focus.has-focus ? 2px : 0px;
+    border-color: Tokens.primary;
+    accessible-role: button;
+    accessible-id: "library-case-" + game.case-id;
+    accessible-label: game.title + ", " + game.family;
+    accessible-description: game.diagnostic == "" ? "Launchable legacy game" : game.diagnostic;
+    accessible-action-default => { root.activated(game.case-id); }
+    min-width: 148px;
+    min-height: 214px;
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+        Rectangle {
+            background: #313846;
+            border-radius: 8px;
+            min-height: 142px;
+            if game.cover-uri != "": Image { source: game.cover; image-fit: cover; }
+            if game.cover-uri == "": Text { text: "NO COVER"; color: Tokens.text-muted; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        Text { text: game.title; color: Tokens.text; font-weight: 600; overflow: elide; }
+        Text { text: game.family; color: Tokens.text-muted; font-size: 12px; }
+        if game.diagnostic != "": Text { text: game.diagnostic; color: Tokens.danger; font-size: 11px; overflow: elide; }
+    }
+    card-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.activated(game.case-id);
+                return accept;
+            }
+            return reject;
+        }
+        TouchArea { clicked => { root.activated(game.case-id); } }
+    }
+}
+
+component TranslationSettings inherits Rectangle {
+    in-out property <string> endpoint-kind;
+    in-out property <string> endpoint;
+    in-out property <string> protocol;
+    in-out property <string> model;
+    in-out property <string> target-language;
+    in-out property <int> context-sentences;
+    in-out property <int> body-limit-bytes;
+    in-out property <int> timeout-ms;
+    in-out property <string> background-context;
+    in-out property <string> glossary;
+    in-out property <string> secret-input;
+    in property <bool> consent-present;
+    in-out property <bool> persistent-cache;
+    in property <bool> has-selected-case;
+    callback back();
+    callback save(string, string, string, string, string, int, int, int, string, string, string);
+    callback grant-consent();
+    callback set-cache(bool);
+
+    background: Tokens.background;
+    VerticalLayout {
+        padding: root.width >= 840px ? 24px : 12px;
+        spacing: 12px;
+        HorizontalLayout {
+            Button { text: "Back"; clicked => { root.back(); } }
+            Text { text: "Translation settings"; color: Tokens.text; font-size: 21px; font-weight: 700; horizontal-stretch: 1; }
+        }
+        ScrollView {
+            mouse-drag-pan-enabled: true;
+            VerticalLayout {
+                padding-right: 8px;
+                spacing: 10px;
+                Text { text: "Provider profile"; color: Tokens.text; font-size: 17px; font-weight: 700; }
+                Text { text: "The endpoint, protocol and model are explicit. AstraEMU never switches them after a failure."; color: Tokens.text-muted; wrap: word-wrap; }
+                Text { text: "Endpoint kind"; color: Tokens.text-muted; }
+                ComboBox {
+                    model: ["ecnu", "openai", "third_party"];
+                    current-value <=> root.endpoint-kind;
+                }
+                Text { text: "HTTPS API base URL"; color: Tokens.text-muted; }
+                LineEdit { text <=> root.endpoint; placeholder-text: "https://…/v1"; }
+                Text { text: "Protocol"; color: Tokens.text-muted; }
+                ComboBox {
+                    model: ["responses", "chat_completions"];
+                    current-value <=> root.protocol;
+                }
+                Text { text: "Model"; color: Tokens.text-muted; }
+                LineEdit { text <=> root.model; placeholder-text: "Required; no implicit default"; }
+                Text { text: "Target language"; color: Tokens.text-muted; }
+                LineEdit { text <=> root.target-language; placeholder-text: "zh-CN"; }
+                Text { text: "Context sentences (0–32)"; color: Tokens.text-muted; }
+                SpinBox { value <=> root.context-sentences; minimum: 0; maximum: 32; }
+                Text { text: "Maximum request body bytes (1–16384)"; color: Tokens.text-muted; }
+                SpinBox { value <=> root.body-limit-bytes; minimum: 1; maximum: 16384; step-size: 256; }
+                Text { text: "Timeout milliseconds (1000–120000)"; color: Tokens.text-muted; }
+                SpinBox { value <=> root.timeout-ms; minimum: 1000; maximum: 120000; step-size: 1000; }
+                Text { text: "Character and world background"; color: Tokens.text-muted; }
+                TextEdit { text <=> root.background-context; min-height: 96px; placeholder-text: "Optional context supplied with each request"; wrap: word-wrap; }
+                Text { text: "Glossary (one source = target pair per line)"; color: Tokens.text-muted; }
+                TextEdit { text <=> root.glossary; min-height: 112px; placeholder-text: "character name = translated name"; wrap: word-wrap; }
+                Text { text: "API credential"; color: Tokens.text-muted; }
+                LineEdit { text <=> root.secret-input; input-type: password; placeholder-text: "Leave blank to keep the platform-stored credential"; }
+                Button {
+                    text: "Save provider profile";
+                    clicked => {
+                        root.save(root.endpoint-kind, root.endpoint, root.protocol, root.model,
+                            root.target-language, root.context-sentences, root.body-limit-bytes,
+                            root.timeout-ms, root.background-context, root.glossary, root.secret-input);
+                        root.secret-input = "";
+                    }
+                }
+                Rectangle { height: 1px; background: #455064; }
+                Text { text: "Network consent"; color: Tokens.text; font-size: 17px; font-weight: 700; }
+                Text {
+                    text: root.consent-present
+                        ? "Granted globally. Changing the profile does not prompt again."
+                        : "Translation sends the current line, up to the configured recent context, background and glossary to the displayed endpoint and model. Consent is global and does not expire automatically.";
+                    color: Tokens.text-muted;
+                    wrap: word-wrap;
+                }
+                if !root.consent-present: Button { text: "Grant global translation consent"; clicked => { root.grant-consent(); } }
+                Rectangle { height: 1px; background: #455064; }
+                Text { text: "Per-game persistence"; color: Tokens.text; font-size: 17px; font-weight: 700; }
+                CheckBox {
+                    enabled: root.has-selected-case;
+                    checked <=> root.persistent-cache;
+                    text: root.has-selected-case ? "Store source and translation in local SQLite for the selected game" : "Select a game to configure persistent cache";
+                    toggled => { root.set-cache(self.checked); }
+                }
+                Text { text: "Session cache remains enabled even when persistence is off."; color: Tokens.text-muted; font-size: 11px; wrap: word-wrap; }
+            }
+        }
+    }
+}
+
+export component ManagerWindow inherits Window {
+    title: "AstraEMU Manager";
+    background: Tokens.background;
+    min-width: 360px;
+    min-height: 640px;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    property <length> usable-x: root.safe-area-insets.left;
+    property <length> usable-y: root.safe-area-insets.top;
+    property <length> usable-width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
+    property <length> usable-height: root.height - root.safe-area-insets.top - root.safe-area-insets.bottom;
+    in property <[GameCard]> games;
+    in-out property <string> selected-case-id;
+    in-out property <string> search-query;
+    in property <string> endpoint-identity;
+    in property <string> model-identity;
+    in property <string> global-diagnostic;
+    in-out property <string> selected-nls;
+    in property <image> stage-frame;
+    in-out property <float> stage-native-width: 1024;
+    in-out property <float> stage-native-height: 768;
+    in-out property <bool> game-active: false;
+    in-out property <bool> about-active: false;
+    in-out property <bool> settings-active: false;
+    in-out property <bool> translation-overlay-active: false;
+    in-out property <bool> diagnostics-overlay-active: false;
+    in-out property <bool> patches-overlay-active: false;
+    in-out property <bool> filters-overlay-active: false;
+    property <bool> overlay-active: root.translation-overlay-active || root.diagnostics-overlay-active || root.patches-overlay-active || root.filters-overlay-active;
+    in-out property <string> filter-preset: "none";
+    in property <string> diagnostics-summary;
+    in property <string> patches-summary;
+    in property <string> translation-source;
+    in property <string> translation-output;
+    in property <string> translation-status;
+    in property <string> translation-endpoint;
+    in property <string> translation-model;
+    in property <string> translation-scope;
+    in-out property <string> translation-endpoint-kind: "ecnu";
+    in-out property <string> translation-profile-endpoint;
+    in-out property <string> translation-profile-protocol: "responses";
+    in-out property <string> translation-profile-model;
+    in-out property <string> translation-target-language: "zh-CN";
+    in-out property <int> translation-context-sentences: 10;
+    in-out property <int> translation-body-limit-bytes: 16384;
+    in-out property <int> translation-timeout-ms: 30000;
+    in-out property <string> translation-background;
+    in-out property <string> translation-glossary;
+    in-out property <string> translation-secret-input;
+    in property <bool> translation-consent-present;
+    in-out property <bool> translation-persistent-cache;
+    callback launch(string);
+    callback select-case(string);
+    callback search(string);
+    callback configure-nls(string);
+    callback game-input(string, bool, float);
+    callback leave-game();
+    callback open-diagnostics();
+    callback open-translation();
+    callback open-patches();
+    callback open-filters();
+    callback rescan();
+    callback open-settings();
+    callback save-translation-profile(string, string, string, string, string, int, int, int, string, string, string);
+    callback grant-translation-consent();
+    callback set-translation-cache(bool);
+    callback reset-translation();
+    callback set-filter-preset(string);
+    callback set-patch-mode(string);
+
+    if root.global-diagnostic != "": Rectangle {
+        x: root.usable-x + 12px;
+        y: root.usable-y + root.usable-height - self.height - 12px;
+        width: root.usable-width - 24px;
+        min-height: 44px;
+        background: #dd5b1b1b;
+        border-radius: Tokens.radius;
+        z: 100;
+        Text {
+            text: root.global-diagnostic;
+            color: Tokens.danger;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            x: 12px;
+            width: parent.width - 24px;
+        }
+    }
+
+    if root.game-active: game-view := Rectangle {
+        property <float> stage-aspect: root.stage-native-width / root.stage-native-height;
+        property <length> stage-width: self.width / self.height > self.stage-aspect ? self.height * self.stage-aspect : self.width;
+        property <length> stage-height: self.width / self.height > self.stage-aspect ? self.height : self.width / self.stage-aspect;
+        property <length> stage-x: (self.width - self.stage-width) / 2;
+        property <length> stage-y: (self.height - self.stage-height) / 2;
+        background: black;
+        init => { game-focus.focus(); }
+        Image {
+            source: root.stage-frame;
+            width: parent.width;
+            height: parent.height;
+            image-fit: contain;
+            accessible-label: "Legacy game stage";
+        }
+        game-focus := FocusScope {
+            key-pressed(event) => {
+                if root.overlay-active { return reject; }
+                if event.text == Key.Return { root.game-input("confirm", true, 1); return accept; }
+                if event.text == Key.Escape { root.game-input("cancel", true, 1); return accept; }
+                if event.text == Key.UpArrow { root.game-input("up", true, 1); return accept; }
+                if event.text == Key.DownArrow { root.game-input("down", true, 1); return accept; }
+                if event.text == Key.LeftArrow { root.game-input("left", true, 1); return accept; }
+                if event.text == Key.RightArrow { root.game-input("right", true, 1); return accept; }
+                if event.text == " " { root.game-input("space", true, 1); return accept; }
+                return reject;
+            }
+            key-released(event) => {
+                if root.overlay-active { return reject; }
+                if event.text == Key.Return { root.game-input("confirm", false, 0); return accept; }
+                if event.text == Key.Escape { root.game-input("cancel", false, 0); return accept; }
+                if event.text == Key.UpArrow { root.game-input("up", false, 0); return accept; }
+                if event.text == Key.DownArrow { root.game-input("down", false, 0); return accept; }
+                if event.text == Key.LeftArrow { root.game-input("left", false, 0); return accept; }
+                if event.text == Key.RightArrow { root.game-input("right", false, 0); return accept; }
+                if event.text == " " { root.game-input("space", false, 0); return accept; }
+                return reject;
+            }
+            TouchArea {
+                moved => {
+                    if self.mouse-x >= game-view.stage-x && self.mouse-x < game-view.stage-x + game-view.stage-width && self.mouse-y >= game-view.stage-y && self.mouse-y < game-view.stage-y + game-view.stage-height {
+                        root.game-input("pointer.x", true, (self.mouse-x - game-view.stage-x) / game-view.stage-width * root.stage-native-width);
+                        root.game-input("pointer.y", true, (self.mouse-y - game-view.stage-y) / game-view.stage-height * root.stage-native-height);
+                    }
+                }
+                clicked => {
+                    if self.mouse-x >= game-view.stage-x && self.mouse-x < game-view.stage-x + game-view.stage-width && self.mouse-y >= game-view.stage-y && self.mouse-y < game-view.stage-y + game-view.stage-height {
+                        root.game-input("pointer.x", true, (self.mouse-x - game-view.stage-x) / game-view.stage-width * root.stage-native-width);
+                        root.game-input("pointer.y", true, (self.mouse-y - game-view.stage-y) / game-view.stage-height * root.stage-native-height);
+                        root.game-input("pointer.primary", true, 1);
+                        root.game-input("pointer.primary", false, 0);
+                    }
+                }
+                scroll-event(event) => {
+                    root.game-input("wheel", false, event.delta-y / 1px);
+                    return accept;
+                }
+            }
+        }
+        Rectangle {
+            x: root.safe-area-insets.left + 12px;
+            y: root.safe-area-insets.top + 12px;
+            width: parent.width - root.safe-area-insets.left - root.safe-area-insets.right - 24px;
+            height: 52px;
+            background: #cc1a1d24;
+            border-radius: Tokens.radius;
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 6px;
+                Button { text: "Back"; clicked => { root.leave-game(); } }
+                Rectangle { horizontal-stretch: 1; }
+                Button { text: "Diagnostics"; clicked => { root.open-diagnostics(); } }
+                Button { text: "Translation"; clicked => { root.open-translation(); } }
+                Button { text: "Patches"; clicked => { root.open-patches(); } }
+                Button { text: "Filters"; clicked => { root.open-filters(); } }
+            }
+        }
+        if root.translation-overlay-active: Rectangle {
+            x: root.usable-width >= 840px ? root.usable-x + root.usable-width - self.width - 12px : root.usable-x + 12px;
+            y: root.usable-width >= 840px ? root.usable-y + 76px : root.usable-y + root.usable-height - self.height - 12px;
+            width: root.usable-width >= 840px ? 420px : root.usable-width - 24px;
+            max-height: root.usable-height - 88px;
+            min-height: 210px;
+            background: #ee1a1d24;
+            border-radius: Tokens.radius;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                HorizontalLayout {
+                    Text { text: "Translation"; color: Tokens.text; font-size: 17px; font-weight: 700; horizontal-stretch: 1; }
+                    Button { text: "Close"; clicked => { root.translation-overlay-active = false; } }
+                }
+                Text { text: root.translation-endpoint + " · " + root.translation-model; color: Tokens.text-muted; font-size: 11px; overflow: elide; }
+                Text { text: root.translation-scope; color: Tokens.text-muted; font-size: 11px; wrap: word-wrap; }
+                Text { text: root.translation-source == "" ? "Waiting for dialogue…" : root.translation-source; color: Tokens.text; wrap: word-wrap; }
+                Rectangle { height: 1px; background: #455064; }
+                Text { text: root.translation-output; color: Tokens.primary; wrap: word-wrap; vertical-stretch: 1; }
+                Text { text: root.translation-status; color: Tokens.text-muted; font-size: 11px; wrap: word-wrap; }
+                Button { text: "Resume translation"; clicked => { root.reset-translation(); } }
+            }
+        }
+        if root.diagnostics-overlay-active: Rectangle {
+            x: root.usable-width >= 840px ? root.usable-x + root.usable-width - self.width - 12px : root.usable-x + 12px;
+            y: root.usable-y + 76px;
+            width: root.usable-width >= 840px ? 420px : root.usable-width - 24px;
+            min-height: 180px;
+            background: #ee1a1d24;
+            border-radius: Tokens.radius;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                HorizontalLayout {
+                    Text { text: "Runtime diagnostics"; color: Tokens.text; font-size: 17px; font-weight: 700; horizontal-stretch: 1; }
+                    Button { text: "Close"; clicked => { root.diagnostics-overlay-active = false; } }
+                }
+                Text { text: root.diagnostics-summary; color: Tokens.text-muted; wrap: word-wrap; }
+                Text { text: root.global-diagnostic == "" ? "No blocking diagnostic." : root.global-diagnostic; color: root.global-diagnostic == "" ? Tokens.primary : Tokens.danger; wrap: word-wrap; }
+            }
+        }
+        if root.patches-overlay-active: Rectangle {
+            x: root.usable-width >= 840px ? root.usable-x + root.usable-width - self.width - 12px : root.usable-x + 12px;
+            y: root.usable-y + 76px;
+            width: root.usable-width >= 840px ? 420px : root.usable-width - 24px;
+            min-height: 180px;
+            background: #ee1a1d24;
+            border-radius: Tokens.radius;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                HorizontalLayout {
+                    Text { text: "Trusted patches"; color: Tokens.text; font-size: 17px; font-weight: 700; horizontal-stretch: 1; }
+                    Button { text: "Close"; clicked => { root.patches-overlay-active = false; } }
+                }
+                Text { text: root.patches-summary; color: Tokens.text-muted; wrap: word-wrap; }
+                Button { text: "Use explicit no-patch mode"; clicked => { root.set-patch-mode("no_patch"); } }
+                Button { text: "Require trusted astraemu.patch.luau"; clicked => { root.set-patch-mode("trusted"); } }
+            }
+        }
+        if root.filters-overlay-active: Rectangle {
+            x: root.usable-width >= 840px ? root.usable-x + root.usable-width - self.width - 12px : root.usable-x + 12px;
+            y: root.usable-y + 76px;
+            width: root.usable-width >= 840px ? 420px : root.usable-width - 24px;
+            min-height: 250px;
+            background: #ee1a1d24;
+            border-radius: Tokens.radius;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                HorizontalLayout {
+                    Text { text: "Final-frame filter"; color: Tokens.text; font-size: 17px; font-weight: 700; horizontal-stretch: 1; }
+                    Button { text: "Close"; clicked => { root.filters-overlay-active = false; } }
+                }
+                Text { text: "FVP does not expose stable layer metadata, so per-layer bindings are blocked and only final-frame presets are available."; color: Tokens.text-muted; wrap: word-wrap; }
+                Button { text: root.filter-preset == "none" ? "✓ Off" : "Off"; clicked => { root.set-filter-preset("none"); } }
+                Button { text: root.filter-preset == "grayscale" ? "✓ Grayscale" : "Grayscale"; clicked => { root.set-filter-preset("grayscale"); } }
+                Button { text: root.filter-preset == "crt-soft" ? "✓ CRT Soft" : "CRT Soft"; clicked => { root.set-filter-preset("crt-soft"); } }
+                Button { text: root.filter-preset == "warm" ? "✓ Warm" : "Warm"; clicked => { root.set-filter-preset("warm"); } }
+            }
+        }
+    }
+
+    if !root.game-active && root.about-active: Rectangle {
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.usable-height;
+        background: Tokens.background;
+        VerticalLayout {
+            padding: 18px;
+            spacing: 12px;
+            HorizontalLayout {
+                Button { text: "Back"; clicked => { root.about-active = false; } }
+                Text { text: "About AstraEMU"; color: Tokens.text; font-size: 20px; font-weight: 700; horizontal-stretch: 1; }
+            }
+            Rectangle {
+                background: Tokens.surface;
+                border-radius: Tokens.radius;
+                AboutSlint { }
+            }
+        }
+    }
+
+    if !root.game-active && root.settings-active: TranslationSettings {
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.usable-height;
+        endpoint-kind <=> root.translation-endpoint-kind;
+        endpoint <=> root.translation-profile-endpoint;
+        protocol <=> root.translation-profile-protocol;
+        model <=> root.translation-profile-model;
+        target-language <=> root.translation-target-language;
+        context-sentences <=> root.translation-context-sentences;
+        body-limit-bytes <=> root.translation-body-limit-bytes;
+        timeout-ms <=> root.translation-timeout-ms;
+        background-context <=> root.translation-background;
+        glossary <=> root.translation-glossary;
+        secret-input <=> root.translation-secret-input;
+        consent-present: root.translation-consent-present;
+        persistent-cache <=> root.translation-persistent-cache;
+        has-selected-case: root.selected-case-id != "";
+        back => { root.settings-active = false; }
+        save(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
+            root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
+        }
+        grant-consent => { root.grant-translation-consent(); }
+        set-cache(enabled) => { root.set-translation-cache(enabled); }
+    }
+
+    if !root.game-active && !root.about-active && !root.settings-active && root.usable-width >= 840px: HorizontalLayout {
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.usable-height;
+        spacing: 0px;
+        Rectangle {
+            width: 196px;
+            background: Tokens.surface;
+            VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+                Text { text: "AstraEMU"; color: Tokens.text; font-size: 22px; font-weight: 700; }
+                Button { text: "Library"; }
+                Button { text: "Diagnostics"; }
+                Button { text: "Translation"; clicked => { root.open-settings(); } }
+                Button { text: "Patches"; }
+                Button { text: "Filters"; }
+                Rectangle { vertical-stretch: 1; }
+                Button { text: "About"; clicked => { root.about-active = true; } }
+            }
+        }
+        VerticalLayout {
+            padding: 18px;
+            spacing: 12px;
+            HorizontalLayout {
+                LineEdit {
+                    text <=> root.search-query;
+                    placeholder-text: "Search library";
+                    horizontal-stretch: 1;
+                    edited => { root.search(self.text); }
+                }
+                Button { text: "Rescan"; clicked => { root.rescan(); } }
+            }
+            ScrollView {
+                mouse-drag-pan-enabled: true;
+                GridLayout {
+                    spacing: 12px;
+                    for game[index] in games: CoverCard {
+                        row: Math.floor(index / 3);
+                        col: Math.mod(index, 3);
+                        game: game;
+                        activated(id) => { root.selected-case-id = id; root.select-case(id); }
+                    }
+                }
+            }
+        }
+        Rectangle {
+            width: 300px;
+            background: Tokens.surface;
+            VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+                Text { text: root.selected-case-id == "" ? "Select a game" : root.selected-case-id; color: Tokens.text; font-size: 18px; wrap: word-wrap; }
+                Text { text: "Endpoint: " + root.endpoint-identity; color: Tokens.text-muted; wrap: word-wrap; }
+                Text { text: "Model: " + root.model-identity; color: Tokens.text-muted; wrap: word-wrap; }
+                Text { text: "FVP text encoding"; color: Tokens.text-muted; }
+                ComboBox {
+                    enabled: root.selected-case-id != "";
+                    model: ["Not configured", "shift_jis", "gbk", "utf8"];
+                    current-value <=> root.selected-nls;
+                    selected(value) => { if value != "Not configured" { root.configure-nls(value); } }
+                }
+                Rectangle { vertical-stretch: 1; }
+                Button { enabled: root.selected-case-id != ""; text: "Launch"; clicked => { root.launch(root.selected-case-id); } }
+            }
+        }
+    }
+
+    if !root.game-active && !root.about-active && !root.settings-active && root.usable-width < 840px: VerticalLayout {
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.usable-height;
+        padding-top: 12px;
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-bottom: 8px;
+        spacing: 10px;
+        HorizontalLayout {
+            Text { text: "AstraEMU"; color: Tokens.text; font-size: 21px; font-weight: 700; horizontal-stretch: 1; }
+            Button { text: "Scan"; clicked => { root.rescan(); } }
+        }
+        LineEdit {
+            text <=> root.search-query;
+            placeholder-text: "Search library";
+            edited => { root.search(self.text); }
+        }
+        ScrollView {
+            mouse-drag-pan-enabled: true;
+            GridLayout {
+                spacing: 10px;
+                for game[index] in games: CoverCard {
+                    row: Math.floor(index / 2);
+                    col: Math.mod(index, 2);
+                    game: game;
+                    activated(id) => { root.selected-case-id = id; root.select-case(id); }
+                }
+            }
+        }
+        if root.selected-case-id != "": Rectangle {
+            min-height: 112px;
+            background: Tokens.surface-raised;
+            border-radius: Tokens.radius;
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 8px;
+                Text { text: root.selected-case-id; color: Tokens.text; wrap: word-wrap; horizontal-stretch: 1; }
+                ComboBox {
+                    model: ["Not configured", "shift_jis", "gbk", "utf8"];
+                    current-value <=> root.selected-nls;
+                    selected(value) => { if value != "Not configured" { root.configure-nls(value); } }
+                }
+                Button { text: "Launch"; clicked => { root.launch(root.selected-case-id); } }
+            }
+        }
+        HorizontalLayout {
+            Button { text: "Library"; horizontal-stretch: 1; }
+            Button { text: "Overlay"; horizontal-stretch: 1; }
+            Button { text: "Settings"; horizontal-stretch: 1; clicked => { root.open-settings(); } }
+            Button { text: "About"; horizontal-stretch: 1; clicked => { root.about-active = true; } }
+        }
+    }
+}

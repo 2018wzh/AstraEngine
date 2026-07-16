@@ -1,0 +1,163 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HeadlessRunReportV1",
+  "type": "object",
+  "required": [
+    "artifact_manifest_hash",
+    "audio_meter_hash",
+    "build_identity_hash",
+    "checkpoints",
+    "consumed_input_messages",
+    "consumed_input_trace_hash",
+    "diagnostic_codes",
+    "engine_id",
+    "entry_identity_hash",
+    "family_provider_id",
+    "fixed_steps",
+    "game_identity_hash",
+    "host_kind",
+    "input_sequence_hash",
+    "lifecycle_steps",
+    "presented_frames",
+    "profile_hash",
+    "runtime_provider_id",
+    "runtime_state_trace_hash",
+    "schema",
+    "session_id_hash",
+    "snapshot_round_trip_verified",
+    "status",
+    "terminal_reached",
+    "visual_trace_hash"
+  ],
+  "properties": {
+    "artifact_manifest_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "audio_meter_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "build_identity_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/HeadlessCheckpointEvidenceV1"
+      }
+    },
+    "consumed_input_messages": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "consumed_input_trace_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "diagnostic_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "engine_id": {
+      "type": "string"
+    },
+    "entry_identity_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "family_provider_id": {
+      "type": "string"
+    },
+    "fixed_steps": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "game_identity_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "host_kind": {
+      "type": "string"
+    },
+    "input_sequence_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "lifecycle_steps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "presented_frames": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "profile_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "runtime_provider_id": {
+      "type": "string"
+    },
+    "runtime_state_trace_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "schema": {
+      "type": "string"
+    },
+    "session_id_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "snapshot_round_trip_verified": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string"
+    },
+    "terminal_reached": {
+      "type": "boolean"
+    },
+    "visual_trace_hash": {
+      "$ref": "#/definitions/Hash256"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    },
+    "HeadlessCheckpointEvidenceV1": {
+      "type": "object",
+      "required": [
+        "checkpoint_id",
+        "fixed_step",
+        "frame_hash",
+        "observation_hash"
+      ],
+      "properties": {
+        "checkpoint_id": {
+          "type": "string"
+        },
+        "fixed_step": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "frame_hash": {
+          "$ref": "#/definitions/Hash256"
+        },
+        "observation_hash": {
+          "$ref": "#/definitions/Hash256"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

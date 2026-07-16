@@ -1,0 +1,16 @@
+[package]
+name = "astra-emu-manager-ui-slint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[lib]
+doctest = false
+
+[dependencies]
+serde.workspace = true
+slint = { workspace = true, features = ["std", "compat-1-2", "serde"] }
+
+[build-dependencies]
+slint-build.workspace = true

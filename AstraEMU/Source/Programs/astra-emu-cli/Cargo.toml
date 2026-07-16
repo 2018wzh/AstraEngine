@@ -1,0 +1,46 @@
+[package]
+name = "astra-emu-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[features]
+default = []
+ffmpeg-vcpkg = ["astra-platform-headless/ffmpeg-vcpkg"]
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "astra-emu-cli"
+path = "src/main.rs"
+
+[dependencies]
+astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+astra-emu-manager-core = { path = "../../Manager/astra-emu-manager-core" }
+astra-headless-protocol = { path = "../../../../Engine/Source/Runtime/astra-headless-protocol" }
+astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
+astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
+astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
+astra-platform-headless = { path = "../../../../Engine/Source/Platform/astra-platform-headless" }
+astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }
+astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi" }
+clap.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+postcard.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+tracing.workspace = true
+
+[build-dependencies]
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

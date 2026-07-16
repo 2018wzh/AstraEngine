@@ -21,6 +21,7 @@ astra-platform-android = { path = "../../Platform/astra-platform-android" }
 astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi" }
 astra-target = { path = "../../Platform/astra-target" }
 astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
+astra-emu-manager-core = { path = "../../../../AstraEMU/Source/Manager/astra-emu-manager-core" }
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true
@@ -30,6 +31,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+astra-emu-fvp = { path = "../../../../AstraEMU/Source/Families/astra-emu-fvp" }
 astra-headless-test = { path = "../astra-headless-test" }
 tempfile.workspace = true
 

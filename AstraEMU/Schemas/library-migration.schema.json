@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LibraryMigrationEvidence",
+  "type": "object",
+  "required": [
+    "applied_migration_ids",
+    "database_identity_hash",
+    "diagnostic_codes",
+    "from_version",
+    "schema",
+    "status",
+    "to_version"
+  ],
+  "properties": {
+    "applied_migration_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "database_identity_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "diagnostic_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "from_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "schema": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "to_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Hash256": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      },
+      "maxItems": 32,
+      "minItems": 32
+    }
+  }
+}

@@ -1,18 +1,20 @@
 # Stage 5 AstraEMU Work
 
-Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Program target；被启动的 legacy case 通过 `AstraEmuRuntimeProvider` 作为 gameplay runtime session 运行，provider 创建并驱动 AstraEngine `RuntimeWorld`。legacy family 以 in-process plugin 接入，并只向 host 注册 `LegacyRuntimeProvider` facade。Provider session 持有 family 私有 VM、VFS 资源解析、媒体状态、诊断和 snapshot section；AstraEngine `StateMachine` 只建模 `Booting`、`Active`、`Awaiting`、`Saving`、`Loading`、`Faulted` 和 `Shutdown` 这些粗粒度生命周期。统一管理、Trusted Luau、文本翻译、runtime memory 和滤镜 preset 都位于 Manager/RuntimeWorld 侧，不进入 family VM public API。本页是 `REOPENED_SPEC` 清单，不表示实现已经存在。
+Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Program target；被启动的 legacy case 通过 `AstraEmuRuntimeProvider` 运行，provider 为每个 session 创建独立 `RuntimeWorld`。legacy family 只注册 `LegacyRuntimeProvider` facade，私有 VM、VFS、媒体状态、诊断和 snapshot section 都留在 provider session 内。Manager/RuntimeWorld 持有统一管理、Trusted Luau、文本翻译和滤镜 preset，不把这些职责塞进 family VM public API。family API、FVP provider、Manager Core、ECNU translation、Slint host、desktop/Android dynamic registration、iOS static registry、签名工具和 evidence encoder 已进入主 workspace。rfvp VM/parser differential golden 已绑定官方 `0.4.0` commit；Windows E3 正式验收按当前实施方向暂缓，正式平台签名、完整 media/full-flow parity、Windows/Android E3 与真机证据仍未形成，因此 Stage 5 继续保持 `IN_PROGRESS`。
+
+FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 Windows MP4 影片、fixed-tick frame selection、同 device wgpu composition、严格 `MediaFence` identity，以及 pending movie 的 family snapshot/rebind。runtime snapshot 使用有界压缩 envelope，并嵌入 live texture 的精确 RGBA；host-command audio restore 不重新读取 raw desktop VFS，而由 host 清理旧 stream 后通过 session resource channel 重建。Windows 本机授权样本的 ignored Headless run 已连续执行 240 tick、240 个 presented frame和一次 save/restore continuation，lifecycle 与 redaction report 通过；两个 checkpoint 的 frame hash 相同，且该 run 属于 Headless E2，所以不能据此声明输入造成视觉变化或 Windows E3。同一样本也通过签名 development package 启动真实 Slint/WGPU 单窗口并保持响应，随后从 window close 走完 Manager/CLI shutdown；本轮修复了无 extension audio 的 container sniff、无 active voice 的 silent callback 误报，以及丢弃中间 texture delta 导致 draw 引用缺失。该次 native run 没有绑定自动输入、视觉变化、非静音 meter、route/terminal 和正式 run identity，仍只是 Windows E3 子链，不能关闭 E3。WMV/MPEG 使用增量 packet decoder；Windows MP4 video/audio 分别使用 stateful WMF SourceReader，按 PTS 合并后进入 16-frame/500ms 预取 ring 和可裁剪 PCM stream，并执行 running frame/byte/sample/timestamp budget。没有 public sanitized full-flow movie fixture 和真实 Windows/Android run identity，不能据此提升为 E3。
 
 ## S5-GAME-RUNTIME-01 AstraEmuRuntimeProvider gameplay runtime
 
 **ID:** `S5-GAME-RUNTIME-01`
 
-**Status:** `REOPENED_SPEC`
+**Status:** `IN_PROGRESS`
 
 **Goal:** AstraEMU 作为 `AstraEmuRuntimeProvider` 与 `NativeVnRuntimeProvider`、后续 `AstraRpgRuntimeProvider` 同级接入，不直接替换 `RuntimeWorld`。
 
 **Depends On:** `S2-VFS-01`、`S3-RUNTIME-PROVIDER-01`、[Game Runtime Provider Contract](../../contracts/game-runtime-provider.md)、[Game Runtime Provider Blueprint](../../implementation/game-runtime-provider.md)
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/runtime_provider.rs`、`AstraEMU/Tests/game_runtime_provider.rs` planned target
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-core/src/runtime_provider.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/main.rs`
 
 **Steps:**
 
@@ -30,13 +32,13 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 
 **ID:** `S5-EMUCORE-SM-01`
 
-**Status:** `REOPENED_SPEC`
+**Status:** `IN_PROGRESS`
 
 **Goal:** Family 内部把旧 VM 映射为私有 scheduler、context、basic-block 和 action 状态机，公共 Runtime 只接收可序列化 effect 和 snapshot envelope。
 
 **Depends On:** `S5-GAME-RUNTIME-01`、`S5-FAMILY-01`、[EmulatorCore StateMachine Mapping](../../implementation/emulator-core-state-machine.md)
 
-**Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/scheduler.rs`、`AstraEMU/Tests/family_scheduler.rs`、`AstraEMU/Tests/fvp/state_machine_mapping.rs` planned target
+**Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`AstraEMU/Source/Families/astra-emu-fvp-rfvp-core/src/portable/vm.rs`、`AstraEMU/Source/Families/astra-emu-fvp/src/provider.rs`
 
 **Steps:**
 
@@ -54,13 +56,13 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 
 **ID:** `S5-LEGACY-VFS-01`
 
-**Status:** `REOPENED_SPEC`
+**Status:** `IN_PROGRESS`
 
 **Goal:** 所有 family pack reader 复用 Asset VFS，旧引擎 pack 只作为 `legacy_pack` mount source，不能替代 `.astrapkg`。
 
 **Depends On:** `S2-VFS-01`、`S5-GAME-RUNTIME-01`、[Asset VFS Contract](../../contracts/asset-vfs.md)
 
-**Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/vfs.rs`、`AstraEMU/Tests/legacy_pack_vfs.rs` planned target
+**Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`AstraEMU/Source/Families/astra-emu-fvp/src/archive.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/desktop_source.rs`
 
 **Steps:**
 
@@ -78,11 +80,13 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 
 **ID:** `S5-MANAGER-01`
 
+**Status:** `IN_PROGRESS`
+
 **Goal:** Manager 能启动 `AstraEmuRuntimeProvider`，由 provider 创建 RuntimeWorld、启用 family plugin、打开 `LegacyRuntimeProvider` session、驱动生命周期 StateMachine，并输出 local case report。
 
 **Depends On:** `S5-GAME-RUNTIME-01`、`S5-EMUCORE-SM-01`、`Docs/contracts/astraemu-ipc.md`、`S1-CORE-01`、`S1-PLUGIN-01`
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/runtime_world.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/plugin_enablement.rs`、`AstraEMU/Tests/manager_runtime_world.rs` planned target
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-core/src/runtime_provider.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/family_host.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/main.rs`、`AstraEMU/Source/Programs/astra-emu-cli/`
 
 **Steps:**
 
@@ -91,31 +95,33 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 3. 通过 `AstraEmuRuntimeProvider::open` 建立 RuntimeWorld 和 family session，并让生命周期 StateMachine 在固定 tick 调用 `emu.step`。
 4. 建立 input、overlay、diagnostics、TextCaptureEvent 和 presentation/audio command 采集路径。
 5. 编写 plugin disabled、permission denied、missing provider、session fault 和 report redaction 测试。
+6. 提供显式 family/game directory 的 quick launch，以及只消费物理输入 JSONL、复用 `astra-platform-headless` 的自动化入口；不得旁路 RuntimeWorld 或 family lifecycle。
 
 **Done Evidence:** Manager 不解析 family 私有 VM 内存，不持有 family 文件系统、renderer/audio handle 或 Actor 指针；所有玩家可见输出都来自 `AstraEmuRuntimeProvider` 输出到 RuntimeWorld 的 event/presentation/audio/report。
 
-**Linked Test IDs:** `T-S5-MANAGER-01`
+**Linked Test IDs:** `T-S5-MANAGER-01`、`T-S5-EMU-CLI-01`
 
-## S5-MANAGER-UI-01 egui Manager 与 runtime overlay
+## S5-MANAGER-UI-01 Slint Manager 与 runtime overlay
 
 **ID:** `S5-MANAGER-UI-01`
 
-**Status:** `SPEC_READY`
+**Status:** `IN_PROGRESS`
 
-**Goal:** AstraEMU Manager、diagnostic/translation/filter overlay 使用 egui，并复用 shared UI input、semantic、resource 和 render contract。
+**Goal:** AstraEMU Manager、diagnostic/translation/filter overlay 使用 Slint 1.17.1；host 统一持有 winit 0.30 event loop、surface 与 wgpu 29.0.4 device/queue，并复用 shared UI input、semantic、resource 和 render contract。
 
 **Depends On:** `S5-MANAGER-01`、`S2-UI-BACKEND-01`、[ADR 0015](../../adr/0015-ui-backend-provider-split.md)
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-ui/`、`AstraEMU/Source/Overlay/astra-emu-overlay-ui/` planned target
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-ui-slint/`、`AstraEMU/Source/Manager/astra-emu-manager/`
 
 **Steps:**
 
-1. 使用 egui core 实现 Manager 表单、provider/family、report、日志和 overlay，不让 egui 类型进入 family API。
-2. 复用 Astra physical input、semantic snapshot、Scene2D/resource lifecycle 和 explicit provider binding。
-3. Windows v1 接 AccessKit、IME、clipboard、diagnostic redaction 和 real Manager workflow；Web 留后续 Stage 5/6 profile。
-4. 原版 legacy UI 默认仍由 family presentation 忠实还原；只有显式 modernization profile 才可替换系统 UI。
+1. 使用 Astra design tokens 和 Slint 组件实现桌面三栏、手机双列/bottom sheet/bottom navigation、移动大屏桌面式布局和游戏 overlay，不让 Slint 类型进入 Manager Core 或 family API。
+2. Slint rendering notifier 取得同一套 wgpu 29 `Device`/`Queue`，Astra renderer 直接提供 GPU stage texture；禁止 CPU 整帧回读和跨设备复制。
+3. 完成 keyboard/gamepad/touch/IME、focus、screen reader semantics、safe area、overlay input consumption、surface rebuild 和 device loss。
+4. Windows 与 Android GPU emulator 形成 E3；Linux、macOS、iOS 关闭 package/provider/host compile E2；Web 对 native family plugin 返回稳定不支持诊断。
+5. About 显示 Slint Royalty-free 2.0 规定归因并随包维护第三方 notices。
 
-**Done Evidence:** Windows Manager workflow、overlay input isolation、report redaction、AccessKit 和 provider identity 通过真实程序证据；不能用 AstraVN Yakui fixture 或静态面板关闭本项。
+**Done Evidence:** Windows/Android Manager workflow、同设备 WGPU identity、响应布局、overlay input isolation、report redaction、accessibility 和 provider identity 通过真实程序证据；不能用静态面板、compile-only 或 emulator 结果外推未验证硬件。
 
 **Linked Test IDs:** `T-S5-MANAGER-UI-01`
 
@@ -123,11 +129,13 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 
 **ID:** `S5-FAMILY-01`
 
+**Status:** `IN_PROGRESS`
+
 **Goal:** 定义并实现 `LegacyFamilyPluginDescriptor`、`LegacyRuntimeProvider`、`LegacyRuntimeSessionId`、`LegacyRuntimeHostCtx`、`LegacyStepInput`、`LegacyStepOutput`、`LegacyEffect`、`LegacyWaitRequest` 和 `LegacySnapshotEnvelope`。
 
 **Depends On:** `S5-GAME-RUNTIME-01`、`S5-EMUCORE-SM-01`、`S5-LEGACY-VFS-01`、`S5-MANAGER-01`、`Docs/contracts/astraemu-ipc.md`、`Docs/implementation/astraemu-legacy-runtime-framework.md`、`Docs/implementation/provider-plugin-api.md`
 
-**Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`AstraEMU/Tests/family_plugin_api.rs` planned target
+**Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`AstraEMU/Source/Manager/astra-emu-manager-core/src/family_loader.rs`
 
 **Steps:**
 
@@ -145,11 +153,13 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 
 **ID:** `S5-AUTOPROBE-01`
 
+**Status:** `IN_PROGRESS`
+
 **Goal:** Manager 能按固定 family 优先级自动 probe case，并允许用户用 profile 手动覆盖。
 
 **Depends On:** `S5-MANAGER-01`、`S5-FAMILY-01`
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/auto_probe.rs`、`AstraEMU/Tests/manager_auto_probe.rs` planned target
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-core/src/probe.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/main.rs`
 
 **Steps:**
 
@@ -167,11 +177,13 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 
 **ID:** `S5-SCRIPT-01`
 
+**Status:** `IN_PROGRESS`
+
 **Goal:** AstraEMU 支持用户 Luau 脚本在 Trusted Project Profile 下执行 patch、decode、text/media hook 和 deterministic effect injection。
 
 **Depends On:** `S5-FAMILY-01`、`S3-LUAU-01`、`Docs/contracts/script-vn.md`
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/trusted_luau.rs`、`AstraEMU/Tests/trusted_luau_patch.rs` planned target
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-core/src/patch.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/desktop_source.rs`、Manager launch orchestration
 
 **Steps:**
 
@@ -179,9 +191,9 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 2. 暴露 read-only VFS、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 effect intent host API。
 3. 状态注入只能提交 `LegacyEffect`、Blackboard、input 或 tag intent，并在 fixed tick 边界应用。
 4. 禁止 native handle、Actor 指针、raw filesystem、raw network、system call、未授权 key 提取和访问控制规避。
-5. 脚本触发禁止能力时隔离禁用该脚本，case 按无补丁模式继续，并写入 redacted diagnostic。
+5. 脚本触发禁止能力时隔离禁用该脚本并写入 redacted diagnostic；只有 case profile 明确允许无补丁模式时继续，否则阻断启动。
 
-**Done Evidence:** Trusted Luau 能产生 deterministic effect；违规脚本被隔离，不污染 RuntimeWorld、family session 或 report。
+**Current Evidence:** 每次执行创建 fresh isolated Luau VM；source、memory、instruction、VFS read、intent、overlay count/bytes 均有界，overlay 只在当前 mount memory 中生效并在 unbind 销毁。Manager 只有 profile 显式选择 `trusted` 才读取固定相对 URI `astraemu.patch.luau`；违规或缺文件直接阻断启动，`no_patch` 也必须显式记录。decode transform 会生成 mount-scoped overlay；text/media hook 会在 host 应用前重新校验 replacement 与 VFS URI；deterministic effect 只在 fixed tick 进入 Runtime。正式 release evidence 尚未生成，所以本项仍为 `IN_PROGRESS`。
 
 **Linked Test IDs:** `T-S5-SCRIPT-01`
 
@@ -189,21 +201,23 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 
 **ID:** `S5-TEXT-01`
 
-**Goal:** `TextCaptureEvent` 进入 Manager 文本管线，支持本地 opt-in 全文 dump、`TranslationProvider`、Stage 4 MCP/provider profile、DeepL-style batch fallback 和 LLM-style streaming overlay。
+**Status:** `IN_PROGRESS`
 
-**Depends On:** `S5-MANAGER-01`、`S5-FAMILY-01`、`S4-AI-01`、`S4-AI-04`、`S4-MCP-02`
+**Goal:** `TextCaptureEvent` 进入 Manager 文本管线；首发 translation provider 通过 ECNU Open API 的显式 Responses/SSE 或 Chat Completions profile 更新非权威 overlay，并执行 consent、预算、缓存、secret 与 report redaction policy。
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/text_pipeline.rs`、`Engine/Source/Runtime/astra-plugin/src/translation_provider.rs`、`AstraEMU/Tests/text_translation_pipeline.rs` planned target
+**Depends On:** `S5-MANAGER-01`、`S5-FAMILY-01`、`S4-AI-01`、`S4-AI-04`
+
+**Target Paths:** `AstraEMU/Source/Providers/astra-emu-translation-openai-compatible/`、`AstraEMU/Source/Manager/astra-emu-manager-core/src/library.rs`
 
 **Steps:**
 
-1. 定义 `TextCapturePipeline`：dump sink、translation queue、overlay sink 和 redaction policy。
-2. 默认 report 只保存 text hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才能写全文 dump。
-3. 定义 `TranslationProvider` slot：`translate_batch` 必选，`translate_stream` 可选，provider 声明 language、glossary、context hint、runtime memory 和 rate limit capability。
-4. 非 streaming provider 通过 batch fallback 一次性更新 overlay；streaming provider 可以逐段更新 overlay。
-5. 翻译 overlay 非权威，不进入 replay hash；session cache 只服务当前 UI。
+1. Profile 必须显式填写 endpoint、protocol、model、目标语言、上下文 0–32、正文预算和 secret reference；代码不硬编码默认 model，也不在失败后切换 endpoint/protocol/model。
+2. 默认最近 10 句，总正文上限 16 KiB；背景、术语表和上下文超限时在句边界确定性截断。
+3. 全局一次授权永不自动失效；UI 始终显示 endpoint、model 和发送范围。默认只有 session cache，用户按游戏 opt-in 后才写 SQLite。
+4. timeout、限流、transport 和协议错误不阻塞 Runtime；保留原文、记录稳定 diagnostic、有限退避后熔断，只允许用户手动恢复。
+5. shipping credential 只存平台 secret store；SQLite、日志、report、save/replay 和 package 只保存 secret reference 或 hash/count/latency/error code。
 
-**Done Evidence:** text dump 不泄露到 report；翻译 provider 可替换；overlay 不改变 runtime replay hash。
+**Done Evidence:** Responses SSE、显式 Chat adapter、截断、consent、cache、timeout/rate-limit/circuit breaker 与 redaction 测试通过；另有 ignored live test 使用 ignored env，并证明凭据未进入输出。overlay 不改变 runtime replay hash。
 
 **Linked Test IDs:** `T-S5-TEXT-01`
 
@@ -211,11 +225,13 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 
 **ID:** `S5-FILTER-01`
 
+**Status:** `IN_PROGRESS`
+
 **Goal:** AstraEMU 复用引擎 `FilterGraph`，为旧 VN case 绑定 final-frame 和 per-layer filter preset。
 
 **Depends On:** `S2-MEDIA-04`、`S5-MANAGER-01`
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/filter_presets.rs`、`AstraEMU/Tests/filter_preset_binding.rs` planned target
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-core/src/filter.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/stage_renderer.rs`
 
 **Steps:**
 
@@ -319,21 +335,23 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 
 **ID:** `S5-FVP-01`
 
-**Goal:** FVP 在首批 family 稳定后接入，覆盖 probe、archive/media resolver、VM core、syscall mapper、presentation bridge 和 save/load。
+**Status:** `IN_PROGRESS`
 
-**Depends On:** `S5-KRKR-01`、`S5-ARTEMIS-01`、`S5-BGI-01`、`Docs/emu/fvp/implementation-checklist.md`
+**Goal:** FVP 作为 v1 首发 family，以固定 rfvp revision 为行为基线，覆盖 probe、archive/media resolver、完整 HCB VM/syscall、presentation/audio/movie/input 与 save/load/snapshot/replay。
 
-**Target Paths:** `AstraEMU/Source/Families/astra-emu-fvp/`、`AstraEMU/Tests/fvp/`、`scenarios/emu/fvp_full_flow.yaml` planned target
+**Depends On:** `S5-FAMILY-01`、`S5-GAME-RUNTIME-01`、`S5-LEGACY-VFS-01`、`Docs/emu/fvp/implementation-checklist.md`
+
+**Target Paths:** `AstraEMU/Source/Families/astra-emu-fvp/`、`AstraEMU/Source/Families/astra-emu-fvp-rfvp-core/`、`Tools/verify_fvp_parity.py`
 
 **Steps:**
 
-1. 复用 `LegacyRuntimeProvider` facade、VFS legacy pack mount 和 release report schema。
-2. 实现 `.bin` pack/media resolver 和 HCB VM execution route。
-3. 把 HCB basic block 映射为 family-private action sequence。
-4. 把 graph、text、sound、movie、thread syscall 转成 trace/event、presentation/audio command、TextCaptureEvent 和 AwaitToken。
-5. 编写 generated fixture、syscall mapper、state-machine mapping 和 full-flow scenario 测试。
+1. 固定并记录 rfvp revision、MPL-2.0 notice、修改记录与 source offer；合法输入逐字节对齐 parser、0x00..0x27 opcode、Variant、stack/call frame、context/thread request、read-state 和 syscall 可观察行为。
+2. 实现 `.bin` VFS、HZC1/NVSG、Ogg/RIFF、WMV/MP4 compatibility probe、cursor、graph/prim/text/audio/movie/input/save/load；路径逃逸、损坏输入、越界和预算失控确定性 fail-fast。
+3. 把 HCB basic block 映射为 family-private action sequence，把有序 effect/wait/trace/coverage/snapshot hint 交给 `AstraEmuRuntimeProvider`。
+4. 覆盖 148 个 release syscall；任何未实现分支、软失败临时代码或 unknown dispatch 都让 coverage gate blocking，不能返回 `Nil` 隐藏缺失行为。
+5. 提交 synthetic fixture 与 sanitized golden；商业样本只生成 ignored local parity report，不进入仓库。
 
-**Done Evidence:** FVP report 能说明 syscall coverage，不提交商业脚本或媒体 payload。
+**Current Evidence:** 148 个 release syscall 均有显式 handler，并通过 catalog identity 与 panic-free neutral probe；synthetic archive/HCB proptest、session lifecycle、self-contained texture snapshot、host-command audio restore ordering、text/audio effect 和 product-provider replay 测试已通过。Windows 本机授权样本的 ignored Headless run 已完成 240 tick、240 frame 和 snapshot round-trip，report 不含路径或 payload；checkpoint 未证明视觉变化，证据等级仍为 E2。`Tools/verify_fvp_parity.py` 会从官方仓库取固定 commit，在临时 detached worktree 中运行同一套脱敏 parser/opcode/Variant/context/call/syscall trace，再与仓库 golden 逐字段比较。该 golden 只覆盖 VM/parser 合法输入，不代表 graph/text/audio/movie/save/load 全流 parity；Windows/Android E3 也未完成，因此不能标记 `DONE`。
 
 **Linked Test IDs:** `T-S5-FVP-01`
 
@@ -363,32 +381,35 @@ Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 自身仍是 Pr
 
 **ID:** `S5-GATE-01`
 
-**Goal:** Release Gate 检查 Artemis full-flow scenario、`LegacyRuntimeProvider` facade、auto probe、Trusted Luau policy、text redaction、filter preset、snapshot、TextCaptureEvent 和 report policy。
+**Status:** `IN_PROGRESS`
 
-**Depends On:** `S5-FAMILY-01`、`S5-AUTOPROBE-01`、`S5-SCRIPT-01`、`S5-TEXT-01`、`S5-FILTER-01`、`S5-ARTEMIS-01`
+**Goal:** Release Gate 检查 FVP full-flow、`LegacyRuntimeProvider` facade、显式 runtime/family/UI binding、Slint/WGPU/toolchain/license identity、Trusted Luau、ECNU translation policy、filter、snapshot/replay、host identity 与 report redaction。
 
-**Target Paths:** `Engine/Source/Developer/astra-release/src/emu_gate.rs`、`Engine/Source/Developer/astra-release/tests/emu_gate.rs` planned target
+**Depends On:** `S5-FAMILY-01`、`S5-AUTOPROBE-01`、`S5-SCRIPT-01`、`S5-TEXT-01`、`S5-FILTER-01`、`S5-FVP-01`、`S5-MANAGER-UI-01`
+
+**Target Paths:** `Engine/Source/Developer/astra-release/src/emu.rs`、`AstraEMU/Source/Manager/astra-emu-manager-core/src/evidence.rs`、`AstraEMU/Source/Programs/astra-emu-evidence/`
 
 **Steps:**
 
-1. 增加 `emu.legacy_runtime_provider`、`emu.auto_probe`、`emu.trusted_luau_policy`、`emu.text_redaction`、`emu.filter_preset`、`emu.report_redaction` 和 `emu.snapshot_replay` gate check。
-2. 校验 report schema、plugin provider registration、hash、trace coverage、TextCaptureEvent、snapshot replay 和 manual override evidence。
-3. 校验报告不含商业 payload、未授权截图、音频采样、完整剧情脚本、私有绝对路径、provider secret 或访问控制规避步骤。
-4. 编写 gate pass、missing provider blocked、missing trace blocked、denied script isolated 和 redaction blocked 测试。
+1. 增加 explicit runtime/family/UI binding、Slint/wgpu/toolchain/license identity、FVP full-flow/syscall/parity/snapshot/replay、Trusted Luau 与 translation consent/provider/cache checks。
+2. 校验 plugin ABI/engine/rustc/feature fingerprint、binary hash、package eligibility、官方签名、Android APK/native manifest 或 iOS static registration binding。
+3. 校验 Windows/Android run identity 绑定同一 build/profile/package/session/input sequence，以及视觉、音频、输入消费、route/terminal 和 surface lifecycle evidence。
+4. 所有 report 只允许 alias/hash/offset/size/count/diagnostic；绝对路径、URI、商业 payload、secret、未授权截图/音频或访问控制规避材料必须 blocking。
+5. 编写 missing/conflicting provider、missing syscall、signature mismatch、denied script、translation consent/cache 和 payload redaction 失败测试。
 
-**Done Evidence:** 每个 family 都能用同一 release gate 输出脱敏 local case report。
+**Current Evidence:** release gate 已有 14 项 fail-closed check，并以完整 passing fixture 验证 provider/UI/FVP/Luau/translation/六平台 continuity。`astra-emu-evidence` 会在写入 package sections 前拒绝 unknown field、payload-like field、绝对路径、identity drift 和不完整 E2/E3 lifecycle。真实平台 evidence 尚未生成，不能把 passing fixture 当作发布证据。
 
 **Linked Test IDs:** `T-S5-GATE-01`
 
-## S5-PROGRAM-TARGET-01 AstraEMU Manager Program target
+## S5-PROGRAM-TARGET-01 AstraEMU Manager 与 CLI Program target
 
 **ID:** `S5-PROGRAM-TARGET-01`
 
-**Goal:** AstraEMU Manager 以 `Program` target 运行；被启动的 case 通过 `AstraEmuRuntimeProvider` 作为 `Game` runtime session 运行，family plugin 仍通过 `LegacyRuntimeProvider` 注册，不升级成独立 Game target。
+**Goal:** AstraEMU Manager 与 `astra-emu-cli` 以 `Program` target 运行；被启动的 case 通过 `AstraEmuRuntimeProvider` 作为 `Game` runtime session 运行，family plugin 仍通过 `LegacyRuntimeProvider` 注册，不升级成独立 Game target。CLI native path 只负责显式 quick launch，Headless path 复用 `astra-platform-headless` 与物理输入协议。
 
 **Depends On:** `S1-TARGET-01`、`S5-MANAGER-01`、`S5-FAMILY-01`
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/target.rs`、`AstraEMU/Tests/manager_program_target.rs` planned target
+**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/main.rs`、`AstraEMU/Source/Manager/astra-emu-manager/Cargo.toml`、`AstraEMU/Source/Programs/astra-emu-cli/`、`AstraEMU/Platforms/`
 
 **Steps:**
 
