@@ -29,7 +29,7 @@ def main() -> int:
     reference = (args.reference or root / ".tmp" / "rfvp-reference").resolve()
     golden = (
         root
-        / "AstraEMU"
+        / "Emulator"
         / "Source"
         / "Families"
         / "astra-emu-fvp"
@@ -39,7 +39,7 @@ def main() -> int:
     )
     trace_source = (
         root
-        / "AstraEMU"
+        / "Emulator"
         / "Source"
         / "Families"
         / "astra-emu-fvp-rfvp-core"

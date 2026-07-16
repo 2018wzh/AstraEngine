@@ -53,7 +53,7 @@ def main() -> int:
     args = parser.parse_args()
 
     root = pathlib.Path(__file__).resolve().parents[1]
-    platform = root / "AstraEMU" / "Platforms" / "Android"
+    platform = root / "Emulator" / "Platforms" / "Android"
     output = (args.output or root / ".tmp" / "android-package").resolve()
     ensure_descendant(output, root)
     abis = args.abi or list(ABI_TARGETS)

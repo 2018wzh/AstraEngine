@@ -15,8 +15,8 @@
 - Upstream: <https://github.com/xmoezzz/rfvp>
 - Fixed revision: `657747252eb0d2c5fb4a340695ce6906c2d45133` (`0.4.0` tag)
 - License: Mozilla Public License 2.0.
-- Astra derivative source: `AstraEMU/Source/Families/astra-emu-fvp-rfvp-core/`
-- Astra wrapper source: `AstraEMU/Source/Families/astra-emu-fvp/`
+- Astra derivative source: `Emulator/Source/Families/astra-emu-fvp-rfvp-core/`
+- Astra wrapper source: `Emulator/Source/Families/astra-emu-fvp/`
 - 修改包括 host VFS、bounded deterministic stepping、effect/trace journal、snapshot isolation、fail-fast syscall coverage 与 ABI provider adapter。发布时同时分发 `MODIFICATIONS.md` 与对应 source archive/source offer；更细的文件级历史由 Git 保留。
 
 MPL-2.0 要求的 covered source 以随 release 对应的 AstraEngine source archive 或公开 source offer 提供；release gate 必须把 source archive hash/source offer identity 与 binary/package identity 绑定。

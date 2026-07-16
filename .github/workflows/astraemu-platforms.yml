@@ -3,7 +3,7 @@ name: AstraEMU platforms
 on:
   push:
     paths:
-      - "AstraEMU/**"
+      - "Emulator/**"
       - "Engine/Source/Runtime/**"
       - "Engine/Source/Platform/**"
       - "Cargo.toml"
@@ -12,7 +12,7 @@ on:
       - ".github/workflows/astraemu-platforms.yml"
   pull_request:
     paths:
-      - "AstraEMU/**"
+      - "Emulator/**"
       - "Engine/Source/Runtime/**"
       - "Engine/Source/Platform/**"
       - "Cargo.toml"
@@ -57,10 +57,10 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate iOS project
-        working-directory: AstraEMU/Platforms/iOS
+        working-directory: Emulator/Platforms/iOS
         run: xcodegen generate
       - name: Build signed-registry iOS simulator package
-        working-directory: AstraEMU/Platforms/iOS
+        working-directory: Emulator/Platforms/iOS
         run: |
           xcodebuild \
             -project AstraEMU.xcodeproj \

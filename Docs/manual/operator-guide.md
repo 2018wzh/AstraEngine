@@ -139,7 +139,7 @@ astra-emu-cli headless \
 
 Android 统一由 `python Tools/build_astraemu_android.py --abi arm64-v8a --abi x86_64` 构建。入口要求 API 36、NDK r28 以上、两种 Rust target、APK signer digest、family signer/trust root 和 Android keystore；它会检查 16 KiB ELF LOAD alignment，把每种 ABI 的动态库及双 manifest 写进 APK，执行 `apksigner verify`，最后输出不含 secret 和本地路径的 `astra.emu.android_package_evidence.v1`。缺 SDK license、签名身份或任一 ABI 都是 blocking，不能以手工复制 `.so` 代替。
 
-iOS 工程由 `AstraEMU/Platforms/iOS/project.yml` 生成。Xcode build phase 调用 `build_for_ios_with_cargo.bash`，分别构建 device/simulator FVP archive，使用 `static-sign` 绑定 Mach-O archive architecture、descriptor、signer 和 trust root，再把同一 registration contract 静态链接进 Manager。device archive 必须由 Xcode 的有效 signing identity 签名；simulator 构建不能外推成真机 E3。
+iOS 工程由 `Emulator/Platforms/iOS/project.yml` 生成。Xcode build phase 调用 `build_for_ios_with_cargo.bash`，分别构建 device/simulator FVP archive，使用 `static-sign` 绑定 Mach-O archive architecture、descriptor、signer 和 trust root，再把同一 registration contract 静态链接进 Manager。device archive 必须由 Xcode 的有效 signing identity 签名；simulator 构建不能外推成真机 E3。
 
 FVP 的固定行为基线是 rfvp `0.4.0` commit `657747252eb0d2c5fb4a340695ce6906c2d45133`。运行 `python Tools/verify_fvp_parity.py` 会在临时 detached worktree 中对 derivative 与官方 revision 执行同一 sanitized trace，并与仓库 golden 逐叶比较；`--evidence-output` 只写 revision、trace hash、opcode/count 和状态。该证据覆盖 parser/VM/Variant/context 的合法输入行为，不代表 media、148 syscall 的真实素材行为或平台 full-flow。
 

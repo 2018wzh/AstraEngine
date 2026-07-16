@@ -81,8 +81,8 @@ def main() -> int:
         shutil.copy2(family, family_root / family_name)
         shutil.copy2(manager, temporary / manager_name)
         shutil.copy2(cli, temporary / cli_name)
-        copy_notice(root / "AstraEMU" / "THIRD_PARTY_NOTICES.md", temporary)
-        copy_notice(root / "AstraEMU" / "Source" / "Families" / "astra-emu-fvp" / "THIRD_PARTY_NOTICES.md", temporary)
+        copy_notice(root / "Emulator" / "THIRD_PARTY_NOTICES.md", temporary)
+        copy_notice(root / "Emulator" / "Source" / "Families" / "astra-emu-fvp" / "THIRD_PARTY_NOTICES.md", temporary)
         verify_distribution(temporary, manager_name, cli_name, family_name, manifest, target, environment)
         report = distribution_report(
             temporary,

@@ -14,7 +14,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S2-VFS-01`、`S3-RUNTIME-PROVIDER-01`、[Game Runtime Provider Contract](../../contracts/game-runtime-provider.md)、[Game Runtime Provider Blueprint](../../implementation/game-runtime-provider.md)
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-core/src/runtime_provider.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/main.rs`
+**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-core/src/runtime_provider.rs`、`Emulator/Source/Manager/astra-emu-manager/src/main.rs`
 
 **Steps:**
 
@@ -38,7 +38,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-GAME-RUNTIME-01`、`S5-FAMILY-01`、[EmulatorCore StateMachine Mapping](../../implementation/emulator-core-state-machine.md)
 
-**Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`AstraEMU/Source/Families/astra-emu-fvp-rfvp-core/src/portable/vm.rs`、`AstraEMU/Source/Families/astra-emu-fvp/src/provider.rs`
+**Target Paths:** `Emulator/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`Emulator/Source/Families/astra-emu-fvp-rfvp-core/src/portable/vm.rs`、`Emulator/Source/Families/astra-emu-fvp/src/provider.rs`
 
 **Steps:**
 
@@ -62,7 +62,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S2-VFS-01`、`S5-GAME-RUNTIME-01`、[Asset VFS Contract](../../contracts/asset-vfs.md)
 
-**Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`AstraEMU/Source/Families/astra-emu-fvp/src/archive.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/desktop_source.rs`
+**Target Paths:** `Emulator/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`Emulator/Source/Families/astra-emu-fvp/src/archive.rs`、`Emulator/Source/Manager/astra-emu-manager/src/desktop_source.rs`
 
 **Steps:**
 
@@ -86,7 +86,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-GAME-RUNTIME-01`、`S5-EMUCORE-SM-01`、`Docs/contracts/astraemu-ipc.md`、`S1-CORE-01`、`S1-PLUGIN-01`
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-core/src/runtime_provider.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/family_host.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/main.rs`、`AstraEMU/Source/Programs/astra-emu-cli/`
+**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-core/src/runtime_provider.rs`、`Emulator/Source/Manager/astra-emu-manager/src/family_host.rs`、`Emulator/Source/Manager/astra-emu-manager/src/main.rs`、`Emulator/Source/Programs/astra-emu-cli/`
 
 **Steps:**
 
@@ -111,7 +111,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-MANAGER-01`、`S2-UI-BACKEND-01`、[ADR 0015](../../adr/0015-ui-backend-provider-split.md)
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-ui-slint/`、`AstraEMU/Source/Manager/astra-emu-manager/`
+**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-ui-slint/`、`Emulator/Source/Manager/astra-emu-manager/`
 
 **Steps:**
 
@@ -135,7 +135,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-GAME-RUNTIME-01`、`S5-EMUCORE-SM-01`、`S5-LEGACY-VFS-01`、`S5-MANAGER-01`、`Docs/contracts/astraemu-ipc.md`、`Docs/implementation/astraemu-legacy-runtime-framework.md`、`Docs/implementation/provider-plugin-api.md`
 
-**Target Paths:** `AstraEMU/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`AstraEMU/Source/Manager/astra-emu-manager-core/src/family_loader.rs`
+**Target Paths:** `Emulator/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`Emulator/Source/Manager/astra-emu-manager-core/src/family_loader.rs`
 
 **Steps:**
 
@@ -159,7 +159,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-MANAGER-01`、`S5-FAMILY-01`
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-core/src/probe.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/main.rs`
+**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-core/src/probe.rs`、`Emulator/Source/Manager/astra-emu-manager/src/main.rs`
 
 **Steps:**
 
@@ -183,7 +183,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-FAMILY-01`、`S3-LUAU-01`、`Docs/contracts/script-vn.md`
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-core/src/patch.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/desktop_source.rs`、Manager launch orchestration
+**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-core/src/patch.rs`、`Emulator/Source/Manager/astra-emu-manager/src/desktop_source.rs`、Manager launch orchestration
 
 **Steps:**
 
@@ -207,7 +207,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-MANAGER-01`、`S5-FAMILY-01`、`S4-AI-01`、`S4-AI-04`
 
-**Target Paths:** `AstraEMU/Source/Providers/astra-emu-translation-openai-compatible/`、`AstraEMU/Source/Manager/astra-emu-manager-core/src/library.rs`
+**Target Paths:** `Emulator/Source/Providers/astra-emu-translation-openai-compatible/`、`Emulator/Source/Manager/astra-emu-manager-core/src/library.rs`
 
 **Steps:**
 
@@ -231,7 +231,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S2-MEDIA-04`、`S5-MANAGER-01`
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager-core/src/filter.rs`、`AstraEMU/Source/Manager/astra-emu-manager/src/stage_renderer.rs`
+**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-core/src/filter.rs`、`Emulator/Source/Manager/astra-emu-manager/src/stage_renderer.rs`
 
 **Steps:**
 
@@ -253,7 +253,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-FAMILY-01`、`Docs/emu/artemis/implementation-checklist.md`
 
-**Target Paths:** `AstraEMU/Source/Families/astra-emu-artemis/`、`AstraEMU/Tests/artemis/`、`scenarios/emu/artemis_full_flow.yaml` planned target
+**Target Paths:** `Emulator/Source/Families/astra-emu-artemis/`、`Emulator/Tests/artemis/`、`scenarios/emu/artemis_full_flow.yaml` planned target
 
 **Steps:**
 
@@ -275,7 +275,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-FAMILY-01`、`Docs/emu/krkr/implementation-checklist.md`
 
-**Target Paths:** `AstraEMU/Source/Families/astra-emu-krkr/`、`AstraEMU/Tests/krkr/`、`scenarios/emu/krkr_probe.yaml` planned target
+**Target Paths:** `Emulator/Source/Families/astra-emu-krkr/`、`Emulator/Tests/krkr/`、`scenarios/emu/krkr_probe.yaml` planned target
 
 **Steps:**
 
@@ -296,7 +296,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-FAMILY-01`、`Docs/emu/bgi/implementation-checklist.md`
 
-**Target Paths:** `AstraEMU/Source/Families/astra-emu-bgi/`、`AstraEMU/Tests/bgi/`、`scenarios/emu/bgi_full_flow.yaml` planned target
+**Target Paths:** `Emulator/Source/Families/astra-emu-bgi/`、`Emulator/Tests/bgi/`、`scenarios/emu/bgi_full_flow.yaml` planned target
 
 **Steps:**
 
@@ -318,7 +318,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-KRKR-01`、`S5-ARTEMIS-01`、`S5-BGI-01`、`Docs/emu/softpal/implementation-checklist.md`
 
-**Target Paths:** `AstraEMU/Source/Families/astra-emu-softpal/`、`AstraEMU/Tests/softpal/`、`scenarios/emu/softpal_full_flow.yaml` planned target
+**Target Paths:** `Emulator/Source/Families/astra-emu-softpal/`、`Emulator/Tests/softpal/`、`scenarios/emu/softpal_full_flow.yaml` planned target
 
 **Steps:**
 
@@ -341,7 +341,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-FAMILY-01`、`S5-GAME-RUNTIME-01`、`S5-LEGACY-VFS-01`、`Docs/emu/fvp/implementation-checklist.md`
 
-**Target Paths:** `AstraEMU/Source/Families/astra-emu-fvp/`、`AstraEMU/Source/Families/astra-emu-fvp-rfvp-core/`、`Tools/verify_fvp_parity.py`
+**Target Paths:** `Emulator/Source/Families/astra-emu-fvp/`、`Emulator/Source/Families/astra-emu-fvp-rfvp-core/`、`Tools/verify_fvp_parity.py`
 
 **Steps:**
 
@@ -363,7 +363,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-KRKR-01`、`S5-ARTEMIS-01`、`S5-BGI-01`、`Docs/emu/siglus/implementation-checklist.md`
 
-**Target Paths:** `AstraEMU/Source/Families/astra-emu-siglus/`、`AstraEMU/Tests/siglus/`、`scenarios/emu/siglus_full_flow.yaml` planned target
+**Target Paths:** `Emulator/Source/Families/astra-emu-siglus/`、`Emulator/Tests/siglus/`、`scenarios/emu/siglus_full_flow.yaml` planned target
 
 **Steps:**
 
@@ -387,7 +387,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S5-FAMILY-01`、`S5-AUTOPROBE-01`、`S5-SCRIPT-01`、`S5-TEXT-01`、`S5-FILTER-01`、`S5-FVP-01`、`S5-MANAGER-UI-01`
 
-**Target Paths:** `Engine/Source/Developer/astra-release/src/emu.rs`、`AstraEMU/Source/Manager/astra-emu-manager-core/src/evidence.rs`、`AstraEMU/Source/Programs/astra-emu-evidence/`
+**Target Paths:** `Engine/Source/Developer/astra-release/src/emu.rs`、`Emulator/Source/Manager/astra-emu-manager-core/src/evidence.rs`、`Emulator/Source/Programs/astra-emu-evidence/`
 
 **Steps:**
 
@@ -409,7 +409,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S1-TARGET-01`、`S5-MANAGER-01`、`S5-FAMILY-01`
 
-**Target Paths:** `AstraEMU/Source/Manager/astra-emu-manager/src/main.rs`、`AstraEMU/Source/Manager/astra-emu-manager/Cargo.toml`、`AstraEMU/Source/Programs/astra-emu-cli/`、`AstraEMU/Platforms/`
+**Target Paths:** `Emulator/Source/Manager/astra-emu-manager/src/main.rs`、`Emulator/Source/Manager/astra-emu-manager/Cargo.toml`、`Emulator/Source/Programs/astra-emu-cli/`、`Emulator/Platforms/`
 
 **Steps:**
 

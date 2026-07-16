@@ -80,7 +80,7 @@
 | AstraVN | 多 crate、runtime provider、policy、presentation 和 package/save 代码存在；script frontend 与 live Player 仍重开/进行中 | 已实现范围不能升级为完整 VN 产品；frontend 和真实 Player 是主要闭口 |
 | Editor | `Editor/Source/.gitkeep` 是当前唯一 tracked 文件 | P1 `CONTRACT_ONLY`、`UNWIRED_MAIN_PATH`；Stage 4 不应被当作实现 |
 | AI/MCP | `astra-ai` 源码存在，但不在根 workspace；Copilot 和 TrustedSession 有明确未完成路径 | P1 `UNWIRED_MAIN_PATH`、`FAKE_IMPLEMENTATION`；Stage 4 必须保持 reopened |
-| AstraEMU | `AstraEMU/Source/.gitkeep` 是当前唯一 tracked 文件 | P2 `DESIGN_GAP`；Stage 5 设计存在但没有实现对象 |
+| AstraEMU | `Emulator/Source/.gitkeep` 是当前唯一 tracked 文件 | P2 `DESIGN_GAP`；Stage 5 设计存在但没有实现对象 |
 | AstraRPG | 当前只有设计、contract、stage 和 migration 目标，没有对应 workspace crate | P2 `DESIGN_GAP`；Stage 7/8 必须保持 planned/spec-ready |
 | UE 能力域 | runtime、package、media contract、provider ABI 和基础 platform host 已有骨架；Editor、完整字体系统、网络、资产规模工具链、完整恢复/性能闭环不足 | P1/P2 `UE_CAPABILITY_GAP`，需要按 owner 拆分后再设计和实现 |
 
@@ -158,7 +158,7 @@
 
 **分类：** `STATUS_MISMATCH` 风险，当前部分已由文档正确标记为 planned/reopened
 
-**证据：** `Docs/implementation/workspace-blueprint.md:17-18`、`Docs/status/stages/stage-4-editor-ai-mcp.md:3`、`Docs/status/stages/stage-5-astra-emu.md:1-9` 和 `Docs/status/stages/stage-7-astra-rpg.md:130` 均明确这些模块尚未实现或处于 spec-ready/reopened；`AstraEMU/Source/.gitkeep`、`Editor/Source/.gitkeep` 也支持该结论。
+**证据：** `Docs/implementation/workspace-blueprint.md:17-18`、`Docs/status/stages/stage-4-editor-ai-mcp.md:3`、`Docs/status/stages/stage-5-astra-emu.md:1-9` 和 `Docs/status/stages/stage-7-astra-rpg.md:130` 均明确这些模块尚未实现或处于 spec-ready/reopened；`Emulator/Source/.gitkeep`、`Editor/Source/.gitkeep` 也支持该结论。
 
 **迁移要求：** 后续新增代码时必须先加入真实 workspace/target、测试矩阵和 release gate，再改变状态。设计 target path、fixture provider、facade re-export、synthetic report 和 planned contract 均不得计入实现完成数量。
 
