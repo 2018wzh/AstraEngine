@@ -24,6 +24,7 @@ SUPPORTED_COMMANDS = {
     "layer",
     "background",
     "show",
+    "move",
     "hide",
     "clear_layer",
     "layer_visibility",
@@ -339,8 +340,17 @@ def _command_payload_valid(command: dict) -> bool:
             _safe_asset(command.get("asset_id"))
             and _safe(command.get("character_id"))
             and _safe(command.get("layer"))
+            and command.get("fit", "contain_height") in {"contain_height", "native"}
             and isinstance(command.get("opacity", 100), int)
             and 0 <= command.get("opacity", 100) <= 100
+        )
+    if kind == "move":
+        return (
+            _safe(command.get("character_id"))
+            and isinstance(command.get("x"), int)
+            and isinstance(command.get("y"), int)
+            and isinstance(command.get("duration_ms"), int)
+            and command["duration_ms"] >= 0
         )
     if kind == "hide":
         return _safe(command.get("character_id"))
@@ -504,8 +514,14 @@ def _render_command(command: dict, strings: dict[str, str]) -> list[str]:
     if kind == "show":
         pose = f" pose:{command['pose']}" if _safe(command.get("pose")) else ""
         at = f" at:{command['at']}" if _safe(command.get("at")) else ""
+        fit = f" fit:{command['fit']}" if command.get("fit") else ""
         opacity = command.get("opacity", 100) / 100
-        return [f"{prefix}show id:{command['character_id']} asset:asset:/{command['asset_id']}{pose} layer:{command['layer']}{at} opacity:{opacity:g} {stable}"]
+        return [f"{prefix}show id:{command['character_id']} asset:asset:/{command['asset_id']}{pose} layer:{command['layer']}{at}{fit} opacity:{opacity:g} {stable}"]
+    if kind == "move":
+        return [
+            f"{prefix}move id:{command['character_id']} x:{command['x']} y:{command['y']} "
+            f"duration:{command['duration_ms']} {stable}"
+        ]
     if kind == "hide":
         return [f"{prefix}hide id:{command['character_id']} {stable}"]
     if kind == "background":

@@ -11582,7 +11582,7 @@ def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | Non
     wrote_story_inputs = not diagnostics
     if wrote_story_inputs:
         _copy_native_assets_to_nativevn(work_root, nativevn_root, conversion_report)
-        _copy_tsuinosora_ui_template(nativevn_root)
+        _copy_tsuinosora_ui_template(work_root, nativevn_root)
         (nativevn_root / "project.yaml").write_text(
             _render_nativevn_project(section_specs, scenario_refs),
             encoding="utf-8",
@@ -11638,20 +11638,31 @@ def _copy_native_assets_to_nativevn(work_root: Path, nativevn_root: Path, conver
     if binding_ir.get("schema") != "tsuinosora.director_asset_binding_ir.v1":
         raise ValueError("runtime asset closure requires the validated Director asset binding IR")
     runtime_assets: dict[str, set[str]] = {}
+
+    def register_runtime_binding(binding: object) -> None:
+        if not isinstance(binding, dict) or "asset_id" not in binding:
+            return
+        native_path = str(binding.get("native_path", ""))
+        asset_id = str(binding.get("asset_id", ""))
+        if (
+            not _is_safe_report_relative_path(native_path)
+            or not native_path.startswith("native-assets/")
+            or not _is_safe_symbol(asset_id)
+        ):
+            raise ValueError("Director runtime asset binding is unsafe")
+        runtime_assets.setdefault(asset_id, set()).add(native_path)
+
     for scene in binding_ir.get("scenes", []):
         for operation in _walk_director_operations(scene.get("operations", [])):
-            binding = operation.get("binding")
-            if not isinstance(binding, dict) or "asset_id" not in binding:
-                continue
-            native_path = str(binding.get("native_path", ""))
-            asset_id = str(binding.get("asset_id", ""))
-            if (
-                not _is_safe_report_relative_path(native_path)
-                or not native_path.startswith("native-assets/")
-                or not _is_safe_symbol(asset_id)
-            ):
-                raise ValueError("Director runtime asset binding is unsafe")
-            runtime_assets.setdefault(asset_id, set()).add(native_path)
+            register_runtime_binding(operation.get("binding"))
+    for stage_layout in binding_ir.get("stage_layouts", []):
+        layers = stage_layout.get("layers") if isinstance(stage_layout, dict) else None
+        if not isinstance(layers, dict):
+            raise ValueError("Director stage layout must contain typed layers")
+        for layer in layers.values():
+            if not isinstance(layer, dict):
+                raise ValueError("Director stage layout layer must be an object")
+            register_runtime_binding(layer.get("binding"))
 
     resources = {
         str(resource.get("native_path", "")): resource
@@ -11739,7 +11750,7 @@ def _walk_director_operations(operations):
                 yield from _walk_director_operations(children)
 
 
-def _copy_tsuinosora_ui_template(nativevn_root: Path) -> None:
+def _copy_tsuinosora_ui_template(work_root: Path, nativevn_root: Path) -> None:
     repository_root = Path(__file__).resolve().parents[2]
     template_root = repository_root / "Examples" / "TsuiNoSora" / "ProjectTemplate"
     if not template_root.is_dir():
@@ -11749,6 +11760,36 @@ def _copy_tsuinosora_ui_template(nativevn_root: Path) -> None:
         target = nativevn_root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    binding_path = work_root / "private" / "director_asset_bindings.json"
+    if binding_path.is_file():
+        binding_ir = _read_json(binding_path)
+        def unique_stage_asset(layer_name: str) -> str:
+            asset_ids = {
+                str(layer.get("binding", {}).get("asset_id", ""))
+                for layout in binding_ir.get("stage_layouts", [])
+                if isinstance(layout, dict)
+                for name, layer in layout.get("layers", {}).items()
+                if name == layer_name and isinstance(layer, dict)
+            }
+            asset_id = next(iter(asset_ids), "")
+            if len(asset_ids) != 1 or not _is_safe_symbol(asset_id):
+                raise ValueError(
+                    f"Director stage layouts do not agree on one {layer_name} asset"
+                )
+            return asset_id
+
+        sky_frame_id = unique_stage_asset("sky")
+        dialogue_frame_id = unique_stage_asset("dialogue_frame")
+        for theme_name in ("classic.json", "modern.json"):
+            theme_path = nativevn_root / "Themes" / theme_name
+            theme = _read_json(theme_path)
+            theme.setdefault("tokens", {})["sky.frame"] = {
+                "asset": f"asset:/{sky_frame_id}"
+            }
+            theme.setdefault("tokens", {})["dialogue.frame"] = {
+                "asset": f"asset:/{dialogue_frame_id}"
+            }
+            _write_json(theme_path, theme)
     localization_root = nativevn_root / "Localization"
     source_locale_path = localization_root / "ja.json"
     if not source_locale_path.is_file():
@@ -11819,6 +11860,42 @@ cook:
 review: accepted
 """
     target.with_name(target.name + ".astra-asset.yaml").write_text(sidecar, encoding="utf-8")
+
+    sc_source = repository_root / "Engine" / "Fixtures" / "PublicDomainFonts" / "NotoSansSC-Variable.ttf"
+    sc_expected_hash = "sha256:a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da"
+    if not sc_source.is_file() or _sha256(sc_source) != sc_expected_hash:
+        raise FileNotFoundError("the reviewed OFL Noto Sans SC UI fallback font is missing or has changed")
+    sc_relative_path = "native-assets/ui/fonts/NotoSansSC-Variable.ttf"
+    sc_target = nativevn_root / sc_relative_path
+    shutil.copy2(sc_source, sc_target)
+    sc_sidecar = """schema: astra.asset.v1
+id: asset:/font/tsuinosora-ui-sc
+source: native-assets/ui/fonts/NotoSansSC-Variable.ttf
+source_hash: sha256:a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da
+type: font.ttf
+license: OFL-1.1
+importer: astra.import.font
+font:
+  family: Noto Sans SC
+  face_index: 0
+  subset: cjk-production
+  coverage:
+    - { start: 32, end: 126 }
+    - { start: 12288, end: 12351 }
+    - { start: 12352, end: 12447 }
+    - { start: 12448, end: 12543 }
+    - { start: 13312, end: 19903 }
+    - { start: 19968, end: 40959 }
+    - { start: 65280, end: 65519 }
+cook:
+  processor: astra.cook.font
+  target_profiles: [classic, modern]
+  params: {}
+review: accepted
+"""
+    sc_target.with_name(sc_target.name + ".astra-asset.yaml").write_text(
+        sc_sidecar, encoding="utf-8"
+    )
 
 
 def _write_asset_sidecar(

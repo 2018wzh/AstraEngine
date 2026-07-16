@@ -17,6 +17,7 @@
     "system.config.text_speed": "文字速度",
     "system.config.auto_delay": "自动播放等待",
     "system.config.high_contrast": "高对比度",
+    "system.config.language": "语言",
     "ui.save.confirm_overwrite": "覆盖此存档吗？",
     "ui.common.cancel": "取消",
     "ui.common.confirm": "确认"

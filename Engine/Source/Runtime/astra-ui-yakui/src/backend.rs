@@ -123,31 +123,44 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
         request.validate()?;
         let mut request = request;
         if let Some(semantics) = self.last_semantics.as_ref() {
-            if let Some(focused) = semantics
-                .nodes
-                .iter()
-                .find(|node| node.focused && node.role == astra_ui_core::UiSemanticRole::Slider)
-            {
+            if let Some(focused) = semantics.nodes.iter().find(|node| node.focused) {
                 for event in &mut request.input.events {
-                    if let UiInputEventKind::Keyboard {
-                        physical_key,
-                        state: UiButtonState::Pressed,
-                        repeat: false,
-                        ..
-                    } = &event.kind
-                    {
-                        let action = match physical_key.as_str() {
-                            "ArrowLeft" | "ArrowDown" => Some("decrement"),
-                            "ArrowRight" | "ArrowUp" => Some("increment"),
-                            _ => None,
-                        };
-                        if let Some(action) = action {
-                            event.kind = UiInputEventKind::AccessibilityAction {
-                                semantic_id: focused.id.clone(),
-                                action: action.to_string(),
-                                value: None,
-                            };
+                    let action = match &event.kind {
+                        UiInputEventKind::Keyboard {
+                            physical_key,
+                            state: UiButtonState::Pressed,
+                            repeat: false,
+                            ..
+                        } if focused.role == astra_ui_core::UiSemanticRole::Slider => {
+                            match physical_key.as_str() {
+                                "ArrowLeft" | "ArrowDown" => Some("decrement"),
+                                "ArrowRight" | "ArrowUp" => Some("increment"),
+                                _ => None,
+                            }
                         }
+                        UiInputEventKind::Keyboard {
+                            physical_key,
+                            state: UiButtonState::Pressed,
+                            repeat: false,
+                            ..
+                        } if focused.role == astra_ui_core::UiSemanticRole::Toggle
+                            && matches!(physical_key.as_str(), "Enter" | "Space") =>
+                        {
+                            Some("activate")
+                        }
+                        UiInputEventKind::Navigation {
+                            action: UiNavigationAction::Activate,
+                        } if focused.role == astra_ui_core::UiSemanticRole::Toggle => {
+                            Some("activate")
+                        }
+                        _ => None,
+                    };
+                    if let Some(action) = action {
+                        event.kind = UiInputEventKind::AccessibilityAction {
+                            semantic_id: focused.id.clone(),
+                            action: action.to_string(),
+                            value: None,
+                        };
                     }
                 }
             }

@@ -198,6 +198,7 @@ pub enum StageCommand {
         pose: Option<String>,
         layer: String,
         placement: StagePlacement,
+        fit: StageFitMode,
         opacity: FixedScalar,
         preset: Option<String>,
     },
@@ -264,6 +265,15 @@ pub enum StageCommand {
         fallback: String,
         budget_us: u32,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StageFitMode {
+    /// Preserve the established VN portrait behavior: fit to 90% of the stage height.
+    ContainHeight,
+    /// Preserve the asset's design-pixel size in stage coordinates.
+    Native,
 }
 
 impl StageCommand {

@@ -19,8 +19,8 @@ class DirectorNativeStoryError(ValueError):
 
 DAY_FLAGS = ("asumi", "ayana", "kotomi", "manhole", "takuji", "yasuko", "yukito", "zakuro")
 LAYER_SPECS = (
-    ("background", "background", 0),
-    ("sky", "sprite", 10),
+    ("sky", "sprite", 0),
+    ("background", "sprite", 10),
     ("character", "sprite", 20),
     ("event", "cg", 30),
     ("eye", "sprite", 40),
@@ -108,6 +108,8 @@ class _Lowering:
         self.default_handler = handlers[0]["handler_id"]
 
     def lower(self, program):
+        self.stage_layouts = _stage_layouts(program.get("stage_layouts"))
+        self.stage_layout = self.stage_layouts["Y"]
         movie_entries = {movie["movie_id"]: movie["entry_node"] for movie in program["movies"]}
         self.choice_option_counts = {
             node["node_id"]: len(node["choice"]["options"])
@@ -144,6 +146,27 @@ class _Lowering:
         ]
         for layer, kind, z in LAYER_SPECS:
             commands.append(self._command("layer", layer=layer, layer_kind=kind, z=z, blend="normal", clip="stage"))
+        sky = self.stage_layout["sky"]
+        commands.extend(
+            [
+                self._command(
+                    "show",
+                    character_id="tsui.layer.sky",
+                    asset_id=sky["binding"]["asset_id"],
+                    layer="sky",
+                    at="center",
+                    fit="native",
+                    opacity=100,
+                ),
+                self._command(
+                    "move",
+                    character_id="tsui.layer.sky",
+                    x=sky["x"],
+                    y=sky["y"] + sky["height"] // 2,
+                    duration_ms=0,
+                ),
+            ]
+        )
         for path, value in (("global.episode", 1), ("global.mode", 0), ("global.panty", 0)):
             commands.append(self._mutate(path, value))
         for day in DAY_FLAGS:
@@ -417,10 +440,9 @@ class _Lowering:
                 commands.append(self._command("preload", handler=handler, asset_id=operation["binding"]["asset_id"]))
             elif kind == "show_member":
                 layer = operation["layer"]
-                if layer == "background":
-                    commands.append(self._command("background", handler=handler, asset_id=operation["binding"]["asset_id"], layer=layer))
-                else:
-                    commands.append(
+                layout = self.stage_layouts[node["movie_id"]][layer]
+                commands.extend(
+                    [
                         self._command(
                             "show",
                             handler=handler,
@@ -428,22 +450,44 @@ class _Lowering:
                             asset_id=operation["binding"]["asset_id"],
                             layer=layer,
                             at="center",
+                            fit="native",
                             opacity=operation["opacity"],
-                        )
-                    )
-                    if operation.get("transition") == "transition_in":
-                        commands.append(self._command("transition", handler=handler, preset="crossfade", duration_ms=250))
+                        ),
+                        self._command(
+                            "move",
+                            handler=handler,
+                            character_id=f"tsui.layer.{layer}",
+                            x=layout["x"],
+                            y=layout["y"] + layout["height"] // 2,
+                            duration_ms=0,
+                        ),
+                    ]
+                )
+                if operation.get("transition") == "transition_in":
+                    commands.append(self._command("transition", handler=handler, preset="crossfade", duration_ms=250))
             elif kind == "show_eye":
-                commands.append(
-                    self._command(
-                        "show",
-                        handler=handler,
-                        character_id="tsui.layer.eye",
-                        asset_id=operation["binding"]["asset_id"],
-                        layer="eye",
-                        at="center",
-                        opacity=100,
-                    )
+                layout = self.stage_layouts[node["movie_id"]]["eye"]
+                commands.extend(
+                    [
+                        self._command(
+                            "show",
+                            handler=handler,
+                            character_id="tsui.layer.eye",
+                            asset_id=operation["binding"]["asset_id"],
+                            layer="eye",
+                            at="center",
+                            fit="native",
+                            opacity=100,
+                        ),
+                        self._command(
+                            "move",
+                            handler=handler,
+                            character_id="tsui.layer.eye",
+                            x=layout["x"],
+                            y=layout["y"] + layout["height"] // 2,
+                            duration_ms=0,
+                        ),
+                    ]
                 )
             elif kind == "hide_layer":
                 duration = 250 if operation.get("transition") == "transition_out" else 0
@@ -894,6 +938,7 @@ def _simulate_state(key, state_map):
             "layer",
             "background",
             "show",
+            "move",
             "hide",
             "clear_layer",
             "layer_visibility",
@@ -1101,6 +1146,38 @@ def _node_handler(node, handler_by_source_hash, default):
             if value and _plain_hash(value) in handler_by_source_hash:
                 return handler_by_source_hash[_plain_hash(value)]
     return default
+
+
+def _stage_layouts(value):
+    required_movies = {"K", "S", "T", "Y", "Z"}
+    required_layers = {"sky", "eye", "background", "character", "event", "shade", "dialogue_frame"}
+    if not isinstance(value, list):
+        raise DirectorNativeStoryError("Director stage layout list is missing")
+    result = {}
+    for record in value:
+        if not isinstance(record, dict) or record.get("movie_id") not in required_movies:
+            raise DirectorNativeStoryError("Director stage layout movie identity is invalid")
+        layers = record.get("layers")
+        if not isinstance(layers, dict) or set(layers) != required_layers:
+            raise DirectorNativeStoryError("Director stage layout layer coverage is incomplete")
+        for layer, layout in layers.items():
+            if not isinstance(layout, dict) or any(
+                not isinstance(layout.get(field), int)
+                for field in ("channel", "x", "y", "width", "height")
+            ):
+                raise DirectorNativeStoryError("Director stage layout geometry is invalid")
+            if layout["width"] <= 0 or layout["height"] <= 0:
+                raise DirectorNativeStoryError("Director stage layout size is invalid")
+            if layer in {"sky", "dialogue_frame"}:
+                binding = layout.get("binding")
+                if not isinstance(binding, dict) or not isinstance(binding.get("asset_id"), str):
+                    raise DirectorNativeStoryError("Director stage layout asset binding is missing")
+        if record["movie_id"] in result:
+            raise DirectorNativeStoryError("Director stage layout movie is duplicated")
+        result[record["movie_id"]] = layers
+    if set(result) != required_movies:
+        raise DirectorNativeStoryError("Director stage layout movie coverage is incomplete")
+    return result
 
 
 def _selector_path(selector, option):

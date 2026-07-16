@@ -34,6 +34,10 @@ def build_story_program_ir(story_graph: dict, asset_bindings: dict) -> tuple[dic
     }
     detailed = deepcopy(story_graph)
     detailed["schema"] = "tsuinosora.director_story_program_ir.v1"
+    stage_layouts = asset_bindings.get("stage_layouts")
+    if not isinstance(stage_layouts, list) or not stage_layouts:
+        raise DirectorStoryProgramError("Director asset bindings have no stage layouts")
+    detailed["stage_layouts"] = deepcopy(stage_layouts)
     counts: Counter[str] = Counter()
     source_statement_count = 0
     for movie in detailed.get("movies", []):

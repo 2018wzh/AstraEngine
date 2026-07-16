@@ -699,3 +699,79 @@ fn requested_focus_activates_a_button_without_prior_navigation() {
     assert_eq!(alternate.actions.len(), 1);
     assert_eq!(alternate.actions[0].semantic_target_id, "root/alternate");
 }
+
+#[astra_headless_test::test]
+fn missing_focus_target_reports_bounded_focusable_semantic_ids() {
+    let mut confirm = node("confirm", "button");
+    confirm.events.push(UiEventBinding {
+        event: "activate".into(),
+        action_id: "vn.advance".into(),
+        arguments: BTreeMap::new(),
+    });
+    let mut root = node("root", "screen");
+    root.children.push(confirm);
+    let view = UiViewBlueprint {
+        id: "ui.focus.missing".into(),
+        source_id: "ui.focus.missing".into(),
+        model_schema: "model.focus.v1".into(),
+        theme_id: "theme.focus".into(),
+        required_capabilities: Vec::new(),
+        root,
+    };
+    let mut bundle = UiBlueprintBundle {
+        schema: "astra.ui_blueprint_bundle.v1".into(),
+        views: BTreeMap::from([(view.id.clone(), view)]),
+        hash: Hash256::from_sha256(&[]),
+    };
+    bundle.hash = bundle.compute_hash().expect("bundle hash");
+    let mut theme = UiThemeManifest {
+        schema: "astra.ui_theme_manifest.v1".into(),
+        id: "theme.focus".into(),
+        parent: None,
+        tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
+        high_contrast_tokens: BTreeMap::new(),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash().expect("theme hash");
+    let frame = UiBlueprintFrameModel {
+        schema: "astra.ui_blueprint_frame_model.v1".into(),
+        view_id: "ui.focus.missing".into(),
+        model: UiValue::Map(BTreeMap::new()),
+        state: UiValue::Map(BTreeMap::new()),
+        modals: Vec::new(),
+        focus_request: Some("root/missing".into()),
+        localization: BTreeMap::new(),
+    };
+    let request = UiFrameRequest {
+        schema: "astra.ui_frame_request.v1".into(),
+        session_id: "session.focus.missing".into(),
+        generation: 1,
+        viewport: UiViewport {
+            physical_width: 800,
+            physical_height: 600,
+            scale_factor: 1.0,
+            font_scale: 1.0,
+            safe_area_points: UiInsets {
+                left: 0.0,
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+            },
+        },
+        fixed_time_ns: 0,
+        input: UiInputFrame {
+            schema: "astra.ui_input_frame.v1".into(),
+            events: Vec::new(),
+        },
+        theme,
+        model_schema: "model.focus.v1".into(),
+        model_payload: postcard::to_allocvec(&frame).expect("frame encode"),
+    };
+    let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
+    let mut backend = AstraYakuiBackend::new(renderer, Hash256::from_sha256(b"missing-focus-test"))
+        .expect("backend");
+    let error = backend.render_frame(request).expect_err("missing target");
+    let message = error.to_string();
+    assert!(message.contains("requested=root/missing"));
+    assert!(message.contains("available=root/confirm"));
+}

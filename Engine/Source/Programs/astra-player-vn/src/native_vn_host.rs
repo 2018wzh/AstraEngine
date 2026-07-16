@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use astra_asset::{AssetCatalog, VfsManifest, VfsSourceRef};
 use astra_core::{Hash256, SchemaVersion};
@@ -37,8 +37,9 @@ use astra_ui_yakui::{
 };
 use astra_vn_core::{
     CompiledCommand, CompiledStory, MovieLoopMode, PresentationCommand, StageBlendMode,
-    StageClipPolicy, StageCommand, StageLayerKind, SystemPageKind, TimelineCommand, VnAudioBus,
-    VnAudioControlAction, VnAudioSync, VnPlayerCommand, VnRunConfig, VnRuntimeState, VnWaitKind,
+    StageClipPolicy, StageCommand, StageFitMode, StageLayerKind, SystemPageKind, TimelineCommand,
+    VnAudioBus, VnAudioControlAction, VnAudioSync, VnPlayerCommand, VnRunConfig, VnRuntimeState,
+    VnWaitKind,
 };
 use astra_vn_package::{
     decode_compiled_project, load_localization as load_package_localization,
@@ -71,8 +72,12 @@ pub struct NativeVnHostCommandSource {
     runtime_state: Option<VnRuntimeState>,
     text_provider: Arc<CosmicTextLayoutProvider>,
     font_families: Vec<String>,
+    available_font_families: Vec<String>,
     text_resources: TextRenderResourceOwner,
     localization: VnLocalizationTable,
+    localizations: BTreeMap<String, VnLocalizationTable>,
+    ui_text_locale: Arc<RwLock<String>>,
+    ui_text_font_families: Arc<RwLock<Vec<String>>>,
     surface: PlayerHostResourceId,
     command_sequence: u64,
     fixed_step: u64,
@@ -222,6 +227,7 @@ struct NativeVnPlayerSavePayload {
     slot: String,
     sections: RuntimeSaveSections,
     runtime_state: VnRuntimeState,
+    stage_director: ProductStageDirector,
     step_evidence: NativeVnStepEvidence,
     draw_commands_json: Vec<u8>,
     draw_commands_hash: Hash256,
@@ -240,6 +246,7 @@ struct ProductPresentationBinding {
     textures: BTreeMap<String, TextureFrame>,
     media_assets: BTreeMap<String, PackagedMediaAsset>,
     localization: VnLocalizationTable,
+    localizations: BTreeMap<String, VnLocalizationTable>,
     text_provider: Arc<CosmicTextLayoutProvider>,
     font_families: Vec<String>,
     manifest: VnPresentationProviderManifest,
@@ -295,8 +302,20 @@ impl NativeVnHostCommandSource {
                 config.locale
             )));
         }
-        let localization = load_package_localization(package, &config.locale, 16 * 1024 * 1024)
-            .map_err(|error| NativeVnHostError::Localization(error.to_string()))?;
+        let localizations = locale_config
+            .available_locales
+            .iter()
+            .map(|locale| {
+                load_package_localization(package, locale, 16 * 1024 * 1024)
+                    .map(|table| (locale.clone(), table))
+                    .map_err(|error| NativeVnHostError::Localization(error.to_string()))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let localization = localizations.get(&config.locale).cloned().ok_or_else(|| {
+            NativeVnHostError::Localization(
+                "ASTRA_PLAYER_LOCALE_TABLE_MISSING: declared locale has no loaded table".into(),
+            )
+        })?;
         let text_provider = Arc::new(CosmicTextLayoutProvider::from_package(
             package,
             "media.font_manifest",
@@ -333,6 +352,7 @@ impl NativeVnHostCommandSource {
                     textures,
                     media_assets,
                     localization,
+                    localizations,
                     text_provider,
                     font_families,
                     manifest: presentation_manifest,
@@ -383,10 +403,18 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_UI_THEME_MISSING: compiled project has no packaged UI theme".into(),
             ));
         }
+        let ui_text_locale = Arc::new(RwLock::new(
+            binding.presentation.localization.locale.clone(),
+        ));
+        let ordered_font_families = ordered_ui_font_families(
+            &binding.presentation.font_families,
+            &binding.presentation.localization.locale,
+        );
+        let ui_text_font_families = Arc::new(RwLock::new(ordered_font_families.clone()));
         let ui_text_measurer = Arc::new(NativeUiTextMeasurer {
             provider: Arc::clone(&binding.presentation.text_provider),
-            font_families: binding.presentation.font_families.clone(),
-            locale: binding.presentation.localization.locale.clone(),
+            font_families: Arc::clone(&ui_text_font_families),
+            locale: Arc::clone(&ui_text_locale),
         });
         let ui_renderer = BlueprintYakuiRenderer::new(compiled.ui_blueprints.clone())?
             .with_image_resources(binding.presentation.textures.clone())
@@ -490,9 +518,13 @@ impl NativeVnHostCommandSource {
             session_id: open.session_id,
             runtime_state: None,
             text_provider: binding.presentation.text_provider,
-            font_families: binding.presentation.font_families,
+            font_families: ordered_font_families,
+            available_font_families: binding.presentation.font_families,
             text_resources: TextRenderResourceOwner::default(),
             localization: binding.presentation.localization,
+            localizations: binding.presentation.localizations,
+            ui_text_locale,
+            ui_text_font_families,
             surface,
             command_sequence: 0,
             fixed_step: 0,
@@ -1050,10 +1082,11 @@ impl NativeVnHostCommandSource {
             .as_ref()
             .map(|bytes| Hash256::from_sha256(bytes));
         let payload = NativeVnPlayerSavePayload {
-            schema: "astra.player.native_vn_save_payload.v2".into(),
+            schema: "astra.player.native_vn_save_payload.v3".into(),
             slot,
             sections,
             runtime_state,
+            stage_director: self.stage_director.clone(),
             step_evidence,
             draw_commands_hash: Hash256::from_sha256(&draw_commands_json),
             draw_commands_json,
@@ -1063,7 +1096,7 @@ impl NativeVnHostCommandSource {
         let payload_bytes = postcard::to_allocvec(&payload)
             .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
         postcard::to_allocvec(&NativeVnPlayerSaveEnvelope {
-            schema: "astra.player.native_vn_save.v2".into(),
+            schema: "astra.player.native_vn_save.v3".into(),
             payload_hash: Hash256::from_sha256(&payload_bytes),
             payload,
         })
@@ -1075,8 +1108,8 @@ impl NativeVnHostCommandSource {
             postcard::from_bytes(bytes).map_err(|error| {
                 NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
             })?;
-        if envelope.schema != "astra.player.native_vn_save.v2"
-            || envelope.payload.schema != "astra.player.native_vn_save_payload.v2"
+        if envelope.schema != "astra.player.native_vn_save.v3"
+            || envelope.payload.schema != "astra.player.native_vn_save_payload.v3"
         {
             return Err(NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_VERSION_UNSUPPORTED: save schema is not supported".into(),
@@ -1094,6 +1127,12 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_SAVE_SESSION_MISMATCH: save belongs to another runtime session"
                     .into(),
             ));
+        }
+        let restored_locale = envelope.payload.runtime_state.locale.clone();
+        if !self.localizations.contains_key(&restored_locale) {
+            return Err(NativeVnHostError::Localization(format!(
+                "ASTRA_PLAYER_RESTORE_LOCALE_UNAVAILABLE: locale {restored_locale} is not packaged"
+            )));
         }
         validate_saved_runtime_state(&envelope.payload.sections)?;
         let report = self.host.restore(RuntimeRestoreRequest {
@@ -1134,6 +1173,8 @@ impl NativeVnHostCommandSource {
                 NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
             })?;
         self.runtime_state = Some(envelope.payload.runtime_state);
+        self.activate_locale(&restored_locale)?;
+        self.stage_director = envelope.payload.stage_director;
         self.last_draw = draw_commands;
         self.last_step_evidence = Some(envelope.payload.step_evidence);
         self.restored_product_media_snapshot = envelope.payload.product_media_snapshot_json;
@@ -1145,6 +1186,11 @@ impl NativeVnHostCommandSource {
         self.pending_ui_focus = None;
         self.ui_semantics = None;
         self.ui_animations.clear();
+        let mut restore_lifecycle = Vec::new();
+        for layout_id in self.live_layout_ids.iter().cloned().collect::<Vec<_>>() {
+            restore_lifecycle.extend(self.text_resources.remove_layout(&layout_id)?);
+        }
+        self.live_layout_ids.clear();
         self.ui_generation = self
             .ui_generation
             .checked_add(1)
@@ -1152,21 +1198,16 @@ impl NativeVnHostCommandSource {
         self.ui_backend
             .context_restored(&format!("vn.ui.{}", self.session_id.0), self.ui_generation)
             .map_err(NativeVnHostError::Ui)?;
-        self.command_sequence = self
-            .command_sequence
-            .checked_add(1)
-            .ok_or(NativeVnHostError::SequenceOverflow)?;
-        Ok(PlayerHostCommandBatch::new(vec![
-            PlayerHostCommand::PresentScene {
-                sequence: self.command_sequence,
-                surface: self.surface,
-                width: self.width,
-                height: self.height,
-                clear_rgba: [8, 10, 16, 255],
-                commands: self.last_draw.clone(),
-                semantics: None,
-            },
-        ])?)
+        let mut batch = self.render(&[], 0)?;
+        let [PlayerHostCommand::PresentScene { commands, .. }] = batch.commands.as_mut_slice()
+        else {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_RESTORE_PRESENTATION_BATCH: restore render must emit exactly one scene"
+                    .into(),
+            ));
+        };
+        commands.splice(0..0, restore_lifecycle);
+        Ok(batch)
     }
 
     pub fn prepare_save_transaction(
@@ -1445,7 +1486,7 @@ impl NativeVnHostCommandSource {
         } else {
             "save"
         };
-        tracing::debug!(
+        tracing::info!(
             event = "vn.ui.secondary_shortcut",
             input_sequence = event.sequence,
             semantic_target_id = "root",
@@ -1626,6 +1667,12 @@ impl NativeVnHostCommandSource {
             input_sequence = action.input_sequence,
             "forwarded a typed UI action to the product command router"
         );
+        let requested_locale = match &product_action {
+            VnUiAction::SetConfig { key, value } if key == "display.language" => {
+                Some(ui_value_to_scalar(value)?)
+            }
+            _ => None,
+        };
         let command = match product_action {
             VnUiAction::Advance => VnPlayerCommand::Advance,
             VnUiAction::Choose { option_id } => VnPlayerCommand::Choose { option_id },
@@ -1662,7 +1709,53 @@ impl NativeVnHostCommandSource {
                 VnPlayerCommand::SubmitText { input_id, value }
             }
         };
-        self.command(command)
+        let previous_locale = if let Some(locale) = requested_locale.as_deref() {
+            let previous = self.localization.locale.clone();
+            self.activate_locale(locale)?;
+            Some(previous)
+        } else {
+            None
+        };
+        match self.command(command) {
+            Ok(batch) => {
+                if let Some(locale) = requested_locale {
+                    tracing::info!(
+                        event = "player.vn.locale.changed",
+                        locale,
+                        "activated a packaged locale through the typed config action"
+                    );
+                }
+                Ok(batch)
+            }
+            Err(error) => {
+                if let Some(previous) = previous_locale {
+                    self.activate_locale(&previous)?;
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn activate_locale(&mut self, locale: &str) -> Result<(), NativeVnHostError> {
+        let localization = self.localizations.get(locale).cloned().ok_or_else(|| {
+            NativeVnHostError::Localization(format!(
+                "ASTRA_PLAYER_LOCALE_UNDECLARED: locale {locale} is not packaged"
+            ))
+        })?;
+        *self.ui_text_locale.write().map_err(|_| {
+            NativeVnHostError::Localization(
+                "ASTRA_PLAYER_LOCALE_LOCK: UI text locale state was poisoned".into(),
+            )
+        })? = locale.to_string();
+        let font_families = ordered_ui_font_families(&self.available_font_families, locale);
+        *self.ui_text_font_families.write().map_err(|_| {
+            NativeVnHostError::Localization(
+                "ASTRA_PLAYER_FONT_FALLBACK_LOCK: UI font fallback state was poisoned".into(),
+            )
+        })? = font_families.clone();
+        self.font_families = font_families;
+        self.localization = localization;
+        Ok(())
     }
 
     fn apply_ui_controller_effects(
@@ -2186,6 +2279,26 @@ impl NativeVnHostCommandSource {
         }
         self.ui_performance
             .record(output.performance.clone(), stable_frame)?;
+        let root_bounds = output
+            .semantics
+            .nodes
+            .iter()
+            .find(|node| node.id == "root")
+            .map(|node| node.bounds_points);
+        tracing::debug!(
+            event = "player.vn.ui.frame_layout",
+            view_id = %active_view_id,
+            generation = self.ui_generation,
+            active_changed,
+            semantic_count = output.semantics.nodes.len(),
+            primitive_count = output.render.primitives.len(),
+            texture_upload_count = output.render.textures.uploads.len(),
+            root_min_x = root_bounds.map_or(-1.0, |bounds| bounds.min.x),
+            root_min_y = root_bounds.map_or(-1.0, |bounds| bounds.min.y),
+            root_max_x = root_bounds.map_or(-1.0, |bounds| bounds.max.x),
+            root_max_y = root_bounds.map_or(-1.0, |bounds| bounds.max.y),
+            "rendered a traceable AstraVN UI semantic generation"
+        );
         let draw = ui_frame_to_scene_commands(&output.render)?;
         let mut next_text_resources = self.text_resources.clone();
         let mut next_layout_ids = BTreeSet::new();
@@ -3187,6 +3300,7 @@ fn stage_scene_commands(
             entity_destination(
                 state,
                 texture,
+                entity.fit,
                 entity.x.millionths,
                 entity.y.millionths,
                 width,
@@ -3313,6 +3427,7 @@ fn effect_filter_graph(
 fn entity_destination(
     state: &ProductStageState,
     texture: &TextureFrame,
+    fit: StageFitMode,
     entity_x: i64,
     entity_y: i64,
     width: u32,
@@ -3324,12 +3439,38 @@ fn entity_destination(
             "ASTRA_PLAYER_CAMERA_ZOOM: camera zoom must remain positive".to_string(),
         ));
     }
-    let base_height = height.saturating_mul(9) / 10;
-    let base_width = ((u64::from(base_height) * u64::from(texture.width))
-        / u64::from(texture.height))
-    .min(u64::from(width));
+    let (base_width, base_height) = match fit {
+        StageFitMode::ContainHeight => {
+            let height_fit = height.saturating_mul(9) / 10;
+            let width_fit =
+                (u64::from(height_fit) * u64::from(texture.width)) / u64::from(texture.height);
+            if width_fit <= u64::from(width) {
+                (width_fit, u64::from(height_fit))
+            } else {
+                (
+                    u64::from(width),
+                    u64::from(width) * u64::from(texture.height) / u64::from(texture.width),
+                )
+            }
+        }
+        StageFitMode::Native => {
+            let viewport_width = u64::from(state.viewport.width);
+            let viewport_height = u64::from(state.viewport.height);
+            if viewport_width == 0 || viewport_height == 0 {
+                return Err(stage_coordinate_error());
+            }
+            let scale_numerator =
+                (u64::from(width) * viewport_height).min(u64::from(height) * viewport_width);
+            (
+                (u64::from(texture.width) * scale_numerator / viewport_width / viewport_height)
+                    .max(1),
+                (u64::from(texture.height) * scale_numerator / viewport_width / viewport_height)
+                    .max(1),
+            )
+        }
+    };
     let destination_width = scale_dimension(base_width, zoom)?;
-    let destination_height = scale_dimension(u64::from(base_height), zoom)?;
+    let destination_height = scale_dimension(base_height, zoom)?;
     let center_x = camera_coordinate(
         entity_x,
         state.camera.x.millionths + state.camera.shake_x.millionths,
@@ -3548,6 +3689,7 @@ fn append_ui_semantic_text(
             6.0,
             256.0,
         )?;
+        let rgba = parse_ui_text_rgba(node.properties.get("text.rgba"))?;
         append_text_value(
             owner,
             provider,
@@ -3565,16 +3707,84 @@ fn append_ui_semantic_text(
             font_size,
             max_lines,
             direction,
-            [255; 4],
+            rgba,
         )?;
     }
     Ok(())
 }
 
+fn parse_ui_text_rgba(value: Option<&String>) -> Result<[u8; 4], NativeVnHostError> {
+    let Some(value) = value else {
+        return Ok([255; 4]);
+    };
+    let channels = value
+        .split(',')
+        .map(|channel| {
+            channel.parse::<u8>().map_err(|_| {
+                NativeVnHostError::Asset(
+                    "ASTRA_PLAYER_UI_TEXT_COLOR: text.rgba must contain four u8 channels".into(),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    channels.try_into().map_err(|_| {
+        NativeVnHostError::Asset(
+            "ASTRA_PLAYER_UI_TEXT_COLOR: text.rgba must contain exactly four channels".into(),
+        )
+    })
+}
+
+fn ordered_ui_font_families(font_families: &[String], locale: &str) -> Vec<String> {
+    let mut ordered = font_families.to_vec();
+    ordered.sort_by_key(|family| {
+        let normalized = family.to_ascii_lowercase();
+        let preferred = if locale.starts_with("zh") {
+            normalized.contains("sans sc")
+        } else {
+            normalized.contains("sans jp")
+        };
+        (!preferred, normalized)
+    });
+    ordered
+}
+
+#[cfg(test)]
+mod font_fallback_tests {
+    use super::ordered_ui_font_families;
+
+    fn packaged_families() -> Vec<String> {
+        vec![
+            "Noto Sans JP".to_string(),
+            "Noto Sans SC".to_string(),
+            "Astra Symbols".to_string(),
+        ]
+    }
+
+    #[astra_headless_test::test]
+    fn locale_selects_the_matching_cjk_font_without_dropping_fallbacks() {
+        let japanese = ordered_ui_font_families(&packaged_families(), "ja");
+        let simplified_chinese = ordered_ui_font_families(&packaged_families(), "zh-Hans");
+
+        assert_eq!(japanese[0], "Noto Sans JP");
+        assert_eq!(simplified_chinese[0], "Noto Sans SC");
+        assert_eq!(japanese.len(), 3);
+        assert_eq!(simplified_chinese.len(), 3);
+    }
+
+    #[astra_headless_test::test]
+    fn non_cjk_locale_uses_the_packaged_japanese_baseline_deterministically() {
+        let first = ordered_ui_font_families(&packaged_families(), "en");
+        let second = ordered_ui_font_families(&packaged_families(), "en");
+
+        assert_eq!(first[0], "Noto Sans JP");
+        assert_eq!(first, second);
+    }
+}
+
 struct NativeUiTextMeasurer {
     provider: Arc<CosmicTextLayoutProvider>,
-    font_families: Vec<String>,
-    locale: String,
+    font_families: Arc<RwLock<Vec<String>>>,
+    locale: Arc<RwLock<String>>,
 }
 
 impl AstraTextMeasurer for NativeUiTextMeasurer {
@@ -3585,12 +3795,24 @@ impl AstraTextMeasurer for NativeUiTextMeasurer {
         let direction = parse_text_direction(Some(&request.direction)).map_err(|error| {
             UiValidationError::invalid("ASTRA_UI_TEXT_DIRECTION", error.to_string())
         })?;
+        let locale = self.locale.read().map_err(|_| {
+            UiValidationError::invalid(
+                "ASTRA_UI_TEXT_LOCALE_LOCK",
+                "UI text locale state was poisoned",
+            )
+        })?;
+        let font_families = self.font_families.read().map_err(|_| {
+            UiValidationError::invalid(
+                "ASTRA_UI_TEXT_FONT_FALLBACK_LOCK",
+                "UI font fallback state was poisoned",
+            )
+        })?;
         let key = format!("ui.measure.{}", request.semantic_id);
         let layout_request = text_request(TextRequestSpec {
             key: &key,
             text: &request.text,
-            locale: &self.locale,
-            font_families: &self.font_families,
+            locale: &locale,
+            font_families: &font_families,
             max_width: request.max_width.max(1.0).round() as u32,
             font_size: request.font_size,
             max_lines: request.max_lines,

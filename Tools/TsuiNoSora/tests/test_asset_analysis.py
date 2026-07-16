@@ -5662,6 +5662,7 @@ class AssetAnalysisTests(unittest.TestCase):
                 {"option_id": "choice.route.confirm", "text": "private confirmation", "target": "ending.good"}
             )
             payload["routes"][0]["choice_ids"].append("choice.route.confirm")
+            payload["routes"][0]["choice_sequence"].append("choice.route.confirm")
             write_native_story_ir_fixture(work).write_text(json.dumps(payload), encoding="utf-8")
             report = write_nativevn_package_input(work)
             story = read_generated_story(work / "nativevn")

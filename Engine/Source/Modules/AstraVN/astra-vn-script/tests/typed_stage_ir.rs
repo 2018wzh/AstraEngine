@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use astra_vn_script::{
     compile_astra_project, AstraSource, CompileAstraProjectOptions, CompiledCommand,
     ExtensionCommandDescriptor, ExtensionFieldContract, ExtensionFieldKind, ExtensionValue,
-    PresentationCommand, StageCommand, TimelineCommand, VnAudioControlAction, VnTimelineJoinPolicy,
+    PresentationCommand, StageCommand, StageFitMode, TimelineCommand, VnAudioControlAction,
+    VnTimelineJoinPolicy,
 };
 
 fn source(command: &str) -> AstraSource {
@@ -67,6 +68,14 @@ fn standard_commands_lower_to_typed_fixed_point_ir() {
     assert_eq!(y.millionths, 4_250_000);
     assert_eq!(zoom.millionths, 1_062_500);
     assert_eq!(duration_ms, 480);
+
+    let command = first_presentation(
+        "show id:sky asset:asset:/stage/sky layer:sky at:center fit:native opacity:1 #@id show.sky",
+    );
+    let PresentationCommand::Stage(StageCommand::Show { fit, .. }) = command else {
+        panic!("expected typed show command")
+    };
+    assert_eq!(fit, StageFitMode::Native);
 }
 
 #[astra_headless_test::test]

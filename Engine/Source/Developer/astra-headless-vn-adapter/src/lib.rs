@@ -14,7 +14,7 @@ use astra_ui_core::{
 };
 use astra_vn_core::VnRunConfig;
 
-use astra_player_vn::{NativeVnHostCommandSource, NativeVnProductMediaHost};
+use astra_player_vn::{NativeVnHostCommandSource, NativeVnProductMediaHost, VnUiHostRequest};
 
 #[derive(Debug, Default)]
 pub struct NativeVnProductAdapterFactory;
@@ -379,6 +379,36 @@ impl NativeVnHeadlessSession {
             .execute_batch(batch)
             .await
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
+        self.process_ui_host_request().await?;
+        Ok(())
+    }
+
+    async fn process_ui_host_request(&mut self) -> Result<(), ProductHostError> {
+        let Some(request) = self.source()?.take_ui_host_request() else {
+            return Ok(());
+        };
+        match request {
+            VnUiHostRequest::Save { slot_id } => {
+                self.save(&slot_id).await?;
+                self.source()?
+                    .mark_save_committed(&slot_id)
+                    .map_err(|error| ProductHostError::Input(error.to_string()))?;
+            }
+            VnUiHostRequest::Load { slot_id } => self.load(&slot_id).await?,
+            VnUiHostRequest::Delete { slot_id } => {
+                let batch = self
+                    .source()?
+                    .delete_save(&slot_id)
+                    .map_err(|error| ProductHostError::Input(error.to_string()))?;
+                self.executor
+                    .execute_batch(batch)
+                    .await
+                    .map_err(|error| ProductHostError::Input(error.to_string()))?;
+                self.source()?
+                    .mark_save_deleted(&slot_id)
+                    .map_err(|error| ProductHostError::Input(error.to_string()))?;
+            }
+        }
         Ok(())
     }
 

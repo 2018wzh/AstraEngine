@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the TsuiNoSora Modern system UI through physical Headless input."""
+"""Capture TsuiNoSora Classic visual checkpoints through physical Headless input."""
 
 from __future__ import annotations
 
@@ -10,9 +10,15 @@ import subprocess
 from pathlib import Path
 
 
-REPORT_SCHEMA = "tsuinosora.modern_system_acceptance_report.v1"
+REPORT_SCHEMA = "tsuinosora.classic_visual_acceptance_report.v1"
 INPUT_SCHEMA = "astra.user_input_sequence.v1"
 RUN_REPORT_SCHEMA = "astra.headless_run_report.v1"
+CHECKPOINTS = [
+    "classic.message",
+    "classic.save",
+    "classic.load",
+    "classic.load_restored",
+]
 
 
 class AcceptanceError(RuntimeError):
@@ -33,8 +39,7 @@ def file_hash(path: Path) -> str:
 
 
 class Sequence:
-    def __init__(self, session: str) -> None:
-        self.session = session
+    def __init__(self) -> None:
         self.rows: list[dict] = []
         self.tick = 0
 
@@ -42,7 +47,7 @@ class Sequence:
         self.rows.append(
             {
                 "schema": INPUT_SCHEMA,
-                "session": self.session,
+                "session": "tsui.classic.visual.acceptance",
                 "sequence": len(self.rows) + 1,
                 "tick": self.tick,
                 "event": event,
@@ -78,98 +83,37 @@ class Sequence:
 
 
 def build_sequence() -> Sequence:
-    sequence = Sequence("tsui.modern.system.acceptance")
+    sequence = Sequence()
     sequence.add({"type": "resume"})
     sequence.add({"type": "focus", "focused": True})
     sequence.await_value("vn.pending_wait_command", "tsui.command.014950", 7200)
+    sequence.checkpoint("classic.message")
 
     sequence.add({"type": "pointer_move", "x": 32768, "y": 32768})
     sequence.add({"type": "pointer_button", "button": "secondary", "state": "pressed"})
     sequence.add({"type": "pointer_button", "button": "secondary", "state": "released"})
-    sequence.await_value("vn.system_page", "quick_panel")
-    sequence.await_value("vn.focused_semantic_id", "root/gold/commands/skip_all")
-    sequence.checkpoint("modern.quick_panel")
-
-    sequence.key("Enter")
-    sequence.await_value("vn.skip_mode", "all")
-
-    sequence.key("Tab")
-    sequence.await_value("vn.focused_semantic_id", "root/gold/commands/config")
-    sequence.key("Enter")
-    sequence.await_value("vn.system_page", "config")
-    sequence.await_value("vn.focused_semantic_id", "root/gold/content/master")
-    sequence.checkpoint("modern.config")
-    sequence.key("ArrowLeft")
-    sequence.await_value("vn.system_config", {"audio.master": "99"})
-    for _ in range(4):
-        sequence.key("Tab")
-    sequence.await_value("vn.focused_semantic_id", "root/gold/content/locale")
-    sequence.key("Enter")
-    sequence.await_value("vn.locale", "en")
-    sequence.checkpoint("modern.config.en")
-    sequence.key("Enter")
-    sequence.await_value("vn.locale", "zh-Hans")
-    sequence.checkpoint("modern.config.zh-Hans")
-    sequence.key("Enter")
-    sequence.await_value("vn.locale", "ja")
-    sequence.checkpoint("modern.config.ja")
-
-    sequence.key("Escape")
-    sequence.await_value("vn.system_page", "quick_panel")
-    sequence.await_value("vn.focused_semantic_id", "root/gold/commands/skip_all")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.await_value("vn.focused_semantic_id", "root/gold/commands/save")
-    sequence.key("Enter")
     sequence.await_value("vn.system_page", "save")
-    sequence.checkpoint("modern.save")
+    sequence.await_value(
+        "vn.focused_semantic_id",
+        "root/gold/paper/slots/slot/slot.01/write/slot.01",
+    )
+    sequence.checkpoint("classic.save")
     sequence.key("Enter")
     sequence.await_value("vn.occupied_save_slot_count", 1)
 
-    sequence.key("Escape")
-    sequence.await_value("vn.system_page", "quick_panel")
-    sequence.await_value("vn.focused_semantic_id", "root/gold/commands/skip_all")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.await_value("vn.focused_semantic_id", "root/gold/commands/load")
+    sequence.key("ArrowUp")
+    sequence.await_value("vn.focused_semantic_id", "root/gold/paper/header/mode_load")
     sequence.key("Enter")
     sequence.await_value("vn.system_page", "load")
-    sequence.checkpoint("modern.load")
+    sequence.await_value(
+        "vn.focused_semantic_id",
+        "root/gold/paper/slots/slot/slot.01/read/slot.01",
+    )
+    sequence.checkpoint("classic.load")
     sequence.key("Enter")
     sequence.await_value("vn.system_page", "save")
     sequence.await_value("vn.occupied_save_slot_count", 1)
-    sequence.checkpoint("modern.load_restored")
-
-    sequence.key("Escape")
-    sequence.await_value("vn.system_page", "quick_panel")
-    sequence.await_value("vn.focused_semantic_id", "root/gold/commands/skip_all")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.await_value("vn.focused_semantic_id", "root/gold/commands/backlog")
-    sequence.key("Enter")
-    sequence.await_value("vn.system_page", "backlog")
-    sequence.await_value("vn.backlog_count", 1)
-    sequence.checkpoint("modern.backlog")
-
-    sequence.key("Escape")
-    sequence.await_value("vn.system_page", "quick_panel")
-    sequence.await_value("vn.focused_semantic_id", "root/gold/commands/skip_all")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.key("Tab")
-    sequence.await_value("vn.focused_semantic_id", "root/gold/commands/auto")
-    sequence.key("Enter")
-    sequence.await_value("vn.auto_enabled", True)
-    sequence.checkpoint("modern.auto_skip")
+    sequence.checkpoint("classic.load_restored")
     sequence.add({"type": "shutdown"})
     return sequence
 
@@ -177,8 +121,8 @@ def build_sequence() -> Sequence:
 def run(arguments: argparse.Namespace) -> dict:
     profile = json.loads(arguments.profile.read_text(encoding="utf-8"))
     identity = json.loads(arguments.build_identity.read_text(encoding="utf-8"))
-    if profile.get("product_profile") != "modern":
-        raise AcceptanceError("Modern acceptance requires product_profile=modern")
+    if profile.get("product_profile") != "classic":
+        raise AcceptanceError("Classic acceptance requires product_profile=classic")
     if profile.get("build_fingerprint") != identity.get("identity_hash"):
         raise AcceptanceError("profile and build identity do not match")
     if profile.get("package_hash") != file_hash(arguments.package):
@@ -188,13 +132,11 @@ def run(arguments: argparse.Namespace) -> dict:
     arguments.artifact_root.mkdir(parents=True)
 
     sequence = build_sequence()
-    input_path = arguments.artifact_root / "modern-system-input.jsonl"
+    input_path = arguments.artifact_root / "classic-visual-input.jsonl"
     input_path.write_text(
         "".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n" for row in sequence.rows),
         encoding="utf-8",
     )
-    stdout_path = arguments.artifact_root / "runner.stdout.log"
-    stderr_path = arguments.artifact_root / "runner.stderr.log"
     command = [
         str(arguments.binary),
         "run",
@@ -209,42 +151,30 @@ def run(arguments: argparse.Namespace) -> dict:
         "--build-identity",
         str(arguments.build_identity),
     ]
-    with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+    with (arguments.artifact_root / "runner.stdout.log").open("wb") as stdout, (
+        arguments.artifact_root / "runner.stderr.log"
+    ).open("wb") as stderr:
         completed = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr)
     if completed.returncode != 0:
-        raise AcceptanceError(f"Headless Modern system run exited with {completed.returncode}")
+        raise AcceptanceError(f"Headless Classic visual run exited with {completed.returncode}")
+
     run_report = json.loads((arguments.artifact_root / "run-report.json").read_text(encoding="utf-8"))
     if run_report.get("schema") != RUN_REPORT_SCHEMA or run_report.get("status") != "passed":
-        raise AcceptanceError("Headless Modern system run did not pass")
+        raise AcceptanceError("Headless Classic visual run did not pass")
     if run_report.get("completed_sequence") != len(sequence.rows):
-        raise AcceptanceError("Headless Modern system run did not consume every input")
+        raise AcceptanceError("Headless Classic visual run did not consume every input")
     checkpoints = run_report.get("checkpoint_results")
-    expected_checkpoints = [
-        "modern.quick_panel",
-        "modern.config",
-        "modern.config.en",
-        "modern.config.zh-Hans",
-        "modern.config.ja",
-        "modern.save",
-        "modern.load",
-        "modern.load_restored",
-        "modern.backlog",
-        "modern.auto_skip",
-    ]
-    if not isinstance(checkpoints, list) or [item.get("id") for item in checkpoints] != expected_checkpoints:
-        raise AcceptanceError("Headless Modern system run has an invalid checkpoint set")
+    if not isinstance(checkpoints, list) or [item.get("id") for item in checkpoints] != CHECKPOINTS:
+        raise AcceptanceError("Headless Classic visual run has an invalid checkpoint set")
     if not all(item.get("passed") is True for item in checkpoints):
-        raise AcceptanceError("Headless Modern system checkpoint failed")
+        raise AcceptanceError("Headless Classic visual checkpoint failed")
     checkpoint_artifacts = [
         arguments.artifact_root / "checkpoints" / f"{checkpoint_id}.png"
-        for checkpoint_id in expected_checkpoints
+        for checkpoint_id in CHECKPOINTS
     ]
-    missing_artifacts = [path.name for path in checkpoint_artifacts if not path.is_file()]
-    if missing_artifacts:
-        raise AcceptanceError(
-            "Headless Modern system checkpoint images are missing: "
-            + ", ".join(missing_artifacts)
-        )
+    missing = [path.name for path in checkpoint_artifacts if not path.is_file()]
+    if missing:
+        raise AcceptanceError("Headless Classic checkpoint images are missing: " + ", ".join(missing))
     return {
         "schema": REPORT_SCHEMA,
         "status": "passed",
@@ -253,7 +183,7 @@ def run(arguments: argparse.Namespace) -> dict:
         "package_hash": profile.get("package_hash"),
         "input_sequence_hash": file_hash(input_path),
         "input_message_count": len(sequence.rows),
-        "checkpoint_ids": expected_checkpoints,
+        "checkpoint_ids": CHECKPOINTS,
         "checkpoint_artifact_hashes": [file_hash(path) for path in checkpoint_artifacts],
         "run_report_hash": file_hash(arguments.artifact_root / "run-report.json"),
         "diagnostics": [],

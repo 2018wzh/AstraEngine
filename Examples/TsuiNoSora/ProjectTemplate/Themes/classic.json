@@ -2,12 +2,21 @@
   "schema": "astra.ui_theme_manifest.v1",
   "id": "tsui.theme.classic",
   "tokens": {
-    "surface.sky": { "color": [126, 189, 229, 255] },
-    "surface.dim": { "color": [25, 43, 62, 128] },
+    "surface.sky": { "color": [4, 24, 82, 255] },
+    "surface.dim": { "color": [3, 12, 39, 156] },
+    "surface.clear": { "color": [0, 0, 0, 0] },
     "surface.paper": { "color": [252, 252, 248, 246] },
     "surface.speaker": { "color": [240, 244, 243, 255] },
     "surface.card": { "color": [248, 248, 242, 255] },
+    "sky.frame": { "asset": "asset:/tsui.ui.classic.sky" },
     "frame.classic": { "asset": "asset:/tsui.ui.classic.frame" },
+    "dialogue.frame": { "asset": "asset:/tsui.ui.classic.frame" },
+    "menu.start": { "asset": "asset:/tsui.ui.classic.menu.save" },
+    "menu.continue": { "asset": "asset:/tsui.ui.classic.menu.load" },
+    "menu.exit": { "asset": "asset:/tsui.ui.classic.menu.exit" },
+    "accent.gold": { "color": [196, 158, 67, 255] },
+    "surface.button": { "color": [19, 46, 91, 255] },
+    "text.on_dark": { "color": [248, 249, 244, 255] },
     "text.body": { "color": [22, 29, 37, 255] }
   },
   "high_contrast_tokens": {

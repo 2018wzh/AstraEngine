@@ -1,6 +1,6 @@
 use astra_vn_presentation::{
     AspectRatio, FixedScalar, ProductStageDirector, StageBlendMode, StageClipPolicy, StageCommand,
-    StageLayerKind, StagePlacement, StageViewport, TimelineCommand, TimelineSpec,
+    StageFitMode, StageLayerKind, StagePlacement, StageViewport, TimelineCommand, TimelineSpec,
     VnPresentationProviderManifest, VnTimelineJoinPolicy, VnTimelineKeyframe, VnTimelineTrack,
 };
 
@@ -53,6 +53,7 @@ fn show_hero(director: &mut ProductStageDirector) {
             pose: Some("normal".to_string()),
             layer: "characters".to_string(),
             placement: StagePlacement::Center,
+            fit: StageFitMode::ContainHeight,
             opacity: FixedScalar::ONE,
             preset: Some("hero_enter".to_string()),
         })
@@ -71,6 +72,7 @@ fn stage_director_applies_profile_bound_tween_without_partial_failure() {
             pose: None,
             layer: "missing".to_string(),
             placement: StagePlacement::Center,
+            fit: StageFitMode::ContainHeight,
             opacity: FixedScalar::ONE,
             preset: Some("hero_enter".to_string()),
         })
@@ -121,6 +123,7 @@ fn stage_director_tracks_preload_and_layer_authority_in_snapshot_state() {
             pose: None,
             layer: "characters".to_string(),
             placement: StagePlacement::Center,
+            fit: StageFitMode::ContainHeight,
             opacity: fixed(500_000),
             preset: None,
         })

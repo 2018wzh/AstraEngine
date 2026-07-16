@@ -706,14 +706,25 @@ fn validate_widget_properties(line: &ParsedLine) -> Result<(), VnError> {
         "fill_width",
         "fill_height",
         "background",
+        "text_color",
         "grow",
         "anchor",
+        "position_x",
+        "position_y",
+        "position_right",
+        "position_bottom",
         "align",
         "gap",
         "padding",
         "style",
     ];
-    const REPEAT: &[&str] = &["items", "item_key", "overscan", "item_extent"];
+    const REPEAT: &[&str] = &[
+        "items",
+        "item_key",
+        "overscan",
+        "item_extent",
+        "viewport_extent",
+    ];
     let widget_properties: &[&str] = match line.keyword.as_str() {
         "text" => &[
             "text",
@@ -725,7 +736,13 @@ fn validate_widget_properties(line: &ParsedLine) -> Result<(), VnError> {
         ],
         "button" => &["text", "value", "text_key", "label_key", "selected"],
         "slider" => &["value", "min", "max", "step", "label_key"],
-        "toggle" => &["checked", "label_key", "value"],
+        "toggle" => &[
+            "checked",
+            "label_key",
+            "value",
+            "indicator_color",
+            "indicator_off_color",
+        ],
         "select" => &["value", "items", "label_key", "item_key"],
         "text_input" => &[
             "value",
@@ -739,7 +756,14 @@ fn validate_widget_properties(line: &ParsedLine) -> Result<(), VnError> {
         "image" => &["asset", "texture", "fit", "opacity"],
         "nine_slice" => &["asset", "texture", "opacity"],
         "virtual_list" => REPEAT,
-        "virtual_grid" => &["items", "item_key", "overscan", "item_extent", "columns"],
+        "virtual_grid" => &[
+            "items",
+            "item_key",
+            "overscan",
+            "item_extent",
+            "viewport_extent",
+            "columns",
+        ],
         "canvas" => &["nodes", "edges"],
         "component_slot" => &["component"],
         "screen" | "row" | "column" | "stack" | "panel" | "scroll" | "modal"

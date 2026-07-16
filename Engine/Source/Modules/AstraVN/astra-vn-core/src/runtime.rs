@@ -181,6 +181,20 @@ impl VnRuntime {
             VnPlayerCommand::SetConfig { key, value } => {
                 validate_system_value("config key", &key, 256)?;
                 validate_system_value("config value", &value, 16_384)?;
+                if key == "display.language" {
+                    if value.is_empty()
+                        || value.len() > 64
+                        || !value
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+                    {
+                        return Err(VnError::diagnostic(
+                            "ASTRA_VN_LOCALE_IDENTITY",
+                            "display.language must be a safe locale identifier",
+                        ));
+                    }
+                    self.state.locale = value.clone();
+                }
                 self.state.system.config.insert(key, value);
             }
             VnPlayerCommand::StartReplay { replay_id } => {

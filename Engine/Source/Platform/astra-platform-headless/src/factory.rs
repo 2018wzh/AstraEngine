@@ -1361,6 +1361,7 @@ fn io_error(operation: &'static str) -> PlatformError {
     )
 }
 fn media_error(error: astra_media::MediaError) -> PlatformError {
+    let diagnostic = error.to_string();
     let diagnostic_codes = match &error {
         MediaError::Diagnostics(diagnostics) => diagnostics
             .iter()
@@ -1372,9 +1373,9 @@ fn media_error(error: astra_media::MediaError) -> PlatformError {
     PlatformError::new(
         PlatformErrorCode::IntegrityMismatch,
         "headless.media",
-        "headless media provider rejected input",
+        format!("headless media provider rejected input: {diagnostic}"),
     )
-    .with_field("media_error", error.to_string())
+    .with_field("media_error", diagnostic)
     .with_field("diagnostic_codes", diagnostic_codes)
 }
 

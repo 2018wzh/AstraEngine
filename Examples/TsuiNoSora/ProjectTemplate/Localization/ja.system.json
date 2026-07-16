@@ -17,6 +17,7 @@
     "system.config.text_speed": "文字速度",
     "system.config.auto_delay": "オート待ち時間",
     "system.config.high_contrast": "ハイコントラスト",
+    "system.config.language": "言語",
     "ui.save.confirm_overwrite": "このセーブを上書きしますか？",
     "ui.common.cancel": "キャンセル",
     "ui.common.confirm": "確認"

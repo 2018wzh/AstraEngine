@@ -167,7 +167,7 @@ state save #@id state.system.save
     assert_eq!(initial.ui_profile, "classic");
     assert_eq!(initial.locale, "en");
     assert_eq!(initial.active_system_page, None);
-    assert_eq!(initial.focused_semantic_id, None);
+    assert_eq!(initial.focused_semantic_id.as_deref(), Some("root/advance"));
     assert_eq!(initial.backlog_count, 1);
     assert_eq!(initial.occupied_save_slot_count, 0);
 

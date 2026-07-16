@@ -157,6 +157,19 @@ fn system_controls_persist_auto_skip_config_and_unlocks_through_save_load() {
             value: "instant".to_string(),
         })
         .unwrap();
+    assert!(runtime
+        .apply(VnPlayerCommand::SetConfig {
+            key: "display.language".to_string(),
+            value: "../en".to_string(),
+        })
+        .is_err());
+    assert_eq!(runtime.state().locale, "zh-Hans");
+    runtime
+        .apply(VnPlayerCommand::SetConfig {
+            key: "display.language".to_string(),
+            value: "en".to_string(),
+        })
+        .unwrap();
     runtime
         .apply(VnPlayerCommand::Unlock {
             kind: SystemUnlockKind::Gallery,
@@ -172,6 +185,7 @@ fn system_controls_persist_auto_skip_config_and_unlocks_through_save_load() {
     assert_eq!(loaded.state_hash(), saved_hash);
     assert!(loaded.state().system.auto_enabled);
     assert_eq!(loaded.state().system.skip_mode, SkipMode::Read);
+    assert_eq!(loaded.state().locale, "en");
     assert_eq!(
         loaded
             .state()

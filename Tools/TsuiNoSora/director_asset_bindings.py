@@ -15,6 +15,16 @@ class DirectorAssetBindingError(ValueError):
 
 RESOURCE_FILE = re.compile(r"(?:^|/)(?P<fourcc>.{4})-(?P<id>[0-9]+)\.[^/]+$")
 MEDIA_FOURCC = {"BITD", "snd "}
+STAGE_CHANNELS = {
+    "sky": 1,
+    "eye": 2,
+    "background": 3,
+    "character": 5,
+    "event": 7,
+    "shade": 9,
+    "dialogue_frame": 12,
+}
+STORY_MOVIES = {"K", "S", "T", "Y", "Z"}
 
 
 def build_asset_binding_ir(story_source: dict, scene_semantics: dict, converted: dict) -> tuple[dict, dict]:
@@ -35,6 +45,11 @@ def build_asset_binding_ir(story_source: dict, scene_semantics: dict, converted:
 
     detailed = deepcopy(scene_semantics)
     detailed["schema"] = "tsuinosora.director_asset_binding_ir.v1"
+    detailed["stage_layouts"] = [
+        _stage_layout(movie, members, resources)
+        for movie in movies.values()
+        if movie["movie_id"] in STORY_MOVIES
+    ]
     eye_prefix = _resolve_eye_prefix(detailed, members.get(("casts", "GENERAL"), {}))
     binding_counts: Counter[str] = Counter()
     referenced_assets: set[str] = set()
@@ -69,6 +84,82 @@ def build_asset_binding_ir(story_source: dict, scene_semantics: dict, converted:
         },
     }
     return detailed, report
+
+
+def _stage_layout(movie, members, resources):
+    frames = movie.get("score", {}).get("frames", [])
+    if not frames or frames[0].get("frame") != 1:
+        raise DirectorAssetBindingError("Director movie has no initial score frame")
+    sprites = {sprite.get("channel"): sprite for sprite in frames[0].get("sprites", [])}
+    layers = {}
+    for layer, channel in STAGE_CHANNELS.items():
+        sprite = sprites.get(channel)
+        if sprite is None:
+            raise DirectorAssetBindingError(
+                f"Director initial score frame is missing stage channel {channel}"
+            )
+        width = sprite.get("width")
+        height = sprite.get("height")
+        x = sprite.get("x")
+        y = sprite.get("y")
+        if (
+            not isinstance(width, int)
+            or width <= 0
+            or not isinstance(height, int)
+            or height <= 0
+            or not isinstance(x, int)
+            or not isinstance(y, int)
+        ):
+            raise DirectorAssetBindingError("Director stage channel geometry is invalid")
+        record = {
+            "channel": channel,
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+        }
+        if layer in {"sky", "dialogue_frame"}:
+            record["binding"] = _resolve_score_sprite(
+                sprite, movie, members, resources
+            )
+        layers[layer] = record
+    return {"movie_id": movie["movie_id"], "layers": layers}
+
+
+def _resolve_score_sprite(sprite, movie, members, resources):
+    library_number = sprite.get("cast_library")
+    member_number = sprite.get("cast_member")
+    libraries = movie.get("cast_libraries", [])
+    if (
+        not isinstance(library_number, int)
+        or not 1 <= library_number <= len(libraries)
+        or not isinstance(member_number, int)
+        or member_number <= 0
+    ):
+        raise DirectorAssetBindingError("Director score sprite cast reference is invalid")
+    library = libraries[library_number - 1]
+    scope = (
+        (movie["source_alias"], movie["movie_id"])
+        if library_number == 1
+        else ("casts", library)
+    )
+    matches = [
+        name
+        for name, candidates in members.get(scope, {}).items()
+        if any(candidate.get("cast_member") == member_number for candidate in candidates)
+    ]
+    if len(matches) != 1:
+        raise DirectorAssetBindingError("Director score sprite cast member is not unique")
+    binding = _resolve_member(
+        matches[0],
+        movie,
+        library if scope[0] == "casts" else None,
+        members,
+        resources,
+    )
+    if binding.get("cast_member") != member_number or not binding.get("asset_id"):
+        raise DirectorAssetBindingError("Director score sprite has no exact media binding")
+    return binding
 
 
 def _resolve_operations(operations, movie, members, resources, counts, referenced_assets, eye_prefix):

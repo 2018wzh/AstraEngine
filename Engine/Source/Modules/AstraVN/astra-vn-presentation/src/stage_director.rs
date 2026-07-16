@@ -6,12 +6,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AspectRatio, AudioControl, AudioCue, FixedScalar, MovieLoopMode, StageBlendMode,
-    StageClipPolicy, StageCommand, StageLayerKind, StagePlacement, StageViewport, TimelineCommand,
-    TimelineSpec, VnError, VnMovieEndBehavior, VnPresentationEasing,
+    StageClipPolicy, StageCommand, StageFitMode, StageLayerKind, StagePlacement, StageViewport,
+    TimelineCommand, TimelineSpec, VnError, VnMovieEndBehavior, VnPresentationEasing,
     VnPresentationProviderManifest, VnTimelineJoinPolicy,
 };
 
-pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v2";
+pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v3";
 const MAX_FRAME_DELTA_NS: u64 = 1_000_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -57,6 +57,7 @@ pub struct ProductStageEntity {
     pub layer: String,
     pub asset: String,
     pub pose: Option<String>,
+    pub fit: StageFitMode,
     pub x: FixedScalar,
     pub y: FixedScalar,
     pub opacity: FixedScalar,
@@ -332,6 +333,7 @@ impl ProductStageDirector {
                         layer: layer.clone(),
                         asset: asset.clone(),
                         pose: None,
+                        fit: StageFitMode::ContainHeight,
                         x: FixedScalar::ZERO,
                         y: FixedScalar::ZERO,
                         opacity: if duration == 0 {
@@ -360,6 +362,7 @@ impl ProductStageDirector {
                 pose,
                 layer,
                 placement,
+                fit,
                 opacity,
                 preset,
             } => {
@@ -383,6 +386,7 @@ impl ProductStageDirector {
                         layer: layer.clone(),
                         asset: asset.clone(),
                         pose: pose.clone(),
+                        fit: *fit,
                         x,
                         y,
                         opacity: if duration == 0 {

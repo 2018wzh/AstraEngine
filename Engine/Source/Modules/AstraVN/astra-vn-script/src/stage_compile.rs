@@ -5,9 +5,9 @@ use astra_core::Diagnostic;
 use crate::{
     lower::ParsedLine, AspectRatio, AudioControl, AudioCue, ExtensionCommandDescriptor,
     ExtensionFieldKind, ExtensionPresentationCommand, ExtensionValue, FixedScalar, MovieLoopMode,
-    StageBlendMode, StageClipPolicy, StageCommand, StageLayerKind, StagePlacement, StageViewport,
-    TimelineCommand, TimelineSpec, VnAudioBus, VnAudioControlAction, VnAudioSync, VnError,
-    VnMovieEndBehavior, VnTimelineJoinPolicy, VnTimelineKeyframe, VnTimelineTrack,
+    StageBlendMode, StageClipPolicy, StageCommand, StageFitMode, StageLayerKind, StagePlacement,
+    StageViewport, TimelineCommand, TimelineSpec, VnAudioBus, VnAudioControlAction, VnAudioSync,
+    VnError, VnMovieEndBehavior, VnTimelineJoinPolicy, VnTimelineKeyframe, VnTimelineTrack,
 };
 
 pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, VnError> {
@@ -59,7 +59,9 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
         "show" => {
             validate_attrs(
                 line,
-                &["id", "asset", "pose", "layer", "at", "opacity", "preset"],
+                &[
+                    "id", "asset", "pose", "layer", "at", "fit", "opacity", "preset",
+                ],
                 &["id", "asset", "layer"],
             )?;
             Ok(StageCommand::Show {
@@ -72,6 +74,13 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
                     "center" => StagePlacement::Center,
                     "right" => StagePlacement::Right,
                     value => return Err(invalid_value(line, "at", value, "left,center,right")),
+                },
+                fit: match line.attr("fit").unwrap_or("contain_height") {
+                    "contain_height" => StageFitMode::ContainHeight,
+                    "native" => StageFitMode::Native,
+                    value => {
+                        return Err(invalid_value(line, "fit", value, "contain_height,native"))
+                    }
                 },
                 opacity: opacity(line, "opacity")?,
                 preset: optional_symbol(line, "preset")?,
