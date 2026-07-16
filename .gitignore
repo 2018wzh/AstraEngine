@@ -5,4 +5,5 @@ target/
 .tmp/
 .astra-cache/
 Examples/TsuiNoSora/.local/
+Examples/NativeVN/.local/
 .idea

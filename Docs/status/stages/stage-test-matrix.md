@@ -76,99 +76,77 @@
 | `T-S3-UI-EXT-01` | Stage 3 | `astra-ui-plugin-abi`, `astra-ui-component-host`, Windows/Web signed fixtures | signature/lifecycle/bounds/permission/failure tests | isolated fixture tests plus Windows dylib and Web component bundle run | `S3-UI-EXT-01` | UI component ABI | `IN_PROGRESS`；ABI 与隔离组件子进程 host 已落地，正式平台 bundle run 待闭合 |
 | `T-S3-ADVANCED-01` | Stage 3 | `astra-vn-package`, `astra-cli`, `astra-test`, `astra-release` | `Examples/NativeVN`, advanced presentation tests, formal Stage 3 runner | NativeVN script check/cook plus focused tests and formal runner | `S3-ADVANCED-01` | advanced presentation | AdvancedVN 技术内容已并入 NativeVN，重复样例已删除；等待 Windows/Web formal evidence |
 | `T-S3-EDIT-01` | Stage 3 | `astra-vn-editor` | `Engine/Source/Modules/AstraVN/astra-vn-editor/tests/editor_metadata.rs` | `cargo test -p astra-vn-editor --test editor_metadata` | `S3-EDIT-01` | source map | Graph/Timeline metadata validates command ids against source map and emits patch manifest slice |
-| `T-S3-SAMPLE-01` | Stage 3 | `astra-cli`, `astra-test`, `astra-vn`, `astra-release` | `Examples/NativeVN/project.yaml`, `scenarios/route_library.yaml`, `scenarios/route_rooftop.yaml` | NativeVN script check/cook plus formal Stage 3 runner | `S3-SAMPLE-01` | VN release profile | 两路线技术样例与许可/hash/sidecar 已覆盖；formal Windows/Web evidence 尚未闭合 |
+| `T-S3-SAMPLE-01` | Stage 3 | `astra-cli`, `astra-test`, `astra-vn`, `astra-release` | `Examples/NativeVN/project.yaml`、旗舰 story/localization/assets/voice sidecar | NativeVN script check/cook plus formal Stage 3 runner | `S3-SAMPLE-01` | VN release profile | 旗舰项目已替换原两路线样例；许可/hash/283 个 sidecar 与 180 条中文配音进入 Cook，formal Windows/Web evidence 尚未闭合 |
 | `T-S3-GAME-TARGET-01` | Stage 3 | `astra-vn-package`, `astra-release`, `astra-test`, `astra-cli` | `Engine/Source/Modules/AstraVN/astra-vn-package/tests/commercial_baseline_manifest.rs`, `Engine/Source/Developer/astra-release/tests/release_report.rs`, `Engine/Source/Developer/astra-test/tests/vn_scenario.rs`, `Engine/Source/Programs/astra-cli/tests/target_platform.rs` | `cargo test -p astra-vn-package --test commercial_baseline_manifest` and `cargo test -p astra-release --test release_report release_gate_` and `cargo test -p astra-test --test vn_scenario` and `cargo test -p astra-cli --test target_platform nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes` | `S3-GAME-TARGET-01` | game target | `nativevn-game` package slice carries VN manifests and release gate evidence；scenario 覆盖 target/profile/platform、`player_input`、`complete_wait`、coverage/hash/visual reference assertion 和 mount alias；Windows/Web route reports 仍不作为 `player.full_playable` evidence |
 | `T-S3-PLAYER-AUTOMATION-01` | Stage 3 | `astra-player-core`, `astra-player`, `astra-player-vn`, `astra-release` | `Engine/Source/Runtime/astra-player-core/`, `Engine/Source/Programs/astra-player/tests/windows_text_presentation.rs`, `Engine/Source/Programs/astra-player-vn/tests/native_vn_host_source.rs`, `Engine/Source/Programs/astra-player/`, `Engine/Source/Developer/astra-release/tests/release_report.rs` | `cargo test -p astra-player-core` and `cargo test -p astra-player --features platform-test-driver` and `cargo test -p astra-player-vn --test native_vn_host_source --features platform-test-driver` and `cargo test -p astra-release` | `S3-PLAYER-AUTOMATION-01` | live player | Player report 覆盖 Windows packaged-font command→hardware capture 与 presentation identity；bundled VN bitmap/headless presenter 已删除，package validated provider selection→instance/prepare/probe/session→localization/font→retained scene→GPU capture/release 子链通过，并阻断 linked descriptor/context/report drift。camera/timeline/video/audio、Web formal run 与完整 route 仍 blocking |
 | `T-S3-RUNTIME-TRIGGER-01` | Stage 3 | `astra-runtime` | `Engine/Source/Runtime/astra-runtime/tests/trigger_event.rs` | `cargo test -p astra-runtime --test trigger_event` | `S3-CORE-01` | runtime action | StateMachine action context exposes the trigger event payload for VN step actions |
 | `T-S3-TSUI-GATE-01` | Stage 3 | Python tools, `astra-release`, `astra-cli`, `astra-player` | `Tools/TsuiNoSora/tests/test_asset_analysis.py`, `Engine/Source/Developer/astra-release/tests/release_report.rs`, `Engine/Source/Programs/astra-cli/tests/target_platform.rs`, `Engine/Source/Programs/astra-player/tests/` | `python Tools/TsuiNoSora/tests/test_asset_analysis.py` and `python Tools/TsuiNoSora/tests/test_asset_analysis.py -k internal_demo_bundle` and `python Tools/TsuiNoSora/tests/test_asset_analysis.py -k visual` and `python Tools/TsuiNoSora/tests/test_asset_analysis.py -k projectorrays` and `python Tools/TsuiNoSora/tests/test_asset_analysis.py -k projectorrays_full_dump` and `python Tools/TsuiNoSora/tests/test_asset_analysis.py -k full_resource_conversion` and `cargo test -p astra-release --test release_report tsuinosora` and `cargo test -p astra-cli --test target_platform tsuinosora_synthetic_gate_runs_internal_and_patch_player_routes` and `cargo test -p astra-cli --test target_platform tsuinosora_demo_slice_generates_playable_nativevn_and_player_routes` and `cargo test -p astra-cli --test target_platform tsuinosora_internal_demo_builds_asset_package_and_bundles` | `S3-TSUI-GATE-01`, `S3-TSUI-INTERNAL-DEMO-01` | TsuiNoSora gate | source inventory、ProjectorRays 本地 dump adapter 脱敏、`projectorrays-convert-resources` JSON-backed metadata chunk converter、`STXT` CP932 text converter、`Lscr` cast-member/source-number/CastScript/ParentScript source 映射和 malformed JSON numeric recovery、empty `Lscr` no-op metadata converter、`BITD` 1/16/32bpp PNG converter、8bpp `BITD` palette sidecar converter、KEY-bound `sndH`/`sndS` WAV converter、KEY-bound `ediM` `MACRZ` verified MP3 converter、`snd `、`cupt`、`SCRF`、`Cinf`、`VWFI`、`Sord`、`Fmap`、`VWLB`、`FCOL`、`FXmp`、`VERS`、`XTRl`、`VWSC` 和 `XMED` 脱敏 converter、ProjectorRays full dump `chunk_fourcc_counts`/`conversion_plan`/`converted_resources`、`tsuinosora.projectorrays_converted_resources.v1` source/native hash 校验、全量 binary chunk conversion blocker、ProjectorRays `GO[...]` route identity 派生、ProjectorRays converted asset bridge、Director reader-required preflight 外部 reader evidence、format probe、edition fingerprint、`tsuinosora.extract_report.v1` direct-readable sidecar 复制、Director `imap`/`mmap` resource map preflight、Director cast/Lingo/source-map preflight、`tsuinosora.script_source_map.v1` reader sidecar、route graph report、visual reference report、visual screenshot capture/comparison report、`capture_automation` 自动截图 intent/execution 脱敏记录、same-run capture role 校验和缺失/失败 blocking、asset analysis、native asset sidecar、cooked asset package section、scenario refs package section、`asset.vfs_manifest`/`asset.catalog` package VFS evidence、conversion report、modern profile report、mount policy、stage3/local/demo gate、NativeVN package input report 文件 manifest/hash evidence、derived route count、route scenario refs、patch scenario refs、route-bound `mount_assets`、project-level `package_sections` target/profile 过滤、payload/path leak blocking、formal release signoff blocking、`internal-demo-bundle` 私有 acceptance 入口、internal classic Windows/Web standalone bundle manifest、player trace log 和 `player.full_playable` report 校验；当前私有 full conversion 已覆盖 2527/2527 ProjectorRays binary chunk，Windows/Web bundle manifest 已从同一 package 产出，原版入口可采集截图，Windows Demo player 28 次 `SendInput` 均有 consumed trace；剩余 blocker 是真实输入后 Demo 画面不变化、full route coverage 缺失和 required manual signoff，modern/Patch/VFS 后续计划 |
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
+| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | NativeVN project、content validation 与 Cook | `Examples/NativeVN/`, `Tools/NativeVN/` | `python Tools/NativeVN/build_nativevn_project.py`、`python Tools/NativeVN/validate_content_pack.py`、`python -m unittest discover Tools/NativeVN/tests`、`cargo run -p astra-cli -- cook Examples/NativeVN/project.yaml --profile advanced-vn --target nativevn-flagship-game --out .tmp/nativevn-flagship-cook`、`python Tools/check_docs.py`；本轮不执行 runner | `S3-FLAGSHIP-DEMO-01` | flagship demo | bilingual narrative、three terminals、visual/UI/video、BGM/SE、180 条用户授权中文配音、`.astra`、UI/theme/controller、283 个 asset sidecar、package section 与真实 Cook构成 cross-module Cook evidence；不声称 `.astrapkg` 或 Runtime/Player/UI E3 |
 
 补充：`T-S3-TSUI-GATE-01` 中的 Windows/Web player route 仍是 bundle route/report slice，不是 `player.full_playable`；完整可玩证据由 `T-S3-PLAYER-AUTOMATION-01` 跟踪。
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 `tsuinosora.native_asset_rearrange_report.v1`，要求 Asset analysis pass 后真实写入 `native-assets/`，并在 conversion report 中记录 source/native 相对路径、classification、hash、byte size 和 converted/missing asset count。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 NativeVN package input 的 route choice 保真，要求 route graph/source map 中的 sanitized choice id 同时出现在 `.astra` option key 和 scenario `player_input choose.value`，多 choice route 按顺序生成连续 choice state。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 route-bound cast member 到 native-assets 的 `mount_assets` 派生，要求 conversion report 和 `local-gate` 生成的 patch/windows scenario refs 保留 source/native hash、classification、route id 和 `sha256` evidence。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 Director `Lctx` entry count/table hash、malformed `Lctx` blocking 和未终止 `Lnam` blocking；`Lctx` 和 `Lnam` 都只输出脱敏结构证据。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 Director duplicate `CASt` binding blocking，防止多个 `CAS*` library/slot 共享同一 `CASt` 时继续生成不唯一 member evidence。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 cast source-map sidecar payload 字段阻断，防止 `tsuinosora.cast_map.v1` 或外部 `tsuinosora.director_cast_map.v1` 把商业正文、payload 或 bytecode 带入 report。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖进入 package 的 `tsuinosora.*` section payload-like 字段阻断；release gate 遇到 `script_text`、`source_text`、`content`、`payload`、`bytecode` 等字段会输出 `ASTRA_TSUI_REPORT_PAYLOAD_LEAK`，`redaction.payload: omitted` 除外。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖空 `tsuinosora.asset_analysis` package section 阻断；`assets: []` 即使搭配 `status: pass` 也不能作为有效 Asset Analysis Gate evidence。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖空 `tsuinosora.conversion_manifest.resources` package section 阻断；covered routes 不能替代 converted resource evidence，缺失时 release gate 输出 `ASTRA_TSUI_CONVERSION_RESOURCE_EVIDENCE`。resource 缺 source/native 相对路径、classification、source hash、converted hash 或正 byte size 时同样 blocking。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖显式 `tsuinosora.director_cast_member_metadata.v1` 的脱敏读取，确保 kind、route id、command id、anchor、bounds 和 metadata hash 进入 Director cast report，且 kind/route/command 继续进入 cast source-map report。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 Director cast metadata 的 anchor/bounds layout 校验；anchor 非数值或 bounds 负尺寸会 blocking。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 Director cast metadata 的 `character_atlas` parts 读取和传递；缺 parts 或 part 字段不合规会 blocking，合规 parts 会进入 cast source-map report。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖默认 `Title.png`/`Game.png` 视觉参考的固定尺寸和 hash；缺文件、PNG 不可读、hash mismatch 或 dimensions mismatch 会 blocking。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 `tsuinosora.visual_screenshot_capture_report.v1` 和 `tsuinosora.visual_comparison_report.v1`；原版/Demo checkpoint 截图只保存在 ignored `.local`，report 只记录尺寸、hash、region id、差异指标、自动采集执行摘要、same-run capture roles、review hash 和 diagnostic，missing/blank/尺寸错误/required review 缺失/关键区域 mismatch/自动采集失败/角色捕获缺失都会 blocking。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 route graph 和 script source-map 的 duplicate `route_id` conflict blocking，防止同一 route 指向多个 terminal/choice signature 后继续生成 NativeVN package input。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖同一 route 内 duplicate choice id blocking，防止重复 choice 进入 `.astra` option key 或 scenario `player_input choose`。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 NativeVN package input 对显式 routes 的写入前校验；不安全 symbol、非 covered coverage、重复 choice 或冲突 route signature 会阻断并保持 `scenario_count: 0`。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖坏 route graph sidecar 不可被 script source-map fallback 绕过；payload/unsafe symbol/coverage/duplicate diagnostic 会让 Stage 3 report blocking。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 unsupported `Lscr` bytecode 的 `script_resource_id`/`script_payload_sha256` 绑定；缺字段、未知 resource id 或 hash mismatch 会让 `tsuinosora.script_source_map_report.v1` blocking。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 partial Lingo bytecode resource coverage blocking；一个 sidecar 不能只覆盖同一 map 中的部分 unsupported `Lscr`。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 `local-gate` 显式 routes 输入阻断；真实本地 gate 必须从 route graph 或 script source-map report 派生 route coverage 后才写 NativeVN package input。
 
-| `T-S3-FLAGSHIP-DEMO-01` | Stage 3 | future flagship assets and formal runner | `Docs/migrations/nativevn-flagship-demo-migration.md` | future licensed asset and Windows/Web acceptance suite | `S3-FLAGSHIP-DEMO-01` | flagship demo | 本轮只记录 migration，不实现产品内容 |
 
 补充：`T-S3-TSUI-GATE-01` 还覆盖 RIFF/RIFX declared size mismatch blocking；declared size 过大或过小都不能继续抽取 Director resource，也不能记录 resource/tag coverage。
 

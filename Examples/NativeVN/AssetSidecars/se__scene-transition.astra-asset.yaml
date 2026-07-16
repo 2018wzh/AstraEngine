@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/scene-transition
+source: Audio/Distribution/se/scene-transition.ogg
+source_hash: sha256:18b5ecf2f33a9125552046af319637b9fa430540f74087313d5a4538726e2a82
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

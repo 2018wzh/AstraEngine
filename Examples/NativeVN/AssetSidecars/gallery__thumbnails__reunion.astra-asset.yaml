@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/gallery/thumbnails/reunion
+source: Visual/Gallery/Thumbnails/reunion.png
+source_hash: sha256:e3f76ce13fe74d2071efdccfad2504fbc221400a50956687b691a62f93f1df5f
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

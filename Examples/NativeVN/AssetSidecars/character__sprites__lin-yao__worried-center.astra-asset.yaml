@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/lin-yao/worried-center
+source: Visual/Characters/Sprites/lin-yao/worried-center.png
+source_hash: sha256:445ae4fa03fae517c57fff4ba313693e753c3980d271b05444509a29fb092922
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

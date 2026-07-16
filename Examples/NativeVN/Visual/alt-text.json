@@ -1,0 +1,638 @@
+{
+  "schema": "nativevn.flagship_alt_text.v1",
+  "id": "nativevn-flagship-alt-text",
+  "items": [
+    {
+      "id": "asset.visual.backgrounds.apartment-studio.png",
+      "relative_path": "Visual/Backgrounds/apartment-studio.png",
+      "alt": {
+        "zh_hans": "雨夜高层公寓工作室，信号分析仪与两把空椅子面对落雨的玻璃城市。",
+        "en": "A rain-night apartment studio where a signal analyzer and two empty chairs face the glass city."
+      }
+    },
+    {
+      "id": "asset.visual.backgrounds.archive-room.png",
+      "relative_path": "Visual/Backgrounds/archive-room.png",
+      "alt": {
+        "zh_hans": "深蓝档案室里排列着玻璃数据柜，一只抽屉发出洋红色微光。",
+        "en": "A deep-blue archive room of glass data drawers, one of them glowing magenta."
+      }
+    },
+    {
+      "id": "asset.visual.backgrounds.dawn-city.png",
+      "relative_path": "Visual/Backgrounds/dawn-city.png",
+      "alt": {
+        "zh_hans": "雨后黎明照亮玻璃都市，远方留下一条逐渐淡去的洋红信号。",
+        "en": "Dawn after rain lights the glass metropolis as a magenta signal fades into the horizon."
+      }
+    },
+    {
+      "id": "asset.visual.backgrounds.glass-corridor.png",
+      "relative_path": "Visual/Backgrounds/glass-corridor.png",
+      "alt": {
+        "zh_hans": "高空玻璃连廊横跨雨夜城市，一道洋红信号沿窗面穿过。",
+        "en": "An elevated glass corridor above the rainy city, crossed by a thin magenta signal."
+      }
+    },
+    {
+      "id": "asset.visual.backgrounds.metro-station.png",
+      "relative_path": "Visual/Backgrounds/metro-station.png",
+      "alt": {
+        "zh_hans": "空旷的雨夜地铁站，站台玻璃上浮现洋红色异常波形。",
+        "en": "An empty rain-night metro platform with an anomalous magenta waveform across the glass doors."
+      }
+    },
+    {
+      "id": "asset.visual.backgrounds.rain-street.png",
+      "relative_path": "Visual/Backgrounds/rain-street.png",
+      "alt": {
+        "zh_hans": "暴雨中的玻璃都市街道，青色灯光与一处洋红信号倒影落在湿地面上。",
+        "en": "A glass-city street in heavy rain, with cyan light and one magenta signal reflection on wet pavement."
+      }
+    },
+    {
+      "id": "asset.visual.backgrounds.rooftop-antenna.png",
+      "relative_path": "Visual/Backgrounds/rooftop-antenna.png",
+      "alt": {
+        "zh_hans": "暴雨天台布满天线阵列，洋红脉冲在城市上空连接设备。",
+        "en": "A storm-lashed rooftop antenna field carrying a magenta pulse above the city."
+      }
+    },
+    {
+      "id": "asset.visual.backgrounds.underground-relay.png",
+      "relative_path": "Visual/Backgrounds/underground-relay.png",
+      "alt": {
+        "zh_hans": "地下中继室的环形核心隔着安全玻璃发光，线缆倒映在积水中。",
+        "en": "An underground relay core glowing behind safety glass, with cables reflected in shallow water."
+      }
+    },
+    {
+      "id": "asset.visual.cg.anomaly-reveal.png",
+      "relative_path": "Visual/CG/anomaly-reveal.png",
+      "alt": {
+        "zh_hans": "林瑶打开档案抽屉，周衡操作控制台，删除的共同记忆以光路显现。",
+        "en": "Lin Yao opens an archive drawer while Zhou Heng reveals erased shared memories at the console."
+      }
+    },
+    {
+      "id": "asset.visual.cg.ending-signal.png",
+      "relative_path": "Visual/CG/ending-signal.png",
+      "alt": {
+        "zh_hans": "信号终局：二人在黎明连廊建立受控通道，一次洋红脉冲通过验证。",
+        "en": "Signal ending: at dawn the pair establish a controlled channel and one magenta pulse passes verification."
+      }
+    },
+    {
+      "id": "asset.visual.cg.ending-silence.png",
+      "relative_path": "Visual/CG/ending-silence.png",
+      "alt": {
+        "zh_hans": "静默终局：中继核心熄灭，林瑶与周衡隔着玻璃成为陌生人。",
+        "en": "Silence ending: the relay dies and Lin Yao and Zhou Heng face each other as strangers through glass."
+      }
+    },
+    {
+      "id": "asset.visual.cg.ending-truth.png",
+      "relative_path": "Visual/CG/ending-truth.png",
+      "alt": {
+        "zh_hans": "真相终局：二人在雨中天台开启公共发射，城市灯光逐点回应。",
+        "en": "Truth ending: the pair open the public transmitter in the rain as city lights answer."
+      }
+    },
+    {
+      "id": "asset.visual.cg.opening-signal.png",
+      "relative_path": "Visual/CG/opening-signal.png",
+      "alt": {
+        "zh_hans": "林瑶与周衡隔着公寓站立，窗外洋红异常信号横贯雨夜城市。",
+        "en": "Lin Yao and Zhou Heng stand apart in the apartment as a magenta signal crosses the rainy city."
+      }
+    },
+    {
+      "id": "asset.visual.cg.reunion.png",
+      "relative_path": "Visual/CG/reunion.png",
+      "alt": {
+        "zh_hans": "林瑶与周衡在空地铁站重逢，二人手中的分析仪映出同一段异常波形。",
+        "en": "Lin Yao and Zhou Heng reunite on an empty platform while their instruments catch the same anomaly."
+      }
+    },
+    {
+      "id": "asset.visual.characters.reference.lin-yao-turnaround.png",
+      "relative_path": "Visual/Characters/Reference/lin-yao-turnaround.png",
+      "alt": {
+        "zh_hans": "林瑶的多角度角色设定与表情参考图。",
+        "en": "Multi-angle character turnaround and expression reference for Lin Yao."
+      }
+    },
+    {
+      "id": "asset.visual.characters.reference.zhou-heng-turnaround.png",
+      "relative_path": "Visual/Characters/Reference/zhou-heng-turnaround.png",
+      "alt": {
+        "zh_hans": "周衡的多角度角色设定与表情参考图。",
+        "en": "Multi-angle character turnaround and expression reference for Zhou Heng."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.determined-analyzer.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/determined-analyzer.png",
+      "alt": {
+        "zh_hans": "林瑶的determined表情、analyzer姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression determined, pose analyzer."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.determined-center.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/determined-center.png",
+      "alt": {
+        "zh_hans": "林瑶的determined表情、center姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression determined, pose center."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.determined-listen.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/determined-listen.png",
+      "alt": {
+        "zh_hans": "林瑶的determined表情、listen姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression determined, pose listen."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.focused-analyzer.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/focused-analyzer.png",
+      "alt": {
+        "zh_hans": "林瑶的focused表情、analyzer姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression focused, pose analyzer."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.focused-center.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/focused-center.png",
+      "alt": {
+        "zh_hans": "林瑶的focused表情、center姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression focused, pose center."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.focused-listen.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/focused-listen.png",
+      "alt": {
+        "zh_hans": "林瑶的focused表情、listen姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression focused, pose listen."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.guarded-analyzer.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/guarded-analyzer.png",
+      "alt": {
+        "zh_hans": "林瑶的guarded表情、analyzer姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression guarded, pose analyzer."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.guarded-center.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/guarded-center.png",
+      "alt": {
+        "zh_hans": "林瑶的guarded表情、center姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression guarded, pose center."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.guarded-listen.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/guarded-listen.png",
+      "alt": {
+        "zh_hans": "林瑶的guarded表情、listen姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression guarded, pose listen."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.neutral-analyzer.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/neutral-analyzer.png",
+      "alt": {
+        "zh_hans": "林瑶的neutral表情、analyzer姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression neutral, pose analyzer."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.neutral-center.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/neutral-center.png",
+      "alt": {
+        "zh_hans": "林瑶的neutral表情、center姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression neutral, pose center."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.neutral-listen.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/neutral-listen.png",
+      "alt": {
+        "zh_hans": "林瑶的neutral表情、listen姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression neutral, pose listen."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.relieved-analyzer.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/relieved-analyzer.png",
+      "alt": {
+        "zh_hans": "林瑶的relieved表情、analyzer姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression relieved, pose analyzer."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.relieved-center.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/relieved-center.png",
+      "alt": {
+        "zh_hans": "林瑶的relieved表情、center姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression relieved, pose center."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.relieved-listen.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/relieved-listen.png",
+      "alt": {
+        "zh_hans": "林瑶的relieved表情、listen姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression relieved, pose listen."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.worried-analyzer.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/worried-analyzer.png",
+      "alt": {
+        "zh_hans": "林瑶的worried表情、analyzer姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression worried, pose analyzer."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.worried-center.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/worried-center.png",
+      "alt": {
+        "zh_hans": "林瑶的worried表情、center姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression worried, pose center."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.lin-yao.worried-listen.png",
+      "relative_path": "Visual/Characters/Sprites/lin-yao/worried-listen.png",
+      "alt": {
+        "zh_hans": "林瑶的worried表情、listen姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Lin Yao, expression worried, pose listen."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.determined-center.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/determined-center.png",
+      "alt": {
+        "zh_hans": "周衡的determined表情、center姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression determined, pose center."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.determined-listen.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/determined-listen.png",
+      "alt": {
+        "zh_hans": "周衡的determined表情、listen姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression determined, pose listen."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.determined-recorder.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/determined-recorder.png",
+      "alt": {
+        "zh_hans": "周衡的determined表情、recorder姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression determined, pose recorder."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.focused-center.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/focused-center.png",
+      "alt": {
+        "zh_hans": "周衡的focused表情、center姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression focused, pose center."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.focused-listen.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/focused-listen.png",
+      "alt": {
+        "zh_hans": "周衡的focused表情、listen姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression focused, pose listen."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.focused-recorder.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/focused-recorder.png",
+      "alt": {
+        "zh_hans": "周衡的focused表情、recorder姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression focused, pose recorder."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.guarded-center.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/guarded-center.png",
+      "alt": {
+        "zh_hans": "周衡的guarded表情、center姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression guarded, pose center."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.guarded-listen.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/guarded-listen.png",
+      "alt": {
+        "zh_hans": "周衡的guarded表情、listen姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression guarded, pose listen."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.guarded-recorder.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/guarded-recorder.png",
+      "alt": {
+        "zh_hans": "周衡的guarded表情、recorder姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression guarded, pose recorder."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.neutral-center.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/neutral-center.png",
+      "alt": {
+        "zh_hans": "周衡的neutral表情、center姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression neutral, pose center."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.neutral-listen.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/neutral-listen.png",
+      "alt": {
+        "zh_hans": "周衡的neutral表情、listen姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression neutral, pose listen."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.neutral-recorder.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/neutral-recorder.png",
+      "alt": {
+        "zh_hans": "周衡的neutral表情、recorder姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression neutral, pose recorder."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.relieved-center.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/relieved-center.png",
+      "alt": {
+        "zh_hans": "周衡的relieved表情、center姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression relieved, pose center."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.relieved-listen.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/relieved-listen.png",
+      "alt": {
+        "zh_hans": "周衡的relieved表情、listen姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression relieved, pose listen."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.relieved-recorder.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/relieved-recorder.png",
+      "alt": {
+        "zh_hans": "周衡的relieved表情、recorder姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression relieved, pose recorder."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.worried-center.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/worried-center.png",
+      "alt": {
+        "zh_hans": "周衡的worried表情、center姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression worried, pose center."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.worried-listen.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/worried-listen.png",
+      "alt": {
+        "zh_hans": "周衡的worried表情、listen姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression worried, pose listen."
+      }
+    },
+    {
+      "id": "asset.visual.characters.sprites.zhou-heng.worried-recorder.png",
+      "relative_path": "Visual/Characters/Sprites/zhou-heng/worried-recorder.png",
+      "alt": {
+        "zh_hans": "周衡的worried表情、recorder姿态透明全身立绘。",
+        "en": "Transparent full-body sprite of Zhou Heng, expression worried, pose recorder."
+      }
+    },
+    {
+      "id": "asset.visual.endings.signal.png",
+      "relative_path": "Visual/Endings/signal.png",
+      "alt": {
+        "zh_hans": "信号终局：二人在黎明连廊建立受控通道，一次洋红脉冲通过验证。",
+        "en": "Signal ending: at dawn the pair establish a controlled channel and one magenta pulse passes verification."
+      }
+    },
+    {
+      "id": "asset.visual.endings.silence.png",
+      "relative_path": "Visual/Endings/silence.png",
+      "alt": {
+        "zh_hans": "静默终局：中继核心熄灭，林瑶与周衡隔着玻璃成为陌生人。",
+        "en": "Silence ending: the relay dies and Lin Yao and Zhou Heng face each other as strangers through glass."
+      }
+    },
+    {
+      "id": "asset.visual.endings.truth.png",
+      "relative_path": "Visual/Endings/truth.png",
+      "alt": {
+        "zh_hans": "真相终局：二人在雨中天台开启公共发射，城市灯光逐点回应。",
+        "en": "Truth ending: the pair open the public transmitter in the rain as city lights answer."
+      }
+    },
+    {
+      "id": "asset.visual.gallery.thumbnails.anomaly-reveal.png",
+      "relative_path": "Visual/Gallery/Thumbnails/anomaly-reveal.png",
+      "alt": {
+        "zh_hans": "画廊缩略图：anomaly-reveal。",
+        "en": "Gallery thumbnail: anomaly-reveal."
+      }
+    },
+    {
+      "id": "asset.visual.gallery.thumbnails.cg-ending-signal.png",
+      "relative_path": "Visual/Gallery/Thumbnails/cg-ending-signal.png",
+      "alt": {
+        "zh_hans": "画廊缩略图：cg-ending-signal。",
+        "en": "Gallery thumbnail: cg-ending-signal."
+      }
+    },
+    {
+      "id": "asset.visual.gallery.thumbnails.cg-ending-silence.png",
+      "relative_path": "Visual/Gallery/Thumbnails/cg-ending-silence.png",
+      "alt": {
+        "zh_hans": "画廊缩略图：cg-ending-silence。",
+        "en": "Gallery thumbnail: cg-ending-silence."
+      }
+    },
+    {
+      "id": "asset.visual.gallery.thumbnails.cg-ending-truth.png",
+      "relative_path": "Visual/Gallery/Thumbnails/cg-ending-truth.png",
+      "alt": {
+        "zh_hans": "画廊缩略图：cg-ending-truth。",
+        "en": "Gallery thumbnail: cg-ending-truth."
+      }
+    },
+    {
+      "id": "asset.visual.gallery.thumbnails.ending-card-signal.png",
+      "relative_path": "Visual/Gallery/Thumbnails/ending-card-signal.png",
+      "alt": {
+        "zh_hans": "画廊缩略图：ending-card-signal。",
+        "en": "Gallery thumbnail: ending-card-signal."
+      }
+    },
+    {
+      "id": "asset.visual.gallery.thumbnails.ending-card-silence.png",
+      "relative_path": "Visual/Gallery/Thumbnails/ending-card-silence.png",
+      "alt": {
+        "zh_hans": "画廊缩略图：ending-card-silence。",
+        "en": "Gallery thumbnail: ending-card-silence."
+      }
+    },
+    {
+      "id": "asset.visual.gallery.thumbnails.ending-card-truth.png",
+      "relative_path": "Visual/Gallery/Thumbnails/ending-card-truth.png",
+      "alt": {
+        "zh_hans": "画廊缩略图：ending-card-truth。",
+        "en": "Gallery thumbnail: ending-card-truth."
+      }
+    },
+    {
+      "id": "asset.visual.gallery.thumbnails.key-art.png",
+      "relative_path": "Visual/Gallery/Thumbnails/key-art.png",
+      "alt": {
+        "zh_hans": "画廊缩略图：key-art。",
+        "en": "Gallery thumbnail: key-art."
+      }
+    },
+    {
+      "id": "asset.visual.gallery.thumbnails.opening-signal.png",
+      "relative_path": "Visual/Gallery/Thumbnails/opening-signal.png",
+      "alt": {
+        "zh_hans": "画廊缩略图：opening-signal。",
+        "en": "Gallery thumbnail: opening-signal."
+      }
+    },
+    {
+      "id": "asset.visual.gallery.thumbnails.reunion.png",
+      "relative_path": "Visual/Gallery/Thumbnails/reunion.png",
+      "alt": {
+        "zh_hans": "画廊缩略图：reunion。",
+        "en": "Gallery thumbnail: reunion."
+      }
+    },
+    {
+      "id": "asset.visual.keyart.key-art.png",
+      "relative_path": "Visual/KeyArt/key-art.png",
+      "alt": {
+        "zh_hans": "林瑶与周衡站在雨夜玻璃都市前，洋红信号横贯二人身后的主视觉。",
+        "en": "Key art of Lin Yao and Zhou Heng before a rainy glass metropolis crossed by a magenta signal."
+      }
+    },
+    {
+      "id": "asset.visual.keyart.title-background.png",
+      "relative_path": "Visual/KeyArt/title-background.png",
+      "alt": {
+        "zh_hans": "雨水覆盖的公寓窗外是一座深蓝城市，桌上信号仪旁留出标题空间。",
+        "en": "A deep-blue city through rain-covered apartment glass, with a signal analyzer and open title space."
+      }
+    },
+    {
+      "id": "asset.visual.ui.backlog.png",
+      "relative_path": "Visual/UI/backlog.png",
+      "alt": {
+        "zh_hans": "回看界面视觉稿，交错对白条目与语音回放波形排列在玻璃面板内。",
+        "en": "Backlog mockup with alternating dialogue rows and a voice-replay waveform inside a glass panel."
+      }
+    },
+    {
+      "id": "asset.visual.ui.choice.png",
+      "relative_path": "Visual/UI/choice.png",
+      "alt": {
+        "zh_hans": "选择界面视觉稿，三张玻璃选项卡中间一项以青色边框选中。",
+        "en": "Choice-screen mockup with three glass options and the middle option highlighted in cyan."
+      }
+    },
+    {
+      "id": "asset.visual.ui.config.png",
+      "relative_path": "Visual/UI/config.png",
+      "alt": {
+        "zh_hans": "设置界面视觉稿，包含分类栏、滑杆、开关与音频分组。",
+        "en": "Configuration mockup with category rail, sliders, toggles, and audio groups."
+      }
+    },
+    {
+      "id": "asset.visual.ui.gallery.png",
+      "relative_path": "Visual/UI/gallery.png",
+      "alt": {
+        "zh_hans": "画廊界面视觉稿，缩略图网格旁显示放大预览与筛选图标。",
+        "en": "Gallery mockup with a thumbnail grid, enlarged preview, and filter icons."
+      }
+    },
+    {
+      "id": "asset.visual.ui.load.png",
+      "relative_path": "Visual/UI/load.png",
+      "alt": {
+        "zh_hans": "读档界面视觉稿，选中卡片以青色框和校验图形突出。",
+        "en": "Load-screen mockup with the selected card emphasized by a cyan frame and verification motif."
+      }
+    },
+    {
+      "id": "asset.visual.ui.message.png",
+      "relative_path": "Visual/UI/message.png",
+      "alt": {
+        "zh_hans": "对白界面视觉稿，下方烟色玻璃消息框保留角色名与控制图标位置。",
+        "en": "Dialogue-screen mockup with a smoked-glass message panel and reserved speaker and control areas."
+      }
+    },
+    {
+      "id": "asset.visual.ui.route-chart.png",
+      "relative_path": "Visual/UI/route-chart.png",
+      "alt": {
+        "zh_hans": "路线图视觉稿，共通节点分成三条路径并连接三个独立终局。",
+        "en": "Route-chart mockup where the common path splits into three routes and three distinct endings."
+      }
+    },
+    {
+      "id": "asset.visual.ui.save.png",
+      "relative_path": "Visual/UI/save.png",
+      "alt": {
+        "zh_hans": "存档界面视觉稿，六张缩略图卡片以路线色标区分。",
+        "en": "Save-screen mockup with six thumbnail cards distinguished by route-color markers."
+      }
+    },
+    {
+      "id": "asset.visual.ui.title.png",
+      "relative_path": "Visual/UI/title.png",
+      "alt": {
+        "zh_hans": "无字标题界面视觉稿，雨夜城市上叠加信号徽记与菜单框。",
+        "en": "Textless title-screen mockup with a signal emblem and menu frames over the rainy city."
+      }
+    },
+    {
+      "id": "asset.visual.video.source.base.png",
+      "relative_path": "Visual/Video/Source/base.png",
+      "alt": {
+        "zh_hans": "雨幕信号循环视频的可重建分层源：base。",
+        "en": "Rebuildable source layer for the rain-signal loop: base."
+      }
+    },
+    {
+      "id": "asset.visual.video.source.rain-layer.png",
+      "relative_path": "Visual/Video/Source/rain-layer.png",
+      "alt": {
+        "zh_hans": "雨幕信号循环视频的可重建分层源：rain-layer。",
+        "en": "Rebuildable source layer for the rain-signal loop: rain-layer."
+      }
+    },
+    {
+      "id": "asset.visual.video.source.signal-layer.png",
+      "relative_path": "Visual/Video/Source/signal-layer.png",
+      "alt": {
+        "zh_hans": "雨幕信号循环视频的可重建分层源：signal-layer。",
+        "en": "Rebuildable source layer for the rain-signal loop: signal-layer."
+      }
+    }
+  ]
+}

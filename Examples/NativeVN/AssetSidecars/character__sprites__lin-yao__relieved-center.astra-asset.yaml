@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/lin-yao/relieved-center
+source: Visual/Characters/Sprites/lin-yao/relieved-center.png
+source_hash: sha256:096c71d6e9da664cac7ae5ec3b678bb40992e41533719b703d1d9ceae378bf18
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

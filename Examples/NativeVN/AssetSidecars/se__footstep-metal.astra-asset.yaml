@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/footstep-metal
+source: Audio/Distribution/se/footstep-metal.ogg
+source_hash: sha256:45422d0788e8183a980145b022da75cc2212df3af29694de10717ddb32a2bd59
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

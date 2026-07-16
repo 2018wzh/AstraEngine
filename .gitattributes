@@ -1,0 +1,6 @@
+Examples/NativeVN/**/*.png filter=lfs diff=lfs merge=lfs -text
+Examples/NativeVN/**/*.wav filter=lfs diff=lfs merge=lfs -text
+Examples/NativeVN/**/*.webm filter=lfs diff=lfs merge=lfs -text
+Examples/NativeVN/**/*.mp4 filter=lfs diff=lfs merge=lfs -text
+Examples/NativeVN/**/*.ttf filter=lfs diff=lfs merge=lfs -text
+Examples/NativeVN/**/*.otf filter=lfs diff=lfs merge=lfs -text

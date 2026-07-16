@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astra.invalid/schema/nativevn.flagship_voice_cues.v1.schema.json",
+  "title": "NativeVN flagship release voice cues v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "package_id", "status", "model", "voices", "cue_count", "cues"],
+  "properties": {
+    "schema": {"const": "nativevn.flagship_voice_cues.v1"},
+    "package_id": {"const": "com.astra.nativevn.signal-glass-rain"},
+    "status": {"const": "release_ready"},
+    "model": {"const": "x-ai/grok-voice-tts-1.0"},
+    "voices": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lin_yao", "zhou_heng"],
+      "properties": {"lin_yao": {"const": "Eve"}, "zhou_heng": {"const": "Rex"}}
+    },
+    "cue_count": {"const": 180},
+    "cues": {"type": "array", "minItems": 180, "maxItems": 180, "items": {"$ref": "#/$defs/cue"}}
+  },
+  "$defs": {
+    "safe_symbol": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,127}$"},
+    "relative_path": {"type": "string", "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:[\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))[^\\u0000]+$"},
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path"],
+      "properties": {"relative_path": {"$ref": "#/$defs/relative_path"}}
+    },
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "prefixed_sha256": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mime_type", "codec", "sample_rate_hz", "channels", "duration_ms"],
+      "properties": {
+        "mime_type": {"const": "audio/ogg"},
+        "codec": {"const": "vorbis"},
+        "sample_rate_hz": {"const": 48000},
+        "channels": {"const": 1},
+        "duration_ms": {"type": "integer", "minimum": 500}
+      }
+    },
+    "source_media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["codec", "sample_rate_hz", "channels", "duration_ms"],
+      "properties": {
+        "codec": {"const": "mp3"},
+        "sample_rate_hz": {"const": 24000},
+        "channels": {"const": 1},
+        "duration_ms": {"type": "integer", "minimum": 500}
+      }
+    },
+    "generation_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "method", "tool", "model_id", "voice_id", "request_text_sha256", "source_audio_sha256", "source_media", "master_sha256"],
+      "properties": {
+        "kind": {"const": "ai_assisted"},
+        "method": {"const": "text-to-speech"},
+        "tool": {"const": "openrouter"},
+        "model_id": {"const": "x-ai/grok-voice-tts-1.0"},
+        "voice_id": {"enum": ["Eve", "Rex"]},
+        "request_text_sha256": {"$ref": "#/$defs/sha256"},
+        "source_audio_sha256": {"$ref": "#/$defs/sha256"},
+        "source_media": {"$ref": "#/$defs/source_media"},
+        "master_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "cue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "scene_id", "route_id", "line_id", "speaker_id", "take", "asset", "master", "sha256", "byte_size", "media", "generation_source", "license_status", "license_evidence", "release_eligible"],
+      "properties": {
+        "id": {"$ref": "#/$defs/safe_symbol"},
+        "role": {"const": "dialogue"},
+        "scene_id": {"$ref": "#/$defs/safe_symbol"},
+        "route_id": {"$ref": "#/$defs/safe_symbol"},
+        "line_id": {"$ref": "#/$defs/safe_symbol"},
+        "speaker_id": {"enum": ["lin_yao", "zhou_heng"]},
+        "take": {"const": 1},
+        "asset": {"$ref": "#/$defs/locator"},
+        "master": {"$ref": "#/$defs/locator"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "byte_size": {"type": "integer", "minimum": 1},
+        "media": {"$ref": "#/$defs/media"},
+        "generation_source": {"$ref": "#/$defs/generation_source"},
+        "license_status": {"const": "user_authorized"},
+        "license_evidence": {"$ref": "#/$defs/locator"},
+        "release_eligible": {"const": true}
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "schema": "nativevn.flagship_cook_evidence.v1",
+  "id": "nativevn-flagship-cook-evidence",
+  "status": "pass",
+  "project": "Examples/NativeVN/project.yaml",
+  "profile": "advanced-vn",
+  "target": "nativevn-flagship-game",
+  "package_id": "com.astra.nativevn.signal-glass-rain",
+  "project_hash": "sha256:c214b5d47345ebd399f3febd7b4eaa903d4b89c3db51218e510d06ea048b3434",
+  "cook_manifest_schema": "astra.cook_manifest.v2",
+  "artifact_count": 310,
+  "asset_cook": {
+    "schema": "astra.cook_batch_summary.v1",
+    "graph_hash": "sha256:6c08ff3e3984b37c83f5f6cb41208bbbcf7e7e4507fcadb103298a503406e6ad",
+    "artifact_count": 283,
+    "cache_hit_count": 0,
+    "cooked_count": 283,
+    "max_concurrency": 8
+  },
+  "scenario_count": 0,
+  "runtime_tests_executed": false,
+  "player_tests_executed": false
+}

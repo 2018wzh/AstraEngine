@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/terminal-wake
+source: Audio/Distribution/se/terminal-wake.ogg
+source_hash: sha256:aea5b2edc10feb07db35d98485b481f4729f3e30ba9dc161ab498313cc8d624d
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

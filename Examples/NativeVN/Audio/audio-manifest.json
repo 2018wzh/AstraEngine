@@ -1,0 +1,837 @@
+{
+  "asset_count": 25,
+  "assets": [
+    {
+      "distribution": {
+        "byte_size": 336179,
+        "format": "ogg_vorbis",
+        "path": "Distribution/bgm/glass-rain.ogg",
+        "sha256": "8aa81183f8005a4ac39be9784383b39c424cb949f5ad5d5bdd1bd635f6a8e7ed"
+      },
+      "duration_seconds": 72.0,
+      "id": "glass-rain",
+      "kind": "bgm",
+      "license_status": "original_project_asset",
+      "loop": true,
+      "master": {
+        "byte_size": 20736044,
+        "channels": 2,
+        "frame_count": 3456000,
+        "path": "Master/bgm/glass-rain.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "908e4971c6b45fb56b35c0ff27957bcc86afb604f3317d76a778931a35564bdb"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "rain_glass",
+        "seed": 1103
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Glass Rain",
+        "zh": "玻璃雨"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 561462,
+        "format": "ogg_vorbis",
+        "path": "Distribution/bgm/carrier-noise.ogg",
+        "sha256": "2c7ec40cabf27d86913f82f0d8f1e0cf620ae6b56c68aeed7079f3672f8793cf"
+      },
+      "duration_seconds": 84.0,
+      "id": "carrier-noise",
+      "kind": "bgm",
+      "license_status": "original_project_asset",
+      "loop": true,
+      "master": {
+        "byte_size": 24192044,
+        "channels": 2,
+        "frame_count": 4032000,
+        "path": "Master/bgm/carrier-noise.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "9143feb1e4a48099d5a5dfd7d4717e45e5176bd1313db055bff22c796bdcccb4"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "carrier",
+        "seed": 2207
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Carrier Noise",
+        "zh": "载波噪声"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 834302,
+        "format": "ogg_vorbis",
+        "path": "Distribution/bgm/thin-line.ogg",
+        "sha256": "20e3c4886747aa4e7dc10c8ee0405c7ecc293833dd799b982b8fa34beca7f546"
+      },
+      "duration_seconds": 66.0,
+      "id": "thin-line",
+      "kind": "bgm",
+      "license_status": "original_project_asset",
+      "loop": true,
+      "master": {
+        "byte_size": 19008044,
+        "channels": 2,
+        "frame_count": 3168000,
+        "path": "Master/bgm/thin-line.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "e7d2b4f4554510731af199fdbca6b7da51ed4fc17c41d1f955dc285c38556dd5"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "thin_line",
+        "seed": 3301
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Thin Line",
+        "zh": "细线"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 328869,
+        "format": "ogg_vorbis",
+        "path": "Distribution/bgm/after-signal.ogg",
+        "sha256": "585dd35966afa3a48a6f5da2d443d5c48323d9650712caf295a731910a3c7983"
+      },
+      "duration_seconds": 78.0,
+      "id": "after-signal",
+      "kind": "bgm",
+      "license_status": "original_project_asset",
+      "loop": true,
+      "master": {
+        "byte_size": 22464044,
+        "channels": 2,
+        "frame_count": 3744000,
+        "path": "Master/bgm/after-signal.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "f42a47cd9ba20425361e5200d57cd9618105855a480ad372606779998155755d"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "after_signal",
+        "seed": 4409
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "After Signal",
+        "zh": "信号之后"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 56913,
+        "format": "ogg_vorbis",
+        "path": "Distribution/stinger/truth.ogg",
+        "sha256": "072c905ca838b825fda86dda2868e20706e8aef33d367502f36e401fffb41c5e"
+      },
+      "duration_seconds": 7.2,
+      "id": "truth",
+      "kind": "stinger",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 2073644,
+        "channels": 2,
+        "frame_count": 345600,
+        "path": "Master/stinger/truth.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "30514cb0571b20a722dd213baf2a7e7b85ac4672593916f89aa4fab9f2a3c108"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "truth",
+        "seed": 5101
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Truth",
+        "zh": "真相"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 51734,
+        "format": "ogg_vorbis",
+        "path": "Distribution/stinger/silence.ogg",
+        "sha256": "fc8db5aeada835c71ed700428ca0412440afec753bcb6b6c0b32a366c8a0e6b7"
+      },
+      "duration_seconds": 6.4,
+      "id": "silence",
+      "kind": "stinger",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 1843244,
+        "channels": 2,
+        "frame_count": 307200,
+        "path": "Master/stinger/silence.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "738167c21add47952592463ffbac4e102d9bf5ea625ce15bc2c7107242341563"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "silence",
+        "seed": 5209
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Silence",
+        "zh": "寂静"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 62126,
+        "format": "ogg_vorbis",
+        "path": "Distribution/stinger/signal.ogg",
+        "sha256": "ab07954f0f76192c3b49cc62970d00f36e1afafc8f0f016efa28ac0c8725d75c"
+      },
+      "duration_seconds": 7.8,
+      "id": "signal",
+      "kind": "stinger",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 2246444,
+        "channels": 2,
+        "frame_count": 374400,
+        "path": "Master/stinger/signal.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "bde6c13ff21d95d72226d5409353f9e3692dfe9d1c6adbfdfc6609ce3acf68c6"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "signal",
+        "seed": 5303
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Signal",
+        "zh": "信号"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 97519,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/rain-window.ogg",
+        "sha256": "40097a9ce1a7c4d4f88f2f3cf3f77172c1b8aaeebb354282bd00586f817bdfa4"
+      },
+      "duration_seconds": 6.0,
+      "id": "rain-window",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 1728044,
+        "channels": 2,
+        "frame_count": 288000,
+        "path": "Master/se/rain-window.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "04829832bbc397ceca411583e067822be610ab2ebe9de6efa2aae69dcd54d4d7"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "rain_window",
+        "seed": 6101
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Rain on Window",
+        "zh": "雨落窗面"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 41942,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/distant-thunder.ogg",
+        "sha256": "2cb20584ab7f5c9bfb851e8cd48b8d67cdf637b854b5988ec897d637aa1a659d"
+      },
+      "duration_seconds": 5.2,
+      "id": "distant-thunder",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 1497644,
+        "channels": 2,
+        "frame_count": 249600,
+        "path": "Master/se/distant-thunder.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "467d187ed0b4de8fdaaf0d9320d0a62151b9bc8055ef77f44b18869f9fe4ca73"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "thunder",
+        "seed": 6203
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Distant Thunder",
+        "zh": "远雷"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 60901,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/fluorescent-hum.ogg",
+        "sha256": "5c015d8814e63eab0155eb257b649ffae4ba3803337698d07bc06e40224ea32f"
+      },
+      "duration_seconds": 4.0,
+      "id": "fluorescent-hum",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 1152044,
+        "channels": 2,
+        "frame_count": 192000,
+        "path": "Master/se/fluorescent-hum.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "e6c9207f329a1e496c8bc793d2bdaa7347e0d026da559647601b26796b5476b0"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "electrical_hum",
+        "seed": 6301
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Fluorescent Hum",
+        "zh": "荧光灯嗡鸣"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 56995,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/radio-static.ogg",
+        "sha256": "71828b28682884cb166ad7e3dbda3f705a4249bf50d3517f50ce8d9c9fd45840"
+      },
+      "duration_seconds": 3.4,
+      "id": "radio-static",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 979244,
+        "channels": 2,
+        "frame_count": 163200,
+        "path": "Master/se/radio-static.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "380b549fb4e3689ddaf2472ef4f2cc89f5553b32942daf059ed591fbecea657c"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "radio_static",
+        "seed": 6503
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Radio Static",
+        "zh": "无线电静电"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 29455,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/signal-lock.ogg",
+        "sha256": "b5ef63679f4cb290d210586e9cbb7a2d54e9bf6e6e7d079a712969dabd4e257a"
+      },
+      "duration_seconds": 1.8,
+      "id": "signal-lock",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 518444,
+        "channels": 2,
+        "frame_count": 86400,
+        "path": "Master/se/signal-lock.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "4892830dffd0befdb809e767cc1b6e09f59055a6e63fd3e6c19a3368d49e576d"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "signal_lock",
+        "seed": 6607
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Signal Lock",
+        "zh": "信号锁定"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 35554,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/terminal-wake.ogg",
+        "sha256": "aea5b2edc10feb07db35d98485b481f4729f3e30ba9dc161ab498313cc8d624d"
+      },
+      "duration_seconds": 2.3,
+      "id": "terminal-wake",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 662444,
+        "channels": 2,
+        "frame_count": 110400,
+        "path": "Master/se/terminal-wake.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "7b23553e553f9f60fee8a1a5b20d275ff79473f8cf509969395352647813217c"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "terminal_wake",
+        "seed": 6701
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Terminal Wake",
+        "zh": "终端唤醒"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 8559,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/terminal-key.ogg",
+        "sha256": "83bee3813e0378b367dd511309b94084a12db6ae894ba71e52fd18845a19afc8"
+      },
+      "duration_seconds": 0.28,
+      "id": "terminal-key",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 80684,
+        "channels": 2,
+        "frame_count": 13440,
+        "path": "Master/se/terminal-key.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "a53210889504f0982f679979a837cd934603389008b5e861368519495225fa18"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "terminal_key",
+        "seed": 6803
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Terminal Key",
+        "zh": "终端按键"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 13868,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/terminal-confirm.ogg",
+        "sha256": "5124bd8cff58907e2cd820c220788654f993776ce0d6fdfa93c5b3cfbf6fa5c3"
+      },
+      "duration_seconds": 0.65,
+      "id": "terminal-confirm",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 187244,
+        "channels": 2,
+        "frame_count": 31200,
+        "path": "Master/se/terminal-confirm.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "9f98e734dc1918e4adec4da969d52064a7b98dd9ea45c5fbdb6f6a18a759aafd"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "terminal_confirm",
+        "seed": 6907
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Terminal Confirm",
+        "zh": "终端确认"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 15313,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/terminal-deny.ogg",
+        "sha256": "ff843f1240c817be0ba1070edf1e874e8fc7b4270ff3900402b5ba92a7b66077"
+      },
+      "duration_seconds": 0.82,
+      "id": "terminal-deny",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 236204,
+        "channels": 2,
+        "frame_count": 39360,
+        "path": "Master/se/terminal-deny.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "0aa06b05c41d6b1f373e35a2e484a29100b0cedf1a26e1c949476f12c5d13e79"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "terminal_deny",
+        "seed": 7001
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Terminal Deny",
+        "zh": "终端拒绝"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 19284,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/message-arrive.ogg",
+        "sha256": "f59a68427d3cf4311c20cee3dfb90fcebc9526e1ae26fb0783b13fd1b072b85e"
+      },
+      "duration_seconds": 1.1,
+      "id": "message-arrive",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 316844,
+        "channels": 2,
+        "frame_count": 52800,
+        "path": "Master/se/message-arrive.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "b65768d90dcf49a245572d919974ed21a5ce7567dd409df145fcafd685557d9f"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "message_arrive",
+        "seed": 7103
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Message Arrive",
+        "zh": "消息抵达"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 14640,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/choice-open.ogg",
+        "sha256": "16139422dbdd1f401645dc1d633a3afb0dbfbeea1441530c7c644aecc5116123"
+      },
+      "duration_seconds": 0.75,
+      "id": "choice-open",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 216044,
+        "channels": 2,
+        "frame_count": 36000,
+        "path": "Master/se/choice-open.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "30e3913067f4f725a233a51ecfb94a349bc5eae7ac792f2f762bbffb5b0d82b0"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "choice_open",
+        "seed": 7207
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Choice Open",
+        "zh": "选项展开"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 11229,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/choice-select.ogg",
+        "sha256": "550959830c2b444e3cae435bc3697c8f826359284326097e31d9e8c59b758a35"
+      },
+      "duration_seconds": 0.48,
+      "id": "choice-select",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 138284,
+        "channels": 2,
+        "frame_count": 23040,
+        "path": "Master/se/choice-select.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "30e13da19034f5d4eed7cf43a346e2187b059f549df3c601bcc70d785fbfed51"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "choice_select",
+        "seed": 7307
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Choice Select",
+        "zh": "选项确认"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 23330,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/archive-open.ogg",
+        "sha256": "d9c5a7a5c4c4a0ab4da207371cf4bd81cf4911ccafccf41da8e9d18f86a250fc"
+      },
+      "duration_seconds": 1.45,
+      "id": "archive-open",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 417644,
+        "channels": 2,
+        "frame_count": 69600,
+        "path": "Master/se/archive-open.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "982eec557b7e1dfecdc097b9e1e60cdfb722cac9fd657c8e3e8bdd80680d3a12"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "archive_open",
+        "seed": 7403
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Archive Open",
+        "zh": "档案开启"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 43815,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/door-pressure.ogg",
+        "sha256": "57e038594627a781edc63c03988ef5fd818eac75db12f555ac4b9c6f6ea0c3e9"
+      },
+      "duration_seconds": 3.2,
+      "id": "door-pressure",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 921644,
+        "channels": 2,
+        "frame_count": 153600,
+        "path": "Master/se/door-pressure.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "c62e2ffe5f34d31c56cbdbeebf3dde7b8a0341a80e48e5c7ce12f6bac483c185"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "door_pressure",
+        "seed": 7507
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Pressure Door",
+        "zh": "气密门"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 13997,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/footstep-metal.ogg",
+        "sha256": "45422d0788e8183a980145b022da75cc2212df3af29694de10717ddb32a2bd59"
+      },
+      "duration_seconds": 0.72,
+      "id": "footstep-metal",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 207404,
+        "channels": 2,
+        "frame_count": 34560,
+        "path": "Master/se/footstep-metal.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "769c423083ad6bd322107d22d840c545c46e28b26ae7f52313e5c729b9336c01"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "footstep_metal",
+        "seed": 7603
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Metal Footstep",
+        "zh": "金属脚步"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 33995,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/glass-fracture.ogg",
+        "sha256": "0f8d4c1f32e5b60f32f431b585797c57c301404b5414d9ca1fc6d0b74d96cb0e"
+      },
+      "duration_seconds": 2.0,
+      "id": "glass-fracture",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 576044,
+        "channels": 2,
+        "frame_count": 96000,
+        "path": "Master/se/glass-fracture.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "5f292be154e4ee997660331aa8e1d7e38e301e698ebf6194f5ff76b0243c6c22"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "glass_fracture",
+        "seed": 7703
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Glass Fracture",
+        "zh": "玻璃裂响"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 46377,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/memory-flare.ogg",
+        "sha256": "a7f4dccd9c5df28ce178ed24e9317d6760736113aa4f554c191c472b729631e7"
+      },
+      "duration_seconds": 2.8,
+      "id": "memory-flare",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 806444,
+        "channels": 2,
+        "frame_count": 134400,
+        "path": "Master/se/memory-flare.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "3909020f0226bc62df29d0e344d4dd115a8c1849f5e3307fa1a469a9f879c342"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "memory_flare",
+        "seed": 7801
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Memory Flare",
+        "zh": "记忆闪回"
+      }
+    },
+    {
+      "distribution": {
+        "byte_size": 27181,
+        "format": "ogg_vorbis",
+        "path": "Distribution/se/scene-transition.ogg",
+        "sha256": "18b5ecf2f33a9125552046af319637b9fa430540f74087313d5a4538726e2a82"
+      },
+      "duration_seconds": 1.6,
+      "id": "scene-transition",
+      "kind": "se",
+      "license_status": "original_project_asset",
+      "loop": false,
+      "master": {
+        "byte_size": 460844,
+        "channels": 2,
+        "frame_count": 76800,
+        "path": "Master/se/scene-transition.wav",
+        "sample_rate": 48000,
+        "sample_width_bits": 24,
+        "sha256": "14ec44af86d656e1d726a037bc0707bdf9f5dd608e151a6c3d6dbf810f2bcecb"
+      },
+      "provenance": {
+        "generator": "Tools/NativeVN/generate_audio.py",
+        "original": true,
+        "recipe": "scene_transition",
+        "seed": 7907
+      },
+      "release_eligible": true,
+      "title": {
+        "en": "Scene Transition",
+        "zh": "场景过渡"
+      }
+    }
+  ],
+  "id": "nativevn-flagship-audio",
+  "sample_contract": {
+    "channels": 2,
+    "sample_rate": 48000,
+    "sample_width_bits": 24
+  },
+  "schema": "astra.nativevn_flagship.audio_manifest.v1"
+}

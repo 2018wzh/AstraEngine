@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/voice/vc_ln_c05_004
+source: Audio/Voice/Distribution/zhou_heng/vc_ln_c05_004.ogg
+source_hash: sha256:8429b4e16e62847e906c0631764285fdfa184311dba32aaa2c0a9801b7603d5e
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

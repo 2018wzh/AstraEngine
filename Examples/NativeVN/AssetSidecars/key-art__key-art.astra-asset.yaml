@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/key-art/key-art
+source: Visual/KeyArt/key-art.png
+source_hash: sha256:9ebcefddeb0ffc02f6f9f01615ed96643c8a7de7cd4136d95c6c09c157751840
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

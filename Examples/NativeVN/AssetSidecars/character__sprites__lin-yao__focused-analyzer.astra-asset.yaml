@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/lin-yao/focused-analyzer
+source: Visual/Characters/Sprites/lin-yao/focused-analyzer.png
+source_hash: sha256:408095a79ff6494a3ecb7fa55f99fcc1265eb72d21c2dd6044a2234426af068a
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

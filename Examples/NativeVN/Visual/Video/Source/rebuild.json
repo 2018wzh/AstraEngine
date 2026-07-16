@@ -1,0 +1,25 @@
+{
+  "schema": "nativevn.flagship_video_recipe.v1",
+  "id": "rain-signal-loop",
+  "width": 1920,
+  "height": 1080,
+  "frame_rate": 24,
+  "frame_count": 288,
+  "duration_ms": 12000,
+  "seed": 1312904278,
+  "layers": [
+    "base.png",
+    "rain-layer.png",
+    "signal-layer.png"
+  ],
+  "outputs": {
+    "mp4": {
+      "path": "../rain-signal-loop.mp4",
+      "sha256": "44020c358f86833c1ad559e729fc0145dd29aa757f4ef7185e1164cf918393f9"
+    },
+    "webm": {
+      "path": "../rain-signal-loop.webm",
+      "sha256": "94cc3a8df5211eca89d0a584286389cef6cb0ff775577bbea63504ade0df2984"
+    }
+  }
+}

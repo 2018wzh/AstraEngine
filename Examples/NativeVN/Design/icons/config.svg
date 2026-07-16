@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-labelledby="config-icon-title">
+  <title id="config-icon-title">Config</title>
+  <path d="m12 3 1 2.2 2.4.7 2.1-1 1.6 1.6-1 2.1.7 2.4 2.2 1v2l-2.2 1-.7 2.4 1 2.1-1.6 1.6-2.1-1-2.4.7-1 2.2h-2l-1-2.2-2.4-.7-2.1 1-1.6-1.6 1-2.1-.7-2.4-2.2-1v-2l2.2-1 .7-2.4-1-2.1 1.6-1.6 2.1 1 2.4-.7 1-2.2h2Z"/>
+  <circle cx="12" cy="12" r="3"/>
+</svg>

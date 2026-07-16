@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-labelledby="choice-icon-title">
+  <title id="choice-icon-title">Choice</title>
+  <circle cx="6" cy="6" r="2"/>
+  <circle cx="18" cy="18" r="2"/>
+  <path d="M8 6h4a4 4 0 0 1 4 4v6M16 18h-4a4 4 0 0 1-4-4V8"/>
+</svg>

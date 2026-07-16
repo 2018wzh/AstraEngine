@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/gallery/thumbnails/ending-card-truth
+source: Visual/Gallery/Thumbnails/ending-card-truth.png
+source_hash: sha256:446b7811db67c121c7a248fff58cc612bf138ed37d6e3e37c9c46fa721078f22
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

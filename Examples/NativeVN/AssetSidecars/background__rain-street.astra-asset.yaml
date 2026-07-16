@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/background/rain-street
+source: Visual/Backgrounds/rain-street.png
+source_hash: sha256:bcd2bcf25f15202c4489ea21b7bd5d3c5135245106f7e55c4bb7efa2988dafbf
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

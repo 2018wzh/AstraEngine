@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/lin-yao/relieved-analyzer
+source: Visual/Characters/Sprites/lin-yao/relieved-analyzer.png
+source_hash: sha256:ee9bfda6a86573d8f7ef33dde42d162da8da0c1d52d42d03928eb1f2bd56edec
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

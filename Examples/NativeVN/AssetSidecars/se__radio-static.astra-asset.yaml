@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/radio-static
+source: Audio/Distribution/se/radio-static.ogg
+source_hash: sha256:71828b28682884cb166ad7e3dbda3f705a4249bf50d3517f50ce8d9c9fd45840
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

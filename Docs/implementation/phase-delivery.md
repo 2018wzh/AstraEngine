@@ -63,17 +63,17 @@ Expected report includes `package.integrity`, `target.manifest`, `platform.capab
 
 **Test IDs:** `T-S3-SCRIPT-01`、`T-S3-SCRIPT-02`、`T-S3-UI-SCRIPT-01`、`T-S3-UI-EXT-01`、`T-S3-LUAU-01`、`T-S3-LUAU-02`、`T-S3-PRESENT-01`、`T-S3-SYSTEM-01`、`T-S3-ADVANCED-01`、`T-S3-SAMPLE-01`、`T-S3-GAME-TARGET-01`、`T-S3-RUNTIME-PROVIDER-01`
 
-**Sample:** `Examples/NativeVN`、`Examples/NativeVN/scenarios/route_library.yaml`、`Examples/NativeVN/scenarios/route_rooftop.yaml`
+**Sample:** `Examples/NativeVN`；当前旗舰里程碑不提交 scenario，Runtime/Player evidence 保持开放。
 
 **Report Schema:** `astra.scenario_report.v1` + `astra.release_report.v1`
 
 ```bash
 astra package build target/cooked-nativevn --target nativevn-game --out target/nativevn.astrapkg
-astra test run Examples/NativeVN/scenarios/route_library.yaml --package target/nativevn.astrapkg --target nativevn-game --profile advanced-vn --headless --report target/reports/stage3-library.yaml
 astra cook Examples/NativeVN/project.yaml --profile advanced-vn --target nativevn-game --out target/cooked-nativevn-advanced
 astra package build target/cooked-nativevn-advanced --target nativevn-game --out target/nativevn-advanced.astrapkg
-astra test run Examples/NativeVN/scenarios/route_rooftop.yaml --package target/nativevn-advanced.astrapkg --target nativevn-game --profile advanced-vn --headless --report target/reports/stage3-rooftop.yaml
 ```
+
+正式 Stage 3 scenario 必须在运行基座成熟后从同一 cooked package、build/profile/session 建立，不能复用已删除的两路线技术样例输入。
 
 Expected report includes `target.manifest`, `runtime_provider.native_vn`, `script.compile`, `script.frontend_conformance`, `luau.policy_lock`, `system_stories.covered`, `vn.system_ui_profile`, `vn.advanced_presentation`, `command.provider_binding` and `vn.replay_hash`.
 

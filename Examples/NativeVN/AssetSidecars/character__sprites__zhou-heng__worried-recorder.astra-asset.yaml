@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/zhou-heng/worried-recorder
+source: Visual/Characters/Sprites/zhou-heng/worried-recorder.png
+source_hash: sha256:a7e28ea9f41eeea6408b5eeff34e8b6a97cab8e559fff9f3b9bd0fa4a9649e58
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

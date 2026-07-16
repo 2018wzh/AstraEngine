@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/lin-yao/worried-analyzer
+source: Visual/Characters/Sprites/lin-yao/worried-analyzer.png
+source_hash: sha256:08814f581530300d07558d344e89a2b834b7c7022c66a42a412871c551618016
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

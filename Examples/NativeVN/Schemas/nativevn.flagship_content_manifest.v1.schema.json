@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astra.invalid/schema/nativevn.flagship_content_manifest.v1.schema.json",
+  "title": "NativeVN flagship content manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "package_id", "title", "status", "schema_refs", "assets"],
+  "properties": {
+    "schema": {"const": "nativevn.flagship_content_manifest.v1"},
+    "package_id": {"const": "com.astra.nativevn.signal-glass-rain"},
+    "title": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["zh_hans", "en"],
+      "properties": {
+        "zh_hans": {"const": "玻璃雨中的信号"},
+        "en": {"const": "Signal in the Glass Rain"}
+      }
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content_creation", "public_release_assets", "engine_integration", "stage_gate"],
+      "properties": {
+        "content_creation": {"const": "complete"},
+        "public_release_assets": {"const": "ready_with_authorized_voice"},
+        "engine_integration": {"const": "cook_ready_with_voice"},
+        "stage_gate": {"const": "IN_PROGRESS"}
+      }
+    },
+    "schema_refs": {
+      "type": "array",
+      "minItems": 4,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/relative_path"}
+    },
+    "assets": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/asset"}
+    }
+  },
+  "$defs": {
+    "safe_symbol": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,127}$"},
+    "relative_path": {
+      "type": "string",
+      "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:[\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))[^\\u0000]+$"
+    },
+    "private_alias": {
+      "type": "string",
+      "pattern": "^private://[a-z][a-z0-9._/-]{0,127}$"
+    },
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "relative_path": {"$ref": "#/$defs/relative_path"},
+        "private_alias": {"$ref": "#/$defs/private_alias"}
+      },
+      "oneOf": [
+        {"required": ["relative_path"]},
+        {"required": ["private_alias"]}
+      ]
+    },
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mime_type"],
+      "properties": {
+        "kind": {"enum": ["image", "font", "audio", "video", "vector", "document", "data"]},
+        "mime_type": {"type": "string", "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "duration_ms": {"type": "integer", "minimum": 1},
+        "sample_rate_hz": {"type": "integer", "minimum": 8000},
+        "channels": {"type": "integer", "minimum": 1, "maximum": 32},
+        "frame_rate": {"type": "number", "exclusiveMinimum": 0},
+        "codec": {"$ref": "#/$defs/safe_symbol"},
+        "color_space": {"$ref": "#/$defs/safe_symbol"},
+        "has_alpha": {"type": "boolean"},
+        "face_index": {"type": "integer", "minimum": 0}
+      }
+    },
+    "generation_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "method"],
+      "properties": {
+        "kind": {"enum": ["hand_authored", "code_native", "recorded", "licensed_source", "third_party_tool", "ai_assisted"]},
+        "method": {"$ref": "#/$defs/safe_symbol"},
+        "tool": {"$ref": "#/$defs/safe_symbol"},
+        "tool_version": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"},
+        "input_refs": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/locator"}}
+      }
+    },
+    "license_status": {"enum": ["pending", "blocked_voice_rights", "approved", "user_authorized", "not_applicable", "internal_only", "rejected"]},
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "locator", "sha256", "byte_size", "media", "generation_source", "license_status", "release_eligible"],
+      "properties": {
+        "id": {"$ref": "#/$defs/safe_symbol"},
+        "role": {"enum": ["background", "character", "prop", "ui_icon", "font", "voice", "bgm", "se", "video", "manifest", "review_evidence"]},
+        "locator": {"$ref": "#/$defs/locator"},
+        "scene_id": {"$ref": "#/$defs/safe_symbol"},
+        "route_id": {"$ref": "#/$defs/safe_symbol"},
+        "line_id": {"$ref": "#/$defs/safe_symbol"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "byte_size": {"type": "integer", "minimum": 1},
+        "media": {"$ref": "#/$defs/media"},
+        "generation_source": {"$ref": "#/$defs/generation_source"},
+        "license_status": {"$ref": "#/$defs/license_status"},
+        "license_evidence": {"$ref": "#/$defs/locator"},
+        "release_eligible": {"type": "boolean"}
+      },
+      "allOf": [
+        {"if": {"properties": {"release_eligible": {"const": true}}}, "then": {"properties": {"license_status": {"enum": ["approved", "user_authorized", "not_applicable"]}}}}
+      ]
+    }
+  }
+}

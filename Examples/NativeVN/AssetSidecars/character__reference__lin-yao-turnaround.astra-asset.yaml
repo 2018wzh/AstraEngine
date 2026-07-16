@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/reference/lin-yao-turnaround
+source: Visual/Characters/Reference/lin-yao-turnaround.png
+source_hash: sha256:da38206905cac0150387d0a05179a30e6d1da162b70a1fe47ae42e04a1c479ff
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

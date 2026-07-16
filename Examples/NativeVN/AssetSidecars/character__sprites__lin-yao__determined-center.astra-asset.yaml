@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/lin-yao/determined-center
+source: Visual/Characters/Sprites/lin-yao/determined-center.png
+source_hash: sha256:3e2c90c8d3e14d54cec9cedaf996aa2d14c9dc37bad089dff16af629d65fb2c6
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

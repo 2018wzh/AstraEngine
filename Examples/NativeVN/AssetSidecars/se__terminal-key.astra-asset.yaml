@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/terminal-key
+source: Audio/Distribution/se/terminal-key.ogg
+source_hash: sha256:83bee3813e0378b367dd511309b94084a12db6ae894ba71e52fd18845a19afc8
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

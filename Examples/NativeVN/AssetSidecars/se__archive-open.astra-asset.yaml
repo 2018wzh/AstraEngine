@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/archive-open
+source: Audio/Distribution/se/archive-open.ogg
+source_hash: sha256:d9c5a7a5c4c4a0ab4da207371cf4bd81cf4911ccafccf41da8e9d18f86a250fc
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

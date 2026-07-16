@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-labelledby="message-icon-title">
+  <title id="message-icon-title">Message</title>
+  <path d="M4 5.5h16v10H9l-5 4v-14Z"/>
+  <path d="M8 9.5h8M8 12.5h5"/>
+</svg>

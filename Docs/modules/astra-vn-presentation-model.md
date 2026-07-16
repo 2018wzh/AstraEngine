@@ -181,8 +181,6 @@ voice sync 由 `TextWindowState.voice_replay`、AudioGraph voice channel 和 Tim
 - Renderer2D provider 不支持某个 effect 时，fallback 不改变剧情状态。
 - 性能预算以 headless capture、frame budget 和 provider capability report 为证据。
 
-```bash
-astra test run Examples/NativeVN/scenarios/route_rooftop.yaml --package target/nativevn.astrapkg --target nativevn-game --profile advanced-vn --headless --report target/reports/advanced-vn.yaml
-```
+旗舰项目当前只验证 Cook，不提交 scenario 或执行 Runtime/Player。正式 advanced presentation scenario 必须在 Player 基座门禁关闭后，从同一 cooked package、build/profile/session 重新建立。
 
 Expected report includes `vn.advanced_presentation`, `timeline.join_cancel`, `presentation.fallback`, `voice.sync` and `renderer.effect_budget`.

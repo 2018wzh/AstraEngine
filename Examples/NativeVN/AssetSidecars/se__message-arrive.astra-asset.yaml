@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/message-arrive
+source: Audio/Distribution/se/message-arrive.ogg
+source_hash: sha256:f59a68427d3cf4311c20cee3dfb90fcebc9526e1ae26fb0783b13fd1b072b85e
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

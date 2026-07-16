@@ -1,51 +1,555 @@
-story main #@id story.main
+story signal_in_the_glass_rain #@id story.signal_in_the_glass_rain
 
-state prologue #@id state.prologue
-  scene technical_stage #@id scene.technical_stage
-    stage viewport:1920x1080 safe_area:16:9 #@id stage.technical
-    layer id:bg kind:background z:0 blend:normal #@id layer.bg
-    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.character
-    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.video
-    layer id:ui kind:text z:900 blend:normal input:message #@id layer.ui
-    background asset:asset:/background/apartment-night layer:bg preset:soft_fade duration:300 #@id bg.technical
-    show id:hero asset:asset:/character/lin-yao pose:normal layer:character at:center preset:hero_enter #@id hero.show
-    camera target:main zoom:1.06 duration:480 preset:slow_push #@id camera.push
-    timeline id:tl.hero.enter target:hero property:opacity keyframes:0=0,300=1 join:block fence:timeline.hero.enter.complete fallback:flat budget_ms:2 #@id timeline.hero.enter
-    timeline id:tl.hero.enter action:cancel reason:replace_target #@id timeline.hero.cancel
-    movie layer:video asset:asset:/movie/rain-signal alpha:0.20 loop:true end:wait fence:movie.signal.end fallback:asset:/background/apartment-night #@id movie.signal
-    bgm asset:asset:/bgm/glass-city loop:true fade:600 #@id bgm.technical
-    voice asset:asset:/voice/cc0-sample sync:text #@id voice.cc0.sample
-    text key:technical.intro speaker:guide voice:voice.cc0.sample window:main #@id line.technical.intro
-    effect text:technical.reveal lip_sync:true filter:astra.filter.bloom fallback:filter_missing budget_ms:2 #@id effect.technical.reveal
-    wait fence:voice_end #@id wait.voice
-    transition preset:flash_soft duration:220 #@id transition.choice
-    choice key:technical.route #@id choice.route
-      option key:technical.route.library -> ending_library #@id choice.library
-      option key:technical.route.rooftop -> ending_rooftop #@id choice.rooftop
+state scn_common_01_glass_train #@id state.scn_common_01_glass_train
+  scene scn_common_01_glass_train #@id scene.scn_common_01_glass_train
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_common_01_glass_train
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_common_01_glass_train.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_common_01_glass_train.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_common_01_glass_train.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_common_01_glass_train.ui
+    background asset:asset:/background/metro-station layer:bg preset:soft_fade duration:400 #@id bg.scn_common_01_glass_train
+    movie layer:video asset:asset:/movie/rain-signal-loop alpha:0.18 loop:true end:continue fallback:asset:/background/metro-station #@id movie.opening
+    bgm asset:asset:/bgm/glass-rain loop:true fade:600 #@id bgm.common
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/guarded-center pose:guarded layer:character at:left preset:soft_fade #@id sprite.scn_common_01_glass_train.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/guarded-center pose:guarded layer:character at:right preset:soft_fade #@id sprite.scn_common_01_glass_train.zhou_heng
+    voice asset:asset:/voice/vc_ln_c01_001 sync:text #@id voice.vc_ln_c01_001
+    text key:line.ln_c01_001 speaker:speaker.zhou_heng voice:voice.vc_ln_c01_001 window:main #@id line.ln_c01_001
+    voice asset:asset:/voice/vc_ln_c01_002 sync:text #@id voice.vc_ln_c01_002
+    text key:line.ln_c01_002 speaker:speaker.zhou_heng voice:voice.vc_ln_c01_002 window:main #@id line.ln_c01_002
+    voice asset:asset:/voice/vc_ln_c01_003 sync:text #@id voice.vc_ln_c01_003
+    text key:line.ln_c01_003 speaker:speaker.lin_yao voice:voice.vc_ln_c01_003 window:main #@id line.ln_c01_003
+    voice asset:asset:/voice/vc_ln_c01_004 sync:text #@id voice.vc_ln_c01_004
+    text key:line.ln_c01_004 speaker:speaker.zhou_heng voice:voice.vc_ln_c01_004 window:main #@id line.ln_c01_004
+    voice asset:asset:/voice/vc_ln_c01_005 sync:text #@id voice.vc_ln_c01_005
+    text key:line.ln_c01_005 speaker:speaker.lin_yao voice:voice.vc_ln_c01_005 window:main #@id line.ln_c01_005
+    voice asset:asset:/voice/vc_ln_c01_006 sync:text #@id voice.vc_ln_c01_006
+    text key:line.ln_c01_006 speaker:speaker.zhou_heng voice:voice.vc_ln_c01_006 window:main #@id line.ln_c01_006
+    voice asset:asset:/voice/vc_ln_c01_007 sync:text #@id voice.vc_ln_c01_007
+    text key:line.ln_c01_007 speaker:speaker.lin_yao voice:voice.vc_ln_c01_007 window:main #@id line.ln_c01_007
+    voice asset:asset:/voice/vc_ln_c01_008 sync:text #@id voice.vc_ln_c01_008
+    text key:line.ln_c01_008 speaker:speaker.zhou_heng voice:voice.vc_ln_c01_008 window:main #@id line.ln_c01_008
+    voice asset:asset:/voice/vc_ln_c01_009 sync:text #@id voice.vc_ln_c01_009
+    text key:line.ln_c01_009 speaker:speaker.lin_yao voice:voice.vc_ln_c01_009 window:main #@id line.ln_c01_009
+    voice asset:asset:/voice/vc_ln_c01_010 sync:text #@id voice.vc_ln_c01_010
+    text key:line.ln_c01_010 speaker:speaker.zhou_heng voice:voice.vc_ln_c01_010 window:main #@id line.ln_c01_010
+    voice asset:asset:/voice/vc_ln_c01_011 sync:text #@id voice.vc_ln_c01_011
+    text key:line.ln_c01_011 speaker:speaker.lin_yao voice:voice.vc_ln_c01_011 window:main #@id line.ln_c01_011
+    voice asset:asset:/voice/vc_ln_c01_012 sync:text #@id voice.vc_ln_c01_012
+    text key:line.ln_c01_012 speaker:speaker.zhou_heng voice:voice.vc_ln_c01_012 window:main #@id line.ln_c01_012
+    jump target:scn_common_02_archive_lobby #@id jump.scn_common_01_glass_train
 
-state ending_library #@id state.ending_library
-  scene library_result #@id scene.library_result
-    se asset:asset:/se/scan bus:se #@id se.library
-    text key:technical.library speaker:guide #@id line.technical.library
-    system_page kind:save policy:astra.policy.standard #@id system.library.save
-    jump target:system_stories #@id jump.system_stories
+state scn_common_02_archive_lobby #@id state.scn_common_02_archive_lobby
+  scene scn_common_02_archive_lobby #@id scene.scn_common_02_archive_lobby
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_common_02_archive_lobby
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_common_02_archive_lobby.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_common_02_archive_lobby.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_common_02_archive_lobby.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_common_02_archive_lobby.ui
+    background asset:asset:/background/archive-room layer:bg preset:soft_fade duration:400 #@id bg.scn_common_02_archive_lobby
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/guarded-center pose:guarded layer:character at:left preset:soft_fade #@id sprite.scn_common_02_archive_lobby.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/guarded-center pose:guarded layer:character at:right preset:soft_fade #@id sprite.scn_common_02_archive_lobby.zhou_heng
+    voice asset:asset:/voice/vc_ln_c02_001 sync:text #@id voice.vc_ln_c02_001
+    text key:line.ln_c02_001 speaker:speaker.lin_yao voice:voice.vc_ln_c02_001 window:main #@id line.ln_c02_001
+    voice asset:asset:/voice/vc_ln_c02_002 sync:text #@id voice.vc_ln_c02_002
+    text key:line.ln_c02_002 speaker:speaker.zhou_heng voice:voice.vc_ln_c02_002 window:main #@id line.ln_c02_002
+    voice asset:asset:/voice/vc_ln_c02_003 sync:text #@id voice.vc_ln_c02_003
+    text key:line.ln_c02_003 speaker:speaker.lin_yao voice:voice.vc_ln_c02_003 window:main #@id line.ln_c02_003
+    voice asset:asset:/voice/vc_ln_c02_004 sync:text #@id voice.vc_ln_c02_004
+    text key:line.ln_c02_004 speaker:speaker.zhou_heng voice:voice.vc_ln_c02_004 window:main #@id line.ln_c02_004
+    voice asset:asset:/voice/vc_ln_c02_005 sync:text #@id voice.vc_ln_c02_005
+    text key:line.ln_c02_005 speaker:speaker.lin_yao voice:voice.vc_ln_c02_005 window:main #@id line.ln_c02_005
+    voice asset:asset:/voice/vc_ln_c02_006 sync:text #@id voice.vc_ln_c02_006
+    text key:line.ln_c02_006 speaker:speaker.zhou_heng voice:voice.vc_ln_c02_006 window:main #@id line.ln_c02_006
+    voice asset:asset:/voice/vc_ln_c02_007 sync:text #@id voice.vc_ln_c02_007
+    text key:line.ln_c02_007 speaker:speaker.lin_yao voice:voice.vc_ln_c02_007 window:main #@id line.ln_c02_007
+    voice asset:asset:/voice/vc_ln_c02_008 sync:text #@id voice.vc_ln_c02_008
+    text key:line.ln_c02_008 speaker:speaker.zhou_heng voice:voice.vc_ln_c02_008 window:main #@id line.ln_c02_008
+    voice asset:asset:/voice/vc_ln_c02_009 sync:text #@id voice.vc_ln_c02_009
+    text key:line.ln_c02_009 speaker:speaker.lin_yao voice:voice.vc_ln_c02_009 window:main #@id line.ln_c02_009
+    voice asset:asset:/voice/vc_ln_c02_010 sync:text #@id voice.vc_ln_c02_010
+    text key:line.ln_c02_010 speaker:speaker.zhou_heng voice:voice.vc_ln_c02_010 window:main #@id line.ln_c02_010
+    voice asset:asset:/voice/vc_ln_c02_011 sync:text #@id voice.vc_ln_c02_011
+    text key:line.ln_c02_011 speaker:speaker.lin_yao voice:voice.vc_ln_c02_011 window:main #@id line.ln_c02_011
+    voice asset:asset:/voice/vc_ln_c02_012 sync:text #@id voice.vc_ln_c02_012
+    text key:line.ln_c02_012 speaker:speaker.zhou_heng voice:voice.vc_ln_c02_012 window:main #@id line.ln_c02_012
+    jump target:scn_common_03_signal_booth #@id jump.scn_common_02_archive_lobby
 
-state ending_rooftop #@id state.ending_rooftop
-  scene rooftop_result #@id scene.rooftop_result
-    shake target:camera.main strength:3 duration:160 #@id camera.rooftop.shake
-    se asset:asset:/se/wind bus:se #@id se.rooftop
-    text key:technical.rooftop speaker:guide #@id line.technical.rooftop
-    system_page kind:route_chart policy:astra.policy.standard #@id system.rooftop.chart
+state scn_common_03_signal_booth #@id state.scn_common_03_signal_booth
+  scene scn_common_03_signal_booth #@id scene.scn_common_03_signal_booth
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_common_03_signal_booth
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_common_03_signal_booth.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_common_03_signal_booth.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_common_03_signal_booth.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_common_03_signal_booth.ui
+    background asset:asset:/background/apartment-studio layer:bg preset:soft_fade duration:400 #@id bg.scn_common_03_signal_booth
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/guarded-center pose:guarded layer:character at:left preset:soft_fade #@id sprite.scn_common_03_signal_booth.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/guarded-center pose:guarded layer:character at:right preset:soft_fade #@id sprite.scn_common_03_signal_booth.zhou_heng
+    voice asset:asset:/voice/vc_ln_c03_001 sync:text #@id voice.vc_ln_c03_001
+    text key:line.ln_c03_001 speaker:speaker.lin_yao voice:voice.vc_ln_c03_001 window:main #@id line.ln_c03_001
+    voice asset:asset:/voice/vc_ln_c03_002 sync:text #@id voice.vc_ln_c03_002
+    text key:line.ln_c03_002 speaker:speaker.zhou_heng voice:voice.vc_ln_c03_002 window:main #@id line.ln_c03_002
+    voice asset:asset:/voice/vc_ln_c03_003 sync:text #@id voice.vc_ln_c03_003
+    text key:line.ln_c03_003 speaker:speaker.lin_yao voice:voice.vc_ln_c03_003 window:main #@id line.ln_c03_003
+    voice asset:asset:/voice/vc_ln_c03_004 sync:text #@id voice.vc_ln_c03_004
+    text key:line.ln_c03_004 speaker:speaker.zhou_heng voice:voice.vc_ln_c03_004 window:main #@id line.ln_c03_004
+    voice asset:asset:/voice/vc_ln_c03_005 sync:text #@id voice.vc_ln_c03_005
+    text key:line.ln_c03_005 speaker:speaker.lin_yao voice:voice.vc_ln_c03_005 window:main #@id line.ln_c03_005
+    voice asset:asset:/voice/vc_ln_c03_006 sync:text #@id voice.vc_ln_c03_006
+    text key:line.ln_c03_006 speaker:speaker.zhou_heng voice:voice.vc_ln_c03_006 window:main #@id line.ln_c03_006
+    voice asset:asset:/voice/vc_ln_c03_007 sync:text #@id voice.vc_ln_c03_007
+    text key:line.ln_c03_007 speaker:speaker.lin_yao voice:voice.vc_ln_c03_007 window:main #@id line.ln_c03_007
+    voice asset:asset:/voice/vc_ln_c03_008 sync:text #@id voice.vc_ln_c03_008
+    text key:line.ln_c03_008 speaker:speaker.zhou_heng voice:voice.vc_ln_c03_008 window:main #@id line.ln_c03_008
+    voice asset:asset:/voice/vc_ln_c03_009 sync:text #@id voice.vc_ln_c03_009
+    text key:line.ln_c03_009 speaker:speaker.lin_yao voice:voice.vc_ln_c03_009 window:main #@id line.ln_c03_009
+    voice asset:asset:/voice/vc_ln_c03_010 sync:text #@id voice.vc_ln_c03_010
+    text key:line.ln_c03_010 speaker:speaker.zhou_heng voice:voice.vc_ln_c03_010 window:main #@id line.ln_c03_010
+    voice asset:asset:/voice/vc_ln_c03_011 sync:text #@id voice.vc_ln_c03_011
+    text key:line.ln_c03_011 speaker:speaker.lin_yao voice:voice.vc_ln_c03_011 window:main #@id line.ln_c03_011
+    voice asset:asset:/voice/vc_ln_c03_012 sync:text #@id voice.vc_ln_c03_012
+    text key:line.ln_c03_012 speaker:speaker.zhou_heng voice:voice.vc_ln_c03_012 window:main #@id line.ln_c03_012
+    voice asset:asset:/voice/vc_ln_c03_013 sync:text #@id voice.vc_ln_c03_013
+    text key:line.ln_c03_013 speaker:speaker.lin_yao voice:voice.vc_ln_c03_013 window:main #@id line.ln_c03_013
+    jump target:scn_common_04_rain_trace #@id jump.scn_common_03_signal_booth
 
-state system_stories #@id state.system_stories
-  scene system_pages #@id scene.system_pages
-    system_page kind:title policy:astra.policy.standard #@id system.title
-    system_page kind:save policy:astra.policy.standard #@id system.save
-    system_page kind:load policy:astra.policy.standard #@id system.load
-    system_page kind:config policy:astra.policy.standard #@id system.config
-    system_page kind:gallery policy:astra.policy.standard #@id system.gallery
-    system_page kind:replay policy:astra.policy.standard #@id system.replay
-    system_page kind:voice_replay policy:astra.policy.standard #@id system.voice_replay
-    system_page kind:route_chart policy:astra.policy.standard #@id system.route_chart
-    system_page kind:backlog policy:astra.policy.standard #@id system.backlog
-    system_page kind:localization_preview policy:astra.policy.standard #@id system.localization_preview
+state scn_common_04_rain_trace #@id state.scn_common_04_rain_trace
+  scene scn_common_04_rain_trace #@id scene.scn_common_04_rain_trace
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_common_04_rain_trace
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_common_04_rain_trace.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_common_04_rain_trace.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_common_04_rain_trace.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_common_04_rain_trace.ui
+    background asset:asset:/background/rain-street layer:bg preset:soft_fade duration:400 #@id bg.scn_common_04_rain_trace
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/guarded-center pose:guarded layer:character at:left preset:soft_fade #@id sprite.scn_common_04_rain_trace.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/guarded-center pose:guarded layer:character at:right preset:soft_fade #@id sprite.scn_common_04_rain_trace.zhou_heng
+    voice asset:asset:/voice/vc_ln_c04_001 sync:text #@id voice.vc_ln_c04_001
+    text key:line.ln_c04_001 speaker:speaker.zhou_heng voice:voice.vc_ln_c04_001 window:main #@id line.ln_c04_001
+    voice asset:asset:/voice/vc_ln_c04_002 sync:text #@id voice.vc_ln_c04_002
+    text key:line.ln_c04_002 speaker:speaker.lin_yao voice:voice.vc_ln_c04_002 window:main #@id line.ln_c04_002
+    voice asset:asset:/voice/vc_ln_c04_003 sync:text #@id voice.vc_ln_c04_003
+    text key:line.ln_c04_003 speaker:speaker.zhou_heng voice:voice.vc_ln_c04_003 window:main #@id line.ln_c04_003
+    voice asset:asset:/voice/vc_ln_c04_004 sync:text #@id voice.vc_ln_c04_004
+    text key:line.ln_c04_004 speaker:speaker.lin_yao voice:voice.vc_ln_c04_004 window:main #@id line.ln_c04_004
+    voice asset:asset:/voice/vc_ln_c04_005 sync:text #@id voice.vc_ln_c04_005
+    text key:line.ln_c04_005 speaker:speaker.zhou_heng voice:voice.vc_ln_c04_005 window:main #@id line.ln_c04_005
+    voice asset:asset:/voice/vc_ln_c04_006 sync:text #@id voice.vc_ln_c04_006
+    text key:line.ln_c04_006 speaker:speaker.lin_yao voice:voice.vc_ln_c04_006 window:main #@id line.ln_c04_006
+    voice asset:asset:/voice/vc_ln_c04_007 sync:text #@id voice.vc_ln_c04_007
+    text key:line.ln_c04_007 speaker:speaker.zhou_heng voice:voice.vc_ln_c04_007 window:main #@id line.ln_c04_007
+    voice asset:asset:/voice/vc_ln_c04_008 sync:text #@id voice.vc_ln_c04_008
+    text key:line.ln_c04_008 speaker:speaker.lin_yao voice:voice.vc_ln_c04_008 window:main #@id line.ln_c04_008
+    voice asset:asset:/voice/vc_ln_c04_009 sync:text #@id voice.vc_ln_c04_009
+    text key:line.ln_c04_009 speaker:speaker.zhou_heng voice:voice.vc_ln_c04_009 window:main #@id line.ln_c04_009
+    voice asset:asset:/voice/vc_ln_c04_010 sync:text #@id voice.vc_ln_c04_010
+    text key:line.ln_c04_010 speaker:speaker.lin_yao voice:voice.vc_ln_c04_010 window:main #@id line.ln_c04_010
+    voice asset:asset:/voice/vc_ln_c04_011 sync:text #@id voice.vc_ln_c04_011
+    text key:line.ln_c04_011 speaker:speaker.zhou_heng voice:voice.vc_ln_c04_011 window:main #@id line.ln_c04_011
+    voice asset:asset:/voice/vc_ln_c04_012 sync:text #@id voice.vc_ln_c04_012
+    text key:line.ln_c04_012 speaker:speaker.lin_yao voice:voice.vc_ln_c04_012 window:main #@id line.ln_c04_012
+    voice asset:asset:/voice/vc_ln_c04_013 sync:text #@id voice.vc_ln_c04_013
+    text key:line.ln_c04_013 speaker:speaker.zhou_heng voice:voice.vc_ln_c04_013 window:main #@id line.ln_c04_013
+    jump target:scn_common_05_memory_room #@id jump.scn_common_04_rain_trace
+
+state scn_common_05_memory_room #@id state.scn_common_05_memory_room
+  scene scn_common_05_memory_room #@id scene.scn_common_05_memory_room
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_common_05_memory_room
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_common_05_memory_room.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_common_05_memory_room.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_common_05_memory_room.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_common_05_memory_room.ui
+    background asset:asset:/background/underground-relay layer:bg preset:soft_fade duration:400 #@id bg.scn_common_05_memory_room
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/guarded-center pose:guarded layer:character at:left preset:soft_fade #@id sprite.scn_common_05_memory_room.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/guarded-center pose:guarded layer:character at:right preset:soft_fade #@id sprite.scn_common_05_memory_room.zhou_heng
+    voice asset:asset:/voice/vc_ln_c05_001 sync:text #@id voice.vc_ln_c05_001
+    text key:line.ln_c05_001 speaker:speaker.lin_yao voice:voice.vc_ln_c05_001 window:main #@id line.ln_c05_001
+    voice asset:asset:/voice/vc_ln_c05_002 sync:text #@id voice.vc_ln_c05_002
+    text key:line.ln_c05_002 speaker:speaker.zhou_heng voice:voice.vc_ln_c05_002 window:main #@id line.ln_c05_002
+    voice asset:asset:/voice/vc_ln_c05_003 sync:text #@id voice.vc_ln_c05_003
+    text key:line.ln_c05_003 speaker:speaker.lin_yao voice:voice.vc_ln_c05_003 window:main #@id line.ln_c05_003
+    voice asset:asset:/voice/vc_ln_c05_004 sync:text #@id voice.vc_ln_c05_004
+    text key:line.ln_c05_004 speaker:speaker.zhou_heng voice:voice.vc_ln_c05_004 window:main #@id line.ln_c05_004
+    voice asset:asset:/voice/vc_ln_c05_005 sync:text #@id voice.vc_ln_c05_005
+    text key:line.ln_c05_005 speaker:speaker.lin_yao voice:voice.vc_ln_c05_005 window:main #@id line.ln_c05_005
+    voice asset:asset:/voice/vc_ln_c05_006 sync:text #@id voice.vc_ln_c05_006
+    text key:line.ln_c05_006 speaker:speaker.zhou_heng voice:voice.vc_ln_c05_006 window:main #@id line.ln_c05_006
+    voice asset:asset:/voice/vc_ln_c05_007 sync:text #@id voice.vc_ln_c05_007
+    text key:line.ln_c05_007 speaker:speaker.lin_yao voice:voice.vc_ln_c05_007 window:main #@id line.ln_c05_007
+    voice asset:asset:/voice/vc_ln_c05_008 sync:text #@id voice.vc_ln_c05_008
+    text key:line.ln_c05_008 speaker:speaker.zhou_heng voice:voice.vc_ln_c05_008 window:main #@id line.ln_c05_008
+    voice asset:asset:/voice/vc_ln_c05_009 sync:text #@id voice.vc_ln_c05_009
+    text key:line.ln_c05_009 speaker:speaker.lin_yao voice:voice.vc_ln_c05_009 window:main #@id line.ln_c05_009
+    voice asset:asset:/voice/vc_ln_c05_010 sync:text #@id voice.vc_ln_c05_010
+    text key:line.ln_c05_010 speaker:speaker.zhou_heng voice:voice.vc_ln_c05_010 window:main #@id line.ln_c05_010
+    voice asset:asset:/voice/vc_ln_c05_011 sync:text #@id voice.vc_ln_c05_011
+    text key:line.ln_c05_011 speaker:speaker.lin_yao voice:voice.vc_ln_c05_011 window:main #@id line.ln_c05_011
+    voice asset:asset:/voice/vc_ln_c05_012 sync:text #@id voice.vc_ln_c05_012
+    text key:line.ln_c05_012 speaker:speaker.zhou_heng voice:voice.vc_ln_c05_012 window:main #@id line.ln_c05_012
+    voice asset:asset:/voice/vc_ln_c05_013 sync:text #@id voice.vc_ln_c05_013
+    text key:line.ln_c05_013 speaker:speaker.lin_yao voice:voice.vc_ln_c05_013 window:main #@id line.ln_c05_013
+    jump target:scn_common_06_decision_bridge #@id jump.scn_common_05_memory_room
+
+state scn_common_06_decision_bridge #@id state.scn_common_06_decision_bridge
+  scene scn_common_06_decision_bridge #@id scene.scn_common_06_decision_bridge
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_common_06_decision_bridge
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_common_06_decision_bridge.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_common_06_decision_bridge.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_common_06_decision_bridge.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_common_06_decision_bridge.ui
+    background asset:asset:/background/glass-corridor layer:bg preset:soft_fade duration:400 #@id bg.scn_common_06_decision_bridge
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/guarded-center pose:guarded layer:character at:left preset:soft_fade #@id sprite.scn_common_06_decision_bridge.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/guarded-center pose:guarded layer:character at:right preset:soft_fade #@id sprite.scn_common_06_decision_bridge.zhou_heng
+    voice asset:asset:/voice/vc_ln_c06_001 sync:text #@id voice.vc_ln_c06_001
+    text key:line.ln_c06_001 speaker:speaker.zhou_heng voice:voice.vc_ln_c06_001 window:main #@id line.ln_c06_001
+    voice asset:asset:/voice/vc_ln_c06_002 sync:text #@id voice.vc_ln_c06_002
+    text key:line.ln_c06_002 speaker:speaker.lin_yao voice:voice.vc_ln_c06_002 window:main #@id line.ln_c06_002
+    voice asset:asset:/voice/vc_ln_c06_003 sync:text #@id voice.vc_ln_c06_003
+    text key:line.ln_c06_003 speaker:speaker.zhou_heng voice:voice.vc_ln_c06_003 window:main #@id line.ln_c06_003
+    voice asset:asset:/voice/vc_ln_c06_004 sync:text #@id voice.vc_ln_c06_004
+    text key:line.ln_c06_004 speaker:speaker.lin_yao voice:voice.vc_ln_c06_004 window:main #@id line.ln_c06_004
+    voice asset:asset:/voice/vc_ln_c06_005 sync:text #@id voice.vc_ln_c06_005
+    text key:line.ln_c06_005 speaker:speaker.zhou_heng voice:voice.vc_ln_c06_005 window:main #@id line.ln_c06_005
+    voice asset:asset:/voice/vc_ln_c06_006 sync:text #@id voice.vc_ln_c06_006
+    text key:line.ln_c06_006 speaker:speaker.lin_yao voice:voice.vc_ln_c06_006 window:main #@id line.ln_c06_006
+    voice asset:asset:/voice/vc_ln_c06_007 sync:text #@id voice.vc_ln_c06_007
+    text key:line.ln_c06_007 speaker:speaker.zhou_heng voice:voice.vc_ln_c06_007 window:main #@id line.ln_c06_007
+    voice asset:asset:/voice/vc_ln_c06_008 sync:text #@id voice.vc_ln_c06_008
+    text key:line.ln_c06_008 speaker:speaker.lin_yao voice:voice.vc_ln_c06_008 window:main #@id line.ln_c06_008
+    voice asset:asset:/voice/vc_ln_c06_009 sync:text #@id voice.vc_ln_c06_009
+    text key:line.ln_c06_009 speaker:speaker.zhou_heng voice:voice.vc_ln_c06_009 window:main #@id line.ln_c06_009
+    voice asset:asset:/voice/vc_ln_c06_010 sync:text #@id voice.vc_ln_c06_010
+    text key:line.ln_c06_010 speaker:speaker.lin_yao voice:voice.vc_ln_c06_010 window:main #@id line.ln_c06_010
+    voice asset:asset:/voice/vc_ln_c06_011 sync:text #@id voice.vc_ln_c06_011
+    text key:line.ln_c06_011 speaker:speaker.zhou_heng voice:voice.vc_ln_c06_011 window:main #@id line.ln_c06_011
+    voice asset:asset:/voice/vc_ln_c06_012 sync:text #@id voice.vc_ln_c06_012
+    text key:line.ln_c06_012 speaker:speaker.lin_yao voice:voice.vc_ln_c06_012 window:main #@id line.ln_c06_012
+    choice key:choice.choice_common_01_disposition #@id choice.choice_common_01_disposition
+      option key:choice.option_truth_publish -> scn_truth_01_observatory #@id option_truth_publish
+      option key:choice.option_silence_close -> scn_silence_01_blackout_corridor #@id option_silence_close
+      option key:choice.option_signal_control -> scn_signal_01_service_tunnel #@id option_signal_control
+
+state scn_truth_01_observatory #@id state.scn_truth_01_observatory
+  scene scn_truth_01_observatory #@id scene.scn_truth_01_observatory
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_truth_01_observatory
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_truth_01_observatory.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_truth_01_observatory.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_truth_01_observatory.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_truth_01_observatory.ui
+    background asset:asset:/background/rooftop-antenna layer:bg preset:soft_fade duration:400 #@id bg.scn_truth_01_observatory
+    bgm asset:asset:/bgm/carrier-noise loop:true fade:600 #@id bgm.truth
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/determined-center pose:determined layer:character at:left preset:soft_fade #@id sprite.scn_truth_01_observatory.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/determined-center pose:determined layer:character at:right preset:soft_fade #@id sprite.scn_truth_01_observatory.zhou_heng
+    voice asset:asset:/voice/vc_ln_t01_001 sync:text #@id voice.vc_ln_t01_001
+    text key:line.ln_t01_001 speaker:speaker.zhou_heng voice:voice.vc_ln_t01_001 window:main #@id line.ln_t01_001
+    voice asset:asset:/voice/vc_ln_t01_002 sync:text #@id voice.vc_ln_t01_002
+    text key:line.ln_t01_002 speaker:speaker.lin_yao voice:voice.vc_ln_t01_002 window:main #@id line.ln_t01_002
+    voice asset:asset:/voice/vc_ln_t01_003 sync:text #@id voice.vc_ln_t01_003
+    text key:line.ln_t01_003 speaker:speaker.zhou_heng voice:voice.vc_ln_t01_003 window:main #@id line.ln_t01_003
+    voice asset:asset:/voice/vc_ln_t01_004 sync:text #@id voice.vc_ln_t01_004
+    text key:line.ln_t01_004 speaker:speaker.lin_yao voice:voice.vc_ln_t01_004 window:main #@id line.ln_t01_004
+    voice asset:asset:/voice/vc_ln_t01_005 sync:text #@id voice.vc_ln_t01_005
+    text key:line.ln_t01_005 speaker:speaker.zhou_heng voice:voice.vc_ln_t01_005 window:main #@id line.ln_t01_005
+    voice asset:asset:/voice/vc_ln_t01_006 sync:text #@id voice.vc_ln_t01_006
+    text key:line.ln_t01_006 speaker:speaker.lin_yao voice:voice.vc_ln_t01_006 window:main #@id line.ln_t01_006
+    voice asset:asset:/voice/vc_ln_t01_007 sync:text #@id voice.vc_ln_t01_007
+    text key:line.ln_t01_007 speaker:speaker.zhou_heng voice:voice.vc_ln_t01_007 window:main #@id line.ln_t01_007
+    voice asset:asset:/voice/vc_ln_t01_008 sync:text #@id voice.vc_ln_t01_008
+    text key:line.ln_t01_008 speaker:speaker.lin_yao voice:voice.vc_ln_t01_008 window:main #@id line.ln_t01_008
+    voice asset:asset:/voice/vc_ln_t01_009 sync:text #@id voice.vc_ln_t01_009
+    text key:line.ln_t01_009 speaker:speaker.zhou_heng voice:voice.vc_ln_t01_009 window:main #@id line.ln_t01_009
+    voice asset:asset:/voice/vc_ln_t01_010 sync:text #@id voice.vc_ln_t01_010
+    text key:line.ln_t01_010 speaker:speaker.lin_yao voice:voice.vc_ln_t01_010 window:main #@id line.ln_t01_010
+    voice asset:asset:/voice/vc_ln_t01_011 sync:text #@id voice.vc_ln_t01_011
+    text key:line.ln_t01_011 speaker:speaker.zhou_heng voice:voice.vc_ln_t01_011 window:main #@id line.ln_t01_011
+    voice asset:asset:/voice/vc_ln_t01_012 sync:text #@id voice.vc_ln_t01_012
+    text key:line.ln_t01_012 speaker:speaker.lin_yao voice:voice.vc_ln_t01_012 window:main #@id line.ln_t01_012
+    jump target:scn_truth_02_public_array #@id jump.scn_truth_01_observatory
+
+state scn_truth_02_public_array #@id state.scn_truth_02_public_array
+  scene scn_truth_02_public_array #@id scene.scn_truth_02_public_array
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_truth_02_public_array
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_truth_02_public_array.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_truth_02_public_array.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_truth_02_public_array.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_truth_02_public_array.ui
+    background asset:asset:/background/archive-room layer:bg preset:soft_fade duration:400 #@id bg.scn_truth_02_public_array
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/determined-center pose:determined layer:character at:left preset:soft_fade #@id sprite.scn_truth_02_public_array.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/determined-center pose:determined layer:character at:right preset:soft_fade #@id sprite.scn_truth_02_public_array.zhou_heng
+    voice asset:asset:/voice/vc_ln_t02_001 sync:text #@id voice.vc_ln_t02_001
+    text key:line.ln_t02_001 speaker:speaker.zhou_heng voice:voice.vc_ln_t02_001 window:main #@id line.ln_t02_001
+    voice asset:asset:/voice/vc_ln_t02_002 sync:text #@id voice.vc_ln_t02_002
+    text key:line.ln_t02_002 speaker:speaker.lin_yao voice:voice.vc_ln_t02_002 window:main #@id line.ln_t02_002
+    voice asset:asset:/voice/vc_ln_t02_003 sync:text #@id voice.vc_ln_t02_003
+    text key:line.ln_t02_003 speaker:speaker.zhou_heng voice:voice.vc_ln_t02_003 window:main #@id line.ln_t02_003
+    voice asset:asset:/voice/vc_ln_t02_004 sync:text #@id voice.vc_ln_t02_004
+    text key:line.ln_t02_004 speaker:speaker.lin_yao voice:voice.vc_ln_t02_004 window:main #@id line.ln_t02_004
+    voice asset:asset:/voice/vc_ln_t02_005 sync:text #@id voice.vc_ln_t02_005
+    text key:line.ln_t02_005 speaker:speaker.zhou_heng voice:voice.vc_ln_t02_005 window:main #@id line.ln_t02_005
+    voice asset:asset:/voice/vc_ln_t02_006 sync:text #@id voice.vc_ln_t02_006
+    text key:line.ln_t02_006 speaker:speaker.lin_yao voice:voice.vc_ln_t02_006 window:main #@id line.ln_t02_006
+    voice asset:asset:/voice/vc_ln_t02_007 sync:text #@id voice.vc_ln_t02_007
+    text key:line.ln_t02_007 speaker:speaker.zhou_heng voice:voice.vc_ln_t02_007 window:main #@id line.ln_t02_007
+    voice asset:asset:/voice/vc_ln_t02_008 sync:text #@id voice.vc_ln_t02_008
+    text key:line.ln_t02_008 speaker:speaker.lin_yao voice:voice.vc_ln_t02_008 window:main #@id line.ln_t02_008
+    voice asset:asset:/voice/vc_ln_t02_009 sync:text #@id voice.vc_ln_t02_009
+    text key:line.ln_t02_009 speaker:speaker.zhou_heng voice:voice.vc_ln_t02_009 window:main #@id line.ln_t02_009
+    voice asset:asset:/voice/vc_ln_t02_010 sync:text #@id voice.vc_ln_t02_010
+    text key:line.ln_t02_010 speaker:speaker.lin_yao voice:voice.vc_ln_t02_010 window:main #@id line.ln_t02_010
+    voice asset:asset:/voice/vc_ln_t02_011 sync:text #@id voice.vc_ln_t02_011
+    text key:line.ln_t02_011 speaker:speaker.zhou_heng voice:voice.vc_ln_t02_011 window:main #@id line.ln_t02_011
+    voice asset:asset:/voice/vc_ln_t02_012 sync:text #@id voice.vc_ln_t02_012
+    text key:line.ln_t02_012 speaker:speaker.lin_yao voice:voice.vc_ln_t02_012 window:main #@id line.ln_t02_012
+    jump target:scn_truth_03_after_rain #@id jump.scn_truth_02_public_array
+
+state scn_truth_03_after_rain #@id state.scn_truth_03_after_rain
+  scene scn_truth_03_after_rain #@id scene.scn_truth_03_after_rain
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_truth_03_after_rain
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_truth_03_after_rain.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_truth_03_after_rain.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_truth_03_after_rain.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_truth_03_after_rain.ui
+    background asset:asset:/background/dawn-city layer:bg preset:soft_fade duration:400 #@id bg.scn_truth_03_after_rain
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/determined-center pose:determined layer:character at:left preset:soft_fade #@id sprite.scn_truth_03_after_rain.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/determined-center pose:determined layer:character at:right preset:soft_fade #@id sprite.scn_truth_03_after_rain.zhou_heng
+    voice asset:asset:/voice/vc_ln_t03_001 sync:text #@id voice.vc_ln_t03_001
+    text key:line.ln_t03_001 speaker:speaker.zhou_heng voice:voice.vc_ln_t03_001 window:main #@id line.ln_t03_001
+    voice asset:asset:/voice/vc_ln_t03_002 sync:text #@id voice.vc_ln_t03_002
+    text key:line.ln_t03_002 speaker:speaker.lin_yao voice:voice.vc_ln_t03_002 window:main #@id line.ln_t03_002
+    voice asset:asset:/voice/vc_ln_t03_003 sync:text #@id voice.vc_ln_t03_003
+    text key:line.ln_t03_003 speaker:speaker.zhou_heng voice:voice.vc_ln_t03_003 window:main #@id line.ln_t03_003
+    voice asset:asset:/voice/vc_ln_t03_004 sync:text #@id voice.vc_ln_t03_004
+    text key:line.ln_t03_004 speaker:speaker.lin_yao voice:voice.vc_ln_t03_004 window:main #@id line.ln_t03_004
+    voice asset:asset:/voice/vc_ln_t03_005 sync:text #@id voice.vc_ln_t03_005
+    text key:line.ln_t03_005 speaker:speaker.zhou_heng voice:voice.vc_ln_t03_005 window:main #@id line.ln_t03_005
+    voice asset:asset:/voice/vc_ln_t03_006 sync:text #@id voice.vc_ln_t03_006
+    text key:line.ln_t03_006 speaker:speaker.lin_yao voice:voice.vc_ln_t03_006 window:main #@id line.ln_t03_006
+    voice asset:asset:/voice/vc_ln_t03_007 sync:text #@id voice.vc_ln_t03_007
+    text key:line.ln_t03_007 speaker:speaker.zhou_heng voice:voice.vc_ln_t03_007 window:main #@id line.ln_t03_007
+    voice asset:asset:/voice/vc_ln_t03_008 sync:text #@id voice.vc_ln_t03_008
+    text key:line.ln_t03_008 speaker:speaker.lin_yao voice:voice.vc_ln_t03_008 window:main #@id line.ln_t03_008
+    voice asset:asset:/voice/vc_ln_t03_009 sync:text #@id voice.vc_ln_t03_009
+    text key:line.ln_t03_009 speaker:speaker.zhou_heng voice:voice.vc_ln_t03_009 window:main #@id line.ln_t03_009
+    voice asset:asset:/voice/vc_ln_t03_010 sync:text #@id voice.vc_ln_t03_010
+    text key:line.ln_t03_010 speaker:speaker.lin_yao voice:voice.vc_ln_t03_010 window:main #@id line.ln_t03_010
+    voice asset:asset:/voice/vc_ln_t03_011 sync:text #@id voice.vc_ln_t03_011
+    text key:line.ln_t03_011 speaker:speaker.zhou_heng voice:voice.vc_ln_t03_011 window:main #@id line.ln_t03_011
+    background asset:asset:/cg/ending-truth layer:bg preset:soft_fade duration:800 #@id cg.ending.truth
+    se asset:asset:/stinger/truth bus:se #@id stinger.truth
+    system_page kind:route_chart policy:astra.policy.standard #@id system.ending.truth.route_chart
+
+state scn_silence_01_blackout_corridor #@id state.scn_silence_01_blackout_corridor
+  scene scn_silence_01_blackout_corridor #@id scene.scn_silence_01_blackout_corridor
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_silence_01_blackout_corridor
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_silence_01_blackout_corridor.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_silence_01_blackout_corridor.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_silence_01_blackout_corridor.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_silence_01_blackout_corridor.ui
+    background asset:asset:/background/glass-corridor layer:bg preset:soft_fade duration:400 #@id bg.scn_silence_01_blackout_corridor
+    bgm asset:asset:/bgm/thin-line loop:true fade:600 #@id bgm.silence
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/worried-center pose:worried layer:character at:left preset:soft_fade #@id sprite.scn_silence_01_blackout_corridor.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/worried-center pose:worried layer:character at:right preset:soft_fade #@id sprite.scn_silence_01_blackout_corridor.zhou_heng
+    voice asset:asset:/voice/vc_ln_s01_001 sync:text #@id voice.vc_ln_s01_001
+    text key:line.ln_s01_001 speaker:speaker.zhou_heng voice:voice.vc_ln_s01_001 window:main #@id line.ln_s01_001
+    voice asset:asset:/voice/vc_ln_s01_002 sync:text #@id voice.vc_ln_s01_002
+    text key:line.ln_s01_002 speaker:speaker.lin_yao voice:voice.vc_ln_s01_002 window:main #@id line.ln_s01_002
+    voice asset:asset:/voice/vc_ln_s01_003 sync:text #@id voice.vc_ln_s01_003
+    text key:line.ln_s01_003 speaker:speaker.zhou_heng voice:voice.vc_ln_s01_003 window:main #@id line.ln_s01_003
+    voice asset:asset:/voice/vc_ln_s01_004 sync:text #@id voice.vc_ln_s01_004
+    text key:line.ln_s01_004 speaker:speaker.lin_yao voice:voice.vc_ln_s01_004 window:main #@id line.ln_s01_004
+    voice asset:asset:/voice/vc_ln_s01_005 sync:text #@id voice.vc_ln_s01_005
+    text key:line.ln_s01_005 speaker:speaker.zhou_heng voice:voice.vc_ln_s01_005 window:main #@id line.ln_s01_005
+    voice asset:asset:/voice/vc_ln_s01_006 sync:text #@id voice.vc_ln_s01_006
+    text key:line.ln_s01_006 speaker:speaker.lin_yao voice:voice.vc_ln_s01_006 window:main #@id line.ln_s01_006
+    voice asset:asset:/voice/vc_ln_s01_007 sync:text #@id voice.vc_ln_s01_007
+    text key:line.ln_s01_007 speaker:speaker.zhou_heng voice:voice.vc_ln_s01_007 window:main #@id line.ln_s01_007
+    voice asset:asset:/voice/vc_ln_s01_008 sync:text #@id voice.vc_ln_s01_008
+    text key:line.ln_s01_008 speaker:speaker.lin_yao voice:voice.vc_ln_s01_008 window:main #@id line.ln_s01_008
+    voice asset:asset:/voice/vc_ln_s01_009 sync:text #@id voice.vc_ln_s01_009
+    text key:line.ln_s01_009 speaker:speaker.zhou_heng voice:voice.vc_ln_s01_009 window:main #@id line.ln_s01_009
+    voice asset:asset:/voice/vc_ln_s01_010 sync:text #@id voice.vc_ln_s01_010
+    text key:line.ln_s01_010 speaker:speaker.lin_yao voice:voice.vc_ln_s01_010 window:main #@id line.ln_s01_010
+    voice asset:asset:/voice/vc_ln_s01_011 sync:text #@id voice.vc_ln_s01_011
+    text key:line.ln_s01_011 speaker:speaker.zhou_heng voice:voice.vc_ln_s01_011 window:main #@id line.ln_s01_011
+    voice asset:asset:/voice/vc_ln_s01_012 sync:text #@id voice.vc_ln_s01_012
+    text key:line.ln_s01_012 speaker:speaker.lin_yao voice:voice.vc_ln_s01_012 window:main #@id line.ln_s01_012
+    jump target:scn_silence_02_null_room #@id jump.scn_silence_01_blackout_corridor
+
+state scn_silence_02_null_room #@id state.scn_silence_02_null_room
+  scene scn_silence_02_null_room #@id scene.scn_silence_02_null_room
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_silence_02_null_room
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_silence_02_null_room.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_silence_02_null_room.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_silence_02_null_room.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_silence_02_null_room.ui
+    background asset:asset:/background/underground-relay layer:bg preset:soft_fade duration:400 #@id bg.scn_silence_02_null_room
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/worried-center pose:worried layer:character at:left preset:soft_fade #@id sprite.scn_silence_02_null_room.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/worried-center pose:worried layer:character at:right preset:soft_fade #@id sprite.scn_silence_02_null_room.zhou_heng
+    voice asset:asset:/voice/vc_ln_s02_001 sync:text #@id voice.vc_ln_s02_001
+    text key:line.ln_s02_001 speaker:speaker.zhou_heng voice:voice.vc_ln_s02_001 window:main #@id line.ln_s02_001
+    voice asset:asset:/voice/vc_ln_s02_002 sync:text #@id voice.vc_ln_s02_002
+    text key:line.ln_s02_002 speaker:speaker.lin_yao voice:voice.vc_ln_s02_002 window:main #@id line.ln_s02_002
+    voice asset:asset:/voice/vc_ln_s02_003 sync:text #@id voice.vc_ln_s02_003
+    text key:line.ln_s02_003 speaker:speaker.zhou_heng voice:voice.vc_ln_s02_003 window:main #@id line.ln_s02_003
+    voice asset:asset:/voice/vc_ln_s02_004 sync:text #@id voice.vc_ln_s02_004
+    text key:line.ln_s02_004 speaker:speaker.lin_yao voice:voice.vc_ln_s02_004 window:main #@id line.ln_s02_004
+    voice asset:asset:/voice/vc_ln_s02_005 sync:text #@id voice.vc_ln_s02_005
+    text key:line.ln_s02_005 speaker:speaker.zhou_heng voice:voice.vc_ln_s02_005 window:main #@id line.ln_s02_005
+    voice asset:asset:/voice/vc_ln_s02_006 sync:text #@id voice.vc_ln_s02_006
+    text key:line.ln_s02_006 speaker:speaker.lin_yao voice:voice.vc_ln_s02_006 window:main #@id line.ln_s02_006
+    voice asset:asset:/voice/vc_ln_s02_007 sync:text #@id voice.vc_ln_s02_007
+    text key:line.ln_s02_007 speaker:speaker.zhou_heng voice:voice.vc_ln_s02_007 window:main #@id line.ln_s02_007
+    voice asset:asset:/voice/vc_ln_s02_008 sync:text #@id voice.vc_ln_s02_008
+    text key:line.ln_s02_008 speaker:speaker.lin_yao voice:voice.vc_ln_s02_008 window:main #@id line.ln_s02_008
+    voice asset:asset:/voice/vc_ln_s02_009 sync:text #@id voice.vc_ln_s02_009
+    text key:line.ln_s02_009 speaker:speaker.zhou_heng voice:voice.vc_ln_s02_009 window:main #@id line.ln_s02_009
+    voice asset:asset:/voice/vc_ln_s02_010 sync:text #@id voice.vc_ln_s02_010
+    text key:line.ln_s02_010 speaker:speaker.lin_yao voice:voice.vc_ln_s02_010 window:main #@id line.ln_s02_010
+    voice asset:asset:/voice/vc_ln_s02_011 sync:text #@id voice.vc_ln_s02_011
+    text key:line.ln_s02_011 speaker:speaker.zhou_heng voice:voice.vc_ln_s02_011 window:main #@id line.ln_s02_011
+    voice asset:asset:/voice/vc_ln_s02_012 sync:text #@id voice.vc_ln_s02_012
+    text key:line.ln_s02_012 speaker:speaker.lin_yao voice:voice.vc_ln_s02_012 window:main #@id line.ln_s02_012
+    jump target:scn_silence_03_morning_platform #@id jump.scn_silence_02_null_room
+
+state scn_silence_03_morning_platform #@id state.scn_silence_03_morning_platform
+  scene scn_silence_03_morning_platform #@id scene.scn_silence_03_morning_platform
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_silence_03_morning_platform
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_silence_03_morning_platform.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_silence_03_morning_platform.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_silence_03_morning_platform.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_silence_03_morning_platform.ui
+    background asset:asset:/background/metro-station layer:bg preset:soft_fade duration:400 #@id bg.scn_silence_03_morning_platform
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/worried-center pose:worried layer:character at:left preset:soft_fade #@id sprite.scn_silence_03_morning_platform.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/worried-center pose:worried layer:character at:right preset:soft_fade #@id sprite.scn_silence_03_morning_platform.zhou_heng
+    voice asset:asset:/voice/vc_ln_s03_001 sync:text #@id voice.vc_ln_s03_001
+    text key:line.ln_s03_001 speaker:speaker.zhou_heng voice:voice.vc_ln_s03_001 window:main #@id line.ln_s03_001
+    voice asset:asset:/voice/vc_ln_s03_002 sync:text #@id voice.vc_ln_s03_002
+    text key:line.ln_s03_002 speaker:speaker.lin_yao voice:voice.vc_ln_s03_002 window:main #@id line.ln_s03_002
+    voice asset:asset:/voice/vc_ln_s03_003 sync:text #@id voice.vc_ln_s03_003
+    text key:line.ln_s03_003 speaker:speaker.zhou_heng voice:voice.vc_ln_s03_003 window:main #@id line.ln_s03_003
+    voice asset:asset:/voice/vc_ln_s03_004 sync:text #@id voice.vc_ln_s03_004
+    text key:line.ln_s03_004 speaker:speaker.lin_yao voice:voice.vc_ln_s03_004 window:main #@id line.ln_s03_004
+    voice asset:asset:/voice/vc_ln_s03_005 sync:text #@id voice.vc_ln_s03_005
+    text key:line.ln_s03_005 speaker:speaker.zhou_heng voice:voice.vc_ln_s03_005 window:main #@id line.ln_s03_005
+    voice asset:asset:/voice/vc_ln_s03_006 sync:text #@id voice.vc_ln_s03_006
+    text key:line.ln_s03_006 speaker:speaker.lin_yao voice:voice.vc_ln_s03_006 window:main #@id line.ln_s03_006
+    voice asset:asset:/voice/vc_ln_s03_007 sync:text #@id voice.vc_ln_s03_007
+    text key:line.ln_s03_007 speaker:speaker.zhou_heng voice:voice.vc_ln_s03_007 window:main #@id line.ln_s03_007
+    voice asset:asset:/voice/vc_ln_s03_008 sync:text #@id voice.vc_ln_s03_008
+    text key:line.ln_s03_008 speaker:speaker.lin_yao voice:voice.vc_ln_s03_008 window:main #@id line.ln_s03_008
+    voice asset:asset:/voice/vc_ln_s03_009 sync:text #@id voice.vc_ln_s03_009
+    text key:line.ln_s03_009 speaker:speaker.zhou_heng voice:voice.vc_ln_s03_009 window:main #@id line.ln_s03_009
+    voice asset:asset:/voice/vc_ln_s03_010 sync:text #@id voice.vc_ln_s03_010
+    text key:line.ln_s03_010 speaker:speaker.lin_yao voice:voice.vc_ln_s03_010 window:main #@id line.ln_s03_010
+    voice asset:asset:/voice/vc_ln_s03_011 sync:text #@id voice.vc_ln_s03_011
+    text key:line.ln_s03_011 speaker:speaker.zhou_heng voice:voice.vc_ln_s03_011 window:main #@id line.ln_s03_011
+    background asset:asset:/cg/ending-silence layer:bg preset:soft_fade duration:800 #@id cg.ending.silence
+    se asset:asset:/stinger/silence bus:se #@id stinger.silence
+    system_page kind:route_chart policy:astra.policy.standard #@id system.ending.silence.route_chart
+
+state scn_signal_01_service_tunnel #@id state.scn_signal_01_service_tunnel
+  scene scn_signal_01_service_tunnel #@id scene.scn_signal_01_service_tunnel
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_signal_01_service_tunnel
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_signal_01_service_tunnel.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_signal_01_service_tunnel.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_signal_01_service_tunnel.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_signal_01_service_tunnel.ui
+    background asset:asset:/background/rain-street layer:bg preset:soft_fade duration:400 #@id bg.scn_signal_01_service_tunnel
+    bgm asset:asset:/bgm/after-signal loop:true fade:600 #@id bgm.signal
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/relieved-center pose:relieved layer:character at:left preset:soft_fade #@id sprite.scn_signal_01_service_tunnel.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/relieved-center pose:relieved layer:character at:right preset:soft_fade #@id sprite.scn_signal_01_service_tunnel.zhou_heng
+    voice asset:asset:/voice/vc_ln_g01_001 sync:text #@id voice.vc_ln_g01_001
+    text key:line.ln_g01_001 speaker:speaker.zhou_heng voice:voice.vc_ln_g01_001 window:main #@id line.ln_g01_001
+    voice asset:asset:/voice/vc_ln_g01_002 sync:text #@id voice.vc_ln_g01_002
+    text key:line.ln_g01_002 speaker:speaker.lin_yao voice:voice.vc_ln_g01_002 window:main #@id line.ln_g01_002
+    voice asset:asset:/voice/vc_ln_g01_003 sync:text #@id voice.vc_ln_g01_003
+    text key:line.ln_g01_003 speaker:speaker.zhou_heng voice:voice.vc_ln_g01_003 window:main #@id line.ln_g01_003
+    voice asset:asset:/voice/vc_ln_g01_004 sync:text #@id voice.vc_ln_g01_004
+    text key:line.ln_g01_004 speaker:speaker.lin_yao voice:voice.vc_ln_g01_004 window:main #@id line.ln_g01_004
+    voice asset:asset:/voice/vc_ln_g01_005 sync:text #@id voice.vc_ln_g01_005
+    text key:line.ln_g01_005 speaker:speaker.zhou_heng voice:voice.vc_ln_g01_005 window:main #@id line.ln_g01_005
+    voice asset:asset:/voice/vc_ln_g01_006 sync:text #@id voice.vc_ln_g01_006
+    text key:line.ln_g01_006 speaker:speaker.lin_yao voice:voice.vc_ln_g01_006 window:main #@id line.ln_g01_006
+    voice asset:asset:/voice/vc_ln_g01_007 sync:text #@id voice.vc_ln_g01_007
+    text key:line.ln_g01_007 speaker:speaker.zhou_heng voice:voice.vc_ln_g01_007 window:main #@id line.ln_g01_007
+    voice asset:asset:/voice/vc_ln_g01_008 sync:text #@id voice.vc_ln_g01_008
+    text key:line.ln_g01_008 speaker:speaker.lin_yao voice:voice.vc_ln_g01_008 window:main #@id line.ln_g01_008
+    voice asset:asset:/voice/vc_ln_g01_009 sync:text #@id voice.vc_ln_g01_009
+    text key:line.ln_g01_009 speaker:speaker.zhou_heng voice:voice.vc_ln_g01_009 window:main #@id line.ln_g01_009
+    voice asset:asset:/voice/vc_ln_g01_010 sync:text #@id voice.vc_ln_g01_010
+    text key:line.ln_g01_010 speaker:speaker.lin_yao voice:voice.vc_ln_g01_010 window:main #@id line.ln_g01_010
+    voice asset:asset:/voice/vc_ln_g01_011 sync:text #@id voice.vc_ln_g01_011
+    text key:line.ln_g01_011 speaker:speaker.zhou_heng voice:voice.vc_ln_g01_011 window:main #@id line.ln_g01_011
+    voice asset:asset:/voice/vc_ln_g01_012 sync:text #@id voice.vc_ln_g01_012
+    text key:line.ln_g01_012 speaker:speaker.lin_yao voice:voice.vc_ln_g01_012 window:main #@id line.ln_g01_012
+    jump target:scn_signal_02_controlled_link #@id jump.scn_signal_01_service_tunnel
+
+state scn_signal_02_controlled_link #@id state.scn_signal_02_controlled_link
+  scene scn_signal_02_controlled_link #@id scene.scn_signal_02_controlled_link
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_signal_02_controlled_link
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_signal_02_controlled_link.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_signal_02_controlled_link.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_signal_02_controlled_link.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_signal_02_controlled_link.ui
+    background asset:asset:/background/underground-relay layer:bg preset:soft_fade duration:400 #@id bg.scn_signal_02_controlled_link
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/relieved-center pose:relieved layer:character at:left preset:soft_fade #@id sprite.scn_signal_02_controlled_link.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/relieved-center pose:relieved layer:character at:right preset:soft_fade #@id sprite.scn_signal_02_controlled_link.zhou_heng
+    voice asset:asset:/voice/vc_ln_g02_001 sync:text #@id voice.vc_ln_g02_001
+    text key:line.ln_g02_001 speaker:speaker.zhou_heng voice:voice.vc_ln_g02_001 window:main #@id line.ln_g02_001
+    voice asset:asset:/voice/vc_ln_g02_002 sync:text #@id voice.vc_ln_g02_002
+    text key:line.ln_g02_002 speaker:speaker.lin_yao voice:voice.vc_ln_g02_002 window:main #@id line.ln_g02_002
+    voice asset:asset:/voice/vc_ln_g02_003 sync:text #@id voice.vc_ln_g02_003
+    text key:line.ln_g02_003 speaker:speaker.zhou_heng voice:voice.vc_ln_g02_003 window:main #@id line.ln_g02_003
+    voice asset:asset:/voice/vc_ln_g02_004 sync:text #@id voice.vc_ln_g02_004
+    text key:line.ln_g02_004 speaker:speaker.lin_yao voice:voice.vc_ln_g02_004 window:main #@id line.ln_g02_004
+    voice asset:asset:/voice/vc_ln_g02_005 sync:text #@id voice.vc_ln_g02_005
+    text key:line.ln_g02_005 speaker:speaker.zhou_heng voice:voice.vc_ln_g02_005 window:main #@id line.ln_g02_005
+    voice asset:asset:/voice/vc_ln_g02_006 sync:text #@id voice.vc_ln_g02_006
+    text key:line.ln_g02_006 speaker:speaker.lin_yao voice:voice.vc_ln_g02_006 window:main #@id line.ln_g02_006
+    voice asset:asset:/voice/vc_ln_g02_007 sync:text #@id voice.vc_ln_g02_007
+    text key:line.ln_g02_007 speaker:speaker.zhou_heng voice:voice.vc_ln_g02_007 window:main #@id line.ln_g02_007
+    voice asset:asset:/voice/vc_ln_g02_008 sync:text #@id voice.vc_ln_g02_008
+    text key:line.ln_g02_008 speaker:speaker.lin_yao voice:voice.vc_ln_g02_008 window:main #@id line.ln_g02_008
+    voice asset:asset:/voice/vc_ln_g02_009 sync:text #@id voice.vc_ln_g02_009
+    text key:line.ln_g02_009 speaker:speaker.zhou_heng voice:voice.vc_ln_g02_009 window:main #@id line.ln_g02_009
+    voice asset:asset:/voice/vc_ln_g02_010 sync:text #@id voice.vc_ln_g02_010
+    text key:line.ln_g02_010 speaker:speaker.lin_yao voice:voice.vc_ln_g02_010 window:main #@id line.ln_g02_010
+    voice asset:asset:/voice/vc_ln_g02_011 sync:text #@id voice.vc_ln_g02_011
+    text key:line.ln_g02_011 speaker:speaker.zhou_heng voice:voice.vc_ln_g02_011 window:main #@id line.ln_g02_011
+    voice asset:asset:/voice/vc_ln_g02_012 sync:text #@id voice.vc_ln_g02_012
+    text key:line.ln_g02_012 speaker:speaker.lin_yao voice:voice.vc_ln_g02_012 window:main #@id line.ln_g02_012
+    jump target:scn_signal_03_dawn_rooftop #@id jump.scn_signal_02_controlled_link
+
+state scn_signal_03_dawn_rooftop #@id state.scn_signal_03_dawn_rooftop
+  scene scn_signal_03_dawn_rooftop #@id scene.scn_signal_03_dawn_rooftop
+    stage viewport:1920x1080 safe_area:16:9 #@id stage.scn_signal_03_dawn_rooftop
+    layer id:bg kind:background z:0 blend:normal #@id layer.scn_signal_03_dawn_rooftop.bg
+    layer id:character kind:sprite z:100 blend:normal clip:stage #@id layer.scn_signal_03_dawn_rooftop.character
+    layer id:video kind:video z:200 blend:screen clip:stage #@id layer.scn_signal_03_dawn_rooftop.video
+    layer id:ui kind:text z:900 blend:normal input:message #@id layer.scn_signal_03_dawn_rooftop.ui
+    background asset:asset:/background/rooftop-antenna layer:bg preset:soft_fade duration:400 #@id bg.scn_signal_03_dawn_rooftop
+    show id:lin_yao asset:asset:/character/sprites/lin-yao/relieved-center pose:relieved layer:character at:left preset:soft_fade #@id sprite.scn_signal_03_dawn_rooftop.lin_yao
+    show id:zhou_heng asset:asset:/character/sprites/zhou-heng/relieved-center pose:relieved layer:character at:right preset:soft_fade #@id sprite.scn_signal_03_dawn_rooftop.zhou_heng
+    voice asset:asset:/voice/vc_ln_g03_001 sync:text #@id voice.vc_ln_g03_001
+    text key:line.ln_g03_001 speaker:speaker.zhou_heng voice:voice.vc_ln_g03_001 window:main #@id line.ln_g03_001
+    voice asset:asset:/voice/vc_ln_g03_002 sync:text #@id voice.vc_ln_g03_002
+    text key:line.ln_g03_002 speaker:speaker.lin_yao voice:voice.vc_ln_g03_002 window:main #@id line.ln_g03_002
+    voice asset:asset:/voice/vc_ln_g03_003 sync:text #@id voice.vc_ln_g03_003
+    text key:line.ln_g03_003 speaker:speaker.zhou_heng voice:voice.vc_ln_g03_003 window:main #@id line.ln_g03_003
+    voice asset:asset:/voice/vc_ln_g03_004 sync:text #@id voice.vc_ln_g03_004
+    text key:line.ln_g03_004 speaker:speaker.lin_yao voice:voice.vc_ln_g03_004 window:main #@id line.ln_g03_004
+    voice asset:asset:/voice/vc_ln_g03_005 sync:text #@id voice.vc_ln_g03_005
+    text key:line.ln_g03_005 speaker:speaker.zhou_heng voice:voice.vc_ln_g03_005 window:main #@id line.ln_g03_005
+    voice asset:asset:/voice/vc_ln_g03_006 sync:text #@id voice.vc_ln_g03_006
+    text key:line.ln_g03_006 speaker:speaker.lin_yao voice:voice.vc_ln_g03_006 window:main #@id line.ln_g03_006
+    voice asset:asset:/voice/vc_ln_g03_007 sync:text #@id voice.vc_ln_g03_007
+    text key:line.ln_g03_007 speaker:speaker.zhou_heng voice:voice.vc_ln_g03_007 window:main #@id line.ln_g03_007
+    voice asset:asset:/voice/vc_ln_g03_008 sync:text #@id voice.vc_ln_g03_008
+    text key:line.ln_g03_008 speaker:speaker.lin_yao voice:voice.vc_ln_g03_008 window:main #@id line.ln_g03_008
+    voice asset:asset:/voice/vc_ln_g03_009 sync:text #@id voice.vc_ln_g03_009
+    text key:line.ln_g03_009 speaker:speaker.zhou_heng voice:voice.vc_ln_g03_009 window:main #@id line.ln_g03_009
+    voice asset:asset:/voice/vc_ln_g03_010 sync:text #@id voice.vc_ln_g03_010
+    text key:line.ln_g03_010 speaker:speaker.lin_yao voice:voice.vc_ln_g03_010 window:main #@id line.ln_g03_010
+    voice asset:asset:/voice/vc_ln_g03_011 sync:text #@id voice.vc_ln_g03_011
+    text key:line.ln_g03_011 speaker:speaker.zhou_heng voice:voice.vc_ln_g03_011 window:main #@id line.ln_g03_011
+    background asset:asset:/cg/ending-signal layer:bg preset:soft_fade duration:800 #@id cg.ending.signal
+    se asset:asset:/stinger/signal bus:se #@id stinger.signal
+    system_page kind:route_chart policy:astra.policy.standard #@id system.ending.signal.route_chart

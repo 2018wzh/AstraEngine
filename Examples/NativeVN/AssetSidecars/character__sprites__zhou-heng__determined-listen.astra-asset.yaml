@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/zhou-heng/determined-listen
+source: Visual/Characters/Sprites/zhou-heng/determined-listen.png
+source_hash: sha256:eca46fcc795131283bf7436f1e8d76324c85cd1fbe46d0cf499c4b7359fcbdcf
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

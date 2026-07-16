@@ -1,0 +1,246 @@
+{
+  "schema": "nativevn.flagship_review.v1",
+  "package_id": "com.astra.nativevn.signal-glass-rain",
+  "reviews": [
+    {
+      "id": "review.content",
+      "subject_id": "asset.localization.editorial-review.md",
+      "role": "content",
+      "artifact": {
+        "relative_path": "Localization/editorial-review.md"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "c6e374cbda26d7072a57ec930d8842ce50751edaca91d6a26d09a4b88c582eb1",
+      "byte_size": 6434,
+      "media": {
+        "kind": "document",
+        "mime_type": "text/markdown"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "manual-review",
+        "tool": "codex"
+      },
+      "review_type": "content_creation",
+      "reviewer_alias": "content.qa",
+      "reviewed_on": "2026-07-15",
+      "decision": "pass",
+      "license_status": "not_applicable",
+      "release_eligible": true,
+      "finding_codes": []
+    },
+    {
+      "id": "review.visual",
+      "subject_id": "asset.visual.keyart.key-art.png",
+      "role": "visual",
+      "artifact": {
+        "relative_path": "Visual/KeyArt/key-art.png"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "9ebcefddeb0ffc02f6f9f01615ed96643c8a7de7cd4136d95c6c09c157751840",
+      "byte_size": 14533909,
+      "media": {
+        "kind": "image",
+        "mime_type": "image/png",
+        "width": 3840,
+        "height": 2160,
+        "color_space": "srgb",
+        "has_alpha": false
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "manual-review",
+        "tool": "codex"
+      },
+      "review_type": "visual_spec",
+      "reviewer_alias": "content.qa",
+      "reviewed_on": "2026-07-15",
+      "decision": "pass",
+      "license_status": "approved",
+      "release_eligible": true,
+      "finding_codes": []
+    },
+    {
+      "id": "review.ui",
+      "subject_id": "asset.design.ui-tokens.md",
+      "role": "ui",
+      "artifact": {
+        "relative_path": "Design/ui-tokens.md"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "b9403a933a98c5401162ee49ace0297a08a2f84b5e7b0e637be5cc21ab1e583b",
+      "byte_size": 1201,
+      "media": {
+        "kind": "document",
+        "mime_type": "text/markdown"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "manual-review",
+        "tool": "codex"
+      },
+      "review_type": "ui_tokens",
+      "reviewer_alias": "content.qa",
+      "reviewed_on": "2026-07-15",
+      "decision": "pass",
+      "license_status": "not_applicable",
+      "release_eligible": true,
+      "finding_codes": []
+    },
+    {
+      "id": "review.accessibility",
+      "subject_id": "asset.visual.alt-text.json",
+      "role": "accessibility",
+      "artifact": {
+        "relative_path": "Visual/alt-text.json"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "cf29e19fb561d4f6b6c2f1bdf169fa76cf3acf40f663ca1bc2fe8d2889d62048",
+      "byte_size": 28364,
+      "media": {
+        "kind": "data",
+        "mime_type": "application/json"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "manual-review",
+        "tool": "codex"
+      },
+      "review_type": "alt_text",
+      "reviewer_alias": "content.qa",
+      "reviewed_on": "2026-07-15",
+      "decision": "pass",
+      "license_status": "not_applicable",
+      "release_eligible": true,
+      "finding_codes": []
+    },
+    {
+      "id": "review.audio_model",
+      "subject_id": "asset.audio.openrouter-audio-review.json",
+      "role": "audio_model",
+      "artifact": {
+        "relative_path": "Audio/openrouter-audio-review.json"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "78e95097c192b5d7767943d24f558042dd73f0d43d4d1c2a6d113b9818913aa8",
+      "byte_size": 44344,
+      "media": {
+        "kind": "data",
+        "mime_type": "application/json"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "manual-review",
+        "tool": "codex"
+      },
+      "review_type": "audio_model_review",
+      "reviewer_alias": "content.qa",
+      "reviewed_on": "2026-07-15",
+      "decision": "pass",
+      "license_status": "not_applicable",
+      "release_eligible": true,
+      "finding_codes": []
+    },
+    {
+      "id": "review.license",
+      "subject_id": "asset.audio.audio-qa-report.json",
+      "role": "license",
+      "artifact": {
+        "relative_path": "Audio/audio-qa-report.json"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "38b3cc76e089bc5cc938d474caf5a4fed08fc324c97ab097e14e02ea9c1e95e5",
+      "byte_size": 15721,
+      "media": {
+        "kind": "data",
+        "mime_type": "application/json"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "manual-review",
+        "tool": "codex"
+      },
+      "review_type": "license",
+      "reviewer_alias": "content.qa",
+      "reviewed_on": "2026-07-15",
+      "decision": "blocked",
+      "license_status": "approved",
+      "release_eligible": false,
+      "finding_codes": [
+        "manual_listening_pending"
+      ]
+    },
+    {
+      "id": "review.voice",
+      "subject_id": "asset.manifests.voice-release.json",
+      "role": "voice",
+      "artifact": {
+        "relative_path": "Manifests/voice-release.json"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "ef8c065bc5b60e632d9d158dee43324ac098bf5e2eeb8a724ae47c0dd9dab08c",
+      "byte_size": 273492,
+      "media": {
+        "kind": "data",
+        "mime_type": "application/json"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "manual-review",
+        "tool": "codex"
+      },
+      "review_type": "voice_rights",
+      "reviewer_alias": "content.qa",
+      "reviewed_on": "2026-07-15",
+      "decision": "pass",
+      "license_status": "user_authorized",
+      "release_eligible": true,
+      "finding_codes": []
+    },
+    {
+      "id": "review.release",
+      "subject_id": "asset.status.md",
+      "role": "release",
+      "artifact": {
+        "relative_path": "STATUS.md"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "9652c2228339fdc5f21cf0ae54fbff808848b5a1a0f31c193a6b61f8bf0f1004",
+      "byte_size": 2411,
+      "media": {
+        "kind": "document",
+        "mime_type": "text/markdown"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "manual-review",
+        "tool": "codex"
+      },
+      "review_type": "release_readiness",
+      "reviewer_alias": "content.qa",
+      "reviewed_on": "2026-07-15",
+      "decision": "blocked",
+      "license_status": "approved",
+      "release_eligible": false,
+      "finding_codes": [
+        "runtime_player_evidence_pending"
+      ]
+    }
+  ]
+}

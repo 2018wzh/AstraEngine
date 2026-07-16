@@ -1,0 +1,311 @@
+{
+  "schema": "astra.nativevn.flagship.screenplay.v1",
+  "story_id": "signal_in_the_glass_rain",
+  "language": "en",
+  "canonical_language": "zh-Hans",
+  "title": "Signal in the Glass Rain",
+  "voiced_characters": [
+    {"id": "lin_yao", "display_name": "Lin Yao"},
+    {"id": "zhou_heng", "display_name": "Zhou Heng"}
+  ],
+  "scenes": [
+    {
+      "id": "scn_common_01_glass_train",
+      "route_scope": "common",
+      "title": "Train in the Rain",
+      "lines": [
+        {"id": "ln_c01_001", "speaker": "zhou_heng", "text": "As the train entered the glass district, rain was sweeping sideways across the canopy. Every window looked wiped clean, then freshly marked.", "scene_id": "scn_common_01_glass_train", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c01_001"},
+        {"id": "ln_c01_002", "speaker": "zhou_heng", "text": "I had come to audit a batch of false alerts. Then the same time appeared on the window three times: 07:41:09.", "scene_id": "scn_common_01_glass_train", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c01_002"},
+        {"id": "ln_c01_003", "speaker": "lin_yao", "text": "Don't touch the glass. That isn't a passenger display. Contact will write your biometric digest into the circuit.", "scene_id": "scn_common_01_glass_train", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c01_003"},
+        {"id": "ln_c01_004", "speaker": "zhou_heng", "text": "When you stepped out from behind the service panel, I recognized your voice first. I just couldn't remember where from.", "scene_id": "scn_common_01_glass_train", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c01_004"},
+        {"id": "ln_c01_005", "speaker": "lin_yao", "text": "Lin Yao, signal architecture for the Gleam Network. The system reported your name before you scanned a badge, Zhou Heng.", "scene_id": "scn_common_01_glass_train", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c01_005"},
+        {"id": "ln_c01_006", "speaker": "zhou_heng", "text": "Then it wasn't a false alert. My badge is still in my coat, and this train can't read an auditor's identity cache.", "scene_id": "scn_common_01_glass_train", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c01_006"},
+        {"id": "ln_c01_007", "speaker": "lin_yao", "text": "That's why I told you not to touch it. It isn't identifying you. It feels more like it was waiting for you to return.", "scene_id": "scn_common_01_glass_train", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c01_007"},
+        {"id": "ln_c01_008", "speaker": "zhou_heng", "text": "Two heart-rate traces surfaced under the timestamp, one fast and one slow. My watch was offline, but the slower trace changed with me.", "scene_id": "scn_common_01_glass_train", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c01_008"},
+        {"id": "ln_c01_009", "speaker": "lin_yao", "text": "The other changed with me. Look away and tell me what else you saw. Describe it, but don't complete it for the signal.", "scene_id": "scn_common_01_glass_train", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c01_009"},
+        {"id": "ln_c01_010", "speaker": "zhou_heng", "text": "An unlit platform. Rain falling through a split in the roof. The floor said seventeen, but Xiangang has no Platform Seventeen.", "scene_id": "scn_common_01_glass_train", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c01_010"},
+        {"id": "ln_c01_011", "speaker": "lin_yao", "text": "No more details yet. If we saw the same image, repeating it could stitch our two fragments together.", "scene_id": "scn_common_01_glass_train", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c01_011"},
+        {"id": "ln_c01_012", "speaker": "zhou_heng", "text": "You said “the same image” without asking for the platform number. You saw seventeen too, didn't you, Lin Yao?", "scene_id": "scn_common_01_glass_train", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c01_012"}
+      ]
+    },
+    {
+      "id": "scn_common_02_archive_lobby",
+      "route_scope": "common",
+      "title": "The Old Archive",
+      "lines": [
+        {"id": "ln_c02_001", "speaker": "lin_yao", "text": "The archive's emergency cache went offline eight years ago. That pulse followed the train here, and now it's moving along the outer wall.", "scene_id": "scn_common_02_archive_lobby", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c02_001"},
+        {"id": "ln_c02_002", "speaker": "zhou_heng", "text": "Rainwater is bridging the facade nodes. It's treating each building as the next pane of glass, taking a route that only exists in this weather.", "scene_id": "scn_common_02_archive_lobby", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c02_002"},
+        {"id": "ln_c02_003", "speaker": "lin_yao", "text": "Sensory frames don't belong on public routing. Gleam carries alerts and indexes. Personal memory isn't even a compatible format.", "scene_id": "scn_common_02_archive_lobby", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c02_003"},
+        {"id": "ln_c02_004", "speaker": "zhou_heng", "text": "But it showed us the same platform. Either the isolation guarantee was false, or someone buried an exception very well.", "scene_id": "scn_common_02_archive_lobby", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c02_004"},
+        {"id": "ln_c02_005", "speaker": "lin_yao", "text": "This isn't a message someone left for us. The frame came from the Refraction Incident. Every shared cache from that night was ordered erased.", "scene_id": "scn_common_02_archive_lobby", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c02_005"},
+        {"id": "ln_c02_006", "speaker": "zhou_heng", "text": "I remember the incident report, not being there. My personal timeline is missing exactly eleven minutes, starting at 07:41.", "scene_id": "scn_common_02_archive_lobby", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c02_006"},
+        {"id": "ln_c02_007", "speaker": "lin_yao", "text": "Mine is missing the same eleven. We signed a mutual seal afterward and closed everything that indexed one of us through the other.", "scene_id": "scn_common_02_archive_lobby", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c02_007"},
+        {"id": "ln_c02_008", "speaker": "zhou_heng", "text": "You say “we” like you're reading someone else's file. I didn't know I had met you, let alone signed anything with you.", "scene_id": "scn_common_02_archive_lobby", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c02_008"},
+        {"id": "ln_c02_009", "speaker": "lin_yao", "text": "I remember one form more than you do. Two names, two consent signatures, and a witness signature that failed validation.", "scene_id": "scn_common_02_archive_lobby", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c02_009"},
+        {"id": "ln_c02_010", "speaker": "zhou_heng", "text": "The witness device and request device were the same terminal. It let the machine filing the seal attest to its own request.", "scene_id": "scn_common_02_archive_lobby", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c02_010"},
+        {"id": "ln_c02_011", "speaker": "lin_yao", "text": "The seal executed, but its legal state stayed “awaiting witness.” It wasn't a back door. It was an error nobody owned.", "scene_id": "scn_common_02_archive_lobby", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c02_011"},
+        {"id": "ln_c02_012", "speaker": "zhou_heng", "text": "So the cache was never erased. It kept waiting for both holders to return, and tonight it finally put us on the same line.", "scene_id": "scn_common_02_archive_lobby", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c02_012"}
+      ]
+    },
+    {
+      "id": "scn_common_03_signal_booth",
+      "route_scope": "common",
+      "title": "Signal Booth",
+      "lines": [
+        {"id": "ln_c03_001", "speaker": "lin_yao", "text": "I've put the booth in local mode. The network outside can see two maintenance badges in here, but not what we're reading.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_001"},
+        {"id": "ln_c03_002", "speaker": "zhou_heng", "text": "This old display can't parse memory frames, but it recognizes 07:41:09. It labels the time as the cache's first write.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_002"},
+        {"id": "ln_c03_003", "speaker": "lin_yao", "text": "Platform Seventeen was still on construction plans when the incident happened. After the blackout, the whole level was hidden from public maps.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_003"},
+        {"id": "ln_c03_004", "speaker": "zhou_heng", "text": "I was checking evacuation markers. You were handling temporary signals. That's why we both know a platform that never opened.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_004"},
+        {"id": "ln_c03_005", "speaker": "lin_yao", "text": "Smoke blinded the locator lights, so we enabled a paired sensory buffer. You watched my path. I listened to your breathing. We corrected each other.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_005"},
+        {"id": "ln_c03_006", "speaker": "zhou_heng", "text": "That function only appeared in a rescue draft. The official report says no personal sensory data was written at the scene.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_006"},
+        {"id": "ln_c03_007", "speaker": "lin_yao", "text": "The report is tidy because the buffer saved the route and broke the isolation rules. Review chose to seal first and assign responsibility later.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_007"},
+        {"id": "ln_c03_008", "speaker": "zhou_heng", "text": "Later never came. The system had three major updates, but that cache stayed in the glass with the ownership error untouched.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_008"},
+        {"id": "ln_c03_009", "speaker": "lin_yao", "text": "I agreed to the seal because every time I closed my eyes, I couldn't tell whose sensation was whose. I thought deletion would restore the line.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_009"},
+        {"id": "ln_c03_010", "speaker": "zhou_heng", "text": "I don't know why I agreed. Lost consent can't decide for me now, but it does tell me someone was afraid back then.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_010"},
+        {"id": "ln_c03_011", "speaker": "lin_yao", "text": "Tonight's rain changed the glass addresses. The old cache was mistaken for a recoverable node. It didn't wake up. It found an exit.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_011"},
+        {"id": "ln_c03_012", "speaker": "zhou_heng", "text": "The checksum ring is incomplete. Repeating the time and platform is a request for both holder digests, not a plea for help.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_012"},
+        {"id": "ln_c03_013", "speaker": "lin_yao", "text": "Then a single-person shutdown will always fail. We read every consequence together, then decide whether this disappears or remains.", "scene_id": "scn_common_03_signal_booth", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c03_013"}
+      ]
+    },
+    {
+      "id": "scn_common_04_rain_trace",
+      "route_scope": "common",
+      "title": "Tracing the Rain",
+      "lines": [
+        {"id": "ln_c04_001", "speaker": "zhou_heng", "text": "The trace climbed the archive wall, then crossed three towers on rainwater bridges. Glass kept separate by daylight had become one wet net.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_001"},
+        {"id": "ln_c04_002", "speaker": "lin_yao", "text": "Stop there. At nineteen meters, the pulse breaks. Step inside eighteen and it resumes filling frames. We are the endpoints.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_002"},
+        {"id": "ln_c04_003", "speaker": "zhou_heng", "text": "A channel that exists only when two people are close. The old design had no session authentication. Distance was the second key.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_003"},
+        {"id": "ln_c04_004", "speaker": "lin_yao", "text": "There's another image. A wall, emergency lights, a hand on a railing. Describe only the structure. Don't decide whose hand it is.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_004"},
+        {"id": "ln_c04_005", "speaker": "zhou_heng", "text": "I remember you holding my wrist and making me match your breathing. It wasn't a promise. We were both trying to stay conscious.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_005"},
+        {"id": "ln_c04_006", "speaker": "lin_yao", "text": "Thank you for not turning it into something else. A shared ordeal becomes a debt too easily. I won't use it to claim anything from you.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_006"},
+        {"id": "ln_c04_007", "speaker": "zhou_heng", "text": "And I won't mistake familiarity for fact. When this is over, whether we want to know each other is a question we ask again.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_007"},
+        {"id": "ln_c04_008", "speaker": "lin_yao", "text": "This block isn't part of the sensory buffer. It's a system diagnostic showing the write order between the seal and reflection cache.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_008"},
+        {"id": "ln_c04_009", "speaker": "zhou_heng", "text": "The order is wrong. It copied shared frames into the facade emergency layer before sealing. Deletion never touched the duplicate.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_009"},
+        {"id": "ln_c04_010", "speaker": "lin_yao", "text": "The public was promised physical isolation. This copy proves personal fragments can enter the city facade during emergency mode.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_010"},
+        {"id": "ln_c04_011", "speaker": "zhou_heng", "text": "And it won't be just us. Anyone who used paired buffering may have a fragment waiting for the wrong condition to revive it.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_011"},
+        {"id": "ln_c04_012", "speaker": "lin_yao", "text": "The diagnostic proves the gap, but it also exposes the old maintenance topology. Before a patch, someone could deliberately build a rain route.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_012"},
+        {"id": "ln_c04_013", "speaker": "zhou_heng", "text": "The proof is tied to our time signatures. We can redact the images, but remove both holder digests and the evidence no longer verifies.", "scene_id": "scn_common_04_rain_trace", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c04_013"}
+      ]
+    },
+    {
+      "id": "scn_common_05_memory_room",
+      "route_scope": "common",
+      "title": "Memory Isolation Room",
+      "lines": [
+        {"id": "ln_c05_001", "speaker": "lin_yao", "text": "No transparent walls, no public light path. The signal is weaker here. We have a few minutes to state all three options clearly.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_001"},
+        {"id": "ln_c05_002", "speaker": "zhou_heng", "text": "Option one: publish the diagnostic signature and patch summary. The images stay local, but our identity digests become evidence.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_002"},
+        {"id": "ln_c05_003", "speaker": "lin_yao", "text": "The cost is immediate exposure. Publication stops anyone erasing the gap quietly. Until the patch lands, the attack surface is real.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_003"},
+        {"id": "ln_c05_004", "speaker": "zhou_heng", "text": "Option two: close the reflection cache and erase every local memory cross-indexed with it. The anomaly can never find us again.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_004"},
+        {"id": "ln_c05_005", "speaker": "lin_yao", "text": "That erases the incident and everything we reconstructed together tonight. We can keep a maintenance record with no personal content.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_005"},
+        {"id": "ln_c05_006", "speaker": "zhou_heng", "text": "So tomorrow we can know there was an anomaly, but not remember who stood here with us when the decision was made.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_006"},
+        {"id": "ln_c05_007", "speaker": "lin_yao", "text": "Option three: seal the old cache and build a separate dual-key channel. Limited time, limited bandwidth, fresh consent every time.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_007"},
+        {"id": "ln_c05_008", "speaker": "zhou_heng", "text": "It can retain descriptions we choose together without touching raw sensory frames. It's feasible, but not fully stress-tested tonight.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_008"},
+        {"id": "ln_c05_009", "speaker": "lin_yao", "text": "If isolation fails, our boundaries may blur again. Identity drift, timeout, or either endpoint going unresponsive must close it at once.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_009"},
+        {"id": "ln_c05_010", "speaker": "zhou_heng", "text": "Which one do you want? I'm not asking you to decide for me. I want to know what you're afraid of now.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_010"},
+        {"id": "ln_c05_011", "speaker": "lin_yao", "text": "Publishing too early could hurt people. Calling erasure “protection” could repeat the past. What I fear most is hiding the cost from you.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_011"},
+        {"id": "ln_c05_012", "speaker": "zhou_heng", "text": "Our old signatures show what happened. They don't grant consent now. Every step tonight gets confirmed again by both of us.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_012"},
+        {"id": "ln_c05_013", "speaker": "lin_yao", "text": "Agreed. Whatever we choose, we state the terms aloud and execute it together. If either of us withdraws, the action stops.", "scene_id": "scn_common_05_memory_room", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c05_013"}
+      ]
+    },
+    {
+      "id": "scn_common_06_decision_bridge",
+      "route_scope": "common",
+      "title": "The Glass Bridge",
+      "lines": [
+        {"id": "ln_c06_001", "speaker": "zhou_heng", "text": "By the time we reached the bridge, facade alerts had spread from one building to seven. The signal didn't speak. It only wrote the time brighter.", "scene_id": "scn_common_06_decision_bridge", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c06_001"},
+        {"id": "ln_c06_002", "speaker": "lin_yao", "text": "One more rise in rain pressure will renumber the nodes. The cache may leave maintenance routing. We have one complete write left.", "scene_id": "scn_common_06_decision_bridge", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c06_002"},
+        {"id": "ln_c06_003", "speaker": "zhou_heng", "text": "Every lit window below us rests on the same promise. Nobody knows an ordering bug once crossed the boundary around their memory.", "scene_id": "scn_common_06_decision_bridge", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c06_003"},
+        {"id": "ln_c06_004", "speaker": "lin_yao", "text": "If we publish, your time signature enters a permanent record. No one sees the hand, but they will know you held the incident cache.", "scene_id": "scn_common_06_decision_bridge", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c06_004"},
+        {"id": "ln_c06_005", "speaker": "zhou_heng", "text": "My identity can be evidence. Our private fragments cannot become public property. If we publish, that line has to hold.", "scene_id": "scn_common_06_decision_bridge", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c06_005"},
+        {"id": "ln_c06_006", "speaker": "lin_yao", "text": "If we close it, every shared index from the incident and tonight goes to zero. We won't struggle to remember. We won't know there is a blank.", "scene_id": "scn_common_06_decision_bridge", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c06_006"},
+        {"id": "ln_c06_007", "speaker": "zhou_heng", "text": "The maintenance record remains. It will show that two people chose closure together, not that one pressed the key for both.", "scene_id": "scn_common_06_decision_bridge", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c06_007"},
+        {"id": "ln_c06_008", "speaker": "lin_yao", "text": "If we build a channel, we keep a connection and accept the risk of testing a new boundary. It cannot become a door left open forever.", "scene_id": "scn_common_06_decision_bridge", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c06_008"},
+        {"id": "ln_c06_009", "speaker": "zhou_heng", "text": "Only chosen content, with expiry, audit, and revocation. The system gap still goes to repair. A channel can't excuse hiding it.", "scene_id": "scn_common_06_decision_bridge", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c06_009"},
+        {"id": "ln_c06_010", "speaker": "lin_yao", "text": "None of these paths is clean, and none is a punishment. We're deciding which consequence we can face without lying about it.", "scene_id": "scn_common_06_decision_bridge", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c06_010"},
+        {"id": "ln_c06_011", "speaker": "zhou_heng", "text": "I'll state my choice. Confirm it only after you've heard me, not for who I was eight years ago or what returned tonight.", "scene_id": "scn_common_06_decision_bridge", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c06_011"},
+        {"id": "ln_c06_012", "speaker": "lin_yao", "text": "I'll confirm my own choice and keep the right to stop. Zhou Heng, we decide where this signal goes now.", "scene_id": "scn_common_06_decision_bridge", "route_scope": "common", "estimated_seconds": 8, "voice_cue_id": "vc_ln_c06_012"}
+      ]
+    },
+    {
+      "id": "scn_truth_01_observatory",
+      "route_scope": "truth",
+      "title": "The Old Observatory",
+      "lines": [
+        {"id": "ln_t01_001", "speaker": "zhou_heng", "text": "I choose publication. Not our memories. What the system did and what it failed to do goes into a record that cannot be withdrawn.", "scene_id": "scn_truth_01_observatory", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t01_001"},
+        {"id": "ln_t01_002", "speaker": "lin_yao", "text": "I consent to publishing the diagnostic and holder digests. I refuse release of images, breathing records, or recoverable sensory data.", "scene_id": "scn_truth_01_observatory", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t01_002"},
+        {"id": "ln_t01_003", "speaker": "zhou_heng", "text": "The observatory's old uplink isn't controlled directly by Gleam. We can escrow the evidence and patch in separate zones, then release both together.", "scene_id": "scn_truth_01_observatory", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t01_003"},
+        {"id": "ln_t01_004", "speaker": "lin_yao", "text": "Understand this: the first minutes after the topology digest goes public are the most dangerous. Someone may infer where other caches lie.", "scene_id": "scn_truth_01_observatory", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t01_004"},
+        {"id": "ln_t01_005", "speaker": "zhou_heng", "text": "If we publish only “a problem exists,” it becomes another false alert. The evidence must be reproducible, and the risk belongs on page one.", "scene_id": "scn_truth_01_observatory", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t01_005"},
+        {"id": "ln_t01_006", "speaker": "lin_yao", "text": "The public doesn't own our eleven minutes. It does need to know the isolation promise failed and the exact conditions of that failure.", "scene_id": "scn_truth_01_observatory", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t01_006"},
+        {"id": "ln_t01_007", "speaker": "zhou_heng", "text": "I'm splitting the package. Outside: write order, version, patch hash, and dual-holder proof. Inside: private content that never uploads.", "scene_id": "scn_truth_01_observatory", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t01_007"},
+        {"id": "ln_t01_008", "speaker": "lin_yao", "text": "The cache is rejecting the split. It wants complete sensory frames for its checksum. I'll have local hardware attest without releasing them.", "scene_id": "scn_truth_01_observatory", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t01_008"},
+        {"id": "ln_t01_009", "speaker": "zhou_heng", "text": "The attestation must say the device saw hashes, not meaning. We can't protect privacy by inventing another false witness.", "scene_id": "scn_truth_01_observatory", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t01_009"},
+        {"id": "ln_t01_010", "speaker": "lin_yao", "text": "Terms set: two current consents, two independent device proofs, one public patch clock. If any one fails, nothing publishes.", "scene_id": "scn_truth_01_observatory", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t01_010"},
+        {"id": "ln_t01_011", "speaker": "zhou_heng", "text": "Confirmed. My name may remain; my memory may not. If the escrow opens early, I withdraw from this release.", "scene_id": "scn_truth_01_observatory", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t01_011"},
+        {"id": "ln_t01_012", "speaker": "lin_yao", "text": "Confirmed. The glass is lighting up. The signal accepts the boundary. Now it will see that we have not lied.", "scene_id": "scn_truth_01_observatory", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t01_012"}
+      ]
+    },
+    {
+      "id": "scn_truth_02_public_array",
+      "route_scope": "truth",
+      "title": "Public Array",
+      "lines": [
+        {"id": "ln_t02_001", "speaker": "zhou_heng", "text": "The release crossed the rain from the observatory to the public array. No window showed an image. The same evidence hash appeared across the city.", "scene_id": "scn_truth_02_public_array", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t02_001"},
+        {"id": "ln_t02_002", "speaker": "lin_yao", "text": "Patch escrow is active, seventeen minutes to completion. Until then, the maintenance topology will be easier than usual to infer.", "scene_id": "scn_truth_02_public_array", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t02_002"},
+        {"id": "ln_t02_003", "speaker": "zhou_heng", "text": "Patch first, and insiders could erase the proof. Publish first, and the city carries the window. We started both together.", "scene_id": "scn_truth_02_public_array", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t02_003"},
+        {"id": "ln_t02_004", "speaker": "lin_yao", "text": "The array is throttling anomalous addressing, slower than planned. The risk isn't gone. Every response is simply on record now.", "scene_id": "scn_truth_02_public_array", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t02_004"},
+        {"id": "ln_t02_005", "speaker": "zhou_heng", "text": "I just remembered something I said after the incident: if only one of us remembers, never use the memory to force belief from the other.", "scene_id": "scn_truth_02_public_array", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t02_005"},
+        {"id": "ln_t02_006", "speaker": "lin_yao", "text": "I remember it too. That's why I never found you. Not because I didn't care. All I had was one form I couldn't prove.", "scene_id": "scn_truth_02_public_array", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t02_006"},
+        {"id": "ln_t02_007", "speaker": "zhou_heng", "text": "What I believe now is the evidence in front of me and the consent you just gave. The past can return, but it cannot outrank today.", "scene_id": "scn_truth_02_public_array", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t02_007"},
+        {"id": "ln_t02_008", "speaker": "lin_yao", "text": "Then the record stops at fact. We sealed together. Tonight we published together. We don't define anything beyond that for each other.", "scene_id": "scn_truth_02_public_array", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t02_008"},
+        {"id": "ln_t02_009", "speaker": "zhou_heng", "text": "Public receipt confirmed. The package is mirrored beyond any single administrator's reach, and the patch clock is still running.", "scene_id": "scn_truth_02_public_array", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t02_009"},
+        {"id": "ln_t02_010", "speaker": "lin_yao", "text": "The first unregistered reflection caches are isolated. The count isn't zero. This gap reached beyond the two of us.", "scene_id": "scn_truth_02_public_array", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t02_010"},
+        {"id": "ln_t02_011", "speaker": "zhou_heng", "text": "The anomaly is receding from the rain, with one final block lit. The display reads: proof complete, private layer remains sealed.", "scene_id": "scn_truth_02_public_array", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t02_011"},
+        {"id": "ln_t02_012", "speaker": "lin_yao", "text": "It has stopped waiting for our witness. What went unfinished eight years ago wasn't a feeling. It was responsibility the system abandoned.", "scene_id": "scn_truth_02_public_array", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t02_012"}
+      ]
+    },
+    {
+      "id": "scn_truth_03_after_rain",
+      "route_scope": "truth",
+      "title": "After the Rain",
+      "lines": [
+        {"id": "ln_t03_001", "speaker": "zhou_heng", "text": "Seventeen minutes later, the patch completed. The public notice admitted isolation had failed and that maintenance never reported it in time.", "scene_id": "scn_truth_03_after_rain", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t03_001"},
+        {"id": "ln_t03_002", "speaker": "lin_yao", "text": "Our names aren't in the notice, but the evidence index has two anonymous holder signatures. Someone determined enough may trace them.", "scene_id": "scn_truth_03_after_rain", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t03_002"},
+        {"id": "ln_t03_003", "speaker": "zhou_heng", "text": "I accept that exposure. From tonight on, no investigation can be ended with “the system can't do that.”", "scene_id": "scn_truth_03_after_rain", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t03_003"},
+        {"id": "ln_t03_004", "speaker": "lin_yao", "text": "Two maintenance maps leaked briefly. Isolation is closing them now. Publication didn't make us heroes. It made the problem visible.", "scene_id": "scn_truth_03_after_rain", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t03_004"},
+        {"id": "ln_t03_005", "speaker": "zhou_heng", "text": "The private layer is still on my device. I remember Platform Seventeen and your hand. I won't use either to prove what we should be.", "scene_id": "scn_truth_03_after_rain", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t03_005"},
+        {"id": "ln_t03_006", "speaker": "lin_yao", "text": "You may remember. Just don't count that hand as a debt, or turn a decision I made then into a promise now.", "scene_id": "scn_truth_03_after_rain", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t03_006"},
+        {"id": "ln_t03_007", "speaker": "zhou_heng", "text": "The rain was too light to bridge the glass. For the first time, the window held only our present reflections. No old frame.", "scene_id": "scn_truth_03_after_rain", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t03_007"},
+        {"id": "ln_t03_008", "speaker": "lin_yao", "text": "Good. The past has done the work it needed to do. Whatever comes next doesn't have to be arranged by an incident cache.", "scene_id": "scn_truth_03_after_rain", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t03_008"},
+        {"id": "ln_t03_009", "speaker": "zhou_heng", "text": "Coffee after we finish the report? No seals, no evidence. We start with the part of tonight we actually chose to remember.", "scene_id": "scn_truth_03_after_rain", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t03_009"},
+        {"id": "ln_t03_010", "speaker": "lin_yao", "text": "First we review the exposure window. After sunrise, if you still want to ask, ask me again.", "scene_id": "scn_truth_03_after_rain", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t03_010"},
+        {"id": "ln_t03_011", "speaker": "zhou_heng", "text": "I nodded and put the terminal away. The city still had a gap, but now it stood inside everyone's record.", "scene_id": "scn_truth_03_after_rain", "route_scope": "truth", "estimated_seconds": 11, "voice_cue_id": "vc_ln_t03_011"}
+      ]
+    },
+    {
+      "id": "scn_silence_01_blackout_corridor",
+      "route_scope": "silence",
+      "title": "Blackout Corridor",
+      "lines": [
+        {"id": "ln_s01_001", "speaker": "zhou_heng", "text": "I choose to close the signal and erase every path it can use to find us. I understand the shared index will have no recoverable copy.", "scene_id": "scn_silence_01_blackout_corridor", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s01_001"},
+        {"id": "ln_s01_002", "speaker": "lin_yao", "text": "I consent to closure. The record keeps only the gap class, disposition hash, and two current signatures. No personal content.", "scene_id": "scn_silence_01_blackout_corridor", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s01_002"},
+        {"id": "ln_s01_003", "speaker": "zhou_heng", "text": "The null process crosses twelve nodes. With each one, the related memory indexes lose another name until nothing points across.", "scene_id": "scn_silence_01_blackout_corridor", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s01_003"},
+        {"id": "ln_s01_004", "speaker": "lin_yao", "text": "I'll call the node. You verify the hash. Any mismatch and we stop. Having started is not permission to continue.", "scene_id": "scn_silence_01_blackout_corridor", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s01_004"},
+        {"id": "ln_s01_005", "speaker": "zhou_heng", "text": "When the first light died, Platform Seventeen flashed once more. Rain fell through the split roof without sound, like an old silent film.", "scene_id": "scn_silence_01_blackout_corridor", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s01_005"},
+        {"id": "ln_s01_006", "speaker": "lin_yao", "text": "I see myself counting your breaths. One to four, then back to one. It was to keep you awake, not to put you in my debt.", "scene_id": "scn_silence_01_blackout_corridor", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s01_006"},
+        {"id": "ln_s01_007", "speaker": "zhou_heng", "text": "I remember asking you not to leave me alone when I woke. You didn't promise forever. You said we should get off the platform first.", "scene_id": "scn_silence_01_blackout_corridor", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s01_007"},
+        {"id": "ln_s01_008", "speaker": "lin_yao", "text": "Don't finish that answer for who I was. What we can give each other now is this choice, completed without a last-minute promise.", "scene_id": "scn_silence_01_blackout_corridor", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s01_008"},
+        {"id": "ln_s01_009", "speaker": "zhou_heng", "text": "I confirm node five. Your hand is close to mine, but we don't touch. The process doesn't need our bodies to prove consent.", "scene_id": "scn_silence_01_blackout_corridor", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s01_009"},
+        {"id": "ln_s01_010", "speaker": "lin_yao", "text": "Node eight complete. The checksum now sees two anonymous digests, not two people. The images are losing time and place.", "scene_id": "scn_silence_01_blackout_corridor", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s01_010"},
+        {"id": "ln_s01_011", "speaker": "zhou_heng", "text": "I still know what 07:41:09 means, but it no longer feels like memory. It feels like a work order someone else filed.", "scene_id": "scn_silence_01_blackout_corridor", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s01_011"},
+        {"id": "ln_s01_012", "speaker": "lin_yao", "text": "The last four nodes are in the null room. Inside, we may forget the platform first, then why the other's voice feels familiar.", "scene_id": "scn_silence_01_blackout_corridor", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s01_012"}
+      ]
+    },
+    {
+      "id": "scn_silence_02_null_room",
+      "route_scope": "silence",
+      "title": "Null Room",
+      "lines": [
+        {"id": "ln_s02_001", "speaker": "zhou_heng", "text": "There are no windows in the null room. The record appears on an opaque wall, preserving the action without any of our words.", "scene_id": "scn_silence_02_null_room", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s02_001"},
+        {"id": "ln_s02_002", "speaker": "lin_yao", "text": "Node nine complete. The incident site has left my index. I know there was an accident, but not where I stood.", "scene_id": "scn_silence_02_null_room", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s02_002"},
+        {"id": "ln_s02_003", "speaker": "zhou_heng", "text": "Node ten complete. I know closure was mutual. I no longer remember why we trusted each other to carry it out.", "scene_id": "scn_silence_02_null_room", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s02_003"},
+        {"id": "ln_s02_004", "speaker": "lin_yao", "text": "Because the signatures are current and the reasons are in the risk statement. Memory can leave. The operation remains auditable.", "scene_id": "scn_silence_02_null_room", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s02_004"},
+        {"id": "ln_s02_005", "speaker": "zhou_heng", "text": "I say my name again, as if leaving a label for the stranger about to wake. Zhou Heng, maintenance audit.", "scene_id": "scn_silence_02_null_room", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s02_005"},
+        {"id": "ln_s02_006", "speaker": "lin_yao", "text": "Lin Yao, signal architecture. Node eleven complete. I'm sorry. Why did I just apologize to you?", "scene_id": "scn_silence_02_null_room", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s02_006"},
+        {"id": "ln_s02_007", "speaker": "zhou_heng", "text": "I don't know. We don't have to chase it. We agreed not to use what is disappearing to demand a new explanation.", "scene_id": "scn_silence_02_null_room", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s02_007"},
+        {"id": "ln_s02_008", "speaker": "lin_yao", "text": "The wall says the last step removes cross-indexes. We'll remember the work tonight, but not the part we held together.", "scene_id": "scn_silence_02_null_room", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s02_008"},
+        {"id": "ln_s02_009", "speaker": "zhou_heng", "text": "I confirm the final hash. Every window outside goes dark. The signal leaves no farewell because it was never a person.", "scene_id": "scn_silence_02_null_room", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s02_009"},
+        {"id": "ln_s02_010", "speaker": "lin_yao", "text": "Process complete. Please show identification. I need to confirm the person who carried out this maintenance with me.", "scene_id": "scn_silence_02_null_room", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s02_010"},
+        {"id": "ln_s02_011", "speaker": "zhou_heng", "text": "I hand over my badge. She reads my name calmly. The gesture feels repeated, but I can't find the first time.", "scene_id": "scn_silence_02_null_room", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s02_011"},
+        {"id": "ln_s02_012", "speaker": "lin_yao", "text": "The record shows mutual consent and no unfinished step. That is enough. Familiarity isn't evidence.", "scene_id": "scn_silence_02_null_room", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s02_012"}
+      ]
+    },
+    {
+      "id": "scn_silence_03_morning_platform",
+      "route_scope": "silence",
+      "title": "Morning Platform",
+      "lines": [
+        {"id": "ln_s03_001", "speaker": "zhou_heng", "text": "By morning, the glass was dry. The report says anomaly closed, shared index nulled. I understand every word and see no image behind it.", "scene_id": "scn_silence_03_morning_platform", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s03_001"},
+        {"id": "ln_s03_002", "speaker": "lin_yao", "text": "The system gap is entering sealed remediation. The report holds no personal content. Thank you for your work last night.", "scene_id": "scn_silence_03_morning_platform", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s03_002"},
+        {"id": "ln_s03_003", "speaker": "zhou_heng", "text": "I should thank her too, but I don't know for what. Instead, I confirm that the tools and checklist she returns are complete.", "scene_id": "scn_silence_03_morning_platform", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s03_003"},
+        {"id": "ln_s03_004", "speaker": "lin_yao", "text": "This stylus is yours. You left it outside the null room, probably because there was no transparent surface inside.", "scene_id": "scn_silence_03_morning_platform", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s03_004"},
+        {"id": "ln_s03_005", "speaker": "zhou_heng", "text": "When I take it, I leave her the space on my left without thinking. The habit has no explanation, and doesn't need to become one.", "scene_id": "scn_silence_03_morning_platform", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s03_005"},
+        {"id": "ln_s03_006", "speaker": "lin_yao", "text": "Have we met before? Sorry. That question may cross the boundary created by last night's disposition.", "scene_id": "scn_silence_03_morning_platform", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s03_006"},
+        {"id": "ln_s03_007", "speaker": "zhou_heng", "text": "The record says there is no need to pursue the private portion. Let's call this our first formal meeting. I'm Zhou Heng.", "scene_id": "scn_silence_03_morning_platform", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s03_007"},
+        {"id": "ln_s03_008", "speaker": "lin_yao", "text": "Lin Yao. My train is here, and I have a review to file. Perhaps we'll share another work order someday.", "scene_id": "scn_silence_03_morning_platform", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s03_008"},
+        {"id": "ln_s03_009", "speaker": "zhou_heng", "text": "07:41 flashes in the door reflection. I take it for an ordinary clock. The numbers don't catch me or ask me to turn around.", "scene_id": "scn_silence_03_morning_platform", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s03_009"},
+        {"id": "ln_s03_010", "speaker": "lin_yao", "text": "Goodbye, Auditor Zhou. Last night's choice has been carried out. We don't need to reopen it with guesses.", "scene_id": "scn_silence_03_morning_platform", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s03_010"},
+        {"id": "ln_s03_011", "speaker": "zhou_heng", "text": "I watch the train leave. The city after rain is clear enough to hold a blank we once chose together.", "scene_id": "scn_silence_03_morning_platform", "route_scope": "silence", "estimated_seconds": 11, "voice_cue_id": "vc_ln_s03_011"}
+      ]
+    },
+    {
+      "id": "scn_signal_01_service_tunnel",
+      "route_scope": "signal",
+      "title": "Service Tunnel",
+      "lines": [
+        {"id": "ln_g01_001", "speaker": "zhou_heng", "text": "I choose a controlled channel. The old cache gets sealed. The new channel inherits none of its authority and assumes no lasting consent.", "scene_id": "scn_signal_01_service_tunnel", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g01_001"},
+        {"id": "ln_g01_002", "speaker": "lin_yao", "text": "I consent to the attempt, with failure conditions first. Identity mismatch, unresponsive endpoint, timeout, or lost audit closes it immediately.", "scene_id": "scn_signal_01_service_tunnel", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g01_002"},
+        {"id": "ln_g01_003", "speaker": "zhou_heng", "text": "Sixty seconds per window. Enough bandwidth for structured descriptions, not raw images, sound, touch, or background renewal.", "scene_id": "scn_signal_01_service_tunnel", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g01_003"},
+        {"id": "ln_g01_004", "speaker": "lin_yao", "text": "Independent keys, confirmed on separate devices. Open, refuse, expire, and revoke all enter an append-only audit chain.", "scene_id": "scn_signal_01_service_tunnel", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g01_004"},
+        {"id": "ln_g01_005", "speaker": "zhou_heng", "text": "Silence stores nothing. No reply means no consent. One successful window grants no permission for the next.", "scene_id": "scn_signal_01_service_tunnel", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g01_005"},
+        {"id": "ln_g01_006", "speaker": "lin_yao", "text": "If one person is unconscious or offline, the other can only close. No waiting queue, no export of the absent person's history.", "scene_id": "scn_signal_01_service_tunnel", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g01_006"},
+        {"id": "ln_g01_007", "speaker": "zhou_heng", "text": "We retain only descriptions chosen together. The first could read: Platform Seventeen. We found each other during the incident.", "scene_id": "scn_signal_01_service_tunnel", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g01_007"},
+        {"id": "ln_g01_008", "speaker": "lin_yao", "text": "Remove “found each other.” It implies a debt. Use this: we used paired buffering and left the platform together.", "scene_id": "scn_signal_01_service_tunnel", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g01_008"},
+        {"id": "ln_g01_009", "speaker": "zhou_heng", "text": "Agreed. A description states what both can confirm. It infers no feeling, and neither of us can revise it alone.", "scene_id": "scn_signal_01_service_tunnel", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g01_009"},
+        {"id": "ln_g01_010", "speaker": "lin_yao", "text": "The old cache requested migration of all sensory frames. Policy denied it. Good. It has finally met a boundary that works.", "scene_id": "scn_signal_01_service_tunnel", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g01_010"},
+        {"id": "ln_g01_011", "speaker": "zhou_heng", "text": "I confirm the first key on my device. Consent applies to this build only. A rebuild requires both of us again.", "scene_id": "scn_signal_01_service_tunnel", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g01_011"},
+        {"id": "ln_g01_012", "speaker": "lin_yao", "text": "Second key confirmed. The channel enters isolated testing and closes in sixty seconds, whether or not we finish speaking.", "scene_id": "scn_signal_01_service_tunnel", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g01_012"}
+      ]
+    },
+    {
+      "id": "scn_signal_02_controlled_link",
+      "route_scope": "signal",
+      "title": "Controlled Link",
+      "lines": [
+        {"id": "ln_g02_001", "speaker": "zhou_heng", "text": "When it opens, the glass shows only two fine lines. No platform, no heart rate. At last it looks like a tool, not a wound in memory.", "scene_id": "scn_signal_02_controlled_link", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g02_001"},
+        {"id": "ln_g02_002", "speaker": "lin_yao", "text": "Audit shows two endpoints and no bypass. Send a test description first. Nothing from the incident.", "scene_id": "scn_signal_02_controlled_link", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g02_002"},
+        {"id": "ln_g02_003", "speaker": "zhou_heng", "text": "I write: I am at this end of the controlled channel at 00:12, and I am willing to wait for your explicit reply.", "scene_id": "scn_signal_02_controlled_link", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g02_003"},
+        {"id": "ln_g02_004", "speaker": "lin_yao", "text": "I reply: I am at the other end. Identity matches. I consent to receive this description during the current window.", "scene_id": "scn_signal_02_controlled_link", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g02_004"},
+        {"id": "ln_g02_005", "speaker": "zhou_heng", "text": "No third endpoint, hidden cache, or system interpreting our pauses as data. The audit chain is quieter than I expected.", "scene_id": "scn_signal_02_controlled_link", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g02_005"},
+        {"id": "ln_g02_006", "speaker": "lin_yao", "text": "The old cache is requesting a replay of the platform. Policy denied the raw sensory export, but pressure is still climbing.", "scene_id": "scn_signal_02_controlled_link", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g02_006"},
+        {"id": "ln_g02_007", "speaker": "zhou_heng", "text": "Don't raise the threshold. Let it fail by the rule. If the channel survives only by loosening the boundary, it closes now.", "scene_id": "scn_signal_02_controlled_link", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g02_007"},
+        {"id": "ln_g02_008", "speaker": "lin_yao", "text": "One identity digest drifted. The change is small, but it crossed our limit. Auto-close triggered. Keys are being destroyed.", "scene_id": "scn_signal_02_controlled_link", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g02_008"},
+        {"id": "ln_g02_009", "speaker": "zhou_heng", "text": "Every light goes dark. No residual frame, no delayed message. The system doesn't even preserve the sentence I hadn't sent.", "scene_id": "scn_signal_02_controlled_link", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g02_009"},
+        {"id": "ln_g02_010", "speaker": "lin_yao", "text": "This failure is a good result. The constraints are real, and we can still stand here together after the channel closes.", "scene_id": "scn_signal_02_controlled_link", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g02_010"},
+        {"id": "ln_g02_011", "speaker": "zhou_heng", "text": "Open it once more? Not to force success. Only to test whether two active requests create an entirely new session.", "scene_id": "scn_signal_02_controlled_link", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g02_011"},
+        {"id": "ln_g02_012", "speaker": "lin_yao", "text": "I consent to one more sixty-second window. We wait ten seconds first, so one choice doesn't slide automatically into the next.", "scene_id": "scn_signal_02_controlled_link", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g02_012"}
+      ]
+    },
+    {
+      "id": "scn_signal_03_dawn_rooftop",
+      "route_scope": "signal",
+      "title": "Rooftop at Dawn",
+      "lines": [
+        {"id": "ln_g03_001", "speaker": "zhou_heng", "text": "The second window kept one shared description, then closed on time. The rain was easing, and the city glass returned to ordinary reflections.", "scene_id": "scn_signal_03_dawn_rooftop", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g03_001"},
+        {"id": "ln_g03_002", "speaker": "lin_yao", "text": "The old cache is sealed out of routing. The new channel inherited no old data, only the sentence we chose together.", "scene_id": "scn_signal_03_dawn_rooftop", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g03_002"},
+        {"id": "ln_g03_003", "speaker": "zhou_heng", "text": "We used paired buffering and left Platform Seventeen together. A short sentence, enough to share memory without swallowing either boundary.", "scene_id": "scn_signal_03_dawn_rooftop", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g03_003"},
+        {"id": "ln_g03_004", "speaker": "lin_yao", "text": "Everything else enters isolated review. No automatic recovery, no automatic deletion. Every disposition needs fresh dual consent.", "scene_id": "scn_signal_03_dawn_rooftop", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g03_004"},
+        {"id": "ln_g03_005", "speaker": "zhou_heng", "text": "The channel resolves our cache, not the system gap. Hiding it in maintenance only leaves the next rain to find it for someone else.", "scene_id": "scn_signal_03_dawn_rooftop", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g03_005"},
+        {"id": "ln_g03_006", "speaker": "lin_yao", "text": "I'll file a sealed disclosure with the patch and every audit hash. Seventy-two hours to remediate, then the gap notice publishes automatically.", "scene_id": "scn_signal_03_dawn_rooftop", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g03_006"},
+        {"id": "ln_g03_007", "speaker": "zhou_heng", "text": "A seal with a deadline isn't silence. Someone can verify that we meet it. I consent to those terms.", "scene_id": "scn_signal_03_dawn_rooftop", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g03_007"},
+        {"id": "ln_g03_008", "speaker": "lin_yao", "text": "The deadline is committed to an external clock. No internal administrator can extend it alone. In seventy-two hours, the facts leave this roof.", "scene_id": "scn_signal_03_dawn_rooftop", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g03_008"},
+        {"id": "ln_g03_009", "speaker": "zhou_heng", "text": "The controlled channel still exists, but it is closed now. I find that more reassuring than a connection that never ends.", "scene_id": "scn_signal_03_dawn_rooftop", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g03_009"},
+        {"id": "ln_g03_010", "speaker": "lin_yao", "text": "If you want to reach me tomorrow, send an ordinary message. Don't let the glass speak for us, or mistake emergency access for intimacy.", "scene_id": "scn_signal_03_dawn_rooftop", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g03_010"},
+        {"id": "ln_g03_011", "speaker": "zhou_heng", "text": "I promise to open the channel only with your explicit consent. After dawn, we start with a connection either of us can close.", "scene_id": "scn_signal_03_dawn_rooftop", "route_scope": "signal", "estimated_seconds": 11, "voice_cue_id": "vc_ln_g03_011"}
+      ]
+    }
+  ],
+  "choices": [
+    {
+      "id": "choice_common_01_disposition",
+      "scene_id": "scn_common_06_decision_bridge",
+      "route_scope": "common",
+      "prompt": "Confirm together how the anomalous signal will be handled.",
+      "options": [
+        {"id": "option_truth_publish", "text": "Publish the truth: disclose the system gap while protecting private memory.", "target_route_id": "route_truth", "target_scene_id": "scn_truth_01_observatory"},
+        {"id": "option_silence_close", "text": "Close the signal: null it completely and lose the memory shared between them.", "target_route_id": "route_silence", "target_scene_id": "scn_silence_01_blackout_corridor"},
+        {"id": "option_signal_control", "text": "Build a channel: seal the old cache and create a revocable controlled link.", "target_route_id": "route_signal", "target_scene_id": "scn_signal_01_service_tunnel"}
+      ]
+    }
+  ]
+}

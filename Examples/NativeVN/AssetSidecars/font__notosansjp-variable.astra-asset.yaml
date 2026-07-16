@@ -1,0 +1,21 @@
+schema: astra.asset.v1
+id: asset:/font/notosansjp-variable
+source: Assets/Fonts/NotoSansJP-Variable.ttf
+source_hash: sha256:c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f
+type: font.ttf
+license: OFL-1.1
+importer: astra.import.font
+font:
+  family: Noto Sans JP
+  face_index: 0
+  subset: cjk-production
+  coverage:
+    - { start: 32, end: 126 }
+    - { start: 12288, end: 12543 }
+    - { start: 13312, end: 40959 }
+    - { start: 65280, end: 65519 }
+cook:
+  processor: astra.cook.font
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

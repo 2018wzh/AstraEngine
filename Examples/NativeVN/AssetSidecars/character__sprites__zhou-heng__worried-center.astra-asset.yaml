@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/zhou-heng/worried-center
+source: Visual/Characters/Sprites/zhou-heng/worried-center.png
+source_hash: sha256:9bdfb218c871cf0d546d38615bb89a4ac1f16b9fd950d3610aa897ff40ef46b0
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

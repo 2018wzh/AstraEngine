@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/lin-yao/neutral-listen
+source: Visual/Characters/Sprites/lin-yao/neutral-listen.png
+source_hash: sha256:b6fa8aa4aa043cadc725b8c9c1c1c34e50b2815f71cef452ced8e803da880125
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

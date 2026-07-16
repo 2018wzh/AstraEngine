@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/ui/message
+source: Visual/UI/message.png
+source_hash: sha256:2b5cc71c536d64dc0eee6401fbb000b2f0693dbd372e46641064062645a639e7
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

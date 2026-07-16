@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/zhou-heng/guarded-recorder
+source: Visual/Characters/Sprites/zhou-heng/guarded-recorder.png
+source_hash: sha256:e39cbbbd4217ac9b2026a20f80b71e93ab483e19d2817cec5cde903910ab4967
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

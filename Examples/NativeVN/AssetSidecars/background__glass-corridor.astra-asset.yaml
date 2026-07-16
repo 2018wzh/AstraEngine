@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/background/glass-corridor
+source: Visual/Backgrounds/glass-corridor.png
+source_hash: sha256:28c4ee6a47550ce1f3862d098477988aed79aa5ee5574fe6985191d3898cf83a
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

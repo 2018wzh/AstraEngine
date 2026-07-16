@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/lin-yao/neutral-center
+source: Visual/Characters/Sprites/lin-yao/neutral-center.png
+source_hash: sha256:e1697a9a725ecbc432e07c0d33489e61cada0adddb0eb4cd8afd039cb75bd22d
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

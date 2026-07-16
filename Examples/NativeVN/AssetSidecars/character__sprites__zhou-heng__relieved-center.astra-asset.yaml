@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/zhou-heng/relieved-center
+source: Visual/Characters/Sprites/zhou-heng/relieved-center.png
+source_hash: sha256:49d60379ab523c1e682dfb689d5408a6909ad91c03162aa5f837cecd24423963
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

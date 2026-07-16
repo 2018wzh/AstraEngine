@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-labelledby="save-icon-title">
+  <title id="save-icon-title">Save</title>
+  <path d="M5 4.5h11l3 3v12H5z"/>
+  <path d="M8 4.5v6h8v-6M8 19.5v-5h8v5"/>
+</svg>

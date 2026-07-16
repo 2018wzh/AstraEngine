@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/ui/backlog
+source: Visual/UI/backlog.png
+source_hash: sha256:7cb3ee49917ae4e6a5b708990096c3d50181e5571623d6e14b4b780f9c527082
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

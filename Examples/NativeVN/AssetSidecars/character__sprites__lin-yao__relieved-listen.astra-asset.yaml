@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/lin-yao/relieved-listen
+source: Visual/Characters/Sprites/lin-yao/relieved-listen.png
+source_hash: sha256:7c1315abaf02e25a70b6873368e550d2c973e1a5d244228891dd4b2d23aaddcf
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

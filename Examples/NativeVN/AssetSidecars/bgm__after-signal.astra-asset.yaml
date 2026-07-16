@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/bgm/after-signal
+source: Audio/Distribution/bgm/after-signal.ogg
+source_hash: sha256:585dd35966afa3a48a6f5da2d443d5c48323d9650712caf295a731910a3c7983
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

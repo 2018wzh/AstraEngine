@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/ui/route-chart
+source: Visual/UI/route-chart.png
+source_hash: sha256:7de7a13afa353ec13173f770212f73976d27c3f95625dbac7bcab0710511b192
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

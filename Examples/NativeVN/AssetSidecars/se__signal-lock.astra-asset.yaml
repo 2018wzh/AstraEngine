@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/signal-lock
+source: Audio/Distribution/se/signal-lock.ogg
+source_hash: sha256:b5ef63679f4cb290d210586e9cbb7a2d54e9bf6e6e7d079a712969dabd4e257a
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

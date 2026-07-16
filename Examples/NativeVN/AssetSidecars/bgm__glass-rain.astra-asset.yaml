@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/bgm/glass-rain
+source: Audio/Distribution/bgm/glass-rain.ogg
+source_hash: sha256:8aa81183f8005a4ac39be9784383b39c424cb949f5ad5d5bdd1bd635f6a8e7ed
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

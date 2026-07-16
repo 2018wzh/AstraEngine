@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/lin-yao/focused-center
+source: Visual/Characters/Sprites/lin-yao/focused-center.png
+source_hash: sha256:dc8cf300fbfeb9dc25a53d35dd05d7a6026026243bc34158660e5a8f0f7529b5
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

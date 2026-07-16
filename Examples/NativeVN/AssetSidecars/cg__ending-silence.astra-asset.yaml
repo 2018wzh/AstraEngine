@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/cg/ending-silence
+source: Visual/CG/ending-silence.png
+source_hash: sha256:b608f7132435476b8bbd21ff58917ca4d4ef66cfa29057be8e8ab6a8291d18e6
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

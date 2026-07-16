@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/bgm/carrier-noise
+source: Audio/Distribution/bgm/carrier-noise.ogg
+source_hash: sha256:2c7ec40cabf27d86913f82f0d8f1e0cf620ae6b56c68aeed7079f3672f8793cf
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

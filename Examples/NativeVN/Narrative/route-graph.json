@@ -1,0 +1,109 @@
+{
+  "schema": "astra.nativevn.flagship.route_graph.v1",
+  "story_id": "signal_in_the_glass_rain",
+  "entry_scene_id": "scn_common_01_glass_train",
+  "routes": [
+    {
+      "id": "route_common",
+      "route_scope": "common",
+      "entry_scene_id": "scn_common_01_glass_train",
+      "scene_ids": [
+        "scn_common_01_glass_train",
+        "scn_common_02_archive_lobby",
+        "scn_common_03_signal_booth",
+        "scn_common_04_rain_trace",
+        "scn_common_05_memory_room",
+        "scn_common_06_decision_bridge"
+      ],
+      "next_choice_id": "choice_common_01_disposition",
+      "terminal_id": null
+    },
+    {
+      "id": "route_truth",
+      "route_scope": "truth",
+      "entry_scene_id": "scn_truth_01_observatory",
+      "scene_ids": [
+        "scn_truth_01_observatory",
+        "scn_truth_02_public_array",
+        "scn_truth_03_after_rain"
+      ],
+      "next_choice_id": null,
+      "terminal_id": "terminal_truth_public_gap"
+    },
+    {
+      "id": "route_silence",
+      "route_scope": "silence",
+      "entry_scene_id": "scn_silence_01_blackout_corridor",
+      "scene_ids": [
+        "scn_silence_01_blackout_corridor",
+        "scn_silence_02_null_room",
+        "scn_silence_03_morning_platform"
+      ],
+      "next_choice_id": null,
+      "terminal_id": "terminal_silence_shared_memory_lost"
+    },
+    {
+      "id": "route_signal",
+      "route_scope": "signal",
+      "entry_scene_id": "scn_signal_01_service_tunnel",
+      "scene_ids": [
+        "scn_signal_01_service_tunnel",
+        "scn_signal_02_controlled_link",
+        "scn_signal_03_dawn_rooftop"
+      ],
+      "next_choice_id": null,
+      "terminal_id": "terminal_signal_controlled_channel"
+    }
+  ],
+  "choices": [
+    {
+      "id": "choice_common_01_disposition",
+      "scene_id": "scn_common_06_decision_bridge",
+      "route_scope": "common",
+      "options": [
+        {
+          "id": "option_truth_publish",
+          "target_route_id": "route_truth",
+          "target_scene_id": "scn_truth_01_observatory"
+        },
+        {
+          "id": "option_silence_close",
+          "target_route_id": "route_silence",
+          "target_scene_id": "scn_silence_01_blackout_corridor"
+        },
+        {
+          "id": "option_signal_control",
+          "target_route_id": "route_signal",
+          "target_scene_id": "scn_signal_01_service_tunnel"
+        }
+      ]
+    }
+  ],
+  "terminals": [
+    {
+      "id": "terminal_truth_public_gap",
+      "route_id": "route_truth",
+      "ending_kind": "truth",
+      "outcome": "The system gap is publicly disclosed with redacted personal memory evidence."
+    },
+    {
+      "id": "terminal_silence_shared_memory_lost",
+      "route_id": "route_silence",
+      "ending_kind": "silence",
+      "outcome": "The signal is closed and the pair lose their shared memory index."
+    },
+    {
+      "id": "terminal_signal_controlled_channel",
+      "route_id": "route_signal",
+      "ending_kind": "signal",
+      "outcome": "A revocable, dual-consent, audited channel replaces the orphaned cache."
+    }
+  ],
+  "invariants": {
+    "single_branch_point": true,
+    "terminal_per_branch": 1,
+    "terminal_ids_unique": true,
+    "cycles_allowed": false,
+    "all_routes_reachable": true
+  }
+}

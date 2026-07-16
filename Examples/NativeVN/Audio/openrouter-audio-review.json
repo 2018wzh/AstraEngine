@@ -1,0 +1,1063 @@
+{
+  "asset_count": 25,
+  "selection": {
+    "required_input_modality": "audio",
+    "strategy": "capability_and_region_probe",
+    "selected_model": "xiaomi/mimo-v2.5",
+    "rationale": "OpenRouter audio-capable structured model verified in the active region; auto and higher-tier audio endpoints failed capability or regional preflight."
+  },
+  "assets": [
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "notes_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "glass-rain",
+      "kind": "bgm",
+      "response_sha256": "46d9a7a3f0a986c6190744ac0fec12e82bdf0405966b9758169cef0bffe19ee1",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Venice",
+      "source_sha256": "8aa81183f8005a4ac39be9784383b39c424cb949f5ad5d5bdd1bd635f6a8e7ed",
+      "summary": "The asset is a low-frequency, pulsating drone with a synthetic, textured quality suitable for a restrained sci-fi atmosphere. The loop is seamless with no audible clicks, pops, or discontinuities at the seam. The integrated loudness and true peak are within safe limits. The noise and carrier texture are intentional stylistic elements and do not constitute defects. No clipping or broken attack/tail detected.",
+      "usage": {
+        "completion_tokens": 1093,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 1002
+        },
+        "cost": 0.00039716,
+        "cost_details": {
+          "upstream_inference_completions_cost": 0.00030604,
+          "upstream_inference_cost": 0.00039716,
+          "upstream_inference_prompt_cost": 9.112e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 665,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 22,
+          "video_tokens": 0
+        },
+        "total_tokens": 1758
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "status_to_decision",
+        "notes_to_summary",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "carrier-noise",
+      "kind": "bgm",
+      "response_sha256": "b89d17a1416bfa46bad8e08143930e56144624ac1b71ca66c7bace99e56d337d",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "2c7ec40cabf27d86913f82f0d8f1e0cf620ae6b56c68aeed7079f3672f8793cf",
+      "summary": "No unintended silence, clipping, clicks, discontinuities, harsh digital artifacts, broken attack/tail, excessive noise, or stereo imbalance detected. The track is a consistent, atmospheric drone with subtle, intentional carrier noise and modulation. The loop seam is clean and undetectable, with the ending reconnecting smoothly to the beginning. The asset fits the declared role of a restrained, sci-fi background BGM, providing a subtle, non-intrusive sonic texture.",
+      "usage": {
+        "completion_tokens": 140,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 4.2308e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 3.92e-05,
+          "upstream_inference_cost": 4.2308e-05,
+          "upstream_inference_prompt_cost": 3.108e-06
+        },
+        "is_byok": false,
+        "prompt_tokens": 963,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 960,
+          "video_tokens": 0
+        },
+        "total_tokens": 1103
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "notes_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "thin-line",
+      "kind": "bgm",
+      "response_sha256": "34c4d4f648d56340593ebf6e90958e81d236b3efc430395bfc1cf28e5f1152ba",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "20e3c4886747aa4e7dc10c8ee0405c7ecc293833dd799b982b8fa34beca7f546",
+      "summary": "No clipping, no clicks, no harsh digital artifacts, no broken attack/tail, no excessive noise, and no stereo imbalance detected. The integrated loudness and true peak are within acceptable limits. The track consists of a consistent ambient drone with subtle textural elements, fitting the atmospheric role of a science-fiction visual novel. The loop seam is practically seamless with a maximum delta of 0.00052059, ensuring a clean reconnection. No concrete audible defects or role mismatch found.",
+      "usage": {
+        "completion_tokens": 126,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 0.00015414,
+        "cost_details": {
+          "upstream_inference_completions_cost": 3.528e-05,
+          "upstream_inference_cost": 0.00015414,
+          "upstream_inference_prompt_cost": 0.00011886
+        },
+        "is_byok": false,
+        "prompt_tokens": 849,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 0,
+          "video_tokens": 0
+        },
+        "total_tokens": 975
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "reason_to_summary",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "after-signal",
+      "kind": "bgm",
+      "response_sha256": "01532033a52a4a0c5fc9c1e5fe174d2f92f63f09821d6c6fc2588da3e062aad1",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Parasail",
+      "source_sha256": "585dd35966afa3a48a6f5da2d443d5c48323d9650712caf295a731910a3c7983",
+      "summary": "The audio is a continuous, low-frequency drone with a subtle, rhythmic pulsing and a slight digital texture. It fits the sci-fi visual novel role perfectly, providing a tense, atmospheric background. There are no unintended silences, clipping, clicks, discontinuities, harsh digital artifacts, broken attacks or tails, excessive noise, or stereo imbalance. The loop seam is virtually imperceptible, with a maximum delta of 0.00139284, ensuring a clean reconnection. The automated measurements are within acceptable ranges for this type of atmospheric BGM.",
+      "usage": {
+        "completion_tokens": 172,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 0.00014446,
+        "cost_details": {
+          "upstream_inference_completions_cost": 4.816e-05,
+          "upstream_inference_cost": 0.00014446,
+          "upstream_inference_prompt_cost": 9.63e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 702,
+        "prompt_tokens_details": {
+          "audio_tokens": 488,
+          "cache_write_tokens": 0,
+          "cached_tokens": 22,
+          "video_tokens": 0
+        },
+        "total_tokens": 874
+      }
+    },
+    {
+      "attempt_count": 2,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "reason_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "truth",
+      "kind": "stinger",
+      "response_sha256": "8c9f92746317b39cd94f2b6dfc19a1893d25888e1fb5555fa2dae56c173e9527",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "DeepInfra",
+      "source_sha256": "072c905ca838b825fda86dda2868e20706e8aef33d367502f36e401fffb41c5e",
+      "summary": "The audio asset is a clean, atmospheric stinger suitable for a sci-fi visual novel. It features a low-frequency drone transitioning into a dramatic, slightly digital impact sound, fitting the 'Truth' title and 'restrained' tone. There are no audible defects such as clipping, clicks, or broken tails. The integrated loudness and true peak levels are within safe limits. The digital texture is consistent with the genre and not a defect.",
+      "usage": {
+        "completion_tokens": 1232,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 1147
+        },
+        "cost": 0.0025632,
+        "cost_details": {
+          "upstream_inference_completions_cost": 0.002464,
+          "upstream_inference_cost": 0.0025632,
+          "upstream_inference_prompt_cost": 9.92e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 248,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 0,
+          "video_tokens": 0
+        },
+        "total_tokens": 1480
+      }
+    },
+    {
+      "attempt_count": 2,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "notes_to_summary",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "silence",
+      "kind": "stinger",
+      "response_sha256": "75abb64d37f3e950b005a5ef78b4bb9a5a21561ad07bcbdb3b9c23052973e825",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "fc8db5aeada835c71ed700428ca0412440afec753bcb6b6c0b32a366c8a0e6b7",
+      "summary": "The asset is a short, non-looping stinger titled 'Silence'. The audio consists of a low, resonant boom followed by a clean, sharp metallic impact, which then decays naturally into silence. This structure is intentional and fits the dramatic, punctuating role of a stinger. The automated measurements are within a reasonable range for this type of sound effect, and no clipping was detected. There are no audible defects such as unintended silence, clicks, discontinuities, harsh artifacts, broken attack/tail, excessive noise, or stereo imbalance. The ending is a clean, natural decay to silence, appropriate for a non-looping stinger. The role is fully appropriate for a restrained 12+ sci-fi visual novel.",
+      "usage": {
+        "completion_tokens": 180,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 8.92976e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 5.04e-05,
+          "upstream_inference_cost": 8.92976e-05,
+          "upstream_inference_prompt_cost": 3.88976e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 466,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 192,
+          "video_tokens": 0
+        },
+        "total_tokens": 646
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "reason_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "signal",
+      "kind": "stinger",
+      "response_sha256": "c6b5ac01737d8aea24f240f558303558af89fcbe38a2ca30cded8b50d227ad96",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "ab07954f0f76192c3b49cc62970d00f36e1afafc8f0f016efa28ac0c8725d75c",
+      "summary": "Audio asset 'Signal' is a single-shot stinger (non-loop) with no unintended silence, clipping, clicks, discontinuities, harsh digital artifacts, broken attack/tail, excessive noise, or stereo imbalance. The integrated loudness of -12.26 LUFS and true peak of -5.0 dBTP are within acceptable range, and zero clipped samples confirm no digital clipping. The sound features a low-frequency drone with a descending digital artifact/glitch effect, which is appropriate for a science-fiction visual novel context. As a non-looping stinger, the ending does not need to reconnect to the beginning, and the tail decays naturally. The asset fits its declared role as a sci-fi stinger.",
+      "usage": {
+        "completion_tokens": 170,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 8.73376e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 4.76e-05,
+          "upstream_inference_cost": 8.73376e-05,
+          "upstream_inference_prompt_cost": 3.97376e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 472,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 192,
+          "video_tokens": 0
+        },
+        "total_tokens": 642
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "status_to_decision",
+        "notes_to_summary",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "rain-window",
+      "kind": "se",
+      "response_sha256": "5f597cab51882d7c8add66c874f0ace865edf7aafda98893286c13f62bf4844b",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "40097a9ce1a7c4d4f88f2f3cf3f77172c1b8aaeebb354282bd00586f817bdfa4",
+      "summary": "The audio is a clear, naturalistic recording of rain falling on a surface, likely a window. The stereo image is balanced and immersive. The integrated loudness and true peak are well within safe limits for a 12+ application, with no clipping. The sound envelope is smooth, with no unintended silence, clicks, or harsh digital artifacts. The carrier noise is consistent with the rain texture. The file's declared purpose as a non-looping sound effect is perfectly fulfilled by the content. As a non-looping SE, loop seam is not applicable.",
+      "usage": {
+        "completion_tokens": 151,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 4.57744e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 4.228e-05,
+          "upstream_inference_cost": 4.57744e-05,
+          "upstream_inference_prompt_cost": 3.4944e-06
+        },
+        "is_byok": false,
+        "prompt_tokens": 464,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 448,
+          "video_tokens": 0
+        },
+        "total_tokens": 615
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "status_to_decision",
+        "notes_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "distant-thunder",
+      "kind": "se",
+      "response_sha256": "6bccec7f46431e01c8a7a09ebd573fb4c4964da59053b3d80963b1927d474567",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "2cb20584ab7f5c9bfb851e8cd48b8d67cdf637b854b5988ec897d637aa1a659d",
+      "summary": "The audio is a single, deep, impactful sound effect, suitable for a dramatic 'distant thunder' or explosion role in a sci-fi visual novel. It has a clean attack, natural decay, and no unintended silence, clipping, clicks, discontinuities, harsh artifacts, or stereo imbalance. The provided integrated loudness of -20.13 LUFS and true peak of -4.55 dBTP are within acceptable limits. As a non-looping sound effect, loop connectivity is not applicable.",
+      "usage": {
+        "completion_tokens": 116,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 7.03976e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 3.248e-05,
+          "upstream_inference_cost": 7.03976e-05,
+          "upstream_inference_prompt_cost": 3.79176e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 459,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 192,
+          "video_tokens": 0
+        },
+        "total_tokens": 575
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "reason_to_summary",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "fluorescent-hum",
+      "kind": "se",
+      "response_sha256": "43cca645f5151d0e2e00cf4bc9c341b217bb7f72429a19dc46531d7845b08136",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Parasail",
+      "source_sha256": "5c015d8814e63eab0155eb257b649ffae4ba3803337698d07bc06e40224ea32f",
+      "summary": "The audio is a continuous, low-frequency hum that perfectly matches the declared role of a fluorescent light sound effect. There are no unintended silences, clipping, clicks, discontinuities, harsh digital artifacts, broken attacks or tails, excessive noise, or stereo imbalance. The automated measurements are within acceptable ranges for a sound effect. Since it is not a looping BGM, the loop seam check is not applicable.",
+      "usage": {
+        "completion_tokens": 140,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 7.012e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 3.92e-05,
+          "upstream_inference_cost": 7.012e-05,
+          "upstream_inference_prompt_cost": 3.092e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 235,
+        "prompt_tokens_details": {
+          "audio_tokens": 26,
+          "cache_write_tokens": 0,
+          "cached_tokens": 22,
+          "video_tokens": 0
+        },
+        "total_tokens": 375
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "notes_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "radio-static",
+      "kind": "se",
+      "response_sha256": "86d6063b07b633e9f64ba79ecf1567a71efcf9b827b293d1156ccd2da9dcc1de",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "DeepInfra",
+      "source_sha256": "71828b28682884cb166ad7e3dbda3f705a4249bf50d3517f50ce8d9c9fd45840",
+      "summary": "The audio asset is a suitable radio static sound effect for a sci-fi visual novel. It features consistent static noise without unintended silence, clipping, or harsh digital artifacts. The loudness levels are appropriate (-16.45 LUFS) and the true peak is safe (-8.5 dBTP). The sound fits the declared role of a sound effect (SE) and does not require looping.",
+      "usage": {
+        "completion_tokens": 1546,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 1543
+        },
+        "cost": 0.0031816,
+        "cost_details": {
+          "upstream_inference_completions_cost": 0.003092,
+          "upstream_inference_cost": 0.0031816,
+          "upstream_inference_prompt_cost": 8.96e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 224,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 0,
+          "video_tokens": 0
+        },
+        "total_tokens": 1770
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "notes_to_summary",
+        "issues_to_defects",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "signal-lock",
+      "kind": "se",
+      "response_sha256": "850704c36c508d97d77ebc00598323bb1485d8dd057964fc39cc12556de7a535",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "b5ef63679f4cb290d210586e9cbb7a2d54e9bf6e6e7d079a712969dabd4e257a",
+      "summary": "The audio file contains a 3.5-second descending, filtered, sci-fi electronic tone. The sound has a clear, intentional carrier noise and digital texture. There are no unintended silences, clipping, clicks, discontinuities, broken attack/tail, excessive noise, or stereo imbalance. The automated measurements are within acceptable ranges. The sound fits the declared role of a sound effect (se) for a restrained 12+ science-fiction visual novel, evoking a signal transmission or device activation. Since it is not a looping BGM, the loop seam is not applicable.",
+      "usage": {
+        "completion_tokens": 146,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 7.57176e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 4.088e-05,
+          "upstream_inference_cost": 7.57176e-05,
+          "upstream_inference_prompt_cost": 3.48376e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 437,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 192,
+          "video_tokens": 0
+        },
+        "total_tokens": 583
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "reason_to_summary",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "terminal-wake",
+      "kind": "se",
+      "response_sha256": "bb38e0e36bbe1ee75f3a8c5059695caadb3c44c874d6ef1b302e02cc67589c39",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Parasail",
+      "source_sha256": "aea5b2edc10feb07db35d98485b481f4729f3e30ba9dc161ab498313cc8d624d",
+      "summary": "The audio is a short, synthesized sci-fi sound effect featuring a rising pitch sweep followed by a brief decay. It is free of unintended silence, clipping, clicks, discontinuities, harsh digital artifacts, broken attack or tail, excessive noise, and stereo imbalance. The sound fits the declared role of a terminal wake-up or activation sound effect for a sci-fi visual novel. Since it is not a looping BGM, the loop seam check is not applicable.",
+      "usage": {
+        "completion_tokens": 145,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 6.905e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 4.06e-05,
+          "upstream_inference_cost": 6.905e-05,
+          "upstream_inference_prompt_cost": 2.845e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 218,
+        "prompt_tokens_details": {
+          "audio_tokens": 15,
+          "cache_write_tokens": 0,
+          "cached_tokens": 23,
+          "video_tokens": 0
+        },
+        "total_tokens": 363
+      }
+    },
+    {
+      "attempt_count": 2,
+      "contract_normalizations": [
+        "status_to_decision",
+        "notes_to_summary",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "terminal-key",
+      "kind": "se",
+      "response_sha256": "46a22e2143215c0fa6b6151463b5debd622b942edb5f3b9eedd2bda8d7a2cc96",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "83bee3813e0378b367dd511309b94084a12db6ae894ba71e52fd18845a19afc8",
+      "summary": "The asset is a short, impactful sound effect (SE) representing a terminal key press. The sound has a clear, sharp digital 'click' attack with a brief, clean decay and no harsh artifacts or clipping. It fits the declared role of a sci-fi terminal key sound effect perfectly. The stereo image is balanced, and there is no unintended silence or excessive noise. The sound is appropriately restrained for a 12+ visual novel context.",
+      "usage": {
+        "completion_tokens": 120,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 6.66176e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 3.36e-05,
+          "upstream_inference_cost": 6.66176e-05,
+          "upstream_inference_prompt_cost": 3.30176e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 424,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 192,
+          "video_tokens": 0
+        },
+        "total_tokens": 544
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "status_to_decision",
+        "reason_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "terminal-confirm",
+      "kind": "se",
+      "response_sha256": "fd1724b2826e19e5e3fab157dbcf0bab045225acb91df8814f05895b15f67fc2",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Venice",
+      "source_sha256": "5124bd8cff58907e2cd820c220788654f993776ce0d6fdfa93c5b3cfbf6fa5c3",
+      "summary": "Clean, short digital confirmation sound effect with a sharp attack and natural decay. No clipping, clicks, or excessive noise detected. Fits the sci-fi terminal UI role perfectly.",
+      "usage": {
+        "completion_tokens": 684,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 646
+        },
+        "cost": 0.00021843,
+        "cost_details": {
+          "upstream_inference_completions_cost": 0.00019152,
+          "upstream_inference_cost": 0.00021843,
+          "upstream_inference_prompt_cost": 2.691e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 207,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 23,
+          "video_tokens": 0
+        },
+        "total_tokens": 891
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "notes_to_summary",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "terminal-deny",
+      "kind": "se",
+      "response_sha256": "5884e5e4ba502180fd674a2f8b46d1d7811013b04dd601bf034c5588f68e0e43",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "ff843f1240c817be0ba1070edf1e874e8fc7b4270ff3900402b5ba92a7b66077",
+      "summary": "Automated measurements are within acceptable ranges (integrated loudness -12.57 LUFS, true peak -7.48 dBTP, no clipped samples). The provided audio is a very brief, low-frequency hum or drone (approximately 1.5 seconds). It functions effectively as a short, non-looping sound effect or atmospheric tone. No unintended silence, clipping, clicks, discontinuities, harsh digital artifacts, broken attack/tail, excessive noise, or stereo imbalance are audible. The sound is clean and consistent. Since it is declared as a non-looping sound effect (loop=false), the loop-seam criterion does not apply. The minimal, restrained character fits the declared 12+ science-fiction visual novel role as a subtle atmospheric or UI element.",
+      "usage": {
+        "completion_tokens": 208,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 9.25176e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 5.824e-05,
+          "upstream_inference_cost": 9.25176e-05,
+          "upstream_inference_prompt_cost": 3.42776e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 433,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 192,
+          "video_tokens": 0
+        },
+        "total_tokens": 641
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "notes_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "message-arrive",
+      "kind": "se",
+      "response_sha256": "bc969584e70e6bb5bc039c28ecdf82f3863c8d4f5999f701163784ac0365fa04",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "f59a68427d3cf4311c20cee3dfb90fcebc9526e1ae26fb0783b13fd1b072b85e",
+      "summary": "The asset is a single, well-executed sound effect. The Doppler-style 'woo-hoo' is clear and intentional. It serves its purpose as a non-looping sound effect for a sci-fi visual novel without any technical defects.",
+      "usage": {
+        "completion_tokens": 263,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 0.0001080576,
+        "cost_details": {
+          "upstream_inference_completions_cost": 7.364e-05,
+          "upstream_inference_cost": 0.0001080576,
+          "upstream_inference_prompt_cost": 3.44176e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 434,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 192,
+          "video_tokens": 0
+        },
+        "total_tokens": 697
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "reason_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "choice-open",
+      "kind": "se",
+      "response_sha256": "52e07d1acf55b08ef6ed6c49e431e63c5d6e00d65977520ff2cbed1f79752531",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "16139422dbdd1f401645dc1d633a3afb0dbfbeea1441530c7c644aecc5116123",
+      "summary": "The audio asset is a sound effect depicting a brief, high-pitched, electronic chime or selection confirmation tone. It features a clean, sharp attack and a quick, digital decay with no unintended silence, clipping, clicks, discontinuities, harsh digital artifacts, broken tails, excessive noise, or stereo imbalance. The automated measurements are within normal ranges for a transient effect. The sound fits the declared role of a 'Choice Open' sound effect (se) for a visual novel, suitable for UI feedback. As a non-looping sound effect, the loop seam check is not applicable.",
+      "usage": {
+        "completion_tokens": 134,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 7.13776e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 3.752e-05,
+          "upstream_inference_cost": 7.13776e-05,
+          "upstream_inference_prompt_cost": 3.38576e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 430,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 192,
+          "video_tokens": 0
+        },
+        "total_tokens": 564
+      }
+    },
+    {
+      "attempt_count": 4,
+      "contract_normalizations": [
+        "reason_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "choice-select",
+      "kind": "se",
+      "response_sha256": "d55bd191d217a24639a63c4e277026dc1f1b52c286fa50161e0aca5eb9119107",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "550959830c2b444e3cae435bc3697c8f826359284326097e31d9e8c59b758a35",
+      "summary": "The audio is a brief, clean, and distinct sound effect suitable for a choice selection in a 12+ sci-fi visual novel. It has a clear digital or electronic quality, a short duration, and no unintended silence, clipping, clicks, discontinuities, harsh artifacts, broken attacks/tails, excessive noise, or stereo imbalance. The integrated loudness and true peak levels are within a reasonable range for an SE asset. The role is appropriate and the asset fulfills its intended function.",
+      "usage": {
+        "completion_tokens": 133,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 4.43352e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 3.724e-05,
+          "upstream_inference_cost": 4.43352e-05,
+          "upstream_inference_prompt_cost": 7.0952e-06
+        },
+        "is_byok": false,
+        "prompt_tokens": 427,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 384,
+          "video_tokens": 0
+        },
+        "total_tokens": 560
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "reason_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "archive-open",
+      "kind": "se",
+      "response_sha256": "fa99d2a41c8256cbd2e7badb92cfc3c64be82064f9729514587eef2249d63030",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Parasail",
+      "source_sha256": "d9c5a7a5c4c4a0ab4da207371cf4bd81cf4911ccafccf41da8e9d18f86a250fc",
+      "summary": "The audio is a short, clean sound effect with no clipping, clicks, or harsh artifacts. It fits the declared role of a sci-fi sound effect (archive open). The integrated loudness and true peak are within acceptable limits. No looping issues apply as loop=false.",
+      "usage": {
+        "completion_tokens": 70,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 4.721e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 1.96e-05,
+          "upstream_inference_cost": 4.721e-05,
+          "upstream_inference_prompt_cost": 2.761e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 212,
+        "prompt_tokens_details": {
+          "audio_tokens": 10,
+          "cache_write_tokens": 0,
+          "cached_tokens": 23,
+          "video_tokens": 0
+        },
+        "total_tokens": 282
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "reason_to_summary",
+        "issues_to_defects",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "door-pressure",
+      "kind": "se",
+      "response_sha256": "08388007add27ac8f9072b3ffa85bb9f497002f7cd0df17e6227b2c676bcdc6a",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "57e038594627a781edc63c03988ef5fd818eac75db12f555ac4b9c6f6ea0c3e9",
+      "summary": "The sound effect features two clean, deep impact sounds separated by intentional silence, with no clipping, clicks, discontinuities, harsh digital artifacts, broken attack or tail, excessive noise, or stereo imbalance. It is appropriate for a 'Pressure Door' SE in a 12+ sci-fi visual novel. The automated measurements confirm no clipped samples and reasonable loudness levels.",
+      "usage": {
+        "completion_tokens": 96,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 6.29776e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 2.688e-05,
+          "upstream_inference_cost": 6.29776e-05,
+          "upstream_inference_prompt_cost": 3.60976e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 446,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 192,
+          "video_tokens": 0
+        },
+        "total_tokens": 542
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "reason_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "footstep-metal",
+      "kind": "se",
+      "response_sha256": "746523970349be96025d70c535b71b6a68c6c66f71e51b7d49065f0ad0837bb3",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "45422d0788e8183a980145b022da75cc2212df3af29694de10717ddb32a2bd59",
+      "summary": "The sound is a single, clear metal footstep on a hard surface, matching the declared role 'Metal Footstep'. It features a sharp initial impact and a natural, smooth metallic ring tail. There is no clipping, distortion, or harsh digital artifacts. The attack and tail are intact, and no unintended silence, clicks, or discontinuities are present. The stereo image is centered and balanced. The brief silence-shaped envelope following the impact is intentional and appropriate for a footstep sound. The automated measurements confirm no clipping and appropriate loudness. No defects are present.",
+      "usage": {
+        "completion_tokens": 130,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 7.05376e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 3.64e-05,
+          "upstream_inference_cost": 7.05376e-05,
+          "upstream_inference_prompt_cost": 3.41376e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 432,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 192,
+          "video_tokens": 0
+        },
+        "total_tokens": 562
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "reason_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "glass-fracture",
+      "kind": "se",
+      "response_sha256": "2ba34482930b575d600efa82fdb44b1cc34fec36bb149d171e929d7b10593e46",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Xiaomi",
+      "source_sha256": "0f8d4c1f32e5b60f32f431b585797c57c301404b5414d9ca1fc6d0b74d96cb0e",
+      "summary": "The sound effect is a clear, sharp glass shattering impact with a natural decay tail. It is well-suited for a science-fiction visual novel as a distinct, non-looping sound effect. No unintended silence, clipping, clicks, discontinuities, or harsh digital artifacts are present. The stereo field is balanced, and the provided automated measurements (integrated loudness of -23.1 LUFS, true peak of -10.86 dBTP, and 0 clipped samples) confirm a well-controlled dynamic range with no clipping. The sound ends with a clean, natural tail, and since it is not a looping asset, the loop seam check is not applicable. No concrete audible defect or role mismatch is detected.",
+      "usage": {
+        "completion_tokens": 204,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 9.26576e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 5.712e-05,
+          "upstream_inference_cost": 9.26576e-05,
+          "upstream_inference_prompt_cost": 3.55376e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 442,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 192,
+          "video_tokens": 0
+        },
+        "total_tokens": 646
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "status_to_decision",
+        "reason_to_summary",
+        "empty_defects_from_pass",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "memory-flare",
+      "kind": "se",
+      "response_sha256": "2e1dcf136f9e26b0af3432dc54ed78f9d30f0832156720b93e81f622bd6c1a03",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Venice",
+      "source_sha256": "a7f4dccd9c5df28ce178ed24e9317d6760736113aa4f554c191c472b729631e7",
+      "summary": "The sound effect is clean, fits the sci-fi visual novel role, and has no audible defects such as clipping, clicks, or excessive noise.",
+      "usage": {
+        "completion_tokens": 925,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 908
+        },
+        "cost": 0.00028621,
+        "cost_details": {
+          "upstream_inference_completions_cost": 0.000259,
+          "upstream_inference_cost": 0.00028621,
+          "upstream_inference_prompt_cost": 2.721e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 222,
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cache_write_tokens": 0,
+          "cached_tokens": 43,
+          "video_tokens": 0
+        },
+        "total_tokens": 1147
+      }
+    },
+    {
+      "attempt_count": 1,
+      "contract_normalizations": [
+        "verdict_to_decision",
+        "reason_to_summary",
+        "fit_from_decision"
+      ],
+      "decision": "pass",
+      "defects": [],
+      "fit_for_role": true,
+      "id": "scene-transition",
+      "kind": "se",
+      "response_sha256": "bb7f83836474e3fd402930a1d1ce557617ad6c2ffc24d47630f756aad61b259f",
+      "selected_model": "xiaomi/mimo-v2.5",
+      "selected_provider": "Parasail",
+      "source_sha256": "18b5ecf2f33a9125552046af319637b9fa430540f74087313d5a4538726e2a82",
+      "summary": "The audio is a short, clean synthesized transition effect with a smooth attack and tail. There are no unintended silences, clipping, clicks, discontinuities, harsh digital artifacts, broken attack or tail, excessive noise, or stereo imbalance. The sound fits the declared role of a scene transition perfectly.",
+      "usage": {
+        "completion_tokens": 112,
+        "completion_tokens_details": {
+          "audio_tokens": 0,
+          "image_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "cost": 5.92e-05,
+        "cost_details": {
+          "upstream_inference_completions_cost": 3.136e-05,
+          "upstream_inference_cost": 5.92e-05,
+          "upstream_inference_prompt_cost": 2.784e-05
+        },
+        "is_byok": false,
+        "prompt_tokens": 213,
+        "prompt_tokens_details": {
+          "audio_tokens": 11,
+          "cache_write_tokens": 0,
+          "cached_tokens": 22,
+          "video_tokens": 0
+        },
+        "total_tokens": 325
+      }
+    }
+  ],
+  "decision": "pass",
+  "human_review_replaced": false,
+  "id": "nativevn-flagship-openrouter-audio-review",
+  "request": {
+    "input_format": "mp3_128k_temporary",
+    "reasoning_effort": "disabled_for_bounded_qa",
+    "requested_model": "xiaomi/mimo-v2.5",
+    "response_format": "json_object",
+    "seed_base": 20260715,
+    "temperature": 0
+  },
+  "schema": "astra.nativevn_flagship.openrouter_audio_review.v1"
+}

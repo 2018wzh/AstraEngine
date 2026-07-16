@@ -1,0 +1,1047 @@
+{
+  "schema": "nativevn.flagship_visual_prompts.v1",
+  "id": "nativevn-flagship-visual-prompts",
+  "records": [
+    {
+      "id": "prompt.visual.backgrounds.apartment-studio.png",
+      "artifact": "Visual/Backgrounds/apartment-studio.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "apartment-studio",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "35dc73160450b31638672855f50c2dd4ac3bed2286e925628114a41294c39645"
+    },
+    {
+      "id": "prompt.visual.backgrounds.archive-room.png",
+      "artifact": "Visual/Backgrounds/archive-room.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "archive-room",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "668be2ad9bd999030b68267424d7fb7576f284f607ebe839e784248f6310719e"
+    },
+    {
+      "id": "prompt.visual.backgrounds.dawn-city.png",
+      "artifact": "Visual/Backgrounds/dawn-city.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "dawn-city",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "441adc22c201d594a26f5fb2275948ef0f21bffafd7c28d6ea630c7fd351e7dd"
+    },
+    {
+      "id": "prompt.visual.backgrounds.glass-corridor.png",
+      "artifact": "Visual/Backgrounds/glass-corridor.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "glass-corridor",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "28c4ee6a47550ce1f3862d098477988aed79aa5ee5574fe6985191d3898cf83a"
+    },
+    {
+      "id": "prompt.visual.backgrounds.metro-station.png",
+      "artifact": "Visual/Backgrounds/metro-station.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "metro-station",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "be1d735d95b78e1450ff7982bc505782d27b9a3d0e980123939f40f25f95b96d"
+    },
+    {
+      "id": "prompt.visual.backgrounds.rain-street.png",
+      "artifact": "Visual/Backgrounds/rain-street.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "rain-street",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "bcd2bcf25f15202c4489ea21b7bd5d3c5135245106f7e55c4bb7efa2988dafbf"
+    },
+    {
+      "id": "prompt.visual.backgrounds.rooftop-antenna.png",
+      "artifact": "Visual/Backgrounds/rooftop-antenna.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "rooftop-antenna",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "2ecaa957d1e7dd180f4aa93c06063da258f25814ae51a6303609ec3bb2154b85"
+    },
+    {
+      "id": "prompt.visual.backgrounds.underground-relay.png",
+      "artifact": "Visual/Backgrounds/underground-relay.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "underground-relay",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "d2e0638e4043e79346382de1e18083233ffc4d1b01f2646da23d12a31222223c"
+    },
+    {
+      "id": "prompt.visual.cg.anomaly-reveal.png",
+      "artifact": "Visual/CG/anomaly-reveal.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "anomaly-reveal",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png",
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "2cc60376bdaf1b92fdea172eaeb51077a17bb78067b66ea7afe3a91b6f09ae28"
+    },
+    {
+      "id": "prompt.visual.cg.ending-signal.png",
+      "artifact": "Visual/CG/ending-signal.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "ending-signal",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png",
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "72790b6b201534e08d9fc1ec3d81ea5ac7419039830da3783a8c6a8615c38f94"
+    },
+    {
+      "id": "prompt.visual.cg.ending-silence.png",
+      "artifact": "Visual/CG/ending-silence.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "ending-silence",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png",
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "b608f7132435476b8bbd21ff58917ca4d4ef66cfa29057be8e8ab6a8291d18e6"
+    },
+    {
+      "id": "prompt.visual.cg.ending-truth.png",
+      "artifact": "Visual/CG/ending-truth.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "ending-truth",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png",
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "4bf36cb723bbd57ec3e5fc62b3f4b591a8f063e7d2b29acc43ecfed8ed85bb56"
+    },
+    {
+      "id": "prompt.visual.cg.opening-signal.png",
+      "artifact": "Visual/CG/opening-signal.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "opening-signal",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png",
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "108cfe2632e790e4f248275edc0c5f8c0a71ddf766d7502c6d3785796ff88fba"
+    },
+    {
+      "id": "prompt.visual.cg.reunion.png",
+      "artifact": "Visual/CG/reunion.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "reunion",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png",
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "a45375ca454498944744a91d99e28e60bbb06fc4c8e58b985576a94a05db69ba"
+    },
+    {
+      "id": "prompt.visual.characters.reference.lin-yao-turnaround.png",
+      "artifact": "Visual/Characters/Reference/lin-yao-turnaround.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "lin-yao-turnaround",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "da38206905cac0150387d0a05179a30e6d1da162b70a1fe47ae42e04a1c479ff"
+    },
+    {
+      "id": "prompt.visual.characters.reference.zhou-heng-turnaround.png",
+      "artifact": "Visual/Characters/Reference/zhou-heng-turnaround.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "zhou-heng-turnaround",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "c25e41c99b145a90af50f105dfb7580847e96bf01a22ded60b06c94e6d5062bf"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.determined-analyzer.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/determined-analyzer.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "determined-analyzer",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "c9b56dc4182a691f6262023b6e470947ba02de9bb5254c9e9b8c953f4597842d"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.determined-center.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/determined-center.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "determined-center",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "3e2c90c8d3e14d54cec9cedaf996aa2d14c9dc37bad089dff16af629d65fb2c6"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.determined-listen.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/determined-listen.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "determined-listen",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "7166e31fa61838e7c4119838b0c161ae66fca8b23128c8d8df7f0ee19eaa3efc"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.focused-analyzer.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/focused-analyzer.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "focused-analyzer",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "408095a79ff6494a3ecb7fa55f99fcc1265eb72d21c2dd6044a2234426af068a"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.focused-center.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/focused-center.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "focused-center",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "dc8cf300fbfeb9dc25a53d35dd05d7a6026026243bc34158660e5a8f0f7529b5"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.focused-listen.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/focused-listen.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "focused-listen",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "ed4add2887a607c3644efd830bb1fbcbfb874e315aff91fd3a1a984c43aed357"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.guarded-analyzer.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/guarded-analyzer.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "guarded-analyzer",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "bbbf4c94d91ba994f301d0f305922952fc64c2024e48638015f27182a002795e"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.guarded-center.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/guarded-center.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "guarded-center",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "93746f40b24bd84cced9a15c08cf27e2733187a9f8f85de0cfe591dd89389e9d"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.guarded-listen.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/guarded-listen.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "guarded-listen",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "0f871606eed5aec61a45aa744425b2fc8bd1c5f6442410bdf141387ec85e24fe"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.neutral-analyzer.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/neutral-analyzer.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "neutral-analyzer",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "79eacf64342010eba70f1c01f98195d91e84aff6fd18dbd36b935d30ef4555e1"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.neutral-center.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/neutral-center.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "neutral-center",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "e1697a9a725ecbc432e07c0d33489e61cada0adddb0eb4cd8afd039cb75bd22d"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.neutral-listen.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/neutral-listen.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "neutral-listen",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "b6fa8aa4aa043cadc725b8c9c1c1c34e50b2815f71cef452ced8e803da880125"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.relieved-analyzer.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/relieved-analyzer.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "relieved-analyzer",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "ee9bfda6a86573d8f7ef33dde42d162da8da0c1d52d42d03928eb1f2bd56edec"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.relieved-center.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/relieved-center.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "relieved-center",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "096c71d6e9da664cac7ae5ec3b678bb40992e41533719b703d1d9ceae378bf18"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.relieved-listen.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/relieved-listen.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "relieved-listen",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "7c1315abaf02e25a70b6873368e550d2c973e1a5d244228891dd4b2d23aaddcf"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.worried-analyzer.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/worried-analyzer.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "worried-analyzer",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "08814f581530300d07558d344e89a2b834b7c7022c66a42a412871c551618016"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.worried-center.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/worried-center.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "worried-center",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "445ae4fa03fae517c57fff4ba313693e753c3980d271b05444509a29fb092922"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.lin-yao.worried-listen.png",
+      "artifact": "Visual/Characters/Sprites/lin-yao/worried-listen.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "worried-listen",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "42c8fea622e3c95d9a92fd40e6ec59381f88494ff124c51236e6fa1125e425d5"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.determined-center.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/determined-center.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "determined-center",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "f544265ceb475c9809b566ec5120029e5df953f6a210b30e87060cea5b6b38a5"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.determined-listen.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/determined-listen.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "determined-listen",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "eca46fcc795131283bf7436f1e8d76324c85cd1fbe46d0cf499c4b7359fcbdcf"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.determined-recorder.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/determined-recorder.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "determined-recorder",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "8437a4926c9f6938433dfe162fb49e18c32212fa18a1c4140534220ebcf6212e"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.focused-center.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/focused-center.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "focused-center",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "210d6d2f4ca6d7dc8dc7746ab9ec2eb5d131295988788914382ce6658a1626a8"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.focused-listen.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/focused-listen.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "focused-listen",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "c91f7161047966921c04504de026b36596f29c4296c85724ea7f5cb698d6353b"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.focused-recorder.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/focused-recorder.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "focused-recorder",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "798bd469d1e6807068600dc5be89aa501324bce8bc15e1e6eb8288e4f07c3986"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.guarded-center.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/guarded-center.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "guarded-center",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "63ca33297519b5c376cdafd8f13917269c0f7ba459bbf4bdee53da4487f4ad08"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.guarded-listen.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/guarded-listen.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "guarded-listen",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "0f9d5fecd3d1c39666627fc9fe696ca7aaa7c59abc177daf3e857d0c0591d1eb"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.guarded-recorder.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/guarded-recorder.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "guarded-recorder",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "e39cbbbd4217ac9b2026a20f80b71e93ab483e19d2817cec5cde903910ab4967"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.neutral-center.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/neutral-center.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "neutral-center",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "13b915299701264600c9ee3fdd0abe116764544d3fbf32d4fc87fabddf988f58"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.neutral-listen.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/neutral-listen.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "neutral-listen",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "5d0675bda58fb5b00201f7b91d46e6be1e1a4d2504f8491157f282c5a03c676d"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.neutral-recorder.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/neutral-recorder.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "neutral-recorder",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "1eac942c8a13f8ad3d672f7df155798af5eef4b07b2abb8a7a4a25fd863b87ab"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.relieved-center.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/relieved-center.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "relieved-center",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "49d60379ab523c1e682dfb689d5408a6909ad91c03162aa5f837cecd24423963"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.relieved-listen.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/relieved-listen.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "relieved-listen",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "33941309ece4a848d48cc8fe8de67044d98dd57149d951fa917f9587bdd78d7a"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.relieved-recorder.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/relieved-recorder.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "relieved-recorder",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "e26ee78c0075e95426b0770ade8496240f1de651332f65a0e1381edc1f09ff24"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.worried-center.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/worried-center.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "worried-center",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "9bdfb218c871cf0d546d38615bb89a4ac1f16b9fd950d3610aa897ff40ef46b0"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.worried-listen.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/worried-listen.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "worried-listen",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "2344e6befd816012553d8ee6f26b80f0fb76f667ff601fe50e8d24d12c4a0947"
+    },
+    {
+      "id": "prompt.visual.characters.sprites.zhou-heng.worried-recorder.png",
+      "artifact": "Visual/Characters/Sprites/zhou-heng/worried-recorder.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "worried-recorder",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "a7e28ea9f41eeea6408b5eeff34e8b6a97cab8e559fff9f3b9bd0fa4a9649e58"
+    },
+    {
+      "id": "prompt.visual.endings.signal.png",
+      "artifact": "Visual/Endings/signal.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "signal",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png",
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "b1fbd1fc02596a0e62698d09fc925f9f155dd739368a6bd821d0b3bb03cc7663"
+    },
+    {
+      "id": "prompt.visual.endings.silence.png",
+      "artifact": "Visual/Endings/silence.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "silence",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png",
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "e6a6f56bcf924c4d0e0f1073fd39744839d79cc024a6a01318a7907cac5c686f"
+    },
+    {
+      "id": "prompt.visual.endings.truth.png",
+      "artifact": "Visual/Endings/truth.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "truth",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png",
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "89d01c9d241978b53282b57d402635126971e16e36a78760591993b6c83fb7f8"
+    },
+    {
+      "id": "prompt.visual.keyart.key-art.png",
+      "artifact": "Visual/KeyArt/key-art.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "key-art",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [
+        "Visual/Characters/Reference/lin-yao-turnaround.png",
+        "Visual/Characters/Reference/zhou-heng-turnaround.png"
+      ],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "9ebcefddeb0ffc02f6f9f01615ed96643c8a7de7cd4136d95c6c09c157751840"
+    },
+    {
+      "id": "prompt.visual.keyart.title-background.png",
+      "artifact": "Visual/KeyArt/title-background.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "title-background",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "970d72e6d435e9780386a2b249c480597fa97bc79ab2559920bb63eb884ac4f6"
+    },
+    {
+      "id": "prompt.visual.ui.backlog.png",
+      "artifact": "Visual/UI/backlog.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "backlog",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "7cb3ee49917ae4e6a5b708990096c3d50181e5571623d6e14b4b780f9c527082"
+    },
+    {
+      "id": "prompt.visual.ui.choice.png",
+      "artifact": "Visual/UI/choice.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "choice",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "c9b7a2bee966be38c6ad7636eec14fb84535cefbe5462fbeebcfdbf26d0d392a"
+    },
+    {
+      "id": "prompt.visual.ui.config.png",
+      "artifact": "Visual/UI/config.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "config",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "e9eb640c319cecf96a314f9e006bc00c13973a8ceaf875bbafdde91ee515a956"
+    },
+    {
+      "id": "prompt.visual.ui.gallery.png",
+      "artifact": "Visual/UI/gallery.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "gallery",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "f4f9a920718ed26e744c52a85619a38d5a3e22ab86353a48dfb23e4a2296f61f"
+    },
+    {
+      "id": "prompt.visual.ui.load.png",
+      "artifact": "Visual/UI/load.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "load",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "85925673846d4d8d7953c6d0d5d13d0900dea72a81b32c3800431e45c2693693"
+    },
+    {
+      "id": "prompt.visual.ui.message.png",
+      "artifact": "Visual/UI/message.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "message",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "2b5cc71c536d64dc0eee6401fbb000b2f0693dbd372e46641064062645a639e7"
+    },
+    {
+      "id": "prompt.visual.ui.route-chart.png",
+      "artifact": "Visual/UI/route-chart.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "route-chart",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "7de7a13afa353ec13173f770212f73976d27c3f95625dbac7bcab0710511b192"
+    },
+    {
+      "id": "prompt.visual.ui.save.png",
+      "artifact": "Visual/UI/save.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "save",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "b2d449bcfe70b4cf99d487b9effaa646407dd289ebee05a3a3055549e5754f2b"
+    },
+    {
+      "id": "prompt.visual.ui.title.png",
+      "artifact": "Visual/UI/title.png",
+      "prompt_family": "nativevn-rain-glass-production",
+      "prompt_parameters": {
+        "subject": "title",
+        "palette": "deep-navy-cyan-magenta",
+        "text": "forbidden"
+      },
+      "reference_assets": [],
+      "model": "openai-imagegen",
+      "selected": true,
+      "sha256": "898a5478e410faf1ccf18652db4d6b86587adba7e17109570e57a8ed42e0f1fb"
+    }
+  ],
+  "rejected": [
+    {
+      "private_alias": "private://generation/key-art-duplicate-figures.png",
+      "sha256": "83bc995c285519458098cfe6d5039d4115e0e891b0300c62c18be4036a8a82d9",
+      "reason": "duplicate_background_figures"
+    },
+    {
+      "private_alias": "private://generation/batch-network-failure",
+      "reason": "network_request_failed_no_artifact"
+    }
+  ]
+}

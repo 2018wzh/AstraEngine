@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/gallery/thumbnails/opening-signal
+source: Visual/Gallery/Thumbnails/opening-signal.png
+source_hash: sha256:3090f5852e3436110b5e0dce01dea9611301167fe726d1a1134a5e2083c1c29d
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

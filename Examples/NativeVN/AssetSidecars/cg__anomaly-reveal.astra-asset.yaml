@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/cg/anomaly-reveal
+source: Visual/CG/anomaly-reveal.png
+source_hash: sha256:2cc60376bdaf1b92fdea172eaeb51077a17bb78067b66ea7afe3a91b6f09ae28
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

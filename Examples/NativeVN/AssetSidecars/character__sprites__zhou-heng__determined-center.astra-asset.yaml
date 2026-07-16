@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/zhou-heng/determined-center
+source: Visual/Characters/Sprites/zhou-heng/determined-center.png
+source_hash: sha256:f544265ceb475c9809b566ec5120029e5df953f6a210b30e87060cea5b6b38a5
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

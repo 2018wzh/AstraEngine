@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/distant-thunder
+source: Audio/Distribution/se/distant-thunder.ogg
+source_hash: sha256:2cb20584ab7f5c9bfb851e8cd48b8d67cdf637b854b5988ec897d637aa1a659d
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

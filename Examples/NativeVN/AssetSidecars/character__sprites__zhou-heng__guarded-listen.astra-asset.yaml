@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/zhou-heng/guarded-listen
+source: Visual/Characters/Sprites/zhou-heng/guarded-listen.png
+source_hash: sha256:0f9d5fecd3d1c39666627fc9fe696ca7aaa7c59abc177daf3e857d0c0591d1eb
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

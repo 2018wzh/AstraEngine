@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/stinger/silence
+source: Audio/Distribution/stinger/silence.ogg
+source_hash: sha256:fc8db5aeada835c71ed700428ca0412440afec753bcb6b6c0b32a366c8a0e6b7
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

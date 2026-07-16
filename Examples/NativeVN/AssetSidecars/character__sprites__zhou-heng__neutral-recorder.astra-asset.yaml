@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/zhou-heng/neutral-recorder
+source: Visual/Characters/Sprites/zhou-heng/neutral-recorder.png
+source_hash: sha256:1eac942c8a13f8ad3d672f7df155798af5eef4b07b2abb8a7a4a25fd863b87ab
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

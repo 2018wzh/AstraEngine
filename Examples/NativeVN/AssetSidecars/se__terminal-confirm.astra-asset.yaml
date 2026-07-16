@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/terminal-confirm
+source: Audio/Distribution/se/terminal-confirm.ogg
+source_hash: sha256:5124bd8cff58907e2cd820c220788654f993776ce0d6fdfa93c5b3cfbf6fa5c3
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

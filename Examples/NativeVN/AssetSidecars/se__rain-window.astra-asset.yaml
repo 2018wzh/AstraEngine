@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/rain-window
+source: Audio/Distribution/se/rain-window.ogg
+source_hash: sha256:40097a9ce1a7c4d4f88f2f3cf3f77172c1b8aaeebb354282bd00586f817bdfa4
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

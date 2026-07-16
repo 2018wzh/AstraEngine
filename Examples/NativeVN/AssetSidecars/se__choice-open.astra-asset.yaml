@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/choice-open
+source: Audio/Distribution/se/choice-open.ogg
+source_hash: sha256:16139422dbdd1f401645dc1d633a3afb0dbfbeea1441530c7c644aecc5116123
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

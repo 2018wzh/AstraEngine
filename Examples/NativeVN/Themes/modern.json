@@ -2,18 +2,96 @@
   "schema": "astra.ui_theme_manifest.v1",
   "id": "astra.vn.theme.modern",
   "tokens": {
-    "surface.clear": { "color": [0, 0, 0, 0] },
-    "surface.dim": { "color": [8, 18, 30, 168] },
-    "surface.system": { "color": [18, 30, 50, 246] },
-    "panel.message": { "color": [24, 54, 82, 228] },
-    "panel.button": { "color": [46, 88, 124, 248] },
-    "panel.message.frame": { "nine_slice": { "asset": "asset:/background/apartment-night", "border": [24, 24, 24, 24] } },
-    "panel.choice.frame": { "nine_slice": { "asset": "asset:/background/apartment-night", "border": [24, 24, 24, 24] } },
-    "system.backdrop": { "asset": "asset:/background/apartment-night" },
-    "text.body": { "color": [248, 252, 255, 255] }
+    "surface.clear": {
+      "color": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "surface.dim": {
+      "color": [
+        8,
+        18,
+        30,
+        168
+      ]
+    },
+    "surface.system": {
+      "color": [
+        18,
+        30,
+        50,
+        246
+      ]
+    },
+    "panel.message": {
+      "color": [
+        24,
+        54,
+        82,
+        228
+      ]
+    },
+    "panel.button": {
+      "color": [
+        46,
+        88,
+        124,
+        248
+      ]
+    },
+    "panel.message.frame": {
+      "nine_slice": {
+        "asset": "asset:/ui/message",
+        "border": [
+          24,
+          24,
+          24,
+          24
+        ]
+      }
+    },
+    "panel.choice.frame": {
+      "nine_slice": {
+        "asset": "asset:/ui/choice",
+        "border": [
+          24,
+          24,
+          24,
+          24
+        ]
+      }
+    },
+    "system.backdrop": {
+      "asset": "asset:/key-art/title-background"
+    },
+    "text.body": {
+      "color": [
+        248,
+        252,
+        255,
+        255
+      ]
+    }
   },
   "high_contrast_tokens": {
-    "surface.system": { "color": [0, 8, 18, 255] },
-    "text.body": { "color": [255, 255, 255, 255] }
+    "surface.system": {
+      "color": [
+        0,
+        8,
+        18,
+        255
+      ]
+    },
+    "text.body": {
+      "color": [
+        255,
+        255,
+        255,
+        255
+      ]
+    }
   }
 }

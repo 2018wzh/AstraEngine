@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/lin-yao/determined-analyzer
+source: Visual/Characters/Sprites/lin-yao/determined-analyzer.png
+source_hash: sha256:c9b56dc4182a691f6262023b6e470947ba02de9bb5254c9e9b8c953f4597842d
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/zhou-heng/focused-listen
+source: Visual/Characters/Sprites/zhou-heng/focused-listen.png
+source_hash: sha256:c91f7161047966921c04504de026b36596f29c4296c85724ea7f5cb698d6353b
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

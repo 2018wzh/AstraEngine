@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/background/archive-room
+source: Visual/Backgrounds/archive-room.png
+source_hash: sha256:668be2ad9bd999030b68267424d7fb7576f284f607ebe839e784248f6310719e
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

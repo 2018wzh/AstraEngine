@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/voice/vc_ln_s02_003
+source: Audio/Voice/Distribution/zhou_heng/vc_ln_s02_003.ogg
+source_hash: sha256:1ead4772cda8a3b54ee120f206972f9a280087afb549f0e740213d4e528112c1
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

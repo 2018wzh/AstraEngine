@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/fluorescent-hum
+source: Audio/Distribution/se/fluorescent-hum.ogg
+source_hash: sha256:5c015d8814e63eab0155eb257b649ffae4ba3803337698d07bc06e40224ea32f
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

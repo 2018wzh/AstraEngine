@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/gallery/thumbnails/ending-card-silence
+source: Visual/Gallery/Thumbnails/ending-card-silence.png
+source_hash: sha256:5a275a88c32333c6d04c720a57a16706269bedb35490bd0a6600235e98b5ae39
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

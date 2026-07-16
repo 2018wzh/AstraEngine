@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/cg/reunion
+source: Visual/CG/reunion.png
+source_hash: sha256:a45375ca454498944744a91d99e28e60bbb06fc4c8e58b985576a94a05db69ba
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

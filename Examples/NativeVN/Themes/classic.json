@@ -2,16 +2,74 @@
   "schema": "astra.ui_theme_manifest.v1",
   "id": "astra.vn.theme.classic",
   "tokens": {
-    "surface.clear": { "color": [0, 0, 0, 0] },
-    "surface.dim": { "color": [8, 12, 22, 180] },
-    "surface.system": { "color": [12, 18, 30, 252] },
-    "panel.message": { "color": [18, 22, 34, 236] },
-    "panel.button": { "color": [38, 58, 84, 255] },
-    "system.backdrop": { "asset": "asset:/background/apartment-night" },
-    "text.body": { "color": [245, 245, 248, 255] }
+    "surface.clear": {
+      "color": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "surface.dim": {
+      "color": [
+        8,
+        12,
+        22,
+        180
+      ]
+    },
+    "surface.system": {
+      "color": [
+        12,
+        18,
+        30,
+        252
+      ]
+    },
+    "panel.message": {
+      "color": [
+        18,
+        22,
+        34,
+        236
+      ]
+    },
+    "panel.button": {
+      "color": [
+        38,
+        58,
+        84,
+        255
+      ]
+    },
+    "system.backdrop": {
+      "asset": "asset:/key-art/title-background"
+    },
+    "text.body": {
+      "color": [
+        245,
+        245,
+        248,
+        255
+      ]
+    }
   },
   "high_contrast_tokens": {
-    "surface.system": { "color": [0, 0, 0, 255] },
-    "text.body": { "color": [255, 255, 255, 255] }
+    "surface.system": {
+      "color": [
+        0,
+        0,
+        0,
+        255
+      ]
+    },
+    "text.body": {
+      "color": [
+        255,
+        255,
+        255,
+        255
+      ]
+    }
   }
 }

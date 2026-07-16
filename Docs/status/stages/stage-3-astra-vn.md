@@ -2,7 +2,7 @@
 
 Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astra` 仍是 canonical story source；AstraVN Core 持有 VN 权威语义，Luau policy 只处理表现、系统页和复杂演出。AstraVN 已迁到 `Engine/Source/Modules/AstraVN/` 并拆成多个功能 crate；`astra-vn` 只保留 Rust ABI dylib facade 和兼容 re-export。`NativeVnRuntimeProvider` 已作为同级 gameplay runtime provider 接入，AstraVN 仍保持 VN 语义，不作为 AstraEMU 或 AstraRPG 的基类。
 
-当前 Stage 3 是 `IN_PROGRESS`，不是 `DONE`。Migration 6 frontend 与 Migration 9 shared 1–3 已完成 focused implementation：`.astra` 使用 lossless token/CST/AST、固定 semantic passes、command registry、token source map、formatter 和 language-service adapter；共享 policy、component effects、versioned runtime envelope 与 async multi-session host 已落地。NativeVN 样例已收敛为两路线技术验收内容，并移除无明确再分发许可的 SAPI 配音。Stage 3 work item 不因此提前关闭：`S3-SCRIPT-01/02`、presentation、system UI、sample 和 Windows/Web Player 都必须等待同一 `.astrapkg` 的 formal native-input evidence。顶层还受 `S3-TSUI-INTERNAL-DEMO-01`、`S3-TSUI-GATE-01` 与 `S3-FLAGSHIP-DEMO-01` 阻断。
+当前 Stage 3 是 `IN_PROGRESS`，不是 `DONE`。Migration 6 frontend 与 Migration 9 shared 1–3 已完成 focused implementation：`.astra` 使用 lossless token/CST/AST、固定 semantic passes、command registry、token source map、formatter 和 language-service adapter；共享 policy、component effects、versioned runtime envelope 与 async multi-session host 已落地。旗舰项目已直接替换原两路线 NativeVN 技术样例，并加入 180 条用户授权的中文发行配音。Stage 3 work item 不因此提前关闭：`S3-SCRIPT-01/02`、presentation、system UI、sample 和 Windows/Web Player 都必须等待同一 `.astrapkg` 的 formal native-input evidence。顶层还受 `S3-TSUI-INTERNAL-DEMO-01`、`S3-TSUI-GATE-01` 与 `S3-FLAGSHIP-DEMO-01` 阻断。
 
 补充：`S3-TSUI-INTERNAL-DEMO-01` 的验收口径已提升为 full-resource classic playable bundle：`tsuinosora-internal-game` 必须完成全量 ProjectorRays dump coverage、全量资源转换 coverage、NativeVN `asset_roots`、asset sidecar、cooked asset package section、`asset.vfs_manifest`/`asset.catalog` package VFS evidence、同一 `.astrapkg` 派生 Windows/Web bundle manifest、`player.full_playable` live automation report 校验，以及原版/Demo 同 checkpoint 视觉截图对比。当前 repo-side pipeline 已落地 ProjectorRays 本地 dump adapter、脱敏 script source-map、Director reader-required preflight 外部 reader evidence、`demo-config-template`、带 `chunk_fourcc_counts`/`conversion_plan` 的 `tsuinosora.projectorrays_full_dump_report.v1`、`tsuinosora.projectorrays_converted_resources.v1` sidecar 校验、JSON-backed metadata chunk converter、`STXT` text converter、`Lscr` cast-member/source-number/CastScript/ParentScript source 映射和 malformed JSON numeric recovery、empty `Lscr` no-op metadata converter、`BITD` 1/16/32bpp PNG converter、8bpp `BITD` palette sidecar converter、KEY-bound `sndH`/`sndS` WAV converter、KEY-bound `ediM` `MACRZ` verified MP3 converter、score/metadata chunk 脱敏 converter、ProjectorRays `GO[...]` route identity 派生、ProjectorRays converted asset bridge、`tsuinosora.visual_screenshot_capture_report.v1`、`tsuinosora.visual_comparison_report.v1`、`capture_automation` 自动截图 intent/execution 脱敏记录、scenario refs package section、同 package Windows/Web bundle manifest、bundle 内原始分辨率 display config、Windows live window、`astra-player` Windows `SendInput` automation runner、player host consumed `TRACE` log 捕获、visual comparison hash 绑定、host conformance callback meter 和 release `player.full_playable` identity continuity 校验。私有 acceptance 命令是 `python Tools/TsuiNoSora/tsuinosora_tools.py internal-demo-bundle --config Examples/TsuiNoSora/.local/demo.config.json --repo-root .`；当前私有 dump 覆盖 2527 个 ProjectorRays binary chunk，2527 个 chunk 均有 converted evidence，`demo-slice` 可生成 28 条脱敏 route 的 NativeVN project/package input，`internal-demo-bundle` 已从同一个 `.astrapkg` 产出 Windows/Web bundle manifest，并能采集原版/Demo 同 checkpoint 截图且通过 title 视觉 comparison；最近一次 Windows live automation 中 28 次 `SendInput` 都被 player host consumed trace 证明。验收仍因 Windows live player 在真实输入后没有产生可见状态变化、automation transcript 未覆盖 28 条 full classic route、缺 required manual signoff 而 blocking，不能作为独立 milestone 标 `DONE`。`modern`、Patch-only 和 Runtime Patch/VFS 插件仍不属于该 milestone，但 full-resource conversion、原体验还原和 100% 可玩是该 milestone 的完成条件。
 
@@ -462,7 +462,7 @@ python Tools/check_docs.py
 
 **Depends On:** `S3-PRESENT-01`、`S3-SYSTEM-01`、`S2-MEDIA-04`
 
-**Target Paths:** `Examples/NativeVN/`、`Examples/NativeVN/scenarios/route_library.yaml`、`Examples/NativeVN/scenarios/route_rooftop.yaml`、`Engine/Source/Modules/AstraVN/astra-vn-package/tests/advanced_presentation.rs`、`Engine/Source/Programs/astra-cli/tests/target_platform.rs`
+**Target Paths:** `Examples/NativeVN/`、`Engine/Source/Modules/AstraVN/astra-vn-package/tests/advanced_presentation.rs`、`Engine/Source/Programs/astra-cli/tests/target_platform.rs`；旗舰项目的正式 scenario 待 Runtime/Player 基座门禁关闭后建立。
 
 **Steps:**
 
@@ -572,11 +572,11 @@ python Tools/check_docs.py
 
 **Status:** `IN_PROGRESS`
 
-**Goal:** 在独立 migration 中交付 15–20 分钟、三终局、中英双语、中文全配音和正式原创资产的旗舰 Demo。
+**Goal:** 交付 15–20 分钟、三终局、中英双语和正式原创资产的旗舰 Demo，并直接替换 `Examples/NativeVN`。当前以用户授权中文配音的发行形态接入真实 `.astra`、UI、localization、asset sidecar 和 Cook。
 
 **Depends On:** `S3-SAMPLE-01`、`S3-PLAYER-AUTOMATION-01`、[NativeVN Flagship Demo Migration](../../migrations/nativevn-flagship-demo-migration.md)
 
-**Current Evidence:** 本轮只保留两路线 NativeVN 技术验收样例。此前 WIP 中的三路线剧情、26 条 Windows SAPI 配音和大体量资源已移出提交候选；没有许可和 formal Windows/Web evidence 前不得标为 `DONE`。
+**Current Evidence:** 旗舰项目包含 180 条中英文对白、共通线和三个唯一终局、79 张视觉文件、9 张 UI 视觉稿、12 秒可重建视频、4 首 BGM、3 个 stinger、18 个 SE、180 条用户授权中文配音、SVG icon、alt text、prompt/provenance、manifest 和 review。真实项目进一步提供 `.astra` canonical story、双语 runtime localization、Yakui UI source、theme/controller、283 个 asset sidecar、显式 target/provider binding 和 package section。`python Tools/NativeVN/validate_content_pack.py` 与工具单元测试覆盖结构、双语引用、路线、媒体、hash、透明通道、音频、逐 cue 配音绑定、授权状态、项目绑定和公开树安全；OpenRouter 辅助试听报告仍不替代人工听审。状态为 `content_creation=complete`、`public_release_assets=ready_with_authorized_voice`、`engine_integration=cook_ready_with_voice`。本轮只形成真实 Cook/package evidence，不执行 Runtime 或 Player 测试；formal Windows/Web E3 前不得标为 `DONE`。
 
 ## 跨 Stage Observability follow-up
 

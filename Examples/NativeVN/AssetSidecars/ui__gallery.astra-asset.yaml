@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/ui/gallery
+source: Visual/UI/gallery.png
+source_hash: sha256:f4f9a920718ed26e744c52a85619a38d5a3e22ab86353a48dfb23e4a2296f61f
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

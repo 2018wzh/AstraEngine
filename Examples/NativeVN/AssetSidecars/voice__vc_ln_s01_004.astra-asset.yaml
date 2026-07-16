@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/voice/vc_ln_s01_004
+source: Audio/Voice/Distribution/lin_yao/vc_ln_s01_004.ogg
+source_hash: sha256:8165ca4f7d54533798d638b21b761e4eb4034c6dbfe9faf67c8a3d34cc0b3d19
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

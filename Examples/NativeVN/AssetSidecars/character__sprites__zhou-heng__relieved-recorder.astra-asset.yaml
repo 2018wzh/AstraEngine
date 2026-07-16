@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/zhou-heng/relieved-recorder
+source: Visual/Characters/Sprites/zhou-heng/relieved-recorder.png
+source_hash: sha256:e26ee78c0075e95426b0770ade8496240f1de651332f65a0e1381edc1f09ff24
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/key-art/title-background
+source: Visual/KeyArt/title-background.png
+source_hash: sha256:970d72e6d435e9780386a2b249c480597fa97bc79ab2559920bb63eb884ac4f6
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

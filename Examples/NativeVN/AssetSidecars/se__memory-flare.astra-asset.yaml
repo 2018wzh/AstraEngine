@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/memory-flare
+source: Audio/Distribution/se/memory-flare.ogg
+source_hash: sha256:a7f4dccd9c5df28ce178ed24e9317d6760736113aa4f554c191c472b729631e7
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

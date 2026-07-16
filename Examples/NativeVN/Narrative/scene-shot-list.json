@@ -1,0 +1,198 @@
+{
+  "schema": "astra.nativevn.flagship.scene_shot_list.v1",
+  "story_id": "signal_in_the_glass_rain",
+  "visual_rules": {
+    "aspect_ratio": "16:9",
+    "content_rating": "12+",
+    "camera_language": "restrained_static_frames_with_slow_parallax",
+    "signal_color": "cool_cyan_with_sparse_amber_checksum_marks",
+    "character_limit": 2,
+    "forbidden": [
+      "third_speaking_character",
+      "graphic_injury",
+      "readable_commercial_text",
+      "hard_cut_during_consent_confirmation"
+    ]
+  },
+  "scenes": [
+    {
+      "id": "scn_common_01_glass_train",
+      "route_scope": "common",
+      "location": "night train through the glass district",
+      "weather": "heavy rain",
+      "palette": "deep blue, sodium amber, wet silver",
+      "shots": [
+        {"id": "shot_c01_01", "framing": "wide", "subject": "train suspended between rain-covered towers", "motion": "slow lateral parallax", "purpose": "establish the glass city and isolation"},
+        {"id": "shot_c01_02", "framing": "insert", "subject": "07:41:09 pulse repeating in a window reflection", "motion": "three measured light beats", "purpose": "introduce the anomaly without a voice"},
+        {"id": "shot_c01_03", "framing": "two-shot", "subject": "Zhou Heng and Lin Yao divided by the dark window seam", "motion": "subtle train sway", "purpose": "stage recognition and guarded distance"}
+      ]
+    },
+    {
+      "id": "scn_common_02_archive_lobby",
+      "route_scope": "common",
+      "location": "old network archive lobby",
+      "weather": "rain visible through sealed facade",
+      "palette": "green-black glass, cold service white",
+      "shots": [
+        {"id": "shot_c02_01", "framing": "wide", "subject": "inactive archive desks reflected into false depth", "motion": "locked camera", "purpose": "make an empty public space feel watchful"},
+        {"id": "shot_c02_02", "framing": "over-shoulder", "subject": "invalid witness hash on Lin Yao's portable panel", "motion": "focus pull from badge to hash", "purpose": "turn the mystery into evidence"},
+        {"id": "shot_c02_03", "framing": "medium two-shot", "subject": "both standing outside the same pool of window light", "motion": "rain shadow moves across them", "purpose": "preserve distrust after the shared record appears"}
+      ]
+    },
+    {
+      "id": "scn_common_03_signal_booth",
+      "route_scope": "common",
+      "location": "shielded maintenance booth",
+      "weather": "rain muffled by insulation",
+      "palette": "matte charcoal, pale cyan diagnostics",
+      "shots": [
+        {"id": "shot_c03_01", "framing": "close two-shot", "subject": "two chairs facing one narrow service display", "motion": "no camera motion", "purpose": "force shared attention without forced intimacy"},
+        {"id": "shot_c03_02", "framing": "insert", "subject": "timestamp 07:41:09 beside a broken checksum ring", "motion": "ring advances then stops", "purpose": "identify the signal as unfinished data"},
+        {"id": "shot_c03_03", "framing": "profile", "subject": "Lin Yao reflected over Zhou Heng's missing timeline", "motion": "display refresh only", "purpose": "connect professional guilt to the erased interval"}
+      ]
+    },
+    {
+      "id": "scn_common_04_rain_trace",
+      "route_scope": "common",
+      "location": "facade inspection gallery",
+      "weather": "peak storm",
+      "palette": "black glass, cyan trace, white rain",
+      "shots": [
+        {"id": "shot_c04_01", "framing": "extreme wide", "subject": "trace crossing several towers through rainwater bridges", "motion": "controlled path reveal", "purpose": "show the city itself becoming the route"},
+        {"id": "shot_c04_02", "framing": "hands insert", "subject": "their hands near but not touching as the trace responds", "motion": "signal brightens within eighteen meters", "purpose": "visualize paired endpoints without romantic shorthand"},
+        {"id": "shot_c04_03", "framing": "split reflection", "subject": "diagnostic signature and fragmented corridor image", "motion": "alternating focus", "purpose": "separate public evidence from private memory"}
+      ]
+    },
+    {
+      "id": "scn_common_05_memory_room",
+      "route_scope": "common",
+      "location": "optically isolated memory review room",
+      "weather": "storm heard but not seen",
+      "palette": "soft gray, three restrained indicator colors",
+      "shots": [
+        {"id": "shot_c05_01", "framing": "symmetrical wide", "subject": "two seats and three unselected disposition panels", "motion": "locked camera", "purpose": "make the tradeoff legible and neutral"},
+        {"id": "shot_c05_02", "framing": "alternating close-ups", "subject": "each character states a boundary", "motion": "slow cuts after complete sentences", "purpose": "give consent language room to land"},
+        {"id": "shot_c05_03", "framing": "insert", "subject": "all three panels remain unselected", "motion": "indicators breathe at different rates", "purpose": "avoid visually endorsing a route"}
+      ]
+    },
+    {
+      "id": "scn_common_06_decision_bridge",
+      "route_scope": "common",
+      "location": "elevated glass bridge",
+      "weather": "storm pressure rising",
+      "palette": "city black, wet cyan, distant amber",
+      "shots": [
+        {"id": "shot_c06_01", "framing": "wide", "subject": "the pair centered above a field of lit windows", "motion": "slow push toward them", "purpose": "place the private choice inside public infrastructure"},
+        {"id": "shot_c06_02", "framing": "two-shot", "subject": "both repeat the consequences before the choice", "motion": "no motion", "purpose": "confirm shared agency"},
+        {"id": "shot_c06_03", "framing": "choice plate", "subject": "three plain text options with equal visual weight", "motion": "none until player input", "purpose": "present the only branch point"}
+      ]
+    },
+    {
+      "id": "scn_truth_01_observatory",
+      "route_scope": "truth",
+      "location": "decommissioned weather observatory",
+      "weather": "rain at maximum intensity",
+      "palette": "storm violet, monitor white",
+      "shots": [
+        {"id": "shot_t01_01", "framing": "wide", "subject": "old antenna dishes behind rain-streaked glass", "motion": "slow dish rotation", "purpose": "establish an independent uplink"},
+        {"id": "shot_t01_02", "framing": "insert", "subject": "public proof and private memory separated into two sealed layers", "motion": "layers lock one after another", "purpose": "make redaction concrete"},
+        {"id": "shot_t01_03", "framing": "two-shot", "subject": "dual attestation completed side by side", "motion": "brief cyan flare", "purpose": "show responsibility as a joint act"}
+      ]
+    },
+    {
+      "id": "scn_truth_02_public_array",
+      "route_scope": "truth",
+      "location": "public facade relay array",
+      "weather": "rain beginning to thin",
+      "palette": "cold white, warning amber, clean cyan",
+      "shots": [
+        {"id": "shot_t02_01", "framing": "city wide", "subject": "proof hash appearing across public panes", "motion": "wave travels outward", "purpose": "show disclosure without displaying private content"},
+        {"id": "shot_t02_02", "framing": "monitor insert", "subject": "patch escrow and evidence release share one countdown", "motion": "synchronized timers", "purpose": "show the managed exposure window"},
+        {"id": "shot_t02_03", "framing": "medium", "subject": "Zhou Heng and Lin Yao watch rather than celebrate", "motion": "rain shadows soften", "purpose": "keep the ending morally unsettled"}
+      ]
+    },
+    {
+      "id": "scn_truth_03_after_rain",
+      "route_scope": "truth",
+      "location": "street below the archive",
+      "weather": "light residual rain",
+      "palette": "clean gray, early blue",
+      "shots": [
+        {"id": "shot_t03_01", "framing": "street wide", "subject": "maintenance panes cycling to a public advisory", "motion": "slow pedestrian-free pan", "purpose": "show public consequence without adding characters"},
+        {"id": "shot_t03_02", "framing": "close two-shot", "subject": "their reflections finally occupy the same pane", "motion": "held frame", "purpose": "close the truth route on chosen proximity"}
+      ]
+    },
+    {
+      "id": "scn_silence_01_blackout_corridor",
+      "route_scope": "silence",
+      "location": "archive blackout corridor",
+      "weather": "rain heard through structure",
+      "palette": "near black, emergency amber",
+      "shots": [
+        {"id": "shot_s01_01", "framing": "long corridor", "subject": "lights extinguish behind the pair in sequence", "motion": "measured follow", "purpose": "visualize irreversible progress"},
+        {"id": "shot_s01_02", "framing": "memory insert", "subject": "abstract corridor geometry with no third figure", "motion": "brief unstable dissolve", "purpose": "show a shared fragment without creating a new actor"},
+        {"id": "shot_s01_03", "framing": "two-shot", "subject": "both maintain the purge controls", "motion": "slow indicator decay", "purpose": "keep the action mutual"}
+      ]
+    },
+    {
+      "id": "scn_silence_02_null_room",
+      "route_scope": "silence",
+      "location": "cache nulling chamber",
+      "weather": "storm receding",
+      "palette": "warm gray fading to neutral white",
+      "shots": [
+        {"id": "shot_s02_01", "framing": "symmetrical wide", "subject": "memory index lights go dark between two consoles", "motion": "none", "purpose": "show loss without spectacle"},
+        {"id": "shot_s02_02", "framing": "badge insert", "subject": "Lin Yao reads Zhou Heng's name as new information", "motion": "focus pull", "purpose": "make the personal cost immediate"},
+        {"id": "shot_s02_03", "framing": "medium separation", "subject": "the pair step back into professional distance", "motion": "slow widening frame", "purpose": "complete the memory loss"}
+      ]
+    },
+    {
+      "id": "scn_silence_03_morning_platform",
+      "route_scope": "silence",
+      "location": "morning train platform",
+      "weather": "dry air after storm",
+      "palette": "pale blue, brushed steel",
+      "shots": [
+        {"id": "shot_s03_01", "framing": "wide", "subject": "clean glass with no signal reflection", "motion": "train approaches slowly", "purpose": "confirm the signal is closed"},
+        {"id": "shot_s03_02", "framing": "object insert", "subject": "a returned maintenance stylus passes between them", "motion": "single careful handoff", "purpose": "leave a trace of courtesy without recovered memory"},
+        {"id": "shot_s03_03", "framing": "split wide", "subject": "they leave in opposite directions", "motion": "camera stays on the empty seam", "purpose": "end on the respected blank"}
+      ]
+    },
+    {
+      "id": "scn_signal_01_service_tunnel",
+      "route_scope": "signal",
+      "location": "facade service tunnel",
+      "weather": "heavy rain outside",
+      "palette": "dark teal, precise white markers",
+      "shots": [
+        {"id": "shot_g01_01", "framing": "tracking two-shot", "subject": "the pair walk while defining channel limits", "motion": "steady forward track", "purpose": "turn negotiation into construction"},
+        {"id": "shot_g01_02", "framing": "diagram insert", "subject": "dual keys, timeout, bandwidth cap, and audit chain", "motion": "constraints lock in sequence", "purpose": "show the controlled channel as a real system"},
+        {"id": "shot_g01_03", "framing": "hands insert", "subject": "separate confirmations on two devices", "motion": "simultaneous commit", "purpose": "show independent consent"}
+      ]
+    },
+    {
+      "id": "scn_signal_02_controlled_link",
+      "route_scope": "signal",
+      "location": "isolated link room",
+      "weather": "rain weakening",
+      "palette": "black, narrow cyan lines, red abort marker",
+      "shots": [
+        {"id": "shot_g02_01", "framing": "wide", "subject": "two thin light paths meet only inside a bounded frame", "motion": "sixty-second pulse", "purpose": "visualize the new channel"},
+        {"id": "shot_g02_02", "framing": "alert insert", "subject": "raw cache replay denied and channel auto-closes", "motion": "clean cut to black", "purpose": "prove the safeguards work"},
+        {"id": "shot_g02_03", "framing": "close two-shot", "subject": "both wait before requesting a second window", "motion": "held silence", "purpose": "make restraint the emotional action"}
+      ]
+    },
+    {
+      "id": "scn_signal_03_dawn_rooftop",
+      "route_scope": "signal",
+      "location": "archive rooftop",
+      "weather": "rain ending at dawn",
+      "palette": "slate blue, muted gold",
+      "shots": [
+        {"id": "shot_g03_01", "framing": "rooftop wide", "subject": "the city glass returns to ordinary reflections", "motion": "slow upward tilt", "purpose": "separate the channel from the storm"},
+        {"id": "shot_g03_02", "framing": "audit insert", "subject": "sealed disclosure deadline set to seventy-two hours", "motion": "deadline commits", "purpose": "retain public accountability"},
+        {"id": "shot_g03_03", "framing": "medium two-shot", "subject": "they leave the channel closed and speak face to face", "motion": "natural walking exit", "purpose": "end on bounded connection"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/se/glass-fracture
+source: Audio/Distribution/se/glass-fracture.ogg
+source_hash: sha256:0f8d4c1f32e5b60f32f431b585797c57c301404b5414d9ca1fc6d0b74d96cb0e
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

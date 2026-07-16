@@ -1,44 +1,38 @@
 schema: astra.target_manifest.v2
-id: com.example.nativevn
+id: com.astra.nativevn.signal-glass-rain
 platform_profiles:
   windows-release:
     schema: astra.platform_host_profile.v2
     id: windows-release
     platform: windows
-    target: nativevn-game
-    package_id: com.example.nativevn
+    target: nativevn-flagship-game
+    package_id: com.astra.nativevn.signal-glass-rain
     renderer: { providers: [wgpu_hardware], allow_software: false }
     decode: { providers: [wmf], allow_software: false }
     audio: { providers: [wasapi], allow_software: false }
     save: { providers: [saved_games], allow_software: false }
-    package_sources:
-      - { kind: bundled }
-      - { kind: user_authorized }
+    package_sources: [{ kind: bundled }, { kind: user_authorized }]
     limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
     package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
   web-release-chrome:
     schema: astra.platform_host_profile.v2
     id: web-release-chrome
     platform: web
-    target: nativevn-game
-    package_id: com.example.nativevn
+    target: nativevn-flagship-game
+    package_id: com.astra.nativevn.signal-glass-rain
     renderer: { providers: [webgpu], allow_software: false }
     decode: { providers: [webcodecs], allow_software: false }
     audio: { providers: [webaudio], allow_software: false }
     save: { providers: [opfs], allow_software: false }
-    package_sources:
-      - { kind: bundled }
-      - { kind: user_authorized }
-      - kind: https_range
-        allowed_origins: [https://cdn.example.invalid]
+    package_sources: [{ kind: bundled }, { kind: user_authorized }]
     limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
     package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
   android-release:
     schema: astra.platform_host_profile.v2
     id: android-release
     platform: android
-    target: nativevn-game
-    package_id: com.example.nativevn
+    target: nativevn-flagship-game
+    package_id: com.astra.nativevn.signal-glass-rain
     renderer: { providers: [wgpu_vulkan], allow_software: false }
     decode: { providers: [mediacodec], allow_software: false }
     audio: { providers: [oboe_aaudio, oboe_opensl_es], allow_software: false }
@@ -48,52 +42,44 @@ platform_profiles:
       - { kind: user_authorized }
     limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
     package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
-
 targets:
-  - id: nativevn-game
+  - id: nativevn-flagship-game
     kind: game
     crate: astra-vn
     default_profile: advanced-vn
     runtime_provider: native_vn
     ui_provider: astra.ui.yakui
-    platforms: [headless, windows, web, android]
+    platforms: [windows, web, android]
     packaged: true
 nativevn:
-  default_locale: en
-  sources:
-    - Scripts
-  ui_sources:
-    - UI
-  ui_themes:
-    - Themes
-  ui_controllers:
-    - Controllers
-  profiles: [classic, modern, advanced-vn]
-  asset_roots: [Assets]
+  default_locale: zh-Hans
+  sources: [Scripts]
+  ui_sources: [UI]
+  ui_themes: [Themes]
+  ui_controllers: [Controllers]
+  profiles: [classic, advanced-vn]
+  asset_roots: [AssetSidecars]
   display:
-    original_resolution:
-      width: 1920
-      height: 1080
+    original_resolution: { width: 1920, height: 1080 }
     scale_filter: linear
-  scenario_refs:
-    - scenarios/route_library.yaml
-    - scenarios/route_rooftop.yaml
+    preview_layers:
+      - { vfs_uri: "package:/Visual/KeyArt/title-background.png", x: 0, y: 0 }
 package_sections:
   - id: vn.localization.zh-Hans
     schema: astra.vn.localization_table.v1
     path: Localization/zh-Hans.json
     codec: raw
-    targets: [nativevn-game]
-    profiles: [classic, modern, advanced-vn]
+    targets: [nativevn-flagship-game]
+    profiles: [classic, advanced-vn]
   - id: vn.localization.en
     schema: astra.vn.localization_table.v1
     path: Localization/en.json
     codec: raw
-    targets: [nativevn-game]
-    profiles: [classic, modern, advanced-vn]
-  - id: vn.localization.ja
-    schema: astra.vn.localization_table.v1
-    path: Localization/ja.json
+    targets: [nativevn-flagship-game]
+    profiles: [classic, advanced-vn]
+  - id: vn.flagship.route_graph
+    schema: astra.nativevn.flagship.route_graph.v1
+    path: Narrative/route-graph.json
     codec: raw
-    targets: [nativevn-game]
-    profiles: [classic, modern, advanced-vn]
+    targets: [nativevn-flagship-game]
+    profiles: [classic, advanced-vn]

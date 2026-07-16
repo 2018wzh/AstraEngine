@@ -1,0 +1,513 @@
+{
+  "analysis_tool": "ffmpeg-loudnorm-aspectralstats",
+  "asset_count": 25,
+  "assets": [
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 72.0,
+      "finding_codes": [],
+      "id": "glass-rain",
+      "integrated_loudness_lufs": -13.48,
+      "kind": "bgm",
+      "loop_seam_max_delta": 0.00210822,
+      "loudness_range_lu": 1.0,
+      "master_path": "Master/bgm/glass-rain.wav",
+      "rms_dbfs": -14.8815,
+      "sample_peak": 0.49922162,
+      "sha256": "908e4971c6b45fb56b35c0ff27957bcc86afb604f3317d76a778931a35564bdb",
+      "spectral_centroid_hz": {
+        "maximum": 3069.35,
+        "minimum": 161.54
+      },
+      "true_peak_dbtp": -6.03
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 84.0,
+      "finding_codes": [],
+      "id": "carrier-noise",
+      "integrated_loudness_lufs": -18.55,
+      "kind": "bgm",
+      "loop_seam_max_delta": 0.00181115,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/bgm/carrier-noise.wav",
+      "rms_dbfs": -18.436,
+      "sample_peak": 0.41108935,
+      "sha256": "9143feb1e4a48099d5a5dfd7d4717e45e5176bd1313db055bff22c796bdcccb4",
+      "spectral_centroid_hz": {
+        "maximum": 2502.84,
+        "minimum": 102.584
+      },
+      "true_peak_dbtp": -7.72
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 66.0,
+      "finding_codes": [],
+      "id": "thin-line",
+      "integrated_loudness_lufs": -15.61,
+      "kind": "bgm",
+      "loop_seam_max_delta": 0.00052059,
+      "loudness_range_lu": 0.3,
+      "master_path": "Master/bgm/thin-line.wav",
+      "rms_dbfs": -17.334,
+      "sample_peak": 0.39214198,
+      "sha256": "e7d2b4f4554510731af199fdbca6b7da51ed4fc17c41d1f955dc285c38556dd5",
+      "spectral_centroid_hz": {
+        "maximum": 2744.47,
+        "minimum": 184.246
+      },
+      "true_peak_dbtp": -8.13
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 78.0,
+      "finding_codes": [],
+      "id": "after-signal",
+      "integrated_loudness_lufs": -15.03,
+      "kind": "bgm",
+      "loop_seam_max_delta": 0.00139284,
+      "loudness_range_lu": 0.5,
+      "master_path": "Master/bgm/after-signal.wav",
+      "rms_dbfs": -16.0698,
+      "sample_peak": 0.44929581,
+      "sha256": "f42a47cd9ba20425361e5200d57cd9618105855a480ad372606779998155755d",
+      "spectral_centroid_hz": {
+        "maximum": 2920.59,
+        "minimum": 125.81
+      },
+      "true_peak_dbtp": -6.95
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 7.2,
+      "finding_codes": [],
+      "id": "truth",
+      "integrated_loudness_lufs": -11.97,
+      "kind": "stinger",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 1.5,
+      "master_path": "Master/stinger/truth.wav",
+      "rms_dbfs": -13.7131,
+      "sample_peak": 0.56608159,
+      "sha256": "30514cb0571b20a722dd213baf2a7e7b85ac4672593916f89aa4fab9f2a3c108",
+      "spectral_centroid_hz": {
+        "maximum": 2290.46,
+        "minimum": 172.659
+      },
+      "true_peak_dbtp": -4.94
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 6.4,
+      "finding_codes": [],
+      "id": "silence",
+      "integrated_loudness_lufs": -16.6,
+      "kind": "stinger",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 12.1,
+      "master_path": "Master/stinger/silence.wav",
+      "rms_dbfs": -18.172,
+      "sample_peak": 0.48270362,
+      "sha256": "738167c21add47952592463ffbac4e102d9bf5ea625ce15bc2c7107242341563",
+      "spectral_centroid_hz": {
+        "maximum": 1749.75,
+        "minimum": 104.993
+      },
+      "true_peak_dbtp": -6.33
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 7.8,
+      "finding_codes": [],
+      "id": "signal",
+      "integrated_loudness_lufs": -12.26,
+      "kind": "stinger",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 1.6,
+      "master_path": "Master/stinger/signal.wav",
+      "rms_dbfs": -14.1574,
+      "sample_peak": 0.56243939,
+      "sha256": "bde6c13ff21d95d72226d5409353f9e3692dfe9d1c6adbfdfc6609ce3acf68c6",
+      "spectral_centroid_hz": {
+        "maximum": 2449.6,
+        "minimum": 208.626
+      },
+      "true_peak_dbtp": -5.0
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 6.0,
+      "finding_codes": [],
+      "id": "rain-window",
+      "integrated_loudness_lufs": -16.78,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 1.6,
+      "master_path": "Master/se/rain-window.wav",
+      "rms_dbfs": -20.0058,
+      "sample_peak": 0.34083394,
+      "sha256": "04829832bbc397ceca411583e067822be610ab2ebe9de6efa2aae69dcd54d4d7",
+      "spectral_centroid_hz": {
+        "maximum": 2158.93,
+        "minimum": 1684.75
+      },
+      "true_peak_dbtp": -9.34
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 5.2,
+      "finding_codes": [],
+      "id": "distant-thunder",
+      "integrated_loudness_lufs": -20.13,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 11.3,
+      "master_path": "Master/se/distant-thunder.wav",
+      "rms_dbfs": -18.1033,
+      "sample_peak": 0.59244127,
+      "sha256": "467d187ed0b4de8fdaaf0d9320d0a62151b9bc8055ef77f44b18869f9fe4ca73",
+      "spectral_centroid_hz": {
+        "maximum": 2316.68,
+        "minimum": 27.202
+      },
+      "true_peak_dbtp": -4.55
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 4.0,
+      "finding_codes": [],
+      "id": "fluorescent-hum",
+      "integrated_loudness_lufs": -20.16,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 1.1,
+      "master_path": "Master/se/fluorescent-hum.wav",
+      "rms_dbfs": -20.1721,
+      "sample_peak": 0.26170615,
+      "sha256": "e6c9207f329a1e496c8bc793d2bdaa7347e0d026da559647601b26796b5476b0",
+      "spectral_centroid_hz": {
+        "maximum": 1116.79,
+        "minimum": 650.396
+      },
+      "true_peak_dbtp": -11.64
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 3.4,
+      "finding_codes": [],
+      "id": "radio-static",
+      "integrated_loudness_lufs": -16.45,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.7,
+      "master_path": "Master/se/radio-static.wav",
+      "rms_dbfs": -19.8477,
+      "sample_peak": 0.37585001,
+      "sha256": "380b549fb4e3689ddaf2472ef4f2cc89f5553b32942daf059ed591fbecea657c",
+      "spectral_centroid_hz": {
+        "maximum": 2062.98,
+        "minimum": 1653.7
+      },
+      "true_peak_dbtp": -8.5
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 1.8,
+      "finding_codes": [],
+      "id": "signal-lock",
+      "integrated_loudness_lufs": -13.78,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/signal-lock.wav",
+      "rms_dbfs": -17.0868,
+      "sample_peak": 0.35403971,
+      "sha256": "4892830dffd0befdb809e767cc1b6e09f59055a6e63fd3e6c19a3368d49e576d",
+      "spectral_centroid_hz": {
+        "maximum": 2588.45,
+        "minimum": 947.577
+      },
+      "true_peak_dbtp": -9.01
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 2.3,
+      "finding_codes": [],
+      "id": "terminal-wake",
+      "integrated_loudness_lufs": -13.43,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/terminal-wake.wav",
+      "rms_dbfs": -16.3112,
+      "sample_peak": 0.36820798,
+      "sha256": "7b23553e553f9f60fee8a1a5b20d275ff79473f8cf509969395352647813217c",
+      "spectral_centroid_hz": {
+        "maximum": 1530.18,
+        "minimum": 570.122
+      },
+      "true_peak_dbtp": -8.68
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 0.28,
+      "finding_codes": [],
+      "id": "terminal-key",
+      "integrated_loudness_lufs": -Infinity,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/terminal-key.wav",
+      "rms_dbfs": -18.0693,
+      "sample_peak": 0.2809271,
+      "sha256": "a53210889504f0982f679979a837cd934603389008b5e861368519495225fa18",
+      "spectral_centroid_hz": {
+        "maximum": 3125.8,
+        "minimum": 1293.09
+      },
+      "true_peak_dbtp": -11.01
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 0.65,
+      "finding_codes": [],
+      "id": "terminal-confirm",
+      "integrated_loudness_lufs": -13.64,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/terminal-confirm.wav",
+      "rms_dbfs": -17.368,
+      "sample_peak": 0.32431284,
+      "sha256": "9f98e734dc1918e4adec4da969d52064a7b98dd9ea45c5fbdb6f6a18a759aafd",
+      "spectral_centroid_hz": {
+        "maximum": 2380.71,
+        "minimum": 1158.03
+      },
+      "true_peak_dbtp": -9.77
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 0.82,
+      "finding_codes": [],
+      "id": "terminal-deny",
+      "integrated_loudness_lufs": -12.57,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/terminal-deny.wav",
+      "rms_dbfs": -15.3312,
+      "sample_peak": 0.42244129,
+      "sha256": "0aa06b05c41d6b1f373e35a2e484a29100b0cedf1a26e1c949476f12c5d13e79",
+      "spectral_centroid_hz": {
+        "maximum": 1755.06,
+        "minimum": 539.683
+      },
+      "true_peak_dbtp": -7.48
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 1.1,
+      "finding_codes": [],
+      "id": "message-arrive",
+      "integrated_loudness_lufs": -13.53,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/message-arrive.wav",
+      "rms_dbfs": -16.7312,
+      "sample_peak": 0.33930043,
+      "sha256": "b65768d90dcf49a245572d919974ed21a5ce7567dd409df145fcafd685557d9f",
+      "spectral_centroid_hz": {
+        "maximum": 1534.77,
+        "minimum": 1016.85
+      },
+      "true_peak_dbtp": -9.38
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 0.75,
+      "finding_codes": [],
+      "id": "choice-open",
+      "integrated_loudness_lufs": -13.29,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/choice-open.wav",
+      "rms_dbfs": -16.4521,
+      "sample_peak": 0.37327771,
+      "sha256": "30e3913067f4f725a233a51ecfb94a349bc5eae7ac792f2f762bbffb5b0d82b0",
+      "spectral_centroid_hz": {
+        "maximum": 2738.53,
+        "minimum": 886.161
+      },
+      "true_peak_dbtp": -8.55
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 0.48,
+      "finding_codes": [],
+      "id": "choice-select",
+      "integrated_loudness_lufs": -13.65,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/choice-select.wav",
+      "rms_dbfs": -17.1838,
+      "sample_peak": 0.34687571,
+      "sha256": "30e13da19034f5d4eed7cf43a346e2187b059f549df3c601bcc70d785fbfed51",
+      "spectral_centroid_hz": {
+        "maximum": 1989.18,
+        "minimum": 1133.02
+      },
+      "true_peak_dbtp": -9.2
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 1.45,
+      "finding_codes": [],
+      "id": "archive-open",
+      "integrated_loudness_lufs": -19.47,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/archive-open.wav",
+      "rms_dbfs": -20.6241,
+      "sample_peak": 0.32800547,
+      "sha256": "982eec557b7e1dfecdc097b9e1e60cdfb722cac9fd657c8e3e8bdd80680d3a12",
+      "spectral_centroid_hz": {
+        "maximum": 1285.23,
+        "minimum": 65.046
+      },
+      "true_peak_dbtp": -9.68
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 3.2,
+      "finding_codes": [],
+      "id": "door-pressure",
+      "integrated_loudness_lufs": -19.43,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.4,
+      "master_path": "Master/se/door-pressure.wav",
+      "rms_dbfs": -17.0035,
+      "sample_peak": 0.44469171,
+      "sha256": "c62e2ffe5f34d31c56cbdbeebf3dde7b8a0341a80e48e5c7ce12f6bac483c185",
+      "spectral_centroid_hz": {
+        "maximum": 1600.36,
+        "minimum": 46.397
+      },
+      "true_peak_dbtp": -7.04
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 0.72,
+      "finding_codes": [],
+      "id": "footstep-metal",
+      "integrated_loudness_lufs": -22.24,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/footstep-metal.wav",
+      "rms_dbfs": -22.1153,
+      "sample_peak": 0.35347108,
+      "sha256": "769c423083ad6bd322107d22d840c545c46e28b26ae7f52313e5c729b9336c01",
+      "spectral_centroid_hz": {
+        "maximum": 1922.15,
+        "minimum": 282.353
+      },
+      "true_peak_dbtp": -9.03
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 2.0,
+      "finding_codes": [],
+      "id": "glass-fracture",
+      "integrated_loudness_lufs": -23.1,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/glass-fracture.wav",
+      "rms_dbfs": -27.3988,
+      "sample_peak": 0.28631571,
+      "sha256": "5f292be154e4ee997660331aa8e1d7e38e301e698ebf6194f5ff76b0243c6c22",
+      "spectral_centroid_hz": {
+        "maximum": 2409.53,
+        "minimum": 1500.76
+      },
+      "true_peak_dbtp": -10.86
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 2.8,
+      "finding_codes": [],
+      "id": "memory-flare",
+      "integrated_loudness_lufs": -15.47,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/memory-flare.wav",
+      "rms_dbfs": -18.7839,
+      "sample_peak": 0.361383,
+      "sha256": "3909020f0226bc62df29d0e344d4dd115a8c1849f5e3307fa1a469a9f879c342",
+      "spectral_centroid_hz": {
+        "maximum": 2726.49,
+        "minimum": 859.728
+      },
+      "true_peak_dbtp": -8.84
+    },
+    {
+      "automated_decision": "pass",
+      "clipped_samples": 0,
+      "duration_seconds": 1.6,
+      "finding_codes": [],
+      "id": "scene-transition",
+      "integrated_loudness_lufs": -16.49,
+      "kind": "se",
+      "loop_seam_max_delta": null,
+      "loudness_range_lu": 0.0,
+      "master_path": "Master/se/scene-transition.wav",
+      "rms_dbfs": -19.0413,
+      "sample_peak": 0.31934408,
+      "sha256": "14ec44af86d656e1d726a037bc0707bdf9f5dd608e151a6c3d6dbf810f2bcecb",
+      "spectral_centroid_hz": {
+        "maximum": 1563.92,
+        "minimum": 620.559
+      },
+      "true_peak_dbtp": -9.91
+    }
+  ],
+  "automated_decision": "pass",
+  "id": "nativevn-flagship-audio-qa",
+  "manual_listening": {
+    "required_before_release": true,
+    "status": "not_performed"
+  },
+  "schema": "astra.nativevn_flagship.audio_qa.v1"
+}

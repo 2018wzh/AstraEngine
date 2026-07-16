@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/stinger/signal
+source: Audio/Distribution/stinger/signal.ogg
+source_hash: sha256:ab07954f0f76192c3b49cc62970d00f36e1afafc8f0f016efa28ac0c8725d75c
+type: audio.ogg
+license: project-owned-generated
+importer: astra.import.audio
+cook:
+  processor: astra.cook.audio
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

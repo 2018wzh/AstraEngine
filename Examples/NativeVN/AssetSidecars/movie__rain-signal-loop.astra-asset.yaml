@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/movie/rain-signal-loop
+source: Visual/Video/rain-signal-loop.webm
+source_hash: sha256:94cc3a8df5211eca89d0a584286389cef6cb0ff775577bbea63504ade0df2984
+type: video.webm
+license: project-owned-generated
+importer: astra.import.video
+cook:
+  processor: astra.cook.video
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

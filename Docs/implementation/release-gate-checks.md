@@ -170,10 +170,10 @@ checks:
 ```bash
 astra package validate target/nativevn.astrapkg --profile desktop-release --report target/release_report.yaml
 astra package bundle target/nativevn.astrapkg --profile classic --target nativevn-game --platform windows --out target/bundle/windows --format json
-astra test run Examples/NativeVN/scenarios/route_library.yaml --package target/nativevn.astrapkg --target nativevn-game --profile advanced-vn --headless --report target/scenario_report.yaml
-astra test run Examples/NativeVN/scenarios/route_rooftop.yaml --package target/nativevn.astrapkg --target nativevn-game --profile advanced-vn --headless --report target/advanced_report.yaml
 astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/artemis_report.yaml
 cargo test -p astra-release release_report
 ```
+
+NativeVN 旗舰项目当前只进入 Cook，不提交或执行 Runtime/Player scenario；相关 release gate 在正式平台验收阶段恢复。
 
 Expected report: 每个 domain 至少一个 check；blocked check 必须有 diagnostic 和 evidence；report 不包含商业 payload、provider secret、native handle 或私有绝对路径。

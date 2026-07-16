@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/character/sprites/zhou-heng/guarded-center
+source: Visual/Characters/Sprites/zhou-heng/guarded-center.png
+source_hash: sha256:63ca33297519b5c376cdafd8f13917269c0f7ba459bbf4bdee53da4487f4ad08
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted

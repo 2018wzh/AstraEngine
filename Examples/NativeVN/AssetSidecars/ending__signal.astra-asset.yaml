@@ -1,0 +1,12 @@
+schema: astra.asset.v1
+id: asset:/ending/signal
+source: Visual/Endings/signal.png
+source_hash: sha256:b1fbd1fc02596a0e62698d09fc925f9f155dd739368a6bd821d0b3bb03cc7663
+type: image.png
+license: project-owned-generated
+importer: astra.import.image
+cook:
+  processor: astra.cook.texture2d
+  target_profiles: [advanced-vn]
+  params: { color_space: srgb }
+review: accepted
