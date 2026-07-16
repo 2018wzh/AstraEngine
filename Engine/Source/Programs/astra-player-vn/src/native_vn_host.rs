@@ -188,6 +188,20 @@ pub struct NativeVnStepEvidence {
     pub terminal_route_ids: std::collections::BTreeSet<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NativeVnProductObservationEvidence {
+    pub schema: String,
+    pub ui_profile: String,
+    pub locale: String,
+    pub active_system_page: Option<SystemPageKind>,
+    pub focused_semantic_id: Option<String>,
+    pub auto_enabled: bool,
+    pub skip_mode: astra_vn_core::SkipMode,
+    pub system_config: BTreeMap<String, String>,
+    pub backlog_count: usize,
+    pub occupied_save_slot_count: usize,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct RuntimeStepEffectEvidence {
     coverage_reached: std::collections::BTreeSet<String>,
@@ -613,6 +627,38 @@ impl NativeVnHostCommandSource {
 
     pub fn ui_semantics(&self) -> Option<&UiSemanticSnapshot> {
         self.ui_semantics.as_ref()
+    }
+
+    pub fn product_observation_evidence(
+        &self,
+    ) -> Result<NativeVnProductObservationEvidence, NativeVnHostError> {
+        let state = self.runtime_state.as_ref().ok_or_else(|| {
+            NativeVnHostError::RuntimeEvidence(
+                "ASTRA_PLAYER_VN_STATE_MISSING: product observation requires runtime state".into(),
+            )
+        })?;
+        Ok(NativeVnProductObservationEvidence {
+            schema: "astra.player_vn_product_observation.v1".into(),
+            ui_profile: self.ui_profile.clone(),
+            locale: state.locale.clone(),
+            active_system_page: state.system_stack.last().map(|frame| frame.page),
+            focused_semantic_id: self.ui_semantics.as_ref().and_then(|snapshot| {
+                snapshot
+                    .nodes
+                    .iter()
+                    .find(|node| node.focused)
+                    .map(|node| node.id.clone())
+            }),
+            auto_enabled: state.system.auto_enabled,
+            skip_mode: state.system.skip_mode,
+            system_config: state.system.config.clone(),
+            backlog_count: state.backlog.len(),
+            occupied_save_slot_count: self
+                .ui_save_slots
+                .values()
+                .filter(|slot| slot.occupied)
+                .count(),
+        })
     }
 
     pub fn mark_save_committed(&mut self, slot_id: &str) -> Result<(), NativeVnHostError> {

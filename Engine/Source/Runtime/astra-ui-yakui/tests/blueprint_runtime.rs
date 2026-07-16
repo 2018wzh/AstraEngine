@@ -438,7 +438,7 @@ fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
         model: UiValue::Map(BTreeMap::new()),
         state: UiValue::Map(BTreeMap::new()),
         modals: Vec::new(),
-        focus_request: None,
+        focus_request: Some("root/volume".into()),
         localization: BTreeMap::new(),
     };
     let request = |events| UiFrameRequest {
@@ -498,6 +498,22 @@ fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
     );
     assert_eq!(second.actions.len(), 1);
     assert_eq!(second.actions[0].action_id, "vn.set_config");
+
+    let keyboard = backend
+        .render_frame(request(vec![UiInputEvent {
+            sequence: 2,
+            kind: UiInputEventKind::Keyboard {
+                logical_key: "ArrowLeft".into(),
+                physical_key: "ArrowLeft".into(),
+                state: UiButtonState::Pressed,
+                repeat: false,
+                modifiers: 0,
+            },
+        }]))
+        .expect("keyboard slider frame");
+    assert_eq!(keyboard.actions.len(), 1);
+    assert_eq!(keyboard.actions[0].action_id, "vn.set_config");
+    assert_eq!(keyboard.actions[0].arguments["value"], UiValue::Number(0.4));
     let UiValue::Number(value) = second.actions[0]
         .arguments
         .get("value")

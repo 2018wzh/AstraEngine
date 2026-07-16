@@ -145,6 +145,65 @@ state save #@id state.system.save
 }
 
 #[astra_headless_test::test]
+fn product_observation_reports_system_ui_without_exposing_content() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    text key:line.one speaker:hero #@id line.one
+
+story system #@id story.system
+state save #@id state.system.save
+  scene save #@id scene.system.save
+    system_page kind:save #@id page.save
+"#;
+    let mut source = source_for(story);
+    source.launch().expect("launch");
+
+    let initial = source
+        .product_observation_evidence()
+        .expect("initial product observation");
+    assert_eq!(initial.schema, "astra.player_vn_product_observation.v1");
+    assert_eq!(initial.ui_profile, "classic");
+    assert_eq!(initial.locale, "en");
+    assert_eq!(initial.active_system_page, None);
+    assert_eq!(initial.focused_semantic_id, None);
+    assert_eq!(initial.backlog_count, 1);
+    assert_eq!(initial.occupied_save_slot_count, 0);
+
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerButton {
+            button: UiPointerButton::Secondary,
+            state: UiButtonState::Pressed,
+            position: astra_ui_core::UiPoint { x: 12.0, y: 12.0 },
+        })
+        .expect("secondary pointer dispatch");
+    let system = source
+        .product_observation_evidence()
+        .expect("system product observation");
+    assert_eq!(
+        system.active_system_page,
+        Some(astra_vn_core::SystemPageKind::Save)
+    );
+    assert_eq!(system.focused_semantic_id.as_deref(), Some("root/back"));
+    assert_eq!(system.backlog_count, 1);
+
+    source
+        .mark_save_committed("slot.01")
+        .expect("mark first slot committed");
+    assert_eq!(
+        source
+            .product_observation_evidence()
+            .expect("saved product observation")
+            .occupied_save_slot_count,
+        1
+    );
+
+    source.release_resources().expect("release");
+    source.shutdown().expect("shutdown");
+}
+
+#[astra_headless_test::test]
 fn secondary_pointer_opens_system_ui_while_story_wait_has_no_ui_surface() {
     let story = r#"
 story main #@id story.main

@@ -487,13 +487,15 @@ impl NativeVnHeadlessSession {
     }
 
     fn refresh_observations(&mut self) -> Result<(), ProductHostError> {
-        let evidence = self
-            .source
-            .as_ref()
-            .and_then(NativeVnHostCommandSource::last_step_evidence)
-            .ok_or_else(|| {
-                ProductHostError::Output("runtime step has no observation evidence".into())
-            })?;
+        let source = self.source.as_ref().ok_or_else(|| {
+            ProductHostError::Output("runtime source is unavailable for observation".into())
+        })?;
+        let evidence = source.last_step_evidence().ok_or_else(|| {
+            ProductHostError::Output("runtime step has no observation evidence".into())
+        })?;
+        let product = source
+            .product_observation_evidence()
+            .map_err(|error| binding("product.observe", error))?;
         self.observations = vec![
             Observation {
                 key: "runtime.state_hash".into(),
@@ -511,6 +513,18 @@ impl NativeVnHeadlessSession {
             hashed_observation("vn.pending_wait_command", &evidence.pending_wait_command_id)?,
             hashed_observation("vn.pending_choices", &evidence.pending_choice_ids)?,
             hashed_observation("vn.terminal_routes", &evidence.terminal_route_ids)?,
+            hashed_observation("vn.ui_profile", &product.ui_profile)?,
+            hashed_observation("vn.locale", &product.locale)?,
+            hashed_observation("vn.system_page", &product.active_system_page)?,
+            hashed_observation("vn.focused_semantic_id", &product.focused_semantic_id)?,
+            hashed_observation("vn.auto_enabled", &product.auto_enabled)?,
+            hashed_observation("vn.skip_mode", &product.skip_mode)?,
+            hashed_observation("vn.system_config", &product.system_config)?,
+            hashed_observation("vn.backlog_count", &product.backlog_count)?,
+            hashed_observation(
+                "vn.occupied_save_slot_count",
+                &product.occupied_save_slot_count,
+            )?,
             hashed_observation("media.active_video", &self.media.has_active_video())?,
             hashed_observation("media.active_voice", &self.media.has_active_voice())?,
         ];

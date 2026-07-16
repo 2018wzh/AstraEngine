@@ -1206,9 +1206,10 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 value: pending.value.clone(),
                 enabled: pending.enabled,
                 hidden: false,
-                focused: focus_override
-                    .as_ref()
-                    .map_or(pending.focused, |expected| expected == &pending.id),
+                focused: focus_override.as_ref().map_or(
+                    pending.focused && pending.actions.contains(&UiSemanticAction::Focus),
+                    |expected| expected == &pending.id,
+                ),
                 selected: false,
                 checked: pending.checked,
                 actions: pending.actions.clone(),

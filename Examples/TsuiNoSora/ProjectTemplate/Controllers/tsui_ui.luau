@@ -24,6 +24,31 @@ for _, definition in controllers do
             return { astra.ui.effect.focus("root/commands/skip_all") }
         end
     end
+    if definition[1] == "tsui.system.title.modern" then
+        on_open = function(_context, _model)
+            return { astra.ui.effect.focus("root/menu/continue") }
+        end
+    end
+    if definition[1] == "tsui.system.save.modern" then
+        on_open = function(_context, _model)
+            return { astra.ui.effect.focus("root/content/slots/slot/slot.01/write") }
+        end
+    end
+    if definition[1] == "tsui.system.load.modern" then
+        on_open = function(_context, _model)
+            return { astra.ui.effect.focus("root/content/slots/slot/slot.01/read") }
+        end
+    end
+    if definition[1] == "tsui.system.config.modern" then
+        on_open = function(_context, _model)
+            return { astra.ui.effect.focus("root/content/master") }
+        end
+    end
+    if definition[1] == "tsui.system.backlog.modern" then
+        on_open = function(_context, _model)
+            return { astra.ui.effect.focus("root/content/back") }
+        end
+    end
     if definition[1] == "tsui.choice.classic" or definition[1] == "tsui.choice.modern" then
         on_open = function(_context, model)
             for _, option_value in model.map.options.list do

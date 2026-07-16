@@ -121,6 +121,37 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
     ) -> Result<UiFrameOutput, UiValidationError> {
         self.ensure_live()?;
         request.validate()?;
+        let mut request = request;
+        if let Some(semantics) = self.last_semantics.as_ref() {
+            if let Some(focused) = semantics
+                .nodes
+                .iter()
+                .find(|node| node.focused && node.role == astra_ui_core::UiSemanticRole::Slider)
+            {
+                for event in &mut request.input.events {
+                    if let UiInputEventKind::Keyboard {
+                        physical_key,
+                        state: UiButtonState::Pressed,
+                        repeat: false,
+                        ..
+                    } = &event.kind
+                    {
+                        let action = match physical_key.as_str() {
+                            "ArrowLeft" | "ArrowDown" => Some("decrement"),
+                            "ArrowRight" | "ArrowUp" => Some("increment"),
+                            _ => None,
+                        };
+                        if let Some(action) = action {
+                            event.kind = UiInputEventKind::AccessibilityAction {
+                                semantic_id: focused.id.clone(),
+                                action: action.to_string(),
+                                value: None,
+                            };
+                        }
+                    }
+                }
+            }
+        }
         if self
             .live_session
             .as_deref()
@@ -364,8 +395,26 @@ fn navigate_semantics(
             node.enabled && !node.hidden && node.actions.contains(&UiSemanticAction::Focus)
         })
         .collect::<Vec<_>>();
-    let current = semantics.nodes.iter().find(|node| node.focused)?;
-    let current_index = focusable.iter().position(|node| node.id == current.id)?;
+    if focusable.is_empty() {
+        return None;
+    }
+    let current = semantics
+        .nodes
+        .iter()
+        .find(|node| node.focused && node.actions.contains(&UiSemanticAction::Focus));
+    let Some(current_index) = current.and_then(|node| {
+        focusable
+            .iter()
+            .position(|candidate| candidate.id == node.id)
+    }) else {
+        return match action {
+            UiNavigationAction::Previous | UiNavigationAction::Up | UiNavigationAction::Left => {
+                focusable.last().map(|node| node.id.clone())
+            }
+            _ => focusable.first().map(|node| node.id.clone()),
+        };
+    };
+    let current = focusable[current_index];
     match action {
         UiNavigationAction::Next => focusable
             .get((current_index + 1) % focusable.len())
