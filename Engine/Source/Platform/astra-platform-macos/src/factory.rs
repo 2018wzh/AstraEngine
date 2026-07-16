@@ -81,6 +81,7 @@ mod macos {
             atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
             mpsc as std_mpsc, Arc,
         },
+        thread,
         time::{Duration, Instant},
     };
 
@@ -1806,6 +1807,7 @@ mod macos {
         }
     }
 
+    #[allow(deprecated)]
     fn decode_avfoundation(request: PlatformDecodeRequest) -> Result<DecodeOutput, PlatformError> {
         use std::io::Write;
         use std::ptr::NonNull;

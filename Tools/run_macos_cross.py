@@ -34,16 +34,18 @@ def main() -> int:
         return 2
     root = pathlib.Path(__file__).resolve().parent.parent
     target = sys.argv[1]
-    toolchain = root / ".tmp" / "osxcross"
+    toolchain = pathlib.Path(
+        os.environ.get("ASTRA_OSXCROSS_ROOT", "/usr/local/osx-ndk-x86")
+    )
     compiler = toolchain / "bin" / TARGETS[target]
     sdk = toolchain / "SDK" / "MacOSX13.3.sdk"
     missing = []
     if not compiler.is_file():
-        missing.append(str(compiler.relative_to(root)))
+        missing.append(str(compiler))
     if not sdk.is_dir():
-        missing.append(".tmp/osxcross/SDK/MacOSX13.3.sdk")
+        missing.append(str(sdk))
     elif not (sdk / "SDKSettings.json").is_file():
-        missing.append(".tmp/osxcross/SDK/MacOSX13.3.sdk/SDKSettings.json")
+        missing.append(str(sdk / "SDKSettings.json"))
     for executable in ("cross", "docker"):
         if shutil.which(executable) is None:
             missing.append(executable)

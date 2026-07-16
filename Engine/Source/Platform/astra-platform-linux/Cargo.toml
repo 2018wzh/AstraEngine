@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+astra-core = { path = "../../Runtime/astra-core" }
 astra-platform = { path = "../astra-platform" }
 
 [features]
@@ -17,7 +18,6 @@ platform-test-driver = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd.workspace = true
-astra-core = { path = "../../Runtime/astra-core" }
 astra-media = { path = "../../Runtime/astra-media" }
 astra-platform-common = { path = "../astra-platform-common" }
 cpal.workspace = true

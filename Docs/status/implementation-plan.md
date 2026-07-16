@@ -119,7 +119,7 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | --- | --- | --- |
 | `S6-LINUX-HOST-01` | `IN_PROGRESS` | Linux sniper/Wayland/Vulkan/ALSA/GStreamer/XDG host 已接线并通过静态检查；真实 host smoke、decode、audio、IME/gamepad 和 release evidence 待环境完善后执行，见 [Stage 6](stages/stage-6-platform-completion.md) |
 | `S6-LINUX-HEADLESS-01` | `SPEC_READY` | Linux native Headless 的 workspace lifecycle、真实 PNG/WAV、artifact、review bundle、session inventory 与 zero-leak portability evidence 延后到 [Stage 6](stages/stage-6-platform-completion.md) |
-| `S6-MACOS-HOST-01` | `IN_PROGRESS` | macOS 主线程 runner、Metal/wgpu、CoreAudio、AVFoundation、Application Support、Universal 2 `.app` 与 cross preflight 已接线；等待 osxcross 静态编译和真机 conformance，见 [Stage 6](stages/stage-6-platform-completion.md) |
+| `S6-MACOS-HOST-01` | `IN_PROGRESS` | macOS 主线程 runner、Metal/wgpu、CoreAudio、AVFoundation、Application Support、Universal 2 `.app` 与本机 Cargo preflight 已接线；x86_64/aarch64 静态编译已通过，等待真机 conformance，见 [Stage 6](stages/stage-6-platform-completion.md) |
 | `S6-MACOS-HEADLESS-01` | `SPEC_READY` | macOS native Headless 的 workspace lifecycle、真实 PNG/WAV、artifact、review bundle、session inventory 与 zero-leak portability evidence 延后到 [Stage 6](stages/stage-6-platform-completion.md) |
 | `S6-IOS-HOST-01` | `SPEC_READY` | Swift/SwiftUI launcher、Metal surface、safe area/touch、AVAudio/AVFoundation、app container save 和 no-JIT Luau gate 见 [Stage 6](stages/stage-6-platform-completion.md) |
 | `S6-ANDROID-HOST-01` | `SPEC_READY` | Kotlin/Java launcher、Vulkan/wgpu surface、AAudio、MediaCodec、SAF/package import、activity resume 和 no-JIT Luau gate 见 [Stage 6](stages/stage-6-platform-completion.md) |

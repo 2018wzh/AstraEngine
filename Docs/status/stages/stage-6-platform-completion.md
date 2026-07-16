@@ -82,7 +82,7 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Linux、macOS host 与 package
 
 **Target Paths:** `Engine/Source/Platform/astra-platform-macos/`、`Docs/platforms/desktop.md`
 
-**Current Evidence:** `astra-platform-macos` 已有显式主线程 runner/factory、typed resource lifecycle、Metal-only wgpu、CoreAudio/cpal、AVFoundation CPU decode、Application Support save、package cache 和 macOS packaged Player。CLI 可生成 macOS 13 Universal 2 `.app`，并把 codesign/notarization 留作外部 blocking check。当前未取得 osxcross 或真机 evidence。
+**Current Evidence:** `astra-platform-macos` 已有显式主线程 runner/factory、typed resource lifecycle、Metal-only wgpu、CoreAudio/cpal、AVFoundation CPU decode、Application Support save、package cache 和 macOS packaged Player。CLI 可生成 macOS 13 Universal 2 `.app`，并把 codesign/notarization 留作外部 blocking check。使用 macOS SDK 13.3 的本机 Cargo x86_64/aarch64 静态 check 已通过；尚未取得真机 evidence。
 
 **Planned Gate:** required checks 以 `required_conformance_checks(PlatformId::Macos)` 为准。必须补 AppKit lifecycle、Metal present/readback、CGEvent/IME/gamepad、ScreenCaptureKit、AccessKit、CoreAudio meter、AVFoundation fixtures、save reopen、package、zero-leak、签名与公证 evidence。
 

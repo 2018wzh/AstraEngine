@@ -739,7 +739,7 @@ fn resolve_bundled_component_path(relative: &str) -> Result<PathBuf, PlayerCliEr
     Ok(resolved)
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn ui_button_state(state: astra_platform::InputState) -> astra_ui_core::UiButtonState {
     match state {
         astra_platform::InputState::Pressed => astra_ui_core::UiButtonState::Pressed,
@@ -747,7 +747,7 @@ fn ui_button_state(state: astra_platform::InputState) -> astra_ui_core::UiButton
     }
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn ui_pointer_button(button: astra_platform::PointerButton) -> astra_ui_core::UiPointerButton {
     match button {
         astra_platform::PointerButton::Primary => astra_ui_core::UiPointerButton::Primary,
@@ -759,7 +759,7 @@ fn ui_pointer_button(button: astra_platform::PointerButton) -> astra_ui_core::Ui
     }
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn gamepad_navigation(
     control: astra_platform::GamepadControl,
 ) -> Option<astra_ui_core::UiNavigationAction> {
@@ -778,7 +778,7 @@ fn gamepad_navigation(
     }
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 async fn execute_platform_save(
     source: &mut astra_player::NativeVnHostCommandSource,
     executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
@@ -795,7 +795,7 @@ async fn execute_platform_save(
     Ok(())
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 async fn execute_platform_load(
     source: &mut astra_player::NativeVnHostCommandSource,
     executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
@@ -829,7 +829,7 @@ async fn execute_platform_load(
     Ok(())
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn player_platform_error(
     operation: &'static str,
     error: impl std::fmt::Display,
@@ -841,7 +841,7 @@ fn player_platform_error(
     )
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn log_consumed_vn_step(
     player_sequence: u64,
     kind: &str,
