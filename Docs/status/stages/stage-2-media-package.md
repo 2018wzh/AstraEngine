@@ -391,7 +391,7 @@ python Tools/run_cargo_isolated.py test --workspace
 2. capability v2 分离 declared、available、selected；只有 live conformance run 能声明 available/selected。
 3. host conformance 绑定 build/profile/package/session identity 和完整资源生命周期。
 4. 缺 SDK、缺 provider、stale handle、队列溢出、device loss 和 shutdown leak 都显式阻断。
-5. Linux factory 在 Stage 6 进入 `IN_PROGRESS`；macOS、iOS、Android factory 返回 `PLATFORM_NOT_IMPLEMENTED`。
+5. Linux、macOS 与 Android 已在 Stage 6 进入 `IN_PROGRESS`；iOS factory 返回 `PLATFORM_NOT_IMPLEMENTED`。Android 不得用 contract/build 证据关闭真实设备 gate。
 
 **Current Evidence:** `cargo test -p astra-platform -p astra-platform-common` 覆盖 contract 和负向门禁。Migration 8 仍等待 Windows/Chrome 同 commit 的完整 conformance 与 Player automation evidence。
 

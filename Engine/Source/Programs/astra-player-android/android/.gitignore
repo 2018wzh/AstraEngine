@@ -1,0 +1,6 @@
+.gradle/
+local.properties
+app/build/
+app/generated/
+build/
+signing.properties

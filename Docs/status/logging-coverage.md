@@ -9,7 +9,7 @@
 
 当前覆盖 EngineCore/Runtime/Plugin、Asset/Package/Cook/Release、Media/Platform、AstraVN/Player 以及 developer/fixture 链路。`astra-observability` 本身不通过全局 subscriber 递归记录内部事件；queue saturation 由独立 critical path生成稳定 WARN。
 
-Windows native crash 只对 `astra-crash-reporter` 和 Windows bundled Player 生效。Web 与其他平台的 logging/ring/fatal tail 已纳入覆盖，但 native dump 仍是 `not_applicable`。
+Windows native crash 只对 `astra-crash-reporter` 和 Windows bundled Player 生效。Android 的 GameActivity lifecycle、provider selection、JNI bridge 与 Player entrypoint 已列为 `instrumented`，但当前不声明 native dump；Web 与其他平台的 logging/ring/fatal tail 继续按各自 host 边界记录。
 
 ```bash
 python Tools/check_observability.py

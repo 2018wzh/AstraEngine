@@ -4,6 +4,37 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+default = []
+platform-test-driver = [
+    "astra-platform/platform-test-driver",
+    "astra-platform-common/platform-test-driver",
+]
+
 [dependencies]
 tracing.workspace = true
+astra-core = { path = "../../Runtime/astra-core" }
+astra-media = { path = "../../Runtime/astra-media" }
 astra-platform = { path = "../astra-platform" }
+astra-platform-common = { path = "../astra-platform-common" }
+astra-ui-core = { path = "../../Runtime/astra-ui-core" }
+pollster.workspace = true
+schemars.workspace = true
+serde.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+wgpu.workspace = true
+winit = { workspace = true, features = ["android-game-activity"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+accesskit.workspace = true
+accesskit_android.workspace = true
+android-activity.workspace = true
+jni.workspace = true
+ndk = { workspace = true, features = ["media", "api-level-28"] }
+ndk-sys.workspace = true
+oboe = { workspace = true, features = ["java-interface"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true

@@ -91,6 +91,16 @@ impl<T, H: TypedHandle> ResourceTable<T, H> {
         self.live == 0
     }
 
+    pub fn handles(&self) -> impl Iterator<Item = H> + '_ {
+        self.slots.iter().enumerate().filter_map(|(index, entry)| {
+            entry.value.as_ref()?;
+            let slot = u32::try_from(index + 1).ok()?;
+            ResourceHandle::from_parts(slot, entry.generation)
+                .ok()
+                .map(H::from_resource)
+        })
+    }
+
     pub fn ensure_empty(&self) -> Result<(), PlatformError> {
         if self.live == 0 {
             return Ok(());

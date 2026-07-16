@@ -1,0 +1,4 @@
+storeFile=release.keystore
+storePassword=inject-at-build-time
+keyAlias=inject-at-build-time
+keyPassword=inject-at-build-time

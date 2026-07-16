@@ -1,6 +1,6 @@
 use astra_observability::{init_host, ConsoleFormat, HostObservabilityConfig, HostRole};
 use astra_player::{
-    LinuxUinputHost, MacosCgEventHost, WebCdpInputHost, WebLiveAutomationRequest,
+    AndroidInputHost, LinuxUinputHost, MacosCgEventHost, WebCdpInputHost, WebLiveAutomationRequest,
     WindowsLiveAutomationRequest, WindowsSendInputHost,
 };
 use astra_player_core::{
@@ -190,6 +190,7 @@ fn main() -> Result<(), PlayerCliError> {
         PlayerPlatform::Linux => LinuxUinputHost.build_report(&script, &transcript),
         PlayerPlatform::Macos => MacosCgEventHost.build_report(&script, &transcript),
         PlayerPlatform::Web => WebCdpInputHost.build_report(&script, &transcript),
+        PlayerPlatform::Android => AndroidInputHost.build_report(&script, &transcript),
     };
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())

@@ -13,6 +13,7 @@ use astra_package::{CookSummaryManifest, PackageManifest, PackageReader};
 use astra_platform::{
     PlatformCapabilityReport, PlatformHostConformanceReport, PlatformValidationStatus,
 };
+use astra_platform_android::AndroidBundleManifest;
 use astra_player_core::{
     PlayerAutomationReport, PlayerAutomationStatus, PlayerPlatform, PlayerPresentationReport,
     PLAYER_PRESENTATION_REPORT_SCHEMA,
@@ -145,6 +146,68 @@ pub struct ReleaseEvidence {
 pub struct ReleaseValidator;
 
 impl ReleaseValidator {
+    pub fn validate_android_bundle_manifest(
+        &self,
+        manifest: &AndroidBundleManifest,
+        package_hash: &str,
+        target: &str,
+        profile: &str,
+        conformance_report: Option<&PlatformHostConformanceReport>,
+        player_report: Option<&PlayerAutomationReport>,
+    ) -> ReleaseCheckRecord {
+        let manifest_valid = manifest.validate().is_ok()
+            && manifest.package_hash == package_hash
+            && manifest.target == target
+            && manifest.profile == profile;
+        let conformance_valid = conformance_report.is_some_and(|report| {
+            report.platform == astra_platform::PlatformId::Android
+                && report.package_hash == manifest.package_hash
+                && report.build_fingerprint == manifest.build_fingerprint
+                && report.target == manifest.target
+                && report.status == astra_platform::ConformanceStatus::Pass
+        });
+        let player_valid = player_report.is_some_and(|report| {
+            report.platform == PlayerPlatform::Android
+                && report.package_hash == manifest.package_hash
+                && report.target == manifest.target
+                && report.profile == manifest.profile
+                && report.full_playable_passed()
+        });
+        if manifest_valid && conformance_valid && player_valid {
+            ReleaseCheckRecord {
+                id: "android.bundle_identity".to_string(),
+                domain: ReleaseDomain::Platform,
+                status: CheckStatus::Pass,
+                summary: "Android APK/AAB identity is bound to live host and Player evidence"
+                    .to_string(),
+                diagnostic: None,
+                evidence: vec![
+                    ReleaseEvidence {
+                        key: "build_fingerprint".to_string(),
+                        value: manifest.build_fingerprint.clone(),
+                    },
+                    ReleaseEvidence {
+                        key: "package_hash".to_string(),
+                        value: manifest.package_hash.clone(),
+                    },
+                ],
+            }
+        } else {
+            ReleaseCheckRecord {
+                id: "android.bundle_identity".to_string(),
+                domain: ReleaseDomain::Platform,
+                status: CheckStatus::Blocked,
+                summary: "Android bundle, host, and Player identities are incomplete or differ"
+                    .to_string(),
+                diagnostic: Some(Diagnostic::blocking(
+                    "ASTRA_ANDROID_RELEASE_IDENTITY_MISMATCH",
+                    "Android release requires the same package, target, profile, build, and live session evidence",
+                )),
+                evidence: Vec::new(),
+            }
+        }
+    }
+
     pub fn validate_package_with_product_evidence(
         &self,
         request: PackageValidateRequest,
@@ -760,6 +823,7 @@ fn player_presentation_check(
             PlayerPlatform::Linux => astra_platform::PlatformId::Linux,
             PlayerPlatform::Macos => astra_platform::PlatformId::Macos,
             PlayerPlatform::Web => astra_platform::PlatformId::Web,
+            PlayerPlatform::Android => astra_platform::PlatformId::Android,
         };
         report.schema == PLAYER_PRESENTATION_REPORT_SCHEMA
             && report.status == PlayerAutomationStatus::Pass

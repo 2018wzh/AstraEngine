@@ -2,14 +2,18 @@ use astra_core::Hash256;
 pub use astra_player_core::{
     PlatformCommandSink, PlayerAudioMeterEvidence, PlayerAutomationReport, PlayerAutomationScript,
     PlayerAutomationStatus, PlayerAutomationStep, PlayerAutomationValidator,
-    PlayerHostCommandExecutor, PlayerHostResourceId, PlayerInputConsumptionEvidence,
-    PlayerInputEvent, PlayerInputTranscript, PlayerPlatform, PlayerPlatformEvidenceIdentity,
-    PlayerRuntimeRouteEvidence, PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
+    PlayerHostCommandExecutor, PlayerHostCommandResult, PlayerHostResourceId,
+    PlayerInputConsumptionEvidence, PlayerInputEvent, PlayerInputTranscript, PlayerPlatform,
+    PlayerPlatformEvidenceIdentity, PlayerRuntimeRouteEvidence, PlayerVisualComparisonEvidence,
+    PlayerVisualRegionEvidence,
 };
 use std::{fs, path::PathBuf};
 
 mod web_cdp;
 pub use web_cdp::*;
+
+mod native_session;
+pub use native_session::*;
 
 pub use astra_player_vn::*;
 
@@ -23,6 +27,10 @@ pub const MACOS_CGEVENT_MOUSE: &str = "cgevent.mouse";
 pub const MACOS_CGEVENT_KEYBOARD: &str = "cgevent.keyboard";
 pub const WEB_CDP_MOUSE: &str = "cdp.mouse";
 pub const WEB_CDP_KEYBOARD: &str = "cdp.keyboard";
+pub const ANDROID_TOUCH: &str = "android.touch";
+pub const ANDROID_KEYBOARD: &str = "android.keyboard";
+pub const ANDROID_GAMEPAD: &str = "android.gamepad";
+pub const ANDROID_ACCESSIBILITY: &str = "android.accessibility";
 
 pub type PlayerAutomationError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -290,6 +298,23 @@ impl MacosCgEventHost {
 
 #[derive(Debug, Clone, Default)]
 pub struct WebCdpInputHost;
+
+#[derive(Debug, Clone, Default)]
+pub struct AndroidInputHost;
+
+impl AndroidInputHost {
+    pub fn build_report(
+        &self,
+        script: &PlayerAutomationScript,
+        transcript: &PlayerInputTranscript,
+    ) -> PlayerAutomationReport {
+        PlayerAutomationValidator.validate(script, transcript)
+    }
+
+    pub fn supports(script: &PlayerAutomationScript) -> bool {
+        script.platform == PlayerPlatform::Android
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct WebLiveAutomationRequest {

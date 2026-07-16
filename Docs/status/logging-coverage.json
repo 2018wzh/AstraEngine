@@ -138,8 +138,8 @@
       "reason": "pure Stage 6 unavailable factory"
     },
     "astra-platform-android": {
-      "status": "not_applicable",
-      "reason": "pure Stage 6 unavailable factory"
+      "status": "instrumented",
+      "reason": "GameActivity host lifecycle, provider selection and native resource failures"
     },
     "astra-platform-web": {
       "status": "instrumented",
@@ -216,6 +216,10 @@
     "astra-player-web": {
       "status": "instrumented",
       "reason": "Web Player package and host lifecycle"
+    },
+    "astra-player-android": {
+      "status": "instrumented",
+      "reason": "Android Player native entrypoint and Runtime/provider session lifecycle"
     },
     "astra-crash-reporter": {
       "status": "instrumented",

@@ -555,6 +555,7 @@ pub enum PlayerPlatform {
     Linux,
     Macos,
     Web,
+    Android,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -809,6 +810,7 @@ fn validate_presentation_identity(
         PlayerPlatform::Linux => identity.renderer_provider == "wgpu_vulkan",
         PlayerPlatform::Macos => identity.renderer_provider == "wgpu_metal",
         PlayerPlatform::Web => identity.renderer_provider == "webgpu",
+        PlayerPlatform::Android => identity.renderer_provider == "wgpu_vulkan",
     };
     if identity.target.is_empty()
         || identity.profile.is_empty()
@@ -1127,6 +1129,10 @@ fn live_input_surface_check(
             "cgevent.keyboard" | "cgevent.mouse" | "cgevent.gamepad"
         ),
         PlayerPlatform::Web => matches!(event.source.as_str(), "cdp.mouse" | "cdp.keyboard"),
+        PlayerPlatform::Android => matches!(
+            event.source.as_str(),
+            "android.touch" | "android.keyboard" | "android.gamepad" | "android.accessibility"
+        ),
     });
     let all_allowed = events.iter().all(|event| match platform {
         PlayerPlatform::Windows => matches!(
@@ -1144,6 +1150,14 @@ fn live_input_surface_check(
         PlayerPlatform::Web => matches!(
             event.source.as_str(),
             "browser.focus" | "cdp.session" | "cdp.mouse" | "cdp.keyboard"
+        ),
+        PlayerPlatform::Android => matches!(
+            event.source.as_str(),
+            "android.focus"
+                | "android.touch"
+                | "android.keyboard"
+                | "android.gamepad"
+                | "android.accessibility"
         ),
     });
     if !events.is_empty() && has_required && all_allowed {
@@ -1464,6 +1478,10 @@ fn is_live_input_source(platform: PlayerPlatform, source: &str) -> bool {
             "cgevent.keyboard" | "cgevent.mouse" | "cgevent.gamepad"
         ),
         PlayerPlatform::Web => matches!(source, "cdp.mouse" | "cdp.keyboard"),
+        PlayerPlatform::Android => matches!(
+            source,
+            "android.touch" | "android.keyboard" | "android.gamepad" | "android.accessibility"
+        ),
     }
 }
 
@@ -1473,6 +1491,9 @@ fn is_consumption_trace_source(platform: PlayerPlatform, source: &str) -> bool {
         PlayerPlatform::Linux => source == "player_host.trace",
         PlayerPlatform::Macos => source == "player_host.trace",
         PlayerPlatform::Web => matches!(source, "player_host.trace" | "browser_host.trace"),
+        PlayerPlatform::Android => {
+            matches!(source, "player_host.trace" | "android_host.trace")
+        }
     }
 }
 

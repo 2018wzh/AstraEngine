@@ -33,6 +33,21 @@ platform_profiles:
         allowed_origins: [https://cdn.example.invalid]
     limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
     package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
+  android-release:
+    schema: astra.platform_host_profile.v2
+    id: android-release
+    platform: android
+    target: nativevn-game
+    package_id: com.example.nativevn
+    renderer: { providers: [wgpu_vulkan], allow_software: false }
+    decode: { providers: [mediacodec], allow_software: false }
+    audio: { providers: [oboe_aaudio, oboe_opensl_es], allow_software: false }
+    save: { providers: [android_app_storage], allow_software: false }
+    package_sources:
+      - { kind: bundled }
+      - { kind: user_authorized }
+    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
+    package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
 
 targets:
   - id: nativevn-game
@@ -41,7 +56,7 @@ targets:
     default_profile: advanced-vn
     runtime_provider: native_vn
     ui_provider: astra.ui.yakui
-    platforms: [headless, windows, web]
+    platforms: [headless, windows, web, android]
     packaged: true
 nativevn:
   default_locale: en

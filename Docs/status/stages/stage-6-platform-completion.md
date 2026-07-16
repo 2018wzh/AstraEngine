@@ -1,6 +1,6 @@
 # Stage 6 Platform Completion Work
 
-Stage 6 收纳 Stage 2 之外的平台完成项。Linux、macOS host 与 packaged Player 已进入 `IN_PROGRESS`；iOS 和 Android 保持 `SPEC_READY`。Linux/macOS Headless 的本机 CI、runtime 与 artifact portability 在本阶段独立关闭。本页不把 capability crate 编译通过写成 host 完成，也不把 API 可用性写成可玩证据。
+Stage 6 收纳 Stage 2 之外的平台完成项。Linux、macOS host 与 packaged Player 已进入 `IN_PROGRESS`；Android 也已进入 `IN_PROGRESS`；iOS 保持 `SPEC_READY`。Linux/macOS Headless 的本机 CI、runtime 与 artifact portability 在本阶段独立关闭。本页不把 capability crate、cross-build、Gradle configuration 或 emulator-only smoke 写成 host 完成，也不把 API 可用性写成可玩证据。
 
 ## S6-LINUX-HEADLESS-01 Linux Headless portability
 
@@ -22,7 +22,7 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Linux、macOS host 与 package
 
 **ID:** `S6-MACOS-HEADLESS-01`
 
-**Status:** `SPEC_READY`
+**Status:** `IN_PROGRESS`
 
 **Goal:** 在 macOS native 环境复核 Migration 11 Headless 的完整 host、JSONL、真实 PNG/WAV、decode、transactional save、bounded package source、artifact、review bundle、统一测试 inventory 与 zero-leak shutdown。
 
@@ -146,13 +146,13 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Linux、macOS host 与 package
 
 **Status:** `SPEC_READY`
 
-**Goal:** 补 Kotlin/Java launcher、Vulkan/wgpu surface、touch/safe area、AAudio/OpenSL ES、MediaCodec、SAF/package import、activity resume 和 no-JIT Luau gate。
+**Goal:** 完成 Kotlin launcher、Vulkan/wgpu surface、touch/insets、AAudio、MediaCodec、SAF/package import、activity resume 和 no-JIT Luau gate，并取得 emulator 与真机 E3。
 
 **Depends On:** `S2-PLATFORM-01`、`S3-LUAU-01`
 
 **Target Paths:** `Engine/Source/Platform/astra-platform-android/`、`Docs/platforms/mobile.md`
 
-**Planned Gate:** required smoke 暂定 `launcher_smoke` 和 `decode.mediacodec`。实现时必须验证 package source、activity lifecycle、save store 和 audio focus。
+**Gate:** required conformance 固定为 lifecycle、Vulkan present/readback、native input、TalkBack、audio output/focus/meter、MediaCodec audio/video、transactional save、bundled/SAF package、resume/recreate 和 zero-leak。对应 host 路径已实现并通过 Android cross-clippy；API 28/36 emulator、arm64 真机和同 run report 仍 blocking。
 
 **Linked Test IDs:** `T-S6-ANDROID-HOST-01`
 
@@ -160,13 +160,13 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Linux、macOS host 与 package
 
 **ID:** `S6-ANDROID-PLAYER-AUTOMATION-01`
 
-**Status:** `SPEC_READY`
+**Status:** `IN_PROGRESS`
 
 **Goal:** 补 Android player live input automation，覆盖设备或 emulator touch/keyboard 输入、activity lifecycle、Vulkan/wgpu frame region hash、audio focus/meter、SAF/package source 和 route/system UI evidence。
 
 **Depends On:** `S6-ANDROID-HOST-01`、`S3-PLAYER-AUTOMATION-01`
 
-**Target Paths:** `Engine/Source/Platform/astra-platform-android/`、`Engine/Source/Programs/astra-player/` planned target、`Docs/platforms/mobile.md`
+**Target Paths:** `Engine/Source/Platform/astra-platform-android/`、`Engine/Source/Programs/astra-player-android/`、`Engine/Source/Programs/astra-player/`、`Tools/build_android.py`、`Docs/platforms/mobile.md`
 
 **Planned Gate:** `player.full_playable.android` 必须使用设备或 emulator 证据；缺 touch transcript、activity resume、frame region change、audio focus/meter、package source 或 route evidence 时 blocking。
 

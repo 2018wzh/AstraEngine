@@ -185,6 +185,29 @@ impl PlatformHostProfile {
         }
     }
 
+    pub fn android_release(target: impl Into<String>, package_id: impl Into<String>) -> Self {
+        Self {
+            schema: PLATFORM_HOST_PROFILE_SCHEMA.to_string(),
+            id: "android-release".to_string(),
+            platform: PlatformId::Android,
+            target: target.into(),
+            package_id: package_id.into(),
+            renderer: ProviderPolicy::required("wgpu_vulkan"),
+            decode: ProviderPolicy::required("mediacodec"),
+            audio: ProviderPolicy {
+                providers: vec!["oboe_aaudio".to_string(), "oboe_opensl_es".to_string()],
+                allow_software: false,
+            },
+            save: ProviderPolicy::required("android_app_storage"),
+            package_sources: vec![
+                PackageSourcePolicy::Bundled,
+                PackageSourcePolicy::UserAuthorized,
+            ],
+            limits: HostLimits::default(),
+            package_cache: PackageCachePolicy::default(),
+        }
+    }
+
     pub fn hash(&self) -> Result<String, PlatformError> {
         let bytes = serde_json::to_vec(self).map_err(|error| {
             PlatformError::new(
@@ -381,7 +404,36 @@ fn validate_release_provider_policy(profile: &PlatformHostProfile) -> Result<(),
             "coreaudio",
             "application_support",
         ],
-        PlatformId::Ios | PlatformId::Android => return Ok(()),
+        PlatformId::Android => {
+            for (field, policy, expected) in [
+                ("renderer", &profile.renderer, &["wgpu_vulkan"][..]),
+                ("decode", &profile.decode, &["mediacodec"][..]),
+                (
+                    "audio",
+                    &profile.audio,
+                    &["oboe_aaudio", "oboe_opensl_es"][..],
+                ),
+                ("save", &profile.save, &["android_app_storage"][..]),
+            ] {
+                if policy.allow_software
+                    || policy
+                        .providers
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>()
+                        != expected
+                {
+                    return Err(PlatformError::new(
+                        PlatformErrorCode::InvalidProfile,
+                        "profile.validate",
+                        "Android release provider policy is unsupported",
+                    )
+                    .with_field("field", field));
+                }
+            }
+            return Ok(());
+        }
+        PlatformId::Ios => return Ok(()),
     };
     for ((field, policy), required) in [
         ("renderer", &profile.renderer),

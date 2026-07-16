@@ -1,0 +1,27 @@
+[package]
+name = "astra-player-android"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+astra-core = { path = "../../Runtime/astra-core" }
+astra-package = { path = "../../Runtime/astra-package" }
+astra-platform = { path = "../../Platform/astra-platform" }
+astra-platform-android = { path = "../../Platform/astra-platform-android" }
+astra-player = { path = "../astra-player" }
+astra-player-core = { path = "../../Runtime/astra-player-core" }
+astra-player-vn = { path = "../astra-player-vn" }
+astra-ui-core = { path = "../../Runtime/astra-ui-core" }
+astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
+astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity.workspace = true

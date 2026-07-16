@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use astra_media_core::{
     BlendMode, GlyphBitmap, GlyphBitmapFormat, MeshMaterial2D, MeshVertex2D, RectI, SceneCommand,
-    TextureFrame,
+    TextureFrame, Transform2D,
 };
 use astra_platform::{PlatformError, PlatformErrorCode, SceneFrame};
 use wgpu::util::DeviceExt;
@@ -73,6 +73,7 @@ enum QuadSource {
 struct DrawQuad {
     source: QuadSource,
     destination: RectI,
+    rotation_quadrants: u8,
 }
 
 struct DrawRun {
@@ -80,6 +81,7 @@ struct DrawRun {
     rgba: [u8; 4],
     opacity: f32,
     clip: RectI,
+    transform: Transform2D,
 }
 
 struct MeshRun {
@@ -88,6 +90,7 @@ struct MeshRun {
     texture_id: Option<String>,
     opacity: f32,
     clip: RectI,
+    transform: Transform2D,
 }
 
 enum DrawPrimitive {
@@ -157,6 +160,11 @@ impl WgpuGlyphAtlasRenderer {
         let mut resources = self.resources.clone();
         let mut draw_runs = Vec::new();
         let mut clip_stack = Vec::new();
+        let mut transform_stack = vec![Transform2D::IDENTITY];
+        let mut camera = Transform2D::IDENTITY;
+        let mut opacity_stack = vec![1.0_f32];
+        let mut transient_resources = BTreeSet::new();
+        let mut transient_sequence = 0_u64;
         let mut run_ids = BTreeSet::new();
         let mut drawn_resources = BTreeSet::new();
         for command in &frame.commands {
@@ -212,9 +220,11 @@ impl WgpuGlyphAtlasRenderer {
                     }
                 }
                 SceneCommand::PushClip { rect } => {
+                    let rect =
+                        transformed_bounds(current_transform(camera, &transform_stack), *rect)?;
                     let clip = intersect_clip(
                         clip_stack.last().copied(),
-                        *rect,
+                        rect,
                         frame.width,
                         frame.height,
                     )?;
@@ -257,19 +267,21 @@ impl WgpuGlyphAtlasRenderer {
                                 source: RectI::new(0, 0, bitmap.width, bitmap.height),
                             },
                             destination: RectI::new(glyph.x, glyph.y, bitmap.width, bitmap.height),
+                            rotation_quadrants: glyph.rotation_quadrants,
                         });
                         drawn_resources.insert(glyph.resource_id.clone());
                     }
                     draw_runs.push(DrawPrimitive::Quads(DrawRun {
                         quads,
                         rgba: *rgba,
-                        opacity: *opacity,
+                        opacity: *opacity * opacity_stack.last().copied().unwrap_or(1.0),
                         clip: clip_stack.last().copied().unwrap_or(RectI::new(
                             0,
                             0,
                             frame.width,
                             frame.height,
                         )),
+                        transform: current_transform(camera, &transform_stack),
                     }));
                 }
                 SceneCommand::Sprite {
@@ -308,15 +320,17 @@ impl WgpuGlyphAtlasRenderer {
                                 source,
                             },
                             destination: *destination,
+                            rotation_quadrants: 0,
                         }],
                         rgba: [255; 4],
-                        opacity: *opacity,
+                        opacity: *opacity * opacity_stack.last().copied().unwrap_or(1.0),
                         clip: clip_stack.last().copied().unwrap_or(RectI::new(
                             0,
                             0,
                             frame.width,
                             frame.height,
                         )),
+                        transform: current_transform(camera, &transform_stack),
                     }));
                 }
                 SceneCommand::Rect {
@@ -339,15 +353,17 @@ impl WgpuGlyphAtlasRenderer {
                         quads: vec![DrawQuad {
                             source: QuadSource::White,
                             destination: RectI::new(*x as i32, *y as i32, *width, *height),
+                            rotation_quadrants: 0,
                         }],
                         rgba: *rgba,
-                        opacity: 1.0,
+                        opacity: opacity_stack.last().copied().unwrap_or(1.0),
                         clip: clip_stack.last().copied().unwrap_or(RectI::new(
                             0,
                             0,
                             frame.width,
                             frame.height,
                         )),
+                        transform: current_transform(camera, &transform_stack),
                     }));
                 }
                 SceneCommand::Mesh2D {
@@ -416,24 +432,143 @@ impl WgpuGlyphAtlasRenderer {
                         vertices: vertices.clone(),
                         indices: indices.clone(),
                         texture_id: resolved_texture,
-                        opacity: *opacity,
+                        opacity: *opacity * opacity_stack.last().copied().unwrap_or(1.0),
                         clip: clip_stack.last().copied().unwrap_or(RectI::new(
                             0,
                             0,
                             frame.width,
                             frame.height,
                         )),
+                        transform: current_transform(camera, &transform_stack),
                     }));
                 }
-                _ => {
-                    return Err(invalid(
-                        "GPU scene pass received an unsupported scene command",
-                    ))
+                SceneCommand::Clear { rgba } => {
+                    draw_runs.push(DrawPrimitive::Quads(DrawRun {
+                        quads: vec![DrawQuad {
+                            source: QuadSource::White,
+                            destination: RectI::new(0, 0, frame.width, frame.height),
+                            rotation_quadrants: 0,
+                        }],
+                        rgba: *rgba,
+                        opacity: 1.0,
+                        clip: RectI::new(0, 0, frame.width, frame.height),
+                        transform: Transform2D::IDENTITY,
+                    }));
+                }
+                SceneCommand::Texture {
+                    id,
+                    frame: texture,
+                    destination,
+                    opacity,
+                    blend,
+                }
+                | SceneCommand::VideoFrame {
+                    id,
+                    frame: texture,
+                    destination,
+                    opacity,
+                    blend,
+                    ..
+                } => {
+                    validate_draw_identity(id, opacity, *blend, &mut run_ids)?;
+                    validate_texture(texture)?;
+                    validate_destination(*destination)?;
+                    let resource_id =
+                        transient_resource_id(&resources, &mut transient_sequence, "texture")?;
+                    resources.insert(resource_id.clone(), AtlasResource::Texture(texture.clone()));
+                    transient_resources.insert(resource_id.clone());
+                    drawn_resources.insert(resource_id.clone());
+                    draw_runs.push(DrawPrimitive::Quads(DrawRun {
+                        quads: vec![DrawQuad {
+                            source: QuadSource::Resource {
+                                resource_id,
+                                source: RectI::new(0, 0, texture.width, texture.height),
+                            },
+                            destination: *destination,
+                            rotation_quadrants: 0,
+                        }],
+                        rgba: [255; 4],
+                        opacity: *opacity * opacity_stack.last().copied().unwrap_or(1.0),
+                        clip: clip_stack.last().copied().unwrap_or(RectI::new(
+                            0,
+                            0,
+                            frame.width,
+                            frame.height,
+                        )),
+                        transform: current_transform(camera, &transform_stack),
+                    }));
+                }
+                SceneCommand::Glyph {
+                    id,
+                    glyph,
+                    x,
+                    y,
+                    rgba,
+                    opacity,
+                    blend,
+                } => {
+                    validate_draw_identity(id, opacity, *blend, &mut run_ids)?;
+                    validate_glyph(glyph)?;
+                    let resource_id =
+                        transient_resource_id(&resources, &mut transient_sequence, "glyph")?;
+                    resources.insert(resource_id.clone(), AtlasResource::Glyph(glyph.clone()));
+                    transient_resources.insert(resource_id.clone());
+                    drawn_resources.insert(resource_id.clone());
+                    draw_runs.push(DrawPrimitive::Quads(DrawRun {
+                        quads: vec![DrawQuad {
+                            source: QuadSource::Resource {
+                                resource_id,
+                                source: RectI::new(0, 0, glyph.width, glyph.height),
+                            },
+                            destination: RectI::new(*x, *y, glyph.width, glyph.height),
+                            rotation_quadrants: 0,
+                        }],
+                        rgba: *rgba,
+                        opacity: *opacity * opacity_stack.last().copied().unwrap_or(1.0),
+                        clip: clip_stack.last().copied().unwrap_or(RectI::new(
+                            0,
+                            0,
+                            frame.width,
+                            frame.height,
+                        )),
+                        transform: current_transform(camera, &transform_stack),
+                    }));
+                }
+                SceneCommand::PushTransform { transform } => {
+                    validate_transform(*transform)?;
+                    let current = *transform_stack
+                        .last()
+                        .expect("transform stack is initialized");
+                    transform_stack.push(compose_transform(current, *transform));
+                }
+                SceneCommand::PopTransform => {
+                    if transform_stack.len() == 1 {
+                        return Err(invalid("GPU scene transform stack underflowed"));
+                    }
+                    transform_stack.pop();
+                }
+                SceneCommand::SetCamera { transform } => {
+                    validate_transform(*transform)?;
+                    camera = *transform;
+                }
+                SceneCommand::PushOpacity { opacity } => {
+                    validate_opacity(*opacity)?;
+                    let current = opacity_stack.last().copied().unwrap_or(1.0);
+                    opacity_stack.push(current * *opacity);
+                }
+                SceneCommand::PopOpacity => {
+                    if opacity_stack.len() == 1 {
+                        return Err(invalid("GPU scene opacity stack underflowed"));
+                    }
+                    opacity_stack.pop();
+                }
+                SceneCommand::FilterGraph { .. } => {
+                    return Err(invalid("GPU scene pass does not implement filter graphs"))
                 }
             }
         }
-        if !clip_stack.is_empty() {
-            return Err(invalid("glyph clip stack is not balanced"));
+        if !clip_stack.is_empty() || transform_stack.len() != 1 || opacity_stack.len() != 1 {
+            return Err(invalid("GPU scene command stacks are not balanced"));
         }
         validate_resource_budget(&resources)?;
 
@@ -531,6 +666,9 @@ impl WgpuGlyphAtlasRenderer {
             }
         }
         queue.submit([encoder.finish()]);
+        for resource_id in transient_resources {
+            resources.remove(&resource_id);
+        }
         Ok((output, resources))
     }
 }
@@ -798,8 +936,14 @@ fn build_vertices(
                 for quad in &run.quads {
                     let left = quad.destination.x as f32;
                     let top = quad.destination.y as f32;
-                    let right = left + quad.destination.width as f32;
-                    let bottom = top + quad.destination.height as f32;
+                    let rotated = quad.rotation_quadrants % 4;
+                    let (draw_width, draw_height) = if rotated % 2 == 0 {
+                        (quad.destination.width, quad.destination.height)
+                    } else {
+                        (quad.destination.height, quad.destination.width)
+                    };
+                    let right = left + draw_width as f32;
+                    let bottom = top + draw_height as f32;
                     let (u0, v0, u1, v1) = match &quad.source {
                         QuadSource::Resource {
                             resource_id,
@@ -824,14 +968,21 @@ fn build_vertices(
                             (u, v, u, v)
                         }
                     };
-                    for (x, y, u, v) in [
-                        (left, top, u0, v0),
-                        (right, top, u1, v0),
-                        (right, bottom, u1, v1),
-                        (left, top, u0, v0),
-                        (right, bottom, u1, v1),
-                        (left, bottom, u0, v1),
-                    ] {
+                    let uv = match rotated {
+                        0 => [(u0, v0), (u1, v0), (u1, v1), (u0, v1)],
+                        1 => [(u0, v1), (u0, v0), (u1, v0), (u1, v1)],
+                        2 => [(u1, v1), (u0, v1), (u0, v0), (u1, v0)],
+                        3 => [(u1, v0), (u1, v1), (u0, v1), (u0, v0)],
+                        _ => unreachable!(),
+                    };
+                    let positions = [(left, top), (right, top), (right, bottom), (left, bottom)];
+                    for corner in [0, 1, 2, 0, 2, 3] {
+                        let (x, y) = transform_point(
+                            run.transform,
+                            positions[corner].0,
+                            positions[corner].1,
+                        );
+                        let (u, v) = uv[corner];
                         push_vertex(&mut bytes, x, y, u, v, color, frame.width, frame.height);
                         vertex_count = vertex_count
                             .checked_add(1)
@@ -856,6 +1007,8 @@ fn build_vertices(
                     .transpose()?;
                 for index in &run.indices {
                     let vertex = &run.vertices[*index as usize];
+                    let (x, y) =
+                        transform_point(run.transform, vertex.position[0], vertex.position[1]);
                     let (u, v) = if let Some((placement, width, height)) = texture_mapping {
                         (
                             (placement.x as f32 + vertex.uv[0] * width as f32) / atlas.width as f32,
@@ -867,8 +1020,8 @@ fn build_vertices(
                     };
                     push_vertex(
                         &mut bytes,
-                        vertex.position[0],
-                        vertex.position[1],
+                        x,
+                        y,
                         u,
                         v,
                         premultiplied_linear(vertex.premultiplied_rgba, run.opacity),
@@ -972,6 +1125,139 @@ fn intersect_clip(
         clipped_width,
         clipped_height,
     ))
+}
+
+fn validate_draw_identity(
+    id: &str,
+    opacity: &f32,
+    blend: BlendMode,
+    run_ids: &mut BTreeSet<String>,
+) -> Result<(), PlatformError> {
+    if id.is_empty()
+        || id.len() > 256
+        || !run_ids.insert(id.to_string())
+        || !opacity.is_finite()
+        || !(0.0..=1.0).contains(opacity)
+        || blend != BlendMode::Alpha
+    {
+        return Err(invalid("draw identity, opacity, or blend mode is invalid"));
+    }
+    Ok(())
+}
+
+fn transient_resource_id(
+    resources: &BTreeMap<String, AtlasResource>,
+    sequence: &mut u64,
+    kind: &str,
+) -> Result<String, PlatformError> {
+    loop {
+        *sequence = sequence
+            .checked_add(1)
+            .ok_or_else(|| invalid("transient scene resource sequence overflowed"))?;
+        let id = format!("astra.transient.{kind}.{sequence}");
+        if !resources.contains_key(&id) {
+            return Ok(id);
+        }
+    }
+}
+
+fn validate_opacity(opacity: f32) -> Result<(), PlatformError> {
+    if opacity.is_finite() && (0.0..=1.0).contains(&opacity) {
+        Ok(())
+    } else {
+        Err(invalid("scene opacity is invalid"))
+    }
+}
+
+fn validate_transform(transform: Transform2D) -> Result<(), PlatformError> {
+    let values = [
+        transform.m11,
+        transform.m12,
+        transform.m21,
+        transform.m22,
+        transform.tx,
+        transform.ty,
+    ];
+    let determinant = transform.m11 * transform.m22 - transform.m12 * transform.m21;
+    if values.into_iter().all(f32::is_finite)
+        && determinant.is_finite()
+        && determinant.abs() >= f32::EPSILON
+    {
+        Ok(())
+    } else {
+        Err(invalid("scene transform is invalid or singular"))
+    }
+}
+
+fn compose_transform(current: Transform2D, next: Transform2D) -> Transform2D {
+    Transform2D {
+        m11: next.m11 * current.m11 + next.m21 * current.m12,
+        m12: next.m12 * current.m11 + next.m22 * current.m12,
+        m21: next.m11 * current.m21 + next.m21 * current.m22,
+        m22: next.m12 * current.m21 + next.m22 * current.m22,
+        tx: next.m11 * current.tx + next.m21 * current.ty + next.tx,
+        ty: next.m12 * current.tx + next.m22 * current.ty + next.ty,
+    }
+}
+
+fn current_transform(camera: Transform2D, stack: &[Transform2D]) -> Transform2D {
+    compose_transform(
+        stack.last().copied().unwrap_or(Transform2D::IDENTITY),
+        camera,
+    )
+}
+
+fn transform_point(transform: Transform2D, x: f32, y: f32) -> (f32, f32) {
+    (
+        transform.m11 * x + transform.m21 * y + transform.tx,
+        transform.m12 * x + transform.m22 * y + transform.ty,
+    )
+}
+
+fn transformed_bounds(transform: Transform2D, rect: RectI) -> Result<RectI, PlatformError> {
+    let right = rect.x as f32 + rect.width as f32;
+    let bottom = rect.y as f32 + rect.height as f32;
+    let points = [
+        transform_point(transform, rect.x as f32, rect.y as f32),
+        transform_point(transform, right, rect.y as f32),
+        transform_point(transform, right, bottom),
+        transform_point(transform, rect.x as f32, bottom),
+    ];
+    let min_x = points
+        .iter()
+        .map(|point| point.0)
+        .fold(f32::INFINITY, f32::min);
+    let min_y = points
+        .iter()
+        .map(|point| point.1)
+        .fold(f32::INFINITY, f32::min);
+    let max_x = points
+        .iter()
+        .map(|point| point.0)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let max_y = points
+        .iter()
+        .map(|point| point.1)
+        .fold(f32::NEG_INFINITY, f32::max);
+    if ![min_x, min_y, max_x, max_y].into_iter().all(f32::is_finite)
+        || min_x < i32::MIN as f32
+        || min_y < i32::MIN as f32
+        || max_x > i32::MAX as f32
+        || max_y > i32::MAX as f32
+    {
+        return Err(invalid(
+            "transformed scene clip is outside supported coordinates",
+        ));
+    }
+    let left = min_x.floor() as i32;
+    let top = min_y.floor() as i32;
+    let right = max_x.ceil() as i64;
+    let bottom = max_y.ceil() as i64;
+    let width = u32::try_from(right - i64::from(left))
+        .map_err(|_| invalid("transformed scene clip width overflowed"))?;
+    let height = u32::try_from(bottom - i64::from(top))
+        .map_err(|_| invalid("transformed scene clip height overflowed"))?;
+    Ok(RectI::new(left, top, width, height))
 }
 
 fn create_pipeline(

@@ -54,6 +54,7 @@ members = [
     "Engine/Source/Programs/astra-player",
     "Engine/Source/Programs/astra-player-vn",
     "Engine/Source/Programs/astra-player-web",
+    "Engine/Source/Programs/astra-player-android",
     "Engine/Source/Programs/astra-crash-reporter",
     "Engine/Source/Programs/astra-ui-component-host",
     "Engine/Plugins/Fixtures/headless-presentation-provider",
@@ -69,6 +70,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 accesskit = "=0.24.1"
+accesskit_android = { version = "=0.7.5", features = ["embedded-dex"] }
 accesskit_winit = { version = "=0.33.1", default-features = false, features = ["rwh_06"] }
 abi_stable = "0.11"
 ashpd = { version = "=0.12.3", default-features = false, features = ["tokio"] }
@@ -162,3 +164,8 @@ wgpu = "30"
 yakui-core = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }
 yakui-widgets = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }
 zstd = "0.13"
+android-activity = { version = "0.6.1", features = ["game-activity"] }
+jni = "0.22.4"
+ndk = "0.9.0"
+ndk-sys = "0.6.0"
+oboe = "0.6.1"

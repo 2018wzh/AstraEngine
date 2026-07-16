@@ -309,7 +309,20 @@ pub fn required_conformance_checks(platform: PlatformId) -> &'static [&'static s
             "distribution.notarization",
             "resource.zero_leaks",
         ],
-        PlatformId::Ios | PlatformId::Android => &[],
+        PlatformId::Android => &[
+            "host.lifecycle",
+            "window.activity",
+            "surface.vulkan_present_readback",
+            "input.android_consumption",
+            "accessibility.talkback_semantics",
+            "audio.android_focus_meter",
+            "decode.mediacodec_audio_video",
+            "save.android_atomic_reopen",
+            "package.bundled_saf_hash_range",
+            "host.resume_recreate",
+            "resource.zero_leaks",
+        ],
+        PlatformId::Ios => &[],
     }
 }
 

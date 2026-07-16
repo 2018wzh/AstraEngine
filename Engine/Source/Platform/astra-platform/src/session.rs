@@ -526,6 +526,28 @@ pub enum TouchPhase {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowInsets {
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioFocusState {
+    Gained,
+    Lost,
+    LostTransient,
+    Duck,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryPressureLevel {
+    Moderate,
+    Critical,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GamepadControl {
     South,
     East,
@@ -565,6 +587,16 @@ pub enum PlatformEventKind {
         width: u32,
         height: u32,
         scale_factor: f64,
+    },
+    WindowInsetsChanged {
+        window: WindowHandle,
+        insets: WindowInsets,
+    },
+    AudioFocusChanged {
+        state: AudioFocusState,
+    },
+    MemoryPressure {
+        level: MemoryPressureLevel,
     },
     Keyboard {
         window: WindowHandle,

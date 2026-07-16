@@ -223,6 +223,10 @@ enum PackageCommand {
         web_player_wasm: Option<PathBuf>,
         #[arg(long)]
         web_player_glue: Option<PathBuf>,
+        #[arg(long)]
+        android_arm64_library: Option<PathBuf>,
+        #[arg(long)]
+        android_x86_64_library: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = ReportFormat::Yaml)]
         format: ReportFormat,
     },
@@ -473,6 +477,8 @@ fn main() -> Result<(), CliError> {
                 ui_component_host,
                 web_player_wasm,
                 web_player_glue,
+                android_arm64_library,
+                android_x86_64_library,
                 format,
             } => {
                 let artifacts = BundleArtifactInputs {
@@ -483,6 +489,8 @@ fn main() -> Result<(), CliError> {
                     ui_component_host,
                     web_player_wasm,
                     web_player_glue,
+                    android_arm64_library,
+                    android_x86_64_library,
                 };
                 let manifest = build_standalone_bundle(
                     &package,
@@ -1320,6 +1328,8 @@ struct BundleArtifactInputs {
     ui_component_host: Option<PathBuf>,
     web_player_wasm: Option<PathBuf>,
     web_player_glue: Option<PathBuf>,
+    android_arm64_library: Option<PathBuf>,
+    android_x86_64_library: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -3545,7 +3555,58 @@ fn build_standalone_bundle_into(
             }
             entrypoint.to_string()
         }
-        PlatformId::Ios | PlatformId::Android => {
+        PlatformId::Android => {
+            let arm64 = artifacts.android_arm64_library.as_deref().ok_or(
+                "Android bundle requires --android-arm64-library pointing to libastra_player_android.so",
+            )?;
+            let arm64_bytes = fs::read(arm64)?;
+            validate_android_native_library(arm64, &arm64_bytes, "arm64-v8a")?;
+            let entrypoint = "lib/arm64-v8a/libastra_player_android.so";
+            let destination = out.join(entrypoint);
+            fs::create_dir_all(destination.parent().expect("Android library has parent"))?;
+            fs::write(&destination, &arm64_bytes)?;
+            files.push(bundle_file(
+                entrypoint,
+                "android_player_cdylib",
+                &arm64_bytes,
+            ));
+
+            if let Some(x86_64) = artifacts.android_x86_64_library.as_deref() {
+                let bytes = fs::read(x86_64)?;
+                validate_android_native_library(x86_64, &bytes, "x86_64")?;
+                let relative = "lib/x86_64/libastra_player_android.so";
+                let destination = out.join(relative);
+                fs::create_dir_all(destination.parent().expect("Android library has parent"))?;
+                fs::write(destination, &bytes)?;
+                files.push(bundle_file(relative, "android_player_test_cdylib", &bytes));
+            }
+            let config = player_config_bytes(
+                target,
+                profile,
+                platform_name,
+                &display_config,
+                &locale_config,
+                ui_components.as_ref(),
+            )?;
+            fs::write(out.join("AstraPlayer.config.json"), &config)?;
+            files.push(bundle_file(
+                "AstraPlayer.config.json",
+                "player_config",
+                &config,
+            ));
+            bundle_checks.extend([
+                PlayerLaunchCheck {
+                    id: "android.arm64_cdylib.verified".to_string(),
+                    status: "pass".to_string(),
+                },
+                PlayerLaunchCheck {
+                    id: "android.apk_aab.pending_gradle".to_string(),
+                    status: "blocking".to_string(),
+                },
+            ]);
+            entrypoint.to_string()
+        }
+        PlatformId::Linux | PlatformId::Macos | PlatformId::Ios => {
             return Err(format!("standalone bundle platform {platform_name} is Stage 6").into());
         }
     };
@@ -3590,6 +3651,25 @@ fn build_standalone_bundle_into(
         serde_json::to_vec_pretty(&manifest)?,
     )?;
     Ok(manifest)
+}
+
+fn validate_android_native_library(path: &Path, bytes: &[u8], abi: &str) -> Result<(), CliError> {
+    if path.file_name().and_then(std::ffi::OsStr::to_str) != Some("libastra_player_android.so")
+        || bytes.len() < 64
+        || !bytes.starts_with(b"\x7fELF")
+    {
+        return Err(format!("ASTRA_ANDROID_NATIVE_LIBRARY_INVALID: {abi}").into());
+    }
+    let expected_machine = match abi {
+        "arm64-v8a" => 183u16,
+        "x86_64" => 62u16,
+        _ => return Err("ASTRA_ANDROID_ABI_UNSUPPORTED".into()),
+    };
+    let machine = u16::from_le_bytes([bytes[18], bytes[19]]);
+    if bytes[4] != 2 || bytes[5] != 1 || machine != expected_machine {
+        return Err(format!("ASTRA_ANDROID_NATIVE_LIBRARY_ABI_MISMATCH: {abi}").into());
+    }
+    Ok(())
 }
 
 fn validate_web_player_wasm(bytes: &[u8]) -> Result<(), CliError> {
