@@ -15,6 +15,10 @@ pub use astra_player_vn::*;
 
 pub const WINDOWS_SENDINPUT_MOUSE: &str = "sendinput.mouse";
 pub const WINDOWS_SENDINPUT_KEYBOARD: &str = "sendinput.keyboard";
+pub const LINUX_UINPUT_MOUSE: &str = "uinput.mouse";
+pub const LINUX_UINPUT_KEYBOARD: &str = "uinput.keyboard";
+pub const LINUX_UINPUT_TOUCH: &str = "uinput.touch";
+pub const LINUX_UINPUT_GAMEPAD: &str = "uinput.gamepad";
 pub const WEB_CDP_MOUSE: &str = "cdp.mouse";
 pub const WEB_CDP_KEYBOARD: &str = "cdp.keyboard";
 
@@ -245,6 +249,23 @@ impl WindowsSendInputHost {
             transcript,
             report,
         })
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LinuxUinputHost;
+
+impl LinuxUinputHost {
+    pub fn build_report(
+        &self,
+        script: &PlayerAutomationScript,
+        transcript: &PlayerInputTranscript,
+    ) -> PlayerAutomationReport {
+        PlayerAutomationValidator.validate(script, transcript)
+    }
+
+    pub fn supports(script: &PlayerAutomationScript) -> bool {
+        script.platform == PlayerPlatform::Linux
     }
 }
 

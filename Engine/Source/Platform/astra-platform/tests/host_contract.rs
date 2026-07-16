@@ -48,6 +48,15 @@ fn release_profiles_lock_selected_providers_without_hidden_fallbacks() {
     assert!(!windows.renderer.allow_software);
     assert!(validate_host_profile(&windows).is_ok());
 
+    let linux =
+        PlatformHostProfile::linux_steam_sniper_release("nativevn-game", "com.example.game");
+    assert_eq!(linux.platform, PlatformId::Linux);
+    assert_eq!(linux.renderer.providers, ["wgpu_vulkan"]);
+    assert_eq!(linux.decode.providers, ["gstreamer"]);
+    assert_eq!(linux.audio.providers, ["alsa"]);
+    assert_eq!(linux.save.providers, ["xdg_data"]);
+    assert!(validate_host_profile(&linux).is_ok());
+
     let web = PlatformHostProfile::web_release("nativevn-web", "com.example.game");
     assert_eq!(web.platform, PlatformId::Web);
     assert_eq!(web.renderer.providers, ["webgpu"]);

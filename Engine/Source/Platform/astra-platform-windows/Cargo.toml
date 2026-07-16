@@ -13,10 +13,12 @@ platform-test-driver = [
 ffmpeg-vcpkg = ["astra-media/ffmpeg-vcpkg"]
 
 [dependencies]
+astra-platform = { path = "../astra-platform" }
+
+[target.'cfg(windows)'.dependencies]
 tracing.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }
 astra-media = { path = "../../Runtime/astra-media" }
-astra-platform = { path = "../astra-platform" }
 astra-platform-common = { path = "../astra-platform-common" }
 astra-ui-core = { path = "../../Runtime/astra-ui-core" }
 cpal.workspace = true
@@ -25,11 +27,9 @@ rfd.workspace = true
 pollster.workspace = true
 tokio.workspace = true
 wgpu.workspace = true
-winit.workspace = true
+winit = { workspace = true, features = ["rwh_06"] }
 accesskit.workspace = true
 accesskit_winit.workspace = true
-
-[target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

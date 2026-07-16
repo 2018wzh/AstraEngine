@@ -1,12 +1,12 @@
 # Stage 6 Platform Completion Work
 
-Stage 6 收纳 Stage 2 之外的平台完成项。Windows 和 Web 属于 Stage 2 完成边界；Migration 11 的 Stage 2 Headless 也只验收 Windows native。Linux、macOS、iOS 和 Android 保持 `SPEC_READY`，等 AstraVN Core、Editor gate 和平台发布路径稳定后再进入真实 SDK、launcher、surface、media、save、resume 和 player input automation 验收；Linux/macOS Headless 的本机 CI、runtime 与 artifact portability 在本阶段独立关闭。本页不把 capability crate 编译通过写成 host 完成，也不把 API 可用性写成可玩证据。
+Stage 6 收纳 Stage 2 之外的平台完成项。Linux host 与 packaged Player 已进入 `IN_PROGRESS`；macOS、iOS 和 Android 保持 `SPEC_READY`。Linux/macOS Headless 的本机 CI、runtime 与 artifact portability 在本阶段独立关闭。本页不把 capability crate 编译通过写成 host 完成，也不把 API 可用性写成可玩证据。
 
 ## S6-LINUX-HEADLESS-01 Linux Headless portability
 
 **ID:** `S6-LINUX-HEADLESS-01`
 
-**Status:** `SPEC_READY`
+**Status:** `IN_PROGRESS`
 
 **Goal:** 在 Linux native 环境复核 Migration 11 Headless 的完整 host、JSONL、真实 PNG/WAV、decode、transactional save、bounded package source、artifact、review bundle、统一测试 inventory 与 zero-leak shutdown，不以只编译通过替代 runtime evidence。
 
@@ -40,13 +40,15 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Windows 和 Web 属于 Stage 2
 
 **Status:** `SPEC_READY`
 
-**Goal:** 补 Linux window/input/audio/save/decode probe，覆盖 winit/wgpu、IME、gamepad、PipeWire/PulseAudio、XDG data、GStreamer/FFmpeg profile 和 windowed smoke。
+**Goal:** 完成 Steam Linux Runtime 3.0 sniper x86_64 的 Wayland window/input、Vulkan hardware wgpu、ALSA、XDG data/portal、GStreamer decode、IME/gamepad、save/package 和 windowed smoke。
 
 **Depends On:** `S2-PLATFORM-01`
 
 **Target Paths:** `Engine/Source/Platform/astra-platform-linux/`、`Docs/platforms/desktop.md`
 
-**Planned Gate:** required smoke 暂定 `windowed_smoke` 和 `decode.linux_media`。进入实现时必须提供真实 Linux host evidence；缺 SDK 或缺 smoke 只能进入 blocking 或 warning report。
+**Current Evidence:** `astra-platform-linux` 已接入真实 factory、typed resource lifecycle、Wayland event loop、Vulkan-only wgpu、ALSA/cpal、GStreamer、XDG save/portal、package cache、gamepad 和 uinput test driver，并通过静态编译与 contract test。当前按开发约束不执行真实 host。
+
+**Planned Gate:** required checks 以 `required_conformance_checks(PlatformId::Linux)` 为准。必须补真实 Vulkan present/readback、ALSA meter、GStreamer fixtures、portal、IME/gamepad/uinput consumption、save reopen、package hash/range 和 zero-leak evidence；缺项保持 blocking。
 
 **Linked Test IDs:** `T-S6-LINUX-HOST-01`
 
@@ -54,13 +56,15 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Windows 和 Web 属于 Stage 2
 
 **ID:** `S6-LINUX-PLAYER-AUTOMATION-01`
 
-**Status:** `SPEC_READY`
+**Status:** `IN_PROGRESS`
 
-**Goal:** 补 Linux player live input automation，覆盖真实窗口 focus、原生 mouse/keyboard/IME/gamepad 输入、winit event loop receipt、window/renderer region hash、PipeWire/PulseAudio meter 和 route/system UI evidence。
+**Goal:** 补 Linux player live input automation，覆盖 Wayland focus、uinput mouse/keyboard/IME/gamepad、winit event receipt、Vulkan frame region hash、ALSA meter 和 route/system UI evidence。
 
 **Depends On:** `S6-LINUX-HOST-01`、`S3-PLAYER-AUTOMATION-01`
 
 **Target Paths:** `Engine/Source/Platform/astra-platform-linux/`、`Engine/Source/Programs/astra-player/` planned target、`Docs/platforms/desktop.md`
+
+**Current Evidence:** packaged Player 已读取 Linux profile 并复用 Windows 的 RuntimeWorld/StateMachine、package、save/load、presentation 与 audio 主循环；CLI 可生成含 `astra-player`、config、package 和 manifest 的 Linux depot tree；automation validator 已接受并校验 uinput transcript。真实输入与 same-run report 尚未执行。
 
 **Planned Gate:** `player.full_playable.linux` 必须读取 Linux host report 和 live input transcript；缺 focus、native input receipt、frame region change、audio meter 或 route evidence 时 blocking。
 

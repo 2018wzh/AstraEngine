@@ -274,7 +274,23 @@ pub fn required_conformance_checks(platform: PlatformId) -> &'static [&'static s
             "package.hash_range",
             "resource.zero_leaks",
         ],
-        PlatformId::Linux | PlatformId::Macos | PlatformId::Ios | PlatformId::Android => &[],
+        PlatformId::Linux => &[
+            "host.lifecycle",
+            "runtime.steam_sniper",
+            "window.wayland_create_destroy",
+            "surface.vulkan_present_readback",
+            "surface.portal_capture",
+            "input.uinput_consumption",
+            "input.ime_consumption",
+            "input.gamepad_consumption",
+            "audio.alsa_output_meter",
+            "decode.gstreamer",
+            "save.xdg_atomic_reopen",
+            "package.portal_authorized",
+            "package.hash_range",
+            "resource.zero_leaks",
+        ],
+        PlatformId::Macos | PlatformId::Ios | PlatformId::Android => &[],
     }
 }
 

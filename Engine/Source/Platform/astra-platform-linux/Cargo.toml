@@ -5,5 +5,39 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-tracing.workspace = true
 astra-platform = { path = "../astra-platform" }
+
+[features]
+default = []
+platform-test-driver = [
+    "astra-platform/platform-test-driver",
+    "astra-platform-common/platform-test-driver",
+    "dep:evdev",
+]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd.workspace = true
+astra-core = { path = "../../Runtime/astra-core" }
+astra-media = { path = "../../Runtime/astra-media" }
+astra-platform-common = { path = "../astra-platform-common" }
+cpal.workspace = true
+directories.workspace = true
+evdev = { workspace = true, optional = true }
+gilrs = { workspace = true, features = ["wgi"] }
+gstreamer.workspace = true
+gstreamer-app.workspace = true
+libc.workspace = true
+pollster.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+wgpu.workspace = true
+winit = { workspace = true, features = [
+    "rwh_06",
+    "wayland",
+    "wayland-dlopen",
+    "wayland-csd-adwaita",
+] }
+
+[dev-dependencies]
+serde_json.workspace = true

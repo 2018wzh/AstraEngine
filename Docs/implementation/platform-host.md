@@ -1,6 +1,6 @@
 # Platform Host Blueprint
 
-平台模块只适配原生能力，不拥有 Runtime 权威状态。Migration 8 当前只产品化 Windows 与 Chrome Web；Linux、macOS、iOS、Android 在 Stage 6 前使用显式 `Unavailable` factory。
+平台模块只适配原生能力，不拥有 Runtime 权威状态。Migration 8 当前产品化 Windows 与 Chrome Web；Linux 在 Stage 6 进入 `IN_PROGRESS`，macOS、iOS、Android 继续使用显式 `Unavailable` factory。
 
 Target 绑定见 [Target And Platform Blueprint](target-platform.md)，native host 状态见 [Migration 8](../migrations/platform-host-migration.md)。平台无关测试后端见 [Migration 11](../migrations/headless-platform-test-backend-migration.md)，生产完备度缺口与收束条件见 [模块能力完备度审查](../migrations/module-completeness-audit-migration.md#p0-004headlessscenariorendereraudio-fixture-和-player-测试仍是分散双轨)。
 

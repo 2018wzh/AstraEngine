@@ -1,8 +1,8 @@
 use astra_observability::{init_host, ConsoleFormat, HostObservabilityConfig, HostRole};
 use astra_player::{
-    WebCdpInputHost, WebLiveAutomationRequest, WindowsLiveAutomationRequest, WindowsSendInputHost,
+    LinuxUinputHost, WebCdpInputHost, WebLiveAutomationRequest, WindowsLiveAutomationRequest,
+    WindowsSendInputHost,
 };
-#[cfg(target_os = "windows")]
 use astra_player_core::{
     PlayerAutomationScript, PlayerHostCommandResult, PlayerInputTranscript, PlayerPlatform,
 };
@@ -187,13 +187,14 @@ fn main() -> Result<(), PlayerCliError> {
     let transcript: PlayerInputTranscript = serde_json::from_slice(&fs::read(transcript_path)?)?;
     let report = match script.platform {
         PlayerPlatform::Windows => WindowsSendInputHost.build_report(&script, &transcript),
+        PlayerPlatform::Linux => LinuxUinputHost.build_report(&script, &transcript),
         PlayerPlatform::Web => WebCdpInputHost.build_report(&script, &transcript),
     };
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn run_bundled_game() -> Result<(), PlayerCliError> {
     use astra_core::Hash256;
     use astra_package::{PackageManifest, PackageReader};
@@ -217,8 +218,12 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         platform: String,
         locale: String,
         package: String,
+        #[cfg(target_os = "windows")]
         #[serde(default)]
         ui_components: Option<UiComponentsConfig>,
+        #[cfg(target_os = "linux")]
+        #[serde(default)]
+        ui_components: Option<serde_json::Value>,
     }
     #[derive(Deserialize)]
     struct Profiles {
@@ -227,10 +232,20 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     }
 
     let config: Config = serde_json::from_slice(&fs::read("AstraPlayer.config.json")?)?;
-    if config.schema != "astra.player_config.v2" || config.platform != "windows" {
-        return Err("invalid Windows Player config".into());
+    let expected_platform = if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    };
+    if config.schema != "astra.player_config.v2" || config.platform != expected_platform {
+        return Err("Player config does not match the native platform".into());
     }
+    #[cfg(target_os = "windows")]
     let mut ui_component_processes = open_ui_component_processes(config.ui_components.as_ref())?;
+    #[cfg(target_os = "linux")]
+    if config.ui_components.is_some() {
+        return Err("Linux Player UI components are not implemented".into());
+    }
     let package_bytes = fs::read(&config.package)?;
     let package_hash = Hash256::from_sha256(&package_bytes).to_string();
     let package = PackageReader::open(&package_bytes)?;
@@ -253,18 +268,25 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .find(|profile| {
-            profile.platform == PlatformId::Windows
+            profile.platform
+                == if cfg!(target_os = "windows") {
+                    PlatformId::Windows
+                } else {
+                    PlatformId::Linux
+                }
                 && profile.target == config.target
                 && profile.package_id == manifest.package_id
         })
-        .ok_or("package does not contain a matching Windows profile")?;
+        .ok_or("package does not contain a matching native platform profile")?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     runtime.block_on(async move {
-        let mut session = astra_platform_windows::factory()
-            .start(HostLaunchProfile::platform(profile))
-            .await?;
+        #[cfg(target_os = "windows")]
+        let factory = astra_platform_windows::factory();
+        #[cfg(target_os = "linux")]
+        let factory = astra_platform_linux::factory();
+        let mut session = factory.start(HostLaunchProfile::platform(profile)).await?;
         let source = session
             .client
             .open_package(PackageSourceRequest::Bundled {
@@ -620,6 +642,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         session.client.destroy_surface(surface).await?;
         session.client.destroy_window(window).await?;
         session.client.shutdown().await?;
+        #[cfg(target_os = "windows")]
         for process in &mut ui_component_processes {
             process
                 .invoke(astra_ui_plugin_abi::UiComponentRequest::Shutdown)
@@ -700,7 +723,7 @@ fn resolve_bundled_component_path(relative: &str) -> Result<PathBuf, PlayerCliEr
     Ok(resolved)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn ui_button_state(state: astra_platform::InputState) -> astra_ui_core::UiButtonState {
     match state {
         astra_platform::InputState::Pressed => astra_ui_core::UiButtonState::Pressed,
@@ -708,7 +731,7 @@ fn ui_button_state(state: astra_platform::InputState) -> astra_ui_core::UiButton
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn ui_pointer_button(button: astra_platform::PointerButton) -> astra_ui_core::UiPointerButton {
     match button {
         astra_platform::PointerButton::Primary => astra_ui_core::UiPointerButton::Primary,
@@ -720,7 +743,7 @@ fn ui_pointer_button(button: astra_platform::PointerButton) -> astra_ui_core::Ui
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn gamepad_navigation(
     control: astra_platform::GamepadControl,
 ) -> Option<astra_ui_core::UiNavigationAction> {
@@ -739,7 +762,7 @@ fn gamepad_navigation(
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 async fn execute_platform_save(
     source: &mut astra_player::NativeVnHostCommandSource,
     executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
@@ -756,7 +779,7 @@ async fn execute_platform_save(
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 async fn execute_platform_load(
     source: &mut astra_player::NativeVnHostCommandSource,
     executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
@@ -790,7 +813,7 @@ async fn execute_platform_load(
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn player_platform_error(
     operation: &'static str,
     error: impl std::fmt::Display,
@@ -802,7 +825,7 @@ fn player_platform_error(
     )
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn log_consumed_vn_step(
     player_sequence: u64,
     kind: &str,
@@ -863,9 +886,9 @@ fn log_consumed_vn_step(
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn run_bundled_game() -> Result<(), PlayerCliError> {
-    Err("native AstraPlayer bundle host is only implemented for Windows in Migration 8".into())
+    Err("native AstraPlayer bundle host is unavailable on this platform".into())
 }
 
 fn parse_usize_arg(

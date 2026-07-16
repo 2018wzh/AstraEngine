@@ -6,7 +6,10 @@ version.workspace = true
 
 [features]
 default = []
-platform-test-driver = ["astra-platform-windows/platform-test-driver"]
+platform-test-driver = [
+    "astra-platform-windows/platform-test-driver",
+    "astra-platform-linux/platform-test-driver",
+]
 
 [lib]
 doctest = false
@@ -40,6 +43,9 @@ tempfile.workspace = true
 astra-platform-windows = { path = "../../Platform/astra-platform-windows" }
 astra-ui-component-host = { path = "../astra-ui-component-host" }
 astra-ui-plugin-abi = { path = "../../Runtime/astra-ui-plugin-abi" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+astra-platform-linux = { path = "../../Platform/astra-platform-linux" }
 
 [dev-dependencies]
 astra-headless-test = { path = "../../Developer/astra-headless-test" }

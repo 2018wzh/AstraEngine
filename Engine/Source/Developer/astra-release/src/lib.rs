@@ -757,6 +757,7 @@ fn player_presentation_check(
     let matches = report.is_some_and(|report| {
         let expected_platform = match report.platform {
             PlayerPlatform::Windows => astra_platform::PlatformId::Windows,
+            PlayerPlatform::Linux => astra_platform::PlatformId::Linux,
             PlayerPlatform::Web => astra_platform::PlatformId::Web,
         };
         report.schema == PLAYER_PRESENTATION_REPORT_SCHEMA

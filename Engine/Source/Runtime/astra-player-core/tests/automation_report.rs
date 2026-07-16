@@ -24,6 +24,21 @@ fn player_automation_report_passes_for_live_windows_input() {
 }
 
 #[astra_headless_test::test]
+fn player_automation_report_accepts_only_linux_uinput() {
+    let report = PlayerAutomationValidator.validate(
+        &script(PlayerPlatform::Linux),
+        &transcript(PlayerPlatform::Linux, "uinput.mouse"),
+    );
+    assert_eq!(report.status, PlayerAutomationStatus::Pass);
+
+    let blocked = PlayerAutomationValidator.validate(
+        &script(PlayerPlatform::Linux),
+        &transcript(PlayerPlatform::Linux, "sendinput.mouse"),
+    );
+    assert_eq!(blocked.status, PlayerAutomationStatus::Blocked);
+}
+
+#[astra_headless_test::test]
 fn player_automation_report_binds_platform_identity_to_full_playable() {
     let report = PlayerAutomationValidator.validate_with_platform_identity(
         &script(PlayerPlatform::Windows),

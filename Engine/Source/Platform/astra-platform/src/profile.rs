@@ -102,6 +102,29 @@ struct PlatformHostProfileV1 {
 }
 
 impl PlatformHostProfile {
+    pub fn linux_steam_sniper_release(
+        target: impl Into<String>,
+        package_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            schema: PLATFORM_HOST_PROFILE_SCHEMA.to_string(),
+            id: "linux-steam-sniper-release".to_string(),
+            platform: PlatformId::Linux,
+            target: target.into(),
+            package_id: package_id.into(),
+            renderer: ProviderPolicy::required("wgpu_vulkan"),
+            decode: ProviderPolicy::required("gstreamer"),
+            audio: ProviderPolicy::required("alsa"),
+            save: ProviderPolicy::required("xdg_data"),
+            package_sources: vec![
+                PackageSourcePolicy::Bundled,
+                PackageSourcePolicy::UserAuthorized,
+            ],
+            limits: HostLimits::default(),
+            package_cache: PackageCachePolicy::default(),
+        }
+    }
+
     pub fn windows_release(target: impl Into<String>, package_id: impl Into<String>) -> Self {
         Self {
             schema: PLATFORM_HOST_PROFILE_SCHEMA.to_string(),
@@ -330,10 +353,9 @@ fn invalid_profile_migration(message: &'static str) -> PlatformError {
 fn validate_release_provider_policy(profile: &PlatformHostProfile) -> Result<(), PlatformError> {
     let expected = match profile.platform {
         PlatformId::Windows => ["wgpu_hardware", "wmf", "wasapi", "saved_games"],
+        PlatformId::Linux => ["wgpu_vulkan", "gstreamer", "alsa", "xdg_data"],
         PlatformId::Web => ["webgpu", "webcodecs", "webaudio", "opfs"],
-        PlatformId::Linux | PlatformId::Macos | PlatformId::Ios | PlatformId::Android => {
-            return Ok(())
-        }
+        PlatformId::Macos | PlatformId::Ios | PlatformId::Android => return Ok(()),
     };
     for ((field, policy), required) in [
         ("renderer", &profile.renderer),
@@ -365,6 +387,13 @@ fn validate_release_provider_policy(profile: &PlatformHostProfile) -> Result<(),
             PlatformErrorCode::InvalidProfile,
             "profile.validate",
             "Migration 8 Web profile only supports Chrome",
+        ));
+    }
+    if profile.platform == PlatformId::Linux && profile.id != "linux-steam-sniper-release" {
+        return Err(PlatformError::new(
+            PlatformErrorCode::InvalidProfile,
+            "profile.validate",
+            "Linux release only supports the Steam Runtime sniper profile",
         ));
     }
     Ok(())

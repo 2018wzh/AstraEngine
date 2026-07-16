@@ -212,6 +212,8 @@ enum PackageCommand {
         #[arg(long)]
         windows_player: Option<PathBuf>,
         #[arg(long)]
+        linux_player: Option<PathBuf>,
+        #[arg(long)]
         crash_reporter: Option<PathBuf>,
         #[arg(long)]
         ui_component_host: Option<PathBuf>,
@@ -463,6 +465,7 @@ fn main() -> Result<(), CliError> {
                 profile,
                 platform,
                 windows_player,
+                linux_player,
                 crash_reporter,
                 ui_component_host,
                 web_player_wasm,
@@ -471,6 +474,7 @@ fn main() -> Result<(), CliError> {
             } => {
                 let artifacts = BundleArtifactInputs {
                     windows_player,
+                    linux_player,
                     crash_reporter,
                     ui_component_host,
                     web_player_wasm,
@@ -1306,6 +1310,7 @@ struct StandaloneBundleManifest {
 #[derive(Debug, Clone, Default)]
 struct BundleArtifactInputs {
     windows_player: Option<PathBuf>,
+    linux_player: Option<PathBuf>,
     crash_reporter: Option<PathBuf>,
     ui_component_host: Option<PathBuf>,
     web_player_wasm: Option<PathBuf>,
@@ -3338,6 +3343,37 @@ fn build_standalone_bundle_into(
             ));
             entrypoint.to_string()
         }
+        PlatformId::Linux => {
+            let entrypoint = "astra-player";
+            let player_source = artifacts
+                .linux_player
+                .as_deref()
+                .ok_or("Linux bundle requires --linux-player pointing to a built astra-player")?;
+            let player_bytes = fs::read(player_source)?;
+            let entrypoint_path = out.join(entrypoint);
+            fs::write(&entrypoint_path, &player_bytes)?;
+            make_executable(&entrypoint_path)?;
+            files.push(bundle_file(entrypoint, "linux_player", &player_bytes));
+            bundle_checks.push(PlayerLaunchCheck {
+                id: "crash_reporter.not_applicable".to_string(),
+                status: "pass".to_string(),
+            });
+            let config = player_config_bytes(
+                target,
+                profile,
+                platform_name,
+                &display_config,
+                &locale_config,
+                ui_components.as_ref(),
+            )?;
+            fs::write(out.join("AstraPlayer.config.json"), &config)?;
+            files.push(bundle_file(
+                "AstraPlayer.config.json",
+                "player_config",
+                &config,
+            ));
+            entrypoint.to_string()
+        }
         PlatformId::Web => {
             let entrypoint = "index.html";
             let index = br#"<!doctype html>
@@ -3416,7 +3452,7 @@ fn build_standalone_bundle_into(
             }
             entrypoint.to_string()
         }
-        PlatformId::Linux | PlatformId::Macos | PlatformId::Ios | PlatformId::Android => {
+        PlatformId::Macos | PlatformId::Ios | PlatformId::Android => {
             return Err(format!("standalone bundle platform {platform_name} is Stage 6").into());
         }
     };

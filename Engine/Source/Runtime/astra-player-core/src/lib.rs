@@ -552,6 +552,7 @@ pub struct PlayerAutomationStep {
 #[serde(rename_all = "snake_case")]
 pub enum PlayerPlatform {
     Windows,
+    Linux,
     Web,
 }
 
@@ -804,6 +805,7 @@ fn validate_presentation_identity(
 ) -> Result<(), PlayerPresentationError> {
     let renderer_matches = match identity.platform {
         PlayerPlatform::Windows => identity.renderer_provider == "wgpu_hardware",
+        PlayerPlatform::Linux => identity.renderer_provider == "wgpu_vulkan",
         PlayerPlatform::Web => identity.renderer_provider == "webgpu",
     };
     if identity.target.is_empty()
@@ -1114,12 +1116,20 @@ fn live_input_surface_check(
             event.source.as_str(),
             "sendinput.mouse" | "sendinput.keyboard" | "sendinput.touch"
         ),
+        PlayerPlatform::Linux => matches!(
+            event.source.as_str(),
+            "uinput.keyboard" | "uinput.mouse" | "uinput.touch" | "uinput.gamepad"
+        ),
         PlayerPlatform::Web => matches!(event.source.as_str(), "cdp.mouse" | "cdp.keyboard"),
     });
     let all_allowed = events.iter().all(|event| match platform {
         PlayerPlatform::Windows => matches!(
             event.source.as_str(),
             "window.focus" | "sendinput.mouse" | "sendinput.keyboard" | "sendinput.touch"
+        ),
+        PlayerPlatform::Linux => matches!(
+            event.source.as_str(),
+            "window.focus" | "uinput.keyboard" | "uinput.mouse" | "uinput.touch" | "uinput.gamepad"
         ),
         PlayerPlatform::Web => matches!(
             event.source.as_str(),
@@ -1435,6 +1445,10 @@ fn is_live_input_source(platform: PlayerPlatform, source: &str) -> bool {
             source,
             "sendinput.mouse" | "sendinput.keyboard" | "sendinput.touch"
         ),
+        PlayerPlatform::Linux => matches!(
+            source,
+            "uinput.keyboard" | "uinput.mouse" | "uinput.touch" | "uinput.gamepad"
+        ),
         PlayerPlatform::Web => matches!(source, "cdp.mouse" | "cdp.keyboard"),
     }
 }
@@ -1442,6 +1456,7 @@ fn is_live_input_source(platform: PlayerPlatform, source: &str) -> bool {
 fn is_consumption_trace_source(platform: PlayerPlatform, source: &str) -> bool {
     match platform {
         PlayerPlatform::Windows => source == "player_host.trace",
+        PlayerPlatform::Linux => source == "player_host.trace",
         PlayerPlatform::Web => matches!(source, "player_host.trace" | "browser_host.trace"),
     }
 }

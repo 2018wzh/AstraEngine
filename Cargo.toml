@@ -71,6 +71,7 @@ rust-version = "1.85"
 accesskit = "=0.24.1"
 accesskit_winit = { version = "=0.33.1", default-features = false, features = ["rwh_06"] }
 abi_stable = "0.11"
+ashpd = { version = "=0.12.3", default-features = false, features = ["tokio"] }
 base64 = "0.22"
 blake3 = "1"
 camino = { version = "1", features = ["serde1"] }
@@ -83,7 +84,10 @@ futures-util = "0.3"
 hex = "0.4"
 hound = "3.5"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
+evdev = "=0.13.2"
 gilrs = { version = "0.11.2", default-features = false }
+gstreamer = "=0.24.2"
+gstreamer-app = "=0.24.2"
 image = { version = "0.25", default-features = false, features = [
     "png",
     "jpeg",
@@ -92,6 +96,7 @@ image = { version = "0.25", default-features = false, features = [
 indexmap = { version = "2", features = ["serde"] }
 js-sys = "0.3"
 libloading = "0.8"
+libc = "0.2"
 logos = "0.16.1"
 mlua = { version = "0.10", features = ["luau", "vendored", "serialize"] }
 miette = { version = "7", features = ["fancy"] }
@@ -147,7 +152,7 @@ wasm-bindgen-test = "0.3"
 wasmparser = "0.253"
 web-sys = "0.3"
 windows = { version = "0.62", default-features = false }
-winit = "0.30"
+winit = { version = "0.30", default-features = false }
 wgpu = "30"
 yakui-core = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }
 yakui-widgets = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }

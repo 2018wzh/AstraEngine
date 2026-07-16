@@ -117,13 +117,13 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 
 | Work ID | Status | Evidence |
 | --- | --- | --- |
-| `S6-LINUX-HOST-01` | `SPEC_READY` | 真实 Linux host smoke、platform decode、audio、save store、IME/gamepad 和 release evidence 见 [Stage 6](stages/stage-6-platform-completion.md) |
+| `S6-LINUX-HOST-01` | `IN_PROGRESS` | Linux sniper/Wayland/Vulkan/ALSA/GStreamer/XDG host 已接线并通过静态检查；真实 host smoke、decode、audio、IME/gamepad 和 release evidence 待环境完善后执行，见 [Stage 6](stages/stage-6-platform-completion.md) |
 | `S6-LINUX-HEADLESS-01` | `SPEC_READY` | Linux native Headless 的 workspace lifecycle、真实 PNG/WAV、artifact、review bundle、session inventory 与 zero-leak portability evidence 延后到 [Stage 6](stages/stage-6-platform-completion.md) |
 | `S6-MACOS-HOST-01` | `SPEC_READY` | 真实 macOS AppKit/winit、Metal/wgpu、CoreAudio、AVFoundation、App Support 和 notarization capability 见 [Stage 6](stages/stage-6-platform-completion.md) |
 | `S6-MACOS-HEADLESS-01` | `SPEC_READY` | macOS native Headless 的 workspace lifecycle、真实 PNG/WAV、artifact、review bundle、session inventory 与 zero-leak portability evidence 延后到 [Stage 6](stages/stage-6-platform-completion.md) |
 | `S6-IOS-HOST-01` | `SPEC_READY` | Swift/SwiftUI launcher、Metal surface、safe area/touch、AVAudio/AVFoundation、app container save 和 no-JIT Luau gate 见 [Stage 6](stages/stage-6-platform-completion.md) |
 | `S6-ANDROID-HOST-01` | `SPEC_READY` | Kotlin/Java launcher、Vulkan/wgpu surface、AAudio、MediaCodec、SAF/package import、activity resume 和 no-JIT Luau gate 见 [Stage 6](stages/stage-6-platform-completion.md) |
-| `S6-LINUX-PLAYER-AUTOMATION-01` | `SPEC_READY` | Linux player input automation、window focus、native input、frame region、audio meter 和 route evidence 见 [Stage 6](stages/stage-6-platform-completion.md) |
+| `S6-LINUX-PLAYER-AUTOMATION-01` | `IN_PROGRESS` | Linux packaged Player、depot bundle 和 uinput transcript validation 已接线；window focus、真实输入、frame region、audio meter 和 route evidence 待环境完善后执行，见 [Stage 6](stages/stage-6-platform-completion.md) |
 | `S6-MACOS-PLAYER-AUTOMATION-01` | `SPEC_READY` | macOS player input automation、AppKit/winit focus/input、frame region、CoreAudio meter 和 route evidence 见 [Stage 6](stages/stage-6-platform-completion.md) |
 | `S6-IOS-PLAYER-AUTOMATION-01` | `SPEC_READY` | iOS player touch/keyboard automation、safe area、AVAudio meter、resume 和 route evidence 见 [Stage 6](stages/stage-6-platform-completion.md) |
 | `S6-ANDROID-PLAYER-AUTOMATION-01` | `SPEC_READY` | Android player touch/keyboard automation、activity lifecycle、audio focus、frame region 和 route evidence 见 [Stage 6](stages/stage-6-platform-completion.md) |
@@ -215,7 +215,7 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | 20 | `S4-EDITOR-TARGET-01` AstraEditor Editor target | `REOPENED_SPEC` | Editor target 需要 Qt/QML shell、PIE bridge 和 gameplay runtime provider selector |
 | 21 | `S5-GAME-RUNTIME-01` + `S5-EMUCORE-SM-01` + `S5-LEGACY-VFS-01` | `REOPENED_SPEC` | AstraEMU 先接成 `AstraEmuRuntimeProvider`，再把 legacy VM 映射为 family-private scheduler/context/basic-block/action 状态机，并复用 Asset VFS legacy pack mount |
 | 22 | `S5-MANAGER-01` + `S5-MANAGER-UI-01` + `S5-PROGRAM-TARGET-01` + `S5-FAMILY-01` + `S5-AUTOPROBE-01` + `S5-SCRIPT-01` + `S5-TEXT-01` + `S5-FILTER-01` | `REOPENED_SPEC` | AstraEMU Manager 仍作为 Program target，启动 gameplay runtime session、family plugin，并复用 Stage 4 provider、MCP 和 memory；Manager/overlay UI 按 ADR 0015 使用 egui，Windows v1 gate 留 Stage 5 |
-| 23 | `S6-LINUX-HOST-01` + `S6-LINUX-HEADLESS-01` + `S6-MACOS-HOST-01` + `S6-MACOS-HEADLESS-01` + `S6-IOS-HOST-01` + `S6-ANDROID-HOST-01` platform completion | `SPEC_READY` | Windows/Web 之外的平台完成从 Stage 2 移出；Linux/macOS Headless native portability 同步延后，等 VN/Core/Editor 发布路径稳定后集中接入真实 SDK 与 runtime evidence |
+| 23 | `S6-LINUX-HOST-01` + `S6-LINUX-HEADLESS-01` + `S6-MACOS-HOST-01` + `S6-MACOS-HEADLESS-01` + `S6-IOS-HOST-01` + `S6-ANDROID-HOST-01` platform completion | `IN_PROGRESS` | Linux host 与 Player 静态主路径已接入，真实 runtime evidence 待环境完善；Linux/macOS Headless 和其余平台仍按 Stage 6 计划推进 |
 | 24 | `S7-POLICY-01` + `S7-RPG-PROVIDER-01` + `S7-RPG-CORE-01` + `S7-RPG-POLICY-01` + `S7-RPG-AI-TOWN-01` + `S7-RPG-TRPG-01` + `S7-RPG-CP2020-01` + `S7-RPG-GATE-01` | `SPEC_READY` | AstraRPG 需要先抽通用 Luau policy，再接 RPG provider/core/policy，最后用 AI Town、`rpg.trpg` 和 CP2020 local-private adapter gate 验证；当前只完成设计和迁移计划 |
 | 25 | `S8-RPG-NET-CONTRACT-01` + `S8-RPG-NET-SERVER-01` + `S8-RPG-NET-CLIENT-01` + `S8-RPG-NET-REPLAY-01` | `SPEC_READY` | Server/Client protocol 依赖 Stage 7 本地 seat/transcript/replay 语义稳定；当前只完成协议阶段设计，不阻塞 Stage 7 |
 
