@@ -90,6 +90,7 @@ pub struct MixerFadeSnapshot {
 pub struct MixedTick {
     pub samples: Vec<f32>,
     pub completed_voices: Vec<String>,
+    pub completed_fades: Vec<String>,
     pub peak_dbfs: f32,
     pub rms_dbfs: f32,
 }
@@ -140,6 +141,17 @@ impl ProductionAudioMixer {
 
     pub fn active_voice_count(&self) -> usize {
         self.voices.len()
+    }
+
+    pub fn voice_bus(&self, voice_id: &str) -> Option<&str> {
+        self.voices.get(voice_id).map(|voice| voice.bus.as_str())
+    }
+
+    pub fn active_bus_fade_id(&self, bus: &str) -> Option<&str> {
+        self.buses
+            .get(bus)
+            .and_then(|state| state.fade.as_ref())
+            .map(|fade| fade.id.as_str())
     }
 
     pub fn apply(
@@ -263,8 +275,9 @@ impl ProductionAudioMixer {
     pub fn render_tick(&mut self) -> Result<MixedTick, MediaError> {
         let mut samples = vec![0.0_f32; CANONICAL_FRAMES_PER_TICK * 2];
         let mut completed = Vec::new();
+        let mut completed_fades = Vec::new();
         for frame in 0..CANONICAL_FRAMES_PER_TICK {
-            self.advance_fades()?;
+            self.advance_fades(&mut completed_fades)?;
             let ids = self.voices.keys().cloned().collect::<Vec<_>>();
             let mut frame_completed = Vec::new();
             for id in ids {
@@ -314,9 +327,12 @@ impl ProductionAudioMixer {
             .sqrt() as f32;
         completed.sort();
         completed.dedup();
+        completed_fades.sort();
+        completed_fades.dedup();
         Ok(MixedTick {
             samples,
             completed_voices: completed,
+            completed_fades,
             peak_dbfs: db(peak),
             rms_dbfs: db(rms),
         })
@@ -447,7 +463,7 @@ impl ProductionAudioMixer {
             .get_mut(id)
             .ok_or_else(|| mixer_error("ASTRA_AUDIO_MIXER_VOICE_UNKNOWN", "voice is not active"))
     }
-    fn advance_fades(&mut self) -> Result<(), MediaError> {
+    fn advance_fades(&mut self, completed: &mut Vec<String>) -> Result<(), MediaError> {
         for bus in self.buses.values_mut() {
             if let Some(fade) = &mut bus.fade {
                 fade.rendered_frames = fade
@@ -461,6 +477,7 @@ impl ProductionAudioMixer {
                 bus.gain = fade.start + (fade.target - fade.start) * progress;
                 if fade.rendered_frames == fade.total_frames {
                     bus.gain = fade.target;
+                    completed.push(fade.id.clone());
                     bus.fade = None;
                 }
             }

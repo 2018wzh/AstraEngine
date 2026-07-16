@@ -27,6 +27,7 @@ impl VnPresentationProviderManifest {
     pub fn standard() -> Self {
         let preset_ids = vec![
             "flash_soft".to_string(),
+            "crossfade".to_string(),
             "hero_enter".to_string(),
             "slow_push".to_string(),
             "soft_fade".to_string(),
@@ -127,6 +128,15 @@ impl VnPresentationProviderManifest {
                     duration_ms: 220,
                     easing: VnPresentationEasing::EaseOut,
                     filter: Some("astra.filter.bloom".to_string()),
+                    fallback_policy_id: Some("filter_missing".to_string()),
+                    budget_us: 4_000,
+                },
+                VnPresentationPreset {
+                    id: "crossfade".to_string(),
+                    command_kinds: vec!["transition".to_string()],
+                    duration_ms: 300,
+                    easing: VnPresentationEasing::EaseInOut,
+                    filter: Some("astra.filter.fade".to_string()),
                     fallback_policy_id: Some("filter_missing".to_string()),
                     budget_us: 4_000,
                 },

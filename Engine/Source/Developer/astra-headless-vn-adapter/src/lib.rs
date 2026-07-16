@@ -92,6 +92,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 256,
                 request.max_video_frames,
                 request.max_decode_output_bytes,
+                request.retain_audio_timeline,
             )
             .map_err(|error| binding("media.create", error))?;
             media
@@ -507,6 +508,7 @@ impl NativeVnHeadlessSession {
                 value_hash: evidence.runtime_presentation_hash.clone(),
             },
             hashed_observation("vn.current_state", &evidence.current_state_id)?,
+            hashed_observation("vn.pending_wait_command", &evidence.pending_wait_command_id)?,
             hashed_observation("vn.pending_choices", &evidence.pending_choice_ids)?,
             hashed_observation("vn.terminal_routes", &evidence.terminal_route_ids)?,
             hashed_observation("media.active_video", &self.media.has_active_video())?,

@@ -91,6 +91,42 @@ fn compiled_story_exposes_story_variable_and_command_manifests() {
 }
 
 #[astra_headless_test::test]
+fn input_wait_is_distinct_from_dialogue_and_advances_without_backlog() {
+    const INPUT_WAIT: &str = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    input_wait #@id wait.input
+    text key:line.after #@id line.after
+"#;
+    let compiled = compile_astra_project(
+        [AstraSource::story("input-wait.astra", INPUT_WAIT)],
+        Default::default(),
+    )
+    .unwrap();
+    let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("en")).unwrap();
+
+    runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".to_string(),
+            state_id: "state.start".to_string(),
+        })
+        .unwrap();
+    assert_eq!(
+        runtime.state().pending_wait.as_ref().map(|wait| wait.kind),
+        Some(VnWaitKind::Input)
+    );
+    assert!(runtime.state().backlog.is_empty());
+
+    runtime.apply(VnPlayerCommand::Advance).unwrap();
+    assert_eq!(
+        runtime.state().pending_wait.as_ref().map(|wait| wait.kind),
+        Some(VnWaitKind::Dialogue)
+    );
+    assert_eq!(runtime.state().backlog.last().unwrap().key, "line.after");
+}
+
+#[astra_headless_test::test]
 fn branch_is_typed_in_route_graph_and_selects_from_runtime_variables() {
     const BRANCHING: &str = r#"
 story main #@id story.main
@@ -293,6 +329,12 @@ fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
         runtime.state().pending_wait.as_ref().map(|wait| wait.kind),
         Some(VnWaitKind::Dialogue)
     );
+    let dialogue_wait_id = runtime
+        .state()
+        .pending_wait
+        .as_ref()
+        .and_then(|wait| wait.await_id.clone())
+        .expect("dialogue wait occurrence id");
 
     let choice = runtime.apply(VnPlayerCommand::Advance).unwrap();
     assert!(matches!(
@@ -304,6 +346,14 @@ fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
         runtime.state().pending_wait.as_ref().map(|wait| wait.kind),
         Some(VnWaitKind::Choice)
     );
+    let choice_wait_id = runtime
+        .state()
+        .pending_wait
+        .as_ref()
+        .and_then(|wait| wait.await_id.clone())
+        .expect("choice wait occurrence id");
+    assert_ne!(dialogue_wait_id, choice_wait_id);
+    assert_eq!(runtime.state().wait_sequence, 2);
 
     let saved_hash = runtime.state_hash();
     let save = runtime.save_slot("slot.auto").unwrap();
@@ -338,6 +388,15 @@ fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
     let mut loaded = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
     loaded.load_slot(save).unwrap();
     assert_eq!(loaded.state_hash(), saved_hash);
+    assert_eq!(loaded.state().wait_sequence, 2);
+    assert_eq!(
+        loaded
+            .state()
+            .pending_wait
+            .as_ref()
+            .and_then(|wait| wait.await_id.as_deref()),
+        Some(choice_wait_id.as_str())
+    );
 }
 
 #[astra_headless_test::test]

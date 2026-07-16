@@ -7,7 +7,7 @@
     "surface.paper": { "color": [252, 252, 248, 242] },
     "surface.speaker": { "color": [232, 241, 244, 255] },
     "surface.card": { "color": [247, 248, 244, 255] },
-    "frame.classic": { "asset": "asset:/tsuinosora/native-assets/projectorrays/data/MENU/chunks/BITD-444.png" },
+    "frame.classic": { "asset": "asset:/tsui.ui.classic.frame" },
     "accent.gold": { "color": [167, 136, 67, 255] },
     "focus.cloud": { "color": [173, 220, 244, 255] },
     "text.body": { "color": [18, 28, 38, 255] }

@@ -47,6 +47,8 @@ pub struct BlueprintYakuiRenderer {
     accessibility_actions: BTreeMap<String, Vec<(UiEventBinding, Option<UiValue>)>>,
     text_inputs: BTreeMap<String, TextInputState>,
     focused_text_input: Option<String>,
+    semantic_focus_override: Option<String>,
+    backend_focus_request: Option<String>,
     text_input_consumed_sequences: BTreeSet<u64>,
     accessibility_dispatched_events: BTreeSet<(String, String)>,
     image_resources: BTreeMap<String, TextureFrame>,
@@ -65,6 +67,8 @@ impl BlueprintYakuiRenderer {
             accessibility_actions: BTreeMap::new(),
             text_inputs: BTreeMap::new(),
             focused_text_input: None,
+            semantic_focus_override: None,
+            backend_focus_request: None,
             text_input_consumed_sequences: BTreeSet::new(),
             accessibility_dispatched_events: BTreeSet::new(),
             image_resources: BTreeMap::new(),
@@ -726,6 +730,10 @@ fn virtual_leading_space(node: &astra_ui_core::UiNodeBlueprint, extent: f32) {
 }
 
 impl YakuiViewRenderer for BlueprintYakuiRenderer {
+    fn request_focus(&mut self, semantic_id: String) {
+        self.backend_focus_request = Some(semantic_id);
+    }
+
     fn build(
         &mut self,
         yakui: &mut yakui_core::Yakui,
@@ -1106,10 +1114,13 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 .then_some(event.sequence)
             }));
         }
+        let backend_focus_request = self.backend_focus_request.take();
         let focus_request = accessibility_focus_request
             .as_ref()
+            .or(backend_focus_request.as_ref())
             .or(frame.focus_request.as_ref());
         let focus_widget = if let Some(focus_request) = focus_request {
+            self.semantic_focus_override = Some(focus_request.clone());
             let target = self
                 .pending
                 .iter()
@@ -1157,6 +1168,16 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         yakui: &yakui_core::Yakui,
         request: &UiFrameRequest,
     ) -> Result<UiSemanticSnapshot, UiValidationError> {
+        let focus_override = self.semantic_focus_override.clone();
+        let raw_focused = self
+            .pending
+            .iter()
+            .filter(|pending| pending.focused)
+            .map(|pending| pending.id.as_str())
+            .collect::<Vec<_>>();
+        let focus_settled = focus_override
+            .as_ref()
+            .is_some_and(|expected| raw_focused.as_slice() == [expected.as_str()]);
         let mut nodes = Vec::with_capacity(self.pending.len());
         for pending in &self.pending {
             let layout = yakui.layout_dom().get(pending.widget_id).ok_or_else(|| {
@@ -1185,7 +1206,9 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 value: pending.value.clone(),
                 enabled: pending.enabled,
                 hidden: false,
-                focused: pending.focused,
+                focused: focus_override
+                    .as_ref()
+                    .map_or(pending.focused, |expected| expected == &pending.id),
                 selected: false,
                 checked: pending.checked,
                 actions: pending.actions.clone(),
@@ -1210,6 +1233,9 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         };
         snapshot.hash = snapshot.compute_hash()?;
         snapshot.validate()?;
+        if focus_settled {
+            self.semantic_focus_override = None;
+        }
         Ok(snapshot)
     }
 }

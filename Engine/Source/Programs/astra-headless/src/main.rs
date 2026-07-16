@@ -38,7 +38,7 @@ mod compare;
 struct CheckpointCapture {
     sequence: u64,
     frame: astra_platform::CapturedFrame,
-    audio: astra_product_host::CanonicalAudioSnapshot,
+    audio: Option<astra_product_host::CanonicalAudioSnapshot>,
 }
 
 #[derive(Debug, Parser)]
@@ -75,6 +75,28 @@ enum Command {
         build_identity: PathBuf,
     },
     BootstrapTestEnv {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        build_identity: PathBuf,
+    },
+    PrepareProfile {
+        #[arg(long)]
+        package: PathBuf,
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        product_profile: String,
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        namespace: String,
+        #[arg(long, default_value_t = 800)]
+        viewport_width: u32,
+        #[arg(long, default_value_t = 600)]
+        viewport_height: u32,
+        #[arg(long)]
+        manifest_only: bool,
         #[arg(long)]
         output: PathBuf,
         #[arg(long)]
@@ -164,6 +186,29 @@ async fn main() {
             output,
             build_identity,
         } => bootstrap_test_env(&output, &build_identity),
+        Command::PrepareProfile {
+            package,
+            target,
+            product_profile,
+            id,
+            namespace,
+            viewport_width,
+            viewport_height,
+            manifest_only,
+            output,
+            build_identity,
+        } => prepare_product_profile(
+            &package,
+            &target,
+            &product_profile,
+            &id,
+            &namespace,
+            viewport_width,
+            viewport_height,
+            manifest_only,
+            &output,
+            &build_identity,
+        ),
         Command::PrepareReview {
             run_report,
             manifest,
@@ -514,7 +559,7 @@ async fn serve(build_identity: &Path, gpu: bool) -> Result<(), String> {
                 session.last_tick = envelope.tick;
                 session.last_sequence = envelope.sequence;
                 let product = session.product.as_mut().ok_or_else(|| "ASTRA_HEADLESS_PRODUCT_SESSION_REQUIRED: lifecycle-only session rejects product input".to_string())?;
-                let observations =
+                let (observations, _) =
                     consume_input(product.as_mut(), envelope.tick, &input.event).await?;
                 if let PhysicalInput::Checkpoint { id } = &input.event {
                     let (capture, result) = capture_checkpoint(
@@ -524,6 +569,11 @@ async fn serve(build_identity: &Path, gpu: bool) -> Result<(), String> {
                         &observations,
                         session.checkpoint_config.as_ref(),
                         session.checkpoint_config_root.as_deref(),
+                        should_capture_checkpoint_audio(
+                            &session.profile,
+                            session.checkpoint_config.as_ref(),
+                            id,
+                        ),
                     )
                     .await?;
                     if session
@@ -907,13 +957,54 @@ async fn run_execution(
     let mut checkpoint_frames = BTreeMap::new();
     let mut completed_sequence = 0;
     let mut final_tick = 0;
+    let mut await_tick_shift = 0_u64;
     for message in &messages {
         completed_sequence = message.sequence;
-        final_tick = message.tick;
+        let effective_tick = message
+            .tick
+            .checked_sub(await_tick_shift)
+            .ok_or_else(|| "ASTRA_HEADLESS_AWAIT_TICK_SHIFT_INVALID".to_string())?;
+        final_tick = effective_tick;
         if matches!(message.event, PhysicalInput::Shutdown) {
             break;
         }
-        let observations = consume_input(product.as_mut(), message.tick, &message.event).await?;
+        let (observations, await_advanced_ticks) =
+            consume_input(product.as_mut(), effective_tick, &message.event)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "{error}: sequence={} tick={} input={}",
+                        message.sequence,
+                        effective_tick,
+                        physical_input_kind(&message.event)
+                    )
+                })?;
+        if let PhysicalInput::Await {
+            timeout_ticks,
+            continue_at_match: true,
+            ..
+        } = &message.event
+        {
+            tracing::info!(
+                event = "astra.headless.await.completed",
+                sequence = message.sequence,
+                effective_tick,
+                advanced_ticks = await_advanced_ticks,
+                timeout_ticks,
+                "Headless observation wait reached its declared predicate"
+            );
+            let unused_ticks = u64::from(
+                timeout_ticks
+                    .checked_sub(await_advanced_ticks)
+                    .ok_or_else(|| "ASTRA_HEADLESS_AWAIT_TICK_ACCOUNTING_INVALID".to_string())?,
+            );
+            await_tick_shift = await_tick_shift
+                .checked_add(unused_ticks)
+                .ok_or_else(|| "ASTRA_HEADLESS_AWAIT_TICK_SHIFT_OVERFLOW".to_string())?;
+            final_tick = final_tick
+                .checked_add(u64::from(await_advanced_ticks))
+                .ok_or_else(|| "ASTRA_HEADLESS_AWAIT_FINAL_TICK_OVERFLOW".to_string())?;
+        }
         if let PhysicalInput::Checkpoint { id } = &message.event {
             let (capture, result) = capture_checkpoint(
                 product.as_mut(),
@@ -922,6 +1013,7 @@ async fn run_execution(
                 &observations,
                 checkpoint_config.as_ref(),
                 checkpoint_config_root.as_deref(),
+                should_capture_checkpoint_audio(&profile, checkpoint_config.as_ref(), id),
             )
             .await?;
             if checkpoint_frames.insert(id.clone(), capture).is_some() {
@@ -1006,6 +1098,26 @@ async fn run_execution(
         serde_json::to_string(&report).map_err(|error| error.to_string())?
     );
     Ok(())
+}
+
+fn physical_input_kind(input: &PhysicalInput) -> &'static str {
+    match input {
+        PhysicalInput::Resume => "resume",
+        PhysicalInput::Focus { .. } => "focus",
+        PhysicalInput::Keyboard { .. } => "keyboard",
+        PhysicalInput::ImePreedit { .. } => "ime_preedit",
+        PhysicalInput::ImeCommit { .. } => "ime_commit",
+        PhysicalInput::PointerMove { .. } => "pointer_move",
+        PhysicalInput::PointerButton { .. } => "pointer_button",
+        PhysicalInput::Wheel { .. } => "wheel",
+        PhysicalInput::Touch { .. } => "touch",
+        PhysicalInput::GamepadConnection { .. } => "gamepad_connection",
+        PhysicalInput::GamepadInput { .. } => "gamepad_input",
+        PhysicalInput::AdvanceTicks { .. } => "advance_ticks",
+        PhysicalInput::Await { .. } => "await",
+        PhysicalInput::Checkpoint { .. } => "checkpoint",
+        PhysicalInput::Shutdown => "shutdown",
+    }
 }
 
 fn blocked_profile_field(
@@ -1387,7 +1499,7 @@ async fn consume_input(
     product: &mut dyn ProductSession,
     tick: u64,
     input: &PhysicalInput,
-) -> Result<Vec<astra_product_host::Observation>, String> {
+) -> Result<(Vec<astra_product_host::Observation>, u32), String> {
     let mut observations = product
         .consume(tick, input)
         .await
@@ -1395,8 +1507,10 @@ async fn consume_input(
     if let PhysicalInput::Await {
         observation,
         timeout_ticks,
+        ..
     } = input
     {
+        let mut advanced_ticks = 0;
         for offset in 0..*timeout_ticks {
             if observation_matches(observation, &observations) {
                 break;
@@ -1408,12 +1522,27 @@ async fn consume_input(
                 .consume(next_tick, &PhysicalInput::AdvanceTicks { count: 1 })
                 .await
                 .map_err(|error| error.to_string())?;
+            advanced_ticks = offset + 1;
         }
         if !observation_matches(observation, &observations) {
-            return Err("ASTRA_HEADLESS_AWAIT_TIMEOUT".into());
+            let (key, expected) = match observation {
+                ObservationPredicate::Equals { key, value_hash } => {
+                    (key.as_str(), value_hash.as_str())
+                }
+                ObservationPredicate::Exists { key } => (key.as_str(), "exists"),
+            };
+            let actual = observations
+                .iter()
+                .filter(|candidate| candidate.key == key)
+                .map(|candidate| candidate.value_hash.as_str())
+                .collect::<Vec<_>>();
+            return Err(format!(
+                "ASTRA_HEADLESS_AWAIT_TIMEOUT: key={key} expected={expected} actual_hashes={actual:?}"
+            ));
         }
+        return Ok((observations, advanced_ticks));
     }
-    Ok(observations)
+    Ok((observations, 0))
 }
 
 async fn capture_checkpoint(
@@ -1423,22 +1552,28 @@ async fn capture_checkpoint(
     observations: &[astra_product_host::Observation],
     config: Option<&CheckpointConfig>,
     config_root: Option<&Path>,
+    capture_audio: bool,
 ) -> Result<(CheckpointCapture, CheckpointResult), String> {
     let frame = product
         .capture_frame()
         .await
         .map_err(|error| error.to_string())?;
-    let audio = product.capture_audio().map_err(|error| error.to_string())?;
-    if audio.sample_rate != 48_000
-        || audio.channels != 2
-        || !audio
-            .samples
-            .len()
-            .is_multiple_of(usize::from(audio.channels))
-        || audio.samples.iter().any(|sample| !sample.is_finite())
-    {
-        return Err("ASTRA_HEADLESS_CHECKPOINT_AUDIO_FORMAT_INVALID".into());
-    }
+    let audio = if capture_audio {
+        let audio = product.capture_audio().map_err(|error| error.to_string())?;
+        if audio.sample_rate != 48_000
+            || audio.channels != 2
+            || !audio
+                .samples
+                .len()
+                .is_multiple_of(usize::from(audio.channels))
+            || audio.samples.iter().any(|sample| !sample.is_finite())
+        {
+            return Err("ASTRA_HEADLESS_CHECKPOINT_AUDIO_FORMAT_INVALID".into());
+        }
+        Some(audio)
+    } else {
+        None
+    };
     let observation_hash = astra_core::Hash256::from_sha256(
         &serde_json::to_vec(observations).map_err(|error| error.to_string())?,
     )
@@ -1482,6 +1617,24 @@ async fn capture_checkpoint(
             audio_metrics: None,
         },
     ))
+}
+
+fn should_capture_checkpoint_audio(
+    profile: &HeadlessHostProfile,
+    config: Option<&CheckpointConfig>,
+    checkpoint_id: &str,
+) -> bool {
+    !matches!(
+        profile.artifacts.retention,
+        astra_platform::HeadlessArtifactRetention::ManifestOnly
+    ) || config
+        .and_then(|config| {
+            config
+                .checkpoints
+                .iter()
+                .find(|checkpoint| checkpoint.id == checkpoint_id)
+        })
+        .is_some_and(|checkpoint| checkpoint.audio_baseline_path.is_some())
 }
 
 fn validate_required_checkpoints(
@@ -1577,7 +1730,11 @@ fn append_checkpoint_artifacts(
             sequence: capture.sequence,
             checkpoint_ids: vec![id.clone()],
         });
-        let audio_bytes = wav_bytes(&capture.audio.samples)?;
+        let audio = capture.audio.as_ref().ok_or_else(|| {
+            "ASTRA_HEADLESS_CHECKPOINT_AUDIO_CAPTURE_MISSING: retained checkpoint requires audio"
+                .to_string()
+        })?;
+        let audio_bytes = wav_bytes(&audio.samples)?;
         reserve_appended_artifact(profile, manifest, audio_bytes.len() as u64)?;
         let audio_relative = format!("checkpoints/{id}.wav");
         let audio_path = root.join(&audio_relative);
@@ -1585,18 +1742,17 @@ fn append_checkpoint_artifacts(
         fs::write(&audio_partial, &audio_bytes)
             .and_then(|_| fs::rename(&audio_partial, &audio_path))
             .map_err(|error| format!("ASTRA_HEADLESS_CHECKPOINT_AUDIO_WRITE_FAILED: {error}"))?;
-        let frame_count =
-            (capture.audio.samples.len() / usize::from(capture.audio.channels)) as u64;
+        let frame_count = (audio.samples.len() / usize::from(audio.channels)) as u64;
         manifest.artifacts.push(ArtifactEntry::Audio {
             relative_path: audio_relative,
             sha256: astra_core::Hash256::from_sha256(&audio_bytes).to_string(),
             byte_size: audio_bytes.len() as u64,
-            sample_rate: capture.audio.sample_rate,
-            channels: capture.audio.channels,
+            sample_rate: audio.sample_rate,
+            channels: audio.channels,
             frame_count,
             duration_ns: frame_count
                 .checked_mul(1_000_000_000)
-                .and_then(|value| value.checked_div(u64::from(capture.audio.sample_rate)))
+                .and_then(|value| value.checked_div(u64::from(audio.sample_rate)))
                 .ok_or_else(|| "ASTRA_HEADLESS_CHECKPOINT_AUDIO_DURATION_OVERFLOW".to_string())?,
             checkpoint: Some(id.clone()),
         });
@@ -1655,8 +1811,12 @@ fn apply_audio_comparisons(
         let actual = captures
             .get(&result.id)
             .ok_or_else(|| "ASTRA_HEADLESS_AUDIO_CHECKPOINT_MISSING".to_string())?;
+        let audio = actual
+            .audio
+            .as_ref()
+            .ok_or_else(|| "ASTRA_HEADLESS_AUDIO_CHECKPOINT_CAPTURE_MISSING".to_string())?;
         let (metrics, passed) = compare::compare_audio_samples(
-            &actual.audio.samples,
+            &audio.samples,
             &root.join(relative),
             hash,
             expectation.audio_tolerance,
@@ -2060,6 +2220,75 @@ fn bootstrap_test_env(output: &Path, build_identity: &Path) -> Result<(), String
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn prepare_product_profile(
+    package_path: &Path,
+    target: &str,
+    product_profile: &str,
+    id: &str,
+    namespace: &str,
+    viewport_width: u32,
+    viewport_height: u32,
+    manifest_only: bool,
+    output: &Path,
+    build_identity: &Path,
+) -> Result<(), String> {
+    if target.trim().is_empty()
+        || product_profile.trim().is_empty()
+        || id.trim().is_empty()
+        || namespace.trim().is_empty()
+        || viewport_width == 0
+        || viewport_height == 0
+    {
+        return Err("ASTRA_HEADLESS_PREPARE_PROFILE_ARGUMENT_INVALID".into());
+    }
+    let identity_hash = read_identity_hash(build_identity)?;
+    let package_bytes = fs::read(package_path)
+        .map_err(|error| format!("ASTRA_HEADLESS_PREPARE_PROFILE_PACKAGE_READ_FAILED: {error}"))?;
+    let reader = astra_package::PackageReader::open(&package_bytes)
+        .map_err(|error| format!("ASTRA_HEADLESS_PREPARE_PROFILE_PACKAGE_INVALID: {error}"))?;
+    let manifest: astra_package::PackageManifest = reader
+        .container()
+        .decode_postcard("package.manifest")
+        .map_err(|error| format!("ASTRA_HEADLESS_PREPARE_PROFILE_MANIFEST_INVALID: {error}"))?;
+    if manifest.profile != product_profile {
+        return Err("ASTRA_HEADLESS_PREPARE_PROFILE_PRODUCT_PROFILE_MISMATCH".into());
+    }
+    let mut profile = HeadlessHostProfile::reference(
+        target,
+        manifest.package_id,
+        identity_hash,
+        reader.package_hash().to_string(),
+    );
+    profile.id = id.to_string();
+    profile.product_profile = product_profile.to_string();
+    profile.viewport_width = viewport_width;
+    profile.viewport_height = viewport_height;
+    profile.artifacts.namespace = namespace.to_string();
+    if manifest_only {
+        profile.artifacts.retention = astra_platform::HeadlessArtifactRetention::ManifestOnly;
+    }
+    astra_platform::validate_headless_host_profile(&profile).map_err(|error| error.to_string())?;
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("ASTRA_HEADLESS_PREPARE_PROFILE_ROOT_FAILED: {error}"))?;
+    }
+    write_atomic_json(output, &profile)
+        .map_err(|error| format!("ASTRA_HEADLESS_PREPARE_PROFILE_WRITE_FAILED: {error}"))?;
+    println!(
+        "{}",
+        serde_json::json!({
+            "schema": "astra.headless_product_profile_preparation.v1",
+            "profile_hash": profile.hash().map_err(|error| error.to_string())?,
+            "package_hash": profile.package_hash,
+            "build_fingerprint": profile.build_fingerprint,
+            "target": profile.target,
+            "product_profile": profile.product_profile,
+        })
+    );
+    Ok(())
+}
+
 fn product_registry() -> Result<ProductAdapterRegistry, String> {
     let mut registry = ProductAdapterRegistry::default();
     registry
@@ -2089,6 +2318,10 @@ async fn open_product(
                 height: profile.viewport_height,
                 max_video_frames: profile.max_video_frames,
                 max_decode_output_bytes: profile.max_decode_output_bytes,
+                retain_audio_timeline: !matches!(
+                    profile.artifacts.retention,
+                    astra_platform::HeadlessArtifactRetention::ManifestOnly
+                ),
                 platform: host.client.clone(),
             },
         )

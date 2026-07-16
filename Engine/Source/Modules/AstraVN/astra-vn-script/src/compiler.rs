@@ -63,6 +63,7 @@ fn compile_bound_sources(
             "mutate" => builder.push_mutate(line)?,
             "system_page" => builder.push_system_page(line)?,
             "wait" => builder.push_wait(line)?,
+            "input_wait" => builder.push_input_wait(line)?,
             _ => match registry.provider(&line.keyword) {
                 Some(CommandProvider::Standard) => builder.push_stage_presentation(line)?,
                 Some(CommandProvider::Extension(descriptor)) => {
@@ -113,6 +114,7 @@ fn compile_bound_sources(
 
 fn enrich_source_map(compiled: &mut CompiledStory, sources: &[AstraSource]) {
     for source in sources {
+        let line_index = SourceLineIndex::new(&source.text);
         let parsed = crate::parse_astra_source(source.path.clone(), &source.text);
         for command in parsed.ast.commands() {
             let id = command.source_id().map(str::to_string).unwrap_or_else(|| {
@@ -121,40 +123,60 @@ fn enrich_source_map(compiled: &mut CompiledStory, sources: &[AstraSource]) {
             let Some(entry) = compiled.source_map.entries.get_mut(&id) else {
                 continue;
             };
-            entry.keyword = source_ref_for_span(&source.path, &source.text, command.keyword_span());
+            entry.keyword = line_index.source_ref(&source.path, command.keyword_span());
             entry.source_id = command
                 .source_id_span()
-                .map(|span| source_ref_for_span(&source.path, &source.text, span));
+                .map(|span| line_index.source_ref(&source.path, span));
             entry.attributes = command
                 .attributes()
                 .map(|attribute| {
                     (
                         attribute.key().to_string(),
-                        source_ref_for_span(&source.path, &source.text, attribute.value_span),
+                        line_index.source_ref(&source.path, attribute.value_span),
                     )
                 })
                 .collect();
             entry.arguments = command
                 .arguments()
-                .map(|(_, span)| source_ref_for_span(&source.path, &source.text, span))
+                .map(|(_, span)| line_index.source_ref(&source.path, span))
                 .collect();
         }
     }
 }
 
-fn source_ref_for_span(path: &str, text: &str, span: crate::TextSpan) -> SourceRef {
-    let start = u32::from(span.start) as usize;
-    let prefix = &text[..start.min(text.len())];
-    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u32 + 1;
-    let column = prefix
-        .rsplit_once('\n')
-        .map_or(prefix.len(), |(_, tail)| tail.len()) as u32
-        + 1;
-    SourceRef {
-        source: path.to_string(),
-        line,
-        column,
-        length: u32::from(span.end - span.start),
+struct SourceLineIndex {
+    line_starts: Vec<usize>,
+    text_len: usize,
+}
+
+impl SourceLineIndex {
+    fn new(text: &str) -> Self {
+        let mut line_starts =
+            Vec::with_capacity(text.bytes().filter(|byte| *byte == b'\n').count() + 1);
+        line_starts.push(0);
+        line_starts.extend(
+            text.bytes()
+                .enumerate()
+                .filter_map(|(index, byte)| (byte == b'\n').then_some(index + 1)),
+        );
+        Self {
+            line_starts,
+            text_len: text.len(),
+        }
+    }
+
+    fn source_ref(&self, path: &str, span: crate::TextSpan) -> SourceRef {
+        let start = (u32::from(span.start) as usize).min(self.text_len);
+        let line_index = self
+            .line_starts
+            .partition_point(|line_start| *line_start <= start)
+            - 1;
+        SourceRef {
+            source: path.to_string(),
+            line: line_index as u32 + 1,
+            column: (start - self.line_starts[line_index]) as u32 + 1,
+            length: u32::from(span.end - span.start),
+        }
     }
 }
 
@@ -647,6 +669,24 @@ impl CompileBuilder {
         Ok(())
     }
 
+    fn push_input_wait(&mut self, line: &ParsedLine) -> Result<(), VnError> {
+        if !line.attrs.is_empty() || !line.args.is_empty() {
+            return Err(VnError::Diagnostic(
+                Diagnostic::blocking(
+                    "ASTRA_VN_INPUT_WAIT_ARGUMENT",
+                    "input_wait does not accept arguments or attributes",
+                )
+                .with_source(line.source_ref()),
+            ));
+        }
+        self.current_scene_mut()?
+            .commands
+            .push(CompiledCommand::InputWait {
+                id: line.stable_id(),
+            });
+        Ok(())
+    }
+
     fn push_stage_presentation(&mut self, line: &ParsedLine) -> Result<(), VnError> {
         self.current_scene_mut()?
             .commands
@@ -949,11 +989,25 @@ impl CompileBuilder {
     }
 
     fn route_graph(&mut self) -> RouteGraph {
-        let state_ids: BTreeSet<_> = self.states.keys().cloned().collect();
+        // System stories are an out-of-band UI navigation graph. Their leaf states
+        // must never become gameplay terminals or pollute route coverage evidence.
+        let system_story_ids = self
+            .stories
+            .iter()
+            .filter(|story| story.name == "system")
+            .map(|story| story.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let state_ids: BTreeSet<_> = self
+            .states
+            .values()
+            .filter(|state| !system_story_ids.contains(state.story_id.as_str()))
+            .map(|state| state.id.clone())
+            .collect();
         let mut nodes = BTreeMap::<String, RouteNode>::new();
         let mut edges = Vec::new();
         for state in self.states.values() {
-            if !state.id.starts_with("state.") {
+            if !state.id.starts_with("state.") || system_story_ids.contains(state.story_id.as_str())
+            {
                 continue;
             }
             nodes.insert(
@@ -1109,7 +1163,8 @@ fn semantic_story(compiled: &CompiledStory) -> CompiledStory {
                     | CompiledCommand::Mutate { id, .. }
                     | CompiledCommand::SystemPage { id, .. }
                     | CompiledCommand::Presentation { id, .. }
-                    | CompiledCommand::Wait { id, .. } => id.clear(),
+                    | CompiledCommand::Wait { id, .. }
+                    | CompiledCommand::InputWait { id } => id.clear(),
                 }
             }
         }
@@ -1238,6 +1293,7 @@ fn command_manifest_identity(command: &CompiledCommand) -> (&str, &'static str) 
         CompiledCommand::SystemPage { id, .. } => (id, "system_page"),
         CompiledCommand::Presentation { id, .. } => (id, "presentation"),
         CompiledCommand::Wait { id, .. } => (id, "wait"),
+        CompiledCommand::InputWait { id } => (id, "input_wait"),
     }
 }
 

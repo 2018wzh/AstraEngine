@@ -15,8 +15,29 @@ local controllers = {
 }
 
 for _, definition in controllers do
+    local on_open = nil
     local on_action = function(_context, _model, action)
         return { astra.ui.effect.forward(action) }
+    end
+    if definition[1] == "tsui.system.quick_panel.modern" then
+        on_open = function(_context, _model)
+            return { astra.ui.effect.focus("root/commands/skip_all") }
+        end
+    end
+    if definition[1] == "tsui.choice.classic" or definition[1] == "tsui.choice.modern" then
+        on_open = function(_context, model)
+            for _, option_value in model.map.options.list do
+                local option = option_value.map
+                if option.enabled.bool then
+                    return {
+                        astra.ui.effect.focus(
+                            "root/choices/options/option/" .. option.option_id.string
+                        ),
+                    }
+                end
+            end
+            return {}
+        end
     end
     if definition[1] == "tsui.system.save.modern" then
         on_action = function(_context, model, action)
@@ -40,5 +61,5 @@ for _, definition in controllers do
         view = definition[2],
         model_schema = definition[3],
         snapshot = "session",
-    }, { on_action = on_action })
+    }, { on_open = on_open, on_action = on_action })
 end

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use astra_vn_script::{
     compile_astra_project, AstraSource, CompileAstraProjectOptions, CompiledCommand,
     ExtensionCommandDescriptor, ExtensionFieldContract, ExtensionFieldKind, ExtensionValue,
-    PresentationCommand, StageCommand, TimelineCommand, VnTimelineJoinPolicy,
+    PresentationCommand, StageCommand, TimelineCommand, VnAudioControlAction, VnTimelineJoinPolicy,
 };
 
 fn source(command: &str) -> AstraSource {
@@ -13,6 +13,30 @@ fn source(command: &str) -> AstraSource {
             "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    {command}\n"
         ),
     )
+}
+
+#[astra_headless_test::test]
+fn fade_stop_requires_duration_and_completion_fence() {
+    let command = first_presentation(
+        "audio action:fade_stop target:bgm.main duration:4000 fence:bgm.main.end #@id audio.fade",
+    );
+    let PresentationCommand::Stage(StageCommand::AudioControl(control)) = command else {
+        panic!("expected typed audio control")
+    };
+    assert_eq!(
+        control.action,
+        VnAudioControlAction::FadeStop {
+            duration_ms: 4_000,
+            fence: "bgm.main.end".into(),
+        }
+    );
+
+    for invalid in [
+        "audio action:fade_stop target:bgm.main fence:bgm.main.end",
+        "audio action:fade_stop target:bgm.main duration:4000",
+    ] {
+        assert!(compile_astra_project([source(invalid)], Default::default()).is_err());
+    }
 }
 
 fn first_presentation(command: &str) -> PresentationCommand {
@@ -78,7 +102,7 @@ fn timeline_requires_real_ordered_keyframes_and_blocking_fence() {
 fn standard_commands_reject_unknown_fields_and_noncanonical_assets() {
     let unknown = compile_astra_project(
         [source(
-            "show id:hero asset:asset:/character/hero layer:characters opacity:1",
+            "show id:hero asset:asset:/character/hero layer:characters unknown:1",
         )],
         Default::default(),
     )

@@ -11,6 +11,7 @@
     "system.backlog": "Backlog",
     "system.auto": "Auto",
     "system.skip_read": "Skip Read",
+    "system.skip_all": "Skip All",
     "system.config": "Config",
     "system.config.master_volume": "Master Volume",
     "system.config.text_speed": "Text Speed",

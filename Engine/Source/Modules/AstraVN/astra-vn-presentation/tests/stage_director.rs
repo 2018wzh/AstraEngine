@@ -53,6 +53,7 @@ fn show_hero(director: &mut ProductStageDirector) {
             pose: Some("normal".to_string()),
             layer: "characters".to_string(),
             placement: StagePlacement::Center,
+            opacity: FixedScalar::ONE,
             preset: Some("hero_enter".to_string()),
         })
         .unwrap();
@@ -70,6 +71,7 @@ fn stage_director_applies_profile_bound_tween_without_partial_failure() {
             pose: None,
             layer: "missing".to_string(),
             placement: StagePlacement::Center,
+            opacity: FixedScalar::ONE,
             preset: Some("hero_enter".to_string()),
         })
         .unwrap_err();
@@ -84,6 +86,60 @@ fn stage_director_applies_profile_bound_tween_without_partial_failure() {
     assert!(midpoint > 0 && midpoint < 1_000_000);
     director.tick(150_000_000).unwrap();
     assert_eq!(director.state().entities["hero"].opacity, FixedScalar::ONE);
+}
+
+#[astra_headless_test::test]
+fn stage_director_tracks_preload_and_layer_authority_in_snapshot_state() {
+    let mut director = director();
+    let output = director
+        .apply(&StageCommand::Preload {
+            asset: "asset:/character/hero".to_string(),
+        })
+        .unwrap();
+    assert_eq!(
+        output,
+        vec![astra_vn_presentation::StageDirectorOutput::Preload {
+            asset: "asset:/character/hero".to_string(),
+        }]
+    );
+    assert!(director
+        .state()
+        .preloaded_assets
+        .contains("asset:/character/hero"));
+    assert!(director
+        .apply(&StageCommand::Preload {
+            asset: "asset:/character/hero".to_string(),
+        })
+        .unwrap()
+        .is_empty());
+
+    configure(&mut director);
+    director
+        .apply(&StageCommand::Show {
+            id: "half".to_string(),
+            asset: "asset:/character/hero".to_string(),
+            pose: None,
+            layer: "characters".to_string(),
+            placement: StagePlacement::Center,
+            opacity: fixed(500_000),
+            preset: None,
+        })
+        .unwrap();
+    assert_eq!(director.state().entities["half"].opacity, fixed(500_000));
+    director
+        .apply(&StageCommand::SetLayerVisibility {
+            layer: "characters".to_string(),
+            visible: false,
+        })
+        .unwrap();
+    assert!(!director.state().layers["characters"].visible);
+    director
+        .apply(&StageCommand::ClearLayer {
+            layer: "characters".to_string(),
+            duration_ms: 0,
+        })
+        .unwrap();
+    assert!(director.state().entities.is_empty());
 }
 
 #[astra_headless_test::test]

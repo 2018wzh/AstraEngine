@@ -36,8 +36,8 @@ ui_view ui.tsui.modern.quick_panel model:astra.vn.ui_model.quick_panel.v1 theme:
         on activate -> vn.open_system page:"backlog"
       toggle id:auto label_key:l10n:system.auto value:$model.auto_enabled min_width:92
         on change -> vn.set_auto enabled:$event.value
-      button id:skip_read text:l10n:system.skip_read min_width:92
-        on activate -> vn.set_skip mode:"read"
+      button id:skip_all text:l10n:system.skip_all min_width:92
+        on activate -> vn.set_skip mode:"all"
       button id:config text:l10n:system.config min_width:92
         on activate -> vn.open_system page:"config"
       button id:return text:l10n:system.back min_width:92

@@ -19,25 +19,37 @@ SAFE_SYMBOL = re.compile(r"^[A-Za-z0-9_.-]+$")
 SAFE_ASSET_ID = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SUPPORTED_COMMANDS = {
+    "preload",
+    "stage",
+    "layer",
     "background",
     "show",
     "hide",
+    "clear_layer",
+    "layer_visibility",
+    "shade",
+    "skip_allowed",
     "bgm",
     "se",
     "voice",
+    "audio_control",
     "movie",
     "transition",
+    "shake",
     "text",
     "choice",
     "wait",
+    "input_wait",
+    "system_page",
     "mutate",
     "jump",
     "branch",
     "call",
     "return",
 }
-MEDIA_COMMANDS = {"background", "show", "bgm", "se", "voice", "movie"}
-WAIT_COMMANDS = {"text", "choice", "wait", "movie"}
+MEDIA_COMMANDS = {"preload", "background", "show", "bgm", "se", "voice", "movie"}
+WAIT_COMMANDS = {"text", "choice", "wait", "input_wait", "movie"}
+MAX_STATES_PER_SOURCE = 64
 PHYSICAL_INPUT_TYPES = {
     "resume",
     "focus",
@@ -82,10 +94,17 @@ def convert_native_story_ir(ir_path: Path, output_root: Path) -> dict:
     strings: dict[str, str] = {}
     generated_files: list[dict] = []
     for story in stories:
-        path = scripts_root / f"{story['story_id']}.astra"
-        rendered = _render_story(story, strings)
-        path.write_text(rendered, encoding="utf-8")
-        generated_files.append(_file_record(path, output_root))
+        states = story["states"]
+        for part, offset in enumerate(range(0, len(states), MAX_STATES_PER_SOURCE)):
+            path = scripts_root / f"{story['story_id']}.{part:03}.astra"
+            rendered = _render_story_part(
+                story["story_id"],
+                states[offset : offset + MAX_STATES_PER_SOURCE],
+                strings,
+                include_story=part == 0,
+            )
+            path.write_text(rendered, encoding="utf-8")
+            generated_files.append(_file_record(path, output_root))
     locale = payload.get("source_locale")
     localization_path = localization_root / f"{locale}.json"
     localization_path.write_text(
@@ -261,12 +280,68 @@ def _command_payload_valid(command: dict) -> bool:
         return _safe(command.get("path")) and command.get("op") in {"set", "add", "sub"} and isinstance(command.get("value"), int)
     if kind == "wait":
         return _safe(command.get("fence"))
+    if kind == "input_wait":
+        return True
+    if kind == "system_page":
+        return command.get("page") in {"title", "quick_panel", "save", "load", "config", "backlog"}
+    if kind == "preload":
+        return _safe_asset(command.get("asset_id"))
+    if kind == "stage":
+        return (
+            isinstance(command.get("width"), int)
+            and command["width"] > 0
+            and isinstance(command.get("height"), int)
+            and command["height"] > 0
+            and isinstance(command.get("safe_width"), int)
+            and command["safe_width"] > 0
+            and isinstance(command.get("safe_height"), int)
+            and command["safe_height"] > 0
+        )
+    if kind == "layer":
+        return (
+            _safe(command.get("layer"))
+            and command.get("layer_kind") in {"background", "sprite", "video", "text", "cg", "ui", "effect"}
+            and isinstance(command.get("z"), int)
+            and command.get("blend", "normal") in {"normal", "add", "multiply", "screen"}
+            and command.get("clip", "stage") in {"stage", "safe_area"}
+        )
+    if kind == "clear_layer":
+        return _safe(command.get("layer")) and isinstance(command.get("duration_ms", 0), int) and command.get("duration_ms", 0) >= 0
+    if kind == "layer_visibility":
+        return _safe(command.get("layer")) and isinstance(command.get("visible"), bool)
+    if kind == "shade":
+        return isinstance(command.get("opacity"), int) and 0 <= command["opacity"] <= 100
+    if kind == "skip_allowed":
+        return isinstance(command.get("allowed"), bool)
+    if kind == "audio_control":
+        if command.get("action") == "fade_stop":
+            return (
+                _safe(command.get("target"))
+                and isinstance(command.get("duration_ms"), int)
+                and command["duration_ms"] > 0
+                and _safe(command.get("fence"))
+            )
+        return command.get("action") in {"pause", "resume", "stop"} and _safe(command.get("target"))
+    if kind == "shake":
+        return (
+            _safe(command.get("target"))
+            and isinstance(command.get("strength"), int)
+            and command["strength"] >= 0
+            and isinstance(command.get("duration_ms"), int)
+            and command["duration_ms"] > 0
+        )
     if kind == "transition":
         return _safe(command.get("preset")) and isinstance(command.get("duration_ms"), int) and command["duration_ms"] >= 0
     if kind in {"background", "bgm", "se", "voice", "movie"}:
         return _safe_asset(command.get("asset_id"))
     if kind == "show":
-        return _safe_asset(command.get("asset_id")) and _safe(command.get("character_id")) and _safe(command.get("layer"))
+        return (
+            _safe_asset(command.get("asset_id"))
+            and _safe(command.get("character_id"))
+            and _safe(command.get("layer"))
+            and isinstance(command.get("opacity", 100), int)
+            and 0 <= command.get("opacity", 100) <= 100
+        )
     if kind == "hide":
         return _safe(command.get("character_id"))
     return False
@@ -313,7 +388,17 @@ def _validate_routes(value, commands: dict[str, dict], state_ids: set[str], diag
             continue
         if route["terminal_id"] not in state_ids:
             diagnostics.append(_diagnostic("TSUI_NATIVE_STORY_ROUTE_TERMINAL_MISSING", "route terminal state does not exist", route_id=route["route_id"]))
+        expected_route_node_id = f"state.{route['terminal_id']}"
+        if route.get("terminal_route_node_id") != expected_route_node_id:
+            diagnostics.append(
+                _diagnostic(
+                    "TSUI_NATIVE_STORY_ROUTE_NODE_INVALID",
+                    "route terminal evidence must name the compiled route graph node",
+                    route_id=route["route_id"],
+                )
+            )
         choices = route.get("choice_ids")
+        choice_sequence = route.get("choice_sequence")
         evidence = route.get("command_ids")
         if not isinstance(choices, list) or len(set(choices)) != len(choices) or not all(_safe(item) for item in choices):
             diagnostics.append(_diagnostic("TSUI_NATIVE_STORY_ROUTE_CHOICES_INVALID", "route choices must be unique safe ids", route_id=route["route_id"]))
@@ -321,13 +406,21 @@ def _validate_routes(value, commands: dict[str, dict], state_ids: set[str], diag
         if any(choice not in known_choices for choice in choices):
             diagnostics.append(_diagnostic("TSUI_NATIVE_STORY_ROUTE_CHOICE_MISSING", "route choice evidence must resolve to a converted option", route_id=route["route_id"]))
             continue
+        if (
+            not isinstance(choice_sequence, list)
+            or not all(_safe(item) for item in choice_sequence)
+            or any(choice not in known_choices for choice in choice_sequence)
+            or list(dict.fromkeys(choice_sequence)) != choices
+        ):
+            diagnostics.append(_diagnostic("TSUI_NATIVE_STORY_ROUTE_CHOICE_SEQUENCE_INVALID", "route choice sequence must preserve every selected option occurrence", route_id=route["route_id"]))
+            continue
         if not isinstance(evidence, list) or not evidence or any(item not in commands for item in evidence):
             diagnostics.append(_diagnostic("TSUI_NATIVE_STORY_ROUTE_COMMANDS_INVALID", "route command evidence must resolve", route_id=route["route_id"]))
             continue
         if not _validate_input_events(route.get("input_events")):
             diagnostics.append(_diagnostic("TSUI_NATIVE_STORY_ROUTE_INPUT_INVALID", "route automation must contain only serialized physical input", route_id=route["route_id"]))
             continue
-        signature = (route["terminal_id"], tuple(choices))
+        signature = (route["terminal_route_node_id"], tuple(choice_sequence))
         if route["route_id"] in signatures and signatures[route["route_id"]] != signature:
             diagnostics.append(_diagnostic("TSUI_NATIVE_STORY_ROUTE_CONFLICT", "route id has conflicting signatures", route_id=route["route_id"]))
         signatures[route["route_id"]] = signature
@@ -342,9 +435,15 @@ def _validate_coverage(value, source_locale, sources, handlers, commands, routes
         diagnostics.append(_diagnostic("TSUI_NATIVE_STORY_LOCALE_INVALID", "original TsuiNoSora story locale must be ja"))
 
 
-def _render_story(story: dict, strings: dict[str, str]) -> str:
-    lines = [f"story {story['story_id']} #@id story.{story['story_id']}"]
-    for state in story["states"]:
+def _render_story_part(
+    story_id: str,
+    states: list[dict],
+    strings: dict[str, str],
+    *,
+    include_story: bool,
+) -> str:
+    lines = [f"story {story_id} #@id story.{story_id}"] if include_story else []
+    for state in states:
         lines.extend(["", f"state {state['state_id']} #@id state.{state['state_id']}"])
         for scene in state["scenes"]:
             lines.append(f"  scene {scene['scene_id']} #@id scene.{scene['scene_id']}")
@@ -396,23 +495,64 @@ def _render_command(command: dict, strings: dict[str, str]) -> list[str]:
         return [f"{prefix}mutate {command['path']} {op} {command['value']} {stable}"]
     if kind == "wait":
         return [f"{prefix}wait fence:{command['fence']} {stable}"]
+    if kind == "input_wait":
+        return [f"{prefix}input_wait {stable}"]
+    if kind == "system_page":
+        return [f"{prefix}system_page kind:{command['page']} {stable}"]
     if kind == "transition":
         return [f"{prefix}transition preset:{command['preset']} duration:{command['duration_ms']} {stable}"]
     if kind == "show":
         pose = f" pose:{command['pose']}" if _safe(command.get("pose")) else ""
         at = f" at:{command['at']}" if _safe(command.get("at")) else ""
-        return [f"{prefix}show id:{command['character_id']} asset:asset:/{command['asset_id']}{pose} layer:{command['layer']}{at} {stable}"]
+        opacity = command.get("opacity", 100) / 100
+        return [f"{prefix}show id:{command['character_id']} asset:asset:/{command['asset_id']}{pose} layer:{command['layer']}{at} opacity:{opacity:g} {stable}"]
     if kind == "hide":
         return [f"{prefix}hide id:{command['character_id']} {stable}"]
     if kind == "background":
         return [f"{prefix}background asset:asset:/{command['asset_id']} layer:{command.get('layer', 'bg')} {stable}"]
     if kind in {"bgm", "se", "voice"}:
         loop = f" loop:{str(command['loop']).lower()}" if isinstance(command.get("loop"), bool) else ""
-        return [f"{prefix}{kind} asset:asset:/{command['asset_id']}{loop} {stable}"]
+        fade = f" fade:{command['fade_ms']}" if isinstance(command.get("fade_ms"), int) else ""
+        sync = ""
+        if _safe(command.get("fence")):
+            sync = f" sync:fence fence:{command['fence']}"
+        return [f"{prefix}{kind} id:{command.get('audio_id', command_id)} asset:asset:/{command['asset_id']}{loop}{fade}{sync} {stable}"]
     if kind == "movie":
         loop = str(bool(command.get("loop", False))).lower()
         end = command.get("end", "wait")
         return [f"{prefix}movie layer:{command.get('layer', 'video')} asset:asset:/{command['asset_id']} loop:{loop} end:{end} {stable}"]
+    if kind == "preload":
+        return [f"{prefix}preload asset:asset:/{command['asset_id']} {stable}"]
+    if kind == "stage":
+        return [
+            f"{prefix}stage viewport:{command['width']}x{command['height']} "
+            f"safe_area:{command['safe_width']}:{command['safe_height']} {stable}"
+        ]
+    if kind == "layer":
+        return [
+            f"{prefix}layer id:{command['layer']} kind:{command['layer_kind']} z:{command['z']} "
+            f"blend:{command.get('blend', 'normal')} clip:{command.get('clip', 'stage')} {stable}"
+        ]
+    if kind == "clear_layer":
+        return [f"{prefix}clear_layer layer:{command['layer']} duration:{command.get('duration_ms', 0)} {stable}"]
+    if kind == "layer_visibility":
+        return [f"{prefix}layer_visibility layer:{command['layer']} visible:{str(command['visible']).lower()} {stable}"]
+    if kind == "shade":
+        return [f"{prefix}shade opacity:{command['opacity'] / 100:g} {stable}"]
+    if kind == "skip_allowed":
+        return [f"{prefix}skip_allowed allowed:{str(command['allowed']).lower()} {stable}"]
+    if kind == "audio_control":
+        timing = ""
+        if command["action"] == "fade_stop":
+            timing = f" duration:{command['duration_ms']} fence:{command['fence']}"
+        return [
+            f"{prefix}audio action:{command['action']} target:{command['target']}{timing} {stable}"
+        ]
+    if kind == "shake":
+        return [
+            f"{prefix}shake target:{command['target']} strength:{command['strength'] / 100:g} "
+            f"duration:{command['duration_ms']} {stable}"
+        ]
     raise AssertionError(f"validated command kind not rendered: {kind}")
 
 

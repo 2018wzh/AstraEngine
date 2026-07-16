@@ -35,15 +35,21 @@ impl Default for CommandRegistry {
             "mutate",
             "system_page",
             "wait",
+            "input_wait",
         ] {
             registry
                 .commands
                 .insert(command.into(), CommandProvider::Core);
         }
         for command in [
+            "preload",
             "background",
             "show",
             "hide",
+            "clear_layer",
+            "layer_visibility",
+            "shade",
+            "skip_allowed",
             "move",
             "camera",
             "movie",

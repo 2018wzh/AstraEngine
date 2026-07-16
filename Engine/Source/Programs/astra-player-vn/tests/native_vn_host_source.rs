@@ -123,6 +123,99 @@ state save #@id state.system.save
         .iter()
         .any(|node| node.id == "root/back"));
 
+    source
+        .dispatch_ui_event(UiInputEventKind::Keyboard {
+            logical_key: "Escape".to_string(),
+            physical_key: "Escape".to_string(),
+            state: UiButtonState::Pressed,
+            repeat: false,
+            modifiers: 0,
+        })
+        .expect("Escape returns from system UI");
+    assert_eq!(
+        source
+            .pending_wait()
+            .expect("restored dialogue wait")
+            .command_id,
+        wait_before
+    );
+
+    source.release_resources().expect("release");
+    source.shutdown().expect("shutdown");
+}
+
+#[astra_headless_test::test]
+fn secondary_pointer_opens_system_ui_while_story_wait_has_no_ui_surface() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    wait fence:opening.audio.end #@id wait.opening.audio
+    text key:line.one speaker:hero #@id line.one
+
+story system #@id story.system
+state save #@id state.system.save
+  scene save #@id scene.system.save
+    system_page kind:save #@id page.save
+"#;
+    let mut source = source_for(story);
+    source.launch().expect("launch");
+    assert_eq!(
+        source.pending_wait().expect("opening wait").command_id,
+        "wait.opening.audio"
+    );
+
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerButton {
+            button: UiPointerButton::Secondary,
+            state: UiButtonState::Pressed,
+            position: astra_ui_core::UiPoint { x: 12.0, y: 12.0 },
+        })
+        .expect("secondary pointer dispatch");
+
+    assert_eq!(
+        source.pending_wait().expect("system page wait").command_id,
+        "page.save"
+    );
+    source.release_resources().expect("release");
+    source.shutdown().expect("shutdown");
+}
+
+#[astra_headless_test::test]
+fn primary_pointer_advances_input_wait_without_fabricating_message_ui() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    input_wait #@id wait.input
+    text key:line.one speaker:hero #@id line.one
+"#;
+    let mut source = source_for(story);
+    source.launch().expect("launch");
+    assert_eq!(
+        source.pending_wait().expect("input wait").command_id,
+        "wait.input"
+    );
+    assert!(source.ui_semantics().is_none());
+
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerButton {
+            button: UiPointerButton::Primary,
+            state: UiButtonState::Pressed,
+            position: astra_ui_core::UiPoint { x: 12.0, y: 12.0 },
+        })
+        .expect("primary pointer dispatch");
+
+    assert_eq!(
+        source.pending_wait().expect("dialogue wait").command_id,
+        "line.one"
+    );
+    assert!(source
+        .ui_semantics()
+        .expect("message semantics")
+        .nodes
+        .iter()
+        .any(|node| node.id == "root/advance"));
     source.release_resources().expect("release");
     source.shutdown().expect("shutdown");
 }
@@ -778,6 +871,10 @@ fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
     assert!(evidence.runtime_event_hash.starts_with("hash128:"));
     assert!(evidence.runtime_presentation_hash.starts_with("hash128:"));
     assert_eq!(evidence.current_state_id.as_deref(), Some("state.start"));
+    assert_eq!(
+        evidence.pending_wait_command_id.as_deref(),
+        Some("line.one")
+    );
 
     advance(&mut source);
     advance(&mut source);

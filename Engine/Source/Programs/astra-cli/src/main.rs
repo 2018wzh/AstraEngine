@@ -2316,7 +2316,9 @@ fn collect_asset_sidecars(
 fn asset_role_for_path(path: &str, asset_type: &str) -> String {
     let normalized = path.replace('\\', "/").to_ascii_lowercase();
     let parts = normalized.split('/').collect::<Vec<_>>();
-    if parts.contains(&"backgrounds") {
+    if asset_type.starts_with("font.") || parts.contains(&"fonts") {
+        "font".to_string()
+    } else if parts.contains(&"backgrounds") {
         "background".to_string()
     } else if parts.contains(&"characters") {
         "character_sprite".to_string()
@@ -2333,8 +2335,6 @@ fn asset_role_for_path(path: &str, asset_type: &str) -> String {
         "audio".to_string()
     } else if parts.contains(&"movies") {
         "movie".to_string()
-    } else if parts.contains(&"fonts") {
-        "font".to_string()
     } else if asset_type.starts_with("image.") {
         "image".to_string()
     } else if asset_type.starts_with("audio.") {
@@ -3152,12 +3152,21 @@ fn section_codec_name(codec: &SectionCodec) -> &'static str {
 }
 
 fn artifact_media_kind(artifact: &CookedArtifactRef) -> String {
-    artifact
-        .asset_role
-        .as_deref()
-        .or(artifact.asset_type.as_deref())
-        .unwrap_or("data")
-        .to_string()
+    if artifact.font.is_some()
+        || artifact
+            .asset_type
+            .as_deref()
+            .is_some_and(|asset_type| asset_type.starts_with("font."))
+    {
+        "font".to_string()
+    } else {
+        artifact
+            .asset_role
+            .as_deref()
+            .or(artifact.asset_type.as_deref())
+            .unwrap_or("data")
+            .to_string()
+    }
 }
 
 fn asset_tags_for_artifact(artifact: &CookedArtifactRef) -> Vec<&str> {

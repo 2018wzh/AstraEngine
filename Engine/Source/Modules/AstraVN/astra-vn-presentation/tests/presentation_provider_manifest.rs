@@ -9,13 +9,20 @@ fn presentation_provider_manifest_declares_filter_fallback_and_await_capabilitie
     assert!(report.filter_count >= 1);
     assert!(report.wait_capability_count >= 4);
     assert_eq!(report.profile_count, 3);
-    assert_eq!(report.preset_count, 4);
+    assert_eq!(report.preset_count, 5);
     assert_eq!(
         manifest
             .resolve_preset("advanced-vn", "camera", "slow_push")
             .unwrap()
             .duration_ms,
         480
+    );
+    assert_eq!(
+        manifest
+            .resolve_preset("modern", "transition", "crossfade")
+            .unwrap()
+            .duration_ms,
+        300
     );
 }
 

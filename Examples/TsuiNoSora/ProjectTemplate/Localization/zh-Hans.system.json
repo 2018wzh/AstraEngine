@@ -11,6 +11,7 @@
     "system.backlog": "历史记录",
     "system.auto": "自动播放",
     "system.skip_read": "跳过已读",
+    "system.skip_all": "全部跳过",
     "system.config": "设置",
     "system.config.master_volume": "主音量",
     "system.config.text_speed": "文字速度",

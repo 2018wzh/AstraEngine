@@ -24,10 +24,7 @@ impl VnLocalizationTable {
             || self.strings.is_empty()
             || self.strings.len() > 65_536
             || self.strings.iter().any(|(key, value)| {
-                key.trim().is_empty()
-                    || key.len() > 256
-                    || value.trim().is_empty()
-                    || value.len() > 1024 * 1024
+                key.trim().is_empty() || key.len() > 256 || value.len() > 1024 * 1024
             })
         {
             return Err(ContainerError::message(

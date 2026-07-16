@@ -3,10 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use astra_core::Hash256;
 use astra_media_core::TextureFrame;
 use astra_ui_core::{
-    UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiCapability,
-    UiEventBinding, UiFrameRequest, UiInputDispositionKind, UiInputEvent, UiInputEventKind,
-    UiInputFrame, UiInsets, UiNodeBlueprint, UiRepeatBinding, UiSemanticAction, UiSemanticRole,
-    UiThemeManifest, UiThemeValue, UiValue, UiValueExpr, UiViewBlueprint, UiViewport,
+    UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState,
+    UiCapability, UiEventBinding, UiFrameRequest, UiInputDispositionKind, UiInputEvent,
+    UiInputEventKind, UiInputFrame, UiInsets, UiNodeBlueprint, UiRepeatBinding, UiSemanticAction,
+    UiSemanticRole, UiThemeManifest, UiThemeValue, UiValue, UiValueExpr, UiViewBlueprint,
+    UiViewport,
 };
 use astra_ui_yakui::{AstraYakuiBackend, BlueprintYakuiRenderer};
 
@@ -505,4 +506,180 @@ fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
         panic!("range action value must be numeric");
     };
     assert!((value - 0.6).abs() < 1e-6);
+}
+
+#[astra_headless_test::test]
+fn requested_focus_activates_a_button_without_prior_navigation() {
+    let mut button = node("confirm", "button");
+    button.events.push(UiEventBinding {
+        event: "activate".into(),
+        action_id: "vn.advance".into(),
+        arguments: BTreeMap::new(),
+    });
+    let mut alternate = node("alternate", "button");
+    alternate.events = button.events.clone();
+    let mut root = node("root", "screen");
+    root.children.push(button);
+    root.children.push(alternate);
+    let view = UiViewBlueprint {
+        id: "ui.focus".into(),
+        source_id: "ui.focus".into(),
+        model_schema: "model.focus.v1".into(),
+        theme_id: "theme.focus".into(),
+        required_capabilities: Vec::new(),
+        root,
+    };
+    let mut bundle = UiBlueprintBundle {
+        schema: "astra.ui_blueprint_bundle.v1".into(),
+        views: BTreeMap::from([(view.id.clone(), view)]),
+        hash: Hash256::from_sha256(&[]),
+    };
+    bundle.hash = bundle.compute_hash().expect("bundle hash");
+    let mut theme = UiThemeManifest {
+        schema: "astra.ui_theme_manifest.v1".into(),
+        id: "theme.focus".into(),
+        parent: None,
+        tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
+        high_contrast_tokens: BTreeMap::new(),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash().expect("theme hash");
+    let request = |focus_request, events| {
+        let frame = UiBlueprintFrameModel {
+            schema: "astra.ui_blueprint_frame_model.v1".into(),
+            view_id: "ui.focus".into(),
+            model: UiValue::Map(BTreeMap::new()),
+            state: UiValue::Map(BTreeMap::new()),
+            modals: Vec::new(),
+            focus_request,
+            localization: BTreeMap::new(),
+        };
+        UiFrameRequest {
+            schema: "astra.ui_frame_request.v1".into(),
+            session_id: "session.focus".into(),
+            generation: 1,
+            viewport: UiViewport {
+                physical_width: 800,
+                physical_height: 600,
+                scale_factor: 1.0,
+                font_scale: 1.0,
+                safe_area_points: UiInsets {
+                    left: 0.0,
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: 0.0,
+                },
+            },
+            fixed_time_ns: 0,
+            input: UiInputFrame {
+                schema: "astra.ui_input_frame.v1".into(),
+                events,
+            },
+            theme: theme.clone(),
+            model_schema: "model.focus.v1".into(),
+            model_payload: postcard::to_allocvec(&frame).expect("frame encode"),
+        }
+    };
+    let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
+    let mut backend =
+        AstraYakuiBackend::new(renderer, Hash256::from_sha256(b"focus-test")).expect("backend");
+    let focused = backend
+        .render_frame(request(Some("root/confirm".into()), Vec::new()))
+        .expect("focus frame");
+    assert_eq!(
+        focused
+            .semantics
+            .nodes
+            .iter()
+            .filter(|node| node.focused)
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root/confirm"]
+    );
+    let activated = backend
+        .render_frame(request(
+            None,
+            vec![UiInputEvent {
+                sequence: 1,
+                kind: UiInputEventKind::Keyboard {
+                    logical_key: "Enter".into(),
+                    physical_key: "Enter".into(),
+                    state: UiButtonState::Pressed,
+                    repeat: false,
+                    modifiers: 0,
+                },
+            }],
+        ))
+        .expect("activate frame");
+    assert_eq!(activated.actions.len(), 1);
+    assert_eq!(activated.actions[0].action_id, "vn.advance");
+    assert_eq!(activated.actions[0].semantic_target_id, "root/confirm");
+
+    backend
+        .render_frame(request(
+            None,
+            vec![UiInputEvent {
+                sequence: 2,
+                kind: UiInputEventKind::Keyboard {
+                    logical_key: "Enter".into(),
+                    physical_key: "Enter".into(),
+                    state: UiButtonState::Released,
+                    repeat: false,
+                    modifiers: 0,
+                },
+            }],
+        ))
+        .expect("release frame");
+    let navigated = backend
+        .render_frame(request(
+            None,
+            vec![UiInputEvent {
+                sequence: 3,
+                kind: UiInputEventKind::Keyboard {
+                    logical_key: "ArrowDown".into(),
+                    physical_key: "ArrowDown".into(),
+                    state: UiButtonState::Pressed,
+                    repeat: false,
+                    modifiers: 0,
+                },
+            }],
+        ))
+        .expect("navigation frame");
+    assert!(navigated
+        .semantics
+        .nodes
+        .iter()
+        .any(|node| node.id == "root/alternate" && node.focused));
+    backend
+        .render_frame(request(
+            None,
+            vec![UiInputEvent {
+                sequence: 4,
+                kind: UiInputEventKind::Keyboard {
+                    logical_key: "ArrowDown".into(),
+                    physical_key: "ArrowDown".into(),
+                    state: UiButtonState::Released,
+                    repeat: false,
+                    modifiers: 0,
+                },
+            }],
+        ))
+        .expect("navigation release frame");
+    let alternate = backend
+        .render_frame(request(
+            None,
+            vec![UiInputEvent {
+                sequence: 5,
+                kind: UiInputEventKind::Keyboard {
+                    logical_key: "Enter".into(),
+                    physical_key: "Enter".into(),
+                    state: UiButtonState::Pressed,
+                    repeat: false,
+                    modifiers: 0,
+                },
+            }],
+        ))
+        .expect("alternate activate frame");
+    assert_eq!(alternate.actions.len(), 1);
+    assert_eq!(alternate.actions[0].semantic_target_id, "root/alternate");
 }

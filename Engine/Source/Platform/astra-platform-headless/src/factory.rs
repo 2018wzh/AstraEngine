@@ -220,6 +220,10 @@ struct AudioState {
     max_frames: usize,
     last_sequence: u64,
     timeline: Vec<f32>,
+    retain_timeline: bool,
+    submitted_samples: u64,
+    square_sum: f64,
+    peak: f32,
     queued: Vec<f32>,
     paused: bool,
     consumed: u64,
@@ -557,6 +561,13 @@ impl HostState {
                         max_frames: request.max_buffered_frames,
                         last_sequence: 0,
                         timeline: Vec::new(),
+                        retain_timeline: !matches!(
+                            self.profile.artifacts.retention,
+                            astra_platform::HeadlessArtifactRetention::ManifestOnly
+                        ),
+                        submitted_samples: 0,
+                        square_sum: 0.0,
+                        peak: 0.0,
                         queued: Vec::new(),
                         paused: false,
                         consumed: 0,
@@ -578,48 +589,61 @@ impl HostState {
                 packet,
                 reply,
             } => {
-                let result = self
-                    .audio
-                    .get(output)
-                    .and_then(|audio| {
-                        audio
-                            .timeline
-                            .len()
-                            .checked_add(packet.samples.len())
-                            .ok_or_else(|| invalid("audio.submit", "sample count overflowed"))
-                    })
-                    .and_then(|samples| self.artifacts.validate_audio_timeline(samples))
-                    .and_then(|_| self.audio.get_mut(output))
-                    .and_then(|a| {
-                        ensure_sequence(a.last_sequence, packet.sequence, "audio.submit")?;
-                        if packet.channels != a.channels
-                            || packet.samples.iter().any(|s| !s.is_finite())
-                        {
-                            return Err(invalid(
-                                "audio.submit",
-                                "audio packet format or sample is invalid",
-                            ));
-                        }
-                        if packet.frame_count() > a.max_frames
-                            || a.queued.len().saturating_add(packet.samples.len())
-                                > a.max_frames.saturating_mul(usize::from(a.channels))
-                        {
-                            return Err(PlatformError::new(
-                                PlatformErrorCode::QueueOverflow,
-                                "audio.submit",
-                                format!(
-                                    "audio buffer limit exceeded: queued_samples={}, packet_samples={}, max_samples={}",
-                                    a.queued.len(),
-                                    packet.samples.len(),
-                                    a.max_frames.saturating_mul(usize::from(a.channels))
-                                ),
-                            ));
-                        }
+                let result = (|| {
+                    let audio = self.audio.get(output)?;
+                    let submitted_samples = audio
+                        .submitted_samples
+                        .checked_add(packet.samples.len() as u64)
+                        .ok_or_else(|| invalid("audio.submit", "sample count overflowed"))?;
+                    let retained_samples = if audio.retain_timeline {
+                        usize::try_from(submitted_samples)
+                            .map_err(|_| invalid("audio.submit", "sample count overflowed"))?
+                    } else {
+                        packet.samples.len()
+                    };
+                    self.artifacts.validate_audio_timeline(retained_samples)?;
+                    if !audio.retain_timeline {
+                        self.artifacts
+                            .record_audio(packet.sequence, &packet.samples)?;
+                    }
+                    let a = self.audio.get_mut(output)?;
+                    ensure_sequence(a.last_sequence, packet.sequence, "audio.submit")?;
+                    if packet.channels != a.channels
+                        || packet.samples.iter().any(|s| !s.is_finite())
+                    {
+                        return Err(invalid(
+                            "audio.submit",
+                            "audio packet format or sample is invalid",
+                        ));
+                    }
+                    if packet.frame_count() > a.max_frames
+                        || a.queued.len().saturating_add(packet.samples.len())
+                            > a.max_frames.saturating_mul(usize::from(a.channels))
+                    {
+                        return Err(PlatformError::new(
+                            PlatformErrorCode::QueueOverflow,
+                            "audio.submit",
+                            format!(
+                                "audio buffer limit exceeded: queued_samples={}, packet_samples={}, max_samples={}",
+                                a.queued.len(),
+                                packet.samples.len(),
+                                a.max_frames.saturating_mul(usize::from(a.channels))
+                            ),
+                        ));
+                    }
+                    for sample in &packet.samples {
+                        let value = f64::from(*sample);
+                        a.square_sum += value * value;
+                        a.peak = a.peak.max(sample.abs());
+                    }
+                    a.submitted_samples = submitted_samples;
+                    if a.retain_timeline {
                         a.timeline.extend_from_slice(&packet.samples);
-                        a.queued.extend(packet.samples);
-                        a.last_sequence = packet.sequence;
-                        Ok(())
-                    });
+                    }
+                    a.queued.extend(packet.samples);
+                    a.last_sequence = packet.sequence;
+                    Ok(())
+                })();
                 let _ = reply.send(result);
             }
             HostCommand::QueryAudio { output, reply } => {
@@ -631,9 +655,9 @@ impl HostState {
             }
             HostCommand::DrainAudio { output, reply } => {
                 let result = self.audio.get_mut(output).map(|a| {
-                    a.consumed = a.timeline.len() as u64;
+                    a.consumed = a.submitted_samples;
                     a.queued.clear();
-                    meter(&a.timeline)
+                    aggregate_audio_meter(a)
                 });
                 let _ = reply.send(result);
             }
@@ -673,8 +697,10 @@ impl HostState {
                     // begins, remove the platform resource even if bounded artifact commit
                     // fails, so cleanup reports the owning error instead of a secondary leak.
                     let state = self.audio.remove(output)?;
-                    self.artifacts
-                        .record_audio(state.last_sequence.max(1), &state.timeline)?;
+                    if state.retain_timeline {
+                        self.artifacts
+                            .record_audio(state.last_sequence.max(1), &state.timeline)?;
+                    }
                     Ok(())
                 })();
                 let _ = reply.send(result);
@@ -898,24 +924,6 @@ fn ensure_sequence(last: u64, next: u64, operation: &'static str) -> Result<(), 
     }
     Ok(())
 }
-fn meter(samples: &[f32]) -> AudioMeter {
-    let peak = samples.iter().fold(0.0_f32, |a, s| a.max(s.abs()));
-    let rms = if samples.is_empty() {
-        0.0
-    } else {
-        (samples
-            .iter()
-            .map(|s| f64::from(*s) * f64::from(*s))
-            .sum::<f64>()
-            / samples.len() as f64)
-            .sqrt() as f32
-    };
-    AudioMeter {
-        sample_count: samples.len() as u64,
-        peak_dbfs: amplitude_db(peak),
-        rms_dbfs: amplitude_db(rms),
-    }
-}
 fn amplitude_db(value: f32) -> f32 {
     if value <= 0.0 {
         -120.0
@@ -928,21 +936,37 @@ fn audio_state(a: &AudioState) -> AudioOutputState {
     AudioOutputState {
         queued_frames: frames,
         callback_count: a.callback_count,
-        submitted_samples: a.timeline.len() as u64,
+        submitted_samples: a.submitted_samples,
         consumed_samples: a.consumed,
         underflow_count: a.underflow_count,
-        meter: meter(&a.timeline),
+        meter: aggregate_audio_meter(a),
     }
 }
 fn audio_status(a: &AudioState) -> AudioOutputStatus {
-    let frames = (a.timeline.len() / usize::from(a.channels)) as u64;
+    let frames = a.submitted_samples / u64::from(a.channels);
     let played = a.consumed / u64::from(a.channels);
     AudioOutputStatus {
         submitted_frames: frames,
         played_frames: played,
         buffered_frames: (a.queued.len() / usize::from(a.channels)) as u64,
         underflow_count: a.underflow_count,
-        meter: meter(&a.timeline),
+        meter: aggregate_audio_meter(a),
+    }
+}
+
+fn aggregate_audio_meter(audio: &AudioState) -> AudioMeter {
+    if audio.submitted_samples == 0 {
+        return AudioMeter {
+            sample_count: 0,
+            peak_dbfs: -120.0,
+            rms_dbfs: -120.0,
+        };
+    }
+    let rms = (audio.square_sum / audio.submitted_samples as f64).sqrt() as f32;
+    AudioMeter {
+        sample_count: audio.submitted_samples,
+        peak_dbfs: amplitude_db(audio.peak),
+        rms_dbfs: amplitude_db(rms),
     }
 }
 
@@ -952,7 +976,7 @@ fn consume_audio_callback(audio: &mut AudioState) {
     }
     audio.callback_count = audio.callback_count.saturating_add(1);
     if audio.queued.is_empty() {
-        if !audio.timeline.is_empty() {
+        if audio.submitted_samples > 0 {
             audio.underflow_count = audio.underflow_count.saturating_add(1);
         }
         return;

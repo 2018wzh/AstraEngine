@@ -31,6 +31,8 @@ from director_scene_semantics import DirectorSceneSemanticError, build_scene_sem
 from director_lingo import DirectorLingoError, build_lingo_ir
 from director_story_graph import DirectorStoryGraphError, build_story_graph
 from director_asset_bindings import DirectorAssetBindingError, build_asset_binding_ir
+from director_story_program import DirectorStoryProgramError, build_story_program_ir
+from director_native_story import DirectorNativeStoryError, build_native_story_ir
 
 
 IMAGE_EXTS = {".png"}
@@ -70,7 +72,7 @@ DEFAULT_STAGE3_TARGETS = [
 INTERNAL_DEMO_STAGE3_TARGETS = [
     {
         "target": "tsuinosora-internal-game",
-        "profiles": ["classic"],
+        "profiles": ["classic", "modern"],
         "platforms": ["headless", "windows", "web"],
     },
 ]
@@ -6064,6 +6066,129 @@ def build_modern_profile_report(conversion_report: dict, features: list[dict]) -
     }
 
 
+def _builtin_modern_ui_feature() -> tuple[dict | None, list[dict]]:
+    """Validate and hash the checked-in Classic/Modern UI project template.
+
+    The hashes are evidence for a reversible presentation feature. They do not
+    include generated story/localization payloads and are safe to publish in a
+    redacted Stage 3 report.
+    """
+
+    repository_root = Path(__file__).resolve().parents[2]
+    template_root = repository_root / "Examples" / "TsuiNoSora" / "ProjectTemplate"
+    required_files = {
+        "classic": [
+            "UI/classic.astra",
+            "Themes/classic.json",
+        ],
+        "modern": [
+            "UI/modern.astra",
+            "Themes/modern.json",
+            "Controllers/tsui_ui.luau",
+            "Scripts/system.astra",
+            "Localization/ja.system.json",
+            "Localization/zh-Hans.system.json",
+            "Localization/en.system.json",
+        ],
+        "shared": ["Profiles/ui_profiles.json"],
+    }
+    diagnostics: list[dict] = []
+    for relative_path in sorted(
+        path for paths in required_files.values() for path in paths
+    ):
+        if not (template_root / relative_path).is_file():
+            diagnostics.append(
+                {
+                    "code": "TSUI_MODERN_UI_TEMPLATE_FILE_MISSING",
+                    "file_id": relative_path.replace("/", "."),
+                    "message": "the checked-in modern UI template is incomplete",
+                }
+            )
+
+    if diagnostics:
+        return None, diagnostics
+
+    try:
+        profile_manifest = _read_json(template_root / "Profiles" / "ui_profiles.json")
+        if profile_manifest.get("schema") != "tsuinosora.ui_profile_manifest.v1":
+            raise ValueError("unexpected UI profile manifest schema")
+        if profile_manifest.get("default_profile") != "modern":
+            raise ValueError("modern must be the default UI profile")
+        profiles = {
+            str(profile.get("id", "")): profile
+            for profile in profile_manifest.get("profiles", [])
+            if isinstance(profile, dict)
+        }
+        if set(profiles) != {"classic", "modern"}:
+            raise ValueError("the UI profile manifest must bind exactly classic and modern")
+        for profile_id in ("classic", "modern"):
+            profile = profiles[profile_id]
+            if (
+                profile.get("design_width") != 800
+                or profile.get("design_height") != 600
+                or profile.get("aspect_policy") != "strict_letterbox"
+                or profile.get("core_state_authority") != "shared"
+            ):
+                raise ValueError(f"{profile_id} does not preserve the shared 800x600 authority contract")
+
+        modern_source = (template_root / "UI" / "modern.astra").read_text(encoding="utf-8")
+        for view_id in (
+            "ui.tsui.modern.title",
+            "ui.tsui.modern.quick_panel",
+            "ui.tsui.modern.save",
+            "ui.tsui.modern.load",
+            "ui.tsui.modern.backlog",
+            "ui.tsui.modern.config",
+        ):
+            if view_id not in modern_source:
+                raise ValueError(f"required modern UI view is missing: {view_id}")
+        classic_source = (template_root / "UI" / "classic.astra").read_text(encoding="utf-8")
+        for view_id in (
+            "ui.tsui.classic.message",
+            "ui.tsui.classic.title",
+            "ui.tsui.classic.save",
+            "ui.tsui.classic.load",
+        ):
+            if view_id not in classic_source:
+                raise ValueError(f"required classic UI view is missing: {view_id}")
+        for locale in ("ja", "zh-Hans", "en"):
+            locale_table = _read_json(template_root / "Localization" / f"{locale}.system.json")
+            if not isinstance(locale_table.get("strings"), dict) or not locale_table["strings"]:
+                raise ValueError(f"system localization is empty: {locale}")
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+        return None, [
+            {
+                "code": "TSUI_MODERN_UI_TEMPLATE_INVALID",
+                "message": str(error),
+            }
+        ]
+
+    def tree_hash(groups: tuple[str, ...]) -> str:
+        digest = hashlib.sha256()
+        for relative_path in sorted(
+            path for group in groups for path in required_files[group]
+        ):
+            digest.update(relative_path.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update((template_root / relative_path).read_bytes())
+            digest.update(b"\0")
+        return f"sha256:{digest.hexdigest()}"
+
+    classic_hash = tree_hash(("classic", "shared"))
+    return (
+        {
+            "feature_id": "tsui.modern.core_reading_suite",
+            "feature_kind": "yakui_system_ui_profile",
+            "input_hash": classic_hash,
+            "output_hash": tree_hash(("modern", "shared")),
+            "fallback_hash": classic_hash,
+            "independent_switch": True,
+            "affects_core_state": False,
+        },
+        [],
+    )
+
+
 def build_route_scenarios(target: str, profile: str, platform: str, routes: list[dict]) -> dict:
     scenarios = []
     diagnostics = []
@@ -6768,7 +6893,20 @@ def build_stage3_gate_report(
 
     modern_profile_path = reports_root / "modern_profile_report.json"
     if requires_modern:
-        modern_profile_report = build_modern_profile_report(conversion_report, modern_features)
+        builtin_modern_ui, modern_ui_diagnostics = _builtin_modern_ui_feature()
+        diagnostics.extend(modern_ui_diagnostics)
+        effective_modern_features = list(modern_features)
+        if builtin_modern_ui is not None:
+            effective_modern_features.append(builtin_modern_ui)
+        modern_profile_report = build_modern_profile_report(
+            conversion_report,
+            effective_modern_features,
+        )
+        if modern_ui_diagnostics:
+            modern_profile_report["status"] = "blocked"
+            modern_profile_report["diagnostics"] = _dedupe_diagnostics(
+                modern_profile_report.get("diagnostics", []) + modern_ui_diagnostics
+            )
         _write_json(modern_profile_path, modern_profile_report)
     else:
         modern_profile_report = {"status": "skipped", "diagnostics": []}
@@ -7074,6 +7212,7 @@ def run_demo_slice_gate(config_path: Path | str) -> dict:
             "director_scene_dsl": "reports/director_scene_dsl_report.json" if story_source_report else "",
             "director_scene_semantics": "reports/director_scene_semantic_report.json" if story_source_report else "",
             "director_asset_bindings": "reports/director_asset_binding_report.json" if story_source_report else "",
+            "director_story_program": "reports/director_story_program_report.json" if story_source_report else "",
             "director_lingo": "reports/director_lingo_report.json" if story_source_report else "",
             "director_story_graph": "reports/director_story_graph_report.json" if story_source_report else "",
             "local_gate": "reports/local_gate_report.json" if local_report else "",
@@ -7142,6 +7281,14 @@ def _run_director_story_source_from_demo_config(config: dict) -> dict | None:
     ]
     if {alias for alias, _ in dump_roots} != {"root", "data", "casts"}:
         return None
+    for stale in (
+        work_root / "private" / "native_story_ir.json",
+        work_root / "reports" / "director_native_story_lowering_report.json",
+    ):
+        try:
+            stale.unlink()
+        except FileNotFoundError:
+            pass
     try:
         detailed, report = build_director_story_source(work_root, dump_roots)
     except DirectorStorySourceError as exc:
@@ -7289,6 +7436,58 @@ def _run_director_story_source_from_demo_config(config: dict) -> dict | None:
                 "story graph requires passing scene DSL and Lingo IR"
             )
         _write_json(work_root / "reports" / "director_story_graph_report.json", graph_report)
+        if graph_report["status"] == "pass" and asset_binding_report["status"] == "pass":
+            try:
+                story_program, story_program_report = build_story_program_ir(
+                    story_graph,
+                    asset_bindings,
+                )
+            except DirectorStoryProgramError as exc:
+                story_program_report = _blocked_story_program_report(str(exc))
+                report["status"] = "blocked"
+                report["diagnostics"].extend(story_program_report["diagnostics"])
+            else:
+                _write_json(
+                    work_root / "private" / "director_story_program.json",
+                    story_program,
+                )
+                try:
+                    native_story, native_story_report = build_native_story_ir(
+                        story_program,
+                        lingo_ir,
+                    )
+                except DirectorNativeStoryError as exc:
+                    native_story_report = {
+                        "schema": "tsuinosora.director_native_story_lowering_report.v1",
+                        "status": "blocked",
+                        "diagnostics": [
+                            {
+                                "code": "TSUI_DIRECTOR_NATIVE_STORY_BLOCKED",
+                                "message": str(exc),
+                            }
+                        ],
+                        "redaction": {
+                            "paths": "report_relative_only",
+                            "payload": "omitted",
+                            "commercial_text": "private_ir_only",
+                        },
+                    }
+                    report["status"] = "blocked"
+                    report["diagnostics"].extend(native_story_report["diagnostics"])
+                else:
+                    _write_json(work_root / "private" / "native_story_ir.json", native_story)
+                _write_json(
+                    work_root / "reports" / "director_native_story_lowering_report.json",
+                    native_story_report,
+                )
+        else:
+            story_program_report = _blocked_story_program_report(
+                "story program requires passing graph and asset bindings"
+            )
+        _write_json(
+            work_root / "reports" / "director_story_program_report.json",
+            story_program_report,
+        )
     _write_json(work_root / "reports" / "director_story_source_report.json", report)
     return report
 
@@ -7350,6 +7549,26 @@ def _blocked_asset_binding_report(message: str) -> dict:
             "payload": "omitted",
             "commercial_text": "private_ir_only",
             "member_names": "private_ir_only",
+        },
+    }
+
+
+def _blocked_story_program_report(message: str) -> dict:
+    return {
+        "schema": "tsuinosora.director_story_program_report.v1",
+        "status": "blocked",
+        "movie_count": 0,
+        "node_count": 0,
+        "source_statement_count": 0,
+        "program_operation_count": 0,
+        "program_kind_counts": {},
+        "story_program_sha256": "sha256:" + "0" * 64,
+        "diagnostics": [{"code": "TSUI_DIRECTOR_STORY_PROGRAM_BLOCKED", "message": message}],
+        "redaction": {
+            "paths": "report_relative_only",
+            "payload": "omitted",
+            "commercial_text": "private_ir_only",
+            "script_source": "private_ir_only",
         },
     }
 
@@ -11354,15 +11573,21 @@ def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | Non
     section_root.mkdir(parents=True, exist_ok=True)
 
     section_specs = _write_nativevn_section_inputs(reports_root, section_root)
+    scenario_refs = sorted(
+        str(item["relative_path"])
+        for item in story_report.get("generated_files", [])
+        if isinstance(item, dict)
+        and str(item.get("relative_path", "")).startswith("Automation/")
+    )
     wrote_story_inputs = not diagnostics
     if wrote_story_inputs:
         _copy_native_assets_to_nativevn(work_root, nativevn_root, conversion_report)
         _copy_tsuinosora_ui_template(nativevn_root)
         (nativevn_root / "project.yaml").write_text(
-            _render_nativevn_project(section_specs, []),
+            _render_nativevn_project(section_specs, scenario_refs),
             encoding="utf-8",
         )
-    files = _nativevn_package_input_files(nativevn_root, section_specs, [])
+    files = _nativevn_package_input_files(nativevn_root, section_specs, scenario_refs)
 
     report = {
         "schema": "tsuinosora.nativevn_package_input_report.v1",
@@ -11401,26 +11626,122 @@ def _copy_native_assets_to_nativevn(work_root: Path, nativevn_root: Path, conver
     target_root = nativevn_root / "native-assets"
     if target_root.exists():
         shutil.rmtree(target_root)
-    resources = [
-        resource
+    binding_path = work_root / "private" / "director_asset_bindings.json"
+    if not binding_path.is_file():
+        coverage = _read_json(work_root / "reports" / "full_conversion_coverage_report.json")
+        if coverage.get("counts", {}).get("media_commands") == 0:
+            return
+        raise FileNotFoundError(
+            "runtime media commands require the validated Director asset binding IR"
+        )
+    binding_ir = _read_json(binding_path)
+    if binding_ir.get("schema") != "tsuinosora.director_asset_binding_ir.v1":
+        raise ValueError("runtime asset closure requires the validated Director asset binding IR")
+    runtime_assets: dict[str, set[str]] = {}
+    for scene in binding_ir.get("scenes", []):
+        for operation in _walk_director_operations(scene.get("operations", [])):
+            binding = operation.get("binding")
+            if not isinstance(binding, dict) or "asset_id" not in binding:
+                continue
+            native_path = str(binding.get("native_path", ""))
+            asset_id = str(binding.get("asset_id", ""))
+            if (
+                not _is_safe_report_relative_path(native_path)
+                or not native_path.startswith("native-assets/")
+                or not _is_safe_symbol(asset_id)
+            ):
+                raise ValueError("Director runtime asset binding is unsafe")
+            runtime_assets.setdefault(asset_id, set()).add(native_path)
+
+    resources = {
+        str(resource.get("native_path", "")): resource
         for resource in conversion_report.get("resources", [])
         if isinstance(resource, dict)
-        and _is_safe_report_relative_path(str(resource.get("native_path", "")))
-        and str(resource.get("native_path", "")).startswith("native-assets/")
-    ]
-    for resource in resources:
-        native_path = str(resource["native_path"])
+    }
+    referenced_paths = {
+        native_path for paths in runtime_assets.values() for native_path in paths
+    }
+    missing = sorted(referenced_paths - set(resources))
+    if missing:
+        raise ValueError("Director runtime asset closure contains unconverted resources")
+    for asset_id, candidate_paths in sorted(runtime_assets.items()):
+        hashes = {
+            str(resources[native_path].get("converted_hash", ""))
+            for native_path in candidate_paths
+        }
+        if len(hashes) != 1 or not next(iter(hashes)).startswith("sha256:"):
+            raise ValueError("Director semantic asset id maps to conflicting converted payloads")
+        native_path = min(candidate_paths)
+        resource = resources[native_path]
         source = work_root / native_path
         if not source.is_file():
-            continue
+            raise FileNotFoundError("converted Director runtime asset is missing")
         target = nativevn_root / native_path
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-        _write_asset_sidecar(target, native_path, resource)
+        _write_asset_sidecar(target, native_path, resource, asset_id)
+    _copy_classic_ui_assets(work_root, nativevn_root, resources)
+
+
+def _copy_classic_ui_assets(
+    work_root: Path,
+    nativevn_root: Path,
+    resources: dict[str, dict],
+) -> None:
+    required = (
+        (
+            "native-assets/projectorrays/data/MENU/chunks/BITD-444.png",
+            "native-assets/ui/classic/frame.png",
+            "tsui.ui.classic.frame",
+            "sha256:6c945086d7e1160ac374e8e9f32e03a4282466b99685f0ade7545ace72861b88",
+        ),
+        (
+            "native-assets/projectorrays/data/MENU/chunks/BITD-449.png",
+            "native-assets/ui/classic/menu-save.png",
+            "tsui.ui.classic.menu.save",
+            "sha256:24633ae07b6e48d684509ddcebb17417cdc166248034f2c91b91a9847620ed52",
+        ),
+        (
+            "native-assets/projectorrays/data/MENU/chunks/BITD-454.png",
+            "native-assets/ui/classic/menu-load.png",
+            "tsui.ui.classic.menu.load",
+            "sha256:7147403eb63c2234c45c5c7df24c388cf454b9096e68f3e75e4953ced9930ed3",
+        ),
+        (
+            "native-assets/projectorrays/data/MENU/chunks/BITD-455.png",
+            "native-assets/ui/classic/menu-exit.png",
+            "tsui.ui.classic.menu.exit",
+            "sha256:3aef150616889ae240f8cf04e3eab6100c734d3334eadf59d76cd2fddf15f4e1",
+        ),
+    )
+    for source_path, target_path, asset_id, expected_hash in required:
+        resource = resources.get(source_path)
+        if not isinstance(resource, dict) or resource.get("converted_hash") != expected_hash:
+            raise ValueError("classic UI asset identity does not match the reviewed conversion")
+        source = work_root / source_path
+        if not source.is_file() or _sha256(source) != expected_hash:
+            raise FileNotFoundError("reviewed classic UI asset is missing or has changed")
+        target = nativevn_root / target_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        ui_resource = {**resource, "native_path": target_path, "classification": "ui"}
+        _write_asset_sidecar(target, target_path, ui_resource, asset_id)
+
+
+def _walk_director_operations(operations):
+    for operation in operations:
+        if not isinstance(operation, dict):
+            raise ValueError("Director asset binding operation must be an object")
+        yield operation
+        for key in ("operations", "events"):
+            children = operation.get(key)
+            if isinstance(children, list):
+                yield from _walk_director_operations(children)
 
 
 def _copy_tsuinosora_ui_template(nativevn_root: Path) -> None:
-    template_root = Path(__file__).resolve().parents[2] / "Examples" / "TsuiNoSora" / "ProjectTemplate"
+    repository_root = Path(__file__).resolve().parents[2]
+    template_root = repository_root / "Examples" / "TsuiNoSora" / "ProjectTemplate"
     if not template_root.is_dir():
         raise FileNotFoundError("TsuiNoSora UI project template is missing")
     for source in sorted(path for path in template_root.rglob("*") if path.is_file()):
@@ -11440,11 +11761,73 @@ def _copy_tsuinosora_ui_template(nativevn_root: Path) -> None:
     source_locale["strings"].update(system_ja["strings"])
     _write_json(source_locale_path, source_locale)
     for locale in ("zh-Hans", "en"):
-        shutil.copy2(localization_root / f"{locale}.system.json", localization_root / f"{locale}.json")
+        system_locale = _read_json(localization_root / f"{locale}.system.json")
+        localized = {
+            **source_locale,
+            "locale": locale,
+            "strings": dict(source_locale["strings"]),
+        }
+        localized["strings"].update(system_locale["strings"])
+        _write_json(localization_root / f"{locale}.json", localized)
+    _copy_tsuinosora_ui_font(repository_root, nativevn_root)
 
 
-def _write_asset_sidecar(asset_path: Path, native_path: str, resource: dict) -> None:
-    asset_id = "asset:/tsuinosora/" + _asset_id_path(native_path)
+def _copy_tsuinosora_ui_font(repository_root: Path, nativevn_root: Path) -> None:
+    source = repository_root / "Examples" / "NativeVN" / "Assets" / "Fonts" / "NotoSansJP-Variable.ttf"
+    expected_hash = "sha256:c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f"
+    if not source.is_file() or _sha256(source) != expected_hash:
+        raise FileNotFoundError("the reviewed OFL Noto Sans JP UI font is missing or has changed")
+    relative_path = "native-assets/ui/fonts/NotoSansJP-Variable.ttf"
+    target = nativevn_root / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    sidecar = """schema: astra.asset.v1
+id: asset:/font/tsuinosora-ui
+source: native-assets/ui/fonts/NotoSansJP-Variable.ttf
+source_hash: sha256:c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f
+type: font.ttf
+license: OFL-1.1
+importer: astra.import.font
+font:
+  family: Noto Sans JP
+  face_index: 0
+  subset: cjk-production
+  coverage:
+    - { start: 32, end: 126 }
+    - { start: 215, end: 215 }
+    - { start: 8217, end: 8217 }
+    - { start: 8594, end: 8595 }
+    - { start: 8704, end: 8704 }
+    - { start: 8707, end: 8707 }
+    - { start: 8801, end: 8801 }
+    - { start: 9512, end: 9512 }
+    - { start: 9547, end: 9547 }
+    - { start: 9633, end: 9633 }
+    - { start: 9670, end: 9671 }
+    - { start: 9675, end: 9675 }
+    - { start: 9734, end: 9734 }
+    - { start: 12288, end: 12351 }
+    - { start: 12352, end: 12447 }
+    - { start: 12448, end: 12543 }
+    - { start: 13312, end: 19903 }
+    - { start: 19968, end: 40959 }
+    - { start: 65280, end: 65519 }
+cook:
+  processor: astra.cook.font
+  target_profiles: [classic, modern]
+  params: {}
+review: accepted
+"""
+    target.with_name(target.name + ".astra-asset.yaml").write_text(sidecar, encoding="utf-8")
+
+
+def _write_asset_sidecar(
+    asset_path: Path,
+    native_path: str,
+    resource: dict,
+    semantic_asset_id: str,
+) -> None:
+    asset_id = f"asset:/{semantic_asset_id}"
     asset_type = _asset_type_for_native_path(native_path, str(resource.get("classification", "")))
     processor = _cook_processor_for_asset_type(asset_type)
     source_hash = str(resource.get("converted_hash") or _sha256(asset_path))
@@ -12964,16 +13347,16 @@ def _render_nativevn_project(section_specs: list[dict], scenario_refs: list[str]
         "      height: 600",
         "    scale_filter: linear",
         "    preview_layers:",
-        "      - vfs_uri: package:/native-assets/projectorrays/data/MENU/chunks/BITD-444.png",
+        "      - vfs_uri: package:/native-assets/ui/classic/frame.png",
         "        x: 0",
         "        y: 0",
-        "      - vfs_uri: package:/native-assets/projectorrays/data/MENU/chunks/BITD-449.png",
+        "      - vfs_uri: package:/native-assets/ui/classic/menu-save.png",
         "        x: 564",
         "        y: 344",
-        "      - vfs_uri: package:/native-assets/projectorrays/data/MENU/chunks/BITD-454.png",
+        "      - vfs_uri: package:/native-assets/ui/classic/menu-load.png",
         "        x: 564",
         "        y: 432",
-        "      - vfs_uri: package:/native-assets/projectorrays/data/MENU/chunks/BITD-455.png",
+        "      - vfs_uri: package:/native-assets/ui/classic/menu-exit.png",
         "        x: 564",
         "        y: 520",
         "  asset_roots:",

@@ -37,6 +37,7 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
             height: 180,
             max_video_frames,
             max_decode_output_bytes,
+            retain_audio_timeline: true,
             platform: host.client.clone(),
         })
         .await

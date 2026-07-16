@@ -496,32 +496,45 @@ impl NativeVnRuntimeProvider {
             .world
             .read_component::<VnRuntimeState>(session.vn_component)
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let presentation = output
-            .presentation
-            .iter()
-            .map(|command| {
+        // Audio cues are also typed presentation commands. Preserve their position
+        // relative to stage audio controls instead of grouping output by domain:
+        // a BGM start followed by fade-stop must never be observed in reverse.
+        let mut media = Vec::with_capacity(output.presentation.len() + output.audio.len());
+        let mut audio = output.audio.iter();
+        for command in &output.presentation {
+            media.push(
                 RuntimeOutputEnvelope::postcard(
                     RuntimeOutputDomain::Presentation,
                     "astra.vn.presentation_command.v2",
                     SchemaVersion::new(2, 0, 0),
                     command,
                 )
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let audio = output
-            .audio
-            .iter()
-            .map(|command| {
-                RuntimeOutputEnvelope::postcard(
-                    RuntimeOutputDomain::Audio,
-                    "astra.vn.audio_command.v2",
-                    SchemaVersion::new(2, 0, 0),
-                    command,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
+                .map_err(|err| CoreVnError::message(err.to_string()))?,
+            );
+            if matches!(command, PresentationCommand::Stage(StageCommand::Audio(_))) {
+                let audio_command = audio.next().ok_or_else(|| {
+                    CoreVnError::diagnostic(
+                        "ASTRA_NATIVE_VN_AUDIO_ORDER_MISSING",
+                        "typed audio presentation has no matching audio output",
+                    )
+                })?;
+                media.push(
+                    RuntimeOutputEnvelope::postcard(
+                        RuntimeOutputDomain::Audio,
+                        "astra.vn.audio_command.v2",
+                        SchemaVersion::new(2, 0, 0),
+                        audio_command,
+                    )
+                    .map_err(|err| CoreVnError::message(err.to_string()))?,
+                );
+            }
+        }
+        if audio.next().is_some() {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_AUDIO_ORDER_EXTRA",
+                "audio output has no matching typed presentation command",
+            ));
+        }
         let awaits = output
             .awaits
             .iter()
@@ -599,15 +612,14 @@ impl NativeVnRuntimeProvider {
         .map_err(|err| CoreVnError::message(err.to_string()))?];
         Ok(RuntimeStepOutput {
             session_id,
-            status: if presentation.is_empty() {
+            status: if output.presentation.is_empty() {
                 "idle".to_string()
             } else {
                 "blocked".to_string()
             },
             outputs: effects
                 .into_iter()
-                .chain(presentation)
-                .chain(audio)
+                .chain(media)
                 .chain(timeline)
                 .chain(awaits)
                 .chain(observations)
@@ -1141,8 +1153,10 @@ fn vn_runtime_event_kinds() -> [&'static str; 16] {
 fn command_resolves_wait(command: &CoreVnPlayerCommand, wait: Option<VnWaitKind>) -> bool {
     matches!(
         (command, wait),
-        (CoreVnPlayerCommand::Advance, Some(VnWaitKind::Dialogue))
-            | (CoreVnPlayerCommand::Choose { .. }, Some(VnWaitKind::Choice))
+        (
+            CoreVnPlayerCommand::Advance,
+            Some(VnWaitKind::Dialogue | VnWaitKind::Input),
+        ) | (CoreVnPlayerCommand::Choose { .. }, Some(VnWaitKind::Choice))
             | (
                 CoreVnPlayerCommand::ReturnSystem,
                 Some(VnWaitKind::SystemPage)

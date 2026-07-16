@@ -153,14 +153,24 @@ def _resolve_member(name, movie, forced_library, members, resources):
     if selected is None or selected_scope is None:
         raise DirectorAssetBindingError("Director member lookup has no matching cast member")
 
-    child_assets = []
+    playable_audio = resources.get(
+        (selected_scope[0], selected_scope[1], selected["resource_id"], "playable_audio")
+    )
+    child_assets = [playable_audio] if playable_audio is not None else []
     for child in selected.get("children", []):
+        if playable_audio is not None and child.get("fourcc") == "snd ":
+            continue
         if child.get("fourcc") not in MEDIA_FOURCC:
             continue
         resource = resources.get((selected_scope[0], selected_scope[1], child["resource_id"], child["fourcc"]))
         if resource is None:
             raise DirectorAssetBindingError("Director media child has no converted resource")
         child_assets.append(resource)
+    is_audio_member = selected_scope[1] == "AUDIO" or selected.get("cast_type") == 6
+    if is_audio_member and playable_audio is None:
+        raise DirectorAssetBindingError(
+            "Director sound cast member has no converted playable audio resource"
+        )
     if len(child_assets) > 1:
         kinds = ",".join(sorted(resource["chunk_fourcc"] for resource in child_assets))
         raise DirectorAssetBindingError(
@@ -219,6 +229,18 @@ def _resource_index(records):
         if key in result:
             raise DirectorAssetBindingError("converted resource identity is duplicated")
         result[key] = record
+        parent_resource_id = record.get("parent_resource_id", record.get("cast_resource_id"))
+        native_path = str(record.get("native_path", "")).lower()
+        if (
+            isinstance(parent_resource_id, int)
+            and native_path.endswith((".wav", ".ogg", ".flac", ".mp3"))
+        ):
+            playable_key = (source_alias, library, parent_resource_id, "playable_audio")
+            if playable_key in result:
+                raise DirectorAssetBindingError(
+                    "Director sound cast member resolves to multiple playable audio resources"
+                )
+            result[playable_key] = record
     return result
 
 

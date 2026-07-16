@@ -117,12 +117,17 @@
     },
     "route": {
       "type": "object",
-      "required": ["route_id", "terminal_id", "command_ids", "choice_ids", "input_events"],
+      "required": ["route_id", "terminal_id", "terminal_route_node_id", "command_ids", "choice_ids", "choice_sequence", "input_events"],
       "properties": {
         "route_id": { "$ref": "#/$defs/symbol" },
         "terminal_id": { "$ref": "#/$defs/symbol" },
+        "terminal_route_node_id": { "$ref": "#/$defs/symbol" },
         "command_ids": { "$ref": "#/$defs/symbolList" },
         "choice_ids": { "$ref": "#/$defs/symbolList" },
+        "choice_sequence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/symbol" }
+        },
         "input_events": {
           "type": "array",
           "minItems": 1,

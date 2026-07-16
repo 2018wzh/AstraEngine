@@ -13,8 +13,8 @@ def member(name, slot, resource, child, fourcc):
     }
 
 
-def converted(path, fourcc, parent, digest):
-    return {
+def converted(path, fourcc, parent, digest, *, native_extension=None):
+    record = {
         "source_alias": "casts",
         "source_relative_path": path,
         "chunk_fourcc": fourcc,
@@ -24,6 +24,9 @@ def converted(path, fourcc, parent, digest):
         "byte_size": 10,
         "cast_resource_id": parent,
     }
+    if native_extension is not None:
+        record["native_path"] = record["native_path"].rsplit(".", 1)[0] + native_extension
+    return record
 
 
 class DirectorAssetBindingTests(unittest.TestCase):
@@ -66,6 +69,13 @@ class DirectorAssetBindingTests(unittest.TestCase):
                 converted("GENERAL/GENERAL/chunks/BITD-11.bin", "BITD", 10, "a"),
                 converted("GENERAL/GENERAL/chunks/BITD-13.bin", "BITD", 12, "b"),
                 converted("AUDIO/AUDIO/chunks/snd -21.bin", "snd ", 20, "c"),
+                converted(
+                    "AUDIO/AUDIO/chunks/ediM-22.bin",
+                    "ediM",
+                    20,
+                    "d",
+                    native_extension=".mp3",
+                ),
             ],
         }
 
@@ -75,6 +85,9 @@ class DirectorAssetBindingTests(unittest.TestCase):
         self.assertEqual(report["reference_count"], 3)
         self.assertEqual(report["unique_asset_count"], 3)
         self.assertTrue(all("asset_id" in item["binding"] for item in detailed["scenes"][0]["operations"]))
+        self.assertTrue(
+            detailed["scenes"][0]["operations"][1]["binding"]["native_path"].endswith(".mp3")
+        )
 
     def test_missing_member_is_blocking(self):
         source = {

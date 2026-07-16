@@ -81,6 +81,7 @@ fn run_nativevn_headless(
                         value_hash: active_video_hash,
                     },
                     timeout_ticks: 1,
+                    continue_at_match: false,
                 },
             ),
             (32, keyboard("Enter")),
@@ -93,6 +94,7 @@ fn run_nativevn_headless(
                         value_hash: active_voice_hash,
                     },
                     timeout_ticks: 1,
+                    continue_at_match: false,
                 },
             ),
             (
@@ -103,6 +105,7 @@ fn run_nativevn_headless(
                         value_hash: inactive_voice_hash,
                     },
                     timeout_ticks: 300,
+                    continue_at_match: false,
                 },
             ),
             (335, keyboard("Enter")),
@@ -114,6 +117,7 @@ fn run_nativevn_headless(
                         value_hash: pending_choices_hash,
                     },
                     timeout_ticks: 60,
+                    continue_at_match: false,
                 },
             ),
             (396, keyboard(choice_key)),
@@ -138,6 +142,7 @@ fn run_nativevn_headless(
                         value_hash: pending_choices_hash,
                     },
                     timeout_ticks: 300,
+                    continue_at_match: false,
                 },
             ),
             (602, keyboard(choice_key)),
@@ -1523,6 +1528,22 @@ fn nativevn_sample_cooks_packages_validates_and_runs_full_playthrough() {
     assert_eq!(font_manifest["fonts"][0]["asset_id"], "asset:/font/ui");
     assert_eq!(font_manifest["fonts"][0]["family"], "Poppins");
     assert_eq!(font_manifest["fonts"][0]["coverage"][0]["start"], 32);
+    let vfs_manifest: serde_json::Value = serde_json::from_slice(
+        &reader
+            .container()
+            .read_section("asset.vfs_manifest")
+            .unwrap(),
+    )
+    .unwrap();
+    let font_uri = font_manifest["fonts"][0]["uri"].as_str().unwrap();
+    let font_vfs_entry = vfs_manifest["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["vfs_uri"] == font_uri)
+        .expect("font manifest URI must resolve to a package VFS entry");
+    assert_eq!(font_vfs_entry["media_kind"], "font");
+    assert_eq!(font_vfs_entry["hash"], font_manifest["fonts"][0]["hash"]);
     let media_manifest: serde_json::Value =
         serde_json::from_slice(&reader.container().read_section("media.manifest").unwrap())
             .unwrap();

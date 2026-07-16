@@ -65,6 +65,10 @@ impl Widget for AstraNodeWidget {
     }
 
     fn update(&mut self, props: Self::Props<'_>) -> Self::Response {
+        if self.props.semantic_id != props.semantic_id {
+            self.pressed = false;
+            self.clicked_semantic_id = None;
+        }
         self.props = props;
         AstraNodeResponse {
             semantic_id: self.props.semantic_id.clone(),

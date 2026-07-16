@@ -223,34 +223,36 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
             }
             command => panic!("unexpected command: {}", command.operation()),
         }
-        match backend.next_command().await.unwrap() {
-            HostCommand::QueryAudio { output, reply } => {
-                assert_eq!(output, native_output);
-                reply
-                    .send(Ok(AudioOutputState {
-                        queued_frames: 0,
-                        callback_count: 1,
-                        submitted_samples: 0,
-                        consumed_samples: 0,
-                        underflow_count: 64,
-                        meter: AudioMeter {
-                            sample_count: 0,
-                            peak_dbfs: -120.0,
-                            rms_dbfs: -120.0,
-                        },
-                    }))
-                    .unwrap();
+        for sequence in 1..=4 {
+            match backend.next_command().await.unwrap() {
+                HostCommand::QueryAudio { output, reply } => {
+                    assert_eq!(output, native_output);
+                    reply
+                        .send(Ok(AudioOutputState {
+                            queued_frames: 0,
+                            callback_count: sequence,
+                            submitted_samples: 0,
+                            consumed_samples: 0,
+                            underflow_count: 64,
+                            meter: AudioMeter {
+                                sample_count: 0,
+                                peak_dbfs: -120.0,
+                                rms_dbfs: -120.0,
+                            },
+                        }))
+                        .unwrap();
+                }
+                command => panic!("unexpected command: {}", command.operation()),
             }
-            command => panic!("unexpected command: {}", command.operation()),
-        }
-        match backend.next_command().await.unwrap() {
-            HostCommand::SubmitAudio { packet, reply, .. } => {
-                assert_eq!(packet.sequence, 1);
-                assert_eq!(packet.channels, 2);
-                assert_eq!(packet.frame_count(), 800);
-                reply.send(Ok(())).unwrap();
+            match backend.next_command().await.unwrap() {
+                HostCommand::SubmitAudio { packet, reply, .. } => {
+                    assert_eq!(packet.sequence, sequence);
+                    assert_eq!(packet.channels, 2);
+                    assert_eq!(packet.frame_count(), 800);
+                    reply.send(Ok(())).unwrap();
+                }
+                command => panic!("unexpected command: {}", command.operation()),
             }
-            command => panic!("unexpected command: {}", command.operation()),
         }
         match backend.next_command().await.unwrap() {
             HostCommand::DrainAudio { output, reply } => {
@@ -279,7 +281,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     let request = NativeVnAudioRequest {
         command_id: "bgm.main".into(),
         command: "bgm".into(),
-        attributes: BTreeMap::from([("loop".into(), "true".into())]),
+        attributes: BTreeMap::from([("loop".into(), "true".into()), ("fade".into(), "40".into())]),
         asset_id: "asset:/bgm/main".into(),
         codec: "wav".into(),
         encoded_bytes: vec![1],
@@ -292,21 +294,37 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     };
     let mut signals = BTreeSet::new();
 
-    host.start(&mut source, &mut executor, &request, audio)
+    host.start(&mut source, &mut executor, &request, audio, &mut signals)
         .await
         .unwrap();
+    signals.insert("bgm.main.end".into());
+    let mut replacement = request.clone();
+    replacement.asset_id = "asset:/bgm/replacement".into();
+    host.start(
+        &mut source,
+        &mut executor,
+        &replacement,
+        PlayerDecodedAudio {
+            sample_rate: 44_100,
+            channels: 1,
+            samples: vec![0.125; 4_410],
+        },
+        &mut signals,
+    )
+    .await
+    .unwrap();
+    assert!(!signals.contains("bgm.main.end"));
     host.pump(&mut source, &mut executor, &mut signals)
         .await
         .unwrap();
     assert_eq!(host.last_meter().unwrap().underflow_count, 64);
-    let snapshot = host.snapshot();
-    host.restore(snapshot).unwrap();
-    assert!(host.is_active());
     host.control(
         &NativeVnAudioControlRequest {
             command_id: "audio.pause".into(),
             action: "pause".into(),
             target: "bgm.main".into(),
+            duration_ms: None,
+            fence: None,
         },
         &mut signals,
     )
@@ -316,20 +334,76 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
             command_id: "audio.resume".into(),
             action: "resume".into(),
             target: "bgm.main".into(),
+            duration_ms: None,
+            fence: None,
         },
         &mut signals,
     )
     .unwrap();
     host.control(
         &NativeVnAudioControlRequest {
-            command_id: "audio.stop".into(),
-            action: "stop".into(),
+            command_id: "audio.fade-stop".into(),
+            action: "fade_stop".into(),
             target: "bgm.main".into(),
+            duration_ms: Some(40),
+            fence: Some("bgm.fade.complete".into()),
         },
         &mut signals,
     )
     .unwrap();
+    host.pump(&mut source, &mut executor, &mut signals)
+        .await
+        .unwrap();
+    let snapshot = host.snapshot();
+    host.restore(snapshot).unwrap();
+    assert!(host.is_active());
+    host.pump(&mut source, &mut executor, &mut signals)
+        .await
+        .unwrap();
+    assert!(!signals.contains("bgm.fade.complete"));
+    host.pump(&mut source, &mut executor, &mut signals)
+        .await
+        .unwrap();
     assert!(signals.contains("bgm.main.end"));
+    assert!(signals.contains("bgm.fade.complete"));
+    host.control(
+        &NativeVnAudioControlRequest {
+            command_id: "audio.fade-stop-again".into(),
+            action: "fade_stop".into(),
+            target: "bgm.main".into(),
+            duration_ms: Some(40),
+            fence: Some("bgm.second-fade.complete".into()),
+        },
+        &mut signals,
+    )
+    .unwrap();
+    assert!(signals.contains("bgm.second-fade.complete"));
+    let unknown = host
+        .control(
+            &NativeVnAudioControlRequest {
+                command_id: "audio.fade-stop-unknown".into(),
+                action: "fade_stop".into(),
+                target: "bgm.unknown".into(),
+                duration_ms: Some(40),
+                fence: Some("bgm.unknown.complete".into()),
+            },
+            &mut signals,
+        )
+        .unwrap_err();
+    assert!(unknown
+        .to_string()
+        .contains("ASTRA_PLAYER_AUDIO_CONTROL_TARGET_UNKNOWN"));
+    host.control(
+        &NativeVnAudioControlRequest {
+            command_id: "audio.stop-after-fade".into(),
+            action: "stop".into(),
+            target: "bgm.main".into(),
+            duration_ms: None,
+            fence: None,
+        },
+        &mut signals,
+    )
+    .unwrap();
     host.shutdown(&mut source, &mut executor).await.unwrap();
     let final_meter = host.last_meter().unwrap();
     assert_eq!(final_meter.consumed_samples, 2_048);

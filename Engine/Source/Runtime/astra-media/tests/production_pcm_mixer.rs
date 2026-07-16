@@ -49,6 +49,8 @@ fn mixes_exact_tick_with_loop_seek_fade_and_snapshot_restore() {
     let first = mixer.render_tick().unwrap();
     assert_eq!(first.samples.len(), CANONICAL_FRAMES_PER_TICK * 2);
     assert!(first.peak_dbfs.is_finite());
+    assert_eq!(first.completed_fades, ["fade"]);
+    assert_eq!(mixer.voice_bus("loop-a"), Some("music"));
     let snapshot = mixer.snapshot();
     let mut restored = ProductionAudioMixer::restore(snapshot, &resolver, 8).unwrap();
     let second = restored.render_tick().unwrap();

@@ -206,6 +206,9 @@ pub enum CompiledCommand {
         id: String,
         fence: String,
     },
+    InputWait {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -321,7 +324,22 @@ impl SystemStoryManifest {
 
     pub fn from_compiled(compiled: &CompiledStory) -> Result<Self, VnError> {
         let mut entries = BTreeMap::new();
+        let system_stories = compiled
+            .stories
+            .iter()
+            .filter(|story| story.name == "system")
+            .collect::<Vec<_>>();
+        if system_stories.len() > 1 {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_SYSTEM_STORY_DUPLICATE",
+                "multiple stories are named system",
+            ));
+        }
+        let system_story_id = system_stories.first().map(|story| story.id.as_str());
         for state in compiled.states.values() {
+            if system_story_id.is_some_and(|story_id| state.story_id != story_id) {
+                continue;
+            }
             for command in state.scenes.iter().flat_map(|scene| &scene.commands) {
                 let CompiledCommand::SystemPage { id, page, policy } = command else {
                     continue;
@@ -332,13 +350,22 @@ impl SystemStoryManifest {
                         format!("system page {id} has unknown kind"),
                     ));
                 }
-                entries.entry(*page).or_insert_with(|| SystemStoryEntry {
+                let entry = SystemStoryEntry {
                     page: *page,
                     story_id: state.story_id.clone(),
                     state_id: state.id.clone(),
                     source_id: id.clone(),
                     policy: policy.clone(),
-                });
+                };
+                if let Some(previous) = entries.insert(*page, entry) {
+                    return Err(VnError::diagnostic(
+                        "ASTRA_VN_SYSTEM_PAGE_DUPLICATE",
+                        format!(
+                            "system page {page:?} is defined by both {} and {id}",
+                            previous.source_id
+                        ),
+                    ));
+                }
             }
         }
         Ok(Self {
@@ -490,6 +517,8 @@ pub struct VnRuntimeState {
     pub route_coverage: BTreeSet<String>,
     #[serde(default)]
     pub route_flags: BTreeMap<String, VnRouteFlag>,
+    #[serde(default)]
+    pub wait_sequence: u64,
     #[serde(default)]
     pub pending_wait: Option<VnWaitState>,
 }
@@ -681,6 +710,7 @@ pub enum VnWaitKind {
     TimelineComplete,
     MovieEnd,
     VoiceEnd,
+    Input,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

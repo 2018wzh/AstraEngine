@@ -11,7 +11,7 @@ use crate::{
     VnPresentationProviderManifest, VnTimelineJoinPolicy,
 };
 
-pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v1";
+pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v2";
 const MAX_FRAME_DELTA_NS: u64 = 1_000_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -21,11 +21,14 @@ pub struct ProductStageState {
     pub configured: bool,
     pub viewport: StageViewport,
     pub safe_area: AspectRatio,
+    pub preloaded_assets: BTreeSet<String>,
     pub layers: BTreeMap<String, ProductStageLayer>,
     pub entities: BTreeMap<String, ProductStageEntity>,
     pub camera: ProductStageCamera,
     pub movies: BTreeMap<String, ProductStageMovie>,
     pub effects: BTreeMap<String, ProductStageEffect>,
+    pub shade_opacity: FixedScalar,
+    pub skip_allowed: bool,
     pub transition: Option<ProductStageTransition>,
     pub frame_index: u64,
     pub elapsed_ns: u64,
@@ -45,6 +48,7 @@ pub struct ProductStageLayer {
     pub blend: StageBlendMode,
     pub clip: Option<StageClipPolicy>,
     pub input: Option<String>,
+    pub visible: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -115,6 +119,7 @@ pub struct ProductStageTransition {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum StageDirectorOutput {
+    Preload { asset: String },
     Audio(AudioCue),
     AudioControl(AudioControl),
     Movie(ProductStageMovie),
@@ -152,11 +157,14 @@ impl ProductStageDirector {
                     width: 16,
                     height: 9,
                 },
+                preloaded_assets: BTreeSet::new(),
                 layers: BTreeMap::new(),
                 entities: BTreeMap::new(),
                 camera: ProductStageCamera::default(),
                 movies: BTreeMap::new(),
                 effects: BTreeMap::new(),
+                shade_opacity: FixedScalar::ZERO,
+                skip_allowed: true,
                 transition: None,
                 frame_index: 0,
                 elapsed_ns: 0,
@@ -241,6 +249,14 @@ impl ProductStageDirector {
             "typed presentation command entered the product stage director"
         );
         match command {
+            StageCommand::Preload { asset } => {
+                if !self.state.preloaded_assets.insert(asset.clone()) {
+                    return Ok(Vec::new());
+                }
+                return Ok(vec![StageDirectorOutput::Preload {
+                    asset: asset.clone(),
+                }]);
+            }
             StageCommand::Configure {
                 viewport,
                 safe_area,
@@ -295,6 +311,7 @@ impl ProductStageDirector {
                         blend: *blend,
                         clip: *clip,
                         input: input.clone(),
+                        visible: true,
                     },
                 );
             }
@@ -343,6 +360,7 @@ impl ProductStageDirector {
                 pose,
                 layer,
                 placement,
+                opacity,
                 preset,
             } => {
                 self.require_layer(
@@ -368,7 +386,7 @@ impl ProductStageDirector {
                         x,
                         y,
                         opacity: if duration == 0 {
-                            FixedScalar::ONE
+                            *opacity
                         } else {
                             FixedScalar::ZERO
                         },
@@ -380,7 +398,7 @@ impl ProductStageDirector {
                         TweenTarget::Entity(id.clone()),
                         TweenProperty::Opacity,
                         FixedScalar::ZERO,
-                        FixedScalar::ONE,
+                        *opacity,
                         duration,
                         self.resolve_easing(command.kind(), preset.as_deref())?,
                         false,
@@ -409,6 +427,63 @@ impl ProductStageDirector {
                         true,
                     )?);
                 }
+            }
+            StageCommand::ClearLayer { layer, duration_ms } => {
+                self.require_layer(
+                    layer,
+                    &[
+                        StageLayerKind::Background,
+                        StageLayerKind::Sprite,
+                        StageLayerKind::Cg,
+                        StageLayerKind::Ui,
+                    ],
+                )?;
+                let entities = self
+                    .state
+                    .entities
+                    .values()
+                    .filter(|entity| entity.layer == *layer)
+                    .map(|entity| (entity.id.clone(), entity.opacity))
+                    .collect::<Vec<_>>();
+                if *duration_ms == 0 {
+                    for (id, _) in entities {
+                        self.state.entities.remove(&id);
+                        self.cancel_target(&TweenTarget::Entity(id));
+                    }
+                } else {
+                    for (id, opacity) in entities {
+                        self.schedule_tween(StageTween::new(
+                            TweenTarget::Entity(id),
+                            TweenProperty::Opacity,
+                            opacity,
+                            FixedScalar::ZERO,
+                            *duration_ms,
+                            VnPresentationEasing::Linear,
+                            true,
+                        )?);
+                    }
+                }
+            }
+            StageCommand::SetLayerVisibility { layer, visible } => {
+                let layer = self.state.layers.get_mut(layer).ok_or_else(|| {
+                    stage_error(
+                        "ASTRA_VN_STAGE_LAYER_UNKNOWN",
+                        "layer visibility references an undeclared layer",
+                    )
+                })?;
+                layer.visible = *visible;
+            }
+            StageCommand::Shade { opacity } => {
+                if !(0..=1_000_000).contains(&opacity.millionths) {
+                    return Err(stage_error(
+                        "ASTRA_VN_STAGE_SHADE_RANGE",
+                        "stage shade opacity must be between zero and one",
+                    ));
+                }
+                self.state.shade_opacity = *opacity;
+            }
+            StageCommand::SetSkipAllowed { allowed } => {
+                self.state.skip_allowed = *allowed;
             }
             StageCommand::Move {
                 id,

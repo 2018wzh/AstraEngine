@@ -4,8 +4,8 @@ use astra_plugin_abi::{
     GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID,
 };
 use astra_vn_runtime_provider::{
-    compile_astra_project, AstraSource, NativeVnRuntimeProvider, PresentationCommand,
-    TimelineCommand, VnRunConfig, VnTimelineTask,
+    compile_astra_project, AstraSource, NativeVnRuntimeProvider, PresentationCommand, StageCommand,
+    TimelineCommand, VnAudioCommand, VnAudioControlAction, VnRunConfig, VnTimelineTask,
 };
 
 const STORY: &str = r#"
@@ -35,6 +35,82 @@ fn native_vn_provider_descriptor_declares_game_runtime_slot_contract() {
     assert!(descriptor
         .release_checks
         .contains(&"runtime_provider.native_vn".to_string()));
+}
+
+#[astra_headless_test::test]
+fn native_vn_provider_preserves_audio_and_stage_control_order() {
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "audio-order.astra",
+            r#"
+story main #@id story.main
+state start #@id state.start
+  scene start #@id scene.start
+    bgm id:bgm.main asset:asset:/bgm/main loop:true fade:500 #@id bgm.start
+    audio action:fade_stop target:bgm.main duration:1000 fence:bgm.main.end #@id bgm.stop
+    wait fence:bgm.main.end #@id wait.bgm
+"#,
+        )],
+        Default::default(),
+    )
+    .unwrap();
+    let mut provider = NativeVnRuntimeProvider::default();
+    let open = provider
+        .open_compiled_story(
+            compiled,
+            VnRunConfig::classic("ja"),
+            RuntimeOpenRequest {
+                target_id: "audio-order".into(),
+                profile: "classic".into(),
+                locale: "ja".into(),
+                seed: 1,
+                package_hash: "sha256:fixture".into(),
+                sections: vec![],
+            },
+        )
+        .unwrap();
+
+    let output = provider
+        .step(RuntimeStepInput {
+            session_id: open.session_id,
+            fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed: 1,
+            mode: RuntimeStepMode::Live,
+            action: "launch_default".into(),
+            payload: serde_json::json!({}),
+        })
+        .unwrap();
+    let audio_index = output
+        .outputs
+        .iter()
+        .position(|envelope| {
+            matches!(
+                envelope.decode_postcard::<VnAudioCommand>(
+                    RuntimeOutputDomain::Audio,
+                    "astra.vn.audio_command.v2",
+                    SchemaVersion::new(2, 0, 0),
+                ),
+                Ok(command) if command.command_id == "bgm.main"
+            )
+        })
+        .unwrap();
+    let stop_index = output
+        .outputs
+        .iter()
+        .position(|envelope| {
+            matches!(
+                envelope.decode_postcard::<PresentationCommand>(
+                    RuntimeOutputDomain::Presentation,
+                    "astra.vn.presentation_command.v2",
+                    SchemaVersion::new(2, 0, 0),
+                ),
+                Ok(PresentationCommand::Stage(StageCommand::AudioControl(control)))
+                    if matches!(control.action, VnAudioControlAction::FadeStop { .. })
+            )
+        })
+        .unwrap();
+    assert!(audio_index < stop_index);
 }
 
 #[astra_headless_test::test]

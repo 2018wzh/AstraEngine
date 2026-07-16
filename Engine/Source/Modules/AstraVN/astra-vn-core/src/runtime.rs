@@ -45,6 +45,7 @@ impl VnRuntime {
                 voice_replay: Default::default(),
                 route_coverage: Default::default(),
                 route_flags: Default::default(),
+                wait_sequence: 0,
                 pending_wait: None,
             },
         })
@@ -129,7 +130,7 @@ impl VnRuntime {
             }
             VnPlayerCommand::Advance => {
                 match self.state.pending_wait.as_ref().map(|wait| wait.kind) {
-                    Some(VnWaitKind::Dialogue) => {
+                    Some(VnWaitKind::Dialogue | VnWaitKind::Input) => {
                         self.state.pending_wait = None;
                         self.run_until_blocked(&mut presentation, &mut reached)?;
                     }
@@ -387,11 +388,11 @@ impl VnRuntime {
                         voice,
                         window,
                     });
-                    self.state.pending_wait = Some(VnWaitState::new(
+                    self.set_pending_wait(VnWaitState::new(
                         VnWaitKind::Dialogue,
                         format!("dialogue:{id}"),
                         id,
-                    ));
+                    ))?;
                     return Ok(());
                 }
                 CompiledCommand::Choice { id, key, options } => {
@@ -413,11 +414,11 @@ impl VnRuntime {
                         enabled_option_ids,
                     });
                     presentation.push(PresentationCommand::Choice { key, options });
-                    self.state.pending_wait = Some(VnWaitState::new(
+                    self.set_pending_wait(VnWaitState::new(
                         VnWaitKind::Choice,
                         format!("choice:{id}"),
                         id,
-                    ));
+                    ))?;
                     return Ok(());
                 }
                 CompiledCommand::Jump { id, target } => {
@@ -550,11 +551,11 @@ impl VnRuntime {
                     } else {
                         self.advance_cursor()?;
                         presentation.push(PresentationCommand::SystemPage { page });
-                        self.state.pending_wait = Some(VnWaitState::new(
+                        self.set_pending_wait(VnWaitState::new(
                             VnWaitKind::SystemPage,
                             format!("system:{id}"),
                             id,
-                        ));
+                        ))?;
                     }
                     return Ok(());
                 }
@@ -563,17 +564,38 @@ impl VnRuntime {
                     let wait = wait_state_from_presentation(&id, &command)?;
                     presentation.push(command);
                     if let Some(wait) = wait {
-                        self.state.pending_wait = Some(wait);
+                        self.set_pending_wait(wait)?;
                         return Ok(());
                     }
                 }
                 CompiledCommand::Wait { id, fence } => {
                     self.advance_cursor()?;
-                    self.state.pending_wait = Some(VnWaitState::new(VnWaitKind::Fence, fence, id));
+                    self.set_pending_wait(VnWaitState::new(VnWaitKind::Fence, fence, id))?;
+                    return Ok(());
+                }
+                CompiledCommand::InputWait { id } => {
+                    self.advance_cursor()?;
+                    self.set_pending_wait(VnWaitState::new(
+                        VnWaitKind::Input,
+                        format!("input:{id}"),
+                        id,
+                    ))?;
                     return Ok(());
                 }
             }
         }
+    }
+
+    fn set_pending_wait(&mut self, mut wait: VnWaitState) -> Result<(), VnError> {
+        self.state.wait_sequence = self.state.wait_sequence.checked_add(1).ok_or_else(|| {
+            VnError::diagnostic(
+                "ASTRA_VN_WAIT_SEQUENCE_OVERFLOW",
+                "VN wait occurrence sequence exhausted its deterministic range",
+            )
+        })?;
+        wait.await_id = Some(format!("wait.{:016x}", self.state.wait_sequence));
+        self.state.pending_wait = Some(wait);
+        Ok(())
     }
 
     fn choose(&mut self, option_id: &str, reached: &mut BTreeSet<String>) -> Result<(), VnError> {
@@ -866,7 +888,8 @@ fn compiled_command_id(command: &CompiledCommand) -> String {
         | CompiledCommand::Mutate { id, .. }
         | CompiledCommand::SystemPage { id, .. }
         | CompiledCommand::Presentation { id, .. }
-        | CompiledCommand::Wait { id, .. } => id.clone(),
+        | CompiledCommand::Wait { id, .. }
+        | CompiledCommand::InputWait { id } => id.clone(),
     }
 }
 

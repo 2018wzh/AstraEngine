@@ -43,6 +43,13 @@ from projectorrays_json import decode_projectorrays_byte_text, loads_projectorra
 from native_story_ir import convert_native_story_ir  # noqa: E402
 
 
+def read_generated_story(root: Path, story_id: str = "main") -> str:
+    parts = sorted((root / "Scripts").glob(f"{story_id}.*.astra"))
+    if not parts:
+        raise FileNotFoundError(f"generated story {story_id} has no source parts")
+    return "".join(path.read_text(encoding="utf-8") for path in parts)
+
+
 def native_story_ir_fixture():
     commands = [
         {
@@ -118,7 +125,9 @@ def native_story_ir_fixture():
             {
                 "route_id": "route.good",
                 "terminal_id": "ending.good",
+                "terminal_route_node_id": "state.ending.good",
                 "choice_ids": ["choice.route.good"],
+                "choice_sequence": ["choice.route.good"],
                 "command_ids": ["line.opening", "choice.route", "line.ending.good"],
                 "input_events": [
                     {"tick": 0, "event": {"type": "resume"}},
@@ -164,7 +173,7 @@ class AssetAnalysisTests(unittest.TestCase):
 
             report = convert_native_story_ir(ir, output)
             encoded_report = json.dumps(report, ensure_ascii=False, sort_keys=True)
-            story = (output / "Scripts" / "main.astra").read_text(encoding="utf-8")
+            story = read_generated_story(output)
             localization = json.loads((output / "Localization" / "ja.json").read_text(encoding="utf-8"))
             input_lines = (output / "Automation" / "route.good.jsonl").read_text(encoding="utf-8").splitlines()
 
@@ -216,7 +225,7 @@ class AssetAnalysisTests(unittest.TestCase):
             ir.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
             report = convert_native_story_ir(ir, output)
-            story = (output / "Scripts" / "main.astra").read_text(encoding="utf-8")
+            story = read_generated_story(output)
             self.assertEqual(report["status"], "pass")
             self.assertIn(
                 "branch path:project.day op:greater_eq value:2 then:ending.good else:opening",
@@ -4885,7 +4894,7 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertEqual(report["reports"]["nativevn_package_input"], "reports/nativevn_package_input_report.json")
             self.assertEqual(nativevn_report["status"], "pass")
             self.assertTrue((work / "nativevn" / "project.yaml").exists())
-            self.assertTrue((work / "nativevn" / "Scripts" / "main.astra").exists())
+            self.assertTrue(list((work / "nativevn" / "Scripts").glob("main.*.astra")))
             self.assertNotIn(str(config).replace("\\", "/"), encoded.replace("\\", "/"))
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
@@ -5497,7 +5506,7 @@ class AssetAnalysisTests(unittest.TestCase):
                 (work / "reports" / "nativevn_package_input_report.json").read_text(encoding="utf-8")
             )
             conversion = json.loads((work / "reports" / "conversion_report.json").read_text(encoding="utf-8"))
-            story = (work / "nativevn" / "Scripts" / "main.astra").read_text(encoding="utf-8")
+            story = read_generated_story(work / "nativevn")
             input_lines = (work / "nativevn" / "Automation" / "route.good.jsonl").read_text(encoding="utf-8").splitlines()
             encoded = json.dumps(report, sort_keys=True)
 
@@ -5565,7 +5574,7 @@ class AssetAnalysisTests(unittest.TestCase):
             report = write_nativevn_package_input(work)
             encoded = json.dumps(report, sort_keys=True)
             project = (work / "nativevn" / "project.yaml").read_text(encoding="utf-8")
-            story = (work / "nativevn" / "Scripts" / "main.astra").read_text(encoding="utf-8")
+            story = read_generated_story(work / "nativevn")
 
             self.assertEqual(report["schema"], "tsuinosora.nativevn_package_input_report.v1")
             self.assertEqual(report["status"], "pass")
@@ -5586,8 +5595,8 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertIn("height: 600", project)
             self.assertIn("scale_filter: linear", project)
             self.assertIn("preview_layers:", project)
-            self.assertIn("package:/native-assets/projectorrays/data/MENU/chunks/BITD-444.png", project)
-            self.assertIn("package:/native-assets/projectorrays/data/MENU/chunks/BITD-449.png", project)
+            self.assertIn("package:/native-assets/ui/classic/frame.png", project)
+            self.assertIn("package:/native-assets/ui/classic/menu-save.png", project)
             self.assertIn("asset_roots:", project)
             self.assertIn("native-assets", project)
             self.assertIn("package_sections:", project)
@@ -5595,7 +5604,9 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertIn("targets: [tsuinosora-patch-game]", project)
             self.assertIn("choice.route.good", story)
             self.assertTrue((work / "nativevn" / "PackageSections" / "asset_analysis.json").exists())
-            self.assertTrue((work / "nativevn" / "native-assets" / "backgrounds" / "bg.png.astra-asset.yaml").exists())
+            self.assertFalse(
+                (work / "nativevn" / "native-assets" / "backgrounds" / "bg.png.astra-asset.yaml").exists()
+            )
             self.assertTrue((work / "nativevn" / "Automation" / "route.good.jsonl").exists())
             self.assertIn("default_profile: modern", project)
             self.assertIn("ui_provider: astra.ui.yakui", project)
@@ -5653,7 +5664,7 @@ class AssetAnalysisTests(unittest.TestCase):
             payload["routes"][0]["choice_ids"].append("choice.route.confirm")
             write_native_story_ir_fixture(work).write_text(json.dumps(payload), encoding="utf-8")
             report = write_nativevn_package_input(work)
-            story = (work / "nativevn" / "Scripts" / "main.astra").read_text(encoding="utf-8")
+            story = read_generated_story(work / "nativevn")
 
             self.assertEqual(report["status"], "pass")
             self.assertIn("choice.route.good", story)
@@ -5726,7 +5737,7 @@ class AssetAnalysisTests(unittest.TestCase):
                 "TSUI_NATIVEVN_EXPLICIT_ROUTE_INPUT_RETIRED",
                 {diagnostic["code"] for diagnostic in report["diagnostics"]},
             )
-            self.assertFalse((work / "nativevn" / "Scripts" / "main.astra").exists())
+            self.assertFalse(list((work / "nativevn" / "Scripts").glob("main.*.astra")))
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
     def test_nativevn_package_input_blocks_invalid_explicit_route_metadata(self):
