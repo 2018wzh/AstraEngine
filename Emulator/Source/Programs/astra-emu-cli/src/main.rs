@@ -1,6 +1,6 @@
-use std::{path::PathBuf, process::Command};
+use std::path::PathBuf;
 
-use astra_emu_cli::{run_headless, HeadlessLaunch};
+use astra_emu_cli::{run_headless, run_native, HeadlessLaunch, NativeLaunch};
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -28,7 +28,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
-    /// Launch the Slint Manager directly into a selected legacy game.
+    /// Launch the selected family directly in an overlay-free native game host.
     Run {
         #[arg(long, value_enum)]
         engine: EngineType,
@@ -36,12 +36,13 @@ enum CliCommand {
         game_dir: PathBuf,
         #[arg(long)]
         entry: Option<String>,
-        #[arg(long)]
-        manager: Option<PathBuf>,
         #[arg(long, requires = "family_library")]
         family_manifest: Option<PathBuf>,
         #[arg(long, requires = "family_manifest")]
         family_library: Option<PathBuf>,
+        /// Enable native audio. Overlay-free visual acceptance is muted by default.
+        #[arg(long, default_value_t = false)]
+        enable_audio: bool,
     },
     /// Run the same AstraEMU RuntimeWorld/provider path on astra-platform-headless.
     Headless {
@@ -80,22 +81,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             engine,
             game_dir,
             entry,
-            manager,
             family_manifest,
             family_library,
+            enable_audio,
         } => {
             tracing::info!(
                 event = "astra_emu_cli_native_launch_started",
                 engine = engine.id()
             );
-            run_native(
-                engine,
+            if engine.id() != "fvp" {
+                return Err("ASTRA_EMU_CLI_ENGINE_UNSUPPORTED".into());
+            }
+            run_native(NativeLaunch {
                 game_dir,
                 entry,
-                manager,
                 family_manifest,
                 family_library,
-            )?;
+                enable_audio,
+            })
+            .await?;
             tracing::info!(
                 event = "astra_emu_cli_native_launch_completed",
                 engine = engine.id()
@@ -145,61 +149,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     Ok(())
-}
-
-fn run_native(
-    engine: EngineType,
-    game_dir: PathBuf,
-    entry: Option<String>,
-    manager: Option<PathBuf>,
-    family_manifest: Option<PathBuf>,
-    family_library: Option<PathBuf>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let game_dir = std::fs::canonicalize(game_dir).map_err(|_| "ASTRA_EMU_CLI_GAME_DIR_INVALID")?;
-    if !game_dir.is_dir() {
-        return Err("ASTRA_EMU_CLI_GAME_DIR_INVALID".into());
-    }
-    let executable = std::env::current_exe().map_err(|_| "ASTRA_EMU_CLI_EXECUTABLE_PATH")?;
-    let manager = manager.unwrap_or_else(|| {
-        executable
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join(manager_file_name())
-    });
-    if !manager.is_file() {
-        return Err("ASTRA_EMU_CLI_MANAGER_MISSING".into());
-    }
-    let mut command = Command::new(manager);
-    command
-        .env("ASTRA_EMU_QUICK_ENGINE", engine.id())
-        .env("ASTRA_EMU_QUICK_GAME_DIR", game_dir);
-    if let Some(entry) = entry {
-        command.env("ASTRA_EMU_QUICK_ENTRY", entry);
-    }
-    match (family_manifest, family_library) {
-        (Some(manifest), Some(library)) => {
-            command
-                .arg("--family-manifest")
-                .arg(manifest)
-                .arg("--family-library")
-                .arg(library);
-        }
-        (None, None) => {}
-        _ => return Err("ASTRA_EMU_CLI_FAMILY_PATH_PAIR_REQUIRED".into()),
-    }
-    let status = command
-        .status()
-        .map_err(|_| "ASTRA_EMU_CLI_MANAGER_START")?;
-    if !status.success() {
-        return Err("ASTRA_EMU_CLI_MANAGER_FAILED".into());
-    }
-    Ok(())
-}
-
-fn manager_file_name() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "astra-emu-manager.exe"
-    } else {
-        "astra-emu-manager"
-    }
 }

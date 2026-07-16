@@ -405,7 +405,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **ID:** `S5-PROGRAM-TARGET-01`
 
-**Goal:** AstraEMU Manager 与 `astra-emu-cli` 以 `Program` target 运行；被启动的 case 通过 `AstraEmuRuntimeProvider` 作为 `Game` runtime session 运行，family plugin 仍通过 `LegacyRuntimeProvider` 注册，不升级成独立 Game target。CLI native path 只负责显式 quick launch，Headless path 复用 `astra-platform-headless` 与物理输入协议。
+**Goal:** AstraEMU Manager 与 `astra-emu-cli` 以 `Program` target 运行；被启动的 case 通过 `AstraEmuRuntimeProvider` 作为 `Game` runtime session 运行，family plugin 仍通过 `LegacyRuntimeProvider` 注册，不升级成独立 Game target。CLI native path 绕过 Manager/Slint，使用 Windows platform host 提供 overlay-free 核心视觉验收；Headless path 复用 `astra-platform-headless` 与物理输入协议。
 
 **Depends On:** `S1-TARGET-01`、`S5-MANAGER-01`、`S5-FAMILY-01`
 
@@ -418,6 +418,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 3. `AstraEmuRuntimeProvider` 的 case target 与 Manager Program target 分开校验。
 4. family plugin descriptor 只进入 plugin registry，不写成独立 Target。
 5. 编写 Manager target validation、case runtime provider handoff、family plugin isolation 和 local case report 测试。
+6. `astra-emu-cli run` 直接创建 provider/session/window/surface，按舞台宽高比路由物理输入；默认静音，显式启用音频，不得隐式启动 Manager 或退回 Headless。
 
 **Done Evidence:** Manager report 包含 Program target id，family report 仍只记录 provider id 和 session id。
 

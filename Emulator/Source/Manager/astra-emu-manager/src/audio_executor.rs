@@ -20,6 +20,7 @@ const TARGET_BUFFERED_FRAMES: usize = 8_192;
 const RENDER_CHUNK_FRAMES: usize = 1_024;
 const MAX_LOADED_STREAMS: usize = 512;
 const MAX_ACTIVE_VOICES: usize = 272;
+const CANONICAL_MIX_CHANNELS: u16 = 2;
 
 pub(crate) struct HostAudioExecutor {
     _stream: cpal::Stream,
@@ -151,15 +152,23 @@ impl HostAudioExecutor {
             &device,
             &config,
             supported.sample_format(),
+            CANONICAL_MIX_CHANNELS,
             consumer,
             Arc::clone(&stream_error),
         )?;
+        tracing::info!(
+            event = "astra.emu.audio.output_opened",
+            sample_rate = config.sample_rate,
+            mix_channels = CANONICAL_MIX_CHANNELS,
+            device_channels = config.channels,
+            sample_format = sample_format_name(supported.sample_format())
+        );
         Ok(Self {
             _stream: stream,
             producer,
             telemetry,
             sample_rate: config.sample_rate,
-            channels: config.channels,
+            channels: CANONICAL_MIX_CHANNELS,
             submitted_samples: 0,
             started: false,
             loaded: BTreeMap::new(),
@@ -710,20 +719,24 @@ fn build_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     format: cpal::SampleFormat,
+    mix_channels: u16,
     consumer: NativeAudioConsumer,
     stream_error: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<cpal::Stream, String> {
+    if mix_channels != CANONICAL_MIX_CHANNELS || config.channels == 0 {
+        return Err("ASTRA_EMU_AUDIO_OUTPUT_FORMAT".into());
+    }
     match format {
         cpal::SampleFormat::F32 => {
-            build_typed_stream::<f32>(device, config, consumer, stream_error, |v| v)
+            build_typed_stream::<f32>(device, config, mix_channels, consumer, stream_error, |v| v)
         }
         cpal::SampleFormat::I16 => {
-            build_typed_stream::<i16>(device, config, consumer, stream_error, |v| {
+            build_typed_stream::<i16>(device, config, mix_channels, consumer, stream_error, |v| {
                 (v.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16
             })
         }
         cpal::SampleFormat::U16 => {
-            build_typed_stream::<u16>(device, config, consumer, stream_error, |v| {
+            build_typed_stream::<u16>(device, config, mix_channels, consumer, stream_error, |v| {
                 ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * f32::from(u16::MAX)) as u16
             })
         }
@@ -734,21 +747,27 @@ fn build_stream(
 fn build_typed_stream<T: cpal::SizedSample + 'static>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
+    mix_channels: u16,
     mut consumer: NativeAudioConsumer,
     stream_error: Arc<std::sync::atomic::AtomicBool>,
     convert: fn(f32) -> T,
 ) -> Result<cpal::Stream, String> {
+    let device_channels = usize::from(config.channels);
+    let mix_channels = usize::from(mix_channels);
     device
         .build_output_stream(
             config,
             move |output: &mut [T], _| {
                 let mut underflow = false;
-                for sample in output {
-                    let value = consumer.pop_sample().unwrap_or_else(|| {
-                        underflow = true;
-                        0.0
-                    });
-                    *sample = convert(value);
+                for frame in output.chunks_exact_mut(device_channels) {
+                    let mut stereo = [0.0_f32; 2];
+                    for sample in stereo.iter_mut().take(mix_channels) {
+                        *sample = consumer.pop_sample().unwrap_or_else(|| {
+                            underflow = true;
+                            0.0
+                        });
+                    }
+                    write_stereo_device_frame(frame, stereo, convert);
                 }
                 if underflow {
                     consumer.record_underflow();
@@ -760,6 +779,27 @@ fn build_typed_stream<T: cpal::SizedSample + 'static>(
             None,
         )
         .map_err(|_| "ASTRA_EMU_AUDIO_STREAM_CREATE".to_owned())
+}
+
+fn write_stereo_device_frame<T>(frame: &mut [T], stereo: [f32; 2], convert: fn(f32) -> T) {
+    if frame.len() == 1 {
+        frame[0] = convert((stereo[0] + stereo[1]) * 0.5);
+        return;
+    }
+    frame[0] = convert(stereo[0]);
+    frame[1] = convert(stereo[1]);
+    for sample in &mut frame[2..] {
+        *sample = convert(0.0);
+    }
+}
+
+fn sample_format_name(format: cpal::SampleFormat) -> &'static str {
+    match format {
+        cpal::SampleFormat::F32 => "f32",
+        cpal::SampleFormat::I16 => "i16",
+        cpal::SampleFormat::U16 => "u16",
+        _ => "unsupported",
+    }
 }
 
 #[cfg(test)]
@@ -800,5 +840,20 @@ mod tests {
         assert_eq!(transition.total_frames, 45);
         assert_eq!(transition.elapsed_frames, 0);
         assert!(fade(0, 48_000, 0.0, 1.0).unwrap().is_none());
+    }
+
+    #[test]
+    fn canonical_stereo_is_mapped_to_native_output_without_layout_guessing() {
+        let mut mono = [0.0_f32; 1];
+        write_stereo_device_frame(&mut mono, [0.5, -0.25], |sample| sample);
+        assert_eq!(mono, [0.125]);
+
+        let mut stereo = [0.0_f32; 2];
+        write_stereo_device_frame(&mut stereo, [0.5, -0.25], |sample| sample);
+        assert_eq!(stereo, [0.5, -0.25]);
+
+        let mut surround = [1.0_f32; 8];
+        write_stereo_device_frame(&mut surround, [0.5, -0.25], |sample| sample);
+        assert_eq!(surround, [0.5, -0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
     }
 }

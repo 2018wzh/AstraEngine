@@ -23,8 +23,10 @@ use astra_headless_protocol::{
 use astra_media::{DecodedVideoStream, DECODED_VIDEO_STREAM_SCHEMA};
 use astra_platform::{
     AudioOutputHandle, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput,
-    HeadlessArtifactRetention, HeadlessHostProfile, PlatformDecodeRequest, PlatformHostClient,
-    PlatformHostFactory, RgbaFrame, SurfaceHandle, SurfaceRequest, WindowRequest,
+    GamepadControl as PlatformGamepadControl, HeadlessArtifactRetention, HeadlessHostProfile,
+    HostLaunchProfile, InputState, PlatformDecodeRequest, PlatformEventKind, PlatformHostClient,
+    PlatformHostFactory, PointerButton as PlatformPointerButton, RgbaFrame, SurfaceHandle,
+    SurfaceRequest, TouchPhase as PlatformTouchPhase, WindowHandle, WindowRequest,
 };
 use astra_platform_headless::HeadlessPlatformFactory;
 use astra_plugin::ProductRuntimeProvider;
@@ -55,6 +57,15 @@ pub struct HeadlessLaunch {
     pub viewport_height: u32,
     pub video_provider: String,
     pub verify_snapshot: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct NativeLaunch {
+    pub game_dir: PathBuf,
+    pub entry: Option<String>,
+    pub family_manifest: Option<PathBuf>,
+    pub family_library: Option<PathBuf>,
+    pub enable_audio: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -96,6 +107,218 @@ pub struct HeadlessRunReportV1 {
     pub diagnostic_codes: Vec<String>,
 }
 
+pub async fn run_native(launch: NativeLaunch) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        run_native_windows(launch).await
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = launch;
+        Err("PLATFORM_NOT_IMPLEMENTED:astra-emu-cli native host".into())
+    }
+}
+
+#[cfg(target_os = "windows")]
+async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
+    let game_root = fs::canonicalize(&launch.game_dir)
+        .map_err(|_| "ASTRA_EMU_CLI_GAME_DIR_INVALID".to_owned())?;
+    if !game_root.is_dir() {
+        return Err("ASTRA_EMU_CLI_GAME_DIR_INVALID".into());
+    }
+    let case = scan_case(&game_root, launch.entry.as_deref())?;
+    let game_identity_hash: Hash256 = case
+        .content_hash
+        .parse()
+        .map_err(|_| "ASTRA_EMU_CASE_FINGERPRINT_INVALID".to_owned())?;
+    let executable = std::env::current_exe().map_err(|_| "ASTRA_EMU_EXECUTABLE_PATH".to_owned())?;
+    let vfs = Arc::new(DesktopVfsRegistry::default());
+    let mount_set_id = format!("native-{}", &game_identity_hash.to_string()[7..39]);
+    vfs.bind(&mount_set_id, &game_root.to_string_lossy())?;
+    let family_config = match (&launch.family_manifest, &launch.family_library) {
+        (Some(manifest), Some(library)) => {
+            CliFamilyHostConfig::with_paths(manifest.clone(), library.clone())
+        }
+        (None, None) => CliFamilyHostConfig::installed_for_executable(&executable)?,
+        _ => return Err("ASTRA_EMU_CLI_FAMILY_PATH_PAIR_REQUIRED".into()),
+    };
+    let family = family_config.create_provider(vfs.clone())?;
+    let mut runtime = AstraEmuRuntimeProvider::new(family)?;
+    runtime.create_instance(ProviderInstanceId("astra.emu.cli.native.instance".into()))?;
+    let profile = probe_profile(
+        &runtime,
+        &case,
+        &mount_set_id,
+        game_identity_hash,
+        "windows",
+        "astra.platform.windows.media",
+        "astra.emu.cli.native.report",
+    )?;
+    let stage_width = profile
+        .family_options
+        .get("fvp.stage_width")
+        .and_then(|value| value.parse::<u32>().ok())
+        .ok_or_else(|| "ASTRA_EMU_FVP_PROBE_STAGE_INVALID".to_owned())?;
+    let stage_height = profile
+        .family_options
+        .get("fvp.stage_height")
+        .and_then(|value| value.parse::<u32>().ok())
+        .ok_or_else(|| "ASTRA_EMU_FVP_PROBE_STAGE_INVALID".to_owned())?;
+    let section = case_profile_section(&case, &profile, &mount_set_id, game_identity_hash)?;
+    let seed = u64::from_le_bytes(game_identity_hash.as_bytes()[..8].try_into().unwrap());
+    let open = runtime.open(RuntimeOpenRequest {
+        target_id: "astra-emu-native-case".into(),
+        profile: "fvp-v1".into(),
+        locale: "und".into(),
+        seed,
+        package_hash: case.content_hash.clone(),
+        sections: vec![section],
+    })?;
+
+    let mut host_profile = astra_platform::PlatformHostProfile::windows_release(
+        "astra-emu-cli",
+        "dev.astraengine.astraemu-cli",
+    );
+    host_profile.id = "astra-emu-cli-native".into();
+    host_profile.limits.max_frame_bytes = usize::try_from(stage_width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(stage_height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| "ASTRA_EMU_NATIVE_FRAME_BOUNDS".to_owned())?;
+    let mut host = astra_platform_windows::factory()
+        .start(HostLaunchProfile::platform(host_profile))
+        .await
+        .map_err(|error| error.to_string())?;
+    let window = host
+        .client
+        .create_window(WindowRequest {
+            title: "AstraEMU FVP".into(),
+            width: stage_width,
+            height: stage_height,
+            visible: true,
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    let surface = host
+        .client
+        .create_surface(SurfaceRequest {
+            window,
+            width: stage_width,
+            height: stage_height,
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    tracing::info!(
+        event = "astra_emu_cli_native_session_opened",
+        family = "fvp",
+        stage_width,
+        stage_height,
+        audio_enabled = launch.enable_audio
+    );
+
+    let mut driver = RuntimeDriver::new(
+        &mut runtime,
+        open.session_id.clone(),
+        seed,
+        profile.fixed_delta_ns,
+        &host.client,
+        surface,
+        launch.enable_audio,
+    );
+    let mut viewport = NativeViewport {
+        window_width: stage_width,
+        window_height: stage_height,
+        stage_width,
+        stage_height,
+    };
+    let mut suspended = false;
+    let mut ticker = tokio::time::interval(std::time::Duration::from_nanos(profile.fixed_delta_ns));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let run_result = loop {
+        tokio::select! {
+            _ = ticker.tick(), if !suspended => {
+                if let Err(error) = driver.step().await {
+                    break Err(error);
+                }
+                if driver.terminal {
+                    break Ok(());
+                }
+            }
+            event = host.events.recv() => {
+                let event = match event {
+                    Ok(event) => event,
+                    Err(error) => break Err(error.to_string()),
+                };
+                match route_native_event(&mut driver, window, &mut viewport, event.kind) {
+                    Ok(NativeEventAction::Continue) => {}
+                    Ok(NativeEventAction::Suspend(value)) => suspended = value,
+                    Ok(NativeEventAction::Close) => break Ok(()),
+                    Err(error) => break Err(error),
+                }
+            }
+        }
+    };
+    let fixed_step = driver.fixed_step;
+    let audio_cleanup = std::mem::take(&mut driver.audio)
+        .shutdown(&host.client)
+        .await
+        .map(|_| ());
+    drop(driver);
+    let runtime_cleanup = runtime.shutdown(open.session_id.clone()).map(|_| ());
+    let surface_cleanup = host
+        .client
+        .destroy_surface(surface)
+        .await
+        .map_err(|error| error.to_string());
+    let window_cleanup = host
+        .client
+        .destroy_window(window)
+        .await
+        .map_err(|error| error.to_string());
+    let host_cleanup = host
+        .client
+        .shutdown()
+        .await
+        .map_err(|error| error.to_string());
+    vfs.unbind(&mount_set_id);
+    let cleanup_errors = [
+        ("audio", audio_cleanup),
+        ("runtime", runtime_cleanup),
+        ("surface", surface_cleanup),
+        ("window", window_cleanup),
+        ("host", host_cleanup),
+    ]
+    .into_iter()
+    .filter_map(|(stage, result)| result.err().map(|error| format!("{stage}={error}")))
+    .collect::<Vec<_>>();
+    match (run_result, cleanup_errors.is_empty()) {
+        (Err(error), true) => return Err(error),
+        (Ok(()), false) => {
+            return Err(format!(
+                "ASTRA_EMU_NATIVE_CLEANUP_FAILED:{}",
+                cleanup_errors.join(";")
+            ));
+        }
+        (Err(error), false) => {
+            return Err(format!(
+                "ASTRA_EMU_NATIVE_RUN_AND_CLEANUP_FAILED:{error};{}",
+                cleanup_errors.join(";")
+            ));
+        }
+        (Ok(()), true) => {}
+    }
+    tracing::info!(
+        event = "astra_emu_cli_native_session_closed",
+        fixed_step,
+        family = "fvp"
+    );
+    Ok(())
+}
+
 pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV1, String> {
     validate_launch(&launch)?;
     let input = read_input_sequence(&launch.input_path)?;
@@ -127,7 +350,15 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV1,
     let family_provider_id = family.descriptor().provider_id.clone();
     let mut runtime = AstraEmuRuntimeProvider::new(family)?;
     runtime.create_instance(ProviderInstanceId("astra.emu.cli.headless.instance".into()))?;
-    let profile = probe_profile(&runtime, &case, &mount_set_id, game_identity_hash)?;
+    let profile = probe_profile(
+        &runtime,
+        &case,
+        &mount_set_id,
+        game_identity_hash,
+        "headless-test",
+        "astra.platform.headless.media",
+        "astra.emu.cli.headless.report",
+    )?;
     let stage_width = profile
         .family_options
         .get("fvp.stage_width")
@@ -367,6 +598,9 @@ fn probe_profile(
     case: &CaseRecord,
     mount_set_id: &str,
     package_hash: Hash256,
+    target: &str,
+    media_service_id: &str,
+    report_sink_id: &str,
 ) -> Result<astra_emu_manager_core::CaseRuntimeProfileRecord, String> {
     let report = runtime.probe_family(
         &LegacyRuntimeHostCtx {
@@ -374,10 +608,10 @@ fn probe_profile(
             package_id: "astra-emu-headless-case".into(),
             package_hash,
             mount_set_id: mount_set_id.into(),
-            media_service_ids: vec!["astra.platform.headless.media".into()],
+            media_service_ids: vec![media_service_id.into()],
             permission_policy_id: "astra.emu.cli.explicit_directory.v1".into(),
-            report_sink_id: "astra.emu.cli.headless.report".into(),
-            target: "headless-test".into(),
+            report_sink_id: report_sink_id.into(),
+            target: target.into(),
             profile: "fvp-v1".into(),
         },
         LegacyProbeRequest {
@@ -518,12 +752,206 @@ struct RuntimeDriver<'a> {
     state_trace: Vec<u8>,
     diagnostics: BTreeSet<String>,
     active_touch: Option<u64>,
+    audio_enabled: bool,
 }
 
 struct ExecutionConfig {
     seed: u64,
     delta_ns: u64,
     verify_snapshot: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeEventAction {
+    Continue,
+    Suspend(bool),
+    Close,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NativeViewport {
+    window_width: u32,
+    window_height: u32,
+    stage_width: u32,
+    stage_height: u32,
+}
+
+fn route_native_event(
+    driver: &mut RuntimeDriver<'_>,
+    window: WindowHandle,
+    viewport: &mut NativeViewport,
+    event: PlatformEventKind,
+) -> Result<NativeEventAction, String> {
+    match event {
+        PlatformEventKind::Resumed => Ok(NativeEventAction::Suspend(false)),
+        PlatformEventKind::Suspended => Ok(NativeEventAction::Suspend(true)),
+        PlatformEventKind::WindowClosed {
+            window: event_window,
+        } if event_window == window => Ok(NativeEventAction::Close),
+        PlatformEventKind::WindowResized {
+            window: event_window,
+            width,
+            height,
+            ..
+        } if event_window == window => {
+            if width == 0 || height == 0 {
+                return Ok(NativeEventAction::Suspend(true));
+            }
+            viewport.window_width = width;
+            viewport.window_height = height;
+            Ok(NativeEventAction::Continue)
+        }
+        PlatformEventKind::WindowFocused { .. } => Ok(NativeEventAction::Continue),
+        PlatformEventKind::Keyboard {
+            window: event_window,
+            physical_key,
+            logical_key,
+            state,
+            repeat,
+        } if event_window == window => {
+            if repeat && state == InputState::Released {
+                return Err("ASTRA_EMU_NATIVE_KEY_REPEAT_INVALID".into());
+            }
+            if let Some(control) = native_key_control(logical_key.as_deref(), &physical_key) {
+                let pressed = state == InputState::Pressed;
+                driver.queue_input(control, pressed, if pressed { 1.0 } else { 0.0 })?;
+            }
+            Ok(NativeEventAction::Continue)
+        }
+        PlatformEventKind::PointerMoved {
+            window: event_window,
+            x,
+            y,
+        } if event_window == window => {
+            if let Some([stage_x, stage_y]) = viewport.map_pointer(x, y) {
+                driver.queue_input("pointer.x", false, stage_x)?;
+                driver.queue_input("pointer.y", false, stage_y)?;
+            }
+            Ok(NativeEventAction::Continue)
+        }
+        PlatformEventKind::PointerButton {
+            window: event_window,
+            button,
+            state,
+        } if event_window == window => {
+            let control = match button {
+                PlatformPointerButton::Primary => Some("pointer.primary"),
+                PlatformPointerButton::Secondary => Some("pointer.secondary"),
+                _ => None,
+            };
+            if let Some(control) = control {
+                let pressed = state == InputState::Pressed;
+                driver.queue_input(control, pressed, if pressed { 1.0 } else { 0.0 })?;
+            }
+            Ok(NativeEventAction::Continue)
+        }
+        PlatformEventKind::MouseWheel {
+            window: event_window,
+            delta_y,
+            ..
+        } if event_window == window => {
+            driver.queue_input("wheel", false, delta_y)?;
+            Ok(NativeEventAction::Continue)
+        }
+        PlatformEventKind::Touch {
+            window: event_window,
+            id,
+            x,
+            y,
+            phase,
+        } if event_window == window => {
+            let Some([stage_x, stage_y]) = viewport.map_pointer(x, y) else {
+                return Ok(NativeEventAction::Continue);
+            };
+            match phase {
+                PlatformTouchPhase::Started => {
+                    if driver.active_touch.replace(id).is_some() {
+                        return Err("ASTRA_EMU_NATIVE_MULTI_TOUCH_UNSUPPORTED".into());
+                    }
+                    driver.queue_input("pointer.x", false, stage_x)?;
+                    driver.queue_input("pointer.y", false, stage_y)?;
+                    driver.queue_input("pointer.primary", true, 1.0)?;
+                }
+                PlatformTouchPhase::Moved if driver.active_touch == Some(id) => {
+                    driver.queue_input("pointer.x", false, stage_x)?;
+                    driver.queue_input("pointer.y", false, stage_y)?;
+                }
+                PlatformTouchPhase::Ended | PlatformTouchPhase::Cancelled
+                    if driver.active_touch == Some(id) =>
+                {
+                    driver.active_touch = None;
+                    driver.queue_input("pointer.primary", false, 0.0)?;
+                }
+                _ => return Err("ASTRA_EMU_NATIVE_TOUCH_SEQUENCE".into()),
+            }
+            Ok(NativeEventAction::Continue)
+        }
+        PlatformEventKind::GamepadInput { control, value, .. } => {
+            let mapped = match control {
+                PlatformGamepadControl::South => Some("confirm"),
+                PlatformGamepadControl::East => Some("cancel"),
+                PlatformGamepadControl::DpadUp => Some("up"),
+                PlatformGamepadControl::DpadDown => Some("down"),
+                PlatformGamepadControl::DpadLeft => Some("left"),
+                PlatformGamepadControl::DpadRight => Some("right"),
+                _ => None,
+            };
+            if let Some(control) = mapped {
+                driver.queue_input(control, value != 0.0, value)?;
+            }
+            Ok(NativeEventAction::Continue)
+        }
+        PlatformEventKind::GamepadConnected { .. }
+        | PlatformEventKind::GamepadDisconnected { .. }
+        | PlatformEventKind::DeviceRestored { .. }
+        | PlatformEventKind::ContextRestored { .. } => Ok(NativeEventAction::Continue),
+        PlatformEventKind::DeviceLost { provider }
+        | PlatformEventKind::ContextLost { provider } => {
+            Err(format!("ASTRA_EMU_NATIVE_DEVICE_LOST:{provider}"))
+        }
+        PlatformEventKind::ImePreedit { .. } | PlatformEventKind::ImeCommit { .. } => {
+            Err("ASTRA_EMU_NATIVE_IME_UNSUPPORTED".into())
+        }
+        _ => Ok(NativeEventAction::Continue),
+    }
+}
+
+fn native_key_control(logical_key: Option<&str>, physical_key: &str) -> Option<&'static str> {
+    let key = logical_key.unwrap_or(physical_key).to_ascii_lowercase();
+    match key.as_str() {
+        "enter" | "return" | "numpadenter" => Some("confirm"),
+        "escape" | "esc" => Some("cancel"),
+        "arrowup" | "up" => Some("up"),
+        "arrowdown" | "down" => Some("down"),
+        "arrowleft" | "left" => Some("left"),
+        "arrowright" | "right" => Some("right"),
+        " " | "space" | "spacebar" => Some("space"),
+        _ => None,
+    }
+}
+
+impl NativeViewport {
+    fn map_pointer(&self, x: f64, y: f64) -> Option<[f32; 2]> {
+        if self.window_width == 0
+            || self.window_height == 0
+            || self.stage_width == 0
+            || self.stage_height == 0
+            || !x.is_finite()
+            || !y.is_finite()
+        {
+            return None;
+        }
+        let scale = (f64::from(self.window_width) / f64::from(self.stage_width))
+            .min(f64::from(self.window_height) / f64::from(self.stage_height));
+        let display_width = f64::from(self.stage_width) * scale;
+        let display_height = f64::from(self.stage_height) * scale;
+        let left = (f64::from(self.window_width) - display_width) * 0.5;
+        let top = (f64::from(self.window_height) - display_height) * 0.5;
+        if x < left || y < top || x >= left + display_width || y >= top + display_height {
+            return None;
+        }
+        Some([((x - left) / scale) as f32, ((y - top) / scale) as f32])
+    }
 }
 
 async fn execute_sequence(
@@ -534,34 +962,15 @@ async fn execute_sequence(
     messages: &[InputMessage],
     config: ExecutionConfig,
 ) -> Result<ExecutionEvidence, String> {
-    let mut driver = RuntimeDriver {
+    let mut driver = RuntimeDriver::new(
         runtime,
         session_id,
-        seed: config.seed,
-        delta_ns: config.delta_ns,
+        config.seed,
+        config.delta_ns,
         platform,
         surface,
-        fixed_step: 0,
-        next_step_mode: RuntimeStepMode::Live,
-        input_sequence: 0,
-        await_sequence: 0,
-        pending_inputs: Vec::new(),
-        pending_waits: BTreeMap::new(),
-        rasterizer: CpuStageRasterizer::default(),
-        base_frame: None,
-        latest_frame: None,
-        present_sequence: 0,
-        state_hash: Hash256::from_sha256(&[]),
-        terminal: false,
-        audio: HeadlessAudioExecutor::default(),
-        video: None,
-        completed_media: Vec::new(),
-        input_trace: Vec::new(),
-        visual_trace: Vec::new(),
-        state_trace: Vec::new(),
-        diagnostics: BTreeSet::new(),
-        active_touch: None,
-    };
+        true,
+    );
     let mut checkpoints = Vec::new();
     let mut snapshot_verified = false;
     for message in messages {
@@ -662,7 +1071,47 @@ async fn execute_sequence(
     })
 }
 
-impl RuntimeDriver<'_> {
+impl<'a> RuntimeDriver<'a> {
+    fn new(
+        runtime: &'a mut AstraEmuRuntimeProvider,
+        session_id: GameRuntimeSessionId,
+        seed: u64,
+        delta_ns: u64,
+        platform: &'a PlatformHostClient,
+        surface: SurfaceHandle,
+        audio_enabled: bool,
+    ) -> RuntimeDriver<'a> {
+        RuntimeDriver {
+            runtime,
+            session_id,
+            seed,
+            delta_ns,
+            platform,
+            surface,
+            fixed_step: 0,
+            next_step_mode: RuntimeStepMode::Live,
+            input_sequence: 0,
+            await_sequence: 0,
+            pending_inputs: Vec::new(),
+            pending_waits: BTreeMap::new(),
+            rasterizer: CpuStageRasterizer::default(),
+            base_frame: None,
+            latest_frame: None,
+            present_sequence: 0,
+            state_hash: Hash256::from_sha256(&[]),
+            terminal: false,
+            audio: HeadlessAudioExecutor::default(),
+            video: None,
+            completed_media: Vec::new(),
+            input_trace: Vec::new(),
+            visual_trace: Vec::new(),
+            state_trace: Vec::new(),
+            diagnostics: BTreeSet::new(),
+            active_touch: None,
+            audio_enabled,
+        }
+    }
+
     fn queue_input(&mut self, control: &str, pressed: bool, value: f32) -> Result<(), String> {
         if self.pending_inputs.len() >= 4096 || !value.is_finite() {
             return Err("ASTRA_EMU_HEADLESS_INPUT_QUEUE_BOUNDS".into());
@@ -918,6 +1367,14 @@ impl RuntimeDriver<'_> {
                     } if command == "astra.emu.audio_command.v1" => {
                         let command: LegacyAudioCommandV1 = postcard::from_bytes(&payload)
                             .map_err(|_| "ASTRA_EMU_HEADLESS_AUDIO_COMMAND_DECODE".to_owned())?;
+                        if !self.audio_enabled {
+                            command.validate().map_err(|error| error.to_string())?;
+                            self.state_trace.extend_from_slice(
+                                Hash256::from_sha256(&payload).to_string().as_bytes(),
+                            );
+                            self.state_trace.push(b'\n');
+                            continue;
+                        }
                         let resource = match &command {
                             LegacyAudioCommandV1::LoadResource { resource_uri, .. } => {
                                 Some(self.runtime.read_session_resource(
@@ -965,7 +1422,9 @@ impl RuntimeDriver<'_> {
                 }
             }
         }
-        self.audio.pump(self.platform).await?;
+        if self.audio_enabled {
+            self.audio.pump(self.platform).await?;
+        }
         let video_changed = self.advance_video()?;
         if rendered || video_changed {
             self.present().await?;
@@ -1725,4 +2184,43 @@ fn write_atomic_json(path: &Path, value: &impl Serialize) -> Result<(), String> 
     )
     .map_err(|_| "ASTRA_EMU_HEADLESS_REPORT_WRITE".to_owned())?;
     fs::rename(partial, path).map_err(|_| "ASTRA_EMU_HEADLESS_REPORT_COMMIT".to_owned())
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+
+    #[test]
+    fn native_key_mapping_is_explicit_and_does_not_capture_unbound_keys() {
+        assert_eq!(
+            native_key_control(Some("Enter"), "Unidentified"),
+            Some("confirm")
+        );
+        assert_eq!(
+            native_key_control(Some("ArrowLeft"), "Unidentified"),
+            Some("left")
+        );
+        assert_eq!(native_key_control(None, "Space"), Some("space"));
+        assert_eq!(native_key_control(Some("F12"), "F12"), None);
+    }
+
+    #[test]
+    fn native_pointer_mapping_preserves_stage_aspect_and_rejects_letterbox() {
+        let landscape = NativeViewport {
+            window_width: 1_920,
+            window_height: 1_080,
+            stage_width: 1_280,
+            stage_height: 720,
+        };
+        assert_eq!(landscape.map_pointer(960.0, 540.0), Some([640.0, 360.0]));
+
+        let letterboxed = NativeViewport {
+            window_width: 1_600,
+            window_height: 1_200,
+            stage_width: 1_280,
+            stage_height: 720,
+        };
+        assert_eq!(letterboxed.map_pointer(800.0, 100.0), None);
+        assert_eq!(letterboxed.map_pointer(800.0, 600.0), Some([640.0, 360.0]));
+    }
 }

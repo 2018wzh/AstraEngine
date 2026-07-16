@@ -39,6 +39,9 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing.workspace = true
 
+[target.'cfg(target_os = "windows")'.dependencies]
+astra-platform-windows = { path = "../../../../Engine/Source/Platform/astra-platform-windows" }
+
 [build-dependencies]
 sha2.workspace = true
 

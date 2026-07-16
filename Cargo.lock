@@ -772,6 +772,7 @@ dependencies = [
  "astra-observability",
  "astra-platform",
  "astra-platform-headless",
+ "astra-platform-windows",
  "astra-plugin",
  "astra-plugin-abi",
  "clap",

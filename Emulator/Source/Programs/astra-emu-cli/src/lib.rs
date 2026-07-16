@@ -3,4 +3,4 @@ pub mod input;
 pub mod rasterizer;
 pub mod runner;
 
-pub use runner::{run_headless, HeadlessLaunch, HeadlessRunReportV1};
+pub use runner::{run_headless, run_native, HeadlessLaunch, HeadlessRunReportV1, NativeLaunch};

@@ -124,7 +124,7 @@ targets = [
 | `astra platform` | `astra-cli` | `astra platform probe` |
 | `astra-editor` | `astra-editor-app` | Qt/QML creator editor |
 | `astra-emu-manager` | `astra-emu-manager` | legacy VN manager that creates RuntimeWorld, selects family plugin and owns overlay/filter/text pipelines |
-| `astra-emu-cli` | `astra-emu-cli` | explicit family/game quick launch plus physical-input JSONL automation through `astra-platform-headless` |
+| `astra-emu-cli` | `astra-emu-cli` | overlay-free native family/game visual host plus physical-input JSONL automation through `astra-platform-headless` |
 | `astra-emu-family-*` | family crate | in-process legacy family plugin |
 
 ## Feature Rules

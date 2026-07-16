@@ -18,7 +18,7 @@ FVP runtime snapshot 使用有界压缩 envelope，并把 live texture 的精确
 
 每个 `LegacyRenderFrameV1` 的 texture delta 与 draw list 必须按 tick 顺序消费。Manager 不得为了追赶 wall clock 丢弃中间 frame 后只渲染最后一帧，否则最后一帧可能引用尚未上传的 texture；队列溢出必须 blocking，而不是静默 pop。
 
-`astra-emu-cli run` 通过显式 `--engine`、授权游戏目录和可选 entry 快速启动同包 Slint Manager；`astra-emu-cli headless` 则使用同一个 `AstraEmuRuntimeProvider` lifecycle 和 `astra-platform-headless` 执行 `astra.user_input_sequence.v1`。Headless 不接受 `advance`、`choose` 等产品语义捷径，只消费序列化物理输入与固定时间控制，并输出脱敏 `astra.emu.headless_run_report.v1`、PNG/WAV 与 artifact manifest。save/restore 后的首 tick 必须显式使用 `RestoreContinuation`，host-owned audio/movie state 先重置再由 family effect 重建，后续 tick 才回到 `Live`。
+`astra-emu-cli run` 是独立于 Manager 的 overlay-free 原生验收入口。它通过显式 `--engine`、授权游戏目录和可选 entry 创建 `AstraEmuRuntimeProvider` session，直接把 family frame 交给 Windows platform host，物理输入按 legacy 舞台宽高比路由。默认静音，只用于排除 Slint/overlay 后比较核心视觉行为；显式 `--enable-audio` 才启用平台音频。`astra-emu-cli headless` 使用同一个 provider lifecycle 和 `astra-platform-headless` 执行 `astra.user_input_sequence.v1`。Headless 不接受 `advance`、`choose` 等产品语义捷径，只消费序列化物理输入与固定时间控制，并输出脱敏 `astra.emu.headless_run_report.v1`、PNG/WAV 与 artifact manifest。save/restore 后的首 tick 必须显式使用 `RestoreContinuation`，host-owned audio/movie state 先重置再由 family effect 重建，后续 tick 才回到 `Live`。
 
 Family 内部可以把 VM 映射为私有 scheduler、context、basic-block 和 action 状态机。多线程或多 context legacy VM 使用多个 child state machine，由 deterministic scheduler 按固定 `(priority, context_id, sequence)` 推进。公共 Runtime 只看到有序 effect、await、trace、snapshot hash 和 diagnostic。
 
