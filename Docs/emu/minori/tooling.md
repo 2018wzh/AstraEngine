@@ -13,7 +13,9 @@ cargo run -p astra-emu-cli -- minori import-garbro-scheme --formats <Formats.dat
 
 Linux 另有前台只读 `minori mount --mountpoint <directory>`。Windows 和 macOS 不声明 FUSE；三种桌面系统都保留 `verify` 与 `extract`。
 
-`import-garbro-scheme` 只接受 `GARbroDB`、zlib 和 `nrbf 0.2.2` 可解析的预期对象。未知对象形状、缺 role、异常 key size、缺 title 或既有补丁都会阻断。命令只在游戏目录写私有 Luau 补丁，终端不打印 key。当前合法 `Formats.dat` 会触发该 crate 的重复 library id 错误，入口保持阻断；运行时不改用 .NET `BinaryFormatter`、启发式解析或隐藏 fallback。
+`import-garbro-scheme` 使用仓库内纯 Rust 两阶段 NRBF reader。第一阶段收集 object、class metadata、library 和有符号 object id，第二阶段校验 forward reference，再读取预期的 Musica/PAZ graph。未知 record、重复 id、断裂 reference、缺 role、异常 key size、缺 title 或既有补丁都会阻断。命令只在游戏目录写私有 Luau 补丁，终端不打印 key；实现不调用 .NET `BinaryFormatter`、managed helper、外部进程、启发式扫描或隐藏 fallback。
+
+当前合法 `Formats.dat` 已完成真实导入。由该入口生成的补丁通过六包 9837 个 entry 全读验证，同 identity 复核为 9837 cache hits/0 misses。补丁、key、输入数据库和明文 cache 仍只保存在本地私有目录。
 
 ## `minori_probe.py`
 

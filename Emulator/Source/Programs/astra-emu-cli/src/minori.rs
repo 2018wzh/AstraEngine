@@ -16,6 +16,9 @@ use clap::Subcommand;
 use flate2::read::ZlibDecoder;
 use globset::Glob;
 
+mod garbro_nrbf;
+use garbro_nrbf::{NrbfGraph, NrbfValue};
+
 #[derive(Debug, Subcommand)]
 pub enum MinoriCommand {
     /// Mount a foreground, read-only FUSE view on Linux.
@@ -412,6 +415,14 @@ fn import_garbro_scheme(
     if !game_dir.is_dir() {
         return Err("ASTRA_EMU_GARBRO_GAME_DIRECTORY".into());
     }
+    let patch_path = game_dir.join("astraemu.patch.luau");
+    if patch_path.exists() {
+        return Err("ASTRA_EMU_GARBRO_PATCH_EXISTS".into());
+    }
+    let temporary = game_dir.join(".astraemu.patch.luau.tmp");
+    if temporary.exists() {
+        return Err("ASTRA_EMU_GARBRO_TEMP_EXISTS".into());
+    }
     let bytes = fs::read(formats)?;
     if bytes.len() < 12 || &bytes[..8] != b"GARbroDB" {
         return Err("ASTRA_EMU_GARBRO_HEADER".into());
@@ -423,23 +434,15 @@ fn import_garbro_scheme(
     if decoded.len() >= 256 * 1024 * 1024 {
         return Err("ASTRA_EMU_GARBRO_SIZE".into());
     }
-    let message = nrbf::RemotingMessage::parse(&decoded).map_err(|_| "ASTRA_EMU_GARBRO_NRBF")?;
-    let root = match &message {
-        nrbf::RemotingMessage::Value(value) => value,
-        _ => return Err("ASTRA_EMU_GARBRO_ROOT".into()),
-    };
-    let records = find_dictionary_values(root, title)?;
+    let graph = NrbfGraph::parse(&decoded).map_err(|error| error.code())?;
+    let root = graph.root().map_err(|_| "ASTRA_EMU_GARBRO_ROOT")?;
+    let records = find_dictionary_values(&graph, root, title)?;
     let record = match records.as_slice() {
         [record] => *record,
         [] => return Err("ASTRA_EMU_GARBRO_TITLE_NOT_FOUND".into()),
         _ => return Err("ASTRA_EMU_GARBRO_TITLE_DUPLICATE".into()),
     };
-    let roles = extract_roles(record)?;
-    let patch_path = game_dir.join("astraemu.patch.luau");
-    if patch_path.exists() {
-        return Err("ASTRA_EMU_GARBRO_PATCH_EXISTS".into());
-    }
-    let temporary = game_dir.join(".astraemu.patch.luau.tmp");
+    let roles = extract_roles(&graph, record)?;
     let patch = render_patch(&roles)?;
     let mut options = OpenOptions::new();
     options.create_new(true).write(true);
@@ -472,25 +475,51 @@ const MAX_GARBRO_GRAPH_NODES: usize = 1_000_000;
 const MAX_GARBRO_GRAPH_DEPTH: usize = 128;
 const MAX_GARBRO_DICTIONARY_ENTRIES: usize = 100_000;
 
+fn is_structural_nrbf_value(value: &NrbfValue) -> bool {
+    matches!(
+        value,
+        NrbfValue::Array(_) | NrbfValue::Object(_) | NrbfValue::Ref(_)
+    )
+}
+
 fn find_dictionary_values<'a>(
-    value: &'a nrbf::Value<'a>,
+    graph: &'a NrbfGraph,
+    value: &'a NrbfValue,
     key: &str,
-) -> Result<Vec<&'a nrbf::Value<'a>>, Box<dyn std::error::Error>> {
+) -> Result<Vec<&'a NrbfValue>, Box<dyn std::error::Error>> {
     let mut stack = vec![(value, 0usize)];
+    let mut references = BTreeSet::new();
     let mut visited = 0usize;
     let mut matches = Vec::new();
     while let Some((value, depth)) = stack.pop() {
         visited += 1;
-        if visited > MAX_GARBRO_GRAPH_NODES || depth > MAX_GARBRO_GRAPH_DEPTH {
-            return Err("ASTRA_EMU_GARBRO_GRAPH_LIMIT".into());
+        if visited > MAX_GARBRO_GRAPH_NODES {
+            return Err("ASTRA_EMU_GARBRO_GRAPH_NODE_LIMIT".into());
+        }
+        if depth > MAX_GARBRO_GRAPH_DEPTH {
+            return Err("ASTRA_EMU_GARBRO_GRAPH_DEPTH_LIMIT".into());
+        }
+        if let NrbfValue::Ref(id) = value {
+            if references.insert(*id) {
+                stack.push((
+                    graph
+                        .dereference(value)
+                        .map_err(|_| "ASTRA_EMU_GARBRO_REFERENCE")?,
+                    depth,
+                ));
+            }
+            continue;
         }
         match value {
-            nrbf::Value::Object(object) => {
+            NrbfValue::Object(object) => {
                 let pair_key = object
                     .members
                     .get("key")
-                    .or_else(|| object.members.get("Key"));
-                if matches!(pair_key, Some(nrbf::Value::String(value)) if *value == key) {
+                    .or_else(|| object.members.get("Key"))
+                    .map(|value| graph.dereference(value))
+                    .transpose()
+                    .map_err(|_| "ASTRA_EMU_GARBRO_REFERENCE")?;
+                if matches!(pair_key, Some(NrbfValue::String(value)) if value == key) {
                     let item = object
                         .members
                         .get("value")
@@ -501,10 +530,21 @@ fn find_dictionary_values<'a>(
                         return Ok(matches);
                     }
                 }
-                stack.extend(object.members.values().map(|value| (value, depth + 1)));
+                stack.extend(
+                    object
+                        .members
+                        .values()
+                        .filter(|value| is_structural_nrbf_value(value))
+                        .map(|value| (value, depth + 1)),
+                );
             }
-            nrbf::Value::Array(values) => {
-                stack.extend(values.iter().map(|value| (value, depth + 1)));
+            NrbfValue::Array(values) => {
+                stack.extend(
+                    values
+                        .iter()
+                        .filter(|value| is_structural_nrbf_value(value))
+                        .map(|value| (value, depth + 1)),
+                );
             }
             _ => {}
         }
@@ -513,38 +553,68 @@ fn find_dictionary_values<'a>(
 }
 
 fn dictionary_entries<'a>(
-    value: &'a nrbf::Value<'a>,
-) -> Result<Vec<(&'a str, &'a nrbf::Value<'a>)>, Box<dyn std::error::Error>> {
+    graph: &'a NrbfGraph,
+    value: &'a NrbfValue,
+) -> Result<Vec<(&'a str, &'a NrbfValue)>, Box<dyn std::error::Error>> {
     let mut stack = vec![(value, 0usize)];
+    let mut references = BTreeSet::new();
     let mut visited = 0usize;
     let mut output = Vec::new();
     let mut keys = BTreeSet::new();
     while let Some((value, depth)) = stack.pop() {
         visited += 1;
-        if visited > MAX_GARBRO_GRAPH_NODES || depth > MAX_GARBRO_GRAPH_DEPTH {
-            return Err("ASTRA_EMU_GARBRO_GRAPH_LIMIT".into());
+        if visited > MAX_GARBRO_GRAPH_NODES {
+            return Err("ASTRA_EMU_GARBRO_GRAPH_NODE_LIMIT".into());
+        }
+        if depth > MAX_GARBRO_GRAPH_DEPTH {
+            return Err("ASTRA_EMU_GARBRO_GRAPH_DEPTH_LIMIT".into());
+        }
+        if let NrbfValue::Ref(id) = value {
+            if references.insert(*id) {
+                stack.push((
+                    graph
+                        .dereference(value)
+                        .map_err(|_| "ASTRA_EMU_GARBRO_REFERENCE")?,
+                    depth,
+                ));
+            }
+            continue;
         }
         match value {
-            nrbf::Value::Object(object) => {
+            NrbfValue::Object(object) => {
                 let key = object
                     .members
                     .get("key")
-                    .or_else(|| object.members.get("Key"));
+                    .or_else(|| object.members.get("Key"))
+                    .map(|value| graph.dereference(value))
+                    .transpose()
+                    .map_err(|_| "ASTRA_EMU_GARBRO_REFERENCE")?;
                 let item = object
                     .members
                     .get("value")
                     .or_else(|| object.members.get("Value"));
-                if let (Some(nrbf::Value::String(key)), Some(item)) = (key, item) {
+                if let (Some(NrbfValue::String(key)), Some(item)) = (key, item) {
                     let folded = key.to_lowercase();
                     if !keys.insert(folded) || output.len() == MAX_GARBRO_DICTIONARY_ENTRIES {
                         return Err("ASTRA_EMU_GARBRO_DICTIONARY_DUPLICATE".into());
                     }
-                    output.push((*key, item));
+                    output.push((key.as_str(), item));
                 }
-                stack.extend(object.members.values().map(|value| (value, depth + 1)));
+                stack.extend(
+                    object
+                        .members
+                        .values()
+                        .filter(|value| is_structural_nrbf_value(value))
+                        .map(|value| (value, depth + 1)),
+                );
             }
-            nrbf::Value::Array(values) => {
-                stack.extend(values.iter().map(|value| (value, depth + 1)));
+            NrbfValue::Array(values) => {
+                stack.extend(
+                    values
+                        .iter()
+                        .filter(|value| is_structural_nrbf_value(value))
+                        .map(|value| (value, depth + 1)),
+                );
             }
             _ => {}
         }
@@ -552,60 +622,72 @@ fn dictionary_entries<'a>(
     Ok(output)
 }
 
-fn object_member<'a>(value: &'a nrbf::Value<'a>, names: &[&str]) -> Option<&'a nrbf::Value<'a>> {
-    let nrbf::Value::Object(object) = value else {
+fn object_member<'a>(
+    graph: &'a NrbfGraph,
+    value: &'a NrbfValue,
+    names: &[&str],
+) -> Option<&'a NrbfValue> {
+    let NrbfValue::Object(object) = graph.dereference(value).ok()? else {
         return None;
     };
-    names.iter().find_map(|name| object.members.get(*name))
+    names
+        .iter()
+        .find_map(|name| object.members.get(*name))
+        .and_then(|value| graph.dereference(value).ok())
 }
 
 fn extract_roles(
-    record: &nrbf::Value<'_>,
+    graph: &NrbfGraph,
+    record: &NrbfValue,
 ) -> Result<BTreeMap<String, ImportedRole>, Box<dyn std::error::Error>> {
+    let record = graph
+        .dereference(record)
+        .map_err(|_| "ASTRA_EMU_GARBRO_REFERENCE")?;
     let class = match record {
-        nrbf::Value::Object(object) => object.class,
+        NrbfValue::Object(object) => object.class.as_str(),
         _ => return Err("ASTRA_EMU_GARBRO_OBJECT".into()),
     };
     if !class.ends_with("PazScheme") {
         return Err("ASTRA_EMU_GARBRO_SCHEME_TYPE".into());
     }
-    let version = match object_member(record, &["Version", "version"]) {
-        Some(nrbf::Value::Int32(value)) => *value,
+    let version = match object_member(graph, record, &["Version", "version"]) {
+        Some(NrbfValue::Int32(value)) => *value,
         _ => return Err("ASTRA_EMU_GARBRO_VERSION".into()),
     };
     if !(0..=2).contains(&version) {
         return Err("ASTRA_EMU_GARBRO_VERSION".into());
     }
-    let arc_keys =
-        object_member(record, &["ArcKeys", "arc_keys"]).ok_or("ASTRA_EMU_GARBRO_ARC_KEYS")?;
-    let arc_entries = dictionary_entries(arc_keys)?;
-    if arc_entries.len() != REQUIRED_ARCHIVE_ROLES.len()
+    let arc_keys = object_member(graph, record, &["ArcKeys", "arc_keys"])
+        .ok_or("ASTRA_EMU_GARBRO_ARC_KEYS")?;
+    let arc_entries = dictionary_entries(graph, arc_keys)?;
+    if arc_entries.len() > REQUIRED_ARCHIVE_ROLES.len() + 2
         || arc_entries.iter().any(|(role, _)| {
             !REQUIRED_ARCHIVE_ROLES
                 .iter()
+                .chain([&"bg", &"bgm"])
                 .any(|expected| role.eq_ignore_ascii_case(expected))
         })
     {
         return Err("ASTRA_EMU_GARBRO_ROLE_SET".into());
     }
     let mut type_entries = Vec::new();
-    if let Some(type_keys) = object_member(record, &["TypeKeys", "type_keys"]) {
-        type_entries = dictionary_entries(type_keys)?;
+    if let Some(type_keys) = object_member(graph, record, &["TypeKeys", "type_keys"]) {
+        type_entries = dictionary_entries(graph, type_keys)?;
     }
     if type_entries.len() > 4
         || type_entries.iter().any(|(key, value)| {
             !["png", "ogg", "sc", "avi"]
                 .iter()
                 .any(|expected| key.eq_ignore_ascii_case(expected))
-                || !matches!(value, nrbf::Value::String(value) if value.len() <= 1024)
+                || !matches!(graph.dereference(value), Ok(NrbfValue::String(value)) if value.len() <= 1024)
         })
     {
         return Err("ASTRA_EMU_GARBRO_TYPE_KEY_SET".into());
     }
     let passwords = type_entries
         .into_iter()
-        .map(|(key, value)| match value {
-            nrbf::Value::String(value) => Ok((key.to_owned(), (*value).to_owned())),
+        .map(|(key, value)| match graph.dereference(value) {
+            Ok(NrbfValue::String(value)) => Ok((key.to_owned(), value.to_owned())),
             _ => Err("ASTRA_EMU_GARBRO_TYPE_KEY_VALUE"),
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
@@ -616,18 +698,23 @@ fn extract_roles(
             .find(|(key, _)| key.eq_ignore_ascii_case(role))
             .map(|(_, value)| *value)
             .ok_or("ASTRA_EMU_GARBRO_ROLE_MISSING")?;
-        if !matches!(value, nrbf::Value::Object(object) if object.class.ends_with("PazKey")) {
+        let value = graph
+            .dereference(value)
+            .map_err(|_| "ASTRA_EMU_GARBRO_REFERENCE")?;
+        if !matches!(value, NrbfValue::Object(object) if object.class.ends_with("PazKey")) {
             return Err("ASTRA_EMU_GARBRO_ROLE_TYPE".into());
         }
         let index_key = json_bytes(
-            object_member(value, &["IndexKey", "index_key"]).ok_or("ASTRA_EMU_GARBRO_INDEX_KEY")?,
+            graph,
+            object_member(graph, value, &["IndexKey", "index_key"])
+                .ok_or("ASTRA_EMU_GARBRO_INDEX_KEY")?,
         )?;
-        let data_value =
-            object_member(value, &["DataKey", "data_key"]).ok_or("ASTRA_EMU_GARBRO_DATA_KEY")?;
-        let data_key = if role == "mov" && matches!(data_value, nrbf::Value::Null) {
+        let data_value = object_member(graph, value, &["DataKey", "data_key"])
+            .ok_or("ASTRA_EMU_GARBRO_DATA_KEY")?;
+        let data_key = if role == "mov" && matches!(data_value, NrbfValue::Null) {
             Vec::new()
         } else {
-            json_bytes(data_value)?
+            json_bytes(graph, data_value)?
         };
         if !(4..=56).contains(&index_key.len())
             || (role != "mov" && !(4..=56).contains(&data_key.len()))
@@ -647,15 +734,18 @@ fn extract_roles(
     }
     Ok(roles)
 }
-fn json_bytes(value: &nrbf::Value<'_>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let nrbf::Value::Array(values) = value else {
+fn json_bytes(graph: &NrbfGraph, value: &NrbfValue) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let NrbfValue::Array(values) = graph
+        .dereference(value)
+        .map_err(|_| "ASTRA_EMU_GARBRO_REFERENCE")?
+    else {
         return Err("ASTRA_EMU_GARBRO_KEY_TYPE".into());
     };
     values
         .iter()
-        .map(|value| match value {
-            nrbf::Value::Byte(value) => Ok(*value),
-            nrbf::Value::UInt16(value) => {
+        .map(|value| match graph.dereference(value) {
+            Ok(NrbfValue::Byte(value)) => Ok(*value),
+            Ok(NrbfValue::UInt16(value)) => {
                 u8::try_from(*value).map_err(|_| "ASTRA_EMU_GARBRO_KEY_BYTE".into())
             }
             _ => Err("ASTRA_EMU_GARBRO_KEY_BYTE".into()),
@@ -897,5 +987,37 @@ mod tests {
     #[test]
     fn byte_literal_escapes_every_byte_including_ascii() {
         assert_eq!(bytes_literal(b"A\0\n\""), r#""\x41\x00\x0a\x22""#);
+    }
+
+    #[test]
+    fn garbro_import_refuses_to_overwrite_patch_before_reading_input() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("astraemu.patch.luau"), b"private").unwrap();
+        let error = import_garbro_scheme(
+            &temp.path().join("missing-formats.dat"),
+            "fixture",
+            temp.path(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(error, "ASTRA_EMU_GARBRO_PATCH_EXISTS");
+        assert_eq!(
+            fs::read(temp.path().join("astraemu.patch.luau")).unwrap(),
+            b"private"
+        );
+    }
+
+    #[test]
+    fn garbro_import_refuses_stale_temporary_patch() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join(".astraemu.patch.luau.tmp"), b"stale").unwrap();
+        let error = import_garbro_scheme(
+            &temp.path().join("missing-formats.dat"),
+            "fixture",
+            temp.path(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(error, "ASTRA_EMU_GARBRO_TEMP_EXISTS");
     }
 }
