@@ -80,6 +80,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 logical_surface,
             )
             .map_err(|error| binding("runtime.open", error))?;
+            hydrate_save_catalog(&mut source, &mut executor).await?;
             executor
                 .execute_batch(
                     source
@@ -120,6 +121,55 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
             }) as Box<dyn ProductSession>)
         })
     }
+}
+
+async fn hydrate_save_catalog(
+    source: &mut NativeVnHostCommandSource,
+    executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
+) -> Result<(), ProductHostError> {
+    let results = executor
+        .execute_batch(
+            source
+                .list_saves()
+                .map_err(|error| binding("save.list.prepare", error))?,
+        )
+        .await
+        .map_err(|error| binding("save.list", error))?;
+    let slots = match results.as_slice() {
+        [PlayerHostCommandResult::SaveList { slots }] => slots.clone(),
+        _ => {
+            return Err(ProductHostError::Binding(
+                "ASTRA_HEADLESS_SAVE_LIST_RESULT_INVALID".into(),
+            ));
+        }
+    };
+    for slot in &slots {
+        let results = executor
+            .execute_batch(
+                source
+                    .read_save(slot)
+                    .map_err(|error| binding("save.catalog.read.prepare", error))?,
+            )
+            .await
+            .map_err(|error| binding("save.catalog.read", error))?;
+        let bytes = match results.as_slice() {
+            [PlayerHostCommandResult::SaveRead { bytes }] => bytes,
+            _ => {
+                return Err(ProductHostError::Binding(
+                    "ASTRA_HEADLESS_SAVE_CATALOG_RESULT_INVALID".into(),
+                ));
+            }
+        };
+        source
+            .ingest_save_catalog_entry(slot, bytes)
+            .map_err(|error| binding("save.catalog.ingest", error))?;
+    }
+    tracing::info!(
+        event = "headless.product.native_vn.save_catalog_hydrated",
+        slot_count = slots.len(),
+        "hydrated validated save metadata before launching NativeVN"
+    );
+    Ok(())
 }
 
 struct NativeVnHeadlessSession {
@@ -170,12 +220,12 @@ impl ProductSession for NativeVnHeadlessSession {
                     physical_key,
                     state: ButtonState::Pressed,
                     ..
-                } if physical_key == "F5" => self.save("slot-quick").await?,
+                } if physical_key == "F5" => self.save("slot.quick").await?,
                 PhysicalInput::Keyboard {
                     physical_key,
                     state: ButtonState::Pressed,
                     ..
-                } if physical_key == "F9" => self.load("slot-quick").await?,
+                } if physical_key == "F9" => self.load("slot.quick").await?,
                 PhysicalInput::Keyboard {
                     physical_key,
                     logical_key,
@@ -371,6 +421,9 @@ impl NativeVnHeadlessSession {
                 return Ok(());
             }
         }
+        if self.source()?.should_capture_gameplay_surface(&event) {
+            self.capture_gameplay_surface().await?;
+        }
         let batch = self
             .source()?
             .dispatch_ui_event(event)
@@ -459,6 +512,24 @@ impl NativeVnHeadlessSession {
         let transaction = PlayerHostResourceId(self.next_save_transaction);
         let media_snapshot = serde_json::to_vec(&self.media.snapshot())
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
+        if !self.source()?.has_gameplay_thumbnail_capture() {
+            self.capture_gameplay_surface().await?;
+        }
+        let last_tick = self.last_tick;
+        let playtime_ms = canonical_ms(last_tick)?;
+        let total_seconds = playtime_ms / 1_000;
+        self.source()?
+            .prepare_save_metadata(
+                slot,
+                format!(
+                    "T+{:02}:{:02}:{:02}",
+                    total_seconds / 3_600,
+                    (total_seconds / 60) % 60,
+                    total_seconds % 60
+                ),
+                playtime_ms,
+            )
+            .map_err(|error| ProductHostError::Input(error.to_string()))?;
         let plan = self
             .source()?
             .prepare_save_transaction_with_product_media_snapshot(
@@ -471,6 +542,34 @@ impl NativeVnHeadlessSession {
             .execute_save_transaction(plan)
             .await
             .map_err(|error| ProductHostError::Input(error.to_string()))
+    }
+
+    async fn capture_gameplay_surface(&mut self) -> Result<(), ProductHostError> {
+        let batch = self
+            .source()?
+            .prepare_surface_capture()
+            .map_err(|error| ProductHostError::Output(error.to_string()))?;
+        let results = self
+            .executor
+            .execute_batch(batch)
+            .await
+            .map_err(|error| ProductHostError::Output(error.to_string()))?;
+        let (width, height, rgba8) = match results.as_slice() {
+            [PlayerHostCommandResult::Captured {
+                width,
+                height,
+                rgba8,
+                ..
+            }] => (*width, *height, rgba8.clone()),
+            _ => {
+                return Err(ProductHostError::Output(
+                    "captured gameplay surface result is invalid".into(),
+                ));
+            }
+        };
+        self.source()?
+            .cache_gameplay_surface(width, height, rgba8)
+            .map_err(|error| ProductHostError::Output(error.to_string()))
     }
 
     async fn load(&mut self, slot: &str) -> Result<(), ProductHostError> {

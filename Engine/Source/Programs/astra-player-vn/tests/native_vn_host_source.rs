@@ -37,6 +37,8 @@ ui_view ui.test.message model:astra.vn.ui_model.message.v1 theme:astra.vn.theme.
   screen id:root
     panel id:advance fill:true
       on activate -> vn.advance
+    button id:exit min_width:48 min_height:48
+      on activate -> vn.request_exit
     text id:body value:$model.text_key
 ui_view ui.test.choice model:astra.vn.ui_model.choice.v1 theme:astra.vn.theme.classic #@id ui.test.choice
   screen id:root
@@ -80,6 +82,36 @@ fn advance(source: &mut NativeVnHostCommandSource) -> astra_player_core::PlayerH
             modifiers: 0,
         })
         .unwrap()
+}
+
+fn prepare_test_save_metadata(source: &mut NativeVnHostCommandSource, slot: &str) {
+    source
+        .cache_gameplay_surface(320, 180, vec![0x40; 320 * 180 * 4])
+        .expect("cache gameplay surface");
+    source
+        .prepare_save_metadata(slot, "2000-01-01T00:00:00Z".into(), 3_723_000)
+        .expect("prepare save metadata");
+}
+
+#[astra_headless_test::test]
+fn typed_ui_exit_request_stays_host_owned_and_observable() {
+    let mut source = source_for(STORY);
+    source.launch().expect("launch");
+    assert!(!source.exit_requested());
+
+    source
+        .dispatch_ui_event(UiInputEventKind::AccessibilityAction {
+            semantic_id: "root/exit".into(),
+            action: "activate".into(),
+            value: None,
+        })
+        .expect("typed exit request");
+
+    assert!(source.exit_requested());
+    assert_eq!(
+        source.pending_wait().expect("dialogue wait").command_id,
+        "line.one"
+    );
 }
 
 #[astra_headless_test::test]
@@ -188,6 +220,7 @@ state save #@id state.system.save
     assert_eq!(system.focused_semantic_id.as_deref(), Some("root/back"));
     assert_eq!(system.backlog_count, 1);
 
+    prepare_test_save_metadata(&mut source, "slot.01");
     source
         .mark_save_committed("slot.01")
         .expect("mark first slot committed");
@@ -950,7 +983,8 @@ fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
     advance(&mut source);
-    let saved = source.save("slot.main").unwrap();
+    prepare_test_save_metadata(&mut source, "slot.01");
+    let saved = source.save("slot.01").unwrap();
 
     advance(&mut source);
     let uninterrupted = source
@@ -960,6 +994,13 @@ fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
         .clone();
 
     source.restore(&saved).unwrap();
+    assert_eq!(
+        source
+            .product_observation_evidence()
+            .unwrap()
+            .occupied_save_slot_count,
+        1
+    );
     advance(&mut source);
     assert_eq!(
         source.last_step_evidence().unwrap().vn_state_hash_after,
@@ -971,7 +1012,8 @@ fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
 fn native_vn_source_rejects_tampered_save_before_restore() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
-    let mut saved = source.save("slot.main").unwrap();
+    prepare_test_save_metadata(&mut source, "slot.01");
+    let mut saved = source.save("slot.01").unwrap();
     let last = saved.len() - 1;
     saved[last] ^= 0x5a;
 
@@ -981,12 +1023,54 @@ fn native_vn_source_rejects_tampered_save_before_restore() {
 }
 
 #[astra_headless_test::test]
+fn native_vn_source_hydrates_validated_save_metadata_before_launch() {
+    let mut writer = source_for(STORY);
+    writer.launch().unwrap();
+    prepare_test_save_metadata(&mut writer, "slot.01");
+    let saved = writer.save("slot.01").unwrap();
+
+    let mut reopened = source_for(STORY);
+    assert!(matches!(
+        reopened.list_saves().unwrap().commands.as_slice(),
+        [PlayerHostCommand::ListSaves { .. }]
+    ));
+    reopened
+        .ingest_save_catalog_entry("slot.01", &saved)
+        .unwrap();
+    reopened.launch().unwrap();
+
+    assert_eq!(
+        reopened
+            .product_observation_evidence()
+            .unwrap()
+            .occupied_save_slot_count,
+        1
+    );
+}
+
+#[astra_headless_test::test]
+fn native_vn_source_rejects_catalog_slot_identity_mismatch() {
+    let mut writer = source_for(STORY);
+    writer.launch().unwrap();
+    prepare_test_save_metadata(&mut writer, "slot.01");
+    let saved = writer.save("slot.01").unwrap();
+
+    let mut reopened = source_for(STORY);
+    assert!(reopened
+        .ingest_save_catalog_entry("slot.02", &saved)
+        .unwrap_err()
+        .to_string()
+        .contains("ASTRA_PLAYER_SAVE_CATALOG_IDENTITY"));
+}
+
+#[astra_headless_test::test]
 fn native_vn_source_builds_atomic_platform_save_transaction() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
+    prepare_test_save_metadata(&mut source, "slot.01");
 
     let plan = source
-        .prepare_save_transaction("slot.main", PlayerHostResourceId(20))
+        .prepare_save_transaction("slot.01", PlayerHostResourceId(20))
         .unwrap();
 
     assert!(matches!(

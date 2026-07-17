@@ -125,6 +125,7 @@ libloading = "0.8"
 libc = "0.2"
 logos = "0.16.1"
 mlua = { version = "0.10", features = ["luau", "vendored", "serialize"] }
+luaur-rt = { version = "=0.1.8", default-features = false, features = ["serde"] }
 objc2 = "0.6.4"
 objc2-av-foundation = { version = "0.3.2", default-features = false }
 objc2-core-media = { version = "0.3.2", default-features = false }

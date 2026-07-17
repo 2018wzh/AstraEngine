@@ -51,6 +51,7 @@ pub struct BlueprintYakuiRenderer {
     accessibility_dispatched_events: BTreeSet<(String, String)>,
     image_resources: BTreeMap<String, TextureFrame>,
     managed_textures: BoundedLru<String, ManagedTextureId>,
+    pending_removed_managed_textures: Vec<ManagedTextureId>,
     text_measurer: Option<Arc<dyn AstraTextMeasurer>>,
 }
 
@@ -71,6 +72,7 @@ impl BlueprintYakuiRenderer {
             accessibility_dispatched_events: BTreeSet::new(),
             image_resources: BTreeMap::new(),
             managed_textures: BoundedLru::new(MAX_MANAGED_IMAGE_TEXTURES, MAX_TEXTURE_BYTES)?,
+            pending_removed_managed_textures: Vec::new(),
             text_measurer: None,
         })
     }
@@ -83,6 +85,27 @@ impl BlueprintYakuiRenderer {
     pub fn with_image_resources(mut self, resources: BTreeMap<String, TextureFrame>) -> Self {
         self.image_resources = resources;
         self
+    }
+
+    pub fn upsert_image_resource(
+        &mut self,
+        asset: String,
+        frame: TextureFrame,
+    ) -> Result<(), UiValidationError> {
+        validate_image_resource(&asset, &frame)?;
+        self.image_resources.insert(asset.clone(), frame);
+        if let Some(managed) = self.managed_textures.remove(&asset) {
+            self.pending_removed_managed_textures.push(managed);
+        }
+        Ok(())
+    }
+
+    pub fn remove_image_resource(&mut self, asset: &str) -> bool {
+        let removed = self.image_resources.remove(asset).is_some();
+        if let Some(managed) = self.managed_textures.remove(&asset.to_string()) {
+            self.pending_removed_managed_textures.push(managed);
+        }
+        removed
     }
 
     fn collect_visual_assets(
@@ -854,6 +877,9 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         yakui: &mut yakui_core::Yakui,
         request: &UiFrameRequest,
     ) -> Result<YakuiViewOutput, UiValidationError> {
+        for managed in self.pending_removed_managed_textures.drain(..) {
+            yakui.paint_dom().textures_mut().remove(managed);
+        }
         let frame: UiBlueprintFrameModel =
             postcard::from_bytes(&request.model_payload).map_err(|error| {
                 UiValidationError::invalid("ASTRA_UI_BLUEPRINT_MODEL_DECODE", error.to_string())
@@ -1386,6 +1412,41 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         }
         Ok(snapshot)
     }
+}
+
+fn validate_image_resource(asset: &str, frame: &TextureFrame) -> Result<(), UiValidationError> {
+    if asset.is_empty() {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_IMAGE_RESOURCE_ID",
+            "UI image resource id must not be empty",
+        ));
+    }
+    let expected = (frame.width as usize)
+        .checked_mul(frame.height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| {
+            UiValidationError::invalid(
+                "ASTRA_UI_IMAGE_RESOURCE_SIZE",
+                "UI image resource dimensions overflow",
+            )
+        })?;
+    if frame.width == 0
+        || frame.height == 0
+        || expected > MAX_TEXTURE_BYTES
+        || frame.rgba8.len() != expected
+    {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_IMAGE_RESOURCE_SIZE",
+            "UI image resource dimensions do not match its bounded RGBA payload",
+        ));
+    }
+    if Hash256::from_sha256(&frame.rgba8) != frame.hash {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_IMAGE_RESOURCE_HASH",
+            "UI image resource payload hash mismatch",
+        ));
+    }
+    Ok(())
 }
 
 fn semantic_role(widget: &str) -> UiSemanticRole {

@@ -25,13 +25,15 @@ ui_view ui.tsui.classic.choice model:astra.vn.ui_model.choice.v1 theme:tsui.them
 ui_view ui.tsui.classic.title model:astra.vn.ui_model.title.v1 theme:tsui.theme.classic #@id ui.tsui.classic.title
   screen id:root background:theme:surface.sky
     image id:frame asset:theme:frame.classic min_width:800 min_height:600
-    column id:menu anchor:bottom_right background:theme:surface.clear min_width:224 padding:12 gap:24
-      button id:start enabled:$model.can_continue min_width:208 min_height:48 background:theme:surface.clear
-        image id:start_image asset:theme:menu.start min_width:200 min_height:48
-        on activate -> vn.return_system
-      button id:load min_width:208 min_height:48 background:theme:surface.clear
-        image id:load_image asset:theme:menu.continue min_width:200 min_height:48
-        on activate -> vn.open_system page:"load"
+    button id:start enabled:$model.can_continue position_x:564 position_y:344 min_width:208 min_height:64 background:theme:surface.clear
+      image id:start_image asset:theme:menu.start min_width:208 min_height:64
+      on activate -> vn.return_system
+    button id:load position_x:564 position_y:432 min_width:208 min_height:64 background:theme:surface.clear
+      image id:load_image asset:theme:menu.continue min_width:208 min_height:64
+      on activate -> vn.open_system page:"load"
+    button id:exit position_x:564 position_y:520 min_width:208 min_height:64 background:theme:surface.clear
+      image id:exit_image asset:theme:menu.exit min_width:208 min_height:64
+      on activate -> vn.request_exit
 
 ui_view ui.tsui.classic.save model:astra.vn.ui_model.save.v1 theme:tsui.theme.classic #@id ui.tsui.classic.save
   screen id:root background:theme:surface.dim

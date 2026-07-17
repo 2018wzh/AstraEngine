@@ -39,6 +39,7 @@ serde_yaml.workspace = true
 tokio.workspace = true
 tungstenite.workspace = true
 tempfile.workspace = true
+time.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 astra-platform-windows = { path = "../../Platform/astra-platform-windows" }

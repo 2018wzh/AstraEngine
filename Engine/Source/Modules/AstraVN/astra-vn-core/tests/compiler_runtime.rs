@@ -471,3 +471,55 @@ fn system_story_uses_a_separate_stack_and_explicit_return() {
         Some(VnWaitKind::Dialogue)
     );
 }
+
+#[astra_headless_test::test]
+fn authored_system_page_return_continues_to_the_next_story_wait() {
+    const BOOT: &str = r#"
+story boot #@id story.boot
+
+state initial #@id state.initial
+  scene initial #@id scene.initial
+    system_page kind:title policy:astra.policy.standard #@id page.boot.title
+    text key:boot.first #@id line.boot.first
+"#;
+    const BOOT_SYSTEM: &str = r#"
+story system #@id story.system
+
+state title #@id state.system.title
+  scene title #@id scene.system.title
+    system_page kind:title policy:astra.policy.standard #@id page.title
+"#;
+    let compiled = compile_astra_project(
+        [
+            AstraSource::story("boot.astra", BOOT),
+            AstraSource::story("system.astra", BOOT_SYSTEM),
+        ],
+        Default::default(),
+    )
+    .unwrap();
+    let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
+
+    runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.boot".to_string(),
+            state_id: "state.initial".to_string(),
+        })
+        .unwrap();
+    assert_eq!(runtime.state().system_stack.len(), 1);
+    assert_eq!(
+        runtime.state().pending_wait.as_ref().map(|wait| wait.kind),
+        Some(VnWaitKind::SystemPage)
+    );
+
+    let returned = runtime.apply(VnPlayerCommand::ReturnSystem).unwrap();
+
+    assert_eq!(runtime.state().system_stack.len(), 0);
+    assert_eq!(
+        runtime.state().pending_wait.as_ref().map(|wait| wait.kind),
+        Some(VnWaitKind::Dialogue)
+    );
+    assert!(matches!(
+        returned.presentation.last(),
+        Some(PresentationCommand::Dialogue { key, .. }) if key == "boot.first"
+    ));
+}

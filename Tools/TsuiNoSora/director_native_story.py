@@ -176,6 +176,7 @@ class _Lowering:
                 commands.append(self._mutate(_selector_path(selector, option), 0))
         for node_id in self.choice_option_counts:
             commands.append(self._mutate(_choice_initialized_path(node_id), 0))
+        commands.append(self._command("system_page", page="title"))
         commands.append(self._command("jump", target=movie_entries["Y"]))
         return commands
 
@@ -903,12 +904,21 @@ def _simulate_state(key, state_map):
             events.extend(_key_events("Enter"))
         elif kind == "system_page":
             events.append({"type": "_pending_wait", "command_id": f"page.{command['page']}"})
-            events.extend(_key_events("Escape"))
-            # Authored inter-episode save screens are entered while story
-            # execution is not already blocked. Returning restores the cursor
-            # after the trigger with no pending wait, so one physical confirm
-            # resumes execution to the next observable wait.
-            events.extend(_key_events("Enter"))
+            if command["page"] == "title":
+                # The title controller focuses the authored Start/Continue button.
+                # Activate it through the real semantic UI path, then open the
+                # Modern Quick Panel and enable Skip All for route enumeration.
+                events.extend(_key_events("Enter"))
+                events.extend(
+                    [
+                        {"type": "pointer_button", "button": "secondary", "state": "pressed"},
+                        {"type": "pointer_button", "button": "secondary", "state": "released"},
+                    ]
+                )
+                events.extend(_key_events("Enter"))
+                events.extend(_key_events("Escape"))
+            else:
+                events.extend(_key_events("Escape"))
         elif kind == "wait":
             events.append(
                 {
@@ -988,10 +998,6 @@ def _route_from_path(index, path):
         {"type": "resume"},
         {"type": "focus", "focused": True},
         {"type": "pointer_move", "x": 32768, "y": 32768},
-        {"type": "pointer_button", "button": "secondary", "state": "pressed"},
-        {"type": "pointer_button", "button": "secondary", "state": "released"},
-        *_key_events("Enter"),
-        *_key_events("Escape"),
     ]
     terminal_id = "tsui.ending"
     for transition in path:

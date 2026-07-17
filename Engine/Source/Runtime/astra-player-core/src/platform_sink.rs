@@ -128,6 +128,9 @@ impl PlatformCommandSink {
             PlayerHostCommand::ReadSave { slot, .. } => Ok(PlayerHostCommandResult::SaveRead {
                 bytes: self.client.read_save(slot.clone()).await?,
             }),
+            PlayerHostCommand::ListSaves { .. } => Ok(PlayerHostCommandResult::SaveList {
+                slots: self.client.list_saves().await?,
+            }),
             PlayerHostCommand::DeleteSave { slot, .. } => {
                 self.client.delete_save(slot.clone()).await?;
                 Ok(PlayerHostCommandResult::Unit)

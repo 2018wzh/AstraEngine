@@ -40,6 +40,7 @@ pub struct SaveSlotViewModel {
     pub title_key: Option<String>,
     pub timestamp_text: Option<String>,
     pub playtime_text: Option<String>,
+    pub metadata_text: Option<String>,
     pub can_write: bool,
     pub can_load: bool,
     pub migration_status: String,

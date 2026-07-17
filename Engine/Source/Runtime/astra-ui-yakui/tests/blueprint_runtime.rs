@@ -370,8 +370,33 @@ fn thousand_gallery_images_are_virtualized_and_bounded_by_lru() {
     assert!(first.performance.instantiated_nodes <= 64);
     assert!(first.performance.active_texture_bytes <= 128 * 4);
 
-    let mut observed_release = false;
-    for sequence in 1..40 {
+    let replacement_rgba8 = vec![255, 32, 16, 255];
+    backend
+        .renderer_mut()
+        .upsert_image_resource(
+            "fixture.thumbnail.0".into(),
+            TextureFrame {
+                width: 1,
+                height: 1,
+                hash: Hash256::from_sha256(&replacement_rgba8),
+                rgba8: replacement_rgba8,
+            },
+        )
+        .expect("replace live texture resource");
+    let replaced = backend
+        .render_frame(request(1, false))
+        .expect("render replaced texture");
+    assert!(
+        !replaced.render.textures.releases.is_empty(),
+        "replacing a live resource must release the superseded Yakui texture"
+    );
+    assert!(
+        !replaced.render.textures.uploads.is_empty(),
+        "replacing a visible resource must upload the replacement texture"
+    );
+
+    let mut observed_release = true;
+    for sequence in 2..40 {
         let output = backend
             .render_frame(request(sequence, true))
             .expect("scrolled frame");

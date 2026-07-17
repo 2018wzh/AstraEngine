@@ -155,6 +155,9 @@ impl VnRuntime {
                 self.state.cursor = Some(frame.return_to);
                 self.state.pending_wait = frame.return_wait;
                 self.state.pending_choice = frame.return_choice;
+                if self.state.pending_wait.is_none() && self.state.pending_choice.is_none() {
+                    self.run_until_blocked(&mut presentation, &mut reached)?;
+                }
             }
             VnPlayerCommand::ReplayVoice { voice } => {
                 if !self.state.voice_replay.contains_key(&voice) {

@@ -99,6 +99,10 @@ impl<R: YakuiViewRenderer> AstraYakuiBackend<R> {
         })
     }
 
+    pub fn renderer_mut(&mut self) -> &mut R {
+        &mut self.renderer
+    }
+
     fn ensure_live(&self) -> Result<(), UiValidationError> {
         if self.shutdown {
             return Err(UiValidationError::invalid(

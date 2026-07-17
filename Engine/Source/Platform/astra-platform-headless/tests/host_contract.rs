@@ -915,6 +915,10 @@ async fn package_save_and_handle_boundaries_fail_closed_and_reopen_transactional
         .await
         .unwrap();
     assert_eq!(
+        reopened.client.list_saves().await.unwrap(),
+        ["persistent-slot"]
+    );
+    assert_eq!(
         reopened.client.read_save("persistent-slot").await.unwrap(),
         b"persisted"
     );

@@ -47,14 +47,17 @@ ui_view ui.tsui.modern.quick_panel model:astra.vn.ui_model.quick_panel.v1 theme:
 ui_view ui.tsui.modern.title model:astra.vn.ui_model.title.v1 theme:tsui.theme.modern #@id ui.tsui.modern.title
   screen id:root background:theme:surface.sky
     image id:sky_frame asset:theme:sky.frame min_width:800 min_height:600
-    column id:menu anchor:bottom_right background:theme:surface.dim min_width:248 padding:12 gap:8
-      text id:title value:l10n:system.title font_size:24 text_color:theme:text.gold
-      button id:continue text:l10n:system.continue enabled:$model.can_continue min_height:50 background:theme:surface.button text_color:theme:text.on_dark
-        on activate -> vn.return_system
-      button id:load text:l10n:system.load min_height:50 background:theme:surface.button text_color:theme:text.on_dark
-        on activate -> vn.open_system page:"load"
-      button id:config text:l10n:system.config min_height:50 background:theme:surface.button text_color:theme:text.on_dark
-        on activate -> vn.open_system page:"config"
+    column id:gold position_x:492 position_y:288 background:theme:accent.gold min_width:284 padding:2
+      column id:menu background:theme:surface.paper min_width:280 padding:12 gap:7
+        text id:title value:l10n:system.title font_size:24 text_color:theme:text.gold
+        button id:continue text:l10n:system.continue enabled:$model.can_continue min_height:46 background:theme:surface.button text_color:theme:text.on_dark
+          on activate -> vn.return_system
+        button id:load text:l10n:system.load min_height:46 background:theme:surface.button text_color:theme:text.on_dark
+          on activate -> vn.open_system page:"load"
+        button id:config text:l10n:system.config min_height:46 background:theme:surface.button text_color:theme:text.on_dark
+          on activate -> vn.open_system page:"config"
+        button id:exit text:l10n:system.quit min_height:46 background:theme:surface.button_alt text_color:theme:text.on_dark
+          on activate -> vn.request_exit
 
 ui_view ui.tsui.modern.save model:astra.vn.ui_model.save.v1 theme:tsui.theme.modern #@id ui.tsui.modern.save
   screen id:root background:theme:surface.sky
@@ -63,14 +66,13 @@ ui_view ui.tsui.modern.save model:astra.vn.ui_model.save.v1 theme:tsui.theme.mod
       column id:content background:theme:surface.paper min_width:714 min_height:484 padding:18 gap:10
         text id:title value:l10n:system.save font_size:26
         virtual_grid id:slots items:$model.slots item_key:slot_id columns:3 overscan:0 item_extent:196 viewport_extent:390 min_height:390 gap:8
-          column id:slot background:theme:surface.card min_width:226 min_height:184 padding:8 gap:2
-            stack id:preview min_width:210 min_height:76
-              image id:empty_preview asset:theme:sky.frame min_width:210 min_height:76
-              image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:210 min_height:76
-            text id:number value:$item.slot_id font_size:18 max_lines:1
-            text id:timestamp value:$item.timestamp_text font_size:16 max_lines:1
-            text id:playtime value:$item.playtime_text font_size:16 max_lines:1
-            button id:write value:$item.slot_id enabled:$item.can_write min_height:42 background:theme:surface.button text_color:theme:text.on_dark
+          column id:slot background:theme:surface.card min_width:226 min_height:184 padding:6 gap:1
+            stack id:preview min_width:214 min_height:64
+              image id:empty_preview asset:theme:sky.frame min_width:214 min_height:64
+              image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:214 min_height:64
+            text id:number value:$item.slot_id font_size:16 max_lines:1
+            text id:metadata value:$item.metadata_text font_size:12 max_lines:1
+            button id:write value:$item.slot_id enabled:$item.can_write min_height:32 background:theme:surface.button text_color:theme:text.on_dark
               on activate -> vn.request_save slot_id:$item.slot_id
         button id:back text:l10n:system.back min_height:42 background:theme:surface.button_alt text_color:theme:text.on_dark
           on activate -> vn.return_system
@@ -93,14 +95,13 @@ ui_view ui.tsui.modern.load model:astra.vn.ui_model.load.v1 theme:tsui.theme.mod
       column id:content background:theme:surface.paper min_width:714 min_height:484 padding:18 gap:10
         text id:title value:l10n:system.load font_size:26
         virtual_grid id:slots items:$model.slots item_key:slot_id columns:3 overscan:0 item_extent:196 viewport_extent:390 min_height:390 gap:8
-          column id:slot background:theme:surface.card min_width:226 min_height:184 padding:8 gap:2
-            stack id:preview min_width:210 min_height:76
-              image id:empty_preview asset:theme:sky.frame min_width:210 min_height:76
-              image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:210 min_height:76
-            text id:number value:$item.slot_id font_size:18 max_lines:1
-            text id:timestamp value:$item.timestamp_text font_size:16 max_lines:1
-            text id:playtime value:$item.playtime_text font_size:16 max_lines:1
-            button id:read value:$item.slot_id enabled:$item.can_load min_height:42 background:theme:surface.button text_color:theme:text.on_dark
+          column id:slot background:theme:surface.card min_width:226 min_height:184 padding:6 gap:1
+            stack id:preview min_width:214 min_height:64
+              image id:empty_preview asset:theme:sky.frame min_width:214 min_height:64
+              image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:214 min_height:64
+            text id:number value:$item.slot_id font_size:16 max_lines:1
+            text id:metadata value:$item.metadata_text font_size:12 max_lines:1
+            button id:read value:$item.slot_id enabled:$item.can_load min_height:32 background:theme:surface.button text_color:theme:text.on_dark
               on activate -> vn.request_load slot_id:$item.slot_id
         button id:back text:l10n:system.back min_height:42 background:theme:surface.button_alt text_color:theme:text.on_dark
           on activate -> vn.return_system

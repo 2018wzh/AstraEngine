@@ -337,6 +337,9 @@ pub enum HostCommand {
         slot: String,
         reply: oneshot::Sender<Result<Vec<u8>, PlatformError>>,
     },
+    ListSaves {
+        reply: oneshot::Sender<Result<Vec<String>, PlatformError>>,
+    },
     DeleteSave {
         slot: String,
         reply: oneshot::Sender<Result<(), PlatformError>>,
@@ -393,6 +396,7 @@ impl HostCommand {
             Self::CommitSave { .. } => "save.commit",
             Self::AbortSave { .. } => "save.abort",
             Self::ReadSave { .. } => "save.read",
+            Self::ListSaves { .. } => "save.list",
             Self::DeleteSave { .. } => "save.delete",
             Self::OpenPackage { .. } => "package.open",
             Self::ReadPackageRange { .. } => "package.read_range",
@@ -471,6 +475,7 @@ impl HostCommand {
             Self::CommitSave { reply, .. } => send_error!(reply),
             Self::AbortSave { reply, .. } => send_error!(reply),
             Self::ReadSave { reply, .. } => send_error!(reply),
+            Self::ListSaves { reply } => send_error!(reply),
             Self::DeleteSave { reply, .. } => send_error!(reply),
             Self::OpenPackage { reply, .. } => send_error!(reply),
             Self::ReadPackageRange { reply, .. } => send_error!(reply),
@@ -1180,6 +1185,24 @@ impl PlatformHostClient {
             "save.delete",
         )
         .await
+    }
+
+    pub async fn list_saves(&self) -> Result<Vec<String>, PlatformError> {
+        self.ensure_running("save.list")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::ListSaves { reply })?;
+        let slots = response.await.map_err(|_| queue_closed("save.list"))??;
+        if slots.len() > 256
+            || slots.windows(2).any(|pair| pair[0] >= pair[1])
+            || slots.iter().any(|slot| !is_safe_slot(slot))
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "save.list",
+                "save backend returned an invalid, duplicate, unsorted, or oversized slot catalog",
+            ));
+        }
+        Ok(slots)
     }
 
     pub async fn open_package(

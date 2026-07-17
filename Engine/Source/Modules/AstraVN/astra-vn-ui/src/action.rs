@@ -10,6 +10,7 @@ pub enum VnUiAction {
     Choose { option_id: String },
     OpenSystem { page: SystemPageKind },
     ReturnSystem,
+    RequestExit,
     RequestSave { slot_id: String },
     RequestSaveConfirmed { slot_id: String },
     RequestLoad { slot_id: String },
@@ -43,6 +44,7 @@ impl VnUiAction {
             Self::Advance
             | Self::OpenSystem { .. }
             | Self::ReturnSystem
+            | Self::RequestExit
             | Self::SetAuto { .. }
             | Self::SetSkip { .. } => "vn",
         }

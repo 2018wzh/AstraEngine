@@ -59,8 +59,8 @@ mod browser {
     };
 
     use crate::services::{
-        commit_save, delete_save, preferred_audio_output_format, read_save, PackageBytes,
-        SaveTransaction, WebAudioOutput, WebDecodeSession,
+        commit_save, delete_save, list_saves, preferred_audio_output_format, read_save,
+        PackageBytes, SaveTransaction, WebAudioOutput, WebDecodeSession,
     };
 
     pub async fn start(
@@ -357,6 +357,9 @@ mod browser {
                 }
                 HostCommand::ReadSave { slot, reply } => {
                     let _ = reply.send(read_save(&profile.package_id, &slot).await);
+                }
+                HostCommand::ListSaves { reply } => {
+                    let _ = reply.send(list_saves(&profile.package_id).await);
                 }
                 HostCommand::DeleteSave { slot, reply } => {
                     let _ = reply.send(delete_save(&profile.package_id, &slot).await);

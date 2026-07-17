@@ -421,6 +421,7 @@ fn item_path_allowed(schema: &str, collection: &str, path: &[String]) -> bool {
                     | "title_key"
                     | "timestamp_text"
                     | "playtime_text"
+                    | "metadata_text"
                     | "can_write"
                     | "can_load"
                     | "migration_status"
@@ -828,7 +829,7 @@ fn validate_action(
     arguments: &BTreeMap<String, String>,
 ) -> Result<(), VnError> {
     let required: &[&str] = match action {
-        "vn.advance" | "vn.return_system" | "ui.close_modal" => &[],
+        "vn.advance" | "vn.return_system" | "vn.request_exit" | "ui.close_modal" => &[],
         "vn.choose" => &["option_id"],
         "vn.open_system" => &["page"],
         "vn.request_save"

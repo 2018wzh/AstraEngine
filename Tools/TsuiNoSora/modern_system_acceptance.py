@@ -81,7 +81,11 @@ def build_sequence() -> Sequence:
     sequence = Sequence("tsui.modern.system.acceptance")
     sequence.add({"type": "resume"})
     sequence.add({"type": "focus", "focused": True})
-    sequence.await_value("vn.pending_wait_command", "tsui.command.014950", 7200)
+    sequence.await_value("vn.system_page", "title", 7200)
+    sequence.await_value("vn.focused_semantic_id", "root/gold/menu/continue")
+    sequence.checkpoint("modern.title")
+    sequence.key("Enter")
+    sequence.await_value("vn.pending_wait_command", "tsui.command.014951", 7200)
 
     sequence.add({"type": "pointer_move", "x": 32768, "y": 32768})
     sequence.add({"type": "pointer_button", "button": "secondary", "state": "pressed"})
@@ -220,6 +224,7 @@ def run(arguments: argparse.Namespace) -> dict:
         raise AcceptanceError("Headless Modern system run did not consume every input")
     checkpoints = run_report.get("checkpoint_results")
     expected_checkpoints = [
+        "modern.title",
         "modern.quick_panel",
         "modern.config",
         "modern.config.en",

@@ -14,6 +14,7 @@ REPORT_SCHEMA = "tsuinosora.classic_visual_acceptance_report.v1"
 INPUT_SCHEMA = "astra.user_input_sequence.v1"
 RUN_REPORT_SCHEMA = "astra.headless_run_report.v1"
 CHECKPOINTS = [
+    "classic.title",
     "classic.message",
     "classic.save",
     "classic.load",
@@ -86,7 +87,11 @@ def build_sequence() -> Sequence:
     sequence = Sequence()
     sequence.add({"type": "resume"})
     sequence.add({"type": "focus", "focused": True})
-    sequence.await_value("vn.pending_wait_command", "tsui.command.014950", 7200)
+    sequence.await_value("vn.system_page", "title", 7200)
+    sequence.await_value("vn.focused_semantic_id", "root/start")
+    sequence.checkpoint("classic.title")
+    sequence.key("Enter")
+    sequence.await_value("vn.pending_wait_command", "tsui.command.014951", 7200)
     sequence.checkpoint("classic.message")
 
     sequence.add({"type": "pointer_move", "x": 32768, "y": 32768})

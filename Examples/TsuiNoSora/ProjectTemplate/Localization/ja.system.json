@@ -13,6 +13,7 @@
     "system.skip_read": "既読スキップ",
     "system.skip_all": "全スキップ",
     "system.config": "設定",
+    "system.quit": "終了",
     "system.config.master_volume": "音量",
     "system.config.text_speed": "文字速度",
     "system.config.auto_delay": "オート待ち時間",

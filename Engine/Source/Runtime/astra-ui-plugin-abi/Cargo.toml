@@ -6,10 +6,10 @@ version.workspace = true
 
 [features]
 default = ["ffi"]
-ffi = []
+ffi = ["dep:abi_stable"]
 
 [dependencies]
-abi_stable.workspace = true
+abi_stable = { workspace = true, optional = true }
 astra-core = { path = "../astra-core" }
 astra-ui-core = { path = "../astra-ui-core" }
 ed25519-dalek.workspace = true

@@ -6,8 +6,16 @@ use astra_vn_ui::{
     VnUiAction, VnUiControllerEffect, VnUiControllerManifest, VnUiControllerSnapshot,
     VnUiControllerUpdate, VnUiSessionState,
 };
+#[cfg(feature = "portable-luau-runtime")]
+use luaur_rt as mlua;
+#[cfg(feature = "portable-luau-runtime")]
+use luaur_rt::{Lua, LuaSerdeExt, Table, Value};
+#[cfg(feature = "luau-runtime")]
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 use thiserror::Error;
+
+#[cfg(all(feature = "luau-runtime", feature = "portable-luau-runtime"))]
+compile_error!("native and portable Luau runtimes are mutually exclusive");
 
 #[derive(Debug, Error)]
 pub enum LuauUiControllerError {
@@ -189,7 +197,7 @@ impl LuauUiControllerHost {
                 )))
             }
         };
-        let context = lua.create_table().map_err(runtime_error)?;
+        let context = create_table(&lua).map_err(runtime_error)?;
         context
             .set(
                 "state",
@@ -257,7 +265,7 @@ fn install_ui_api(
     lua: &Lua,
     registrations: Rc<RefCell<BTreeMap<String, VnUiControllerManifest>>>,
 ) -> Result<(), LuauUiControllerError> {
-    let registry = lua.create_table().map_err(runtime_error)?;
+    let registry = create_table(lua).map_err(runtime_error)?;
     lua.globals()
         .set("__astra_ui_controllers", registry.clone())
         .map_err(runtime_error)?;
@@ -293,13 +301,13 @@ fn install_ui_api(
             },
         )
         .map_err(runtime_error)?;
-    let controller = lua.create_table().map_err(runtime_error)?;
+    let controller = create_table(lua).map_err(runtime_error)?;
     controller
         .set("register", register)
         .map_err(runtime_error)?;
-    let ui = lua.create_table().map_err(runtime_error)?;
+    let ui = create_table(lua).map_err(runtime_error)?;
     ui.set("controller", controller).map_err(runtime_error)?;
-    let effect = lua.create_table().map_err(runtime_error)?;
+    let effect = create_table(lua).map_err(runtime_error)?;
     effect
         .set(
             "forward",
@@ -369,7 +377,7 @@ fn install_ui_api(
         )
         .map_err(runtime_error)?;
     ui.set("effect", effect).map_err(runtime_error)?;
-    let astra = lua.create_table().map_err(runtime_error)?;
+    let astra = create_table(lua).map_err(runtime_error)?;
     astra.set("ui", ui).map_err(runtime_error)?;
     lua.globals().set("astra", astra).map_err(runtime_error)
 }
@@ -492,6 +500,16 @@ fn validate_effects(
 
 fn runtime_error(error: mlua::Error) -> LuauUiControllerError {
     LuauUiControllerError::Runtime(error.to_string())
+}
+
+#[cfg(feature = "luau-runtime")]
+fn create_table(lua: &Lua) -> mlua::Result<Table> {
+    lua.create_table()
+}
+
+#[cfg(feature = "portable-luau-runtime")]
+fn create_table(lua: &Lua) -> mlua::Result<Table> {
+    Ok(lua.create_table())
 }
 
 #[cfg(test)]

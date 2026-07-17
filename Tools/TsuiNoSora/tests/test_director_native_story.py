@@ -119,33 +119,55 @@ class DirectorNativeStoryAutomationTests(unittest.TestCase):
         ]
         self.assertEqual(wait_hashes, [observation_hash("line.after.first")])
 
-    def test_route_enables_skip_all_through_physical_quick_panel_input(self):
+    def test_route_does_not_inject_a_synthetic_quick_panel_preamble(self):
         route = _route_from_path(1, [])
         types = [item["event"]["type"] for item in route["input_events"]]
         self.assertEqual(
-            types[:9],
+            types[:3],
             [
                 "resume",
                 "focus",
                 "pointer_move",
-                "pointer_button",
-                "pointer_button",
-                "keyboard",
-                "keyboard",
-                "keyboard",
-                "keyboard",
             ],
         )
-        self.assertEqual(
-            route["input_events"][3]["event"],
-            {"type": "pointer_button", "button": "secondary", "state": "pressed"},
-        )
+        self.assertNotIn("pointer_button", types[:-2])
         terminal_wait = route["input_events"][-3]["event"]
         self.assertEqual(terminal_wait["type"], "await")
         self.assertEqual(terminal_wait["observation"]["key"], "vn.terminal_routes")
         self.assertEqual(
             terminal_wait["observation"]["value_hash"], observation_hash(["state.tsui.ending"])
         )
+
+    def test_authored_title_drives_start_and_skip_all_through_physical_ui(self):
+        states = [
+            {
+                "state_id": "tsui.init",
+                "scenes": [
+                    {
+                        "commands": [
+                            {"command_id": "page.title", "kind": "system_page", "page": "title"},
+                            {"command_id": "jump.ending", "kind": "jump", "target": "ending"},
+                        ]
+                    }
+                ],
+            },
+            {
+                "state_id": "ending",
+                "scenes": [{"commands": [{"command_id": "wait.ending", "kind": "input_wait"}]}],
+            },
+        ]
+
+        route = _derive_route_automation(states, {})[0]
+        events = [item["event"] for item in route["input_events"]]
+
+        title_start = next(index for index, event in enumerate(events) if event.get("physical_key") == "Enter")
+        secondary = next(
+            index
+            for index, event in enumerate(events)
+            if event.get("type") == "pointer_button" and event.get("button") == "secondary"
+        )
+        self.assertLess(title_start, secondary)
+        self.assertTrue(any(event.get("physical_key") == "Escape" for event in events[secondary:]))
 
     def test_route_planner_preserves_terminal_state_input(self):
         states = [

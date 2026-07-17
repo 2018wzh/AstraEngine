@@ -13,6 +13,7 @@
     "system.skip_read": "Skip Read",
     "system.skip_all": "Skip All",
     "system.config": "Config",
+    "system.quit": "Quit",
     "system.config.master_volume": "Master Volume",
     "system.config.text_speed": "Text Speed",
     "system.config.auto_delay": "Auto Delay",

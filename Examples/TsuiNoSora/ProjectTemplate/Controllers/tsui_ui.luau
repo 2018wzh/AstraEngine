@@ -26,7 +26,7 @@ for _, definition in controllers do
     end
     if definition[1] == "tsui.system.title.classic" then
         on_open = function(_context, _model)
-            return { astra.ui.effect.focus("root/menu/start") }
+            return { astra.ui.effect.focus("root/start") }
         end
     end
     if definition[1] == "tsui.system.save.classic" then
@@ -41,7 +41,7 @@ for _, definition in controllers do
     end
     if definition[1] == "tsui.system.title.modern" then
         on_open = function(_context, _model)
-            return { astra.ui.effect.focus("root/menu/continue") }
+            return { astra.ui.effect.focus("root/gold/menu/continue") }
         end
     end
     if definition[1] == "tsui.system.save.modern" then

@@ -113,6 +113,9 @@ pub struct NativeVnHostCommandSource {
     ui_semantics: Option<UiSemanticSnapshot>,
     ui_save_slots: BTreeMap<String, SaveSlotViewModel>,
     pending_ui_host_request: Option<VnUiHostRequest>,
+    gameplay_thumbnail_capture: Option<TextureFrame>,
+    pending_save_metadata: Option<NativeVnSaveMetadata>,
+    exit_requested: bool,
     ui_controller_host: LuauUiControllerHost,
     ui_controller_sessions: BTreeMap<String, VnUiSessionState>,
     base_ui_instance_id: Option<String>,
@@ -233,6 +236,7 @@ struct NativeVnPlayerSavePayload {
     draw_commands_hash: Hash256,
     product_media_snapshot_json: Option<Vec<u8>>,
     product_media_snapshot_hash: Option<Hash256>,
+    save_metadata: NativeVnSaveMetadata,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -240,6 +244,15 @@ struct NativeVnPlayerSaveEnvelope {
     schema: String,
     payload_hash: Hash256,
     payload: NativeVnPlayerSavePayload,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct NativeVnSaveMetadata {
+    slot_id: String,
+    thumbnail_asset: String,
+    thumbnail: TextureFrame,
+    timestamp_text: String,
+    playtime_text: String,
 }
 
 struct ProductPresentationBinding {
@@ -571,6 +584,9 @@ impl NativeVnHostCommandSource {
             ui_semantics: None,
             ui_save_slots: default_save_slots(),
             pending_ui_host_request: None,
+            gameplay_thumbnail_capture: None,
+            pending_save_metadata: None,
+            exit_requested: false,
             ui_controller_host,
             ui_controller_sessions: BTreeMap::new(),
             base_ui_instance_id: None,
@@ -657,6 +673,132 @@ impl NativeVnHostCommandSource {
         self.pending_ui_host_request.take()
     }
 
+    pub fn should_capture_gameplay_surface(&self, event: &UiInputEventKind) -> bool {
+        self.runtime_state.as_ref().is_some_and(|state| {
+            state.system_stack.is_empty()
+                && matches!(
+                    event,
+                    UiInputEventKind::PointerButton {
+                        button: astra_ui_core::UiPointerButton::Secondary,
+                        state: UiButtonState::Pressed,
+                        ..
+                    }
+                )
+        })
+    }
+
+    pub fn prepare_surface_capture(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::CaptureSurface {
+                sequence: self.next_command_sequence()?,
+                surface: self.surface,
+            },
+        ])?)
+    }
+
+    pub fn has_gameplay_thumbnail_capture(&self) -> bool {
+        self.gameplay_thumbnail_capture.is_some()
+    }
+
+    pub fn cache_gameplay_surface(
+        &mut self,
+        width: u32,
+        height: u32,
+        rgba8: Vec<u8>,
+    ) -> Result<(), NativeVnHostError> {
+        const THUMBNAIL_WIDTH: u32 = 160;
+        const THUMBNAIL_HEIGHT: u32 = 120;
+        if width == 0 || height == 0 || width > 8192 || height > 8192 {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_CAPTURE_DIMENSIONS: captured gameplay surface dimensions are invalid"
+                    .into(),
+            ));
+        }
+        let expected = usize::try_from(width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| {
+                NativeVnHostError::Save(
+                    "ASTRA_PLAYER_SAVE_CAPTURE_SIZE: captured gameplay surface size overflowed"
+                        .into(),
+                )
+            })?;
+        if rgba8.len() != expected {
+            return Err(NativeVnHostError::Save(format!(
+                "ASTRA_PLAYER_SAVE_CAPTURE_BYTES: captured gameplay surface expected {expected} bytes but received {}",
+                rgba8.len()
+            )));
+        }
+        let source = image::RgbaImage::from_raw(width, height, rgba8).ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_CAPTURE_IMAGE: captured gameplay surface could not form an RGBA image"
+                    .into(),
+            )
+        })?;
+        let thumbnail = image::imageops::resize(
+            &source,
+            THUMBNAIL_WIDTH,
+            THUMBNAIL_HEIGHT,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let rgba8 = thumbnail.into_raw();
+        self.gameplay_thumbnail_capture = Some(TextureFrame {
+            width: THUMBNAIL_WIDTH,
+            height: THUMBNAIL_HEIGHT,
+            hash: Hash256::from_sha256(&rgba8),
+            rgba8,
+        });
+        tracing::debug!(
+            event = "player.vn.save.thumbnail_cached",
+            width = THUMBNAIL_WIDTH,
+            height = THUMBNAIL_HEIGHT,
+            "cached a bounded gameplay thumbnail from the final composed surface"
+        );
+        Ok(())
+    }
+
+    pub fn prepare_save_metadata(
+        &mut self,
+        slot_id: &str,
+        timestamp_text: String,
+        playtime_ms: u64,
+    ) -> Result<(), NativeVnHostError> {
+        if !self.ui_save_slots.contains_key(slot_id) {
+            return Err(NativeVnHostError::Save(format!(
+                "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
+            )));
+        }
+        if timestamp_text.trim().is_empty() || timestamp_text.len() > 64 {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_TIMESTAMP: save timestamp must be a bounded non-empty string"
+                    .into(),
+            ));
+        }
+        let thumbnail = self.gameplay_thumbnail_capture.clone().ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_THUMBNAIL_MISSING: no gameplay surface was captured before opening the save UI"
+                    .into(),
+            )
+        })?;
+        self.pending_save_metadata = Some(NativeVnSaveMetadata {
+            slot_id: slot_id.to_string(),
+            thumbnail_asset: format!("astra.internal.save_thumbnail.{slot_id}"),
+            thumbnail,
+            timestamp_text,
+            playtime_text: format_playtime(playtime_ms),
+        });
+        Ok(())
+    }
+
+    pub fn exit_requested(&self) -> bool {
+        self.exit_requested
+    }
+
     pub fn ui_semantics(&self) -> Option<&UiSemanticSnapshot> {
         self.ui_semantics.as_ref()
     }
@@ -694,14 +836,40 @@ impl NativeVnHostCommandSource {
     }
 
     pub fn mark_save_committed(&mut self, slot_id: &str) -> Result<(), NativeVnHostError> {
-        let slot = self.ui_save_slots.get_mut(slot_id).ok_or_else(|| {
-            NativeVnHostError::Save(format!(
-                "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
-            ))
+        let metadata = self.pending_save_metadata.take().ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_METADATA_MISSING: committed save has no prepared metadata"
+                    .into(),
+            )
         })?;
-        slot.occupied = true;
-        slot.can_load = true;
-        slot.migration_status = "current".to_string();
+        if metadata.slot_id != slot_id {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_METADATA_SLOT: prepared metadata belongs to another slot".into(),
+            ));
+        }
+        {
+            let slot = self.ui_save_slots.get_mut(slot_id).ok_or_else(|| {
+                NativeVnHostError::Save(format!(
+                    "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
+                ))
+            })?;
+            slot.occupied = true;
+            slot.thumbnail_asset = Some(metadata.thumbnail_asset.clone());
+            slot.has_thumbnail = true;
+            slot.timestamp_text = Some(metadata.timestamp_text.clone());
+            slot.playtime_text = Some(metadata.playtime_text.clone());
+            slot.metadata_text = Some(format!(
+                "{} | {}",
+                metadata.timestamp_text, metadata.playtime_text
+            ));
+            slot.can_load = true;
+            slot.migration_status = "current".to_string();
+        }
+        self.ui_backend
+            .renderer_mut()
+            .upsert_image_resource(metadata.thumbnail_asset.clone(), metadata.thumbnail.clone())?;
+        self.textures
+            .insert(metadata.thumbnail_asset, metadata.thumbnail);
         Ok(())
     }
 
@@ -711,13 +879,21 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
             ))
         })?;
+        let thumbnail_asset = slot.thumbnail_asset.take();
         slot.occupied = false;
         slot.can_load = false;
-        slot.thumbnail_asset = None;
+        slot.has_thumbnail = false;
         slot.title_key = None;
         slot.timestamp_text = None;
         slot.playtime_text = None;
+        slot.metadata_text = None;
         slot.migration_status = "empty".to_string();
+        if let Some(thumbnail_asset) = thumbnail_asset {
+            self.ui_backend
+                .renderer_mut()
+                .remove_image_resource(&thumbnail_asset);
+            self.textures.remove(&thumbnail_asset);
+        }
         Ok(())
     }
 
@@ -1081,8 +1257,19 @@ impl NativeVnHostCommandSource {
         let product_media_snapshot_hash = product_media_snapshot_json
             .as_ref()
             .map(|bytes| Hash256::from_sha256(bytes));
+        let save_metadata = self.pending_save_metadata.clone().ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_METADATA_MISSING: save serialization requires prepared metadata"
+                    .into(),
+            )
+        })?;
+        if save_metadata.slot_id != slot {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_METADATA_SLOT: prepared metadata belongs to another slot".into(),
+            ));
+        }
         let payload = NativeVnPlayerSavePayload {
-            schema: "astra.player.native_vn_save_payload.v3".into(),
+            schema: "astra.player.native_vn_save_payload.v4".into(),
             slot,
             sections,
             runtime_state,
@@ -1092,11 +1279,12 @@ impl NativeVnHostCommandSource {
             draw_commands_json,
             product_media_snapshot_json,
             product_media_snapshot_hash,
+            save_metadata,
         };
         let payload_bytes = postcard::to_allocvec(&payload)
             .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
         postcard::to_allocvec(&NativeVnPlayerSaveEnvelope {
-            schema: "astra.player.native_vn_save.v3".into(),
+            schema: "astra.player.native_vn_save.v4".into(),
             payload_hash: Hash256::from_sha256(&payload_bytes),
             payload,
         })
@@ -1104,30 +1292,14 @@ impl NativeVnHostCommandSource {
     }
 
     pub fn restore(&mut self, bytes: &[u8]) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        let envelope: NativeVnPlayerSaveEnvelope =
-            postcard::from_bytes(bytes).map_err(|error| {
-                NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
-            })?;
-        if envelope.schema != "astra.player.native_vn_save.v3"
-            || envelope.payload.schema != "astra.player.native_vn_save_payload.v3"
-        {
-            return Err(NativeVnHostError::Save(
-                "ASTRA_PLAYER_SAVE_VERSION_UNSUPPORTED: save schema is not supported".into(),
-            ));
-        }
-        let payload_bytes = postcard::to_allocvec(&envelope.payload)
-            .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
-        if Hash256::from_sha256(&payload_bytes) != envelope.payload_hash {
-            return Err(NativeVnHostError::Save(
-                "ASTRA_PLAYER_SAVE_INTEGRITY: save payload hash mismatch".into(),
-            ));
-        }
+        let envelope = decode_save_envelope(bytes)?;
         if envelope.payload.sections.session_id != self.session_id {
             return Err(NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_SESSION_MISMATCH: save belongs to another runtime session"
                     .into(),
             ));
         }
+        validate_save_metadata(&envelope.payload.save_metadata, &envelope.payload.slot)?;
         let restored_locale = envelope.payload.runtime_state.locale.clone();
         if !self.localizations.contains_key(&restored_locale) {
             return Err(NativeVnHostError::Localization(format!(
@@ -1172,12 +1344,14 @@ impl NativeVnHostCommandSource {
             serde_json::from_slice(&envelope.payload.draw_commands_json).map_err(|error| {
                 NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
             })?;
+        let save_metadata = envelope.payload.save_metadata;
         self.runtime_state = Some(envelope.payload.runtime_state);
         self.activate_locale(&restored_locale)?;
         self.stage_director = envelope.payload.stage_director;
         self.last_draw = draw_commands;
         self.last_step_evidence = Some(envelope.payload.step_evidence);
         self.restored_product_media_snapshot = envelope.payload.product_media_snapshot_json;
+        self.apply_save_metadata(save_metadata)?;
         self.ui_controller_sessions.clear();
         self.base_ui_instance_id = None;
         self.base_ui_theme_id = None;
@@ -1274,6 +1448,66 @@ impl NativeVnHostCommandSource {
                 slot,
             },
         ])?)
+    }
+
+    pub fn list_saves(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::ListSaves {
+                sequence: self.next_command_sequence()?,
+            },
+        ])?)
+    }
+
+    pub fn ingest_save_catalog_entry(
+        &mut self,
+        expected_slot: &str,
+        bytes: &[u8],
+    ) -> Result<(), NativeVnHostError> {
+        let envelope = decode_save_envelope(bytes)?;
+        if envelope.payload.slot != expected_slot
+            || envelope.payload.sections.session_id != self.session_id
+        {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_CATALOG_IDENTITY: catalog entry does not belong to the requested slot and session"
+                    .into(),
+            ));
+        }
+        validate_save_metadata(&envelope.payload.save_metadata, expected_slot)?;
+        self.apply_save_metadata(envelope.payload.save_metadata)
+    }
+
+    fn apply_save_metadata(
+        &mut self,
+        metadata: NativeVnSaveMetadata,
+    ) -> Result<(), NativeVnHostError> {
+        {
+            let slot = self
+                .ui_save_slots
+                .get_mut(&metadata.slot_id)
+                .ok_or_else(|| {
+                    NativeVnHostError::Save(
+                        "ASTRA_PLAYER_SAVE_METADATA_SLOT: metadata references an undeclared slot"
+                            .into(),
+                    )
+                })?;
+            slot.occupied = true;
+            slot.thumbnail_asset = Some(metadata.thumbnail_asset.clone());
+            slot.has_thumbnail = true;
+            slot.timestamp_text = Some(metadata.timestamp_text.clone());
+            slot.playtime_text = Some(metadata.playtime_text.clone());
+            slot.metadata_text = Some(format!(
+                "{} | {}",
+                metadata.timestamp_text, metadata.playtime_text
+            ));
+            slot.can_load = true;
+            slot.migration_status = "current".into();
+        }
+        self.ui_backend
+            .renderer_mut()
+            .upsert_image_resource(metadata.thumbnail_asset.clone(), metadata.thumbnail.clone())?;
+        self.textures
+            .insert(metadata.thumbnail_asset, metadata.thumbnail);
+        Ok(())
     }
 
     pub fn delete_save(
@@ -1556,6 +1790,7 @@ impl NativeVnHostCommandSource {
                 page: SystemPageKind::parse(ui_string_argument(action, "page")?),
             },
             "vn.return_system" => VnUiAction::ReturnSystem,
+            "vn.request_exit" => VnUiAction::RequestExit,
             "vn.set_config" => VnUiAction::SetConfig {
                 key: ui_string_argument(action, "key")?.to_string(),
                 value: action.arguments.get("value").cloned().ok_or_else(|| {
@@ -1673,11 +1908,24 @@ impl NativeVnHostCommandSource {
             }
             _ => None,
         };
+        if matches!(product_action, VnUiAction::RequestExit) {
+            self.exit_requested = true;
+            tracing::info!(
+                event = "player.vn.exit.requested",
+                controller_id = %controller.controller_id,
+                input_sequence = action.input_sequence,
+                "accepted a typed UI request to close the Player session"
+            );
+            return self.present_current_scene(self.ui_draw.clone());
+        }
         let command = match product_action {
             VnUiAction::Advance => VnPlayerCommand::Advance,
             VnUiAction::Choose { option_id } => VnPlayerCommand::Choose { option_id },
             VnUiAction::OpenSystem { page } => VnPlayerCommand::OpenSystem { page },
             VnUiAction::ReturnSystem => VnPlayerCommand::ReturnSystem,
+            VnUiAction::RequestExit => {
+                unreachable!("exit requests are handled before runtime routing")
+            }
             VnUiAction::SetConfig { key, value } => VnPlayerCommand::SetConfig {
                 key,
                 value: ui_value_to_scalar(&value)?,
@@ -4005,9 +4253,9 @@ fn system_page_localization_key(page: SystemPageKind) -> Result<&'static str, Na
 }
 
 fn default_save_slots() -> BTreeMap<String, SaveSlotViewModel> {
-    (1..=24)
-        .map(|index| {
-            let slot_id = format!("slot.{index:02}");
+    std::iter::once("slot.quick".to_string())
+        .chain((1..=24).map(|index| format!("slot.{index:02}")))
+        .map(|slot_id| {
             (
                 slot_id.clone(),
                 SaveSlotViewModel {
@@ -4018,6 +4266,7 @@ fn default_save_slots() -> BTreeMap<String, SaveSlotViewModel> {
                     title_key: None,
                     timestamp_text: None,
                     playtime_text: None,
+                    metadata_text: None,
                     can_write: true,
                     can_load: false,
                     migration_status: "empty".to_string(),
@@ -4025,6 +4274,75 @@ fn default_save_slots() -> BTreeMap<String, SaveSlotViewModel> {
             )
         })
         .collect()
+}
+
+fn format_playtime(playtime_ms: u64) -> String {
+    let total_seconds = playtime_ms / 1_000;
+    let hours = total_seconds / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
+    let seconds = total_seconds % 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+fn decode_save_envelope(bytes: &[u8]) -> Result<NativeVnPlayerSaveEnvelope, NativeVnHostError> {
+    let envelope: NativeVnPlayerSaveEnvelope = postcard::from_bytes(bytes).map_err(|error| {
+        NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
+    })?;
+    if envelope.schema != "astra.player.native_vn_save.v4"
+        || envelope.payload.schema != "astra.player.native_vn_save_payload.v4"
+    {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_VERSION_UNSUPPORTED: save schema is not supported".into(),
+        ));
+    }
+    let payload_bytes = postcard::to_allocvec(&envelope.payload)
+        .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
+    if Hash256::from_sha256(&payload_bytes) != envelope.payload_hash {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_INTEGRITY: save payload hash mismatch".into(),
+        ));
+    }
+    Ok(envelope)
+}
+
+fn validate_save_metadata(
+    metadata: &NativeVnSaveMetadata,
+    expected_slot: &str,
+) -> Result<(), NativeVnHostError> {
+    if metadata.slot_id != expected_slot
+        || metadata.thumbnail_asset != format!("astra.internal.save_thumbnail.{expected_slot}")
+    {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_METADATA_IDENTITY: save metadata identity does not match its slot"
+                .into(),
+        ));
+    }
+    if metadata.timestamp_text.trim().is_empty()
+        || metadata.timestamp_text.len() > 64
+        || metadata.playtime_text.len() != 8
+    {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_METADATA_TEXT: save metadata text is invalid".into(),
+        ));
+    }
+    let expected_bytes = usize::try_from(metadata.thumbnail.width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(metadata.thumbnail.height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(4));
+    if metadata.thumbnail.width != 160
+        || metadata.thumbnail.height != 120
+        || expected_bytes != Some(metadata.thumbnail.rgba8.len())
+        || Hash256::from_sha256(&metadata.thumbnail.rgba8) != metadata.thumbnail.hash
+    {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_METADATA_THUMBNAIL: save thumbnail integrity check failed".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn system_page_binding_key(page: SystemPageKind) -> Result<&'static str, NativeVnHostError> {

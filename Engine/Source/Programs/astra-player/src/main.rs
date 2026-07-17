@@ -367,6 +367,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                 error.to_string(),
             )
         })?;
+        hydrate_save_catalog(&mut vn, &mut executor).await?;
         executor
             .execute_batch(vn.launch().map_err(|error| {
                 astra_platform::PlatformError::new(
@@ -452,8 +453,12 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                                 &mut executor,
                                 "slot.quick",
                                 PlayerHostResourceId(save_transaction_id),
+                                timeline_clock.elapsed().as_millis() as u64,
                             )
                             .await?;
+                            vn.mark_save_committed("slot.quick").map_err(|error| {
+                                player_platform_error("player.save.commit_state", error)
+                            })?;
                             tracing::info!(
                                 event = "astra.player.save.committed",
                                 player_sequence,
@@ -565,6 +570,9 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                     _ => None,
                 };
                 if let Some(kind) = ui_input {
+                    if vn.should_capture_gameplay_surface(&kind) {
+                        capture_gameplay_surface(&mut vn, &mut executor).await?;
+                    }
                     let batch = vn.dispatch_ui_event(kind).map_err(|error| {
                         astra_platform::PlatformError::new(
                             astra_platform::PlatformErrorCode::InvalidState,
@@ -579,6 +587,14 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                             error.to_string(),
                         )
                     })?;
+                    if vn.exit_requested() {
+                        tracing::info!(
+                            event = "player.session.exit_requested",
+                            player_sequence,
+                            "closing the Player session after a typed UI exit request"
+                        );
+                        break;
+                    }
                     if let Some(request) = vn.take_ui_host_request() {
                         match request {
                             astra_player::VnUiHostRequest::Save { slot_id } => {
@@ -595,6 +611,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                                     &mut executor,
                                     &slot_id,
                                     PlayerHostResourceId(save_transaction_id),
+                                    timeline_clock.elapsed().as_millis() as u64,
                                 )
                                 .await?;
                                 vn.mark_save_committed(&slot_id).map_err(|error| {
@@ -806,7 +823,23 @@ async fn execute_platform_save(
     executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
     slot: &str,
     transaction: astra_player::PlayerHostResourceId,
+    playtime_ms: u64,
 ) -> Result<(), astra_platform::PlatformError> {
+    if !source.has_gameplay_thumbnail_capture() {
+        capture_gameplay_surface(source, executor).await?;
+    }
+    let now = time::OffsetDateTime::now_utc();
+    let timestamp = format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute()
+    );
+    source
+        .prepare_save_metadata(slot, timestamp, playtime_ms)
+        .map_err(|error| player_platform_error("player.save.metadata", error))?;
     let plan = source
         .prepare_save_transaction(slot, transaction)
         .map_err(|error| player_platform_error("player.save.prepare", error))?;
@@ -815,6 +848,38 @@ async fn execute_platform_save(
         .await
         .map_err(|error| player_platform_error("player.save.transaction", error))?;
     Ok(())
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+async fn capture_gameplay_surface(
+    source: &mut astra_player::NativeVnHostCommandSource,
+    executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
+) -> Result<(), astra_platform::PlatformError> {
+    let results = executor
+        .execute_batch(
+            source
+                .prepare_surface_capture()
+                .map_err(|error| player_platform_error("player.save.capture.prepare", error))?,
+        )
+        .await
+        .map_err(|error| player_platform_error("player.save.capture", error))?;
+    let (width, height, rgba8) = match results.as_slice() {
+        [PlayerHostCommandResult::Captured {
+            width,
+            height,
+            rgba8,
+            ..
+        }] => (*width, *height, rgba8.clone()),
+        _ => {
+            return Err(player_platform_error(
+                "player.save.capture",
+                "ASTRA_PLAYER_SAVE_CAPTURE_RESULT: platform returned an unexpected result",
+            ));
+        }
+    };
+    source
+        .cache_gameplay_surface(width, height, rgba8)
+        .map_err(|error| player_platform_error("player.save.capture.cache", error))
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -848,6 +913,56 @@ async fn execute_platform_load(
         .execute_batch(present)
         .await
         .map_err(|error| player_platform_error("player.save.present", error))?;
+    Ok(())
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+async fn hydrate_save_catalog(
+    source: &mut astra_player::NativeVnHostCommandSource,
+    executor: &mut astra_player::PlayerHostCommandExecutor<astra_player::PlatformCommandSink>,
+) -> Result<(), astra_platform::PlatformError> {
+    let results = executor
+        .execute_batch(
+            source
+                .list_saves()
+                .map_err(|error| player_platform_error("player.save.list.prepare", error))?,
+        )
+        .await
+        .map_err(|error| player_platform_error("player.save.list", error))?;
+    let slots = match results.as_slice() {
+        [PlayerHostCommandResult::SaveList { slots }] => slots.clone(),
+        _ => {
+            return Err(player_platform_error(
+                "player.save.list",
+                "ASTRA_PLAYER_SAVE_LIST_RESULT_INVALID: platform returned an unexpected result",
+            ));
+        }
+    };
+    for slot in &slots {
+        let results = executor
+            .execute_batch(source.read_save(slot).map_err(|error| {
+                player_platform_error("player.save.catalog.read.prepare", error)
+            })?)
+            .await
+            .map_err(|error| player_platform_error("player.save.catalog.read", error))?;
+        let bytes = match results.as_slice() {
+            [PlayerHostCommandResult::SaveRead { bytes }] => bytes,
+            _ => {
+                return Err(player_platform_error(
+                    "player.save.catalog.read",
+                    "ASTRA_PLAYER_SAVE_CATALOG_RESULT_INVALID: platform returned an unexpected result",
+                ));
+            }
+        };
+        source
+            .ingest_save_catalog_entry(slot, bytes)
+            .map_err(|error| player_platform_error("player.save.catalog.ingest", error))?;
+    }
+    tracing::info!(
+        event = "player.save.catalog.hydrated",
+        slot_count = slots.len(),
+        "hydrated validated save metadata before launching the product runtime"
+    );
     Ok(())
 }
 
