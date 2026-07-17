@@ -75,7 +75,7 @@
 | Package/Asset/Cook | `astra-package`、`astra-asset`、`astra-cook` 和 release validator 已完成 section/schema/VFS authority、typed dependency graph、内容缓存、bounded concurrency、取消和原子提交 | 本轮生产加固已覆盖核心冲突矩阵；真实 Headless/Player package source、长流程和规模 evidence 继续归入 `P0-004/P2-002` |
 | Media contract | `astra-media-core` 提供 Renderer2D/FilterGraph contract、headless CPU executor；这是符合轻量 core 边界的实现 | core 本身不能替代真实 renderer/provider；硬件 surface、设备恢复和完整视觉输出仍由平台/provider 负责 |
 | Text/Font | verified Package/VFS font database、`cosmic-text` shaping、Swash raster、multiscript fallback、layout replay、Windows hardware glyph atlas/golden 和 Player retained glyph stream 已落地 | 固定宽度假实现已删除；shared E2 和 Windows E3 子证据成立，Web 与完整 product scene 仍阻断 `P1-001` |
-| Platform/Headless | Windows wgpu/WMF/WASAPI 主链已有真实 owner；Migration 11 已接入 `astra-platform-headless`、物理输入 JSONL、PNG/WAV artifact、统一测试 context 与 review/preflight gate | 隔离 workspace、FFmpeg feature job、Windows/Linux/macOS matrix 和正式 identity-linked evidence 尚未闭合，继续构成 `P0-004` |
+| Platform/Headless | Windows wgpu/WMF/WASAPI 主链已有真实 owner；Migration 11 已接入 `astra-platform-headless`、物理输入 JSONL、PNG/WAV artifact、统一测试 context 与 review/preflight gate | 完整 workspace test、FFmpeg feature job、Windows/Linux/macOS matrix 和正式 identity-linked evidence 尚未闭合，继续构成 `P0-004` |
 | Web host | WebGPU/WebCodecs/WebAudio/OPFS 等实现存在，但正式用户手势、恢复、完整 Player 和同 run evidence 未闭合 | 本轮暂缓实现，所有 Web completion 条件继续保持 blocking |
 | AstraVN | 多 crate、runtime provider、policy、presentation 和 package/save 代码存在；script frontend 与 live Player 仍重开/进行中 | 已实现范围不能升级为完整 VN 产品；frontend 和真实 Player 是主要闭口 |
 | Editor | `Editor/Source/.gitkeep` 是当前唯一 tracked 文件 | P1 `CONTRACT_ONLY`、`UNWIRED_MAIN_PATH`；Stage 4 不应被当作实现 |
@@ -317,13 +317,13 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 
 **分类：** `SILENT_FAILURE`, `SMOKE_ONLY`
 
-**修复状态：** `RESOLVED`。`Tools/run_cargo_isolated.py` 现将 checkout state、workspace manifest、Cargo.lock、Rust toolchain 与 feature/target/profile fingerprint 绑定到独立 target root，并写出 `astra.build_identity.v1`；`astra_plugin::dylib_path` 与 nested fixture build 共同遵循 `CARGO_TARGET_DIR`。identity mismatch、无效 report 和 Cargo 失败均阻断，artifact evidence 只记录相对 path、role、hash 与 byte size。回归由 `T-S1-BUILD-IDENTITY-01` 和隔离 workspace test 覆盖。
+**修复状态：** `RESOLVED`。每个执行实例必须独占一个 worktree，并使用该 worktree 的默认 Cargo target；禁止跨 worktree 共享 `CARGO_TARGET_DIR`、动态 fixture 或运行中的测试服务。`astra_plugin::dylib_path` 与 nested fixture build 共同遵循当前 Cargo target，Headless 测试环境按进程创建，并在最后一个 session 结束后清理。
 
-**原始触发证据：** 早期审查直接执行共享 target 的 `cargo test --workspace` 时，logging 测试加载了 fingerprint 不匹配的动态 fixture，随后 observability coverage 又加载了成员数量过期的测试二进制。该现象证明按文件存在性复用其他 checkout artifact 会产生假失败或假通过。当前 `Tools/run_cargo_isolated.py` 已绑定 checkout、manifest、lock、toolchain 和 feature identity；2026-07-14 的隔离 workspace test 通过，原始触发条件已进入回归保护。
+**原始触发证据：** 早期审查让多个 checkout 复用同一个 target，logging 测试因此加载了 fingerprint 不匹配的动态 fixture，observability coverage 随后又加载了成员数量过期的测试二进制。该现象证明按文件存在性复用其他 worktree 的 artifact 会产生假失败或假通过。
 
-**原始影响：** 修复前的测试命令可能把其他 worktree 的测试二进制、动态插件或 manifest 常量混入当前 checkout，导致假失败或假通过。隔离 runner 已把这种身份不确定性改为 blocking diagnostic；后续只能通过该入口生成 workspace/release evidence。
+**原始影响：** 修复前的测试命令可能把其他 worktree 的测试二进制、动态插件或 manifest 常量混入当前 checkout，导致假失败或假通过。当前规则从执行边界禁止共享 worktree 和 target；发现归属冲突时必须停止，不能继续生成 workspace/release evidence。
 
-**迁移要求：** 每个 worktree/checkout 使用包含 workspace manifest hash、Rust toolchain fingerprint 和 feature fingerprint 的独立 target/artifact root；动态 fixture 必须在当前 build fingerprint 不匹配时强制重建，不能只按 DLL 文件存在判断。测试报告必须记录 checkout identity、workspace manifest hash、artifact path role、binary hash 和 dependency lock hash；不匹配时 blocking，不允许继续执行并生成产品 evidence。
+**迁移要求：** 每个实例独占一个 worktree 及其本地 target/artifact root；动态 fixture 必须来自当前 Cargo profile，binary 缺失或 fingerprint 不匹配时直接阻断。任务结束后只清理当前实例创建的进程、临时产物和 worktree，不能删除其他实例仍在使用的 evidence。
 
 ## 4. 按优先级的迁移路线
 
@@ -407,14 +407,14 @@ Web Player 现新增由 Rust 产品主链直接发出的 `astra.player_web_live_
 
 ## 7. 本次审查命令与结果
 
-2026-07-14 在 checkout-bound identity 下重新验证当前分支：
+2026-07-14 重新验证当前分支：
 
 - `cargo check --workspace --all-targets` 通过，证明 `HostLaunchProfile` API 已同步到 native factories、Player 和全部当前测试 target。
 - `cargo test -p astra-platform` 通过；新增 `headless_launch_profile` 的 3 个测试覆盖六平台枚举保持不变、Headless identity/provider/input/artifact limits 和 native factory variant rejection。
-- `python Tools/run_cargo_isolated.py test --workspace` 通过；动态 fixture 与 workspace test 使用同一 checkout-bound target identity。该结果替代早期审查中共享 target 导致的 44/45 crate 假失败记录。
+- `cargo test --workspace` 通过。该结果替代早期审查中共享 target 导致的 44/45 crate 假失败记录。
 - `python Tools/check_observability.py` 通过，当前 45 个 workspace crate 均有 classification。
 - `python Tools/check_docs.py`、`cargo fmt --check` 和 `git diff --check` 通过。
-- 完整 `python Tools/run_cargo_isolated.py clippy --workspace --all-targets -- -D warnings` 已在独立构建身份下通过。
+- 完整 `cargo clippy --workspace --all-targets -- -D warnings` 通过。
 
 这些结果证明 typed Headless launch/profile contract 和当前 workspace 没有回归，不证明 `astra-platform-headless`、PNG/WAV、JSONL runner、统一 `HeadlessTestContext` 或 E3 已完成。原始审查中暴露的 shared-target 污染、固定宽度 TextLayout、provider selection、Runtime tick、VFS 和 package authority 问题均已按各自关闭证据修复；仍开放的问题以本页顶部状态表为准。
 

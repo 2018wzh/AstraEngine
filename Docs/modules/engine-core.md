@@ -12,7 +12,7 @@ EngineCore 是所有产品线共享的引擎内核。它提供 RuntimeWorld、Ac
 | `astra-target` | Editor/Game/Program Target manifest、validation report |
 | `astra-property` | derive 宏、PropertySystem metadata、Inspector/MCP/save glue |
 | `astra-test` | 历史 report DTO；旧 YAML runner 已由 Migration 11 删除 |
-| `astra-headless-test` | checkout-bound `HeadlessTestContext` 与统一 test lifecycle |
+| `astra-headless-test` | worktree-local `HeadlessTestContext` 与统一 test lifecycle |
 | `astra-headless` | Developer-only JSONL product runner、artifact/review/preflight evidence 工具 |
 | `astra-cli` | cook/package/release CLI；旧 `astra test run --headless` 只返回迁移 diagnostic |
 

@@ -127,11 +127,11 @@ impl Fixture {
             .join(dylib_filename("ui_component_provider"));
         assert!(
             host.is_file(),
-            "component host binary must be built in the checkout-bound target"
+            "component host binary must be built in the worktree-local target"
         );
         assert!(
             artifact.is_file(),
-            "component fixture dylib must be built in the checkout-bound target"
+            "component fixture dylib must be built in the worktree-local target"
         );
         let artifact_bytes = std::fs::read(&artifact).expect("fixture artifact");
         let signing = SigningKey::from_bytes(&[19; 32]);

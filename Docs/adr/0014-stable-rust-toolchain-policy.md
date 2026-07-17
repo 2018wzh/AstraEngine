@@ -19,5 +19,4 @@ AstraEngine 改用仓库根 `rust-toolchain.toml` 的 `stable` channel 作为唯
 
 ## Verification
 
-本 ADR 当前只锁定迁移方向。实现完成后，`Tools/run_cargo_isolated.py` 必须证明 toolchain/lockfile/feature/target 身份一致，并阻断 identity mismatch。
-
+本 ADR 当前只锁定迁移方向。实现完成后，各产品构建入口必须证明 toolchain/lockfile/feature/target 身份一致，并阻断 identity mismatch。

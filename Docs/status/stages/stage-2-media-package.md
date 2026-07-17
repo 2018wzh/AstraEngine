@@ -349,7 +349,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 ## Migration 11 Headless Platform 测试后端
 
-[Migration 11](../../migrations/headless-platform-test-backend-migration.md) 已进入实现阶段。`S2-MEDIA-01` 与 `S2-MEDIA-03` 保持 `DONE`，只表示局部 renderer/audio contract；其余 Headless 工作项必须等隔离全测、跨平台 job 和正式 evidence 通过后才能关闭。
+[Migration 11](../../migrations/headless-platform-test-backend-migration.md) 已进入实现阶段。`S2-MEDIA-01` 与 `S2-MEDIA-03` 保持 `DONE`，只表示局部 renderer/audio contract；其余 Headless 工作项必须等完整 workspace test、跨平台 job 和正式 evidence 通过后才能关闭。
 
 | Work ID | Status | Planned boundary | Planned Test ID |
 | --- | --- | --- | --- |
@@ -368,7 +368,8 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 ```bash
 cargo test -p astra-platform-headless
 cargo test -p astra-headless
-python Tools/run_cargo_isolated.py test --workspace
+cargo build -p astra-headless
+cargo test --workspace
 ```
 
 对应 crate、binary、schema 和 report 已接入 workspace，但尚未取得完整运行证据，不能把这些命令写成已通过。实现工作在独立分支进行，合入前仍须满足全量门禁。

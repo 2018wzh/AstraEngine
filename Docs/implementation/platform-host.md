@@ -34,7 +34,7 @@ Headless 的 `HttpsRange` source 只接受 allowlist 中不含 credential/fragme
 | `astra-platform-common` | generational resource table、ordered completion、atomic save、hash-bound package range、shared `WgpuPresentationCore`、audio/gamepad mapper、verified cache 与共用 policy |
 | `astra-platform-windows` | winit event loop、hardware wgpu、WASAPI、WMF、Saved Games、Windows package source；test injection 仅在 `platform-test-driver` |
 | `astra-platform-web` | canvas/DOM、WebGPU、WebAudio、WebCodecs、OPFS、fetch/File source |
-| `astra-platform-headless` | `publish = false` 测试 host 已实现完整 service、物理输入编排和 PNG/WAV artifact；隔离全测与正式 evidence 尚待闭合 |
+| `astra-platform-headless` | `publish = false` 测试 host 已实现完整 service、物理输入编排和 PNG/WAV artifact；完整 workspace test 与正式 evidence 尚待闭合 |
 | `astra-player-web` | 独立 WASM Player，读取 config、package 和 cooked platform profile |
 | iOS、Android crate | Stage 6 `PLATFORM_NOT_IMPLEMENTED` factory |
 

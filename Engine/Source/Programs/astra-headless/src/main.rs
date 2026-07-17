@@ -1666,7 +1666,7 @@ fn bootstrap_test_env(output: &Path, build_identity: &Path) -> Result<(), String
         identity_hash,
         package_hash,
     );
-    profile.id = "checkout-bound-test".into();
+    profile.id = "worktree-local-test".into();
     let profile_path = output.join("headless-profile.json");
     write_atomic_json(&profile_path, &profile)?;
     fs::create_dir_all(output.join("artifacts"))

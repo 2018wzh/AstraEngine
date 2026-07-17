@@ -1,5 +1,5 @@
 #[astra_headless_test::test]
-fn starts_and_stops_checkout_bound_session() {
+fn starts_and_stops_worktree_local_session() {
     assert!(std::env::var_os("ASTRA_BUILD_IDENTITY").is_some());
 }
 

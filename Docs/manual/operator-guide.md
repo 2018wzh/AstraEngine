@@ -2,23 +2,25 @@
 
 Operator 负责构建、打包、平台适配、Release Gate、crash bundle 和 AstraEMU local case report。
 
-## Checkout-bound Cargo 验证
+## Worktree 内 Cargo 验证
 
-多 worktree 或本地 release 验证统一通过 checkout-bound 入口执行：
+每次验证都应在当前实例独占的 worktree 中直接执行 Cargo。workspace test 依赖 Headless test driver，因此先构建对应 binary：
 
 ```bash
-python Tools/run_cargo_isolated.py clippy --workspace --all-targets -- -D warnings
-python Tools/run_cargo_isolated.py test --workspace
-python Tools/run_cargo_isolated.py test --workspace --features ffmpeg-vcpkg
+cargo clippy --workspace --all-targets -- -D warnings
+cargo build -p astra-headless
+cargo test --workspace
+cargo build -p astra-headless --features ffmpeg-vcpkg
+cargo test --workspace --features ffmpeg-vcpkg
 ```
 
-该入口从 commit/dirty state、workspace manifest、Cargo.lock、Rust toolchain 和 feature/target/profile 参数派生独立 target root。target root 内的 `astra-build-identity.json` 使用 `astra.build_identity.v1`，只记录 hash、状态、artifact role、相对路径和 byte size。报告损坏、identity 不一致、动态 fixture 不在同一 target root 或 Cargo 返回非零状态时必须停止，不得改用共享 `target/debug` 继续生成证据。
+禁止让多个实例共享 worktree 或 `CARGO_TARGET_DIR`。Headless 测试框架只解析当前 Cargo profile 中的 `astra-headless`，为测试进程生成临时 profile、package、build identity 和 artifact root，并在最后一个 session 结束后删除这些产物。binary 缺失、hash 不一致、bootstrap 失败或清理失败都会阻断测试。
 
-入口会在 Cargo 启动前清理旧 identity，默认保留最近 3 个 identity，缓存上限为 50 GiB，最长保留 7 天。当前任务、仍有 lease 的并行任务和带 `.pin` 标记的 identity 不参与清理。需要调整策略时，设置 `ASTRA_CARGO_CACHE_MAX_GIB`、`ASTRA_CARGO_CACHE_KEEP` 或 `ASTRA_CARGO_CACHE_MAX_AGE_DAYS`；只执行清理可运行 `python Tools/run_cargo_isolated.py --gc-only`，临时跳过自动清理则在 Cargo 参数前加 `--no-auto-gc`。每次清理都会更新 `target/identity/astra-build-cache-gc.json`；配置无效、协调超时或文件删除失败都会阻断命令。
+任务结束后，应停止当前实例启动的进程，删除不再需要的临时报告、fixture 和构建缓存。只允许清理当前实例拥有的产物；移除 worktree 前必须确认没有未提交修改，也不能触碰其他实例仍在使用的目录。
 
-Windows 的 `ffmpeg-vcpkg` job 要求设置 `VCPKG_ROOT`；driver 会从 `VCPKG_DEFAULT_TRIPLET`（默认 `x64-windows`）解析 release/debug runtime，并只在该隔离命令的子进程 `PATH` 中加入 DLL 目录。目录或 runtime 缺失时命令直接阻断，不复制 DLL，也不退回无视频模式。
+Windows 的 `ffmpeg-vcpkg` job 要求设置 `VCPKG_ROOT`，并把 `VCPKG_DEFAULT_TRIPLET` 对应的 release/debug runtime 目录显式加入 `PATH`。目录或 runtime 缺失时命令直接阻断，不复制 DLL，也不退回无视频模式。
 
-CI 的默认 Headless job 必须在 `windows-latest`、`ubuntu-latest` 和 `macos-latest` 分别执行 docs、fmt、isolated clippy/test、test convergence 与 shipping graph 检查。独立 Windows job 从显式 vcpkg root 安装 FFmpeg，并以 `ffmpeg-vcpkg` 同时运行 workspace clippy/test；配置存在不等于 job 已通过，状态页只能引用实际 CI run evidence。
+CI 的默认 Headless job 执行 docs、fmt、clippy、Headless driver build、workspace test、test convergence 与 shipping graph 检查。独立 Windows job 从显式 vcpkg root 安装 FFmpeg，并以 `ffmpeg-vcpkg` 同时运行 workspace clippy/test；配置存在不等于 job 已通过，状态页只能引用实际 CI run evidence。
 
 性能验收必须把同一份 build identity 继续传入 `PerformanceRunIdentity`，并补齐 package hash、host profile hash、product profile 和 session id。`astra.performance_report.v1` 为 `blocked` 时，应按 diagnostic 检查 run duration、sample count、threshold 或 identity drift；不要重写报告、删掉慢 sample或在采样后放宽 budget。正式校验使用 `ReleaseValidator::validate_package_with_product_evidence`，同时提交 capability、conformance、Player、budget 和 report。普通 debug test 只验证 recorder、host 与 validator 接线，正式阈值需要 release build 与声明的参考环境。
 
@@ -62,7 +64,7 @@ astra-headless validate-review \
   --review target/headless/full-playthrough/review.json
 ```
 
-文件与 stdio 使用同一双向 JSONL 协议。默认保存全部 presented frame PNG 和完整 PCM S16LE WAV；`all`、`checkpoints`、`final`、`manifest-only` 显式受 frame、byte、duration、package 和 artifact count 限额约束。stdout 只输出协议或 report，日志只写 stderr。当前实现仍需通过完整隔离 workspace、FFmpeg feature job 与正式 review/preflight evidence 后才能关闭 Migration 11。
+文件与 stdio 使用同一双向 JSONL 协议。默认保存全部 presented frame PNG 和完整 PCM S16LE WAV；`all`、`checkpoints`、`final`、`manifest-only` 显式受 frame、byte、duration、package 和 artifact count 限额约束。stdout 只输出协议或 report，日志只写 stderr。当前实现仍需通过完整 workspace、FFmpeg feature job 与正式 review/preflight evidence 后才能关闭 Migration 11。
 
 产品、Player、样例或 full-playthrough 必须先通过自动比较，再运行 `prepare-review`。模型或具名人工只能按 bundle 查看 required checkpoint、首尾帧、最大差异帧、失败邻近帧和完整 WAV，不得自行省略条目。音频要检查波形、频谱、响度、静音、削波、声道和时长；涉及语音内容或音画同步时还要试听。完成的 `astra.headless_review.v1` 必须再通过 `validate-review`；模型不能覆盖自动失败或自行放宽容差。
 

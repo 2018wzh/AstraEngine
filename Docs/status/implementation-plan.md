@@ -19,7 +19,7 @@
 
 | Area | Code status | Evidence |
 | --- | --- | --- |
-| Stage 1 EngineCore | `DONE` | `python Tools/run_cargo_isolated.py test --workspace` 通过；checkout-bound identity绑定 commit/dirty state、workspace manifests、Cargo.lock、toolchain与features，动态 fixture build/load使用同一 target root；Runtime snapshot保存 stable id generator、完整 EventQueue/AwaitQueue/delayed queue、typed component、mutation/effect trace；flat FSM支持 run-to-quiescence和事务回滚；provider-free replay校验 input/await/provider output与逐 tick hash |
+| Stage 1 EngineCore | `DONE` | workspace test 通过；Runtime snapshot保存 stable id generator、完整 EventQueue/AwaitQueue/delayed queue、typed component、mutation/effect trace；flat FSM支持 run-to-quiescence和事务回滚；provider-free replay校验 input/await/provider output与逐 tick hash |
 | Stage 2 Media + Package | `IN_PROGRESS` | 生产完备度审查已重开本 Stage。VFS/container/schema/scenario authority、Cook transactional dependency pipeline、bounded text layout replay、Windows hardware glyph golden、Windows native media 设备恢复/队列/资源释放、通用 measured performance contract 和 release same-run validator 已完成；Migration 11 的完整 Headless host、真实 PNG/WAV、image/audio/video decode、物理 JSONL、CLI、测试 lifecycle、approval/review 和 preflight gate 已进入统一实现，当前只等待 Windows CI、具名 review 与真实 Windows/Web linked evidence。Linux/macOS Headless portability 与其他 native host 一并进入 Stage 6，不阻断 Stage 2。GPU FilterGraph、正式 release-reference performance pass 和真实 Player performance artifact 同样保持开放；Web 本轮暂缓 |
 | Stage 3 AstraVN | `IN_PROGRESS` | Migration 6 frontend 与 Migration 9 shared 1–3 focused implementation 已落地。旗舰项目已直接替换 `Examples/NativeVN` 原两路线技术样例，并接入 `.astra`、project descriptor、localization、UI/theme/controller、180 条用户授权中文配音、283 个 asset sidecar 与真实 Cook。本轮未执行 Runtime/Player 测试。`S3-SCRIPT-01/02`、presentation、system UI、sample、Windows/Web Player 均等待同一 `.astrapkg` 的 formal native-input evidence。顶层仍由 `S3-TSUI-INTERNAL-DEMO-01`、`S3-TSUI-GATE-01` 和 `S3-FLAGSHIP-DEMO-01` 阻断 |
 | Stage 4 Editor + AI/MCP | `REOPENED_SPEC` | Editor workflow、runtime-provider-aware shell、Plugin Manager、AI provider profile、ONNX ModelBundle、Runtime Director、memory、MCP context 和 AI/MCP gate 已写入文档；`Editor/Source` 和 `Engine/Plugins/Providers/astra-ai-onnx` 尚不存在。Stage 4 因 VFS/GameRuntime contract 重开，Project Wizard、PIE、Debugger 和 Release Gate 必须读取 `RuntimeEditorMetadata`，ONNX ModelBundle、Context Pack、generated artifact 和 MCP package access 需要改为统一 VFS mount evidence |
@@ -35,7 +35,6 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | Work ID | Status | Evidence |
 | --- | --- | --- |
 | `S1-BOOT-01` | `DONE` | workspace、toolchain、CI 配置存在 |
-| `S1-BUILD-IDENTITY-01` | `DONE` | `python -m unittest Tools.tests.test_run_cargo_isolated`、`python Tools/run_cargo_isolated.py test -p astra-plugin --test artifact_path`、`python Tools/run_cargo_isolated.py test -p astra-cli --test logging` 和隔离 workspace tests；`astra.build_identity.v1` 记录 checkout/manifest/lock/toolchain/feature identity 与相对 artifact hash |
 | `S1-CORE-01` | `DONE` | `cargo test -p astra-core core_types` |
 | `S1-RUNTIME-01` | `DONE` | `cargo test -p astra-runtime world_actor` 和 `cargo test -p astra-runtime trigger_event`；typed component payload/hash、component mutation record 和 trigger event 已覆盖 |
 | `S1-RUNTIME-02` | `DONE` | `cargo test -p astra-runtime state_machine_tick`；run-to-quiescence、terminal、cycle/microstep blocker 和整机事务回滚已覆盖 |
@@ -159,7 +158,7 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | 3 | `S2-GATE-01` release report | `DONE` | `astra-release` 和 `astra package validate` 输出 `astra.release_report.v1`；release profile 缺 `compiled.project` cook/project artifact 时阻断 |
 | 4 | `S2-MEDIA-01` 到 `S2-MEDIA-05` media contract/providers | `IN_PROGRESS` | shared contract、字体 E2、Windows hardware glyph visual E3 子证据、typed FilterGraph、AudioGraph v2、audio-master scheduler、WMF one-shot decode、optional FFmpeg timestamped stream、Windows WASAPI/wgpu native media session、product-profile-bound measured report 和 release same-run validator 已落地；真实 Player performance artifact、Web glyph consumer、GPU FilterGraph 和正式 release-reference performance pass 未闭合，不能沿用旧 `DONE` |
 | 4a | P1-001 Text/Font 产品闭环 | `IN_PROGRESS` | 固定宽度根因已删除；固定 revision/hash/OFL 的 Noto Sans SC、Noto Sans Arabic、Noto Emoji 已通过真实 `astra.font_manifest.v1`、Package section 和 VFS 构造 provider，覆盖复杂 script/cluster 与 fallback；AssetSidecar 现在要求 typed family/face/subset/Unicode coverage，Cook 自动生成 profile-bound font manifest 和 locale config。bounded transcript 已覆盖 snapshot/restore、uninterrupted continuation、provider-free replay 和 drift blocking。Windows hardware atlas/golden、Player command/release consumer、bundled VN dialogue/choice/system text、事务回滚、release 和 loss/rebuild已闭合；仍需 WebGPU glyph consumer与 bundled VN 完整 presentation/audio 主路径，证据不足前不得标记完整字体系统 |
-| 5 | `S2-HEADLESS-*` Migration 11 | `IN_PROGRESS` | 实现已进入统一主路径；完成隔离 workspace test、`ffmpeg-vcpkg` job、正式 review 与 Windows/Web linked preflight evidence 后逐项关闭 |
+| 5 | `S2-HEADLESS-*` Migration 11 | `IN_PROGRESS` | 实现已进入统一主路径；完成 worktree-local workspace test、`ffmpeg-vcpkg` job、正式 review 与 Windows/Web linked preflight evidence 后逐项关闭 |
 | 6 | `S2-WINDOWS-HOST-01` + `S2-WINDOWS-WMF-01` + `S2-WINDOWS-GATE-01` Windows platform repair | `IN_PROGRESS` | Windows real host 已接入 winit/wgpu/WASAPI/WMF/Saved Games/package range；Player 全服务接线和同 run conformance/automation evidence 尚未完成 |
 | 7 | `S3-MODULE-LAYOUT-01` AstraVN module layout | `DONE` | AstraVN 已迁到 `Engine/Source/Modules/AstraVN/`，workspace/path dependency 已改链 |
 | 8 | `S3-CRATE-SPLIT-01` AstraVN functional crate split | `DONE` | AstraVN 功能 crate 已拆出，`astra-vn` 只作为 facade、`rlib`/Rust ABI `dylib` 和兼容 re-export |
@@ -227,8 +226,9 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 ```bash
 python Tools/check_docs.py
 cargo fmt --check
-python Tools/run_cargo_isolated.py clippy --workspace --all-targets -- -D warnings
-python Tools/run_cargo_isolated.py test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo build -p astra-headless
+cargo test --workspace
 git diff --check
 ```
 

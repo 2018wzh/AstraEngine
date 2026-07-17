@@ -20,15 +20,17 @@ jobs:
       - name: Format
         run: cargo fmt --check
       - name: Clippy
-        run: python Tools/run_cargo_isolated.py clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build Headless test driver
+        run: cargo build -p astra-headless
       - name: Test
-        run: python Tools/run_cargo_isolated.py test --workspace
+        run: cargo test --workspace
       - name: Headless convergence
         run: python Tools/check_headless_test_convergence.py
       - name: Shipping dependency isolation
         run: python Tools/check_headless_shipping_graph.py
       - name: Headless acceptance tooling
-        run: python -m unittest Tools.tests.test_run_cargo_isolated Tools.tests.test_run_platform_host_acceptance
+        run: python -m unittest Tools.tests.test_run_platform_host_acceptance
 
   headless-video-ffmpeg:
     runs-on: windows-latest
@@ -49,7 +51,11 @@ jobs:
         run: .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
       - name: Install FFmpeg
         run: .\vcpkg\vcpkg.exe install ffmpeg:x64-windows --clean-after-build
+      - name: Configure FFmpeg runtime
+        run: python -c "import os,pathlib; root=pathlib.Path(os.environ['VCPKG_ROOT'])/'installed'/os.environ['VCPKG_DEFAULT_TRIPLET']; pathlib.Path(os.environ['GITHUB_PATH']).open('a', encoding='utf-8').write(str(root/'debug'/'bin')+'\n'+str(root/'bin')+'\n')"
       - name: Clippy with FFmpeg
-        run: python Tools/run_cargo_isolated.py clippy --workspace --all-targets --features ffmpeg-vcpkg -- -D warnings
+        run: cargo clippy --workspace --all-targets --features ffmpeg-vcpkg -- -D warnings
+      - name: Build Headless test driver with FFmpeg
+        run: cargo build -p astra-headless --features ffmpeg-vcpkg
       - name: Test with FFmpeg
-        run: python Tools/run_cargo_isolated.py test --workspace --features ffmpeg-vcpkg
+        run: cargo test --workspace --features ffmpeg-vcpkg
