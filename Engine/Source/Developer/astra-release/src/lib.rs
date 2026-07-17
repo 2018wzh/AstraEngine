@@ -336,12 +336,13 @@ impl ReleaseValidator {
             has_target = request.target.is_some(),
             "release validation started"
         );
-        let package_hash = Hash256::from_sha256(&request.package_bytes).to_string();
+        let mut package_hash = Hash256::from_sha256(&request.package_bytes).to_string();
         let mut checks = Vec::new();
         let mut package_id = "unknown".to_string();
 
         match PackageReader::open(&request.package_bytes) {
             Ok(package) => {
+                package_hash = package.package_hash().to_string();
                 let package_manifest = package
                     .container()
                     .decode_postcard::<PackageManifest>("package.manifest")

@@ -85,7 +85,7 @@ pub trait LegacyRuntimeProvider {
 }
 ```
 
-`take_ephemeral_text` 与 ABI v3 的 `read_session_resource` 都是 out-of-band host channel，不是 deterministic output。前者是单次 plaintext lease，后者让 family session 解析 `.bin` 等 virtual VFS 后把有界 media bytes 交给 host decoder。两者都禁止进入 effect、RuntimeWorld、save/replay、report、log 或 package；`read_session_resource` 还必须校验 session/context、规范化 URI、最大 byte bound 和 poisoned state，host 不得失败后改读 raw filesystem。
+ABI v4 的 host VFS 使用 `stat_file` 和 `read_file_range`。range 请求绑定 expected revision、offset、length 与 max bytes，host 不传文件句柄或本地路径。`take_ephemeral_text` 与 `read_session_resource` 仍是 out-of-band host channel，不是 deterministic output：前者是单次 plaintext lease，后者把 family 已解析的有界 media bytes 交给 host decoder。两者都禁止进入 effect、RuntimeWorld、save/replay、report、log 或 package；`read_session_resource` 还必须校验 session/context、规范化 URI、最大 byte bound 和 poisoned state，失败后不得改读 raw filesystem。
 
 `open` 返回 `LegacyRuntimeSessionId`。session 持有 family 私有 VM state、resource resolver、legacy presentation/audio state、await state、snapshot cursor 和 trace cursor。Manager 可以并行 probe 多个 case，也可以在测试里同时打开多个 session；provider 必须用 session id 隔离状态。
 

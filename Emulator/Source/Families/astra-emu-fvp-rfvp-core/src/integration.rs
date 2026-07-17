@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{BufWriter, Read, Write};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -18,9 +18,18 @@ use crate::{
         Variant,
     },
     subsystem::{
-        resources::{input_manager::KeyCode, thread_manager::ThreadManager},
-        save_state::SaveStateSnapshotV1,
-        world::{GameData, RuntimeVfs, SyscallJournalEntry},
+        anzu_scene::AnzuScene,
+        global_savedata::GlobalSaveDataV1,
+        resources::{
+            input_manager::{InputManagerSnapshotV1, KeyCode},
+            motion_manager::{DissolveType, MotionManagerCanonicalStateV1},
+            thread_manager::{ThreadManager, ThreadManagerSnapshotV1},
+            thread_wrapper::ThreadWrapperSnapshotV1,
+            time::TimeSnapshotV1,
+            timer_manager::TimerManagerSnapshotV1,
+        },
+        save_state::{AudioSnapshotV1, SaveStateSnapshotV1},
+        world::{GameData, RuntimeGameStateSnapshotV1, RuntimeVfs, SyscallJournalEntry},
     },
     vm_runner::{VmRunner, VmTraceRecord},
 };
@@ -32,10 +41,40 @@ const SNAPSHOT_ZLIB_MAGIC: &[u8; 8] = b"AFVPSZ02";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeSnapshotV1 {
     pub version: u16,
+    pub frame_index: u64,
+    pub input: InputManagerSnapshotV1,
+    pub timers: TimerManagerSnapshotV1,
+    pub time: TimeSnapshotV1,
+    pub deferred_threads: ThreadWrapperSnapshotV1,
+    pub global_state: GlobalSaveDataV1,
+    pub runtime_state: RuntimeGameStateSnapshotV1,
     pub save_state: SaveStateSnapshotV1,
     pub globals_volatile: Vec<Variant>,
     pub non_volatile_count: u16,
     pub volatile_count: u16,
+    pub last_dissolve_type: DissolveType,
+    pub last_dissolve2_transitioning: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CanonicalRuntimeStateV1 {
+    version: u16,
+    frame_index: u64,
+    input: InputManagerSnapshotV1,
+    timers: TimerManagerSnapshotV1,
+    time: TimeSnapshotV1,
+    deferred_threads: ThreadWrapperSnapshotV1,
+    global_state: GlobalSaveDataV1,
+    runtime_state: RuntimeGameStateSnapshotV1,
+    motion: MotionManagerCanonicalStateV1,
+    audio: AudioSnapshotV1,
+    vm: ThreadManagerSnapshotV1,
+    globals_non_volatile: Vec<Variant>,
+    globals_volatile: Vec<Variant>,
+    non_volatile_count: u16,
+    volatile_count: u16,
+    last_dissolve_type: DissolveType,
+    last_dissolve2_transitioning: bool,
 }
 
 pub struct RuntimeSession {
@@ -47,6 +86,21 @@ pub struct RuntimeSession {
     non_volatile_count: u16,
     volatile_count: u16,
     render_cache: HostPrimRenderCache,
+    frame_index: u64,
+    last_frame_phases: Vec<FramePhase>,
+    last_dissolve_type: DissolveType,
+    last_dissolve2_transitioning: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FramePhase {
+    Time,
+    Timers,
+    InputLatch,
+    Vm,
+    SceneAndWait,
+    Capture,
 }
 
 #[derive(Debug, Clone)]
@@ -185,19 +239,77 @@ impl RuntimeSession {
             non_volatile_count,
             volatile_count,
             render_cache: HostPrimRenderCache::new(),
+            frame_index: 0,
+            last_frame_phases: Vec::with_capacity(6),
+            last_dissolve_type: DissolveType::None,
+            last_dissolve2_transitioning: false,
         })
     }
 
     pub fn tick_bounded(&mut self, frame_time_ms: u64, max_instructions: u64) -> Result<()> {
+        self.last_frame_phases.clear();
         self.activate_globals()?;
-        let result = self.runner.tick_bounded(
-            &mut self.game,
-            &mut self.parser,
-            frame_time_ms,
-            max_instructions,
+        self.game
+            .time_mut_ref()
+            .set_external_delta(crate::platform_time::Duration::from_millis(frame_time_ms));
+        self.game.time_mut_ref().frame();
+        self.last_frame_phases.push(FramePhase::Time);
+        self.game
+            .timer_manager
+            .tick(frame_time_ms.min(u64::from(u32::MAX)) as u32);
+        self.last_frame_phases.push(FramePhase::Timers);
+        self.game.inputs_manager.begin_frame();
+        self.last_frame_phases.push(FramePhase::InputLatch);
+        self.last_frame_phases.push(FramePhase::Vm);
+        let current_dissolve_type = self.game.motion_manager.get_dissolve_type();
+        let current_dissolve2_transitioning = self.game.motion_manager.is_dissolve2_transitioning();
+        let dissolve_completed = !matches!(
+            self.last_dissolve_type,
+            DissolveType::None | DissolveType::Static
+        ) && matches!(
+            current_dissolve_type,
+            DissolveType::None | DissolveType::Static
         );
+        let dissolve2_completed =
+            self.last_dissolve2_transitioning && !current_dissolve2_transitioning;
+        self.last_dissolve_type = current_dissolve_type;
+        self.last_dissolve2_transitioning = current_dissolve2_transitioning;
+        let result = if dissolve_completed || dissolve2_completed {
+            self.runner.tick_bounded_sequence(
+                &mut self.game,
+                &mut self.parser,
+                &[0, frame_time_ms],
+                max_instructions,
+            )
+        } else {
+            self.runner.tick_bounded(
+                &mut self.game,
+                &mut self.parser,
+                frame_time_ms,
+                max_instructions,
+            )
+        };
+        if result.as_ref().is_ok_and(|report| !report.forced_yield) {
+            AnzuScene::new().update_after_vm(&mut self.game, frame_time_ms);
+            self.last_frame_phases.push(FramePhase::SceneAndWait);
+        }
         self.capture_globals()?;
-        result.map(|_| ())
+        self.last_frame_phases.push(FramePhase::Capture);
+        let report = result?;
+        if report.forced_yield {
+            anyhow::bail!(
+                "RFVP_INSTRUCTION_BUDGET_EXHAUSTED: frame={} budget={} contexts={}",
+                self.frame_index.saturating_add(1),
+                max_instructions,
+                report.forced_yield_contexts
+            );
+        }
+        self.frame_index = self.frame_index.saturating_add(1);
+        Ok(())
+    }
+
+    pub fn last_frame_phases(&self) -> &[FramePhase] {
+        &self.last_frame_phases
     }
 
     pub fn inject_key(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
@@ -307,28 +419,27 @@ impl RuntimeSession {
     }
 
     pub fn snapshot(&mut self) -> Result<Vec<u8>> {
-        self.activate_globals()?;
-        let snapshot = RuntimeSnapshotV1 {
-            version: 1,
-            save_state: SaveStateSnapshotV1::capture_with_thread_manager(
-                &mut self.game,
-                self.runner.thread_manager(),
-            ),
-            globals_volatile: self.globals_volatile.clone(),
-            non_volatile_count: self.non_volatile_count,
-            volatile_count: self.volatile_count,
-        };
-        let bytes = bincode_options(MAX_SNAPSHOT_UNCOMPRESSED_BYTES)
-            .serialize(&snapshot)
-            .context("serialize FVP runtime snapshot")?;
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-        encoder
-            .write_all(&bytes)
-            .context("compress FVP runtime snapshot")?;
+        let snapshot = self.capture_runtime_snapshot()?;
+        let uncompressed_len = bincode_options(MAX_SNAPSHOT_UNCOMPRESSED_BYTES)
+            .serialized_size(&snapshot)
+            .context("measure FVP runtime snapshot")?;
+        if uncompressed_len > MAX_SNAPSHOT_UNCOMPRESSED_BYTES {
+            anyhow::bail!("RFVP_RUNTIME_SNAPSHOT_TOO_LARGE");
+        }
+        let encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        let mut writer = BufWriter::with_capacity(1024 * 1024, encoder);
+        bincode_options(MAX_SNAPSHOT_UNCOMPRESSED_BYTES)
+            .serialize_into(&mut writer, &snapshot)
+            .context("serialize and compress FVP runtime snapshot")?;
+        writer.flush().context("flush FVP runtime snapshot")?;
+        let encoder = writer
+            .into_inner()
+            .map_err(|error| error.into_error())
+            .context("finish buffering FVP runtime snapshot")?;
         let compressed = encoder.finish().context("finish FVP runtime snapshot")?;
         let mut envelope = Vec::with_capacity(16 + compressed.len());
         envelope.extend_from_slice(SNAPSHOT_ZLIB_MAGIC);
-        envelope.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+        envelope.extend_from_slice(&uncompressed_len.to_le_bytes());
         envelope.extend_from_slice(&compressed);
         if envelope.len() as u64 > MAX_SNAPSHOT_BYTES {
             anyhow::bail!("RFVP_RUNTIME_SNAPSHOT_TOO_LARGE");
@@ -336,12 +447,35 @@ impl RuntimeSession {
         Ok(envelope)
     }
 
+    fn capture_runtime_snapshot(&mut self) -> Result<RuntimeSnapshotV1> {
+        self.activate_globals()?;
+        Ok(RuntimeSnapshotV1 {
+            version: 5,
+            frame_index: self.frame_index,
+            input: self.game.inputs_manager.capture_snapshot_v1(),
+            timers: self.game.timer_manager.capture_snapshot_v1(),
+            time: self.game.time_ref().capture_snapshot_v1(),
+            deferred_threads: self.game.thread_wrapper.capture_snapshot_v1(),
+            global_state: GlobalSaveDataV1::capture(&self.game),
+            runtime_state: self.game.capture_runtime_state_v1(),
+            save_state: SaveStateSnapshotV1::capture_with_thread_manager(
+                &mut self.game,
+                self.runner.thread_manager(),
+            ),
+            globals_volatile: self.globals_volatile.clone(),
+            non_volatile_count: self.non_volatile_count,
+            volatile_count: self.volatile_count,
+            last_dissolve_type: self.last_dissolve_type,
+            last_dissolve2_transitioning: self.last_dissolve2_transitioning,
+        })
+    }
+
     pub fn restore(&mut self, bytes: &[u8]) -> Result<()> {
         if bytes.len() as u64 > MAX_SNAPSHOT_BYTES {
             anyhow::bail!("RFVP_RUNTIME_SNAPSHOT_TOO_LARGE");
         }
         let snapshot = decode_runtime_snapshot(bytes)?;
-        if snapshot.version != 1
+        if snapshot.version != 5
             || snapshot.non_volatile_count != self.non_volatile_count
             || snapshot.volatile_count != self.volatile_count
         {
@@ -353,6 +487,17 @@ impl RuntimeSession {
         snapshot
             .save_state
             .apply(&mut self.game, self.runner.thread_manager_mut())?;
+        snapshot.global_state.apply(&mut self.game);
+        self.game.apply_runtime_state_v1(snapshot.runtime_state);
+        self.game.inputs_manager.apply_snapshot_v1(snapshot.input);
+        self.game.timer_manager.apply_snapshot_v1(snapshot.timers);
+        self.game.time_mut_ref().apply_snapshot_v1(snapshot.time);
+        self.game
+            .thread_wrapper
+            .apply_snapshot_v1(snapshot.deferred_threads);
+        self.frame_index = snapshot.frame_index;
+        self.last_dissolve_type = snapshot.last_dissolve_type;
+        self.last_dissolve2_transitioning = snapshot.last_dissolve2_transitioning;
         self.game.take_syscall_journal();
         self.runner.take_trace();
         self.render_cache = HostPrimRenderCache::new();
@@ -361,6 +506,39 @@ impl RuntimeSession {
 
     pub fn state_bytes(&mut self) -> Result<Vec<u8>> {
         self.snapshot()
+    }
+
+    pub fn canonical_state_bytes(&mut self) -> Result<Vec<u8>> {
+        self.activate_globals()?;
+        let globals_non_volatile = GLOBAL
+            .lock()
+            .map_err(|_| anyhow::anyhow!("RFVP_GLOBAL_LOCK_POISONED"))?
+            .snapshot_non_volatile();
+        let state = CanonicalRuntimeStateV1 {
+            version: 2,
+            frame_index: self.frame_index,
+            input: self.game.inputs_manager.capture_snapshot_v1(),
+            timers: self.game.timer_manager.capture_snapshot_v1(),
+            time: self.game.time_ref().capture_snapshot_v1(),
+            deferred_threads: self.game.thread_wrapper.capture_snapshot_v1(),
+            global_state: GlobalSaveDataV1::capture(&self.game),
+            runtime_state: self.game.capture_runtime_state_v1(),
+            motion: self.game.motion_manager.capture_canonical_state_v1(),
+            audio: AudioSnapshotV1 {
+                bgm: self.game.bgm_player_ref().capture_snapshot_v1(),
+                se: self.game.se_player_ref().capture_snapshot_v1(),
+            },
+            vm: self.runner.thread_manager().capture_snapshot_v1(),
+            globals_non_volatile,
+            globals_volatile: self.globals_volatile.clone(),
+            non_volatile_count: self.non_volatile_count,
+            volatile_count: self.volatile_count,
+            last_dissolve_type: self.last_dissolve_type,
+            last_dissolve2_transitioning: self.last_dissolve2_transitioning,
+        };
+        bincode_options(MAX_SNAPSHOT_UNCOMPRESSED_BYTES)
+            .serialize(&state)
+            .context("serialize FVP canonical runtime state")
     }
 
     fn activate_globals(&self) -> Result<()> {

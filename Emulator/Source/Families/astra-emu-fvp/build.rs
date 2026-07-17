@@ -39,7 +39,7 @@ fn main() {
         features.join(",").to_ascii_lowercase()
     };
     let feature_identity =
-        format!("rfvp=657747252eb0d2c5fb4a340695ce6906c2d45133;features={feature_identity}");
+        format!("rfvp=3b5ea6c96a925c12f95aef8554905e8fecbc77c3;features={feature_identity}");
     let feature_fingerprint = format!("sha256.{}", hex_sha256(feature_identity.as_bytes()));
     println!("cargo:rustc-env=ASTRA_FVP_FEATURE_FINGERPRINT={feature_fingerprint}");
     let descriptor = json!({

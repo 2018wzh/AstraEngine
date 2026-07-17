@@ -137,13 +137,13 @@ astra-emu-cli headless \
   --artifacts ./Build/AstraEMU-Evidence
 ```
 
-`--verify-snapshot` 会在首个 checkpoint 执行同 session save/restore round-trip；输入没有 checkpoint 时会阻断。Headless 结果只形成 E2，不能替代真实 Windows 窗口、GPU、音频设备和输入消费 E3。
+`--verify-snapshot` 会在首个 checkpoint 执行同 session save/restore round-trip；输入没有 checkpoint 时会阻断。FVP snapshot 对每张 live graph 独立压缩精确 RGBA，并校验 decoded length 与像素 hash；脚本 texture alias 不会被当作可重开的本地路径。默认 `--artifact-retention checkpoints` 只落盘具名 checkpoint PNG，但全部提交帧仍进入 frame-stream hash；逐帧图像对照需要显式使用 `--artifact-retention all`。正式本地资源审计另加 `--audit-all-resources`，它在 gameplay run 后按 4 MiB range 流式读取全部可见资源，报告只保留资源/range 数、总字节数、最大 range 和 manifest hash，不写资源名或本地路径。Headless 结果只形成 E2，不能替代真实 Windows 窗口、GPU、音频设备和输入消费 E3。
 
 Android 统一由 `python Tools/build_astraemu_android.py --abi arm64-v8a --abi x86_64` 构建。入口要求 API 36、NDK r28 以上、两种 Rust target、APK signer digest、family signer/trust root 和 Android keystore；它会检查 16 KiB ELF LOAD alignment，把每种 ABI 的动态库及双 manifest 写进 APK，执行 `apksigner verify`，最后输出不含 secret 和本地路径的 `astra.emu.android_package_evidence.v1`。缺 SDK license、签名身份或任一 ABI 都是 blocking，不能以手工复制 `.so` 代替。
 
 iOS 工程由 `Emulator/Platforms/iOS/project.yml` 生成。Xcode build phase 调用 `build_for_ios_with_cargo.bash`，分别构建 device/simulator FVP archive，使用 `static-sign` 绑定 Mach-O archive architecture、descriptor、signer 和 trust root，再把同一 registration contract 静态链接进 Manager。device archive 必须由 Xcode 的有效 signing identity 签名；simulator 构建不能外推成真机 E3。
 
-FVP 的固定行为基线是 rfvp `0.4.0` commit `657747252eb0d2c5fb4a340695ce6906c2d45133`。运行 `python Tools/verify_fvp_parity.py` 会在临时 detached worktree 中对 derivative 与官方 revision 执行同一 sanitized trace，并与仓库 golden 逐叶比较；`--evidence-output` 只写 revision、trace hash、opcode/count 和状态。该证据覆盖 parser/VM/Variant/context 的合法输入行为，不代表 media、148 syscall 的真实素材行为或平台 full-flow。
+FVP 的固定行为基线是 rfvp `0.5.0` commit `3b5ea6c96a925c12f95aef8554905e8fecbc77c3`。`python Tools/verify_fvp_parity.py --reference .tmp/rfvp-reference` 只在本地受控环境运行：工具校验 reference revision，在临时 detached worktree 中执行 observer trace，并输出 `astra.frame_parity_report.v1`。CI 不联网拉取 RFVP。synthetic trace 只覆盖 parser/VM/Variant/context；实际游戏还要逐帧比较 semantic/RGBA/video PTS，并按固定音频容差检查 PCM。首差异保留前 30 帧和后 60 帧，任何自动比较失败都不能由人工审查覆盖。
 
 ## 日志命令
 

@@ -140,6 +140,8 @@ Package validation report includes section table hash, schema registry hash, pol
 
 `schema.registry` 当前使用 `astra.schema_registry.v2`，由 `PackageBuilder` 从实际 section table 派生每个 `section_id/schema/version`，不接受调用方提供的空成功 registry。`PackageReader` 要求 registry 与除自身外的 section table 双向一一对应，并在任何 release/runtime reader 读取 policy 或 payload 前验证 required section schema、package identity、container version 和 registry binding。旧 v1、缺项、多项、unknown section 或 schema/version drift 都是 package integrity blocker。
 
+Container 已硬切 v2。128-byte footer 绑定 file length、kind/version、header hash、section-table hash 与 ordered section Merkle root；leaf 包含 section id、schema/version、codec/encryption、offset、stored/decoded length 和双 hash。runtime 通过 `PackageReader::open_source` 提供 expected content root，只读取 header、footer、table 和实际访问的 section；footer 自报但未被 launch identity 绑定的 root 不能作为可信 package identity。`package_hash` 现指 canonical content root，不再指整个容器文件的 SHA-256。v1 container 返回稳定迁移阻断诊断，不提供 runtime migrator。
+
 `cook.summary` 使用 `astra.cook_batch_summary.v1`，从 `astra.cook_manifest.v2` 复制 content-bound graph hash、artifact/cache-hit/cooked count 和 concurrency limit。Reader 要求计数闭合且 artifact count 与 package 内 `astra.cooked_asset.v1` section 数量相同；Release Gate 输出 `package.cook_graph`，只记录摘要字段，不记录 DDC root、源路径或 payload。
 
 ## Tests

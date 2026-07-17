@@ -1,15 +1,16 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{Cursor, ErrorKind},
+    sync::Arc,
 };
 
 use astra_core::{Diagnostic, Hash256};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use symphonia::core::{
-    codecs::audio::{AudioDecoderOptions, CODEC_ID_NULL_AUDIO},
+    codecs::audio::{AudioDecoder, AudioDecoderOptions, CODEC_ID_NULL_AUDIO},
     errors::Error as SymphoniaError,
-    formats::{probe::Hint, FormatOptions, TrackType},
+    formats::{probe::Hint, FormatOptions, FormatReader, TrackType},
     io::MediaSourceStream,
     meta::MetadataOptions,
 };
@@ -162,6 +163,168 @@ pub struct WindowsDecodedAudioChunk {
     pub sample_rate: u32,
     pub channels: u16,
     pub pcm_s16le: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymphoniaDecodedAudioChunk {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub pcm_s16le: Vec<u8>,
+}
+
+pub struct SymphoniaAudioStreamDecoder {
+    format: Box<dyn FormatReader>,
+    decoder: Box<dyn AudioDecoder>,
+    track_id: u32,
+    sample_rate: u32,
+    channels: u16,
+    decoded_bytes: u64,
+    max_decoded_bytes: u64,
+}
+
+impl SymphoniaAudioStreamDecoder {
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    pub fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    pub fn next_chunk(&mut self) -> Result<Option<SymphoniaDecodedAudioChunk>, MediaError> {
+        loop {
+            let packet = match self.format.next_packet() {
+                Ok(Some(packet)) => packet,
+                Ok(None) => return Ok(None),
+                Err(SymphoniaError::IoError(error)) if error.kind() == ErrorKind::UnexpectedEof => {
+                    return Ok(None);
+                }
+                Err(error) => {
+                    return Err(MediaError::message(format!(
+                        "read streaming audio packet: {error}"
+                    )))
+                }
+            };
+            if packet.track_id != self.track_id {
+                continue;
+            }
+            let decoded = self.decoder.decode(&packet).map_err(|error| match error {
+                SymphoniaError::DecodeError(_) => decode_error(
+                    "ASTRA_AUDIO_STREAM_CORRUPT_PACKET",
+                    "streaming audio decoder rejected a media packet",
+                ),
+                error => MediaError::message(format!("decode streaming audio packet: {error}")),
+            })?;
+            self.sample_rate = decoded.spec().rate();
+            self.channels = u16::try_from(decoded.spec().channels().count()).map_err(|_| {
+                decode_error(
+                    "ASTRA_AUDIO_STREAM_CHANNELS",
+                    "streaming audio channel count exceeds the supported range",
+                )
+            })?;
+            let mut samples = vec![0i16; decoded.samples_interleaved()];
+            decoded.copy_to_slice_interleaved(&mut samples);
+            let chunk_bytes = u64::try_from(samples.len())
+                .ok()
+                .and_then(|samples| samples.checked_mul(2))
+                .ok_or_else(|| {
+                    decode_error(
+                        "ASTRA_AUDIO_STREAM_BUDGET",
+                        "streaming audio sample byte count overflowed",
+                    )
+                })?;
+            self.decoded_bytes = self.decoded_bytes.checked_add(chunk_bytes).ok_or_else(|| {
+                decode_error(
+                    "ASTRA_AUDIO_STREAM_BUDGET",
+                    "streaming audio decoded byte count overflowed",
+                )
+            })?;
+            if self.decoded_bytes > self.max_decoded_bytes {
+                return Err(decode_error(
+                    "ASTRA_AUDIO_STREAM_BUDGET",
+                    "streaming audio exceeds the declared session decode budget",
+                ));
+            }
+            let mut pcm_s16le = Vec::with_capacity(chunk_bytes as usize);
+            for sample in samples {
+                pcm_s16le.extend_from_slice(&sample.to_le_bytes());
+            }
+            return Ok(Some(SymphoniaDecodedAudioChunk {
+                sample_rate: self.sample_rate,
+                channels: self.channels,
+                pcm_s16le,
+            }));
+        }
+    }
+}
+
+pub fn open_symphonia_audio_stream(
+    codec: &str,
+    bytes: Arc<[u8]>,
+    max_decoded_bytes: u64,
+) -> Result<SymphoniaAudioStreamDecoder, MediaError> {
+    if !matches!(codec, "wav" | "ogg" | "flac" | "mp3")
+        || bytes.is_empty()
+        || max_decoded_bytes == 0
+    {
+        return Err(decode_error(
+            "ASTRA_AUDIO_STREAM_DESCRIPTOR",
+            "streaming audio descriptor is invalid",
+        ));
+    }
+    let mut hint = Hint::new();
+    hint.with_extension(codec);
+    let media_stream = MediaSourceStream::new(Box::new(Cursor::new(bytes)), Default::default());
+    let format = symphonia::default::get_probe()
+        .probe(
+            &hint,
+            media_stream,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
+        .map_err(|error| MediaError::message(format!("probe streaming audio: {error}")))?;
+    let track = format
+        .default_track(TrackType::Audio)
+        .ok_or_else(|| MediaError::message("streaming audio has no supported track"))?;
+    let codec_params = track
+        .codec_params
+        .as_ref()
+        .and_then(|params| params.audio())
+        .ok_or_else(|| MediaError::message("streaming audio is missing codec parameters"))?;
+    if codec_params.codec == CODEC_ID_NULL_AUDIO {
+        return Err(MediaError::message("streaming audio has no codec id"));
+    }
+    let track_id = track.id;
+    let sample_rate = codec_params.sample_rate.unwrap_or_default();
+    let channels = codec_params
+        .channels
+        .as_ref()
+        .map(|channels| channels.count())
+        .unwrap_or_default();
+    let channels = u16::try_from(channels).map_err(|_| {
+        decode_error(
+            "ASTRA_AUDIO_STREAM_CHANNELS",
+            "streaming audio channel count exceeds the supported range",
+        )
+    })?;
+    if sample_rate == 0 || channels == 0 {
+        return Err(decode_error(
+            "ASTRA_AUDIO_STREAM_FORMAT",
+            "streaming audio format is incomplete",
+        ));
+    }
+    let decoder = symphonia::default::get_codecs()
+        .make_audio_decoder(codec_params, &AudioDecoderOptions::default())
+        .map_err(|error| MediaError::message(format!("create streaming audio decoder: {error}")))?;
+    Ok(SymphoniaAudioStreamDecoder {
+        format,
+        decoder,
+        track_id,
+        sample_rate,
+        channels,
+        decoded_bytes: 0,
+        max_decoded_bytes,
+    })
 }
 
 pub struct WindowsAudioStreamDecoder {

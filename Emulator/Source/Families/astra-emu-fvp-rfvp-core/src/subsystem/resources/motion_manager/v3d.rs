@@ -9,7 +9,7 @@ use alloc::{
 };
 use anyhow::Result;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum V3dMotionType {
     None = 0,
     Linear,
@@ -35,7 +35,7 @@ impl TryFrom<i32> for V3dMotionType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct V3dMotion {
     reverse: bool,
     src_x: i32,
@@ -156,7 +156,7 @@ impl V3dMotion {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct V3dMotionContainer {
     motion: V3dMotion,
     current_x: i32,

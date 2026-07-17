@@ -37,7 +37,7 @@ astra-emu-family-*
 
 统一管理能力放在 Manager 上，不把 RetroArch/libretro 风格 core ABI 引进 family 层。Manager 先按 `FamilyAutoProbePolicy` 调用各 family `probe`，默认顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori；用户 profile 可以覆盖最终选择。probe 只记录 marker、confidence、blocker、skipped reason 和 override reason，不执行商业脚本。
 
-ABI v3 增加 session-bound、bounded `read_session_resource` host channel。它只解决 family virtual VFS 与通用媒体 host 之间的资源交付：family 负责 archive/path 语义，Manager 和 Headless 负责 decode/playback。资源 bytes 不属于 DTO observable state，禁止序列化、记录或进入任何 evidence；失败必须保留稳定 diagnostic，不能退回 raw desktop VFS 猜测路径。
+ABI v4 把 host VFS 固定为 `stat_file`/`read_file_range`，每次请求都携带 expected revision、offset、length 和 max bytes。单次 range 不能超过 16 MiB；offset、length 与文件长度都使用 checked arithmetic，读取前后 revision 变化会阻断 session。v3 插件硬拒绝，不退回 whole-file callback。`read_session_resource` 只负责 family virtual VFS 与通用媒体 host 之间的已解析资源交付：family 负责 archive/path 语义，Manager 和 Headless 负责 decode/playback。资源 bytes 不属于 DTO observable state，禁止序列化、记录或进入 evidence。
 
 Trusted Luau 是 Manager host API，不是 EngineCore public API。Trusted Project Profile 可以打开 read-only VFS mount、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 effect intent。脚本只能提交 deterministic `LegacyEffect`、Blackboard、input 或 tag intent，host adapter 在 fixed tick 边界应用。脚本请求未授权 key 提取、商业保护处理、访问控制规避、raw filesystem/network/system call 或 native handle 时，Manager 隔离禁用脚本，并写入 redacted diagnostic。
 

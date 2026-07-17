@@ -31,7 +31,7 @@ fn main() {
         "cargo:rustc-env=ASTRA_EMU_MANAGER_RUSTC_FINGERPRINT=sha256.{}",
         hex_sha256(identity.as_bytes())
     );
-    let features = "rfvp=657747252eb0d2c5fb4a340695ce6906c2d45133;features=none";
+    let features = "rfvp=3b5ea6c96a925c12f95aef8554905e8fecbc77c3;features=none";
     println!(
         "cargo:rustc-env=ASTRA_EMU_FVP_FEATURE_FINGERPRINT=sha256.{}",
         hex_sha256(features.as_bytes())

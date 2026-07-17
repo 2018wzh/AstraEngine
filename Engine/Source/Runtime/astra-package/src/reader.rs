@@ -6,6 +6,7 @@ use crate::{
 };
 use astra_core::Hash256;
 use astra_plugin_abi::ValidatedRuntimeProviderSelection;
+use std::sync::Arc;
 
 const REQUIRED_SECTIONS: &[(&str, &str)] = &[
     ("package.manifest", "astra.package_manifest.v1"),
@@ -39,8 +40,32 @@ pub struct PackageReader {
 
 impl PackageReader {
     pub fn open(bytes: &[u8]) -> Result<Self, ContainerError> {
-        let package_hash = Hash256::from_sha256(bytes);
-        let container = AstraContainerReader::new(bytes)?;
+        Self::finish_open(AstraContainerReader::new(bytes)?)
+    }
+
+    pub fn open_with_expected_content_root(
+        bytes: &[u8],
+        expected_content_root: Hash256,
+    ) -> Result<Self, ContainerError> {
+        let reader = Self::open(bytes)?;
+        if reader.package_hash != expected_content_root {
+            return Err(ContainerError::message(
+                "package content root does not match launch identity",
+            ));
+        }
+        Ok(reader)
+    }
+
+    pub fn open_source(
+        source: Arc<dyn astra_byte_source::BoundedByteSource>,
+        expected_content_root: Hash256,
+    ) -> Result<Self, ContainerError> {
+        let container = AstraContainerReader::open_source(source, expected_content_root)?;
+        Self::finish_open(container)
+    }
+
+    fn finish_open(container: AstraContainerReader) -> Result<Self, ContainerError> {
+        let package_hash = container.content_root();
         if container.kind() != ContainerKind::Package {
             return Err(ContainerError::message("container is not a package"));
         }

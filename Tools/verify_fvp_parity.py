@@ -14,7 +14,7 @@ import sys
 import uuid
 
 
-REVISION = "657747252eb0d2c5fb4a340695ce6906c2d45133"
+REVISION = "3b5ea6c96a925c12f95aef8554905e8fecbc77c3"
 UPSTREAM = "https://github.com/xmoezzz/rfvp.git"
 
 
@@ -35,7 +35,7 @@ def main() -> int:
         / "astra-emu-fvp"
         / "tests"
         / "golden"
-        / "rfvp-0.4.0-vm-trace.json"
+        / "rfvp-0.5.0-vm-trace.json"
     )
     trace_source = (
         root
@@ -85,7 +85,7 @@ def main() -> int:
                 "astra_fvp_parity_trace",
                 "--no-default-features",
                 "--features",
-                "native-video",
+                "native-video,zlib-flate2",
             ],
             worktree,
             target_root / "reference",
@@ -111,14 +111,31 @@ def main() -> int:
         evidence_path = (root / args.evidence_output).resolve()
         ensure_descendant(evidence_path, root)
         evidence = {
-            "schema": "astra.emu.fvp_parity.v1",
-            "rfvp_revision": REVISION,
+            "schema": "astra.frame_parity_report.v1",
+            "reference_revision": REVISION,
+            "reference_observer_patch_hash": f"sha256.{fixture_digest}",
+            "build_identity": "local-private",
+            "profile": "synthetic.vm",
+            "game_identity_hash": f"sha256.{fixture_digest}",
+            "input_sequence_hash": f"sha256.{hashlib.sha256(b'no-input').hexdigest()}",
             "fixture_id": "fvp.synthetic.vm.reference.v1",
             "fixture_hash": f"sha256.{fixture_digest}",
             "astra_trace_hash": f"sha256.{digest}",
             "reference_trace_hash": f"sha256.{digest}",
             "compared_event_count": count_leaves(upstream),
             "first_divergence_sequence": None,
+            "frames": [{
+                "frame_index": 0,
+                "semantic_astra_hash": f"sha256.{digest}",
+                "semantic_reference_hash": f"sha256.{digest}",
+                "rgba_astra_hash": None,
+                "rgba_reference_hash": None,
+                "audio_astra_hash": None,
+                "audio_reference_hash": None,
+                "video_pts": None,
+            }],
+            "difference_window_before": 30,
+            "difference_window_after": 60,
             "status": "pass",
             "diagnostic_codes": [],
         }

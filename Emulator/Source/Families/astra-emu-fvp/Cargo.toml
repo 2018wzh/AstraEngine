@@ -12,6 +12,7 @@ doctest = false
 abi_stable.workspace = true
 anyhow = "1"
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-emu-fvp-rfvp-core = { path = "../astra-emu-fvp-rfvp-core", features = ["host-command-audio", "host-command-video"] }
 bincode = "1.3"
@@ -34,5 +35,5 @@ sha2.workspace = true
 
 [package.metadata.astra]
 upstream = "https://github.com/xmoezzz/rfvp"
-upstream_revision = "657747252eb0d2c5fb4a340695ce6906c2d45133"
+upstream_revision = "3b5ea6c96a925c12f95aef8554905e8fecbc77c3"
 license_notice = "THIRD_PARTY_NOTICES.md"

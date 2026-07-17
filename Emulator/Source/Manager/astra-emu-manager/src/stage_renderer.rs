@@ -365,6 +365,13 @@ impl StageGpu {
             }
         }
         context.queue.submit([encoder.finish()]);
+        self.textures.retain(|texture_id, _| {
+            *texture_id == u32::MAX
+                || frame
+                    .draws
+                    .iter()
+                    .any(|draw| draw.texture_id == *texture_id)
+        });
         Ok(())
     }
 

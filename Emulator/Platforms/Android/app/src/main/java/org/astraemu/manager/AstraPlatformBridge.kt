@@ -147,6 +147,63 @@ object AstraPlatformBridge {
     }
 
     @JvmStatic
+    fun readDocumentRange(
+        activity: Activity,
+        documentUriText: String,
+        expectedSize: Long,
+        expectedModifiedMs: Long,
+        offset: Long,
+        length: Int,
+    ): ByteArray {
+        require(expectedSize >= 0 && offset >= 0 && length in 0..16 * 1024 * 1024)
+        val end = Math.addExact(offset, length.toLong())
+        require(end <= expectedSize)
+        val uri = Uri.parse(documentUriText)
+        require(uri.scheme == "content")
+        fun verifyIdentity() {
+            activity.contentResolver.query(
+                uri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_SIZE,
+                    DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+                ),
+                null,
+                null,
+                null,
+            ).use { cursor ->
+                requireNotNull(cursor) { "document provider returned no metadata cursor" }
+                check(cursor.moveToFirst()) { "document provider returned no metadata row" }
+                check(cursor.getLong(0) == expectedSize && cursor.getLong(1) == expectedModifiedMs) {
+                    "document revision changed"
+                }
+            }
+        }
+        verifyIdentity()
+        val result = ByteArray(length)
+        activity.contentResolver.openInputStream(uri).use { input ->
+            requireNotNull(input) { "document provider returned no input stream" }
+            var skipped = 0L
+            while (skipped < offset) {
+                val amount = input.skip(offset - skipped)
+                if (amount > 0) {
+                    skipped = Math.addExact(skipped, amount)
+                } else {
+                    check(input.read() >= 0) { "document range offset exceeds source" }
+                    skipped++
+                }
+            }
+            var written = 0
+            while (written < length) {
+                val count = input.read(result, written, length - written)
+                check(count >= 0) { "document range returned a short read" }
+                written = Math.addExact(written, count)
+            }
+        }
+        verifyIdentity()
+        return result
+    }
+
+    @JvmStatic
     fun storeSecret(activity: Activity, reference: String, secret: String): String {
         validateSecretReference(reference)
         require(secret.isNotEmpty() && secret.toByteArray(Charsets.UTF_8).size <= 16 * 1024)

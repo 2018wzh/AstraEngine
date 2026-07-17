@@ -9,11 +9,10 @@ use alloc::{
 // AUTO-GENERATED from syscalls_extracted.csv; do not edit by hand.
 // Provides syscall specs and a default registration for unknown/unimplemented syscalls.
 
-use std::collections::HashMap;
-
 use super::Syscaller;
 use crate::script::Variant;
 use crate::subsystem::world::GameData;
+use crate::utils::stable_hash::StableHashMap;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SyscallSpec {
@@ -1101,7 +1100,9 @@ impl Syscaller for UnimplementedSyscall {
 }
 
 /// Insert fail-fast handlers for every extracted symbol that is not already implemented.
-pub fn register_unimplemented_syscalls(m: &mut HashMap<String, Box<dyn Syscaller + Send + Sync>>) {
+pub fn register_unimplemented_syscalls(
+    m: &mut StableHashMap<String, Box<dyn Syscaller + Send + Sync>>,
+) {
     for s in SYSCALL_SPECS {
         m.entry(s.name.to_string())
             .or_insert_with(|| Box::new(UnimplementedSyscall::new(s.name, s.argc)));

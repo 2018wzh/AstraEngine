@@ -28,6 +28,7 @@ pub(crate) struct HostGraphCacheEntry {
 #[derive(Debug, Default)]
 pub(crate) struct HostPrimRenderCache {
     graphs: Vec<HostGraphCacheEntry>,
+    active_graphs: Vec<u16>,
     white_ready: bool,
 }
 
@@ -35,7 +36,23 @@ impl HostPrimRenderCache {
     pub fn new() -> Self {
         Self {
             graphs: Vec::new(),
+            active_graphs: Vec::new(),
             white_ready: false,
+        }
+    }
+
+    fn begin_frame(&mut self) {
+        self.active_graphs.clear();
+    }
+
+    fn finish_frame(&mut self) {
+        self.graphs
+            .retain(|entry| self.active_graphs.contains(&entry.graph_id));
+    }
+
+    fn mark_graph_active(&mut self, graph_id: u16) {
+        if !self.active_graphs.contains(&graph_id) {
+            self.active_graphs.push(graph_id);
         }
     }
 
@@ -93,6 +110,7 @@ impl HostPrimRenderCache {
         let Some(img) = graph.get_texture().as_ref() else {
             return Ok(false);
         };
+        self.mark_graph_active(graph_id);
         let generation = graph.get_generation();
         if self.graph_generation(graph_id) == Some(generation) {
             return Ok(true);
@@ -266,6 +284,31 @@ fn emit_sprite(
     Ok(())
 }
 
+#[cfg(test)]
+mod cache_tests {
+    use super::{HostGraphCacheEntry, HostPrimRenderCache};
+
+    #[test]
+    fn render_cache_forgets_graphs_that_leave_the_committed_frame() {
+        let mut cache = HostPrimRenderCache::new();
+        cache.graphs = vec![
+            HostGraphCacheEntry {
+                graph_id: 1,
+                generation: 3,
+            },
+            HostGraphCacheEntry {
+                graph_id: 2,
+                generation: 5,
+            },
+        ];
+        cache.begin_frame();
+        cache.mark_graph_active(2);
+        cache.finish_frame();
+        assert_eq!(cache.graph_generation(1), None);
+        assert_eq!(cache.graph_generation(2), Some(5));
+    }
+}
+
 fn vertex(position: glam::Vec3, tex_coord: Vec2, color: Vec4) -> Vertex2D {
     Vertex2D {
         position: [position.x, position.y],
@@ -320,6 +363,7 @@ pub(crate) fn render_motion_to_host<B>(
 where
     B: RenderBackend<Error = RfvpError> + TextureBackend<Error = RfvpError>,
 {
+    cache.begin_frame();
     backend.begin_frame(
         u16::try_from(virtual_size.0).map_err(|_| RfvpError::CapacityExceeded)?,
         u16::try_from(virtual_size.1).map_err(|_| RfvpError::CapacityExceeded)?,
@@ -381,6 +425,7 @@ where
 
     backend.submit_commands(&frame.commands)?;
     backend.end_frame()?;
+    cache.finish_frame();
     Ok(frame)
 }
 

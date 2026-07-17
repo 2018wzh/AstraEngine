@@ -68,6 +68,15 @@ enum CliCommand {
         video_provider: String,
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         verify_snapshot: bool,
+        #[arg(
+            long,
+            default_value = "checkpoints",
+            value_parser = ["all", "checkpoints", "final", "manifest-only"]
+        )]
+        artifact_retention: String,
+        /// Stream and hash every visible resource after the gameplay run.
+        #[arg(long, default_value_t = false)]
+        audit_all_resources: bool,
     },
 }
 
@@ -117,6 +126,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             viewport_height,
             video_provider,
             verify_snapshot,
+            artifact_retention,
+            audit_all_resources,
         } => {
             if engine.id() != "fvp" {
                 return Err("ASTRA_EMU_CLI_ENGINE_UNSUPPORTED".into());
@@ -136,6 +147,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 viewport_height,
                 video_provider,
                 verify_snapshot,
+                artifact_retention,
+                audit_all_resources,
             })
             .await?;
             tracing::info!(

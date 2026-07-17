@@ -258,7 +258,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         return Err("native Player UI components are not implemented on this platform".into());
     }
     let package_bytes = fs::read(resource_root.join(&config.package))?;
-    let package_hash = Hash256::from_sha256(&package_bytes).to_string();
+    let package_storage_hash = Hash256::from_sha256(&package_bytes).to_string();
     let package = PackageReader::open(&package_bytes)?;
     let manifest: PackageManifest = package.container().decode_postcard("package.manifest")?;
     if manifest.profile != config.profile {
@@ -301,7 +301,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
             .client
             .open_package(PackageSourceRequest::Bundled {
                 relative_path: config.package.clone(),
-                expected_hash: package_hash.clone(),
+                expected_hash: package_storage_hash.clone(),
             })
             .await?;
         let _container_header = session.client.read_package_range(source, 0, 16).await?;

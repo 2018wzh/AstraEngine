@@ -6,7 +6,7 @@ use alloc::{
     vec,
     vec::Vec,
 };
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct SnowFlake {
     /// dword0 in original: variant index (uint)
     pub variant_idx: u32,
@@ -24,9 +24,17 @@ impl SnowFlake {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SnowMotion {
+    #[serde(
+        serialize_with = "serialize_flakes",
+        deserialize_with = "deserialize_flakes"
+    )]
     pub flakes: [SnowFlake; 1024], // 0x0000 .. 0x3FFF (16 * 1024 = 16384)
+    #[serde(
+        serialize_with = "serialize_flake_ptrs",
+        deserialize_with = "deserialize_flake_ptrs"
+    )]
     pub flake_ptrs: [usize; 1024], // 0x4000 .. 0x4FFF (store indices 0..1023)
     // control area (starting ~0x5000)
     pub enabled: bool, // byte at 0x5000 (we use u8's LOBYTE)
@@ -48,6 +56,47 @@ pub struct SnowMotion {
     pub color_r: i32,           // dword @ 0x503C (5135) (likely)
     pub color_g: i32,           // dword @ 0x5040 (5136) (likely)
     pub color_b_or_extra: i32,  // dword @ 0x5044 (5137) (likely)
+}
+
+fn serialize_flakes<S>(flakes: &[SnowFlake; 1024], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serde::Serialize::serialize(flakes.as_slice(), serializer)
+}
+
+fn deserialize_flakes<'de, D>(deserializer: D) -> Result<[SnowFlake; 1024], D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let flakes = <Vec<SnowFlake> as serde::Deserialize>::deserialize(deserializer)?;
+    flakes
+        .try_into()
+        .map_err(|value: Vec<SnowFlake>| serde::de::Error::invalid_length(value.len(), &"1024"))
+}
+
+fn serialize_flake_ptrs<S>(ptrs: &[usize; 1024], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let encoded = ptrs
+        .iter()
+        .map(|&value| u16::try_from(value).map_err(serde::ser::Error::custom))
+        .collect::<Result<Vec<_>, _>>()?;
+    serde::Serialize::serialize(&encoded, serializer)
+}
+
+fn deserialize_flake_ptrs<'de, D>(deserializer: D) -> Result<[usize; 1024], D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let encoded = <Vec<u16> as serde::Deserialize>::deserialize(deserializer)?;
+    if encoded.len() != 1024 {
+        return Err(serde::de::Error::invalid_length(encoded.len(), &"1024"));
+    }
+    let ptrs = encoded.into_iter().map(usize::from).collect::<Vec<_>>();
+    ptrs.try_into()
+        .map_err(|value: Vec<usize>| serde::de::Error::invalid_length(value.len(), &"1024"))
 }
 
 impl SnowMotion {
@@ -551,6 +600,7 @@ impl SnowMotion {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SnowMotionContainer {
     motion: Vec<SnowMotion>,
 }

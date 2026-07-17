@@ -9,7 +9,7 @@ use alloc::{
 };
 use anyhow::Result;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum AlphaMotionType {
     // linear interpolation
     Linear = 0,
@@ -29,7 +29,7 @@ impl TryFrom<i32> for AlphaMotionType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlphaMotion {
     id: u16,
     prim_id: u32,
@@ -211,6 +211,7 @@ impl AlphaMotion {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlphaMotionContainer {
     motions: Vec<AlphaMotion>,
     current_id: u32,

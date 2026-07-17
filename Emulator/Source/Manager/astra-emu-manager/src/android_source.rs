@@ -3,11 +3,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevision};
+use astra_core::Hash256;
 use astra_emu_family_api::{LegacyProviderError, LegacyVfsReader};
 use astra_emu_manager_core::{
     CancellationToken, GrantedSourceEntry, GrantedSourceReader, SourceScanError,
 };
-use sha2::{Digest, Sha256};
 
 use crate::android_platform::{self, AndroidDocumentEntry};
 
@@ -29,7 +30,8 @@ struct AndroidVfsMount {
 struct BoundDocument {
     document_uri: String,
     byte_size: u64,
-    sha256: [u8; 32],
+    modified_ms: i64,
+    revision: SourceRevision,
 }
 
 impl AndroidVfsRegistry {
@@ -46,10 +48,9 @@ impl AndroidVfsRegistry {
         }
         let mut files = BTreeMap::new();
         for entry in entries {
-            let bytes = android_platform::read_document(&entry.document_uri, entry.byte_size)?;
-            if bytes.len() as u64 != entry.byte_size {
-                return Err("ASTRA_EMU_ANDROID_VFS_MUTATED".into());
-            }
+            let mut revision_material = entry.document_uri.as_bytes().to_vec();
+            revision_material.extend_from_slice(&entry.modified_ms.to_le_bytes());
+            revision_material.extend_from_slice(&entry.byte_size.to_le_bytes());
             let key = entry.relative_path.to_ascii_lowercase();
             if files
                 .insert(
@@ -57,7 +58,8 @@ impl AndroidVfsRegistry {
                     BoundDocument {
                         document_uri: entry.document_uri,
                         byte_size: entry.byte_size,
-                        sha256: Sha256::digest(&bytes).into(),
+                        modified_ms: entry.modified_ms,
+                        revision: SourceRevision(Hash256::from_sha256(&revision_material)),
                     },
                 )
                 .is_some()
@@ -131,12 +133,11 @@ impl AndroidVfsRegistry {
 }
 
 impl LegacyVfsReader for AndroidVfsRegistry {
-    fn read_file(
+    fn stat_file(
         &self,
         mount_set_id: &str,
         uri: &str,
-        max_bytes: u64,
-    ) -> Result<Vec<u8>, LegacyProviderError> {
+    ) -> Result<ByteSourceStat, LegacyProviderError> {
         validate_relative_path(uri).map_err(|_| {
             LegacyProviderError::invalid("ASTRA_EMU_VFS_PATH_INVALID", "VFS URI is unsafe")
         })?;
@@ -147,13 +148,10 @@ impl LegacyVfsReader for AndroidVfsRegistry {
             LegacyProviderError::invalid("ASTRA_EMU_VFS_MOUNT_MISSING", "VFS mount is not active")
         })?;
         if let Some(bytes) = mount.overlays.get(&uri.to_ascii_lowercase()) {
-            if bytes.len() as u64 > max_bytes {
-                return Err(LegacyProviderError::invalid(
-                    "ASTRA_EMU_VFS_BOUNDS",
-                    "VFS overlay exceeds the requested bound",
-                ));
-            }
-            return Ok(bytes.to_vec());
+            return Ok(ByteSourceStat {
+                len: bytes.len() as u64,
+                revision: SourceRevision(Hash256::from_sha256(bytes)),
+            });
         }
         let bound = mount
             .files
@@ -162,29 +160,70 @@ impl LegacyVfsReader for AndroidVfsRegistry {
             .ok_or_else(|| {
                 LegacyProviderError::invalid("ASTRA_EMU_VFS_NOT_FOUND", "VFS entry is not present")
             })?;
-        drop(mounts);
-        if bound.byte_size > max_bytes {
+        Ok(ByteSourceStat {
+            len: bound.byte_size,
+            revision: bound.revision,
+        })
+    }
+
+    fn read_file_range(
+        &self,
+        mount_set_id: &str,
+        uri: &str,
+        expected_revision: SourceRevision,
+        range: ByteRange,
+        max_bytes: u64,
+    ) -> Result<RangeReadResult, LegacyProviderError> {
+        let stat = self.stat_file(mount_set_id, uri)?;
+        range.validate(stat.len, max_bytes).map_err(|error| {
+            LegacyProviderError::invalid("ASTRA_EMU_VFS_BOUNDS", error.to_string())
+        })?;
+        if stat.revision != expected_revision {
             return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_VFS_BOUNDS",
-                "VFS entry exceeds the requested bound",
+                "ASTRA_EMU_VFS_REVISION",
+                "VFS revision changed",
             ));
         }
-        let bytes =
-            android_platform::read_document(&bound.document_uri, max_bytes).map_err(|_| {
+        let mounts = self.mounts.lock().map_err(|_| {
+            LegacyProviderError::invalid("ASTRA_EMU_ANDROID_VFS_LOCK", "VFS lock is poisoned")
+        })?;
+        let mount = mounts.get(mount_set_id).ok_or_else(|| {
+            LegacyProviderError::invalid("ASTRA_EMU_VFS_MOUNT_MISSING", "VFS mount is not active")
+        })?;
+        let bytes = if let Some(bytes) = mount.overlays.get(&uri.to_ascii_lowercase()) {
+            bytes[range.offset as usize..(range.offset + range.len) as usize].to_vec()
+        } else {
+            let bound = mount
+                .files
+                .get(&uri.to_ascii_lowercase())
+                .cloned()
+                .ok_or_else(|| {
+                    LegacyProviderError::invalid(
+                        "ASTRA_EMU_VFS_NOT_FOUND",
+                        "VFS entry is not present",
+                    )
+                })?;
+            drop(mounts);
+            android_platform::read_document_range(
+                &bound.document_uri,
+                bound.byte_size,
+                bound.modified_ms,
+                range.offset,
+                range.len as u32,
+            )
+            .map_err(|_| {
                 LegacyProviderError::invalid(
-                    "ASTRA_EMU_ANDROID_VFS_READ",
-                    "SAF document read failed",
+                    "ASTRA_EMU_ANDROID_VFS_RANGE_READ",
+                    "SAF document range read failed",
                 )
-            })?;
-        if bytes.len() as u64 != bound.byte_size
-            || <[u8; 32]>::from(Sha256::digest(&bytes)) != bound.sha256
-        {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_ANDROID_VFS_MUTATED",
-                "SAF document identity changed after mount",
-            ));
-        }
-        Ok(bytes)
+            })?
+        };
+        Ok(RangeReadResult {
+            range,
+            revision: stat.revision,
+            content_hash: Hash256::from_sha256(&bytes),
+            bytes,
+        })
     }
 }
 

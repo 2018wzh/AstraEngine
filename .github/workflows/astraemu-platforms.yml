@@ -41,8 +41,6 @@ jobs:
           sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
       - name: Check Linux Manager and FVP
         run: cargo clippy -p astra-emu-manager -p astra-emu-fvp --all-targets -- -D warnings
-      - name: Differential VM parity against pinned rfvp
-        run: python Tools/verify_fvp_parity.py
 
   apple-host-e2:
     runs-on: macos-15

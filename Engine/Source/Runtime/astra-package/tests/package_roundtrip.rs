@@ -1,15 +1,48 @@
-use astra_core::SchemaVersion;
+use astra_core::{Hash256, SchemaVersion};
 use astra_package::{
     section_aad_hash, AstraContainerBuilder, AstraContainerReader, ContainerKind,
     EncryptionDescriptor, ExternalKeyRef, MigrationPolicy, PackageBuildRequest, PackageBuilder,
     PackageReader, SectionCodec, SectionPayload,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct FixturePayload {
     name: String,
     value: u32,
+}
+
+#[astra_headless_test::test]
+fn container_v2_streaming_reader_requires_external_content_root() {
+    let blob = AstraContainerBuilder::new(ContainerKind::Package)
+        .add_section(SectionPayload::raw(
+            "alpha",
+            "schema.alpha",
+            b"payload".to_vec(),
+        ))
+        .write()
+        .unwrap();
+    let trusted = AstraContainerReader::new(blob.as_bytes())
+        .unwrap()
+        .content_root();
+    let source = Arc::new(astra_byte_source::MemoryByteSource::new(
+        blob.as_bytes().to_vec(),
+    ));
+    let reader = AstraContainerReader::open_source(source.clone(), trusted).unwrap();
+    assert_eq!(reader.read_section("alpha").unwrap(), b"payload");
+    let wrong = Hash256::from_sha256(b"wrong");
+    assert!(AstraContainerReader::open_source(source, wrong)
+        .unwrap_err()
+        .to_string()
+        .contains("launch identity"));
+
+    let mut legacy = blob.into_bytes();
+    legacy[8..10].copy_from_slice(&1_u16.to_le_bytes());
+    assert!(AstraContainerReader::new(&legacy)
+        .unwrap_err()
+        .to_string()
+        .contains("ASTRA_CONTAINER_V1_MIGRATION_REQUIRED"));
 }
 
 #[astra_headless_test::test]

@@ -20,7 +20,19 @@ impl Scene for AnzuScene {
         let frame_duration = game_data.time_mut_ref().delta_duration();
         let frame_us = frame_duration.as_micros() as i64;
         let frame_ms = ((frame_us as u64) + 999) / 1000;
-        let frame_duration = frame_ms as i64;
+        self.update_after_vm(game_data, frame_ms);
+    }
+
+    fn late_update(&mut self, _game_data: &mut GameData) {}
+}
+
+impl AnzuScene {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub(crate) fn update_after_vm(&mut self, game_data: &mut GameData, frame_ms: u64) {
+        let frame_duration = frame_ms.min(i64::MAX as u64) as i64;
 
         crate::trace::vm(format_args!(
             "AnzuScene::on_update frame_duration={}",
@@ -47,6 +59,14 @@ impl Scene for AnzuScene {
             frame_duration
         };
 
+        self.update_text_reveal(game_data, elapsed);
+        let pulse = game_data.inputs_manager.take_control_pulse();
+        let fast_forward = ctrl_down || pulse;
+        let elapsed = if fast_forward {
+            -frame_duration
+        } else {
+            frame_duration
+        };
         self.update_alpha_motions(game_data, elapsed);
         self.update_move_motions(game_data, elapsed);
         self.update_rotation_motions(game_data, elapsed);
@@ -57,42 +77,6 @@ impl Scene for AnzuScene {
         self.update_parts_motions(game_data, elapsed);
         self.update_snow_motions(game_data, elapsed);
         self.update_dissolve(game_data, frame_duration, fast_forward);
-    }
-
-    fn late_update(&mut self, game_data: &mut GameData) {
-        // Text reveal and its repaint/upload must observe the effects of VM syscalls issued
-        // in this frame (TextPrint/TextRepaint/ControlPulse). Therefore we update it in
-        // late_update, after scheduler.execute().
-        let frame_duration = game_data.time_mut_ref().delta_duration();
-        let frame_us = frame_duration.as_micros() as i64;
-        let frame_ms = ((frame_us as u64) + 999) / 1000;
-        let frame_duration = frame_ms as i64;
-
-        let ctrl_down =
-            (game_data.inputs_manager.get_input_state() & (1u32 << (KeyCode::Ctrl as u32))) != 0;
-        let pulse = game_data.inputs_manager.take_control_pulse();
-        let fast_forward = ctrl_down || pulse;
-        let elapsed = if fast_forward {
-            -frame_duration
-        } else {
-            frame_duration
-        };
-
-        let completed = game_data.motion_manager.update_text_reveal(
-            elapsed,
-            GLOBAL.lock().unwrap().get_int_var(0),
-            elapsed < 0,
-            &game_data.fontface_manager,
-        );
-        for tid in completed {
-            game_data.thread_wrapper.thread_text_resume(tid);
-        }
-    }
-}
-
-impl AnzuScene {
-    pub fn new() -> Self {
-        Self {}
     }
 
     fn update_alpha_motions(&mut self, game_data: &mut GameData, elapsed: i64) {

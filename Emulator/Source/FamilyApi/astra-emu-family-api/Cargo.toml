@@ -10,6 +10,7 @@ doctest = false
 [dependencies]
 abi_stable.workspace = true
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true

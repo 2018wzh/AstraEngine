@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 astra-asset = { path = "../astra-asset" }
+astra-byte-source = { path = "../astra-byte-source" }
 astra-core = { path = "../astra-core" }
 astra-plugin-abi = { path = "../astra-plugin-abi" }
 astra-target = { path = "../../Platform/astra-target" }

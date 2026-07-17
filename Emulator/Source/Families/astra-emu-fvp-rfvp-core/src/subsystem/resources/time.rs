@@ -17,6 +17,13 @@ pub enum Error {
 
 mod time {
     use crate::platform_time::{Duration, Instant};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct TimeSnapshotV1 {
+        pub delta_micros: u64,
+        pub frame_number: u64,
+    }
 
     /// ['Time'] is a resource dedicated to compute the time durations between frames and keep a track of
     /// frame numbers
@@ -65,6 +72,20 @@ mod time {
         /// Returns the duration of the last executed frame
         pub fn delta_duration(&self) -> Duration {
             self.delta_duration
+        }
+
+        pub fn capture_snapshot_v1(&self) -> TimeSnapshotV1 {
+            TimeSnapshotV1 {
+                delta_micros: self.delta_duration.as_micros().min(u128::from(u64::MAX)) as u64,
+                frame_number: self.frame_number,
+            }
+        }
+
+        pub fn apply_snapshot_v1(&mut self, snapshot: TimeSnapshotV1) {
+            self.delta_duration = Duration::from_micros(snapshot.delta_micros);
+            self.frame_number = snapshot.frame_number;
+            self.measure_start = Instant::now();
+            self.external_delta = None;
         }
     }
 }

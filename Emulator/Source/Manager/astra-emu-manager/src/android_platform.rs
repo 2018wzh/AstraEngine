@@ -297,6 +297,52 @@ pub fn read_document(document_uri: &str, max_bytes: u64) -> Result<Vec<u8>, Stri
     Ok(bytes)
 }
 
+pub fn read_document_range(
+    document_uri: &str,
+    expected_size: u64,
+    expected_modified_ms: i64,
+    offset: u64,
+    length: u32,
+) -> Result<Vec<u8>, String> {
+    validate_content_uri(document_uri)?;
+    let expected_size = i64::try_from(expected_size).map_err(|_| "ASTRA_EMU_ANDROID_SAF_BOUNDS")?;
+    let offset = i64::try_from(offset).map_err(|_| "ASTRA_EMU_ANDROID_SAF_BOUNDS")?;
+    let length = i32::try_from(length).map_err(|_| "ASTRA_EMU_ANDROID_SAF_BOUNDS")?;
+    let ctx = context()?;
+    let mut env = ctx
+        .vm
+        .attach_current_thread()
+        .map_err(|_| "ASTRA_EMU_ANDROID_JNI_ATTACH")?;
+    let activity = unsafe { JObject::from_raw(ctx.app.activity_as_ptr().cast()) };
+    let uri = env
+        .new_string(document_uri)
+        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_URI")?;
+    let result = env.call_static_method(
+        BRIDGE_CLASS,
+        "readDocumentRange",
+        "(Landroid/app/Activity;Ljava/lang/String;JJJI)[B",
+        &[
+            JValue::Object(&activity),
+            JValue::Object(&uri),
+            JValue::Long(expected_size),
+            JValue::Long(expected_modified_ms),
+            JValue::Long(offset),
+            JValue::Int(length),
+        ],
+    );
+    let object = result
+        .map_err(|_| clear_jni_error(&mut env, "ASTRA_EMU_ANDROID_SAF_RANGE_READ"))?
+        .l()
+        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_RANGE_READ")?;
+    let bytes = env
+        .convert_byte_array(JByteArray::from(object))
+        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_RANGE_READ")?;
+    if bytes.len() != length as usize {
+        return Err("ASTRA_EMU_ANDROID_SAF_SHORT_READ".into());
+    }
+    Ok(bytes)
+}
+
 fn call_bridge_bytes(
     name: &str,
     signature: &str,

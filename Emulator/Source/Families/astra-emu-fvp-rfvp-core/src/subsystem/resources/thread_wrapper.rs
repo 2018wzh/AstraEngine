@@ -8,6 +8,7 @@ use alloc::{
 };
 use std::collections::VecDeque;
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ThreadRequest {
     /// start a new thread with the given id and address
     Start(u32, u32),
@@ -36,7 +37,22 @@ pub struct ThreadWrapper {
     requests: VecDeque<ThreadRequest>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ThreadWrapperSnapshotV1 {
+    requests: VecDeque<ThreadRequest>,
+}
+
 impl ThreadWrapper {
+    pub fn capture_snapshot_v1(&self) -> ThreadWrapperSnapshotV1 {
+        ThreadWrapperSnapshotV1 {
+            requests: self.requests.clone(),
+        }
+    }
+
+    pub fn apply_snapshot_v1(&mut self, snapshot: ThreadWrapperSnapshotV1) {
+        self.requests = snapshot.requests;
+    }
+
     pub fn new() -> Self {
         Default::default()
     }
@@ -83,5 +99,26 @@ impl ThreadWrapper {
 
     pub fn should_break(&mut self) {
         self.requests.push_back(ThreadRequest::ShouldBreak());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_preserves_deferred_requests_for_the_next_vm_tick() {
+        let mut original = ThreadWrapper::new();
+        original.thread_start(7, 42);
+        original.thread_wait(16);
+        original.thread_text_resume(7);
+
+        let mut restored = ThreadWrapper::new();
+        restored.apply_snapshot_v1(original.capture_snapshot_v1());
+
+        assert!(matches!(restored.pop(), Some(ThreadRequest::Start(7, 42))));
+        assert!(matches!(restored.pop(), Some(ThreadRequest::Wait(16))));
+        assert!(matches!(restored.pop(), Some(ThreadRequest::TextResume(7))));
+        assert!(restored.pop().is_none());
     }
 }

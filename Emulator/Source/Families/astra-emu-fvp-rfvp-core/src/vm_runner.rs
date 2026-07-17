@@ -83,15 +83,37 @@ impl VmRunner {
         frame_time_ms: u64,
         max_instructions: u64,
     ) -> Result<VmTickReport> {
+        self.tick_bounded_sequence(game, parser, &[frame_time_ms], max_instructions)
+    }
+
+    pub fn tick_bounded_sequence(
+        &mut self,
+        game: &mut GameData,
+        parser: &mut Parser,
+        frame_times_ms: &[u64],
+        max_instructions: u64,
+    ) -> Result<VmTickReport> {
         if max_instructions == 0 {
             anyhow::bail!("RFVP_INSTRUCTION_BUDGET_ZERO");
+        }
+        if frame_times_ms.is_empty() {
+            anyhow::bail!("RFVP_VM_TICK_SEQUENCE_EMPTY");
         }
         self.remaining_instructions = Some(max_instructions);
         self.budget_exhausted = false;
         self.trace.clear();
-        let report = self.tick(game, parser, frame_time_ms);
+        let mut result = Ok(());
+        for &frame_time_ms in frame_times_ms {
+            if let Err(error) = self.tick(game, parser, frame_time_ms) {
+                result = Err(error);
+                break;
+            }
+            if self.budget_exhausted {
+                break;
+            }
+        }
         self.remaining_instructions = None;
-        report?;
+        result?;
         Ok(VmTickReport {
             forced_yield: self.budget_exhausted,
             forced_yield_contexts: u32::from(self.budget_exhausted),

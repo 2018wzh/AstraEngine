@@ -13,7 +13,7 @@
 ## rfvp derivative used by astra-emu-fvp
 
 - Upstream: <https://github.com/xmoezzz/rfvp>
-- Fixed revision: `657747252eb0d2c5fb4a340695ce6906c2d45133` (`0.4.0` tag)
+- Fixed revision: `3b5ea6c96a925c12f95aef8554905e8fecbc77c3` (`0.5.0` tag)
 - License: Mozilla Public License 2.0.
 - Astra derivative source: `Emulator/Source/Families/astra-emu-fvp-rfvp-core/`
 - Astra wrapper source: `Emulator/Source/Families/astra-emu-fvp/`

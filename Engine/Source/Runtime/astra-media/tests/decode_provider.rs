@@ -1,6 +1,6 @@
 use astra_media::{
-    DecodeBindingContext, DecodeKind, DecodeOutput, DecodeProvider, DecodeProviderRegistry,
-    DecodeRequest, ImageDecodeProvider, SymphoniaAudioDecodeProvider,
+    open_symphonia_audio_stream, DecodeBindingContext, DecodeKind, DecodeOutput, DecodeProvider,
+    DecodeProviderRegistry, DecodeRequest, ImageDecodeProvider, SymphoniaAudioDecodeProvider,
     SyntheticPlatformDecodeProvider,
 };
 use serde_json::Value;
@@ -80,6 +80,21 @@ fn symphonia_decode_provider_decodes_bounded_wav_to_cpu_pcm() {
         }
         DecodeOutput::MediaSurfaceToken(_) => panic!("expected CPU PCM output"),
     }
+}
+
+#[astra_headless_test::test]
+fn symphonia_stream_decoder_emits_bounded_chunks_without_whole_file_pcm() {
+    let source = std::sync::Arc::<[u8]>::from(tiny_wav());
+    let mut decoder = open_symphonia_audio_stream("wav", source, 8).unwrap();
+    assert_eq!(decoder.sample_rate(), 8_000);
+    assert_eq!(decoder.channels(), 1);
+    let chunk = decoder.next_chunk().unwrap().unwrap();
+    assert_eq!(chunk.pcm_s16le.len(), 8);
+    assert!(decoder.next_chunk().unwrap().is_none());
+
+    let source = std::sync::Arc::<[u8]>::from(tiny_wav());
+    let mut decoder = open_symphonia_audio_stream("wav", source, 7).unwrap();
+    assert!(decoder.next_chunk().is_err());
 }
 
 #[astra_headless_test::test]

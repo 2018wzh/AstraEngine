@@ -10,7 +10,7 @@ AstraEMU 需要复用 AstraEngine Runtime、Media、Plugin、Save/Replay 和 Rel
 
 AstraEMU v1 采用 Manager + AstraEngine `RuntimeWorld` + in-process family plugin。Manager 负责窗口、输入、配置、插件启用和报告；`RuntimeWorld` 持有 tick、MutationLog、Save/Replay 和 deterministic replay；family plugin 通过 ExtensionRegistry 注册一个 `LegacyRuntimeProvider` facade。
 
-`LegacyRuntimeProvider` 是 family runtime 的唯一主入口。它用 `probe`、`open`、`step`、`save`、`restore` 和 `shutdown` 管理 session，`open` 返回 `LegacyRuntimeSessionId`。family VM、archive resolver、script executor、media state 和 snapshot serializer 都留在 session 内。ABI v3 的 `read_session_resource` 只作为 session-bound、bounded、ephemeral media delivery channel，避免 Manager 重复实现 family archive path；返回 bytes 不得进入 deterministic state 或 evidence。AstraEngine StateMachine 只驱动 `Booting`、`Active`、`Awaiting`、`Saving`、`Loading`、`Faulted`、`Shutdown` 这类粗粒度生命周期。
+`LegacyRuntimeProvider` 是 family runtime 的唯一主入口。它用 `probe`、`open`、`step`、`save`、`restore` 和 `shutdown` 管理 session，`open` 返回 `LegacyRuntimeSessionId`。family VM、archive resolver、script executor、media state 和 snapshot serializer 都留在 session 内。ABI v4 的 host VFS 只暴露 `stat_file` 与 `read_file_range`，revision 是 session-bound opaque identity；本地路径、文件句柄和 whole-file callback 不跨 ABI。`read_session_resource` 仍是有界、短生命周期的已解析媒体通道，返回 bytes 不得进入 deterministic state 或 evidence。AstraEngine StateMachine 只驱动 `Booting`、`Active`、`Awaiting`、`Saving`、`Loading`、`Faulted`、`Shutdown` 这类粗粒度生命周期。
 
 `EMUCoreBridge` 保留为普通 extension point，用于外部工具桥接和研究环境。它不属于 v1 主架构，也不能替换 `RuntimeWorld`、MutationLog、Save container 或 Release Gate core checks。
 

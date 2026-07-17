@@ -28,12 +28,25 @@ impl UnsupportedVfsRegistry {
 }
 
 impl LegacyVfsReader for UnsupportedVfsRegistry {
-    fn read_file(
+    fn stat_file(
         &self,
         _mount_set_id: &str,
         _uri: &str,
+    ) -> Result<astra_byte_source::ByteSourceStat, LegacyProviderError> {
+        Err(LegacyProviderError::invalid(
+            "PLATFORM_NOT_IMPLEMENTED",
+            "source grant provider is unavailable",
+        ))
+    }
+
+    fn read_file_range(
+        &self,
+        _mount_set_id: &str,
+        _uri: &str,
+        _expected_revision: astra_byte_source::SourceRevision,
+        _range: astra_byte_source::ByteRange,
         _max_bytes: u64,
-    ) -> Result<Vec<u8>, LegacyProviderError> {
+    ) -> Result<astra_byte_source::RangeReadResult, LegacyProviderError> {
         Err(LegacyProviderError::invalid(
             "PLATFORM_NOT_IMPLEMENTED",
             "source grant provider is unavailable",

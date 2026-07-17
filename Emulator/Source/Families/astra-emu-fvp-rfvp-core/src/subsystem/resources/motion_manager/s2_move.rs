@@ -52,7 +52,7 @@ fn should_skip_update(prim_manager: &PrimManager, prim_id: u32, flag: bool) -> b
     false
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ScaleMotionType {
     None = 0,
     Linear,
@@ -78,7 +78,7 @@ impl TryFrom<i32> for ScaleMotionType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScaleMotion {
     id: u16,
     prim_id: u32,
@@ -214,6 +214,7 @@ impl ScaleMotion {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScaleMotionContainer {
     motions: Vec<ScaleMotion>,
     free_ids: Vec<u16>,

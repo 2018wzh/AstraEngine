@@ -7,10 +7,16 @@ use alloc::{
     vec::Vec,
 };
 use anyhow::{anyhow, Result};
+use atomic_refcell::AtomicRefCell;
 #[cfg(feature = "old_school")]
 use core_maths::CoreFloat;
+#[cfg(feature = "zlib-flate2")]
+use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use image::{DynamicImage, GenericImageView};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+#[cfg(feature = "zlib-flate2")]
+use std::io::{Read, Write};
 
 use super::texture::NvsgTexture;
 use super::vfs::Vfs;
@@ -57,6 +63,8 @@ pub struct GraphBuff {
     /// GPU cache can refresh the corresponding texture.
     pub generation: u64,
 
+    content_hash_cache: AtomicRefCell<Option<(u64, [u8; 32])>>,
+
     /// Track how this graph was populated so it can be restored correctly.
     pub load_kind: GraphBuffLoadKind,
 }
@@ -79,6 +87,7 @@ impl GraphBuff {
             u: 0,
             v: 0,
             generation: 0,
+            content_hash_cache: AtomicRefCell::new(None),
             load_kind: GraphBuffLoadKind::Unknown,
         }
     }
@@ -91,6 +100,25 @@ impl GraphBuff {
     #[inline]
     pub fn mark_dirty(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+        *self.content_hash_cache.get_mut() = None;
+    }
+
+    pub fn content_sha256(&self) -> [u8; 32] {
+        if let Some((generation, hash)) = *self.content_hash_cache.borrow() {
+            if generation == self.generation {
+                return hash;
+            }
+        }
+        let mut digest = Sha256::new();
+        if let Some(texture) = &self.texture {
+            match texture {
+                DynamicImage::ImageRgba8(rgba) => digest.update(rgba.as_raw()),
+                _ => digest.update(texture.to_rgba8().as_raw()),
+            }
+        }
+        let hash: [u8; 32] = digest.finalize().into();
+        *self.content_hash_cache.borrow_mut() = Some((self.generation, hash));
+        hash
     }
 
     pub fn get_r_value(&self) -> u8 {
@@ -503,6 +531,54 @@ impl GraphBuff {
     }
 }
 
+#[cfg(test)]
+mod canonical_state_tests {
+    use super::*;
+    use image::{ImageBuffer, Rgba};
+
+    #[test]
+    fn content_hash_is_cached_by_generation_and_invalidated_by_mutation() {
+        let mut graph = GraphBuff::new();
+        graph.texture = Some(DynamicImage::ImageRgba8(ImageBuffer::from_pixel(
+            2,
+            2,
+            Rgba([1, 2, 3, 255]),
+        )));
+        graph.texture_ready = true;
+        graph.mark_dirty();
+        let initial = graph.content_sha256();
+        assert_eq!(initial, graph.content_sha256());
+
+        graph.texture = Some(DynamicImage::ImageRgba8(ImageBuffer::from_pixel(
+            2,
+            2,
+            Rgba([9, 8, 7, 255]),
+        )));
+        graph.mark_dirty();
+        assert_ne!(initial, graph.content_sha256());
+    }
+
+    #[test]
+    fn snapshot_pixels_are_self_contained_and_round_trip_exactly() {
+        let mut graph = GraphBuff::new();
+        graph.texture = Some(DynamicImage::ImageRgba8(ImageBuffer::from_pixel(
+            2,
+            2,
+            Rgba([1, 2, 3, 255]),
+        )));
+        graph.texture_ready = true;
+        graph.texture_path = "graph/source".into();
+        graph.load_kind = GraphBuffLoadKind::Texture;
+        graph.mark_dirty();
+        let snapshot = graph.capture_snapshot_with_id(1);
+        let pixels = snapshot.rgba.as_ref().expect("loaded graph pixels");
+        assert_eq!(
+            decode_snapshot_pixels(pixels).unwrap(),
+            vec![1, 2, 3, 255].repeat(4)
+        );
+    }
+}
+
 #[cfg(feature = "old_school")]
 fn inverse_scale_old_school_u16(value: u16, scale: f32) -> u16 {
     if value == 0 {
@@ -647,11 +723,142 @@ pub struct GraphBuffSnapshotV1 {
     pub u: u16,
     pub v: u16,
     pub load_kind: GraphBuffLoadKind,
-    /// Raw RGBA8 pixels (width*height*4). Only present for non-VFS textures.
-    pub rgba: Option<Vec<u8>>,
+    pub generation: u64,
+    /// Self-contained RGBA8 pixels. Desktop snapshots compress each graph
+    /// independently so capture never retains a second full decoded scene.
+    pub rgba: Option<GraphBuffSnapshotPixelsV1>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GraphBuffSnapshotPixelsV1 {
+    Raw {
+        sha256: [u8; 32],
+        bytes: Vec<u8>,
+    },
+    Zlib {
+        decoded_len: u64,
+        sha256: [u8; 32],
+        bytes: Vec<u8>,
+    },
+}
+
+fn snapshot_pixels(image: &DynamicImage) -> GraphBuffSnapshotPixelsV1 {
+    match image {
+        DynamicImage::ImageRgba8(rgba) => encode_snapshot_pixels(rgba.as_raw()),
+        other => encode_snapshot_pixels(other.to_rgba8().as_raw()),
+    }
+}
+
+fn encode_snapshot_pixels(rgba: &[u8]) -> GraphBuffSnapshotPixelsV1 {
+    #[cfg(feature = "zlib-flate2")]
+    {
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
+        encoder
+            .write_all(rgba)
+            .expect("writing an in-memory graph snapshot cannot fail");
+        return GraphBuffSnapshotPixelsV1::Zlib {
+            decoded_len: rgba.len() as u64,
+            sha256: Sha256::digest(rgba).into(),
+            bytes: encoder
+                .finish()
+                .expect("finishing an in-memory graph snapshot cannot fail"),
+        };
+    }
+    #[cfg(not(feature = "zlib-flate2"))]
+    {
+        GraphBuffSnapshotPixelsV1::Raw {
+            sha256: Sha256::digest(rgba).into(),
+            bytes: rgba.to_vec(),
+        }
+    }
+}
+
+fn decode_snapshot_pixels(pixels: &GraphBuffSnapshotPixelsV1) -> Result<Vec<u8>> {
+    match pixels {
+        GraphBuffSnapshotPixelsV1::Raw { sha256, bytes } => {
+            if <[u8; 32]>::from(Sha256::digest(bytes)) != *sha256 {
+                anyhow::bail!("RFVP_GRAPH_SNAPSHOT_PIXEL_HASH_MISMATCH");
+            }
+            Ok(bytes.clone())
+        }
+        GraphBuffSnapshotPixelsV1::Zlib {
+            decoded_len,
+            sha256,
+            bytes,
+        } => {
+            const MAX_GRAPH_SNAPSHOT_BYTES: u64 = 256 * 1024 * 1024;
+            if *decoded_len > MAX_GRAPH_SNAPSHOT_BYTES {
+                anyhow::bail!("RFVP_GRAPH_SNAPSHOT_PIXEL_BOUNDS");
+            }
+            #[cfg(feature = "zlib-flate2")]
+            {
+                let capacity = usize::try_from(*decoded_len)
+                    .map_err(|_| anyhow!("RFVP_GRAPH_SNAPSHOT_PIXEL_BOUNDS"))?;
+                let mut decoded = Vec::with_capacity(capacity);
+                ZlibDecoder::new(bytes.as_slice())
+                    .take(decoded_len.saturating_add(1))
+                    .read_to_end(&mut decoded)?;
+                if decoded.len() != capacity {
+                    anyhow::bail!("RFVP_GRAPH_SNAPSHOT_PIXEL_LENGTH");
+                }
+                if <[u8; 32]>::from(Sha256::digest(&decoded)) != *sha256 {
+                    anyhow::bail!("RFVP_GRAPH_SNAPSHOT_PIXEL_HASH_MISMATCH");
+                }
+                Ok(decoded)
+            }
+            #[cfg(not(feature = "zlib-flate2"))]
+            {
+                let _ = bytes;
+                anyhow::bail!("RFVP_GRAPH_SNAPSHOT_ZLIB_UNAVAILABLE");
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphBuffCanonicalStateV1 {
+    pub id: u16,
+    pub r_value: u8,
+    pub g_value: u8,
+    pub b_value: u8,
+    pub texture_ready: bool,
+    pub texture_path: String,
+    pub offset_x: u16,
+    pub offset_y: u16,
+    pub width: u16,
+    pub height: u16,
+    pub display_width: u16,
+    pub display_height: u16,
+    pub u: u16,
+    pub v: u16,
+    pub generation: u64,
+    pub load_kind: GraphBuffLoadKind,
+    pub rgba_sha256: [u8; 32],
 }
 
 impl GraphBuff {
+    pub fn capture_canonical_state_with_id(&self, id: u16) -> GraphBuffCanonicalStateV1 {
+        GraphBuffCanonicalStateV1 {
+            id,
+            r_value: self.r_value,
+            g_value: self.g_value,
+            b_value: self.b_value,
+            texture_ready: self.texture_ready,
+            texture_path: self.texture_path.clone(),
+            offset_x: self.offset_x,
+            offset_y: self.offset_y,
+            width: self.width,
+            height: self.height,
+            display_width: self.get_display_width(),
+            display_height: self.get_display_height(),
+            u: self.u,
+            v: self.v,
+            generation: self.generation,
+            load_kind: self.load_kind,
+            rgba_sha256: self.content_sha256(),
+        }
+    }
+
     pub fn capture_snapshot_with_id(&self, id: u16) -> GraphBuffSnapshotV1 {
         // Skip empty graphs.
         if !self.texture_ready && self.texture.is_none() && self.texture_path.is_empty() {
@@ -671,6 +878,7 @@ impl GraphBuff {
                 u: self.u,
                 v: self.v,
                 load_kind: self.load_kind,
+                generation: self.generation,
                 rgba: None,
             };
         }
@@ -691,14 +899,8 @@ impl GraphBuff {
             u: self.u,
             v: self.v,
             load_kind: self.load_kind,
-            // Persist exact pixels even for VFS-backed textures. Runtime filters,
-            // graph copies and tone operations can mutate them after load, and a
-            // virtual source URI is not guaranteed to remain independently
-            // resolvable. The outer runtime snapshot compresses this payload.
-            rgba: self.texture.as_ref().map(|img| match img {
-                DynamicImage::ImageRgba8(rgba) => rgba.as_raw().clone(),
-                _ => img.to_rgba8().into_raw(),
-            }),
+            generation: self.generation,
+            rgba: self.texture.as_ref().map(snapshot_pixels),
         }
     }
 
@@ -713,9 +915,10 @@ impl GraphBuff {
         // Embedded pixels are authoritative because the texture may have been
         // mutated since its source asset was loaded. VFS reload remains the
         // compatibility path for older snapshots without embedded pixels.
-        if let Some(rgba) = &snap.rgba {
+        if let Some(pixels) = &snap.rgba {
+            let rgba = decode_snapshot_pixels(pixels)?;
             self.load_from_buff_ref_with_display_size(
-                rgba,
+                &rgba,
                 snap.width as u32,
                 snap.height as u32,
                 snap.display_width as u32,
@@ -728,7 +931,8 @@ impl GraphBuff {
             self.texture_path = snap.texture_path.clone();
             self.texture_ready = snap.texture_ready;
             self.load_kind = snap.load_kind;
-            self.mark_dirty();
+            self.generation = snap.generation;
+            *self.content_hash_cache.borrow_mut() = None;
             return Ok(());
         }
         if !snap.texture_path.is_empty() {
@@ -750,15 +954,26 @@ impl GraphBuff {
                 }
                 _ => self.load_texture(&snap.texture_path, bytes)?,
             }
-
-            // load_* already sets offsets/u/v/size/ready/path/kind.
+            self.offset_x = snap.offset_x;
+            self.offset_y = snap.offset_y;
+            self.width = snap.width;
+            self.height = snap.height;
+            self.display_width = snap.display_width;
+            self.display_height = snap.display_height;
+            self.u = snap.u;
+            self.v = snap.v;
+            self.texture_ready = snap.texture_ready;
+            self.load_kind = snap.load_kind;
+            self.generation = snap.generation;
+            *self.content_hash_cache.borrow_mut() = None;
             return Ok(());
         }
 
         // No path: require pixels.
-        if let Some(rgba) = &snap.rgba {
+        if let Some(pixels) = &snap.rgba {
+            let rgba = decode_snapshot_pixels(pixels)?;
             self.load_from_buff_ref_with_display_size(
-                rgba,
+                &rgba,
                 snap.width as u32,
                 snap.height as u32,
                 snap.display_width as u32,
@@ -770,10 +985,13 @@ impl GraphBuff {
             self.v = snap.v;
             self.texture_ready = snap.texture_ready;
             self.load_kind = snap.load_kind;
-            self.mark_dirty();
+            self.generation = snap.generation;
+            *self.content_hash_cache.borrow_mut() = None;
             return Ok(());
         }
 
+        self.generation = snap.generation;
+        *self.content_hash_cache.borrow_mut() = None;
         Ok(())
     }
 }

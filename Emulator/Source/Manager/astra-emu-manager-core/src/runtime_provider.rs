@@ -100,17 +100,16 @@ impl RuntimeAction for ApplyLegacyEffectsAction {
         ctx: &mut DeterministicActionContext<'_>,
         _input: &BTreeMap<String, BlackboardValue>,
     ) -> Result<ActionTrace, RuntimeError> {
-        let output = self
+        let output_guard = self
             .output
             .lock()
-            .map_err(|_| RuntimeError::message("ASTRA_EMU_OUTPUT_LOCK_POISONED"))?
-            .take()
-            .ok_or_else(|| {
-                RuntimeError::diagnostic(Diagnostic::blocking(
-                    "ASTRA_EMU_OUTPUT_MISSING",
-                    "family provider did not publish a step output",
-                ))
-            })?;
+            .map_err(|_| RuntimeError::message("ASTRA_EMU_OUTPUT_LOCK_POISONED"))?;
+        let output = output_guard.as_ref().ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_EMU_OUTPUT_MISSING",
+                "family provider did not publish a step output",
+            ))
+        })?;
         let mut state = ctx.read_component::<EmuRuntimeState>(self.state_component)?;
         state.family_state_hash = output.state_hash;
         state.fixed_step = ctx.step();
@@ -131,9 +130,18 @@ impl RuntimeAction for ApplyLegacyEffectsAction {
                     command, payload, ..
                 } => ctx.emit_presentation(PresentationCommand::Custom {
                     kind: command.clone(),
-                    data: [("payload".into(), BlackboardValue::Bytes(payload.clone()))]
-                        .into_iter()
-                        .collect(),
+                    data: [
+                        (
+                            "payload_hash".into(),
+                            BlackboardValue::String(Hash256::from_sha256(payload).to_string()),
+                        ),
+                        (
+                            "payload_bytes".into(),
+                            BlackboardValue::I64(payload.len() as i64),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
                 }),
                 LegacyEffect::Audio {
                     command, payload, ..
@@ -239,7 +247,7 @@ impl AstraEmuRuntimeProvider {
                 ),
                 schema(
                     RuntimeOutputDomain::Presentation,
-                    "astra.emu.presentation_effect.v1",
+                    "astra.emu.render_frame.v1",
                 ),
                 schema(RuntimeOutputDomain::Audio, "astra.emu.audio_effect.v1"),
                 schema(RuntimeOutputDomain::Trace, "astra.emu.legacy_trace.v1"),
@@ -654,7 +662,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
         *session
             .output
             .lock()
-            .map_err(|_| "ASTRA_EMU_OUTPUT_LOCK_POISONED")? = Some(family_output.clone());
+            .map_err(|_| "ASTRA_EMU_OUTPUT_LOCK_POISONED")? = Some(family_output);
         let mut ingress = Vec::with_capacity(await_results.len() + 1);
         for result in await_results {
             let token_id = session
@@ -716,6 +724,39 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             session.poisoned = true;
             return Err(format!("{}:{}", diagnostic.code, diagnostic.message));
         }
+        let mut family_output = session
+            .output
+            .lock()
+            .map_err(|_| "ASTRA_EMU_OUTPUT_LOCK_POISONED")?
+            .take()
+            .ok_or_else(|| {
+                session.poisoned = true;
+                "ASTRA_EMU_OUTPUT_MISSING_AFTER_TICK".to_owned()
+            })?;
+        let render_output = family_output
+            .effects
+            .iter()
+            .position(|effect| {
+                matches!(
+                    effect,
+                    LegacyEffect::Presentation { command, .. }
+                        if command == "astra.emu.render_frame.v1"
+                )
+            })
+            .map(|index| family_output.effects.remove(index))
+            .map(|effect| match effect {
+                LegacyEffect::Presentation {
+                    command, payload, ..
+                } => RuntimeOutputEnvelope {
+                    domain: RuntimeOutputDomain::Presentation,
+                    schema: command,
+                    version: SchemaVersion::new(1, 0, 0),
+                    codec: RuntimeOutputCodec::Postcard,
+                    hash: Hash256::from_sha256(&payload),
+                    bytes: payload,
+                },
+                _ => unreachable!("matched render presentation effect"),
+            });
         let mut outputs = vec![RuntimeOutputEnvelope::postcard(
             RuntimeOutputDomain::Effect,
             "astra.emu.legacy_step_output.v1",
@@ -723,26 +764,8 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             &family_output,
         )
         .map_err(|error| error.to_string())?];
-        for effect in &family_output.effects {
-            let (domain, schema) = match effect {
-                LegacyEffect::Presentation { .. } => (
-                    RuntimeOutputDomain::Presentation,
-                    "astra.emu.presentation_effect.v1",
-                ),
-                LegacyEffect::Audio { .. } => {
-                    (RuntimeOutputDomain::Audio, "astra.emu.audio_effect.v1")
-                }
-                _ => continue,
-            };
-            outputs.push(
-                RuntimeOutputEnvelope::postcard(
-                    domain,
-                    schema,
-                    SchemaVersion::new(1, 0, 0),
-                    effect,
-                )
-                .map_err(|error| error.to_string())?,
-            );
+        if let Some(render_output) = render_output {
+            outputs.push(render_output);
         }
         outputs.push(
             RuntimeOutputEnvelope::postcard(
@@ -1063,25 +1086,49 @@ mod tests {
     }
 
     impl LegacyVfsReader for MemoryVfs {
-        fn read_file(
+        fn stat_file(
             &self,
             mount_set_id: &str,
             uri: &str,
-            max_bytes: u64,
-        ) -> Result<Vec<u8>, LegacyProviderError> {
+        ) -> Result<astra_byte_source::ByteSourceStat, LegacyProviderError> {
             if mount_set_id != "mount.test" || uri != "script.hcb" {
                 return Err(LegacyProviderError::invalid(
                     "TEST_VFS_NOT_FOUND",
                     "synthetic fixture path is missing",
                 ));
             }
-            if self.script.len() as u64 > max_bytes {
+            Ok(astra_byte_source::ByteSourceStat {
+                len: self.script.len() as u64,
+                revision: astra_byte_source::SourceRevision(Hash256::from_sha256(&self.script)),
+            })
+        }
+
+        fn read_file_range(
+            &self,
+            mount_set_id: &str,
+            uri: &str,
+            expected_revision: astra_byte_source::SourceRevision,
+            range: astra_byte_source::ByteRange,
+            max_bytes: u64,
+        ) -> Result<astra_byte_source::RangeReadResult, LegacyProviderError> {
+            let stat = self.stat_file(mount_set_id, uri)?;
+            range.validate(stat.len, max_bytes).map_err(|error| {
+                LegacyProviderError::invalid("TEST_VFS_BOUNDS", error.to_string())
+            })?;
+            if stat.revision != expected_revision {
                 return Err(LegacyProviderError::invalid(
-                    "TEST_VFS_BOUNDS",
-                    "synthetic fixture exceeds the requested bound",
+                    "TEST_VFS_REVISION",
+                    "synthetic fixture revision changed",
                 ));
             }
-            Ok(self.script.clone())
+            let bytes =
+                self.script[range.offset as usize..(range.offset + range.len) as usize].to_vec();
+            Ok(astra_byte_source::RangeReadResult {
+                range,
+                revision: stat.revision,
+                content_hash: Hash256::from_sha256(&bytes),
+                bytes,
+            })
         }
     }
 

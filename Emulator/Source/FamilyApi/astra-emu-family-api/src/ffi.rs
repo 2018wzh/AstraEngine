@@ -12,7 +12,7 @@ use crate::{
     LegacyRuntimeHostCtx, LegacyRuntimeSessionId, LegacySnapshotEnvelope, LegacyStepInput,
 };
 
-pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v3";
+pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v4";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LegacyProviderInstanceRequest {
@@ -70,6 +70,21 @@ pub struct LegacyResourceReadCall {
     pub ctx: LegacyRuntimeHostCtx,
     pub session_id: LegacyRuntimeSessionId,
     pub resource_uri: String,
+    pub max_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyVfsStatCall {
+    pub mount_set_id: String,
+    pub uri: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyVfsRangeCall {
+    pub mount_set_id: String,
+    pub uri: String,
+    pub expected_revision: astra_byte_source::SourceRevision,
+    pub range: astra_byte_source::ByteRange,
     pub max_bytes: u64,
 }
 
@@ -148,14 +163,16 @@ impl FfiLegacyResult {
 }
 
 pub type FfiLegacyInvoke = extern "C" fn(RVec<u8>) -> FfiLegacyResult;
-pub type FfiLegacyReadVfs = extern "C" fn(RString, RString, RString, u64) -> FfiLegacyResult;
+pub type FfiLegacyVfsCall = extern "C" fn(RString, RVec<u8>) -> FfiLegacyResult;
 
 #[repr(C)]
 #[derive(Clone, StableAbi)]
 pub struct FfiLegacyHostServices {
     pub host_token: RString,
     #[sabi(unsafe_opaque_field)]
-    pub read_vfs: FfiLegacyReadVfs,
+    pub stat_vfs: FfiLegacyVfsCall,
+    #[sabi(unsafe_opaque_field)]
+    pub read_vfs_range: FfiLegacyVfsCall,
 }
 
 impl core::fmt::Debug for FfiLegacyHostServices {

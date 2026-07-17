@@ -17,7 +17,7 @@ use anyhow::Result;
 const LIP_SLOTS: usize = 4;
 const LIP_FRAMES: usize = 4;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 struct Frame {
     graph_id: i32,
     dur_ms: u32,
@@ -32,7 +32,7 @@ impl Default for Frame {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 struct LipSlot {
     // Target primitive id.
     prim_id: i16,
@@ -60,6 +60,7 @@ impl Default for LipSlot {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LipMotionContainer {
     slots: [LipSlot; LIP_SLOTS],
 }

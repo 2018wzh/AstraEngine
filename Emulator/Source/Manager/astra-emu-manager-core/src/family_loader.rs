@@ -317,7 +317,8 @@ impl DynamicFamilyLoader {
             .map_err(|error| FamilyPluginLoadError::Provider(error.to_string()))?;
         let services = FfiLegacyHostServices {
             host_token: host_token.clone().into(),
-            read_vfs: ffi_read_vfs,
+            stat_vfs: ffi_stat_vfs,
+            read_vfs_range: ffi_read_vfs_range,
         };
         if let Err(error) = (module.create_instance())(services, payload.into()).decode::<()>() {
             remove_vfs_reader(&host_token);
@@ -550,13 +551,9 @@ fn invoke<I: Serialize, O: serde::de::DeserializeOwned>(
     function(bytes.into()).decode()
 }
 
-extern "C" fn ffi_read_vfs(
-    host_token: RString,
-    mount_set_id: RString,
-    uri: RString,
-    max_bytes: u64,
-) -> FfiLegacyResult {
+extern "C" fn ffi_stat_vfs(host_token: RString, payload: RVec<u8>) -> FfiLegacyResult {
     let result = (|| {
+        let call: LegacyVfsStatCall = decode_ffi_request(payload)?;
         let readers = vfs_readers().lock().map_err(|_| {
             LegacyProviderError::invalid(
                 "ASTRA_EMU_VFS_LOCK_POISONED",
@@ -566,10 +563,36 @@ extern "C" fn ffi_read_vfs(
         let reader = readers.get(host_token.as_str()).ok_or_else(|| {
             LegacyProviderError::invalid("ASTRA_EMU_VFS_HOST_TOKEN", "host VFS token is not active")
         })?;
-        reader.read_file(mount_set_id.as_str(), uri.as_str(), max_bytes)
+        reader.stat_file(&call.mount_set_id, &call.uri)
     })();
     match result {
-        Ok(bytes) => FfiLegacyResult::success(&bytes),
+        Ok(stat) => FfiLegacyResult::success(&stat),
+        Err(error) => FfiLegacyResult::failure(error),
+    }
+}
+
+extern "C" fn ffi_read_vfs_range(host_token: RString, payload: RVec<u8>) -> FfiLegacyResult {
+    let result = (|| {
+        let call: LegacyVfsRangeCall = decode_ffi_request(payload)?;
+        let readers = vfs_readers().lock().map_err(|_| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_VFS_LOCK_POISONED",
+                "host VFS registry lock is poisoned",
+            )
+        })?;
+        let reader = readers.get(host_token.as_str()).ok_or_else(|| {
+            LegacyProviderError::invalid("ASTRA_EMU_VFS_HOST_TOKEN", "host VFS token is not active")
+        })?;
+        reader.read_file_range(
+            &call.mount_set_id,
+            &call.uri,
+            call.expected_revision,
+            call.range,
+            call.max_bytes,
+        )
+    })();
+    match result {
+        Ok(range) => FfiLegacyResult::success(&range),
         Err(error) => FfiLegacyResult::failure(error),
     }
 }
@@ -974,25 +997,49 @@ mod tests {
     }
 
     impl LegacyVfsReader for DynamicMemoryVfs {
-        fn read_file(
+        fn stat_file(
             &self,
             mount_set_id: &str,
             uri: &str,
-            max_bytes: u64,
-        ) -> Result<Vec<u8>, LegacyProviderError> {
+        ) -> Result<astra_byte_source::ByteSourceStat, LegacyProviderError> {
             if mount_set_id != "mount.test" || uri != "script.hcb" {
                 return Err(LegacyProviderError::invalid(
                     "TEST_VFS_NOT_FOUND",
                     "dynamic fixture is not present",
                 ));
             }
-            if self.script.len() as u64 > max_bytes {
+            Ok(astra_byte_source::ByteSourceStat {
+                len: self.script.len() as u64,
+                revision: astra_byte_source::SourceRevision(Hash256::from_sha256(&self.script)),
+            })
+        }
+
+        fn read_file_range(
+            &self,
+            mount_set_id: &str,
+            uri: &str,
+            expected_revision: astra_byte_source::SourceRevision,
+            range: astra_byte_source::ByteRange,
+            max_bytes: u64,
+        ) -> Result<astra_byte_source::RangeReadResult, LegacyProviderError> {
+            let stat = self.stat_file(mount_set_id, uri)?;
+            range.validate(stat.len, max_bytes).map_err(|error| {
+                LegacyProviderError::invalid("TEST_VFS_BOUNDS", error.to_string())
+            })?;
+            if stat.revision != expected_revision {
                 return Err(LegacyProviderError::invalid(
-                    "TEST_VFS_BOUNDS",
-                    "dynamic fixture exceeds the read budget",
+                    "TEST_VFS_REVISION",
+                    "dynamic fixture revision changed",
                 ));
             }
-            Ok(self.script.clone())
+            let bytes =
+                self.script[range.offset as usize..(range.offset + range.len) as usize].to_vec();
+            Ok(astra_byte_source::RangeReadResult {
+                range,
+                revision: stat.revision,
+                content_hash: Hash256::from_sha256(&bytes),
+                bytes,
+            })
         }
     }
 

@@ -30,6 +30,8 @@ astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi"
 clap.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
+image.workspace = true
+rayon.workspace = true
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true

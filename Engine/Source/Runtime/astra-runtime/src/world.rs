@@ -8,7 +8,7 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     ActionRegistry, ActorId, ActorRecord, ActorSnapshot, ActorStore, AwaitQueue, AwaitResult,
@@ -964,7 +964,7 @@ impl RuntimeWorld {
             presentation_hash: self.presentation_hash(),
             diagnostics: self.diagnostics.clone(),
         };
-        info!(
+        trace!(
             step = report.step,
             state_hash = %report.state_hash,
             event_hash = %report.event_hash,

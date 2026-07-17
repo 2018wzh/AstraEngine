@@ -63,18 +63,33 @@ impl RuntimeVfs for CaseVfs {
             .lock()
             .map_err(|_| anyhow::anyhow!("RFVP_VFS_ARCHIVE_LOCK_POISONED"))?;
         if !archives.contains_key(folder) {
-            let archive_bytes = self
-                .read_direct(&format!("{folder}.bin"))
-                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-            let archive = FvpArchive::parse(archive_bytes, self.nls, MAX_CASE_FILES)
-                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            let archive_uri = format!("{folder}.bin");
+            let archive = if self.files.is_some() {
+                let archive_bytes = self
+                    .read_direct(&archive_uri)
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                FvpArchive::parse(archive_bytes, self.nls, MAX_CASE_FILES)
+            } else {
+                let (host, mount_set_id) = self
+                    .host
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("RFVP_VFS_HOST_UNAVAILABLE"))?;
+                FvpArchive::open_host(
+                    Arc::clone(host),
+                    mount_set_id.clone(),
+                    archive_uri,
+                    self.nls,
+                    MAX_CASE_FILES,
+                )
+            }
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
             archives.insert(folder.into(), archive);
         }
         archives
             .get(folder)
-            .and_then(|archive| archive.read(entry))
-            .map(ToOwned::to_owned)
-            .ok_or_else(|| anyhow::anyhow!("RFVP_VFS_NOT_FOUND"))
+            .ok_or_else(|| anyhow::anyhow!("RFVP_VFS_NOT_FOUND"))?
+            .read(entry)
+            .map_err(|error| anyhow::anyhow!(error.to_string()))
     }
 }
 
@@ -513,27 +528,15 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         ) {
             return Err(invalid("ASTRA_FVP_STEP_MODE", "unsupported step mode"));
         }
-        // Each executed instruction can produce at most one syscall journal
-        // effect and one host media command. Reserve a third slot per
-        // instruction plus the mandatory render frame so the provider honors
-        // the negotiated effect/trace bounds before mutating VM state.
-        let effect_instruction_budget = input
-            .budget
-            .max_effects
-            .checked_sub(1)
-            .map(|value| value / 3)
-            .filter(|value| *value > 0)
-            .ok_or_else(|| {
-                invalid(
-                    "ASTRA_FVP_EFFECT_BUDGET_MINIMUM",
-                    "FVP requires at least four effect slots per step",
-                )
-            })?;
+        // The VM must run to the same semantic yield point as RFVP. Effects are
+        // emitted only by syscalls and host media drains, so using the effect
+        // capacity as an instruction quota splits one RFVP frame across many
+        // Astra ticks and changes timer/dissolve behavior. Bound instruction
+        // tracing here and validate the actual effect count after collection.
         let instruction_budget = input
             .budget
             .max_instructions
-            .min(input.budget.max_trace_entries)
-            .min(effect_instruction_budget);
+            .min(input.budget.max_trace_entries);
         apply_inputs(session, &input.input_edges)?;
         let frame_ms = input.delta_ns.div_ceil(1_000_000);
         let tick_result = catch_unwind(AssertUnwindSafe(|| {
@@ -681,6 +684,34 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         render_frame.validate()?;
         let render_payload = postcard::to_allocvec(&render_frame)
             .map_err(|error| invalid("ASTRA_FVP_RENDER_ENCODE", error.to_string()))?;
+        if tracing::enabled!(tracing::Level::TRACE) {
+            let mut translucent_draws = 0u32;
+            let mut minimum_translucent_alpha = u32::MAX;
+            let mut maximum_translucent_alpha = 0u32;
+            for draw in &render_frame.draws {
+                let alpha = draw.vertices[0].color[3].clamp(0.0, 1.0);
+                if alpha > 0.0 && alpha < 1.0 {
+                    translucent_draws = translucent_draws.saturating_add(1);
+                    let quantized = (alpha * 1_000_000.0).round() as u32;
+                    minimum_translucent_alpha = minimum_translucent_alpha.min(quantized);
+                    maximum_translucent_alpha = maximum_translucent_alpha.max(quantized);
+                }
+            }
+            tracing::trace!(
+                event = "astra.emu.fvp.render_frame",
+                fixed_step = input.tick_index,
+                draw_count = render_frame.draws.len(),
+                texture_update_count = render_frame.texture_updates.len(),
+                translucent_draw_count = translucent_draws,
+                minimum_translucent_alpha_ppm = if translucent_draws == 0 {
+                    0
+                } else {
+                    minimum_translucent_alpha
+                },
+                maximum_translucent_alpha_ppm = maximum_translucent_alpha,
+                render_payload_hash = %Hash256::from_sha256(&render_payload),
+            );
+        }
         effects.push(LegacyEffect::Presentation {
             sequence: effects.len() as u64,
             command: "astra.emu.render_frame.v1".into(),
@@ -691,7 +722,11 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             session.poisoned = true;
             return Err(invalid(
                 "ASTRA_FVP_EFFECT_BUDGET",
-                "rfvp emitted more effects than the negotiated budget",
+                format!(
+                    "rfvp emitted {} effects; negotiated maximum is {}",
+                    effects.len(),
+                    input.budget.max_effects
+                ),
             ));
         }
         let mut contexts = BTreeSet::new();
@@ -711,7 +746,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             })
             .collect();
         coverage.contexts = contexts.into_iter().collect();
-        let state_bytes = session.runtime.state_bytes().map_err(|error| {
+        let state_bytes = session.runtime.canonical_state_bytes().map_err(|error| {
             session.poisoned = true;
             invalid("ASTRA_FVP_STATE", error.to_string())
         })?;
@@ -775,15 +810,15 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         let envelope = LegacySnapshotEnvelope {
             family_id: FamilyId(FVP_FAMILY_ID.into()),
             session_id: session_id.clone(),
-            schema_version: SchemaVersion::new(1, 0, 0),
+            schema_version: SchemaVersion::new(2, 0, 0),
             case_fingerprint: session.case_fingerprint,
             fixed_step: session.last_step,
             session_seed: session.seed,
             runtime_cursor: session.instruction_count,
             family_sections: vec![LegacySnapshotSection {
                 section_id: "fvp.runtime".into(),
-                schema: "astra.emu.fvp.runtime.v1".into(),
-                version: SchemaVersion::new(1, 0, 0),
+                schema: "astra.emu.fvp.runtime.v2".into(),
+                version: SchemaVersion::new(2, 0, 0),
                 hash: Hash256::from_sha256(&bytes),
                 bytes,
             }],
@@ -816,8 +851,8 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         }
         let section = &snapshot.family_sections[0];
         if section.section_id != "fvp.runtime"
-            || section.schema != "astra.emu.fvp.runtime.v1"
-            || section.version != SchemaVersion::new(1, 0, 0)
+            || section.schema != "astra.emu.fvp.runtime.v2"
+            || section.version != SchemaVersion::new(2, 0, 0)
             || section.hash != Hash256::from_sha256(&section.bytes)
         {
             return Err(invalid(
@@ -879,7 +914,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         let state_hash = Hash256::from_sha256(
             &session
                 .runtime
-                .state_bytes()
+                .canonical_state_bytes()
                 .map_err(|error| invalid("ASTRA_FVP_STATE", error.to_string()))?,
         );
         Ok(LegacyRestoreReport {
@@ -903,7 +938,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         let state_hash = Hash256::from_sha256(
             &session
                 .runtime
-                .state_bytes()
+                .canonical_state_bytes()
                 .map_err(|error| invalid("ASTRA_FVP_STATE", error.to_string()))?,
         );
         Ok(LegacyShutdownReport {
@@ -1412,19 +1447,43 @@ mod tests {
     }
 
     impl LegacyVfsReader for MemoryReader {
-        fn read_file(
+        fn stat_file(
             &self,
             mount_set_id: &str,
             uri: &str,
-            max_bytes: u64,
-        ) -> Result<Vec<u8>, LegacyProviderError> {
+        ) -> Result<astra_byte_source::ByteSourceStat, LegacyProviderError> {
             if mount_set_id != "mount.test" || uri != "script.hcb" {
                 return Err(invalid("TEST_VFS_NOT_FOUND", "fixture URI is not present"));
             }
-            if self.script.len() as u64 > max_bytes {
-                return Err(invalid("TEST_VFS_BOUNDS", "fixture exceeds read budget"));
+            Ok(astra_byte_source::ByteSourceStat {
+                len: self.script.len() as u64,
+                revision: astra_byte_source::SourceRevision(Hash256::from_sha256(&self.script)),
+            })
+        }
+
+        fn read_file_range(
+            &self,
+            mount_set_id: &str,
+            uri: &str,
+            expected_revision: astra_byte_source::SourceRevision,
+            range: astra_byte_source::ByteRange,
+            max_bytes: u64,
+        ) -> Result<astra_byte_source::RangeReadResult, LegacyProviderError> {
+            let stat = self.stat_file(mount_set_id, uri)?;
+            range
+                .validate(stat.len, max_bytes)
+                .map_err(|error| invalid("TEST_VFS_BOUNDS", error.to_string()))?;
+            if stat.revision != expected_revision {
+                return Err(invalid("TEST_VFS_REVISION", "fixture revision changed"));
             }
-            Ok(self.script.clone())
+            let bytes =
+                self.script[range.offset as usize..(range.offset + range.len) as usize].to_vec();
+            Ok(astra_byte_source::RangeReadResult {
+                range,
+                revision: stat.revision,
+                content_hash: Hash256::from_sha256(&bytes),
+                bytes,
+            })
         }
     }
 
@@ -1501,7 +1560,14 @@ mod tests {
         let before = output.state_hash;
         let saved: FvpSessionSnapshotV1 =
             postcard::from_bytes(&snapshot.family_sections[0].bytes).unwrap();
-        assert_eq!(Hash256::from_sha256(&saved.runtime_bytes), before);
+        let canonical_before = provider
+            .sessions
+            .get_mut(&session_id.0)
+            .unwrap()
+            .runtime
+            .canonical_state_bytes()
+            .unwrap();
+        assert_eq!(Hash256::from_sha256(&canonical_before), before);
         let restore = provider.restore(&ctx, &session_id, &snapshot).unwrap();
         let after_bytes = provider
             .sessions
@@ -1805,29 +1871,13 @@ mod tests {
     }
 
     #[test]
-    fn negotiated_effect_budget_limits_execution_before_vm_mutation() {
+    fn negotiated_effect_budget_does_not_throttle_non_effect_instructions() {
         let script = text_flow_hcb("Budgeted line");
         let fingerprint = Hash256::from_sha256(&script);
         let ctx = host_ctx();
         let mut provider = FvpRuntimeProvider::with_vfs(Arc::new(MemoryReader { script }));
         let session_id = LegacyRuntimeSessionId("session.effect_budget".into());
         open_fixture(&mut provider, &ctx, &session_id, fingerprint);
-
-        let too_small = LegacyStepInput {
-            budget: LegacyStepBudget {
-                max_instructions: 100_000,
-                max_effects: 3,
-                max_trace_entries: 65_536,
-            },
-            ..step_input(1, Vec::new())
-        };
-        assert_eq!(
-            provider
-                .step(&ctx, &session_id, too_small)
-                .unwrap_err()
-                .code(),
-            "ASTRA_FVP_EFFECT_BUDGET_MINIMUM"
-        );
 
         let bounded = provider
             .step(
@@ -1844,7 +1894,10 @@ mod tests {
             )
             .unwrap();
         assert!(bounded.effects.len() <= 4);
-        assert!(bounded.trace.len() <= 1);
+        assert!(
+            bounded.trace.len() > 1,
+            "effect capacity must not become an instruction quota"
+        );
     }
 
     fn open_fixture(

@@ -10,7 +10,7 @@ use astra_media::{
     DecodedVideoFrame, DecodedVideoStream, FfmpegDecodedPacket, DECODED_VIDEO_STREAM_SCHEMA,
 };
 use astra_media_core::{
-    CpuRendererProvider, HeadlessRenderer, RenderTargetFormat, Renderer2DProvider,
+    CpuRendererProvider, HeadlessRenderer, MediaError, RenderTargetFormat, Renderer2DProvider,
     RendererCreateRequest, SceneCommand,
 };
 use astra_platform::{
@@ -444,7 +444,12 @@ impl HostState {
                             return Err(PlatformError::new(
                                 PlatformErrorCode::QueueOverflow,
                                 "audio.submit",
-                                "audio buffer limit exceeded",
+                                format!(
+                                    "audio buffer limit exceeded: queued_samples={}, packet_samples={}, max_samples={}",
+                                    a.queued.len(),
+                                    packet.samples.len(),
+                                    a.max_frames.saturating_mul(usize::from(a.channels))
+                                ),
                             ));
                         }
                         a.timeline.extend_from_slice(&packet.samples);
@@ -1164,12 +1169,21 @@ fn io_error(operation: &'static str) -> PlatformError {
     )
 }
 fn media_error(error: astra_media::MediaError) -> PlatformError {
+    let diagnostic_codes = match &error {
+        MediaError::Diagnostics(diagnostics) => diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+        MediaError::Message(_) => "ASTRA_MEDIA_PROVIDER_MESSAGE".to_owned(),
+    };
     PlatformError::new(
         PlatformErrorCode::IntegrityMismatch,
         "headless.media",
         "headless media provider rejected input",
     )
     .with_field("media_error", error.to_string())
+    .with_field("diagnostic_codes", diagnostic_codes)
 }
 
 #[cfg(test)]

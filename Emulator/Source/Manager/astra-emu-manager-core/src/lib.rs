@@ -8,7 +8,9 @@ mod probe;
 mod runtime_provider;
 mod scanner;
 
-pub use desktop_source::{DesktopGrantedSource, DesktopVfsRegistry};
+pub use desktop_source::{
+    DesktopGrantedSource, DesktopVfsRegistry, VfsAccessMetrics, VfsAuditSummary,
+};
 pub use evidence::*;
 pub use family_loader::*;
 pub use filter::{FilterBinding, FilterGraph, FilterLayer, FilterValidation};

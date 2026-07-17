@@ -4,6 +4,7 @@ members = [
     "Engine/Source/Runtime/astra-core",
     "Engine/Source/Runtime/astra-package",
     "Engine/Source/Runtime/astra-asset",
+    "Engine/Source/Runtime/astra-byte-source",
     "Engine/Source/Runtime/astra-media-core",
     "Engine/Source/Runtime/astra-media",
     "Engine/Source/Runtime/astra-ui-core",
@@ -188,7 +189,8 @@ web-sys = "0.3"
 windows = { version = "0.62", default-features = false }
 winit = { version = "0.30", default-features = false }
 keyring = "=4.1.5"
-wgpu = "30"
+wgpu = "29"
+rayon = "1.12"
 yakui-core = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }
 yakui-widgets = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }
 zstd = "0.13"

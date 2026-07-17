@@ -1,26 +1,27 @@
 #[cfg(feature = "no_std")]
 use alloc::collections::{BTreeMap, BTreeSet};
-#[cfg(all(not(feature = "no_std"), target_os = "uefi"))]
-use std::collections::hash_map::DefaultHasher;
 #[cfg(not(feature = "no_std"))]
-use std::collections::{HashMap, HashSet};
-#[cfg(all(not(feature = "no_std"), target_os = "uefi"))]
-use std::hash::BuildHasherDefault;
+use std::collections::{BTreeMap, BTreeSet};
 
-#[cfg(feature = "no_std")]
 pub type StableHashMap<K, V> = BTreeMap<K, V>;
 
-#[cfg(feature = "no_std")]
 pub type StableHashSet<T> = BTreeSet<T>;
 
-#[cfg(all(not(feature = "no_std"), target_os = "uefi"))]
-pub type StableHashMap<K, V> = HashMap<K, V, BuildHasherDefault<DefaultHasher>>;
+#[cfg(test)]
+mod tests {
+    use super::StableHashMap;
 
-#[cfg(all(not(feature = "no_std"), target_os = "uefi"))]
-pub type StableHashSet<T> = HashSet<T, BuildHasherDefault<DefaultHasher>>;
-
-#[cfg(all(not(feature = "no_std"), not(target_os = "uefi")))]
-pub type StableHashMap<K, V> = HashMap<K, V>;
-
-#[cfg(all(not(feature = "no_std"), not(target_os = "uefi")))]
-pub type StableHashSet<T> = HashSet<T>;
+    #[test]
+    fn serialization_order_does_not_depend_on_insertion_order() {
+        let mut left = StableHashMap::new();
+        left.insert("second", 2_u8);
+        left.insert("first", 1_u8);
+        let mut right = StableHashMap::new();
+        right.insert("first", 1_u8);
+        right.insert("second", 2_u8);
+        assert_eq!(
+            bincode::serialize(&left).unwrap(),
+            bincode::serialize(&right).unwrap()
+        );
+    }
+}

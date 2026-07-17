@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 const MAX_SYMBOL_BYTES: usize = 128;
-const MAX_EFFECTS_PER_STEP: usize = 4096;
+const MAX_EFFECTS_PER_STEP: usize = 65_536;
+const MAX_TRACE_ENTRIES_PER_STEP: u32 = 1_000_000;
 const MAX_DIAGNOSTICS_PER_STEP: usize = 256;
 const MAX_SNAPSHOT_SECTIONS: usize = 128;
 const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
@@ -105,12 +106,46 @@ pub struct LegacyProbeRequest {
 }
 
 pub trait LegacyVfsReader: Send + Sync {
+    fn stat_file(
+        &self,
+        mount_set_id: &str,
+        uri: &str,
+    ) -> Result<astra_byte_source::ByteSourceStat, LegacyProviderError>;
+
+    fn read_file_range(
+        &self,
+        mount_set_id: &str,
+        uri: &str,
+        expected_revision: astra_byte_source::SourceRevision,
+        range: astra_byte_source::ByteRange,
+        max_bytes: u64,
+    ) -> Result<astra_byte_source::RangeReadResult, LegacyProviderError>;
+
     fn read_file(
         &self,
         mount_set_id: &str,
         uri: &str,
         max_bytes: u64,
-    ) -> Result<Vec<u8>, LegacyProviderError>;
+    ) -> Result<Vec<u8>, LegacyProviderError> {
+        let stat = self.stat_file(mount_set_id, uri)?;
+        if stat.len > max_bytes {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_VFS_BOUNDS",
+                "VFS entry exceeds the requested byte bound",
+            ));
+        }
+        self.read_file_range(
+            mount_set_id,
+            uri,
+            stat.revision,
+            astra_byte_source::ByteRange {
+                offset: 0,
+                len: stat.len,
+            },
+            max_bytes,
+        )
+        .map(|result| result.bytes)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -173,7 +208,7 @@ impl LegacyStepBudget {
                 "effect budget is outside the supported bound",
             ));
         }
-        if self.max_trace_entries == 0 || self.max_trace_entries > 65_536 {
+        if self.max_trace_entries == 0 || self.max_trace_entries > MAX_TRACE_ENTRIES_PER_STEP {
             return Err(LegacyProviderError::invalid(
                 "ASTRA_EMU_STEP_TRACE_BUDGET",
                 "trace budget is outside the supported bound",

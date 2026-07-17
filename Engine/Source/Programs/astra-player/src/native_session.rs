@@ -1,4 +1,3 @@
-use astra_core::Hash256;
 use astra_package::{PackageManifest, PackageReader};
 use astra_platform::{
     InputState, PackageSourceRequest, PlatformError, PlatformErrorCode, PlatformEventKind,
@@ -37,7 +36,7 @@ pub async fn run_native_vn_player_session(
             "Player session config is incomplete",
         ));
     }
-    let package_hash = Hash256::from_sha256(&package_bytes).to_string();
+    let package_storage_hash = Hash256::from_sha256(&package_bytes).to_string();
     let package = PackageReader::open(&package_bytes)
         .map_err(|error| player_error_owned("player.package.open", error))?;
     let manifest: PackageManifest = package
@@ -54,7 +53,7 @@ pub async fn run_native_vn_player_session(
         .client
         .open_package(PackageSourceRequest::Bundled {
             relative_path: config.bundled_package_path,
-            expected_hash: package_hash,
+            expected_hash: package_storage_hash,
         })
         .await?;
     let header = session.client.read_package_range(source, 0, 16).await?;
@@ -473,3 +472,4 @@ fn player_error_owned(operation: &'static str, error: impl std::fmt::Display) ->
         error.to_string(),
     )
 }
+use astra_core::Hash256;

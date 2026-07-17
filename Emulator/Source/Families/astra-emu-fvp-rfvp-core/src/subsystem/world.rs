@@ -187,7 +187,49 @@ pub struct GameData {
     pub(crate) debug_vm: crate::debug_ui::vm_snapshot::VmSnapshot,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RuntimeGameStateSnapshotV1 {
+    pub root_prim: Option<i16>,
+    pub can_fullscreen: bool,
+    pub pending_render_flag: Option<i32>,
+    pub lock_scripter: bool,
+    pub close_pending: bool,
+    pub last_current_thread: u32,
+    pub current_thread: u32,
+    pub main_thread_exited: bool,
+    pub game_should_exit: bool,
+    pub halt: bool,
+}
+
 impl GameData {
+    pub fn capture_runtime_state_v1(&self) -> RuntimeGameStateSnapshotV1 {
+        RuntimeGameStateSnapshotV1 {
+            root_prim: self.root_prim,
+            can_fullscreen: self.can_fullscreen,
+            pending_render_flag: self.pending_render_flag,
+            lock_scripter: self.lock_scripter,
+            close_pending: self.close_pending,
+            last_current_thread: self.last_current_thread,
+            current_thread: self.current_thread,
+            main_thread_exited: self.main_thread_exited,
+            game_should_exit: self.game_should_exit,
+            halt: self.halt,
+        }
+    }
+
+    pub fn apply_runtime_state_v1(&mut self, snapshot: RuntimeGameStateSnapshotV1) {
+        self.root_prim = snapshot.root_prim;
+        self.can_fullscreen = snapshot.can_fullscreen;
+        self.pending_render_flag = snapshot.pending_render_flag;
+        self.lock_scripter = snapshot.lock_scripter;
+        self.close_pending = snapshot.close_pending;
+        self.last_current_thread = snapshot.last_current_thread;
+        self.current_thread = snapshot.current_thread;
+        self.main_thread_exited = snapshot.main_thread_exited;
+        self.game_should_exit = snapshot.game_should_exit;
+        self.halt = snapshot.halt;
+    }
+
     /// Initialize a `GameData` at `dst` with the same values as `GameData::default()`,
     /// but without creating a large temporary on the stack.
     ///

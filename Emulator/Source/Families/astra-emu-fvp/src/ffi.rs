@@ -9,7 +9,7 @@ use astra_emu_family_api::{
     FfiLegacyEphemeralText, FfiLegacyHostServices, FfiLegacyResult, LegacyOpenCall,
     LegacyProbeCall, LegacyProviderError, LegacyProviderInstanceRequest, LegacyResourceReadCall,
     LegacyRestoreCall, LegacyRuntimeProvider, LegacySessionCall, LegacyStepCall,
-    LegacyTextLeaseCall, LegacyVfsReader,
+    LegacyTextLeaseCall, LegacyVfsRangeCall, LegacyVfsReader, LegacyVfsStatCall,
 };
 
 use crate::FvpRuntimeProvider;
@@ -22,26 +22,45 @@ struct FfiVfsReader {
 }
 
 impl LegacyVfsReader for FfiVfsReader {
-    fn read_file(
+    fn stat_file(
         &self,
         mount_set_id: &str,
         uri: &str,
+    ) -> Result<astra_byte_source::ByteSourceStat, LegacyProviderError> {
+        let payload = postcard::to_allocvec(&LegacyVfsStatCall {
+            mount_set_id: mount_set_id.to_owned(),
+            uri: uri.to_owned(),
+        })
+        .map_err(|error| LegacyProviderError::invalid("ASTRA_EMU_FFI_ENCODE", error.to_string()))?;
+        (self.services.stat_vfs)(self.services.host_token.clone(), payload.into()).decode()
+    }
+
+    fn read_file_range(
+        &self,
+        mount_set_id: &str,
+        uri: &str,
+        expected_revision: astra_byte_source::SourceRevision,
+        range: astra_byte_source::ByteRange,
         max_bytes: u64,
-    ) -> Result<Vec<u8>, LegacyProviderError> {
-        let result = (self.services.read_vfs)(
-            self.services.host_token.clone(),
-            mount_set_id.into(),
-            uri.into(),
+    ) -> Result<astra_byte_source::RangeReadResult, LegacyProviderError> {
+        let payload = postcard::to_allocvec(&LegacyVfsRangeCall {
+            mount_set_id: mount_set_id.to_owned(),
+            uri: uri.to_owned(),
+            expected_revision,
+            range,
             max_bytes,
-        );
-        let bytes: Vec<u8> = result.decode()?;
-        if bytes.len() as u64 > max_bytes {
+        })
+        .map_err(|error| LegacyProviderError::invalid("ASTRA_EMU_FFI_ENCODE", error.to_string()))?;
+        let result: astra_byte_source::RangeReadResult =
+            (self.services.read_vfs_range)(self.services.host_token.clone(), payload.into())
+                .decode()?;
+        if result.bytes.len() as u64 > max_bytes || result.bytes.len() as u64 != range.len {
             return Err(LegacyProviderError::invalid(
                 "ASTRA_EMU_FFI_VFS_BOUNDS",
-                "host VFS returned more bytes than requested",
+                "host VFS returned a range with invalid length",
             ));
         }
-        Ok(bytes)
+        Ok(result)
     }
 }
 

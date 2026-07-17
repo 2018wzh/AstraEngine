@@ -70,6 +70,38 @@ pub struct FvpParityEvidence {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct FrameParityFrameV1 {
+    pub frame_index: u64,
+    pub semantic_astra_hash: Hash256,
+    pub semantic_reference_hash: Hash256,
+    pub rgba_astra_hash: Option<Hash256>,
+    pub rgba_reference_hash: Option<Hash256>,
+    pub audio_astra_hash: Option<Hash256>,
+    pub audio_reference_hash: Option<Hash256>,
+    pub video_pts: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FrameParityReportV1 {
+    pub schema: String,
+    pub reference_revision: String,
+    pub reference_observer_patch_hash: Hash256,
+    pub build_identity: String,
+    pub profile: String,
+    pub game_identity_hash: Hash256,
+    pub input_sequence_hash: Hash256,
+    pub frames: Vec<FrameParityFrameV1>,
+    pub compared_event_count: u64,
+    pub first_divergence_sequence: Option<u64>,
+    pub difference_window_before: u32,
+    pub difference_window_after: u32,
+    pub status: String,
+    pub diagnostic_codes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TranslationEvidence {
     pub schema: String,
     pub provider_identity: String,
@@ -203,7 +235,7 @@ pub struct EmuPlatformRunEvidenceV1 {
     pub diagnostic_codes: Vec<String>,
 }
 
-pub const RFVP_REFERENCE_REVISION: &str = "657747252eb0d2c5fb4a340695ce6906c2d45133";
+pub const RFVP_REFERENCE_REVISION: &str = "3b5ea6c96a925c12f95aef8554905e8fecbc77c3";
 pub const FVP_RELEASE_SYSCALL_CATALOG_HASH: &str =
     "sha256:c53cb15a5a1fe29d11c8cf8b0cf14a20c2dab7d85dace74f3b35345d5aa97d6a";
 pub const EMU_RELEASE_PLATFORMS: [&str; 6] = [
@@ -407,6 +439,37 @@ pub fn validate_fvp_parity(value: &FvpParityEvidence) -> Result<(), String> {
         || !value.diagnostic_codes.is_empty()
     {
         return Err("ASTRA_EMU_FVP_PARITY_DIVERGENCE".into());
+    }
+    Ok(())
+}
+
+pub fn validate_frame_parity(value: &FrameParityReportV1) -> Result<(), String> {
+    let frames_match = !value.frames.is_empty()
+        && value
+            .frames
+            .windows(2)
+            .all(|pair| pair[0].frame_index + 1 == pair[1].frame_index)
+        && value.frames.iter().all(|frame| {
+            frame.semantic_astra_hash == frame.semantic_reference_hash
+                && frame.rgba_astra_hash == frame.rgba_reference_hash
+                && frame.audio_astra_hash == frame.audio_reference_hash
+        });
+    if value.schema != "astra.frame_parity_report.v1"
+        || value.reference_revision != RFVP_REFERENCE_REVISION
+        || is_zero(value.reference_observer_patch_hash)
+        || !safe_id(&value.build_identity)
+        || !safe_id(&value.profile)
+        || is_zero(value.game_identity_hash)
+        || is_zero(value.input_sequence_hash)
+        || !frames_match
+        || value.compared_event_count == 0
+        || value.first_divergence_sequence.is_some()
+        || value.difference_window_before != 30
+        || value.difference_window_after != 60
+        || value.status != "pass"
+        || !value.diagnostic_codes.is_empty()
+    {
+        return Err("ASTRA_EMU_FRAME_PARITY_DIVERGENCE".into());
     }
     Ok(())
 }

@@ -17,6 +17,11 @@
 // production Astra wrapper remains under workspace-wide `-D warnings`.
 #![allow(clippy::all, clippy::nursery, clippy::pedantic)]
 
+#[cfg(feature = "gpu-render")]
+compile_error!("ASTRA_FVP_RFVP_GPU_HOST_RETIRED: use Astra Renderer2D with workspace wgpu 29");
+#[cfg(feature = "wasm")]
+compile_error!("ASTRA_FVP_RFVP_WASM_HOST_RETIRED: use AstraPlatform Web with workspace wgpu 29");
+
 extern crate alloc;
 #[cfg(feature = "no_std")]
 extern crate self as image;

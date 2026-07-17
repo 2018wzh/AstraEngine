@@ -380,8 +380,8 @@ impl RuntimeBridge {
                 provider_results: Vec::new(),
                 budget: LegacyStepBudget {
                     max_instructions: 100_000,
-                    max_effects: 4096,
-                    max_trace_entries: 65_536,
+                    max_effects: 65_536,
+                    max_trace_entries: 100_000,
                 },
             })
             .map_err(|error| error.to_string())?,
@@ -391,6 +391,23 @@ impl RuntimeBridge {
         let mut audio_commands = Vec::new();
         let mut video_commands = Vec::new();
         for envelope in &output.outputs {
+            if envelope.domain == RuntimeOutputDomain::Presentation
+                && envelope.schema == "astra.emu.render_frame.v1"
+            {
+                let frame = envelope
+                    .decode_postcard::<LegacyRenderFrameV1>(
+                        RuntimeOutputDomain::Presentation,
+                        "astra.emu.render_frame.v1",
+                        SchemaVersion::new(1, 0, 0),
+                    )
+                    .map_err(|error| error.to_string())?;
+                frame.validate().map_err(|error| error.to_string())?;
+                if self.render_frames.len() >= 3 {
+                    return Err("ASTRA_EMU_RENDER_FRAME_QUEUE_OVERFLOW".into());
+                }
+                self.render_frames.push_back(frame);
+                continue;
+            }
             if envelope.domain != RuntimeOutputDomain::Effect
                 || envelope.schema != "astra.emu.legacy_step_output.v1"
             {
