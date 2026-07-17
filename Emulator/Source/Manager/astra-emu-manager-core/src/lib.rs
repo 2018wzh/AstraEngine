@@ -2,6 +2,7 @@ mod desktop_source;
 mod evidence;
 mod family_loader;
 mod filter;
+mod identity;
 mod library;
 mod patch;
 mod probe;
@@ -14,6 +15,11 @@ pub use desktop_source::{
 pub use evidence::*;
 pub use family_loader::*;
 pub use filter::{FilterBinding, FilterGraph, FilterLayer, FilterValidation};
+pub use identity::{
+    BangumiPlayStateRecord, DisplayTitle, ExternalIdentityRecord, InstallationRecord,
+    MatchCandidateRecord, MatchDecisionRecord, MetadataSnapshotRecord, ProviderConsentRecord,
+    ScanRunRecord, WorkRecord, MATCHER_VERSION,
+};
 pub use library::{
     CancellationToken, CaseRecord, CaseRuntimeProfileRecord, CoverCacheRecord, Library,
     LibraryError, ScanCandidate, ScanReport, SourceDiagnosticRecord, SourceGrant,
@@ -26,5 +32,6 @@ pub use patch::{
 pub use probe::{AutoProbe, ProbeBinding, ProbeError, DEFAULT_PROBE_ORDER};
 pub use runtime_provider::{AstraEmuRuntimeProvider, EmuCaseProfile, EmuStepPayload};
 pub use scanner::{
-    GrantedSourceEntry, GrantedSourceReader, LibraryScanner, ScanLimits, SourceScanError,
+    DiscoveryMarker, FamilyDiscoveryDescriptor, GrantedSourceEntry, GrantedSourceReader,
+    LibraryScanner, ScanLimits, SourceScanError, DEFAULT_DISCOVERY_DESCRIPTORS,
 };

@@ -13,7 +13,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken(Arc<AtomicBool>);
@@ -163,7 +163,7 @@ pub enum LibraryError {
 }
 
 pub struct Library {
-    connection: Connection,
+    pub(crate) connection: Connection,
 }
 
 impl Library {
@@ -356,6 +356,11 @@ impl Library {
                 )?;
             }
             tx.pragma_update(None, "user_version", 5)?;
+            version = 5;
+        }
+        if version == 5 {
+            crate::identity::migrate_v6(&tx)?;
+            tx.pragma_update(None, "user_version", 6)?;
         }
         tx.commit()?;
         Ok(())
@@ -403,9 +408,23 @@ impl Library {
             return Err(LibraryError::SourceGrantInactive(source_id.to_owned()));
         }
 
+        let normalized_candidates = candidates
+            .iter()
+            .cloned()
+            .map(|mut candidate| {
+                if candidate.case_identity.starts_with("case-sha256:") {
+                    let material = format!("{}\0{}", candidate.source_id, candidate.relative_path);
+                    candidate.case_identity = format!(
+                        "case-{}",
+                        &Hash256::from_sha256(material.as_bytes()).to_hex()[..32]
+                    );
+                }
+                candidate
+            })
+            .collect::<Vec<_>>();
         let mut identities = BTreeSet::new();
         let mut locations = BTreeSet::new();
-        for candidate in candidates {
+        for candidate in &normalized_candidates {
             if candidate.source_id != source_id {
                 return Err(LibraryError::SourceGrantInactive(
                     candidate.source_id.clone(),
@@ -425,12 +444,12 @@ impl Library {
         tracing::debug!(
             event = "astra.emu.library.scan_apply_started",
             source_id = %source_id,
-            record_count = candidates.len()
+            record_count = normalized_candidates.len()
         );
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for candidate in candidates {
+        for candidate in &normalized_candidates {
             let conflicting_source: Option<String> = tx
                 .query_row(
                     "SELECT source_id FROM library_case WHERE case_identity=?1 AND source_id<>?2",
@@ -474,7 +493,7 @@ impl Library {
             unchanged: 0,
             removed: 0,
         };
-        for candidate in candidates {
+        for candidate in &normalized_candidates {
             if cancellation.is_cancelled() {
                 return Err(LibraryError::Cancelled);
             }
@@ -495,12 +514,14 @@ impl Library {
             }
             tx.execute(
                 "INSERT INTO library_case(case_identity, source_id, relative_path, content_hash,
-                    modified_ns, byte_size, title, family_override)
-                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)
+                    modified_ns, byte_size, title, family_override, work_id,
+                    installation_fingerprint)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9)
                  ON CONFLICT(case_identity) DO UPDATE SET
                     source_id=excluded.source_id, relative_path=excluded.relative_path,
                     content_hash=excluded.content_hash, modified_ns=excluded.modified_ns,
-                    byte_size=excluded.byte_size, title=excluded.title",
+                    byte_size=excluded.byte_size, title=excluded.title,
+                    installation_fingerprint=excluded.installation_fingerprint",
                 params![
                     candidate.case_identity,
                     candidate.source_id,
@@ -508,9 +529,15 @@ impl Library {
                     candidate.content_hash,
                     candidate.modified_ns,
                     candidate.byte_size,
-                    candidate.title
+                    candidate.title,
+                    crate::identity::work_id_for_case(&candidate.case_identity),
+                    crate::identity::installation_fingerprint(
+                        &candidate.content_hash,
+                        candidate.byte_size
+                    )
                 ],
             )?;
+            crate::identity::ensure_work_for_candidate(&tx, candidate)?;
         }
         for stale_identity in existing.keys().filter(|id| !identities.contains(*id)) {
             report.removed += tx.execute(
@@ -1040,7 +1067,7 @@ fn case_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CaseRecord>
     })
 }
 
-fn validate_symbol(value: &str) -> Result<(), LibraryError> {
+pub(crate) fn validate_symbol(value: &str) -> Result<(), LibraryError> {
     if value.is_empty()
         || value.len() > 128
         || !value
@@ -1052,7 +1079,7 @@ fn validate_symbol(value: &str) -> Result<(), LibraryError> {
     Ok(())
 }
 
-fn validate_relative_path(value: &str) -> Result<(), LibraryError> {
+pub(crate) fn validate_relative_path(value: &str) -> Result<(), LibraryError> {
     if value.is_empty()
         || value.len() > 4096
         || value.starts_with('/')
@@ -1190,7 +1217,7 @@ mod tests {
             .connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         let table_count: i64 = library
             .connection
             .query_row(
@@ -1204,9 +1231,13 @@ mod tests {
     }
 
     #[test]
-    fn version_four_migration_repairs_legacy_windows_unsafe_case_identity() {
+    fn current_schema_repairs_legacy_windows_unsafe_case_identity_on_initial_migration() {
         let mut library = Library::in_memory().unwrap();
         library.upsert_grant(&grant("grant-1")).unwrap();
+        let expected = format!(
+            "case-{}",
+            &Hash256::from_sha256(b"grant-1\0game/start.hcb").to_hex()[..32]
+        );
         library
             .apply_scan(
                 "grant-1",
@@ -1219,17 +1250,8 @@ mod tests {
             )
             .unwrap();
         library
-            .set_persistent_translation_cache("case-sha256:0123456789012345678", true)
+            .set_persistent_translation_cache(&expected, true)
             .unwrap();
-        library
-            .connection
-            .pragma_update(None, "user_version", 4)
-            .unwrap();
-        library.migrate().unwrap();
-        let expected = format!(
-            "case-{}",
-            &Hash256::from_sha256(b"grant-1\0game/start.hcb").to_hex()[..32]
-        );
         assert_eq!(library.list_cases().unwrap()[0].case_identity, expected);
         assert!(library
             .persistent_translation_cache_enabled(&expected)

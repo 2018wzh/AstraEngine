@@ -3,6 +3,7 @@ mod android_platform;
 #[cfg(target_os = "android")]
 mod android_source;
 mod audio_executor;
+mod metadata_runtime;
 mod platform_secret;
 mod platform_source;
 mod stage_renderer;
@@ -37,12 +38,19 @@ use astra_emu_manager::family_host::FamilyHostConfig;
 use astra_emu_manager::{run_manager_with_initial_state, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
 use astra_emu_manager_core::{
-    AstraEmuRuntimeProvider, CancellationToken, CaseRuntimeProfileRecord, EmuCaseProfile,
-    EmuStepPayload, GrantedSourceReader, Library, LibraryScanner, PatchContext, PatchDiagnostic,
-    PatchHostAction, PatchVfsReader, ScanLimits, SourceGrant, TranslationCacheRecord,
-    TranslationConsent, TranslationProfileRecord, TrustedPatchRuntime,
+    AstraEmuRuntimeProvider, BangumiPlayStateRecord, CancellationToken, CaseRuntimeProfileRecord,
+    EmuCaseProfile, EmuStepPayload, ExternalIdentityRecord, GrantedSourceReader, Library,
+    LibraryScanner, MatchCandidateRecord, MatchDecisionRecord, MetadataSnapshotRecord,
+    PatchContext, PatchDiagnostic, PatchHostAction, PatchVfsReader, ProviderConsentRecord,
+    ScanLimits, SourceGrant, TranslationCacheRecord, TranslationConsent, TranslationProfileRecord,
+    TrustedPatchRuntime,
 };
+use astra_emu_manager_ui_slint::MatchReviewViewModel;
 use astra_emu_manager_ui_slint::{GameCardViewModel, ManagerViewModel};
+use astra_emu_metadata::{
+    match_metadata, BangumiPlayStatus, BangumiPlayUpdate, CoverAsset, MatchInput,
+    MetadataProviderId, MetadataSearchQuery,
+};
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
 };
@@ -52,6 +60,7 @@ use astra_plugin_abi::{
     RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepInput, RuntimeStepMode,
 };
 use image::GenericImageView;
+use metadata_runtime::{MetadataCommand, MetadataCommandKind, MetadataPayload, MetadataRuntime};
 use platform_secret::ManagerSecretStore;
 use platform_source::{GrantedSource, VfsRegistry};
 use stage_renderer::ManagerStageRenderer;
@@ -887,6 +896,9 @@ struct AstraEmuManagerController {
     data_dir: PathBuf,
     patch_summary: String,
     pending_patch_actions: Vec<PatchHostAction>,
+    metadata: MetadataRuntime,
+    metadata_request_sequence: u64,
+    bangumi_sync_summary: String,
 }
 
 struct MountedPatchReader {
@@ -914,6 +926,7 @@ impl AstraEmuManagerController {
             Library::open(data_dir.join("library.sqlite3")).map_err(|error| error.to_string())?;
         let vfs = Arc::new(VfsRegistry::default());
         let runtime = Rc::new(RefCell::new(RuntimeBridge::new(vfs.clone())?));
+        let metadata = MetadataRuntime::start()?;
         Ok(Self {
             library,
             selected_case_id: None,
@@ -925,7 +938,253 @@ impl AstraEmuManagerController {
             data_dir,
             patch_summary: "Explicit no-patch mode is active.".into(),
             pending_patch_actions: Vec::new(),
+            metadata,
+            metadata_request_sequence: 0,
+            bangumi_sync_summary: "Not synchronized".into(),
         })
+    }
+
+    fn next_metadata_request(&mut self, action: &str) -> Result<String, String> {
+        self.metadata_request_sequence = self
+            .metadata_request_sequence
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_METADATA_REQUEST_OVERFLOW".to_owned())?;
+        Ok(format!(
+            "metadata-{action}-{}",
+            self.metadata_request_sequence
+        ))
+    }
+
+    fn selected_metadata_context(
+        &self,
+    ) -> Result<
+        (
+            String,
+            astra_emu_manager_core::InstallationRecord,
+            astra_emu_manager_core::WorkRecord,
+        ),
+        String,
+    > {
+        let case_identity = self
+            .selected_case_id
+            .clone()
+            .ok_or_else(|| "ASTRA_EMU_CASE_SELECTION_MISSING".to_owned())?;
+        let installation = self
+            .library
+            .list_installations()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|record| record.case_identity == case_identity)
+            .ok_or_else(|| "ASTRA_EMU_INSTALLATION_MISSING".to_owned())?;
+        let work = self
+            .library
+            .work_for_case(&case_identity)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "ASTRA_EMU_WORK_MISSING".to_owned())?;
+        Ok((case_identity, installation, work))
+    }
+
+    fn metadata_provider(value: &str) -> Result<MetadataProviderId, String> {
+        match value {
+            "vndb" => Ok(MetadataProviderId::Vndb),
+            "bangumi" => Ok(MetadataProviderId::Bangumi),
+            _ => Err("ASTRA_EMU_METADATA_PROVIDER_INVALID".into()),
+        }
+    }
+
+    fn metadata_access_token(
+        &self,
+        provider: MetadataProviderId,
+    ) -> Result<Option<String>, String> {
+        let consent = self
+            .library
+            .provider_consent(provider.as_str())
+            .map_err(|error| error.to_string())?
+            .filter(|record| record.network_enabled)
+            .ok_or_else(|| "ASTRA_EMU_METADATA_CONSENT_REQUIRED".to_owned())?;
+        consent
+            .secret_reference
+            .map(|reference| {
+                ManagerSecretStore::open()
+                    .map_err(|error| error.to_string())?
+                    .resolve(&reference)
+                    .map_err(|_| "ASTRA_EMU_METADATA_SECRET_UNAVAILABLE".to_owned())
+            })
+            .transpose()
+    }
+
+    fn poll_metadata(&mut self) -> Result<bool, String> {
+        let mut changed = false;
+        while let Some(completion) = self.metadata.try_recv()? {
+            changed = true;
+            tracing::info!(
+                event = "astra.emu.metadata.completed",
+                provider = completion.provider.as_str(),
+                request_id = %completion.request_id,
+                success = completion.result.is_ok()
+            );
+            match completion.result {
+                Ok(payload) => self.apply_metadata_payload(
+                    &completion.request_id,
+                    &completion.case_identity,
+                    completion.provider,
+                    payload,
+                )?,
+                Err(error) => {
+                    self.diagnostic = error.clone();
+                    if completion.request_id.starts_with("metadata-play-") {
+                        if let Ok((_, _, work)) = self.selected_metadata_context() {
+                            if let Some(mut state) = self
+                                .library
+                                .bangumi_play_state(&work.work_id)
+                                .map_err(|error| error.to_string())?
+                            {
+                                state.last_diagnostic_code = Some(error);
+                                self.library
+                                    .set_bangumi_play_state(&state)
+                                    .map_err(|error| error.to_string())?;
+                            }
+                        }
+                        self.bangumi_sync_summary =
+                            "Synchronization failed; retry is explicit.".into();
+                    }
+                }
+            }
+        }
+        Ok(changed)
+    }
+
+    fn apply_metadata_payload(
+        &mut self,
+        request_id: &str,
+        case_identity: &str,
+        provider: MetadataProviderId,
+        payload: MetadataPayload,
+    ) -> Result<(), String> {
+        let installation = self
+            .library
+            .list_installations()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|record| record.case_identity == case_identity)
+            .ok_or_else(|| "ASTRA_EMU_INSTALLATION_MISSING".to_owned())?;
+        let work = self
+            .library
+            .work_for_case(case_identity)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "ASTRA_EMU_WORK_MISSING".to_owned())?;
+        let now = unix_time_ms()?;
+        match payload {
+            MetadataPayload::Search(records) => {
+                let prior = self
+                    .library
+                    .external_identities(&work.work_id)
+                    .map_err(|error| error.to_string())?
+                    .into_iter()
+                    .find(|record| record.provider == provider.as_str())
+                    .map(|record| record.remote_id);
+                for record in records {
+                    let assessment = match_metadata(
+                        &MatchInput {
+                            title: work.local_title.clone(),
+                            aliases: Vec::new(),
+                            developer: None,
+                            release_date: None,
+                            installation_fingerprint: installation.installation_fingerprint.clone(),
+                            previously_verified_remote_id: prior.clone(),
+                            user_verified_remote_id: None,
+                        },
+                        &record,
+                    );
+                    let candidate_id = format!(
+                        "match-{}",
+                        &Hash256::from_sha256(
+                            format!(
+                                "{}\0{}\0{}\0{}",
+                                case_identity,
+                                provider.as_str(),
+                                record.remote_id,
+                                assessment.matcher_version
+                            )
+                            .as_bytes()
+                        )
+                        .to_hex()[..32]
+                    );
+                    self.library
+                        .upsert_match_candidate(&MatchCandidateRecord {
+                            candidate_id,
+                            case_identity: case_identity.to_owned(),
+                            installation_fingerprint: installation.installation_fingerprint.clone(),
+                            provider: provider.as_str().into(),
+                            remote_id: record.remote_id.clone(),
+                            matcher_version: assessment.matcher_version.clone(),
+                            score_millis: assessment.score_millis,
+                            state: "pending".into(),
+                            evidence_json:
+                                serde_json::json!({"record": record, "assessment": assessment})
+                                    .to_string(),
+                            created_at_unix_ms: now,
+                        })
+                        .map_err(|error| error.to_string())?;
+                }
+                self.diagnostic.clear();
+            }
+            MetadataPayload::Fetch { record, cover } => {
+                let record = *record;
+                if request_id.starts_with("metadata-manual-") {
+                    self.library
+                        .upsert_external_identity(&ExternalIdentityRecord {
+                            work_id: work.work_id.clone(),
+                            provider: provider.as_str().into(),
+                            remote_id: record.remote_id.clone(),
+                            provenance: "user-verified-id".into(),
+                            verified_at_unix_ms: now,
+                        })
+                        .map_err(|error| error.to_string())?;
+                }
+                let effective_work_id = self
+                    .library
+                    .work_for_case(case_identity)
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| "ASTRA_EMU_WORK_MISSING".to_owned())?
+                    .work_id;
+                let normalized_json = serde_json::to_string(&record)
+                    .map_err(|_| "ASTRA_EMU_METADATA_SNAPSHOT_SERIALIZE".to_owned())?;
+                let response_hash = Hash256::from_sha256(normalized_json.as_bytes()).to_string();
+                self.library
+                    .upsert_metadata_snapshot(&MetadataSnapshotRecord {
+                        work_id: effective_work_id,
+                        provider: provider.as_str().into(),
+                        remote_id: record.remote_id.clone(),
+                        normalized_json,
+                        response_hash,
+                        fetched_at_unix_ms: now,
+                        state: "fresh".into(),
+                        cover_safe: !record.sensitive,
+                    })
+                    .map_err(|error| error.to_string())?;
+                if let Some(cover) = cover {
+                    persist_remote_cover(&mut self.library, &self.data_dir, case_identity, &cover)?;
+                }
+                self.diagnostic.clear();
+            }
+            MetadataPayload::BangumiPlaySynced => {
+                if let Some(mut state) = self
+                    .library
+                    .bangumi_play_state(&work.work_id)
+                    .map_err(|error| error.to_string())?
+                {
+                    state.last_synced_at_unix_ms = Some(now);
+                    state.last_diagnostic_code = None;
+                    self.library
+                        .set_bangumi_play_state(&state)
+                        .map_err(|error| error.to_string())?;
+                }
+                self.bangumi_sync_summary = "Bangumi play status synchronized.".into();
+                self.diagnostic.clear();
+            }
+        }
+        Ok(())
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -1015,13 +1274,58 @@ impl AstraEmuManagerController {
             Arc::new(GrantedSource::new(&grant.platform_token).map_err(|error| error.to_string())?);
         let scanner =
             LibraryScanner::new(ScanLimits::default()).map_err(|error| error.to_string())?;
-        scanner
-            .scan(
-                &mut self.library,
-                &grant.source_id,
-                source.clone(),
-                &CancellationToken::default(),
-            )
+        let started = unix_time_ms()?;
+        let scan_id = format!(
+            "scan-{}",
+            &Hash256::from_sha256(format!("{}\0{started}", grant.source_id).as_bytes()).to_hex()
+                [..32]
+        );
+        let mut scan_run = astra_emu_manager_core::ScanRunRecord {
+            scan_id,
+            source_id: grant.source_id.clone(),
+            stage: "local-discovery".into(),
+            state: "running".into(),
+            discovered_count: 0,
+            matched_count: 0,
+            failed_count: 0,
+            diagnostic_code: None,
+            started_at_unix_ms: started,
+            finished_at_unix_ms: None,
+        };
+        self.library
+            .upsert_scan_run(&scan_run)
+            .map_err(|error| error.to_string())?;
+        let report = match scanner.scan(
+            &mut self.library,
+            &grant.source_id,
+            source.clone(),
+            &CancellationToken::default(),
+        ) {
+            Ok(report) => report,
+            Err(error) => {
+                scan_run.state =
+                    if matches!(error, astra_emu_manager_core::SourceScanError::Cancelled) {
+                        "cancelled".into()
+                    } else {
+                        "failed".into()
+                    };
+                scan_run.failed_count = 1;
+                scan_run.diagnostic_code = Some(scan_error_code(&error).into());
+                scan_run.finished_at_unix_ms = Some(unix_time_ms()?);
+                self.library
+                    .upsert_scan_run(&scan_run)
+                    .map_err(|failure| failure.to_string())?;
+                return Err(error.to_string());
+            }
+        };
+        scan_run.stage = "local-complete".into();
+        scan_run.state = "completed".into();
+        scan_run.discovered_count =
+            u32::try_from(report.inserted + report.updated + report.unchanged)
+                .map_err(|_| "ASTRA_EMU_SCAN_COUNT_OVERFLOW".to_owned())?;
+        scan_run.finished_at_unix_ms = Some(unix_time_ms()?);
+        self.library
+            .upsert_scan_run(&scan_run)
             .map_err(|error| error.to_string())?;
         refresh_cover_cache(&mut self.library, &grant.source_id, source, &self.data_dir)?;
         Ok(())
@@ -1145,6 +1449,21 @@ impl AstraEmuManagerController {
             }
             _ => Err("ASTRA_EMU_PATCH_MODE_INVALID".into()),
         }
+    }
+}
+
+fn scan_error_code(error: &astra_emu_manager_core::SourceScanError) -> &'static str {
+    use astra_emu_manager_core::SourceScanError;
+    match error {
+        SourceScanError::Enumeration => "ASTRA_EMU_SCAN_SOURCE_ENUMERATION",
+        SourceScanError::Read => "ASTRA_EMU_SCAN_SOURCE_READ",
+        SourceScanError::EntryBounds => "ASTRA_EMU_SCAN_ENTRY_BOUNDS",
+        SourceScanError::ScriptBounds => "ASTRA_EMU_SCAN_SCRIPT_BOUNDS",
+        SourceScanError::InvalidPath => "ASTRA_EMU_SCAN_PATH_INVALID",
+        SourceScanError::DuplicatePath => "ASTRA_EMU_SCAN_DUPLICATE_PATH",
+        SourceScanError::DiscoveryBounds => "ASTRA_EMU_SCAN_DISCOVERY_BOUNDS",
+        SourceScanError::Cancelled => "ASTRA_EMU_SCAN_CANCELLED",
+        SourceScanError::Library(_) => "ASTRA_EMU_SCAN_LIBRARY",
     }
 }
 
@@ -1276,6 +1595,54 @@ fn refresh_cover_cache(
     Ok(())
 }
 
+fn unix_time_ms() -> Result<i64, String> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "ASTRA_EMU_SYSTEM_CLOCK_INVALID".to_owned())?
+        .as_millis()
+        .try_into()
+        .map_err(|_| "ASTRA_EMU_SYSTEM_CLOCK_OVERFLOW".to_owned())
+}
+
+fn persist_remote_cover(
+    library: &mut Library,
+    data_dir: &std::path::Path,
+    case_identity: &str,
+    cover: &CoverAsset,
+) -> Result<(), String> {
+    let cache_root = data_dir.join("covers");
+    std::fs::create_dir_all(&cache_root)
+        .map_err(|_| "ASTRA_EMU_COVER_CACHE_DIRECTORY_CREATE".to_owned())?;
+    let extension = match cover.media_type.as_str() {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/webp" => "webp",
+        _ => return Err("ASTRA_EMU_METADATA_COVER_MIME".into()),
+    };
+    let file_name = format!("{}-{}.{}", case_identity, &cover.sha256[7..23], extension);
+    let relative_path = format!("covers/{file_name}");
+    let final_path = cache_root.join(&file_name);
+    let temporary_path = cache_root.join(format!("{file_name}.tmp"));
+    std::fs::write(&temporary_path, &cover.bytes)
+        .map_err(|_| "ASTRA_EMU_COVER_CACHE_WRITE".to_owned())?;
+    std::fs::rename(&temporary_path, &final_path).map_err(|_| {
+        let _ = std::fs::remove_file(&temporary_path);
+        "ASTRA_EMU_COVER_CACHE_COMMIT".to_owned()
+    })?;
+    library
+        .upsert_cover_cache(&CoverCacheRecord {
+            case_identity: case_identity.into(),
+            source_hash: cover.sha256.clone(),
+            cache_relative_path: relative_path,
+            image_hash: cover.sha256.clone(),
+            width: cover.width,
+            height: cover.height,
+            byte_size: i64::try_from(cover.bytes.len())
+                .map_err(|_| "ASTRA_EMU_METADATA_COVER_BOUNDS".to_owned())?,
+        })
+        .map_err(|error| error.to_string())
+}
+
 impl ManagerController for AstraEmuManagerController {
     fn model(&self) -> Result<ManagerViewModel, String> {
         let translation_profile = self
@@ -1298,6 +1665,27 @@ impl ManagerController for AstraEmuManagerController {
                         .is_some_and(|family| family.to_lowercase().contains(&query))
             })
             .map(|case| {
+                let work = self
+                    .library
+                    .work_for_case(&case.case_identity)
+                    .map_err(|error| error.to_string())?;
+                let identities = work
+                    .as_ref()
+                    .map(|work| self.library.external_identities(&work.work_id))
+                    .transpose()
+                    .map_err(|error| error.to_string())?
+                    .unwrap_or_default();
+                let preferred_provider = ["bangumi", "vndb"].into_iter().find(|provider| {
+                    identities
+                        .iter()
+                        .any(|identity| identity.provider == *provider)
+                });
+                let display_title = self
+                    .library
+                    .display_title_for_case(&case.case_identity, preferred_provider)
+                    .map_err(|error| error.to_string())?
+                    .map(|title| title.value)
+                    .unwrap_or_else(|| case.title.clone());
                 let cover_uri = self
                     .library
                     .cover_cache(&case.case_identity)
@@ -1311,7 +1699,7 @@ impl ManagerController for AstraEmuManagerController {
                     .unwrap_or_default();
                 Ok(GameCardViewModel {
                     case_id: case.case_identity,
-                    title: case.title,
+                    title: display_title,
                     family: case.family_override.unwrap_or_else(|| "Auto probe".into()),
                     cover_uri,
                     diagnostic: String::new(),
@@ -1351,8 +1739,93 @@ impl ManagerController for AstraEmuManagerController {
             .as_ref()
             .map(|profile| profile.protocol.clone())
             .unwrap_or_else(|| "responses".into());
+        let match_reviews = self
+            .library
+            .pending_match_candidates()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|candidate| {
+                let value: serde_json::Value = serde_json::from_str(&candidate.evidence_json)
+                    .map_err(|_| "ASTRA_EMU_METADATA_EVIDENCE_SCHEMA".to_owned())?;
+                let record = value.get("record").unwrap_or(&serde_json::Value::Null);
+                Ok(MatchReviewViewModel {
+                    candidate_id: candidate.candidate_id,
+                    case_id: candidate.case_identity,
+                    provider: candidate.provider,
+                    remote_id: candidate.remote_id,
+                    title: record
+                        .get("title")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("Unknown title")
+                        .to_owned(),
+                    aliases: record
+                        .get("alternate_titles")
+                        .and_then(|value| value.as_array())
+                        .map(|values| {
+                            values
+                                .iter()
+                                .filter_map(|value| value.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" · ")
+                        })
+                        .unwrap_or_default(),
+                    release_date: record
+                        .get("release_date")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("Unknown date")
+                        .to_owned(),
+                    developer: record
+                        .get("developers")
+                        .and_then(|value| value.as_array())
+                        .map(|values| {
+                            values
+                                .iter()
+                                .filter_map(|value| value.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" · ")
+                        })
+                        .unwrap_or_default(),
+                    evidence: value
+                        .get("assessment")
+                        .map(|value| value.to_string())
+                        .unwrap_or_default(),
+                    score_millis: i32::from(candidate.score_millis),
+                    diagnostic: String::new(),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let vndb_consent = self
+            .library
+            .provider_consent("vndb")
+            .map_err(|error| error.to_string())?
+            .is_some_and(|value| value.network_enabled);
+        let bangumi_consent = self
+            .library
+            .provider_consent("bangumi")
+            .map_err(|error| error.to_string())?
+            .is_some_and(|value| value.network_enabled);
+        let sensitive_covers = self
+            .library
+            .provider_consent("bangumi")
+            .map_err(|error| error.to_string())?
+            .is_some_and(|value| value.sensitive_cover_enabled)
+            || self
+                .library
+                .provider_consent("vndb")
+                .map_err(|error| error.to_string())?
+                .is_some_and(|value| value.sensitive_cover_enabled);
+        let bangumi_play = self
+            .selected_metadata_context()
+            .ok()
+            .and_then(|(_, _, work)| {
+                self.library
+                    .bangumi_play_state(&work.work_id)
+                    .ok()
+                    .flatten()
+            });
         Ok(ManagerViewModel {
             games,
+            match_reviews,
             selected_case_id: self.selected_case_id.clone(),
             search_query: self.search_query.clone(),
             endpoint_identity: translation_profile
@@ -1417,6 +1890,22 @@ impl ManagerController for AstraEmuManagerController {
                 .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
                 .diagnostics_summary(),
             patches_summary: self.patch_summary.clone(),
+            vndb_consent,
+            bangumi_consent,
+            sensitive_covers,
+            bangumi_play_status: bangumi_play
+                .as_ref()
+                .map(|value| value.status.clone())
+                .unwrap_or_else(|| "doing".into()),
+            bangumi_rating: bangumi_play
+                .as_ref()
+                .and_then(|value| value.rating)
+                .map(i32::from)
+                .unwrap_or(1),
+            bangumi_note: bangumi_play
+                .and_then(|value| value.note)
+                .unwrap_or_default(),
+            bangumi_sync_summary: self.bangumi_sync_summary.clone(),
         })
     }
 
@@ -1593,6 +2082,275 @@ impl ManagerController for AstraEmuManagerController {
             .set_persistent_translation_cache(&case_identity, enabled)
             .map_err(|error| error.to_string())?;
         self.diagnostic.clear();
+        self.model()
+    }
+
+    fn refresh_metadata(&mut self, provider: &str) -> Result<ManagerViewModel, String> {
+        let provider = Self::metadata_provider(provider)?;
+        let (case_identity, _, work) = self.selected_metadata_context()?;
+        let token = self.metadata_access_token(provider)?;
+        let consent = self
+            .library
+            .provider_consent(provider.as_str())
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "ASTRA_EMU_METADATA_CONSENT_REQUIRED".to_owned())?;
+        let linked = self
+            .library
+            .external_identities(&work.work_id)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|record| record.provider == provider.as_str());
+        let (action, kind) = if let Some(linked) = linked {
+            ("refresh", MetadataCommandKind::Fetch(linked.remote_id))
+        } else {
+            (
+                "search",
+                MetadataCommandKind::Search(MetadataSearchQuery {
+                    title: work.user_title.unwrap_or(work.local_title),
+                    aliases: Vec::new(),
+                    developer: None,
+                    release_date: None,
+                    limit: 10,
+                }),
+            )
+        };
+        let request_id = self.next_metadata_request(action)?;
+        self.metadata.submit(MetadataCommand {
+            request_id,
+            case_identity,
+            provider,
+            access_token: token,
+            allow_sensitive_cover: consent.sensitive_cover_enabled,
+            kind,
+        })?;
+        self.diagnostic = format!("{} metadata request queued", provider.as_str());
+        self.model()
+    }
+
+    fn accept_match(&mut self, candidate_id: &str) -> Result<ManagerViewModel, String> {
+        if !self
+            .library
+            .pending_match_candidates()
+            .map_err(|error| error.to_string())?
+            .iter()
+            .any(|candidate| candidate.candidate_id == candidate_id)
+        {
+            return Err("ASTRA_EMU_METADATA_MATCH_NOT_PENDING".into());
+        }
+        let now = unix_time_ms()?;
+        self.library
+            .record_match_decision(&MatchDecisionRecord {
+                decision_id: format!(
+                    "decision-{}",
+                    &Hash256::from_sha256(format!("{candidate_id}\0accepted\0{now}").as_bytes())
+                        .to_hex()[..32]
+                ),
+                candidate_id: candidate_id.into(),
+                decision: "accepted".into(),
+                provenance: "user-review".into(),
+                decided_at_unix_ms: now,
+            })
+            .map_err(|error| error.to_string())?;
+        self.diagnostic.clear();
+        self.model()
+    }
+
+    fn reject_match(&mut self, candidate_id: &str) -> Result<ManagerViewModel, String> {
+        if !self
+            .library
+            .pending_match_candidates()
+            .map_err(|error| error.to_string())?
+            .iter()
+            .any(|candidate| candidate.candidate_id == candidate_id)
+        {
+            return Err("ASTRA_EMU_METADATA_MATCH_NOT_PENDING".into());
+        }
+        let now = unix_time_ms()?;
+        self.library
+            .record_match_decision(&MatchDecisionRecord {
+                decision_id: format!(
+                    "decision-{}",
+                    &Hash256::from_sha256(format!("{candidate_id}\0rejected\0{now}").as_bytes())
+                        .to_hex()[..32]
+                ),
+                candidate_id: candidate_id.into(),
+                decision: "rejected".into(),
+                provenance: "user-review".into(),
+                decided_at_unix_ms: now,
+            })
+            .map_err(|error| error.to_string())?;
+        self.diagnostic.clear();
+        self.model()
+    }
+
+    fn unlink_identity(&mut self, provider: &str) -> Result<ManagerViewModel, String> {
+        let provider = Self::metadata_provider(provider)?;
+        let (_, _, work) = self.selected_metadata_context()?;
+        self.library
+            .unlink_external_identity(&work.work_id, provider.as_str())
+            .map_err(|error| error.to_string())?;
+        self.diagnostic.clear();
+        self.model()
+    }
+
+    fn link_external_id(
+        &mut self,
+        provider: &str,
+        remote_id: &str,
+    ) -> Result<ManagerViewModel, String> {
+        let provider = Self::metadata_provider(provider)?;
+        let remote_id = remote_id.trim();
+        if remote_id.is_empty()
+            || remote_id.len() > 64
+            || remote_id.chars().any(char::is_whitespace)
+        {
+            return Err("ASTRA_EMU_METADATA_REMOTE_ID_INVALID".into());
+        }
+        let (case_identity, _, _) = self.selected_metadata_context()?;
+        let token = self.metadata_access_token(provider)?;
+        let consent = self
+            .library
+            .provider_consent(provider.as_str())
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "ASTRA_EMU_METADATA_CONSENT_REQUIRED".to_owned())?;
+        let request_id = self.next_metadata_request("manual")?;
+        self.metadata.submit(MetadataCommand {
+            request_id,
+            case_identity,
+            provider,
+            access_token: token,
+            allow_sensitive_cover: consent.sensitive_cover_enabled,
+            kind: MetadataCommandKind::Fetch(remote_id.into()),
+        })?;
+        self.diagnostic = "External ID validation queued".into();
+        self.model()
+    }
+
+    fn set_metadata_consent(
+        &mut self,
+        provider: &str,
+        enabled: bool,
+        secret: &str,
+    ) -> Result<ManagerViewModel, String> {
+        let provider = Self::metadata_provider(provider)?;
+        let previous = self
+            .library
+            .provider_consent(provider.as_str())
+            .map_err(|error| error.to_string())?;
+        let secret_reference = if provider == MetadataProviderId::Bangumi {
+            let reference = "astraemu.metadata.bangumi.token".to_owned();
+            if !secret.is_empty() {
+                ManagerSecretStore::open()
+                    .map_err(|error| error.to_string())?
+                    .store(&reference, secret)
+                    .map_err(|error| error.to_string())?;
+                Some(reference)
+            } else {
+                previous
+                    .as_ref()
+                    .and_then(|value| value.secret_reference.clone())
+            }
+        } else {
+            None
+        };
+        self.library
+            .set_provider_consent(&ProviderConsentRecord {
+                provider: provider.as_str().into(),
+                network_enabled: enabled,
+                sensitive_cover_enabled: previous
+                    .as_ref()
+                    .is_some_and(|value| value.sensitive_cover_enabled),
+                secret_reference,
+                granted_at_unix_ms: unix_time_ms()?,
+            })
+            .map_err(|error| error.to_string())?;
+        self.diagnostic.clear();
+        self.model()
+    }
+
+    fn set_sensitive_cover_policy(
+        &mut self,
+        provider: &str,
+        enabled: bool,
+    ) -> Result<ManagerViewModel, String> {
+        let provider = Self::metadata_provider(provider)?;
+        let mut consent = self
+            .library
+            .provider_consent(provider.as_str())
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "ASTRA_EMU_METADATA_CONSENT_REQUIRED".to_owned())?;
+        consent.sensitive_cover_enabled = enabled;
+        consent.granted_at_unix_ms = unix_time_ms()?;
+        self.library
+            .set_provider_consent(&consent)
+            .map_err(|error| error.to_string())?;
+        self.diagnostic.clear();
+        self.model()
+    }
+
+    fn update_bangumi_play_status(
+        &mut self,
+        status: &str,
+        rating: i32,
+        note: &str,
+    ) -> Result<ManagerViewModel, String> {
+        let status_value = match status {
+            "wish" => BangumiPlayStatus::Wish,
+            "doing" => BangumiPlayStatus::Doing,
+            "collect" => BangumiPlayStatus::Collect,
+            "on_hold" => BangumiPlayStatus::OnHold,
+            "dropped" => BangumiPlayStatus::Dropped,
+            _ => return Err("ASTRA_EMU_BANGUMI_PLAY_STATUS_INVALID".into()),
+        };
+        let rating = u8::try_from(rating)
+            .ok()
+            .filter(|rating| (1..=10).contains(rating))
+            .ok_or_else(|| "ASTRA_EMU_BANGUMI_RATING_INVALID".to_owned())?;
+        let (case_identity, _, work) = self.selected_metadata_context()?;
+        let subject_id = self
+            .library
+            .external_identities(&work.work_id)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|record| record.provider == "bangumi")
+            .ok_or_else(|| "ASTRA_EMU_BANGUMI_IDENTITY_REQUIRED".to_owned())?
+            .remote_id
+            .parse::<u32>()
+            .map_err(|_| "ASTRA_EMU_BANGUMI_IDENTITY_INVALID".to_owned())?;
+        let token = self
+            .metadata_access_token(MetadataProviderId::Bangumi)?
+            .ok_or_else(|| "ASTRA_EMU_BANGUMI_TOKEN_REQUIRED".to_owned())?;
+        let note = (!note.trim().is_empty()).then(|| note.trim().to_owned());
+        let update = BangumiPlayUpdate {
+            subject_id,
+            status: status_value,
+            rating: Some(rating),
+            note: note.clone(),
+            private: true,
+        };
+        update.validate().map_err(|error| error.to_string())?;
+        self.library
+            .set_bangumi_play_state(&BangumiPlayStateRecord {
+                work_id: work.work_id,
+                subject_id,
+                status: status.into(),
+                rating: Some(rating),
+                note,
+                auto_mark_doing: false,
+                last_synced_at_unix_ms: None,
+                last_diagnostic_code: None,
+            })
+            .map_err(|error| error.to_string())?;
+        let request_id = self.next_metadata_request("play")?;
+        self.metadata.submit(MetadataCommand {
+            request_id,
+            case_identity,
+            provider: MetadataProviderId::Bangumi,
+            access_token: Some(token),
+            allow_sensitive_cover: false,
+            kind: MetadataCommandKind::SyncBangumi(update),
+        })?;
+        self.bangumi_sync_summary = "Synchronization queued".into();
         self.model()
     }
 
@@ -1782,6 +2540,7 @@ impl ManagerController for AstraEmuManagerController {
 
     #[cfg(target_os = "android")]
     fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String> {
+        let mut changed = self.poll_metadata()?;
         for state in android_platform::take_pending_lifecycle()? {
             let suspended = !matches!(state, android_platform::AndroidLifecycleState::Resumed);
             self.runtime
@@ -1790,14 +2549,24 @@ impl ManagerController for AstraEmuManagerController {
                 .set_suspended(suspended)?;
         }
         let grants = android_platform::take_pending_tree_grants()?;
-        if grants.is_empty() {
-            return Ok(None);
-        }
         for grant in grants {
             self.accept_android_grant(grant)?;
+            changed = true;
         }
-        self.diagnostic.clear();
-        self.model().map(Some)
+        if changed {
+            self.model().map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String> {
+        if self.poll_metadata()? {
+            self.model().map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
     fn game_input(&mut self, control: &str, pressed: bool, value: f32) -> Result<(), String> {

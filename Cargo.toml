@@ -66,6 +66,7 @@ members = [
     "Emulator/Source/Families/astra-emu-fvp",
     "Emulator/Source/Manager/astra-emu-manager-core",
     "Emulator/Source/Providers/astra-emu-translation-openai-compatible",
+    "Emulator/Source/Providers/astra-emu-metadata",
     "Emulator/Source/Manager/astra-emu-manager-ui-slint",
     "Emulator/Source/Manager/astra-emu-manager",
     "Emulator/Source/Programs/astra-emu-schema",
@@ -140,6 +141,7 @@ reqwest = { version = "0.13.4", default-features = false, features = [
     "rustls",
     "stream",
 ] }
+bangumi-api = "0.1.2"
 rcgen = "0.14"
 rfd = { version = "0.17.2", default-features = false, features = ["wayland", "xdg-portal"] }
 rtrb = "0.3.4"
@@ -181,6 +183,9 @@ fast-srgb8 = "1"
 time = { version = "0.3", features = ["formatting"] }
 uuid = { version = "1", features = ["serde"] }
 url = "2"
+unicode-normalization = "0.1"
+strsim = "0.11"
+vn = "0.11.2"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 wasm-bindgen-test = "0.3"

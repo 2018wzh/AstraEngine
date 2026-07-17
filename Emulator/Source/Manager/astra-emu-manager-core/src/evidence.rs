@@ -118,6 +118,22 @@ pub struct TranslationEvidence {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct MetadataEvidenceV1 {
+    pub schema: String,
+    pub release_use: String,
+    pub enabled_providers: Vec<String>,
+    pub vndb_commercial_license_id: Option<String>,
+    pub consent_separated: bool,
+    pub secret_references_only: bool,
+    pub sensitive_cover_default: bool,
+    pub local_path_present: bool,
+    pub query_body_present: bool,
+    pub status: String,
+    pub diagnostic_codes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UiHostIdentityEvidence {
     pub schema: String,
     pub program_target_id: String,
@@ -256,6 +272,7 @@ pub struct AstraEmuEvidenceBundleV1 {
     pub fvp_parity: FvpParityEvidence,
     pub trusted_luau: TrustedLuauEvidenceV1,
     pub translation: TranslationEvidence,
+    pub metadata: MetadataEvidenceV1,
     pub platforms: BTreeMap<String, EmuPlatformRunEvidenceV1>,
 }
 
@@ -268,6 +285,7 @@ impl AstraEmuEvidenceBundleV1 {
         validate_fvp_parity(&self.fvp_parity)?;
         validate_trusted_luau(&self.trusted_luau)?;
         validate_translation_evidence(&self.translation)?;
+        validate_metadata_evidence(&self.metadata)?;
         if self.platforms.len() != EMU_RELEASE_PLATFORMS.len() {
             return Err("ASTRA_EMU_PLATFORM_EVIDENCE_SET".into());
         }
@@ -314,6 +332,7 @@ pub fn validate_release_manifest(value: &EmuReleaseManifestV1) -> Result<(), Str
         "fvp_parity",
         "trusted_luau",
         "translation",
+        "metadata",
     ];
     let platforms = value
         .required_platforms
@@ -344,6 +363,42 @@ pub fn validate_release_manifest(value: &EmuReleaseManifestV1) -> Result<(), Str
         {
             return Err("ASTRA_EMU_RELEASE_MANIFEST_INVALID".into());
         }
+    }
+    Ok(())
+}
+
+pub fn validate_metadata_evidence(value: &MetadataEvidenceV1) -> Result<(), String> {
+    let providers = value
+        .enabled_providers
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let known = providers
+        .iter()
+        .all(|provider| matches!(*provider, "vndb" | "bangumi"));
+    let commercial_vndb_permitted = value.release_use != "commercial"
+        || !providers.contains("vndb")
+        || value
+            .vndb_commercial_license_id
+            .as_deref()
+            .is_some_and(safe_id);
+    if value.schema != "astra.emu.metadata_evidence.v1"
+        || !matches!(
+            value.release_use.as_str(),
+            "development" | "non_commercial" | "commercial"
+        )
+        || providers.len() != value.enabled_providers.len()
+        || !known
+        || !commercial_vndb_permitted
+        || !value.consent_separated
+        || !value.secret_references_only
+        || value.sensitive_cover_default
+        || value.local_path_present
+        || value.query_body_present
+        || value.status != "passed"
+        || !value.diagnostic_codes.is_empty()
+    {
+        return Err("ASTRA_EMU_METADATA_EVIDENCE_INVALID".into());
     }
     Ok(())
 }
@@ -610,4 +665,36 @@ fn safe_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+#[cfg(test)]
+mod metadata_evidence_tests {
+    use super::*;
+
+    fn commercial_vndb() -> MetadataEvidenceV1 {
+        MetadataEvidenceV1 {
+            schema: "astra.emu.metadata_evidence.v1".into(),
+            release_use: "commercial".into(),
+            enabled_providers: vec!["vndb".into(), "bangumi".into()],
+            vndb_commercial_license_id: None,
+            consent_separated: true,
+            secret_references_only: true,
+            sensitive_cover_default: false,
+            local_path_present: false,
+            query_body_present: false,
+            status: "passed".into(),
+            diagnostic_codes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn commercial_vndb_release_is_blocked_without_explicit_license() {
+        let mut evidence = commercial_vndb();
+        assert_eq!(
+            validate_metadata_evidence(&evidence),
+            Err("ASTRA_EMU_METADATA_EVIDENCE_INVALID".into())
+        );
+        evidence.vndb_commercial_license_id = Some("licensed-distribution-1".into());
+        assert!(validate_metadata_evidence(&evidence).is_ok());
+    }
 }

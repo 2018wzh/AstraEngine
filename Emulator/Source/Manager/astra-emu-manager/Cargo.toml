@@ -20,6 +20,7 @@ astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }
+astra-emu-metadata = { path = "../../Providers/astra-emu-metadata" }
 astra-emu-translation-openai-compatible = { path = "../../Providers/astra-emu-translation-openai-compatible" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
 astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }

@@ -1,0 +1,26 @@
+[package]
+name = "astra-emu-metadata"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+bangumi-api.workspace = true
+hex.workspace = true
+image.workspace = true
+reqwest.workspace = true
+reqwest12 = { package = "reqwest", version = "0.12.22", default-features = false, features = ["json", "rustls-tls"] }
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+strsim.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+unicode-normalization.workspace = true
+url.workspace = true
+vn.workspace = true

@@ -157,6 +157,18 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Goal:** Manager 能按固定 family 优先级自动 probe case，并允许用户用 profile 手动覆盖。
 
+## S5-METADATA-01 作品识别、元数据与 Bangumi 游玩状态
+
+**Status:** `IN_PROGRESS`
+
+**Goal:** 本地扫描与 family probe 保持独立，同时建立作品级身份、VNDB/Bangumi metadata provider、可解释确认队列和 Bangumi 收藏状态同步。
+
+**Target Paths:** `Emulator/Source/Providers/astra-emu-metadata/`、`Emulator/Source/Manager/astra-emu-manager-core/src/identity.rs`、`Emulator/Source/Manager/astra-emu-manager/src/metadata_runtime.rs`、`Emulator/Source/Manager/astra-emu-manager-ui-slint/`
+
+**Current Evidence:** Library v6 work/installation/external identity/snapshot/candidate/decision/scan run/consent/Bangumi state schema、v5 本地迁移、七 family discovery descriptor、版本化 fingerprint、`vn`/`bangumi-api` provider adapter、matcher、封面策略、后台 Manager command queue 和 Scan Review 状态模型已经接入。局部 crate check 与 provider unit test 属于 E1；离线 HTTP contract fixture、完整 Manager UI 自动化、正式 release license gate 和 Windows/Android E3 仍未闭合，因此不能标记 `DONE`。
+
+**Done Evidence:** v5 回滚迁移、离线 provider contract fixture、取消与恢复、冲突确认、拒绝记忆、手动 ID、封面边界、Bangumi 收藏更新、桌面/窄屏 UI、商业 VNDB license gate 和 observability redaction 全部通过；在线或 UI fixture 最高只计 E2。
+
 **Depends On:** `S5-MANAGER-01`、`S5-FAMILY-01`
 
 **Target Paths:** `Emulator/Source/Manager/astra-emu-manager-core/src/probe.rs`、`Emulator/Source/Manager/astra-emu-manager/src/main.rs`

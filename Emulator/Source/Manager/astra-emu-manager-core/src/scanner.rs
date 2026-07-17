@@ -1,9 +1,15 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use astra_core::Hash256;
 use thiserror::Error;
 
 use crate::{CancellationToken, Library, LibraryError, ScanCandidate, ScanReport};
+
+const FINGERPRINT_SCHEMA: &str = "astra.emu.discovery_fingerprint.v1";
+const LARGE_MARKER_PREFIX_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GrantedSourceEntry {
@@ -20,7 +26,121 @@ pub trait GrantedSourceReader: Send + Sync {
     ) -> Result<Vec<GrantedSourceEntry>, SourceScanError>;
 
     fn read_file(&self, relative_path: &str, max_bytes: u64) -> Result<Vec<u8>, SourceScanError>;
+
+    fn read_prefix(
+        &self,
+        relative_path: &str,
+        byte_size: u64,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, SourceScanError> {
+        if byte_size > max_bytes {
+            return Err(SourceScanError::ScriptBounds);
+        }
+        self.read_file(relative_path, max_bytes)
+    }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscoveryMarker {
+    FileName(&'static str),
+    Extension(&'static str),
+}
+
+impl DiscoveryMarker {
+    fn matches(self, path: &str) -> bool {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        match self {
+            Self::FileName(expected) => name.eq_ignore_ascii_case(expected),
+            Self::Extension(extension) => name
+                .to_ascii_lowercase()
+                .ends_with(&format!(".{extension}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FamilyDiscoveryDescriptor {
+    pub family_id: &'static str,
+    pub entry_markers: &'static [DiscoveryMarker],
+    pub supporting_markers: &'static [DiscoveryMarker],
+    pub max_markers_per_root: usize,
+}
+
+const KRKR_ENTRY: &[DiscoveryMarker] = &[
+    DiscoveryMarker::FileName("data.xp3"),
+    DiscoveryMarker::Extension("tjs"),
+];
+const KRKR_SUPPORT: &[DiscoveryMarker] = &[DiscoveryMarker::Extension("xp3")];
+const ARTEMIS_ENTRY: &[DiscoveryMarker] = &[DiscoveryMarker::Extension("pfs")];
+const ARTEMIS_SUPPORT: &[DiscoveryMarker] = &[DiscoveryMarker::FileName("system.ini")];
+const BGI_ENTRY: &[DiscoveryMarker] = &[
+    DiscoveryMarker::FileName("data01000.arc"),
+    DiscoveryMarker::FileName("sysgrp.arc"),
+];
+const BGI_SUPPORT: &[DiscoveryMarker] = &[DiscoveryMarker::Extension("arc")];
+const SIGLUS_ENTRY: &[DiscoveryMarker] = &[
+    DiscoveryMarker::FileName("gameexe.dat"),
+    DiscoveryMarker::FileName("scene.pck"),
+];
+const SIGLUS_SUPPORT: &[DiscoveryMarker] = &[DiscoveryMarker::Extension("pck")];
+const SOFTPAL_ENTRY: &[DiscoveryMarker] = &[
+    DiscoveryMarker::FileName("data.pac"),
+    DiscoveryMarker::FileName("archive.dat"),
+    DiscoveryMarker::FileName("script.src"),
+];
+const SOFTPAL_SUPPORT: &[DiscoveryMarker] = &[
+    DiscoveryMarker::Extension("pac"),
+    DiscoveryMarker::Extension("src"),
+];
+const FVP_ENTRY: &[DiscoveryMarker] = &[DiscoveryMarker::Extension("hcb")];
+const FVP_SUPPORT: &[DiscoveryMarker] = &[DiscoveryMarker::Extension("hcb")];
+const MINORI_ENTRY: &[DiscoveryMarker] = &[DiscoveryMarker::FileName("scr.paz")];
+const MINORI_SUPPORT: &[DiscoveryMarker] = &[DiscoveryMarker::Extension("paz")];
+
+pub const DEFAULT_DISCOVERY_DESCRIPTORS: [FamilyDiscoveryDescriptor; 7] = [
+    FamilyDiscoveryDescriptor {
+        family_id: "krkr",
+        entry_markers: KRKR_ENTRY,
+        supporting_markers: KRKR_SUPPORT,
+        max_markers_per_root: 32,
+    },
+    FamilyDiscoveryDescriptor {
+        family_id: "artemis",
+        entry_markers: ARTEMIS_ENTRY,
+        supporting_markers: ARTEMIS_SUPPORT,
+        max_markers_per_root: 16,
+    },
+    FamilyDiscoveryDescriptor {
+        family_id: "bgi",
+        entry_markers: BGI_ENTRY,
+        supporting_markers: BGI_SUPPORT,
+        max_markers_per_root: 32,
+    },
+    FamilyDiscoveryDescriptor {
+        family_id: "siglus",
+        entry_markers: SIGLUS_ENTRY,
+        supporting_markers: SIGLUS_SUPPORT,
+        max_markers_per_root: 16,
+    },
+    FamilyDiscoveryDescriptor {
+        family_id: "softpal",
+        entry_markers: SOFTPAL_ENTRY,
+        supporting_markers: SOFTPAL_SUPPORT,
+        max_markers_per_root: 32,
+    },
+    FamilyDiscoveryDescriptor {
+        family_id: "fvp",
+        entry_markers: FVP_ENTRY,
+        supporting_markers: FVP_SUPPORT,
+        max_markers_per_root: 64,
+    },
+    FamilyDiscoveryDescriptor {
+        family_id: "minori",
+        entry_markers: MINORI_ENTRY,
+        supporting_markers: MINORI_SUPPORT,
+        max_markers_per_root: 32,
+    },
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScanLimits {
@@ -51,6 +171,8 @@ pub enum SourceScanError {
     InvalidPath,
     #[error("ASTRA_EMU_SCAN_DUPLICATE_PATH")]
     DuplicatePath,
+    #[error("ASTRA_EMU_SCAN_DISCOVERY_BOUNDS")]
+    DiscoveryBounds,
     #[error("ASTRA_EMU_SCAN_CANCELLED")]
     Cancelled,
     #[error(transparent)]
@@ -59,14 +181,43 @@ pub enum SourceScanError {
 
 pub struct LibraryScanner {
     limits: ScanLimits,
+    descriptors: Vec<FamilyDiscoveryDescriptor>,
+}
+
+#[derive(Default)]
+struct RootEvidence {
+    entries: BTreeMap<String, GrantedSourceEntry>,
+    families: BTreeSet<&'static str>,
+    primary: BTreeSet<String>,
+    marker_limit: usize,
 }
 
 impl LibraryScanner {
     pub fn new(limits: ScanLimits) -> Result<Self, SourceScanError> {
+        Self::with_descriptors(limits, DEFAULT_DISCOVERY_DESCRIPTORS)
+    }
+
+    pub fn with_descriptors(
+        limits: ScanLimits,
+        descriptors: impl IntoIterator<Item = FamilyDiscoveryDescriptor>,
+    ) -> Result<Self, SourceScanError> {
         if limits.max_entries == 0 || limits.max_script_bytes == 0 {
             return Err(SourceScanError::EntryBounds);
         }
-        Ok(Self { limits })
+        let descriptors = descriptors.into_iter().collect::<Vec<_>>();
+        if descriptors.is_empty()
+            || descriptors.iter().any(|descriptor| {
+                descriptor.family_id.is_empty()
+                    || descriptor.entry_markers.is_empty()
+                    || descriptor.max_markers_per_root == 0
+            })
+        {
+            return Err(SourceScanError::DiscoveryBounds);
+        }
+        Ok(Self {
+            limits,
+            descriptors,
+        })
     }
 
     pub fn scan(
@@ -85,48 +236,131 @@ impl LibraryScanner {
         }
         entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
         let mut paths = BTreeSet::new();
-        let mut candidates = Vec::new();
-        for entry in entries {
+        let mut normalized_entries = Vec::with_capacity(entries.len());
+        for mut entry in entries {
+            let path = normalize_source_path(&entry.relative_path)?;
+            if !paths.insert(path.clone()) {
+                return Err(SourceScanError::DuplicatePath);
+            }
+            entry.relative_path = path;
+            normalized_entries.push(entry);
+        }
+
+        let mut roots = BTreeMap::<String, RootEvidence>::new();
+        for entry in normalized_entries.iter().filter(|entry| entry.is_file) {
             if cancellation.is_cancelled() {
                 return Err(SourceScanError::Cancelled);
             }
-            let relative_path = normalize_source_path(&entry.relative_path)?;
-            if !paths.insert(relative_path.clone()) {
-                return Err(SourceScanError::DuplicatePath);
+            for descriptor in &self.descriptors {
+                let is_primary = descriptor
+                    .entry_markers
+                    .iter()
+                    .any(|marker| marker.matches(&entry.relative_path));
+                let is_support = descriptor
+                    .supporting_markers
+                    .iter()
+                    .any(|marker| marker.matches(&entry.relative_path));
+                if !is_primary && !is_support {
+                    continue;
+                }
+                let root = installation_root(&entry.relative_path).to_owned();
+                let evidence = roots.entry(root).or_default();
+                evidence.families.insert(descriptor.family_id);
+                evidence.marker_limit = evidence.marker_limit.max(descriptor.max_markers_per_root);
+                evidence
+                    .entries
+                    .insert(entry.relative_path.clone(), entry.clone());
+                if is_primary {
+                    evidence.primary.insert(entry.relative_path.clone());
+                }
             }
-            if !entry.is_file || !relative_path.to_ascii_lowercase().ends_with(".hcb") {
+        }
+
+        let mut candidates = Vec::new();
+        for (root, evidence) in roots {
+            if evidence.primary.is_empty() {
                 continue;
             }
-            if entry.byte_size > self.limits.max_script_bytes || entry.byte_size > i64::MAX as u64 {
-                return Err(SourceScanError::ScriptBounds);
+            if evidence.entries.len() > evidence.marker_limit {
+                return Err(SourceScanError::DiscoveryBounds);
             }
-            let bytes = source.read_file(&relative_path, self.limits.max_script_bytes)?;
-            if bytes.len() as u64 != entry.byte_size {
-                return Err(SourceScanError::Read);
+            let primary_path = evidence
+                .primary
+                .iter()
+                .next()
+                .expect("checked above")
+                .clone();
+            let primary = evidence
+                .entries
+                .get(&primary_path)
+                .expect("same evidence map");
+            let primary_modified_ns = primary.modified_ns;
+            let primary_byte_size = primary.byte_size;
+            let mut material = Vec::new();
+            append_field(&mut material, FINGERPRINT_SCHEMA.as_bytes());
+            append_field(&mut material, root.as_bytes());
+            for family in evidence.families {
+                append_field(&mut material, family.as_bytes());
             }
-            let content_hash = Hash256::from_sha256(&bytes).to_string();
-            let identity_material = format!("{source_id}\0{relative_path}");
-            let identity = Hash256::from_sha256(identity_material.as_bytes()).to_hex();
-            let title = relative_path
-                .rsplit_once('/')
-                .and_then(|(parent, _)| parent.rsplit('/').next())
-                .filter(|value| !value.is_empty())
-                .unwrap_or("FVP Game")
-                .to_owned();
+            for (path, marker) in evidence.entries {
+                append_field(&mut material, path.as_bytes());
+                append_field(&mut material, &marker.byte_size.to_le_bytes());
+                append_field(&mut material, &marker.modified_ns.to_le_bytes());
+                if marker.byte_size <= self.limits.max_script_bytes {
+                    let bytes = source.read_file(&path, self.limits.max_script_bytes)?;
+                    if bytes.len() as u64 != marker.byte_size {
+                        return Err(SourceScanError::Read);
+                    }
+                    append_field(&mut material, Hash256::from_sha256(&bytes).as_bytes());
+                } else {
+                    let prefix_len = marker.byte_size.min(LARGE_MARKER_PREFIX_BYTES);
+                    let bytes = source.read_prefix(&path, marker.byte_size, prefix_len)?;
+                    if bytes.len() as u64 != prefix_len {
+                        return Err(SourceScanError::Read);
+                    }
+                    append_field(&mut material, Hash256::from_sha256(&bytes).as_bytes());
+                }
+            }
+            let content_hash = Hash256::from_sha256(&material).to_string();
+            let identity = Hash256::from_sha256(format!("{source_id}\0{root}").as_bytes()).to_hex();
+            let title = if root.is_empty() {
+                primary_path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or("Legacy Game")
+                    .rsplit_once('.')
+                    .map_or_else(|| primary_path.clone(), |(stem, _)| stem.to_owned())
+            } else {
+                root.rsplit('/').next().unwrap_or("Legacy Game").to_owned()
+            };
             candidates.push(ScanCandidate {
                 source_id: source_id.to_owned(),
-                relative_path,
+                relative_path: primary_path,
                 case_identity: format!("case-{}", &identity[..32]),
                 content_hash,
-                modified_ns: entry.modified_ns,
-                byte_size: entry.byte_size as i64,
-                title,
+                modified_ns: primary_modified_ns,
+                byte_size: i64::try_from(primary_byte_size)
+                    .map_err(|_| SourceScanError::ScriptBounds)?,
+                title: if title.is_empty() {
+                    "Legacy Game".into()
+                } else {
+                    title
+                },
             });
         }
         library
             .apply_scan(source_id, &candidates, cancellation)
             .map_err(Into::into)
     }
+}
+
+fn append_field(output: &mut Vec<u8>, value: &[u8]) {
+    output.extend_from_slice(&(value.len() as u64).to_le_bytes());
+    output.extend_from_slice(value);
+}
+
+fn installation_root(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(parent, _)| parent)
 }
 
 fn normalize_source_path(value: &str) -> Result<String, SourceScanError> {
@@ -189,11 +423,13 @@ mod tests {
     }
 
     #[test]
-    fn scan_is_deterministic_and_removes_disappeared_cases() {
+    fn scan_merges_family_markers_per_installation_root() {
         let source = Arc::new(MemorySource {
             files: Mutex::new(BTreeMap::from([
                 ("a/start.hcb".into(), b"one".to_vec()),
-                ("b/start.hcb".into(), b"two".to_vec()),
+                ("a/second.hcb".into(), b"two".to_vec()),
+                ("b/data.xp3".into(), b"archive".to_vec()),
+                ("b/startup.tjs".into(), b"script".to_vec()),
                 ("notes/readme.txt".into(), b"ignored".to_vec()),
             ])),
         });
@@ -217,6 +453,39 @@ mod tests {
         let second = scanner
             .scan(&mut library, "root-1", source, &cancellation)
             .unwrap();
-        assert_eq!((second.unchanged, second.removed), (1, 1));
+        assert_eq!(
+            (second.updated, second.unchanged, second.removed),
+            (1, 1, 0)
+        );
+    }
+
+    #[test]
+    fn discovery_does_not_execute_or_parse_candidate_content() {
+        let source = Arc::new(MemorySource {
+            files: Mutex::new(BTreeMap::from([(
+                "game/startup.tjs".into(),
+                b"System.exec('commercial payload')".to_vec(),
+            )])),
+        });
+        let mut library = Library::in_memory().unwrap();
+        library
+            .upsert_grant(&SourceGrant {
+                source_id: "root-1".into(),
+                alias: "Games".into(),
+                platform_token: "opaque".into(),
+                token_kind: "test".into(),
+                active: true,
+            })
+            .unwrap();
+        let report = LibraryScanner::new(ScanLimits::default())
+            .unwrap()
+            .scan(
+                &mut library,
+                "root-1",
+                source,
+                &CancellationToken::default(),
+            )
+            .unwrap();
+        assert_eq!(report.inserted, 1);
     }
 }

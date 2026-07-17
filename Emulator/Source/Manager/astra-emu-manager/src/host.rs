@@ -63,6 +63,48 @@ pub trait ManagerController: 'static {
     fn rescan(&mut self) -> Result<ManagerViewModel, String>;
     fn launch(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
     fn leave_game(&mut self) -> Result<ManagerViewModel, String>;
+    fn refresh_metadata(&mut self, _provider: &str) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_METADATA_NOT_CONFIGURED".into())
+    }
+    fn accept_match(&mut self, _candidate_id: &str) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_METADATA_NOT_CONFIGURED".into())
+    }
+    fn reject_match(&mut self, _candidate_id: &str) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_METADATA_NOT_CONFIGURED".into())
+    }
+    fn unlink_identity(&mut self, _provider: &str) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_METADATA_NOT_CONFIGURED".into())
+    }
+    fn link_external_id(
+        &mut self,
+        _provider: &str,
+        _remote_id: &str,
+    ) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_METADATA_NOT_CONFIGURED".into())
+    }
+    fn set_metadata_consent(
+        &mut self,
+        _provider: &str,
+        _enabled: bool,
+        _secret: &str,
+    ) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_METADATA_NOT_CONFIGURED".into())
+    }
+    fn set_sensitive_cover_policy(
+        &mut self,
+        _provider: &str,
+        _enabled: bool,
+    ) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_METADATA_NOT_CONFIGURED".into())
+    }
+    fn update_bangumi_play_status(
+        &mut self,
+        _status: &str,
+        _rating: i32,
+        _note: &str,
+    ) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_METADATA_NOT_CONFIGURED".into())
+    }
     fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String> {
         Ok(None)
     }
@@ -404,6 +446,77 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             window.set_settings_active(true);
         }
     });
+    macro_rules! metadata_callback {
+        ($callback:ident, $method:ident, |$($arg:ident),*|) => {{
+            let weak = adapter.window().as_weak();
+            let callback_controller = controller.clone();
+            let callback_adapter = adapter.clone();
+            adapter.window().$callback(move |$($arg),*| {
+                let result = callback_controller.borrow_mut().$method($($arg.as_str()),*);
+                if let Some(window) = weak.upgrade() {
+                    match result {
+                        Ok(model) => callback_adapter.apply(&model),
+                        Err(error) => window.set_global_diagnostic(error.into()),
+                    }
+                }
+            });
+        }};
+    }
+    metadata_callback!(on_refresh_metadata, refresh_metadata, |provider|);
+    metadata_callback!(on_accept_match, accept_match, |candidate_id|);
+    metadata_callback!(on_reject_match, reject_match, |candidate_id|);
+    metadata_callback!(on_unlink_identity, unlink_identity, |provider|);
+    metadata_callback!(on_link_external_id, link_external_id, |provider, remote_id|);
+    let consent_weak = adapter.window().as_weak();
+    let metadata_consent_controller = controller.clone();
+    let metadata_consent_adapter = adapter.clone();
+    adapter
+        .window()
+        .on_set_metadata_consent(move |provider, enabled, secret| {
+            let result = metadata_consent_controller
+                .borrow_mut()
+                .set_metadata_consent(provider.as_str(), enabled, secret.as_str());
+            if let Some(window) = consent_weak.upgrade() {
+                match result {
+                    Ok(model) => metadata_consent_adapter.apply(&model),
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
+        });
+    let cover_weak = adapter.window().as_weak();
+    let cover_controller = controller.clone();
+    let cover_adapter = adapter.clone();
+    adapter
+        .window()
+        .on_set_sensitive_cover_policy(move |provider, enabled| {
+            let result = cover_controller
+                .borrow_mut()
+                .set_sensitive_cover_policy(provider.as_str(), enabled);
+            if let Some(window) = cover_weak.upgrade() {
+                match result {
+                    Ok(model) => cover_adapter.apply(&model),
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
+        });
+    let play_weak = adapter.window().as_weak();
+    let play_controller = controller.clone();
+    let play_adapter = adapter.clone();
+    adapter
+        .window()
+        .on_update_bangumi_play_status(move |status, rating, note| {
+            let result = play_controller.borrow_mut().update_bangumi_play_status(
+                status.as_str(),
+                rating,
+                note.as_str(),
+            );
+            if let Some(window) = play_weak.upgrade() {
+                match result {
+                    Ok(model) => play_adapter.apply(&model),
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
+        });
     let renderer_callback = renderer.clone();
     adapter.window().window().set_rendering_notifier(move |state, api| {
         let slint::GraphicsAPI::WGPU29 { device, queue, .. } = api else {

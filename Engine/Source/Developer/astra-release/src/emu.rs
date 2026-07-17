@@ -1,11 +1,11 @@
 use astra_core::Diagnostic;
 use astra_emu_manager_core::{
-    validate_fvp_coverage, validate_fvp_parity, validate_platform_evidence,
-    validate_provider_binding, validate_release_manifest, validate_translation_evidence,
-    validate_trusted_luau, validate_ui_host_identity, AstraEmuEvidenceBundleV1,
-    EmuPlatformRunEvidenceV1, EmuProviderBindingEvidenceV1, EmuReleaseManifestV1,
-    FvpParityEvidence, FvpSyscallCoverageEvidence, TranslationEvidence, TrustedLuauEvidenceV1,
-    UiHostIdentityEvidence,
+    validate_fvp_coverage, validate_fvp_parity, validate_metadata_evidence,
+    validate_platform_evidence, validate_provider_binding, validate_release_manifest,
+    validate_translation_evidence, validate_trusted_luau, validate_ui_host_identity,
+    AstraEmuEvidenceBundleV1, EmuPlatformRunEvidenceV1, EmuProviderBindingEvidenceV1,
+    EmuReleaseManifestV1, FvpParityEvidence, FvpSyscallCoverageEvidence, MetadataEvidenceV1,
+    TranslationEvidence, TrustedLuauEvidenceV1, UiHostIdentityEvidence,
 };
 use astra_package::{PackageReader, SectionEntry};
 use serde::de::DeserializeOwned;
@@ -33,9 +33,24 @@ pub(super) fn emu_release_checks(
     checks.push(fvp_parity_check(package, &manifest));
     checks.push(luau_check(package, &manifest));
     checks.push(translation_check(package, &manifest));
+    checks.push(metadata_check(package, &manifest));
     checks.extend(platform_checks(package, &manifest));
     checks.push(continuity_check(package, &manifest, profile, target));
     checks
+}
+
+fn metadata_check(package: &PackageReader, manifest: &EmuReleaseManifestV1) -> ReleaseCheckRecord {
+    let decoded = decode_named::<MetadataEvidenceV1>(package, manifest, "metadata");
+    let Ok(value) = decoded else {
+        return *decoded.unwrap_err();
+    };
+    let valid = validate_metadata_evidence(&value).is_ok();
+    record(
+        "emu.metadata_license",
+        valid,
+        "metadata provider consent, privacy and commercial license policy are explicit",
+        "ASTRA_EMU_METADATA_EVIDENCE_INVALID",
+    )
 }
 
 fn manifest_check(manifest: &EmuReleaseManifestV1) -> ReleaseCheckRecord {
@@ -197,9 +212,16 @@ fn continuity_check(
         decode_named::<FvpParityEvidence>(package, manifest, "fvp_parity"),
         decode_named::<TrustedLuauEvidenceV1>(package, manifest, "trusted_luau"),
         decode_named::<TranslationEvidence>(package, manifest, "translation"),
+        decode_named::<MetadataEvidenceV1>(package, manifest, "metadata"),
     );
-    let (Ok(ui_host_identity), Ok(fvp_coverage), Ok(fvp_parity), Ok(trusted_luau), Ok(translation)) =
-        values
+    let (
+        Ok(ui_host_identity),
+        Ok(fvp_coverage),
+        Ok(fvp_parity),
+        Ok(trusted_luau),
+        Ok(translation),
+        Ok(metadata),
+    ) = values
     else {
         return blocked(
             "emu.evidence.continuity",
@@ -225,6 +247,7 @@ fn continuity_check(
         fvp_parity,
         trusted_luau,
         translation,
+        metadata,
         platforms,
     };
     record(

@@ -14,8 +14,24 @@ pub struct GameCardViewModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchReviewViewModel {
+    pub candidate_id: String,
+    pub case_id: String,
+    pub provider: String,
+    pub remote_id: String,
+    pub title: String,
+    pub aliases: String,
+    pub release_date: String,
+    pub developer: String,
+    pub evidence: String,
+    pub score_millis: i32,
+    pub diagnostic: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagerViewModel {
     pub games: Vec<GameCardViewModel>,
+    pub match_reviews: Vec<MatchReviewViewModel>,
     pub selected_case_id: Option<String>,
     pub search_query: String,
     pub endpoint_identity: String,
@@ -37,19 +53,33 @@ pub struct ManagerViewModel {
     pub filter_preset: String,
     pub diagnostics_summary: String,
     pub patches_summary: String,
+    pub vndb_consent: bool,
+    pub bangumi_consent: bool,
+    pub sensitive_covers: bool,
+    pub bangumi_play_status: String,
+    pub bangumi_rating: i32,
+    pub bangumi_note: String,
+    pub bangumi_sync_summary: String,
 }
 
 pub struct SlintManagerAdapter {
     window: ManagerWindow,
     games: Rc<VecModel<GameCard>>,
+    reviews: Rc<VecModel<MatchReview>>,
 }
 
 impl SlintManagerAdapter {
     pub fn new() -> Result<Self, slint::PlatformError> {
         let window = ManagerWindow::new()?;
         let games = Rc::new(VecModel::default());
+        let reviews = Rc::new(VecModel::default());
         window.set_games(ModelRc::from(games.clone()));
-        Ok(Self { window, games })
+        window.set_match_reviews(ModelRc::from(reviews.clone()));
+        Ok(Self {
+            window,
+            games,
+            reviews,
+        })
     }
 
     pub fn apply(&self, model: &ManagerViewModel) {
@@ -70,6 +100,25 @@ impl SlintManagerAdapter {
             })
             .collect::<Vec<_>>();
         self.games.set_vec(cards);
+        self.reviews.set_vec(
+            model
+                .match_reviews
+                .iter()
+                .map(|item| MatchReview {
+                    candidate_id: item.candidate_id.as_str().into(),
+                    case_id: item.case_id.as_str().into(),
+                    provider: item.provider.as_str().into(),
+                    remote_id: item.remote_id.as_str().into(),
+                    title: item.title.as_str().into(),
+                    aliases: item.aliases.as_str().into(),
+                    release_date: item.release_date.as_str().into(),
+                    developer: item.developer.as_str().into(),
+                    evidence: item.evidence.as_str().into(),
+                    score_millis: item.score_millis,
+                    diagnostic: item.diagnostic.as_str().into(),
+                })
+                .collect::<Vec<_>>(),
+        );
         self.window
             .set_selected_case_id(model.selected_case_id.as_deref().unwrap_or_default().into());
         self.window
@@ -112,6 +161,16 @@ impl SlintManagerAdapter {
             .set_diagnostics_summary(model.diagnostics_summary.as_str().into());
         self.window
             .set_patches_summary(model.patches_summary.as_str().into());
+        self.window.set_vndb_consent(model.vndb_consent);
+        self.window.set_bangumi_consent(model.bangumi_consent);
+        self.window.set_sensitive_covers(model.sensitive_covers);
+        self.window
+            .set_bangumi_play_status(model.bangumi_play_status.as_str().into());
+        self.window.set_bangumi_rating(model.bangumi_rating);
+        self.window
+            .set_bangumi_note(model.bangumi_note.as_str().into());
+        self.window
+            .set_bangumi_sync_summary(model.bangumi_sync_summary.as_str().into());
     }
 
     pub fn window(&self) -> &ManagerWindow {
@@ -125,7 +184,7 @@ impl SlintManagerAdapter {
 
 #[cfg(test)]
 mod tests {
-    use super::{GameCardViewModel, ManagerViewModel};
+    use super::{GameCardViewModel, ManagerViewModel, MatchReviewViewModel};
 
     fn assert_contract_is_send_sync<T: Send + Sync>() {}
 
@@ -133,5 +192,6 @@ mod tests {
     fn public_view_models_do_not_require_ui_thread_types() {
         assert_contract_is_send_sync::<GameCardViewModel>();
         assert_contract_is_send_sync::<ManagerViewModel>();
+        assert_contract_is_send_sync::<MatchReviewViewModel>();
     }
 }

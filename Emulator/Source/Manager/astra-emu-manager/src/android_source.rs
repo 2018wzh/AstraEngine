@@ -298,6 +298,33 @@ impl GrantedSourceReader for AndroidGrantedSource {
         }
         Ok(bytes)
     }
+
+    fn read_prefix(
+        &self,
+        relative_path: &str,
+        byte_size: u64,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, SourceScanError> {
+        validate_relative_path(relative_path)?;
+        let document = self
+            .index
+            .lock()
+            .map_err(|_| SourceScanError::Read)?
+            .get(&relative_path.to_ascii_lowercase())
+            .cloned()
+            .ok_or(SourceScanError::Read)?;
+        if document.byte_size != byte_size || max_bytes > byte_size {
+            return Err(SourceScanError::Read);
+        }
+        android_platform::read_document_range(
+            &document.document_uri,
+            document.byte_size,
+            document.modified_ms,
+            0,
+            u32::try_from(max_bytes).map_err(|_| SourceScanError::ScriptBounds)?,
+        )
+        .map_err(|_| SourceScanError::Read)
+    }
 }
 
 fn validate_relative_path(path: &str) -> Result<(), SourceScanError> {

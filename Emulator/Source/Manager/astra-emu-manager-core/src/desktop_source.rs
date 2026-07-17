@@ -580,6 +580,31 @@ impl GrantedSourceReader for DesktopGrantedSource {
         }
         Ok(bytes)
     }
+
+    fn read_prefix(
+        &self,
+        relative_path: &str,
+        byte_size: u64,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, SourceScanError> {
+        let path = self.resolved_file(relative_path)?;
+        let metadata = fs::metadata(&path).map_err(|_| SourceScanError::Read)?;
+        if metadata.len() != byte_size || max_bytes > byte_size {
+            return Err(SourceScanError::Read);
+        }
+        let mut bytes = Vec::with_capacity(
+            usize::try_from(max_bytes).map_err(|_| SourceScanError::ScriptBounds)?,
+        );
+        fs::File::open(path)
+            .map_err(|_| SourceScanError::Read)?
+            .take(max_bytes)
+            .read_to_end(&mut bytes)
+            .map_err(|_| SourceScanError::Read)?;
+        if bytes.len() as u64 != max_bytes {
+            return Err(SourceScanError::Read);
+        }
+        Ok(bytes)
+    }
 }
 
 fn relative_path_string(path: &Path) -> Result<String, SourceScanError> {

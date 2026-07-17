@@ -9,6 +9,20 @@ export struct GameCard {
     diagnostic: string,
 }
 
+export struct MatchReview {
+    candidate-id: string,
+    case-id: string,
+    provider: string,
+    remote-id: string,
+    title: string,
+    aliases: string,
+    release-date: string,
+    developer: string,
+    evidence: string,
+    score-millis: int,
+    diagnostic: string,
+}
+
 global Tokens {
     out property <color> background: #111318;
     out property <color> surface: #1a1d24;
@@ -170,6 +184,7 @@ export component ManagerWindow inherits Window {
     property <length> usable-width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
     property <length> usable-height: root.height - root.safe-area-insets.top - root.safe-area-insets.bottom;
     in property <[GameCard]> games;
+    in property <[MatchReview]> match-reviews;
     in-out property <string> selected-case-id;
     in-out property <string> search-query;
     in property <string> endpoint-identity;
@@ -182,6 +197,7 @@ export component ManagerWindow inherits Window {
     in-out property <bool> game-active: false;
     in-out property <bool> about-active: false;
     in-out property <bool> settings-active: false;
+    in-out property <bool> metadata-active: false;
     in-out property <bool> translation-overlay-active: false;
     in-out property <bool> diagnostics-overlay-active: false;
     in-out property <bool> patches-overlay-active: false;
@@ -209,6 +225,16 @@ export component ManagerWindow inherits Window {
     in-out property <string> translation-secret-input;
     in property <bool> translation-consent-present;
     in-out property <bool> translation-persistent-cache;
+    in-out property <bool> vndb-consent;
+    in-out property <bool> bangumi-consent;
+    in-out property <bool> sensitive-covers;
+    in-out property <string> metadata-provider: "vndb";
+    in-out property <string> external-id-input;
+    in-out property <string> bangumi-token-input;
+    in-out property <string> bangumi-play-status: "doing";
+    in-out property <int> bangumi-rating: 1;
+    in-out property <string> bangumi-note;
+    in property <string> bangumi-sync-summary;
     callback launch(string);
     callback select-case(string);
     callback search(string);
@@ -227,6 +253,14 @@ export component ManagerWindow inherits Window {
     callback reset-translation();
     callback set-filter-preset(string);
     callback set-patch-mode(string);
+    callback refresh-metadata(string);
+    callback accept-match(string);
+    callback reject-match(string);
+    callback unlink-identity(string);
+    callback link-external-id(string, string);
+    callback set-metadata-consent(string, bool, string);
+    callback set-sensitive-cover-policy(string, bool);
+    callback update-bangumi-play-status(string, int, string);
 
     if root.global-diagnostic != "": Rectangle {
         x: root.usable-x + 12px;
@@ -455,7 +489,69 @@ export component ManagerWindow inherits Window {
         set-cache(enabled) => { root.set-translation-cache(enabled); }
     }
 
-    if !root.game-active && !root.about-active && !root.settings-active && root.usable-width >= 840px: HorizontalLayout {
+    if !root.game-active && root.metadata-active: Rectangle {
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.usable-height;
+        background: Tokens.background;
+        VerticalLayout {
+            padding: root.width >= 840px ? 24px : 12px;
+            spacing: 10px;
+            HorizontalLayout {
+                Button { text: "Back"; clicked => { root.metadata-active = false; } }
+                Text { text: "Metadata and play status"; color: Tokens.text; font-size: 21px; font-weight: 700; horizontal-stretch: 1; }
+            }
+            ScrollView {
+                mouse-drag-pan-enabled: true;
+                VerticalLayout {
+                    spacing: 10px;
+                    Text { text: "Provider consent"; color: Tokens.text; font-size: 17px; font-weight: 700; }
+                    CheckBox { checked <=> root.vndb-consent; text: "Enable VNDB metadata network access"; toggled => { root.set-metadata-consent("vndb", self.checked, ""); } }
+                    CheckBox { checked <=> root.bangumi-consent; text: "Enable Bangumi metadata and collection access"; toggled => { root.set-metadata-consent("bangumi", self.checked, root.bangumi-token-input); root.bangumi-token-input = ""; } }
+                    LineEdit { text <=> root.bangumi-token-input; input-type: password; placeholder-text: "Bangumi access token (stored by the platform secret store)"; }
+                    CheckBox { checked <=> root.sensitive-covers; text: "Allow sensitive covers for the selected provider"; toggled => { root.set-sensitive-cover-policy(root.metadata-provider, self.checked); } }
+                    Rectangle { height: 1px; background: #455064; }
+                    Text { text: "Manual verified identity"; color: Tokens.text; font-size: 17px; font-weight: 700; }
+                    ComboBox { model: ["vndb", "bangumi"]; current-value <=> root.metadata-provider; }
+                    LineEdit { text <=> root.external-id-input; placeholder-text: root.metadata-provider == "vndb" ? "v123" : "subject id"; }
+                    HorizontalLayout {
+                        Button { enabled: root.selected-case-id != ""; text: "Validate and link"; clicked => { root.link-external-id(root.metadata-provider, root.external-id-input); } }
+                        Button { enabled: root.selected-case-id != ""; text: "Refresh"; clicked => { root.refresh-metadata(root.metadata-provider); } }
+                        Button { enabled: root.selected-case-id != ""; text: "Unlink"; clicked => { root.unlink-identity(root.metadata-provider); } }
+                    }
+                    Rectangle { height: 1px; background: #455064; }
+                    Text { text: "Review queue"; color: Tokens.text; font-size: 17px; font-weight: 700; }
+                    for item in root.match-reviews: Rectangle {
+                        min-height: 150px;
+                        background: Tokens.surface-raised;
+                        border-radius: Tokens.radius;
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 4px;
+                            Text { text: item.provider + " " + item.remote-id + " · " + item.title; color: Tokens.text; font-weight: 700; wrap: word-wrap; }
+                            Text { text: item.aliases + " · " + item.release-date + " · " + item.developer; color: Tokens.text-muted; wrap: word-wrap; }
+                            Text { text: item.evidence; color: Tokens.text-muted; wrap: word-wrap; }
+                            if item.diagnostic != "": Text { text: item.diagnostic; color: Tokens.danger; wrap: word-wrap; }
+                            HorizontalLayout {
+                                Button { text: "Accept"; clicked => { root.accept-match(item.candidate-id); } }
+                                Button { text: "Reject"; clicked => { root.reject-match(item.candidate-id); } }
+                            }
+                        }
+                    }
+                    Rectangle { height: 1px; background: #455064; }
+                    Text { text: "Bangumi play status"; color: Tokens.text; font-size: 17px; font-weight: 700; }
+                    ComboBox { model: ["wish", "doing", "collect", "on_hold", "dropped"]; current-value <=> root.bangumi-play-status; }
+                    SpinBox { value <=> root.bangumi-rating; minimum: 1; maximum: 10; }
+                    TextEdit { text <=> root.bangumi-note; placeholder-text: "Private note (maximum 1024 characters)"; min-height: 80px; }
+                    Button { enabled: root.selected-case-id != ""; text: "Sync play status"; clicked => { root.update-bangumi-play-status(root.bangumi-play-status, root.bangumi-rating, root.bangumi-note); } }
+                    Text { text: root.bangumi-sync-summary; color: Tokens.text-muted; wrap: word-wrap; }
+                }
+            }
+        }
+    }
+
+    if !root.game-active && !root.about-active && !root.settings-active && !root.metadata-active && root.usable-width >= 840px: HorizontalLayout {
         x: root.usable-x;
         y: root.usable-y;
         width: root.usable-width;
@@ -471,6 +567,7 @@ export component ManagerWindow inherits Window {
                 Button { text: "Library"; }
                 Button { text: "Diagnostics"; }
                 Button { text: "Translation"; clicked => { root.open-settings(); } }
+                Button { text: "Metadata"; clicked => { root.metadata-active = true; } }
                 Button { text: "Patches"; }
                 Button { text: "Filters"; }
                 Rectangle { vertical-stretch: 1; }
@@ -524,7 +621,7 @@ export component ManagerWindow inherits Window {
         }
     }
 
-    if !root.game-active && !root.about-active && !root.settings-active && root.usable-width < 840px: VerticalLayout {
+    if !root.game-active && !root.about-active && !root.settings-active && !root.metadata-active && root.usable-width < 840px: VerticalLayout {
         x: root.usable-x;
         y: root.usable-y;
         width: root.usable-width;
@@ -575,6 +672,7 @@ export component ManagerWindow inherits Window {
             Button { text: "Library"; horizontal-stretch: 1; }
             Button { text: "Overlay"; horizontal-stretch: 1; }
             Button { text: "Settings"; horizontal-stretch: 1; clicked => { root.open-settings(); } }
+            Button { text: "Metadata"; horizontal-stretch: 1; clicked => { root.metadata-active = true; } }
             Button { text: "About"; horizontal-stretch: 1; clicked => { root.about-active = true; } }
         }
     }
