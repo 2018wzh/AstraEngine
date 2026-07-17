@@ -1578,9 +1578,9 @@ fn nativevn_sample_cooks_packages_validates_and_runs_full_playthrough() {
         .any(|check| { check["status"] == "blocked" }));
 
     let headless_report = run_nativevn_headless(&package, root, &case_dir, "classic", "Digit1");
-    assert_eq!(headless_report["schema"], "astra.headless_run_report.v1");
+    assert_eq!(headless_report["schema"], "astra.headless_run_report.v2");
     assert_eq!(headless_report["status"], "passed");
-    assert!(headless_report["frame_count"].as_u64().unwrap() > 0);
+    assert!(headless_report["rasterized_frame_count"].as_u64().unwrap() > 0);
     assert!(headless_report["audio_frame_count"].as_u64().unwrap() > 0);
     assert_eq!(headless_report["checkpoint_results"][0]["id"], "final");
     assert_eq!(headless_report["checkpoint_results"][0]["passed"], true);
@@ -1957,9 +1957,9 @@ fn nativevn_sample_runs_opt_in_advanced_presentation_gate() {
     {
         let headless_report =
             run_nativevn_headless(&package, root, &case_dir, "advanced-vn", "Digit2");
-        assert_eq!(headless_report["schema"], "astra.headless_run_report.v1");
+        assert_eq!(headless_report["schema"], "astra.headless_run_report.v2");
         assert_eq!(headless_report["status"], "passed");
-        assert!(headless_report["frame_count"].as_u64().unwrap() > 0);
+        assert!(headless_report["rasterized_frame_count"].as_u64().unwrap() > 0);
         assert!(headless_report["audio_frame_count"].as_u64().unwrap() > 0);
         assert_eq!(headless_report["checkpoint_results"][0]["id"], "final");
         assert_eq!(headless_report["checkpoint_results"][0]["passed"], true);

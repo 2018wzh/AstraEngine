@@ -18,7 +18,7 @@ pub struct PlatformHostSession {
 }
 ```
 
-`HostLaunchProfile::Platform` 只接受 `astra.platform_host_profile.v2`，`HostLaunchProfile::Headless` 只接受测试专用 `astra.headless_host_profile.v1`。`PlatformId` 不增加 Headless variant。native factory 收到 Headless profile 时在 `host.start` 返回 `InvalidProfile`；Headless factory也必须反向阻断 native profile。Release、Cook 和 shipping Player 继续只接收 `PlatformHostProfile`。
+`HostLaunchProfile::Platform` 只接受 `astra.platform_host_profile.v2`，`HostLaunchProfile::Headless` 只接受测试专用 `astra.headless_host_profile.v2`。`PlatformId` 不增加 Headless variant。native factory 收到 Headless profile 时在 `host.start` 返回 `InvalidProfile`；Headless factory也必须反向阻断 native profile。Release、Cook 和 shipping Player 继续只接收 `PlatformHostProfile`。
 
 `PlatformHostClient` 通过 Future 提交 window/surface/present/capture、audio、decode、save transaction、package range 和 shutdown 命令。OS/browser event loop 在本地主线程 executor 持有 `!Send` 资源，Tokio 只负责编排。
 
@@ -44,7 +44,7 @@ Headless 的 `HttpsRange` source 只接受 allowlist 中不含 credential/fragme
 
 Windows release 要求 `wgpu_hardware`、`wmf`、`wasapi`、`saved_games`。Web release 只支持 Chrome，固定要求 `webgpu`、`webcodecs`、`webaudio`、`opfs`，不配置 fallback。
 
-Headless 不写入 `project.yaml.platform_profiles` 或 cooked `platform.profiles`。`astra.headless_host_profile.v1` 只供测试 harness 与 Developer 工具使用，声明 provider binding、JSONL 输入协议、artifact policy、限额和 build/package identity。Release Gate、shipping target 或 AstraPlayer 发现该 schema、Headless provider id 或 Developer binary role时必须阻断。
+Headless 不写入 `project.yaml.platform_profiles` 或 cooked `platform.profiles`。`astra.headless_host_profile.v2` 只供测试 harness 与 Developer 工具使用，声明 provider binding、render policy、JSONL 输入协议、artifact policy、双帧限额和 build/package identity。Release Gate、shipping target 或 AstraPlayer 发现该 schema、Headless provider id 或 Developer binary role时必须阻断。
 
 ## Reports And Gate
 
@@ -58,4 +58,4 @@ Web required checks：`host.lifecycle`、`window.canvas`、`surface.webgpu_prese
 
 静态 WAV meter、接口存在性、hidden-window smoke、文件存在、route report、DOM synthetic click 和 `--dump-dom` 只能作诊断，不能通过 `player.full_playable`。
 
-Migration 11 完成后，真实产品平台验收还必须读取 `astra.headless_preflight_link.v1`。Headless 与真实平台 run 绑定同一 build、cooked package、input sequence、scenario、target 和 content identity，但使用各自的 profile/session id。Headless 只形成 E2 证据，不能替代真实平台 E3。
+Migration 11 完成后，真实产品平台验收还必须读取 `astra.headless_preflight_link.v2`。Headless 与真实平台 run 绑定同一 build、cooked package、input sequence、scenario、target 和 content identity，但使用各自的 profile/session id。Headless 只形成 E2 证据，不能替代真实平台 E3。

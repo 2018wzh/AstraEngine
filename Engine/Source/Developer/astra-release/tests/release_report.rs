@@ -32,8 +32,8 @@ fn release_gate_blocks_headless_profile_schema_in_package() {
         nativevn_target_manifest(),
         vec![SectionPayload::raw(
             "headless.profile",
-            "astra.headless_host_profile.v1",
-            br#"{"schema":"astra.headless_host_profile.v1"}"#.to_vec(),
+            "astra.headless_host_profile.v2",
+            br#"{"schema":"astra.headless_host_profile.v2"}"#.to_vec(),
         )],
     );
 
@@ -98,7 +98,7 @@ fn release_gate_blocks_headless_launch_profile_in_cooked_platform_profiles() {
                 "schema": "astra.platform_profiles.v2",
                 "profiles": [{
                     "kind": "headless",
-                    "profile": {"schema": "astra.headless_host_profile.v1"}
+                    "profile": {"schema": "astra.headless_host_profile.v2"}
                 }]
             })
             .to_string()
@@ -134,9 +134,6 @@ fn shipping_release_target_cannot_declare_headless_platform() {
         target,
         vec![cooked_project_section("desktop-release", "nativevn-game")],
     );
-    request.target_manifest = target.to_string().into_bytes();
-    bind_request_to_target(&mut request, "nativevn-game", "desktop-release", true);
-    let blob = PackageBuilder::build(request).unwrap();
 
     assert_headless_release_boundary_blocked(
         blob.into_bytes(),

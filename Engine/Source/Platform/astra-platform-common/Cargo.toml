@@ -10,6 +10,7 @@ platform-test-driver = []
 
 [dependencies]
 astra-core = { path = "../../Runtime/astra-core" }
+astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
 astra-media-core = { path = "../../Runtime/astra-media-core" }
 astra-platform = { path = "../astra-platform" }
 tempfile.workspace = true

@@ -90,7 +90,7 @@ enum Command {
     },
     Package {
         #[command(subcommand)]
-        command: PackageCommand,
+        command: Box<PackageCommand>,
     },
     Test {
         #[command(subcommand)]
@@ -451,7 +451,7 @@ fn main() -> Result<(), CliError> {
                 );
             }
         },
-        Command::Package { command } => match command {
+        Command::Package { command } => match *command {
             PackageCommand::Build {
                 cooked,
                 out,
@@ -3606,7 +3606,7 @@ fn build_standalone_bundle_into(
             ]);
             entrypoint.to_string()
         }
-        PlatformId::Linux | PlatformId::Macos | PlatformId::Ios => {
+        PlatformId::Ios => {
             return Err(format!("standalone bundle platform {platform_name} is Stage 6").into());
         }
     };

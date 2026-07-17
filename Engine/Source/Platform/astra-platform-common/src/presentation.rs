@@ -586,7 +586,7 @@ impl WgpuReadback {
     }
 }
 
-fn install_device_lost_callback(device: &wgpu::Device, lost: Arc<AtomicBool>) {
+pub(crate) fn install_device_lost_callback(device: &wgpu::Device, lost: Arc<AtomicBool>) {
     device.set_device_lost_callback(move |_reason, _message| {
         lost.store(true, Ordering::Release);
         tracing::error!(

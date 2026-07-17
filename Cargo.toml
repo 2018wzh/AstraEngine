@@ -194,7 +194,7 @@ web-sys = "0.3"
 windows = { version = "0.62", default-features = false }
 winit = { version = "0.30", default-features = false }
 keyring = "=4.1.5"
-wgpu = "29"
+wgpu = { version = "29", features = ["static-dxc"] }
 rayon = "1.12"
 yakui-core = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }
 yakui-widgets = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }

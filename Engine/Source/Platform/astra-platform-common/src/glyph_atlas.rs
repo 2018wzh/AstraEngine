@@ -13,15 +13,15 @@ const MAX_GLYPH_RESOURCES: usize = 65_536;
 const MAX_GLYPH_BYTES: usize = 64 * 1024 * 1024;
 const VERTEX_STRIDE: wgpu::BufferAddress = 32;
 
-pub(super) struct WgpuGlyphAtlasRenderer {
+pub(crate) struct WgpuGlyphAtlasRenderer {
     resources: BTreeMap<String, AtlasResource>,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
 }
 
-pub(super) struct PreparedGlyphFrame {
-    pub(super) texture: wgpu::Texture,
+pub(crate) struct PreparedGlyphFrame {
+    pub(crate) texture: wgpu::Texture,
     next_resources: BTreeMap<String, AtlasResource>,
 }
 
@@ -105,7 +105,11 @@ struct DrawBatch {
 }
 
 impl WgpuGlyphAtlasRenderer {
-    pub(super) fn new(device: &wgpu::Device) -> Self {
+    pub(crate) fn reset_resources(&mut self) {
+        self.resources.clear();
+    }
+
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
         let (layout, sampler, pipeline) = create_pipeline(device);
         Self {
             resources: BTreeMap::new(),
@@ -122,7 +126,7 @@ impl WgpuGlyphAtlasRenderer {
         self.pipeline = pipeline;
     }
 
-    pub(super) fn render(
+    pub(crate) fn render(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -145,7 +149,7 @@ impl WgpuGlyphAtlasRenderer {
             .map(|(texture, _)| texture)
     }
 
-    pub(super) fn commit(&mut self, prepared: PreparedGlyphFrame) -> wgpu::Texture {
+    pub(crate) fn commit(&mut self, prepared: PreparedGlyphFrame) -> wgpu::Texture {
         self.resources = prepared.next_resources;
         prepared.texture
     }

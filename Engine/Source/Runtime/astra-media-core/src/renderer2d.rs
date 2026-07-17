@@ -366,6 +366,24 @@ pub struct HeadlessRenderer {
 }
 
 impl HeadlessRenderer {
+    pub fn retained_resource_commands(&self) -> Vec<DrawCommand> {
+        self.textures
+            .iter()
+            .map(|(resource_id, frame)| DrawCommand::UploadTexture {
+                resource_id: resource_id.clone(),
+                frame: frame.clone(),
+            })
+            .chain(
+                self.glyphs
+                    .iter()
+                    .map(|(resource_id, glyph)| DrawCommand::UploadGlyph {
+                        resource_id: resource_id.clone(),
+                        glyph: glyph.clone(),
+                    }),
+            )
+            .collect()
+    }
+
     pub fn capture_frame(&mut self, commands: &[DrawCommand]) -> Result<CpuFrame, MediaError> {
         <Self as Renderer2D>::capture_frame(self, commands)
     }
@@ -373,6 +391,191 @@ impl HeadlessRenderer {
     pub fn capture_hash(&mut self, commands: &[DrawCommand]) -> Result<Hash256, MediaError> {
         <Self as Renderer2D>::capture_hash(self, commands)
     }
+
+    /// Validates and transactionally commits the retained resource state without
+    /// allocating or rasterizing a render target. A later materialization can use
+    /// a clone taken before this call plus the same command stream.
+    pub fn submit_frame(&mut self, commands: &[DrawCommand]) -> Result<(), MediaError> {
+        let mut textures = self.textures.clone();
+        let mut glyphs = self.glyphs.clone();
+        let mut clip_depth = 1_usize;
+        let mut transform_depth = 1_usize;
+        let mut opacity_depth = 1_usize;
+        for command in commands {
+            match command {
+                DrawCommand::UploadTexture { resource_id, frame } => {
+                    validate_texture(frame)?;
+                    if textures
+                        .insert(resource_id.clone(), frame.clone())
+                        .is_some()
+                    {
+                        return Err(MediaError::message(
+                            "ASTRA_MEDIA_RESOURCE_DUPLICATE: texture resource is already uploaded",
+                        ));
+                    }
+                }
+                DrawCommand::UploadGlyph { resource_id, glyph } => {
+                    validate_glyph(glyph)?;
+                    if glyphs.insert(resource_id.clone(), glyph.clone()).is_some() {
+                        return Err(MediaError::message(
+                            "ASTRA_MEDIA_RESOURCE_DUPLICATE: glyph resource is already uploaded",
+                        ));
+                    }
+                }
+                DrawCommand::ReleaseResource { resource_id } => {
+                    if !(textures.remove(resource_id).is_some()
+                        | glyphs.remove(resource_id).is_some())
+                    {
+                        return Err(MediaError::message(
+                            "ASTRA_MEDIA_RESOURCE_UNKNOWN: released resource is not uploaded",
+                        ));
+                    }
+                }
+                DrawCommand::Sprite {
+                    texture_id,
+                    source,
+                    opacity,
+                    ..
+                } => {
+                    validate_opacity(*opacity)?;
+                    let texture = textures.get(texture_id).ok_or_else(|| {
+                        MediaError::message(
+                            "ASTRA_MEDIA_RESOURCE_UNKNOWN: sprite texture is not uploaded",
+                        )
+                    })?;
+                    if let Some(source) = source {
+                        validate_source_rect(texture, *source)?;
+                    }
+                }
+                DrawCommand::GlyphRun {
+                    glyphs: instances,
+                    opacity,
+                    ..
+                } => {
+                    validate_opacity(*opacity)?;
+                    for instance in instances {
+                        if !glyphs.contains_key(&instance.resource_id) {
+                            return Err(MediaError::message(
+                                "ASTRA_MEDIA_RESOURCE_UNKNOWN: glyph resource is not uploaded",
+                            ));
+                        }
+                    }
+                }
+                DrawCommand::Mesh2D {
+                    vertices,
+                    indices,
+                    material,
+                    texture_id,
+                    opacity,
+                    ..
+                } => {
+                    validate_opacity(*opacity)?;
+                    if vertices.is_empty()
+                        || indices.is_empty()
+                        || indices.len() % 3 != 0
+                        || indices
+                            .iter()
+                            .any(|index| *index as usize >= vertices.len())
+                        || vertices.iter().any(|vertex| {
+                            !vertex.position.into_iter().all(f32::is_finite)
+                                || !vertex.uv.into_iter().all(f32::is_finite)
+                        })
+                    {
+                        return Err(MediaError::message(
+                            "ASTRA_MEDIA_MESH_TOPOLOGY: mesh payload is invalid",
+                        ));
+                    }
+                    match (material, texture_id) {
+                        (MeshMaterial2D::Solid, None) => {}
+                        (MeshMaterial2D::ColorTexture | MeshMaterial2D::GlyphMask, Some(id))
+                            if textures.contains_key(id) => {}
+                        _ => {
+                            return Err(MediaError::message(
+                                "ASTRA_MEDIA_MESH_MATERIAL: mesh material and texture mismatch",
+                            ))
+                        }
+                    }
+                }
+                DrawCommand::Texture { frame, opacity, .. }
+                | DrawCommand::VideoFrame { frame, opacity, .. } => {
+                    validate_texture(frame)?;
+                    validate_opacity(*opacity)?;
+                }
+                DrawCommand::Glyph { glyph, opacity, .. } => {
+                    validate_glyph(glyph)?;
+                    validate_opacity(*opacity)?;
+                }
+                DrawCommand::PushClip { .. } => clip_depth += 1,
+                DrawCommand::PopClip => {
+                    clip_depth = clip_depth.checked_sub(1).ok_or_else(|| {
+                        MediaError::message("ASTRA_MEDIA_CLIP_STACK: clip stack underflow")
+                    })?;
+                    if clip_depth == 0 {
+                        return Err(MediaError::message(
+                            "ASTRA_MEDIA_CLIP_STACK: clip stack underflow",
+                        ));
+                    }
+                }
+                DrawCommand::PushTransform { transform } => {
+                    validate_transform(*transform)?;
+                    transform_depth += 1;
+                }
+                DrawCommand::PopTransform => {
+                    if transform_depth == 1 {
+                        return Err(MediaError::message(
+                            "ASTRA_MEDIA_TRANSFORM_STACK: transform stack underflow",
+                        ));
+                    }
+                    transform_depth -= 1;
+                }
+                DrawCommand::SetCamera { transform } => validate_transform(*transform)?,
+                DrawCommand::PushOpacity { opacity } => {
+                    validate_opacity(*opacity)?;
+                    opacity_depth += 1;
+                }
+                DrawCommand::PopOpacity => {
+                    if opacity_depth == 1 {
+                        return Err(MediaError::message(
+                            "ASTRA_MEDIA_OPACITY_STACK: opacity stack underflow",
+                        ));
+                    }
+                    opacity_depth -= 1;
+                }
+                DrawCommand::FilterGraph { graph } => {
+                    let validation = crate::FilterValidator.validate(graph);
+                    if !validation.blocking_diagnostics().is_empty() {
+                        return Err(MediaError::Diagnostics(validation.diagnostics));
+                    }
+                }
+                DrawCommand::Clear { .. } | DrawCommand::Rect { .. } => {}
+            }
+        }
+        if clip_depth != 1 || transform_depth != 1 || opacity_depth != 1 {
+            return Err(MediaError::message(
+                "ASTRA_MEDIA_SCENE_STACK: scene command stacks are unbalanced",
+            ));
+        }
+        self.textures = textures;
+        self.glyphs = glyphs;
+        Ok(())
+    }
+}
+
+fn validate_source_rect(frame: &TextureFrame, source: RectI) -> Result<(), MediaError> {
+    let right = source.x.checked_add_unsigned(source.width);
+    let bottom = source.y.checked_add_unsigned(source.height);
+    if source.x < 0
+        || source.y < 0
+        || source.width == 0
+        || source.height == 0
+        || right.is_none_or(|value| value > frame.width as i32)
+        || bottom.is_none_or(|value| value > frame.height as i32)
+    {
+        return Err(MediaError::message(
+            "ASTRA_MEDIA_TEXTURE_SOURCE: source rectangle is outside the texture",
+        ));
+    }
+    Ok(())
 }
 
 impl Renderer2D for HeadlessRenderer {

@@ -14,11 +14,11 @@ from pathlib import Path
 CAPABILITY_SCHEMA = "astra.platform_capability_report.v2"
 CONFORMANCE_SCHEMA = "astra.platform_host_conformance_report.v1"
 PLAYER_SCHEMA = "astra.player_automation_report.v1"
-HEADLESS_RUN_SCHEMA = "astra.headless_run_report.v1"
-HEADLESS_REVIEW_BUNDLE_SCHEMA = "astra.headless_review_bundle.v1"
-HEADLESS_REVIEW_SCHEMA = "astra.headless_review.v1"
+HEADLESS_RUN_SCHEMA = "astra.headless_run_report.v2"
+HEADLESS_REVIEW_BUNDLE_SCHEMA = "astra.headless_review_bundle.v2"
+HEADLESS_REVIEW_SCHEMA = "astra.headless_review.v2"
 PLATFORM_RUN_IDENTITY_SCHEMA = "astra.platform_run_identity.v1"
-PREFLIGHT_LINK_SCHEMA = "astra.headless_preflight_link.v1"
+PREFLIGHT_LINK_SCHEMA = "astra.headless_preflight_link.v2"
 REQUIRED = {
     "windows": {
         "host.lifecycle", "window.create_destroy", "surface.present_readback",

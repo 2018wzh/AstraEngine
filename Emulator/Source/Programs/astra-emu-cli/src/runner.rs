@@ -455,7 +455,9 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV1,
             _ => None,
         })
         .collect();
-    host_profile.artifacts.max_frames = input.final_tick.saturating_add(100).max(1);
+    let frame_budget = input.final_tick.saturating_add(100).max(1);
+    host_profile.artifacts.max_submitted_frames = frame_budget;
+    host_profile.artifacts.max_rasterized_frames = frame_budget;
     host_profile.artifacts.max_duration_ns = input
         .final_tick
         .saturating_add(100)
@@ -771,7 +773,7 @@ fn persist_checkpoint_frames(
             height: frame.height,
             color_space: "rgba8_srgb".into(),
             sequence: frame.sequence,
-            checkpoint: Some(frame.id.clone()),
+            checkpoint_ids: vec![frame.id.clone()],
         });
     }
     Ok(())

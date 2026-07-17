@@ -98,7 +98,7 @@ fn product_package_with_request(
         .to_vec();
     let font_hash = Hash256::from_sha256(&font);
     let background =
-        include_bytes!("../../../../../Examples/NativeVN/Assets/Backgrounds/apartment-night.png")
+        include_bytes!("../../../../../Examples/NativeVN/Visual/Backgrounds/apartment-studio.png")
             .to_vec();
     let background_hash = Hash256::from_sha256(&background);
     sections.push(SectionPayload::raw(

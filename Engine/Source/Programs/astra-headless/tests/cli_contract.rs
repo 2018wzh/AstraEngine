@@ -75,6 +75,10 @@ impl Fixture {
             schema: HEADLESS_CHECKPOINT_CONFIG_SCHEMA.into(),
             id: "cli-equivalence".into(),
             input_sequence_hash: input_hash,
+            renderer_identity_hash:
+                astra_headless_protocol::RendererExecutionIdentity::cpu_reference()
+                    .hash()
+                    .unwrap(),
             checkpoints: vec![astra_headless_protocol::CheckpointExpectation {
                 id: "final".into(),
                 required: true,
@@ -229,6 +233,63 @@ fn file_and_stdio_execute_the_same_product_sequence() {
         )
         .unwrap()
     );
+}
+
+#[astra_headless_test::test]
+#[ignore = "requires a native hardware GPU runner"]
+fn gpu_run_executes_product_sequence_and_records_native_backend_identity() {
+    let fixture = Fixture::new();
+    let mut profile: HeadlessHostProfile =
+        serde_json::from_slice(&fs::read(&fixture.profile).unwrap()).unwrap();
+    profile.providers.renderer = "wgpu_offscreen".into();
+    fs::write(
+        &fixture.profile,
+        serde_json::to_vec_pretty(&profile).unwrap(),
+    )
+    .unwrap();
+    let artifact_root = fixture.root().join("gpu-run");
+    let output = command()
+        .args([
+            "run",
+            "--gpu",
+            "--profile",
+            fixture.profile.to_str().unwrap(),
+            "--package",
+            fixture.package.to_str().unwrap(),
+            "--input",
+            fixture.input.to_str().unwrap(),
+            "--artifact-root",
+            artifact_root.to_str().unwrap(),
+            "--build-identity",
+            fixture.build_identity.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: RunReport = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report.status, RunStatus::Passed);
+    assert_eq!(report.render_policy, "checkpoints");
+    let manifest: astra_headless_protocol::ArtifactManifest =
+        serde_json::from_slice(&fs::read(artifact_root.join("artifact-manifest.json")).unwrap())
+            .unwrap();
+    manifest.validate().unwrap();
+    assert_eq!(manifest.renderer_identity.provider, "wgpu_offscreen");
+    assert_eq!(
+        manifest.renderer_identity.backend,
+        if cfg!(target_os = "windows") {
+            "dx12"
+        } else if cfg!(target_os = "linux") {
+            "vulkan"
+        } else {
+            "metal"
+        }
+    );
+    assert!(manifest.submitted_frame_count >= manifest.rasterized_frame_count);
+    assert!(manifest.rasterized_frame_count >= 1);
 }
 
 #[astra_headless_test::test]

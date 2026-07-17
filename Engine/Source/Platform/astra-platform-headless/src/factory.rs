@@ -16,11 +16,13 @@ use astra_media_core::{
 use astra_platform::{
     host_channel, AudioDeviceFormat, AudioMeter, AudioOutputHandle, AudioOutputState,
     AudioOutputStatus, CapturedFrame, DecodeKind, DecodeOutput, DecodeSessionHandle,
-    HeadlessHostProfile, HostCommand, HostLaunchProfile, PackageSourceHandle, PackageSourceRequest,
-    PlatformError, PlatformErrorCode, PlatformHostFactory, PlatformHostSession, RgbaFrame,
-    SaveTransactionHandle, SurfaceHandle, WindowHandle,
+    HeadlessHostProfile, HeadlessRenderPolicy, HostCommand, HostLaunchProfile, PackageSourceHandle,
+    PackageSourceRequest, PlatformError, PlatformErrorCode, PlatformHostFactory,
+    PlatformHostSession, RgbaFrame, SaveTransactionHandle, SurfaceHandle, WindowHandle,
 };
-use astra_platform_common::{AtomicSaveStore, FilePackageSource, ResourceTable, SaveTransaction};
+use astra_platform_common::{
+    AtomicSaveStore, FilePackageSource, ResourceTable, SaveTransaction, WgpuOffscreenRenderer,
+};
 use reqwest::header::{ACCEPT_ENCODING, CONTENT_RANGE, RANGE};
 use sha2::{Digest, Sha256};
 
@@ -31,6 +33,7 @@ pub struct HeadlessPlatformFactory {
     user_authorized_package: Option<PathBuf>,
     input_sequence_hash: String,
     https_root_certificates: Vec<Vec<u8>>,
+    gpu_enabled: bool,
 }
 
 impl HeadlessPlatformFactory {
@@ -41,7 +44,12 @@ impl HeadlessPlatformFactory {
             user_authorized_package: None,
             input_sequence_hash: astra_core::Hash256::from_sha256(&[]).to_string(),
             https_root_certificates: Vec::new(),
+            gpu_enabled: false,
         }
+    }
+    pub fn with_gpu(mut self, enabled: bool) -> Self {
+        self.gpu_enabled = enabled;
+        self
     }
     pub fn with_input_sequence_hash(mut self, hash: impl Into<String>) -> Self {
         self.input_sequence_hash = hash.into();
@@ -63,7 +71,7 @@ impl PlatformHostFactory for HeadlessPlatformFactory {
         Box::pin(async move {
             let profile = launch.require_headless()?.clone();
             launch.validate()?;
-            validate_provider_bindings(&profile)?;
+            validate_provider_bindings(&profile, factory.gpu_enabled)?;
             let (client, backend, events) = host_channel(
                 launch.clone(),
                 profile.limits.command_queue_capacity,
@@ -86,13 +94,36 @@ impl PlatformHostFactory for HeadlessPlatformFactory {
     }
 }
 
-fn validate_provider_bindings(profile: &HeadlessHostProfile) -> Result<(), PlatformError> {
+fn validate_provider_bindings(
+    profile: &HeadlessHostProfile,
+    gpu_enabled: bool,
+) -> Result<(), PlatformError> {
+    match (profile.providers.renderer.as_str(), gpu_enabled) {
+        ("cpu_reference", false) | ("wgpu_offscreen", true) => {}
+        ("cpu_reference", true) => {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidProfile,
+                "headless.provider.bind",
+                "--gpu requires the profile to bind wgpu_offscreen",
+            ))
+        }
+        ("wgpu_offscreen", false) => {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidProfile,
+                "headless.provider.bind",
+                "wgpu_offscreen requires explicit --gpu authorization",
+            ))
+        }
+        (provider, _) => {
+            return Err(PlatformError::new(
+                PlatformErrorCode::ProviderUnavailable,
+                "headless.provider.bind",
+                "headless profile binds an unavailable renderer",
+            )
+            .with_field("provider", provider))
+        }
+    }
     for (field, actual, expected) in [
-        (
-            "renderer",
-            profile.providers.renderer.as_str(),
-            "cpu_reference",
-        ),
         ("text", profile.providers.text.as_str(), "cosmic_text_cpu"),
         (
             "audio_mixer",
@@ -169,6 +200,20 @@ struct SurfaceState {
     height: u32,
     last_sequence: u64,
     frame: Option<Vec<u8>>,
+    pending: Option<PendingScene>,
+    materialized_sequence: Option<u64>,
+    gpu_renderer: Option<WgpuOffscreenRenderer>,
+}
+#[derive(Clone)]
+struct PendingScene {
+    sequence: u64,
+    width: u32,
+    height: u32,
+    renderer: HeadlessRenderer,
+    commands: Vec<SceneCommand>,
+    gpu_commands: Vec<SceneCommand>,
+    clear_rgba: [u8; 4],
+    semantics: Option<astra_ui_core::UiSemanticSnapshot>,
 }
 struct AudioState {
     channels: u16,
@@ -250,13 +295,90 @@ impl HostState {
         }
     }
 
+    fn materialize_surface(
+        &mut self,
+        surface: SurfaceHandle,
+    ) -> Result<CapturedFrame, PlatformError> {
+        if let Some(cached) = {
+            let state = self.surfaces.get(surface)?;
+            state.frame.as_ref().map(|rgba8| CapturedFrame {
+                width: state.width,
+                height: state.height,
+                rgba8: rgba8.clone(),
+            })
+        } {
+            return Ok(cached);
+        }
+        let pending = self
+            .surfaces
+            .get(surface)?
+            .pending
+            .clone()
+            .ok_or_else(|| invalid("surface.capture", "surface has not submitted a scene"))?;
+        let captured = {
+            let state = self.surfaces.get_mut(surface)?;
+            if let Some(renderer) = &mut state.gpu_renderer {
+                renderer.render(&astra_platform::SceneFrame {
+                    sequence: pending.sequence,
+                    width: pending.width,
+                    height: pending.height,
+                    clear_rgba: pending.clear_rgba,
+                    commands: pending.gpu_commands.clone(),
+                    semantics: pending.semantics.clone(),
+                })?
+            } else {
+                let mut renderer = pending.renderer.clone();
+                let output = renderer
+                    .capture_frame(&pending.commands)
+                    .map_err(media_error)?;
+                CapturedFrame {
+                    width: output.width,
+                    height: output.height,
+                    rgba8: output.bytes,
+                }
+            }
+        };
+        if captured.width != pending.width || captured.height != pending.height {
+            return Err(invalid(
+                "surface.capture",
+                "materialized frame dimensions do not match the submitted scene",
+            ));
+        }
+        self.artifacts.record_rasterized_frame(
+            pending.sequence,
+            captured.width,
+            captured.height,
+            &captured.rgba8,
+        )?;
+        let state = self.surfaces.get_mut(surface)?;
+        state.frame = Some(captured.rgba8.clone());
+        state.pending = None;
+        state.materialized_sequence = Some(pending.sequence);
+        Ok(captured)
+    }
+
     async fn handle(&mut self, command: HostCommand) {
         match command {
             HostCommand::CreateWindow { reply, .. } => {
                 let _ = reply.send(self.windows.insert(WindowState { surface_count: 0 }));
             }
             HostCommand::CreateSurface { request, reply } => {
+                let gpu_renderer = if self.profile.providers.renderer == "wgpu_offscreen" {
+                    match WgpuOffscreenRenderer::new().await {
+                        Ok(renderer) => Some(renderer),
+                        Err(error) => {
+                            let _ = reply.send(Err(error));
+                            return;
+                        }
+                    }
+                } else {
+                    None
+                };
                 let result = (|| {
+                    if let Some(renderer) = &gpu_renderer {
+                        self.artifacts
+                            .set_renderer_identity(renderer.identity().clone())?;
+                    }
                     let window = self.windows.get_mut(request.window)?;
                     let renderer = CpuRendererProvider
                         .create(RendererCreateRequest {
@@ -273,6 +395,9 @@ impl HostState {
                         height: request.height,
                         last_sequence: 0,
                         frame: None,
+                        pending: None,
+                        materialized_sequence: None,
+                        gpu_renderer,
                     })?;
                     window.surface_count += 1;
                     Ok(handle)
@@ -280,18 +405,7 @@ impl HostState {
                 let _ = reply.send(result);
             }
             HostCommand::CaptureSurface { surface, reply } => {
-                let result = self.surfaces.get(surface).and_then(|s| {
-                    s.frame
-                        .clone()
-                        .map(|rgba8| CapturedFrame {
-                            width: s.width,
-                            height: s.height,
-                            rgba8,
-                        })
-                        .ok_or_else(|| {
-                            invalid("surface.capture", "surface has not presented a frame")
-                        })
-                });
+                let result = self.materialize_surface(surface);
                 let _ = reply.send(result);
             }
             HostCommand::PresentRgba {
@@ -308,7 +422,16 @@ impl HostState {
                             "frame dimensions do not match surface",
                         ));
                     }
-                    self.artifacts.record_frame(
+                    let canonical = serde_json::to_vec(&(
+                        frame.sequence,
+                        frame.width,
+                        frame.height,
+                        &frame.rgba8,
+                    ))
+                    .map_err(|_| invalid("surface.present_rgba", "frame serialization failed"))?;
+                    self.artifacts
+                        .record_submission(frame.sequence, &canonical)?;
+                    self.artifacts.record_rasterized_frame(
                         frame.sequence,
                         frame.width,
                         frame.height,
@@ -325,7 +448,16 @@ impl HostState {
             } => {
                 let result = (|| {
                     let sequence = frame.sequence;
-                    let (width, height, bytes, renderer) = {
+                    let canonical = serde_json::to_vec(&(
+                        frame.sequence,
+                        frame.width,
+                        frame.height,
+                        frame.clear_rgba,
+                        &frame.commands,
+                        &frame.semantics,
+                    ))
+                    .map_err(|_| invalid("surface.present_scene", "scene serialization failed"))?;
+                    let (renderer, pending, materialize) = {
                         let s = self.surfaces.get(surface)?;
                         ensure_increasing(
                             s.last_sequence,
@@ -338,34 +470,65 @@ impl HostState {
                                 "frame dimensions do not match surface",
                             ));
                         }
-                        let mut renderer = s.renderer.clone();
+                        let renderer_before_submission = s.renderer.clone();
+                        let mut gpu_commands =
+                            renderer_before_submission.retained_resource_commands();
+                        gpu_commands.extend(frame.commands.clone());
                         let mut commands = Vec::with_capacity(frame.commands.len() + 1);
                         commands.push(SceneCommand::Clear {
                             rgba: frame.clear_rgba,
                         });
                         commands.extend(frame.commands);
-                        let output = renderer.capture_frame(&commands).map_err(media_error)?;
-                        (output.width, output.height, output.bytes, renderer)
+                        let mut renderer = s.renderer.clone();
+                        renderer.submit_frame(&commands).map_err(media_error)?;
+                        let pending = PendingScene {
+                            sequence,
+                            width: frame.width,
+                            height: frame.height,
+                            renderer: renderer_before_submission,
+                            commands,
+                            gpu_commands,
+                            clear_rgba: frame.clear_rgba,
+                            semantics: frame.semantics.clone(),
+                        };
+                        (
+                            renderer,
+                            pending,
+                            self.profile.render_policy == HeadlessRenderPolicy::All
+                                || sequence == 1,
+                        )
                     };
-                    self.artifacts
-                        .record_frame(sequence, width, height, &bytes)?;
-                    let s = self.surfaces.get_mut(surface)?;
-                    s.renderer = renderer;
-                    s.frame = Some(bytes);
-                    s.last_sequence = sequence;
+                    // The canonical submission stream advances only after the full
+                    // scene has validated. Invalid skipped frames therefore cannot
+                    // alter either retained resources or submitted evidence.
+                    self.artifacts.record_submission(sequence, &canonical)?;
+                    {
+                        let s = self.surfaces.get_mut(surface)?;
+                        s.renderer = renderer;
+                        s.pending = Some(pending);
+                        s.frame = None;
+                        s.materialized_sequence = None;
+                        s.last_sequence = sequence;
+                    }
+                    if materialize {
+                        self.materialize_surface(surface)?;
+                    }
                     Ok(())
                 })();
                 let _ = reply.send(result);
             }
             HostCommand::DestroySurface { surface, reply } => {
-                let result = self.surfaces.remove(surface).and_then(|s| {
-                    let window = self.windows.get_mut(s.window)?;
-                    window.surface_count =
-                        window.surface_count.checked_sub(1).ok_or_else(|| {
-                            invalid("surface.destroy", "window surface count underflow")
-                        })?;
-                    Ok(())
-                });
+                let result = self
+                    .materialize_surface(surface)
+                    .and_then(|_| self.surfaces.remove(surface))
+                    .and_then(|s| {
+                        let window = self.windows.get_mut(s.window)?;
+                        window.surface_count =
+                            window.surface_count.checked_sub(1).ok_or_else(|| {
+                                invalid("surface.destroy", "window surface count underflow")
+                            })?;
+                        Ok(())
+                    });
                 let _ = reply.send(result);
             }
             HostCommand::DestroyWindow { window, reply } => {
@@ -708,6 +871,8 @@ fn present_rgba(surface: &mut SurfaceState, frame: RgbaFrame) -> Result<(), Plat
         ));
     }
     surface.frame = Some(frame.rgba8);
+    surface.pending = None;
+    surface.materialized_sequence = Some(frame.sequence);
     surface.last_sequence = frame.sequence;
     Ok(())
 }

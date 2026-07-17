@@ -13,6 +13,7 @@ pub struct CheckpointConfig {
     pub schema: String,
     pub id: String,
     pub input_sequence_hash: String,
+    pub renderer_identity_hash: String,
     pub checkpoints: Vec<CheckpointExpectation>,
     pub tolerance_approval: Option<ToleranceApprovalBinding>,
 }
@@ -109,10 +110,10 @@ impl CheckpointConfig {
             ));
         }
         validate_symbol("checkpoint.id", &self.id)?;
-        if !is_sha256(&self.input_sequence_hash) {
+        if !is_sha256(&self.input_sequence_hash) || !is_sha256(&self.renderer_identity_hash) {
             return Err(ProtocolError::invalid(
                 "checkpoint.input_hash",
-                "input sequence hash must be sha256",
+                "input sequence and renderer identity hashes must be sha256",
             ));
         }
         let mut ids = std::collections::BTreeSet::new();

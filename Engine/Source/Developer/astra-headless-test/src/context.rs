@@ -155,9 +155,14 @@ fn start_server() -> Result<Server, HeadlessTestError> {
     let actual_binary_hash = format!("sha256:{:x}", Sha256::digest(&binary_bytes));
     let test_root = prepare_test_environment(&binary, &actual_binary_hash)?;
     let identity = test_root.join("build-identity.json");
-    let mut child = Command::new(&binary)
+    let mut command = Command::new(&binary);
+    command
         .args(["serve", "--stdio", "--build-identity"])
-        .arg(&identity)
+        .arg(&identity);
+    if env::var("ASTRA_HEADLESS_GPU").as_deref() == Ok("1") {
+        command.arg("--gpu");
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -272,6 +277,25 @@ fn prepare_test_environment(
             "test bootstrap failed: {}",
             String::from_utf8_lossy(&output.stderr)
         )));
+    }
+    if env::var("ASTRA_HEADLESS_GPU").as_deref() == Ok("1") {
+        let profile_path = test_root.join("headless-profile.json");
+        let profile_bytes = fs::read(&profile_path).map_err(|error| {
+            HeadlessTestError::Server(format!("headless profile read failed: {error}"))
+        })?;
+        let mut profile: serde_json::Value =
+            serde_json::from_slice(&profile_bytes).map_err(|error| {
+                HeadlessTestError::Server(format!("headless profile invalid: {error}"))
+            })?;
+        profile["providers"]["renderer"] = serde_json::Value::String("wgpu_offscreen".into());
+        fs::write(
+            &profile_path,
+            serde_json::to_vec_pretty(&profile)
+                .map_err(|error| HeadlessTestError::Server(error.to_string()))?,
+        )
+        .map_err(|error| {
+            HeadlessTestError::Server(format!("headless profile write failed: {error}"))
+        })?;
     }
     env::set_var("ASTRA_HEADLESS_BINARY", binary);
     env::set_var("ASTRA_HEADLESS_BINARY_HASH", binary_hash);

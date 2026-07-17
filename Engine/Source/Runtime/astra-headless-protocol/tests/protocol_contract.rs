@@ -120,6 +120,9 @@ fn customized_tolerance_requires_hash_bound_human_approval() {
         schema: HEADLESS_CHECKPOINT_CONFIG_SCHEMA.into(),
         id: "approval.test".into(),
         input_sequence_hash: hash("input"),
+        renderer_identity_hash: astra_headless_protocol::RendererExecutionIdentity::cpu_reference()
+            .hash()
+            .unwrap(),
         checkpoints: vec![CheckpointExpectation {
             id: "final".into(),
             required: true,

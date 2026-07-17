@@ -16,6 +16,8 @@ astra-core = { path = "../../Runtime/astra-core" }
 astra-observability = { path = "../../Developer/astra-observability" }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-platform-headless = { path = "../../Platform/astra-platform-headless" }
+astra-platform-common = { path = "../../Platform/astra-platform-common" }
+astra-media-core = { path = "../../Runtime/astra-media-core" }
 astra-package = { path = "../../Runtime/astra-package" }
 astra-product-host = { path = "../../Runtime/astra-product-host" }
 astra-player-vn = { path = "../astra-player-vn" }

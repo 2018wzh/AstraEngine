@@ -4,7 +4,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use astra_headless_protocol::{ArtifactEntry, ArtifactManifest, HEADLESS_ARTIFACT_MANIFEST_SCHEMA};
+use astra_headless_protocol::{
+    ArtifactEntry, ArtifactManifest, RendererExecutionIdentity, HEADLESS_ARTIFACT_MANIFEST_SCHEMA,
+};
 use astra_platform::{
     HeadlessArtifactPolicy, HeadlessArtifactRetention, HeadlessHostProfile, PlatformError,
     PlatformErrorCode,
@@ -17,11 +19,13 @@ pub(crate) struct ArtifactRecorder {
     policy: HeadlessArtifactPolicy,
     manifest: ArtifactManifest,
     total_bytes: u64,
-    frame_count: u64,
+    submitted_frame_count: u64,
+    rasterized_frame_count: u64,
     audio_frames: u64,
     audio_artifact_count: u64,
     final_frame: Option<(u64, u32, u32, Vec<u8>)>,
-    frame_digest: Sha256,
+    submitted_scene_digest: Sha256,
+    rasterized_frame_digest: Sha256,
     audio_digest: Sha256,
     audio_square_sum: f64,
     audio_sample_count: u64,
@@ -29,6 +33,31 @@ pub(crate) struct ArtifactRecorder {
 }
 
 impl ArtifactRecorder {
+    pub(crate) fn set_renderer_identity(
+        &mut self,
+        identity: RendererExecutionIdentity,
+    ) -> Result<(), PlatformError> {
+        identity
+            .validate()
+            .map_err(|_| integrity("artifact.renderer_identity", "renderer identity is invalid"))?;
+        if self.manifest.rasterized_frame_count != 0 {
+            return Err(integrity(
+                "artifact.renderer_identity",
+                "renderer identity cannot change after rasterization",
+            ));
+        }
+        let encoded = serde_json::to_vec(&identity).map_err(|_| {
+            integrity(
+                "artifact.renderer_identity",
+                "renderer identity encoding failed",
+            )
+        })?;
+        self.manifest.renderer_identity_hash =
+            astra_core::Hash256::from_sha256(&encoded).to_string();
+        self.manifest.renderer_identity = identity;
+        self.commit_manifest()
+    }
+
     pub(crate) fn new(
         root: PathBuf,
         profile: &HeadlessHostProfile,
@@ -55,9 +84,20 @@ impl ArtifactRecorder {
                 package_hash: profile.package_hash.clone(),
                 input_sequence_hash,
                 provider_identity_hash: astra_core::Hash256::from_sha256(&providers).to_string(),
-                presented_frame_count: 0,
+                renderer_identity_hash: RendererExecutionIdentity::cpu_reference().hash().map_err(
+                    |_| integrity("artifact.renderer_identity", "renderer identity is invalid"),
+                )?,
+                renderer_identity: RendererExecutionIdentity::cpu_reference(),
+                render_policy: match profile.render_policy {
+                    astra_platform::HeadlessRenderPolicy::All => "all",
+                    astra_platform::HeadlessRenderPolicy::Checkpoints => "checkpoints",
+                }
+                .into(),
+                submitted_frame_count: 0,
+                rasterized_frame_count: 0,
                 audio_frame_count: 0,
-                frame_stream_hash: empty_hash(),
+                submitted_scene_stream_hash: empty_hash(),
+                rasterized_frame_stream_hash: empty_hash(),
                 audio_stream_hash: empty_hash(),
                 audio_peak_dbfs: None,
                 audio_rms_dbfs: None,
@@ -66,11 +106,13 @@ impl ArtifactRecorder {
                 artifacts: Vec::new(),
             },
             total_bytes: 0,
-            frame_count: 0,
+            submitted_frame_count: 0,
+            rasterized_frame_count: 0,
             audio_frames: 0,
             audio_artifact_count: 0,
             final_frame: None,
-            frame_digest: Sha256::new(),
+            submitted_scene_digest: Sha256::new(),
+            rasterized_frame_digest: Sha256::new(),
             audio_digest: Sha256::new(),
             audio_square_sum: 0.0,
             audio_sample_count: 0,
@@ -78,30 +120,52 @@ impl ArtifactRecorder {
         })
     }
 
-    pub(crate) fn record_frame(
+    pub(crate) fn record_submission(
+        &mut self,
+        sequence: u64,
+        scene_bytes: &[u8],
+    ) -> Result<(), PlatformError> {
+        let next_count = self
+            .submitted_frame_count
+            .checked_add(1)
+            .ok_or_else(|| limit("artifact.scene", "submitted frame counter overflowed"))?;
+        if next_count > self.policy.max_submitted_frames {
+            return Err(limit("artifact.scene", "submitted frame limit exceeded"));
+        }
+        self.submitted_frame_count = next_count;
+        self.submitted_scene_digest.update(sequence.to_le_bytes());
+        self.submitted_scene_digest
+            .update((scene_bytes.len() as u64).to_le_bytes());
+        self.submitted_scene_digest.update(scene_bytes);
+        self.refresh_analysis();
+        Ok(())
+    }
+
+    pub(crate) fn record_rasterized_frame(
         &mut self,
         sequence: u64,
         width: u32,
         height: u32,
         rgba8: &[u8],
     ) -> Result<(), PlatformError> {
-        self.frame_count = self
-            .frame_count
+        let next_count = self
+            .rasterized_frame_count
             .checked_add(1)
             .ok_or_else(|| limit("artifact.frame", "frame counter overflowed"))?;
-        if self.frame_count > self.policy.max_frames {
-            return Err(limit("artifact.frame", "frame limit exceeded"));
+        if next_count > self.policy.max_rasterized_frames {
+            return Err(limit("artifact.frame", "rasterized frame limit exceeded"));
         }
-        self.frame_digest.update(sequence.to_le_bytes());
-        self.frame_digest.update(width.to_le_bytes());
-        self.frame_digest.update(height.to_le_bytes());
-        self.frame_digest.update(rgba8);
+        self.rasterized_frame_count = next_count;
+        self.rasterized_frame_digest.update(sequence.to_le_bytes());
+        self.rasterized_frame_digest.update(width.to_le_bytes());
+        self.rasterized_frame_digest.update(height.to_le_bytes());
+        self.rasterized_frame_digest.update(rgba8);
         self.refresh_analysis();
         if self.policy.retention == HeadlessArtifactRetention::Final {
             self.final_frame = Some((sequence, width, height, rgba8.to_vec()));
             return Ok(());
         }
-        if self.policy.retention != HeadlessArtifactRetention::All {
+        if self.policy.retention == HeadlessArtifactRetention::ManifestOnly {
             return Ok(());
         }
         let mut bytes = Vec::new();
@@ -119,7 +183,7 @@ impl ArtifactRecorder {
             height,
             color_space: "rgba8_srgb".into(),
             sequence,
-            checkpoint: None,
+            checkpoint_ids: Vec::new(),
         });
         self.commit_manifest()
     }
@@ -247,7 +311,7 @@ impl ArtifactRecorder {
                 height,
                 color_space: "rgba8_srgb".into(),
                 sequence,
-                checkpoint: None,
+                checkpoint_ids: Vec::new(),
             });
         }
         self.commit_manifest()?;
@@ -283,10 +347,17 @@ impl ArtifactRecorder {
     }
 
     fn refresh_analysis(&mut self) {
-        self.manifest.presented_frame_count = self.frame_count;
+        self.manifest.submitted_frame_count = self.submitted_frame_count;
+        self.manifest.rasterized_frame_count = self.rasterized_frame_count;
         self.manifest.audio_frame_count = self.audio_frames;
-        self.manifest.frame_stream_hash =
-            format!("sha256:{:x}", self.frame_digest.clone().finalize());
+        self.manifest.submitted_scene_stream_hash = format!(
+            "sha256:{:x}",
+            self.submitted_scene_digest.clone().finalize()
+        );
+        self.manifest.rasterized_frame_stream_hash = format!(
+            "sha256:{:x}",
+            self.rasterized_frame_digest.clone().finalize()
+        );
         self.manifest.audio_stream_hash =
             format!("sha256:{:x}", self.audio_digest.clone().finalize());
         self.manifest.audio_peak_dbfs = finite_db(self.audio_peak);

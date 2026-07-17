@@ -8,7 +8,7 @@ use crate::{
     PlatformHostProfile, PlatformId,
 };
 
-pub const HEADLESS_HOST_PROFILE_SCHEMA: &str = "astra.headless_host_profile.v1";
+pub const HEADLESS_HOST_PROFILE_SCHEMA: &str = "astra.headless_host_profile.v2";
 pub const HEADLESS_INPUT_POLICY_SCHEMA: &str = "astra.headless_input_policy.v1";
 pub const USER_INPUT_SEQUENCE_SCHEMA: &str = "astra.user_input_sequence.v1";
 pub const HEADLESS_PROTOCOL_SCHEMA: &str = "astra.headless_protocol.v1";
@@ -30,6 +30,13 @@ pub enum HeadlessArtifactRetention {
     Checkpoints,
     Final,
     ManifestOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HeadlessRenderPolicy {
+    All,
+    Checkpoints,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -73,7 +80,8 @@ pub struct HeadlessArtifactPolicy {
     pub retention: HeadlessArtifactRetention,
     pub max_artifacts: u64,
     pub max_total_bytes: u64,
-    pub max_frames: u64,
+    pub max_submitted_frames: u64,
+    pub max_rasterized_frames: u64,
     pub max_audio_frames: u64,
     pub max_duration_ns: u64,
     pub required_checkpoints: Vec<String>,
@@ -99,6 +107,7 @@ pub struct HeadlessHostProfile {
     pub audio_sample_format: String,
     pub audio_artifact_format: String,
     pub providers: HeadlessProviderBindings,
+    pub render_policy: HeadlessRenderPolicy,
     pub input: HeadlessInputPolicy,
     pub artifacts: HeadlessArtifactPolicy,
     pub package_sources: Vec<PackageSourcePolicy>,
@@ -136,6 +145,7 @@ impl HeadlessHostProfile {
                 package: "verified_bounded".to_string(),
                 product_adapter: "astra.native_vn".to_string(),
             },
+            render_policy: HeadlessRenderPolicy::Checkpoints,
             tick_duration_ns: HEADLESS_TICK_DURATION_NS,
             frame_format: "rgba8_srgb".to_string(),
             image_artifact_format: "png".to_string(),
@@ -157,7 +167,8 @@ impl HeadlessHostProfile {
                 retention: HeadlessArtifactRetention::All,
                 max_artifacts: 100_000,
                 max_total_bytes: 8 * 1024 * 1024 * 1024,
-                max_frames: 100_000,
+                max_submitted_frames: 100_000,
+                max_rasterized_frames: 100_000,
                 max_audio_frames: 48_000 * 60 * 60,
                 max_duration_ns: 60 * 60 * 1_000_000_000,
                 required_checkpoints: Vec::new(),
@@ -374,7 +385,8 @@ pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(
     let artifacts = &profile.artifacts;
     if artifacts.max_artifacts == 0
         || artifacts.max_total_bytes == 0
-        || artifacts.max_frames == 0
+        || artifacts.max_submitted_frames == 0
+        || artifacts.max_rasterized_frames == 0
         || artifacts.max_audio_frames == 0
         || artifacts.max_duration_ns == 0
         || artifacts.max_artifacts < artifacts.required_checkpoints.len() as u64

@@ -1,5 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{
     is_sha256, validate_symbol, ProtocolError, HEADLESS_PREFLIGHT_LINK_SCHEMA,
@@ -13,6 +14,57 @@ pub enum RunStatus {
     Blocked,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RendererExecutionIdentity {
+    pub provider: String,
+    pub backend: String,
+    pub device_type: String,
+    pub vendor_id: u32,
+    pub device_id: u32,
+    pub adapter_name_hash: String,
+    pub driver_identity_hash: String,
+}
+
+impl RendererExecutionIdentity {
+    pub fn cpu_reference() -> Self {
+        Self {
+            provider: "cpu_reference".into(),
+            backend: "cpu".into(),
+            device_type: "cpu".into(),
+            vendor_id: 0,
+            device_id: 0,
+            adapter_name_hash: hash_bytes(b"cpu_reference"),
+            driver_identity_hash: hash_bytes(b"deterministic_cpu"),
+        }
+    }
+
+    pub fn hash(&self) -> Result<String, ProtocolError> {
+        self.validate()?;
+        let encoded = serde_json::to_vec(self).map_err(|_| {
+            ProtocolError::invalid("renderer.identity", "renderer identity encoding failed")
+        })?;
+        Ok(hash_bytes(&encoded))
+    }
+
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        validate_symbol("renderer.provider", &self.provider)?;
+        validate_symbol("renderer.backend", &self.backend)?;
+        validate_symbol("renderer.device_type", &self.device_type)?;
+        if !is_sha256(&self.adapter_name_hash) || !is_sha256(&self.driver_identity_hash) {
+            return Err(ProtocolError::invalid(
+                "renderer.identity",
+                "renderer identity hashes are invalid",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn hash_bytes(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ArtifactManifest {
@@ -22,9 +74,14 @@ pub struct ArtifactManifest {
     pub package_hash: String,
     pub input_sequence_hash: String,
     pub provider_identity_hash: String,
-    pub presented_frame_count: u64,
+    pub renderer_identity_hash: String,
+    pub renderer_identity: RendererExecutionIdentity,
+    pub render_policy: String,
+    pub submitted_frame_count: u64,
+    pub rasterized_frame_count: u64,
     pub audio_frame_count: u64,
-    pub frame_stream_hash: String,
+    pub submitted_scene_stream_hash: String,
+    pub rasterized_frame_stream_hash: String,
     pub audio_stream_hash: String,
     pub audio_peak_dbfs: Option<f64>,
     pub audio_rms_dbfs: Option<f64>,
@@ -41,7 +98,9 @@ impl ArtifactManifest {
                 &self.package_hash,
                 &self.input_sequence_hash,
                 &self.provider_identity_hash,
-                &self.frame_stream_hash,
+                &self.renderer_identity_hash,
+                &self.submitted_scene_stream_hash,
+                &self.rasterized_frame_stream_hash,
                 &self.audio_stream_hash,
             ]
             .iter()
@@ -50,6 +109,25 @@ impl ArtifactManifest {
             return Err(ProtocolError::invalid(
                 "artifact_manifest.validate",
                 "artifact manifest identity or stream hash is invalid",
+            ));
+        }
+        self.renderer_identity.validate()?;
+        if self.renderer_identity_hash != self.renderer_identity.hash()? {
+            return Err(ProtocolError::invalid(
+                "artifact_manifest.renderer_identity",
+                "renderer identity hash does not match its canonical identity",
+            ));
+        }
+        if !matches!(self.render_policy.as_str(), "all" | "checkpoints") {
+            return Err(ProtocolError::invalid(
+                "artifact_manifest.render_policy",
+                "artifact manifest render policy is invalid",
+            ));
+        }
+        if self.rasterized_frame_count > self.submitted_frame_count {
+            return Err(ProtocolError::invalid(
+                "artifact_manifest.frame_count",
+                "rasterized frame count exceeds submitted frame count",
             ));
         }
         validate_symbol("artifact_manifest.run", &self.run_id)?;
@@ -76,7 +154,7 @@ impl ArtifactManifest {
                     height,
                     color_space,
                     sequence,
-                    checkpoint,
+                    checkpoint_ids,
                 } => {
                     if *byte_size == 0
                         || *width == 0
@@ -89,7 +167,17 @@ impl ArtifactManifest {
                             "frame artifact metadata is invalid",
                         ));
                     }
-                    (relative_path, sha256, checkpoint)
+                    let mut ids = std::collections::BTreeSet::new();
+                    for checkpoint in checkpoint_ids {
+                        validate_symbol("artifact_manifest.checkpoint", checkpoint)?;
+                        if !ids.insert(checkpoint) {
+                            return Err(ProtocolError::invalid(
+                                "artifact_manifest.checkpoint",
+                                "frame checkpoint identity is duplicated",
+                            ));
+                        }
+                    }
+                    (relative_path, sha256, None)
                 }
                 ArtifactEntry::Audio {
                     relative_path,
@@ -112,7 +200,7 @@ impl ArtifactManifest {
                             "audio artifact metadata is invalid",
                         ));
                     }
-                    (relative_path, sha256, checkpoint)
+                    (relative_path, sha256, checkpoint.as_ref())
                 }
             };
             if !safe_relative_path(path) || !is_sha256(hash) || !paths.insert(path) {
@@ -140,7 +228,7 @@ pub enum ArtifactEntry {
         height: u32,
         color_space: String,
         sequence: u64,
-        checkpoint: Option<String>,
+        checkpoint_ids: Vec<String>,
     },
     Audio {
         relative_path: String,
@@ -170,7 +258,12 @@ pub struct RunReport {
     pub content_identity: String,
     pub status: RunStatus,
     pub manifest_hash: String,
-    pub frame_count: u64,
+    pub renderer_identity_hash: String,
+    pub render_policy: String,
+    pub submitted_frame_count: u64,
+    pub rasterized_frame_count: u64,
+    pub submitted_scene_stream_hash: String,
+    pub rasterized_frame_stream_hash: String,
     pub audio_frame_count: u64,
     pub duration_ns: u64,
     pub completed_sequence: u64,
@@ -273,6 +366,9 @@ impl RunReport {
                 &self.input_sequence_hash,
                 &self.checkpoint_config_hash,
                 &self.manifest_hash,
+                &self.renderer_identity_hash,
+                &self.submitted_scene_stream_hash,
+                &self.rasterized_frame_stream_hash,
             ]
             .iter()
             .any(|hash| !is_sha256(hash))
@@ -280,6 +376,14 @@ impl RunReport {
             return Err(ProtocolError::invalid(
                 "run_report.validate",
                 "run report schema or identity hash is invalid",
+            ));
+        }
+        if !matches!(self.render_policy.as_str(), "all" | "checkpoints")
+            || self.rasterized_frame_count > self.submitted_frame_count
+        {
+            return Err(ProtocolError::invalid(
+                "run_report.render",
+                "run report render policy or frame counts are invalid",
             ));
         }
         for (operation, value) in [

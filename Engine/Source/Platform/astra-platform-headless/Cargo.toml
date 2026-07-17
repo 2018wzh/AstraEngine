@@ -17,6 +17,7 @@ astra-media = { path = "../../Runtime/astra-media" }
 astra-media-core = { path = "../../Runtime/astra-media-core" }
 astra-platform = { path = "../astra-platform" }
 astra-platform-common = { path = "../astra-platform-common" }
+astra-ui-core = { path = "../../Runtime/astra-ui-core" }
 image.workspace = true
 hound.workspace = true
 reqwest.workspace = true

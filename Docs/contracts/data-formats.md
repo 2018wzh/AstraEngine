@@ -124,17 +124,18 @@ Migration 11 Headless 测试格式已经由 Rust 类型实现，仍不得进入 
 
 | Schema | Status | Purpose |
 | --- | --- | --- |
-| `astra.headless_host_profile.v1` | `CONTRACT_DONE` | v1 已破坏性固化 canonical media、provider binding、input/artifact policy、frame/audio/package/decode/video 资源限额与 build/package identity；缺字段和旧 shape 直接阻断，shipping API/graph 拒绝 |
+| `astra.headless_host_profile.v2` | `CONTRACT_DONE` | v2 固化 `all/checkpoints` render policy、CPU/WGPU flag-binding、双帧预算、canonical submitted stream 与 provider/backend/adapter identity；缺字段和旧 shape 直接阻断，shipping API/graph 拒绝 |
 | `astra.user_input_sequence.v1` | `IN_PROGRESS` | 已实现平台无关物理输入、固定 tick/time、await、checkpoint 和 shutdown；没有产品语义 variant |
 | `astra.headless_protocol.v1` | `IN_PROGRESS` | 已实现文件和 stdio 共用的双向 JSONL envelope、session 与严格 sequence 校验 |
-| `astra.headless_checkpoint_config.v1` | `IN_PROGRESS` | checkpoint、observation/baseline、受控宽松默认容差以及 approval binding；完整 config hash 写入 run report |
-| `astra.headless_tolerance_approval.v1` | `IN_PROGRESS` | 仅接受具名人工 approval，绑定 approval 文件 hash、tolerance-set hash、前一配置 hash和原因码；不能覆盖自动失败 |
-| `astra.headless_artifact_manifest.v1` | `IN_PROGRESS` | 已实现 PNG/WAV 相对路径、hash、格式、时长、sequence、checkpoint 与 provider identity |
-| `astra.headless_run_report.v1` | `IN_PROGRESS` | 已实现原子 pass/blocked report、checkpoint config hash、产物计数、比较结果与 blocking diagnostic |
-| `astra.headless_review_bundle.v1` | `IN_PROGRESS` | `prepare-review` 从已校验 report/manifest 选择 required checkpoint、首尾/最大差异/失败邻近帧和完整 WAV，并逐文件复核 hash |
-| `astra.headless_review.v1` | `IN_PROGRESS` | DTO、`validate-review` 与自动失败不可覆盖规则已实现；正式具名模型/人工 evidence 尚待生成 |
+| `astra.headless_checkpoint_config.v2` | `IN_PROGRESS` | checkpoint、observation/baseline、受控宽松默认容差、approval 与 renderer identity binding；完整 config hash 写入 run report |
+| `astra.headless_tolerance_approval.v2` | `IN_PROGRESS` | 仅接受具名人工 approval，绑定 approval 文件 hash、tolerance-set hash、前一配置 hash和原因码；不能覆盖自动失败 |
+| `astra.headless_artifact_manifest.v2` | `IN_PROGRESS` | 分开记录 submitted/rasterized 帧数和 stream hash、render policy、provider/backend/adapter identity；同帧 checkpoint 使用 `checkpoint_ids` 去重 |
+| `astra.headless_run_report.v2` | `IN_PROGRESS` | 已实现原子 pass/blocked report、checkpoint config hash、双流计数/hash、比较结果与 blocking diagnostic |
+| `astra.headless_review_bundle.v2` | `IN_PROGRESS` | `prepare-review` 从稀疏 artifact 中选择 required checkpoint、首尾/最大差异/失败邻近帧和完整 WAV，并逐文件复核 hash |
+| `astra.headless_review.v2` | `IN_PROGRESS` | DTO、`validate-review` 与自动失败不可覆盖规则已实现；正式具名模型/人工 evidence 尚待生成 |
 | `astra.platform_run_identity.v1` | `IN_PROGRESS` | 真实平台工具记录 report/build/package/input/scenario/target/content/profile/session continuity；不能由 Headless 自称平台证据 |
-| `astra.headless_preflight_link.v1` | `IN_PROGRESS` | DTO、identity 校验与 formal release check 已实现；真实 Windows/Web link evidence 尚待生成 |
+| `astra.headless_preflight_link.v2` | `IN_PROGRESS` | DTO、identity 校验与 formal release check 已实现；真实 Windows/Web link evidence 尚待生成 |
+| `astra.headless_render_performance.v1` | `IN_PROGRESS` | 固定 1920x1080、60 帧预热、600 帧测量，记录 p50/p95、总耗时、CPU sparse/GPU speedup 和 provider identity；正式三桌面 runner evidence 尚待生成 |
 
 实现存在不等于 evidence 已生成。商业或本地 PNG/WAV 只能留在 ignored 私有工作区；可提交报告只保留脱敏 metadata。
 

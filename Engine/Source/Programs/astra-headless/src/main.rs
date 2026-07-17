@@ -4,19 +4,29 @@ use std::{
     io::{self, BufReader},
     path::{Path, PathBuf},
     sync::Arc,
+    time::Instant,
 };
 
+use astra_core::Hash256;
 use astra_headless_protocol::{
     ArtifactEntry, ArtifactManifest, CheckpointConfig, CheckpointResult, Envelope, JsonlReader,
     JsonlWriter, Message, ObservationPredicate, PhysicalInput, PlatformRunIdentity, PreflightLink,
-    ReviewArtifactRole, ReviewArtifactSelection, ReviewBundle, ReviewRecord, RunReport, RunStatus,
-    SequenceValidator, HEADLESS_PREFLIGHT_LINK_SCHEMA, HEADLESS_PROTOCOL_SCHEMA,
-    HEADLESS_REVIEW_BUNDLE_SCHEMA, HEADLESS_RUN_REPORT_SCHEMA, TICK_DURATION_NS,
+    RenderPerformanceReport, RendererExecutionIdentity, ReviewArtifactRole,
+    ReviewArtifactSelection, ReviewBundle, ReviewRecord, RunReport, RunStatus, SequenceValidator,
+    HEADLESS_PREFLIGHT_LINK_SCHEMA, HEADLESS_PROTOCOL_SCHEMA, HEADLESS_RENDER_PERFORMANCE_SCHEMA,
+    HEADLESS_REVIEW_BUNDLE_SCHEMA, HEADLESS_RUN_REPORT_SCHEMA, MIN_CPU_SPARSE_SPEEDUP,
+    MIN_GPU_ALL_SPEEDUP, TICK_DURATION_NS,
 };
 use astra_headless_vn_adapter::NativeVnProductAdapterFactory;
+use astra_media_core::{
+    BlendMode, CpuRendererProvider, FilterGraph, FilterNode, FilterParam, FilterTarget,
+    GlyphBitmap, GlyphBitmapFormat, MeshMaterial2D, MeshVertex2D, RectI, RenderTargetFormat,
+    Renderer2DProvider, RendererCreateRequest, SceneCommand, TextureFrame,
+};
 use astra_platform::{
     HeadlessHostProfile, PackageSourceRequest, PlatformHostFactory, PlatformHostSession,
 };
+use astra_platform_common::WgpuOffscreenRenderer;
 use astra_platform_headless::HeadlessPlatformFactory;
 use astra_product_host::{ProductAdapterRegistry, ProductOpenRequest, ProductSession};
 use clap::{Parser, Subcommand};
@@ -42,6 +52,8 @@ struct Args {
 enum Command {
     Run {
         #[arg(long)]
+        gpu: bool,
+        #[arg(long)]
         profile: PathBuf,
         #[arg(long)]
         package: PathBuf,
@@ -57,6 +69,8 @@ enum Command {
     Serve {
         #[arg(long)]
         stdio: bool,
+        #[arg(long)]
+        gpu: bool,
         #[arg(long)]
         build_identity: PathBuf,
     },
@@ -92,6 +106,14 @@ enum Command {
         #[arg(long)]
         output: PathBuf,
     },
+    BenchmarkRender {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        build_identity: PathBuf,
+        #[arg(long)]
+        gpu: bool,
+    },
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -109,15 +131,17 @@ async fn main() {
     let result = match Args::parse().command {
         Command::Serve {
             stdio,
+            gpu,
             build_identity,
         } => {
             if !stdio {
                 Err("ASTRA_HEADLESS_TRANSPORT_REQUIRED: serve requires --stdio".into())
             } else {
-                serve(&build_identity).await
+                serve(&build_identity, gpu).await
             }
         }
         Command::Run {
+            gpu,
             profile,
             package,
             input,
@@ -132,6 +156,7 @@ async fn main() {
                 &artifact_root,
                 checkpoint_config.as_deref(),
                 &build_identity,
+                gpu,
             )
             .await
         }
@@ -155,6 +180,11 @@ async fn main() {
             platform_run_identity,
             output,
         } => link_preflight(&headless_run_report, &platform_run_identity, &output),
+        Command::BenchmarkRender {
+            output,
+            build_identity,
+            gpu,
+        } => benchmark_render(&output, &build_identity, gpu).await,
     };
     if let Err(error) = result {
         tracing::error!(
@@ -188,7 +218,7 @@ struct LiveSession {
     last_sequence: u64,
 }
 
-async fn serve(build_identity: &Path) -> Result<(), String> {
+async fn serve(build_identity: &Path, gpu: bool) -> Result<(), String> {
     let identity_hash = read_identity_hash(build_identity)?;
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -247,6 +277,7 @@ async fn serve(build_identity: &Path) -> Result<(), String> {
                     .ok_or_else(|| "ASTRA_HEADLESS_PACKAGE_PATH_INVALID".to_string())?
                     .to_owned();
                 let host = HeadlessPlatformFactory::new(&root, package_root)
+                    .with_gpu(gpu)
                     .start(profile.clone().into())
                     .await
                     .map_err(|e| e.to_string())?;
@@ -369,6 +400,11 @@ async fn serve(build_identity: &Path) -> Result<(), String> {
                 )
                 .map_err(|e| format!("ASTRA_HEADLESS_MANIFEST_INVALID: {e}"))?;
                 manifest.input_sequence_hash = input_hash.clone();
+                if session.checkpoint_config.as_ref().is_some_and(|config| {
+                    config.renderer_identity_hash != manifest.renderer_identity_hash
+                }) {
+                    return Err("ASTRA_HEADLESS_CHECKPOINT_RENDERER_IDENTITY_MISMATCH".into());
+                }
                 append_checkpoint_artifacts(
                     &session.artifact_root,
                     &session.profile,
@@ -388,8 +424,6 @@ async fn serve(build_identity: &Path) -> Result<(), String> {
                 )?;
                 manifest.validate().map_err(|error| error.to_string())?;
                 write_atomic_json(&manifest_path, &manifest)?;
-                let frame_count = manifest.presented_frame_count;
-                let audio_frame_count = manifest.audio_frame_count;
                 let report_path = session
                     .artifact_root
                     .join(format!("{}.run-report.json", envelope.session));
@@ -411,8 +445,13 @@ async fn serve(build_identity: &Path) -> Result<(), String> {
                     content_identity: session.profile.package_id.clone(),
                     status: RunStatus::Passed,
                     manifest_hash: hash_file(&manifest_path)?,
-                    frame_count,
-                    audio_frame_count,
+                    renderer_identity_hash: manifest.renderer_identity_hash.clone(),
+                    render_policy: manifest.render_policy.clone(),
+                    submitted_frame_count: manifest.submitted_frame_count,
+                    rasterized_frame_count: manifest.rasterized_frame_count,
+                    submitted_scene_stream_hash: manifest.submitted_scene_stream_hash.clone(),
+                    rasterized_frame_stream_hash: manifest.rasterized_frame_stream_hash.clone(),
+                    audio_frame_count: manifest.audio_frame_count,
                     duration_ns: session
                         .last_tick
                         .checked_mul(TICK_DURATION_NS)
@@ -561,9 +600,16 @@ async fn finalize_blocked_live_session(mut session: LiveSession, error: &str) {
             input_sequence_hash: input_hash.clone(),
             provider_identity_hash: provider_hash(&session.profile)
                 .unwrap_or_else(|_| empty_hash()),
-            presented_frame_count: 0,
+            renderer_identity_hash: renderer_identity_hash(&blocked_renderer_identity(
+                &session.profile,
+            )),
+            renderer_identity: blocked_renderer_identity(&session.profile),
+            render_policy: render_policy_name(&session.profile).into(),
+            submitted_frame_count: 0,
+            rasterized_frame_count: 0,
             audio_frame_count: 0,
-            frame_stream_hash: empty_hash(),
+            submitted_scene_stream_hash: empty_hash(),
+            rasterized_frame_stream_hash: empty_hash(),
             audio_stream_hash: empty_hash(),
             audio_peak_dbfs: None,
             audio_rms_dbfs: None,
@@ -598,7 +644,12 @@ async fn finalize_blocked_live_session(mut session: LiveSession, error: &str) {
         content_identity: session.profile.package_id.clone(),
         status: RunStatus::Blocked,
         manifest_hash: hash_file(&manifest_path).unwrap_or_else(|_| empty_hash()),
-        frame_count: manifest.presented_frame_count,
+        renderer_identity_hash: manifest.renderer_identity_hash.clone(),
+        render_policy: manifest.render_policy.clone(),
+        submitted_frame_count: manifest.submitted_frame_count,
+        rasterized_frame_count: manifest.rasterized_frame_count,
+        submitted_scene_stream_hash: manifest.submitted_scene_stream_hash.clone(),
+        rasterized_frame_stream_hash: manifest.rasterized_frame_stream_hash.clone(),
         audio_frame_count: manifest.audio_frame_count,
         duration_ns: session.last_tick.saturating_mul(TICK_DURATION_NS),
         completed_sequence: session.last_sequence,
@@ -628,6 +679,7 @@ async fn run(
     artifact_root: &Path,
     checkpoint_config: Option<&Path>,
     build_identity: &Path,
+    gpu: bool,
 ) -> Result<(), String> {
     match run_execution(
         profile_path,
@@ -636,6 +688,7 @@ async fn run(
         artifact_root,
         checkpoint_config,
         build_identity,
+        gpu,
     )
     .await
     {
@@ -677,7 +730,18 @@ async fn run(
                     .unwrap_or_else(|| "blocked-content".into()),
                 status: RunStatus::Blocked,
                 manifest_hash,
-                frame_count: 0,
+                renderer_identity_hash: blocked_profile_field(profile_path, |profile| {
+                    renderer_identity_hash(&blocked_renderer_identity(&profile))
+                })
+                .unwrap_or_else(empty_hash),
+                render_policy: blocked_profile_field(profile_path, |profile| {
+                    render_policy_name(&profile).into()
+                })
+                .unwrap_or_else(|| "checkpoints".into()),
+                submitted_frame_count: 0,
+                rasterized_frame_count: 0,
+                submitted_scene_stream_hash: empty_hash(),
+                rasterized_frame_stream_hash: empty_hash(),
                 audio_frame_count: 0,
                 duration_ns: 0,
                 completed_sequence: 0,
@@ -714,6 +778,8 @@ fn ensure_blocked_manifest(
         .map(|bytes| canonical_or_raw_input_hash(&bytes))
         .unwrap_or_else(|_| empty_hash());
     let provider_identity_hash = provider_hash(&profile)?;
+    let renderer_identity = blocked_renderer_identity(&profile);
+    let render_policy = render_policy_name(&profile).to_string();
     write_atomic_json(
         manifest_path,
         &ArtifactManifest {
@@ -723,9 +789,14 @@ fn ensure_blocked_manifest(
             package_hash: profile.package_hash,
             input_sequence_hash: input_hash,
             provider_identity_hash,
-            presented_frame_count: 0,
+            renderer_identity_hash: renderer_identity_hash(&renderer_identity),
+            renderer_identity,
+            render_policy,
+            submitted_frame_count: 0,
+            rasterized_frame_count: 0,
             audio_frame_count: 0,
-            frame_stream_hash: empty_hash(),
+            submitted_scene_stream_hash: empty_hash(),
+            rasterized_frame_stream_hash: empty_hash(),
             audio_stream_hash: empty_hash(),
             audio_peak_dbfs: None,
             audio_rms_dbfs: None,
@@ -743,6 +814,7 @@ async fn run_execution(
     artifact_root: &Path,
     checkpoint_config: Option<&Path>,
     build_identity: &Path,
+    gpu: bool,
 ) -> Result<(), String> {
     let identity_hash = read_identity_hash(build_identity)?;
     let profile = read_profile(profile_path, &identity_hash)?;
@@ -799,6 +871,7 @@ async fn run_execution(
         .and_then(|value| value.to_str())
         .ok_or_else(|| "ASTRA_HEADLESS_PACKAGE_PATH_INVALID".to_string())?;
     let host = HeadlessPlatformFactory::new(artifact_root, package_root)
+        .with_gpu(gpu)
         .with_input_sequence_hash(input_hash.clone())
         .start(profile.clone().into())
         .await
@@ -869,6 +942,12 @@ async fn run_execution(
     let mut manifest: ArtifactManifest =
         serde_json::from_slice(&fs::read(&manifest_path).map_err(|error| error.to_string())?)
             .map_err(|error| error.to_string())?;
+    if checkpoint_config
+        .as_ref()
+        .is_some_and(|config| config.renderer_identity_hash != manifest.renderer_identity_hash)
+    {
+        return Err("ASTRA_HEADLESS_CHECKPOINT_RENDERER_IDENTITY_MISMATCH".into());
+    }
     append_checkpoint_artifacts(artifact_root, &profile, &checkpoint_frames, &mut manifest)?;
     apply_audio_comparisons(
         checkpoint_config.as_ref(),
@@ -883,8 +962,6 @@ async fn run_execution(
     )?;
     manifest.validate().map_err(|error| error.to_string())?;
     write_atomic_json(&manifest_path, &manifest)?;
-    let frame_count = manifest.presented_frame_count;
-    let audio_frame_count = manifest.audio_frame_count;
     let report = RunReport {
         schema: HEADLESS_RUN_REPORT_SCHEMA.into(),
         run_id: messages
@@ -908,8 +985,13 @@ async fn run_execution(
         content_identity: profile.package_id.clone(),
         status: RunStatus::Passed,
         manifest_hash: hash_file(&manifest_path)?,
-        frame_count,
-        audio_frame_count,
+        renderer_identity_hash: manifest.renderer_identity_hash.clone(),
+        render_policy: manifest.render_policy.clone(),
+        submitted_frame_count: manifest.submitted_frame_count,
+        rasterized_frame_count: manifest.rasterized_frame_count,
+        submitted_scene_stream_hash: manifest.submitted_scene_stream_hash.clone(),
+        rasterized_frame_stream_hash: manifest.rasterized_frame_stream_hash.clone(),
+        audio_frame_count: manifest.audio_frame_count,
         duration_ns: final_tick
             .checked_mul(TICK_DURATION_NS)
             .ok_or_else(|| "ASTRA_HEADLESS_DURATION_OVERFLOW".to_string())?,
@@ -947,6 +1029,262 @@ fn diagnostic_code(error: &str) -> String {
         })
         .unwrap_or("ASTRA_HEADLESS_RUN_BLOCKED")
         .to_string()
+}
+
+async fn benchmark_render(
+    output: &Path,
+    build_identity: &Path,
+    include_gpu: bool,
+) -> Result<(), String> {
+    const WIDTH: u32 = 1920;
+    const HEIGHT: u32 = 1080;
+    const WARMUP: u32 = 60;
+    const MEASURED: u32 = 600;
+
+    let build_fingerprint = read_identity_hash(build_identity)?;
+    let commands = benchmark_commands();
+    let scenario_hash = format!(
+        "sha256:{}",
+        sha256_hex(
+            &serde_json::to_vec(&(WIDTH, HEIGHT, WARMUP, MEASURED, &commands))
+                .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_SERIALIZE_FAILED: {error}"))?
+        )
+    );
+    let request = RendererCreateRequest {
+        width: WIDTH,
+        height: HEIGHT,
+        format: RenderTargetFormat::Rgba8Srgb,
+        profile: "headless-performance".into(),
+    };
+
+    let mut cpu_all = CpuRendererProvider
+        .create(request.clone())
+        .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_CPU_CREATE_FAILED: {error}"))?;
+    for _ in 0..WARMUP {
+        cpu_all
+            .capture_frame(&commands)
+            .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_CPU_WARMUP_FAILED: {error}"))?;
+    }
+    let (cpu_all_duration_ns, cpu_all_samples) =
+        measure_frames(MEASURED, || cpu_all.capture_frame(&commands).map(|_| ()))?;
+
+    let mut cpu_sparse = CpuRendererProvider
+        .create(request)
+        .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_CPU_CREATE_FAILED: {error}"))?;
+    for _ in 0..WARMUP {
+        cpu_sparse
+            .submit_frame(&commands)
+            .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_SPARSE_WARMUP_FAILED: {error}"))?;
+    }
+    let mut sparse_index = 0_u32;
+    let (cpu_sparse_duration_ns, cpu_sparse_samples) = measure_frames(MEASURED, || {
+        let selected =
+            sparse_index == 0 || sparse_index == MEASURED / 2 || sparse_index + 1 == MEASURED;
+        sparse_index += 1;
+        if selected {
+            let mut snapshot = cpu_sparse.clone();
+            snapshot.capture_frame(&commands).map(|_| ())
+        } else {
+            cpu_sparse.submit_frame(&commands)
+        }
+    })?;
+    let cpu_sparse_speedup = cpu_all_duration_ns as f64 / cpu_sparse_duration_ns as f64;
+    let (cpu_all_p50_frame_ns, cpu_all_p95_frame_ns) = percentiles(cpu_all_samples);
+    let (cpu_sparse_p50_frame_ns, cpu_sparse_p95_frame_ns) = percentiles(cpu_sparse_samples);
+
+    let mut gpu_all_duration_ns = None;
+    let mut gpu_all_p50_frame_ns = None;
+    let mut gpu_all_p95_frame_ns = None;
+    let mut gpu_all_speedup = None;
+    let mut gpu_identity = None;
+    if include_gpu {
+        let mut renderer = WgpuOffscreenRenderer::new()
+            .await
+            .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_GPU_REQUIRED: {error}"))?;
+        let mut sequence = 0_u64;
+        for _ in 0..WARMUP {
+            sequence += 1;
+            renderer
+                .render(&benchmark_scene(sequence, commands.clone()))
+                .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_GPU_WARMUP_FAILED: {error}"))?;
+        }
+        let (duration, samples) = measure_platform_frames(MEASURED, || {
+            sequence += 1;
+            renderer
+                .render(&benchmark_scene(sequence, commands.clone()))
+                .map(|_| ())
+        })?;
+        let (p50, p95) = percentiles(samples);
+        gpu_all_duration_ns = Some(duration);
+        gpu_all_p50_frame_ns = Some(p50);
+        gpu_all_p95_frame_ns = Some(p95);
+        gpu_all_speedup = Some(cpu_all_duration_ns as f64 / duration as f64);
+        gpu_identity = Some(renderer.identity().clone());
+    }
+
+    let mut diagnostics = Vec::new();
+    if cpu_sparse_speedup < MIN_CPU_SPARSE_SPEEDUP {
+        diagnostics.push("ASTRA_HEADLESS_CPU_SPARSE_SPEEDUP_BELOW_THRESHOLD".into());
+    }
+    if gpu_all_speedup.is_some_and(|speedup| speedup < MIN_GPU_ALL_SPEEDUP) {
+        diagnostics.push("ASTRA_HEADLESS_GPU_SPEEDUP_BELOW_THRESHOLD".into());
+    }
+    let status = if diagnostics.is_empty() {
+        RunStatus::Passed
+    } else {
+        RunStatus::Blocked
+    };
+    let report = RenderPerformanceReport {
+        schema: HEADLESS_RENDER_PERFORMANCE_SCHEMA.into(),
+        status,
+        build_fingerprint,
+        scenario_hash,
+        width: WIDTH,
+        height: HEIGHT,
+        warmup_frames: WARMUP,
+        measured_frames: MEASURED,
+        cpu_all_duration_ns,
+        cpu_all_p50_frame_ns,
+        cpu_all_p95_frame_ns,
+        cpu_sparse_duration_ns,
+        cpu_sparse_p50_frame_ns,
+        cpu_sparse_p95_frame_ns,
+        cpu_sparse_speedup,
+        gpu_all_duration_ns,
+        gpu_all_p50_frame_ns,
+        gpu_all_p95_frame_ns,
+        gpu_all_speedup,
+        gpu_identity,
+        diagnostics,
+    };
+    report.validate().map_err(|error| error.to_string())?;
+    write_atomic_json(output, &report)?;
+    if report.status == RunStatus::Blocked {
+        return Err("ASTRA_HEADLESS_BENCHMARK_THRESHOLD_BLOCKED".into());
+    }
+    Ok(())
+}
+
+fn benchmark_scene(sequence: u64, commands: Vec<SceneCommand>) -> astra_platform::SceneFrame {
+    astra_platform::SceneFrame {
+        sequence,
+        width: 1920,
+        height: 1080,
+        clear_rgba: [4, 8, 16, 255],
+        commands,
+        semantics: None,
+    }
+}
+
+fn benchmark_commands() -> Vec<SceneCommand> {
+    let texture_bytes = [64_u8, 128, 224, 255].repeat(64 * 64);
+    let glyph_bytes = vec![192_u8; 32 * 32];
+    let mut fade_params = BTreeMap::new();
+    fade_params.insert("amount".into(), FilterParam::Float(0.92));
+    vec![
+        SceneCommand::Texture {
+            id: "benchmark.texture".into(),
+            frame: TextureFrame {
+                width: 64,
+                height: 64,
+                hash: Hash256::from_sha256(&texture_bytes),
+                rgba8: texture_bytes,
+            },
+            destination: RectI::new(64, 64, 1024, 640),
+            opacity: 1.0,
+            blend: BlendMode::Alpha,
+        },
+        SceneCommand::Glyph {
+            id: "benchmark.glyph".into(),
+            glyph: GlyphBitmap {
+                width: 32,
+                height: 32,
+                format: GlyphBitmapFormat::Alpha8,
+                hash: Hash256::from_sha256(&glyph_bytes),
+                pixels: glyph_bytes,
+            },
+            x: 128,
+            y: 128,
+            rgba: [255, 240, 220, 255],
+            opacity: 1.0,
+            blend: BlendMode::Alpha,
+        },
+        SceneCommand::Mesh2D {
+            id: "benchmark.mesh".into(),
+            vertices: vec![
+                MeshVertex2D {
+                    position: [960.0, 128.0],
+                    uv: [0.0, 0.0],
+                    premultiplied_rgba: [240, 80, 80, 255],
+                },
+                MeshVertex2D {
+                    position: [1760.0, 900.0],
+                    uv: [1.0, 1.0],
+                    premultiplied_rgba: [80, 240, 80, 255],
+                },
+                MeshVertex2D {
+                    position: [720.0, 900.0],
+                    uv: [0.0, 1.0],
+                    premultiplied_rgba: [80, 80, 240, 255],
+                },
+            ],
+            indices: vec![0, 1, 2],
+            material: MeshMaterial2D::Solid,
+            texture_id: None,
+            opacity: 0.9,
+            blend: BlendMode::Alpha,
+        },
+        SceneCommand::FilterGraph {
+            graph: FilterGraph {
+                schema: "astra.filter_graph.v1".into(),
+                nodes: vec![FilterNode {
+                    id: "benchmark.fade".into(),
+                    kind: "astra.filter.fade".into(),
+                    input: FilterTarget::Final,
+                    output: FilterTarget::Final,
+                    params: fade_params,
+                    deterministic: true,
+                    allow_cpu_fallback: true,
+                }],
+            },
+        },
+    ]
+}
+
+fn measure_frames<E>(
+    count: u32,
+    mut frame: impl FnMut() -> Result<(), E>,
+) -> Result<(u64, Vec<u64>), String>
+where
+    E: std::fmt::Display,
+{
+    let total = Instant::now();
+    let mut samples = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let started = Instant::now();
+        frame().map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_CPU_FAILED: {error}"))?;
+        samples.push(duration_ns(started.elapsed()));
+    }
+    Ok((duration_ns(total.elapsed()), samples))
+}
+
+fn measure_platform_frames(
+    count: u32,
+    frame: impl FnMut() -> Result<(), astra_platform::PlatformError>,
+) -> Result<(u64, Vec<u64>), String> {
+    measure_frames(count, frame)
+}
+
+fn duration_ns(duration: std::time::Duration) -> u64 {
+    u64::try_from(duration.as_nanos())
+        .unwrap_or(u64::MAX)
+        .max(1)
+}
+
+fn percentiles(mut samples: Vec<u64>) -> (u64, u64) {
+    samples.sort_unstable();
+    let index = |percent: usize| ((samples.len() - 1) * percent) / 100;
+    (samples[index(50)], samples[index(95)])
 }
 
 fn read_identity_hash(path: &Path) -> Result<String, String> {
@@ -1237,7 +1575,7 @@ fn append_checkpoint_artifacts(
             height: frame.height,
             color_space: "rgba8_srgb".into(),
             sequence: capture.sequence,
-            checkpoint: Some(id.clone()),
+            checkpoint_ids: vec![id.clone()],
         });
         let audio_bytes = wav_bytes(&capture.audio.samples)?;
         reserve_appended_artifact(profile, manifest, audio_bytes.len() as u64)?;
@@ -1371,6 +1709,32 @@ fn provider_hash(profile: &HeadlessHostProfile) -> Result<String, String> {
     let bytes = serde_json::to_vec(&profile.providers).map_err(|e| e.to_string())?;
     Ok(format!("sha256:{}", sha256_hex(&bytes)))
 }
+
+fn render_policy_name(profile: &HeadlessHostProfile) -> &'static str {
+    match profile.render_policy {
+        astra_platform::HeadlessRenderPolicy::All => "all",
+        astra_platform::HeadlessRenderPolicy::Checkpoints => "checkpoints",
+    }
+}
+
+fn blocked_renderer_identity(profile: &HeadlessHostProfile) -> RendererExecutionIdentity {
+    let gpu = profile.providers.renderer == "wgpu_offscreen";
+    RendererExecutionIdentity {
+        provider: profile.providers.renderer.clone(),
+        backend: if gpu { "unavailable" } else { "cpu" }.into(),
+        device_type: if gpu { "unavailable" } else { "cpu" }.into(),
+        vendor_id: 0,
+        device_id: 0,
+        adapter_name_hash: empty_hash(),
+        driver_identity_hash: empty_hash(),
+    }
+}
+
+fn renderer_identity_hash(identity: &RendererExecutionIdentity) -> String {
+    serde_json::to_vec(identity)
+        .map(|bytes| format!("sha256:{:x}", Sha256::digest(bytes)))
+        .unwrap_or_else(|_| empty_hash())
+}
 fn hash_file(path: &Path) -> Result<String, String> {
     Ok(format!(
         "sha256:{}",
@@ -1407,7 +1771,12 @@ fn prepare_review(
         || manifest.build_fingerprint != report.build_fingerprint
         || manifest.package_hash != report.package_hash
         || manifest.input_sequence_hash != report.input_sequence_hash
-        || manifest.presented_frame_count != report.frame_count
+        || manifest.renderer_identity_hash != report.renderer_identity_hash
+        || manifest.render_policy != report.render_policy
+        || manifest.submitted_frame_count != report.submitted_frame_count
+        || manifest.rasterized_frame_count != report.rasterized_frame_count
+        || manifest.submitted_scene_stream_hash != report.submitted_scene_stream_hash
+        || manifest.rasterized_frame_stream_hash != report.rasterized_frame_stream_hash
         || manifest.audio_frame_count != report.audio_frame_count
     {
         return Err(
@@ -1423,9 +1792,9 @@ fn prepare_review(
                 relative_path,
                 sha256,
                 sequence,
-                checkpoint,
+                checkpoint_ids,
                 ..
-            } => Some((relative_path, sha256, *sequence, checkpoint.as_deref())),
+            } => Some((relative_path, sha256, *sequence, checkpoint_ids.as_slice())),
             ArtifactEntry::Audio { .. } => None,
         })
         .collect::<Vec<_>>();
@@ -1437,17 +1806,22 @@ fn prepare_review(
     }
     let mut selected_frames = Vec::new();
     let mut push_frame = |role: ReviewArtifactRole,
-                          frame: &(&String, &String, u64, Option<&str>)| {
+                          frame: &(&String, &String, u64, &[String]),
+                          checkpoint: Option<&str>| {
         selected_frames.push(ReviewArtifactSelection {
             role,
             relative_path: frame.0.clone(),
             sha256: frame.1.clone(),
             sequence: Some(frame.2),
-            checkpoint: frame.3.map(str::to_string),
+            checkpoint: checkpoint.map(str::to_string),
         });
     };
-    push_frame(ReviewArtifactRole::FirstFrame, frames.first().unwrap());
-    push_frame(ReviewArtifactRole::LastFrame, frames.last().unwrap());
+    push_frame(
+        ReviewArtifactRole::FirstFrame,
+        frames.first().unwrap(),
+        None,
+    );
+    push_frame(ReviewArtifactRole::LastFrame, frames.last().unwrap(), None);
 
     let required_checkpoints = report
         .checkpoint_results
@@ -1457,13 +1831,17 @@ fn prepare_review(
     for checkpoint in &required_checkpoints {
         let frame = frames
             .iter()
-            .find(|frame| frame.3 == Some(checkpoint.as_str()))
+            .find(|frame| frame.3.iter().any(|id| id == checkpoint))
             .ok_or_else(|| {
                 format!(
                     "ASTRA_HEADLESS_REVIEW_CHECKPOINT: checkpoint {checkpoint} has no retained frame"
                 )
             })?;
-        push_frame(ReviewArtifactRole::RequiredCheckpoint, frame);
+        push_frame(
+            ReviewArtifactRole::RequiredCheckpoint,
+            frame,
+            Some(checkpoint),
+        );
     }
 
     if let Some(maximum) = report.checkpoint_results.iter().max_by(|left, right| {
@@ -1479,9 +1857,13 @@ fn prepare_review(
     }) {
         if let Some(frame) = frames
             .iter()
-            .find(|frame| frame.3 == Some(maximum.id.as_str()))
+            .find(|frame| frame.3.iter().any(|id| id == &maximum.id))
         {
-            push_frame(ReviewArtifactRole::MaximumDifference, frame);
+            push_frame(
+                ReviewArtifactRole::MaximumDifference,
+                frame,
+                Some(&maximum.id),
+            );
         }
     }
 
@@ -1492,12 +1874,12 @@ fn prepare_review(
     {
         if let Some((_, _, sequence, _)) = frames
             .iter()
-            .find(|frame| frame.3 == Some(failed.id.as_str()))
+            .find(|frame| frame.3.iter().any(|id| id == &failed.id))
         {
             for neighbor in frames.iter().filter(|frame| {
-                frame.2.abs_diff(*sequence) == 1 && frame.3 != Some(failed.id.as_str())
+                frame.2.abs_diff(*sequence) == 1 && !frame.3.iter().any(|id| id == &failed.id)
             }) {
-                push_frame(ReviewArtifactRole::FailureNeighbor, neighbor);
+                push_frame(ReviewArtifactRole::FailureNeighbor, neighbor, None);
             }
         }
     }
@@ -1751,9 +2133,10 @@ mod evidence_tests {
     use std::fs;
 
     use astra_headless_protocol::{
-        ArtifactEntry, ArtifactManifest, CheckpointResult, PlatformRunIdentity, ReviewRecord,
-        ReviewVerdict, ReviewerKind, RunReport, RunStatus, HEADLESS_ARTIFACT_MANIFEST_SCHEMA,
-        HEADLESS_REVIEW_SCHEMA, HEADLESS_RUN_REPORT_SCHEMA, PLATFORM_RUN_IDENTITY_SCHEMA,
+        ArtifactEntry, ArtifactManifest, CheckpointResult, PlatformRunIdentity,
+        RendererExecutionIdentity, ReviewRecord, ReviewVerdict, ReviewerKind, RunReport, RunStatus,
+        HEADLESS_ARTIFACT_MANIFEST_SCHEMA, HEADLESS_REVIEW_SCHEMA, HEADLESS_RUN_REPORT_SCHEMA,
+        PLATFORM_RUN_IDENTITY_SCHEMA,
     };
 
     use super::{hash_file, link_preflight, prepare_review, validate_review, write_atomic_json};
@@ -1770,6 +2153,8 @@ mod evidence_tests {
         fs::write(&frame, b"frame").unwrap();
         fs::write(&audio, b"audio").unwrap();
         let common = hash(b"common");
+        let renderer_identity = RendererExecutionIdentity::cpu_reference();
+        let renderer_identity_hash = renderer_identity.hash().unwrap();
         let manifest = ArtifactManifest {
             schema: HEADLESS_ARTIFACT_MANIFEST_SCHEMA.into(),
             run_id: "formal-run".into(),
@@ -1777,9 +2162,14 @@ mod evidence_tests {
             package_hash: hash(b"package"),
             input_sequence_hash: hash(b"input"),
             provider_identity_hash: hash(b"provider"),
-            presented_frame_count: 1,
+            renderer_identity_hash: renderer_identity_hash.clone(),
+            renderer_identity,
+            render_policy: "checkpoints".into(),
+            submitted_frame_count: 1,
+            rasterized_frame_count: 1,
             audio_frame_count: 800,
-            frame_stream_hash: hash(b"frame-stream"),
+            submitted_scene_stream_hash: hash(b"scene-stream"),
+            rasterized_frame_stream_hash: hash(b"frame-stream"),
             audio_stream_hash: hash(b"audio-stream"),
             audio_peak_dbfs: Some(-1.0),
             audio_rms_dbfs: Some(-3.0),
@@ -1794,7 +2184,7 @@ mod evidence_tests {
                     height: 1,
                     color_space: "rgba8_srgb".into(),
                     sequence: 1,
-                    checkpoint: Some("required.final".into()),
+                    checkpoint_ids: vec!["required.final".into()],
                 },
                 ArtifactEntry::Audio {
                     relative_path: "audio.wav".into(),
@@ -1824,7 +2214,12 @@ mod evidence_tests {
             content_identity: "native-vn-public".into(),
             status: RunStatus::Passed,
             manifest_hash: hash_file(&manifest_path).unwrap(),
-            frame_count: 1,
+            renderer_identity_hash,
+            render_policy: manifest.render_policy.clone(),
+            submitted_frame_count: 1,
+            rasterized_frame_count: 1,
+            submitted_scene_stream_hash: manifest.submitted_scene_stream_hash.clone(),
+            rasterized_frame_stream_hash: manifest.rasterized_frame_stream_hash.clone(),
             audio_frame_count: 800,
             duration_ns: 16_666_667,
             completed_sequence: 4,

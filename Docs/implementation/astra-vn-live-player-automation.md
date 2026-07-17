@@ -37,7 +37,7 @@ Transcript identity 必须由完整 canonical JSON 计算；序列化失败或 a
 
 Migration 11 已实现平台无关 `astra.user_input_sequence.v1`。它只包含 focus/resume、keyboard、IME、pointer、wheel、touch、gamepad、固定时间推进、await、checkpoint 和 shutdown；`advance`、`choose`、`open_system`、直接 `VnPlayerCommand` 和 Runtime mutation 在 schema/adapter 边界阻断。file 与 stdio 现在执行同一物理输入序列并产生等价 manifest/report，损坏 JSONL 和断流会提交 blocked report 后非零退出。
 
-产品、Player、样例和 full-playthrough 在进入 Windows/Web live automation 前，必须先用相同 build、cooked package 和 input sequence 通过 Headless 自动比较与模型审查。`astra.headless_preflight_link.v1` 只负责绑定两次 run，不能把 Headless 的 PNG/WAV、route 或 input transcript冒充 Windows/Web host evidence。
+产品、Player、样例和 full-playthrough 在进入 Windows/Web live automation 前，必须先用相同 build、cooked package 和 input sequence 通过 Headless 自动比较与模型审查。`astra.headless_preflight_link.v2` 只负责绑定两次 run，不能把 Headless 的 PNG/WAV、route 或 input transcript冒充 Windows/Web host evidence。
 
 ## Windows Driver
 

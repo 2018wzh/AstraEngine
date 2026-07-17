@@ -93,7 +93,7 @@ fn product_package_with_video(story: &str, video: Option<Vec<u8>>) -> Vec<u8> {
     ));
     let video_hash = video.as_ref().map(|bytes| Hash256::from_sha256(bytes));
     let video_fallback = include_bytes!(
-        "../../../../../../Examples/NativeVN/Assets/Backgrounds/apartment-night.png"
+        "../../../../../../Examples/NativeVN/Visual/Backgrounds/apartment-studio.png"
     );
     let video_fallback_hash = Hash256::from_sha256(video_fallback);
     if let Some(bytes) = &video {

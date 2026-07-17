@@ -1220,9 +1220,7 @@ mod macos {
         width: u32,
         height: u32,
     ) -> Result<SurfaceResource, PlatformError> {
-        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        descriptor.backends = wgpu::Backends::METAL;
-        let instance = wgpu::Instance::new(descriptor);
+        let instance = astra_platform_common::native_wgpu_instance()?;
         let surface = instance
             .create_surface(window)
             .map_err(|_| host_error("surface.create", "wgpu surface creation failed"))?;

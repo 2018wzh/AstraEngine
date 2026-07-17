@@ -64,13 +64,15 @@ astra-headless validate-review \
   --review target/headless/full-playthrough/review.json
 ```
 
-文件与 stdio 使用同一双向 JSONL 协议。默认保存全部 presented frame PNG 和完整 PCM S16LE WAV；`all`、`checkpoints`、`final`、`manifest-only` 显式受 frame、byte、duration、package 和 artifact count 限额约束。stdout 只输出协议或 report，日志只写 stderr。当前实现仍需通过完整 workspace、FFmpeg feature job 与正式 review/preflight evidence 后才能关闭 Migration 11。
+文件与 stdio 使用同一双向 JSONL 协议。Headless profile v2 默认 `render_policy: checkpoints`：所有 scene 都校验并进入 submitted hash，仅首帧、具名 checkpoint 和末帧产生 RGBA；逐帧视觉验证显式使用 `all`。`max_submitted_frames` 与 `max_rasterized_frames` 任一超限都会阻断。stdout 只输出协议或 report，日志只写 stderr。
 
-产品、Player、样例或 full-playthrough 必须先通过自动比较，再运行 `prepare-review`。模型或具名人工只能按 bundle 查看 required checkpoint、首尾帧、最大差异帧、失败邻近帧和完整 WAV，不得自行省略条目。音频要检查波形、频谱、响度、静音、削波、声道和时长；涉及语音内容或音画同步时还要试听。完成的 `astra.headless_review.v1` 必须再通过 `validate-review`；模型不能覆盖自动失败或自行放宽容差。
+GPU job 必须先把 profile renderer 绑定为 `wgpu_offscreen`，再给 `run` 或 `serve` 传 `--gpu`；CPU profile 与 flag 混用会阻断。workspace test job 通过 `ASTRA_HEADLESS_GPU=1 cargo test ...` 让 `HeadlessTestContext` 生成 GPU profile 并启动 `serve --gpu`。该模式固定 Windows/DX12、Linux/Vulkan、macOS/Metal；Windows DX12 使用 build-locked static DXC，不读取 PATH 中的动态 DXC。所有平台都要求 hardware adapter，不回退软件 adapter或其他 backend。可用 `astra-headless benchmark-render --build-identity ... --output ... --gpu` 生成固定 1920x1080、60 帧预热、600 帧测量的性能报告。
 
-checkpoint 未显式改写时使用固定的受控宽松默认容差。任何自定义容差都要在 config 中绑定 `astra.headless_tolerance_approval.v1` 的相对路径和 SHA-256；approval 只能是具名人工，必须匹配 tolerance-set hash。`astra-headless` 会把完整 checkpoint config hash 写入新 run report。修改 approval、config 或 baseline 后必须重跑，不能复用或编辑旧 report。
+产品、Player、样例或 full-playthrough 必须先通过自动比较，再运行 `prepare-review`。模型或具名人工只能按 bundle 查看 required checkpoint、首尾帧、最大差异帧、失败邻近帧和完整 WAV，不得自行省略条目。音频要检查波形、频谱、响度、静音、削波、声道和时长；涉及语音内容或音画同步时还要试听。完成的 `astra.headless_review.v2` 必须再通过 `validate-review`；模型不能覆盖自动失败或自行放宽容差。
 
-真实平台验收只能在 `astra.headless_run_report.v1`、`astra.headless_review_bundle.v1` 和 `astra.headless_review.v1` 全部通过后启动。平台 automation 完成后输出 `astra.platform_run_identity.v1`，再运行 `astra-headless link-preflight --headless-run-report ... --platform-run-identity ... --output ...`。Headless 与真实平台 run 必须绑定同一 build、cooked package、input sequence、scenario、target 和 content identity；`astra.headless_preflight_link.v1` 只建立关联，Headless 结果不能替代真实窗口、浏览器、音频设备或原生输入证据。
+checkpoint 未显式改写时使用固定的受控宽松默认容差。任何自定义容差都要在 config 中绑定 `astra.headless_tolerance_approval.v2` 的相对路径和 SHA-256；approval 只能是具名人工，必须匹配 tolerance-set hash。`astra-headless` 会把完整 checkpoint config hash 写入新 run report。修改 approval、config 或 baseline 后必须重跑，不能复用或编辑旧 report。
+
+真实平台验收只能在 `astra.headless_run_report.v2`、`astra.headless_review_bundle.v2` 和 `astra.headless_review.v2` 全部通过后启动。平台 automation 完成后输出 `astra.platform_run_identity.v1`，再运行 `astra-headless link-preflight --headless-run-report ... --platform-run-identity ... --output ...`。Headless 与真实平台 run 必须绑定同一 build、cooked package、input sequence、scenario、target 和 content identity；`astra.headless_preflight_link.v2` 只建立关联，Headless 结果不能替代真实窗口、浏览器、音频设备或原生输入证据。
 
 正式 Windows/Web 联合验收统一走 `Tools/run_platform_host_acceptance.py`。该入口在启动任何真实 host 命令前先校验 Headless run、review bundle、review、两份 platform run identity 和两份 preflight link；自动失败、review verdict 缺失、artifact hash 漂移或任一 identity 不一致都会在 host 启动前阻断。`--skip-host-runs` 只用于复核已经形成的同 run 证据，不能生成 E3：
 
@@ -180,10 +182,10 @@ Windows shipping Player 默认使用平台 writable `Saved/Logs` 与 `Saved/Cras
 | `astra.target_validation_report.v1` | Editor/Game/Program target |
 | `astra.platform_capability_report.v2` | declared/available/selected 平台 provider |
 | `astra.platform_host_conformance_report.v1` | build/profile/package/session 绑定的真实 host 生命周期证据 |
-| `astra.headless_artifact_manifest.v1` | Headless PNG/WAV 相对路径、hash、尺寸、时长、全流指标和 provider identity |
-| `astra.headless_run_report.v1` | 平台无关 host、输入、产物与自动比较结果 |
-| `astra.headless_review.v1` | 具名模型或人工的视觉/音频审查结果；不能覆盖自动失败 |
-| `astra.headless_preflight_link.v1` | Headless E2 与真实平台 run 的 identity 关联 |
+| `astra.headless_artifact_manifest.v2` | Headless submitted/rasterized 双流、PNG/WAV、render policy 和 renderer identity |
+| `astra.headless_run_report.v2` | 平台无关 host、输入、双流产物与自动比较结果 |
+| `astra.headless_review.v2` | 具名模型或人工的视觉/音频审查结果；不能覆盖自动失败 |
+| `astra.headless_preflight_link.v2` | Headless E2 与真实平台 run 的 identity 关联 |
 | `astra.plugin_report.v1` | 插件加载、卸载和 provider |
 | `astra.emu.local_case_report.v1` | AstraEMU FVP 和后续 family；只允许 alias/hash/offset/size 与稳定 diagnostic，禁止绝对路径和商业 payload |
 

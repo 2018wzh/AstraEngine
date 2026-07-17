@@ -151,4 +151,4 @@ cargo test --workspace --features ffmpeg-vcpkg
 
 Expected evidence 包括 `astra.headless_test_inventory.v1`、shipping graph report，以及产品 run 的 artifact manifest/run report；旧 `astra.scenario_report.v1` 不再是 Headless 完成证据。
 
-旧 `astra test run --headless` 现在返回明确迁移错误，不再读取 YAML 或转发。`astra-headless`、`astra.headless_run_report.v1` 和 workspace tests 已成为统一实现路径；在完整 workspace test 与正式 evidence 完成前，Migration 11 仍保持 `IN_PROGRESS`。
+旧 `astra test run --headless` 现在返回明确迁移错误，不再读取 YAML 或转发。`astra-headless`、`astra.headless_run_report.v2` 和 workspace tests 已成为统一实现路径；在完整 workspace test 与正式 evidence 完成前，Migration 11 仍保持 `IN_PROGRESS`。

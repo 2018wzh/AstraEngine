@@ -69,8 +69,9 @@ pub fn product_package(story: &str) -> Vec<u8> {
     .unwrap();
     let mut sections =
         package_sections_for_project(&compiled, &["classic".to_string()], "nativevn-game").unwrap();
-    let font = include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/Poppins-Regular.ttf")
-        .to_vec();
+    let font =
+        include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf")
+            .to_vec();
     let font_hash = Hash256::from_sha256(&font);
     sections.push(SectionPayload::raw(
         "asset.font.ui",
@@ -88,7 +89,7 @@ pub fn product_package(story: &str) -> Vec<u8> {
             fonts: vec![FontPackageEntry {
                 asset_id: "asset:/font/ui".to_string(),
                 uri: VfsUri::parse("package:/fonts/ui.ttf").unwrap(),
-                family: "Poppins".to_string(),
+                family: "Noto Sans JP".to_string(),
                 face_index: 0,
                 hash: font_hash,
                 license_id: "OFL-1.1".to_string(),

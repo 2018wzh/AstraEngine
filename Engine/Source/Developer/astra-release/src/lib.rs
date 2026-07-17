@@ -497,14 +497,16 @@ impl ReleaseValidator {
 }
 
 fn headless_shipping_isolation_check(package: &PackageReader) -> ReleaseCheckRecord {
-    const FORBIDDEN: [&str; 8] = [
-        "astra.headless_host_profile.v1",
+    const FORBIDDEN: [&str; 10] = [
+        "astra.headless_host_profile.v2",
         "astra.headless_protocol.v1",
+        "astra.headless_checkpoint_config.v2",
+        "astra.headless_tolerance_approval.v2",
         "astra.user_input_sequence.v1",
-        "astra.headless_artifact_manifest.v1",
-        "astra.headless_run_report.v1",
-        "astra.headless_review.v1",
-        "astra.headless_preflight_link.v1",
+        "astra.headless_artifact_manifest.v2",
+        "astra.headless_run_report.v2",
+        "astra.headless_review.v2",
+        "astra.headless_preflight_link.v2",
         "astra-platform-headless",
     ];
     let mut violation = None;
@@ -699,7 +701,12 @@ mod headless_preflight_tests {
                 content_identity: "content.v1".into(),
                 status: RunStatus::Passed,
                 manifest_hash: hash("manifest"),
-                frame_count: 1,
+                renderer_identity_hash: hash("renderer"),
+                render_policy: "checkpoints".into(),
+                submitted_frame_count: 3,
+                rasterized_frame_count: 1,
+                submitted_scene_stream_hash: hash("scene-stream"),
+                rasterized_frame_stream_hash: hash("frame-stream"),
                 audio_frame_count: 800,
                 duration_ns: 16_666_667,
                 completed_sequence: 3,

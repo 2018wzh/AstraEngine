@@ -1085,9 +1085,11 @@ dependencies = [
  "astra-headless-protocol",
  "astra-headless-test",
  "astra-headless-vn-adapter",
+ "astra-media-core",
  "astra-observability",
  "astra-package",
  "astra-platform",
+ "astra-platform-common",
  "astra-platform-headless",
  "astra-player-vn",
  "astra-product-host",
@@ -1290,6 +1292,7 @@ name = "astra-platform-common"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-headless-protocol",
  "astra-media-core",
  "astra-platform",
  "directories",
@@ -1316,6 +1319,7 @@ dependencies = [
  "astra-media-core",
  "astra-platform",
  "astra-platform-common",
+ "astra-ui-core",
  "hound",
  "image 0.25.10",
  "rcgen",
@@ -6566,6 +6570,12 @@ dependencies = [
  "lyon_geom",
  "num-traits",
 ]
+
+[[package]]
+name = "mach-dxcompiler-rs"
+version = "0.1.4+2024.11.22-df583a3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e3cd67e8ea2ba061339150970542cf1c60ba44c6d17e31279cbc133a4b018f8"
 
 [[package]]
 name = "mach2"
@@ -12031,6 +12041,7 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
  "log 0.4.33",
+ "mach-dxcompiler-rs",
  "naga",
  "ndk-sys 0.6.0+11769913",
  "objc2 0.6.4",
