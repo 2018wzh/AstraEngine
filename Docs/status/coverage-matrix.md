@@ -1,6 +1,6 @@
 # Implementation Coverage Matrix
 
-TsuiNoSora 当前覆盖边界：严格 ProjectorRays codec、2527/2527 binary resource conversion、完整 typed story IR、私有 NativeVN project/package、Classic/Modern Yakui UI 和 Player secondary-input action routing 已落地。私有 full coverage report 记录 578 个 source resource、724 个 handler、24,190 条 command、36 条自动化路线、1,293 个 choice、3,053 条 media command 与 17,151 个 wait command，状态为 `pass`。Classic 4 个和 Modern 10 个 Headless 视觉/交互 checkpoint 已通过，Modern 同时覆盖 `ja`、`zh-Hans`、`en`；Classic stage 与 dialogue frame 使用 Director score 原始几何。36 路线同 run 汇总、Windows E3、Web bundle/E2 和 formal signoff 仍为 blocking；旧 synthetic story 与旧 worktree 证据不计入当前 coverage。
+TsuiNoSora 当前覆盖边界：严格 ProjectorRays codec、2527/2527 binary resource conversion、完整 typed story IR、私有 NativeVN project/package、Classic/Modern Yakui UI 和 Player secondary-input action routing 已落地。私有 full coverage report 记录 578 个 source resource、724 个 handler、24,190 条 command、36 条自动化路线、1,293 个 choice、3,053 条 media command 与 17,151 个 wait command，状态为 `pass`。Classic 4 个和 Modern 10 个 Headless 视觉/交互 checkpoint 已通过，Modern 同时覆盖 `ja`、`zh-Hans`、`en`；Classic stage 与 dialogue frame 使用 Director score 原始几何。上一最终路线包的 36/36 Headless matrix 已通过；最新视觉包只完成前 11 条复验，不能替代完整同 package matrix。Title 启动检查点、真实存档缩略图/metadata、Windows E3、Web portable graph/bundle E2 和 formal signoff 仍为 blocking；旧 synthetic story 与旧 worktree 证据不计入当前 coverage。
 
 | 模块 | Design | Contract | Public API | Data Format | Test Scenario | Release Gate | Manual |
 | --- | --- | --- | --- | --- | --- | --- | --- |

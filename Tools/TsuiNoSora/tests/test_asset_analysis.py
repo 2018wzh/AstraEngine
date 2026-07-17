@@ -5610,6 +5610,13 @@ class AssetAnalysisTests(unittest.TestCase):
             self.assertTrue((work / "nativevn" / "Automation" / "route.good.jsonl").exists())
             self.assertIn("default_profile: modern", project)
             self.assertIn("ui_provider: astra.ui.yakui", project)
+            self.assertIn("platform_profiles:", project)
+            self.assertIn("windows-internal-release:", project)
+            self.assertIn("web-release-chrome:", project)
+            self.assertNotIn("windows-patch-release:", project)
+            self.assertIn("renderer: { providers: [wgpu_hardware], allow_software: false }", project)
+            self.assertIn("renderer: { providers: [webgpu], allow_software: false }", project)
+            self.assertIn("package_sources: [{ kind: bundled }]", project)
             self.assertNotIn(tmp.replace("\\", "/"), encoded.replace("\\", "/"))
 
     def test_nativevn_package_input_preserves_route_choices_in_story_and_scenario(self):

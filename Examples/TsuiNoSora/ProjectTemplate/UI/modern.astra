@@ -64,7 +64,9 @@ ui_view ui.tsui.modern.save model:astra.vn.ui_model.save.v1 theme:tsui.theme.mod
         text id:title value:l10n:system.save font_size:26
         virtual_grid id:slots items:$model.slots item_key:slot_id columns:3 overscan:0 item_extent:196 viewport_extent:390 min_height:390 gap:8
           column id:slot background:theme:surface.card min_width:226 min_height:184 padding:8 gap:2
-            image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:210 min_height:76
+            stack id:preview min_width:210 min_height:76
+              image id:empty_preview asset:theme:sky.frame min_width:210 min_height:76
+              image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:210 min_height:76
             text id:number value:$item.slot_id font_size:18 max_lines:1
             text id:timestamp value:$item.timestamp_text font_size:16 max_lines:1
             text id:playtime value:$item.playtime_text font_size:16 max_lines:1
@@ -92,7 +94,9 @@ ui_view ui.tsui.modern.load model:astra.vn.ui_model.load.v1 theme:tsui.theme.mod
         text id:title value:l10n:system.load font_size:26
         virtual_grid id:slots items:$model.slots item_key:slot_id columns:3 overscan:0 item_extent:196 viewport_extent:390 min_height:390 gap:8
           column id:slot background:theme:surface.card min_width:226 min_height:184 padding:8 gap:2
-            image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:210 min_height:76
+            stack id:preview min_width:210 min_height:76
+              image id:empty_preview asset:theme:sky.frame min_width:210 min_height:76
+              image id:thumbnail asset:$item.thumbnail_asset visible:$item.has_thumbnail min_width:210 min_height:76
             text id:number value:$item.slot_id font_size:18 max_lines:1
             text id:timestamp value:$item.timestamp_text font_size:16 max_lines:1
             text id:playtime value:$item.playtime_text font_size:16 max_lines:1

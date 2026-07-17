@@ -32,7 +32,20 @@ async fn windows_host_owns_window_surface_present_capture_and_shutdown() {
         .await
         .expect("create surface");
     let rgba8 = [32, 64, 128, 255].repeat(64 * 64);
-    let out_of_order = session
+    session
+        .client
+        .present_rgba(
+            surface,
+            RgbaFrame {
+                sequence: 2,
+                width: 64,
+                height: 64,
+                rgba8: rgba8.clone(),
+            },
+        )
+        .await
+        .expect("present first frame with the global host command sequence");
+    let duplicate = session
         .client
         .present_rgba(
             surface,
@@ -45,13 +58,13 @@ async fn windows_host_owns_window_surface_present_capture_and_shutdown() {
         )
         .await
         .unwrap_err();
-    assert_eq!(out_of_order.code, PlatformErrorCode::InvalidState);
+    assert_eq!(duplicate.code, PlatformErrorCode::InvalidState);
     let malformed = session
         .client
         .present_rgba(
             surface,
             RgbaFrame {
-                sequence: 1,
+                sequence: 3,
                 width: 64,
                 height: 64,
                 rgba8: vec![0; 4],
@@ -65,7 +78,7 @@ async fn windows_host_owns_window_surface_present_capture_and_shutdown() {
         .present_rgba(
             surface,
             RgbaFrame {
-                sequence: 1,
+                sequence: 3,
                 width: 64,
                 height: 64,
                 rgba8: rgba8.clone(),
@@ -85,7 +98,7 @@ async fn windows_host_owns_window_surface_present_capture_and_shutdown() {
         .present_rgba(
             surface,
             RgbaFrame {
-                sequence: 2,
+                sequence: 4,
                 width: 32,
                 height: 48,
                 rgba8: resized.clone(),

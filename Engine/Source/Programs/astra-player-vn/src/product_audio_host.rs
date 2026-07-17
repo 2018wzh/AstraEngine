@@ -10,6 +10,8 @@ pub struct NativeVnProductAudioHost {
     mixer: Option<ProductionAudioMixer>,
     assets: ProductPcmAssets,
     output: Option<astra_player_core::PlayerHostResourceId>,
+    output_sample_rate: u32,
+    output_channels: u16,
     next_packet_sequence: u64,
     voice_kinds: BTreeMap<String, String>,
     known_bgm_targets: BTreeSet<String>,
@@ -60,6 +62,10 @@ pub struct NativeVnProductAudioSnapshot {
     pub known_bgm_targets: BTreeSet<String>,
     pub pending_fade_stops: BTreeMap<String, NativeVnPendingFadeStop>,
     pub last_meter: Option<NativeVnAudioMeterSnapshot>,
+    #[serde(default)]
+    pub output_sample_rate: u32,
+    #[serde(default)]
+    pub output_channels: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -78,6 +84,8 @@ impl NativeVnProductAudioHost {
             mixer: None,
             assets: ProductPcmAssets::default(),
             output: None,
+            output_sample_rate: 0,
+            output_channels: 0,
             next_packet_sequence: 0,
             voice_kinds: BTreeMap::new(),
             known_bgm_targets: BTreeSet::new(),
@@ -108,7 +116,7 @@ impl NativeVnProductAudioHost {
 
     pub fn snapshot(&self) -> NativeVnProductAudioSnapshot {
         NativeVnProductAudioSnapshot {
-            schema: "astra.player.native_vn_audio_snapshot.v3".into(),
+            schema: "astra.player.native_vn_audio_snapshot.v4".into(),
             mixer: self.mixer.as_ref().map(ProductionAudioMixer::snapshot),
             output: self.output.map(|output| output.0),
             next_packet_sequence: self.next_packet_sequence,
@@ -116,6 +124,8 @@ impl NativeVnProductAudioHost {
             known_bgm_targets: self.known_bgm_targets.clone(),
             pending_fade_stops: self.pending_fade_stops.clone(),
             last_meter: self.last_meter,
+            output_sample_rate: self.output_sample_rate,
+            output_channels: self.output_channels,
         }
     }
 
@@ -127,7 +137,9 @@ impl NativeVnProductAudioHost {
         let has_output = snapshot.output.is_some();
         if !matches!(
             snapshot.schema.as_str(),
-            "astra.player.native_vn_audio_snapshot.v2" | "astra.player.native_vn_audio_snapshot.v3"
+            "astra.player.native_vn_audio_snapshot.v2"
+                | "astra.player.native_vn_audio_snapshot.v3"
+                | "astra.player.native_vn_audio_snapshot.v4"
         ) || has_mixer != has_output
             || (has_mixer && snapshot.next_packet_sequence == 0)
             || (!has_mixer && !snapshot.voice_kinds.is_empty())
@@ -135,10 +147,20 @@ impl NativeVnProductAudioHost {
             || snapshot.pending_fade_stops.values().any(|pending| {
                 !snapshot.voice_kinds.contains_key(&pending.voice_id) || pending.fence.is_empty()
             })
-            || (snapshot.schema == "astra.player.native_vn_audio_snapshot.v3"
-                && snapshot.voice_kinds.iter().any(|(voice_id, kind)| {
-                    kind == "bgm" && !snapshot.known_bgm_targets.contains(voice_id)
-                }))
+            || (matches!(
+                snapshot.schema.as_str(),
+                "astra.player.native_vn_audio_snapshot.v3"
+                    | "astra.player.native_vn_audio_snapshot.v4"
+            ) && snapshot.voice_kinds.iter().any(|(voice_id, kind)| {
+                kind == "bgm" && !snapshot.known_bgm_targets.contains(voice_id)
+            }))
+            || (snapshot.schema == "astra.player.native_vn_audio_snapshot.v4"
+                && if has_output {
+                    snapshot.output_sample_rate != CANONICAL_SAMPLE_RATE
+                        || !(CANONICAL_CHANNELS..=32).contains(&snapshot.output_channels)
+                } else {
+                    snapshot.output_sample_rate != 0 || snapshot.output_channels != 0
+                })
             || snapshot.pending_fade_stops.iter().any(|(fade_id, _)| {
                 !snapshot.mixer.as_ref().is_some_and(|mixer| {
                     mixer
@@ -168,6 +190,17 @@ impl NativeVnProductAudioHost {
         );
         self.mixer = mixer;
         self.output = snapshot.output.map(astra_player_core::PlayerHostResourceId);
+        let has_restored_output = self.output.is_some();
+        self.output_sample_rate = match (has_restored_output, snapshot.output_sample_rate) {
+            (false, _) => 0,
+            (true, 0) => CANONICAL_SAMPLE_RATE,
+            (true, sample_rate) => sample_rate,
+        };
+        self.output_channels = match (has_restored_output, snapshot.output_channels) {
+            (false, _) => 0,
+            (true, 0) => CANONICAL_CHANNELS,
+            (true, channels) => channels,
+        };
         // The mixer timeline is replay state, while packet sequence belongs to the
         // already-open host output and must never move backwards across load.
         self.next_packet_sequence = self.next_packet_sequence.max(snapshot.next_packet_sequence);
@@ -195,22 +228,30 @@ impl NativeVnProductAudioHost {
             .execute_batch(query)
             .await
             .map_err(|error| player_platform_error("player.audio.format", error))?;
-        if !matches!(
-            result.as_slice(),
+        let (output_sample_rate, output_channels) = match result.as_slice() {
             [PlayerHostCommandResult::AudioFormat {
-                sample_rate: CANONICAL_SAMPLE_RATE,
-                channels: CANONICAL_CHANNELS
-            }]
-        ) {
+                sample_rate,
+                channels,
+            }] if *sample_rate == CANONICAL_SAMPLE_RATE && *channels >= CANONICAL_CHANNELS => {
+                (*sample_rate, *channels)
+            }
+            _ => {
+                return Err(player_platform_error(
+                    "player.audio.format",
+                    "ASTRA_PLAYER_AUDIO_CANONICAL_RATE_OR_STEREO_OUTPUT_REQUIRED",
+                ));
+            }
+        };
+        if output_channels > 32 {
             return Err(player_platform_error(
                 "player.audio.format",
-                "ASTRA_PLAYER_AUDIO_CANONICAL_FORMAT_REQUIRED",
+                "ASTRA_PLAYER_AUDIO_OUTPUT_CHANNEL_LIMIT",
             ));
         }
         let (output, open) = source
             .prepare_persistent_audio_open(
-                CANONICAL_SAMPLE_RATE,
-                CANONICAL_CHANNELS,
+                output_sample_rate,
+                output_channels,
                 Self::BUFFERED_FRAMES,
             )
             .map_err(|error| player_platform_error("player.audio.open.prepare", error))?;
@@ -226,6 +267,8 @@ impl NativeVnProductAudioHost {
             ));
         }
         self.output = Some(output);
+        self.output_sample_rate = output_sample_rate;
+        self.output_channels = output_channels;
         self.mixer = Some(
             ProductionAudioMixer::new(Self::MAX_VOICES)
                 .map_err(|error| player_platform_error("player.audio.mixer.create", error))?,
@@ -412,9 +455,10 @@ impl NativeVnProductAudioHost {
             .execute_batch(query)
             .await
             .map_err(|error| player_platform_error("player.audio.query", error))?;
-        match state.as_slice() {
+        let queued_frames = match state.as_slice() {
             [PlayerHostCommandResult::AudioState {
                 output: actual,
+                queued_frames,
                 callback_count,
                 submitted_samples,
                 consumed_samples,
@@ -431,6 +475,7 @@ impl NativeVnProductAudioHost {
                     peak_dbfs_bits: *peak_dbfs_bits,
                     rms_dbfs_bits: *rms_dbfs_bits,
                 });
+                *queued_frames
             }
             _ => {
                 return Err(player_platform_error(
@@ -438,6 +483,17 @@ impl NativeVnProductAudioHost {
                     "ASTRA_PLAYER_AUDIO_QUERY_RESULT",
                 ))
             }
+        };
+        let tick_frames = u64::try_from(CANONICAL_FRAMES_PER_TICK)
+            .map_err(|_| player_platform_error("player.audio.pump", "tick frame overflowed"))?;
+        if queued_frames.saturating_add(tick_frames) > u64::from(Self::BUFFERED_FRAMES) {
+            tracing::trace!(
+                event = "astra.player.audio.buffer_sufficient",
+                queued_frames,
+                buffered_frames = Self::BUFFERED_FRAMES,
+                "Player deferred mixer advancement until the hardware queue has capacity"
+            );
+            return Ok(());
         }
         let mixed = self
             .mixer
@@ -451,10 +507,22 @@ impl NativeVnProductAudioHost {
                 "ASTRA_PLAYER_AUDIO_TICK_FRAME_COUNT",
             ));
         }
+        let output_channels = self.output_channels;
+        if self.output_sample_rate != CANONICAL_SAMPLE_RATE || output_channels < CANONICAL_CHANNELS
+        {
+            return Err(player_platform_error(
+                "player.audio.render",
+                "ASTRA_PLAYER_AUDIO_OUTPUT_FORMAT_STATE_INVALID",
+            ));
+        }
+        if self.retain_submitted_timeline {
+            self.submitted_timeline.extend_from_slice(&mixed.samples);
+        }
+        let samples = upmix_canonical_stereo(&mixed.samples, output_channels)?;
         let packet = PlayerMixedAudio {
-            sample_rate: CANONICAL_SAMPLE_RATE,
-            channels: CANONICAL_CHANNELS,
-            samples: mixed.samples,
+            sample_rate: self.output_sample_rate,
+            channels: output_channels,
+            samples,
             completed: Vec::new(),
         };
         let submit = source
@@ -464,9 +532,6 @@ impl NativeVnProductAudioHost {
             .execute_batch(submit)
             .await
             .map_err(|error| player_platform_error("player.audio.submit", error))?;
-        if self.retain_submitted_timeline {
-            self.submitted_timeline.extend_from_slice(&packet.samples);
-        }
         self.next_packet_sequence = self
             .next_packet_sequence
             .checked_add(1)
@@ -802,11 +867,51 @@ impl NativeVnProductAudioHost {
             ));
         }
         self.mixer = None;
+        self.output = None;
+        self.output_sample_rate = 0;
+        self.output_channels = 0;
         self.assets.assets.clear();
         self.voice_kinds.clear();
         self.known_bgm_targets.clear();
         Ok(())
     }
+}
+
+fn upmix_canonical_stereo(
+    canonical: &[f32],
+    output_channels: u16,
+) -> Result<Vec<f32>, astra_platform::PlatformError> {
+    if output_channels < CANONICAL_CHANNELS
+        || !canonical
+            .len()
+            .is_multiple_of(usize::from(CANONICAL_CHANNELS))
+    {
+        return Err(player_platform_error(
+            "player.audio.upmix",
+            "ASTRA_PLAYER_AUDIO_UPMIX_FORMAT_INVALID",
+        ));
+    }
+    if output_channels == CANONICAL_CHANNELS {
+        return Ok(canonical.to_vec());
+    }
+    let frame_count = canonical.len() / usize::from(CANONICAL_CHANNELS);
+    let sample_count = frame_count
+        .checked_mul(usize::from(output_channels))
+        .ok_or_else(|| {
+            player_platform_error(
+                "player.audio.upmix",
+                "ASTRA_PLAYER_AUDIO_UPMIX_SIZE_OVERFLOW",
+            )
+        })?;
+    let mut output = vec![0.0; sample_count];
+    for (input, output) in canonical
+        .chunks_exact(usize::from(CANONICAL_CHANNELS))
+        .zip(output.chunks_exact_mut(usize::from(output_channels)))
+    {
+        output[0] = input[0];
+        output[1] = input[1];
+    }
+    Ok(output)
 }
 
 fn parse_audio_bool(
@@ -854,4 +959,43 @@ fn player_platform_error(
         operation,
         error.to_string(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{upmix_canonical_stereo, NativeVnProductAudioHost, CANONICAL_SAMPLE_RATE};
+
+    #[astra_headless_test::test]
+    fn canonical_stereo_upmix_preserves_front_channels_and_silences_surround_channels() {
+        let output = upmix_canonical_stereo(&[0.25, -0.5, 0.75, -1.0], 8).unwrap();
+
+        assert_eq!(output.len(), 16);
+        assert_eq!(&output[..8], &[0.25, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(&output[8..], &[0.75, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[astra_headless_test::test]
+    fn version_four_snapshot_rejects_output_format_without_a_live_output() {
+        let mut host = NativeVnProductAudioHost::new(false);
+        let mut snapshot = host.snapshot();
+        snapshot.output_sample_rate = CANONICAL_SAMPLE_RATE;
+
+        let error = host.restore(snapshot).unwrap_err();
+
+        assert_eq!(error.operation, "player.audio.restore");
+    }
+
+    #[astra_headless_test::test]
+    fn legacy_empty_snapshot_restores_to_a_valid_version_four_snapshot() {
+        let mut host = NativeVnProductAudioHost::new(false);
+        let mut snapshot = host.snapshot();
+        snapshot.schema = "astra.player.native_vn_audio_snapshot.v3".into();
+
+        host.restore(snapshot).unwrap();
+
+        let restored = host.snapshot();
+        assert_eq!(restored.output, None);
+        assert_eq!(restored.output_sample_rate, 0);
+        assert_eq!(restored.output_channels, 0);
+    }
 }

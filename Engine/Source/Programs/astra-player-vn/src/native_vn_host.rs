@@ -2022,8 +2022,11 @@ impl NativeVnHostCommandSource {
             [8, 10, 16, 255],
         )];
         commands.extend(self.scene_draw.iter().cloned());
-        commands.extend(ui_draw);
-        self.ui_draw = commands.clone();
+        commands.extend(ui_draw.iter().cloned());
+        // Retain only the UI layer. Keeping the fully composed frame here caused
+        // every resize/focus repaint to recursively append the previous clear and
+        // scene layers, producing duplicate resource identities on the WGPU path.
+        self.ui_draw = ui_draw;
         Ok(PlayerHostCommandBatch::new(vec![
             PlayerHostCommand::PresentScene {
                 sequence: self.next_command_sequence()?,

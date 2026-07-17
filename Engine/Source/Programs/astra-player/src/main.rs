@@ -220,12 +220,24 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         platform: String,
         locale: String,
         package: String,
+        display: DisplayConfig,
         #[cfg(target_os = "windows")]
         #[serde(default)]
         ui_components: Option<UiComponentsConfig>,
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         #[serde(default)]
         ui_components: Option<serde_json::Value>,
+    }
+    #[derive(Deserialize)]
+    struct DisplayConfig {
+        schema: String,
+        original_resolution: DisplayResolution,
+        scale_filter: String,
+    }
+    #[derive(Deserialize)]
+    struct DisplayResolution {
+        width: u32,
+        height: u32,
     }
     #[derive(Deserialize)]
     struct Profiles {
@@ -251,7 +263,15 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     if config.schema != "astra.player_config.v2" || config.platform != expected_platform {
         return Err("Player config does not match the native platform".into());
     }
-    #[cfg(target_os = "windows")]
+    if config.display.schema != "astra.player_display_config.v1"
+        || config.display.original_resolution.width == 0
+        || config.display.original_resolution.height == 0
+        || config.display.original_resolution.width > 16_384
+        || config.display.original_resolution.height > 16_384
+        || !matches!(config.display.scale_filter.as_str(), "linear" | "nearest")
+    {
+        return Err("invalid native Player display config".into());
+    }
     let mut ui_component_processes = open_ui_component_processes(config.ui_components.as_ref())?;
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if config.ui_components.is_some() {
@@ -307,8 +327,8 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         let _container_header = session.client.read_package_range(source, 0, 16).await?;
         session.client.close_package(source).await?;
 
-        let width = 1280;
-        let height = 720;
+        let width = config.display.original_resolution.width;
+        let height = config.display.original_resolution.height;
         let window = session
             .client
             .create_window(WindowRequest {
@@ -600,11 +620,12 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                         }
                     }
                     media
-                        .process(
+                        .process_with_audio_tick(
                             &mut vn,
                             &mut executor,
                             timeline_clock.elapsed().as_millis() as u64,
                             Vec::new(),
+                            false,
                         )
                         .await?;
                     log_consumed_vn_step(player_sequence, "physical_ui", &vn)?;

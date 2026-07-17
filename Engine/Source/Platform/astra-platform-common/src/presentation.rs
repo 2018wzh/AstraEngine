@@ -137,16 +137,21 @@ impl WgpuPresentationCore {
                 "frame byte size does not match its dimensions",
             ));
         }
-        let expected_sequence = match self.last_sequence {
-            Some(sequence) => sequence.checked_add(1).ok_or_else(|| {
-                invalid("surface.present_rgba", "frame sequence counter overflowed")
-            })?,
-            None => 1,
-        };
-        if frame.sequence != expected_sequence {
+        if frame.sequence == 0
+            || self
+                .last_sequence
+                .is_some_and(|last_sequence| frame.sequence <= last_sequence)
+        {
+            tracing::error!(
+                event = "platform.wgpu.surface.frame_sequence_rejected",
+                operation = "surface.present_rgba",
+                frame_sequence = frame.sequence,
+                previous_sequence = ?self.last_sequence,
+                "wgpu surface rejected a non-increasing frame sequence"
+            );
             return Err(invalid(
                 "surface.present_rgba",
-                "frame sequence is duplicated, skipped, or out of order",
+                "frame sequence is zero, duplicated, or out of order",
             ));
         }
         if frame.width != self.config.width || frame.height != self.config.height {
@@ -239,16 +244,24 @@ impl WgpuPresentationCore {
 
     pub fn present_scene(&mut self, frame: SceneFrame) -> Result<(), PlatformError> {
         self.ensure_device_available("surface.present_scene")?;
-        let expected_sequence = match self.last_sequence {
-            Some(sequence) => sequence.checked_add(1).ok_or_else(|| {
-                invalid("surface.present_scene", "frame sequence counter overflowed")
-            })?,
-            None => 1,
-        };
-        if frame.sequence != expected_sequence || frame.width == 0 || frame.height == 0 {
+        if frame.sequence == 0
+            || self
+                .last_sequence
+                .is_some_and(|last_sequence| frame.sequence <= last_sequence)
+            || frame.width == 0
+            || frame.height == 0
+        {
+            tracing::error!(
+                event = "platform.wgpu.surface.scene_frame_rejected",
+                frame_sequence = frame.sequence,
+                previous_sequence = ?self.last_sequence,
+                frame_width = frame.width,
+                frame_height = frame.height,
+                "wgpu surface rejected an invalid scene frame"
+            );
             return Err(invalid(
                 "surface.present_scene",
-                "text frame sequence or dimensions are invalid",
+                "scene frame sequence is zero, duplicated, or out of order, or dimensions are zero",
             ));
         }
         if frame.width != self.config.width || frame.height != self.config.height {

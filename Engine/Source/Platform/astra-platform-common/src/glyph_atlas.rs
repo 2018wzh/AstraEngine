@@ -5,6 +5,7 @@ use astra_media_core::{
     TextureFrame, Transform2D,
 };
 use astra_platform::{PlatformError, PlatformErrorCode, SceneFrame};
+use sha2::{Digest, Sha256};
 use wgpu::util::DeviceExt;
 
 const ATLAS_SIDE: u32 = 4096;
@@ -345,14 +346,22 @@ impl WgpuGlyphAtlasRenderer {
                     height,
                     rgba,
                 } => {
-                    if id.is_empty()
-                        || id.len() > 256
-                        || !run_ids.insert(id.clone())
-                        || *width == 0
-                        || *height == 0
-                    {
+                    let duplicate = run_ids.contains(id);
+                    if id.is_empty() || id.len() > 256 || duplicate || *width == 0 || *height == 0 {
+                        let id_hash = format!("sha256:{:x}", Sha256::digest(id.as_bytes()));
+                        tracing::error!(
+                            event = "platform.wgpu.scene.rectangle_rejected",
+                            id_hash,
+                            id_empty = id.is_empty(),
+                            id_too_long = id.len() > 256,
+                            duplicate,
+                            width = *width,
+                            height = *height,
+                            "wgpu scene rejected an invalid rectangle"
+                        );
                         return Err(invalid("rectangle identity or dimensions are invalid"));
                     }
+                    run_ids.insert(id.clone());
                     draw_runs.push(DrawPrimitive::Quads(DrawRun {
                         quads: vec![DrawQuad {
                             source: QuadSource::White,
