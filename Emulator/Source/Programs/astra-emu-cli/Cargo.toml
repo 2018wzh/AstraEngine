@@ -20,6 +20,7 @@ path = "src/main.rs"
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-emu-manager-core = { path = "../../Manager/astra-emu-manager-core" }
+astra-emu-minori = { path = "../../Families/astra-emu-minori" }
 astra-headless-protocol = { path = "../../../../Engine/Source/Runtime/astra-headless-protocol" }
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
@@ -28,9 +29,14 @@ astra-platform-headless = { path = "../../../../Engine/Source/Platform/astra-pla
 astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }
 astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi" }
 clap.workspace = true
+directories.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
 image.workspace = true
+nrbf.workspace = true
+flate2.workspace = true
+fs2 = "0.4"
+globset = "0.4"
 rayon.workspace = true
 postcard.workspace = true
 schemars.workspace = true
@@ -43,6 +49,10 @@ tracing.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 astra-platform-windows = { path = "../../../../Engine/Source/Platform/astra-platform-windows" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+fuser.workspace = true
+libc.workspace = true
 
 [build-dependencies]
 sha2.workspace = true

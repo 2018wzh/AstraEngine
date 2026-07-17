@@ -202,10 +202,13 @@ export component ManagerWindow inherits Window {
     in-out property <bool> diagnostics-overlay-active: false;
     in-out property <bool> patches-overlay-active: false;
     in-out property <bool> filters-overlay-active: false;
-    property <bool> overlay-active: root.translation-overlay-active || root.diagnostics-overlay-active || root.patches-overlay-active || root.filters-overlay-active;
+    in-out property <bool> vfs-overlay-active: false;
+    property <bool> overlay-active: root.translation-overlay-active || root.diagnostics-overlay-active || root.patches-overlay-active || root.filters-overlay-active || root.vfs-overlay-active;
     in-out property <string> filter-preset: "none";
     in property <string> diagnostics-summary;
     in property <string> patches-summary;
+    in property <string> vfs-summary;
+    in property <string> vfs-preview;
     in property <string> translation-source;
     in property <string> translation-output;
     in property <string> translation-status;
@@ -354,6 +357,7 @@ export component ManagerWindow inherits Window {
                 Button { text: "Diagnostics"; clicked => { root.open-diagnostics(); } }
                 Button { text: "Translation"; clicked => { root.open-translation(); } }
                 Button { text: "Patches"; clicked => { root.open-patches(); } }
+                Button { text: "Files"; clicked => { root.vfs-overlay-active = true; } }
                 Button { text: "Filters"; clicked => { root.open-filters(); } }
             }
         }
@@ -416,6 +420,26 @@ export component ManagerWindow inherits Window {
                 Text { text: root.patches-summary; color: Tokens.text-muted; wrap: word-wrap; }
                 Button { text: "Use explicit no-patch mode"; clicked => { root.set-patch-mode("no_patch"); } }
                 Button { text: "Require trusted astraemu.patch.luau"; clicked => { root.set-patch-mode("trusted"); } }
+            }
+        }
+        if root.vfs-overlay-active: Rectangle {
+            x: root.usable-width >= 840px ? root.usable-x + root.usable-width - self.width - 12px : root.usable-x + 12px;
+            y: root.usable-y + 76px;
+            width: root.usable-width >= 840px ? 520px : root.usable-width - 24px;
+            min-height: 280px;
+            background: #ee1a1d24;
+            border-radius: Tokens.radius;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                HorizontalLayout {
+                    Text { text: "Mounted files"; color: Tokens.text; font-size: 17px; font-weight: 700; horizontal-stretch: 1; }
+                    Button { text: "Close"; clicked => { root.vfs-overlay-active = false; } }
+                }
+                LineEdit { placeholder-text: "Search mounted URI"; }
+                Text { text: root.vfs-summary; color: Tokens.text-muted; wrap: word-wrap; }
+                Rectangle { height: 1px; background: #455064; }
+                ScrollView { Text { text: root.vfs-preview; color: Tokens.text; wrap: word-wrap; } }
             }
         }
         if root.filters-overlay-active: Rectangle {

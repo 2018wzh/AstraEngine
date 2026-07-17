@@ -23,7 +23,7 @@ mov.paz
 汉化补丁单独备份/
 ```
 
-`mov.paz` 当前大小为 0，movie 支持仍要在 core 中保留，因为同 family 其他样本可能使用独立 movie archive。
+当前六个 archive 均非空；`mov.paz` 含 5 个 entry。文件名、计数和大小可以进入脱敏研究记录，key、payload、完整脚本文本与导出内容只保存在 ignored 私有目录。
 
 ## 参考文件
 
@@ -36,4 +36,4 @@ mov.paz
 
 ## 资料可信度
 
-PAZ 与 `.sc` 资料来自本地样本和历史工具交叉验证。实际 core 实现前必须用 `Tools/AstraEMU/minori_probe.py`、`minori_paz.py` 和手工小样本确认当前游戏的 header、TOC、压缩和脚本字段。
+PAZ 结论按 GARbro contract、本地样本观察和推测分开记录。六个真实 index 与 9837 个 entry 全读已用于复核 header、TOC、entry bounds、archive role 和 decode/cache；89 个 `.sc` 的全包 census 已确认 CP932 行式结构与 command token。未确认的 operand 语义不从文件名或文本形态猜测。

@@ -2,18 +2,18 @@
 
 ## 反编译形态
 
-第一阶段反编译只要求保真，不要求还原作者源码：
+第一阶段反编译按 CP932 行源码保真，不改写正文：
 
 ```text
-00012340: label L_0010
-00012358: msg speaker="..." text="..." voice="..."
-00012410: bg file="..." transition=fade time=500
-00012438: sprite slot=1 file="..." x=640 y=0 alpha=255
-00012490: select id=42 choices=[...]
-00012520: jump L_0100
+00012340: .label route_a
+00012358: .message <raw operands>
+00012410: .stage <raw operands>
+00012438: .transition <raw operands>
+00012490: .select <raw operands>
+00012520: .goto route_b
 ```
 
-如果字段无法命名，使用 `op_XX raw=<hex>`，同时把 stack/operand 数量写入 trace。
+如果 operand 字段无法命名，保留原始 CP932 bytes 和 source span，不输出猜测字段。正文、完整 raw operand 与 disassembly 不进入 report 或日志。
 
 ## Message
 

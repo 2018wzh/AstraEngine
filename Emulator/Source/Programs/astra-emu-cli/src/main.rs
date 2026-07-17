@@ -3,6 +3,10 @@ use std::path::PathBuf;
 use astra_emu_cli::{run_headless, run_native, HeadlessLaunch, NativeLaunch};
 use clap::{Parser, Subcommand, ValueEnum};
 
+mod minori;
+#[cfg(target_os = "linux")]
+mod minori_fuse;
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum EngineType {
     Fvp,
@@ -28,6 +32,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
+    /// Inspect, verify, extract, or prepare a private Minori PAZ decoder.
+    Minori {
+        #[command(subcommand)]
+        command: minori::MinoriCommand,
+    },
     /// Launch the selected family directly in an overlay-free native game host.
     Run {
         #[arg(long, value_enum)]
@@ -86,6 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     observability.role = astra_observability::HostRole::Cli;
     let _observability = astra_observability::init_host(observability)?;
     match Cli::parse().command {
+        CliCommand::Minori { command } => minori::run(command)?,
         CliCommand::Run {
             engine,
             game_dir,

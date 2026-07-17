@@ -60,6 +60,8 @@ pub struct ManagerViewModel {
     pub bangumi_rating: i32,
     pub bangumi_note: String,
     pub bangumi_sync_summary: String,
+    pub vfs_summary: String,
+    pub vfs_preview: String,
 }
 
 pub struct SlintManagerAdapter {
@@ -171,6 +173,10 @@ impl SlintManagerAdapter {
             .set_bangumi_note(model.bangumi_note.as_str().into());
         self.window
             .set_bangumi_sync_summary(model.bangumi_sync_summary.as_str().into());
+        self.window
+            .set_vfs_summary(model.vfs_summary.as_str().into());
+        self.window
+            .set_vfs_preview(model.vfs_preview.as_str().into());
     }
 
     pub fn window(&self) -> &ManagerWindow {
