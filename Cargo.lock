@@ -821,7 +821,6 @@ dependencies = [
  "hex",
  "image 0.25.10",
  "libc",
- "nrbf",
  "postcard",
  "rayon",
  "schemars",
@@ -7297,18 +7296,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 
 [[package]]
-name = "nrbf"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac2270c96e013b136a3618ae2702ebb40de4d668ec965a287be8498dbbbba540"
-dependencies = [
- "bitflags 2.13.1",
- "nom 8.0.0",
- "rust_decimal",
- "serde",
-]
-
-[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9376,18 +9363,6 @@ dependencies = [
  "fallible-streaming-iterator",
  "libsqlite3-sys",
  "smallvec",
-]
-
-[[package]]
-name = "rust_decimal"
-version = "1.42.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be2a24f50780bc85f09cc6ac299bdf1424302742d77221106859c9d8b102126a"
-dependencies = [
- "arrayvec",
- "num-traits",
- "serde",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -12009,7 +11984,6 @@ dependencies = [
  "cfg-if",
  "once_cell",
  "rustversion",
- "serde",
  "wasm-bindgen-macro",
  "wasm-bindgen-shared",
 ]

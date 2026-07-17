@@ -33,7 +33,6 @@ directories.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
 image.workspace = true
-nrbf.workspace = true
 flate2.workspace = true
 fs2 = "0.4"
 globset = "0.4"

@@ -11,11 +11,11 @@
 | viewer tree/stat/page/search/text/image/audio/hex | backend 已实现 | backend 分类与 bounds unit tests 通过；Slint Files 面板仍是 session 接线 scaffold，真实 UI 验收待补 |
 | desktop verify/extract | 已实现 | Windows 真实 `scr` extract 通过；staging tree 原子提交、失败清理和大小写冲突 tests 通过；macOS 运行证据待补 |
 | Linux foreground read-only FUSE | 代码已接入 | 缺真实 Linux FUSE 证据，不标完成 |
-| GARbro scheme importer | 严格入口已实现，真实导入阻断 | `nrbf 0.2.2` 对当前合法 `Formats.dat` 的 library state 回溯产生重复 library id；不使用 `BinaryFormatter` 或宽松 fallback |
+| GARbro scheme importer | 已实现 | 纯 Rust 两阶段 NRBF reader 支持有符号 object id 与 forward reference；真实 scheme 生成的私有补丁已通过六包 9837 entry 全读，不使用 managed helper 或 fallback |
 | `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command 全包通过；`select` operand 语义仍 unknown |
 | Minori VM、演出、存档、完整模拟 | 未开始 | 下一阶段 |
 
-当前合法样本的六个 archive 均非空。六个 index 与 9837 个 entry 已完成全读，第二轮为 9837 cache hits/0 misses；89 个脚本的 payload-free census 也已通过。Linux FUSE、macOS extract、GARbro scheme import 和 VM 仍各自保留独立证据边界。
+当前合法样本的六个 archive 均非空。纯 Rust GARbro scheme importer 生成的私有补丁已完成六个 index 与 9837 个 entry 全读，第二轮为 9837 cache hits/0 misses；89 个脚本的 payload-free census 也已通过。Linux FUSE、macOS extract 和 VM 仍各自保留独立证据边界。
 
 ## 下一阶段 Archive
 
