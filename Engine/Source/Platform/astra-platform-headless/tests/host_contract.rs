@@ -94,6 +94,8 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
         hash(package),
     );
     profile.artifacts.namespace = "contract".into();
+    profile.artifacts.max_audio_frames = 1_600;
+    profile.artifacts.max_duration_ns = 800 * 1_000_000_000 / 48_000;
     let session = HeadlessPlatformFactory::new(temp.path().join("artifacts"), temp.path())
         .start(profile.into())
         .await
@@ -489,6 +491,60 @@ async fn rejects_legacy_profile_shape_and_audio_limit_before_commit() {
         .unwrap_err();
     assert_eq!(error.code, PlatformErrorCode::QueueOverflow);
     session.client.abort_audio(audio).await.unwrap();
+    session.client.shutdown().await.unwrap();
+
+    let mut close_limited = HeadlessHostProfile::reference(
+        "headless-test",
+        "com.example.close-limit",
+        hash(b"build"),
+        hash(b"package"),
+    );
+    close_limited.artifacts.max_audio_frames = 1_000;
+    let session = HeadlessPlatformFactory::new(temp.path().join("close-limit"), temp.path())
+        .start(close_limited.into())
+        .await
+        .unwrap();
+    let first = session
+        .client
+        .open_audio_output(AudioOutputRequest {
+            sample_rate: 48_000,
+            channels: 2,
+            max_buffered_frames: 800,
+        })
+        .await
+        .unwrap();
+    let second = session
+        .client
+        .open_audio_output(AudioOutputRequest {
+            sample_rate: 48_000,
+            channels: 2,
+            max_buffered_frames: 800,
+        })
+        .await
+        .unwrap();
+    for output in [first, second] {
+        session
+            .client
+            .submit_audio(
+                output,
+                AudioPacket {
+                    sequence: 1,
+                    channels: 2,
+                    samples: vec![0.0; 1_600],
+                },
+            )
+            .await
+            .unwrap();
+    }
+    session.client.close_audio(first).await.unwrap();
+    assert_eq!(
+        session.client.close_audio(second).await.unwrap_err().code,
+        PlatformErrorCode::QueueOverflow
+    );
+    assert_eq!(
+        session.client.close_audio(second).await.unwrap_err().code,
+        PlatformErrorCode::StaleHandle
+    );
     session.client.shutdown().await.unwrap();
 }
 

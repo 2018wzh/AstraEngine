@@ -129,54 +129,35 @@ impl ArtifactRecorder {
         sequence: u64,
         samples: &[f32],
     ) -> Result<(), PlatformError> {
-        if !samples.len().is_multiple_of(2) {
-            return Err(integrity(
-                "artifact.wav",
-                "stereo samples are not frame aligned",
-            ));
-        }
+        self.validate_audio_timeline_samples(samples.len(), Some(samples))?;
         let frames = (samples.len() / 2) as u64;
-        self.audio_frames = self
+        let next_audio_frames = self
             .audio_frames
             .checked_add(frames)
             .ok_or_else(|| limit("artifact.audio", "audio frame counter overflowed"))?;
-        if self.audio_frames > self.policy.max_audio_frames {
-            return Err(limit("artifact.audio", "audio frame limit exceeded"));
-        }
-        let duration_ns = self
-            .audio_frames
-            .checked_mul(1_000_000_000)
-            .and_then(|v| v.checked_div(48_000))
-            .ok_or_else(|| limit("artifact.audio", "audio duration overflowed"))?;
-        if duration_ns > self.policy.max_duration_ns {
-            return Err(limit("artifact.audio", "audio duration limit exceeded"));
-        }
-        for sample in samples {
-            let value = f64::from(*sample);
-            self.audio_digest.update(sample.to_le_bytes());
-            self.audio_square_sum += value * value;
-            self.audio_peak = self.audio_peak.max(value.abs());
-            self.audio_sample_count = self.audio_sample_count.saturating_add(1);
-        }
-        self.refresh_analysis();
+        let duration_ns = audio_duration_ns(frames)?;
         if self.policy.retention == HeadlessArtifactRetention::ManifestOnly {
+            self.commit_audio_analysis(next_audio_frames, samples);
             return Ok(());
         }
-        self.audio_artifact_count = self
+        let next_artifact_count = self
             .audio_artifact_count
             .checked_add(1)
             .ok_or_else(|| limit("artifact.audio", "audio artifact counter overflowed"))?;
         let bytes = wav_bytes(samples)?;
-        self.reserve(bytes.len() as u64)?;
+        let next_total_bytes = self.validate_reserve(bytes.len() as u64)?;
         // `sequence` belongs to an individual audio output and may restart after a
         // snapshot restore recreates platform handles. Artifact identity is session-wide,
         // so use a recorder-owned monotonic ordinal and retain the source sequence only
         // as diagnostic context in the file name.
         let relative = format!(
             "audio/output-{:010}-source-{sequence:010}.wav",
-            self.audio_artifact_count
+            next_artifact_count
         );
         atomic_write(&self.root.join(&relative), &bytes)?;
+        self.audio_artifact_count = next_artifact_count;
+        self.total_bytes = next_total_bytes;
+        self.commit_audio_analysis(next_audio_frames, samples);
         self.manifest.artifacts.push(ArtifactEntry::Audio {
             relative_path: relative,
             sha256: astra_core::Hash256::from_sha256(&bytes).to_string(),
@@ -184,21 +165,29 @@ impl ArtifactRecorder {
             sample_rate: 48_000,
             channels: 2,
             frame_count: frames,
-            duration_ns: frames
-                .checked_mul(1_000_000_000)
-                .and_then(|value| value.checked_div(48_000))
-                .ok_or_else(|| limit("artifact.audio", "audio duration overflowed"))?,
+            duration_ns,
             checkpoint: None,
         });
         self.commit_manifest()
     }
 
     pub(crate) fn validate_audio_timeline(&self, sample_count: usize) -> Result<(), PlatformError> {
+        self.validate_audio_timeline_samples(sample_count, None)
+    }
+
+    fn validate_audio_timeline_samples(
+        &self,
+        sample_count: usize,
+        samples: Option<&[f32]>,
+    ) -> Result<(), PlatformError> {
         if !sample_count.is_multiple_of(2) {
             return Err(integrity(
                 "artifact.wav",
                 "stereo samples are not frame aligned",
             ));
+        }
+        if samples.is_some_and(|samples| samples.iter().any(|sample| !sample.is_finite())) {
+            return Err(integrity("artifact.wav", "audio sample is not finite"));
         }
         let frames = (sample_count / 2) as u64;
         let total_frames = self
@@ -208,10 +197,9 @@ impl ArtifactRecorder {
         if total_frames > self.policy.max_audio_frames {
             return Err(limit("artifact.audio", "audio frame limit exceeded"));
         }
-        let duration_ns = total_frames
-            .checked_mul(1_000_000_000)
-            .and_then(|value| value.checked_div(48_000))
-            .ok_or_else(|| limit("artifact.audio", "audio duration overflowed"))?;
+        // Multiple outputs may overlap in wall time. `max_audio_frames` bounds their
+        // aggregate retained data; `max_duration_ns` bounds each individual artifact.
+        let duration_ns = audio_duration_ns(frames)?;
         if duration_ns > self.policy.max_duration_ns {
             return Err(limit("artifact.audio", "audio duration limit exceeded"));
         }
@@ -228,6 +216,18 @@ impl ArtifactRecorder {
             }
         }
         Ok(())
+    }
+
+    fn commit_audio_analysis(&mut self, next_audio_frames: u64, samples: &[f32]) {
+        self.audio_frames = next_audio_frames;
+        for sample in samples {
+            let value = f64::from(*sample);
+            self.audio_digest.update(sample.to_le_bytes());
+            self.audio_square_sum += value * value;
+            self.audio_peak = self.audio_peak.max(value.abs());
+            self.audio_sample_count = self.audio_sample_count.saturating_add(1);
+        }
+        self.refresh_analysis();
     }
 
     pub(crate) fn finish(&mut self) -> Result<String, PlatformError> {
@@ -257,6 +257,12 @@ impl ArtifactRecorder {
     }
 
     fn reserve(&mut self, bytes: u64) -> Result<(), PlatformError> {
+        let next = self.validate_reserve(bytes)?;
+        self.total_bytes = next;
+        Ok(())
+    }
+
+    fn validate_reserve(&self, bytes: u64) -> Result<u64, PlatformError> {
         if (self.manifest.artifacts.len() as u64) >= self.policy.max_artifacts {
             return Err(limit("artifact.commit", "artifact count limit exceeded"));
         }
@@ -267,8 +273,7 @@ impl ArtifactRecorder {
         if next > self.policy.max_total_bytes {
             return Err(limit("artifact.commit", "artifact byte limit exceeded"));
         }
-        self.total_bytes = next;
-        Ok(())
+        Ok(next)
     }
 
     fn commit_manifest(&self) -> Result<(), PlatformError> {
@@ -302,6 +307,13 @@ fn finite_db(value: f64) -> Option<f64> {
     } else {
         Some(20.0 * value.log10())
     }
+}
+
+fn audio_duration_ns(frames: u64) -> Result<u64, PlatformError> {
+    frames
+        .checked_mul(1_000_000_000)
+        .and_then(|value| value.checked_div(48_000))
+        .ok_or_else(|| limit("artifact.audio", "audio duration overflowed"))
 }
 
 fn wav_bytes(samples: &[f32]) -> Result<Vec<u8>, PlatformError> {

@@ -506,10 +506,13 @@ impl HostState {
             }
             HostCommand::CloseAudio { output, reply } => {
                 let result = (|| {
-                    let state = self.audio.get(output)?;
+                    // Handle lifetime is independent from artifact persistence. Once close
+                    // begins, remove the platform resource even if bounded artifact commit
+                    // fails, so cleanup reports the owning error instead of a secondary leak.
+                    let state = self.audio.remove(output)?;
                     self.artifacts
                         .record_audio(state.last_sequence.max(1), &state.timeline)?;
-                    self.audio.remove(output).map(|_| ())
+                    Ok(())
                 })();
                 let _ = reply.send(result);
             }
