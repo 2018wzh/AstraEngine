@@ -5,6 +5,10 @@
       "status": "not_applicable",
       "reason": "pure schema, identifiers, hashes and diagnostic value types"
     },
+    "astra-byte-source": {
+      "status": "not_applicable",
+      "reason": "pure bounded byte-range source contract and deterministic in-memory implementation"
+    },
     "astra-ui-core": {
       "status": "not_applicable",
       "reason": "pure schema and validation contract for backend-neutral UI data"
@@ -244,6 +248,10 @@
     "astra-emu-translation-openai-compatible": {
       "status": "instrumented",
       "reason": "translation request, retry and circuit-breaker lifecycle"
+    },
+    "astra-emu-metadata": {
+      "status": "instrumented",
+      "reason": "metadata provider creation and remote request lifecycle"
     },
     "astra-emu-manager-ui-slint": {
       "status": "not_applicable",

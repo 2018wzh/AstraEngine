@@ -18,6 +18,7 @@
     "host_kind",
     "input_sequence_hash",
     "lifecycle_steps",
+    "phase_timings",
     "presented_frames",
     "profile_hash",
     "runtime_provider_id",
@@ -27,6 +28,7 @@
     "snapshot_round_trip_verified",
     "status",
     "terminal_reached",
+    "vfs_access",
     "visual_trace_hash"
   ],
   "properties": {
@@ -88,6 +90,9 @@
         "type": "string"
       }
     },
+    "phase_timings": {
+      "$ref": "#/definitions/HeadlessPhaseTimingEvidenceV1"
+    },
     "presented_frames": {
       "type": "integer",
       "format": "uint64",
@@ -95,6 +100,16 @@
     },
     "profile_hash": {
       "$ref": "#/definitions/Hash256"
+    },
+    "resource_audit": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HeadlessResourceAuditEvidenceV1"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "runtime_provider_id": {
       "type": "string"
@@ -116,6 +131,9 @@
     },
     "terminal_reached": {
       "type": "boolean"
+    },
+    "vfs_access": {
+      "$ref": "#/definitions/HeadlessVfsAccessEvidenceV1"
     },
     "visual_trace_hash": {
       "$ref": "#/definitions/Hash256"
@@ -155,6 +173,150 @@
         },
         "observation_hash": {
           "$ref": "#/definitions/Hash256"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HeadlessDurationDistributionV1": {
+      "type": "object",
+      "required": [
+        "max_ns",
+        "median_ns",
+        "p95_ns",
+        "sample_count",
+        "total_ns"
+      ],
+      "properties": {
+        "max_ns": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "median_ns": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "p95_ns": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "sample_count": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "total_ns": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "HeadlessPhaseTimingEvidenceV1": {
+      "type": "object",
+      "required": [
+        "effect_dispatch",
+        "media",
+        "present",
+        "raster",
+        "runtime_step",
+        "step_total"
+      ],
+      "properties": {
+        "effect_dispatch": {
+          "$ref": "#/definitions/HeadlessDurationDistributionV1"
+        },
+        "media": {
+          "$ref": "#/definitions/HeadlessDurationDistributionV1"
+        },
+        "present": {
+          "$ref": "#/definitions/HeadlessDurationDistributionV1"
+        },
+        "raster": {
+          "$ref": "#/definitions/HeadlessDurationDistributionV1"
+        },
+        "runtime_step": {
+          "$ref": "#/definitions/HeadlessDurationDistributionV1"
+        },
+        "step_total": {
+          "$ref": "#/definitions/HeadlessDurationDistributionV1"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HeadlessResourceAuditEvidenceV1": {
+      "type": "object",
+      "required": [
+        "bytes_read",
+        "manifest_hash",
+        "max_range_bytes",
+        "range_count",
+        "resource_count"
+      ],
+      "properties": {
+        "bytes_read": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "manifest_hash": {
+          "$ref": "#/definitions/Hash256"
+        },
+        "max_range_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "range_count": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "resource_count": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "HeadlessVfsAccessEvidenceV1": {
+      "type": "object",
+      "required": [
+        "bytes_read",
+        "max_range_bytes",
+        "read_count",
+        "resource_count",
+        "unique_range_count"
+      ],
+      "properties": {
+        "bytes_read": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "max_range_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "read_count": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "resource_count": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "unique_range_count": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
         }
       },
       "additionalProperties": false

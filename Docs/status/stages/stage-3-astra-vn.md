@@ -71,18 +71,12 @@ cargo test -p astra-vn-runtime-provider --test game_runtime_provider
 cargo test -p astra-vn-runtime-provider --test runtime_provider_ffi
 cargo test -p astra-runtime --test trigger_event
 cargo test -p astra-test --test vn_scenario
-cargo test -p astra-cli --test target_platform nativevn_sample_runs_opt_in_advanced_presentation_gate
-cargo test -p astra-cli --test target_platform nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes
-cargo test -p astra-cli --test target_platform package_build_includes_target_filtered_tsuinosora_sections
-cargo test -p astra-cli --test target_platform tsuinosora_synthetic_gate_runs_internal_and_patch_player_routes
-cargo test -p astra-cli --test target_platform tsuinosora_demo_slice_generates_playable_nativevn_and_player_routes
-cargo test -p astra-cli --test target_platform tsuinosora_internal_demo_builds_asset_package_and_bundles
+cargo test -p astra-cli --test target_platform nativevn_minimal_profile_cooks_packages_and_runs_headless -- --exact
 cargo test -p astra-player-core
 cargo test -p astra-player --features platform-test-driver --test windows_input_automation
 cargo test -p astra-player --test web_input_automation
 cargo test -p astra-release release_gate_accepts_player_full_playable_only_with_matching_live_report
 cargo test -p astra-release --test release_report release_gate_
-cargo test -p astra-release --test release_report tsuinosora
 python Tools/TsuiNoSora/tests/test_asset_analysis.py
 python Tools/TsuiNoSora/tests/test_asset_analysis.py -k internal_demo_bundle
 python Tools/TsuiNoSora/tests/test_asset_analysis.py -k projectorrays
@@ -182,7 +176,7 @@ python Tools/check_docs.py
 4. 保持 `VnRuntimeState`、`vn.runtime_state`、`vn.policy_state`、VN package sections 和 `vn.*` release gate 的兼容性。
 5. 编写 provider smoke、package/release continuity、missing binding blocking 和 replay hash 测试。
 
-**Done Evidence:** `cargo test -p astra-plugin-abi runtime_provider_abi`、`cargo test -p astra-plugin runtime_provider_registry`、`cargo test -p astra-vn-runtime-provider --test game_runtime_provider`、`cargo test -p astra-vn-runtime-provider --test runtime_provider_ffi`、`cargo test -p astra-test --test vn_scenario`、`cargo test -p astra-release --test release_report runtime_provider` 和 `cargo test -p astra-cli --test target_platform nativevn_sample_cooks_packages_validates_and_runs_full_playthrough` 通过。NativeVN session 使用 RuntimeWorld 的 `astra.vn.step` action；FFI 覆盖 instance create/destroy、package-bound open、step、hashed save section、restore、shutdown 和活动 session destroy blocker；release report 输出 behavior state/event/presentation hash。VN provider 不能被 AstraEMU/AstraRPG 当作基类复用。
+**Done Evidence:** `cargo test -p astra-plugin-abi runtime_provider_abi`、`cargo test -p astra-plugin runtime_provider_registry`、`cargo test -p astra-vn-runtime-provider --test game_runtime_provider`、`cargo test -p astra-vn-runtime-provider --test runtime_provider_ffi`、`cargo test -p astra-test --test vn_scenario`、`cargo test -p astra-release --test release_report runtime_provider` 和 `cargo test -p astra-cli --test target_platform nativevn_minimal_profile_cooks_packages_and_runs_headless` 通过。NativeVN session 使用 RuntimeWorld 的 `astra.vn.step` action；FFI 覆盖 instance create/destroy、package-bound open、step、hashed save section、restore、shutdown 和活动 session destroy blocker；release report 输出 behavior state/event/presentation hash。VN provider 不能被 AstraEMU/AstraRPG 当作基类复用。
 
 **Linked Test IDs:** `T-S3-RUNTIME-PROVIDER-01`
 
@@ -471,7 +465,7 @@ python Tools/check_docs.py
 3. 编写 full scenario，穿过 system UI、save/load、replay 和 release gate。
 4. 接入 `vn.advanced_presentation`、`presentation.fallback`、`renderer.effect_budget` 和 `timeline.join_cancel` evidence。
 
-**Current Evidence:** `cargo test -p astra-vn-package --test advanced_presentation` 和 `cargo test -p astra-cli --test target_platform nativevn_sample_runs_opt_in_advanced_presentation_gate` 通过；advanced profile 已收进 NativeVN，两条路线覆盖 `vn.advanced_presentation`、`timeline.join_cancel`、`presentation.fallback`、`voice.sync`、`renderer.effect_budget`、save/load 和 replay hash。Windows/Web formal runner 尚未形成真实宿主证据，因此本项仍为 `IN_PROGRESS`。
+**Current Evidence:** `cargo test -p astra-vn-package --test advanced_presentation` 覆盖 advanced profile 的 package contract；Windows/Web formal runner 尚未形成真实宿主证据，因此本项仍为 `IN_PROGRESS`。
 
 **Linked Test IDs:** `T-S3-ADVANCED-01`
 
@@ -515,7 +509,7 @@ python Tools/check_docs.py
 3. `scenarios/full_playthrough.yaml` 覆盖启动、movie/voice wait、choice、路线、系统页、save/load、config、gallery/replay unlock 和 replay_from_start。
 4. `astra package validate` 验证 `vn.commercial_baseline` pass，scenario 断言 backlog、read-state、voice replay、system state、route coverage 和 replay hash。
 
-**Done Evidence:** `cargo test -p astra-cli --test target_platform nativevn_sample_cooks_packages_validates_and_runs_full_playthrough` 通过；该测试执行真实 cook、package、release validate 和 headless full playthrough。
+**Done Evidence:** `cargo test -p astra-cli --test target_platform nativevn_minimal_profile_cooks_packages_and_runs_headless` 通过；该测试执行真实 cook、package、release validate 和 headless full playthrough。
 
 **Linked Test IDs:** `T-S3-SAMPLE-01`
 
@@ -538,7 +532,7 @@ python Tools/check_docs.py
 3. Release report 同时包含 `target.manifest`、`vn.commercial_baseline`、`vn.system_ui_profile` 和 `platform.eligibility`。
 4. 编写 Game target package、standalone Windows/Web bundle 和 full playthrough 测试。
 
-**Done Evidence:** `cargo test -p astra-cli --test target_platform nativevn_sample_builds_windows_and_web_bundles_and_runs_player_routes` 通过；NativeVN package 的 `target.manifest` 与 full playthrough 使用同一个 Game target id，package 包含 `vn.policy_bundle_manifest` 与 `vn.policy_bundle_source_cache`；Windows/Web bundle 由同一 `.astrapkg` 生成，bundle 内包含 package 和 `scenario.refs` 引用的公开 scenario；Windows entrypoint 无参数打开 live window，`AstraPlayer.exe --launch-report` 输出 `astra.player_launch_report.v1`，`AstraPlayer.exe --route-scenario scenarios/full_playthrough.yaml --format json` 从 bundle 内读取 config、package 和 scenario refs 后输出 `astra.player_route_report.v1`；Web bundle 写入 `index.html`、`astra-player.js`、`AstraPlayer.config.json`、`AstraPlayer.route_model.json` 和 scenario JSON，并由真实 headless browser host 读取 package hash、route model 和 scenario 后在 DOM 中输出 `astra.player_route_report.v1`。这些证据只关闭 Game target、bundle 和 route report slice；完整可玩仍依赖 `S3-PLAYER-AUTOMATION-01`。
+**Current Evidence:** Engine workspace 不再运行旗舰 Windows/Web bundle route 测试。`minimal` 只验证 cook/package 与 Headless 产品链路；正式 Game target、bundle 和平台 E3 仍为 `IN_PROGRESS`。
 
 **Linked Test IDs:** `T-S3-GAME-TARGET-01`
 

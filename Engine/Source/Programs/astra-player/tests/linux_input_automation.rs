@@ -84,6 +84,10 @@ fn linux_uinput_transcript_produces_full_playable_report() {
     };
 
     let report = LinuxUinputHost.build_report(&script, &transcript);
-    assert_eq!(report.status, PlayerAutomationStatus::Pass);
+    assert_eq!(
+        report.status,
+        PlayerAutomationStatus::Pass,
+        "unexpected report: {report:?}"
+    );
     assert!(report.full_playable_passed());
 }

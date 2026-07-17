@@ -52,8 +52,6 @@ cargo test -p astra-asset vfs_uri
 cargo test -p astra-asset vfs_overlayfs
 cargo test -p astra-plugin vfs_provider_registry
 cargo test -p astra-release vfs_mount_gate
-cargo test -p astra-release --test release_report tsuinosora
-cargo test -p astra-cli --test target_platform tsuinosora_synthetic_gate_runs_internal_and_patch_player_routes
 ```
 
 ## 不得修改项

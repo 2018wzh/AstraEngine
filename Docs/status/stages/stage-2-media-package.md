@@ -67,7 +67,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 7. 内容寻址 cache 命中必须重新验证 artifact identity；corruption/version/source drift 阻断，不能静默 recook。
 8. CLI cook 和 package 文件通过 staging + swap 原子提交；失败或取消不得覆盖上一份完整产物。
 
-**Done Evidence:** `cargo test -p astra-cook --all-targets` 覆盖 fresh/stale/blocked、graph 错误、processor drift/panic、预取消/执行中取消、cache hit/corruption、128 个节点、8 MiB payload、显式容量上限和目录原子替换；`cargo test -p astra-cli --test target_platform nativevn_sample_cooks_packages_validates_and_runs_full_playthrough` 覆盖 `astra.cook_manifest.v2`、真实项目二次 cache hit、旧输出清理和失败 recook 保留完整产物。
+**Done Evidence:** `cargo test -p astra-cook --all-targets` 覆盖 fresh/stale/blocked、graph 错误、processor drift/panic、预取消/执行中取消、cache hit/corruption、128 个节点、8 MiB payload、显式容量上限和目录原子替换；`cargo test -p astra-cli --test target_platform nativevn_minimal_profile_cooks_packages_and_runs_headless` 覆盖 `astra.cook_manifest.v2`、NativeVN `minimal` 字体资产、package section 与 Headless 消费；cache、旧输出清理和失败 recook rollback 由 `astra-cook` focused tests 负责。
 
 **Linked Test IDs:** `T-S2-ASSET-02`
 
@@ -113,7 +113,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 4. 实现固定 priority overlay 解析、whiteout allowlist、local authorized root host capability、bounds/hash validation 和 URI/path normalization。
 5. Release Gate 校验 URI、prefix/provider/capability、package section bounds/hash、overlay whiteout、catalog 引用和 payload/path redaction。
 
-**Done Evidence:** `cargo test -p astra-asset vfs_uri`、`cargo test -p astra-asset vfs_overlayfs`、`cargo test -p astra-package package_vfs_mount`、`cargo test -p astra-package package_roundtrip`、`cargo test -p astra-plugin vfs_provider_registry`、`cargo test -p astra-release vfs_mount_gate` 和 `cargo test -p astra-cli --test target_platform tsuinosora_synthetic_gate_runs_internal_and_patch_player_routes` 通过；report 覆盖 `vfs.uri_format`、`vfs.prefix_registry`、`vfs.package_mount`、`vfs.overlay_mount`、`vfs.catalog`、旧 `asset.registry` blocking、path leak blocking 和 payload leak blocking。legacy pack reader 实现仍留 Stage 5。
+**Done Evidence:** `cargo test -p astra-asset vfs_uri`、`cargo test -p astra-asset vfs_overlayfs`、`cargo test -p astra-package package_vfs_mount`、`cargo test -p astra-package package_roundtrip`、`cargo test -p astra-plugin vfs_provider_registry`、`cargo test -p astra-release vfs_mount_gate` 和  通过；report 覆盖 `vfs.uri_format`、`vfs.prefix_registry`、`vfs.package_mount`、`vfs.overlay_mount`、`vfs.catalog`、旧 `asset.registry` blocking、path leak blocking 和 payload leak blocking。legacy pack reader 实现仍留 Stage 5。
 
 **Linked Test IDs:** `T-S2-VFS-01`
 

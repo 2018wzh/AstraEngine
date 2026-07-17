@@ -16,6 +16,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 async fn spawn_tls_range_server(
     payload: &'static [u8],
 ) -> (String, Vec<u8>, tokio::task::JoinHandle<()>) {
+    if tokio_rustls::rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = tokio_rustls::rustls::crypto::aws_lc_rs::default_provider().install_default();
+    }
+    assert!(
+        tokio_rustls::rustls::crypto::CryptoProvider::get_default().is_some(),
+        "the TLS range-server fixture requires an explicit rustls crypto provider"
+    );
     let certified = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let certificate_pem = certified.cert.pem().into_bytes();
     let certificate = certified.cert.der().clone();

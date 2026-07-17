@@ -87,7 +87,7 @@ cargo test -p astra-vn --test vn_dylib_facade
 cargo test -p astra-vn-plugin --test vn_plugin_extensions
 cargo test -p astra-test --test vn_scenario
 cargo test -p astra-release --test release_report release_gate_
-cargo test -p astra-cli --test target_platform nativevn_sample_cooks_packages_validates_and_runs_full_playthrough
+cargo test -p astra-cli --test target_platform nativevn_minimal_profile_cooks_packages_and_runs_headless
 ```
 
 ## 不得修改项

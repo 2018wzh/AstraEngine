@@ -5,7 +5,7 @@ use astra_core::{
 use astra_emu_manager_core::EmuReleaseManifestV1;
 use astra_package::{
     AstraContainerBuilder, ContainerKind, PackageBuildRequest, PackageBuilder, PackageManifest,
-    SectionPayload, CURRENT_CONTAINER_VERSION,
+    PackageReader, SectionPayload, CURRENT_CONTAINER_VERSION,
 };
 use astra_platform::{
     ConformanceCheck, ConformanceStatus, PlatformCapabilityReport, PlatformHostConformanceReport,
@@ -140,6 +140,35 @@ fn shipping_release_target_cannot_declare_headless_platform() {
         "desktop-release",
         "nativevn-game",
         "ASTRA_HEADLESS_RELEASE_TARGET",
+    );
+}
+
+#[astra_headless_test::test]
+fn release_gate_blocks_nativevn_minimal_engine_test_profile() {
+    let blob = package_with_target_manifest(
+        "minimal",
+        nativevn_target_manifest(),
+        vec![cooked_project_section("minimal", "nativevn-game")],
+    );
+    let report = ReleaseValidator
+        .validate_package(PackageValidateRequest {
+            package_bytes: blob.into_bytes(),
+            profile: "minimal".to_string(),
+            require_ffmpeg: false,
+            target: Some("nativevn-game".to_string()),
+            require_platform_report: false,
+            platform_report: None,
+        })
+        .unwrap();
+    let check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "profile.engine_test_isolation")
+        .unwrap();
+    assert_eq!(check.status, CheckStatus::Blocked);
+    assert_eq!(
+        check.diagnostic.as_ref().unwrap().code,
+        "ASTRA_ENGINE_TEST_PROFILE_RELEASE"
     );
 }
 
@@ -309,7 +338,10 @@ fn release_gate_accepts_player_full_playable_only_with_matching_live_report() {
     ))
     .unwrap();
     let package_bytes = blob.into_bytes();
-    let package_hash = Hash256::from_sha256(&package_bytes).to_string();
+    let package_hash = PackageReader::open(&package_bytes)
+        .unwrap()
+        .package_hash()
+        .to_string();
 
     let base = ReleaseValidator
         .validate_package(package_request(package_bytes.clone()))
@@ -322,11 +354,7 @@ fn release_gate_accepts_player_full_playable_only_with_matching_live_report() {
     let report = ReleaseValidator
         .validate_package_with_player_report(
             package_request(package_bytes.clone()),
-            Some(player_report(
-                &package_hash,
-                "classic",
-                "tsuinosora-internal-game",
-            )),
+            Some(player_report(&package_hash, "classic", "test-game")),
         )
         .unwrap();
     let player_check = report
@@ -335,7 +363,11 @@ fn release_gate_accepts_player_full_playable_only_with_matching_live_report() {
         .find(|check| check.id == "player.full_playable")
         .unwrap();
     assert_eq!(player_check.domain, ReleaseDomain::Player);
-    assert_eq!(player_check.status, CheckStatus::Pass);
+    assert_eq!(
+        player_check.status,
+        CheckStatus::Pass,
+        "unexpected player check: {player_check:?}"
+    );
 
     let blocked = ReleaseValidator
         .validate_package_with_player_report(
@@ -343,7 +375,7 @@ fn release_gate_accepts_player_full_playable_only_with_matching_live_report() {
             Some(player_report(
                 "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                 "classic",
-                "tsuinosora-internal-game",
+                "test-game",
             )),
         )
         .unwrap();
@@ -364,10 +396,13 @@ fn release_gate_requires_capability_conformance_player_identity_continuity() {
     ))
     .unwrap();
     let package_bytes = blob.into_bytes();
-    let package_hash = Hash256::from_sha256(&package_bytes).to_string();
+    let package_hash = PackageReader::open(&package_bytes)
+        .unwrap()
+        .package_hash()
+        .to_string();
     let capability = platform_capability(
         PlatformId::Windows,
-        "tsuinosora-internal-game",
+        "test-game",
         &["wgpu_hardware", "wmf", "wasapi", "saved_games"],
     );
     let session_id = "session.windows.release";
@@ -387,7 +422,7 @@ fn release_gate_requires_capability_conformance_player_identity_continuity() {
         checks,
         diagnostics: Vec::new(),
     };
-    let mut player = player_report(&package_hash, "classic", "tsuinosora-internal-game");
+    let mut player = player_report(&package_hash, "classic", "test-game");
     let full = player
         .checks
         .iter_mut()
@@ -427,10 +462,13 @@ fn release_gate_accepts_only_measured_performance_from_the_same_clean_product_ru
     ))
     .unwrap();
     let package_bytes = blob.into_bytes();
-    let package_hash = Hash256::from_sha256(&package_bytes).to_string();
+    let package_hash = PackageReader::open(&package_bytes)
+        .unwrap()
+        .package_hash()
+        .to_string();
     let capability = platform_capability(
         PlatformId::Windows,
-        "tsuinosora-internal-game",
+        "test-game",
         &["wgpu_hardware", "wmf", "wasapi", "saved_games"],
     );
     let session_id = "session.windows.performance";
@@ -449,7 +487,7 @@ fn release_gate_accepts_only_measured_performance_from_the_same_clean_product_ru
             .collect(),
         diagnostics: Vec::new(),
     };
-    let mut player = player_report(&package_hash, "classic", "tsuinosora-internal-game");
+    let mut player = player_report(&package_hash, "classic", "test-game");
     player.checks[0].evidence.extend([
         PlayerAutomationEvidence {
             key: "profile_hash".into(),
@@ -536,9 +574,17 @@ fn release_gate_accepts_only_measured_performance_from_the_same_clean_product_ru
             }],
         )
         .unwrap();
-    assert!(report.checks.iter().any(|check| {
-        check.id == "performance.product_run" && check.status == CheckStatus::Pass
-    }));
+    assert!(
+        report.checks.iter().any(|check| {
+            check.id == "performance.product_run" && check.status == CheckStatus::Pass
+        }),
+        "unexpected performance checks: {:?}",
+        report
+            .checks
+            .iter()
+            .filter(|check| check.id == "performance.product_run")
+            .collect::<Vec<_>>()
+    );
     assert!(report
         .checks
         .iter()
@@ -1950,903 +1996,6 @@ fn release_gate_accepts_system_story_manifest_for_classic_profile() {
         .any(|entry| entry.key == "page_count" && entry.value == "10"));
 }
 
-#[astra_headless_test::test]
-fn release_gate_blocks_missing_tsuinosora_sections_for_tsuinosora_target() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let sections = package_sections_for_project(
-        &compiled,
-        &["classic".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    let blob = package_with_target_manifest("classic", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "classic".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.reference_evidence")
-        .unwrap();
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert_eq!(
-        check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_TSUI_SECTION_MISSING"
-    );
-}
-
-#[astra_headless_test::test]
-fn release_gate_accepts_tsuinosora_sections_for_classic_profile() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["classic".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections(
-        "tsuinosora-internal-game",
-        false,
-        false,
-    ));
-    let blob = package_with_target_manifest("classic", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "classic".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    for id in [
-        "tsuinosora.reference_evidence",
-        "tsuinosora.asset_analysis",
-        "tsuinosora.conversion_manifest",
-        "tsuinosora.mount_policy",
-    ] {
-        assert!(
-            report
-                .checks
-                .iter()
-                .any(|check| check.id == id && check.status == CheckStatus::Pass),
-            "missing pass check {id}"
-        );
-    }
-}
-
-#[astra_headless_test::test]
-fn release_gate_blocks_tsuinosora_reference_hash_mismatch() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["classic".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    let mut tsui_sections = tsuinosora_sections("tsuinosora-internal-game", false, false);
-    let reference = tsui_sections
-        .iter_mut()
-        .find(|section| section.id == "tsuinosora.reference_evidence")
-        .unwrap();
-    reference.payload = serde_json::json!({
-        "schema": "tsuinosora.visual_reference_report.v1",
-        "status": "pass",
-        "references": [
-            {
-                "logical_id": "title",
-                "file_name": "Title.png",
-                "dimensions": {"width": 1386, "height": 1040},
-                "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-                "allowed_regions": ["title_background", "title_menu_buttons"]
-            },
-            {
-                "logical_id": "game",
-                "file_name": "Game.png",
-                "dimensions": {"width": 1403, "height": 1053},
-                "hash": "sha256:1c4ddf68fa15fd6a76db259b155366456198bd551c49de8a9ede9ca0f2be9d84",
-                "allowed_regions": ["background_viewport", "text_window"]
-            }
-        ],
-        "diagnostics": [],
-        "prohibited_outputs": ["new_commercial_screenshot", "commercial_audio"]
-    })
-    .to_string()
-    .into_bytes();
-    sections.extend(tsui_sections);
-    let blob = package_with_target_manifest("classic", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "classic".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.reference_evidence")
-        .unwrap();
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert_eq!(
-        check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_TSUI_REFERENCE_HASH_MISMATCH"
-    );
-}
-
-#[astra_headless_test::test]
-fn release_gate_blocks_tsuinosora_asset_quarantine() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["classic".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections("tsuinosora-internal-game", true, false));
-    let blob = package_with_target_manifest("classic", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "classic".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.asset_analysis")
-        .unwrap();
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert_eq!(
-        check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_TSUI_ASSET_QUARANTINE"
-    );
-}
-
-#[astra_headless_test::test]
-fn release_gate_blocks_empty_tsuinosora_asset_analysis() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["classic".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections(
-        "tsuinosora-internal-game",
-        false,
-        false,
-    ));
-    sections.retain(|section| section.id != "tsuinosora.asset_analysis");
-    sections.push(json_section(
-        "tsuinosora.asset_analysis",
-        "tsuinosora.asset_analysis.v1",
-        serde_json::json!({
-            "schema": "tsuinosora.asset_analysis.v1",
-            "status": "pass",
-            "reference_hashes": [
-                "sha256:3799183a831bdbdc144e1bc9e06dffd831417d436338a1daf04b45bc35624bca",
-                "sha256:1c4ddf68fa15fd6a76db259b155366456198bd551c49de8a9ede9ca0f2be9d84"
-            ],
-            "assets": [],
-            "quarantine": [],
-            "diagnostics": [],
-            "redaction": {"paths": "alias_or_report_relative_only", "payload": "omitted"}
-        }),
-    ));
-    let blob = package_with_target_manifest("classic", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "classic".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.asset_analysis")
-        .unwrap();
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert_eq!(
-        check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_TSUI_ASSET_ANALYSIS_EMPTY"
-    );
-}
-
-#[astra_headless_test::test]
-fn release_gate_requires_tsuinosora_modern_profile_report() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["classic".to_string(), "modern".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections(
-        "tsuinosora-internal-game",
-        false,
-        false,
-    ));
-    let blob = package_with_target_manifest("modern", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "modern".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-    let missing = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.modern_profile_report")
-        .unwrap();
-    assert_eq!(missing.status, CheckStatus::Blocked);
-
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["classic".to_string(), "modern".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections("tsuinosora-internal-game", false, true));
-    let blob = package_with_target_manifest("modern", tsuinosora_target_manifest(), sections);
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "modern".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-    assert!(report.checks.iter().any(|check| {
-        check.id == "tsuinosora.modern_profile_report" && check.status == CheckStatus::Pass
-    }));
-}
-
-#[astra_headless_test::test]
-fn release_gate_blocks_tsuinosora_conversion_route_gap() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["classic".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections(
-        "tsuinosora-internal-game",
-        false,
-        false,
-    ));
-    sections.retain(|section| section.id != "tsuinosora.conversion_manifest");
-    sections.push(json_section(
-        "tsuinosora.conversion_manifest",
-        "tsuinosora.conversion_report.v1",
-        serde_json::json!({
-            "schema": "tsuinosora.conversion_report.v1",
-            "status": "pass",
-            "counts": {"source_files": 2, "asset_count": 1, "quarantine_count": 0, "route_count": 1},
-            "routes": [{"route_id": "classic.main", "coverage": "missing"}],
-            "diagnostics": [],
-            "redaction": {"paths": "alias_only", "payload": "omitted"}
-        }),
-    ));
-    let blob = package_with_target_manifest("classic", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "classic".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.conversion_manifest")
-        .unwrap();
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert_eq!(
-        check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_TSUI_ROUTE_COVERAGE"
-    );
-}
-
-#[astra_headless_test::test]
-fn release_gate_blocks_tsuinosora_conversion_without_resource_evidence() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["classic".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections(
-        "tsuinosora-internal-game",
-        false,
-        false,
-    ));
-    sections.retain(|section| section.id != "tsuinosora.conversion_manifest");
-    sections.push(json_section(
-        "tsuinosora.conversion_manifest",
-        "tsuinosora.conversion_report.v1",
-        serde_json::json!({
-            "schema": "tsuinosora.conversion_report.v1",
-            "status": "pass",
-            "inputs": {"original_install_root": "original_install_root"},
-            "counts": {
-                "source_files": 2,
-                "asset_count": 0,
-                "quarantine_count": 0,
-                "route_count": 1
-            },
-            "resources": [],
-            "routes": [{
-                "route_id": "classic.main",
-                "coverage": "covered",
-                "terminal": "ending.good"
-            }],
-            "diagnostics": [],
-            "redaction": {"paths": "alias_only", "payload": "omitted"}
-        }),
-    ));
-    let blob = package_with_target_manifest("classic", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "classic".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.conversion_manifest")
-        .unwrap();
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert_eq!(
-        check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_TSUI_CONVERSION_RESOURCE_EVIDENCE"
-    );
-    assert!(check
-        .evidence
-        .iter()
-        .any(|evidence| evidence.key == "resource_count" && evidence.value == "0"));
-}
-
-#[astra_headless_test::test]
-fn release_gate_blocks_tsuinosora_conversion_resource_without_hash_evidence() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["classic".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections(
-        "tsuinosora-internal-game",
-        false,
-        false,
-    ));
-    sections.retain(|section| section.id != "tsuinosora.conversion_manifest");
-    sections.push(json_section(
-        "tsuinosora.conversion_manifest",
-        "tsuinosora.conversion_report.v1",
-        serde_json::json!({
-            "schema": "tsuinosora.conversion_report.v1",
-            "status": "pass",
-            "inputs": {"original_install_root": "original_install_root"},
-            "counts": {
-                "source_files": 2,
-                "asset_count": 1,
-                "quarantine_count": 0,
-                "route_count": 1
-            },
-            "resources": [{
-                "source": "containers/ready/0001_png.png",
-                "native_path": "native-assets/backgrounds/0001_png.png",
-                "classification": "background",
-                "byte_size": 68
-            }],
-            "routes": [{
-                "route_id": "classic.main",
-                "coverage": "covered",
-                "terminal": "ending.good"
-            }],
-            "diagnostics": [],
-            "redaction": {"paths": "alias_only", "payload": "omitted"}
-        }),
-    ));
-    let blob = package_with_target_manifest("classic", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "classic".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.conversion_manifest")
-        .unwrap();
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert_eq!(
-        check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_TSUI_CONVERSION_RESOURCE_EVIDENCE"
-    );
-    assert!(check
-        .evidence
-        .iter()
-        .any(|evidence| evidence.key == "field" && evidence.value == "resources.0.source_hash"));
-}
-
-#[astra_headless_test::test]
-fn release_gate_blocks_tsuinosora_report_path_leak() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["classic".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections(
-        "tsuinosora-internal-game",
-        false,
-        false,
-    ));
-    sections.retain(|section| section.id != "tsuinosora.mount_policy");
-    let leaked_alias = ["C", ":/", "local-source"].concat();
-    sections.push(json_section(
-        "tsuinosora.mount_policy",
-        "tsuinosora.mount_policy.v1",
-        serde_json::json!({
-            "schema": "tsuinosora.mount_policy.v1",
-            "target": "tsuinosora-internal-game",
-            "status": "pass",
-            "aliases": [{
-                "alias": "original",
-                "value": leaked_alias,
-                "hash_policy": "manifest_required",
-                "fallback": "blocking"
-            }],
-            "diagnostics": []
-        }),
-    ));
-    let blob = package_with_target_manifest("classic", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "classic".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.mount_policy")
-        .unwrap();
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert_eq!(
-        check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_TSUI_REPORT_PATH_LEAK"
-    );
-}
-
-#[astra_headless_test::test]
-fn release_gate_blocks_tsuinosora_report_payload_field_leak() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["classic".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections(
-        "tsuinosora-internal-game",
-        false,
-        false,
-    ));
-    sections.retain(|section| section.id != "tsuinosora.conversion_manifest");
-    sections.push(json_section(
-        "tsuinosora.conversion_manifest",
-        "tsuinosora.conversion_report.v1",
-        serde_json::json!({
-            "schema": "tsuinosora.conversion_report.v1",
-            "status": "pass",
-            "counts": {
-                "source_files": 2,
-                "asset_count": 1,
-                "quarantine_count": 0,
-                "route_count": 1
-            },
-            "routes": [{
-                "route_id": "classic.main",
-                "coverage": "covered",
-                "terminal": "ending.good",
-                "script_text": "commercial text must never enter release reports"
-            }],
-            "diagnostics": [],
-            "redaction": {"paths": "alias_only", "payload": "omitted"}
-        }),
-    ));
-    let blob = package_with_target_manifest("classic", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "classic".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.conversion_manifest")
-        .unwrap();
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert_eq!(
-        check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_TSUI_REPORT_PAYLOAD_LEAK"
-    );
-    assert!(check
-        .evidence
-        .iter()
-        .any(|evidence| evidence.key == "field" && evidence.value == "routes.0.script_text"));
-}
-
-#[astra_headless_test::test]
-fn release_gate_requires_tsuinosora_manual_signoff_for_release_profile() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["desktop-release".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections(
-        "tsuinosora-internal-game",
-        false,
-        false,
-    ));
-    let blob =
-        package_with_target_manifest("desktop-release", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "desktop-release".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-    let missing = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.manual_signoff")
-        .unwrap();
-    assert_eq!(missing.status, CheckStatus::Blocked);
-    assert_eq!(
-        missing.diagnostic.as_ref().unwrap().code,
-        "ASTRA_TSUI_SECTION_MISSING"
-    );
-
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["desktop-release".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections(
-        "tsuinosora-internal-game",
-        false,
-        false,
-    ));
-    sections.push(tsuinosora_manual_signoff_section());
-    let blob =
-        package_with_target_manifest("desktop-release", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "desktop-release".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-    assert!(report.checks.iter().any(|check| {
-        check.id == "tsuinosora.manual_signoff" && check.status == CheckStatus::Pass
-    }));
-}
-
-#[astra_headless_test::test]
-fn release_gate_blocks_incomplete_tsuinosora_manual_signoff_check_set() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["desktop-release".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections(
-        "tsuinosora-internal-game",
-        false,
-        false,
-    ));
-    sections.push(json_section(
-        "tsuinosora.manual_signoff",
-        "tsuinosora.manual_signoff.v1",
-        serde_json::json!({
-            "schema": "tsuinosora.manual_signoff.v1",
-            "status": "pass",
-            "checks": [
-                {"check_id": "manual.full_playthrough", "result": "pass"}
-            ],
-            "blockers": [],
-            "redaction": {"paths": "alias_or_hash_only", "payload": "omitted"}
-        }),
-    ));
-    let blob =
-        package_with_target_manifest("desktop-release", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "desktop-release".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.manual_signoff")
-        .unwrap();
-
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert_eq!(
-        check.diagnostic.as_ref().unwrap().code,
-        "ASTRA_TSUI_MANUAL_SIGNOFF"
-    );
-    assert!(check
-        .evidence
-        .iter()
-        .any(|evidence| evidence.key == "missing_required_count" && evidence.value == "3"));
-}
-
-#[astra_headless_test::test]
-fn release_gate_requires_tsuinosora_manual_signoff_check_id_field() {
-    let compiled = compile_astra_project(
-        [AstraSource::story(
-            "main.astra",
-            nativevn_story_with_system_pages(),
-        )],
-        Default::default(),
-    )
-    .unwrap();
-    let mut sections = package_sections_for_project(
-        &compiled,
-        &["desktop-release".to_string()],
-        "tsuinosora-internal-game",
-    )
-    .unwrap();
-    sections.extend(tsuinosora_sections(
-        "tsuinosora-internal-game",
-        false,
-        false,
-    ));
-    sections.push(json_section(
-        "tsuinosora.manual_signoff",
-        "tsuinosora.manual_signoff.v1",
-        serde_json::json!({
-            "schema": "tsuinosora.manual_signoff.v1",
-            "status": "pass",
-            "checks": [
-                {"id": "manual.full_playthrough", "result": "pass"},
-                {"id": "manual.audio_listening", "result": "pass"},
-                {"id": "manual.visual_review", "result": "pass"},
-                {"id": "manual.alias_replacement", "result": "pass"}
-            ],
-            "blockers": [],
-            "redaction": {"paths": "alias_or_hash_only", "payload": "omitted"}
-        }),
-    ));
-    let blob =
-        package_with_target_manifest("desktop-release", tsuinosora_target_manifest(), sections);
-
-    let report = ReleaseValidator
-        .validate_package(PackageValidateRequest {
-            package_bytes: blob.into_bytes(),
-            profile: "desktop-release".to_string(),
-            require_ffmpeg: false,
-            target: Some("tsuinosora-internal-game".to_string()),
-            require_platform_report: false,
-            platform_report: None,
-        })
-        .unwrap();
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id == "tsuinosora.manual_signoff")
-        .unwrap();
-
-    assert_eq!(check.status, CheckStatus::Blocked);
-    assert!(check
-        .evidence
-        .iter()
-        .any(|evidence| evidence.key == "missing_required_count" && evidence.value == "4"));
-}
-
 fn package_with_target_manifest(
     profile: &str,
     target_manifest: serde_json::Value,
@@ -2931,171 +2080,6 @@ fn nativevn_target_manifest() -> serde_json::Value {
             "packaged": true
         }]
     })
-}
-
-fn tsuinosora_target_manifest() -> serde_json::Value {
-    serde_json::json!({
-        "schema": "astra.target_manifest.v2",
-        "targets": [{
-            "id": "tsuinosora-internal-game",
-            "kind": "game",
-            "crate": "astra-vn",
-            "runtime_provider": "native_vn",
-            "ui_provider": "astra.ui.yakui",
-            "default_profile": "classic",
-            "platforms": ["headless", "windows", "web"],
-            "packaged": true
-        }]
-    })
-}
-
-fn tsuinosora_sections(
-    target: &str,
-    quarantine: bool,
-    include_modern: bool,
-) -> Vec<SectionPayload> {
-    let mut sections = vec![
-        json_section(
-            "tsuinosora.reference_evidence",
-            "tsuinosora.visual_reference_report.v1",
-            serde_json::json!({
-                "schema": "tsuinosora.visual_reference_report.v1",
-                "status": "pass",
-                "references": [
-                    {
-                        "logical_id": "title",
-                        "dimensions": {"width": 1386, "height": 1040},
-                        "hash": "sha256:3799183a831bdbdc144e1bc9e06dffd831417d436338a1daf04b45bc35624bca",
-                        "allowed_regions": ["title_background", "title_menu_buttons"]
-                    },
-                    {
-                        "logical_id": "game",
-                        "dimensions": {"width": 1403, "height": 1053},
-                        "hash": "sha256:1c4ddf68fa15fd6a76db259b155366456198bd551c49de8a9ede9ca0f2be9d84",
-                        "allowed_regions": ["background_viewport", "text_window"]
-                    }
-                ],
-                "prohibited_outputs": ["new_commercial_screenshot", "commercial_audio"]
-            }),
-        ),
-        json_section(
-            "tsuinosora.asset_analysis",
-            "tsuinosora.asset_analysis.v1",
-            serde_json::json!({
-                "schema": "tsuinosora.asset_analysis.v1",
-                "status": if quarantine { "blocked" } else { "pass" },
-                "reference_hashes": [
-                    "sha256:3799183a831bdbdc144e1bc9e06dffd831417d436338a1daf04b45bc35624bca",
-                    "sha256:1c4ddf68fa15fd6a76db259b155366456198bd551c49de8a9ede9ca0f2be9d84"
-                ],
-                "assets": [{
-                    "relative_path": "native-assets/bg/opening.png",
-                    "classification": "background",
-                    "confidence": 0.91,
-                    "sha256": "sha256:bg"
-                }],
-                "quarantine": if quarantine {
-                    serde_json::json!([{"relative_path": "native-assets/chara/unknown.png"}])
-                } else {
-                    serde_json::json!([])
-                },
-                "diagnostics": []
-            }),
-        ),
-        json_section(
-            "tsuinosora.conversion_manifest",
-            "tsuinosora.conversion_report.v1",
-            serde_json::json!({
-                "schema": "tsuinosora.conversion_report.v1",
-                "status": "pass",
-                "inputs": {"original_install_root": "original_install_root"},
-                "counts": {
-                    "source_files": 2,
-                    "asset_count": 1,
-                    "quarantine_count": 0,
-                    "route_count": 1
-                },
-                "resources": [{
-                    "source": "containers/ready/0001_png.png",
-                    "native_path": "native-assets/backgrounds/0001_png.png",
-                    "classification": "background",
-                    "source_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-                    "converted_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-                    "byte_size": 68
-                }],
-                "routes": [{
-                    "route_id": "classic.main",
-                    "coverage": "covered",
-                    "terminal": "ending.good"
-                }],
-                "diagnostics": [],
-                "redaction": {"paths": "alias_only", "payload": "omitted"}
-            }),
-        ),
-        json_section(
-            "tsuinosora.mount_policy",
-            "tsuinosora.mount_policy.v1",
-            serde_json::json!({
-                "schema": "tsuinosora.mount_policy.v1",
-                "target": target,
-                "status": "pass",
-                "aliases": [{
-                    "alias": "original",
-                    "value": "original_install_root",
-                    "hash_policy": "manifest_required",
-                    "fallback": "blocking"
-                }],
-                "diagnostics": []
-            }),
-        ),
-    ];
-    if include_modern {
-        sections.push(json_section(
-            "tsuinosora.modern_profile_report",
-            "tsuinosora.modern_profile_report.v1",
-            serde_json::json!({
-                "schema": "tsuinosora.modern_profile_report.v1",
-                "status": "pass",
-                "base_conversion_status": "pass",
-                "counts": {"feature_count": 1, "route_count": 1},
-                "features": [{
-                    "feature_id": "remake_overlay.hero",
-                    "feature_kind": "portrait_overlay",
-                    "input_hash": "sha256:input",
-                    "output_hash": "sha256:output",
-                    "fallback_hash": "sha256:fallback",
-                    "independent_switch": true,
-                    "affects_core_state": false
-                }],
-                "diagnostics": [],
-                "redaction": {"paths": "alias_or_hash_only", "payload": "omitted"}
-            }),
-        ));
-    }
-    sections
-}
-
-fn json_section(id: &str, schema: &str, value: serde_json::Value) -> SectionPayload {
-    SectionPayload::raw(id, schema, value.to_string().into_bytes())
-}
-
-fn tsuinosora_manual_signoff_section() -> SectionPayload {
-    json_section(
-        "tsuinosora.manual_signoff",
-        "tsuinosora.manual_signoff.v1",
-        serde_json::json!({
-            "schema": "tsuinosora.manual_signoff.v1",
-            "status": "pass",
-            "checks": [
-                {"check_id": "manual.full_playthrough", "result": "pass"},
-                {"check_id": "manual.audio_listening", "result": "pass"},
-                {"check_id": "manual.visual_review", "result": "pass_with_diagnostics"},
-                {"check_id": "manual.alias_replacement", "result": "pass"}
-            ],
-            "blockers": [],
-            "redaction": {"paths": "alias_or_hash_only", "payload": "omitted"}
-        }),
-    )
 }
 
 fn nativevn_story_with_system_pages() -> &'static str {
@@ -3193,7 +2177,7 @@ fn package_request(package_bytes: Vec<u8>) -> PackageValidateRequest {
         package_bytes,
         profile: "classic".to_string(),
         require_ffmpeg: false,
-        target: Some("tsuinosora-internal-game".to_string()),
+        target: Some("test-game".to_string()),
         require_platform_report: false,
         platform_report: None,
     }

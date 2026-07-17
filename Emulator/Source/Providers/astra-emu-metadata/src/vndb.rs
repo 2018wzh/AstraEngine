@@ -27,6 +27,15 @@ pub struct VndbProvider {
 impl VndbProvider {
     pub fn new(config: VndbProviderConfig) -> Result<Self, MetadataError> {
         config.license.permit_vndb()?;
+        tracing::info!(
+            target: "astra_emu_metadata::vndb",
+            event = "emu.metadata.provider.create",
+            provider_id = "vndb",
+            network_consent = config.network_consent,
+            timeout_ms = config.timeout.as_millis(),
+            minimum_request_delay_ms = config.minimum_request_delay.as_millis(),
+            "metadata provider created"
+        );
         let client = Vndb::builder()
             .max_concurrent_requests(1)
             .delay(config.minimum_request_delay)

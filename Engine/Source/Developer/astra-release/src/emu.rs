@@ -331,7 +331,7 @@ mod tests {
     use astra_core::Hash256;
     use astra_emu_manager_core::{
         EmuPlatformRunEvidenceV1, EmuProviderBindingEvidenceV1, FvpParityEvidence,
-        FvpSyscallCoverageEvidence, TranslationEvidence, TrustedLuauEvidenceV1,
+        FvpSyscallCoverageEvidence, MetadataEvidenceV1, TranslationEvidence, TrustedLuauEvidenceV1,
         UiHostIdentityEvidence, RFVP_REFERENCE_REVISION,
     };
     use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
@@ -342,7 +342,7 @@ mod tests {
         let package = package_with_complete_evidence();
         let reader = PackageReader::open(&package).unwrap();
         let checks = emu_release_checks(&reader, "fvp-v1", Some("astra-emu-case"));
-        assert_eq!(checks.len(), 14);
+        assert_eq!(checks.len(), 15);
         assert!(
             checks.iter().all(|check| check.status == CheckStatus::Pass),
             "unexpected blocked checks: {:?}",
@@ -370,6 +370,7 @@ mod tests {
             ("fvp_parity".into(), "emu.evidence.parity".into()),
             ("trusted_luau".into(), "emu.evidence.luau".into()),
             ("translation".into(), "emu.evidence.translation".into()),
+            ("metadata".into(), "emu.evidence.metadata".into()),
         ]);
         let mut sections = vec![postcard_section(
             "emu.evidence.binding",
@@ -491,6 +492,23 @@ mod tests {
                 latency_ms_total: 1,
                 error_codes: Vec::new(),
                 redaction_status: "pass".into(),
+            },
+        ));
+        sections.push(postcard_section(
+            "emu.evidence.metadata",
+            "astra.emu.metadata_evidence.v1",
+            &MetadataEvidenceV1 {
+                schema: "astra.emu.metadata_evidence.v1".into(),
+                release_use: "non_commercial".into(),
+                enabled_providers: vec!["vndb".into(), "bangumi".into()],
+                vndb_commercial_license_id: None,
+                consent_separated: true,
+                secret_references_only: true,
+                sensitive_cover_default: false,
+                local_path_present: false,
+                query_body_present: false,
+                status: "passed".into(),
+                diagnostic_codes: Vec::new(),
             },
         ));
         for (platform, architecture, host_kind, level) in platforms {

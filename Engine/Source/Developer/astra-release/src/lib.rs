@@ -363,6 +363,10 @@ impl ReleaseValidator {
                     ],
                 });
                 checks.push(headless_shipping_isolation_check(&package));
+                checks.push(engine_test_profile_isolation_check(
+                    &package,
+                    &request.profile,
+                ));
                 for section in [
                     "schema.registry",
                     "cook.summary",
@@ -493,6 +497,50 @@ impl ReleaseValidator {
             ),
         }
         Ok(report)
+    }
+}
+
+fn engine_test_profile_isolation_check(
+    package: &PackageReader,
+    profile: &str,
+) -> ReleaseCheckRecord {
+    let has_nativevn_profile_manifest = package
+        .container()
+        .decode_postcard::<VnProfileManifest>("vn.profile_manifest")
+        .is_ok_and(|manifest| manifest.profiles.iter().any(|entry| entry == "minimal"));
+    let has_nativevn_target = package
+        .container()
+        .read_bounded("target.manifest", 256 * 1024)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<TargetManifest>(&bytes).ok())
+        .is_some_and(|manifest| {
+            manifest
+                .targets
+                .iter()
+                .any(|target| target.runtime_provider.as_deref() == Some("native_vn"))
+        });
+    let is_nativevn_engine_test_profile =
+        profile == "minimal" && (has_nativevn_profile_manifest || has_nativevn_target);
+    if is_nativevn_engine_test_profile {
+        return ReleaseCheckRecord {
+            id: "profile.engine_test_isolation".to_string(),
+            domain: ReleaseDomain::Target,
+            status: CheckStatus::Blocked,
+            summary: "Engine-only NativeVN profile cannot be released".to_string(),
+            diagnostic: Some(Diagnostic::blocking(
+                "ASTRA_ENGINE_TEST_PROFILE_RELEASE",
+                "NativeVN minimal profile is reserved for Engine tests",
+            )),
+            evidence: vec![evidence("profile", profile)],
+        };
+    }
+    ReleaseCheckRecord {
+        id: "profile.engine_test_isolation".to_string(),
+        domain: ReleaseDomain::Target,
+        status: CheckStatus::Pass,
+        summary: "release profile is not reserved for Engine tests".to_string(),
+        diagnostic: None,
+        evidence: vec![evidence("profile", profile)],
     }
 }
 

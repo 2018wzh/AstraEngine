@@ -947,7 +947,7 @@ impl PlayerAutomationValidator {
             transcript_coverage_check(script, transcript),
             visual_region_check(&transcript.visual_regions),
             visual_comparison_check(transcript.visual_comparison.as_ref()),
-            audio_meter_check(&transcript.audio_meter),
+            audio_meter_check(transcript.platform, &transcript.audio_meter),
             runtime_route_evidence_check(script, transcript),
             route_coverage_check(script, transcript),
         ];
@@ -1359,8 +1359,20 @@ fn visual_region_check(regions: &[PlayerVisualRegionEvidence]) -> PlayerAutomati
     }
 }
 
-fn audio_meter_check(meter: &PlayerAudioMeterEvidence) -> PlayerAutomationCheck {
-    if matches!(meter.provider.as_str(), "wasapi" | "webaudio")
+fn audio_meter_check(
+    platform: PlayerPlatform,
+    meter: &PlayerAudioMeterEvidence,
+) -> PlayerAutomationCheck {
+    let provider_matches = match platform {
+        PlayerPlatform::Windows => meter.provider == "wasapi",
+        PlayerPlatform::Web => meter.provider == "webaudio",
+        PlayerPlatform::Linux => matches!(meter.provider.as_str(), "alsa" | "pipewire"),
+        PlayerPlatform::Macos => meter.provider == "coreaudio",
+        PlayerPlatform::Android => {
+            matches!(meter.provider.as_str(), "oboe_aaudio" | "oboe_opensl_es")
+        }
+    };
+    if provider_matches
         && meter.callback_count > 0
         && meter.host_report_hash.starts_with("sha256:")
         && meter.sample_count > 0

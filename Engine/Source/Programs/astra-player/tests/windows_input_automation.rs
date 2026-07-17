@@ -43,7 +43,7 @@ fn windows_blocks_route_scenario_transcript() {
 
 fn script() -> PlayerAutomationScript {
     let mut script = PlayerAutomationScript::new(
-        "tsuinosora-internal-game",
+        "test-game",
         "classic",
         PlayerPlatform::Windows,
         "sha256:1111111111111111111111111111111111111111111111111111111111111111",
@@ -68,7 +68,7 @@ fn script() -> PlayerAutomationScript {
 fn transcript(sources: Vec<&str>) -> PlayerInputTranscript {
     PlayerInputTranscript {
         schema: "astra.player_input_transcript.v2".to_string(),
-        target: "tsuinosora-internal-game".to_string(),
+        target: "test-game".to_string(),
         profile: "classic".to_string(),
         platform: PlayerPlatform::Windows,
         package_hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"

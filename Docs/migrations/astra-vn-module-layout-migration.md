@@ -46,7 +46,7 @@ cargo test -p astra-vn --test vn_dylib_facade
 cargo test -p astra-vn-plugin --test vn_plugin_extensions
 cargo test -p astra-test --test vn_scenario
 cargo test -p astra-release --test release_report release_gate_
-cargo test -p astra-cli --test target_platform nativevn_sample_cooks_packages_validates_and_runs_full_playthrough
+cargo test -p astra-cli --test target_platform nativevn_minimal_profile_cooks_packages_and_runs_headless
 ```
 
 代码搬迁完成后，`rg` 命令只允许本文件、[AstraVN Crate Split Migration](astra-vn-crate-split-migration.md) 和 [Game Runtime Provider Migration](game-runtime-provider-migration.md) 命中迁移前路径；其他命中必须改链。

@@ -35,7 +35,7 @@ fn web_blocks_dom_or_js_callback_transcripts() {
 
 fn script() -> PlayerAutomationScript {
     let mut script = PlayerAutomationScript::new(
-        "tsuinosora-internal-game",
+        "test-game",
         "classic",
         PlayerPlatform::Web,
         "sha256:4444444444444444444444444444444444444444444444444444444444444444",
@@ -60,7 +60,7 @@ fn script() -> PlayerAutomationScript {
 fn transcript(sources: Vec<&str>) -> PlayerInputTranscript {
     PlayerInputTranscript {
         schema: "astra.player_input_transcript.v2".to_string(),
-        target: "tsuinosora-internal-game".to_string(),
+        target: "test-game".to_string(),
         profile: "classic".to_string(),
         platform: PlayerPlatform::Web,
         package_hash: "sha256:4444444444444444444444444444444444444444444444444444444444444444"

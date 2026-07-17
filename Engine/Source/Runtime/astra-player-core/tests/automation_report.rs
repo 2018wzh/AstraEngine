@@ -157,7 +157,7 @@ fn player_automation_report_blocks_route_without_terminal_signature() {
 
 fn script(platform: PlayerPlatform) -> PlayerAutomationScript {
     let mut script = PlayerAutomationScript::new(
-        "tsuinosora-internal-game",
+        "test-game",
         "classic",
         platform,
         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -175,7 +175,7 @@ fn script(platform: PlayerPlatform) -> PlayerAutomationScript {
 fn transcript(platform: PlayerPlatform, source: &str) -> PlayerInputTranscript {
     PlayerInputTranscript {
         schema: "astra.player_input_transcript.v2".to_string(),
-        target: "tsuinosora-internal-game".to_string(),
+        target: "test-game".to_string(),
         profile: "classic".to_string(),
         platform,
         package_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -207,7 +207,14 @@ fn transcript(platform: PlayerPlatform, source: &str) -> PlayerInputTranscript {
             height: 720,
         }],
         audio_meter: PlayerAudioMeterEvidence {
-            provider: "wasapi".into(),
+            provider: match platform {
+                PlayerPlatform::Windows => "wasapi",
+                PlayerPlatform::Web => "webaudio",
+                PlayerPlatform::Linux => "pipewire",
+                PlayerPlatform::Macos => "coreaudio",
+                PlayerPlatform::Android => "oboe_aaudio",
+            }
+            .into(),
             callback_count: 4,
             host_report_hash: "sha256:host".into(),
             sample_count: 48_000,

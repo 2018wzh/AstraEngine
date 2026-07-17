@@ -8,6 +8,8 @@ use crate::VnWaitKind;
 
 pub const VN_PRESENTATION_PROVIDER_MANIFEST_SCHEMA: &str =
     "astra.vn.presentation_provider_manifest.v2";
+/// Bounded profile reserved for Engine tests. Shipping manifests must not select it.
+pub const VN_ENGINE_TEST_PROFILE_ID: &str = "minimal";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnPresentationProviderManifest {
@@ -67,6 +69,7 @@ impl VnPresentationProviderManifest {
                 VnWaitKind::VoiceEnd,
             ],
             profiles: [
+                (VN_ENGINE_TEST_PROFILE_ID, 4, 2, 4_000),
                 ("classic", 16, 8, 4_000),
                 ("modern", 32, 16, 8_000),
                 ("advanced-vn", 64, 32, 16_000),
@@ -212,7 +215,12 @@ impl VnPresentationProviderManifest {
 
         let presets = self.validate_presets(&fallback_ids, &mut diagnostics);
         let profiles = self.validate_profiles(&fallback_ids, &presets, &mut diagnostics);
-        for required in ["classic", "modern", "advanced-vn"] {
+        for required in [
+            VN_ENGINE_TEST_PROFILE_ID,
+            "classic",
+            "modern",
+            "advanced-vn",
+        ] {
             if !profiles.contains_key(required) {
                 diagnostics.push(
                     Diagnostic::blocking(
