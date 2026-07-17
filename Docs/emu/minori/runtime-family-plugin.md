@@ -30,7 +30,7 @@ Session 输出：
 - `PresentationCommand`：背景、立绘、窗口和 transition。
 - `AudioCommand`：BGM、voice、SE、movie ref。
 - `StateMachineTrace`：script id、pc、opcode、wait reason。
-- `Diagnostic`：missing key、missing resource、unknown opcode、decode failed。
+- `Diagnostic`：missing key、missing resource、unknown command/operand、decode failed。
 - `LegacySnapshotEnvelope`：VM pc、stack、variables、choice state、presentation/audio state 和 resolver fingerprint。
 
 ## Error Policy

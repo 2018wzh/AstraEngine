@@ -1,5 +1,20 @@
 # Minori Tooling
 
+正式入口是 `astra-emu-cli minori`：
+
+```sh
+cargo run -p astra-emu-cli -- minori verify --game-dir <case-root> --version 2 --index-size-xor <value>
+cargo run -p astra-emu-cli -- minori census-scripts --game-dir <case-root>
+cargo run -p astra-emu-cli -- minori extract --game-dir <case-root> --output <private-output> --role scr
+cargo run -p astra-emu-cli -- minori import-garbro-scheme --formats <Formats.dat> --title <title> --game-dir <case-root>
+```
+
+`verify` 检查六包、index、全部 entry descriptor，并对每个 entry 做首段与尾段随机读取；报告只给出 entry、cache hit/miss 和 range-read 数量。`census-scripts` 直接从 VFS 读取全部 `scr/*.sc`，只输出文件、行、command、operand size 与 token 计数，不输出正文、文件名或 raw operand。`extract` 的 role、glob 和单 URI selector 互斥，写入前检查容量、大小写冲突和既有输出；所有文件先写入同卷 staging tree，全部成功后才以目录 rename 提交，失败时不保留部分输出。
+
+Linux 另有前台只读 `minori mount --mountpoint <directory>`。Windows 和 macOS 不声明 FUSE；三种桌面系统都保留 `verify` 与 `extract`。
+
+`import-garbro-scheme` 只接受 `GARbroDB`、zlib 和 `nrbf 0.2.2` 可解析的预期对象。未知对象形状、缺 role、异常 key size、缺 title 或既有补丁都会阻断。命令只在游戏目录写私有 Luau 补丁，终端不打印 key。当前合法 `Formats.dat` 会触发该 crate 的重复 library id 错误，入口保持阻断；运行时不改用 .NET `BinaryFormatter`、启发式解析或隐藏 fallback。
+
 ## `minori_probe.py`
 
 ```bash

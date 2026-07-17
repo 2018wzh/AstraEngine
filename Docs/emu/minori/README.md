@@ -1,6 +1,6 @@
-# Minori AstraEMU 资料入口
+# AstraEMU Minori
 
-Minori family 资料面向 `夏空のペルセウス` 这类 PAZ + `.sc` 脚本游戏。目标是让 AstraEMU `LegacyRuntimeProvider` session 能完成本地合法样本的资源定位、脚本反编译、演出命令建模和运行时状态复现。
+Minori family 资料面向 PAZ + `.sc` 脚本游戏。本阶段已有 `astra-emu-minori`、Manager viewer service 和 `astra-emu-cli minori`；尚未实现 Minori VM、演出执行、存档和完整游戏模拟。
 
 ## 阅读顺序
 
@@ -20,4 +20,6 @@ Minori family 资料面向 `夏空のペルセウス` 这类 PAZ + `.sc` 脚本�
 
 ## 边界
 
-PAZ key、exe patch、安装器保护和 hook 资料不进入公共实现。AstraEMU 只提供外部 key 输入、只读 archive reader、反编译诊断和 family session 状态机。
+PAZ key、exe patch、安装器保护和 hook 资料不进入公共实现。`astraemu.patch.luau`、明文 cache、导出资源、脚本文本和 disassembly 都是本地私有数据，不进入 Git、package、report 或日志。
+
+`scr/st/sys/se/voice/mov.paz` 必须同时存在且非空。当前授权样本满足这一条件，六个真实 index 和 9837 个 entry 全读已通过；同 identity 第二轮为 9837 cache hits/0 misses，89 个脚本的 payload-free census 也已通过。FUSE 与平台验收仍需独立证据，不能由 Windows VFS 结果替代。

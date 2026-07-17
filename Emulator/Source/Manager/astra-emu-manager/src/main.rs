@@ -1906,6 +1906,8 @@ impl ManagerController for AstraEmuManagerController {
                 .and_then(|value| value.note)
                 .unwrap_or_default(),
             bangumi_sync_summary: self.bangumi_sync_summary.clone(),
+            vfs_summary: "Mounted archive tree, stat, search and paged reads are provided by LegacyVfsViewer after a case session opens.".into(),
+            vfs_preview: "Select an entry to request a bounded text, image, audio or hex preview.".into(),
         })
     }
 

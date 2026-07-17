@@ -116,6 +116,7 @@ python Tools/check_dynamic_artifacts.py
 | `astra-emu-fvp` | 5 in progress | FVP v1 `LegacyRuntimeProvider`、固定 rfvp revision、HCB/VM/syscall/snapshot 与 renderer-neutral frame 输出 | `astra-emu-family-api`, `astra-emu-fvp-rfvp-core` | window/event-loop/GPU/audio native handle ownership |
 | `astra-emu-translation-openai-compatible` | 5 in progress | ECNU/OpenAI-compatible Responses SSE、显式 Chat adapter、预算、熔断与平台 secret store | `reqwest`, `tokio`, `keyring` | Manager Core HTTP DTO、shipping credential persistence |
 | `astra-emu-schema` | 5 in progress | 从 Rust 真源生成 AstraEMU JSON Schema | `schemars` 与 AstraEMU contract crates | 手写 schema 真源 |
+| `astra-emu-minori` | 5 in progress | Minori PAZ v0-v2 VFS、分卷、cache 与 `.sc` lossless parser；不含 VM | `astra-emu-family-api`, `blowfish`, `rc4`, `flate2` | key、商业 payload、Luau function 或本地路径 |
 | `astra-emu-evidence` | 5 in progress | 校验 runtime/family/UI/FVP/Luau/translation/六平台 continuity，生成原子 Postcard evidence sections、hash summary 和 project-relative package fragment | `astra-emu-manager-core`, `postcard`, `serde_yaml` | 商业 payload、绝对路径、secret、手填 passing evidence |
 | `astra-emu-family-package` | 5 in progress | 检查 desktop/Android dynamic descriptor 或 iOS static archive identity，重算 binary hash，并通过 secure environment key 生成 detached Ed25519 manifest | `astra-emu-manager-core`, `ed25519-dalek`, `object` | 私钥文件、未签名发布包、运行时下载 |
 

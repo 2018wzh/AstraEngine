@@ -31,4 +31,4 @@ BGM、SE、voice 分离。Voice replay 从 backlog 触发时不能推进脚本 V
 
 ## Movie
 
-当前样本 `mov.paz` 为空，但 `PlayMovie` command 仍需要支持。若资源缺失，core 返回 recoverable diagnostic，并允许测试 scenario 断言缺失资源路径。
+当前样本 `mov.paz` 非空并含 5 个 entry。VFS 只负责准确解密和读取；`PlayMovie` command、媒体解码、时间轴与缺失资源策略属于下一阶段 runtime/media 接入，不能由 archive 可读性推断完成。
