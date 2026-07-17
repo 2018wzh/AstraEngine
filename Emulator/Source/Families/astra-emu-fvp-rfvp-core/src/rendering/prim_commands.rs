@@ -15,7 +15,7 @@ use crate::host_api::{
 use crate::subsystem::resources::{
     color_manager::ColorManager,
     graph_buff::GraphBuff,
-    motion_manager::{snow::SnowMotion, MotionManager},
+    motion_manager::{snow::SnowMotion, DissolveType, MotionManager},
     prim::{Prim, PrimManager, PrimType},
 };
 
@@ -398,6 +398,25 @@ where
         0,
     )?;
 
+    // RFVP composites both engine-owned dissolve layers after the ordinary scene tree and
+    // before the custom root. Keeping that ordering is observable: the custom root contains
+    // overlays that must remain unaffected by scene transitions.
+    for color in dissolve_overlay_colors(motion) {
+        emit_sprite(
+            &mut frame.commands,
+            &mut frame.hit_proxies,
+            &mut order,
+            -1,
+            Mat4::IDENTITY,
+            virtual_size.0 as f32,
+            virtual_size.1 as f32,
+            Vec2::ZERO,
+            Vec2::ONE,
+            color,
+            DrawTextureKey::White,
+        )?;
+    }
+
     let root = prim_manager.get_custom_root_prim_id() as i16;
     if root != 0 {
         let mut visit = vec![0u8; 4096];
@@ -427,6 +446,41 @@ where
     backend.end_frame()?;
     cache.finish_frame();
     Ok(frame)
+}
+
+fn dissolve_overlay_colors(motion: &MotionManager) -> Vec<Vec4> {
+    let mut colors = Vec::with_capacity(2);
+    if matches!(
+        motion.get_dissolve_type(),
+        DissolveType::Static | DissolveType::ColoredFadeIn | DissolveType::ColoredFadeOut
+    ) {
+        let alpha = motion.get_dissolve_alpha();
+        if alpha > 0.0 {
+            let color = motion
+                .color_manager
+                .get_entry(motion.get_dissolve_color_id() as u8);
+            colors.push(vec4(
+                color.get_r() as f32 / 255.0,
+                color.get_g() as f32 / 255.0,
+                color.get_b() as f32 / 255.0,
+                (color.get_a() as f32 / 255.0) * alpha,
+            ));
+        }
+    }
+
+    let alpha = motion.get_dissolve2_alpha();
+    if alpha > 0.0 {
+        let color = motion
+            .color_manager
+            .get_entry(motion.get_dissolve2_color_id() as u8);
+        colors.push(vec4(
+            color.get_r() as f32 / 255.0,
+            color.get_g() as f32 / 255.0,
+            color.get_b() as f32 / 255.0,
+            (color.get_a() as f32 / 255.0) * alpha,
+        ));
+    }
+    colors
 }
 
 #[allow(clippy::too_many_arguments)]

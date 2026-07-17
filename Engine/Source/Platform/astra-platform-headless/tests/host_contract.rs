@@ -319,6 +319,29 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
         client.close_audio(audio).await.unwrap_err().code,
         PlatformErrorCode::StaleHandle
     );
+
+    // Recreated outputs restart their packet sequence after restore. Artifact paths must
+    // remain unique for the whole host session instead of reusing the packet sequence.
+    let restored_audio = client
+        .open_audio_output(AudioOutputRequest {
+            sample_rate: 48_000,
+            channels: 2,
+            max_buffered_frames: 800,
+        })
+        .await
+        .unwrap();
+    client
+        .submit_audio(
+            restored_audio,
+            AudioPacket {
+                sequence: 1,
+                channels: 2,
+                samples: vec![0.125; 1_600],
+            },
+        )
+        .await
+        .unwrap();
+    client.close_audio(restored_audio).await.unwrap();
     client.shutdown().await.unwrap();
 
     assert!(temp
@@ -327,7 +350,11 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
         .is_file());
     assert!(temp
         .path()
-        .join("artifacts/audio/output-0000000001.wav")
+        .join("artifacts/audio/output-0000000001-source-0000000001.wav")
+        .is_file());
+    assert!(temp
+        .path()
+        .join("artifacts/audio/output-0000000002-source-0000000001.wav")
         .is_file());
     assert!(temp
         .path()

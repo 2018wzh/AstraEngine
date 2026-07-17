@@ -19,6 +19,7 @@ pub(crate) struct ArtifactRecorder {
     total_bytes: u64,
     frame_count: u64,
     audio_frames: u64,
+    audio_artifact_count: u64,
     final_frame: Option<(u64, u32, u32, Vec<u8>)>,
     frame_digest: Sha256,
     audio_digest: Sha256,
@@ -67,6 +68,7 @@ impl ArtifactRecorder {
             total_bytes: 0,
             frame_count: 0,
             audio_frames: 0,
+            audio_artifact_count: 0,
             final_frame: None,
             frame_digest: Sha256::new(),
             audio_digest: Sha256::new(),
@@ -160,9 +162,20 @@ impl ArtifactRecorder {
         if self.policy.retention == HeadlessArtifactRetention::ManifestOnly {
             return Ok(());
         }
+        self.audio_artifact_count = self
+            .audio_artifact_count
+            .checked_add(1)
+            .ok_or_else(|| limit("artifact.audio", "audio artifact counter overflowed"))?;
         let bytes = wav_bytes(samples)?;
         self.reserve(bytes.len() as u64)?;
-        let relative = format!("audio/output-{sequence:010}.wav");
+        // `sequence` belongs to an individual audio output and may restart after a
+        // snapshot restore recreates platform handles. Artifact identity is session-wide,
+        // so use a recorder-owned monotonic ordinal and retain the source sequence only
+        // as diagnostic context in the file name.
+        let relative = format!(
+            "audio/output-{:010}-source-{sequence:010}.wav",
+            self.audio_artifact_count
+        );
         atomic_write(&self.root.join(&relative), &bytes)?;
         self.manifest.artifacts.push(ArtifactEntry::Audio {
             relative_path: relative,
