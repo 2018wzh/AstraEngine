@@ -1,47 +1,30 @@
 # Minori Tooling
 
-正式入口是 `astra-emu-cli minori`：
+通用 VFS 操作统一走 `astra-emu-cli vfs`。CLI 只从显式 `--game-dir` 和严格 YAML mount profile 建立 family mount，不按注册顺序选择 provider，也不保留旧 `astra-emu-cli minori` 入口。
 
 ```sh
-cargo run -p astra-emu-cli -- minori verify --game-dir <case-root> --version 2 --index-size-xor <value>
-cargo run -p astra-emu-cli -- minori census-scripts --game-dir <case-root>
-cargo run -p astra-emu-cli -- minori extract --game-dir <case-root> --output <private-output> --role scr
-cargo run -p astra-emu-cli -- minori import-garbro-scheme --formats <Formats.dat> --title <title> --game-dir <case-root>
+cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --mount-profile <profile.yaml> verify
+cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --mount-profile <profile.yaml> list --uri minori:/
+cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --mount-profile <profile.yaml> stat --uri minori:/scr/example.sc
+cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --mount-profile <profile.yaml> read --uri minori:/scr/example.sc --offset 0 --length 4096
+cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --mount-profile <profile.yaml> extract --output <private-output> --prefix minori:/scr/
 ```
 
-`verify` 检查六包、index、全部 entry descriptor，并对每个 entry 做首段与尾段随机读取；报告只给出 entry、cache hit/miss 和 range-read 数量。`census-scripts` 直接从 VFS 读取全部 `scr/*.sc`，只输出文件、行、command、operand size 与 token 计数，不输出正文、文件名或 raw operand。`extract` 的 role、glob 和单 URI selector 互斥，写入前检查容量、大小写冲突和既有输出；所有文件先写入同卷 staging tree，全部成功后才以目录 rename 提交，失败时不保留部分输出。
+`verify` 以 4 MiB range 完整流读每个 entry，校验 decoded size、可用 content hash、source mutation，并复读首尾最多 4 KiB。报告只包含 family、source/entry/range/byte/cache 计数与聚合 hash。`read` 默认也只输出 hash 和范围信息；只有显式 `--format hex` 或 `--format text --encoding <encoding>` 才向 stdout 输出最多 64 KiB 内容。`--output` 可原子写出最多 64 MiB 的私有 range。
 
-Linux 另有前台只读 `minori mount --mountpoint <directory>`。Windows 和 macOS 不声明 FUSE；三种桌面系统都保留 `verify` 与 `extract`。
+`extract` 的 `--prefix`、`--glob` 和 `--entry` 互斥；不传 selector 表示整树。写入前检查容量、大小写冲突、既有目标和路径，全部文件写入 staging tree 后才提交。Linux 提供前台只读 `mount --mountpoint <directory>`；Windows 和 macOS 不声明 FUSE。
 
-`import-garbro-scheme` 使用仓库内纯 Rust 两阶段 NRBF reader。第一阶段收集 object、class metadata、library 和有符号 object id，第二阶段校验 forward reference，再读取预期的 Musica/PAZ graph。未知 record、重复 id、断裂 reference、缺 role、异常 key size、缺 title 或既有补丁都会阻断。命令只在游戏目录写私有 Luau 补丁，终端不打印 key；实现不调用 .NET `BinaryFormatter`、managed helper、外部进程、启发式扫描或隐藏 fallback。
+Minori 专用导入与脚本研究放在独立 CLI：
 
-当前合法 `Formats.dat` 已完成真实导入。由该入口生成的补丁通过六包 9837 个 entry 全读验证，同 identity 复核为 9837 cache hits/0 misses。补丁、key、输入数据库和明文 cache 仍只保存在本地私有目录。
-
-## `minori_probe.py`
-
-```bash
-python Tools/AstraEMU/minori_probe.py "<minori-case-root>" --json
+```sh
+cargo run -p astra-emu-minori-cli -- import-garbro-scheme --formats <Formats.dat> --title <title> --game-dir <case-root>
+cargo run -p astra-emu-minori-cli -- census-scripts --game-dir <case-root> --mount-profile <profile.yaml>
 ```
 
-输出 `.paz`、`.mys`、`.exe`、`.chm` 的大小和 magic 标签。
+`import-garbro-scheme` 使用纯 Rust 两阶段 NRBF reader，只接受预期的 Musica/PAZ graph。它原子生成 data-only `astraemu.patch.luau` 与 `astraemu.minori.mount.yaml`；任一目标或临时文件已存在即阻断，成对提交失败会回滚本次新文件。Luau 只调用 `astra.family.register_private_profile` 注册 opaque key/policy payload，不参与 index 或 entry 解密。key 不进入 YAML、stdout、report 或日志。
 
-## `minori_paz.py`
+当前合法样本已通过真实导入、六包 9837 entry 的 manifest v2 全量 verify，以及 89 脚本的 payload-free census。同 identity Release 复核的 29720 次 range read 全部命中 cache，聚合 hash 与前次一致。补丁、key、输入数据库、明文 cache、导出内容和 disassembly 都留在本地私有目录。
 
-```bash
-python Tools/AstraEMU/minori_paz.py "<minori-case-root>/scr.paz" --json
-python Tools/AstraEMU/minori_paz.py scr.paz --key-file local-key.hex --json
-```
+## 辅助研究脚本
 
-该工具不内置 key。没有 `--key-file` 时只输出 probe 信息。
-
-## `minori_sc.py`
-
-```bash
-python Tools/AstraEMU/minori_sc.py decoded.sc --json
-```
-
-输入必须是已经合法解出的 `.sc` 或同等文本/二进制脚本片段。输出 message/select/voice/bgm/se/image 等 marker。
-
-## 约束
-
-所有 extract/decode 产物只能写到显式输出目录，不提交到仓库。
+`Tools/AstraEMU/minori_probe.py`、`minori_paz.py` 和 `minori_sc.py` 只用于格式研究，不是生产 VFS 路径。`minori_paz.py` 不内置 key；没有显式 key file 时只做 probe。所有 decode/extract 产物必须写到 ignored 私有目录。

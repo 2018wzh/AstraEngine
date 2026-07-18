@@ -56,6 +56,8 @@ AstraEngine 仓库是 AstraEngine 系列的产品总入口，负责维护跨仓�
 - AstraEMU 使用 Manager + AstraEngine RuntimeWorld + in-process family plugin 架构。family plugin 只注册 `LegacyRuntimeProvider` facade；auto probe、Trusted Luau、文本翻译和 FilterGraph preset 位于 Manager/RuntimeWorld 层，family plugin 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
 - AstraEMU v1 首发 family 是 FVP；固定 rfvp revision 的合法输入可观察行为、完整 syscall coverage、snapshot/replay 与脱敏 parity report 是 FVP release gate。Artemis 和其他 family 以后续 probe report 接入，不能阻塞 EngineCore、AstraVN、Editor 和六平台 gate。默认 auto-probe 顺序保持 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori，显式 case profile 始终优先。
 - Minori GARbro scheme 导入必须使用仓库内纯 Rust 两阶段 NRBF reader，先收集对象、metadata、library 与有符号 object id，再解析 forward reference。不得调用 .NET `BinaryFormatter`、managed helper、外部进程、启发式扫描或任何 fallback；未知 record、断裂 reference、重复 id、越界、非预期 Musica/PAZ graph 和 role/key 约束不满足都必须阻断。
+- AstraEMU in-process legacy VFS 契约归 `astra-emu-family-core`，Trusted Luau、mount profile、cache、viewer、verify、extract 与 Linux FUSE 归 `astra-emu-family-support`；`astra-emu-family-api` 只保留 ABI-safe DTO，不得重新导出进程内 trait。
+- 通用 VFS 命令固定为 `astra-emu-cli vfs --family <family>`，family 专用研究命令放独立 CLI。Minori 只能使用纯 Rust `MinoriPazDecryptProvider`；Luau 只注册 data-only private profile，不得参与逐 entry 解密，也不得保留 native/Luau fallback。
 - AstraRPG 是后续同级 gameplay runtime provider。`AstraTRPG` 不作为独立顶层模块或 provider 落地，只能作为 AstraRPG 的 `rpg.trpg` ruleset/profile layer；package/save/report namespace 使用 `rpg.*` 和 `rpg.trpg.*`，不得新增顶层 `trpg.*`。
 - CP2020 等规则书适配只能作为 local-private adapter：仓库可提交 schema、manifest、resolver skeleton、公开最小 fixture、hash、coverage 和 diagnostic，不得提交完整规则正文、表格、扫描图、职业/装备/义体完整清单或可复原 payload。
 

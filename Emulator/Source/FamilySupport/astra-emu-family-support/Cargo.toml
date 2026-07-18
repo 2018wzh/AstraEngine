@@ -1,5 +1,5 @@
 [package]
-name = "astra-emu-minori"
+name = "astra-emu-family-support"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,20 +10,34 @@ doctest = false
 [dependencies]
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
-astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-support" }
+astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
 blowfish.workspace = true
 crc32fast = "1.5"
-directories.workspace = true
 encoding_rs.workspace = true
 flate2.workspace = true
+fs2 = "0.4"
+globset = "0.4"
 lru.workspace = true
+mlua.workspace = true
 rc4.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+fuser.workspace = true
+libc.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+] }
 
 [dev-dependencies]
 tempfile.workspace = true

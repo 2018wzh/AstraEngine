@@ -34,6 +34,7 @@ use astra_emu_family_api::{
     LegacyProbeRequest, LegacyRenderFrameV1, LegacyRuntimeHostCtx, LegacyStepBudget,
     LegacyVfsReader, LegacyVideoCommandV1, LegacyWaitRequest,
 };
+use astra_emu_family_support::LegacyVfsFamilyRegistry;
 use astra_emu_manager::family_host::FamilyHostConfig;
 use astra_emu_manager::{run_manager_with_initial_state, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
@@ -51,6 +52,7 @@ use astra_emu_metadata::{
     match_metadata, BangumiPlayStatus, BangumiPlayUpdate, CoverAsset, MatchInput,
     MetadataProviderId, MetadataSearchQuery,
 };
+use astra_emu_minori::MinoriVfsFamilyFactory;
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
 };
@@ -891,6 +893,7 @@ struct AstraEmuManagerController {
     search_query: String,
     diagnostic: String,
     vfs: Arc<VfsRegistry>,
+    _family_vfs_registry: Arc<LegacyVfsFamilyRegistry>,
     runtime: Rc<RefCell<RuntimeBridge>>,
     active_mount_set_id: Option<String>,
     data_dir: PathBuf,
@@ -925,6 +928,10 @@ impl AstraEmuManagerController {
         let library =
             Library::open(data_dir.join("library.sqlite3")).map_err(|error| error.to_string())?;
         let vfs = Arc::new(VfsRegistry::default());
+        let mut family_vfs_registry = LegacyVfsFamilyRegistry::default();
+        family_vfs_registry
+            .register(Arc::new(MinoriVfsFamilyFactory))
+            .map_err(|error| error.to_string())?;
         let runtime = Rc::new(RefCell::new(RuntimeBridge::new(vfs.clone())?));
         let metadata = MetadataRuntime::start()?;
         Ok(Self {
@@ -933,6 +940,7 @@ impl AstraEmuManagerController {
             search_query: String::new(),
             diagnostic: String::new(),
             vfs,
+            _family_vfs_registry: Arc::new(family_vfs_registry),
             runtime,
             active_mount_set_id: None,
             data_dir,

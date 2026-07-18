@@ -231,7 +231,15 @@
     },
     "astra-emu-family-api": {
       "status": "not_applicable",
-      "reason": "pure ABI-safe descriptor, session, effect, VFS and redaction DTO contract"
+      "reason": "pure ABI-safe descriptor, session, effect and redaction DTO contract"
+    },
+    "astra-emu-family-core": {
+      "status": "not_applicable",
+      "reason": "pure in-process VFS, decrypt transport and family factory contract"
+    },
+    "astra-emu-family-support": {
+      "status": "instrumented",
+      "reason": "trusted Luau, private profile, cache, verify, extract and viewer failure lifecycle"
     },
     "astra-emu-fvp-rfvp-core": {
       "status": "instrumented",
@@ -240,6 +248,10 @@
     "astra-emu-fvp": {
       "status": "instrumented",
       "reason": "FVP provider session, step, media and snapshot lifecycle"
+    },
+    "astra-emu-minori": {
+      "status": "instrumented",
+      "reason": "Minori PAZ mount, source validation, decrypt and cache lifecycle"
     },
     "astra-emu-manager-core": {
       "status": "instrumented",
@@ -264,6 +276,10 @@
     "astra-emu-cli": {
       "status": "instrumented",
       "reason": "explicit native launch and headless provider/session/artifact lifecycle"
+    },
+    "astra-emu-minori-cli": {
+      "status": "instrumented",
+      "reason": "Minori private scheme import and script census lifecycle"
     },
     "astra-emu-schema": {
       "status": "not_applicable",

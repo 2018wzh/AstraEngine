@@ -3,24 +3,26 @@ use std::{
     io::{Read, Write},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        mpsc, Arc, Mutex,
     },
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
 use astra_core::Hash256;
-use astra_emu_family_api::LegacyProviderError;
-use astra_emu_minori::{MinoriDecodeService, PazEntryDescriptor};
+use astra_emu_family_core::{
+    validate_decrypt_output, validate_decrypt_request, LegacyCoreError, LegacyDecryptPhase,
+    LegacyDecryptProvider, LegacyDecryptRequest,
+};
 use blowfish::{
     cipher::{BlockCipherDecrypt, BlockCipherEncrypt, KeyInit},
     Blowfish,
 };
-use encoding_rs::SHIFT_JIS;
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use mlua::{Function, Lua, LuaOptions, RegistryKey, StdLib, Table, Value, VmState};
 use rc4::{Rc4, StreamCipher};
 
-pub const DECODER_CAPABILITY: &str = "astra.vfs.decode.v1";
+pub const DECODER_CAPABILITY: &str = "astra.vfs.decrypt.v2";
 pub const MAX_DECODER_BATCH_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_DECODER_BATCH_ENTRIES: usize = 64;
 pub const DECODER_CHUNK_BYTES: usize = 4 * 1024 * 1024;
@@ -46,23 +48,25 @@ impl Default for DecoderLimits {
 
 struct DecoderRegistration {
     id: String,
+    descriptor_schema_id: String,
+    descriptor_schema_hash: Hash256,
+    private_profile_hash: Hash256,
     decode_index: RegistryKey,
     decode_entries: RegistryKey,
 }
 
-pub struct TrustedDecoderSession {
+struct LuaDecoderRuntime {
     lua: Lua,
-    patch_hash: Hash256,
     decoders: BTreeMap<String, DecoderRegistration>,
     limits: DecoderLimits,
 }
 
-impl TrustedDecoderSession {
-    pub fn load(
+impl LuaDecoderRuntime {
+    fn load(
         source: &str,
         required_capabilities: &BTreeSet<String>,
         limits: DecoderLimits,
-    ) -> Result<Self, LegacyProviderError> {
+    ) -> Result<Self, LegacyCoreError> {
         if source.len() > 256 * 1024
             || limits.instruction_budget == 0
             || limits.output_bytes > MAX_DECODER_BATCH_BYTES
@@ -128,6 +132,15 @@ impl TrustedDecoderSession {
                 if capabilities != [DECODER_CAPABILITY.to_owned()] {
                     return Err(mlua::Error::runtime("ASTRA_EMU_DECODER_CAPABILITY"));
                 }
+                let descriptor_schema_id: String = descriptor.get("descriptor_schema")?;
+                if !safe_symbol(&descriptor_schema_id) {
+                    return Err(mlua::Error::runtime("ASTRA_EMU_DECODER_DESCRIPTOR_SCHEMA"));
+                }
+                let private_profile_hash: mlua::Buffer = descriptor.get("private_profile_hash")?;
+                let private_profile_hash: [u8; 32] = private_profile_hash
+                    .to_vec()
+                    .try_into()
+                    .map_err(|_| mlua::Error::runtime("ASTRA_EMU_DECODER_PRIVATE_PROFILE_HASH"))?;
                 let decode_index: Function = descriptor.get("decode_index")?;
                 let decode_entries: Function = descriptor.get("decode_entries")?;
                 let mut guard = registration_sink
@@ -138,6 +151,9 @@ impl TrustedDecoderSession {
                 }
                 guard.push(DecoderRegistration {
                     id,
+                    descriptor_schema_hash: Hash256::from_sha256(descriptor_schema_id.as_bytes()),
+                    descriptor_schema_id,
+                    private_profile_hash: Hash256::from_bytes(private_profile_hash),
                     decode_index: lua.create_registry_value(decode_index)?,
                     decode_entries: lua.create_registry_value(decode_entries)?,
                 });
@@ -146,7 +162,7 @@ impl TrustedDecoderSession {
             .map_err(lua_api_error)?,
         )
         .map_err(lua_api_error)?;
-        install_intrinsics(&lua, &vfs)?;
+        install_intrinsics(&lua, &vfs, limits)?;
         astra.set("vfs", vfs).map_err(lua_api_error)?;
         globals.set("astra", astra).map_err(lua_api_error)?;
         drop(globals);
@@ -178,13 +194,131 @@ impl TrustedDecoderSession {
         }
         Ok(Self {
             lua,
-            patch_hash: Hash256::from_sha256(source.as_bytes()),
             decoders,
             limits,
         })
     }
+}
 
-    pub fn decoder(self: &Arc<Self>, id: &str) -> Result<SessionDecoder, LegacyProviderError> {
+#[derive(Clone)]
+struct DecoderIdentity {
+    descriptor_schema_id: String,
+    descriptor_schema_hash: Hash256,
+    private_profile_hash: Hash256,
+}
+
+struct OwnedDecryptRequest {
+    phase: LegacyDecryptPhase,
+    descriptors: Vec<Vec<u8>>,
+    transport: astra_emu_family_core::LegacyDecryptTransport,
+    bytes: Vec<u8>,
+}
+
+enum DecoderWorkerCommand {
+    Decrypt {
+        id: String,
+        request: OwnedDecryptRequest,
+        response: mpsc::SyncSender<Result<Vec<u8>, LegacyCoreError>>,
+    },
+    Shutdown,
+}
+
+struct DecoderWorker {
+    sender: mpsc::Sender<DecoderWorkerCommand>,
+    join: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl Drop for DecoderWorker {
+    fn drop(&mut self) {
+        let _ = self.sender.send(DecoderWorkerCommand::Shutdown);
+        if let Ok(join) = self.join.get_mut() {
+            if let Some(join) = join.take() {
+                let _ = join.join();
+            }
+        }
+    }
+}
+
+pub struct TrustedDecoderSession {
+    patch_hash: Hash256,
+    decoders: BTreeMap<String, DecoderIdentity>,
+    worker: DecoderWorker,
+}
+
+impl TrustedDecoderSession {
+    pub fn load(
+        source: &str,
+        required_capabilities: &BTreeSet<String>,
+        limits: DecoderLimits,
+    ) -> Result<Self, LegacyCoreError> {
+        let patch_hash = Hash256::from_sha256(source.as_bytes());
+        let (commands, receiver) = mpsc::channel();
+        let (initialized, initialization) = mpsc::sync_channel(1);
+        let source = source.to_owned();
+        let capabilities = required_capabilities.clone();
+        let join = thread::Builder::new()
+            .name("astra-vfs-luau-decoder".into())
+            .spawn(move || {
+                let runtime = match LuaDecoderRuntime::load(&source, &capabilities, limits) {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        let _ = initialized.send(Err(error));
+                        return;
+                    }
+                };
+                let identities = runtime
+                    .decoders
+                    .iter()
+                    .map(|(id, registration)| {
+                        (
+                            id.clone(),
+                            DecoderIdentity {
+                                descriptor_schema_id: registration.descriptor_schema_id.clone(),
+                                descriptor_schema_hash: registration.descriptor_schema_hash,
+                                private_profile_hash: registration.private_profile_hash,
+                            },
+                        )
+                    })
+                    .collect();
+                if initialized.send(Ok(identities)).is_err() {
+                    return;
+                }
+                while let Ok(command) = receiver.recv() {
+                    match command {
+                        DecoderWorkerCommand::Decrypt {
+                            id,
+                            request,
+                            response,
+                        } => {
+                            let _ = response.send(runtime.decrypt(&id, request));
+                        }
+                        DecoderWorkerCommand::Shutdown => break,
+                    }
+                }
+            })
+            .map_err(|_| {
+                error(
+                    "ASTRA_EMU_DECODER_WORKER_CREATE",
+                    "trusted decoder worker could not be created",
+                )
+            })?;
+        let decoders = initialization.recv().map_err(|_| {
+            error(
+                "ASTRA_EMU_DECODER_WORKER_INIT",
+                "trusted decoder worker stopped during initialization",
+            )
+        })??;
+        Ok(Self {
+            patch_hash,
+            decoders,
+            worker: DecoderWorker {
+                sender: commands,
+                join: Mutex::new(Some(join)),
+            },
+        })
+    }
+
+    pub fn decoder(self: &Arc<Self>, id: &str) -> Result<SessionDecoder, LegacyCoreError> {
         if !self.decoders.contains_key(id) {
             return Err(error(
                 "ASTRA_EMU_DECODER_NOT_FOUND",
@@ -207,140 +341,119 @@ pub struct SessionDecoder {
     id: String,
 }
 
-impl MinoriDecodeService for SessionDecoder {
-    fn decoder_id(&self) -> &str {
+impl LegacyDecryptProvider for SessionDecoder {
+    fn provider_id(&self) -> &str {
         &self.id
     }
-    fn patch_hash(&self) -> Hash256 {
-        self.session.patch_hash
+    fn private_profile_hash(&self) -> Hash256 {
+        self.session.decoders[&self.id].private_profile_hash
     }
-    fn decode_index(
-        &self,
-        role: &str,
-        version: u8,
-        encrypted: &[u8],
-    ) -> Result<Vec<u8>, LegacyProviderError> {
-        if encrypted.len() > MAX_DECODER_BATCH_BYTES {
-            return Err(error(
-                "ASTRA_EMU_DECODER_BATCH_BYTES",
-                "index batch exceeds 64 MiB",
-            ));
-        }
-        let registration = &self.session.decoders[&self.id];
-        let function: Function = self
-            .session
-            .lua
-            .registry_value(&registration.decode_index)
-            .map_err(lua_call_error)?;
-        let descriptor = self.session.lua.create_table().map_err(lua_call_error)?;
-        descriptor.set("role", role).map_err(lua_call_error)?;
-        descriptor.set("version", version).map_err(lua_call_error)?;
-        self.call(
-            function,
-            (
-                self.session
-                    .lua
-                    .create_buffer(encrypted)
-                    .map_err(lua_call_error)?,
-                descriptor,
-            ),
-        )
+    fn descriptor_schema_id(&self) -> &str {
+        &self.session.decoders[&self.id].descriptor_schema_id
     }
-    fn decode_entry(
-        &self,
-        version: u8,
-        entry: &PazEntryDescriptor,
-        encrypted: &[u8],
-    ) -> Result<Vec<u8>, LegacyProviderError> {
-        let registration = &self.session.decoders[&self.id];
-        let function: Function = self
-            .session
-            .lua
-            .registry_value(&registration.decode_entries)
-            .map_err(lua_call_error)?;
-        let mut output = Vec::with_capacity(encrypted.len());
-        for (chunk_index, chunk) in encrypted.chunks(DECODER_CHUNK_BYTES).enumerate() {
-            let chunk_offset = chunk_index
-                .checked_mul(DECODER_CHUNK_BYTES)
-                .ok_or_else(|| {
-                    error(
-                        "ASTRA_EMU_DECODER_CHUNK_OFFSET",
-                        "decoder chunk offset overflowed",
-                    )
-                })?;
-            let list = self.session.lua.create_table().map_err(lua_call_error)?;
-            let descriptor = self.session.lua.create_table().map_err(lua_call_error)?;
-            descriptor
-                .set("role", entry.archive_role.as_str())
-                .map_err(lua_call_error)?;
-            descriptor
-                .set("entry_id", entry.entry_id.as_str())
-                .map_err(lua_call_error)?;
-            descriptor
-                .set("name", entry.name.as_str())
-                .map_err(lua_call_error)?;
-            descriptor.set("version", version).map_err(lua_call_error)?;
-            descriptor
-                .set("unpacked_size", entry.unpacked_size)
-                .map_err(lua_call_error)?;
-            descriptor
-                .set("stored_size", entry.stored_size)
-                .map_err(lua_call_error)?;
-            descriptor
-                .set("total_size", encrypted.len() as u64)
-                .map_err(lua_call_error)?;
-            descriptor
-                .set("chunk_offset", chunk_offset as u64)
-                .map_err(lua_call_error)?;
-            descriptor
-                .set("packed", entry.packed)
-                .map_err(lua_call_error)?;
-            if let Some(video_key) = &entry.video_key {
-                descriptor
-                    .set(
-                        "video_key",
-                        self.session
-                            .lua
-                            .create_buffer(video_key)
-                            .map_err(lua_call_error)?,
-                    )
-                    .map_err(lua_call_error)?;
-            }
-            list.set(1, descriptor).map_err(lua_call_error)?;
-            let decoded = self.call(
-                function.clone(),
-                (
-                    self.session
-                        .lua
-                        .create_buffer(chunk)
-                        .map_err(lua_call_error)?,
-                    list,
-                ),
-            )?;
-            if decoded.len() != chunk.len() {
-                return Err(error(
-                    "ASTRA_EMU_DECODER_CHUNK_SIZE",
-                    "decoder callback changed a chunk length",
-                ));
-            }
-            output.extend_from_slice(&decoded);
-        }
+    fn descriptor_schema_hash(&self) -> Hash256 {
+        self.session.decoders[&self.id].descriptor_schema_hash
+    }
+
+    fn decrypt(&self, request: LegacyDecryptRequest<'_>) -> Result<Vec<u8>, LegacyCoreError> {
+        validate_decrypt_request(self, &request)?;
+        let owned = OwnedDecryptRequest {
+            phase: request.phase,
+            descriptors: request
+                .descriptors
+                .iter()
+                .map(|descriptor| descriptor.payload.clone())
+                .collect(),
+            transport: request.transport,
+            bytes: request.bytes.to_vec(),
+        };
+        let (response, result) = mpsc::sync_channel(1);
+        self.session
+            .worker
+            .sender
+            .send(DecoderWorkerCommand::Decrypt {
+                id: self.id.clone(),
+                request: owned,
+                response,
+            })
+            .map_err(|_| {
+                error(
+                    "ASTRA_EMU_DECODER_WORKER_STOPPED",
+                    "trusted decoder worker is not available",
+                )
+            })?;
+        let output = result.recv().map_err(|_| {
+            error(
+                "ASTRA_EMU_DECODER_WORKER_STOPPED",
+                "trusted decoder worker stopped before returning output",
+            )
+        })??;
+        validate_decrypt_output(&request, &output)?;
         Ok(output)
     }
 }
 
-impl SessionDecoder {
+impl LuaDecoderRuntime {
+    fn decrypt(&self, id: &str, request: OwnedDecryptRequest) -> Result<Vec<u8>, LegacyCoreError> {
+        let registration = self.decoders.get(id).ok_or_else(|| {
+            error(
+                "ASTRA_EMU_DECODER_NOT_FOUND",
+                "trusted decoder id is not registered",
+            )
+        })?;
+        let key = match request.phase {
+            LegacyDecryptPhase::Index => &registration.decode_index,
+            LegacyDecryptPhase::Entry => &registration.decode_entries,
+        };
+        let function: Function = self.lua.registry_value(key).map_err(lua_call_error)?;
+        let descriptors = self.lua.create_table().map_err(lua_call_error)?;
+        for (index, descriptor) in request.descriptors.iter().enumerate() {
+            descriptors
+                .set(
+                    index + 1,
+                    self.lua.create_buffer(descriptor).map_err(lua_call_error)?,
+                )
+                .map_err(lua_call_error)?;
+        }
+        let transport = self.lua.create_table().map_err(lua_call_error)?;
+        transport
+            .set("chunk_offset", request.transport.chunk_offset)
+            .map_err(lua_call_error)?;
+        transport
+            .set("total_size", request.transport.total_size)
+            .map_err(lua_call_error)?;
+        transport
+            .set("batch_index", request.transport.batch_index)
+            .map_err(lua_call_error)?;
+        transport
+            .set("input_bound", request.transport.input_bound)
+            .map_err(lua_call_error)?;
+        transport
+            .set("output_bound", request.transport.output_bound)
+            .map_err(lua_call_error)?;
+        let output = self.call(
+            function,
+            (
+                self.lua
+                    .create_buffer(request.bytes)
+                    .map_err(lua_call_error)?,
+                descriptors,
+                transport,
+            ),
+        )?;
+        Ok(output)
+    }
+
     fn call<A: mlua::IntoLuaMulti>(
         &self,
         function: Function,
         arguments: A,
-    ) -> Result<Vec<u8>, LegacyProviderError> {
-        install_budget(&self.session.lua, self.session.limits);
+    ) -> Result<Vec<u8>, LegacyCoreError> {
+        install_budget(&self.lua, self.limits);
         let value: Value = function.call(arguments).map_err(lua_call_error)?;
-        self.session.lua.remove_interrupt();
+        self.lua.remove_interrupt();
         let bytes = match value {
             Value::Buffer(buffer) => buffer.to_vec(),
-            Value::String(value) => value.as_bytes().to_vec(),
             _ => {
                 return Err(error(
                     "ASTRA_EMU_DECODER_OUTPUT_TYPE",
@@ -348,7 +461,7 @@ impl SessionDecoder {
                 ))
             }
         };
-        if bytes.len() > self.session.limits.output_bytes {
+        if bytes.len() > self.limits.output_bytes {
             return Err(error(
                 "ASTRA_EMU_DECODER_OUTPUT_LIMIT",
                 "decoder callback output exceeds its limit",
@@ -372,7 +485,11 @@ fn install_budget(lua: &Lua, limits: DecoderLimits) {
     });
 }
 
-fn install_intrinsics(lua: &Lua, vfs: &Table) -> Result<(), LegacyProviderError> {
+fn install_intrinsics(
+    lua: &Lua,
+    vfs: &Table,
+    limits: DecoderLimits,
+) -> Result<(), LegacyCoreError> {
     vfs.set(
         "crc32",
         lua.create_function(|_, bytes: mlua::Buffer| Ok(crc32fast::hash(&bytes.to_vec())))
@@ -433,10 +550,19 @@ fn install_intrinsics(lua: &Lua, vfs: &Table) -> Result<(), LegacyProviderError>
         "rc4",
         lua.create_function(
             |lua, (bytes, key, skip): (mlua::Buffer, mlua::Buffer, u32)| {
+                if skip as usize > MAX_DECODER_BATCH_BYTES {
+                    return Err(mlua::Error::runtime("ASTRA_EMU_DECODER_RC4_SKIP"));
+                }
                 let mut cipher = Rc4::new_from_slice(&key.to_vec())
                     .map_err(|_| mlua::Error::runtime("ASTRA_EMU_DECODER_RC4_KEY"))?;
-                let mut discarded = vec![0; skip as usize];
-                cipher.apply_keystream(&mut discarded);
+                let mut remaining = skip as usize;
+                let mut discarded = vec![0; DECODER_CHUNK_BYTES];
+                while remaining > 0 {
+                    let length = remaining.min(discarded.len());
+                    cipher.apply_keystream(&mut discarded[..length]);
+                    discarded[..length].fill(0);
+                    remaining -= length;
+                }
                 let mut out = bytes.to_vec();
                 cipher.apply_keystream(&mut out);
                 lua.create_buffer(out)
@@ -447,12 +573,16 @@ fn install_intrinsics(lua: &Lua, vfs: &Table) -> Result<(), LegacyProviderError>
     .map_err(lua_api_error)?;
     vfs.set(
         "zlib_decode",
-        lua.create_function(|lua, bytes: mlua::Buffer| {
+        lua.create_function(move |lua, bytes: mlua::Buffer| {
             let source = bytes.to_vec();
             let mut out = Vec::new();
             ZlibDecoder::new(source.as_slice())
+                .take((limits.output_bytes as u64).saturating_add(1))
                 .read_to_end(&mut out)
                 .map_err(mlua::Error::external)?;
+            if out.len() > limits.output_bytes {
+                return Err(mlua::Error::runtime("ASTRA_EMU_DECODER_ZLIB_OUTPUT_LIMIT"));
+            }
             lua.create_buffer(out)
         })
         .map_err(lua_api_error)?,
@@ -486,60 +616,18 @@ fn install_intrinsics(lua: &Lua, vfs: &Table) -> Result<(), LegacyProviderError>
     )
     .map_err(lua_api_error)?;
     vfs.set(
-        "cp932",
-        lua.create_function(|lua, text: String| {
-            let (bytes, _, malformed) = SHIFT_JIS.encode(&text);
-            if malformed {
-                return Err(mlua::Error::runtime("ASTRA_EMU_DECODER_CP932"));
-            }
-            lua.create_buffer(bytes)
-        })
-        .map_err(lua_api_error)?,
-    )
-    .map_err(lua_api_error)?;
-    vfs.set(
-        "mov_decode",
+        "write",
         lua.create_function(
-            |lua,
-             (bytes, video_key, entry_key, version, chunk_offset, total_size): (
-                mlua::Buffer,
-                mlua::Buffer,
-                mlua::Buffer,
-                u8,
-                u64,
-                u64,
-            )| {
+            |lua, (bytes, offset, replacement): (mlua::Buffer, u32, mlua::Buffer)| {
                 let mut output = bytes.to_vec();
-                let video = video_key.to_vec();
-                let entry = entry_key.to_vec();
-                if video.len() != 256 || entry.is_empty() {
-                    return Err(mlua::Error::runtime("ASTRA_EMU_DECODER_VIDEO_KEY"));
+                let replacement = replacement.to_vec();
+                let end = (offset as usize)
+                    .checked_add(replacement.len())
+                    .ok_or_else(|| mlua::Error::runtime("ASTRA_EMU_DECODER_WRITE_BOUNDS"))?;
+                if output.len() > DECODER_CHUNK_BYTES || end > output.len() {
+                    return Err(mlua::Error::runtime("ASTRA_EMU_DECODER_WRITE_BOUNDS"));
                 }
-                if version == 0 {
-                    let mut table = [0u8; 256];
-                    for (index, value) in video.iter().enumerate() {
-                        table[*value as usize] = index as u8;
-                    }
-                    for byte in &mut output {
-                        *byte = table[*byte as usize];
-                    }
-                    return lua.create_buffer(output);
-                }
-                let key = (0..256)
-                    .map(|index| video[index] ^ entry[index % entry.len()])
-                    .collect::<Vec<_>>();
-                let mut cipher = Rc4::new_from_slice(&key)
-                    .map_err(|_| mlua::Error::runtime("ASTRA_EMU_DECODER_VIDEO_RC4"))?;
-                let block_len = usize::try_from(total_size.min(0x10000))
-                    .map_err(|_| mlua::Error::runtime("ASTRA_EMU_DECODER_VIDEO_SIZE"))?;
-                if block_len == 0 {
-                    return lua.create_buffer(output);
-                }
-                let mut block = vec![0; block_len];
-                cipher.apply_keystream(&mut block);
-                for (index, byte) in output.iter_mut().enumerate() {
-                    *byte ^= block[(chunk_offset as usize + index) % block.len()];
-                }
+                output[offset as usize..end].copy_from_slice(&replacement);
                 lua.create_buffer(output)
             },
         )
@@ -556,16 +644,16 @@ fn safe_symbol(value: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
-fn error(code: &'static str, message: impl Into<String>) -> LegacyProviderError {
-    LegacyProviderError::invalid(code, message)
+fn error(code: &'static str, message: impl Into<String>) -> LegacyCoreError {
+    LegacyCoreError::invalid(code, message)
 }
-fn lua_api_error(_: mlua::Error) -> LegacyProviderError {
+fn lua_api_error(_: mlua::Error) -> LegacyCoreError {
     error(
         "ASTRA_EMU_DECODER_API",
         "trusted decoder API initialization failed",
     )
 }
-fn lua_call_error(lua_error: mlua::Error) -> LegacyProviderError {
+fn lua_call_error(lua_error: mlua::Error) -> LegacyCoreError {
     tracing::error!(
         event = "astra_emu_decoder_callback_failed",
         cause = sanitized_lua_error(&lua_error)
@@ -608,26 +696,54 @@ fn sanitized_lua_error(error: &mlua::Error) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use astra_emu_family_core::{LegacyDecryptTransport, LegacyOpaqueDescriptor};
+
+    const SOURCE: &str = r#"
+        astra.vfs.register_decoder({
+            id='copy',
+            capabilities={'astra.vfs.decrypt.v2'},
+            descriptor_schema='fixture.opaque.v1',
+            private_profile_hash=buffer.fromstring(string.rep('\0', 32)),
+            decode_index=function(bytes, descriptors, transport) return bytes end,
+            decode_entries=function(bytes, descriptors, transport) return bytes end
+        })
+    "#;
+
     #[test]
     fn buffer_callback_registers_and_runs() {
-        let source = r#"astra.vfs.register_decoder({ id='copy', capabilities={'astra.vfs.decode.v1'}, decode_index=function(bytes, descriptor) return bytes end, decode_entries=function(bytes, entries) return bytes end })"#;
         let session = Arc::new(
             TrustedDecoderSession::load(
-                source,
+                SOURCE,
                 &BTreeSet::from([DECODER_CAPABILITY.into()]),
                 DecoderLimits::default(),
             )
             .unwrap(),
         );
+        let decoder = session.decoder("copy").unwrap();
+        let descriptor = LegacyOpaqueDescriptor {
+            schema_id: "fixture.opaque.v1".into(),
+            schema_hash: Hash256::from_sha256(b"fixture.opaque.v1"),
+            payload: vec![1],
+        };
         assert_eq!(
-            session
-                .decoder("copy")
-                .unwrap()
-                .decode_index("scr", 1, b"abc")
+            decoder
+                .decrypt(LegacyDecryptRequest {
+                    phase: LegacyDecryptPhase::Index,
+                    descriptors: std::slice::from_ref(&descriptor),
+                    transport: LegacyDecryptTransport {
+                        chunk_offset: 0,
+                        total_size: 3,
+                        batch_index: 0,
+                        input_bound: 3,
+                        output_bound: 3,
+                    },
+                    bytes: b"abc",
+                })
                 .unwrap(),
             b"abc"
         );
     }
+
     #[test]
     fn missing_capability_is_blocking() {
         assert_eq!(
@@ -637,54 +753,5 @@ mod tests {
                 .code(),
             "ASTRA_EMU_DECODER_CAPABILITY"
         );
-    }
-
-    #[test]
-    fn entry_callback_receives_bounded_chunks_with_global_offsets() {
-        let source = r#"
-            astra.vfs.register_decoder({
-                id='chunk-offset',
-                capabilities={'astra.vfs.decode.v1'},
-                decode_index=function(bytes, descriptor) return bytes end,
-                decode_entries=function(bytes, entries)
-                    local descriptor = entries[1]
-                    local output = buffer.create(buffer.len(bytes))
-                    buffer.fill(
-                        output,
-                        0,
-                        descriptor.chunk_offset / 4194304,
-                        buffer.len(bytes)
-                    )
-                    return output
-                end
-            })
-        "#;
-        let session = Arc::new(
-            TrustedDecoderSession::load(
-                source,
-                &BTreeSet::from([DECODER_CAPABILITY.into()]),
-                DecoderLimits::default(),
-            )
-            .unwrap(),
-        );
-        let decoder = session.decoder("chunk-offset").unwrap();
-        let encrypted = vec![0x5a; DECODER_CHUNK_BYTES + 3];
-        let descriptor = PazEntryDescriptor {
-            archive_role: "scr".into(),
-            entry_id: "entry-1".into(),
-            name: "fixture.sc".into(),
-            offset: 0,
-            unpacked_size: encrypted.len() as u64,
-            stored_size: encrypted.len() as u64,
-            aligned_size: encrypted.len() as u64,
-            packed: false,
-            video_key: None,
-        };
-        let decoded = decoder.decode_entry(2, &descriptor, &encrypted).unwrap();
-        assert_eq!(
-            &decoded[..DECODER_CHUNK_BYTES],
-            vec![0; DECODER_CHUNK_BYTES]
-        );
-        assert_eq!(&decoded[DECODER_CHUNK_BYTES..], &[1, 1, 1]);
     }
 }

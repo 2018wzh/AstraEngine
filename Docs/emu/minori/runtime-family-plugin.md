@@ -37,10 +37,10 @@ Session 输出：
 
 | 情况 | Diagnostic | 行为 |
 | --- | --- | --- |
-| 缺 PAZ key | `NeedsUserKey` | 阻止加载 case |
-| entry 缺失 | `MissingResource` | 可恢复，输出 fallback command |
-| opcode 未识别 | `UnknownOpcode` | 保留 raw operand，继续或暂停由 severity 决定 |
-| payload 解码失败 | `DecodeFailed` | 阻止使用该资源 |
+| 缺 private profile 或 key | `ASTRA_EMU_MINORI_PRIVATE_PROFILE_*` | 阻止 mount |
+| entry 缺失 | `ASTRA_EMU_VFS_ENTRY_MISSING` | 阻止该次读取，不生成替代资源 |
+| opcode 未识别 | `UnknownOpcode` | parser 保留 raw operand；执行核心实现前不得猜测语义 |
+| payload 解码失败 | `ASTRA_EMU_MINORI_DECRYPT_*` | 阻止读取，不切换 provider 或算法 |
 
 ## First Implementation Gate
 

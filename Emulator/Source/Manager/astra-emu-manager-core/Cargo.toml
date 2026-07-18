@@ -12,21 +12,14 @@ abi_stable.workspace = true
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
-astra-emu-minori = { path = "../../Families/astra-emu-minori" }
 astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }
 astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi" }
 astra-runtime = { path = "../../../../Engine/Source/Runtime/astra-runtime" }
 blake3.workspace = true
-blowfish.workspace = true
-crc32fast = "1.5"
 ed25519-dalek.workspace = true
-encoding_rs.workspace = true
 hex.workspace = true
-image.workspace = true
 libloading.workspace = true
 mlua.workspace = true
-rc4.workspace = true
-flate2.workspace = true
 postcard.workspace = true
 rusqlite.workspace = true
 schemars.workspace = true
@@ -34,7 +27,6 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
-symphonia.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

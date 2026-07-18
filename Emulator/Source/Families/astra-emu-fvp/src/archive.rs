@@ -2,7 +2,10 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use astra_byte_source::{ByteRange, ByteSourceStat, SourceRevision, DEFAULT_MAX_RANGE_BYTES};
 use astra_core::Hash256;
-use astra_emu_family_api::{LegacyPackManifest, LegacyProviderError, LegacyVfsEntry};
+use astra_emu_family_api::LegacyProviderError;
+use astra_emu_family_core::{
+    LegacyPackManifest, LegacyVfsEntry, LegacyVfsSource, LEGACY_PACK_MANIFEST_SCHEMA,
+};
 use encoding_rs::{Encoding, GBK, SHIFT_JIS, UTF_8};
 
 use crate::FvpNls;
@@ -271,25 +274,52 @@ impl FvpArchive {
         folder: &str,
         reader_hash: Hash256,
     ) -> Result<LegacyPackManifest, LegacyProviderError> {
+        let (source_size, source_hash) = match &self.storage {
+            ArchiveStorage::Memory(bytes) => (bytes.len() as u64, Hash256::from_sha256(bytes)),
+            ArchiveStorage::Host { stat, .. } => (stat.len, stat.revision.0),
+        };
         let mut entries = Vec::with_capacity(self.entries.len());
         for entry in &self.entries {
             let bytes = self.read(&entry.name)?;
             entries.push(LegacyVfsEntry {
                 uri: format!("fvp:/{folder}/{}", entry.name),
                 entry_id: format!("{folder}:{}", entry.name),
-                offset: entry.offset,
-                size: entry.size,
-                content_hash: Hash256::from_sha256(&bytes),
+                source_id: folder.into(),
+                source_offset: entry.offset,
+                stored_size: entry.size,
+                decoded_size: entry.size,
+                source_hash: Hash256::from_sha256(&bytes),
+                content_hash: Some(Hash256::from_sha256(&bytes)),
+                method: "raw".into(),
                 media_kind: classify(&bytes).into(),
             });
         }
-        Ok(LegacyPackManifest {
+        let manifest = LegacyPackManifest {
+            schema: LEGACY_PACK_MANIFEST_SCHEMA.into(),
+            family_id: "fvp".into(),
             mount_id: mount_id.into(),
             prefix: "fvp:/".into(),
             reader_id: "astra.fvp.bin.v1".into(),
             reader_hash,
+            decrypt_provider_id: "astra.emu.fvp.raw.v1".into(),
+            private_profile_hash: Hash256::from_sha256(b"astra.emu.fvp.no_private_profile"),
+            mount_profile_hash: reader_hash,
+            sources: vec![LegacyVfsSource {
+                source_id: folder.into(),
+                archive_role: Some(folder.into()),
+                byte_size: source_size,
+                part_count: 1,
+                source_hash,
+            }],
             entries,
-        })
+        };
+        manifest.validate(1_000_000).map_err(|_| {
+            LegacyProviderError::invalid(
+                "ASTRA_FVP_MANIFEST_CORE",
+                "in-process VFS manifest failed core validation",
+            )
+        })?;
+        Ok(manifest)
     }
 }
 

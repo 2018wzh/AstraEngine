@@ -3,9 +3,7 @@ use std::path::PathBuf;
 use astra_emu_cli::{run_headless, run_native, HeadlessLaunch, NativeLaunch};
 use clap::{Parser, Subcommand, ValueEnum};
 
-mod minori;
-#[cfg(target_os = "linux")]
-mod minori_fuse;
+mod vfs;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum EngineType {
@@ -32,11 +30,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
-    /// Inspect, verify, extract, or prepare a private Minori PAZ decoder.
-    Minori {
-        #[command(subcommand)]
-        command: minori::MinoriCommand,
-    },
+    /// Inspect, verify, extract, or mount a family-owned legacy VFS.
+    Vfs(vfs::VfsArgs),
     /// Launch the selected family directly in an overlay-free native game host.
     Run {
         #[arg(long, value_enum)]
@@ -95,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     observability.role = astra_observability::HostRole::Cli;
     let _observability = astra_observability::init_host(observability)?;
     match Cli::parse().command {
-        CliCommand::Minori { command } => minori::run(command)?,
+        CliCommand::Vfs(arguments) => vfs::run(arguments)?,
         CliCommand::Run {
             engine,
             game_dir,
@@ -172,4 +167,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_minori_command_is_not_accepted() {
+        assert!(Cli::try_parse_from(["astra-emu-cli", "minori"]).is_err());
+    }
+
+    #[test]
+    fn generic_vfs_command_requires_explicit_family_and_profile() {
+        assert!(Cli::try_parse_from(["astra-emu-cli", "vfs", "verify"]).is_err());
+    }
 }

@@ -19,6 +19,8 @@ path = "src/main.rs"
 [dependencies]
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
+astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-support" }
 astra-emu-manager-core = { path = "../../Manager/astra-emu-manager-core" }
 astra-emu-minori = { path = "../../Families/astra-emu-minori" }
 astra-headless-protocol = { path = "../../../../Engine/Source/Runtime/astra-headless-protocol" }
@@ -31,6 +33,7 @@ astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi"
 clap.workspace = true
 directories.workspace = true
 ed25519-dalek.workspace = true
+encoding_rs.workspace = true
 hex.workspace = true
 image.workspace = true
 flate2.workspace = true

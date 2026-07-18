@@ -2,7 +2,7 @@
 
 本阶段没有 VM。现有 CFG 只表达 parser 已确认的 `label`、`goto`、`if` 和跨脚本 `chain`；`end` 暂记 terminate，样本未观察到可独立确认的 return command。`select` 的 operand/target 关系仍为 unknown。parser 不能执行变量、等待、消息、音频或演出命令。
 
-全包 census 已确认 29 个 command token 及其数量。下一阶段仍需逐项拆分入口、消息、姓名、语音、选项、条件表达式、变量、等待和主要演出 operand；没有样本证据的字段保持 unknown，不用 command 名称代替语义证明。执行核心仍须经 `LegacyRuntimeProvider` session 和 RuntimeWorld StateMachine 提交 effect/await/trace。
+全包 census 已确认 89 个脚本、33728 行、33695 个 command 和 29 个 command token，catalog 范围内 unknown opcode 为 0。下一阶段仍需逐项拆分入口、消息、姓名、语音、选项、条件表达式、变量、等待和主要演出 operand；没有样本证据的字段保持 unknown，不用 command 名称代替语义证明。执行核心仍须经 `LegacyRuntimeProvider` session 和 RuntimeWorld StateMachine 提交 effect/await/trace。
 
 ## VM State
 

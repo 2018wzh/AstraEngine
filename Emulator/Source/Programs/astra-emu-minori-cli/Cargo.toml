@@ -1,28 +1,24 @@
 [package]
-name = "astra-emu-minori"
+name = "astra-emu-minori-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[lib]
-doctest = false
+[[bin]]
+name = "astra-emu-minori-cli"
+path = "src/main.rs"
 
 [dependencies]
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
 astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-support" }
-blowfish.workspace = true
-crc32fast = "1.5"
-directories.workspace = true
-encoding_rs.workspace = true
+astra-emu-minori = { path = "../../Families/astra-emu-minori" }
+astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
+clap.workspace = true
 flate2.workspace = true
-lru.workspace = true
-rc4.workspace = true
-schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
-thiserror.workspace = true
+serde_yaml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
