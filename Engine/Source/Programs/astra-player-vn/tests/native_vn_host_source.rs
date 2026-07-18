@@ -33,7 +33,7 @@ ui_bind surface:choice view:ui.test.choice controller:test.choice policy:astra.p
 ui_bind system_page:save view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.save
 ui_bind system_page:load view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.load
 ui_bind system_page:config view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.config
-ui_view ui.test.message model:astra.vn.ui_model.message.v1 theme:astra.vn.theme.classic #@id ui.test.message
+ui_view ui.test.message model:astra.vn.ui_model.message.v2 theme:astra.vn.theme.classic #@id ui.test.message
   screen id:root
     panel id:advance fill:true
       on activate -> vn.advance
@@ -502,7 +502,7 @@ fn test_controller_options(mut options: CompileAstraProjectOptions) -> CompileAs
 fn test_controller_source() -> String {
     r#"
 local controllers = {
-  { "test.message", "ui.test.message", "astra.vn.ui_model.message.v1" },
+  { "test.message", "ui.test.message", "astra.vn.ui_model.message.v2" },
   { "test.choice", "ui.test.choice", "astra.vn.ui_model.choice.v1" },
   { "test.system", "ui.test.system", "astra.vn.ui_model.system.v1" },
 }

@@ -1295,7 +1295,11 @@ async fn execute_sequence(
                 PhysicalInput::Await {
                     observation,
                     timeout_ticks,
+                    continue_at_match,
                 } => {
+                    if *continue_at_match {
+                        return Err("ASTRA_EMU_HEADLESS_AWAIT_CONTINUATION_UNSUPPORTED".into());
+                    }
                     let mut matched = driver.observation_matches(observation);
                     for _ in 0..*timeout_ticks {
                         if matched || driver.terminal {

@@ -2309,20 +2309,25 @@ impl NativeVnHostCommandSource {
             localization_keys: &localization_keys,
         };
         let (surface, system_page, model) = if state.pending_choice.is_some() {
-            ("choice", None, model_to_ui_value(&context.build_choice()?)?)
+            (
+                "choice".to_string(),
+                None,
+                model_to_ui_value(&context.build_choice()?)?,
+            )
         } else if let Some(frame) = state.system_stack.last() {
             let page_model = context.build_system_page(frame.page)?;
             (
-                "system",
+                "system".to_string(),
                 Some(system_page_binding_key(frame.page)?),
                 page_model.to_ui_value()?,
             )
         } else {
-            (
-                "message",
-                None,
-                model_to_ui_value(&context.build_message()?)?,
-            )
+            let message = context.build_message()?;
+            let surface = message
+                .window
+                .clone()
+                .unwrap_or_else(|| "message".to_string());
+            (surface, None, model_to_ui_value(&message)?)
         };
         let binding = resolve_binding(
             &self.ui_bindings,
@@ -2332,7 +2337,7 @@ impl NativeVnHostCommandSource {
                     .as_ref()
                     .map(|wait| wait.command_id.as_str()),
                 system_page,
-                surface: Some(surface),
+                surface: Some(&surface),
                 profile: &self.ui_profile,
             },
         )?
@@ -3861,10 +3866,13 @@ fn append_text_value(
     x: u32,
     y: u32,
     max_width: u32,
+    max_height: u32,
     font_size: f32,
     max_lines: u32,
     direction: TextDirection,
     rgba: [u8; 4],
+    horizontal_align: UiTextAlignment,
+    vertical_align: UiTextAlignment,
 ) -> Result<(), NativeVnHostError> {
     let request = text_request(TextRequestSpec {
         key,
@@ -3877,13 +3885,17 @@ fn append_text_value(
         direction,
     });
     let layout = provider.layout(&request)?;
+    let layout_width = layout.width.ceil().clamp(0.0, max_width as f32) as u32;
+    let layout_height = layout.height.ceil().clamp(0.0, max_height as f32) as u32;
+    let aligned_x = x.saturating_add(horizontal_align.offset(max_width, layout_width));
+    let aligned_y = y.saturating_add(vertical_align.offset(max_height, layout_height));
     let commands = owner.update_layout(layout_id, &layout, rgba)?;
     for command in commands {
         match command {
             SceneCommand::UploadGlyph { .. } | SceneCommand::ReleaseResource { .. } => {
                 lifecycle.push(command);
             }
-            command => draw.push(translate_text_command(command, x, y)?),
+            command => draw.push(translate_text_command(command, aligned_x, aligned_y)?),
         }
     }
     if !layout_ids.insert(layout_id.to_string()) {
@@ -3931,7 +3943,14 @@ fn append_ui_semantic_text(
         let width =
             non_negative_coord(node.bounds_points.max.x - node.bounds_points.min.x, "width")?
                 .max(1);
+        let height = non_negative_coord(
+            node.bounds_points.max.y - node.bounds_points.min.y,
+            "height",
+        )?
+        .max(1);
         let direction = parse_text_direction(node.properties.get("text.direction"))?;
+        let horizontal_align = parse_ui_text_alignment(node.properties.get("text.align"))?;
+        let vertical_align = parse_ui_text_alignment(node.properties.get("text.vertical_align"))?;
         let max_lines = parse_bounded_u32_property(node, "text.max_lines", 4, 1, 1_024)?;
         let font_size = parse_bounded_f32_property(
             node,
@@ -3955,13 +3974,45 @@ fn append_ui_semantic_text(
             x.saturating_add(8),
             y.saturating_add(8),
             width.saturating_sub(16).max(1),
+            height.saturating_sub(16).max(1),
             font_size,
             max_lines,
             direction,
             rgba,
+            horizontal_align,
+            vertical_align,
         )?;
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiTextAlignment {
+    Start,
+    Center,
+    End,
+}
+
+impl UiTextAlignment {
+    fn offset(self, available: u32, content: u32) -> u32 {
+        let remaining = available.saturating_sub(content);
+        match self {
+            Self::Start => 0,
+            Self::Center => remaining / 2,
+            Self::End => remaining,
+        }
+    }
+}
+
+fn parse_ui_text_alignment(value: Option<&String>) -> Result<UiTextAlignment, NativeVnHostError> {
+    match value.map(String::as_str).unwrap_or("start") {
+        "start" => Ok(UiTextAlignment::Start),
+        "center" => Ok(UiTextAlignment::Center),
+        "end" => Ok(UiTextAlignment::End),
+        _ => Err(NativeVnHostError::Asset(
+            "ASTRA_PLAYER_UI_TEXT_ALIGNMENT: alignment must be start, center or end".into(),
+        )),
+    }
 }
 
 fn parse_ui_text_rgba(value: Option<&String>) -> Result<[u8; 4], NativeVnHostError> {
@@ -4001,7 +4052,7 @@ fn ordered_ui_font_families(font_families: &[String], locale: &str) -> Vec<Strin
 
 #[cfg(test)]
 mod font_fallback_tests {
-    use super::ordered_ui_font_families;
+    use super::{ordered_ui_font_families, parse_ui_text_alignment, UiTextAlignment};
 
     fn packaged_families() -> Vec<String> {
         vec![
@@ -4029,6 +4080,21 @@ mod font_fallback_tests {
 
         assert_eq!(first[0], "Noto Sans JP");
         assert_eq!(first, second);
+    }
+
+    #[astra_headless_test::test]
+    fn semantic_text_alignment_uses_bounded_container_offsets() {
+        assert_eq!(UiTextAlignment::Start.offset(754, 320), 0);
+        assert_eq!(UiTextAlignment::Center.offset(754, 320), 217);
+        assert_eq!(UiTextAlignment::End.offset(754, 320), 434);
+        assert_eq!(UiTextAlignment::Center.offset(320, 754), 0);
+    }
+
+    #[astra_headless_test::test]
+    fn invalid_semantic_text_alignment_is_blocking() {
+        let invalid = "middle".to_string();
+        let error = parse_ui_text_alignment(Some(&invalid)).unwrap_err();
+        assert!(error.to_string().contains("ASTRA_PLAYER_UI_TEXT_ALIGNMENT"));
     }
 }
 

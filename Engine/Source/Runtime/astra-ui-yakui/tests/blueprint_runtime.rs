@@ -37,7 +37,20 @@ fn modal_stack_is_rendered_as_bounded_dialog_semantics() {
         root: base_root,
     };
     let mut dialog_root = node("dialog", "modal");
-    dialog_root.children.push(node("message", "text"));
+    let mut message = node("message", "text");
+    message.properties.insert(
+        "text_align".into(),
+        UiValueExpr::Literal {
+            value: UiValue::String("center".into()),
+        },
+    );
+    message.properties.insert(
+        "vertical_align".into(),
+        UiValueExpr::Literal {
+            value: UiValue::String("end".into()),
+        },
+    );
+    dialog_root.children.push(message);
     let dialog = UiViewBlueprint {
         id: "ui.dialog".into(),
         source_id: "ui.dialog".into(),
@@ -114,6 +127,23 @@ fn modal_stack_is_rendered_as_bounded_dialog_semantics() {
         .nodes
         .iter()
         .any(|node| node.id == "root/modal.0/dialog/message"));
+    let message = output
+        .semantics
+        .nodes
+        .iter()
+        .find(|node| node.id == "root/modal.0/dialog/message")
+        .expect("message semantic node");
+    assert_eq!(
+        message.properties.get("text.align").map(String::as_str),
+        Some("center")
+    );
+    assert_eq!(
+        message
+            .properties
+            .get("text.vertical_align")
+            .map(String::as_str),
+        Some("end")
+    );
     assert_eq!(output.semantics.root_id, "root");
 }
 

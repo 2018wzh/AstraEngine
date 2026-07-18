@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections import Counter
 from hashlib import sha256
 import json
+import unicodedata
 
 
 class DirectorNativeStoryError(ValueError):
@@ -34,6 +35,11 @@ MECHANISM_REPLACEMENTS = {
     "system_popup": "astra_system_page_wait",
     "se_stop": "astra_audio_control",
     "bgm_fade_out_fast": "astra_audio_fade_control",
+}
+READING_SURFACES = {
+    "talk": "tsui.surface.dialogue",
+    "mono": "tsui.surface.monologue",
+    "monoreturn": "tsui.surface.monologue",
 }
 
 
@@ -533,7 +539,22 @@ class _Lowering:
                         )
                     )
             elif kind == "text":
-                commands.append(self._command("text", handler=handler, text=operation["text"], speaker_id=None))
+                reading_mode = operation.get("reading_mode")
+                if reading_mode not in READING_SURFACES:
+                    raise DirectorNativeStoryError("reading text lost its typed talk/mono surface identity")
+                text, speaker_id, speaker_text = _split_reading_text(
+                    operation["text"], reading_mode
+                )
+                commands.append(
+                    self._command(
+                        "text",
+                        handler=handler,
+                        text=text,
+                        speaker_id=speaker_id,
+                        speaker_text=speaker_text,
+                        window=READING_SURFACES[reading_mode],
+                    )
+                )
             elif kind == "wait":
                 commands.append(self._command("input_wait", handler=handler))
             elif kind == "waitse":
@@ -727,15 +748,39 @@ def _authority_operations(operations):
     return result
 
 
-def _flatten_scene_operations(operations):
+def _flatten_scene_operations(operations, reading_mode=None):
     for operation in operations:
         kind = operation["kind"]
         if kind == "transaction":
-            yield from _flatten_scene_operations(operation["operations"])
+            yield from _flatten_scene_operations(operation["operations"], reading_mode)
         elif kind == "reading":
-            yield from _flatten_scene_operations(operation["events"])
+            mode = operation.get("mode")
+            if mode not in READING_SURFACES:
+                raise DirectorNativeStoryError("typed reading mode is missing or unsupported")
+            yield from _flatten_scene_operations(operation["events"], mode)
+        elif kind == "text":
+            if reading_mode not in READING_SURFACES:
+                raise DirectorNativeStoryError("scene text is not owned by a typed reading block")
+            yield {**operation, "reading_mode": reading_mode}
         else:
             yield operation
+
+
+def _split_reading_text(text, reading_mode):
+    if not isinstance(text, str) or not text:
+        raise DirectorNativeStoryError("reading text is empty")
+    if reading_mode != "talk" or "「" not in text:
+        return text, None, None
+    prefix, body = text.split("「", 1)
+    speaker = "".join(prefix.split())
+    if not speaker:
+        return text, None, None
+    if len(speaker) > 32 or any(
+        unicodedata.category(character)[0] not in {"L", "N"} for character in speaker
+    ):
+        raise DirectorNativeStoryError("talk speaker prefix is not a bounded name token")
+    speaker_id = f"tsui.speaker.{sha256(speaker.encode('utf-8')).hexdigest()[:16]}"
+    return f"「{body}", speaker_id, speaker
 
 
 def _selector_sizes(program):

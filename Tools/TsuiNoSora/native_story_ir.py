@@ -50,6 +50,7 @@ SUPPORTED_COMMANDS = {
 }
 MEDIA_COMMANDS = {"preload", "background", "show", "bgm", "se", "voice", "movie"}
 WAIT_COMMANDS = {"text", "choice", "wait", "input_wait", "movie"}
+READING_WINDOWS = {"tsui.surface.dialogue", "tsui.surface.monologue"}
 MAX_STATES_PER_SOURCE = 64
 PHYSICAL_INPUT_TYPES = {
     "resume",
@@ -253,7 +254,21 @@ def _validate_command(command, handlers, commands, diagnostics) -> None:
 def _command_payload_valid(command: dict) -> bool:
     kind = command["kind"]
     if kind == "text":
-        return isinstance(command.get("text"), str) and bool(command["text"]) and _optional_safe(command.get("speaker_id"))
+        speaker_id = command.get("speaker_id")
+        speaker_text = command.get("speaker_text")
+        speaker_pair_valid = (speaker_id is None and speaker_text is None) or (
+            _safe(speaker_id)
+            and isinstance(speaker_text, str)
+            and bool(speaker_text)
+            and len(speaker_text) <= 32
+            and not any(character in speaker_text for character in "\r\n\0")
+        )
+        return (
+            isinstance(command.get("text"), str)
+            and bool(command["text"])
+            and command.get("window") in READING_WINDOWS
+            and speaker_pair_valid
+        )
     if kind == "choice":
         options = command.get("options")
         return isinstance(command.get("prompt"), str) and isinstance(options, list) and bool(options) and all(
@@ -471,8 +486,12 @@ def _render_command(command: dict, strings: dict[str, str]) -> list[str]:
         key = f"story.{command_id}"
         strings[key] = command["text"]
         speaker = f" speaker:{command['speaker_id']}" if command.get("speaker_id") else ""
+        if command.get("speaker_id"):
+            strings[f"speaker.{command['speaker_id']}"] = command["speaker_text"]
         voice = f" voice:{command['voice_command_id']}" if command.get("voice_command_id") else ""
-        return [f"{prefix}text key:{key}{speaker}{voice} {stable}"]
+        return [
+            f"{prefix}text key:{key}{speaker}{voice} window:{command['window']} {stable}"
+        ]
     if kind == "choice":
         key = f"story.{command_id}.prompt"
         strings[key] = command["prompt"]

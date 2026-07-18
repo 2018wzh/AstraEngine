@@ -1,5 +1,7 @@
 # Stage Test Matrix
 
+2026-07-18 增量：最新 Classic/Modern package 已分别通过 5/11 个 `wgpu_offscreen` 物理输入视觉 checkpoint；Windows GPU evidence 使用 DX12 hardware adapter，并由 v2 run report/artifact manifest 绑定 renderer identity。此 E2 不替代当前 package 的完整路线矩阵、Windows E3 或 formal signoff。
+
 TsuiNoSora 的 `T-S3-TSUI-GATE-01` 现已要求 `tsuinosora.native_story_ir.v1` 与 `tsuinosora.full_conversion_coverage_report.v1`。测试 fixture 可验证 generator/validator，但 route metadata 合成剧情和语义 `advance`/`choose` 自动化已退休；真实验收只能使用完整私有 IR 生成的物理输入 JSONL。当前 2527/2527 resource conversion、完整 IR 与上一最终路线包的 36/36 Headless matrix 已通过；最新视觉包的完整矩阵、Windows E3、Web portable graph/bundle E2、Title 启动检查点和 formal signoff 尚未通过，故相关 work item保持 `IN_PROGRESS`。
 
 本矩阵把 Stage 1-8 的工作项映射到测试项目。Stage 1 和 Stage 2 路径已经落在 UE 风格 workspace；Stage 3-6 仍包含未实现目标路径；Stage 7/8 是 AstraRPG planned extension，测试项先作为 `SPEC_READY` 迁移目标。

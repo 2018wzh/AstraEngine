@@ -277,7 +277,7 @@ fn validate_view_bindings(view: &UiViewBlueprint) -> Result<(), VnError> {
 fn is_known_model_schema(schema: &str) -> bool {
     matches!(
         schema,
-        "astra.vn.ui_model.message.v1"
+        "astra.vn.ui_model.message.v2"
             | "astra.vn.ui_model.choice.v1"
             | "astra.vn.ui_model.title.v1"
             | "astra.vn.ui_model.quick_panel.v1"
@@ -360,7 +360,7 @@ fn validate_bound_expr(
 fn model_path_allowed(schema: &str, path: &[String]) -> bool {
     let first = path.first().map(String::as_str);
     match schema {
-        "astra.vn.ui_model.message.v1" => matches!(
+        "astra.vn.ui_model.message.v2" => matches!(
             first,
             Some(
                 "command_id"
@@ -732,6 +732,8 @@ fn validate_widget_properties(line: &ParsedLine) -> Result<(), VnError> {
             "value",
             "text_key",
             "direction",
+            "text_align",
+            "vertical_align",
             "max_lines",
             "font_size",
         ],

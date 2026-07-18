@@ -12,6 +12,7 @@ pub struct MessageViewModel {
     pub text_key: String,
     pub speaker_key: Option<String>,
     pub voice_id: Option<String>,
+    pub window: Option<String>,
     pub auto_enabled: bool,
     pub skip_mode: SkipMode,
 }
@@ -189,14 +190,12 @@ impl VnUiModelContext<'_> {
             )
         })?;
         Ok(MessageViewModel {
-            schema: "astra.vn.ui_model.message.v1".to_string(),
+            schema: "astra.vn.ui_model.message.v2".to_string(),
             command_id: entry.command_id.clone(),
             text_key: entry.key.clone(),
-            speaker_key: entry
-                .speaker
-                .as_ref()
-                .map(|speaker| format!("speaker.{speaker}")),
+            speaker_key: speaker_localization_key(entry.speaker.as_deref()),
             voice_id: entry.voice.clone(),
+            window: entry.layout.window.clone(),
             auto_enabled: self.runtime.system.auto_enabled,
             skip_mode: self.runtime.system.skip_mode,
         })
@@ -287,7 +286,7 @@ impl VnUiModelContext<'_> {
                     .map(|entry| BacklogEntryViewModel {
                         command_id: entry.voice.clone(),
                         text_key: entry.line_key.clone(),
-                        speaker_key: entry.speaker.clone(),
+                        speaker_key: speaker_localization_key(entry.speaker.as_deref()),
                         voice_id: Some(entry.voice.clone()),
                         has_voice: true,
                         can_jump: false,
@@ -376,7 +375,7 @@ impl VnUiModelContext<'_> {
             .map(|entry| BacklogEntryViewModel {
                 command_id: entry.command_id.clone(),
                 text_key: entry.key.clone(),
-                speaker_key: entry.speaker.clone(),
+                speaker_key: speaker_localization_key(entry.speaker.as_deref()),
                 voice_id: entry.voice.clone(),
                 has_voice: entry.voice.is_some(),
                 can_jump: entry.read,
@@ -384,6 +383,10 @@ impl VnUiModelContext<'_> {
             })
             .collect()
     }
+}
+
+fn speaker_localization_key(speaker: Option<&str>) -> Option<String> {
+    speaker.map(|speaker| format!("speaker.{speaker}"))
 }
 
 fn config_integer(
@@ -466,7 +469,7 @@ fn json_to_ui_value(value: serde_json::Value) -> Result<UiValue, UiValidationErr
 
 #[cfg(test)]
 mod tests {
-    use super::{config_bool, config_integer};
+    use super::{config_bool, config_integer, speaker_localization_key};
     use std::collections::BTreeMap;
 
     #[astra_headless_test::test]
@@ -488,5 +491,14 @@ mod tests {
         let values = BTreeMap::new();
         assert_eq!(config_integer(&values, "volume", 50, 0, 100).unwrap(), 50);
         assert!(config_bool(&values, "contrast", true).unwrap());
+    }
+
+    #[astra_headless_test::test]
+    fn speaker_ids_are_resolved_through_the_localization_namespace() {
+        assert_eq!(
+            speaker_localization_key(Some("tsui.speaker.fixture")),
+            Some("speaker.tsui.speaker.fixture".to_string())
+        );
+        assert_eq!(speaker_localization_key(None), None);
     }
 }

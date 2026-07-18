@@ -1814,6 +1814,30 @@ fn semantic_text_properties(
         }
         properties.insert("text.direction".into(), direction);
     }
+    for (source, target, allowed) in [
+        ("text_align", "text.align", ["start", "center", "end"]),
+        (
+            "vertical_align",
+            "text.vertical_align",
+            ["start", "center", "end"],
+        ),
+    ] {
+        if let Some(expr) = node.properties.get(source) {
+            let UiValue::String(value) = evaluate(expr, frame, item, None)? else {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_UI_TEXT_ALIGNMENT_TYPE",
+                    format!("{source} must resolve to a string"),
+                ));
+            };
+            if !allowed.contains(&value.as_str()) {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_UI_TEXT_ALIGNMENT",
+                    format!("{source} must be start, center or end"),
+                ));
+            }
+            properties.insert(target.into(), value);
+        }
+    }
     for (source, target, min, max) in [
         ("max_lines", "text.max_lines", 1.0_f32, 1_024.0_f32),
         ("font_size", "text.font_size", 6.0_f32, 256.0_f32),

@@ -180,11 +180,13 @@ fn tsuinosora_classic_and_modern_ui_template_compiles_as_one_project() {
         .with_ui_theme(theme_from_source(MODERN_THEME));
     for id in [
         "tsui.message.classic",
+        "tsui.monologue.classic",
         "tsui.choice.classic",
         "tsui.system.title.classic",
         "tsui.system.save.classic",
         "tsui.system.load.classic",
         "tsui.message.modern",
+        "tsui.monologue.modern",
         "tsui.choice.modern",
         "tsui.system.title.modern",
         "tsui.system.quick_panel.modern",
@@ -206,11 +208,27 @@ fn tsuinosora_classic_and_modern_ui_template_compiles_as_one_project() {
     )
     .expect("the checked-in TsuiNoSora UI template must compile");
 
-    assert_eq!(compiled.ui_blueprints.views.len(), 14);
+    assert_eq!(compiled.ui_blueprints.views.len(), 16);
     assert!(compiled
         .ui_blueprints
         .views
         .contains_key("ui.tsui.modern.quick_panel"));
+    for view_id in ["ui.tsui.classic.monologue", "ui.tsui.modern.monologue"] {
+        let view = compiled
+            .ui_blueprints
+            .views
+            .get(view_id)
+            .expect("typed monologue view");
+        assert_eq!(view.model_schema, "astra.vn.ui_model.message.v2");
+    }
+    for profile in ["classic", "modern"] {
+        assert!(compiled
+            .ui_bindings
+            .profile_scoped_bindings
+            .get(profile)
+            .and_then(|bindings| bindings.surface_bindings.get("tsui.surface.monologue"))
+            .is_some());
+    }
 }
 
 fn theme_from_source(source: &str) -> UiThemeManifest {

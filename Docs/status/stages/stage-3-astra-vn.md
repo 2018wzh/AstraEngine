@@ -1,5 +1,7 @@
 # Stage 3 AstraVN Work
 
+2026-07-18 GPU E2 增量证据：Classic 现为 5 个 checkpoint，Modern 现为 11 个 checkpoint；两次运行均显式绑定 `wgpu_offscreen`，由 Windows DX12 硬件 adapter rasterize，并在 v2 run report/artifact manifest 中校验同一 renderer identity、scene submission 和 checkpoint rasterization。该证据取代下文旧的 4/10 checkpoint 计数，但不改变特殊 Classic surface、当前 package 完整路线、Windows E3 和 formal signoff 的 blocking 状态。
+
 Stage 3 把 EngineCore、Media 和 Package 组合成原生 VN 工作流。`.astra` 仍是 canonical story source；AstraVN Core 持有 VN 权威语义，Luau policy 只处理表现、系统页和复杂演出。AstraVN 已迁到 `Engine/Source/Modules/AstraVN/` 并拆成多个功能 crate；`astra-vn` 只保留 Rust ABI dylib facade 和兼容 re-export。`NativeVnRuntimeProvider` 已作为同级 gameplay runtime provider 接入，AstraVN 仍保持 VN 语义，不作为 AstraEMU 或 AstraRPG 的基类。
 
 当前 Stage 3 是 `IN_PROGRESS`，不是 `DONE`。Migration 6 frontend 与 Migration 9 shared 1–3 已完成 focused implementation：`.astra` 使用 lossless token/CST/AST、固定 semantic passes、command registry、token source map、formatter 和 language-service adapter；共享 policy、component effects、versioned runtime envelope 与 async multi-session host 已落地。旗舰项目已直接替换原两路线 NativeVN 技术样例，并加入 180 条用户授权的中文发行配音。Stage 3 work item 不因此提前关闭：`S3-SCRIPT-01/02`、presentation、system UI、sample 和 Windows/Web Player 都必须等待同一 `.astrapkg` 的 formal native-input evidence。顶层还受 `S3-TSUI-INTERNAL-DEMO-01`、`S3-TSUI-GATE-01` 与 `S3-FLAGSHIP-DEMO-01` 阻断。

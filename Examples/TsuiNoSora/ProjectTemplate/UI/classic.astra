@@ -1,10 +1,12 @@
 ui_bind profile:classic surface:message view:ui.tsui.classic.message controller:tsui.message.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.message
+ui_bind profile:classic surface:tsui.surface.dialogue view:ui.tsui.classic.message controller:tsui.message.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.dialogue
+ui_bind profile:classic surface:tsui.surface.monologue view:ui.tsui.classic.monologue controller:tsui.monologue.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.monologue
 ui_bind profile:classic surface:choice view:ui.tsui.classic.choice controller:tsui.choice.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.choice
 ui_bind profile:classic system_page:title view:ui.tsui.classic.title controller:tsui.system.title.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.title
 ui_bind profile:classic system_page:save view:ui.tsui.classic.save controller:tsui.system.save.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.save
 ui_bind profile:classic system_page:load view:ui.tsui.classic.load controller:tsui.system.load.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.load
 
-ui_view ui.tsui.classic.message model:astra.vn.ui_model.message.v1 theme:tsui.theme.classic #@id ui.tsui.classic.message
+ui_view ui.tsui.classic.message model:astra.vn.ui_model.message.v2 theme:tsui.theme.classic #@id ui.tsui.classic.message
   screen id:root
     panel id:advance fill:true
       on activate -> vn.advance
@@ -12,6 +14,13 @@ ui_view ui.tsui.classic.message model:astra.vn.ui_model.message.v1 theme:tsui.th
     row id:dialogue position_x:56 position_y:484 gap:18
       text id:speaker_text value:$model.speaker_key min_width:92 font_size:20 max_lines:2
       text id:body value:$model.text_key font_size:22 max_lines:3
+
+ui_view ui.tsui.classic.monologue model:astra.vn.ui_model.message.v2 theme:tsui.theme.classic #@id ui.tsui.classic.monologue
+  screen id:root
+    panel id:advance fill:true
+      on activate -> vn.advance
+    panel id:stage_dim position_x:23 position_y:42 min_width:754 min_height:424 background:theme:surface.monologue_dim
+    text id:body value:$model.text_key position_x:23 position_y:42 min_width:754 min_height:424 font_size:22 max_lines:20 text_align:center vertical_align:center text_color:theme:text.monologue
 
 ui_view ui.tsui.classic.choice model:astra.vn.ui_model.choice.v1 theme:tsui.theme.classic #@id ui.tsui.classic.choice
   screen id:root background:theme:surface.dim

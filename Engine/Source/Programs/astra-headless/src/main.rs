@@ -2258,7 +2258,10 @@ fn prepare_product_profile(
         target,
         manifest.package_id,
         identity_hash,
-        reader.package_hash().to_string(),
+        // Platform package sources verify the complete stored container bytes. The
+        // package content root is an internal section identity and can differ from
+        // the storage hash when container metadata is present.
+        astra_core::Hash256::from_sha256(&package_bytes).to_string(),
     );
     profile.id = id.to_string();
     profile.product_profile = product_profile.to_string();

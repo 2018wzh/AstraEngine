@@ -21,7 +21,7 @@ ui_bind profile:modern system_page:voice_replay view:ui.system.voice_replay cont
 ui_bind profile:modern system_page:route_chart view:ui.system.route_chart controller:system.route.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.route.modern
 ui_bind profile:modern system_page:localization_preview view:ui.system.localization controller:system.localization.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.localization.modern
 
-ui_view ui.message.classic model:astra.vn.ui_model.message.v1 theme:astra.vn.theme.classic #@id ui.message.classic
+ui_view ui.message.classic model:astra.vn.ui_model.message.v2 theme:astra.vn.theme.classic #@id ui.message.classic
   screen id:root background:theme:surface.clear
     panel id:advance fill:true
       on activate -> vn.advance
@@ -171,7 +171,7 @@ ui_view ui.system.localization model:astra.vn.ui_model.localization_preview.v1 t
 ui_bind profile:advanced-vn surface:message view:ui.message.modern controller:message.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.message.modern
 ui_bind profile:advanced-vn surface:choice view:ui.choice.modern controller:choice.modern policy:astra.policy.standard theme:astra.vn.theme.modern #@id ui.bind.choice.modern
 
-ui_view ui.message.modern model:astra.vn.ui_model.message.v1 theme:astra.vn.theme.modern #@id ui.message.modern
+ui_view ui.message.modern model:astra.vn.ui_model.message.v2 theme:astra.vn.theme.modern #@id ui.message.modern
   screen id:root background:theme:surface.clear
     panel id:advance fill:true
       on activate -> vn.advance

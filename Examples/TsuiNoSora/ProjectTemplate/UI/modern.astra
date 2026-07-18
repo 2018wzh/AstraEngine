@@ -1,4 +1,6 @@
 ui_bind profile:modern surface:message view:ui.tsui.modern.message controller:tsui.message.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.message
+ui_bind profile:modern surface:tsui.surface.dialogue view:ui.tsui.modern.message controller:tsui.message.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.dialogue
+ui_bind profile:modern surface:tsui.surface.monologue view:ui.tsui.modern.monologue controller:tsui.monologue.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.monologue
 ui_bind profile:modern surface:choice view:ui.tsui.modern.choice controller:tsui.choice.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.choice
 ui_bind profile:modern system_page:title view:ui.tsui.modern.title controller:tsui.system.title.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.title
 ui_bind profile:modern system_page:quick_panel view:ui.tsui.modern.quick_panel controller:tsui.system.quick_panel.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.quick_panel
@@ -7,7 +9,7 @@ ui_bind profile:modern system_page:load view:ui.tsui.modern.load controller:tsui
 ui_bind profile:modern system_page:config view:ui.tsui.modern.config controller:tsui.system.config.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.config
 ui_bind profile:modern system_page:backlog view:ui.tsui.modern.backlog controller:tsui.system.backlog.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.backlog
 
-ui_view ui.tsui.modern.message model:astra.vn.ui_model.message.v1 theme:tsui.theme.modern #@id ui.tsui.modern.message
+ui_view ui.tsui.modern.message model:astra.vn.ui_model.message.v2 theme:tsui.theme.modern #@id ui.tsui.modern.message
   screen id:root
     panel id:advance fill:true
       on activate -> vn.advance
@@ -15,6 +17,13 @@ ui_view ui.tsui.modern.message model:astra.vn.ui_model.message.v1 theme:tsui.the
     row id:dialogue position_x:56 position_y:484 gap:18
       text id:speaker_text value:$model.speaker_key min_width:92 font_size:20 max_lines:2
       text id:body value:$model.text_key font_size:22 max_lines:3
+
+ui_view ui.tsui.modern.monologue model:astra.vn.ui_model.message.v2 theme:tsui.theme.modern #@id ui.tsui.modern.monologue
+  screen id:root
+    panel id:advance fill:true
+      on activate -> vn.advance
+    panel id:stage_dim position_x:23 position_y:42 min_width:754 min_height:424 background:theme:surface.monologue_dim
+    text id:body value:$model.text_key position_x:23 position_y:42 min_width:754 min_height:424 font_size:22 max_lines:20 text_align:center vertical_align:center text_color:theme:text.monologue
 
 ui_view ui.tsui.modern.choice model:astra.vn.ui_model.choice.v1 theme:tsui.theme.modern #@id ui.tsui.modern.choice
   screen id:root background:theme:surface.dim

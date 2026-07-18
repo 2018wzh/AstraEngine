@@ -4,8 +4,11 @@ import unittest
 
 from director_native_story import (
     _derive_route_automation,
+    _flatten_scene_operations,
     _resolve_pending_wait_events,
     _route_from_path,
+    _split_reading_text,
+    DirectorNativeStoryError,
 )
 
 
@@ -22,6 +25,51 @@ def _keyboard_events(key):
 
 
 class DirectorNativeStoryAutomationTests(unittest.TestCase):
+    def test_reading_blocks_preserve_typed_surface_identity(self):
+        operations = [
+            {
+                "kind": "reading",
+                "mode": "talk",
+                "events": [{"kind": "text", "text": "話者「台詞」"}],
+            },
+            {
+                "kind": "reading",
+                "mode": "mono",
+                "events": [{"kind": "text", "text": "叙述"}],
+            },
+        ]
+
+        flattened = list(_flatten_scene_operations(operations))
+
+        self.assertEqual(
+            [operation["reading_mode"] for operation in flattened], ["talk", "mono"]
+        )
+
+    def test_text_outside_reading_block_is_blocking(self):
+        with self.assertRaisesRegex(
+            DirectorNativeStoryError,
+            "scene text is not owned by a typed reading block",
+        ):
+            list(_flatten_scene_operations([{"kind": "text", "text": "orphan"}]))
+
+    def test_talk_speaker_is_split_without_changing_dialogue_quote(self):
+        text, speaker_id, speaker_text = _split_reading_text(
+            "話 者「台詞」", "talk"
+        )
+
+        self.assertEqual(text, "「台詞」")
+        self.assertEqual(speaker_text, "話者")
+        self.assertRegex(speaker_id, r"^tsui\.speaker\.[0-9a-f]{16}$")
+
+    def test_monologue_never_infers_a_speaker(self):
+        text, speaker_id, speaker_text = _split_reading_text(
+            "話者「叙述として表示する」", "mono"
+        )
+
+        self.assertEqual(text, "話者「叙述として表示する」")
+        self.assertIsNone(speaker_id)
+        self.assertIsNone(speaker_text)
+
     def test_async_wait_continues_at_the_next_stable_wait_command(self):
         events = _resolve_pending_wait_events(
             [

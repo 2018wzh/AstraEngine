@@ -9,10 +9,16 @@ import json
 import subprocess
 from pathlib import Path
 
+from headless_gpu_acceptance import (
+    GpuAcceptanceError,
+    file_hash,
+    prepare_gpu_profile,
+    validate_gpu_artifacts,
+)
+
 
 REPORT_SCHEMA = "tsuinosora.classic_visual_acceptance_report.v1"
 INPUT_SCHEMA = "astra.user_input_sequence.v1"
-RUN_REPORT_SCHEMA = "astra.headless_run_report.v1"
 CHECKPOINTS = [
     "classic.title",
     "classic.message",
@@ -29,14 +35,6 @@ class AcceptanceError(RuntimeError):
 def json_hash(value: object) -> str:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
-
-
-def file_hash(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return "sha256:" + digest.hexdigest()
 
 
 class Sequence:
@@ -130,11 +128,13 @@ def run(arguments: argparse.Namespace) -> dict:
         raise AcceptanceError("Classic acceptance requires product_profile=classic")
     if profile.get("build_fingerprint") != identity.get("identity_hash"):
         raise AcceptanceError("profile and build identity do not match")
-    if profile.get("package_hash") != file_hash(arguments.package):
-        raise AcceptanceError("profile and package do not match")
+    if not str(profile.get("package_hash", "")).startswith("sha256:"):
+        raise AcceptanceError("profile package identity is invalid")
     if arguments.artifact_root.exists():
         raise AcceptanceError("artifact root already exists")
     arguments.artifact_root.mkdir(parents=True)
+    gpu_profile_path = arguments.artifact_root / "headless-gpu-profile.json"
+    gpu_profile = prepare_gpu_profile(arguments.profile, gpu_profile_path)
 
     sequence = build_sequence()
     input_path = arguments.artifact_root / "classic-visual-input.jsonl"
@@ -145,8 +145,9 @@ def run(arguments: argparse.Namespace) -> dict:
     command = [
         str(arguments.binary),
         "run",
+        "--gpu",
         "--profile",
-        str(arguments.profile),
+        str(gpu_profile_path),
         "--package",
         str(arguments.package),
         "--input",
@@ -163,16 +164,13 @@ def run(arguments: argparse.Namespace) -> dict:
     if completed.returncode != 0:
         raise AcceptanceError(f"Headless Classic visual run exited with {completed.returncode}")
 
-    run_report = json.loads((arguments.artifact_root / "run-report.json").read_text(encoding="utf-8"))
-    if run_report.get("schema") != RUN_REPORT_SCHEMA or run_report.get("status") != "passed":
-        raise AcceptanceError("Headless Classic visual run did not pass")
-    if run_report.get("completed_sequence") != len(sequence.rows):
-        raise AcceptanceError("Headless Classic visual run did not consume every input")
-    checkpoints = run_report.get("checkpoint_results")
-    if not isinstance(checkpoints, list) or [item.get("id") for item in checkpoints] != CHECKPOINTS:
-        raise AcceptanceError("Headless Classic visual run has an invalid checkpoint set")
-    if not all(item.get("passed") is True for item in checkpoints):
-        raise AcceptanceError("Headless Classic visual checkpoint failed")
+    run_report, manifest = validate_gpu_artifacts(
+        arguments.artifact_root,
+        build_fingerprint=profile["build_fingerprint"],
+        package_hash=profile["package_hash"],
+        completed_sequence=len(sequence.rows),
+        checkpoint_ids=CHECKPOINTS,
+    )
     checkpoint_artifacts = [
         arguments.artifact_root / "checkpoints" / f"{checkpoint_id}.png"
         for checkpoint_id in CHECKPOINTS
@@ -183,10 +181,14 @@ def run(arguments: argparse.Namespace) -> dict:
     return {
         "schema": REPORT_SCHEMA,
         "status": "passed",
-        "profile_id": profile.get("id"),
+        "profile_id": gpu_profile.get("id"),
         "build_fingerprint": profile.get("build_fingerprint"),
         "package_hash": profile.get("package_hash"),
-        "input_sequence_hash": file_hash(input_path),
+        "headless_gpu_profile_hash": file_hash(gpu_profile_path),
+        "renderer_identity_hash": manifest.get("renderer_identity_hash"),
+        "renderer_identity": manifest.get("renderer_identity"),
+        "input_sequence_hash": run_report.get("input_sequence_hash"),
+        "input_file_hash": file_hash(input_path),
         "input_message_count": len(sequence.rows),
         "checkpoint_ids": CHECKPOINTS,
         "checkpoint_artifact_hashes": [file_hash(path) for path in checkpoint_artifacts],
@@ -206,7 +208,7 @@ def main() -> int:
     arguments = parser.parse_args()
     try:
         report = run(arguments)
-    except (AcceptanceError, OSError, json.JSONDecodeError) as error:
+    except (AcceptanceError, GpuAcceptanceError, OSError, json.JSONDecodeError) as error:
         parser.error(str(error))
     arguments.report.parent.mkdir(parents=True, exist_ok=True)
     arguments.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
