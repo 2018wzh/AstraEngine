@@ -1,13 +1,12 @@
 use std::{
     collections::BTreeMap,
     ffi::OsStr,
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 
-use astra_emu_family_api::{LegacyMountedVfs, LegacyVfsNodeKind};
-use astra_emu_minori::MinoriMountedVfs;
+use astra_emu_family_core::{LegacyMountedVfs, LegacyVfsNodeKind};
 use fuser::{
     BsdFileFlags, Config, Errno, FileAttr, FileHandle, FileType, Filesystem, FopenFlags, INodeNo,
     LockOwner, MountOption, OpenFlags, RenameFlags, ReplyAttr, ReplyCreate, ReplyData,
@@ -23,18 +22,21 @@ struct Node {
     kind: FileType,
     size: u64,
 }
-struct ReadOnlyMinoriFs {
-    vfs: Arc<MinoriMountedVfs>,
+
+struct ReadOnlyLegacyFs {
+    vfs: Arc<dyn LegacyMountedVfs>,
     nodes: BTreeMap<u64, Node>,
     by_child: BTreeMap<(u64, String), u64>,
 }
 
-impl ReadOnlyMinoriFs {
-    fn new(vfs: Arc<MinoriMountedVfs>) -> Self {
+impl ReadOnlyLegacyFs {
+    fn new(vfs: Arc<dyn LegacyMountedVfs>) -> Result<Self, Box<dyn std::error::Error>> {
+        vfs.manifest().validate(10_000_000)?;
+        let prefix = vfs.manifest().prefix.clone();
         let mut nodes = BTreeMap::from([(
             1,
             Node {
-                uri: "minori:/".into(),
+                uri: prefix.clone(),
                 parent: 1,
                 name: "/".into(),
                 kind: FileType::Directory,
@@ -42,16 +44,19 @@ impl ReadOnlyMinoriFs {
             },
         )]);
         let mut by_child = BTreeMap::new();
-        let mut by_uri = BTreeMap::from([("minori:/".to_owned(), 1u64)]);
+        let mut by_uri = BTreeMap::from([(prefix.clone(), 1u64)]);
         let mut next = 2u64;
         for entry in &vfs.manifest().entries {
             let relative = entry
                 .uri
-                .strip_prefix("minori:/")
-                .expect("validated Minori URI");
+                .strip_prefix(&prefix)
+                .ok_or("ASTRA_EMU_VFS_FUSE_URI")?;
             let parts = relative.split('/').collect::<Vec<_>>();
+            if parts.iter().any(|part| part.is_empty()) {
+                return Err("ASTRA_EMU_VFS_FUSE_URI".into());
+            }
             let mut parent = 1;
-            let mut current = "minori:/".to_owned();
+            let mut current = prefix.clone();
             for (index, part) in parts.iter().enumerate() {
                 current.push_str(part);
                 let last = index + 1 == parts.len();
@@ -59,7 +64,7 @@ impl ReadOnlyMinoriFs {
                     *ino
                 } else {
                     let ino = next;
-                    next += 1;
+                    next = next.checked_add(1).ok_or("ASTRA_EMU_VFS_FUSE_INODE")?;
                     nodes.insert(
                         ino,
                         Node {
@@ -71,11 +76,13 @@ impl ReadOnlyMinoriFs {
                             } else {
                                 FileType::Directory
                             },
-                            size: if last { entry.size } else { 0 },
+                            size: if last { entry.decoded_size } else { 0 },
                         },
                     );
                     by_uri.insert(current.clone(), ino);
-                    by_child.insert((parent, (*part).into()), ino);
+                    if by_child.insert((parent, (*part).into()), ino).is_some() {
+                        return Err("ASTRA_EMU_VFS_FUSE_DUPLICATE".into());
+                    }
                     ino
                 };
                 parent = ino;
@@ -84,12 +91,13 @@ impl ReadOnlyMinoriFs {
                 }
             }
         }
-        Self {
+        Ok(Self {
             vfs,
             nodes,
             by_child,
-        }
+        })
     }
+
     fn attr(&self, ino: u64) -> Option<FileAttr> {
         self.nodes.get(&ino).map(|node| FileAttr {
             ino: INodeNo(ino),
@@ -115,7 +123,7 @@ impl ReadOnlyMinoriFs {
     }
 }
 
-impl Filesystem for ReadOnlyMinoriFs {
+impl Filesystem for ReadOnlyLegacyFs {
     fn lookup(&self, _: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         let Some(name) = name.to_str() else {
             return reply.error(Errno::ENOENT);
@@ -188,7 +196,7 @@ impl Filesystem for ReadOnlyMinoriFs {
     fn open(&self, _: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
         if flags.0 & (libc::O_WRONLY | libc::O_RDWR | libc::O_TRUNC | libc::O_CREAT) != 0 {
             return reply.error(Errno::EROFS);
-        };
+        }
         if self
             .nodes
             .get(&ino.0)
@@ -233,13 +241,14 @@ impl Filesystem for ReadOnlyMinoriFs {
         {
             return reply.error(Errno::ENOTDIR);
         }
-        let mut entries = Vec::new();
-        entries.push((ino.0, FileType::Directory, ".".to_owned()));
-        entries.push((
-            self.nodes[&ino.0].parent,
-            FileType::Directory,
-            "..".to_owned(),
-        ));
+        let mut entries = vec![
+            (ino.0, FileType::Directory, ".".to_owned()),
+            (
+                self.nodes[&ino.0].parent,
+                FileType::Directory,
+                "..".to_owned(),
+            ),
+        ];
         for ((parent, _), child) in self
             .by_child
             .range((ino.0, String::new())..=(ino.0, String::from("\u{10ffff}")))
@@ -284,13 +293,14 @@ impl Filesystem for ReadOnlyMinoriFs {
     }
 }
 
-pub fn mount(
-    vfs: Arc<MinoriMountedVfs>,
-    mountpoint: PathBuf,
+pub fn mount_read_only(
+    vfs: Arc<dyn LegacyMountedVfs>,
+    mountpoint: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !mountpoint.is_dir() {
-        return Err("ASTRA_EMU_MINORI_FUSE_MOUNTPOINT".into());
+        return Err("ASTRA_EMU_VFS_FUSE_MOUNTPOINT".into());
     }
+    let family_id = vfs.manifest().family_id.clone();
     let config = Config {
         mount_options: vec![
             MountOption::RO,
@@ -298,10 +308,10 @@ pub fn mount(
             MountOption::NoSuid,
             MountOption::NoExec,
             MountOption::DefaultPermissions,
-            MountOption::FSName("astraemu-minori".into()),
+            MountOption::FSName(format!("astraemu-{family_id}")),
         ],
         ..Config::default()
     };
-    fuser::mount2(ReadOnlyMinoriFs::new(vfs), mountpoint, &config)?;
+    fuser::mount2(ReadOnlyLegacyFs::new(vfs)?, mountpoint, &config)?;
     Ok(())
 }

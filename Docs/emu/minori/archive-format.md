@@ -25,13 +25,13 @@ PAZ reader 采用三段式：
 | --- | --- | --- |
 | v1+ index size 位于 `0x20`，经 scheme XOR 后必须 8 字节对齐；index 使用 Blowfish | GARbro `ArcPAZ` contract | 已实现，并由六个真实 index 复核 |
 | entry descriptor 含 name、offset、unpacked/stored/aligned size 和 packed flag | GARbro contract | 已实现并做 bounds/duplicate 检查 |
-| v1/v2 使用 CP932 派生 entry key，v2 按 CRC32 派生 RC4 skip | GARbro contract | Luau native intrinsic 已实现 |
+| v1/v2 使用 CP932 派生 entry key，v2 按 CRC32 派生 RC4 skip | GARbro contract | 纯 Rust `MinoriPazDecryptProvider` 已实现 |
 | packed entry 解密后执行 zlib | GARbro contract | 已实现 |
 | `.pazA` 至 `.pazZ` 是连续逻辑分卷 | GARbro contract | 已实现；空分卷和后缀缺口阻断 |
 | Blowfish block 由两个 little-endian `u32` word 组成 | GARbro contract + 本地样本 | 已实现，并由六个真实 index 复核 |
 | `mov` entry 不要求 8 字节对齐；movie 分支使用独立 transform | GARbro contract + 本地样本 | 已实现，5 个真实 descriptor 通过 |
 | packed entry 解压结果可能带不超过 16 字节的全零尾部 | 本地样本观察 | 仅在可证明全零时裁剪；非零或更长尾部阻断 |
-| 当前样本六包可完整挂载和读取 | 本地样本 | 已成立，共 9837 个 entry；第二轮 9837 cache hits/0 misses |
+| 当前样本六包可完整挂载和读取 | 本地样本 | 已成立，共 9837 个 entry；第二轮 29720 次 range read 全部命中 cache |
 
 mount 使用 `minori:/<role>/<entry>`。绝对路径、`..`、重复 URI/entry id、短读、越界、未对齐 block、未知 version、源文件 metadata/hash 变化都返回稳定 diagnostic。
 

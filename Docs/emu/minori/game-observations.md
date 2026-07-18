@@ -8,7 +8,7 @@
 
 ## 未知
 
-六包 9837 个 entry 已完成首段和尾段随机读取；首轮 cache 为 3526 hits/6311 misses，第二轮同 identity 为 9837 hits/0 misses。`scr.paz` 的 89 文件全包 census 已确认 CP932 行式结构与 29 个 command token；`select` 等 operand 语义仍待下一阶段确认。
+manifest v2 全量 verify 已完整流读六包 9837 个 entry，并复读每个非空 entry 的首尾最多 4 KiB：共 29720 次 range read、2403596354 个 decoded bytes。同 identity Release 复核的 29720 次读取全部命中 cache，聚合 hash 一致。`scr.paz` 的 89 文件 census 记录 33728 行、33695 个 command、29 个 command token，unknown opcode 为 0；`select` 等 operand 语义仍待下一阶段确认。
 
 ## `夏空のペルセウス`
 

@@ -1,4 +1,3 @@
-mod decoder;
 mod desktop_source;
 mod evidence;
 mod family_loader;
@@ -9,12 +8,6 @@ mod patch;
 mod probe;
 mod runtime_provider;
 mod scanner;
-mod viewer;
-
-pub use decoder::{
-    DecoderLimits, TrustedDecoderSession, DECODER_CAPABILITY, DECODER_CHUNK_BYTES,
-    MAX_DECODER_BATCH_BYTES, MAX_DECODER_BATCH_ENTRIES,
-};
 pub use desktop_source::{
     DesktopGrantedSource, DesktopVfsRegistry, VfsAccessMetrics, VfsAuditSummary,
 };
@@ -41,4 +34,3 @@ pub use scanner::{
     DiscoveryMarker, FamilyDiscoveryDescriptor, GrantedSourceEntry, GrantedSourceReader,
     LibraryScanner, ScanLimits, SourceScanError, DEFAULT_DISCOVERY_DESCRIPTORS,
 };
-pub use viewer::{LegacyVfsViewer, ViewerPage, ViewerPreview};

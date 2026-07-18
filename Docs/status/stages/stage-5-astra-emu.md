@@ -62,7 +62,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Depends On:** `S2-VFS-01`、`S5-GAME-RUNTIME-01`、[Asset VFS Contract](../../contracts/asset-vfs.md)
 
-**Target Paths:** `Emulator/Source/FamilyApi/astra-emu-family-api/src/vfs.rs`、`Emulator/Source/Families/astra-emu-fvp/src/archive.rs`、`Emulator/Source/Families/astra-emu-minori/`、`Emulator/Source/Manager/astra-emu-manager-core/src/viewer.rs`、`Emulator/Source/Programs/astra-emu-cli/src/minori.rs`
+**Target Paths:** `Emulator/Source/FamilyCore/astra-emu-family-core/`、`Emulator/Source/FamilySupport/astra-emu-family-support/`、`Emulator/Source/Families/astra-emu-fvp/src/archive.rs`、`Emulator/Source/Families/astra-emu-minori/`、`Emulator/Source/Programs/astra-emu-cli/src/vfs.rs`、`Emulator/Source/Programs/astra-emu-minori-cli/`
 
 **Steps:**
 
@@ -74,7 +74,7 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 **Done Evidence:** `cargo test -p astra-emu-family-api legacy_pack_vfs` 和 `cargo test -p astra-release emu_gate` 通过；report 输出 `emu.legacy_pack_vfs`，且不写本地 root、payload、完整脚本或 bytecode。
 
-**Current Evidence:** Minori PAZ v0-v2 reader、trusted Luau decoder registry、private plaintext cache、viewer backend、desktop extract、纯 Rust GARbro NRBF importer 和 Linux FUSE 入口已接入 workspace。合成测试覆盖六个 role、v0/v1/v2、分卷跨界、archive XOR、随机读取、源文件突变、cache identity/LRU、NRBF forward reference/负 object id、unknown command round-trip 和 4 MiB decoder chunk offset；真实 scheme 生成的私有补丁通过 9837 个 entry 首尾随机读取，同 identity 第二轮为 9837 cache hits/0 misses。89 个 CP932 脚本、33728 行、33695 command 的 payload-free census 通过，`label/goto/if/chain` CFG 已闭合。Linux FUSE、macOS extract 和 `select` 等 operand 语义仍缺完整证据，因此本项保持 `IN_PROGRESS`。
+**Current Evidence:** in-process VFS 已从 ABI API 硬迁移到 `astra-emu-family-core`，公共 profile/Luau/cache/viewer/verify/extract/FUSE 实现进入 `astra-emu-family-support`。通用 CLI 固定为 `vfs --family`，GARbro import 与 census 位于独立 Minori CLI。Minori 只使用纯 Rust decrypt provider；Luau 只注册 data-only private profile，不存在逐 entry callback 或 fallback。合成测试覆盖 manifest v2、opaque transport、六 role、v0/v1/v2、分卷跨界、archive XOR、随机读取、源文件突变、cache identity/corruption/LRU、NRBF forward reference/负 object id 和 unknown command round-trip。真实私有 profile 的 Release verify 覆盖 6 source、9837 entry、29720 range read 与 2403596354 decoded bytes；同 identity 复核全部命中 cache，聚合 hash 一致。89 个 CP932 脚本、33728 行、33695 command、29 token 的 payload-free census 通过，unknown opcode 为 0。Linux FUSE、macOS extract、Manager media preview 和 `select` 等 operand 语义仍缺完整证据，因此本项保持 `IN_PROGRESS`。
 
 **Linked Test IDs:** `T-S5-LEGACY-VFS-01`
 

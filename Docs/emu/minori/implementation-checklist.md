@@ -4,18 +4,19 @@
 
 | 项目 | 状态 | 证据边界 |
 | --- | --- | --- |
-| family API mount/read_dir/stat/read_range/open_stream/unmount | 已实现 | unit/compile，未宣称所有 family 已迁移 |
+| `family-core` mount/read_dir/stat/read_range/open_stream 契约与 manifest v2 | 已实现 | unit/compile；`family-api` 已硬迁移为 ABI DTO，不保留 VFS re-export |
 | PAZ v0-v2、分卷、zlib、随机读取 | 已实现 | GARbro contract + synthetic tests；真实六包 9837 个 entry 完成首尾随机读取 |
-| session Luau decoder registry 与 native buffer intrinsics | 已实现 | Manager Core unit tests |
-| plaintext cache 8 GiB/1 GiB、identity、权限、atomic/LRU | 已实现 | cache tests；路径不进 report |
-| viewer tree/stat/page/search/text/image/audio/hex | backend 已实现 | backend 分类与 bounds unit tests 通过；Slint Files 面板仍是 session 接线 scaffold，真实 UI 验收待补 |
-| desktop verify/extract | 已实现 | Windows 真实 `scr` extract 通过；staging tree 原子提交、失败清理和大小写冲突 tests 通过；macOS 运行证据待补 |
+| 纯 Rust `MinoriPazDecryptProvider` | 已实现 | Blowfish、RC4 skip、archive XOR、zlib、movie transform；没有 Luau callback 或 fallback |
+| Trusted Luau v2 private profile | 已实现 | data-only 一次注册、sandbox 与预算 tests；Minori Luau 不执行逐 entry 解密 |
+| 公共 plaintext cache、identity、权限、atomic/LRU | 已实现 | corruption/identity/LRU tests；Windows owner-only DACL 与 Unix mode 失败即阻断 |
+| 公共 viewer tree/stat/page/search/text/hex/media binding | backend 已实现 | image/audio/video 必须显式 `DecodeProviderRegistry` binding；Manager UI 接线和真实预览验收待补 |
+| 公共 desktop verify/extract | 已实现 | Windows manifest v2 全量 verify 已通过；extract contract 已接入，macOS 运行证据待补 |
 | Linux foreground read-only FUSE | 代码已接入 | 缺真实 Linux FUSE 证据，不标完成 |
-| GARbro scheme importer | 已实现 | 纯 Rust 两阶段 NRBF reader 支持有符号 object id 与 forward reference；真实 scheme 生成的私有补丁已通过六包 9837 entry 全读，不使用 managed helper 或 fallback |
-| `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command 全包通过；`select` operand 语义仍 unknown |
+| GARbro scheme importer | 已实现 | 独立 CLI 使用纯 Rust 两阶段 NRBF reader；原子生成 patch/profile，不使用 managed helper 或 fallback |
+| `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command/29 token，unknown opcode 0；`select` operand 语义仍 unknown |
 | Minori VM、演出、存档、完整模拟 | 未开始 | 下一阶段 |
 
-当前合法样本的六个 archive 均非空。纯 Rust GARbro scheme importer 生成的私有补丁已完成六个 index 与 9837 个 entry 全读，第二轮为 9837 cache hits/0 misses；89 个脚本的 payload-free census 也已通过。Linux FUSE、macOS extract 和 VM 仍各自保留独立证据边界。
+当前合法样本的六个 archive 均非空。纯 Rust GARbro scheme importer 生成的私有补丁已完成六个 index 与 9837 个 entry 全读；manifest v2 verify 共执行 29720 次 range read、读取 2403596354 个 decoded bytes，同 identity Release 复核全部命中 cache，聚合 hash 一致。89 个脚本的 payload-free census 也已通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。
 
 ## 下一阶段 Archive
 
