@@ -1800,7 +1800,7 @@ fn native_vn_behavioral_evidence(
         let state = output
             .outputs
             .iter()
-            .find(|envelope| envelope.schema == "astra.vn.runtime_state.v1")
+            .find(|envelope| envelope.schema == "astra.vn.runtime_state.v2")
             .ok_or_else(|| {
                 (
                     "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE",
@@ -1816,7 +1816,7 @@ fn native_vn_behavioral_evidence(
                     matches!(
                         envelope.domain,
                         RuntimeOutputDomain::Effect | RuntimeOutputDomain::Trace
-                    ) && envelope.schema != "astra.vn.runtime_state.v1"
+                    ) && envelope.schema != "astra.vn.runtime_state.v2"
                 })
                 .collect::<Vec<_>>(),
         )
@@ -3132,7 +3132,7 @@ fn vn_compiled_project_check(package: &PackageReader, profile: &str) -> ReleaseC
             };
         }
     };
-    if compiled.schema != "astra.vn.compiled_project.v1"
+    if compiled.schema != "astra.vn.compiled_project.v3"
         || compiled.story.stories.is_empty()
         || compiled.story.states.is_empty()
     {

@@ -17,6 +17,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnCompiledProjectRoot {
     pub schema: String,
+    pub compiled_project_schema: String,
     pub project_hash: Hash256,
     pub story_hash: Hash128,
     pub ui_blueprint_hash: Hash256,
@@ -113,7 +114,8 @@ pub fn package_sections_for_project_with_components(
         profiles: profiles.to_vec(),
     };
     let root = VnCompiledProjectRoot {
-        schema: "astra.vn.compiled_project_root.v1".to_string(),
+        schema: "astra.vn.compiled_project_root.v2".to_string(),
+        compiled_project_schema: "astra.vn.compiled_project.v3".to_string(),
         project_hash: project.project_hash,
         story_hash: project.story.story_hash,
         ui_blueprint_hash: project.ui_blueprints.hash,
@@ -125,7 +127,7 @@ pub fn package_sections_for_project_with_components(
     let mut sections = vec![
         SectionPayload::postcard(
             "vn.compiled_project",
-            "astra.vn.compiled_project_root.v1",
+            "astra.vn.compiled_project_root.v2",
             &root,
         )?,
         SectionPayload::postcard("vn.story", "astra.vn.story", &project.story)?,
@@ -209,13 +211,13 @@ pub fn package_sections_for_project_with_components(
         )?,
         SectionPayload::postcard(
             "vn.system_story_manifest",
-            "astra.vn.system_story_manifest.v1",
+            "astra.vn.system_story_manifest.v2",
             &project.story.system_story_manifest,
         )?,
         SectionPayload::postcard(
             "vn.system_ui_profile_manifest",
-            "astra.vn.system_ui_profile_manifest.v1",
-            &VnSystemUiProfileManifest::from_compiled(&project.story, vec!["zh-Hans".to_string()]),
+            "astra.vn.system_ui_profile_manifest.v2",
+            &VnSystemUiProfileManifest::from_compiled(project, vec!["zh-Hans".to_string()]),
         )?,
     ];
     sections.append(&mut component_sections);
@@ -455,7 +457,10 @@ pub fn decode_compiled_project(
     package: &PackageReader,
 ) -> Result<CompiledVnProject, ContainerError> {
     let root: VnCompiledProjectRoot = package.container().decode_postcard("vn.compiled_project")?;
-    if root.schema != "astra.vn.compiled_project_root.v1" || root.ui_provider != "astra.ui.yakui" {
+    if root.schema != "astra.vn.compiled_project_root.v2"
+        || root.compiled_project_schema != "astra.vn.compiled_project.v3"
+        || root.ui_provider != "astra.ui.yakui"
+    {
         return Err(ContainerError::message(
             "ASTRA_VN_COMPILED_PROJECT_ROOT: invalid project root or UI provider",
         ));
@@ -478,6 +483,14 @@ pub fn decode_compiled_project(
     let components: VnUiComponentBundleManifest = package
         .container()
         .decode_postcard("vn.ui_component_manifest")?;
+    let system_ui: VnSystemUiProfileManifest = package
+        .container()
+        .decode_postcard("vn.system_ui_profile_manifest")?;
+    if system_ui.schema != "astra.vn.system_ui_profile_manifest.v2" {
+        return Err(ContainerError::message(
+            "ASTRA_VN_SYSTEM_UI_PROFILE_SCHEMA: packaged system UI policy is not v2",
+        ));
+    }
     if components.schema != "astra.vn.ui_component_bundle.v1"
         || components.ids.len() != components.bindings.len()
         || components
@@ -506,6 +519,7 @@ pub fn decode_compiled_project(
             ui_bindings.hash,
             &themes,
             &controllers.sources,
+            &system_ui.profiles,
         ))
         .map_err(|error| {
             ContainerError::message(format!("ASTRA_VN_COMPILED_PROJECT_ENCODE: {error}"))
@@ -517,7 +531,7 @@ pub fn decode_compiled_project(
         ));
     }
     Ok(CompiledVnProject {
-        schema: "astra.vn.compiled_project.v1".to_string(),
+        schema: "astra.vn.compiled_project.v3".to_string(),
         project_hash: root.project_hash,
         story,
         ui_blueprints,
@@ -528,5 +542,6 @@ pub fn decode_compiled_project(
         theme_ids: themes.keys().cloned().collect(),
         themes,
         component_ids: components.ids,
+        system_ui_profiles: system_ui.profiles,
     })
 }

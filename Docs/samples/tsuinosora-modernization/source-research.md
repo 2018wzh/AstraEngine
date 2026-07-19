@@ -19,6 +19,8 @@
 
 已知输入模型较窄：原版主要依赖左键推进和右键存档。classic profile 要复现这个节奏；modern profile 再把标题、设置、backlog、auto、skip、gallery、route chart 和 replay 补成 AstraVN 商业基线系统。
 
+当前完整 reader 已将 `MENU`、`POPUP`、`SAVE`、`LOAD` 与五个剧情 movie 的 Score、label、handler 和 cast identity 闭合。可观察 UI 事实包括：Title 左上 64×64 隐藏热点、灰色 tabbed system window、8 个文本存档槽、文字 Hidden/Manual/FastForward、BGM/SE 开关、两种黑场 Opening、约 70% 舞台 shade、白色菱形 choice，以及人物使用 800×600 frame space 越过内部 752×424 stage。对应稳定 resource/frame/channel 映射见样例侧 [Classic 忠实还原设计](../../../Examples/TsuiNoSora/Docs/classic-director-fidelity-design.md)；商业 Lingo body 仍只保存在私有 IR。
+
 ## Remake Source Shape
 
 Remake 版先作为可选立绘 overlay 来源，不默认替换背景、CG、UI 或影片。该样本表现为 Artemis/PFS 系列资源形态，包含主 archive、patch-like archive、备份 archive、字体和 loose movie 文件。Artemis 侧的 archive、patch chain、script、presentation 和 media 研究已经在以下页面维护：

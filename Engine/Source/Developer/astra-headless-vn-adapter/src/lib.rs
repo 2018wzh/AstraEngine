@@ -441,11 +441,25 @@ impl NativeVnHeadlessSession {
             return Ok(());
         };
         match request {
-            VnUiHostRequest::Save { slot_id } => {
-                self.save(&slot_id).await?;
-                self.source()?
+            VnUiHostRequest::Save { slot_id, .. } => {
+                if let Err(error) = self.save(&slot_id).await {
+                    self.source()?
+                        .mark_save_failed(&slot_id)
+                        .map_err(|cleanup_error| {
+                            ProductHostError::Input(cleanup_error.to_string())
+                        })?;
+                    return Err(error);
+                }
+                if let Some(batch) = self
+                    .source()?
                     .mark_save_committed(&slot_id)
-                    .map_err(|error| ProductHostError::Input(error.to_string()))?;
+                    .map_err(|error| ProductHostError::Input(error.to_string()))?
+                {
+                    self.executor
+                        .execute_batch(batch)
+                        .await
+                        .map_err(|error| ProductHostError::Input(error.to_string()))?;
+                }
             }
             VnUiHostRequest::Load { slot_id } => self.load(&slot_id).await?,
             VnUiHostRequest::Delete { slot_id } => {
@@ -640,6 +654,7 @@ impl NativeVnHeadlessSession {
             },
             hashed_observation("vn.current_state", &evidence.current_state_id)?,
             hashed_observation("vn.pending_wait_command", &evidence.pending_wait_command_id)?,
+            hashed_observation("vn.pending_wait_await_id", &evidence.pending_wait_await_id)?,
             hashed_observation("vn.pending_choices", &evidence.pending_choice_ids)?,
             hashed_observation("vn.terminal_routes", &evidence.terminal_route_ids)?,
             hashed_observation("vn.ui_profile", &product.ui_profile)?,
@@ -648,6 +663,9 @@ impl NativeVnHeadlessSession {
             hashed_observation("vn.focused_semantic_id", &product.focused_semantic_id)?,
             hashed_observation("vn.auto_enabled", &product.auto_enabled)?,
             hashed_observation("vn.skip_mode", &product.skip_mode)?,
+            hashed_observation("vn.reading_mode", &product.reading_mode)?,
+            hashed_observation("vn.audio_enabled", &product.audio_enabled)?,
+            hashed_observation("vn.skip_allowed", &product.skip_allowed)?,
             hashed_observation("vn.system_config", &product.system_config)?,
             hashed_observation("vn.backlog_count", &product.backlog_count)?,
             hashed_observation(

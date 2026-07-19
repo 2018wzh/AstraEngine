@@ -1,5 +1,13 @@
 # Conversion Manifest
 
+## Director 视觉参考与运行时派生补充
+
+Classic 原版参考使用 `original-ui-reference-manifest.json` 记录稳定 `TSUI1999-UI-*`、raw/crop/output hash、尺寸、裁剪矩形和转换器版本。截图本体、contact sheet 和差异图不进入 Git 或 package。输入数量、尺寸、裁剪区域、缩放输出或稳定 ID 不一致时处理工具必须 blocking。
+
+Director 视觉资产的 runtime 派生另写私有 report，只允许记录 source resource id、command id、source/converted hash、尺寸、matte 判定、visible bbox、asset id 与 diagnostic。802×602 人物白色 matte 转 800×600 alpha、754×82 dialogue frame 透明度恢复都必须满足具名尺寸与边缘规则；不满足时不得 raw copy 或由 shader 猜测透明度。
+
+Classic system page 使用 profile v2 声明的 page/slot/action policy。system frame 的 `return_cursor`、`return_wait` 与 `return_choice` 是底层画面和返回位置的唯一权威 identity；`SwitchSystemPage` 不增加 stack depth。未声明 page、slot、action、mutation key 或 jump target，或者 underlay 解析不唯一，均必须在 Runtime/UI 边界阻断。
+
 本页定义 TsuiNoSora modernization sample 的脱敏 report schema。字段约束转换器、VFS 插件和 release gate。当前仓库已有 `Tools/TsuiNoSora/tsuinosora_tools.py` 的公开 synthetic/local helper slice，能生成 inventory、direct-readable extract preflight、Director `imap`/`mmap` resource map preflight、受限 `XFIR` RIFF/RIFX exact wrapper reader、Director `KEY*`/`CAS*` cast map preflight、Director `Lctx`/`Lnam`/`Lscr` Lingo map preflight、受限 RIFF/RIFX readable chunk report、cast source map report、script source map report、route graph report、visual reference、visual screenshot capture/comparison、Asset analysis、conversion、modern profile、mount policy、stage3 gate、local gate 和 NativeVN package input report；公开 synthetic patch Web bundle 已能读取脱敏 mount policy 并输出 `player.patch_direct_read` route check。完整商业 Director/Shockwave cast parser/source-map reader、完整 payload 转换和真实本地 patch direct-read 仍未完成。
 
 产品项目生成不再接受 route metadata 或 synthetic story。唯一入口是 ignored 私有 `native_story_ir.json`，schema 为 `tsuinosora.native_story_ir.v1`；生成器同时输出脱敏 `tsuinosora.full_conversion_coverage_report.v1`。coverage report 只记录 source kind、command/media kind、hash、计数、coverage 状态和 diagnostic，不记录正文、脚本、资源 payload 或本地路径。任一 source、handler、command、route、terminal、choice、media 或 wait 未转换时，NativeVN project 写出必须阻断。

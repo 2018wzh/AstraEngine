@@ -79,6 +79,25 @@ fn standard_commands_lower_to_typed_fixed_point_ir() {
 }
 
 #[astra_headless_test::test]
+fn shade_has_a_typed_opaque_color_and_separate_coverage() {
+    let command = first_presentation("shade color:222420ff opacity:0.92 #@id shade.scene");
+    let PresentationCommand::Stage(StageCommand::Shade { color, opacity }) = command else {
+        panic!("expected typed shade command")
+    };
+    assert_eq!(color, [0x22, 0x24, 0x20, 0xff]);
+    assert_eq!(opacity.millionths, 920_000);
+
+    let error = compile_astra_project(
+        [source(
+            "shade color:22242080 opacity:0.92 #@id shade.invalid",
+        )],
+        Default::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), "ASTRA_VN_STAGE_ATTRIBUTE_INVALID");
+}
+
+#[astra_headless_test::test]
 fn timeline_requires_real_ordered_keyframes_and_blocking_fence() {
     let command = first_presentation(
         "timeline id:tl.enter target:hero property:opacity keyframes:0=0,120=0.5,300=1 join:block fence:tl.enter.done fallback:flat budget_ms:2 #@id timeline.enter",

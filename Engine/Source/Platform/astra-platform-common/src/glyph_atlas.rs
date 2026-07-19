@@ -781,18 +781,42 @@ fn pack_atlas(resources: &BTreeMap<String, AtlasResource>) -> Result<PackedAtlas
         .map(|resource| resource.width() + ATLAS_PADDING * 2)
         .max()
         .unwrap_or(64);
-    let atlas_width = widest
+    let total_area = resources.values().try_fold(0_u64, |total, resource| {
+        let width = u64::from(resource.width() + ATLAS_PADDING * 2);
+        let height = u64::from(resource.height() + ATLAS_PADDING * 2);
+        total
+            .checked_add(
+                width
+                    .checked_mul(height)
+                    .ok_or_else(|| invalid("glyph atlas resource area overflowed"))?,
+            )
+            .ok_or_else(|| invalid("glyph atlas total area overflowed"))
+    })?;
+    let mut atlas_width = widest
         .max(1024)
         .checked_next_power_of_two()
         .ok_or_else(|| invalid("glyph atlas width overflowed"))?;
+    while atlas_width < ATLAS_SIDE && u64::from(atlas_width) * u64::from(atlas_width) < total_area {
+        atlas_width = atlas_width
+            .checked_mul(2)
+            .ok_or_else(|| invalid("glyph atlas width overflowed"))?;
+    }
     if atlas_width > ATLAS_SIDE {
         return Err(invalid("glyph is larger than the configured atlas"));
     }
+    let mut ordered = resources.iter().collect::<Vec<_>>();
+    ordered.sort_by(|(left_id, left), (right_id, right)| {
+        right
+            .height()
+            .cmp(&left.height())
+            .then_with(|| right.width().cmp(&left.width()))
+            .then_with(|| left_id.cmp(right_id))
+    });
     let mut placements = BTreeMap::new();
     let mut x = ATLAS_PADDING * 3;
     let mut y = ATLAS_PADDING;
     let mut row_height = 0;
-    for (resource_id, resource) in resources {
+    for (resource_id, resource) in ordered {
         if resource.width() + ATLAS_PADDING * 2 > atlas_width
             || resource.height() + ATLAS_PADDING * 2 > ATLAS_SIDE
         {
@@ -1374,6 +1398,40 @@ struct VertexOutput {
 }
 @fragment fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let sample = textureSample(atlas, atlas_sampler, input.uv);
-    return vec4<f32>(sample.rgb * input.color.rgb, sample.a * input.color.a);
+    let alpha = sample.a * input.color.a;
+    return vec4<f32>(sample.rgb * input.color.rgb * sample.a, alpha);
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::{pack_atlas, AtlasResource};
+    use astra_core::Hash256;
+    use astra_media_core::TextureFrame;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn atlas_width_tracks_total_area_and_packs_multiple_stage_textures() {
+        let rgba8 = vec![0x7f; 800 * 600 * 4];
+        let texture = TextureFrame {
+            width: 800,
+            height: 600,
+            hash: Hash256::from_sha256(&rgba8),
+            rgba8,
+        };
+        let resources = (0..8)
+            .map(|index| {
+                (
+                    format!("texture.stage.{index}"),
+                    AtlasResource::Texture(texture.clone()),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        let packed = pack_atlas(&resources).expect("stage textures must fit the bounded atlas");
+
+        assert_eq!(packed.placements.len(), 8);
+        assert_eq!(packed.width, 2048);
+        assert!(packed.height <= 4096);
+    }
+}

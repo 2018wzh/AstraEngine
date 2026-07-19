@@ -36,11 +36,114 @@ from tsuinosora_tools import (  # noqa: E402
     write_demo_slice_config_template,
     write_nativevn_package_input,
     _normalize_visual_capture_image,
+    _derive_director_character_sprite,
+    _derive_director_background_transparent_sprite,
+    _director_runtime_bindings,
     _resolve_visual_capture_launch_command,
     _visual_capture_launch_environment,
 )
 from projectorrays_json import decode_projectorrays_byte_text, loads_projectorrays_json  # noqa: E402
 from native_story_ir import convert_native_story_ir  # noqa: E402
+
+
+class DirectorRuntimeAssetDerivationTests(unittest.TestCase):
+    def test_background_transparent_ink_removes_only_edge_connected_white_matte(self):
+        from PIL import Image, ImageDraw
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.png"
+            target = root / "target.png"
+            image = Image.new("RGBA", (209, 209), (255, 255, 255, 255))
+            draw = ImageDraw.Draw(image)
+            draw.ellipse((30, 30, 178, 178), fill=(10, 20, 30, 255))
+            image.save(source)
+
+            self.assertTrue(_derive_director_background_transparent_sprite(source, target))
+            with Image.open(target) as derived:
+                rgba = derived.convert("RGBA")
+                self.assertEqual(rgba.size, (209, 209))
+                self.assertEqual(rgba.getpixel((0, 0))[3], 0)
+                self.assertEqual(rgba.getpixel((104, 104)), (10, 20, 30, 255))
+
+    def test_background_transparent_ink_rejects_non_white_corner_contract(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.png"
+            target = root / "target.png"
+            Image.new("RGBA", (209, 209), (1, 2, 3, 255)).save(source)
+            self.assertFalse(_derive_director_background_transparent_sprite(source, target))
+            self.assertFalse(target.exists())
+
+    def test_score_opening_assets_enter_the_runtime_asset_closure(self):
+        bindings = list(
+            _director_runtime_bindings(
+                {
+                    "scenes": [],
+                    "score_openings": [
+                        {
+                            "frames": [
+                                {
+                                    "sprite": {
+                                        "binding": {
+                                            "asset_id": "tsui.asset.opening",
+                                            "native_path": "native-assets/opening.png",
+                                        }
+                                    }
+                                },
+                                {"sprite": None},
+                            ]
+                        }
+                    ],
+                    "stage_layouts": [],
+                }
+            )
+        )
+        self.assertEqual(
+            bindings,
+            [
+                (
+                    {
+                        "asset_id": "tsui.asset.opening",
+                        "native_path": "native-assets/opening.png",
+                    },
+                    "event",
+                )
+            ],
+        )
+
+    def test_character_sprite_recovers_bounded_white_matte_and_director_border(self):
+        from PIL import Image, ImageDraw
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.png"
+            target = root / "target.png"
+            image = Image.new("RGBA", (802, 602), (0, 0, 0, 255))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((1, 1, 800, 600), fill=(255, 255, 255, 255))
+            draw.rectangle((250, 100, 550, 550), fill=(10, 20, 30, 255))
+            draw.rectangle((350, 200, 450, 300), fill=(255, 255, 255, 255))
+            image.save(source)
+
+            self.assertTrue(_derive_director_character_sprite(source, target))
+            with Image.open(target) as derived:
+                self.assertEqual(derived.size, (800, 600))
+                self.assertEqual(derived.convert("RGBA").getpixel((0, 0))[3], 0)
+                self.assertEqual(derived.convert("RGBA").getpixel((400, 250))[3], 255)
+
+    def test_opaque_full_frame_character_layer_asset_is_not_rewritten(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.png"
+            target = root / "target.png"
+            Image.new("RGBA", (800, 600), (1, 2, 3, 255)).save(source)
+            self.assertFalse(_derive_director_character_sprite(source, target))
+            self.assertFalse(target.exists())
 
 
 def read_generated_story(root: Path, story_id: str = "main") -> str:
@@ -58,6 +161,8 @@ def native_story_ir_fixture():
             "kind": "text",
             "text": "private opening text",
             "speaker_id": "narrator",
+            "speaker_text": "Narrator",
+            "window": "tsui.surface.dialogue",
         },
         {
             "command_id": "choice.route",
@@ -107,6 +212,7 @@ def native_story_ir_fixture():
                                         "handler_id": "handler.start",
                                         "kind": "text",
                                         "text": "private ending text",
+                                        "window": "tsui.surface.dialogue",
                                     },
                                     {
                                         "command_id": "jump.ending.good",

@@ -1,0 +1,229 @@
+{
+  "schema": "tsuinosora.classic_visual_node_map.v3",
+  "entries": [
+    {
+      "reference_id": "TSUI1999-UI-001",
+      "checkpoint": "classic.title",
+      "comparison_class": "same_node",
+      "identity": {
+        "movie_id": "MENU",
+        "frame": 1,
+        "typed_state": "tsui.init",
+        "wait_command": "tsui.command.000047",
+        "handler_id": "director.menu.score",
+        "locator": {
+          "method": "system_resource",
+          "content_sha256": "sha256:d3e5782e41c2fadb89b10798f39e04512c48fe675503c3e8ac3de2597417c334"
+        },
+        "reference_sha256": "sha256:d3e5782e41c2fadb89b10798f39e04512c48fe675503c3e8ac3de2597417c334",
+        "resource_hashes": ["sha256:d3e5782e41c2fadb89b10798f39e04512c48fe675503c3e8ac3de2597417c334"]
+      }
+    },
+    {
+      "reference_id": "TSUI1999-UI-002",
+      "checkpoint": "classic.opening.staggered",
+      "comparison_class": "same_node",
+      "identity": {
+        "movie_id": "Y",
+        "frame": 13,
+        "typed_state": "director.y.0010.score.0013",
+        "wait_command": "tsui.command.016600",
+        "handler_id": "handler.3a7a26d4dc705e9d.000",
+        "locator": {
+          "method": "score_bitmap_text",
+          "asset_id": "tsui.asset.d08b856bae4ac50a286c3dfa",
+          "content_sha256": "sha256:d08b856bae4ac50a286c3dfa194c387fa79175217b05e5bdb16957e8aa06ef1f"
+        },
+        "reference_sha256": "sha256:14d9be331f4088395ba7489756cdfba71ae9c360d304ff501d5d2dd2e56bf4f0",
+        "resource_hashes": ["sha256:d08b856bae4ac50a286c3dfa194c387fa79175217b05e5bdb16957e8aa06ef1f"]
+      }
+    },
+    {
+      "reference_id": "TSUI1999-UI-003",
+      "checkpoint": "classic.opening.centered",
+      "comparison_class": "same_node",
+      "identity": {
+        "movie_id": "Y",
+        "frame": 20,
+        "typed_state": "director.y.0020",
+        "wait_command": "tsui.command.016631",
+        "handler_id": "handler.scene.d8825e23963e64ea",
+        "locator": {
+          "method": "score_bitmap_text",
+          "asset_id": "tsui.asset.017491577d234996cbb23393",
+          "content_sha256": "sha256:017491577d234996cbb2339321302de282aade53b6ec31a76c814f9b72d8da89"
+        },
+        "reference_sha256": "sha256:b1d7d80ed0c981ba41ff6fe1190d352391c2d935b1758017c88bd0e47fff1a3e",
+        "resource_hashes": ["sha256:017491577d234996cbb2339321302de282aade53b6ec31a76c814f9b72d8da89"]
+      }
+    },
+    {
+      "reference_id": "TSUI1999-UI-004",
+      "checkpoint": "classic.stage.opening_sphere",
+      "comparison_class": "same_node",
+      "identity": {
+        "movie_id": "K",
+        "frame": 33,
+        "typed_state": "director.k.0033",
+        "wait_command": "tsui.command.000122",
+        "handler_id": "handler.scene.3e089ad8823552aa",
+        "locator": {
+          "method": "resource_sequence",
+          "content_sha256": "sha256:08698bdf8c25a3b0ba0c3039b36f0b6b667d083889e9eab81ca8f81fc43fbb51"
+        },
+        "reference_sha256": "sha256:279d7b8248af1bb32aa218b3328ee7dfc3f502189542bebaabd6dd6116121138",
+        "resource_hashes": [
+          "sha256:08698bdf8c25a3b0ba0c3039b36f0b6b667d083889e9eab81ca8f81fc43fbb51",
+          "sha256:66ed4fb3c5813145d781c015cc1fa347eac75297ff977c647faa33c15e7b4813"
+        ]
+      }
+    },
+    {
+      "reference_id": "TSUI1999-UI-005",
+      "checkpoint": "classic.dialogue.background_only",
+      "comparison_class": "same_node",
+      "reference_validation": {
+        "status": "recapture_required",
+        "reason_code": "source_presentation_contradiction",
+        "required_evidence": "two_consecutive_frames"
+      },
+      "identity": {
+        "movie_id": "K",
+        "frame": 138,
+        "typed_state": "director.k.0138",
+        "wait_command": "tsui.command.000901",
+        "handler_id": "handler.scene.566c978ab875c56b",
+        "locator": {
+          "method": "story_text",
+          "content_sha256": "sha256:a494cfb082c1c63eb1f90885c2e0a871df8e597220b3d44f68b4960214d39bac",
+          "candidate_commands": ["tsui.command.000901", "tsui.command.016644"]
+        },
+        "reference_sha256": "sha256:467ae467eebe2597621b807a982decfce549dba8e03d84a28e33e530b0647b97",
+        "resource_hashes": ["sha256:43211ebcee30068e13f60981c73e7136e3b0a7b49b6d24de59fdde9185faa07d"]
+      }
+    },
+    {
+      "reference_id": "TSUI1999-UI-006",
+      "checkpoint": "classic.dialogue.character_overflow",
+      "comparison_class": "same_node",
+      "reference_validation": {
+        "status": "color_tolerance_approved",
+        "reason_code": "capture_color_state_unproven",
+        "profile_id": "capture_palette_v1",
+        "evidence": "same_node_resource_closure_and_stable_gpu_capture"
+      },
+      "identity": {
+        "movie_id": "Y",
+        "frame": 26,
+        "typed_state": "director.y.0026",
+        "wait_command": "tsui.command.016676",
+        "handler_id": "handler.scene.94b6e39f46a7d047",
+        "locator": {
+          "method": "story_text",
+          "content_sha256": "sha256:b72b08e6d3c8fdfce5f1e0ecce82a722983fc7ed083cc1fb139284ee2bde43d6",
+          "candidate_commands": ["tsui.command.000936", "tsui.command.016676"]
+        },
+        "reference_sha256": "sha256:51154107312d88c797775e130e9878ca0a361da8ecaf6e4f4194d3df0e3e806f",
+        "resource_hashes": [
+          "sha256:43211ebcee30068e13f60981c73e7136e3b0a7b49b6d24de59fdde9185faa07d",
+          "sha256:0aeba17c8bedd738fc3211845575fbcd50d243414a2fdd42ce2582c3dacca616"
+        ]
+      }
+    },
+    {
+      "reference_id": "TSUI1999-UI-007",
+      "checkpoint": "classic.dialogue.two_character_overflow",
+      "comparison_class": "same_node",
+      "identity": {
+        "movie_id": "Y",
+        "frame": 84,
+        "typed_state": "director.y.0084",
+        "wait_command": "tsui.command.016992",
+        "handler_id": "handler.scene.fc84f2292fabeec3",
+        "locator": {
+          "method": "story_text",
+          "content_sha256": "sha256:8d2ee3a5eba453d6e1111b1e51737fe5b549be3c8fa877a9ace61ad172879ac2",
+          "candidate_commands": ["tsui.command.001283", "tsui.command.016992"]
+        },
+        "reference_sha256": "sha256:605e3ba1c32dc3fda1fa0e7f0203cd34306e465c6269a80584c1473c4fae8b59",
+        "resource_hashes": [
+          "sha256:6aecdaf60584a1d0131be843cbaf0b07e00f226c5c40aeab5db7c04826f5d004",
+          "sha256:0f6d609f4c8f8a1df1dcd46469a8a1ba6b97c219485a6d91729ab1c7f5f0b34e"
+        ]
+      }
+    },
+    {
+      "reference_id": "TSUI1999-UI-008",
+      "checkpoint": "classic.monologue",
+      "comparison_class": "same_node",
+      "identity": {
+        "movie_id": "Y",
+        "frame": 84,
+        "typed_state": "director.y.0084",
+        "wait_command": "tsui.command.016986",
+        "handler_id": "handler.scene.fc84f2292fabeec3",
+        "locator": {
+          "method": "story_text",
+          "content_sha256": "sha256:5c66a956fc79e75a0686430cfb225f77aa5b598df8aae7518c884b6ebf269bfb",
+          "candidate_commands": ["tsui.command.016986"]
+        },
+        "reference_sha256": "sha256:4faac3c7f1a02569a882f48909b03830f7275d287b22ad68e39f690398ccd0b9",
+        "resource_hashes": [
+          "sha256:6aecdaf60584a1d0131be843cbaf0b07e00f226c5c40aeab5db7c04826f5d004",
+          "sha256:6d52def42f3ad265501c43e0757c1b13a29e1c1ea785da21ed953e5909bb6c79"
+        ]
+      }
+    },
+    {
+      "reference_id": "TSUI1999-UI-009",
+      "checkpoint": "classic.choice",
+      "comparison_class": "same_node",
+      "reference_validation": {
+        "status": "recapture_required",
+        "reason_code": "capture_transition_state_unproven",
+        "required_evidence": "two_consecutive_frames"
+      },
+      "identity": {
+        "movie_id": "Y",
+        "frame": 32,
+        "typed_state": "director.y.0032.choice",
+        "wait_command": "tsui.command.016711",
+        "handler_id": "handler.92766820d6690cf6.000",
+        "locator": {
+          "method": "story_choice",
+          "content_sha256": "sha256:bb489d1e2c559b6845fd039b0eb82c23f3c140fa76acca67c4522e3f2d0fd9bd",
+          "candidate_commands": ["tsui.command.016711"]
+        },
+        "reference_sha256": "sha256:3f713d69b1daa29228e8948d6785103edb7550e751e8a63fa8b3bab20c674b6d",
+        "resource_hashes": [
+          "sha256:43211ebcee30068e13f60981c73e7136e3b0a7b49b6d24de59fdde9185faa07d",
+          "sha256:0aeba17c8bedd738fc3211845575fbcd50d243414a2fdd42ce2582c3dacca616"
+        ]
+      }
+    },
+    {"reference_id":"TSUI1999-UI-010","checkpoint":"classic.title_load","comparison_class":"system_geometry","identity":{"system_page":"load","entry":"title","reference_sha256":"sha256:257a7928f115d75d4ea1b15e52feed3bc92d60b133a4f29973601df403f9f6ec"}},
+    {"reference_id":"TSUI1999-UI-011","checkpoint":"classic.popup","comparison_class":"system_geometry","identity":{"system_page":"quick_panel","entry":"story","reference_sha256":"sha256:af1d2f1b6f59e4ad64f6c5b7a529f7fff51e5f53a57114bbf7061e074fb5f56b"}},
+    {"reference_id":"TSUI1999-UI-012","checkpoint":"classic.config","comparison_class":"system_geometry","identity":{"system_page":"config","entry":"story","reference_sha256":"sha256:5696357ddba44a3e0f46622c82133af25bf42690402bd2c1dc1ac5969611c6e1"}},
+    {"reference_id":"TSUI1999-UI-013","checkpoint":"classic.load","comparison_class":"system_geometry","identity":{"system_page":"load","entry":"story","reference_sha256":"sha256:371cb0f757f0305d3b33faec9a0195f4926e29c6e3cdfaaa5ed07add0957869f"}},
+    {"reference_id":"TSUI1999-UI-014","checkpoint":"classic.save","comparison_class":"system_geometry","identity":{"system_page":"save","entry":"story","reference_sha256":"sha256:5af40b5526f5742b631db3ba0493799f484f661ad598bdea9e03dabf72d4d5c2"}},
+    {
+      "reference_id": "TSUI1999-UI-015",
+      "checkpoint": "classic.dialogue.legacy_game",
+      "comparison_class": "same_node",
+      "identity": {
+        "movie_id": "K",
+        "frame": 27,
+        "typed_state": "director.k.0027",
+        "wait_command": "tsui.command.000107",
+        "handler_id": "handler.scene.8eecb4e5a11c8b61",
+        "locator": {
+          "method": "story_text",
+          "content_sha256": "sha256:bfac3c5d77617f97017ab9aa6fabd5d1799207558059c6bba3acca42a759e5a0",
+          "candidate_commands": ["tsui.command.000107", "tsui.command.009349", "tsui.command.024301"]
+        },
+        "reference_sha256": "sha256:f23d60640fdfa365b29b2953f9b59ec831564acce026107290df1febab1f00fe",
+        "resource_hashes": ["sha256:7db561e7684d965fa146334dea9d7b5fe4290f1166b9eb180ebe879a70e114bb"]
+      }
+    }
+  ]
+}

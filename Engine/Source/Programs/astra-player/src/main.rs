@@ -448,17 +448,29 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                                         "ASTRA_PLAYER_SAVE_TRANSACTION_OVERFLOW",
                                     )
                                 })?;
-                            execute_platform_save(
+                            if let Err(error) = execute_platform_save(
                                 &mut vn,
                                 &mut executor,
                                 "slot.quick",
                                 PlayerHostResourceId(save_transaction_id),
                                 timeline_clock.elapsed().as_millis() as u64,
                             )
-                            .await?;
-                            vn.mark_save_committed("slot.quick").map_err(|error| {
-                                player_platform_error("player.save.commit_state", error)
-                            })?;
+                            .await
+                            {
+                                vn.mark_save_failed("slot.quick").map_err(|cleanup_error| {
+                                    player_platform_error("player.save.abort_state", cleanup_error)
+                                })?;
+                                return Err(error);
+                            }
+                            if let Some(batch) =
+                                vn.mark_save_committed("slot.quick").map_err(|error| {
+                                    player_platform_error("player.save.commit_state", error)
+                                })?
+                            {
+                                executor.execute_batch(batch).await.map_err(|error| {
+                                    player_platform_error("player.save.commit_completion", error)
+                                })?;
+                            }
                             tracing::info!(
                                 event = "astra.player.save.committed",
                                 player_sequence,
@@ -597,7 +609,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                     }
                     if let Some(request) = vn.take_ui_host_request() {
                         match request {
-                            astra_player::VnUiHostRequest::Save { slot_id } => {
+                            astra_player::VnUiHostRequest::Save { slot_id, .. } => {
                                 save_transaction_id =
                                     save_transaction_id.checked_add(1).ok_or_else(|| {
                                         astra_platform::PlatformError::new(
@@ -606,17 +618,35 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                                             "ASTRA_PLAYER_SAVE_TRANSACTION_OVERFLOW",
                                         )
                                     })?;
-                                execute_platform_save(
+                                if let Err(error) = execute_platform_save(
                                     &mut vn,
                                     &mut executor,
                                     &slot_id,
                                     PlayerHostResourceId(save_transaction_id),
                                     timeline_clock.elapsed().as_millis() as u64,
                                 )
-                                .await?;
-                                vn.mark_save_committed(&slot_id).map_err(|error| {
-                                    player_platform_error("player.save.commit_state", error)
-                                })?;
+                                .await
+                                {
+                                    vn.mark_save_failed(&slot_id).map_err(|cleanup_error| {
+                                        player_platform_error(
+                                            "player.save.abort_state",
+                                            cleanup_error,
+                                        )
+                                    })?;
+                                    return Err(error);
+                                }
+                                if let Some(batch) =
+                                    vn.mark_save_committed(&slot_id).map_err(|error| {
+                                        player_platform_error("player.save.commit_state", error)
+                                    })?
+                                {
+                                    executor.execute_batch(batch).await.map_err(|error| {
+                                        player_platform_error(
+                                            "player.save.commit_completion",
+                                            error,
+                                        )
+                                    })?;
+                                }
                             }
                             astra_player::VnUiHostRequest::Load { slot_id } => {
                                 execute_platform_load(&mut vn, &mut executor, &slot_id).await?;

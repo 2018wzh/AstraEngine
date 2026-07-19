@@ -50,9 +50,22 @@ def build_asset_binding_ir(story_source: dict, scene_semantics: dict, converted:
         for movie in movies.values()
         if movie["movie_id"] in STORY_MOVIES
     ]
+    detailed["score_openings"] = [
+        _score_opening(movie, members, resources)
+        for movie in movies.values()
+        if movie["movie_id"] in STORY_MOVIES
+    ]
     eye_prefix = _resolve_eye_prefix(detailed, members.get(("casts", "GENERAL"), {}))
     binding_counts: Counter[str] = Counter()
     referenced_assets: set[str] = set()
+    for opening in detailed["score_openings"]:
+        for frame in opening["frames"]:
+            sprite = frame.get("sprite")
+            if sprite is None:
+                continue
+            binding = sprite["binding"]
+            binding_counts["score_opening_media"] += 1
+            referenced_assets.add(binding["asset_id"])
     for scene in detailed.get("scenes", []):
         movie = movies.get(scene.get("movie_id"))
         if movie is None:
@@ -84,6 +97,75 @@ def build_asset_binding_ir(story_source: dict, scene_semantics: dict, converted:
         },
     }
     return detailed, report
+
+
+def _score_opening(movie, members, resources):
+    labels = sorted(movie.get("labels", []), key=lambda row: row.get("frame", -1))
+    opening = [row for row in labels if row.get("label") == "op"]
+    if len(opening) != 1:
+        raise DirectorAssetBindingError("Director story movie must expose exactly one op label")
+    first_frame = opening[0].get("frame")
+    if not isinstance(first_frame, int) or first_frame <= 0:
+        raise DirectorAssetBindingError("Director op label frame is invalid")
+    following = [row.get("frame") for row in labels if isinstance(row.get("frame"), int) and row["frame"] > first_frame]
+    if not following:
+        raise DirectorAssetBindingError("Director op label has no following story label")
+    end_frame = min(following)
+    frames = {
+        row.get("frame"): row
+        for row in movie.get("score", {}).get("frames", [])
+        if isinstance(row.get("frame"), int)
+    }
+    sequence = []
+    for frame_number in range(first_frame, end_frame):
+        frame = frames.get(frame_number)
+        if frame is None:
+            raise DirectorAssetBindingError("Director op score frame is missing")
+        sprites = frame.get("sprites", [])
+        authored = [sprite for sprite in sprites if sprite.get("channel") not in STAGE_CHANNELS.values()]
+        if len(authored) > 1:
+            raise DirectorAssetBindingError("Director op score frame has multiple authored sprites")
+        tempo = frame.get("main", {}).get("tempo", 0)
+        delay_ms = _score_delay_ms(tempo)
+        record = {
+            "frame": frame_number,
+            "delay_ms": delay_ms,
+            "sprite": None,
+        }
+        if authored:
+            sprite = authored[0]
+            binding = _resolve_score_sprite(sprite, movie, members, resources)
+            if binding.get("width") != sprite.get("width") or binding.get("height") != sprite.get("height"):
+                raise DirectorAssetBindingError(
+                    "Director op score sprite geometry does not match its converted bitmap"
+                )
+            record["sprite"] = {
+                "channel": sprite["channel"],
+                "x": sprite["x"],
+                "y": sprite["y"],
+                "width": sprite["width"],
+                "height": sprite["height"],
+                "binding": binding,
+            }
+        sequence.append(record)
+    if not any(row["sprite"] is not None for row in sequence):
+        raise DirectorAssetBindingError("Director op score contains no authored sprite")
+    return {
+        "movie_id": movie["movie_id"],
+        "entry_frame": first_frame,
+        "next_frame": end_frame,
+        "score_source_sha256": movie.get("score_source_sha256"),
+        "handler_source_sha256": opening[0].get("action", {}).get("source_sha256"),
+        "frames": sequence,
+    }
+
+
+def _score_delay_ms(tempo):
+    if tempo == 0:
+        return 0
+    if isinstance(tempo, int) and 128 <= tempo <= 255:
+        return (256 - tempo) * 1_000
+    raise DirectorAssetBindingError("Director op score uses an unsupported tempo encoding")
 
 
 def _stage_layout(movie, members, resources):
@@ -285,6 +367,18 @@ def _resolve_member(name, movie, forced_library, members, resources):
                 "media_fourcc": resource["chunk_fourcc"],
             }
         )
+        width = resource.get("width")
+        height = resource.get("height")
+        if width is not None or height is not None:
+            if (
+                not isinstance(width, int)
+                or width <= 0
+                or not isinstance(height, int)
+                or height <= 0
+            ):
+                raise DirectorAssetBindingError("Director converted image dimensions are invalid")
+            binding["width"] = width
+            binding["height"] = height
     return binding
 
 

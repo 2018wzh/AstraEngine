@@ -1,0 +1,44 @@
+{
+  "schema": "tsuinosora.classic_visual_comparison_policy.v3",
+  "thresholds": {
+    "max_geometry_delta_px": 2,
+    "min_ssim": 0.94,
+    "max_perceptual_error": 0.08
+  },
+  "color_tolerance_profiles": {
+    "capture_palette_v1": {
+      "reason_code": "capture_color_state_unproven",
+      "min_ssim": 0.75,
+      "max_perceptual_error": 0.12
+    }
+  },
+  "color_tolerance_approval": {
+    "relative_path": "classic-visual-color-tolerance-approval.json",
+    "sha256": "sha256:393c1c2c21a496ceb814b6de65c2084f9ba22ed19f2ca58a3cb1a7bbae3e93b5"
+  },
+  "capture_normalization": {
+    "id": "windows_175pct_bilinear_then_lanczos_v1",
+    "reference_ids": ["TSUI1999-UI-001","TSUI1999-UI-002","TSUI1999-UI-003","TSUI1999-UI-004","TSUI1999-UI-005","TSUI1999-UI-006","TSUI1999-UI-007","TSUI1999-UI-008","TSUI1999-UI-009","TSUI1999-UI-010","TSUI1999-UI-011","TSUI1999-UI-012","TSUI1999-UI-013","TSUI1999-UI-014","TSUI1999-UI-015"],
+    "source_size": [800,600],
+    "captured_size": [1400,1050],
+    "upscale": "bilinear",
+    "downscale": "lanczos"
+  },
+  "checks": [
+    {"id":"classic.title","reference_id":"TSUI1999-UI-001","checkpoint":"classic.title","mask":{"boxes":[],"max_coverage":0.0},"geometry":[]},
+    {"id":"classic.opening.staggered","reference_id":"TSUI1999-UI-002","checkpoint":"classic.opening.staggered","mask":{"boxes":[],"max_coverage":0.0},"geometry":[{"id":"text","detector":"light_text_bbox","search":[240,190,710,420]}]},
+    {"id":"classic.opening.centered","reference_id":"TSUI1999-UI-003","checkpoint":"classic.opening.centered","mask":{"boxes":[],"max_coverage":0.0},"geometry":[{"id":"text","detector":"light_text_bbox","search":[250,220,650,380]}]},
+    {"id":"classic.stage.opening_sphere","reference_id":"TSUI1999-UI-004","checkpoint":"classic.stage.opening_sphere","mask":{"boxes":[],"max_coverage":0.0},"geometry":[]},
+    {"id":"classic.dialogue.background_only","reference_id":"TSUI1999-UI-005","checkpoint":"classic.dialogue.background_only","mask":{"boxes":[[50,490,755,552]],"max_coverage":0.10},"geometry":[{"id":"dialogue_frame","detector":"declared_rect","reference_rect":[23,483,777,565],"capture_rect":[23,483,777,565]}]},
+    {"id":"classic.dialogue.character","reference_id":"TSUI1999-UI-006","checkpoint":"classic.dialogue.character_overflow","color_tolerance":"capture_palette_v1","mask":{"boxes":[[50,490,755,552]],"max_coverage":0.10},"geometry":[{"id":"dialogue_frame","detector":"declared_rect","reference_rect":[23,483,777,565],"capture_rect":[23,483,777,565]}]},
+    {"id":"classic.dialogue.two_characters","reference_id":"TSUI1999-UI-007","checkpoint":"classic.dialogue.two_character_overflow","mask":{"boxes":[[50,490,755,552]],"max_coverage":0.10},"geometry":[{"id":"dialogue_frame","detector":"declared_rect","reference_rect":[23,483,777,565],"capture_rect":[23,483,777,565]}]},
+    {"id":"classic.monologue","reference_id":"TSUI1999-UI-008","checkpoint":"classic.monologue","mask":{"boxes":[[100,65,680,180]],"max_coverage":0.14},"geometry":[{"id":"text","detector":"light_text_origin","search":[80,60,700,220]}]},
+    {"id":"classic.choice","reference_id":"TSUI1999-UI-009","checkpoint":"classic.choice","mask":{"boxes":[[120,100,460,205]],"max_coverage":0.08},"geometry":[{"id":"diamonds","detector":"choice_diamond_origins","expected_count":2,"search":[100,90,250,220]}]},
+    {"id":"classic.title_load","reference_id":"TSUI1999-UI-010","checkpoint":"classic.title_load","mask":{"boxes":[[238,205,562,402]],"max_coverage":0.14},"geometry":[{"id":"window","detector":"modal_bbox"},{"id":"tabs","detector":"declared_rect","reference_rect":[238,201,558,224],"capture_rect":[238,201,558,224]},{"id":"slots","detector":"declared_rect","reference_rect":[240,231,488,375],"capture_rect":[240,231,488,375]}]},
+    {"id":"classic.popup","reference_id":"TSUI1999-UI-011","checkpoint":"classic.popup","mask":{"boxes":[[238,205,562,402]],"max_coverage":0.14},"geometry":[{"id":"window","detector":"modal_bbox"},{"id":"tabs","detector":"declared_rect","reference_rect":[238,201,558,224],"capture_rect":[238,201,558,224]}]},
+    {"id":"classic.config","reference_id":"TSUI1999-UI-012","checkpoint":"classic.config","mask":{"boxes":[[238,205,562,402]],"max_coverage":0.14},"geometry":[{"id":"window","detector":"modal_bbox"},{"id":"tabs","detector":"declared_rect","reference_rect":[238,201,558,224],"capture_rect":[238,201,558,224]}]},
+    {"id":"classic.load","reference_id":"TSUI1999-UI-013","checkpoint":"classic.load","mask":{"boxes":[[238,205,562,402]],"max_coverage":0.14},"geometry":[{"id":"window","detector":"modal_bbox"},{"id":"tabs","detector":"declared_rect","reference_rect":[238,201,558,224],"capture_rect":[238,201,558,224]},{"id":"slots","detector":"declared_rect","reference_rect":[240,231,488,375],"capture_rect":[240,231,488,375]}]},
+    {"id":"classic.save","reference_id":"TSUI1999-UI-014","checkpoint":"classic.save","mask":{"boxes":[[238,205,562,402]],"max_coverage":0.14},"geometry":[{"id":"window","detector":"modal_bbox"},{"id":"tabs","detector":"declared_rect","reference_rect":[238,201,558,224],"capture_rect":[238,201,558,224]},{"id":"slots","detector":"declared_rect","reference_rect":[240,231,488,375],"capture_rect":[240,231,488,375]}]},
+    {"id":"classic.dialogue.legacy_game","reference_id":"TSUI1999-UI-015","checkpoint":"classic.dialogue.legacy_game","mask":{"boxes":[[50,490,755,552]],"max_coverage":0.10},"geometry":[{"id":"dialogue_frame","detector":"declared_rect","reference_rect":[23,483,777,565],"capture_rect":[23,483,777,565]}]}
+  ]
+}

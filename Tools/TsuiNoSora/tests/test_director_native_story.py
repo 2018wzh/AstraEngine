@@ -4,9 +4,13 @@ import unittest
 
 from director_native_story import (
     _derive_route_automation,
+    _choice_display_text,
+    _director_blend_to_linear_opacity,
     _flatten_scene_operations,
+    _native_center_y,
     _resolve_pending_wait_events,
     _route_from_path,
+    _score_openings,
     _split_reading_text,
     DirectorNativeStoryError,
 )
@@ -25,24 +29,124 @@ def _keyboard_events(key):
 
 
 class DirectorNativeStoryAutomationTests(unittest.TestCase):
+    def test_director_choice_visual_prefix_is_lowered_into_the_classic_view(self):
+        self.assertEqual(_choice_display_text("\u3000\u3000◆fixture"), "fixture")
+        with self.assertRaisesRegex(DirectorNativeStoryError, "visual prefix"):
+            _choice_display_text("fixture")
+
+    def test_director_gamma_space_shade_is_converted_to_linear_scene_alpha(self):
+        self.assertEqual(_director_blend_to_linear_opacity(0), 0)
+        self.assertEqual(_director_blend_to_linear_opacity(70), 92)
+        self.assertEqual(_director_blend_to_linear_opacity(100), 100)
+        with self.assertRaisesRegex(DirectorNativeStoryError, "outside zero"):
+            _director_blend_to_linear_opacity(101)
+
+    def test_native_asset_center_uses_bound_height_not_stage_height(self):
+        self.assertEqual(
+            _native_center_y(
+                {"height": 209},
+                {"x": 400, "y": 196, "width": 800, "height": 600},
+            ),
+            300,
+        )
+        with self.assertRaisesRegex(
+            DirectorNativeStoryError,
+            "positive native height",
+        ):
+            _native_center_y({}, {"x": 0, "y": 0, "width": 800, "height": 600})
+
+    def test_score_opening_is_bound_to_the_director_entry_node(self):
+        movies = [
+            {"movie_id": movie, "entry_node": f"director.{movie.lower()}.0010"}
+            for movie in ("K", "S", "T", "Y", "Z")
+        ]
+        binding = {
+            "asset_id": "tsui.asset.fixture",
+            "width": 800,
+            "height": 600,
+        }
+        records = [
+            {
+                "movie_id": movie,
+                "entry_frame": 10,
+                "next_frame": 11,
+                "frames": [
+                    {
+                        "frame": 10,
+                        "delay_ms": 9_000,
+                        "sprite": {
+                            "x": 400,
+                            "y": 300,
+                            "width": 800,
+                            "height": 600,
+                            "binding": binding,
+                        },
+                    }
+                ],
+            }
+            for movie in ("K", "S", "T", "Y", "Z")
+        ]
+
+        openings = _score_openings(records, movies)
+
+        self.assertEqual(set(openings), {movie["entry_node"] for movie in movies})
+        self.assertEqual(openings["director.y.0010"]["frames"][0]["delay_ms"], 9_000)
+
     def test_reading_blocks_preserve_typed_surface_identity(self):
         operations = [
             {
                 "kind": "reading",
                 "mode": "talk",
+                "termination": "close",
                 "events": [{"kind": "text", "text": "話者「台詞」"}],
             },
             {
                 "kind": "reading",
                 "mode": "mono",
+                "termination": "close",
                 "events": [{"kind": "text", "text": "叙述"}],
+            },
+        ]
+
+        flattened = list(_flatten_scene_operations(operations))
+        text_operations = [operation for operation in flattened if operation["kind"] == "text"]
+
+        self.assertEqual(
+            [operation["reading_mode"] for operation in text_operations], ["talk", "mono"]
+        )
+        self.assertEqual([operation["reading_group"] for operation in text_operations], [0, 1])
+        self.assertEqual(
+            [operation for operation in flattened if operation["kind"] == "set_shade"],
+            [
+                {"kind": "set_shade", "opacity": 70},
+                {"kind": "set_shade", "opacity": 0},
+            ],
+        )
+
+    def test_monologue_escape_preserves_shade_until_monoreturn_closes(self):
+        operations = [
+            {
+                "kind": "reading",
+                "mode": "mono",
+                "termination": "escape",
+                "events": [{"kind": "text", "text": "first"}],
+            },
+            {
+                "kind": "reading",
+                "mode": "monoreturn",
+                "termination": "close",
+                "events": [{"kind": "text", "text": "second"}],
             },
         ]
 
         flattened = list(_flatten_scene_operations(operations))
 
         self.assertEqual(
-            [operation["reading_mode"] for operation in flattened], ["talk", "mono"]
+            [operation for operation in flattened if operation["kind"] == "set_shade"],
+            [
+                {"kind": "set_shade", "opacity": 70},
+                {"kind": "set_shade", "opacity": 0},
+            ],
         )
 
     def test_text_outside_reading_block_is_blocking(self):

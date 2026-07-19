@@ -243,6 +243,8 @@ impl BlueprintYakuiRenderer {
                 0.0
             }
         });
+        let max_width = property_number(node, "max_width", frame, item)?.unwrap_or(f32::INFINITY);
+        let max_height = property_number(node, "max_height", frame, item)?.unwrap_or(f32::INFINITY);
         let default_fill = if matches!(
             node.widget.as_str(),
             "button" | "select" | "toggle" | "slider" | "text_input"
@@ -259,9 +261,11 @@ impl BlueprintYakuiRenderer {
                 .get(text_key)
                 .map(String::as_str)
                 .unwrap_or(text_key);
-            let max_width = viewport_width_points(request).max(1.0);
+            let viewport_width = viewport_width_points(request).max(1.0);
             let font_size = property_number(node, "font_size", frame, item)?
                 .unwrap_or_else(|| default_ui_font_size(request));
+            let text_padding =
+                non_negative_layout_property(node, "text_padding", frame, item)?.unwrap_or(8.0);
             let max_lines = bounded_u32_property(node, "max_lines", frame, item, 4, 1, 1_024)?;
             let direction = property_string(node, "direction", frame, item)?
                 .unwrap_or_else(|| "auto".to_string());
@@ -274,7 +278,7 @@ impl BlueprintYakuiRenderer {
             let measured = measurer.measure(&AstraTextMeasureRequest {
                 semantic_id: semantic_id.clone(),
                 text: text.to_string(),
-                max_width: (max_width - 16.0).max(1.0),
+                max_width: (max_width.min(viewport_width) - 16.0).max(1.0),
                 font_size,
                 max_lines,
                 direction,
@@ -289,8 +293,14 @@ impl BlueprintYakuiRenderer {
                     "AstraText returned invalid UI layout metrics",
                 ));
             }
-            min_width = min_width.max(measured.width + 16.0);
-            min_height = min_height.max(measured.height + 16.0);
+            min_width = min_width.max(measured.width + text_padding * 2.0);
+            min_height = min_height.max(measured.height + text_padding * 2.0);
+        }
+        if max_width < min_width || max_height < min_height {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_LAYOUT_SIZE_RANGE",
+                "max_width/max_height must contain measured content and min_width/min_height",
+            ));
         }
         let fill_layout = property_bool(node, "fill", frame, item)?.unwrap_or(false);
         let fill_width = fill_layout
@@ -327,6 +337,7 @@ impl BlueprintYakuiRenderer {
         let props = AstraNodeProps {
             semantic_id: semantic_id.clone(),
             min_size: Vec2::new(min_width, min_height),
+            max_size: Vec2::new(max_width, max_height),
             fill,
             interactive,
             fill_width,
@@ -335,6 +346,7 @@ impl BlueprintYakuiRenderer {
                 node.widget.as_str(),
                 "screen" | "stack" | "modal" | "canvas"
             ),
+            clip_children: property_bool(node, "clip_children", frame, item)?.unwrap_or(false),
         };
         let children = node.children.clone();
         let parent = Some(semantic_id.as_str());
@@ -393,6 +405,10 @@ impl BlueprintYakuiRenderer {
         }
         let gap = non_negative_layout_property(node, "gap", frame, item)?.unwrap_or(0.0);
         let padding = non_negative_layout_property(node, "padding", frame, item)?.unwrap_or(0.0);
+        let cross_axis_alignment = property_string(node, "cross_align", frame, item)?
+            .map(|value| parse_cross_axis_alignment(&value))
+            .transpose()?
+            .unwrap_or(CrossAxisAlignment::Stretch);
         let build_widget = || -> Result<_, UiValidationError> {
             Ok(match node.widget.as_str() {
                 "row" => AstraNodeWidget::show(props, || {
@@ -414,7 +430,7 @@ impl BlueprintYakuiRenderer {
                         List::column()
                             .item_spacing(gap)
                             .main_axis_size(MainAxisSize::Min)
-                            .cross_axis_alignment(CrossAxisAlignment::Stretch)
+                            .cross_axis_alignment(cross_axis_alignment)
                             .show(|| {
                                 child_error = self
                                     .render_children(
@@ -554,11 +570,13 @@ impl BlueprintYakuiRenderer {
                                 AstraNodeProps {
                                     semantic_id: format!("{semantic_id}.indicator"),
                                     min_size: Vec2::new(30.0, 30.0),
+                                    max_size: Vec2::INFINITY,
                                     fill: indicator_color,
                                     interactive: false,
                                     fill_width: false,
                                     fill_height: false,
                                     loose_children: false,
+                                    clip_children: false,
                                 },
                                 || {},
                             );
@@ -833,11 +851,13 @@ fn virtual_leading_space(node: &astra_ui_core::UiNodeBlueprint, extent: f32) {
         AstraNodeProps {
             semantic_id: format!("{}.virtual-leading", node.local_id),
             min_size: Vec2::new(0.0, extent),
+            max_size: Vec2::INFINITY,
             fill: Color::CLEAR,
             interactive: false,
             fill_width: false,
             fill_height: false,
             loose_children: false,
+            clip_children: false,
         },
         || {},
     );
@@ -1217,11 +1237,13 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                     AstraNodeProps {
                         semantic_id: semantic_id.clone(),
                         min_size: Vec2::ZERO,
+                        max_size: Vec2::INFINITY,
                         fill: Color::rgba(0, 0, 0, 96),
                         interactive: true,
                         fill_width: true,
                         fill_height: true,
                         loose_children: true,
+                        clip_children: false,
                     },
                     || {
                         child_error = self
@@ -1537,6 +1559,19 @@ fn parse_alignment(value: &str) -> Result<Alignment, UiValidationError> {
         _ => Err(UiValidationError::invalid(
             "ASTRA_UI_ALIGNMENT",
             "anchor must be a registered Astra alignment token",
+        )),
+    }
+}
+
+fn parse_cross_axis_alignment(value: &str) -> Result<CrossAxisAlignment, UiValidationError> {
+    match value {
+        "start" => Ok(CrossAxisAlignment::Start),
+        "center" => Ok(CrossAxisAlignment::Center),
+        "end" => Ok(CrossAxisAlignment::End),
+        "stretch" => Ok(CrossAxisAlignment::Stretch),
+        _ => Err(UiValidationError::invalid(
+            "ASTRA_UI_CROSS_AXIS_ALIGNMENT",
+            "cross_align must be start, center, end, or stretch",
         )),
     }
 }

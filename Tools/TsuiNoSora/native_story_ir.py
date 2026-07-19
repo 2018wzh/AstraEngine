@@ -29,6 +29,7 @@ SUPPORTED_COMMANDS = {
     "clear_layer",
     "layer_visibility",
     "shade",
+    "backdrop",
     "skip_allowed",
     "bgm",
     "se",
@@ -36,6 +37,7 @@ SUPPORTED_COMMANDS = {
     "audio_control",
     "movie",
     "transition",
+    "timeline",
     "shake",
     "text",
     "choice",
@@ -49,8 +51,13 @@ SUPPORTED_COMMANDS = {
     "return",
 }
 MEDIA_COMMANDS = {"preload", "background", "show", "bgm", "se", "voice", "movie"}
-WAIT_COMMANDS = {"text", "choice", "wait", "input_wait", "movie"}
-READING_WINDOWS = {"tsui.surface.dialogue", "tsui.surface.monologue"}
+WAIT_COMMANDS = {"text", "choice", "wait", "input_wait", "movie", "timeline"}
+READING_WINDOWS = {
+    "tsui.surface.dialogue",
+    "tsui.surface.monologue",
+    "tsui.surface.opening.staggered",
+    "tsui.surface.opening.centered",
+}
 MAX_STATES_PER_SOURCE = 64
 PHYSICAL_INPUT_TYPES = {
     "resume",
@@ -326,7 +333,20 @@ def _command_payload_valid(command: dict) -> bool:
     if kind == "layer_visibility":
         return _safe(command.get("layer")) and isinstance(command.get("visible"), bool)
     if kind == "shade":
-        return isinstance(command.get("opacity"), int) and 0 <= command["opacity"] <= 100
+        color = command.get("color")
+        return (
+            isinstance(command.get("opacity"), int)
+            and 0 <= command["opacity"] <= 100
+            and isinstance(color, str)
+            and len(color) == 8
+            and color.endswith("ff")
+            and all(character in "0123456789abcdef" for character in color)
+        )
+    if kind == "backdrop":
+        color = command.get("color")
+        return isinstance(color, str) and len(color) == 8 and all(
+            character in "0123456789abcdef" for character in color
+        )
     if kind == "skip_allowed":
         return isinstance(command.get("allowed"), bool)
     if kind == "audio_control":
@@ -348,6 +368,17 @@ def _command_payload_valid(command: dict) -> bool:
         )
     if kind == "transition":
         return _safe(command.get("preset")) and isinstance(command.get("duration_ms"), int) and command["duration_ms"] >= 0
+    if kind == "timeline":
+        return (
+            _safe(command.get("timeline_id"))
+            and _safe(command.get("target"))
+            and command.get("property") == "opacity"
+            and isinstance(command.get("value"), int)
+            and 0 <= command["value"] <= 100
+            and isinstance(command.get("duration_ms"), int)
+            and command["duration_ms"] > 0
+            and _safe(command.get("fence"))
+        )
     if kind in {"background", "bgm", "se", "voice", "movie"}:
         return _safe_asset(command.get("asset_id"))
     if kind == "show":
@@ -530,6 +561,14 @@ def _render_command(command: dict, strings: dict[str, str]) -> list[str]:
         return [f"{prefix}system_page kind:{command['page']} {stable}"]
     if kind == "transition":
         return [f"{prefix}transition preset:{command['preset']} duration:{command['duration_ms']} {stable}"]
+    if kind == "timeline":
+        duration_ms = command["duration_ms"]
+        value = command["value"] / 100
+        return [
+            f"{prefix}timeline id:{command['timeline_id']} target:{command['target']} "
+            f"property:{command['property']} keyframes:0={value:g},{duration_ms}={value:g} join:block "
+            f"fence:{command['fence']} fallback:flat budget_ms:2 {stable}"
+        ]
     if kind == "show":
         pose = f" pose:{command['pose']}" if _safe(command.get("pose")) else ""
         at = f" at:{command['at']}" if _safe(command.get("at")) else ""
@@ -573,7 +612,12 @@ def _render_command(command: dict, strings: dict[str, str]) -> list[str]:
     if kind == "layer_visibility":
         return [f"{prefix}layer_visibility layer:{command['layer']} visible:{str(command['visible']).lower()} {stable}"]
     if kind == "shade":
-        return [f"{prefix}shade opacity:{command['opacity'] / 100:g} {stable}"]
+        return [
+            f"{prefix}shade color:{command['color']} "
+            f"opacity:{command['opacity'] / 100:g} {stable}"
+        ]
+    if kind == "backdrop":
+        return [f"{prefix}backdrop color:{command['color']} {stable}"]
     if kind == "skip_allowed":
         return [f"{prefix}skip_allowed allowed:{str(command['allowed']).lower()} {stable}"]
     if kind == "audio_control":

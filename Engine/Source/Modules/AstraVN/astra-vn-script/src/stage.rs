@@ -22,7 +22,9 @@ impl FixedScalar {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 pub struct StageViewport {
     pub width: u32,
     pub height: u32,
@@ -215,7 +217,11 @@ pub enum StageCommand {
         layer: String,
         visible: bool,
     },
+    Backdrop {
+        color: [u8; 4],
+    },
     Shade {
+        color: [u8; 4],
         opacity: FixedScalar,
     },
     SetSkipAllowed {
@@ -248,6 +254,10 @@ pub enum StageCommand {
     },
     Audio(AudioCue),
     AudioControl(AudioControl),
+    SetAudioBusEnabled {
+        bus: VnAudioBus,
+        enabled: bool,
+    },
     Transition {
         preset: String,
         duration_ms: u32,
@@ -287,6 +297,7 @@ impl StageCommand {
             Self::Hide { .. } => "hide",
             Self::ClearLayer { .. } => "clear_layer",
             Self::SetLayerVisibility { .. } => "layer_visibility",
+            Self::Backdrop { .. } => "backdrop",
             Self::Shade { .. } => "shade",
             Self::SetSkipAllowed { .. } => "skip_allowed",
             Self::Move { .. } => "move",
@@ -299,6 +310,7 @@ impl StageCommand {
                 VnAudioBus::Movie => "movie_audio",
             },
             Self::AudioControl(_) => "audio",
+            Self::SetAudioBusEnabled { .. } => "audio_bus_enabled",
             Self::Transition { .. } => "transition",
             Self::Shake { .. } => "shake",
             Self::Timeline(_) => "timeline",

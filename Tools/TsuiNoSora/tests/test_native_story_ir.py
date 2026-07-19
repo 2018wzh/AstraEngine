@@ -49,6 +49,24 @@ class NativeStoryReadingIrTests(unittest.TestCase):
 
         self.assertFalse(_command_payload_valid(command))
 
+    def test_blocking_score_timeline_has_a_typed_fence_and_fixed_duration(self):
+        command = {
+            "command_id": "timeline.opening.001",
+            "kind": "timeline",
+            "timeline_id": "tsui.opening.y.0010",
+            "target": "tsui.layer.event",
+            "property": "opacity",
+            "value": 100,
+            "duration_ms": 9_000,
+            "fence": "tsui.opening.y.0010.complete",
+        }
+
+        self.assertTrue(_command_payload_valid(command))
+        rendered = _render_command(command, {})[0]
+        self.assertIn("keyframes:0=1,9000=1", rendered)
+        self.assertIn("join:block", rendered)
+        self.assertIn("fence:tsui.opening.y.0010.complete", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -219,7 +219,7 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
                     "astra.vn.runtime_step_trace.v1",
                     1,
                 ),
-                (RuntimeOutputDomain::Trace, "astra.vn.runtime_state.v1", 1),
+                (RuntimeOutputDomain::Trace, "astra.vn.runtime_state.v2", 2),
                 (
                     RuntimeOutputDomain::DirtySaveSection,
                     "astra.runtime.dirty_save_section.v1",

@@ -11581,7 +11581,10 @@ def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | Non
     )
     wrote_story_inputs = not diagnostics
     if wrote_story_inputs:
-        _copy_native_assets_to_nativevn(work_root, nativevn_root, conversion_report)
+        derivation_report = _copy_native_assets_to_nativevn(
+            work_root, nativevn_root, conversion_report
+        )
+        _write_json(reports_root / "runtime_asset_derivation_report.json", derivation_report)
         _copy_tsuinosora_ui_template(work_root, nativevn_root)
         (nativevn_root / "project.yaml").write_text(
             _render_nativevn_project(section_specs, scenario_refs),
@@ -11621,7 +11624,9 @@ def write_nativevn_package_input(work_root: Path | str, routes: list[dict] | Non
     return report
 
 
-def _copy_native_assets_to_nativevn(work_root: Path, nativevn_root: Path, conversion_report: dict) -> None:
+def _copy_native_assets_to_nativevn(
+    work_root: Path, nativevn_root: Path, conversion_report: dict
+) -> dict:
     source_root = work_root / "native-assets"
     target_root = nativevn_root / "native-assets"
     if target_root.exists():
@@ -11630,16 +11635,22 @@ def _copy_native_assets_to_nativevn(work_root: Path, nativevn_root: Path, conver
     if not binding_path.is_file():
         coverage = _read_json(work_root / "reports" / "full_conversion_coverage_report.json")
         if coverage.get("counts", {}).get("media_commands") == 0:
-            return
+            return {
+                "schema": "tsuinosora.runtime_asset_derivation_report.v1",
+                "status": "pass",
+                "derived_asset_count": 0,
+                "assets": [],
+                "diagnostics": [],
+            }
         raise FileNotFoundError(
             "runtime media commands require the validated Director asset binding IR"
         )
     binding_ir = _read_json(binding_path)
     if binding_ir.get("schema") != "tsuinosora.director_asset_binding_ir.v1":
         raise ValueError("runtime asset closure requires the validated Director asset binding IR")
-    runtime_assets: dict[str, set[str]] = {}
+    runtime_assets: dict[str, dict[str, set[str]]] = {}
 
-    def register_runtime_binding(binding: object) -> None:
+    def register_runtime_binding(binding: object, role: str | None = None) -> None:
         if not isinstance(binding, dict) or "asset_id" not in binding:
             return
         native_path = str(binding.get("native_path", ""))
@@ -11650,19 +11661,13 @@ def _copy_native_assets_to_nativevn(work_root: Path, nativevn_root: Path, conver
             or not _is_safe_symbol(asset_id)
         ):
             raise ValueError("Director runtime asset binding is unsafe")
-        runtime_assets.setdefault(asset_id, set()).add(native_path)
+        record = runtime_assets.setdefault(asset_id, {"paths": set(), "roles": set()})
+        record["paths"].add(native_path)
+        if role:
+            record["roles"].add(role)
 
-    for scene in binding_ir.get("scenes", []):
-        for operation in _walk_director_operations(scene.get("operations", [])):
-            register_runtime_binding(operation.get("binding"))
-    for stage_layout in binding_ir.get("stage_layouts", []):
-        layers = stage_layout.get("layers") if isinstance(stage_layout, dict) else None
-        if not isinstance(layers, dict):
-            raise ValueError("Director stage layout must contain typed layers")
-        for layer in layers.values():
-            if not isinstance(layer, dict):
-                raise ValueError("Director stage layout layer must be an object")
-            register_runtime_binding(layer.get("binding"))
+    for binding, role in _director_runtime_bindings(binding_ir):
+        register_runtime_binding(binding, role)
 
     resources = {
         str(resource.get("native_path", "")): resource
@@ -11670,12 +11675,16 @@ def _copy_native_assets_to_nativevn(work_root: Path, nativevn_root: Path, conver
         if isinstance(resource, dict)
     }
     referenced_paths = {
-        native_path for paths in runtime_assets.values() for native_path in paths
+        native_path
+        for record in runtime_assets.values()
+        for native_path in record["paths"]
     }
     missing = sorted(referenced_paths - set(resources))
     if missing:
         raise ValueError("Director runtime asset closure contains unconverted resources")
-    for asset_id, candidate_paths in sorted(runtime_assets.items()):
+    derivations = []
+    for asset_id, runtime_record in sorted(runtime_assets.items()):
+        candidate_paths = runtime_record["paths"]
         hashes = {
             str(resources[native_path].get("converted_hash", ""))
             for native_path in candidate_paths
@@ -11689,9 +11698,224 @@ def _copy_native_assets_to_nativevn(work_root: Path, nativevn_root: Path, conver
             raise FileNotFoundError("converted Director runtime asset is missing")
         target = nativevn_root / native_path
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        _write_asset_sidecar(target, native_path, resource, asset_id)
+        derived = False
+        if "character" in runtime_record["roles"]:
+            derived = _derive_director_character_sprite(source, target)
+        transform = "director_white_matte_crop_v1"
+        if not derived and "eye" in runtime_record["roles"]:
+            derived = _derive_director_background_transparent_sprite(source, target)
+            transform = "director_background_transparent_ink_v1"
+        if not derived and "dialogue_frame" in runtime_record["roles"]:
+            derived = _derive_director_dialogue_frame(source, target)
+            transform = "director_dialogue_translucency_v1"
+        if not derived:
+            shutil.copy2(source, target)
+        runtime_resource = dict(resource)
+        runtime_resource["converted_hash"] = _sha256(target)
+        _write_asset_sidecar(target, native_path, runtime_resource, asset_id)
+        if derived:
+            derivations.append(
+                {
+                    "asset_id": asset_id,
+                    "native_path": native_path,
+                    "source_hash": str(resource.get("converted_hash", "")),
+                    "runtime_hash": runtime_resource["converted_hash"],
+                    "transform": transform,
+                }
+            )
     _copy_classic_ui_assets(work_root, nativevn_root, resources)
+    report = {
+        "schema": "tsuinosora.runtime_asset_derivation_report.v1",
+        "status": "pass",
+        "derived_asset_count": len(derivations),
+        "assets": derivations,
+        "diagnostics": [],
+        "redaction": {
+            "paths": "report_relative_only",
+            "payload": "omitted",
+            "commercial_text": "omitted",
+        },
+    }
+    if _report_has_path_leak(report):
+        raise ValueError("runtime asset derivation report contains a local path-like value")
+    return report
+
+
+def _director_runtime_bindings(binding_ir: dict):
+    for scene in binding_ir.get("scenes", []):
+        for operation in _walk_director_operations(scene.get("operations", [])):
+            role = None
+            if operation.get("kind") == "show_member":
+                role = str(operation.get("layer", ""))
+            elif operation.get("kind") == "show_eye":
+                role = "eye"
+            yield operation.get("binding"), role
+    for opening in binding_ir.get("score_openings", []):
+        if not isinstance(opening, dict):
+            raise ValueError("Director score opening must be an object")
+        for frame in opening.get("frames", []):
+            if not isinstance(frame, dict):
+                raise ValueError("Director score opening frame must be an object")
+            sprite = frame.get("sprite")
+            if sprite is not None:
+                if not isinstance(sprite, dict):
+                    raise ValueError("Director score opening sprite must be an object")
+                yield sprite.get("binding"), "event"
+    for stage_layout in binding_ir.get("stage_layouts", []):
+        layers = stage_layout.get("layers") if isinstance(stage_layout, dict) else None
+        if not isinstance(layers, dict):
+            raise ValueError("Director stage layout must contain typed layers")
+        for layer_name, layer in layers.items():
+            if not isinstance(layer, dict):
+                raise ValueError("Director stage layout layer must be an object")
+            yield layer.get("binding"), str(layer_name)
+
+
+def _derive_director_character_sprite(source: Path, target: Path) -> bool:
+    """Recover Director's bounded white-matte sprite from ProjectorRays PNG output."""
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise RuntimeError("Director character matte recovery requires Pillow") from error
+
+    with Image.open(source) as opened:
+        rgba = opened.convert("RGBA")
+    if rgba.size != (802, 602):
+        return False
+    width, height = rgba.size
+    outer = [
+        rgba.getpixel((0, 0)),
+        rgba.getpixel((width - 1, 0)),
+        rgba.getpixel((0, height - 1)),
+        rgba.getpixel((width - 1, height - 1)),
+    ]
+    if any(pixel != (0, 0, 0, 255) for pixel in outer):
+        return False
+    inner = [
+        rgba.getpixel((1, 1)),
+        rgba.getpixel((width - 2, 1)),
+        rgba.getpixel((1, height - 2)),
+        rgba.getpixel((width - 2, height - 2)),
+    ]
+    white_corners = sum(pixel == (255, 255, 255, 255) for pixel in inner)
+    if white_corners < 3:
+        return False
+
+    sprite = rgba.crop((1, 1, width - 1, height - 1))
+    pixels = sprite.load()
+    sprite_width, sprite_height = sprite.size
+    queue: deque[tuple[int, int]] = deque()
+    visited: set[tuple[int, int]] = set()
+    for x in range(sprite_width):
+        queue.append((x, 0))
+        queue.append((x, sprite_height - 1))
+    for y in range(sprite_height):
+        queue.append((0, y))
+        queue.append((sprite_width - 1, y))
+    while queue:
+        x, y = queue.popleft()
+        if (x, y) in visited:
+            continue
+        r, g, b, alpha = pixels[x, y]
+        if alpha != 255 or max(255 - r, 255 - g, 255 - b) > 24:
+            continue
+        visited.add((x, y))
+        pixels[x, y] = (r, g, b, 0)
+        if x:
+            queue.append((x - 1, y))
+        if x + 1 < sprite_width:
+            queue.append((x + 1, y))
+        if y:
+            queue.append((x, y - 1))
+        if y + 1 < sprite_height:
+            queue.append((x, y + 1))
+    if len(visited) < sprite_width * sprite_height // 10:
+        raise ValueError("Director character white matte is not a bounded edge region")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    sprite.save(target, format="PNG", compress_level=9, optimize=False)
+    return True
+
+
+def _derive_director_dialogue_frame(source: Path, target: Path) -> bool:
+    """Restore the translucent paper field encoded by Director's dialogue cast."""
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise RuntimeError("Director dialogue derivation requires Pillow") from error
+
+    with Image.open(source) as opened:
+        rgba = opened.convert("RGBA")
+    if rgba.size != (754, 82):
+        return False
+    pixels = list(rgba.getdata())
+    paper = sum(1 for red, green, blue, alpha in pixels if alpha == 255 and min(red, green, blue) >= 248)
+    if paper < len(pixels) * 3 // 4:
+        raise ValueError("Director dialogue frame does not contain the proven bounded paper field")
+    derived = []
+    for red, green, blue, alpha in pixels:
+        if alpha == 255 and min(red, green, blue) >= 248:
+            derived.append((red, green, blue, 160))
+        else:
+            derived.append((red, green, blue, alpha))
+    rgba.putdata(derived)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    rgba.save(target, format="PNG", compress_level=9, optimize=False)
+    return True
+
+
+def _derive_director_background_transparent_sprite(source: Path, target: Path) -> bool:
+    """Recover Director background-transparent ink from an edge-connected white matte."""
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise RuntimeError("Director background-transparent ink recovery requires Pillow") from error
+
+    with Image.open(source) as opened:
+        rgba = opened.convert("RGBA")
+    width, height = rgba.size
+    if width <= 1 or height <= 1 or rgba.size in {(800, 600), (802, 602)}:
+        return False
+    corners = (
+        rgba.getpixel((0, 0)),
+        rgba.getpixel((width - 1, 0)),
+        rgba.getpixel((0, height - 1)),
+        rgba.getpixel((width - 1, height - 1)),
+    )
+    if sum(
+        alpha == 255 and max(255 - red, 255 - green, 255 - blue) <= 24
+        for red, green, blue, alpha in corners
+    ) < 3:
+        return False
+
+    pixels = rgba.load()
+    queue: deque[tuple[int, int]] = deque()
+    visited: set[tuple[int, int]] = set()
+    for x in range(width):
+        queue.extend(((x, 0), (x, height - 1)))
+    for y in range(height):
+        queue.extend(((0, y), (width - 1, y)))
+    while queue:
+        x, y = queue.popleft()
+        if (x, y) in visited:
+            continue
+        red, green, blue, alpha = pixels[x, y]
+        if alpha != 255 or max(255 - red, 255 - green, 255 - blue) > 24:
+            continue
+        visited.add((x, y))
+        pixels[x, y] = (red, green, blue, 0)
+        if x:
+            queue.append((x - 1, y))
+        if x + 1 < width:
+            queue.append((x + 1, y))
+        if y:
+            queue.append((x, y - 1))
+        if y + 1 < height:
+            queue.append((x, y + 1))
+    if len(visited) < width * height // 10:
+        raise ValueError("Director background-transparent matte is not a bounded edge region")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    rgba.save(target, format="PNG", compress_level=9, optimize=False)
+    return True
 
 
 def _copy_classic_ui_assets(
@@ -11705,27 +11929,38 @@ def _copy_classic_ui_assets(
             "native-assets/ui/classic/frame.png",
             "tsui.ui.classic.frame",
             "sha256:6c945086d7e1160ac374e8e9f32e03a4282466b99685f0ade7545ace72861b88",
+            "copy",
+        ),
+        (
+            "native-assets/projectorrays/casts/GENERAL/GENERAL/chunks/BITD-1283.png",
+            "native-assets/ui/classic/dialogue.png",
+            "tsui.ui.classic.dialogue",
+            "sha256:7e68165e5d8783fc5950dff1a8b1164c2e91dd0a9937af5bf8bd2acf94ecf3a5",
+            "dialogue",
         ),
         (
             "native-assets/projectorrays/data/MENU/chunks/BITD-449.png",
             "native-assets/ui/classic/menu-save.png",
             "tsui.ui.classic.menu.save",
             "sha256:24633ae07b6e48d684509ddcebb17417cdc166248034f2c91b91a9847620ed52",
+            "copy",
         ),
         (
             "native-assets/projectorrays/data/MENU/chunks/BITD-454.png",
             "native-assets/ui/classic/menu-load.png",
             "tsui.ui.classic.menu.load",
             "sha256:7147403eb63c2234c45c5c7df24c388cf454b9096e68f3e75e4953ced9930ed3",
+            "copy",
         ),
         (
             "native-assets/projectorrays/data/MENU/chunks/BITD-455.png",
             "native-assets/ui/classic/menu-exit.png",
             "tsui.ui.classic.menu.exit",
             "sha256:3aef150616889ae240f8cf04e3eab6100c734d3334eadf59d76cd2fddf15f4e1",
+            "copy",
         ),
     )
-    for source_path, target_path, asset_id, expected_hash in required:
+    for source_path, target_path, asset_id, expected_hash, transform in required:
         resource = resources.get(source_path)
         if not isinstance(resource, dict) or resource.get("converted_hash") != expected_hash:
             raise ValueError("classic UI asset identity does not match the reviewed conversion")
@@ -11734,8 +11969,17 @@ def _copy_classic_ui_assets(
             raise FileNotFoundError("reviewed classic UI asset is missing or has changed")
         target = nativevn_root / target_path
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        ui_resource = {**resource, "native_path": target_path, "classification": "ui"}
+        if transform == "dialogue":
+            if not _derive_director_dialogue_frame(source, target):
+                raise ValueError("reviewed classic dialogue asset has an unexpected geometry")
+        else:
+            shutil.copy2(source, target)
+        ui_resource = {
+            **resource,
+            "native_path": target_path,
+            "classification": "ui",
+            "converted_hash": _sha256(target),
+        }
         _write_asset_sidecar(target, target_path, ui_resource, asset_id)
 
 
@@ -11822,7 +12066,9 @@ def _copy_tsuinosora_ui_font(repository_root: Path, nativevn_root: Path) -> None
     target = nativevn_root / relative_path
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
-    sidecar = """schema: astra.asset.v1
+    required_codepoints = _collect_tsuinosora_ui_codepoints(nativevn_root)
+    jp_coverage = _font_coverage_ranges(source, required_codepoints)
+    sidecar = f"""schema: astra.asset.v1
 id: asset:/font/tsuinosora-ui
 source: native-assets/ui/fonts/NotoSansJP-Variable.ttf
 source_hash: sha256:c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f
@@ -11832,31 +12078,13 @@ importer: astra.import.font
 font:
   family: Noto Sans JP
   face_index: 0
-  subset: cjk-production
+  subset: cjk-production-required
   coverage:
-    - { start: 32, end: 126 }
-    - { start: 215, end: 215 }
-    - { start: 8217, end: 8217 }
-    - { start: 8594, end: 8595 }
-    - { start: 8704, end: 8704 }
-    - { start: 8707, end: 8707 }
-    - { start: 8801, end: 8801 }
-    - { start: 9512, end: 9512 }
-    - { start: 9547, end: 9547 }
-    - { start: 9633, end: 9633 }
-    - { start: 9670, end: 9671 }
-    - { start: 9675, end: 9675 }
-    - { start: 9734, end: 9734 }
-    - { start: 12288, end: 12351 }
-    - { start: 12352, end: 12447 }
-    - { start: 12448, end: 12543 }
-    - { start: 13312, end: 19903 }
-    - { start: 19968, end: 40959 }
-    - { start: 65280, end: 65519 }
+{_render_font_coverage_yaml(jp_coverage)}
 cook:
   processor: astra.cook.font
   target_profiles: [classic, modern]
-  params: {}
+  params: {{}}
 review: accepted
 """
     target.with_name(target.name + ".astra-asset.yaml").write_text(sidecar, encoding="utf-8")
@@ -11868,7 +12096,14 @@ review: accepted
     sc_relative_path = "native-assets/ui/fonts/NotoSansSC-Variable.ttf"
     sc_target = nativevn_root / sc_relative_path
     shutil.copy2(sc_source, sc_target)
-    sc_sidecar = """schema: astra.asset.v1
+    sc_coverage = _font_coverage_ranges(sc_source, required_codepoints)
+    missing = required_codepoints - _expand_coverage(jp_coverage) - _expand_coverage(sc_coverage)
+    if missing:
+        preview = ",".join(f"U+{codepoint:04X}" for codepoint in sorted(missing)[:8])
+        raise ValueError(
+            "reviewed TsuiNoSora UI fonts do not cover every required codepoint: " + preview
+        )
+    sc_sidecar = f"""schema: astra.asset.v1
 id: asset:/font/tsuinosora-ui-sc
 source: native-assets/ui/fonts/NotoSansSC-Variable.ttf
 source_hash: sha256:a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da
@@ -11878,24 +12113,168 @@ importer: astra.import.font
 font:
   family: Noto Sans SC
   face_index: 0
-  subset: cjk-production
+  subset: cjk-production-required
   coverage:
-    - { start: 32, end: 126 }
-    - { start: 12288, end: 12351 }
-    - { start: 12352, end: 12447 }
-    - { start: 12448, end: 12543 }
-    - { start: 13312, end: 19903 }
-    - { start: 19968, end: 40959 }
-    - { start: 65280, end: 65519 }
+{_render_font_coverage_yaml(sc_coverage)}
 cook:
   processor: astra.cook.font
   target_profiles: [classic, modern]
-  params: {}
+  params: {{}}
 review: accepted
 """
     sc_target.with_name(sc_target.name + ".astra-asset.yaml").write_text(
         sc_sidecar, encoding="utf-8"
     )
+
+
+def _collect_tsuinosora_ui_codepoints(nativevn_root: Path) -> set[int]:
+    codepoints = set(range(32, 127))
+    roots = (
+        nativevn_root / "Localization",
+        nativevn_root / "UI",
+        nativevn_root / "Scripts",
+        nativevn_root / "Controllers",
+        nativevn_root / "Themes",
+    )
+    files = sorted(
+        path
+        for root in roots
+        if root.is_dir()
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".json", ".astra", ".luau"}
+    )
+    if not files:
+        raise FileNotFoundError("TsuiNoSora UI font coverage has no textual project inputs")
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as error:
+            raise ValueError("TsuiNoSora UI source is not strict UTF-8") from error
+        codepoints.update(ord(character) for character in text if character not in "\r\n\t")
+    return codepoints
+
+
+def _font_coverage_ranges(font_path: Path, required: set[int]) -> list[tuple[int, int]]:
+    data = font_path.read_bytes()
+    if len(data) < 12:
+        raise ValueError("reviewed UI font has a truncated SFNT header")
+    table_count = struct.unpack_from(">H", data, 4)[0]
+    cmap_offset = None
+    cmap_size = None
+    for index in range(table_count):
+        record_offset = 12 + index * 16
+        if record_offset + 16 > len(data):
+            raise ValueError("reviewed UI font has a truncated SFNT table directory")
+        tag, offset, size = struct.unpack_from(">4s4xII", data, record_offset)
+        if offset > len(data) or size > len(data) - offset:
+            raise ValueError("reviewed UI font contains an out-of-bounds SFNT table")
+        if tag == b"cmap":
+            cmap_offset, cmap_size = offset, size
+    if cmap_offset is None or cmap_size is None or cmap_size < 4:
+        raise ValueError("reviewed UI font does not contain a bounded cmap table")
+    cmap = memoryview(data)[cmap_offset : cmap_offset + cmap_size]
+    subtable_count = struct.unpack_from(">H", cmap, 2)[0]
+    supported: set[int] = set()
+    accepted_subtable = False
+    for index in range(subtable_count):
+        record_offset = 4 + index * 8
+        if record_offset + 8 > len(cmap):
+            raise ValueError("reviewed UI font has a truncated cmap directory")
+        platform, encoding, offset = struct.unpack_from(">HHI", cmap, record_offset)
+        if platform != 0 and not (platform == 3 and encoding in {1, 10}):
+            continue
+        if offset + 2 > len(cmap):
+            raise ValueError("reviewed UI font contains an out-of-bounds cmap subtable")
+        format_id = struct.unpack_from(">H", cmap, offset)[0]
+        if format_id == 4:
+            accepted_subtable = True
+            supported.update(_cmap_format4_supported(cmap[offset:], required))
+        elif format_id == 12:
+            accepted_subtable = True
+            supported.update(_cmap_format12_supported(cmap[offset:], required))
+    if not accepted_subtable:
+        raise ValueError("reviewed UI font has no supported Unicode cmap format")
+    return _merge_codepoint_ranges(supported)
+
+
+def _cmap_format4_supported(cmap: memoryview, required: set[int]) -> set[int]:
+    if len(cmap) < 16:
+        raise ValueError("reviewed UI font has a truncated cmap format 4 subtable")
+    length = struct.unpack_from(">H", cmap, 2)[0]
+    segment_count = struct.unpack_from(">H", cmap, 6)[0] // 2
+    if length > len(cmap) or segment_count == 0:
+        raise ValueError("reviewed UI font has an invalid cmap format 4 boundary")
+    table = cmap[:length]
+    end_codes_offset = 14
+    start_codes_offset = end_codes_offset + segment_count * 2 + 2
+    deltas_offset = start_codes_offset + segment_count * 2
+    range_offsets_offset = deltas_offset + segment_count * 2
+    if range_offsets_offset + segment_count * 2 > len(table):
+        raise ValueError("reviewed UI font has a truncated cmap format 4 segment table")
+    supported = set()
+    for segment in range(segment_count):
+        end = struct.unpack_from(">H", table, end_codes_offset + segment * 2)[0]
+        start = struct.unpack_from(">H", table, start_codes_offset + segment * 2)[0]
+        delta = struct.unpack_from(">h", table, deltas_offset + segment * 2)[0]
+        range_offset_position = range_offsets_offset + segment * 2
+        range_offset = struct.unpack_from(">H", table, range_offset_position)[0]
+        for codepoint in required:
+            if codepoint > 0xFFFF or codepoint < start or codepoint > end:
+                continue
+            if range_offset == 0:
+                glyph = (codepoint + delta) & 0xFFFF
+            else:
+                glyph_position = range_offset_position + range_offset + (codepoint - start) * 2
+                if glyph_position + 2 > len(table):
+                    raise ValueError("reviewed UI font has an out-of-bounds cmap format 4 glyph")
+                glyph = struct.unpack_from(">H", table, glyph_position)[0]
+                if glyph:
+                    glyph = (glyph + delta) & 0xFFFF
+            if glyph:
+                supported.add(codepoint)
+    return supported
+
+
+def _cmap_format12_supported(cmap: memoryview, required: set[int]) -> set[int]:
+    if len(cmap) < 16:
+        raise ValueError("reviewed UI font has a truncated cmap format 12 subtable")
+    length, group_count = struct.unpack_from(">II", cmap, 4)[0], struct.unpack_from(">I", cmap, 12)[0]
+    if length > len(cmap) or 16 + group_count * 12 > length:
+        raise ValueError("reviewed UI font has an invalid cmap format 12 boundary")
+    supported = set()
+    candidates = sorted(required)
+    candidate_index = 0
+    for group in range(group_count):
+        start, end, first_glyph = struct.unpack_from(">III", cmap, 16 + group * 12)
+        while candidate_index < len(candidates) and candidates[candidate_index] < start:
+            candidate_index += 1
+        scan = candidate_index
+        while scan < len(candidates) and candidates[scan] <= end:
+            codepoint = candidates[scan]
+            if first_glyph + codepoint - start:
+                supported.add(codepoint)
+            scan += 1
+    return supported
+
+
+def _merge_codepoint_ranges(codepoints: set[int]) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    for codepoint in sorted(codepoints):
+        if ranges and codepoint == ranges[-1][1] + 1:
+            ranges[-1] = (ranges[-1][0], codepoint)
+        else:
+            ranges.append((codepoint, codepoint))
+    return ranges
+
+
+def _expand_coverage(ranges: list[tuple[int, int]]) -> set[int]:
+    return {codepoint for start, end in ranges for codepoint in range(start, end + 1)}
+
+
+def _render_font_coverage_yaml(ranges: list[tuple[int, int]]) -> str:
+    if not ranges:
+        raise ValueError("reviewed UI font does not cover any required codepoint")
+    return "\n".join(f"    - {{ start: {start}, end: {end} }}" for start, end in ranges)
 
 
 def _write_asset_sidecar(

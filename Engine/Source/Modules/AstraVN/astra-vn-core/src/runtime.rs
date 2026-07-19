@@ -9,6 +9,7 @@ use crate::{
     VnCommandCursor, VnCoverage, VnError, VnMovieEndBehavior, VnPlayerCommand, VnReplayUiState,
     VnRouteFlag, VnRouteFlagKind, VnRunConfig, VnRuntimeState, VnSaveBlob, VnStepOutput,
     VnSystemFrame, VnTimelineJoinPolicy, VnWaitKind, VnWaitState, VoiceReplayEntry,
+    VN_RUNTIME_STATE_SCHEMA,
 };
 
 #[derive(Debug, Clone)]
@@ -30,7 +31,7 @@ impl VnRuntime {
         Ok(Self {
             compiled,
             state: VnRuntimeState {
-                schema: "astra.vn.runtime_state.v1".to_string(),
+                schema: VN_RUNTIME_STATE_SCHEMA.to_string(),
                 instance_id: "vn.default".to_string(),
                 profile: config.profile,
                 locale: config.locale,
@@ -56,7 +57,7 @@ impl VnRuntime {
         state: VnRuntimeState,
     ) -> Result<Self, VnError> {
         let compiled = compiled.into();
-        if state.schema != "astra.vn.runtime_state.v1" {
+        if state.schema != VN_RUNTIME_STATE_SCHEMA {
             return Err(VnError::diagnostic(
                 "ASTRA_VN_RUNTIME_STATE_SCHEMA",
                 "VN runtime state schema is invalid",
@@ -129,13 +130,17 @@ impl VnRuntime {
                 self.run_until_blocked(&mut presentation, &mut reached)?;
             }
             VnPlayerCommand::Advance => {
-                match self.state.pending_wait.as_ref().map(|wait| wait.kind) {
-                    Some(VnWaitKind::Dialogue | VnWaitKind::Input) => {
-                        self.state.pending_wait = None;
-                        self.run_until_blocked(&mut presentation, &mut reached)?;
+                if self.state.system.reading_mode == crate::ReadingMode::Hidden {
+                    self.state.system.reading_mode = crate::ReadingMode::Manual;
+                } else {
+                    match self.state.pending_wait.as_ref().map(|wait| wait.kind) {
+                        Some(VnWaitKind::Dialogue | VnWaitKind::Input) => {
+                            self.state.pending_wait = None;
+                            self.run_until_blocked(&mut presentation, &mut reached)?;
+                        }
+                        None => self.run_until_blocked(&mut presentation, &mut reached)?,
+                        Some(_) => {}
                     }
-                    None => self.run_until_blocked(&mut presentation, &mut reached)?,
-                    Some(_) => {}
                 }
             }
             VnPlayerCommand::Choose { option_id } => {
@@ -144,6 +149,9 @@ impl VnRuntime {
             }
             VnPlayerCommand::OpenSystem { page } => {
                 self.open_system_story(page, &mut presentation, &mut reached)?;
+            }
+            VnPlayerCommand::SwitchSystemPage { page } => {
+                self.switch_system_story(page, &mut presentation, &mut reached)?;
             }
             VnPlayerCommand::ReturnSystem => {
                 let frame = self.state.system_stack.pop().ok_or_else(|| {
@@ -180,6 +188,110 @@ impl VnRuntime {
             }
             VnPlayerCommand::SetSkip { mode } => {
                 self.state.system.skip_mode = mode;
+            }
+            VnPlayerCommand::SetReadingMode { mode } => {
+                self.state.system.reading_mode = mode;
+                if mode == crate::ReadingMode::FastForward {
+                    self.fast_forward_until_blocked(&mut presentation, &mut reached)?;
+                }
+            }
+            VnPlayerCommand::SetAudioEnabled { enabled } => {
+                self.state.system.audio_enabled = enabled;
+                for bus in [VnAudioBus::Bgm, VnAudioBus::Se] {
+                    presentation.push(PresentationCommand::Stage(
+                        StageCommand::SetAudioBusEnabled { bus, enabled },
+                    ));
+                }
+            }
+            VnPlayerCommand::InvokeSystemAction { action_id } => {
+                let action_checkpoint = self.state.clone();
+                let action_result = (|| -> Result<(), VnError> {
+                    validate_system_value("system action id", &action_id, 128)?;
+                    let program = self
+                        .compiled
+                        .system_story_manifest
+                        .actions
+                        .get(&action_id)
+                        .cloned()
+                        .ok_or_else(|| {
+                            VnError::diagnostic(
+                                "ASTRA_VN_SYSTEM_ACTION_UNDECLARED",
+                                format!(
+                                    "system action {action_id} is not declared by the compiled story"
+                                ),
+                            )
+                        })?;
+                    for effect in program.effects {
+                        match effect {
+                            crate::SystemActionEffect::Mutate {
+                                scope,
+                                key,
+                                op,
+                                value,
+                            } => {
+                                let entry = self
+                                    .state
+                                    .variables
+                                    .entry(scope)
+                                    .or_default()
+                                    .entry(key)
+                                    .or_default();
+                                *entry = match op {
+                                    MutationOp::Set => Some(value),
+                                    MutationOp::Add => entry.checked_add(value),
+                                    MutationOp::Sub => entry.checked_sub(value),
+                                }
+                                .ok_or_else(|| {
+                                    VnError::diagnostic(
+                                        "ASTRA_VN_SYSTEM_ACTION_MUTATION_OVERFLOW",
+                                        "system action mutation overflowed i64",
+                                    )
+                                })?;
+                            }
+                            crate::SystemActionEffect::Jump { target } => {
+                                let target = self.resolve_runtime_target(&target);
+                                if !self.compiled.states.contains_key(&target) {
+                                    return Err(VnError::diagnostic(
+                                        "ASTRA_VN_SYSTEM_ACTION_TARGET",
+                                        "system action jump target is not compiled",
+                                    ));
+                                }
+                                self.state.system_stack.clear();
+                                self.state.pending_wait = None;
+                                self.state.pending_choice = None;
+                                let story_id = self.story_for_state(&target)?;
+                                self.state.cursor = Some(self.cursor_for(&story_id, &target, 0)?);
+                                self.record_route_flag(VnRouteFlagKind::Jump, &action_id, &target);
+                                self.reach(&target, &mut reached);
+                                self.run_until_blocked(&mut presentation, &mut reached)?;
+                            }
+                            crate::SystemActionEffect::SwitchSystemPage { page } => {
+                                self.switch_system_story(page, &mut presentation, &mut reached)?;
+                            }
+                            crate::SystemActionEffect::ReturnSystem => {
+                                let frame = self.state.system_stack.pop().ok_or_else(|| {
+                                    VnError::diagnostic(
+                                        "ASTRA_VN_SYSTEM_STACK",
+                                        "system action return requires an open system story",
+                                    )
+                                })?;
+                                self.state.cursor = Some(frame.return_to);
+                                self.state.pending_wait = frame.return_wait;
+                                self.state.pending_choice = frame.return_choice;
+                                if self.state.pending_wait.is_none()
+                                    && self.state.pending_choice.is_none()
+                                {
+                                    self.run_until_blocked(&mut presentation, &mut reached)?;
+                                }
+                            }
+                        }
+                    }
+                    Ok(())
+                })();
+                if let Err(error) = action_result {
+                    self.state = action_checkpoint;
+                    return Err(error);
+                }
             }
             VnPlayerCommand::SetConfig { key, value } => {
                 validate_system_value("config key", &key, 256)?;
@@ -295,6 +407,16 @@ impl VnRuntime {
                 self.state.pending_wait = None;
                 self.run_until_blocked(&mut presentation, &mut reached)?;
             }
+        }
+        if self.state.system.reading_mode == crate::ReadingMode::FastForward
+            && self.state.system.skip_allowed
+            && self.state.system_stack.is_empty()
+            && matches!(
+                self.state.pending_wait.as_ref().map(|wait| wait.kind),
+                Some(VnWaitKind::Dialogue | VnWaitKind::Input)
+            )
+        {
+            self.fast_forward_until_blocked(&mut presentation, &mut reached)?;
         }
         let events = reached
             .iter()
@@ -579,6 +701,11 @@ impl VnRuntime {
                 CompiledCommand::Presentation { id, command } => {
                     self.advance_cursor()?;
                     let wait = wait_state_from_presentation(&id, &command)?;
+                    if let PresentationCommand::Stage(StageCommand::SetSkipAllowed { allowed }) =
+                        &command
+                    {
+                        self.state.system.skip_allowed = *allowed;
+                    }
                     presentation.push(command);
                     if let Some(wait) = wait {
                         self.set_pending_wait(wait)?;
@@ -848,6 +975,85 @@ impl VnRuntime {
         self.state.cursor = Some(self.cursor_for(&entry.story_id, &entry.state_id, 0)?);
         self.reach(&entry.state_id, reached);
         self.run_until_blocked(presentation, reached)
+    }
+
+    fn switch_system_story(
+        &mut self,
+        page: crate::SystemPageKind,
+        presentation: &mut Vec<PresentationCommand>,
+        reached: &mut BTreeSet<String>,
+    ) -> Result<(), VnError> {
+        let entry = self
+            .compiled
+            .system_story_manifest
+            .entries
+            .get(&page)
+            .cloned()
+            .ok_or_else(|| {
+                VnError::diagnostic(
+                    "ASTRA_VN_SYSTEM_ENTRY_MISSING",
+                    format!("system page {page:?} has no compiled story entry"),
+                )
+            })?;
+        let frame = self.state.system_stack.last_mut().ok_or_else(|| {
+            VnError::diagnostic(
+                "ASTRA_VN_SYSTEM_STACK",
+                "system page switch requires an open system story",
+            )
+        })?;
+        frame.page = page;
+        self.state.pending_wait = None;
+        self.state.pending_choice = None;
+        self.state.cursor = Some(self.cursor_for(&entry.story_id, &entry.state_id, 0)?);
+        self.reach(&entry.state_id, reached);
+        self.run_until_blocked(presentation, reached)
+    }
+
+    fn fast_forward_until_blocked(
+        &mut self,
+        presentation: &mut Vec<PresentationCommand>,
+        reached: &mut BTreeSet<String>,
+    ) -> Result<(), VnError> {
+        const MAX_FAST_FORWARD_WAITS: usize = 100_000;
+        for _ in 0..MAX_FAST_FORWARD_WAITS {
+            if !self.state.system.skip_allowed {
+                return Ok(());
+            }
+            match self.state.pending_wait.as_ref().map(|wait| wait.kind) {
+                Some(VnWaitKind::Dialogue | VnWaitKind::Input) => {
+                    self.state.pending_wait = None;
+                    let presentation_start = presentation.len();
+                    self.run_until_blocked(presentation, reached)?;
+                    if matches!(
+                        self.state.pending_wait.as_ref().map(|wait| wait.kind),
+                        Some(VnWaitKind::Dialogue | VnWaitKind::Input)
+                    ) && self.state.system_stack.is_empty()
+                    {
+                        let retained = presentation
+                            .drain(presentation_start..)
+                            .filter(|command| {
+                                !matches!(command, PresentationCommand::Dialogue { .. })
+                            })
+                            .collect::<Vec<_>>();
+                        presentation.extend(retained);
+                    }
+                }
+                None => {
+                    self.run_until_blocked(presentation, reached)?;
+                    if self.state.pending_wait.is_none() && self.state.pending_choice.is_none() {
+                        return Ok(());
+                    }
+                }
+                Some(_) => return Ok(()),
+            }
+            if self.state.pending_choice.is_some() || !self.state.system_stack.is_empty() {
+                return Ok(());
+            }
+        }
+        Err(VnError::diagnostic(
+            "ASTRA_VN_READING_MODE_BUDGET",
+            "fast-forward exceeded the bounded dialogue/input wait budget",
+        ))
     }
 
     fn resolve_runtime_target(&self, target: &str) -> String {

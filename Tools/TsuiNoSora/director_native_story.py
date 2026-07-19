@@ -18,13 +18,68 @@ class DirectorNativeStoryError(ValueError):
     """Raised when typed Director behavior cannot be represented exactly."""
 
 
+# Recovered from two independent same-node captures of GENERAL.tshadehalf.
+# ProjectorRays exports the indexed BITD without its Director palette, so the
+# displayed neutral cannot be derived from the standalone PNG payload.
+DIRECTOR_SHADE_COLOR = "222420ff"
+DIRECTOR_CHOICE_PREFIX = "\u3000\u3000◆"
+
+
+def _native_center_y(binding, layout):
+    height = binding.get("height")
+    if not isinstance(height, int) or height <= 0:
+        raise DirectorNativeStoryError(
+            "bound presentation asset is missing a positive native height"
+        )
+    return layout["y"] + height // 2
+
+
+def _choice_display_text(value):
+    if not isinstance(value, str) or not value.startswith(DIRECTOR_CHOICE_PREFIX):
+        raise DirectorNativeStoryError(
+            "Director choice option is missing the proven visual prefix"
+        )
+    display = value[len(DIRECTOR_CHOICE_PREFIX) :]
+    if not display:
+        raise DirectorNativeStoryError("Director choice option has no display text")
+    return display
+
+
+def _director_blend_to_linear_opacity(opacity):
+    """Convert Director's gamma-space black blend to linear Scene2D alpha.
+
+    Director composites the authored shade in device RGB. Scene2D blends on an
+    sRGB attachment in linear light, so calibrate the constant alpha at the
+    50% sRGB midpoint instead of applying an unconstrained gamma approximation.
+    """
+    if not isinstance(opacity, int) or not 0 <= opacity <= 100:
+        raise DirectorNativeStoryError("Director blend opacity is outside zero through one hundred")
+    if opacity in {0, 100}:
+        return opacity
+    if opacity == 70:
+        return 92
+    visible_srgb = 1.0 - opacity / 100.0
+
+    def srgb_to_linear(value):
+        if value <= 0.04045:
+            return value / 12.92
+        return ((value + 0.055) / 1.055) ** 2.4
+
+    midpoint = srgb_to_linear(0.5)
+    visible_linear = srgb_to_linear(0.5 * visible_srgb) / midpoint
+    return round((1.0 - visible_linear) * 100)
+
+
 DAY_FLAGS = ("asumi", "ayana", "kotomi", "manhole", "takuji", "yasuko", "yukito", "zakuro")
 LAYER_SPECS = (
     ("sky", "sprite", 0),
+    # Director channel 2 is behind channel 3.  Eye-transition sprites therefore
+    # disappear beneath the next background instead of becoming a foreground
+    # overlay.
+    ("eye", "sprite", 5),
     ("background", "sprite", 10),
     ("character", "sprite", 20),
     ("event", "cg", 30),
-    ("eye", "sprite", 40),
     ("video", "video", 50),
 )
 MECHANISM_REPLACEMENTS = {
@@ -41,8 +96,6 @@ READING_SURFACES = {
     "mono": "tsui.surface.monologue",
     "monoreturn": "tsui.surface.monologue",
 }
-
-
 def build_native_story_ir(program: dict, lingo: dict) -> tuple[dict, dict]:
     if program.get("schema") != "tsuinosora.director_story_program_ir.v1":
         raise DirectorNativeStoryError("Director story program schema is invalid")
@@ -115,6 +168,11 @@ class _Lowering:
 
     def lower(self, program):
         self.stage_layouts = _stage_layouts(program.get("stage_layouts"))
+        self.score_openings = _score_openings(program.get("score_openings"), program["movies"])
+        self.score_opening_continuations = {
+            f"director.{opening['movie_id'].lower()}.{opening['next_frame']:04d}"
+            for opening in self.score_openings.values()
+        }
         self.stage_layout = self.stage_layouts["Y"]
         movie_entries = {movie["movie_id"]: movie["entry_node"] for movie in program["movies"]}
         self.choice_option_counts = {
@@ -143,8 +201,102 @@ class _Lowering:
         )
         for movie in program["movies"]:
             for node in movie["nodes"]:
-                self._lower_node(node)
+                opening = self.score_openings.get(node["node_id"])
+                if opening is None:
+                    self._lower_node(node)
+                else:
+                    self._lower_score_opening(node, opening)
         return self.states
+
+    def _lower_score_opening(self, node, opening):
+        if node.get("presentation") is not None or node.get("choice") is not None:
+            raise DirectorNativeStoryError("Director score opening entry contains conflicting authored content")
+        programs = [
+            operation
+            for program in node["flow"].get("programs", [])
+            for operation in program["body"]
+        ]
+        if _authority_operations(programs):
+            raise DirectorNativeStoryError("Director score opening entry contains conflicting authority")
+        continuation = self._flow_fallback(node)
+        target = continuation
+        resolved_frames = []
+        previous_sprite = None
+        for frame in opening["frames"]:
+            sprite = frame.get("sprite")
+            if sprite is not None:
+                previous_sprite = sprite
+            timing_sprite = sprite
+            if sprite is None and frame["delay_ms"]:
+                if previous_sprite is None:
+                    raise DirectorNativeStoryError(
+                        "Director score opening delayed blank frame has no prior presentation target"
+                    )
+                timing_sprite = previous_sprite
+            resolved_frames.append((frame, timing_sprite))
+        for frame, timing_sprite in reversed(resolved_frames):
+            commands = []
+            sprite = frame.get("sprite")
+            if sprite is None and timing_sprite is None:
+                commands.append(self._command("clear_layer", node=node, layer="event", duration_ms=0))
+            else:
+                binding = timing_sprite["binding"]
+                commands.extend(
+                    [
+                        self._command("preload", node=node, asset_id=binding["asset_id"]),
+                        self._command(
+                            "show",
+                            node=node,
+                            character_id="tsui.layer.event",
+                            asset_id=binding["asset_id"],
+                            layer="event",
+                            at="center",
+                            fit="native",
+                            opacity=100 if sprite is not None else 0,
+                        ),
+                        self._command(
+                            "move",
+                            node=node,
+                            character_id="tsui.layer.event",
+                            x=timing_sprite["x"],
+                            y=timing_sprite["y"] + timing_sprite["height"] // 2,
+                            duration_ms=0,
+                        ),
+                    ]
+                )
+            delay_ms = frame["delay_ms"]
+            if delay_ms:
+                commands.append(
+                    self._command(
+                        "timeline",
+                        node=node,
+                        timeline_id=f"tsui.opening.{opening['movie_id'].lower()}.{frame['frame']:04d}",
+                        target="tsui.layer.event",
+                        property="opacity",
+                        value=100 if sprite is not None else 0,
+                        duration_ms=delay_ms,
+                        fence=f"tsui.opening.{opening['movie_id'].lower()}.{frame['frame']:04d}.complete",
+                    )
+                )
+            commands.append(self._command("jump", node=node, target=target))
+            target = self._add_generated_state(
+                f"{node['node_id']}.score.{frame['frame']:04d}", commands
+            )
+        clear_commands = [
+            self._command("clear_layer", node=node, layer=layer, duration_ms=0)
+            for layer in ("sky", "eye", "background", "character", "event", "video")
+        ]
+        clear_commands.extend(
+            [
+                self._command("backdrop", node=node, color="000000ff"),
+                self._command("shade", node=node, opacity=0),
+                self._command("jump", node=node, target=target),
+            ]
+        )
+        self._add_state(node["node_id"], clear_commands)
+        self.mechanism_replacements["director_score_opening"] = (
+            "astra_typed_stage_sequence_with_blocking_timeline_waits"
+        )
 
     def _initial_commands(self, movie_entries):
         commands = [
@@ -196,6 +348,10 @@ class _Lowering:
             ),
         )
         commands = self._presentation_commands(node)
+        if node["node_id"] in self.score_opening_continuations:
+            # The original Score keeps its black stage behind the continuation
+            # frame. Clear it only after that frame's authored wait has completed.
+            commands.append(self._command("backdrop", node=node, color="00000000"))
         choice = node.get("choice")
         if choice is not None:
             if authoritative:
@@ -207,6 +363,18 @@ class _Lowering:
                     option["targets"][0],
                     f"{node['node_id']}.option.{option['option_id'].rsplit('.', 1)[-1]}",
                 )
+                # GENERAL's authored selector entry handlers call tshadehalf before
+                # showing the selector, and every selected branch clears that shade
+                # before resuming story execution.  Preserve that presentation
+                # lifecycle in the typed stage program instead of approximating it
+                # with a profile-specific full-screen UI overlay.
+                option_target = self._add_generated_state(
+                    f"{node['node_id']}.option.{option['option_id'].rsplit('.', 1)[-1]}.shade_clear",
+                    [
+                        self._command("shade", node=node, opacity=0),
+                        self._command("jump", node=node, target=option_target),
+                    ],
+                )
                 condition = {
                     "path": _selector_path(choice["selector"], int(option["option_id"].rsplit(".", 1)[-1])),
                     "op": "not_eq",
@@ -215,14 +383,21 @@ class _Lowering:
                 options.append(
                     {
                         "option_id": option["option_id"],
-                        "text": option["text"],
+                        "text": _choice_display_text(option["text"]),
                         "target": option_target,
                         "enabled_when": condition,
                     }
                 )
             choice_state = self._add_generated_state(
                 f"{node['node_id']}.choice",
-                [self._command("choice", node=node, prompt=choice["prompt"], options=options)],
+                [
+                    self._command(
+                        "shade",
+                        node=node,
+                        opacity=_director_blend_to_linear_opacity(70),
+                    ),
+                    self._command("choice", node=node, prompt=choice["prompt"], options=options),
+                ],
             )
             resolver = f"director.{node['movie_id'].lower()}.{choice['resolver_frame']:04d}"
             gated_target = self._compile_selector_gate(
@@ -465,7 +640,7 @@ class _Lowering:
                             handler=handler,
                             character_id=f"tsui.layer.{layer}",
                             x=layout["x"],
-                            y=layout["y"] + layout["height"] // 2,
+                            y=_native_center_y(operation["binding"], layout),
                             duration_ms=0,
                         ),
                     ]
@@ -491,7 +666,7 @@ class _Lowering:
                             handler=handler,
                             character_id="tsui.layer.eye",
                             x=layout["x"],
-                            y=layout["y"] + layout["height"] // 2,
+                            y=_native_center_y(operation["binding"], layout),
                             duration_ms=0,
                         ),
                     ]
@@ -502,7 +677,13 @@ class _Lowering:
             elif kind == "set_layer_visibility":
                 commands.append(self._command("layer_visibility", handler=handler, layer=operation["layer"], visible=operation["visible"]))
             elif kind == "set_shade":
-                commands.append(self._command("shade", handler=handler, opacity=operation["opacity"]))
+                commands.append(
+                    self._command(
+                        "shade",
+                        handler=handler,
+                        opacity=_director_blend_to_linear_opacity(operation["opacity"]),
+                    )
+                )
             elif kind == "play_audio":
                 commands.append(
                     self._command(
@@ -587,6 +768,8 @@ class _Lowering:
             "kind": kind,
             "handler_id": handler or _node_handler(node, self.handler_by_source_hash, self.default_handler),
         }
+        if kind == "shade":
+            fields.setdefault("color", DIRECTOR_SHADE_COLOR)
         result.update(fields)
         return result
 
@@ -748,20 +931,44 @@ def _authority_operations(operations):
     return result
 
 
-def _flatten_scene_operations(operations, reading_mode=None):
+def _flatten_scene_operations(
+    operations, reading_mode=None, reading_group=None, group_counter=None
+):
+    if group_counter is None:
+        group_counter = [0]
     for operation in operations:
         kind = operation["kind"]
         if kind == "transaction":
-            yield from _flatten_scene_operations(operation["operations"], reading_mode)
+            yield from _flatten_scene_operations(
+                operation["operations"], reading_mode, reading_group, group_counter
+            )
         elif kind == "reading":
             mode = operation.get("mode")
             if mode not in READING_SURFACES:
                 raise DirectorNativeStoryError("typed reading mode is missing or unsupported")
-            yield from _flatten_scene_operations(operation["events"], mode)
+            current_group = group_counter[0]
+            group_counter[0] += 1
+            termination = operation.get("termination")
+            if termination not in {"close", "escape"}:
+                raise DirectorNativeStoryError("typed reading termination is missing or unsupported")
+            # GENERAL.tmono0 enters the authored 70% shade before the first
+            # monologue glyph. tmono3 clears it only for a normal </mono> close;
+            # </monoescape> intentionally preserves it until monoreturn completes.
+            if mode == "mono":
+                yield {"kind": "set_shade", "opacity": 70}
+            yield from _flatten_scene_operations(
+                operation["events"], mode, current_group, group_counter
+            )
+            if mode in {"mono", "monoreturn"} and termination == "close":
+                yield {"kind": "set_shade", "opacity": 0}
         elif kind == "text":
-            if reading_mode not in READING_SURFACES:
+            if reading_mode not in READING_SURFACES or reading_group is None:
                 raise DirectorNativeStoryError("scene text is not owned by a typed reading block")
-            yield {**operation, "reading_mode": reading_mode}
+            yield {
+                **operation,
+                "reading_mode": reading_mode,
+                "reading_group": reading_group,
+            }
         else:
             yield operation
 
@@ -973,6 +1180,10 @@ def _simulate_state(key, state_map):
                 }
             )
             events.append({"type": "_await_next_wait", "timeout_ticks": 3_600})
+        elif kind == "timeline":
+            events.append({"type": "_pending_wait", "command_id": command["command_id"]})
+            timeout_ticks = (command["duration_ms"] * 60 + 999) // 1_000 + 120
+            events.append({"type": "_await_next_wait", "timeout_ticks": timeout_ticks})
         elif kind == "movie" and command.get("end", "wait") == "wait":
             events.append({"type": "_pending_wait", "command_id": command["command_id"]})
             events.append({"type": "_await_next_wait", "timeout_ticks": 18_000})
@@ -997,6 +1208,7 @@ def _simulate_state(key, state_map):
             "hide",
             "clear_layer",
             "layer_visibility",
+            "backdrop",
             "shade",
             "skip_allowed",
             "transition",
@@ -1228,6 +1440,58 @@ def _stage_layouts(value):
         result[record["movie_id"]] = layers
     if set(result) != required_movies:
         raise DirectorNativeStoryError("Director stage layout movie coverage is incomplete")
+    return result
+
+
+def _score_openings(value, movies):
+    required_movies = {movie["movie_id"]: movie["entry_node"] for movie in movies}
+    if set(required_movies) != {"K", "S", "T", "Y", "Z"} or not isinstance(value, list):
+        raise DirectorNativeStoryError("Director score opening coverage is missing")
+    result = {}
+    for record in value:
+        if not isinstance(record, dict):
+            raise DirectorNativeStoryError("Director score opening record is invalid")
+        movie_id = record.get("movie_id")
+        entry_frame = record.get("entry_frame")
+        next_frame = record.get("next_frame")
+        if (
+            movie_id not in required_movies
+            or not isinstance(entry_frame, int)
+            or not isinstance(next_frame, int)
+            or next_frame <= entry_frame
+            or required_movies[movie_id] != f"director.{movie_id.lower()}.{entry_frame:04d}"
+        ):
+            raise DirectorNativeStoryError("Director score opening identity is invalid")
+        frames = record.get("frames")
+        if not isinstance(frames, list) or [row.get("frame") for row in frames] != list(
+            range(entry_frame, next_frame)
+        ):
+            raise DirectorNativeStoryError("Director score opening frame coverage is incomplete")
+        for frame in frames:
+            delay_ms = frame.get("delay_ms")
+            sprite = frame.get("sprite")
+            if not isinstance(delay_ms, int) or delay_ms < 0:
+                raise DirectorNativeStoryError("Director score opening delay is invalid")
+            if sprite is None:
+                continue
+            if any(not isinstance(sprite.get(field), int) for field in ("x", "y", "width", "height")):
+                raise DirectorNativeStoryError("Director score opening sprite geometry is invalid")
+            binding = sprite.get("binding")
+            if (
+                sprite["width"] <= 0
+                or sprite["height"] <= 0
+                or not isinstance(binding, dict)
+                or not isinstance(binding.get("asset_id"), str)
+                or binding.get("width") != sprite["width"]
+                or binding.get("height") != sprite["height"]
+            ):
+                raise DirectorNativeStoryError("Director score opening asset binding is invalid")
+        node_id = required_movies[movie_id]
+        if node_id in result:
+            raise DirectorNativeStoryError("Director score opening movie is duplicated")
+        result[node_id] = record
+    if len(result) != len(required_movies):
+        raise DirectorNativeStoryError("Director score opening movie coverage is incomplete")
     return result
 
 

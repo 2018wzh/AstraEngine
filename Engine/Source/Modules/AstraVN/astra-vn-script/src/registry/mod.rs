@@ -48,6 +48,7 @@ impl Default for CommandRegistry {
             "hide",
             "clear_layer",
             "layer_visibility",
+            "backdrop",
             "shade",
             "skip_allowed",
             "move",

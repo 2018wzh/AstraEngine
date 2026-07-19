@@ -1,7 +1,9 @@
 use astra_vn_system::{
-    compile_astra_project, AstraSource, SystemPageKind, SystemStoryManifest,
-    SystemStoryValidationStatus, VnSystemUiProfileManifest,
+    compile_astra_project, AstraSource, ReadingMode, SaveCompletionPolicy, SystemPageKind,
+    SystemStoryManifest, SystemStoryValidationStatus, SystemUiProfilePolicy,
+    VnSystemUiProfileManifest,
 };
+use std::collections::BTreeSet;
 
 const SYSTEM_STORY: &str = r#"
 story main #@id story.main
@@ -82,10 +84,36 @@ fn system_ui_profile_manifest_validates_migration_unlock_and_localization() {
         Default::default(),
     )
     .unwrap();
-    let manifest = VnSystemUiProfileManifest::from_compiled(&compiled, vec!["zh-Hans".to_string()]);
+    let mut manifest =
+        VnSystemUiProfileManifest::from_compiled(&compiled, vec!["zh-Hans".to_string()]);
+    manifest.profiles.insert(
+        "classic".into(),
+        SystemUiProfilePolicy {
+            profile_id: "classic".into(),
+            save_slot_ids: (1..=8).map(|index| format!("slot.{index:02}")).collect(),
+            quick_slot_id: None,
+            allowed_pages: BTreeSet::from([
+                SystemPageKind::Title,
+                SystemPageKind::Save,
+                SystemPageKind::Load,
+            ]),
+            reading_modes: BTreeSet::from([ReadingMode::Manual]),
+            audio_toggle: true,
+            save_completion: SaveCompletionPolicy::ReturnSystem,
+            custom_action_ids: BTreeSet::new(),
+        },
+    );
 
     let report = manifest.validate();
     assert_eq!(report.status, SystemStoryValidationStatus::Pass);
+
+    let mut icon_only_system_ui = manifest.clone();
+    icon_only_system_ui.localization.text_key_count = 0;
+    assert_eq!(
+        icon_only_system_ui.validate().status,
+        SystemStoryValidationStatus::Pass,
+        "a localized system UI may be icon-only and therefore reference no text keys"
+    );
 
     let mut missing_migration = manifest.clone();
     missing_migration.save_migration.migrator_id.clear();

@@ -2,7 +2,12 @@ use astra_core::Diagnostic;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{CompiledCommand, CompiledStory, SystemStoryValidationStatus, SystemUnlockKind};
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::{
+    CompiledCommand, CompiledVnProject, ReadingMode, SystemStoryValidationStatus,
+    SystemUiProfilePolicy, SystemUnlockKind,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnSystemUiProfileManifest {
@@ -10,6 +15,8 @@ pub struct VnSystemUiProfileManifest {
     pub save_migration: SystemSaveMigrationPolicy,
     pub unlock_sources: Vec<SystemUnlockSourcePolicy>,
     pub localization: SystemLocalizationCoverage,
+    pub profiles: BTreeMap<String, SystemUiProfilePolicy>,
+    pub declared_system_action_ids: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -41,7 +48,7 @@ pub struct SystemUiProfileValidationReport {
 }
 
 impl VnSystemUiProfileManifest {
-    pub fn from_compiled(compiled: &CompiledStory, locales: Vec<String>) -> Self {
+    pub fn from_compiled(compiled: &CompiledVnProject, locales: Vec<String>) -> Self {
         let text_key_count = compiled
             .states
             .values()
@@ -50,7 +57,7 @@ impl VnSystemUiProfileManifest {
             .filter(|command| matches!(command, CompiledCommand::Dialogue { .. }))
             .count();
         Self {
-            schema: "astra.vn.system_ui_profile_manifest.v1".to_string(),
+            schema: "astra.vn.system_ui_profile_manifest.v2".to_string(),
             save_migration: SystemSaveMigrationPolicy {
                 minimum_supported_schema: "astra.vn.save_slot.v1".to_string(),
                 current_schema: "astra.vn.save_slot.v1".to_string(),
@@ -72,6 +79,14 @@ impl VnSystemUiProfileManifest {
                 font_fallback_covered: true,
                 layout_covered: true,
             },
+            profiles: compiled.system_ui_profiles.clone(),
+            declared_system_action_ids: compiled
+                .story
+                .system_story_manifest
+                .actions
+                .keys()
+                .cloned()
+                .collect(),
         }
     }
 
@@ -81,7 +96,7 @@ impl VnSystemUiProfileManifest {
             "AstraVN system UI profile validation started"
         );
         let mut diagnostics = Vec::new();
-        if self.schema != "astra.vn.system_ui_profile_manifest.v1" {
+        if self.schema != "astra.vn.system_ui_profile_manifest.v2" {
             diagnostics.push(Diagnostic::blocking(
                 "ASTRA_VN_SYSTEM_UI_PROFILE_SCHEMA",
                 "system UI profile manifest schema is invalid",
@@ -116,7 +131,6 @@ impl VnSystemUiProfileManifest {
             }
         }
         if self.localization.locales.is_empty()
-            || self.localization.text_key_count == 0
             || !self.localization.font_fallback_covered
             || !self.localization.layout_covered
         {
@@ -125,8 +139,57 @@ impl VnSystemUiProfileManifest {
                 "system UI profile must declare localization coverage",
             ));
         }
+        if self.profiles.is_empty() {
+            diagnostics.push(Diagnostic::blocking(
+                "ASTRA_VN_SYSTEM_UI_PROFILE_POLICY_MISSING",
+                "system UI profile manifest must declare at least one profile policy",
+            ));
+        }
+        for (profile_id, policy) in &self.profiles {
+            if profile_id != &policy.profile_id
+                || profile_id.is_empty()
+                || policy.save_slot_ids.is_empty()
+                || !policy.reading_modes.contains(&ReadingMode::Manual)
+            {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_VN_SYSTEM_UI_PROFILE_POLICY_INVALID",
+                        "system UI profile policy identity, slots, or reading modes are invalid",
+                    )
+                    .with_field("profile", profile_id),
+                );
+                continue;
+            }
+            let unique = policy.save_slot_ids.iter().collect::<BTreeSet<_>>();
+            if unique.len() != policy.save_slot_ids.len()
+                || policy
+                    .quick_slot_id
+                    .as_ref()
+                    .is_some_and(|slot| !unique.contains(slot))
+            {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_VN_SYSTEM_UI_PROFILE_SLOT_POLICY",
+                        "save slots must be unique and quick slot must be declared",
+                    )
+                    .with_field("profile", profile_id),
+                );
+            }
+            if !policy
+                .custom_action_ids
+                .is_subset(&self.declared_system_action_ids)
+            {
+                diagnostics.push(
+                    Diagnostic::blocking(
+                        "ASTRA_VN_SYSTEM_ACTION_POLICY",
+                        "profile custom actions must be compiled into the system story manifest",
+                    )
+                    .with_field("profile", profile_id),
+                );
+            }
+        }
         SystemUiProfileValidationReport {
-            schema: "astra.vn.system_ui_profile_validation_report.v1".to_string(),
+            schema: "astra.vn.system_ui_profile_validation_report.v2".to_string(),
             status: if diagnostics.is_empty() {
                 SystemStoryValidationStatus::Pass
             } else {

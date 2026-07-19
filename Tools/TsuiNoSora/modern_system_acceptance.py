@@ -9,6 +9,7 @@ import json
 import subprocess
 from pathlib import Path
 
+from classic_visual_acceptance import StoryIndex
 from headless_gpu_acceptance import (
     GpuAcceptanceError,
     file_hash,
@@ -75,7 +76,7 @@ class Sequence:
         self.add({"type": "checkpoint", "id": checkpoint_id})
 
 
-def build_sequence() -> Sequence:
+def build_sequence(story: StoryIndex) -> Sequence:
     sequence = Sequence("tsui.modern.system.acceptance")
     sequence.add({"type": "resume"})
     sequence.add({"type": "focus", "focused": True})
@@ -83,7 +84,14 @@ def build_sequence() -> Sequence:
     sequence.await_value("vn.focused_semantic_id", "root/gold/menu/continue")
     sequence.checkpoint("modern.title")
     sequence.key("Enter")
-    sequence.await_value("vn.pending_wait_command", "tsui.command.014951", 7200)
+    # The Director-backed title entry is authoritative.  Resolve the first
+    # dialogue identity from the current private IR instead of carrying a
+    # command id from an older generated package.
+    sequence.await_value(
+        "vn.pending_wait_command",
+        story.command("director.y.0026", "text", 0),
+        7200,
+    )
 
     sequence.add({"type": "pointer_move", "x": 32768, "y": 32768})
     sequence.add({"type": "pointer_button", "button": "secondary", "state": "pressed"})
@@ -191,7 +199,8 @@ def run(arguments: argparse.Namespace) -> dict:
     gpu_profile_path = arguments.artifact_root / "headless-gpu-profile.json"
     gpu_profile = prepare_gpu_profile(arguments.profile, gpu_profile_path)
 
-    sequence = build_sequence()
+    story = StoryIndex(json.loads(arguments.story_ir.read_text(encoding="utf-8")))
+    sequence = build_sequence(story)
     input_path = arguments.artifact_root / "modern-system-input.jsonl"
     input_path.write_text(
         "".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n" for row in sequence.rows),
@@ -273,6 +282,7 @@ def main() -> int:
     parser.add_argument("--profile", required=True, type=Path)
     parser.add_argument("--package", required=True, type=Path)
     parser.add_argument("--build-identity", required=True, type=Path)
+    parser.add_argument("--story-ir", required=True, type=Path)
     parser.add_argument("--artifact-root", required=True, type=Path)
     parser.add_argument("--report", required=True, type=Path)
     arguments = parser.parse_args()

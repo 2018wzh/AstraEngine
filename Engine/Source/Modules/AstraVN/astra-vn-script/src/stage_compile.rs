@@ -108,9 +108,28 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
                 visible: parse_bool(line, "visible", required(line, "visible")?)?,
             })
         }
+        "backdrop" => {
+            validate_attrs(line, &["color"], &["color"])?;
+            Ok(StageCommand::Backdrop {
+                color: parse_rgba(line, required(line, "color")?)?,
+            })
+        }
         "shade" => {
-            validate_attrs(line, &["opacity"], &["opacity"])?;
+            validate_attrs(line, &["color", "opacity"], &["opacity"])?;
+            let color = match line.attrs.get("color") {
+                Some(value) => parse_rgba(line, value)?,
+                None => [0, 0, 0, 255],
+            };
+            if color[3] != 255 {
+                return Err(invalid_value(
+                    line,
+                    "color",
+                    line.attr("color").unwrap_or(""),
+                    "an opaque #RRGGBB or #RRGGBBAA color",
+                ));
+            }
             Ok(StageCommand::Shade {
+                color,
                 opacity: opacity(line, "opacity")?,
             })
         }
@@ -613,6 +632,19 @@ fn parse_aspect(line: &ParsedLine, value: &str) -> Result<AspectRatio, VnError> 
         ));
     }
     Ok(AspectRatio { width, height })
+}
+
+fn parse_rgba(line: &ParsedLine, value: &str) -> Result<[u8; 4], VnError> {
+    if value.len() != 8 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(invalid_value(line, "color", value, "RRGGBBAA"));
+    }
+    let mut color = [0_u8; 4];
+    for (index, component) in color.iter_mut().enumerate() {
+        let start = index * 2;
+        *component = u8::from_str_radix(&value[start..start + 2], 16)
+            .map_err(|_| invalid_value(line, "color", value, "RRGGBBAA"))?;
+    }
+    Ok(color)
 }
 
 fn parse_layer_kind(line: &ParsedLine, value: &str) -> Result<StageLayerKind, VnError> {

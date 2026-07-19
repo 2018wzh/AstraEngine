@@ -1,106 +1,82 @@
-# 《终之空》1999 原版 UI 补充视觉参考
+# 《终之空》1999 原版 UI 视觉参考审查
 
-## 1. 文档边界
+## 1. 证据边界
 
-本文整理 2026-07-17 从公开网页取得的原版非成人游戏截图，用于 Classic profile 的结构分析和关键帧验收。截图本体属于商业作品素材，只保存在 ignored 私有工作区；Git 仅记录来源、尺寸、hash、稳定编号和不含正文的视觉结论。
+本文记录 Classic profile 的原版视觉参考。2026-07-18 新增的 14 张本机全屏捕获与一张既有 `Game.png` 基准统一为 `TSUI1999-UI-001..015`。图片本体、裁剪图、contact sheet、OCR 和差异图只保存在 ignored 私有工作区；Git 中的 [original-ui-reference-manifest.json](original-ui-reference-manifest.json) 只含尺寸、hash、裁剪参数和稳定语义。
 
-这些截图是 `Title.png`、`Game.png` 之外的补充证据，不能替代本地合法原版、同 checkpoint 捕获、自动差异检查或人工 formal signoff，也不能单独证明路线、输入、音频和存读档语义正确。
+公开网页截图与 Windows 98 实机录像继续用于交叉核验层级和动态行为，但不再占用稳定 reference ID：
 
-## 2. 来源与交叉验证
+- [原版截图合集](https://amaikahlua.hatenablog.com/entry/2020/12/09/183000)
+- [Windows 98 实机录像](https://www.youtube.com/watch?v=x3xBNw6o414)
 
-- 主来源：[甘いカクテル「終ノ空 感想」](https://amaikahlua.hatenablog.com/entry/2020/12/09/183000)。该页面保留多张 1999 Windows 版实机截图。
-- 交叉来源：[YouTube「[WIN98]終ノ空 Prologue」](https://www.youtube.com/watch?v=x3xBNw6o414)。动态画面确认云层外框、金线舞台、对白条和立绘越界关系并非单张截图的裁切伪影。
-- 旧官方产品 URL 当前无法提供可用的历史截图，因此没有把它作为本轮视觉结论的直接证据。
+这些参考不能代替合法原版 source、同 checkpoint 自动差异、Windows E3 或 formal human signoff。
 
-所有下载文件统一位于 `Examples/TsuiNoSora/.local/work/original-ui-references/`。`tsui1999-ui-reference-contact-sheet.png` 只用于本地模型审查，不进入 Git 或 release evidence。
+## 2. 裁剪与归一化
 
-## 3. 统一命名与文件清单
-
-| ID | 私有文件名 | 原始尺寸 | SHA-256 | 原始图像来源 | 视觉分类 |
-| --- | --- | --- | --- | --- | --- |
-| `TSUI1999-UI-001` | `tsui1999-ui-001-dialogue-character-overflow.png` | 812×610 | `c59ef8ef45eea4bdd6a429fee200ce6fffb23ce9cad744f03638f5a9cb4073a6` | [原图](https://cdn-ak.f.st-hatena.com/images/fotolife/a/amaikahlua/20201104/20201104194416.png) | 有 speaker 的标准对白；人物跨过舞台下沿进入对白区域 |
-| `TSUI1999-UI-002` | `tsui1999-ui-002-stage-centered-narration.png` | 810×608 | `ad8416d351349f352644378c478190fb53037480a342000377938ea30670a4b2` | [原图](https://cdn-ak.f.st-hatena.com/images/fotolife/a/amaikahlua/20201104/20201104194841.png) | 保留天空框与金线舞台，舞台压暗并显示居中多行叙述；没有底部对白条 |
-| `TSUI1999-UI-003` | `tsui1999-ui-003-dialogue-background-only.png` | 813×612 | `6bc5124ae16a0f02ed702d79542bc19b7a4a507b78528cb4b05d9c71f052b006` | [原图](https://cdn-ak.f.st-hatena.com/images/fotolife/a/amaikahlua/20201104/20201104195019.png) | 无人物的标准对白，用于确认舞台、speaker 铭牌和对白条的独立层级 |
-| `TSUI1999-UI-004` | `tsui1999-ui-004-dialogue-character-standard-a.png` | 810×608 | `0eb45e01213b31bdc9f10c6abd997bf1b98199db86acbdfb6f85a5b34f0d0314` | [原图](https://cdn-ak.f.st-hatena.com/images/fotolife/a/amaikahlua/20201104/20201104195325.png) | 日景人物对白；人物下缘与对白条发生覆盖 |
-| `TSUI1999-UI-005` | `tsui1999-ui-005-dialogue-character-standard-b.png` | 813×614 | `95c76fcd3e3f9e1481e14b77dd1c2655b5b4e75a32e5f156ea97b9b1f890b453` | [原图](https://cdn-ak.f.st-hatena.com/images/fotolife/a/amaikahlua/20201104/20201104195707.png) | 夜景人物对白；用于检查高对比背景、立绘层级和对白可读性 |
-| `TSUI1999-UI-006` | `tsui1999-ui-006-black-centered-monologue.png` | 810×614 | `b032f72575be8b73e3c2016cc3d50755edcb076aa9b4bcfdb2345cfd54e1bfda` | [原图](https://cdn-ak.f.st-hatena.com/images/fotolife/a/amaikahlua/20201104/20201104200055.png) | 纯黑全屏叙述；无天空框、舞台边框、speaker 和对白条 |
-
-统一命名规则如下：
+本机捕获固定为 3839×2399。游戏区域为同一 1400×1050 矩形：
 
 ```text
-tsui1999-ui-NNN-<semantic-role>.png
+left=1220 top=674 right=2620 bottom=1724
 ```
 
-- `NNN` 是稳定三位编号；新增参考只能追加，不能复用或重新排序。
-- `semantic-role` 只描述 UI/构图作用，不写正文、角色名、路线名或来源页面标题。
-- 文件内容变化必须产生新的编号；不能在相同文件名下替换 bytes 后继续沿用旧 hash。
+`process_original_ui_references.py` 先验证所有 desktop capture 尺寸一致、裁剪矩形未越界，再以 Pillow Lanczos 缩放为 800×600。既有 1403×1053 `Game.png` 使用单独验证的 `(1,1)-(1401,1051)` 边界裁剪后归一化。输入尺寸、数量、裁剪范围或 legacy 尺寸不一致时直接阻断。
 
-## 4. 对 Classic 实现的约束
+## 3. 稳定参考清单
 
-### 4.1 标准对白不是唯一阅读 surface
+| ID | 语义 | 关键视觉事实 |
+| --- | --- | --- |
+| `TSUI1999-UI-001` | Title | 绿色云景、右侧三枚黑底图片按钮、左上隐藏热点无可见提示 |
+| `TSUI1999-UI-002` | Opening staggered | 纯黑背景、白字短行错落排布 |
+| `TSUI1999-UI-003` | Opening centered | 纯黑背景、窄列短文本居中 |
+| `TSUI1999-UI-004` | Stage background | 蓝天、云层与中央 eye overlay |
+| `TSUI1999-UI-005` | Dialogue background-only | 黑场 stage、底部 754×82 dialogue frame |
+| `TSUI1999-UI-006` | Dialogue one character | 人物越过 752×424 stage 下沿；对白框半透明 |
+| `TSUI1999-UI-007` | Dialogue two characters | 双人物独立 z-order 与越框关系 |
+| `TSUI1999-UI-008` | Stage monologue | stage 整体压暗、居中文字、无对白条 |
+| `TSUI1999-UI-009` | Choice | 压暗 stage 上的白色菱形列表，无纸面/金色 modal |
+| `TSUI1999-UI-010` | Title Load | 灰色 Load modal 覆盖 Title；绿色背景和原三枚按钮保留 |
+| `TSUI1999-UI-011` | POPUP | 剧情内灰色 tabbed modal；底层 stage、人物与对白保留 |
+| `TSUI1999-UI-012` | Config | 文字模式与音频开关，不含 Modern 配置项 |
+| `TSUI1999-UI-013` | Load | 8 行文本槽位；与 Save 原位 tab 切换 |
+| `TSUI1999-UI-014` | Save | 8 行文本槽位、无缩略图；底层 story/dialogue 保留 |
+| `TSUI1999-UI-015` | Legacy gameplay | 云框、金线、角饰、752×424 stage、754×82 dialogue 的公开基准 |
 
-`TSUI1999-UI-001/003/004/005` 证明标准对白至少由以下独立层组成：
+精确 raw/crop/output SHA-256 与尺寸以 manifest 为准；本文不复制 hash 表，避免双重真源。
 
-```text
-sky frame
-stage background
-character layers that may cross the stage bottom edge
-gold stage rule and corner ornaments
-speaker plaque
-white dialogue strip
-dialogue text
-```
+## 4. 区域级视觉约束
 
-因此不能把人物永久裁剪在 stage viewport 内，也不能把 speaker 铭牌、对白条和天空框烘焙成随场景切换的单张背景。`Scene2D` 必须允许角色层按转换 metadata 选择 `stage-clipped` 或 `frame-overflow` composition。
+### 4.1 舞台与对白
 
-### 4.2 舞台居中叙述是独立模式
+- 画布固定 800×600，不能宽屏重排。
+- stage 约 752×424，中心约 `(400,252)`；dialogue frame 约 754×82，中心约 `(400,524)`。
+- sky、eye、stage、character、event、shade、dialogue frame 必须是独立层。
+- character layer 使用 800×600 frame space，不能永久裁到 stage。
+- speaker 与正文 baseline 由严格解码的 cast/STXT 字段和真实 font metrics 决定。
 
-`TSUI1999-UI-002` 要求 Classic 的 `tsui.surface.monologue` 支持
-`stage_centered_narration` 视觉状态：
+### 4.2 叙述与选择
 
-- 天空外框、金线和角饰继续存在；
-- 当前舞台画面被压暗，但不能改变权威场景资源；
-- 正文在舞台内部居中排版；
-- speaker 铭牌和底部对白条必须隐藏；
-- advance wait、save/restore 和 backlog identity 仍沿用同一个 story command。
+- Opening 的两种黑场文字布局是不同 authored surface，不能按正文长度推测。
+- `mono/monoreturn` 保持同一 reading surface；stage/black 差异来自权威 presentation state。
+- stage monologue 使用约 70% shade，隐藏 speaker 和 dialogue frame。
+- choice 复用 shade，选项前置白色菱形；Classic 禁止纸面 panel、金边 modal 和现代 focus ring。
 
-### 4.3 黑场叙述复用叙述 surface
+### 4.3 系统窗口
 
-`TSUI1999-UI-006` 不是第三套由 UI 猜测的 surface。源数据审查表明它与舞台居中叙述
-同属 `mono` 阅读模式，因此继续绑定 `tsui.surface.monologue`；黑场来自权威
-presentation scene state，而不是 UI 根据正文、颜色或截图 hash 切换。该状态要求：
+- 在 800×600 Yakui 画布内模拟原灰色窗口，不创建第二 OS window。
+- Save/Load/Config tab 原位切换，位置和窗口尺寸保持稳定。
+- Classic 只显示 8 个文本槽；Modern 的缩略图和 metadata 仍保存在底层 save v4，但不可见。
+- 捕获中的 mojibake 属于 locale 环境问题；产品只接受严格 CP932 恢复后的日文。
 
-- 输出完整 4:3 黑场，不绘制天空框、舞台边框和对白条；
-- 正文使用原作接近中央的窄列排版，而不是普通底部对白布局；
-- `talk` 与 `mono`/`monoreturn` 的 surface 选择必须由 typed conversion IR 显式产生；
-- 黑场与普通舞台的差异必须由转换后的 presentation state 决定，UI 不新增推测性
-  `black_centered_monologue` surface；
-- save/load 必须恢复相同 surface kind、文本布局和 presentation state。
+## 5. Checkpoint 状态
 
-因此本轮实现只需要两类权威阅读 surface：
+| Checkpoint | 参考 | 状态 |
+| --- | --- | --- |
+| Title、Title Load | `001/010` | 同一 Classic package 的物理输入 GPU checkpoint 与区域比较通过 |
+| 两种 Opening | `002/003` | 同一 Classic package 的物理输入 GPU checkpoint 与区域比较通过 |
+| 背景、普通对白 | `004/005/015` | `004/015` 通过；`005` 的黑色 stage 与相同 Director frame 的背景可见语义冲突，必须重新连续捕获两帧 |
+| 单/双人物越框 | `006/007` | frame-space/clip 几何均通过；`007` 按默认门禁通过，`006` 由具名 human approval 绑定固定色彩 profile 后通过，未豁免 anchor、visible bbox、越框或 z-order |
+| stage monologue、choice | `008/009` | `008` 通过；`009` 已修复双菱形并达到 1 px 几何误差，但原版 shade/transition 状态缺少连续帧证据，SSIM 门禁仍阻断 |
+| POPUP、Config、Load、Save | `011/012/013/014` | GPU checkpoint 与 modal geometry/underlay 比较通过 |
+| Exit、隐藏测试菜单 | 共享 `011` 的系统窗口视觉语法 | 物理输入 GPU checkpoint 通过；原始截图集中没有独立画面，行为由 Score/Lingo typed effect 证据约束 |
 
-```text
-talk                -> tsui.surface.dialogue
-mono / monoreturn   -> tsui.surface.monologue
-```
-
-`classic.narration.stage_centered` 与 `classic.monologue.black_centered` 仍保留为两个视觉
-checkpoint，因为它们验证不同的 presentation state，但不能据此扩张 UI public contract。
-
-## 5. 视觉 checkpoint 与判定
-
-| Checkpoint ID | 参考 | 必查项 | 当前判定 |
-| --- | --- | --- | --- |
-| `classic.dialogue.background_only` | `TSUI1999-UI-003` | 4:3、云框、金线、speaker 铭牌、对白条、文字基线 | 2026-07-18 已用 Windows DX12 `wgpu_offscreen` 完成同构普通对白 GPU E2 与模型审查；仍需相同剧情 checkpoint 的自动差异证据 |
-| `classic.dialogue.character_overflow` | `TSUI1999-UI-001/004/005` | 立绘 crop、anchor、layer、对白区覆盖、夜景可读性 | 未覆盖，blocking |
-| `classic.narration.stage_centered` | `TSUI1999-UI-002` | `tsui.surface.monologue`、舞台压暗、居中文本、底部对白隐藏、wait 恢复 | 未覆盖，blocking |
-| `classic.monologue.black_centered` | `TSUI1999-UI-006` | 同一 monologue surface、权威黑场 state、窄列文字、无外框、save/restore | 未覆盖，blocking |
-
-只有上述 checkpoint 全部由同一 package/session 的 Headless E2 产物验证，并经模型实际查看截图后，才能声明 Classic 阅读 surface 覆盖完成。Windows E3 和 formal manual signoff 仍需独立完成。
-
-## 6. 隐私与再分发规则
-
-- 不把六张补充截图、contact sheet、OCR 文本、差异图或裁切图加入 Git。
-- 不把图片 bytes、正文、角色名、本机绝对路径或下载缓存路径写入 package/report。
-- 对外 report 只允许稳定 ID、来源域、hash、尺寸、checkpoint、区域和判定。
-- 如果来源失效，保留 hash 作为本地证据身份，但不能把私有缓存改成仓库镜像。
+2026-07-19 的 v43 同包硬件比较复用同一份已通过的 18-checkpoint GPU capture identity。剧情参考先按正文或选项的脱敏内容 hash 搜索完整 typed IR，再用 Score frame、handler 和资源闭包消歧；Opening 的 bitmap text 则按 Score channel 与 bitmap hash 定位。15 项 v3 比较中 13 项通过。`006` 的人物 anchor、visible bbox、越框、z-order 与 frame-space 几何均成立，同节点资源闭包和连续 GPU 帧稳定，因此按项目所有者明确批准的 `capture_palette_v1` 通过；approval 文件 hash 与 tolerance-set hash 都进入报告，固定阈值为 SSIM `0.75`、感知误差 `0.12`，不能调整。`005/009` 仍因 source/presentation 冲突或 transition 缺证据保持 blocking，且不具备色彩容差资格。模型已并排检查 reference、capture、mask、absolute diff 与 perceptual heatmap。自动失败不能由模型覆盖。Windows E3、当前 package 的完整路线矩阵和 formal signoff 仍独立保持 `IN_PROGRESS`。

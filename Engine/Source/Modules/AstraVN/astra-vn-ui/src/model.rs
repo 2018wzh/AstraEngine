@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use astra_ui_core::{UiValidationError, UiValue, ValidateUi};
-use astra_vn_script::{CompiledStory, SkipMode, SystemPageKind, VnRuntimeState};
+use astra_vn_script::{CompiledStory, SkipMode, SystemPageKind, VnRuntimeState, VnWaitKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -104,6 +104,22 @@ pub struct LocalizationEntryViewModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SystemPageUnderlayViewModel {
+    pub kind: String,
+    pub title: bool,
+    pub message: bool,
+    pub choice: bool,
+    pub text_key: Option<String>,
+    pub speaker_key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SystemPageViewModel {
+    pub page: VnUiPageModel,
+    pub underlay: SystemPageUnderlayViewModel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VnUiPageModel {
     Title {
@@ -174,6 +190,48 @@ impl VnUiPageModel {
     }
 }
 
+impl SystemPageViewModel {
+    pub fn to_ui_value(&self) -> Result<UiValue, UiValidationError> {
+        let mut page = self.page.to_ui_value()?;
+        let UiValue::Map(values) = &mut page else {
+            return Err(UiValidationError::invalid(
+                "ASTRA_VN_UI_SYSTEM_PAGE_MODEL",
+                "system page model must encode as a map",
+            ));
+        };
+        values.insert(
+            "underlay_kind".into(),
+            UiValue::String(self.underlay.kind.clone()),
+        );
+        values.insert("underlay_title".into(), UiValue::Bool(self.underlay.title));
+        values.insert(
+            "underlay_message".into(),
+            UiValue::Bool(self.underlay.message),
+        );
+        values.insert(
+            "underlay_choice".into(),
+            UiValue::Bool(self.underlay.choice),
+        );
+        values.insert(
+            "underlay_text_key".into(),
+            self.underlay
+                .text_key
+                .clone()
+                .map(UiValue::String)
+                .unwrap_or(UiValue::Null),
+        );
+        values.insert(
+            "underlay_speaker_key".into(),
+            self.underlay
+                .speaker_key
+                .clone()
+                .map(UiValue::String)
+                .unwrap_or(UiValue::Null),
+        );
+        Ok(page)
+    }
+}
+
 pub struct VnUiModelContext<'a> {
     pub runtime: &'a VnRuntimeState,
     pub story: &'a CompiledStory,
@@ -227,8 +285,8 @@ impl VnUiModelContext<'_> {
     pub fn build_system_page(
         &self,
         page: SystemPageKind,
-    ) -> Result<VnUiPageModel, UiValidationError> {
-        Ok(match page {
+    ) -> Result<SystemPageViewModel, UiValidationError> {
+        let page = match page {
             SystemPageKind::Title => VnUiPageModel::Title {
                 can_continue: self.runtime.cursor.is_some(),
             },
@@ -325,7 +383,75 @@ impl VnUiModelContext<'_> {
                         .collect(),
                 }
             }
+            SystemPageKind::Custom => VnUiPageModel::Title { can_continue: true },
+        };
+        Ok(SystemPageViewModel {
+            page,
+            underlay: self.system_page_underlay()?,
         })
+    }
+
+    fn system_page_underlay(&self) -> Result<SystemPageUnderlayViewModel, UiValidationError> {
+        let Some(frame) = self.runtime.system_stack.last() else {
+            return Ok(SystemPageUnderlayViewModel::none());
+        };
+        if frame.return_choice.is_some() {
+            return Ok(SystemPageUnderlayViewModel {
+                kind: "choice".into(),
+                title: false,
+                message: false,
+                choice: true,
+                text_key: None,
+                speaker_key: None,
+            });
+        }
+        let Some(wait) = frame.return_wait.as_ref() else {
+            return Ok(SystemPageUnderlayViewModel::none());
+        };
+        if wait.kind == VnWaitKind::SystemPage {
+            let pages = self
+                .story
+                .system_story_manifest
+                .entries
+                .values()
+                .filter(|entry| {
+                    entry.story_id == frame.return_to.story_id
+                        && entry.state_id == frame.return_to.state_id
+                })
+                .map(|entry| entry.page)
+                .collect::<Vec<_>>();
+            if pages.len() != 1 {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_VN_UI_SYSTEM_UNDERLAY_PAGE",
+                    "system page return cursor must resolve to exactly one authored page",
+                ));
+            }
+            return Ok(SystemPageUnderlayViewModel {
+                kind: system_page_underlay_kind(pages[0]).into(),
+                title: pages[0] == SystemPageKind::Title,
+                message: false,
+                choice: false,
+                text_key: None,
+                speaker_key: None,
+            });
+        }
+        if matches!(wait.kind, VnWaitKind::Dialogue | VnWaitKind::Input) {
+            let entry = self.runtime.backlog.last().ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_VN_UI_SYSTEM_UNDERLAY_MESSAGE",
+                    "reading-surface system overlay requires a backlog entry",
+                )
+            })?;
+            return Ok(SystemPageUnderlayViewModel {
+                kind: "message".into(),
+                title: false,
+                message: true,
+                choice: false,
+                text_key: Some(entry.key.clone()),
+                speaker_key: speaker_localization_key(entry.speaker.as_deref()),
+            });
+        }
+        Ok(SystemPageUnderlayViewModel::none())
     }
 
     fn config_model(&self) -> Result<ConfigViewModel, UiValidationError> {
@@ -382,6 +508,37 @@ impl VnUiModelContext<'_> {
                 read: entry.read,
             })
             .collect()
+    }
+}
+
+impl SystemPageUnderlayViewModel {
+    fn none() -> Self {
+        Self {
+            kind: "none".into(),
+            title: false,
+            message: false,
+            choice: false,
+            text_key: None,
+            speaker_key: None,
+        }
+    }
+}
+
+fn system_page_underlay_kind(page: SystemPageKind) -> &'static str {
+    match page {
+        SystemPageKind::Title => "title",
+        SystemPageKind::QuickPanel => "quick_panel",
+        SystemPageKind::Save => "save",
+        SystemPageKind::Load => "load",
+        SystemPageKind::Config => "config",
+        SystemPageKind::Gallery => "gallery",
+        SystemPageKind::Replay => "replay",
+        SystemPageKind::VoiceReplay => "voice_replay",
+        SystemPageKind::RouteChart => "route_chart",
+        SystemPageKind::Backlog => "backlog",
+        SystemPageKind::LocalizationPreview => "localization_preview",
+        SystemPageKind::Custom => "custom",
+        SystemPageKind::Unknown => "unknown",
     }
 }
 
@@ -469,7 +626,11 @@ fn json_to_ui_value(value: serde_json::Value) -> Result<UiValue, UiValidationErr
 
 #[cfg(test)]
 mod tests {
-    use super::{config_bool, config_integer, speaker_localization_key};
+    use super::{
+        config_bool, config_integer, speaker_localization_key, SystemPageUnderlayViewModel,
+        SystemPageViewModel, VnUiPageModel,
+    };
+    use astra_ui_core::UiValue;
     use std::collections::BTreeMap;
 
     #[astra_headless_test::test]
@@ -500,5 +661,31 @@ mod tests {
             Some("speaker.tsui.speaker.fixture".to_string())
         );
         assert_eq!(speaker_localization_key(None), None);
+    }
+
+    #[astra_headless_test::test]
+    fn system_page_model_exposes_a_typed_reconstructible_underlay() {
+        let value = SystemPageViewModel {
+            page: VnUiPageModel::Title { can_continue: true },
+            underlay: SystemPageUnderlayViewModel {
+                kind: "message".into(),
+                title: false,
+                message: true,
+                choice: false,
+                text_key: Some("line.fixture".into()),
+                speaker_key: Some("speaker.fixture".into()),
+            },
+        }
+        .to_ui_value()
+        .expect("system page model");
+        let UiValue::Map(values) = value else {
+            panic!("system page model must be a map");
+        };
+        assert_eq!(values["underlay_kind"], UiValue::String("message".into()));
+        assert_eq!(values["underlay_message"], UiValue::Bool(true));
+        assert_eq!(
+            values["underlay_text_key"],
+            UiValue::String("line.fixture".into())
+        );
     }
 }

@@ -247,14 +247,7 @@ pub fn ui_frame_to_scene_commands(
         });
     }
     for upload in &frame.textures.uploads {
-        let rgba8 = match upload.format {
-            UiTextureFormat::Rgba8SrgbPremultiplied => upload.pixels.clone(),
-            UiTextureFormat::R8Unorm => upload
-                .pixels
-                .iter()
-                .flat_map(|value| [255, 255, 255, *value])
-                .collect(),
-        };
+        let rgba8 = scene_texture_rgba8(upload);
         commands.push(SceneCommand::UploadTexture {
             resource_id: texture_resource_id(frame, upload.id, upload.generation),
             frame: TextureFrame {
@@ -295,9 +288,83 @@ pub fn ui_frame_to_scene_commands(
     Ok(commands)
 }
 
+/// Scene2D `TextureFrame` pixels are straight-alpha RGBA. The UI transport is
+/// premultiplied, so restore straight color before sharing the stage renderer.
+fn scene_texture_rgba8(upload: &UiTextureUpload) -> Vec<u8> {
+    match upload.format {
+        UiTextureFormat::Rgba8SrgbPremultiplied => upload
+            .pixels
+            .chunks_exact(4)
+            .flat_map(|pixel| {
+                let alpha = u16::from(pixel[3]);
+                if alpha == 0 {
+                    [0, 0, 0, 0]
+                } else {
+                    let restore =
+                        |value: u8| ((u16::from(value) * 255 + alpha / 2) / alpha).min(255) as u8;
+                    [
+                        restore(pixel[0]),
+                        restore(pixel[1]),
+                        restore(pixel[2]),
+                        pixel[3],
+                    ]
+                }
+            })
+            .collect(),
+        UiTextureFormat::R8Unorm => upload
+            .pixels
+            .iter()
+            .flat_map(|value| [255, 255, 255, *value])
+            .collect(),
+    }
+}
+
 fn texture_resource_id(frame: &UiRenderFrame, id: UiTextureId, generation: u64) -> String {
     format!(
         "ui:{}/{}/{}/{}",
         frame.session_id, frame.generation, id.0, generation
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scene_texture_rgba8;
+    use astra_core::Hash256;
+    use astra_ui_core::{UiTextureFormat, UiTextureId, UiTextureUpload};
+
+    #[astra_headless_test::test]
+    fn glyph_mask_upload_becomes_straight_alpha_scene_texture() {
+        let upload = UiTextureUpload {
+            id: UiTextureId(1),
+            generation: 1,
+            width: 2,
+            height: 1,
+            format: UiTextureFormat::R8Unorm,
+            content_hash: Hash256::from_sha256(&[64, 255]),
+            pixels: vec![64, 255],
+        };
+
+        assert_eq!(
+            scene_texture_rgba8(&upload),
+            vec![255, 255, 255, 64, 255, 255, 255, 255]
+        );
+    }
+
+    #[astra_headless_test::test]
+    fn premultiplied_ui_upload_is_unpremultiplied_at_scene_boundary() {
+        let upload = UiTextureUpload {
+            id: UiTextureId(2),
+            generation: 1,
+            width: 2,
+            height: 1,
+            format: UiTextureFormat::Rgba8SrgbPremultiplied,
+            content_hash: Hash256::from_sha256(&[100, 50, 25, 128, 0, 0, 0, 0]),
+            pixels: vec![100, 50, 25, 128, 0, 0, 0, 0],
+        };
+
+        assert_eq!(
+            scene_texture_rgba8(&upload),
+            vec![199, 100, 50, 128, 0, 0, 0, 0]
+        );
+    }
 }

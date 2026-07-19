@@ -1,5 +1,5 @@
 use astra_ui_core::UiValue;
-use astra_vn_script::{SkipMode, SystemPageKind};
+use astra_vn_script::{ReadingMode, SkipMode, SystemPageKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +9,7 @@ pub enum VnUiAction {
     Advance,
     Choose { option_id: String },
     OpenSystem { page: SystemPageKind },
+    SwitchSystemPage { page: SystemPageKind },
     ReturnSystem,
     RequestExit,
     RequestSave { slot_id: String },
@@ -18,6 +19,9 @@ pub enum VnUiAction {
     SetConfig { key: String, value: UiValue },
     SetAuto { enabled: bool },
     SetSkip { mode: SkipMode },
+    SetReadingMode { mode: ReadingMode },
+    SetAudioEnabled { enabled: bool },
+    InvokeSystemAction { action_id: String },
     ReplayVoice { voice_id: String },
     StartReplay { replay_id: String },
     PreviewGallery { item_id: String },
@@ -40,13 +44,17 @@ impl VnUiAction {
             Self::RequestRouteJump { node_id } => node_id,
             Self::RequestBacklogJump { command_id } => command_id,
             Self::SubmitText { input_id, .. } => input_id,
+            Self::InvokeSystemAction { action_id } => action_id,
             Self::SetConfig { key, .. } => key,
             Self::Advance
             | Self::OpenSystem { .. }
+            | Self::SwitchSystemPage { .. }
             | Self::ReturnSystem
             | Self::RequestExit
             | Self::SetAuto { .. }
-            | Self::SetSkip { .. } => "vn",
+            | Self::SetSkip { .. }
+            | Self::SetReadingMode { .. }
+            | Self::SetAudioEnabled { .. } => "vn",
         }
     }
 }

@@ -398,53 +398,65 @@ fn append_raw_layout(
                 ));
             }
             let cluster = &source_text[glyph.start..glyph.end];
-            if !cluster_covered(cluster, &face.coverage) {
-                return Err(MediaError::message(
-                    "ASTRA_TEXT_FONT_COVERAGE: shaped cluster is outside the packaged coverage declaration",
-                ));
-            }
-            let expected_family_index = family_chain
-                .iter()
-                .position(|family| {
-                    state.faces.values().any(|candidate| {
-                        candidate.family.eq_ignore_ascii_case(family)
-                            && cluster_covered(cluster, &candidate.coverage)
-                    })
-                })
-                .ok_or_else(|| {
-                    MediaError::message(
-                        "ASTRA_TEXT_GLYPH_MISSING: no declared fallback coverage contains the source cluster",
-                    )
-                })?;
-            if family_index != expected_family_index {
-                return Err(MediaError::message(
-                    "ASTRA_TEXT_FALLBACK_ORDER: shaper did not select the first eligible declared fallback",
-                ));
-            }
-            if family_index > 0
-                && !diagnostics.iter().any(|diagnostic| {
-                    diagnostic.code == "ASTRA_TEXT_FONT_FALLBACK"
-                        && diagnostic
-                            .fields
-                            .get("family")
-                            .is_some_and(|family| family == &face.family)
-                })
-            {
-                tracing::debug!(
+            if cluster.is_empty() {
+                tracing::trace!(
                     target: "astra_media::text",
-                    event = "text.font.fallback",
+                    event = "text.font.synthetic_glyph",
                     family = %face.family,
                     asset_id = %face.asset_id,
-                    fallback_index = family_index,
+                    source_offset = glyph.start,
                 );
-                diagnostics.push(
-                    Diagnostic::warning(
-                        "ASTRA_TEXT_FONT_FALLBACK",
-                        "shaping consumed an explicitly declared packaged fallback face",
-                    )
-                    .with_field("family", &face.family)
-                    .with_field("asset_id", &face.asset_id),
-                );
+            } else {
+                if !cluster_covered(cluster, &face.coverage) {
+                    return Err(MediaError::message(
+                        "ASTRA_TEXT_FONT_COVERAGE: shaped cluster is outside the packaged coverage declaration",
+                    ));
+                }
+                let expected_family_index = family_chain
+                    .iter()
+                    .position(|family| {
+                        state.faces.values().any(|candidate| {
+                            candidate.family.eq_ignore_ascii_case(family)
+                                && cluster_covered(cluster, &candidate.coverage)
+                        })
+                    })
+                    .ok_or_else(|| {
+                        MediaError::message(
+                            "ASTRA_TEXT_GLYPH_MISSING: no declared fallback coverage contains the source cluster",
+                        )
+                    })?;
+                if family_index != expected_family_index {
+                    return Err(MediaError::message(format!(
+                        "ASTRA_TEXT_FALLBACK_ORDER: shaper did not select the first eligible declared fallback: actual_index={family_index} expected_index={expected_family_index} source_start={} source_end={}",
+                        glyph.start,
+                        glyph.end,
+                    )));
+                }
+                if family_index > 0
+                    && !diagnostics.iter().any(|diagnostic| {
+                        diagnostic.code == "ASTRA_TEXT_FONT_FALLBACK"
+                            && diagnostic
+                                .fields
+                                .get("family")
+                                .is_some_and(|family| family == &face.family)
+                    })
+                {
+                    tracing::debug!(
+                        target: "astra_media::text",
+                        event = "text.font.fallback",
+                        family = %face.family,
+                        asset_id = %face.asset_id,
+                        fallback_index = family_index,
+                    );
+                    diagnostics.push(
+                        Diagnostic::warning(
+                            "ASTRA_TEXT_FONT_FALLBACK",
+                            "shaping consumed an explicitly declared packaged fallback face",
+                        )
+                        .with_field("family", &face.family)
+                        .with_field("asset_id", &face.asset_id),
+                    );
+                }
             }
             let direction = if glyph.level.number().is_multiple_of(2) {
                 TextDirection::LeftToRight

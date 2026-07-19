@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
     AspectRatio, AudioControl, AudioCue, FixedScalar, MovieLoopMode, StageBlendMode,
     StageClipPolicy, StageCommand, StageFitMode, StageLayerKind, StagePlacement, StageViewport,
-    TimelineCommand, TimelineSpec, VnError, VnMovieEndBehavior, VnPresentationEasing,
+    TimelineCommand, TimelineSpec, VnAudioBus, VnError, VnMovieEndBehavior, VnPresentationEasing,
     VnPresentationProviderManifest, VnTimelineJoinPolicy,
 };
 
-pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v3";
+pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v6";
 const MAX_FRAME_DELTA_NS: u64 = 1_000_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -27,9 +27,12 @@ pub struct ProductStageState {
     pub camera: ProductStageCamera,
     pub movies: BTreeMap<String, ProductStageMovie>,
     pub effects: BTreeMap<String, ProductStageEffect>,
+    pub backdrop_color: Option<[u8; 4]>,
+    pub shade_color: [u8; 4],
     pub shade_opacity: FixedScalar,
     pub skip_allowed: bool,
     pub transition: Option<ProductStageTransition>,
+    pub audio_bus_enabled: BTreeMap<VnAudioBus, bool>,
     pub frame_index: u64,
     pub elapsed_ns: u64,
 }
@@ -123,6 +126,7 @@ pub enum StageDirectorOutput {
     Preload { asset: String },
     Audio(AudioCue),
     AudioControl(AudioControl),
+    AudioBusEnabled { bus: VnAudioBus, enabled: bool },
     Movie(ProductStageMovie),
     Effect(ProductStageEffect),
     FenceCompleted { kind: String, id: String },
@@ -164,9 +168,15 @@ impl ProductStageDirector {
                 camera: ProductStageCamera::default(),
                 movies: BTreeMap::new(),
                 effects: BTreeMap::new(),
+                backdrop_color: None,
+                shade_color: [0, 0, 0, 255],
                 shade_opacity: FixedScalar::ZERO,
                 skip_allowed: true,
                 transition: None,
+                audio_bus_enabled: BTreeMap::from([
+                    (VnAudioBus::Bgm, true),
+                    (VnAudioBus::Se, true),
+                ]),
                 frame_index: 0,
                 elapsed_ns: 0,
             },
@@ -439,6 +449,7 @@ impl ProductStageDirector {
                         StageLayerKind::Background,
                         StageLayerKind::Sprite,
                         StageLayerKind::Cg,
+                        StageLayerKind::Video,
                         StageLayerKind::Ui,
                     ],
                 )?;
@@ -477,13 +488,23 @@ impl ProductStageDirector {
                 })?;
                 layer.visible = *visible;
             }
-            StageCommand::Shade { opacity } => {
+            StageCommand::Backdrop { color } => {
+                self.state.backdrop_color = (color[3] != 0).then_some(*color);
+            }
+            StageCommand::Shade { color, opacity } => {
+                if color[3] != 255 {
+                    return Err(stage_error(
+                        "ASTRA_VN_STAGE_SHADE_COLOR_ALPHA",
+                        "stage shade color must be opaque; opacity owns coverage",
+                    ));
+                }
                 if !(0..=1_000_000).contains(&opacity.millionths) {
                     return Err(stage_error(
                         "ASTRA_VN_STAGE_SHADE_RANGE",
                         "stage shade opacity must be between zero and one",
                     ));
                 }
+                self.state.shade_color = *color;
                 self.state.shade_opacity = *opacity;
             }
             StageCommand::SetSkipAllowed { allowed } => {
@@ -651,6 +672,13 @@ impl ProductStageDirector {
                 });
             }
             StageCommand::Timeline(timeline) => self.apply_timeline(timeline)?,
+            StageCommand::SetAudioBusEnabled { bus, enabled } => {
+                self.state.audio_bus_enabled.insert(*bus, *enabled);
+                return Ok(vec![StageDirectorOutput::AudioBusEnabled {
+                    bus: *bus,
+                    enabled: *enabled,
+                }]);
+            }
             StageCommand::Effect {
                 target,
                 lip_sync,

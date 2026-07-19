@@ -1,6 +1,8 @@
 ui_bind profile:modern surface:message view:ui.tsui.modern.message controller:tsui.message.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.message
 ui_bind profile:modern surface:tsui.surface.dialogue view:ui.tsui.modern.message controller:tsui.message.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.dialogue
 ui_bind profile:modern surface:tsui.surface.monologue view:ui.tsui.modern.monologue controller:tsui.monologue.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.monologue
+ui_bind profile:modern surface:tsui.surface.opening.staggered view:ui.tsui.modern.monologue controller:tsui.monologue.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.opening_staggered
+ui_bind profile:modern surface:tsui.surface.opening.centered view:ui.tsui.modern.monologue controller:tsui.monologue.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.opening_centered
 ui_bind profile:modern surface:choice view:ui.tsui.modern.choice controller:tsui.choice.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.choice
 ui_bind profile:modern system_page:title view:ui.tsui.modern.title controller:tsui.system.title.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.title
 ui_bind profile:modern system_page:quick_panel view:ui.tsui.modern.quick_panel controller:tsui.system.quick_panel.modern policy:tsui.policy.ui theme:tsui.theme.modern #@id ui.bind.tsui.modern.quick_panel
@@ -22,11 +24,10 @@ ui_view ui.tsui.modern.monologue model:astra.vn.ui_model.message.v2 theme:tsui.t
   screen id:root
     panel id:advance fill:true
       on activate -> vn.advance
-    panel id:stage_dim position_x:23 position_y:42 min_width:754 min_height:424 background:theme:surface.monologue_dim
     text id:body value:$model.text_key position_x:23 position_y:42 min_width:754 min_height:424 font_size:22 max_lines:20 text_align:center vertical_align:center text_color:theme:text.monologue
 
 ui_view ui.tsui.modern.choice model:astra.vn.ui_model.choice.v1 theme:tsui.theme.modern #@id ui.tsui.modern.choice
-  screen id:root background:theme:surface.dim
+  screen id:root
     column id:gold anchor:center background:theme:accent.gold min_width:604 padding:2
       column id:choices background:theme:surface.paper min_width:600 padding:20 gap:10
         text id:prompt value:$model.prompt_key font_size:22
@@ -44,7 +45,7 @@ ui_view ui.tsui.modern.quick_panel model:astra.vn.ui_model.quick_panel.v1 theme:
           on activate -> vn.open_system page:"load"
         button id:backlog text:l10n:system.backlog min_width:104 background:theme:surface.button text_color:theme:text.on_dark
           on activate -> vn.open_system page:"backlog"
-        toggle id:auto label_key:l10n:system.auto value:$model.auto_enabled min_width:94 background:theme:surface.button_alt text_color:theme:text.on_dark
+        toggle id:auto label_key:l10n:system.auto value:$model.auto_enabled min_width:104 background:theme:surface.button_alt text_color:theme:text.on_dark
           on change -> vn.set_auto enabled:$event.value
         button id:skip_all text:l10n:system.skip_all min_width:94 background:theme:surface.button text_color:theme:text.on_dark
           on activate -> vn.set_skip mode:"all"
@@ -151,3 +152,4 @@ ui_view ui.tsui.modern.backlog model:astra.vn.ui_model.backlog.v1 theme:tsui.the
             text id:body value:$item.text_key font_size:18 max_lines:3
         button id:back text:l10n:system.back min_height:42 background:theme:surface.button_alt text_color:theme:text.on_dark
           on activate -> vn.return_system
+ui_policy profile:modern save_slots:"slot.quick,slot.01,slot.02,slot.03,slot.04,slot.05,slot.06,slot.07,slot.08,slot.09,slot.10,slot.11,slot.12,slot.13,slot.14,slot.15,slot.16,slot.17,slot.18,slot.19,slot.20,slot.21,slot.22,slot.23,slot.24" quick_slot:slot.quick allowed_pages:"title,quick_panel,save,load,config,backlog" reading_modes:"manual,fast_forward" audio_toggle:true save_completion:stay custom_actions:"" #@id ui.policy.tsui.modern

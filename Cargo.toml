@@ -58,6 +58,7 @@ members = [
     "Engine/Source/Programs/astra-player-android",
     "Engine/Source/Programs/astra-crash-reporter",
     "Engine/Source/Programs/astra-ui-component-host",
+    "Examples/TsuiNoSora/Tools/original-patcher",
     "Engine/Plugins/Fixtures/headless-presentation-provider",
     "Engine/Plugins/Fixtures/vn-extension-provider",
     "Engine/Plugins/Fixtures/ui-component-provider",
@@ -94,14 +95,18 @@ accesskit_winit = { version = "=0.33.1", default-features = false, features = ["
 abi_stable = "0.11"
 ashpd = { version = "=0.12.3", default-features = false, features = ["tokio"] }
 base64 = "0.22"
+binrw = "0.15"
 blake3 = "1"
 camino = { version = "1", features = ["serde1"] }
 clap = { version = "4", features = ["derive"] }
+configparser = "3"
 cosmic-text = "=0.18.2"
 cpal = "0.17"
 directories = "6"
+dunce = "1"
 ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["fast"] }
 encoding_rs = "0.8"
+filetime = "0.2"
 ffmpeg-next = "8.1"
 futures-util = "0.3"
 hex = "0.4"
@@ -166,6 +171,10 @@ tempfile = "3"
 ctrlc = "3"
 text-size = "1.1.1"
 thiserror = "1"
+wait-timeout = "0.2"
+walkdir = "2"
+windows-sys = "0.61"
+winresource = "0.1"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tokio-rustls = "0.26"
 tracing = "0.1"

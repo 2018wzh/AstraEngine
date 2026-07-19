@@ -38,6 +38,10 @@ def build_story_program_ir(story_graph: dict, asset_bindings: dict) -> tuple[dic
     if not isinstance(stage_layouts, list) or not stage_layouts:
         raise DirectorStoryProgramError("Director asset bindings have no stage layouts")
     detailed["stage_layouts"] = deepcopy(stage_layouts)
+    score_openings = asset_bindings.get("score_openings")
+    if not isinstance(score_openings, list) or len(score_openings) != len(detailed.get("movies", [])):
+        raise DirectorStoryProgramError("Director asset bindings do not cover every story opening")
+    detailed["score_openings"] = deepcopy(score_openings)
     counts: Counter[str] = Counter()
     source_statement_count = 0
     for movie in detailed.get("movies", []):

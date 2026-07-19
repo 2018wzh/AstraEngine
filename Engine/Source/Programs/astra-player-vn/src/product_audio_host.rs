@@ -616,6 +616,54 @@ impl NativeVnProductAudioHost {
         request: &crate::NativeVnAudioControlRequest,
         completed_signals: &mut BTreeSet<String>,
     ) -> Result<(), astra_platform::PlatformError> {
+        if matches!(request.action.as_str(), "enable_bus" | "disable_bus") {
+            if !matches!(request.target.as_str(), "bgm" | "se")
+                || request.duration_ms.is_some()
+                || request.fence.is_some()
+            {
+                return Err(player_platform_error(
+                    "player.audio.bus_enabled",
+                    "ASTRA_PLAYER_AUDIO_BUS_ENABLED_CONTRACT",
+                ));
+            }
+            let mixer = self.mixer.as_mut().ok_or_else(|| {
+                player_platform_error("player.audio.bus_enabled", "mixer is missing")
+            })?;
+            if let Some(active_fade_id) =
+                mixer.active_bus_fade_id(&request.target).map(str::to_owned)
+            {
+                mixer
+                    .apply(
+                        AudioCommand::CancelFade {
+                            fade_id: active_fade_id,
+                        },
+                        &self.assets,
+                    )
+                    .map_err(|error| {
+                        player_platform_error("player.audio.bus_enabled.cancel_fade", error)
+                    })?;
+            }
+            mixer
+                .apply(
+                    AudioCommand::set_bus_gain(
+                        request.target.clone(),
+                        if request.action == "enable_bus" {
+                            1.0
+                        } else {
+                            0.0
+                        },
+                    ),
+                    &self.assets,
+                )
+                .map_err(|error| player_platform_error("player.audio.bus_enabled", error))?;
+            tracing::info!(
+                event = "astra.player.audio.bus_enabled",
+                bus = %request.target,
+                enabled = request.action == "enable_bus",
+                "Player applied a typed VN audio bus enabled state"
+            );
+            return Ok(());
+        }
         if request.action == "fade_stop" {
             let duration_ms = request
                 .duration_ms

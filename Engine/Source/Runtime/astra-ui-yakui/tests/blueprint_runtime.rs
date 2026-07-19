@@ -25,6 +25,117 @@ fn node(id: &str, widget: &str) -> UiNodeBlueprint {
 }
 
 #[astra_headless_test::test]
+fn explicit_max_size_bounds_an_absolutely_positioned_window() {
+    let mut window = node("window", "column");
+    for (key, value) in [
+        ("min_width", 336.0),
+        ("max_width", 336.0),
+        ("min_height", 242.0),
+        ("max_height", 242.0),
+        ("position_x", 232.0),
+        ("position_y", 166.0),
+    ] {
+        window.properties.insert(
+            key.into(),
+            UiValueExpr::Literal {
+                value: UiValue::Number(value),
+            },
+        );
+    }
+    window.properties.insert(
+        "clip_children".into(),
+        UiValueExpr::Literal {
+            value: UiValue::Bool(true),
+        },
+    );
+    let mut oversized = node("oversized", "panel");
+    oversized.properties.insert(
+        "min_height".into(),
+        UiValueExpr::Literal {
+            value: UiValue::Number(320.0),
+        },
+    );
+    window.children.push(oversized);
+    let mut root = node("root", "screen");
+    root.children.push(window);
+    let view = UiViewBlueprint {
+        id: "ui.fixed_window".into(),
+        source_id: "ui.fixed_window".into(),
+        model_schema: "model.fixed_window.v1".into(),
+        theme_id: "theme.classic".into(),
+        required_capabilities: Vec::new(),
+        root,
+    };
+    let mut bundle = UiBlueprintBundle {
+        schema: "astra.ui_blueprint_bundle.v1".into(),
+        views: BTreeMap::from([(view.id.clone(), view)]),
+        hash: Hash256::from_sha256(&[]),
+    };
+    bundle.hash = bundle.compute_hash().expect("bundle hash");
+    let mut theme = UiThemeManifest {
+        schema: "astra.ui_theme_manifest.v1".into(),
+        id: "theme.classic".into(),
+        parent: None,
+        tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
+        high_contrast_tokens: BTreeMap::new(),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash().expect("theme hash");
+    let frame = UiBlueprintFrameModel {
+        schema: "astra.ui_blueprint_frame_model.v1".into(),
+        view_id: "ui.fixed_window".into(),
+        model: UiValue::Map(BTreeMap::new()),
+        state: UiValue::Map(BTreeMap::new()),
+        modals: Vec::new(),
+        focus_request: None,
+        localization: BTreeMap::new(),
+    };
+    let request = UiFrameRequest {
+        schema: "astra.ui_frame_request.v1".into(),
+        session_id: "session.fixed_window".into(),
+        generation: 1,
+        viewport: UiViewport {
+            physical_width: 800,
+            physical_height: 600,
+            scale_factor: 1.0,
+            font_scale: 1.0,
+            safe_area_points: UiInsets {
+                left: 0.0,
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+            },
+        },
+        fixed_time_ns: 0,
+        input: UiInputFrame {
+            schema: "astra.ui_input_frame.v1".into(),
+            events: Vec::new(),
+        },
+        theme,
+        model_schema: "model.fixed_window.v1".into(),
+        model_payload: postcard::to_allocvec(&frame).expect("frame encode"),
+    };
+    let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
+    let mut backend =
+        AstraYakuiBackend::new(renderer, Hash256::from_sha256(b"test")).expect("backend");
+    let output = backend.render_frame(request).expect("render");
+    let window = output
+        .semantics
+        .nodes
+        .iter()
+        .find(|node| node.id == "root/window")
+        .expect("window semantics");
+    assert_eq!(
+        window.bounds_points.max.x - window.bounds_points.min.x,
+        336.0
+    );
+    assert_eq!(
+        window.bounds_points.max.y - window.bounds_points.min.y,
+        242.0
+    );
+}
+
+#[astra_headless_test::test]
 fn modal_stack_is_rendered_as_bounded_dialog_semantics() {
     let mut base_root = node("root", "screen");
     base_root.children.push(node("content", "panel"));

@@ -8,7 +8,10 @@ use astra_ui_core::{
 };
 
 use crate::lower::{lower_sources_from_cst, ParsedLine};
-use crate::{AstraSource, CompiledStory, CompiledVnProject, VnError};
+use crate::{
+    AstraSource, CompiledStory, CompiledVnProject, ReadingMode, SaveCompletionPolicy,
+    SystemPageKind, SystemUiProfilePolicy, VnError,
+};
 
 pub(crate) fn compile_project_ui(
     story: CompiledStory,
@@ -35,6 +38,7 @@ pub(crate) fn compile_project_ui(
     let mut surface_bindings = BTreeMap::new();
     let mut profile_bindings = BTreeMap::new();
     let mut profile_scoped_bindings = BTreeMap::<String, UiProfileScopedBindings>::new();
+    let mut system_ui_profiles = BTreeMap::<String, SystemUiProfilePolicy>::new();
     let mut source_map = BTreeMap::new();
     let mut controller_ids = BTreeSet::new();
     let mut theme_ids = BTreeSet::new();
@@ -123,6 +127,21 @@ pub(crate) fn compile_project_ui(
                 source_map.insert(line.stable_id(), line.source_ref());
                 index += 1;
             }
+            "ui_policy" => {
+                let policy = parse_system_ui_policy(line)?;
+                if system_ui_profiles
+                    .insert(policy.profile_id.clone(), policy)
+                    .is_some()
+                {
+                    return Err(diagnostic(
+                        line,
+                        "ASTRA_UI_SYSTEM_POLICY_DUPLICATE",
+                        "UI profile declares more than one system policy",
+                    ));
+                }
+                source_map.insert(line.stable_id(), line.source_ref());
+                index += 1;
+            }
             _ => {
                 return Err(diagnostic(
                     line,
@@ -131,6 +150,17 @@ pub(crate) fn compile_project_ui(
                 ))
             }
         }
+    }
+
+    let bound_profiles = profile_scoped_bindings
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let policy_profiles = system_ui_profiles.keys().cloned().collect::<BTreeSet<_>>();
+    if !policy_profiles.is_empty() && bound_profiles != policy_profiles {
+        return Err(VnError::message(
+            "ASTRA_UI_SYSTEM_POLICY_PROFILE_SET: every profile-scoped UI binding must have exactly one ui_policy",
+        ));
     }
 
     for view in views.values() {
@@ -202,9 +232,10 @@ pub(crate) fn compile_project_ui(
         &ui_bindings,
         &themes,
         &controller_sources,
+        &system_ui_profiles,
     )?;
     Ok(CompiledVnProject {
-        schema: "astra.vn.compiled_project.v1".to_string(),
+        schema: "astra.vn.compiled_project.v3".to_string(),
         project_hash,
         story,
         ui_blueprints,
@@ -215,7 +246,148 @@ pub(crate) fn compile_project_ui(
         theme_ids,
         themes,
         component_ids,
+        system_ui_profiles,
     })
+}
+
+fn parse_system_ui_policy(line: &ParsedLine) -> Result<SystemUiProfilePolicy, VnError> {
+    let profile_id = required_attr(line, "profile")?.to_string();
+    validate_policy_id(line, "profile", &profile_id)?;
+    let save_slot_ids = split_policy_list(required_attr(line, "save_slots")?);
+    if save_slot_ids.is_empty() {
+        return Err(diagnostic(
+            line,
+            "ASTRA_UI_SYSTEM_SAVE_SLOTS",
+            "save_slots must not be empty",
+        ));
+    }
+    let mut unique_slots = BTreeSet::new();
+    for slot in &save_slot_ids {
+        validate_policy_id(line, "save_slots", slot)?;
+        if !unique_slots.insert(slot.clone()) {
+            return Err(diagnostic(
+                line,
+                "ASTRA_UI_SYSTEM_SAVE_SLOT_DUPLICATE",
+                "save slot ids must be unique",
+            ));
+        }
+    }
+    let quick_slot_id = line
+        .attr("quick_slot")
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(slot) = &quick_slot_id {
+        validate_policy_id(line, "quick_slot", slot)?;
+        if !unique_slots.contains(slot) {
+            return Err(diagnostic(
+                line,
+                "ASTRA_UI_SYSTEM_QUICK_SLOT",
+                "quick_slot must also be declared in save_slots",
+            ));
+        }
+    }
+    let allowed_pages = split_policy_list(required_attr(line, "allowed_pages")?)
+        .into_iter()
+        .map(|value| {
+            let page = SystemPageKind::parse(&value);
+            if page == SystemPageKind::Unknown {
+                Err(diagnostic(
+                    line,
+                    "ASTRA_UI_SYSTEM_PAGE_UNKNOWN",
+                    "allowed_pages contains an unknown page",
+                ))
+            } else {
+                Ok(page)
+            }
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    let reading_modes = split_policy_list(required_attr(line, "reading_modes")?)
+        .into_iter()
+        .map(|value| match value.as_str() {
+            "hidden" => Ok(ReadingMode::Hidden),
+            "manual" => Ok(ReadingMode::Manual),
+            "fast_forward" => Ok(ReadingMode::FastForward),
+            _ => Err(diagnostic(
+                line,
+                "ASTRA_UI_READING_MODE_UNKNOWN",
+                "reading_modes contains an unknown mode",
+            )),
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    if !reading_modes.contains(&ReadingMode::Manual) {
+        return Err(diagnostic(
+            line,
+            "ASTRA_UI_READING_MODE_MANUAL",
+            "reading_modes must include manual",
+        ));
+    }
+    let audio_toggle = match required_attr(line, "audio_toggle")? {
+        "true" => true,
+        "false" => false,
+        _ => {
+            return Err(diagnostic(
+                line,
+                "ASTRA_UI_AUDIO_TOGGLE",
+                "audio_toggle must be true or false",
+            ))
+        }
+    };
+    let save_completion = match required_attr(line, "save_completion")? {
+        "stay" => SaveCompletionPolicy::Stay,
+        "return_system" => SaveCompletionPolicy::ReturnSystem,
+        _ => {
+            return Err(diagnostic(
+                line,
+                "ASTRA_UI_SAVE_COMPLETION",
+                "save_completion must be stay or return_system",
+            ))
+        }
+    };
+    let custom_action_ids = line
+        .attr("custom_actions")
+        .map(split_policy_list)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|id| {
+            validate_policy_id(line, "custom_actions", &id)?;
+            Ok(id)
+        })
+        .collect::<Result<BTreeSet<_>, VnError>>()?;
+    Ok(SystemUiProfilePolicy {
+        profile_id,
+        save_slot_ids,
+        quick_slot_id,
+        allowed_pages,
+        reading_modes,
+        audio_toggle,
+        save_completion,
+        custom_action_ids,
+    })
+}
+
+fn split_policy_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn validate_policy_id(line: &ParsedLine, field: &str, value: &str) -> Result<(), VnError> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(diagnostic(
+            line,
+            "ASTRA_UI_SYSTEM_POLICY_ID",
+            &format!("{field} must be a bounded safe identifier"),
+        ));
+    }
+    Ok(())
 }
 
 fn parse_view(lines: &[ParsedLine], index: usize) -> Result<(UiViewBlueprint, usize), VnError> {
@@ -359,6 +531,21 @@ fn validate_bound_expr(
 
 fn model_path_allowed(schema: &str, path: &[String]) -> bool {
     let first = path.first().map(String::as_str);
+    if is_system_page_model_schema(schema)
+        && matches!(
+            first,
+            Some(
+                "underlay_kind"
+                    | "underlay_title"
+                    | "underlay_message"
+                    | "underlay_choice"
+                    | "underlay_text_key"
+                    | "underlay_speaker_key"
+            )
+        )
+    {
+        return true;
+    }
     match schema {
         "astra.vn.ui_model.message.v2" => matches!(
             first,
@@ -403,6 +590,25 @@ fn model_path_allowed(schema: &str, path: &[String]) -> bool {
         "astra.vn.ui_model.system.v1" => true,
         _ => false,
     }
+}
+
+fn is_system_page_model_schema(schema: &str) -> bool {
+    matches!(
+        schema,
+        "astra.vn.ui_model.title.v1"
+            | "astra.vn.ui_model.quick_panel.v1"
+            | "astra.vn.ui_model.config.v1"
+            | "astra.vn.ui_model.save.v1"
+            | "astra.vn.ui_model.load.v1"
+            | "astra.vn.ui_model.backlog.v1"
+            | "astra.vn.ui_model.gallery.v1"
+            | "astra.vn.ui_model.replay.v1"
+            | "astra.vn.ui_model.voice_replay.v1"
+            | "astra.vn.ui_model.route_chart.v1"
+            | "astra.vn.ui_model.localization_preview.v1"
+            | "astra.vn.ui_model.text_input.v1"
+            | "astra.vn.ui_model.system.v1"
+    )
 }
 
 fn item_path_allowed(schema: &str, collection: &str, path: &[String]) -> bool {
@@ -703,11 +909,15 @@ fn validate_widget_properties(line: &ParsedLine) -> Result<(), VnError> {
         "enabled",
         "min_width",
         "min_height",
+        "max_width",
+        "max_height",
         "fill",
         "fill_width",
         "fill_height",
+        "clip_children",
         "background",
         "text_color",
+        "text_padding",
         "grow",
         "anchor",
         "position_x",
@@ -715,6 +925,7 @@ fn validate_widget_properties(line: &ParsedLine) -> Result<(), VnError> {
         "position_right",
         "position_bottom",
         "align",
+        "cross_align",
         "gap",
         "padding",
         "style",
@@ -737,7 +948,16 @@ fn validate_widget_properties(line: &ParsedLine) -> Result<(), VnError> {
             "max_lines",
             "font_size",
         ],
-        "button" => &["text", "value", "text_key", "label_key", "selected"],
+        "button" => &[
+            "text",
+            "value",
+            "text_key",
+            "label_key",
+            "selected",
+            "direction",
+            "max_lines",
+            "font_size",
+        ],
         "slider" => &["value", "min", "max", "step", "label_key"],
         "toggle" => &[
             "checked",
@@ -833,7 +1053,7 @@ fn validate_action(
     let required: &[&str] = match action {
         "vn.advance" | "vn.return_system" | "vn.request_exit" | "ui.close_modal" => &[],
         "vn.choose" => &["option_id"],
-        "vn.open_system" => &["page"],
+        "vn.open_system" | "vn.switch_system" => &["page"],
         "vn.request_save"
         | "vn.request_save_confirmed"
         | "vn.request_load"
@@ -841,6 +1061,9 @@ fn validate_action(
         "vn.set_config" => &["key", "value"],
         "vn.set_auto" => &["enabled"],
         "vn.set_skip" => &["mode"],
+        "vn.set_reading_mode" => &["mode"],
+        "vn.set_audio_enabled" => &["enabled"],
+        "vn.invoke_system_action" => &["action_id"],
         "vn.replay_voice" => &["voice_id"],
         "vn.start_replay" => &["replay_id"],
         "vn.preview_gallery" => &["item_id"],
@@ -937,6 +1160,7 @@ fn hash_project(
     bindings: &UiBindingManifest,
     themes: &BTreeMap<String, UiThemeManifest>,
     controller_sources: &BTreeMap<String, String>,
+    system_ui_profiles: &BTreeMap<String, SystemUiProfilePolicy>,
 ) -> Result<Hash256, VnError> {
     Ok(Hash256::from_sha256(&postcard::to_allocvec(&(
         story.story_hash,
@@ -944,6 +1168,7 @@ fn hash_project(
         bindings.hash,
         themes,
         controller_sources,
+        system_ui_profiles,
     ))?))
 }
 

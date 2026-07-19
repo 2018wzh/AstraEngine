@@ -170,6 +170,60 @@ fn tsuinosora_classic_and_modern_ui_template_compiles_as_one_project() {
     const CONTROLLERS: &str = include_str!(
         "../../../../../../Examples/TsuiNoSora/ProjectTemplate/Controllers/tsui_ui.luau"
     );
+    const CLASSIC_TEST_TARGETS: &str = r#"
+story k12 #@id story.fixture.k12
+state k12 #@id director.k.0015
+story k13 #@id story.fixture.k13
+state k13 #@id director.k.0126
+story k14 #@id story.fixture.k14
+state k14 #@id director.k.0249
+story k15 #@id story.fixture.k15
+state k15 #@id director.k.0312
+story k16 #@id story.fixture.k16
+state k16 #@id director.k.0387
+story k1701 #@id story.fixture.k1701
+state k1701 #@id director.k.0456
+story k1801 #@id story.fixture.k1801
+state k1801 #@id director.k.0543
+story t13 #@id story.fixture.t13
+state t13 #@id director.t.0018
+story t14 #@id story.fixture.t14
+state t14 #@id director.t.0111
+story t15 #@id story.fixture.t15
+state t15 #@id director.t.0216
+story t16 #@id story.fixture.t16
+state t16 #@id director.t.0309
+story t17 #@id story.fixture.t17
+state t17 #@id director.t.0408
+story t17_18 #@id story.fixture.t17_18
+state t17_18 #@id director.t.0453
+story t19 #@id story.fixture.t19
+state t19 #@id director.t.0498
+story y13 #@id story.fixture.y13
+state y13 #@id director.y.0020
+story y14 #@id story.fixture.y14
+state y14 #@id director.y.0246
+story y15 #@id story.fixture.y15
+state y15 #@id director.y.0405
+story y16 #@id story.fixture.y16
+state y16 #@id director.y.0524
+story y17 #@id story.fixture.y17
+state y17 #@id director.y.0667
+story y17_18 #@id story.fixture.y17_18
+state y17_18 #@id director.y.0775
+story y18_19 #@id story.fixture.y18_19
+state y18_19 #@id director.y.0922
+story y20 #@id story.fixture.y20
+state y20 #@id director.y.1030
+story z09 #@id story.fixture.z09
+state z09 #@id director.z.0015
+story z10 #@id story.fixture.z10
+state z10 #@id director.z.0060
+story z11 #@id story.fixture.z11
+state z11 #@id director.z.0087
+story z12 #@id story.fixture.z12
+state z12 #@id director.z.0126
+"#;
     const CLASSIC_THEME: &str =
         include_str!("../../../../../../Examples/TsuiNoSora/ProjectTemplate/Themes/classic.json");
     const MODERN_THEME: &str =
@@ -181,10 +235,15 @@ fn tsuinosora_classic_and_modern_ui_template_compiles_as_one_project() {
     for id in [
         "tsui.message.classic",
         "tsui.monologue.classic",
+        "tsui.opening.staggered.classic",
+        "tsui.opening.centered.classic",
         "tsui.choice.classic",
         "tsui.system.title.classic",
+        "tsui.system.popup.classic",
         "tsui.system.save.classic",
         "tsui.system.load.classic",
+        "tsui.system.config.classic",
+        "tsui.system.test.classic",
         "tsui.message.modern",
         "tsui.monologue.modern",
         "tsui.choice.modern",
@@ -201,6 +260,7 @@ fn tsuinosora_classic_and_modern_ui_template_compiles_as_one_project() {
     let compiled = compile_astra_project(
         [
             astra_vn_script::AstraSource::story("system.astra", SYSTEM_STORY),
+            astra_vn_script::AstraSource::story("classic-test-targets.astra", CLASSIC_TEST_TARGETS),
             astra_vn_script::AstraSource::ui("classic.astra", CLASSIC_UI),
             astra_vn_script::AstraSource::ui("modern.astra", MODERN_UI),
         ],
@@ -208,7 +268,7 @@ fn tsuinosora_classic_and_modern_ui_template_compiles_as_one_project() {
     )
     .expect("the checked-in TsuiNoSora UI template must compile");
 
-    assert_eq!(compiled.ui_blueprints.views.len(), 16);
+    assert_eq!(compiled.ui_blueprints.views.len(), 21);
     assert!(compiled
         .ui_blueprints
         .views
@@ -229,6 +289,21 @@ fn tsuinosora_classic_and_modern_ui_template_compiles_as_one_project() {
             .and_then(|bindings| bindings.surface_bindings.get("tsui.surface.monologue"))
             .is_some());
     }
+    let classic = compiled
+        .system_ui_profiles
+        .get("classic")
+        .expect("classic system UI policy");
+    assert_eq!(classic.save_slot_ids.len(), 8);
+    assert_eq!(classic.save_slot_ids.first().unwrap(), "slot.01");
+    assert_eq!(classic.save_slot_ids.last().unwrap(), "slot.08");
+    assert!(classic.quick_slot_id.is_none());
+    assert_eq!(classic.custom_action_ids.len(), 31);
+    let modern = compiled
+        .system_ui_profiles
+        .get("modern")
+        .expect("modern system UI policy");
+    assert_eq!(modern.save_slot_ids.len(), 25);
+    assert_eq!(modern.quick_slot_id.as_deref(), Some("slot.quick"));
 }
 
 fn theme_from_source(source: &str) -> UiThemeManifest {
@@ -315,7 +390,7 @@ fn unknown_command_is_editable_but_requires_explicit_compile_binding() {
         }),
     )
     .unwrap();
-    assert_eq!(compiled.schema, "astra.vn.compiled_project.v1");
+    assert_eq!(compiled.schema, "astra.vn.compiled_project.v3");
 }
 
 #[astra_headless_test::test]
@@ -332,7 +407,7 @@ fn standard_audio_control_is_bound_without_an_extension_bypass() {
         Default::default(),
     )
     .unwrap();
-    assert_eq!(compiled.schema, "astra.vn.compiled_project.v1");
+    assert_eq!(compiled.schema, "astra.vn.compiled_project.v3");
 }
 
 #[astra_headless_test::test]

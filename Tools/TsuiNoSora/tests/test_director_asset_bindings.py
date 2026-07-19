@@ -13,7 +13,7 @@ def member(name, slot, resource, child, fourcc):
     }
 
 
-def converted(path, fourcc, parent, digest, *, native_extension=None):
+def converted(path, fourcc, parent, digest, *, native_extension=None, width=10, height=10):
     record = {
         "source_alias": "casts",
         "source_relative_path": path,
@@ -26,7 +26,56 @@ def converted(path, fourcc, parent, digest, *, native_extension=None):
     }
     if native_extension is not None:
         record["native_path"] = record["native_path"].rsplit(".", 1)[0] + native_extension
+    if fourcc == "BITD":
+        record["width"] = width
+        record["height"] = height
     return record
+
+
+def score_fixture():
+    stage = [
+        {
+            "channel": channel,
+            "cast_library": 2,
+            "cast_member": 1,
+            "x": 5,
+            "y": 5,
+            "width": 10,
+            "height": 10,
+        }
+        for channel in (1, 2, 3, 5, 7, 9, 12)
+    ]
+    opening = {
+        "channel": 35,
+        "cast_library": 2,
+        "cast_member": 1,
+        "x": 5,
+        "y": 5,
+        "width": 10,
+        "height": 10,
+    }
+    return {
+        "frames": [
+            {"frame": 1, "main": {"tempo": 0}, "sprites": stage},
+            {"frame": 10, "main": {"tempo": 247}, "sprites": [opening]},
+            {"frame": 11, "main": {"tempo": 0}, "sprites": []},
+        ]
+    }
+
+
+def story_movie():
+    return {
+        "movie_id": "K",
+        "source_alias": "data",
+        "cast_libraries": ["K", "GENERAL", "AUDIO"],
+        "cast_members": [],
+        "labels": [
+            {"label": "op", "frame": 10, "action": {"source_sha256": "sha256:" + "1" * 64}},
+            {"label": "next", "frame": 12},
+        ],
+        "score": score_fixture(),
+        "score_source_sha256": "sha256:" + "2" * 64,
+    }
 
 
 class DirectorAssetBindingTests(unittest.TestCase):
@@ -37,14 +86,7 @@ class DirectorAssetBindingTests(unittest.TestCase):
                 "GENERAL": [member("background", 1, 10, 11, "BITD"), member("eye1", 2, 12, 13, "BITD")],
                 "AUDIO": [member("music", 1, 20, 21, "snd ")],
             },
-            "movies": [
-                {
-                    "movie_id": "K",
-                    "source_alias": "data",
-                    "cast_libraries": ["K", "GENERAL", "AUDIO"],
-                    "cast_members": [],
-                }
-            ],
+            "movies": [story_movie()],
         }
         semantics = {
             "schema": "tsuinosora.director_scene_semantic_ir.v1",
@@ -82,8 +124,9 @@ class DirectorAssetBindingTests(unittest.TestCase):
         detailed, report = build_asset_binding_ir(source, semantics, resources)
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["reference_count"], 3)
+        self.assertEqual(report["reference_count"], 4)
         self.assertEqual(report["unique_asset_count"], 3)
+        self.assertEqual(report["binding_kind_counts"]["score_opening_media"], 1)
         self.assertTrue(all("asset_id" in item["binding"] for item in detailed["scenes"][0]["operations"]))
         self.assertTrue(
             detailed["scenes"][0]["operations"][1]["binding"]["native_path"].endswith(".mp3")
@@ -93,7 +136,7 @@ class DirectorAssetBindingTests(unittest.TestCase):
         source = {
             "schema": "tsuinosora.director_story_source.v1",
             "external_casts": {"GENERAL": [member("eye1", 1, 10, 11, "BITD")]},
-            "movies": [{"movie_id": "K", "source_alias": "data", "cast_libraries": ["K", "GENERAL"], "cast_members": []}],
+            "movies": [{**story_movie(), "cast_libraries": ["K", "GENERAL"]}],
         }
         semantics = {
             "schema": "tsuinosora.director_scene_semantic_ir.v1",

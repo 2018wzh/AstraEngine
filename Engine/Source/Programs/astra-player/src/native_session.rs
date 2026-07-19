@@ -279,7 +279,7 @@ pub async fn run_native_vn_player_session(
                     .map_err(|error| player_error_owned("player.host.execute", error))?;
                 if let Some(request) = vn.take_ui_host_request() {
                     match request {
-                        VnUiHostRequest::Save { slot_id } => {
+                        VnUiHostRequest::Save { slot_id, .. } => {
                             save_transaction_id =
                                 save_transaction_id.checked_add(1).ok_or_else(|| {
                                     player_error(
@@ -287,16 +287,28 @@ pub async fn run_native_vn_player_session(
                                         "save transaction counter overflowed",
                                     )
                                 })?;
-                            execute_platform_save(
+                            if let Err(error) = execute_platform_save(
                                 &mut vn,
                                 &mut executor,
                                 &slot_id,
                                 PlayerHostResourceId(save_transaction_id),
                             )
-                            .await?;
-                            vn.mark_save_committed(&slot_id).map_err(|error| {
-                                player_error_owned("player.save.commit_state", error)
-                            })?;
+                            .await
+                            {
+                                vn.mark_save_failed(&slot_id).map_err(|cleanup_error| {
+                                    player_error_owned("player.save.abort_state", cleanup_error)
+                                })?;
+                                return Err(error);
+                            }
+                            if let Some(batch) =
+                                vn.mark_save_committed(&slot_id).map_err(|error| {
+                                    player_error_owned("player.save.commit_state", error)
+                                })?
+                            {
+                                executor.execute_batch(batch).await.map_err(|error| {
+                                    player_error_owned("player.save.commit_completion", error)
+                                })?;
+                            }
                         }
                         VnUiHostRequest::Load { slot_id } => {
                             execute_platform_load(&mut vn, &mut executor, &slot_id).await?;

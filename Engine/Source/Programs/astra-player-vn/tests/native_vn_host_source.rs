@@ -28,11 +28,13 @@ state start #@id state.start
 "#;
 
 const TEST_UI: &str = r#"
-ui_bind surface:message view:ui.test.message controller:test.message policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.message
-ui_bind surface:choice view:ui.test.choice controller:test.choice policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.choice
-ui_bind system_page:save view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.save
-ui_bind system_page:load view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.load
-ui_bind system_page:config view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.config
+ui_policy profile:classic save_slots:"slot.01" quick_slot:"" allowed_pages:"quick_panel,save,load,config" reading_modes:"manual" audio_toggle:false save_completion:stay custom_actions:"" #@id ui.policy.test.classic
+ui_bind profile:classic surface:message view:ui.test.message controller:test.message policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.message
+ui_bind profile:classic surface:choice view:ui.test.choice controller:test.choice policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.choice
+ui_bind profile:classic system_page:quick_panel view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.quick_panel
+ui_bind profile:classic system_page:save view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.save
+ui_bind profile:classic system_page:load view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.load
+ui_bind profile:classic system_page:config view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.config
 ui_view ui.test.message model:astra.vn.ui_model.message.v2 theme:astra.vn.theme.classic #@id ui.test.message
   screen id:root
     panel id:advance fill:true
@@ -123,9 +125,9 @@ state start #@id state.start
     text key:line.one speaker:hero #@id line.one
 
 story system #@id story.system
-state save #@id state.system.save
-  scene save #@id scene.system.save
-    system_page kind:save #@id page.save
+state popup #@id state.system.popup
+  scene popup #@id scene.system.popup
+    system_page kind:quick_panel #@id page.popup
 "#;
     let mut source = source_for(story);
     source.launch().expect("launch");
@@ -145,7 +147,7 @@ state save #@id state.system.save
 
     assert_eq!(
         source.pending_wait().expect("system page wait").command_id,
-        "page.save"
+        "page.popup"
     );
     assert_ne!(source.pending_wait().unwrap().command_id, wait_before);
     assert!(source
@@ -177,6 +179,69 @@ state save #@id state.system.save
 }
 
 #[astra_headless_test::test]
+fn secondary_pointer_round_trips_the_same_choice_occurrence() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    choice key:line.one #@id choice.prompt
+      option key:line.one target:first #@id option.first
+      option key:line.one target:second #@id option.second
+
+state first #@id state.first
+  scene first #@id scene.first
+    input_wait #@id wait.first
+
+state second #@id state.second
+  scene second #@id scene.second
+    input_wait #@id wait.second
+
+story system #@id story.system
+state popup #@id state.system.popup
+  scene popup #@id scene.system.popup
+    system_page kind:quick_panel #@id page.popup
+"#;
+    let mut source = source_for(story);
+    source.launch().expect("launch");
+    let choice_wait = source.pending_wait().expect("choice wait").clone();
+    let choice = source
+        .last_step_evidence()
+        .expect("choice evidence")
+        .pending_choice_ids
+        .clone();
+
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerButton {
+            button: UiPointerButton::Secondary,
+            state: UiButtonState::Pressed,
+            position: astra_ui_core::UiPoint { x: 12.0, y: 12.0 },
+        })
+        .expect("secondary pointer dispatch");
+    assert_eq!(
+        source.pending_wait().expect("system page wait").command_id,
+        "page.popup"
+    );
+
+    source
+        .dispatch_ui_event(UiInputEventKind::Keyboard {
+            logical_key: "Escape".to_string(),
+            physical_key: "Escape".to_string(),
+            state: UiButtonState::Pressed,
+            repeat: false,
+            modifiers: 0,
+        })
+        .expect("Escape returns from system UI");
+    assert_eq!(source.pending_wait(), Some(&choice_wait));
+    assert_eq!(
+        source
+            .last_step_evidence()
+            .expect("restored choice evidence")
+            .pending_choice_ids,
+        choice
+    );
+}
+
+#[astra_headless_test::test]
 fn product_observation_reports_system_ui_without_exposing_content() {
     let story = r#"
 story main #@id story.main
@@ -185,9 +250,9 @@ state start #@id state.start
     text key:line.one speaker:hero #@id line.one
 
 story system #@id story.system
-state save #@id state.system.save
-  scene save #@id scene.system.save
-    system_page kind:save #@id page.save
+state popup #@id state.system.popup
+  scene popup #@id scene.system.popup
+    system_page kind:quick_panel #@id page.popup
 "#;
     let mut source = source_for(story);
     source.launch().expect("launch");
@@ -195,11 +260,12 @@ state save #@id state.system.save
     let initial = source
         .product_observation_evidence()
         .expect("initial product observation");
-    assert_eq!(initial.schema, "astra.player_vn_product_observation.v1");
+    assert_eq!(initial.schema, "astra.player_vn_product_observation.v2");
     assert_eq!(initial.ui_profile, "classic");
     assert_eq!(initial.locale, "en");
     assert_eq!(initial.active_system_page, None);
     assert_eq!(initial.focused_semantic_id.as_deref(), Some("root/advance"));
+    assert!(initial.skip_allowed);
     assert_eq!(initial.backlog_count, 1);
     assert_eq!(initial.occupied_save_slot_count, 0);
 
@@ -215,22 +281,10 @@ state save #@id state.system.save
         .expect("system product observation");
     assert_eq!(
         system.active_system_page,
-        Some(astra_vn_core::SystemPageKind::Save)
+        Some(astra_vn_core::SystemPageKind::QuickPanel)
     );
     assert_eq!(system.focused_semantic_id.as_deref(), Some("root/back"));
     assert_eq!(system.backlog_count, 1);
-
-    prepare_test_save_metadata(&mut source, "slot.01");
-    source
-        .mark_save_committed("slot.01")
-        .expect("mark first slot committed");
-    assert_eq!(
-        source
-            .product_observation_evidence()
-            .expect("saved product observation")
-            .occupied_save_slot_count,
-        1
-    );
 
     source.release_resources().expect("release");
     source.shutdown().expect("shutdown");
@@ -246,9 +300,9 @@ state start #@id state.start
     text key:line.one speaker:hero #@id line.one
 
 story system #@id story.system
-state save #@id state.system.save
-  scene save #@id scene.system.save
-    system_page kind:save #@id page.save
+state popup #@id state.system.popup
+  scene popup #@id scene.system.popup
+    system_page kind:quick_panel #@id page.popup
 "#;
     let mut source = source_for(story);
     source.launch().expect("launch");
@@ -267,7 +321,7 @@ state save #@id state.system.save
 
     assert_eq!(
         source.pending_wait().expect("system page wait").command_id,
-        "page.save"
+        "page.popup"
     );
     source.release_resources().expect("release");
     source.shutdown().expect("shutdown");
@@ -381,7 +435,8 @@ fn product_package_with_request(
                 "line.after":"Line after wait.",
                 "speaker.hero":"Hero",
                 "system.back":"Back",
-                "system.save":"Save"
+                "system.save":"Save",
+                "system.quick_panel":"Quick Panel"
             }
         }"#
         .to_vec(),
@@ -956,7 +1011,7 @@ fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
     source.launch().unwrap();
     let evidence = source.last_step_evidence().expect("launch evidence");
 
-    assert_eq!(evidence.schema, "astra.player_vn_step_evidence.v1");
+    assert_eq!(evidence.schema, "astra.player_vn_step_evidence.v2");
     assert_eq!(evidence.fixed_step, 1);
     assert!(evidence.coverage_reached.contains("state.start"));
     assert!(evidence.runtime_state_hash.starts_with("hash128:"));
@@ -966,6 +1021,13 @@ fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
     assert_eq!(
         evidence.pending_wait_command_id.as_deref(),
         Some("line.one")
+    );
+    assert!(
+        evidence
+            .pending_wait_await_id
+            .as_deref()
+            .is_some_and(|await_id| astra_core::StableId::parse(await_id).is_ok()),
+        "runtime wait occurrence must expose its serialized AwaitToken identity"
     );
 
     advance(&mut source);

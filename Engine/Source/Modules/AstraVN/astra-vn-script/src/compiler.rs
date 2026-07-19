@@ -8,8 +8,9 @@ use crate::{
     AstraSource, AstraSourceRole, BranchOp, ChoiceOption, CommandManifest, CommandManifestEntry,
     CommandProvider, CommandRegistry, CommandSourceMap, CompiledCommand, CompiledStory,
     CompiledVnProject, ExtensionCommandDescriptor, MutationOp, PresentationCommand, RouteEdge,
-    RouteGraph, RouteNode, Scene, State, Story, StoryManifest, StoryManifestEntry, SystemPageKind,
-    SystemStoryManifest, VariableCondition, VariableManifest, VariableScopeManifest, VnError,
+    RouteGraph, RouteNode, Scene, State, Story, StoryManifest, StoryManifestEntry,
+    SystemActionEffect, SystemActionProgram, SystemPageKind, SystemStoryManifest,
+    VariableCondition, VariableManifest, VariableScopeManifest, VnError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +63,7 @@ fn compile_bound_sources(
             "return" => builder.push_return(line)?,
             "mutate" => builder.push_mutate(line)?,
             "system_page" => builder.push_system_page(line)?,
+            "system_action" => builder.push_system_action(line)?,
             "wait" => builder.push_wait(line)?,
             "input_wait" => builder.push_input_wait(line)?,
             _ => match registry.provider(&line.keyword) {
@@ -276,12 +278,13 @@ struct CompileBuilder {
     current_scene: Option<String>,
     source_map: CommandSourceMap,
     debug_symbols: BTreeMap<String, String>,
+    system_actions: BTreeMap<String, SystemActionProgram>,
 }
 
 impl CompileBuilder {
     fn validate_structure(&self, line: &ParsedLine) -> Result<(), VnError> {
         let valid = match line.keyword.as_str() {
-            "story" | "state" => line.indent == 0,
+            "story" | "state" | "system_action" => line.indent == 0,
             "scene" => line.indent == 2,
             "option" => {
                 let last_command = self.current_scene().and_then(|scene| scene.commands.last());
@@ -655,6 +658,138 @@ impl CompileBuilder {
         Ok(())
     }
 
+    fn push_system_action(&mut self, line: &ParsedLine) -> Result<(), VnError> {
+        let id = line.source_id.clone().ok_or_else(|| {
+            VnError::diagnostic(
+                "ASTRA_VN_SYSTEM_ACTION_ID",
+                "system_action requires a stable #@id",
+            )
+        })?;
+        validate_system_action_symbol("action id", &id)?;
+        let mut effects = Vec::new();
+        if line.attr("mutation").is_some() && line.attr("mutations").is_some() {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_SYSTEM_ACTION_MUTATION_CONFLICT",
+                "system_action cannot declare both mutation and mutations",
+            ));
+        }
+        let mutations = line
+            .attr("mutation")
+            .into_iter()
+            .chain(
+                line.attr("mutations")
+                    .into_iter()
+                    .flat_map(|value| value.split(';')),
+            )
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        if mutations.iter().any(|mutation| mutation.is_empty()) {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_SYSTEM_ACTION_MUTATION",
+                "mutations must not contain an empty effect",
+            ));
+        }
+        for mutation in mutations {
+            let fields = mutation.split(',').map(str::trim).collect::<Vec<_>>();
+            if fields.len() != 4 {
+                return Err(VnError::diagnostic(
+                    "ASTRA_VN_SYSTEM_ACTION_MUTATION",
+                    "each mutation must be scope,key,op,value",
+                ));
+            }
+            validate_system_action_symbol("mutation scope", fields[0])?;
+            validate_system_action_symbol("mutation key", fields[1])?;
+            let op = match fields[2] {
+                "set" => MutationOp::Set,
+                "add" => MutationOp::Add,
+                "sub" => MutationOp::Sub,
+                _ => {
+                    return Err(VnError::diagnostic(
+                        "ASTRA_VN_SYSTEM_ACTION_MUTATION_OP",
+                        "mutation op must be set, add or sub",
+                    ))
+                }
+            };
+            let value = fields[3].parse::<i64>().map_err(|_| {
+                VnError::diagnostic(
+                    "ASTRA_VN_SYSTEM_ACTION_MUTATION_VALUE",
+                    "mutation value must be an i64",
+                )
+            })?;
+            effects.push(SystemActionEffect::Mutate {
+                scope: fields[0].to_string(),
+                key: fields[1].to_string(),
+                op,
+                value,
+            });
+        }
+        if let Some(target) = line.attr("jump") {
+            validate_system_action_symbol("jump target", target)?;
+            effects.push(SystemActionEffect::Jump {
+                target: target.to_string(),
+            });
+        }
+        if let Some(value) = line.attr("switch_page") {
+            let page = SystemPageKind::parse(value);
+            if page == SystemPageKind::Unknown {
+                return Err(VnError::diagnostic(
+                    "ASTRA_VN_SYSTEM_ACTION_PAGE",
+                    "switch_page must name a built-in page",
+                ));
+            }
+            effects.push(SystemActionEffect::SwitchSystemPage { page });
+        }
+        if let Some(value) = line.attr("return_system") {
+            if value != "true" {
+                return Err(VnError::diagnostic(
+                    "ASTRA_VN_SYSTEM_ACTION_RETURN",
+                    "return_system, when present, must be true",
+                ));
+            }
+            effects.push(SystemActionEffect::ReturnSystem);
+        }
+        if effects.is_empty() || effects.len() > 8 {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_SYSTEM_ACTION_EFFECTS",
+                "system_action must contain between one and eight compiled effects",
+            ));
+        }
+        let terminal_effects = effects
+            .iter()
+            .enumerate()
+            .filter(|(_, effect)| {
+                matches!(
+                    effect,
+                    SystemActionEffect::Jump { .. }
+                        | SystemActionEffect::SwitchSystemPage { .. }
+                        | SystemActionEffect::ReturnSystem
+                )
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if terminal_effects.len() > 1
+            || terminal_effects
+                .first()
+                .is_some_and(|index| *index + 1 != effects.len())
+        {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_SYSTEM_ACTION_TERMINAL_EFFECT",
+                "jump, switch_page or return_system may appear once and must be the final effect",
+            ));
+        }
+        if self
+            .system_actions
+            .insert(id.clone(), SystemActionProgram { id, effects })
+            .is_some()
+        {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_SYSTEM_ACTION_DUPLICATE",
+                "system action id is duplicated",
+            ));
+        }
+        Ok(())
+    }
+
     fn push_wait(&mut self, line: &ParsedLine) -> Result<(), VnError> {
         self.current_scene_mut()?
             .commands
@@ -716,6 +851,7 @@ impl CompileBuilder {
     fn finish(mut self) -> Result<CompiledStory, VnError> {
         trace_pass(SemanticPass::Routes);
         self.validate_targets()?;
+        self.validate_system_action_targets()?;
         self.validate_main_reachability()?;
         trace_pass(SemanticPass::Variables);
         self.validate_text_keys()?;
@@ -729,7 +865,10 @@ impl CompileBuilder {
             story_manifest,
             variable_manifest,
             command_manifest,
-            system_story_manifest: SystemStoryManifest::empty(),
+            system_story_manifest: SystemStoryManifest {
+                actions: self.system_actions,
+                ..SystemStoryManifest::empty()
+            },
             stories: self.stories,
             states: self.states,
             route_graph,
@@ -960,6 +1099,25 @@ impl CompileBuilder {
         Ok(())
     }
 
+    fn validate_system_action_targets(&self) -> Result<(), VnError> {
+        let state_ids = self.states.keys().cloned().collect::<BTreeSet<_>>();
+        for action in self.system_actions.values() {
+            for effect in &action.effects {
+                let SystemActionEffect::Jump { target } = effect else {
+                    continue;
+                };
+                let resolved = resolve_target(target, &state_ids);
+                if !state_ids.contains(&resolved) {
+                    return Err(VnError::diagnostic(
+                        "ASTRA_VN_SYSTEM_ACTION_TARGET",
+                        format!("system action {} targets unknown state {target}", action.id),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn resolved_edges_from(&self, state: &State, state_ids: &BTreeSet<String>) -> Vec<String> {
         let mut targets = Vec::new();
         for command in state.scenes.iter().flat_map(|scene| &scene.commands) {
@@ -1176,6 +1334,21 @@ fn required_attr(line: &ParsedLine, key: &str) -> Result<String, VnError> {
     line.attr(key)
         .map(str::to_string)
         .ok_or_else(|| VnError::diagnostic("ASTRA_VN_ATTR_MISSING", format!("{key} is missing")))
+}
+
+fn validate_system_action_symbol(field: &str, value: &str) -> Result<(), VnError> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(VnError::diagnostic(
+            "ASTRA_VN_SYSTEM_ACTION_SYMBOL",
+            format!("{field} must be a bounded safe symbol"),
+        ));
+    }
+    Ok(())
 }
 
 fn parse_variable_condition(line: &ParsedLine, value: &str) -> Result<VariableCondition, VnError> {

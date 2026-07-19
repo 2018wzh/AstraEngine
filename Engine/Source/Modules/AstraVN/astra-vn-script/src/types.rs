@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::CommandSourceMap;
 use crate::VnError;
 
+pub const VN_RUNTIME_STATE_SCHEMA: &str = "astra.vn.runtime_state.v2";
+pub const VN_RUNTIME_STATE_SCHEMA_MAJOR: u16 = 2;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AstraSource {
     pub path: String,
@@ -52,6 +55,38 @@ pub struct CompiledVnProject {
     pub theme_ids: BTreeSet<String>,
     pub themes: BTreeMap<String, UiThemeManifest>,
     pub component_ids: BTreeSet<String>,
+    pub system_ui_profiles: BTreeMap<String, SystemUiProfilePolicy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SystemUiProfilePolicy {
+    pub profile_id: String,
+    pub save_slot_ids: Vec<String>,
+    pub quick_slot_id: Option<String>,
+    pub allowed_pages: BTreeSet<SystemPageKind>,
+    pub reading_modes: BTreeSet<ReadingMode>,
+    pub audio_toggle: bool,
+    pub save_completion: SaveCompletionPolicy,
+    pub custom_action_ids: BTreeSet<String>,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SaveCompletionPolicy {
+    Stay,
+    ReturnSystem,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadingMode {
+    Hidden,
+    Manual,
+    FastForward,
 }
 
 impl std::ops::Deref for CompiledVnProject {
@@ -263,6 +298,7 @@ pub enum SystemPageKind {
     RouteChart,
     Backlog,
     LocalizationPreview,
+    Custom,
     Unknown,
 }
 
@@ -280,6 +316,7 @@ impl SystemPageKind {
             "route_chart" | "chart" => Self::RouteChart,
             "backlog" => Self::Backlog,
             "localization_preview" | "locale_preview" => Self::LocalizationPreview,
+            "custom" => Self::Custom,
             _ => Self::Unknown,
         }
     }
@@ -289,6 +326,31 @@ impl SystemPageKind {
 pub struct SystemStoryManifest {
     pub schema: String,
     pub entries: BTreeMap<SystemPageKind, SystemStoryEntry>,
+    pub actions: BTreeMap<String, SystemActionProgram>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SystemActionProgram {
+    pub id: String,
+    pub effects: Vec<SystemActionEffect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemActionEffect {
+    Mutate {
+        scope: String,
+        key: String,
+        op: MutationOp,
+        value: i64,
+    },
+    Jump {
+        target: String,
+    },
+    SwitchSystemPage {
+        page: SystemPageKind,
+    },
+    ReturnSystem,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -317,8 +379,9 @@ pub enum SystemStoryValidationStatus {
 impl SystemStoryManifest {
     pub fn empty() -> Self {
         Self {
-            schema: "astra.vn.system_story_manifest.v1".to_string(),
+            schema: "astra.vn.system_story_manifest.v2".to_string(),
             entries: BTreeMap::new(),
+            actions: BTreeMap::new(),
         }
     }
 
@@ -370,6 +433,7 @@ impl SystemStoryManifest {
         }
         Ok(Self {
             entries,
+            actions: compiled.system_story_manifest.actions.clone(),
             ..Self::empty()
         })
     }
@@ -571,6 +635,9 @@ pub struct VnSystemState {
     pub gallery_unlocks: BTreeSet<String>,
     #[serde(default)]
     pub replay_unlocks: BTreeSet<String>,
+    pub reading_mode: ReadingMode,
+    pub audio_enabled: bool,
+    pub skip_allowed: bool,
 }
 
 impl Default for VnSystemState {
@@ -581,6 +648,9 @@ impl Default for VnSystemState {
             config: BTreeMap::new(),
             gallery_unlocks: BTreeSet::new(),
             replay_unlocks: BTreeSet::new(),
+            reading_mode: ReadingMode::Manual,
+            audio_enabled: true,
+            skip_allowed: true,
         }
     }
 }
@@ -766,10 +836,14 @@ pub enum VnPlayerCommand {
     Advance,
     Choose { option_id: String },
     OpenSystem { page: SystemPageKind },
+    SwitchSystemPage { page: SystemPageKind },
     ReturnSystem,
     ReplayVoice { voice: String },
     SetAuto { enabled: bool },
     SetSkip { mode: SkipMode },
+    SetReadingMode { mode: ReadingMode },
+    SetAudioEnabled { enabled: bool },
+    InvokeSystemAction { action_id: String },
     SetConfig { key: String, value: String },
     StartReplay { replay_id: String },
     PreviewGallery { item_id: String },

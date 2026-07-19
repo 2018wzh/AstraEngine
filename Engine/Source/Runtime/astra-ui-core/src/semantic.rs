@@ -238,7 +238,14 @@ impl ValidateUi for UiSemanticSnapshot {
             if !node.bounds_points.is_finite_and_ordered() {
                 return Err(UiValidationError::invalid(
                     "ASTRA_UI_SEMANTIC_BOUNDS",
-                    format!("semantic node {} has invalid bounds", node.id),
+                    format!(
+                        "semantic node {} has invalid bounds min=({}, {}) max=({}, {})",
+                        node.id,
+                        node.bounds_points.min.x,
+                        node.bounds_points.min.y,
+                        node.bounds_points.max.x,
+                        node.bounds_points.max.y
+                    ),
                 ));
             }
             for value in [&node.name, &node.description, &node.value]

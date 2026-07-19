@@ -1,10 +1,17 @@
+ui_policy profile:classic save_slots:"slot.01,slot.02,slot.03,slot.04,slot.05,slot.06,slot.07,slot.08" quick_slot:"" allowed_pages:"title,quick_panel,save,load,config,custom" reading_modes:"hidden,manual,fast_forward" audio_toggle:true save_completion:return_system custom_actions:"tsui.classic.test.open,tsui.classic.test.mode.ayana,tsui.classic.test.mode.kotomi,tsui.classic.test.panty.off,tsui.classic.test.panty.on,tsui.classic.test.jump.y13,tsui.classic.test.jump.y14,tsui.classic.test.jump.y15,tsui.classic.test.jump.y16,tsui.classic.test.jump.y17,tsui.classic.test.jump.y17_18,tsui.classic.test.jump.y18_19,tsui.classic.test.jump.y20,tsui.classic.test.jump.k12,tsui.classic.test.jump.k13,tsui.classic.test.jump.k14,tsui.classic.test.jump.k15,tsui.classic.test.jump.k16,tsui.classic.test.jump.k1701,tsui.classic.test.jump.k1801,tsui.classic.test.jump.z09,tsui.classic.test.jump.z10,tsui.classic.test.jump.z11,tsui.classic.test.jump.z12,tsui.classic.test.jump.t13,tsui.classic.test.jump.t14,tsui.classic.test.jump.t15,tsui.classic.test.jump.t16,tsui.classic.test.jump.t17,tsui.classic.test.jump.t17_18,tsui.classic.test.jump.t19" #@id ui.policy.tsui.classic
+
 ui_bind profile:classic surface:message view:ui.tsui.classic.message controller:tsui.message.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.message
 ui_bind profile:classic surface:tsui.surface.dialogue view:ui.tsui.classic.message controller:tsui.message.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.dialogue
 ui_bind profile:classic surface:tsui.surface.monologue view:ui.tsui.classic.monologue controller:tsui.monologue.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.monologue
+ui_bind profile:classic surface:tsui.surface.opening.staggered view:ui.tsui.classic.opening_staggered controller:tsui.opening.staggered.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.opening_staggered
+ui_bind profile:classic surface:tsui.surface.opening.centered view:ui.tsui.classic.opening_centered controller:tsui.opening.centered.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.opening_centered
 ui_bind profile:classic surface:choice view:ui.tsui.classic.choice controller:tsui.choice.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.choice
 ui_bind profile:classic system_page:title view:ui.tsui.classic.title controller:tsui.system.title.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.title
+ui_bind profile:classic system_page:quick_panel view:ui.tsui.classic.popup controller:tsui.system.popup.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.popup
 ui_bind profile:classic system_page:save view:ui.tsui.classic.save controller:tsui.system.save.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.save
 ui_bind profile:classic system_page:load view:ui.tsui.classic.load controller:tsui.system.load.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.load
+ui_bind profile:classic system_page:config view:ui.tsui.classic.config controller:tsui.system.config.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.config
+ui_bind profile:classic system_page:custom view:ui.tsui.classic.test controller:tsui.system.test.classic policy:tsui.policy.ui theme:tsui.theme.classic #@id ui.bind.tsui.classic.test
 
 ui_view ui.tsui.classic.message model:astra.vn.ui_model.message.v2 theme:tsui.theme.classic #@id ui.tsui.classic.message
   screen id:root
@@ -19,21 +26,35 @@ ui_view ui.tsui.classic.monologue model:astra.vn.ui_model.message.v2 theme:tsui.
   screen id:root
     panel id:advance fill:true
       on activate -> vn.advance
-    panel id:stage_dim position_x:23 position_y:42 min_width:754 min_height:424 background:theme:surface.monologue_dim
-    text id:body value:$model.text_key position_x:23 position_y:42 min_width:754 min_height:424 font_size:22 max_lines:20 text_align:center vertical_align:center text_color:theme:text.monologue
+    text id:body value:$model.text_key position_x:120 position_y:68 min_width:544 min_height:120 max_width:544 max_height:120 font_size:22 max_lines:5 text_align:start vertical_align:start text_color:theme:text.monologue
+
+ui_view ui.tsui.classic.opening_staggered model:astra.vn.ui_model.message.v2 theme:tsui.theme.classic #@id ui.tsui.classic.opening_staggered
+  screen id:root background:theme:surface.opening_black
+    panel id:advance fill:true
+      on activate -> vn.advance
+    text id:body value:$model.text_key position_x:282 position_y:245 min_width:390 min_height:142 max_width:390 font_size:24 max_lines:6 text_align:start vertical_align:center text_color:theme:text.monologue
+
+ui_view ui.tsui.classic.opening_centered model:astra.vn.ui_model.message.v2 theme:tsui.theme.classic #@id ui.tsui.classic.opening_centered
+  screen id:root background:theme:surface.opening_black
+    panel id:advance fill:true
+      on activate -> vn.advance
+    text id:body value:$model.text_key position_x:160 position_y:252 min_width:480 min_height:96 max_width:480 max_height:96 font_size:24 max_lines:3 text_align:center vertical_align:center text_color:theme:text.monologue
 
 ui_view ui.tsui.classic.choice model:astra.vn.ui_model.choice.v1 theme:tsui.theme.classic #@id ui.tsui.classic.choice
-  screen id:root background:theme:surface.dim
-    column id:gold anchor:center background:theme:accent.gold min_width:584 padding:2
-      column id:choices background:theme:surface.paper min_width:580 padding:18 gap:8
-        text id:prompt value:$model.prompt_key font_size:22
-        virtual_list id:options items:$model.options item_key:option_id overscan:2 item_extent:50 gap:6
-          button id:option min_height:44 value:$item.text_key background:theme:surface.button text_color:theme:text.on_dark
-            on activate -> vn.choose option_id:$item.option_id
+  screen id:root
+    column id:choices position_x:137 position_y:110 min_width:300 gap:4
+      virtual_list id:options items:$model.options item_key:option_id overscan:2 item_extent:40 gap:1
+        button id:option min_height:40 max_height:40 padding:0 background:theme:surface.clear text_color:theme:text.system
+          row id:line gap:0
+            text id:diamond text:"◆" font_size:18 text_color:theme:text.system
+            text id:body value:$item.text_key font_size:20 text_color:theme:text.system
+          on activate -> vn.choose option_id:$item.option_id
 
 ui_view ui.tsui.classic.title model:astra.vn.ui_model.title.v1 theme:tsui.theme.classic #@id ui.tsui.classic.title
   screen id:root background:theme:surface.sky
     image id:frame asset:theme:frame.classic min_width:800 min_height:600
+    button id:hidden_test position_x:0 position_y:0 min_width:64 min_height:64 background:theme:surface.clear
+      on activate -> vn.invoke_system_action action_id:"tsui.classic.test.open"
     button id:start enabled:$model.can_continue position_x:564 position_y:344 min_width:208 min_height:64 background:theme:surface.clear
       image id:start_image asset:theme:menu.start min_width:208 min_height:64
       on activate -> vn.return_system
@@ -44,36 +65,214 @@ ui_view ui.tsui.classic.title model:astra.vn.ui_model.title.v1 theme:tsui.theme.
       image id:exit_image asset:theme:menu.exit min_width:208 min_height:64
       on activate -> vn.request_exit
 
+ui_view ui.tsui.classic.popup model:astra.vn.ui_model.quick_panel.v1 theme:tsui.theme.classic #@id ui.tsui.classic.popup
+  screen id:root
+    image id:underlay_title_frame asset:theme:frame.classic visible:$model.underlay_title min_width:800 min_height:600
+    image id:underlay_title_start asset:theme:menu.start visible:$model.underlay_title position_x:564 position_y:344 min_width:208 min_height:64
+    image id:underlay_title_load asset:theme:menu.continue visible:$model.underlay_title position_x:564 position_y:432 min_width:208 min_height:64
+    image id:underlay_title_exit asset:theme:menu.exit visible:$model.underlay_title position_x:564 position_y:520 min_width:208 min_height:64
+    image id:underlay_dialogue_frame asset:theme:dialogue.frame visible:$model.underlay_message min_width:754 min_height:82 position_x:23 position_y:483
+    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
+      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
+      text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
+    column id:window position_x:232 position_y:166 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
+      row id:titlebar background:theme:system.chrome min_width:332 min_height:31 max_height:31 padding:4
+        text id:title value:l10n:system.quick_panel font_size:11 text_color:theme:text.system_dark text_padding:1
+      row id:tabs background:theme:system.chrome min_width:332 min_height:23 max_height:23 gap:0 padding:2
+        button id:config text:l10n:system.config min_width:54 min_height:19 max_height:19 background:theme:system.tab_active font_size:11 text_padding:1
+          on activate -> vn.switch_system page:"config"
+        button id:save text:l10n:system.save min_width:46 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
+          on activate -> vn.switch_system page:"save"
+        button id:load text:l10n:system.load min_width:46 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
+          on activate -> vn.switch_system page:"load"
+        button id:exit text:l10n:system.back min_width:42 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
+          on activate -> vn.return_system
+      column id:content background:theme:system.body min_width:332 min_height:184 max_height:184 padding:8 gap:4
+        button id:hide text:l10n:system.text_hidden min_width:316 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+          on activate -> vn.set_reading_mode mode:"hidden"
+        button id:fast text:l10n:system.fast_forward min_width:316 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+          on activate -> vn.set_reading_mode mode:"fast_forward"
+        button id:back text:l10n:system.back min_width:316 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+          on activate -> vn.return_system
+
 ui_view ui.tsui.classic.save model:astra.vn.ui_model.save.v1 theme:tsui.theme.classic #@id ui.tsui.classic.save
-  screen id:root background:theme:surface.dim
-    column id:gold anchor:center background:theme:accent.gold min_width:664 padding:2
-      column id:paper background:theme:surface.paper min_width:660 padding:18 gap:8
-        row id:header gap:12
-          text id:title value:l10n:system.save font_size:24 min_width:500
-          button id:mode_load text:l10n:system.load min_width:120 min_height:40 background:theme:surface.button text_color:theme:text.on_dark
-            on activate -> vn.open_system page:"load"
-        virtual_list id:slots items:$model.slots item_key:slot_id overscan:0 item_extent:48 viewport_extent:280 min_height:280 gap:4
-          row id:slot min_height:44 background:theme:surface.card padding:4 gap:8
-            text id:number value:$item.slot_id min_width:100
-            text id:timestamp value:$item.timestamp_text
-            button id:write value:$item.slot_id enabled:$item.can_write min_width:120 background:theme:surface.button text_color:theme:text.on_dark
-              on activate -> vn.request_save slot_id:$item.slot_id
-        button id:back text:l10n:system.back min_height:44 background:theme:surface.button text_color:theme:text.on_dark
+  screen id:root
+    image id:underlay_title_frame asset:theme:frame.classic visible:$model.underlay_title min_width:800 min_height:600
+    image id:underlay_title_start asset:theme:menu.start visible:$model.underlay_title position_x:564 position_y:344 min_width:208 min_height:64
+    image id:underlay_title_load asset:theme:menu.continue visible:$model.underlay_title position_x:564 position_y:432 min_width:208 min_height:64
+    image id:underlay_title_exit asset:theme:menu.exit visible:$model.underlay_title position_x:564 position_y:520 min_width:208 min_height:64
+    image id:underlay_dialogue_frame asset:theme:dialogue.frame visible:$model.underlay_message min_width:754 min_height:82 position_x:23 position_y:483
+    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
+      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
+      text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
+    column id:window position_x:232 position_y:166 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
+      row id:titlebar background:theme:system.chrome min_width:332 min_height:31 max_height:31 padding:4
+        text id:title value:l10n:system.save font_size:11 text_color:theme:text.system_dark text_padding:1
+      row id:tabs background:theme:system.chrome min_width:332 min_height:23 max_height:23 gap:0 padding:2
+        button id:config text:l10n:system.config min_width:54 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
+          on activate -> vn.switch_system page:"config"
+        button id:save text:l10n:system.save min_width:46 min_height:19 max_height:19 background:theme:system.tab_active font_size:11 text_padding:1
+        button id:load text:l10n:system.load min_width:46 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
+          on activate -> vn.switch_system page:"load"
+        button id:exit text:l10n:system.back min_width:42 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
+          on activate -> vn.return_system
+      column id:body background:theme:system.body padding:6 gap:2 min_width:332 min_height:184 max_height:184
+        virtual_list id:slots items:$model.slots item_key:slot_id overscan:0 item_extent:18 viewport_extent:144 min_width:248 min_height:144 max_height:144 gap:0 cross_align:start
+          button id:slot min_width:248 min_height:18 max_height:18 enabled:$item.can_write background:theme:system.row text_color:theme:text.system_dark
+            text id:number value:$item.slot_id min_width:244 font_size:11 text_padding:1 text_align:start
+            on activate -> vn.request_save slot_id:$item.slot_id
+        button id:back text:l10n:system.back min_width:60 min_height:18 max_height:18 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
           on activate -> vn.return_system
 
 ui_view ui.tsui.classic.load model:astra.vn.ui_model.load.v1 theme:tsui.theme.classic #@id ui.tsui.classic.load
-  screen id:root background:theme:surface.dim
-    column id:gold anchor:center background:theme:accent.gold min_width:664 padding:2
-      column id:paper background:theme:surface.paper min_width:660 padding:18 gap:8
-        row id:header gap:12
-          text id:title value:l10n:system.load font_size:24 min_width:500
-          button id:mode_save text:l10n:system.save min_width:120 min_height:40 background:theme:surface.button text_color:theme:text.on_dark
-            on activate -> vn.open_system page:"save"
-        virtual_list id:slots items:$model.slots item_key:slot_id overscan:0 item_extent:48 viewport_extent:280 min_height:280 gap:4
-          row id:slot min_height:44 background:theme:surface.card padding:4 gap:8
-            text id:number value:$item.slot_id min_width:100
-            text id:timestamp value:$item.timestamp_text
-            button id:read value:$item.slot_id enabled:$item.can_load min_width:120 background:theme:surface.button text_color:theme:text.on_dark
-              on activate -> vn.request_load slot_id:$item.slot_id
-        button id:back text:l10n:system.back min_height:44 background:theme:surface.button text_color:theme:text.on_dark
+  screen id:root
+    image id:underlay_title_frame asset:theme:frame.classic visible:$model.underlay_title min_width:800 min_height:600
+    image id:underlay_title_start asset:theme:menu.start visible:$model.underlay_title position_x:564 position_y:344 min_width:208 min_height:64
+    image id:underlay_title_load asset:theme:menu.continue visible:$model.underlay_title position_x:564 position_y:432 min_width:208 min_height:64
+    image id:underlay_title_exit asset:theme:menu.exit visible:$model.underlay_title position_x:564 position_y:520 min_width:208 min_height:64
+    image id:underlay_dialogue_frame asset:theme:dialogue.frame visible:$model.underlay_message min_width:754 min_height:82 position_x:23 position_y:483
+    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
+      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
+      text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
+    column id:window position_x:232 position_y:166 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
+      row id:titlebar background:theme:system.chrome min_width:332 min_height:31 max_height:31 padding:4
+        text id:title value:l10n:system.load font_size:11 text_color:theme:text.system_dark text_padding:1
+      row id:tabs background:theme:system.chrome min_width:332 min_height:23 max_height:23 gap:0 padding:2
+        button id:config text:l10n:system.config min_width:54 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
+          on activate -> vn.switch_system page:"config"
+        button id:save text:l10n:system.save min_width:46 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
+          on activate -> vn.switch_system page:"save"
+        button id:load text:l10n:system.load min_width:46 min_height:19 max_height:19 background:theme:system.tab_active font_size:11 text_padding:1
+        button id:exit text:l10n:system.back min_width:42 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
+          on activate -> vn.return_system
+      column id:body background:theme:system.body padding:6 gap:2 min_width:332 min_height:184 max_height:184
+        virtual_list id:slots items:$model.slots item_key:slot_id overscan:0 item_extent:18 viewport_extent:144 min_width:248 min_height:144 max_height:144 gap:0 cross_align:start
+          button id:slot min_width:248 min_height:18 max_height:18 enabled:$item.can_load background:theme:system.row text_color:theme:text.system_dark
+            text id:number value:$item.slot_id min_width:244 font_size:11 text_padding:1 text_align:start
+            on activate -> vn.request_load slot_id:$item.slot_id
+        button id:back text:l10n:system.back min_width:60 min_height:18 max_height:18 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+          on activate -> vn.return_system
+
+ui_view ui.tsui.classic.config model:astra.vn.ui_model.config.v1 theme:tsui.theme.classic #@id ui.tsui.classic.config
+  screen id:root
+    image id:underlay_title_frame asset:theme:frame.classic visible:$model.underlay_title min_width:800 min_height:600
+    image id:underlay_title_start asset:theme:menu.start visible:$model.underlay_title position_x:564 position_y:344 min_width:208 min_height:64
+    image id:underlay_title_load asset:theme:menu.continue visible:$model.underlay_title position_x:564 position_y:432 min_width:208 min_height:64
+    image id:underlay_title_exit asset:theme:menu.exit visible:$model.underlay_title position_x:564 position_y:520 min_width:208 min_height:64
+    image id:underlay_dialogue_frame asset:theme:dialogue.frame visible:$model.underlay_message min_width:754 min_height:82 position_x:23 position_y:483
+    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
+      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
+      text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
+    column id:window position_x:232 position_y:166 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
+      row id:titlebar background:theme:system.chrome min_width:332 min_height:31 max_height:31 padding:4
+        text id:title value:l10n:system.config font_size:11 text_color:theme:text.system_dark text_padding:1
+      row id:tabs background:theme:system.chrome min_width:332 min_height:23 max_height:23 gap:0 padding:2
+        button id:config text:l10n:system.config min_width:54 min_height:19 max_height:19 background:theme:system.tab_active font_size:11 text_padding:1
+        button id:save text:l10n:system.save min_width:46 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
+          on activate -> vn.switch_system page:"save"
+        button id:load text:l10n:system.load min_width:46 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
+          on activate -> vn.switch_system page:"load"
+        button id:exit text:l10n:system.back min_width:42 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
+          on activate -> vn.return_system
+      column id:body background:theme:system.body padding:8 gap:4 min_width:332 min_height:184 max_height:184
+        row id:reading_modes min_height:22 max_height:22 gap:4
+          button id:hidden text:l10n:system.text_hidden min_width:96 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+            on activate -> vn.set_reading_mode mode:"hidden"
+          button id:manual text:l10n:system.text_manual min_width:96 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+            on activate -> vn.set_reading_mode mode:"manual"
+          button id:fast text:l10n:system.fast_forward min_width:96 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+            on activate -> vn.set_reading_mode mode:"fast_forward"
+        row id:audio min_height:22 max_height:22 gap:4
+          button id:audio_on text:l10n:system.audio_on min_width:148 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+            on activate -> vn.set_audio_enabled enabled:true
+          button id:audio_off text:l10n:system.audio_off min_width:148 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+            on activate -> vn.set_audio_enabled enabled:false
+        button id:back text:l10n:system.back min_width:60 min_height:18 max_height:18 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+          on activate -> vn.return_system
+
+ui_view ui.tsui.classic.test model:astra.vn.ui_model.title.v1 theme:tsui.theme.classic #@id ui.tsui.classic.test
+  screen id:root
+    image id:underlay_title_frame asset:theme:frame.classic visible:$model.underlay_title min_width:800 min_height:600
+    image id:underlay_title_start asset:theme:menu.start visible:$model.underlay_title position_x:564 position_y:344 min_width:208 min_height:64
+    image id:underlay_title_load asset:theme:menu.continue visible:$model.underlay_title position_x:564 position_y:432 min_width:208 min_height:64
+    image id:underlay_title_exit asset:theme:menu.exit visible:$model.underlay_title position_x:564 position_y:520 min_width:208 min_height:64
+    image id:underlay_dialogue_frame asset:theme:dialogue.frame visible:$model.underlay_message min_width:754 min_height:82 position_x:23 position_y:483
+    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
+      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
+      text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
+    column id:window position_x:232 position_y:166 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
+      row id:tabs background:theme:system.chrome min_height:22 padding:2
+        text id:title value:l10n:system.test_menu font_size:13 text_color:theme:text.system_dark text_padding:1
+      column id:body background:theme:system.body padding:4 gap:1 min_height:210
+        row id:flags gap:2
+          button id:mode_ayana text:l10n:system.test.mode_ayana min_width:76 min_height:18 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+            on activate -> vn.invoke_system_action action_id:"tsui.classic.test.mode.ayana"
+          button id:mode_kotomi text:l10n:system.test.mode_kotomi min_width:76 min_height:18 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+            on activate -> vn.invoke_system_action action_id:"tsui.classic.test.mode.kotomi"
+          button id:panty_off text:l10n:system.test.panty_off min_width:76 min_height:18 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+            on activate -> vn.invoke_system_action action_id:"tsui.classic.test.panty.off"
+          button id:panty_on text:l10n:system.test.panty_on min_width:76 min_height:18 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+            on activate -> vn.invoke_system_action action_id:"tsui.classic.test.panty.on"
+        row id:routes gap:4
+          column id:y gap:2 cross_align:start
+            text id:y_title value:l10n:system.test.route_y min_width:76 min_height:14 font_size:11 text_color:theme:text.system_dark text_padding:1
+            button id:y13 text:l10n:system.test.y13 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.y13"
+            button id:y14 text:l10n:system.test.y14 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.y14"
+            button id:y15 text:l10n:system.test.y15 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.y15"
+            button id:y16 text:l10n:system.test.y16 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.y16"
+            button id:y17 text:l10n:system.test.y17 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.y17"
+            button id:y17_18 text:l10n:system.test.y17_18 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.y17_18"
+            button id:y18_19 text:l10n:system.test.y18_19 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.y18_19"
+            button id:y20 text:l10n:system.test.y20 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.y20"
+          column id:k gap:2 cross_align:start
+            text id:k_title value:l10n:system.test.route_k min_width:76 min_height:14 font_size:11 text_color:theme:text.system_dark text_padding:1
+            button id:k12 text:l10n:system.test.k12 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.k12"
+            button id:k13 text:l10n:system.test.k13 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.k13"
+            button id:k14 text:l10n:system.test.k14 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.k14"
+            button id:k15 text:l10n:system.test.k15 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.k15"
+            button id:k16 text:l10n:system.test.k16 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.k16"
+            button id:k1701 text:l10n:system.test.k1701 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.k1701"
+            button id:k1801 text:l10n:system.test.k1801 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.k1801"
+          column id:z gap:2 cross_align:start
+            text id:z_title value:l10n:system.test.route_z min_width:76 min_height:14 font_size:11 text_color:theme:text.system_dark text_padding:1
+            button id:z09 text:l10n:system.test.z09 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.z09"
+            button id:z10 text:l10n:system.test.z10 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.z10"
+            button id:z11 text:l10n:system.test.z11 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.z11"
+            button id:z12 text:l10n:system.test.z12 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.z12"
+          column id:t gap:2 cross_align:start
+            text id:t_title value:l10n:system.test.route_t min_width:76 min_height:14 font_size:11 text_color:theme:text.system_dark text_padding:1
+            button id:t13 text:l10n:system.test.t13 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.t13"
+            button id:t14 text:l10n:system.test.t14 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.t14"
+            button id:t15 text:l10n:system.test.t15 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.t15"
+            button id:t16 text:l10n:system.test.t16 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.t16"
+            button id:t17 text:l10n:system.test.t17 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.t17"
+            button id:t17_18 text:l10n:system.test.t17_18 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.t17_18"
+            button id:t19 text:l10n:system.test.t19 min_width:76 min_height:16 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
+              on activate -> vn.invoke_system_action action_id:"tsui.classic.test.jump.t19"
+        button id:back text:l10n:system.back min_height:24 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
           on activate -> vn.return_system
