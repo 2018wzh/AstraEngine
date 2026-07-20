@@ -461,7 +461,7 @@ fn log_consumed_vn_step(
             "consumed input has no RuntimeWorld evidence",
         )
     })?;
-    tracing::info!(
+    tracing::trace!(
         event = "astra.player.input.consumed",
         player_sequence,
         fixed_step = evidence.fixed_step,

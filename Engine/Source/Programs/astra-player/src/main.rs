@@ -1,6 +1,7 @@
 use astra_observability::{init_host, ConsoleFormat, HostObservabilityConfig, HostRole};
 use astra_player::{
-    AndroidInputHost, LinuxUinputHost, MacosCgEventHost, WebCdpInputHost, WebLiveAutomationRequest,
+    bundled_player_resource_root, load_bundled_observability, AndroidInputHost, LinuxUinputHost,
+    MacosCgEventHost, PlayerObservabilityOverrides, WebCdpInputHost, WebLiveAutomationRequest,
     WindowsLiveAutomationRequest, WindowsSendInputHost,
 };
 use astra_player_core::{
@@ -29,8 +30,8 @@ struct UiComponentConfig {
 }
 
 fn main() -> Result<(), PlayerCliError> {
-    let mut log_filter = env::var("ASTRA_LOG").unwrap_or_else(|_| "info".to_string());
-    let mut log_format = ConsoleFormat::Compact;
+    let mut log_filter = env::var("ASTRA_LOG").ok();
+    let mut log_format = None;
     let mut log_dir = None;
     let mut log_max_file_bytes = astra_observability::DEFAULT_MAX_FILE_BYTES;
     let mut log_max_archives = astra_observability::DEFAULT_MAX_ARCHIVES;
@@ -52,23 +53,26 @@ fn main() -> Result<(), PlayerCliError> {
     while let Some(arg) = args.next() {
         match arg.to_string_lossy().as_ref() {
             "--log-filter" => {
-                log_filter = args
-                    .next()
-                    .ok_or("missing --log-filter value")?
-                    .to_string_lossy()
-                    .into_owned()
+                log_filter = Some(
+                    args.next()
+                        .ok_or("missing --log-filter value")?
+                        .to_string_lossy()
+                        .into_owned(),
+                )
             }
             "--log-format" => {
-                log_format = match args
-                    .next()
-                    .ok_or("missing --log-format value")?
-                    .to_string_lossy()
-                    .as_ref()
-                {
-                    "compact" => ConsoleFormat::Compact,
-                    "json" => ConsoleFormat::Json,
-                    _ => return Err("invalid --log-format value".into()),
-                }
+                log_format = Some(
+                    match args
+                        .next()
+                        .ok_or("missing --log-format value")?
+                        .to_string_lossy()
+                        .as_ref()
+                    {
+                        "compact" => ConsoleFormat::Compact,
+                        "json" => ConsoleFormat::Json,
+                        _ => return Err("invalid --log-format value".into()),
+                    },
+                )
             }
             "--log-dir" => log_dir = args.next().map(PathBuf::from),
             "--log-max-file-bytes" => {
@@ -104,12 +108,33 @@ fn main() -> Result<(), PlayerCliError> {
             other => return Err(format!("unknown argument: {other}").into()),
         }
     }
-    let mut observability = HostObservabilityConfig::for_cli(log_filter);
-    observability.role = HostRole::Player;
-    observability.console_format = log_format;
-    observability.log_dir = log_dir;
-    observability.max_file_bytes = log_max_file_bytes;
-    observability.max_archives = log_max_archives;
+    let bundled_mode = script.is_none()
+        && transcript.is_none()
+        && windows_bundle.is_none()
+        && web_bundle.is_none()
+        && !show_help;
+    let observability = if bundled_mode {
+        load_bundled_observability(
+            &bundled_player_resource_root().map_err(|error| -> PlayerCliError { error.into() })?,
+            PlayerObservabilityOverrides {
+                filter: log_filter,
+                console_format: log_format,
+                log_dir,
+                max_file_bytes: Some(log_max_file_bytes),
+                max_archives: Some(log_max_archives),
+            },
+        )
+        .map_err(|error| -> PlayerCliError { error.into() })?
+    } else {
+        let mut config =
+            HostObservabilityConfig::for_cli(log_filter.unwrap_or_else(|| "info".to_string()));
+        config.role = HostRole::Player;
+        config.console_format = log_format.unwrap_or(ConsoleFormat::Compact);
+        config.log_dir = log_dir;
+        config.max_file_bytes = log_max_file_bytes;
+        config.max_archives = log_max_archives;
+        config
+    };
     let _observability = init_host(observability)?;
     tracing::info!(event = "player.host.start", "AstraPlayer host started");
     if show_help {
@@ -253,14 +278,8 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         profiles: Vec<serde_json::Value>,
     }
 
-    #[cfg(target_os = "macos")]
-    let resource_root = std::env::current_exe()?
-        .parent()
-        .and_then(std::path::Path::parent)
-        .map(|contents| contents.join("Resources"))
-        .ok_or("macOS app resource directory is unavailable")?;
-    #[cfg(not(target_os = "macos"))]
-    let resource_root = PathBuf::from(".");
+    let resource_root =
+        bundled_player_resource_root().map_err(|error| -> PlayerCliError { error.into() })?;
     let config: Config =
         serde_json::from_slice(&fs::read(resource_root.join("AstraPlayer.config.json"))?)?;
     let expected_platform = match () {
@@ -1031,7 +1050,7 @@ async fn hydrate_save_catalog(
             .ingest_save_catalog_entry(slot, bytes)
             .map_err(|error| player_platform_error("player.save.catalog.ingest", error))?;
     }
-    tracing::info!(
+    tracing::trace!(
         event = "player.save.catalog.hydrated",
         slot_count = slots.len(),
         "hydrated validated save metadata before launching the product runtime"
@@ -1090,13 +1109,13 @@ fn log_consumed_vn_step(
             .collect::<Vec<_>>()
             .join(",")
     };
-    tracing::info!(
+    tracing::trace!(
         event = "astra.player.input.consumed",
         player_sequence,
         kind,
         "Player host consumed platform input"
     );
-    tracing::info!(
+    tracing::trace!(
         event = "astra.player.vn.step",
         player_sequence,
         fixed_step = evidence.fixed_step,

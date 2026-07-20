@@ -12,6 +12,9 @@ use std::{fs, path::PathBuf};
 mod web_cdp;
 pub use web_cdp::*;
 
+mod bundled_observability;
+pub use bundled_observability::*;
+
 mod native_session;
 pub use native_session::*;
 
@@ -874,11 +877,19 @@ mod windows_live {
     use astra_platform_windows::WindowsTestDriver;
     use std::{
         fs,
+        io::{Read, Write},
         path::PathBuf,
         process::{Command, Stdio},
         thread,
         time::Duration,
     };
+
+    const MAX_HOST_STDERR_BYTES: usize = 16 * 1024 * 1024;
+
+    struct StderrCapture {
+        bytes: Vec<u8>,
+        total_bytes: usize,
+    }
 
     pub fn run(
         bundle: &BundleContext,
@@ -894,18 +905,24 @@ mod windows_live {
         let entrypoint = bundle.bundle_dir.join(&bundle.entrypoint);
         let mut child = Command::new(entrypoint)
             .current_dir(&bundle.bundle_dir)
-            .env("ASTRA_PLAYER_TRACE", "1")
+            .env("ASTRA_LOG", "trace")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or("ASTRA_PLAYER_E3_STDERR_UNAVAILABLE: child stderr was not piped")?;
+        let stderr_reader = thread::spawn(move || drain_stderr(stderr, MAX_HOST_STDERR_BYTES));
         trace_line(
             &mut trace_lines,
             "level=TRACE event=astra.player.bundle.launch role=bundle_entrypoint".to_string(),
         );
         let result = (|| {
-            let window = WindowsTestDriver::wait_for_process_window(
+            let window = WindowsTestDriver::wait_for_window(
                 child.id(),
+                &bundle.target,
                 Duration::from_millis(timeout_ms.max(1)),
             )?;
             trace_line(
@@ -982,8 +999,19 @@ mod windows_live {
             })
         })();
         let _ = child.kill();
-        let output = child.wait_with_output()?;
-        let host_stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        child.wait()?;
+        let stderr_capture = stderr_reader
+            .join()
+            .map_err(|_| "ASTRA_PLAYER_E3_STDERR_READER_PANICKED")??;
+        if stderr_capture.total_bytes > MAX_HOST_STDERR_BYTES {
+            return Err(format!(
+                "ASTRA_PLAYER_E3_STDERR_LIMIT_EXCEEDED: captured {} bytes, limit is {} bytes",
+                stderr_capture.total_bytes, MAX_HOST_STDERR_BYTES
+            )
+            .into());
+        }
+        let host_stderr = String::from_utf8(stderr_capture.bytes)
+            .map_err(|_| "ASTRA_PLAYER_E3_STDERR_NOT_UTF8")?;
         let host_traces = parse_player_host_traces(&host_stderr);
         trace_line(
             &mut trace_lines,
@@ -1018,6 +1046,25 @@ mod windows_live {
             fs::write(path, combined)?;
         }
         result
+    }
+
+    fn drain_stderr(
+        mut stderr: impl Read,
+        capture_limit: usize,
+    ) -> Result<StderrCapture, std::io::Error> {
+        let mut bytes = Vec::with_capacity(capture_limit.min(64 * 1024));
+        let mut total_bytes = 0usize;
+        let mut chunk = [0u8; 8192];
+        loop {
+            let read = stderr.read(&mut chunk)?;
+            if read == 0 {
+                break;
+            }
+            total_bytes = total_bytes.saturating_add(read);
+            let remaining = capture_limit.saturating_sub(bytes.len());
+            bytes.write_all(&chunk[..read.min(remaining)])?;
+        }
+        Ok(StderrCapture { bytes, total_bytes })
     }
 
     fn trace_line(lines: &mut Vec<String>, line: String) {
@@ -1078,6 +1125,19 @@ mod windows_live {
         run.input_consumption = consumption;
         run.runtime_routes = runtime_routes;
         run.route_coverage = route_coverage.into_iter().collect();
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::drain_stderr;
+
+        #[test]
+        fn stderr_drain_keeps_reading_after_capture_limit() {
+            let source = vec![b'x'; 256 * 1024];
+            let capture = drain_stderr(source.as_slice(), 1024).unwrap();
+            assert_eq!(capture.bytes.len(), 1024);
+            assert_eq!(capture.total_bytes, source.len());
+        }
     }
 }
 

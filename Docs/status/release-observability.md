@@ -7,8 +7,9 @@ Release observability 包含 structured logging、runtime trace、scenario/relea
 - `astra-observability` 已统一 host 初始化、category filter、runtime reload、compact/JSON console、限额 JSON file、critical mirror 和 fatal ring。
 - `astra.log_event.v1` 固定 session/process role、span stack、thread label 和结构化 fields。
 - 当前 Cargo workspace 的运行链路已按 [logging coverage](logging-coverage.md) 分类；纯 DTO/schema/proc-macro/facade 不制造无意义日志。
-- `astra-cli`、`astra-player`、bundled Windows Player 和测试 host 共用配置入口。CLI 未给 `--log-dir` 时不落盘。
+- `astra-cli`、`astra-player`、bundled Windows Player 和测试 host 共用配置入口。CLI 未给 `--log-dir` 时不落盘。bundled Player 在初始化日志前读取并严格校验 `AstraPlayer.config.json` 的 observability policy；配置中的日志、crash 目录只能是 bundle 内安全相对路径，显式 CLI 或 `ASTRA_LOG` 可用于受控验收覆盖。
 - Windows bundle manifest 与 `AstraPlayer.config.json` 已升为 v2。shipping Windows bundle 携带经 role/hash/size 校验、自检和启动握手的 `AstraCrashReporter.exe`。
+- 高频物理输入消费与 VN step 证据使用 TRACE。Windows E3 runner 显式启用 TRACE，并在 Player 运行期间持续、有界地排空 stderr；超过 16 MiB 时阻断，避免 pipe 背压把真实窗口输入路径卡死。runner 等待产品窗口标题，不会把 source-directory picker 误认成游戏窗口。该实现关闭日志风暴根因，但单个产品的 E3 状态仍须由同 build/package/input identity 的实际报告决定。
 - Web host 输出同 schema 的 console/ring/error tail，不提供本地日志文件或 native minidump。
 
 ## Crash 边界
