@@ -23,6 +23,10 @@ use astra_media_core::{
     GlyphBitmap, GlyphBitmapFormat, MeshMaterial2D, MeshVertex2D, RectI, RenderTargetFormat,
     Renderer2DProvider, RendererCreateRequest, SceneCommand, TextureFrame,
 };
+use astra_package::{
+    AuthorizedSourceReader, ContainerCryptoProvider, ContainerError,
+    SourceFingerprintCryptoProvider, SourceUnlockPolicy, SourceVerificationManifest,
+};
 use astra_platform::{
     HeadlessHostProfile, PackageSourceRequest, PlatformHostFactory, PlatformHostSession,
 };
@@ -65,6 +69,10 @@ enum Command {
         checkpoint_config: Option<PathBuf>,
         #[arg(long)]
         build_identity: PathBuf,
+        #[arg(long, requires = "source_root")]
+        source_profile: Option<PathBuf>,
+        #[arg(long, requires = "source_profile")]
+        source_root: Option<PathBuf>,
     },
     Serve {
         #[arg(long)]
@@ -170,16 +178,20 @@ async fn main() {
             artifact_root,
             checkpoint_config,
             build_identity,
+            source_profile,
+            source_root,
         } => {
-            run(
-                &profile,
-                &package,
-                &input,
-                &artifact_root,
-                checkpoint_config.as_deref(),
-                &build_identity,
+            run(RunRequest {
+                profile_path: &profile,
+                package_path: &package,
+                input_path: &input,
+                artifact_root: &artifact_root,
+                checkpoint_config: checkpoint_config.as_deref(),
+                build_identity: &build_identity,
                 gpu,
-            )
+                source_profile: source_profile.as_deref(),
+                source_root: source_root.as_deref(),
+            })
             .await
         }
         Command::BootstrapTestEnv {
@@ -271,7 +283,7 @@ async fn serve(build_identity: &Path, gpu: bool) -> Result<(), String> {
         JsonlReader::new(BufReader::new(stdin.lock()), 1024 * 1024).map_err(|e| e.to_string())?;
     let mut writer = JsonlWriter::new(stdout.lock());
     let mut sessions = BTreeMap::<String, LiveSession>::new();
-    let registry = product_registry()?;
+    let registry = product_registry(None)?;
     while let Some(envelope) = reader.read::<Envelope>().map_err(|e| e.to_string())? {
         let failure_session = envelope.session.clone();
         let handled: Result<(), String> = async {
@@ -722,26 +734,28 @@ async fn finalize_blocked_live_session(mut session: LiveSession, error: &str) {
     }
 }
 
-async fn run(
-    profile_path: &Path,
-    package_path: &Path,
-    input_path: &Path,
-    artifact_root: &Path,
-    checkpoint_config: Option<&Path>,
-    build_identity: &Path,
+#[derive(Clone, Copy)]
+struct RunRequest<'a> {
+    profile_path: &'a Path,
+    package_path: &'a Path,
+    input_path: &'a Path,
+    artifact_root: &'a Path,
+    checkpoint_config: Option<&'a Path>,
+    build_identity: &'a Path,
     gpu: bool,
-) -> Result<(), String> {
-    match run_execution(
+    source_profile: Option<&'a Path>,
+    source_root: Option<&'a Path>,
+}
+
+async fn run(request: RunRequest<'_>) -> Result<(), String> {
+    let RunRequest {
         profile_path,
-        package_path,
         input_path,
         artifact_root,
         checkpoint_config,
-        build_identity,
-        gpu,
-    )
-    .await
-    {
+        ..
+    } = request;
+    match run_execution(request).await {
         Ok(()) => Ok(()),
         Err(error) => {
             fs::create_dir_all(artifact_root)
@@ -857,15 +871,18 @@ fn ensure_blocked_manifest(
     )
 }
 
-async fn run_execution(
-    profile_path: &Path,
-    package_path: &Path,
-    input_path: &Path,
-    artifact_root: &Path,
-    checkpoint_config: Option<&Path>,
-    build_identity: &Path,
-    gpu: bool,
-) -> Result<(), String> {
+async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
+    let RunRequest {
+        profile_path,
+        package_path,
+        input_path,
+        artifact_root,
+        checkpoint_config,
+        build_identity,
+        gpu,
+        source_profile,
+        source_root,
+    } = request;
     let identity_hash = read_identity_hash(build_identity)?;
     let profile = read_profile(profile_path, &identity_hash)?;
     fs::create_dir_all(artifact_root).map_err(|e| e.to_string())?;
@@ -951,7 +968,8 @@ async fn run_execution(
     if astra_core::Hash256::from_sha256(&package_bytes).to_string() != profile.package_hash {
         return Err("ASTRA_HEADLESS_PRODUCT_PACKAGE_HASH_MISMATCH".into());
     }
-    let registry = product_registry()?;
+    let package_crypto = source_package_crypto(&package_bytes, source_profile, source_root)?;
+    let registry = product_registry(package_crypto)?;
     let mut product = open_product(&registry, &profile, &host, package_bytes).await?;
     let mut checkpoint_results = Vec::new();
     let mut checkpoint_frames = BTreeMap::new();
@@ -2245,10 +2263,9 @@ fn prepare_product_profile(
     let identity_hash = read_identity_hash(build_identity)?;
     let package_bytes = fs::read(package_path)
         .map_err(|error| format!("ASTRA_HEADLESS_PREPARE_PROFILE_PACKAGE_READ_FAILED: {error}"))?;
-    let reader = astra_package::PackageReader::open(&package_bytes)
+    let reader = astra_package::AstraContainerReader::new(&package_bytes)
         .map_err(|error| format!("ASTRA_HEADLESS_PREPARE_PROFILE_PACKAGE_INVALID: {error}"))?;
     let manifest: astra_package::PackageManifest = reader
-        .container()
         .decode_postcard("package.manifest")
         .map_err(|error| format!("ASTRA_HEADLESS_PREPARE_PROFILE_MANIFEST_INVALID: {error}"))?;
     if manifest.profile != product_profile {
@@ -2292,12 +2309,117 @@ fn prepare_product_profile(
     Ok(())
 }
 
-fn product_registry() -> Result<ProductAdapterRegistry, String> {
+fn product_registry(
+    package_crypto: Option<Arc<dyn ContainerCryptoProvider>>,
+) -> Result<ProductAdapterRegistry, String> {
     let mut registry = ProductAdapterRegistry::default();
+    let factory = match package_crypto {
+        Some(crypto) => NativeVnProductAdapterFactory::with_package_crypto(crypto),
+        None => NativeVnProductAdapterFactory::default(),
+    };
     registry
-        .register(Arc::new(NativeVnProductAdapterFactory))
+        .register(Arc::new(factory))
         .map_err(|error| error.to_string())?;
     Ok(registry)
+}
+
+fn source_package_crypto(
+    package_bytes: &[u8],
+    source_profile: Option<&Path>,
+    source_root: Option<&Path>,
+) -> Result<Option<Arc<dyn ContainerCryptoProvider>>, String> {
+    let raw = astra_package::AstraContainerReader::new(package_bytes)
+        .map_err(|error| format!("ASTRA_HEADLESS_PACKAGE_INSPECT_FAILED: {error}"))?;
+    let source_locked = raw.has_section("source.unlock");
+    match (source_locked, source_profile, source_root) {
+        (false, None, None) => Ok(None),
+        (false, _, _) => Err(
+            "ASTRA_HEADLESS_SOURCE_UNLOCK_UNEXPECTED: plaintext package must not receive source input"
+                .into(),
+        ),
+        (true, Some(profile_path), Some(root)) => {
+            let policy: SourceUnlockPolicy = raw
+                .decode_postcard("source.unlock")
+                .map_err(|error| format!("ASTRA_HEADLESS_SOURCE_POLICY_INVALID: {error}"))?;
+            let profile_bytes = fs::read(profile_path)
+                .map_err(|_| "ASTRA_HEADLESS_SOURCE_PROFILE_READ_FAILED".to_string())?;
+            let profile: SourceVerificationManifest = serde_json::from_slice(&profile_bytes)
+                .map_err(|_| "ASTRA_HEADLESS_SOURCE_PROFILE_INVALID".to_string())?;
+            let mut reader = HeadlessSourceReader::open(root)?;
+            let provider = SourceFingerprintCryptoProvider::unlock(&policy, &profile, &mut reader)
+                .map_err(|error| format!("ASTRA_HEADLESS_SOURCE_UNLOCK_FAILED: {error}"))?;
+            Ok(Some(Arc::new(provider)))
+        }
+        (true, _, _) => Err(
+            "ASTRA_HEADLESS_SOURCE_UNLOCK_REQUIRED: source-locked package requires --source-profile and --source-root"
+                .into(),
+        ),
+    }
+}
+
+struct HeadlessSourceReader {
+    root: PathBuf,
+}
+
+impl HeadlessSourceReader {
+    fn open(root: &Path) -> Result<Self, String> {
+        let root = root
+            .canonicalize()
+            .map_err(|_| "ASTRA_HEADLESS_SOURCE_ROOT_INVALID".to_string())?;
+        if !root.is_dir() {
+            return Err("ASTRA_HEADLESS_SOURCE_ROOT_INVALID".into());
+        }
+        Ok(Self { root })
+    }
+
+    fn resolve(&self, relative_path: &str) -> Result<PathBuf, ContainerError> {
+        astra_platform::validate_safe_relative_path(relative_path)
+            .map_err(|_| ContainerError::Crypto("authorized source path is invalid".into()))?;
+        let path = self
+            .root
+            .join(relative_path)
+            .canonicalize()
+            .map_err(|_| ContainerError::Crypto("authorized source file is missing".into()))?;
+        if !path.starts_with(&self.root) {
+            return Err(ContainerError::Crypto(
+                "authorized source path escaped its root".into(),
+            ));
+        }
+        Ok(path)
+    }
+}
+
+impl AuthorizedSourceReader for HeadlessSourceReader {
+    fn stat_relative(&mut self, relative_path: &str) -> Result<u64, ContainerError> {
+        let path = self.resolve(relative_path)?;
+        let metadata = path
+            .metadata()
+            .map_err(|_| ContainerError::Crypto("authorized source file is missing".into()))?;
+        if !metadata.is_file() {
+            return Err(ContainerError::Crypto(
+                "authorized source entry is not a file".into(),
+            ));
+        }
+        Ok(metadata.len())
+    }
+
+    fn read_relative(
+        &mut self,
+        relative_path: &str,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, ContainerError> {
+        let path = self.resolve(relative_path)?;
+        let metadata = path
+            .metadata()
+            .map_err(|_| ContainerError::Crypto("authorized source file is missing".into()))?;
+        if !metadata.is_file() || metadata.len() > max_bytes {
+            return Err(ContainerError::Crypto(
+                "authorized source file exceeds its read bound".into(),
+            ));
+        }
+        fs::read(path)
+            .map_err(|_| ContainerError::Crypto("authorized source file read failed".into()))
+    }
 }
 
 async fn open_product(

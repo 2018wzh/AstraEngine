@@ -39,16 +39,15 @@ def story_index():
                     "states": [
                         state("tsui.init", ["system_page"]),
                         state("director.y.0010.score.0013", ["timeline"]),
+                        state("director.y.0010.score.0015", ["timeline"]),
                         state("director.y.0020", ["wait"]),
-                        state("director.y.0026", ["text"] * 31),
+                        state("director.y.0026", ["text"] * 45),
                         state("director.k.0015", ["wait"]),
                         state("director.k.0021", ["text"] * 12),
                         state("director.k.0027", ["text"]),
                         state("director.k.0033", ["wait"]),
-                        state("director.k.0126", ["wait"]),
-                        state("director.k.0132", ["text", "wait", "text", "text", "text", "text", "wait", "text", "text", "wait", "text", "text", "text", "text", "text", "text"]),
-                        state("director.k.0138", ["text"] * 4),
                         state("director.y.0032.choice", ["choice"]),
+                        state("director.y.0038", ["text"]),
                         state("director.y.0072", ["wait", "text"]),
                         state("director.y.0084", ["text"] * 14),
                     ]
@@ -113,7 +112,6 @@ class ClassicVisualAcceptanceTests(unittest.TestCase):
             MODULE.build_system_sequence(story_index()),
             MODULE.build_k_sequence(story_index()),
             MODULE.build_two_character_sequence(story_index()),
-            MODULE.build_k13_text_sequence(story_index()),
         ]
         checkpoints = {checkpoint for sequence in sequences for checkpoint in sequence.checkpoints}
         expected = {
@@ -135,6 +133,11 @@ class ClassicVisualAcceptanceTests(unittest.TestCase):
                 "classic.opening.centered",
                 "classic.dialogue.legacy_game",
                 "classic.dialogue.two_character_overflow",
+                "classic.opening.viewpoint",
+                "classic.dialogue.first",
+                "classic.dialogue.background_only.next",
+                "classic.choice.predecessor",
+                "classic.choice.successor",
             }
         stable = {f"{checkpoint}.__stable" for checkpoint in expected if checkpoint in {
             "classic.title", "classic.title_load", "classic.dialogue.background_only",
@@ -143,6 +146,9 @@ class ClassicVisualAcceptanceTests(unittest.TestCase):
             "classic.monologue", "classic.choice", "classic.opening.centered",
             "classic.stage.opening_sphere", "classic.dialogue.legacy_game",
             "classic.dialogue.two_character_overflow",
+            "classic.opening.viewpoint", "classic.dialogue.first",
+            "classic.dialogue.background_only.next", "classic.choice.predecessor",
+            "classic.choice.successor",
         }}
         self.assertEqual(checkpoints, expected | stable)
 
@@ -161,7 +167,6 @@ class ClassicVisualAcceptanceTests(unittest.TestCase):
             MODULE.build_system_sequence(story_index()),
             MODULE.build_k_sequence(story_index()),
             MODULE.build_two_character_sequence(story_index()),
-            MODULE.build_k13_text_sequence(story_index()),
         ):
             self.assertTrue(sequence.rows)
             self.assertTrue(all(row["event"]["type"] in allowed for row in sequence.rows))

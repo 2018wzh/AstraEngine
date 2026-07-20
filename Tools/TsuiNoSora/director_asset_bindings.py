@@ -25,6 +25,7 @@ STAGE_CHANNELS = {
     "dialogue_frame": 12,
 }
 STORY_MOVIES = {"K", "S", "T", "Y", "Z"}
+INITIAL_VISIBLE_LAYERS = {"sky", "character"}
 
 
 def build_asset_binding_ir(story_source: dict, scene_semantics: dict, converted: dict) -> tuple[dict, dict]:
@@ -58,6 +59,11 @@ def build_asset_binding_ir(story_source: dict, scene_semantics: dict, converted:
     eye_prefix = _resolve_eye_prefix(detailed, members.get(("casts", "GENERAL"), {}))
     binding_counts: Counter[str] = Counter()
     referenced_assets: set[str] = set()
+    for layout in detailed["stage_layouts"]:
+        for layer in INITIAL_VISIBLE_LAYERS:
+            binding = layout["layers"][layer]["binding"]
+            binding_counts["score_initial_media"] += 1
+            referenced_assets.add(binding["asset_id"])
     for opening in detailed["score_openings"]:
         for frame in opening["frames"]:
             sprite = frame.get("sprite")
@@ -199,8 +205,11 @@ def _stage_layout(movie, members, resources):
             "y": y,
             "width": width,
             "height": height,
+            "ink": sprite.get("ink"),
+            "blend": sprite.get("blend"),
+            "initial_visible": layer in INITIAL_VISIBLE_LAYERS,
         }
-        if layer in {"sky", "dialogue_frame"}:
+        if layer in {"sky", "character", "dialogue_frame"}:
             record["binding"] = _resolve_score_sprite(
                 sprite, movie, members, resources
             )
@@ -241,6 +250,9 @@ def _resolve_score_sprite(sprite, movie, members, resources):
     )
     if binding.get("cast_member") != member_number or not binding.get("asset_id"):
         raise DirectorAssetBindingError("Director score sprite has no exact media binding")
+    # The private binding IR retains the exact cast-member identity so palette-backed
+    # semantic solids can be recovered without guessing from the exported PNG pixels.
+    binding["director_member"] = matches[0]
     return binding
 
 

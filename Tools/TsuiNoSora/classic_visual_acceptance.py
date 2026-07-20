@@ -26,6 +26,9 @@ class AcceptanceError(RuntimeError):
     pass
 
 
+CLASSIC_CONFIG_FAST_FORWARD_POINT = (490, 265)
+
+
 class StoryIndex:
     def __init__(self, story_ir: dict) -> None:
         if story_ir.get("schema") != "tsuinosora.native_story_ir.v1":
@@ -296,6 +299,14 @@ def build_system_sequence(story: StoryIndex) -> Sequence:
         typed_state="director.y.0010.score.0013",
         wait_command=opening_staggered,
     )
+    opening_viewpoint = story.command("director.y.0010.score.0015", "timeline")
+    sequence.await_value("vn.pending_wait_command", opening_viewpoint, 7200)
+    sequence.node_checkpoint(
+        "classic.opening.viewpoint",
+        reference_id="TSUI1999-EVIDENCE-Y-VIEWPOINT",
+        typed_state="director.y.0010.score.0015",
+        wait_command=opening_viewpoint,
+    )
     opening_centered = story.command("director.y.0020", "wait")
     sequence.await_value("vn.pending_wait_command", opening_centered, 7200)
     sequence.node_checkpoint(
@@ -306,10 +317,31 @@ def build_system_sequence(story: StoryIndex) -> Sequence:
     )
     first_dialogue = story.command("director.y.0026", "text", 0)
     sequence.await_value("vn.pending_wait_command", first_dialogue, 7200)
+    sequence.node_checkpoint(
+        "classic.dialogue.first",
+        reference_id="TSUI1999-EVIDENCE-Y-DIALOGUE-FIRST",
+        typed_state="director.y.0026",
+        wait_command=first_dialogue,
+    )
     sequence.key("Enter", 2)
     background_dialogue = story.command("director.y.0026", "text", 2)
     sequence.await_value("vn.pending_wait_command", background_dialogue)
-    sequence.key("Enter", 28)
+    sequence.node_checkpoint(
+        "classic.dialogue.background_only",
+        reference_id="TSUI1999-UI-005",
+        typed_state="director.y.0026",
+        wait_command=background_dialogue,
+    )
+    sequence.key("Enter", 2)
+    next_dialogue = story.command("director.y.0026", "text", 4)
+    sequence.await_value("vn.pending_wait_command", next_dialogue)
+    sequence.node_checkpoint(
+        "classic.dialogue.background_only.next",
+        reference_id="TSUI1999-EVIDENCE-Y-DIALOGUE-NEXT",
+        typed_state="director.y.0026",
+        wait_command=next_dialogue,
+    )
+    sequence.key("Enter", 26)
     character_dialogue = story.command("director.y.0026", "text", 30)
     sequence.await_value("vn.pending_wait_command", character_dialogue)
     sequence.node_checkpoint("classic.dialogue.character_overflow", reference_id="TSUI1999-UI-006", typed_state="director.y.0026", wait_command=character_dialogue)
@@ -341,54 +373,6 @@ def build_system_sequence(story: StoryIndex) -> Sequence:
     open_popup(sequence)
     switch_popup_to_config(sequence)
     sequence.node_checkpoint("classic.config", reference_id="TSUI1999-UI-012", typed_state="director.y.0026", wait_command=character_dialogue)
-    sequence.finish()
-    return sequence
-
-
-def build_k13_text_sequence(story: StoryIndex) -> Sequence:
-    """Reach the reused first-route line through the original hidden K13 entry.
-
-    The text fingerprint is not unique across Director movies.  This sequence preserves the
-    selected K occurrence and advances every intervening dialogue/media fence through physical
-    input instead of treating a matching string as sufficient node evidence.
-    """
-    sequence = Sequence("tsui.classic.visual.k13_text")
-    sequence.start()
-    await_title(sequence)
-    open_hidden_test(sequence)
-    sequence.key("Tab", 13)
-    sequence.await_value("vn.focused_semantic_id", "root/window/body/routes/k/k13")
-    sequence.key("Enter")
-
-    sequence.await_value("vn.pending_wait_command", story.command("director.k.0126", "wait"), 7200)
-    sequence.await_value("vn.pending_wait_command", story.command("director.k.0132", "text", 0), 7200)
-    sequence.key("Enter")
-    sequence.await_value("vn.pending_wait_command", story.command("director.k.0132", "wait", 0), 7200)
-    sequence.await_value("vn.pending_wait_command", story.command("director.k.0132", "text", 1), 7200)
-    sequence.key("Enter", 3)
-    sequence.await_value("vn.pending_wait_command", story.command("director.k.0132", "text", 4), 7200)
-    sequence.key("Enter")
-    sequence.await_value("vn.pending_wait_command", story.command("director.k.0132", "wait", 1), 7200)
-    sequence.await_value("vn.pending_wait_command", story.command("director.k.0132", "text", 5), 7200)
-    sequence.key("Enter")
-    sequence.await_value("vn.pending_wait_command", story.command("director.k.0132", "text", 6), 7200)
-    sequence.key("Enter")
-    sequence.await_value("vn.pending_wait_command", story.command("director.k.0132", "wait", 2), 7200)
-    sequence.await_value("vn.pending_wait_command", story.command("director.k.0132", "text", 7), 7200)
-    sequence.key("Enter", 5)
-    sequence.await_value("vn.pending_wait_command", story.command("director.k.0132", "text", 12), 7200)
-    sequence.key("Enter")
-
-    sequence.await_value("vn.pending_wait_command", story.command("director.k.0138", "text", 0), 7200)
-    sequence.key("Enter", 3)
-    selected = story.command("director.k.0138", "text", 3)
-    sequence.await_value("vn.pending_wait_command", selected, 7200)
-    sequence.node_checkpoint(
-        "classic.dialogue.background_only",
-        reference_id="TSUI1999-UI-005",
-        typed_state="director.k.0138",
-        wait_command=selected,
-    )
     sequence.finish()
     return sequence
 
@@ -429,27 +413,45 @@ def build_two_character_sequence(story: StoryIndex) -> Sequence:
     sequence = Sequence("tsui.classic.visual.two_character")
     sequence.start()
     await_title(sequence)
-    open_hidden_test(sequence)
-    sequence.key("Tab", 4)
-    sequence.await_value("vn.focused_semantic_id", "root/window/body/routes/y/y13")
+    # The same-node Y evidence must enter through the authored movie lifecycle.
+    # A direct test-menu label jump bypasses the converted startMovie/tinit Score
+    # snapshot and therefore cannot prove the natural first-route presentation.
     sequence.key("Enter")
     sequence.await_value("vn.pending_wait_command", story.command("director.y.0020", "wait"), 7200)
     sequence.await_value("vn.pending_wait_command", story.command("director.y.0026", "text", 0), 7200)
 
-    open_popup(sequence)
-    switch_popup_to_config(sequence)
-    sequence.pointer_click(490, 241)
-    sequence.await_value("vn.reading_mode", "fast_forward")
-    sequence.key("Escape")
+    sequence.key("Enter", 30)
+    pre_choice = story.command("director.y.0026", "text", 30)
+    sequence.await_value("vn.pending_wait_command", pre_choice, 14400)
+    sequence.node_checkpoint(
+        "classic.choice.predecessor",
+        reference_id="TSUI1999-EVIDENCE-Y-CHOICE-PREDECESSOR",
+        typed_state="director.y.0026",
+        wait_command=pre_choice,
+    )
+    sequence.key("Enter", 15)
     choice_wait = story.command("director.y.0032.choice", "choice")
     sequence.await_value("vn.pending_wait_command", choice_wait, 14400)
     sequence.node_checkpoint("classic.choice", reference_id="TSUI1999-UI-009", typed_state="director.y.0032.choice", wait_command=choice_wait)
     sequence.key("Enter")
+    post_choice = story.command("director.y.0038", "text", 0)
+    sequence.await_value("vn.pending_wait_command", post_choice, 14400)
+    sequence.node_checkpoint(
+        "classic.choice.successor",
+        reference_id="TSUI1999-EVIDENCE-Y-CHOICE-SUCCESSOR",
+        typed_state="director.y.0038",
+        wait_command=post_choice,
+    )
+    open_popup(sequence)
+    switch_popup_to_config(sequence)
+    sequence.pointer_click(*CLASSIC_CONFIG_FAST_FORWARD_POINT)
+    sequence.await_value("vn.reading_mode", "fast_forward")
+    sequence.key("Escape")
     sequence.await_value("vn.pending_wait_command", story.command("director.y.0072", "wait"), 14400)
 
     open_popup(sequence)
     switch_popup_to_config(sequence)
-    sequence.pointer_click(390, 241)
+    sequence.pointer_click(390, 265)
     sequence.await_value("vn.reading_mode", "manual")
     sequence.key("Escape")
     first_y72 = story.command("director.y.0072", "text", 0)
@@ -497,6 +499,21 @@ def run_sequence(arguments: argparse.Namespace, root: Path, sequence: Sequence) 
         "--build-identity",
         str(arguments.build_identity),
     ]
+    source_profile = getattr(arguments, "source_profile", None)
+    source_root = getattr(arguments, "source_root", None)
+    if (source_profile is None) != (source_root is None):
+        raise AcceptanceError(
+            "Classic source-locked acceptance requires both source profile and source root"
+        )
+    if source_profile is not None:
+        command.extend(
+            [
+                "--source-profile",
+                str(source_profile),
+                "--source-root",
+                str(source_root),
+            ]
+        )
     with (root / "runner.stdout.log").open("wb") as stdout, (root / "runner.stderr.log").open(
         "wb"
     ) as stderr:
@@ -548,7 +565,6 @@ def run(arguments: argparse.Namespace) -> dict:
         build_system_sequence(story),
         build_k_sequence(story),
         build_two_character_sequence(story),
-        build_k13_text_sequence(story),
     ]
     runs = [
         run_sequence(arguments, arguments.artifact_root / f"run-{index:02d}", sequence)
@@ -583,6 +599,8 @@ def main() -> int:
     parser.add_argument("--node-map", required=True, type=Path)
     parser.add_argument("--artifact-root", required=True, type=Path)
     parser.add_argument("--report", required=True, type=Path)
+    parser.add_argument("--source-profile", type=Path)
+    parser.add_argument("--source-root", type=Path)
     arguments = parser.parse_args()
     try:
         report = run(arguments)

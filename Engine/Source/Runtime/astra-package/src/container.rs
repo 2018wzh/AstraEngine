@@ -135,7 +135,7 @@ pub struct ExternalKeyRef {
     pub uri: String,
 }
 
-pub trait ContainerCryptoProvider {
+pub trait ContainerCryptoProvider: Send + Sync {
     fn provider_id(&self) -> &str;
 
     fn decrypt(
@@ -289,6 +289,7 @@ pub struct AstraContainerReader {
     bytes: Vec<u8>,
     source: Option<(Arc<dyn BoundedByteSource>, ByteSourceStat)>,
     content_root: Hash256,
+    crypto: Option<Arc<dyn ContainerCryptoProvider>>,
 }
 
 impl Clone for AstraContainerReader {
@@ -299,6 +300,7 @@ impl Clone for AstraContainerReader {
             bytes: self.bytes.clone(),
             source: self.source.clone(),
             content_root: self.content_root,
+            crypto: self.crypto.clone(),
         }
     }
 }
@@ -324,6 +326,11 @@ impl AstraContainerReader {
         expected_content_root: Hash256,
     ) -> Result<Self, ContainerError> {
         read_container_source(source, expected_content_root)
+    }
+
+    pub fn with_crypto_provider(mut self, crypto: Arc<dyn ContainerCryptoProvider>) -> Self {
+        self.crypto = Some(crypto);
+        self
     }
 
     pub fn kind(&self) -> ContainerKind {
@@ -380,9 +387,10 @@ impl AstraContainerReader {
             .section_entry(id)
             .ok_or_else(|| ContainerError::message(format!("missing section {id}")))?;
         if entry.encryption.is_some() {
-            return Err(ContainerError::Crypto(format!(
-                "section {id} requires crypto provider"
-            )));
+            let crypto = self.crypto.as_deref().ok_or_else(|| {
+                ContainerError::Crypto(format!("section {id} requires crypto provider"))
+            })?;
+            return self.read_section_with_crypto(id, crypto);
         }
         let stored = self.stored_payload(entry)?;
         decode_payload(entry, &stored)
@@ -755,6 +763,7 @@ fn read_container(bytes: &[u8]) -> Result<AstraContainerReader, ContainerError> 
         bytes: bytes.to_vec(),
         source: None,
         content_root,
+        crypto: None,
     })
 }
 
@@ -925,6 +934,7 @@ fn read_container_source(
         bytes: Vec::new(),
         source: Some((source, stat)),
         content_root,
+        crypto: None,
     })
 }
 

@@ -841,6 +841,46 @@ state start #@id state.start
 }
 
 #[astra_headless_test::test]
+fn packaged_native_vn_preload_does_not_create_an_unbounded_gpu_residency_lease() {
+    let bytes = product_package_for(
+        r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    preload asset:asset:/background/apartment-night #@id preload.background
+    text key:line.one speaker:hero #@id line.one
+"#,
+    );
+    let package = PackageReader::open(&bytes).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        640,
+        360,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+
+    let frame = source.launch().unwrap();
+    assert!(!scene_commands(&frame).iter().any(|command| {
+        matches!(
+            command,
+            SceneCommand::UploadTexture { resource_id, .. }
+                if resource_id == "asset:/background/apartment-night"
+        )
+    }));
+    let shutdown = source.release_resources().unwrap();
+    assert!(!scene_commands(&shutdown).iter().any(|command| {
+        matches!(
+            command,
+            SceneCommand::ReleaseResource { resource_id }
+                if resource_id == "asset:/background/apartment-night"
+        )
+    }));
+    source.shutdown().unwrap();
+}
+
+#[astra_headless_test::test]
 fn package_open_blocks_undeclared_localization() {
     let bytes = product_package();
     let package = PackageReader::open(&bytes).unwrap();

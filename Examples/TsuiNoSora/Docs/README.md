@@ -1,6 +1,6 @@
 # TsuiNoSora 本地证据索引
 
-本目录只保存迁移工具需要的公开模板、脱敏 manifest 与既有权威视觉证据。商业安装源、全屏截图、裁剪图、转换产物、运行截图和差异图必须留在 ignored 私有工作区，不能写入 package、report 或 Git。本机全屏捕获由工具严格裁剪 `(1220,674)-(2620,1724)` 的 1400×1050 游戏区域，再用 Lanczos 缩放为 800×600；输入尺寸或区域契约不一致时阻断。
+本目录只保存迁移工具需要的公开模板、脱敏 manifest 与既有权威视觉证据。商业安装源、全屏截图、裁剪图、转换产物、运行截图和差异图必须留在 ignored 私有工作区，不能写入 package、report 或 Git。旧桌面捕获严格裁剪固定的 1400×1050 游戏区域，再缩放为 800×600。第一线路新增捕获允许原生 800×600 RGBA，或带固定 1 px 边框的 802×602 RGBA；前者原样保留，后者只去除边框，两者都不缩放、不转换色彩。任一输入不满足自己的 manifest 契约都必须阻断。
 
 | 文件 | 用途 |
 | --- | --- |
@@ -9,6 +9,9 @@
 | `demo.config.template.json` | 私有转换入口的无路径模板 |
 | [original-ui-reference-audit.md](original-ui-reference-audit.md) | 1999 原版补充截图的来源、统一编号、hash、视觉分类和实现约束 |
 | [classic-director-fidelity-design.md](classic-director-fidelity-design.md) | Director movie/handler/Score channel 到 Classic UI 与行为的映射 |
+| [classic-first-route-private-rc.md](classic-first-route-private-rc.md) | Classic 第一线路 private research preview 的截图、Score snapshot、source unlock 与延期门禁 |
+| `classic-first-route-recapture-manifest.json` | 新增 800×600/802×602 连续帧的脱敏 raw/normalized hash 与节点证据 |
+| `classic-source-profile.json` | 1999 日文原版的 source verification profile；只含安全相对路径、长度与 hash |
 | `classic-visual-node-map.json` | reference、Director 节点、typed state、wait occurrence 与 GPU checkpoint 的脱敏同节点映射 |
 | `classic-visual-comparison-policy.json` | v3 固定几何/图像门禁、mask 上限和逐项色彩 tolerance 绑定 |
 | `classic-visual-color-tolerance-approval.json` | 项目所有者明确批准的 `astra.headless_tolerance_approval.v2`；只授权固定 `capture_palette_v1`，不等同于 formal signoff |

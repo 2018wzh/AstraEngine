@@ -9,6 +9,9 @@ from PIL import Image
 
 from compare_classic_visual_references import (
     ComparisonError,
+    LEGACY_DESKTOP_CAPTURE_REFERENCE_IDS,
+    _capture_normalization,
+    _entries_by_id,
     _mask,
     _json_hash,
     _ssim,
@@ -104,7 +107,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             },
             "capture_normalization": {
                 "id": "windows_175pct_bilinear_then_lanczos_v1",
-                "reference_ids": [f"TSUI1999-UI-{index:03d}" for index in range(1, 16)],
+                "reference_ids": sorted(LEGACY_DESKTOP_CAPTURE_REFERENCE_IDS),
                 "source_size": [800, 600],
                 "captured_size": [1400, 1050],
                 "upscale": "bilinear",
@@ -220,6 +223,49 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             "TSUI_CLASSIC_VISUAL_REFERENCE_RECAPTURE_REQUIRED",
         )
 
+    def test_opening_bitmap_accepts_exact_resource_closure_as_stability_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, node_map, _, _, _ = self.fixture(root)
+            entry = node_map["entries"][0]
+            entry["reference_id"] = "TSUI1999-UI-002"
+            resource_hash = "sha256:" + "1" * 64
+            entry["identity"]["locator"] = {
+                "method": "score_bitmap_text",
+                "content_sha256": resource_hash,
+            }
+            entry["identity"]["resource_hashes"] = [resource_hash]
+            entry["reference_validation"] = {
+                "status": "verified",
+                "method": "score_bitmap_resource_closure",
+                "capture_sha256": entry["identity"]["reference_sha256"],
+                "resource_sha256": resource_hash,
+            }
+
+            entries = _entries_by_id(node_map)
+
+        self.assertIn("TSUI1999-UI-002", entries)
+
+    def test_score_bitmap_stability_cannot_be_used_for_another_reference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, node_map, _, _, _ = self.fixture(root)
+            entry = node_map["entries"][0]
+            resource_hash = "sha256:" + "1" * 64
+            entry["identity"]["locator"] = {
+                "method": "score_bitmap_text",
+                "content_sha256": resource_hash,
+            }
+            entry["reference_validation"] = {
+                "status": "verified",
+                "method": "score_bitmap_resource_closure",
+                "capture_sha256": entry["identity"]["reference_sha256"],
+                "resource_sha256": resource_hash,
+            }
+
+            with self.assertRaisesRegex(ComparisonError, "REFERENCE_VALIDATION"):
+                _entries_by_id(node_map)
+
     def test_reference_retake_requires_bounded_reason_and_two_frames(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -238,8 +284,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             policy, node_map, acceptance, references, captures = self.fixture(
                 root, capture_color=(60, 76, 92)
             )
-            node_map["entries"][0]["reference_validation"] = {
-                "status": "color_tolerance_approved",
+            node_map["entries"][0]["color_tolerance_approval"] = {
                 "reason_code": "capture_color_state_unproven",
                 "profile_id": "capture_palette_v1",
                 "evidence": "same_node_resource_closure_and_stable_gpu_capture",
@@ -254,8 +299,7 @@ class ClassicVisualComparisonTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             policy, node_map, acceptance, references, captures = self.fixture(root)
-            node_map["entries"][0]["reference_validation"] = {
-                "status": "color_tolerance_approved",
+            node_map["entries"][0]["color_tolerance_approval"] = {
                 "reason_code": "source_presentation_contradiction",
                 "profile_id": "capture_palette_v1",
                 "evidence": "same_node_resource_closure_and_stable_gpu_capture",
@@ -309,6 +353,16 @@ class ClassicVisualComparisonTests(unittest.TestCase):
             policy["capture_normalization"]["upscale"] = "bicubic"
             with self.assertRaisesRegex(ComparisonError, "CAPTURE_NORMALIZATION"):
                 compare(policy, node_map, acceptance, references, captures, root / "artifacts", root)
+
+    def test_native_client_recaptures_are_not_resampled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            policy, _, _, _, _ = self.fixture(root)
+            normalized, normalization_id = _capture_normalization(policy)
+            self.assertEqual(normalization_id, "windows_175pct_bilinear_then_lanczos_v1")
+            self.assertNotIn("TSUI1999-UI-003", normalized)
+            self.assertNotIn("TSUI1999-UI-005", normalized)
+            self.assertNotIn("TSUI1999-UI-009", normalized)
 
 
 if __name__ == "__main__":

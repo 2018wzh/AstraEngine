@@ -11699,9 +11699,12 @@ def _copy_native_assets_to_nativevn(
         target = nativevn_root / native_path
         target.parent.mkdir(parents=True, exist_ok=True)
         derived = False
-        if "character" in runtime_record["roles"]:
+        if "solid_black" in runtime_record["roles"]:
+            derived = _derive_director_solid_black(source, target)
+        transform = "director_solid_black_palette_v1"
+        if not derived and "character" in runtime_record["roles"]:
             derived = _derive_director_character_sprite(source, target)
-        transform = "director_white_matte_crop_v1"
+            transform = "director_white_matte_crop_v1"
         if not derived and "eye" in runtime_record["roles"]:
             derived = _derive_director_background_transparent_sprite(source, target)
             transform = "director_background_transparent_ink_v1"
@@ -11768,7 +11771,36 @@ def _director_runtime_bindings(binding_ir: dict):
         for layer_name, layer in layers.items():
             if not isinstance(layer, dict):
                 raise ValueError("Director stage layout layer must be an object")
-            yield layer.get("binding"), str(layer_name)
+            binding = layer.get("binding")
+            role = str(layer_name)
+            if isinstance(binding, dict) and binding.get("director_member") == "black":
+                role = "solid_black"
+            yield binding, role
+
+
+def _derive_director_solid_black(source: Path, target: Path) -> bool:
+    """Recover Director's palette-backed full-frame ``black`` cast member.
+
+    ProjectorRays exports this indexed BITD as an opaque white RGB image because the
+    Director palette is external to the standalone payload.  The caller only assigns
+    the ``solid_black`` role after an exact Score-to-cast binding proves the member name.
+    The pixel and geometry checks below prevent this transform from accepting an
+    arbitrary image that merely happens to be used on a character channel.
+    """
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise RuntimeError("Director solid palette recovery requires Pillow") from error
+
+    with Image.open(source) as opened:
+        rgba = opened.convert("RGBA")
+    if rgba.size != (800, 600):
+        return False
+    colors = rgba.getcolors(maxcolors=2)
+    if colors != [(800 * 600, (255, 255, 255, 255))]:
+        return False
+    Image.new("RGBA", rgba.size, (0, 0, 0, 255)).save(target)
+    return True
 
 
 def _derive_director_character_sprite(source: Path, target: Path) -> bool:

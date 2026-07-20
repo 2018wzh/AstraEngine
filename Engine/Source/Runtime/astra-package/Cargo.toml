@@ -5,18 +5,22 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+aes-gcm-siv.workspace = true
 astra-asset = { path = "../astra-asset" }
 astra-byte-source = { path = "../astra-byte-source" }
 astra-core = { path = "../astra-core" }
 astra-plugin-abi = { path = "../astra-plugin-abi", default-features = false }
 astra-target = { path = "../../Platform/astra-target" }
+hkdf.workspace = true
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+zeroize.workspace = true
 zstd.workspace = true
 
 [dev-dependencies]

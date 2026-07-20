@@ -38,6 +38,7 @@ pub struct PackageBuildRequest {
     pub scenario_refs: Vec<u8>,
     pub platform_eligibility: Vec<u8>,
     pub extra_sections: Vec<SectionPayload>,
+    pub source_unlock_policy: Option<crate::SourceUnlockPolicy>,
 }
 
 impl PackageBuildRequest {
@@ -104,6 +105,7 @@ impl PackageBuildRequest {
                 "platforms": ["windows", "linux", "macos", "ios", "android", "web"]
             })),
             extra_sections: Vec::new(),
+            source_unlock_policy: None,
         }
     }
 }
@@ -339,6 +341,20 @@ pub struct PackageBuilder;
 
 impl PackageBuilder {
     pub fn build(request: PackageBuildRequest) -> Result<ContainerBlob, ContainerError> {
+        Self::build_inner(request, None)
+    }
+
+    pub fn build_with_crypto(
+        request: PackageBuildRequest,
+        crypto: &dyn crate::ContainerCryptoProvider,
+    ) -> Result<ContainerBlob, ContainerError> {
+        Self::build_inner(request, Some(crypto))
+    }
+
+    fn build_inner(
+        request: PackageBuildRequest,
+        crypto: Option<&dyn crate::ContainerCryptoProvider>,
+    ) -> Result<ContainerBlob, ContainerError> {
         tracing::info!(
             event = "package.build.start",
             profile = %request.profile,
@@ -354,6 +370,7 @@ impl PackageBuilder {
             &request.target_manifest,
             &request.asset_vfs_manifest,
         )?;
+        let source_unlock_policy = request.source_unlock_policy.clone();
         let manifest = PackageManifest {
             schema: "astra.package_manifest.v1".to_string(),
             package_id: request.package_id,
@@ -426,6 +443,9 @@ impl PackageBuilder {
         ];
         sections.extend(request.cooked_assets);
         sections.extend(request.extra_sections);
+        if let Some(policy) = source_unlock_policy {
+            apply_source_unlock_policy(&mut sections, &policy, crypto)?;
+        }
         let registry = SchemaRegistryManifest {
             schema: "astra.schema_registry.v2".to_string(),
             schemas: std::iter::once(&manifest_section)
@@ -449,7 +469,11 @@ impl PackageBuilder {
         for section in sections {
             builder = builder.add_section(section);
         }
-        match builder.write() {
+        let result = match crypto {
+            Some(crypto) => builder.write_with_crypto(crypto),
+            None => builder.write(),
+        };
+        match result {
             Ok(blob) => {
                 tracing::info!(
                     event = "package.build.complete",
@@ -468,6 +492,64 @@ impl PackageBuilder {
             }
         }
     }
+}
+
+fn apply_source_unlock_policy(
+    sections: &mut Vec<SectionPayload>,
+    policy: &crate::SourceUnlockPolicy,
+    crypto: Option<&dyn crate::ContainerCryptoProvider>,
+) -> Result<(), ContainerError> {
+    policy.validate()?;
+    let crypto = crypto.ok_or_else(|| {
+        ContainerError::Crypto("source-locked package build requires a crypto provider".into())
+    })?;
+    if crypto.provider_id() != crate::SOURCE_FINGERPRINT_PROVIDER_ID {
+        return Err(ContainerError::Crypto(
+            "source-locked package build received the wrong crypto provider".into(),
+        ));
+    }
+    if sections.iter().any(|section| section.id == "source.unlock") {
+        return Err(ContainerError::message(
+            "source.unlock section is already present",
+        ));
+    }
+    let mut protected_found = std::collections::BTreeSet::new();
+    for section in sections.iter_mut() {
+        if policy.protected_sections.contains(&section.id) {
+            if section.encryption.is_some() {
+                return Err(ContainerError::Crypto(format!(
+                    "protected section {} already has an encryption descriptor",
+                    section.id
+                )));
+            }
+            section.encryption = Some(crate::EncryptionDescriptor {
+                provider_id: crate::SOURCE_FINGERPRINT_PROVIDER_ID.to_string(),
+                method: crate::SOURCE_FINGERPRINT_METHOD.to_string(),
+                key_ref: crate::ExternalKeyRef {
+                    uri: format!("source-fingerprint://{}", policy.source_profile),
+                },
+                aad_hash: crate::section_aad_hash(ContainerKind::Package, section)?,
+            });
+            protected_found.insert(section.id.clone());
+        }
+    }
+    if protected_found != policy.protected_sections {
+        let missing = policy
+            .protected_sections
+            .difference(&protected_found)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(",");
+        return Err(ContainerError::Crypto(format!(
+            "source unlock policy references missing protected sections: {missing}"
+        )));
+    }
+    sections.push(SectionPayload::postcard(
+        "source.unlock",
+        "astra.source_unlock_policy.v1",
+        policy,
+    )?);
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

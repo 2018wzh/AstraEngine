@@ -1,0 +1,10 @@
+{
+  "schema": "astra.source_verification_manifest.v1",
+  "profile_id": "tsuinosora.windows.1999.verified.v1",
+  "manifest_hash": "sha256:c6353454004a9b47ae3e5ecca7eeb078e1693ef1f5669f5e6a3c78403607e72b",
+  "entries": [
+    {"relative_path":"DATA/MENU.dxr","byte_length":3770400,"sha256":"sha256:e060066456a7b239ae5ea5362ed6c338130f6d908af759421b23ff70644457f3"},
+    {"relative_path":"READY.dxr","byte_length":164373,"sha256":"sha256:25c92bf1a41365051f7500249c47b779367fcd9efd27b32fb9299732b85ba8f7"},
+    {"relative_path":"SETUP.exe","byte_length":4001991,"sha256":"sha256:1d05513c1c3aa2bfb857d7d5c6ba50dcbc15ec8c49e160553e5a8b66b6c5e4d7"}
+  ]
+}

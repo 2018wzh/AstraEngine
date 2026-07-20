@@ -42,12 +42,12 @@ ui_view ui.tsui.classic.opening_centered model:astra.vn.ui_model.message.v2 them
 
 ui_view ui.tsui.classic.choice model:astra.vn.ui_model.choice.v1 theme:tsui.theme.classic #@id ui.tsui.classic.choice
   screen id:root
-    column id:choices position_x:137 position_y:110 min_width:300 gap:4
+    column id:choices position_x:153 position_y:110 min_width:300 max_width:300 gap:4
       virtual_list id:options items:$model.options item_key:option_id overscan:2 item_extent:40 gap:1
-        button id:option min_height:40 max_height:40 padding:0 background:theme:surface.clear text_color:theme:text.system
-          row id:line gap:0
-            text id:diamond text:"◆" font_size:18 text_color:theme:text.system
-            text id:body value:$item.text_key font_size:20 text_color:theme:text.system
+        button id:option min_width:300 max_width:300 min_height:40 max_height:40 padding:0 background:theme:surface.clear text_color:theme:text.system
+          row id:line min_width:300 max_width:300 gap:0
+            text id:diamond text:"◆" font_size:22 text_padding:0 text_color:theme:text.system
+            text id:body value:$item.text_key min_width:268 max_width:268 font_size:20 max_lines:1 text_padding:1 text_color:theme:text.system
           on activate -> vn.choose option_id:$item.option_id
 
 ui_view ui.tsui.classic.title model:astra.vn.ui_model.title.v1 theme:tsui.theme.classic #@id ui.tsui.classic.title
@@ -75,7 +75,7 @@ ui_view ui.tsui.classic.popup model:astra.vn.ui_model.quick_panel.v1 theme:tsui.
     row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
       text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
       text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
-    column id:window position_x:232 position_y:166 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
+    column id:window position_x:232 position_y:190 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
       row id:titlebar background:theme:system.chrome min_width:332 min_height:31 max_height:31 padding:4
         text id:title value:l10n:system.quick_panel font_size:11 text_color:theme:text.system_dark text_padding:1
       row id:tabs background:theme:system.chrome min_width:332 min_height:23 max_height:23 gap:0 padding:2
@@ -105,7 +105,7 @@ ui_view ui.tsui.classic.save model:astra.vn.ui_model.save.v1 theme:tsui.theme.cl
     row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
       text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
       text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
-    column id:window position_x:232 position_y:166 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
+    column id:window position_x:232 position_y:190 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
       row id:titlebar background:theme:system.chrome min_width:332 min_height:31 max_height:31 padding:4
         text id:title value:l10n:system.save font_size:11 text_color:theme:text.system_dark text_padding:1
       row id:tabs background:theme:system.chrome min_width:332 min_height:23 max_height:23 gap:0 padding:2
@@ -134,7 +134,7 @@ ui_view ui.tsui.classic.load model:astra.vn.ui_model.load.v1 theme:tsui.theme.cl
     row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
       text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
       text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
-    column id:window position_x:232 position_y:166 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
+    column id:window position_x:232 position_y:190 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
       row id:titlebar background:theme:system.chrome min_width:332 min_height:31 max_height:31 padding:4
         text id:title value:l10n:system.load font_size:11 text_color:theme:text.system_dark text_padding:1
       row id:tabs background:theme:system.chrome min_width:332 min_height:23 max_height:23 gap:0 padding:2
@@ -163,7 +163,7 @@ ui_view ui.tsui.classic.config model:astra.vn.ui_model.config.v1 theme:tsui.them
     row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
       text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
       text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
-    column id:window position_x:232 position_y:166 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
+    column id:window position_x:232 position_y:190 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
       row id:titlebar background:theme:system.chrome min_width:332 min_height:31 max_height:31 padding:4
         text id:title value:l10n:system.config font_size:11 text_color:theme:text.system_dark text_padding:1
       row id:tabs background:theme:system.chrome min_width:332 min_height:23 max_height:23 gap:0 padding:2

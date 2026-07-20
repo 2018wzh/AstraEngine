@@ -1,6 +1,8 @@
 use astra_core::Hash256;
 use astra_headless_protocol::{ButtonState, GamepadControl, PhysicalInput, TouchPhase};
-use astra_package::PackageReader;
+use astra_package::{
+    AstraContainerReader, ContainerCryptoProvider, PackageReader, SourceUnlockPolicy,
+};
 use astra_platform::{SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest};
 use astra_player_core::{
     PlatformCommandSink, PlayerHostCommandExecutor, PlayerHostCommandResult, PlayerHostResourceId,
@@ -13,11 +15,22 @@ use astra_ui_core::{
     UiButtonState, UiInputEventKind, UiNavigationAction, UiPoint, UiPointerButton, UiTouchPhase,
 };
 use astra_vn_core::VnRunConfig;
+use std::sync::Arc;
 
 use astra_player_vn::{NativeVnHostCommandSource, NativeVnProductMediaHost, VnUiHostRequest};
 
-#[derive(Debug, Default)]
-pub struct NativeVnProductAdapterFactory;
+#[derive(Default)]
+pub struct NativeVnProductAdapterFactory {
+    package_crypto: Option<Arc<dyn ContainerCryptoProvider>>,
+}
+
+impl NativeVnProductAdapterFactory {
+    pub fn with_package_crypto(package_crypto: Arc<dyn ContainerCryptoProvider>) -> Self {
+        Self {
+            package_crypto: Some(package_crypto),
+        }
+    }
+}
 
 impl ProductAdapterFactory for NativeVnProductAdapterFactory {
     fn binding_id(&self) -> &str {
@@ -28,6 +41,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
         &'a self,
         request: ProductOpenRequest,
     ) -> ProductFuture<'a, Result<Box<dyn ProductSession>, ProductHostError>> {
+        let package_crypto = self.package_crypto.clone();
         Box::pin(async move {
             tracing::info!(
                 event = "headless.product.native_vn.open",
@@ -35,8 +49,36 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 profile = %request.profile,
                 "opening NativeVN through the generic Headless product host"
             );
-            let package = PackageReader::open(&request.package_bytes)
-                .map_err(|error| binding("package.open", error))?;
+            let raw = AstraContainerReader::new(&request.package_bytes)
+                .map_err(|error| binding("package.inspect", error))?;
+            let source_locked = raw.has_section("source.unlock");
+            let package = match (source_locked, package_crypto) {
+                (false, None) => PackageReader::open(&request.package_bytes),
+                (false, Some(_)) => {
+                    return Err(ProductHostError::Binding(
+                        "package.unlock: plaintext package received unexpected crypto provider"
+                            .into(),
+                    ));
+                }
+                (true, None) => {
+                    return Err(ProductHostError::Binding(
+                        "package.unlock: source-locked package requires verified source input"
+                            .into(),
+                    ));
+                }
+                (true, Some(crypto)) => {
+                    let policy: SourceUnlockPolicy = raw
+                        .decode_postcard("source.unlock")
+                        .map_err(|error| binding("package.unlock_policy", error))?;
+                    PackageReader::open_source_locked(
+                        &request.package_bytes,
+                        &policy,
+                        "source.unlock",
+                        crypto,
+                    )
+                }
+            }
+            .map_err(|error| binding("package.open", error))?;
             let locale = match request.locale {
                 Some(locale) => locale,
                 None => {

@@ -12,7 +12,10 @@ from director_native_story import (
     _route_from_path,
     _score_openings,
     _split_reading_text,
+    trace_route_choice_witness,
+    _Lowering,
     DirectorNativeStoryError,
+    LAYER_SPECS,
 )
 
 
@@ -29,6 +32,107 @@ def _keyboard_events(key):
 
 
 class DirectorNativeStoryAutomationTests(unittest.TestCase):
+    def test_route_witness_reaches_next_movie_wait_and_tracks_authored_choice(self):
+        states = [
+            {
+                "state_id": "tsui.init",
+                "scenes": [{"commands": [{"command_id": "jump.y", "kind": "jump", "target": "director.y.0001"}]}],
+            },
+            {
+                "state_id": "director.y.0001",
+                "scenes": [{"commands": [{"command_id": "choice.y", "kind": "choice", "options": [
+                    {"option_id": "choice.y.0001.1", "target": "director.y.0002"},
+                    {"option_id": "choice.y.0001.2", "target": "director.y.0003"},
+                ]}]}],
+            },
+            {
+                "state_id": "director.y.0002",
+                "scenes": [{"commands": [{"command_id": "jump.k", "kind": "jump", "target": "director.k.0010"}]}],
+            },
+            {
+                "state_id": "director.y.0003",
+                "scenes": [{"commands": [{"command_id": "jump.bad", "kind": "jump", "target": "bad"}]}],
+            },
+            {
+                "state_id": "director.k.0010",
+                "scenes": [{"commands": [
+                    {"command_id": "timeline.k", "kind": "timeline", "duration_ms": 9000},
+                    {"command_id": "jump.k.next", "kind": "jump", "target": "director.k.0011"},
+                ]}],
+            },
+        ]
+
+        witness = trace_route_choice_witness(
+            states, ["choice.y.0001.1"], "K"
+        )
+        self.assertEqual(witness["boundary_state"], "director.k.0010")
+        self.assertEqual(witness["boundary_wait_command"], "timeline.k")
+        self.assertEqual(witness["consumed_choice_sequence"], ["choice.y.0001.1"])
+        choice = next(item for item in witness["transitions"] if item["choice_id"])
+        self.assertEqual(choice["choice_focus_index"], 1)
+        self.assertEqual(choice["choice_first_option_id"], "choice.y.0001.1")
+
+    def test_non_skippable_dialogue_is_awaited_and_physically_advanced(self):
+        events = _resolve_pending_wait_events(
+            [
+                {"type": "_skip_allowed", "allowed": False},
+                {"type": "_dialogue_advance", "command_id": "line.locked"},
+                {"type": "_pending_wait", "command_id": "choice.next"},
+            ]
+        )
+        self.assertEqual(events[0]["type"], "await")
+        self.assertEqual(events[0]["observation"]["key"], "vn.pending_wait_command")
+        self.assertEqual(events[1]["physical_key"], "Enter")
+        self.assertEqual(events[2]["physical_key"], "Enter")
+
+    def test_movie_entry_snapshot_preserves_initial_black_character_layer(self):
+        lowering = _Lowering(
+            [{"handler_id": "handler.fixture"}], {}, {}, {}
+        )
+        binding = {"asset_id": "tsui.asset.fixture", "height": 600}
+        lowering.stage_layouts = {
+            "Y": {
+                layer: {
+                    "x": 400,
+                    "y": 300,
+                    "width": 800,
+                    "height": 600,
+                    "initial_visible": layer in {"sky", "character"},
+                    **({"binding": binding} if layer in {"sky", "character"} else {}),
+                }
+                for layer in (
+                    "sky",
+                    "eye",
+                    "background",
+                    "character",
+                    "event",
+                    "shade",
+                    "dialogue_frame",
+                )
+            }
+        }
+        lowering.movie_entry_nodes = {"director.y.0010": "Y"}
+
+        commands = lowering._movie_entry_snapshot_commands(
+            {"node_id": "director.y.0010", "frame_actions": []}
+        )
+
+        shown = [command for command in commands if command["kind"] == "show"]
+        self.assertEqual([command["layer"] for command in shown], ["sky", "character"])
+        self.assertEqual(shown[1]["character_id"], "tsui.layer.character")
+        self.assertEqual(
+            [command["layer"] for command in commands if command["kind"] == "clear_layer"],
+            ["sky", "eye", "background", "character", "event", "video", "dialogue_frame"],
+        )
+        declared = {layer for layer, _, _ in LAYER_SPECS}
+        self.assertTrue(
+            {
+                command["layer"]
+                for command in commands
+                if command["kind"] == "clear_layer"
+            }.issubset(declared)
+        )
+
     def test_director_choice_visual_prefix_is_lowered_into_the_classic_view(self):
         self.assertEqual(_choice_display_text("\u3000\u3000◆fixture"), "fixture")
         with self.assertRaisesRegex(DirectorNativeStoryError, "visual prefix"):
@@ -36,7 +140,7 @@ class DirectorNativeStoryAutomationTests(unittest.TestCase):
 
     def test_director_gamma_space_shade_is_converted_to_linear_scene_alpha(self):
         self.assertEqual(_director_blend_to_linear_opacity(0), 0)
-        self.assertEqual(_director_blend_to_linear_opacity(70), 92)
+        self.assertEqual(_director_blend_to_linear_opacity(70), 91)
         self.assertEqual(_director_blend_to_linear_opacity(100), 100)
         with self.assertRaisesRegex(DirectorNativeStoryError, "outside zero"):
             _director_blend_to_linear_opacity(101)
@@ -91,6 +195,68 @@ class DirectorNativeStoryAutomationTests(unittest.TestCase):
 
         self.assertEqual(set(openings), {movie["entry_node"] for movie in movies})
         self.assertEqual(openings["director.y.0010"]["frames"][0]["delay_ms"], 9_000)
+
+    def test_score_opening_replaces_the_previous_channel_member(self):
+        lowering = _Lowering([{"handler_id": "handler.fixture"}], {}, {}, {})
+        binding = {"asset_id": "tsui.asset.fixture", "height": 600}
+        lowering.stage_layouts = {
+            "Y": {
+                layer: {
+                    "x": 400,
+                    "y": 300,
+                    "width": 800,
+                    "height": 600,
+                    "initial_visible": layer in {"sky", "character"},
+                    **({"binding": binding} if layer in {"sky", "character"} else {}),
+                }
+                for layer in (
+                    "sky",
+                    "eye",
+                    "background",
+                    "character",
+                    "event",
+                    "shade",
+                    "dialogue_frame",
+                )
+            }
+        }
+        lowering.movie_entry_nodes = {"director.y.0010": "Y"}
+        node = {
+            "node_id": "director.y.0010",
+            "flow": {"kind": "next", "target": "director.y.0011", "programs": []},
+        }
+        opening = {
+            "movie_id": "Y",
+            "frames": [
+                {
+                    "frame": frame,
+                    "delay_ms": 1,
+                    "sprite": {
+                        "x": 400,
+                        "y": 300,
+                        "width": 800,
+                        "height": 600,
+                        "binding": {"asset_id": f"tsui.asset.fixture.{frame}", "height": 600},
+                    },
+                }
+                for frame in (10, 11)
+            ],
+        }
+
+        lowering._lower_score_opening(node, opening)
+
+        frame_states = [
+            state
+            for state in lowering.states
+            if ".score." in state["state_id"]
+        ]
+        self.assertEqual(len(frame_states), 2)
+        for state in frame_states:
+            commands = state["scenes"][0]["commands"]
+            self.assertEqual(commands[0]["kind"], "clear_layer")
+            self.assertEqual(commands[0]["layer"], "event")
+            self.assertEqual(commands[1]["kind"], "preload")
+            self.assertEqual(commands[2]["kind"], "show")
 
     def test_reading_blocks_preserve_typed_surface_identity(self):
         operations = [

@@ -220,6 +220,8 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         platform: String,
         locale: String,
         package: String,
+        #[serde(default)]
+        source_unlock: Option<SourceUnlockConfig>,
         display: DisplayConfig,
         #[cfg(target_os = "windows")]
         #[serde(default)]
@@ -227,6 +229,12 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         #[serde(default)]
         ui_components: Option<serde_json::Value>,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct SourceUnlockConfig {
+        schema: String,
+        source_profile: String,
     }
     #[derive(Deserialize)]
     struct DisplayConfig {
@@ -279,7 +287,42 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     }
     let package_bytes = fs::read(resource_root.join(&config.package))?;
     let package_storage_hash = Hash256::from_sha256(&package_bytes).to_string();
-    let package = PackageReader::open(&package_bytes)?;
+    let container = astra_package::AstraContainerReader::new(&package_bytes)?;
+    let package = if container.has_section("source.unlock") {
+        let unlock = config
+            .source_unlock
+            .as_ref()
+            .ok_or("source-locked package requires Player source_unlock config")?;
+        if unlock.schema != "astra.player_source_unlock.v1" {
+            return Err("unsupported Player source unlock config".into());
+        }
+        astra_platform::validate_safe_relative_path(&unlock.source_profile)?;
+        let policy: astra_package::SourceUnlockPolicy =
+            container.decode_postcard("source.unlock")?;
+        let source_manifest: astra_package::SourceVerificationManifest =
+            serde_json::from_slice(&fs::read(resource_root.join(&unlock.source_profile))?)?;
+        #[cfg(target_os = "windows")]
+        {
+            use astra_platform::UserAuthorizedSourceDirectoryProvider;
+            let source = astra_platform_windows::WindowsSourceDirectoryProvider
+                .authorize_source_directory()?;
+            astra_player_vn::open_source_locked_package(
+                &package_bytes,
+                &policy,
+                &source_manifest,
+                &source,
+            )?
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            return Err("source-locked package is only enabled for the Windows RC".into());
+        }
+    } else {
+        if config.source_unlock.is_some() {
+            return Err("Player source_unlock config requires a source-locked package".into());
+        }
+        PackageReader::open(&package_bytes)?
+    };
     let manifest: PackageManifest = package.container().decode_postcard("package.manifest")?;
     if manifest.profile != config.profile {
         return Err("Player config/package profile mismatch".into());

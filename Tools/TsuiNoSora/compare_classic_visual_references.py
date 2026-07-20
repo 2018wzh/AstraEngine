@@ -16,6 +16,20 @@ POLICY_SCHEMA = "tsuinosora.classic_visual_comparison_policy.v3"
 NODE_MAP_SCHEMA = "tsuinosora.classic_visual_node_map.v3"
 REPORT_SCHEMA = "tsuinosora.classic_visual_comparison_report.v3"
 CAPTURE_NORMALIZATION_ID = "windows_175pct_bilinear_then_lanczos_v1"
+LEGACY_DESKTOP_CAPTURE_REFERENCE_IDS = {
+    "TSUI1999-UI-001",
+    "TSUI1999-UI-002",
+    "TSUI1999-UI-004",
+    "TSUI1999-UI-006",
+    "TSUI1999-UI-007",
+    "TSUI1999-UI-008",
+    "TSUI1999-UI-010",
+    "TSUI1999-UI-011",
+    "TSUI1999-UI-012",
+    "TSUI1999-UI-013",
+    "TSUI1999-UI-014",
+    "TSUI1999-UI-015",
+}
 COLOR_TOLERANCE_PROFILE_ID = "capture_palette_v1"
 COLOR_TOLERANCE_PROFILE = {
     "reason_code": "capture_color_state_unproven",
@@ -51,7 +65,7 @@ def _image(path: Path) -> np.ndarray:
 
 def _capture_normalization(policy: dict) -> tuple[set[str], str]:
     normalization = policy.get("capture_normalization")
-    expected_ids = {f"TSUI1999-UI-{index:03d}" for index in range(1, 16)}
+    expected_ids = LEGACY_DESKTOP_CAPTURE_REFERENCE_IDS
     if not isinstance(normalization, dict) or (
         normalization.get("id") != CAPTURE_NORMALIZATION_ID
         or normalization.get("source_size") != [800, 600]
@@ -474,9 +488,37 @@ def _entries_by_id(node_map: dict) -> dict[str, dict]:
             if reference_validation.get("status") not in {
                 "verified",
                 "recapture_required",
-                "color_tolerance_approved",
             }:
                 raise ComparisonError("TSUI_CLASSIC_VISUAL_REFERENCE_VALIDATION: unsupported status")
+            if reference_validation.get("status") == "verified" and "method" in reference_validation:
+                validation_method = reference_validation.get("method")
+                if validation_method == "byte_identical_stable_pair":
+                    valid_reference = (
+                        isinstance(reference_validation.get("capture_pair_sha256"), str)
+                        and len(reference_validation["capture_pair_sha256"]) == 71
+                        and reference_validation["capture_pair_sha256"]
+                        == identity["reference_sha256"]
+                    )
+                elif validation_method == "score_bitmap_resource_closure":
+                    locator = identity.get("locator")
+                    resource_hashes = identity.get("resource_hashes")
+                    valid_reference = (
+                        reference_id == "TSUI1999-UI-002"
+                        and reference_validation.get("capture_sha256")
+                        == identity["reference_sha256"]
+                        and isinstance(locator, dict)
+                        and locator.get("method") == "score_bitmap_text"
+                        and reference_validation.get("resource_sha256")
+                        == locator.get("content_sha256")
+                        and isinstance(resource_hashes, list)
+                        and reference_validation.get("resource_sha256") in resource_hashes
+                    )
+                else:
+                    valid_reference = False
+                if not valid_reference:
+                    raise ComparisonError(
+                        "TSUI_CLASSIC_VISUAL_REFERENCE_VALIDATION: reference stability evidence is incomplete"
+                    )
             if reference_validation.get("status") == "recapture_required":
                 if reference_validation.get("reason_code") not in {
                     "source_presentation_contradiction",
@@ -486,12 +528,14 @@ def _entries_by_id(node_map: dict) -> dict[str, dict]:
                     raise ComparisonError(
                         "TSUI_CLASSIC_VISUAL_REFERENCE_VALIDATION: recapture evidence is incomplete"
                     )
-            if reference_validation.get("status") == "color_tolerance_approved":
+            color_approval = entry.get("color_tolerance_approval")
+            if color_approval is not None:
                 if (
-                    reference_validation.get("reason_code")
+                    not isinstance(color_approval, dict)
+                    or color_approval.get("reason_code")
                     != COLOR_TOLERANCE_PROFILE["reason_code"]
-                    or reference_validation.get("profile_id") != COLOR_TOLERANCE_PROFILE_ID
-                    or reference_validation.get("evidence")
+                    or color_approval.get("profile_id") != COLOR_TOLERANCE_PROFILE_ID
+                    or color_approval.get("evidence")
                     != "same_node_resource_closure_and_stable_gpu_capture"
                 ):
                     raise ComparisonError(
@@ -612,6 +656,7 @@ def compare(
         metrics["max_geometry_delta_px"] = geometry_delta
         comparison_class = entry.get("comparison_class")
         reference_validation = entry.get("reference_validation", {"status": "verified"})
+        color_approval = entry.get("color_tolerance_approval")
         color_tolerance_id = check.get("color_tolerance")
         color_tolerance = None
         if color_tolerance_id is not None:
@@ -621,14 +666,14 @@ def compare(
                 )
             if (
                 comparison_class != "same_node"
-                or reference_validation.get("status") != "color_tolerance_approved"
-                or reference_validation.get("profile_id") != color_tolerance_id
+                or not isinstance(color_approval, dict)
+                or color_approval.get("profile_id") != color_tolerance_id
             ):
                 raise ComparisonError(
                     "TSUI_CLASSIC_VISUAL_COLOR_TOLERANCE_BINDING: tolerance is not approved by node evidence"
                 )
             color_tolerance = color_profiles[color_tolerance_id]
-        elif reference_validation.get("status") == "color_tolerance_approved":
+        elif color_approval is not None:
             raise ComparisonError(
                 "TSUI_CLASSIC_VISUAL_COLOR_TOLERANCE_BINDING: approved node is missing a policy profile"
             )

@@ -18,10 +18,11 @@ class DirectorNativeStoryError(ValueError):
     """Raised when typed Director behavior cannot be represented exactly."""
 
 
-# Recovered from two independent same-node captures of GENERAL.tshadehalf.
-# ProjectorRays exports the indexed BITD without its Director palette, so the
-# displayed neutral cannot be derived from the standalone PNG payload.
-DIRECTOR_SHADE_COLOR = "222420ff"
+# Recovered by comparing the stable pre-choice and choice captures at the same
+# Score state.  Every non-text pixel follows Director's authored 70% black
+# device-RGB blend; the previous dark-neutral approximation left a visible
+# color floor and could not reproduce that relation.
+DIRECTOR_SHADE_COLOR = "000000ff"
 DIRECTOR_CHOICE_PREFIX = "\u3000\u3000◆"
 
 
@@ -56,8 +57,6 @@ def _director_blend_to_linear_opacity(opacity):
         raise DirectorNativeStoryError("Director blend opacity is outside zero through one hundred")
     if opacity in {0, 100}:
         return opacity
-    if opacity == 70:
-        return 92
     visible_srgb = 1.0 - opacity / 100.0
 
     def srgb_to_linear(value):
@@ -80,6 +79,7 @@ LAYER_SPECS = (
     ("background", "sprite", 10),
     ("character", "sprite", 20),
     ("event", "cg", 30),
+    ("dialogue_frame", "sprite", 40),
     ("video", "video", 50),
 )
 MECHANISM_REPLACEMENTS = {
@@ -169,12 +169,8 @@ class _Lowering:
     def lower(self, program):
         self.stage_layouts = _stage_layouts(program.get("stage_layouts"))
         self.score_openings = _score_openings(program.get("score_openings"), program["movies"])
-        self.score_opening_continuations = {
-            f"director.{opening['movie_id'].lower()}.{opening['next_frame']:04d}"
-            for opening in self.score_openings.values()
-        }
-        self.stage_layout = self.stage_layouts["Y"]
         movie_entries = {movie["movie_id"]: movie["entry_node"] for movie in program["movies"]}
+        self.movie_entry_nodes = {entry: movie_id for movie_id, entry in movie_entries.items()}
         self.choice_option_counts = {
             node["node_id"]: len(node["choice"]["options"])
             for movie in program["movies"]
@@ -241,6 +237,14 @@ class _Lowering:
                 commands.append(self._command("clear_layer", node=node, layer="event", duration_ms=0))
             else:
                 binding = timing_sprite["binding"]
+                if sprite is not None:
+                    # Director score sprites replace the member occupying the
+                    # same channel. A retained Scene2D layer otherwise keeps
+                    # pixels from earlier bitmap members and produces ghosted
+                    # cumulative opening text.
+                    commands.append(
+                        self._command("clear_layer", node=node, layer="event", duration_ms=0)
+                    )
                 commands.extend(
                     [
                         self._command("preload", node=node, asset_id=binding["asset_id"]),
@@ -282,18 +286,9 @@ class _Lowering:
             target = self._add_generated_state(
                 f"{node['node_id']}.score.{frame['frame']:04d}", commands
             )
-        clear_commands = [
-            self._command("clear_layer", node=node, layer=layer, duration_ms=0)
-            for layer in ("sky", "eye", "background", "character", "event", "video")
-        ]
-        clear_commands.extend(
-            [
-                self._command("backdrop", node=node, color="000000ff"),
-                self._command("shade", node=node, opacity=0),
-                self._command("jump", node=node, target=target),
-            ]
-        )
-        self._add_state(node["node_id"], clear_commands)
+        entry_commands = self._movie_entry_snapshot_commands(node)
+        entry_commands.append(self._command("jump", node=node, target=target))
+        self._add_state(node["node_id"], entry_commands)
         self.mechanism_replacements["director_score_opening"] = (
             "astra_typed_stage_sequence_with_blocking_timeline_waits"
         )
@@ -304,27 +299,6 @@ class _Lowering:
         ]
         for layer, kind, z in LAYER_SPECS:
             commands.append(self._command("layer", layer=layer, layer_kind=kind, z=z, blend="normal", clip="stage"))
-        sky = self.stage_layout["sky"]
-        commands.extend(
-            [
-                self._command(
-                    "show",
-                    character_id="tsui.layer.sky",
-                    asset_id=sky["binding"]["asset_id"],
-                    layer="sky",
-                    at="center",
-                    fit="native",
-                    opacity=100,
-                ),
-                self._command(
-                    "move",
-                    character_id="tsui.layer.sky",
-                    x=sky["x"],
-                    y=sky["y"] + sky["height"] // 2,
-                    duration_ms=0,
-                ),
-            ]
-        )
         for path, value in (("global.episode", 1), ("global.mode", 0), ("global.panty", 0)):
             commands.append(self._mutate(path, value))
         for day in DAY_FLAGS:
@@ -347,11 +321,10 @@ class _Lowering:
                 operation["kind"] == "external_dispatch" for operation in authoritative
             ),
         )
-        commands = self._presentation_commands(node)
-        if node["node_id"] in self.score_opening_continuations:
-            # The original Score keeps its black stage behind the continuation
-            # frame. Clear it only after that frame's authored wait has completed.
-            commands.append(self._command("backdrop", node=node, color="00000000"))
+        commands = []
+        if node["node_id"] in self.movie_entry_nodes:
+            commands.extend(self._movie_entry_snapshot_commands(node))
+        commands.extend(self._presentation_commands(node))
         choice = node.get("choice")
         if choice is not None:
             if authoritative:
@@ -758,6 +731,54 @@ class _Lowering:
                 raise DirectorNativeStoryError(f"scene semantic {kind!r} has no NativeVN lowering")
         return commands
 
+    def _movie_entry_snapshot_commands(self, node):
+        movie_id = self.movie_entry_nodes.get(node["node_id"])
+        if movie_id is None:
+            raise DirectorNativeStoryError("movie entry snapshot requested for a non-entry node")
+        layouts = self.stage_layouts[movie_id]
+        commands = [
+            self._command("clear_layer", node=node, layer=layer, duration_ms=0)
+            for layer in ("sky", "eye", "background", "character", "event", "video", "dialogue_frame")
+        ]
+        commands.extend(
+            [
+                self._command("backdrop", node=node, color="000000ff"),
+                self._command("shade", node=node, opacity=0),
+            ]
+        )
+        for layer in ("sky", "character"):
+            layout = layouts[layer]
+            if not layout["initial_visible"]:
+                raise DirectorNativeStoryError("Director initial visible layer contract is inconsistent")
+            binding = layout["binding"]
+            commands.extend(
+                [
+                    self._command("preload", node=node, asset_id=binding["asset_id"]),
+                    self._command(
+                        "show",
+                        node=node,
+                        character_id=f"tsui.layer.{layer}",
+                        asset_id=binding["asset_id"],
+                        layer=layer,
+                        at="center",
+                        fit="native",
+                        opacity=100,
+                    ),
+                    self._command(
+                        "move",
+                        node=node,
+                        character_id=f"tsui.layer.{layer}",
+                        x=layout["x"],
+                        y=_native_center_y(binding, layout),
+                        duration_ms=0,
+                    ),
+                ]
+            )
+        self.mechanism_replacements["director_movie_entry_score_snapshot"] = (
+            "astra_typed_stage_layer_initialization"
+        )
+        return commands
+
     def _mutate(self, path, value):
         return self._command("mutate", path=path, op="set", value=value)
 
@@ -1080,6 +1101,79 @@ def _derive_route_automation(states, program):
     return routes
 
 
+def trace_route_choice_witness(states, choice_sequence, boundary_movie):
+    """Trace one authored choice witness until the next movie's first wait.
+
+    This keeps route acceptance tied to the same deterministic simulator used by
+    conversion coverage.  The returned transitions still contain abstract input
+    markers; a profile-specific acceptance builder must lower them to physical
+    input without writing Runtime state directly.
+    """
+    if not isinstance(boundary_movie, str) or len(boundary_movie) != 1 or not boundary_movie.isupper():
+        raise DirectorNativeStoryError("route witness boundary movie is invalid")
+    if not isinstance(choice_sequence, list) or not all(
+        isinstance(choice_id, str) and choice_id for choice_id in choice_sequence
+    ):
+        raise DirectorNativeStoryError("route witness choice sequence is invalid")
+    state_map = {state["state_id"]: state for state in states}
+    current = _sim_key("tsui.init", {})
+    choice_cursor = 0
+    transitions = []
+    boundary_wait = None
+    boundary_state = None
+    visited = 0
+    while boundary_wait is None:
+        source_state_id = current[0]
+        outgoing, terminal_step = _simulate_state(current, state_map)
+        if terminal_step is not None:
+            raise DirectorNativeStoryError("route witness reached a terminal before its movie boundary")
+        if not outgoing:
+            raise DirectorNativeStoryError("route witness reached a state without a successor")
+        selected = None
+        choice_outgoing = [transition for transition in outgoing if transition["choice_id"] is not None]
+        if choice_outgoing:
+            if len(choice_outgoing) != len(outgoing):
+                raise DirectorNativeStoryError("route witness mixes choice and deterministic successors")
+            if choice_cursor >= len(choice_sequence):
+                raise DirectorNativeStoryError("route witness exhausted its authored choice sequence")
+            expected = choice_sequence[choice_cursor]
+            matches = [transition for transition in choice_outgoing if transition["choice_id"] == expected]
+            if len(matches) != 1:
+                raise DirectorNativeStoryError("route witness choice is unavailable or ambiguous")
+            selected = dict(matches[0])
+            selected["choice_focus_index"] = choice_outgoing.index(matches[0]) + 1
+            selected["choice_first_option_id"] = choice_outgoing[0]["choice_id"]
+            choice_cursor += 1
+        elif len(outgoing) == 1:
+            selected = outgoing[0]
+        else:
+            raise DirectorNativeStoryError("route witness has ambiguous deterministic successors")
+        transitions.append(selected)
+        current = selected["successor"]
+        visited += 1
+        if visited > 100_000:
+            raise DirectorNativeStoryError("route witness state budget exceeded")
+        state_id = current[0]
+        if state_id.startswith(f"director.{boundary_movie.lower()}."):
+            for event in selected["events"]:
+                if event["type"] == "_pending_wait":
+                    boundary_wait = event["command_id"]
+                    boundary_state = source_state_id
+                    break
+            if boundary_wait is None:
+                # Continue through non-interactive entry snapshot states until
+                # the boundary movie exposes its first authoritative wait.
+                continue
+    if choice_cursor == 0:
+        raise DirectorNativeStoryError("route witness did not exercise any authored choice")
+    return {
+        "transitions": transitions,
+        "boundary_state": boundary_state,
+        "boundary_wait_command": boundary_wait,
+        "consumed_choice_sequence": choice_sequence[:choice_cursor],
+    }
+
+
 def _simulate_state(key, state_map):
     state_id, variables_tuple = key
     variables = dict(variables_tuple)
@@ -1151,6 +1245,8 @@ def _simulate_state(key, state_map):
             return result, None
         elif kind == "text":
             events.append({"type": "_dialogue_advance", "command_id": command["command_id"]})
+        elif kind == "skip_allowed":
+            events.append({"type": "_skip_allowed", "allowed": command["allowed"]})
         elif kind == "input_wait":
             events.append({"type": "_pending_wait", "command_id": command["command_id"]})
             events.extend(_key_events("Enter"))
@@ -1210,7 +1306,6 @@ def _simulate_state(key, state_map):
             "layer_visibility",
             "backdrop",
             "shade",
-            "skip_allowed",
             "transition",
             "shake",
         }:
@@ -1368,13 +1463,33 @@ def _resolve_pending_wait_events(events):
         raise DirectorNativeStoryError("completed audio fence is missing its continuation marker")
 
     expanded = []
+    skip_allowed = True
     for event in normalized:
+        if event["type"] == "_skip_allowed":
+            skip_allowed = event["allowed"]
+            continue
         # The route preamble enables Skip All through the real modern Quick Panel.
-        # Dialogue waits are not stable route checkpoints after that action: the
-        # runtime may consume an entire dialogue run before another input arrives.
-        # Choices and media/input fences remain explicit checkpoints below.
-        if event["type"] != "_dialogue_advance":
-            expanded.append(event)
+        # Skippable dialogue waits are not stable route checkpoints after that
+        # action.  Authored non-skippable dialogue remains a physical input
+        # boundary and must be awaited before Enter is delivered.
+        if event["type"] == "_dialogue_advance":
+            if not skip_allowed:
+                value = json.dumps(event["command_id"], ensure_ascii=False, separators=(",", ":"))
+                expanded.append(
+                    {
+                        "type": "await",
+                        "observation": {
+                            "kind": "equals",
+                            "key": "vn.pending_wait_command",
+                            "value_hash": f"sha256:{sha256(value.encode('utf-8')).hexdigest()}",
+                        },
+                        "timeout_ticks": 14_400,
+                        "continue_at_match": True,
+                    }
+                )
+                expanded.extend(_key_events("Enter"))
+            continue
+        expanded.append(event)
 
     resolved_reversed = []
     next_wait_command_id = None
@@ -1431,10 +1546,14 @@ def _stage_layouts(value):
                 raise DirectorNativeStoryError("Director stage layout geometry is invalid")
             if layout["width"] <= 0 or layout["height"] <= 0:
                 raise DirectorNativeStoryError("Director stage layout size is invalid")
-            if layer in {"sky", "dialogue_frame"}:
+            if not isinstance(layout.get("initial_visible"), bool):
+                raise DirectorNativeStoryError("Director stage layout visibility is invalid")
+            if layer in {"sky", "character", "dialogue_frame"}:
                 binding = layout.get("binding")
                 if not isinstance(binding, dict) or not isinstance(binding.get("asset_id"), str):
                     raise DirectorNativeStoryError("Director stage layout asset binding is missing")
+            if layout["initial_visible"] != (layer in {"sky", "character"}):
+                raise DirectorNativeStoryError("Director stage layout initial visibility is inconsistent")
         if record["movie_id"] in result:
             raise DirectorNativeStoryError("Director stage layout movie is duplicated")
         result[record["movie_id"]] = layers

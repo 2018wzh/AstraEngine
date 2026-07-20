@@ -43,6 +43,24 @@ impl PackageReader {
         Self::finish_open(AstraContainerReader::new(bytes)?)
     }
 
+    pub fn open_with_crypto(
+        bytes: &[u8],
+        crypto: Arc<dyn crate::ContainerCryptoProvider>,
+    ) -> Result<Self, ContainerError> {
+        Self::finish_open(AstraContainerReader::new(bytes)?.with_crypto_provider(crypto))
+    }
+
+    pub fn open_source_locked(
+        bytes: &[u8],
+        policy: &crate::SourceUnlockPolicy,
+        bootstrap_section_id: &str,
+        crypto: Arc<dyn crate::ContainerCryptoProvider>,
+    ) -> Result<Self, ContainerError> {
+        let container = AstraContainerReader::new(bytes)?;
+        crate::validate_source_locked_container(&container, policy, bootstrap_section_id)?;
+        Self::finish_open(container.with_crypto_provider(crypto))
+    }
+
     pub fn open_with_expected_content_root(
         bytes: &[u8],
         expected_content_root: Hash256,

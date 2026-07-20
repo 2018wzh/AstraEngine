@@ -27,7 +27,7 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
         .start(profile.into())
         .await
         .unwrap();
-    let mut product = NativeVnProductAdapterFactory
+    let mut product = NativeVnProductAdapterFactory::default()
         .open(ProductOpenRequest {
             package_bytes: Arc::from(package),
             profile: "classic".into(),

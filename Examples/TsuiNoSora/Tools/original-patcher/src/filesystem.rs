@@ -198,22 +198,77 @@ fn preserve_file_metadata(source: &Path, target: &Path) -> PatchResult<()> {
             error,
         )
     })?;
-    fs::set_permissions(target, metadata.permissions()).map_err(|error| {
-        PatchError::io(
-            "TSUI_PATCH_FILE_METADATA_FAILED",
-            "copy file permissions",
-            error,
-        )
-    })?;
-    let accessed = FileTime::from_last_access_time(&metadata);
+    make_metadata_writable(target)?;
     let modified = FileTime::from_last_modification_time(&metadata);
+    let accessed = normalized_access_time(FileTime::from_last_access_time(&metadata), modified);
     set_file_times(target, accessed, modified).map_err(|error| {
         PatchError::io(
             "TSUI_PATCH_FILE_METADATA_FAILED",
             "copy file timestamps",
             error,
         )
+    })?;
+    // Optical media and archival source trees commonly mark every file read-only.
+    // Apply that bit only after all metadata writes, otherwise Windows rejects the
+    // timestamp update on the newly copied destination file.
+    fs::set_permissions(target, metadata.permissions()).map_err(|error| {
+        PatchError::io(
+            "TSUI_PATCH_FILE_METADATA_FAILED",
+            "copy file permissions",
+            error,
+        )
     })
+}
+
+#[cfg(windows)]
+#[allow(clippy::permissions_set_readonly_false)]
+fn make_metadata_writable(target: &Path) -> PatchResult<()> {
+    // On Windows this only clears FILE_ATTRIBUTE_READONLY. The Unix branch is
+    // compiled separately and never calls Permissions::set_readonly(false),
+    // which would otherwise broaden all write bits and trigger this lint.
+    let mut permissions = fs::metadata(target)
+        .map_err(|error| {
+            PatchError::io(
+                "TSUI_PATCH_FILE_METADATA_FAILED",
+                "read copied file permissions",
+                error,
+            )
+        })?
+        .permissions();
+    if permissions.readonly() {
+        permissions.set_readonly(false);
+        fs::set_permissions(target, permissions).map_err(|error| {
+            PatchError::io(
+                "TSUI_PATCH_FILE_METADATA_FAILED",
+                "prepare copied file metadata",
+                error,
+            )
+        })?;
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn make_metadata_writable(_target: &Path) -> PatchResult<()> {
+    Ok(())
+}
+
+#[cfg(windows)]
+fn normalized_access_time(accessed: FileTime, modified: FileTime) -> FileTime {
+    const WINDOWS_FILETIME_EPOCH_UNIX_SECONDS: i64 = -11_644_473_600;
+    if accessed.unix_seconds() <= WINDOWS_FILETIME_EPOCH_UNIX_SECONDS {
+        // ISO 9660 media commonly exposes an unspecified access time as the
+        // Windows FILETIME epoch. SetFileTime rejects that zero FILETIME, so use
+        // the source modification time as the deterministic access time.
+        modified
+    } else {
+        accessed
+    }
+}
+
+#[cfg(not(windows))]
+fn normalized_access_time(accessed: FileTime, _modified: FileTime) -> FileTime {
+    accessed
 }
 
 fn safe_relative(root: &Path, path: &Path) -> PatchResult<String> {
@@ -288,5 +343,38 @@ mod tests {
         let path = temp.path().join("large.bin");
         fs::write(&path, vec![0x5a; 2 * 1024 * 1024]).expect("large fixture");
         assert_eq!(hash_file(&path).expect("hash").len(), 64);
+    }
+
+    #[test]
+    fn copy_tree_preserves_read_only_files_after_timestamp_copy() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        fs::create_dir(&source).expect("source");
+        let source_file = source.join("disc.bin");
+        fs::write(&source_file, b"disc").expect("fixture");
+        let mut permissions = fs::metadata(&source_file).expect("metadata").permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&source_file, permissions).expect("read-only fixture");
+
+        copy_tree(&source, &destination).expect("copy read-only source tree");
+
+        let copied = destination.join("disc.bin");
+        assert_eq!(fs::read(copied.as_path()).expect("copied bytes"), b"disc");
+        assert!(
+            fs::metadata(copied)
+                .expect("copied metadata")
+                .permissions()
+                .readonly(),
+            "source read-only permission must be preserved"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalizes_unspecified_optical_media_access_time() {
+        let unspecified = FileTime::from_unix_time(-11_644_473_600, 0);
+        let modified = FileTime::from_unix_time(932_054_400, 0);
+        assert_eq!(normalized_access_time(unspecified, modified), modified);
     }
 }

@@ -124,9 +124,16 @@ class DirectorAssetBindingTests(unittest.TestCase):
         detailed, report = build_asset_binding_ir(source, semantics, resources)
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["reference_count"], 4)
+        self.assertEqual(report["reference_count"], 6)
         self.assertEqual(report["unique_asset_count"], 3)
         self.assertEqual(report["binding_kind_counts"]["score_opening_media"], 1)
+        self.assertEqual(report["binding_kind_counts"]["score_initial_media"], 2)
+        stage = detailed["stage_layouts"][0]["layers"]
+        self.assertTrue(stage["sky"]["initial_visible"])
+        self.assertTrue(stage["character"]["initial_visible"])
+        self.assertFalse(stage["background"]["initial_visible"])
+        self.assertEqual(stage["character"]["binding"]["director_member"], "background")
+        self.assertIn("asset_id", stage["character"]["binding"])
         self.assertTrue(all("asset_id" in item["binding"] for item in detailed["scenes"][0]["operations"]))
         self.assertTrue(
             detailed["scenes"][0]["operations"][1]["binding"]["native_path"].endswith(".mp3")

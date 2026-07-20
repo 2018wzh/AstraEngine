@@ -79,4 +79,6 @@ left=1220 top=674 right=2620 bottom=1724
 | POPUP、Config、Load、Save | `011/012/013/014` | GPU checkpoint 与 modal geometry/underlay 比较通过 |
 | Exit、隐藏测试菜单 | 共享 `011` 的系统窗口视觉语法 | 物理输入 GPU checkpoint 通过；原始截图集中没有独立画面，行为由 Score/Lingo typed effect 证据约束 |
 
-2026-07-19 的 v43 同包硬件比较复用同一份已通过的 18-checkpoint GPU capture identity。剧情参考先按正文或选项的脱敏内容 hash 搜索完整 typed IR，再用 Score frame、handler 和资源闭包消歧；Opening 的 bitmap text 则按 Score channel 与 bitmap hash 定位。15 项 v3 比较中 13 项通过。`006` 的人物 anchor、visible bbox、越框、z-order 与 frame-space 几何均成立，同节点资源闭包和连续 GPU 帧稳定，因此按项目所有者明确批准的 `capture_palette_v1` 通过；approval 文件 hash 与 tolerance-set hash 都进入报告，固定阈值为 SSIM `0.75`、感知误差 `0.12`，不能调整。`005/009` 仍因 source/presentation 冲突或 transition 缺证据保持 blocking，且不具备色彩容差资格。模型已并排检查 reference、capture、mask、absolute diff 与 perceptual heatmap。自动失败不能由模型覆盖。Windows E3、当前 package 的完整路线矩阵和 formal signoff 仍独立保持 `IN_PROGRESS`。
+2026-07-19 的 v43 结果只保留为历史证据，其中 UI015 的几何偏差为 0，但整幅画面的色阶不同，SSIM 为 0.723907、感知误差为 0.110397，不能按字体差异豁免。2026-07-20 的 private RC 已用新增连续帧关闭 `005/009` 的 source/presentation 缺口，并重新生成 13 项 Y 范围像素预检；模型已查看全部 reference、capture、mask、absolute diff 与 perceptual heatmap，自动失败没有被覆盖。
+
+本轮 RC 只保证 Y，因此视觉门禁固定为 UI001、UI002、UI003、UI005 至 UI014，共 13 项。UI004/UI015 属于未保证的 K movie，只保留研究状态。13 项像素预检均已通过；UI002 的原版与 capture 整体文字 bbox 完全一致，差异只落在 384 个字形 raster 像素，该项仍使用覆盖率上限 `0.08` 的紧边界文字 mask。`006` 仍是唯一可使用 `capture_palette_v1` 色彩容差的节点。模型已查看全部五联图，自动失败未被覆盖。30 张输入和 12 组 A/B 稳定复帧已闭合，权威 manifest 与 node map 已更新。Windows E3 显式延期；最终同身份重跑和 formal signoff 保持 `IN_PROGRESS`。

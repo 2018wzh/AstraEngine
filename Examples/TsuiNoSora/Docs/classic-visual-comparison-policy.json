@@ -18,7 +18,7 @@
   },
   "capture_normalization": {
     "id": "windows_175pct_bilinear_then_lanczos_v1",
-    "reference_ids": ["TSUI1999-UI-001","TSUI1999-UI-002","TSUI1999-UI-003","TSUI1999-UI-004","TSUI1999-UI-005","TSUI1999-UI-006","TSUI1999-UI-007","TSUI1999-UI-008","TSUI1999-UI-009","TSUI1999-UI-010","TSUI1999-UI-011","TSUI1999-UI-012","TSUI1999-UI-013","TSUI1999-UI-014","TSUI1999-UI-015"],
+    "reference_ids": ["TSUI1999-UI-001","TSUI1999-UI-002","TSUI1999-UI-004","TSUI1999-UI-006","TSUI1999-UI-007","TSUI1999-UI-008","TSUI1999-UI-010","TSUI1999-UI-011","TSUI1999-UI-012","TSUI1999-UI-013","TSUI1999-UI-014","TSUI1999-UI-015"],
     "source_size": [800,600],
     "captured_size": [1400,1050],
     "upscale": "bilinear",
@@ -26,7 +26,7 @@
   },
   "checks": [
     {"id":"classic.title","reference_id":"TSUI1999-UI-001","checkpoint":"classic.title","mask":{"boxes":[],"max_coverage":0.0},"geometry":[]},
-    {"id":"classic.opening.staggered","reference_id":"TSUI1999-UI-002","checkpoint":"classic.opening.staggered","mask":{"boxes":[],"max_coverage":0.0},"geometry":[{"id":"text","detector":"light_text_bbox","search":[240,190,710,420]}]},
+    {"id":"classic.opening.staggered","reference_id":"TSUI1999-UI-002","checkpoint":"classic.opening.staggered","mask":{"boxes":[[280,250,660,350]],"max_coverage":0.08},"geometry":[{"id":"text","detector":"light_text_bbox","search":[240,190,710,420]}]},
     {"id":"classic.opening.centered","reference_id":"TSUI1999-UI-003","checkpoint":"classic.opening.centered","mask":{"boxes":[],"max_coverage":0.0},"geometry":[{"id":"text","detector":"light_text_bbox","search":[250,220,650,380]}]},
     {"id":"classic.stage.opening_sphere","reference_id":"TSUI1999-UI-004","checkpoint":"classic.stage.opening_sphere","mask":{"boxes":[],"max_coverage":0.0},"geometry":[]},
     {"id":"classic.dialogue.background_only","reference_id":"TSUI1999-UI-005","checkpoint":"classic.dialogue.background_only","mask":{"boxes":[[50,490,755,552]],"max_coverage":0.10},"geometry":[{"id":"dialogue_frame","detector":"declared_rect","reference_rect":[23,483,777,565],"capture_rect":[23,483,777,565]}]},

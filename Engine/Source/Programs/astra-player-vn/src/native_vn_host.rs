@@ -3162,15 +3162,10 @@ impl NativeVnHostCommandSource {
             self.height,
         )?;
 
-        let mut next_texture_ids = scene_texture_ids(&next_scene_draw);
-        next_texture_ids.extend(
-            next_stage_director
-                .state()
-                .preloaded_assets
-                .iter()
-                .filter(|asset| self.textures.contains_key(*asset))
-                .cloned(),
-        );
+        // Preload is package/decode readiness, not an unbounded GPU residency
+        // lease.  Only resources referenced by the retained scene stay live on
+        // the surface; a later draw uploads a prevalidated asset on demand.
+        let next_texture_ids = scene_texture_ids(&next_scene_draw);
         let mut lifecycle = Vec::new();
         for asset_id in self.live_texture_ids.difference(&next_texture_ids) {
             lifecycle.push(SceneCommand::ReleaseResource {
