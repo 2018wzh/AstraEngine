@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import urllib.request
 import zipfile
 
@@ -55,7 +56,7 @@ def run(command: list[str], *, cwd: pathlib.Path) -> str:
 def validate_lock(lock: dict[str, object]) -> None:
     if lock.get("schema") != "astra.ui_toolchain_lock.v1":
         raise RuntimeError("ASTRA_UI_TOOLCHAIN_LOCK_SCHEMA_INVALID")
-    for tool in ("node", "luau", "jco"):
+    for tool in ("node", "luau", "portable_luau_runtime", "jco"):
         if not isinstance(lock.get(tool), dict):
             raise RuntimeError(f"ASTRA_UI_TOOLCHAIN_LOCK_MISSING: {tool}")
 
@@ -140,7 +141,9 @@ def analyze_luau(root: pathlib.Path, analyzer: pathlib.Path) -> None:
         run([str(analyzer), "--mode=strict", str(harness)], cwd=root)
 
 
-def supply_chain_preflight(root: pathlib.Path, target: str) -> dict[str, object]:
+def supply_chain_preflight(
+    root: pathlib.Path, lock: dict[str, object], target: str
+) -> dict[str, object]:
     metadata = json.loads(run(["cargo", "metadata", "--locked", "--format-version", "1"], cwd=root))
     packages = metadata.get("packages")
     if not isinstance(packages, list):
@@ -172,6 +175,58 @@ def supply_chain_preflight(root: pathlib.Path, target: str) -> dict[str, object]
             "source_sha256": "sha256:" + hashlib.sha256(source.encode()).hexdigest(),
             "license": package["license"],
         }
+    portable = lock["portable_luau_runtime"]
+    assert isinstance(portable, dict)
+    portable_packages = portable.get("packages")
+    if not isinstance(portable_packages, dict) or not portable_packages:
+        raise RuntimeError("ASTRA_UI_SUPPLY_CHAIN_PORTABLE_LUAU_LOCK_INVALID")
+    cargo_lock = tomllib.loads((root / "Cargo.lock").read_text(encoding="utf-8"))
+    locked_packages = {
+        (str(package.get("name")), str(package.get("version"))): package
+        for package in cargo_lock.get("package", [])
+        if isinstance(package, dict)
+    }
+    portable_evidence: dict[str, object] = {}
+    for name, checksum in sorted(portable_packages.items()):
+        matches = by_name.get(str(name), [])
+        if len(matches) != 1:
+            raise RuntimeError(f"ASTRA_UI_SUPPLY_CHAIN_DUPLICATE_OR_MISSING: {name}")
+        package = matches[0]
+        version = str(portable["version"])
+        if (
+            package.get("version") != version
+            or package.get("source") != portable["source"]
+            or package.get("license") != portable["license"]
+        ):
+            raise RuntimeError(f"ASTRA_UI_SUPPLY_CHAIN_IDENTITY_MISMATCH: {name}")
+        locked = locked_packages.get((str(name), version))
+        if not isinstance(locked, dict) or locked.get("checksum") != checksum:
+            raise RuntimeError(f"ASTRA_UI_SUPPLY_CHAIN_CHECKSUM_MISMATCH: {name}")
+        portable_evidence[str(name)] = {
+            "version": version,
+            "source_sha256": "sha256:" + hashlib.sha256(str(portable["source"]).encode()).hexdigest(),
+            "license": portable["license"],
+            "crate_checksum": f"sha256:{checksum}",
+        }
+    evidence.update(portable_evidence)
+    portable_graph = run(
+        [
+            "cargo",
+            "tree",
+            "-p",
+            "astra-player-web",
+            "--target",
+            "wasm32-unknown-unknown",
+        ],
+        cwd=root,
+    )
+    leaked = sorted(
+        name
+        for name in ("mlua", "abi_stable", "libloading")
+        if any(line.lstrip("│├└─ ").startswith(f"{name} ") for line in portable_graph.splitlines())
+    )
+    if leaked:
+        raise RuntimeError("ASTRA_UI_SUPPLY_CHAIN_WEB_NATIVE_LEAK: " + ",".join(leaked))
     if target == "windows-x86_64" and "windows" not in by_name:
         raise RuntimeError("ASTRA_UI_SUPPLY_CHAIN_WINDOWS_UIA_DEPENDENCY_MISSING")
     installed_targets = set(run(["rustup", "target", "list", "--installed"], cwd=root).splitlines())
@@ -220,7 +275,7 @@ def main() -> int:
     jco, jco_evidence = provision_jco(root, lock)
     if not args.skip_analysis:
         analyze_luau(root, analyzer)
-    supply_chain = supply_chain_preflight(root, target)
+    supply_chain = supply_chain_preflight(root, lock, target)
     report: dict[str, object] = {
         "schema": SCHEMA,
         "target": target,

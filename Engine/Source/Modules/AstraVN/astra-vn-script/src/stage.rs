@@ -22,7 +22,9 @@ impl FixedScalar {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 pub struct StageViewport {
     pub width: u32,
     pub height: u32,
@@ -114,12 +116,13 @@ pub struct AudioCue {
     pub sync: VnAudioSync,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VnAudioControlAction {
     Pause,
     Resume,
     Stop,
+    FadeStop { duration_ms: u32, fence: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -170,6 +173,9 @@ pub enum TimelineCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum StageCommand {
+    Preload {
+        asset: String,
+    },
     Configure {
         viewport: StageViewport,
         safe_area: AspectRatio,
@@ -194,12 +200,32 @@ pub enum StageCommand {
         pose: Option<String>,
         layer: String,
         placement: StagePlacement,
+        fit: StageFitMode,
+        opacity: FixedScalar,
         preset: Option<String>,
     },
     Hide {
         id: String,
         preset: Option<String>,
         duration_ms: u32,
+    },
+    ClearLayer {
+        layer: String,
+        duration_ms: u32,
+    },
+    SetLayerVisibility {
+        layer: String,
+        visible: bool,
+    },
+    Backdrop {
+        color: [u8; 4],
+    },
+    Shade {
+        color: [u8; 4],
+        opacity: FixedScalar,
+    },
+    SetSkipAllowed {
+        allowed: bool,
     },
     Move {
         id: String,
@@ -228,6 +254,10 @@ pub enum StageCommand {
     },
     Audio(AudioCue),
     AudioControl(AudioControl),
+    SetAudioBusEnabled {
+        bus: VnAudioBus,
+        enabled: bool,
+    },
     Transition {
         preset: String,
         duration_ms: u32,
@@ -247,14 +277,29 @@ pub enum StageCommand {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StageFitMode {
+    /// Preserve the established VN portrait behavior: fit to 90% of the stage height.
+    ContainHeight,
+    /// Preserve the asset's design-pixel size in stage coordinates.
+    Native,
+}
+
 impl StageCommand {
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::Preload { .. } => "preload",
             Self::Configure { .. } => "stage",
             Self::DeclareLayer { .. } => "layer",
             Self::Background { .. } => "background",
             Self::Show { .. } => "show",
             Self::Hide { .. } => "hide",
+            Self::ClearLayer { .. } => "clear_layer",
+            Self::SetLayerVisibility { .. } => "layer_visibility",
+            Self::Backdrop { .. } => "backdrop",
+            Self::Shade { .. } => "shade",
+            Self::SetSkipAllowed { .. } => "skip_allowed",
             Self::Move { .. } => "move",
             Self::Camera { .. } => "camera",
             Self::Movie { .. } => "movie",
@@ -265,6 +310,7 @@ impl StageCommand {
                 VnAudioBus::Movie => "movie_audio",
             },
             Self::AudioControl(_) => "audio",
+            Self::SetAudioBusEnabled { .. } => "audio_bus_enabled",
             Self::Transition { .. } => "transition",
             Self::Shake { .. } => "shake",
             Self::Timeline(_) => "timeline",

@@ -59,6 +59,30 @@ async fn platform_sink_keeps_native_save_handles_out_of_results() {
 }
 
 #[astra_headless_test::tokio_test]
+async fn platform_sink_lists_sorted_save_slots_without_native_storage_details() {
+    let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
+    let (client, mut backend, _events) = host_channel(profile, 8, 8).unwrap();
+    let backend_task = tokio::spawn(async move {
+        match backend.next_command().await.unwrap() {
+            HostCommand::ListSaves { reply } => reply
+                .send(Ok(vec!["slot.01".into(), "slot.quick".into()]))
+                .unwrap(),
+            _ => panic!("unexpected command"),
+        }
+    });
+    let batch =
+        PlayerHostCommandBatch::new(vec![PlayerHostCommand::ListSaves { sequence: 1 }]).unwrap();
+    let mut executor = PlayerHostCommandExecutor::new(PlatformCommandSink::new(client));
+    assert_eq!(
+        executor.execute_batch(batch).await.unwrap(),
+        [PlayerHostCommandResult::SaveList {
+            slots: vec!["slot.01".into(), "slot.quick".into()]
+        }]
+    );
+    backend_task.await.unwrap();
+}
+
+#[astra_headless_test::tokio_test]
 async fn platform_sink_exposes_bounded_audio_queue_state_without_native_handles() {
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let (client, mut backend, _events) = host_channel(profile, 8, 8).unwrap();

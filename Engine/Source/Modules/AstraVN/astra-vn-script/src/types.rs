@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::CommandSourceMap;
 use crate::VnError;
 
+pub const VN_RUNTIME_STATE_SCHEMA: &str = "astra.vn.runtime_state.v2";
+pub const VN_RUNTIME_STATE_SCHEMA_MAJOR: u16 = 2;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AstraSource {
     pub path: String,
@@ -52,6 +55,38 @@ pub struct CompiledVnProject {
     pub theme_ids: BTreeSet<String>,
     pub themes: BTreeMap<String, UiThemeManifest>,
     pub component_ids: BTreeSet<String>,
+    pub system_ui_profiles: BTreeMap<String, SystemUiProfilePolicy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SystemUiProfilePolicy {
+    pub profile_id: String,
+    pub save_slot_ids: Vec<String>,
+    pub quick_slot_id: Option<String>,
+    pub allowed_pages: BTreeSet<SystemPageKind>,
+    pub reading_modes: BTreeSet<ReadingMode>,
+    pub audio_toggle: bool,
+    pub save_completion: SaveCompletionPolicy,
+    pub custom_action_ids: BTreeSet<String>,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SaveCompletionPolicy {
+    Stay,
+    ReturnSystem,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadingMode {
+    Hidden,
+    Manual,
+    FastForward,
 }
 
 impl std::ops::Deref for CompiledVnProject {
@@ -169,6 +204,15 @@ pub enum CompiledCommand {
         id: String,
         target: String,
     },
+    Branch {
+        id: String,
+        scope: String,
+        key: String,
+        op: BranchOp,
+        value: i64,
+        then_target: String,
+        else_target: String,
+    },
     Call {
         id: String,
         target: String,
@@ -197,6 +241,9 @@ pub enum CompiledCommand {
         id: String,
         fence: String,
     },
+    InputWait {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -204,6 +251,16 @@ pub struct ChoiceOption {
     pub id: String,
     pub key: String,
     pub target: String,
+    #[serde(default)]
+    pub enabled_when: Option<VariableCondition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VariableCondition {
+    pub scope: String,
+    pub key: String,
+    pub op: BranchOp,
+    pub value: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -214,12 +271,24 @@ pub enum MutationOp {
     Sub,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BranchOp {
+    Eq,
+    NotEq,
+    Less,
+    LessEq,
+    Greater,
+    GreaterEq,
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SystemPageKind {
     Title,
+    QuickPanel,
     Save,
     Load,
     Config,
@@ -229,6 +298,7 @@ pub enum SystemPageKind {
     RouteChart,
     Backlog,
     LocalizationPreview,
+    Custom,
     Unknown,
 }
 
@@ -236,6 +306,7 @@ impl SystemPageKind {
     pub fn parse(value: &str) -> Self {
         match value {
             "title" => Self::Title,
+            "quick_panel" => Self::QuickPanel,
             "save" => Self::Save,
             "load" => Self::Load,
             "config" => Self::Config,
@@ -245,6 +316,7 @@ impl SystemPageKind {
             "route_chart" | "chart" => Self::RouteChart,
             "backlog" => Self::Backlog,
             "localization_preview" | "locale_preview" => Self::LocalizationPreview,
+            "custom" => Self::Custom,
             _ => Self::Unknown,
         }
     }
@@ -254,6 +326,31 @@ impl SystemPageKind {
 pub struct SystemStoryManifest {
     pub schema: String,
     pub entries: BTreeMap<SystemPageKind, SystemStoryEntry>,
+    pub actions: BTreeMap<String, SystemActionProgram>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SystemActionProgram {
+    pub id: String,
+    pub effects: Vec<SystemActionEffect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemActionEffect {
+    Mutate {
+        scope: String,
+        key: String,
+        op: MutationOp,
+        value: i64,
+    },
+    Jump {
+        target: String,
+    },
+    SwitchSystemPage {
+        page: SystemPageKind,
+    },
+    ReturnSystem,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -282,14 +379,30 @@ pub enum SystemStoryValidationStatus {
 impl SystemStoryManifest {
     pub fn empty() -> Self {
         Self {
-            schema: "astra.vn.system_story_manifest.v1".to_string(),
+            schema: "astra.vn.system_story_manifest.v2".to_string(),
             entries: BTreeMap::new(),
+            actions: BTreeMap::new(),
         }
     }
 
     pub fn from_compiled(compiled: &CompiledStory) -> Result<Self, VnError> {
         let mut entries = BTreeMap::new();
+        let system_stories = compiled
+            .stories
+            .iter()
+            .filter(|story| story.name == "system")
+            .collect::<Vec<_>>();
+        if system_stories.len() > 1 {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_SYSTEM_STORY_DUPLICATE",
+                "multiple stories are named system",
+            ));
+        }
+        let system_story_id = system_stories.first().map(|story| story.id.as_str());
         for state in compiled.states.values() {
+            if system_story_id.is_some_and(|story_id| state.story_id != story_id) {
+                continue;
+            }
             for command in state.scenes.iter().flat_map(|scene| &scene.commands) {
                 let CompiledCommand::SystemPage { id, page, policy } = command else {
                     continue;
@@ -300,17 +413,27 @@ impl SystemStoryManifest {
                         format!("system page {id} has unknown kind"),
                     ));
                 }
-                entries.entry(*page).or_insert_with(|| SystemStoryEntry {
+                let entry = SystemStoryEntry {
                     page: *page,
                     story_id: state.story_id.clone(),
                     state_id: state.id.clone(),
                     source_id: id.clone(),
                     policy: policy.clone(),
-                });
+                };
+                if let Some(previous) = entries.insert(*page, entry) {
+                    return Err(VnError::diagnostic(
+                        "ASTRA_VN_SYSTEM_PAGE_DUPLICATE",
+                        format!(
+                            "system page {page:?} is defined by both {} and {id}",
+                            previous.source_id
+                        ),
+                    ));
+                }
             }
         }
         Ok(Self {
             entries,
+            actions: compiled.system_story_manifest.actions.clone(),
             ..Self::empty()
         })
     }
@@ -459,6 +582,8 @@ pub struct VnRuntimeState {
     #[serde(default)]
     pub route_flags: BTreeMap<String, VnRouteFlag>,
     #[serde(default)]
+    pub wait_sequence: u64,
+    #[serde(default)]
     pub pending_wait: Option<VnWaitState>,
 }
 
@@ -493,6 +618,7 @@ pub enum VnRouteFlagKind {
     Launch,
     Choice,
     Jump,
+    Branch,
     Call,
     Return,
 }
@@ -509,6 +635,9 @@ pub struct VnSystemState {
     pub gallery_unlocks: BTreeSet<String>,
     #[serde(default)]
     pub replay_unlocks: BTreeSet<String>,
+    pub reading_mode: ReadingMode,
+    pub audio_enabled: bool,
+    pub skip_allowed: bool,
 }
 
 impl Default for VnSystemState {
@@ -519,6 +648,9 @@ impl Default for VnSystemState {
             config: BTreeMap::new(),
             gallery_unlocks: BTreeSet::new(),
             replay_unlocks: BTreeSet::new(),
+            reading_mode: ReadingMode::Manual,
+            audio_enabled: true,
+            skip_allowed: true,
         }
     }
 }
@@ -568,6 +700,7 @@ pub struct PendingChoice {
     pub choice_id: String,
     pub key: String,
     pub options: Vec<ChoiceOption>,
+    pub enabled_option_ids: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -647,6 +780,7 @@ pub enum VnWaitKind {
     TimelineComplete,
     MovieEnd,
     VoiceEnd,
+    Input,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -702,10 +836,14 @@ pub enum VnPlayerCommand {
     Advance,
     Choose { option_id: String },
     OpenSystem { page: SystemPageKind },
+    SwitchSystemPage { page: SystemPageKind },
     ReturnSystem,
     ReplayVoice { voice: String },
     SetAuto { enabled: bool },
     SetSkip { mode: SkipMode },
+    SetReadingMode { mode: ReadingMode },
+    SetAudioEnabled { enabled: bool },
+    InvokeSystemAction { action_id: String },
     SetConfig { key: String, value: String },
     StartReplay { replay_id: String },
     PreviewGallery { item_id: String },

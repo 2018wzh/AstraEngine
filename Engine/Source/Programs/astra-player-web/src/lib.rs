@@ -738,7 +738,7 @@ mod browser {
             return Ok(());
         };
         match request {
-            astra_player_vn::VnUiHostRequest::Save { slot_id } => {
+            astra_player_vn::VnUiHostRequest::Save { slot_id, .. } => {
                 *save_transaction_id = save_transaction_id.checked_add(1).ok_or_else(|| {
                     web_player_error(
                         "player.save.transaction",
@@ -752,9 +752,15 @@ mod browser {
                     PlayerHostResourceId(*save_transaction_id),
                 )
                 .await?;
-                source
+                if let Some(batch) = source
                     .mark_save_committed(&slot_id)
-                    .map_err(|error| web_player_error("player.save.commit_state", error))
+                    .map_err(|error| web_player_error("player.save.commit_state", error))?
+                {
+                    executor.execute_batch(batch).await.map_err(|error| {
+                        web_player_error("player.save.commit_completion", error)
+                    })?;
+                }
+                Ok(())
             }
             astra_player_vn::VnUiHostRequest::Load { slot_id } => {
                 execute_web_load(source, executor, &slot_id).await

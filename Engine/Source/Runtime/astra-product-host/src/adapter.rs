@@ -30,6 +30,10 @@ pub struct ProductOpenRequest {
     pub height: u32,
     pub max_video_frames: u64,
     pub max_decode_output_bytes: u64,
+    /// Whether the adapter must retain the full canonical mixed-audio timeline.
+    /// Manifest-only behavior runs disable this while preserving mixer state,
+    /// meters, completion fences, and deterministic observations.
+    pub retain_audio_timeline: bool,
     pub platform: PlatformHostClient,
 }
 

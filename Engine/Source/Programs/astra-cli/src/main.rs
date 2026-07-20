@@ -19,9 +19,10 @@ use astra_observability::{
     init_host, ConsoleFormat, CrashReportingMode, HostObservabilityConfig, ObservabilityGuard,
 };
 use astra_package::{
-    CookSummaryManifest, MigrationPolicy, PackageBuildRequest, PackageBuilder, PackageManifest,
-    PackageReader, ScenarioReference, ScenarioRefsManifest, SectionCodec, SectionPayload,
-    CURRENT_CONTAINER_VERSION,
+    AuthorizedSourceReader, ContainerError, CookSummaryManifest, MigrationPolicy,
+    PackageBuildRequest, PackageBuilder, PackageManifest, PackageReader, ScenarioReference,
+    ScenarioRefsManifest, SectionCodec, SectionPayload, SourceFingerprintCryptoProvider,
+    SourceUnlockPolicy, SourceVerificationManifest, CURRENT_CONTAINER_VERSION,
 };
 use astra_platform::{
     migrate_host_profile_json, validate_host_profile, PlatformCapabilityReport,
@@ -198,6 +199,12 @@ enum PackageCommand {
         out: PathBuf,
         #[arg(long)]
         target: Option<String>,
+        #[arg(long, requires_all = ["source_profile", "source_root"])]
+        source_unlock_policy: Option<PathBuf>,
+        #[arg(long, requires_all = ["source_unlock_policy", "source_root"])]
+        source_profile: Option<PathBuf>,
+        #[arg(long, requires_all = ["source_unlock_policy", "source_profile"])]
+        source_root: Option<PathBuf>,
     },
     Bundle {
         package: PathBuf,
@@ -227,6 +234,10 @@ enum PackageCommand {
         android_arm64_library: Option<PathBuf>,
         #[arg(long)]
         android_x86_64_library: Option<PathBuf>,
+        #[arg(long, requires = "source_root")]
+        source_profile: Option<PathBuf>,
+        #[arg(long, requires = "source_profile")]
+        source_root: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = ReportFormat::Yaml)]
         format: ReportFormat,
     },
@@ -456,9 +467,22 @@ fn main() -> Result<(), CliError> {
                 cooked,
                 out,
                 target,
+                source_unlock_policy,
+                source_profile,
+                source_root,
             } => {
                 let manifest = read_cook_manifest(&cooked)?;
-                let package = build_package_from_cooked(&cooked, manifest, target.as_deref())?;
+                let source_lock = SourceLockBuildInputs::from_paths(
+                    source_unlock_policy.as_deref(),
+                    source_profile.as_deref(),
+                    source_root.as_deref(),
+                )?;
+                let package = build_package_from_cooked(
+                    &cooked,
+                    manifest,
+                    target.as_deref(),
+                    source_lock.as_ref(),
+                )?;
                 if let Some(parent) = out.parent() {
                     fs::create_dir_all(parent)?;
                 }
@@ -479,6 +503,8 @@ fn main() -> Result<(), CliError> {
                 web_player_glue,
                 android_arm64_library,
                 android_x86_64_library,
+                source_profile,
+                source_root,
                 format,
             } => {
                 let artifacts = BundleArtifactInputs {
@@ -491,6 +517,8 @@ fn main() -> Result<(), CliError> {
                     web_player_glue,
                     android_arm64_library,
                     android_x86_64_library,
+                    source_profile,
+                    source_root,
                 };
                 let manifest = build_standalone_bundle(
                     &package,
@@ -753,7 +781,7 @@ fn compile_ui_preview_package(
         cooked.clone(),
         &CookCancellationToken::default(),
     )?;
-    Ok(build_package_from_cooked(&cooked, manifest, Some(target))?.into_bytes())
+    Ok(build_package_from_cooked(&cooked, manifest, Some(target), None)?.into_bytes())
 }
 
 fn render_ui_snapshot(
@@ -1319,7 +1347,7 @@ struct StandaloneBundleManifest {
     files: Vec<StandaloneBundleFile>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 struct BundleArtifactInputs {
     windows_player: Option<PathBuf>,
     linux_player: Option<PathBuf>,
@@ -1330,6 +1358,89 @@ struct BundleArtifactInputs {
     web_player_glue: Option<PathBuf>,
     android_arm64_library: Option<PathBuf>,
     android_x86_64_library: Option<PathBuf>,
+    source_profile: Option<PathBuf>,
+    source_root: Option<PathBuf>,
+}
+
+struct SourceLockBuildInputs {
+    policy: SourceUnlockPolicy,
+    crypto: SourceFingerprintCryptoProvider,
+}
+
+impl SourceLockBuildInputs {
+    fn from_paths(
+        policy_path: Option<&Path>,
+        profile_path: Option<&Path>,
+        source_root: Option<&Path>,
+    ) -> Result<Option<Self>, CliError> {
+        match (policy_path, profile_path, source_root) {
+            (None, None, None) => Ok(None),
+            (Some(policy_path), Some(profile_path), Some(source_root)) => {
+                let policy: SourceUnlockPolicy = serde_json::from_slice(&fs::read(policy_path)?)?;
+                let profile: SourceVerificationManifest =
+                    serde_json::from_slice(&fs::read(profile_path)?)?;
+                let mut reader = FilesystemSourceReader::open(source_root)?;
+                let crypto =
+                    SourceFingerprintCryptoProvider::unlock(&policy, &profile, &mut reader)?;
+                Ok(Some(Self { policy, crypto }))
+            }
+            _ => {
+                Err("source-locked package build requires policy, profile, and source root".into())
+            }
+        }
+    }
+}
+
+struct FilesystemSourceReader {
+    root: PathBuf,
+}
+
+impl FilesystemSourceReader {
+    fn open(root: &Path) -> Result<Self, CliError> {
+        let root = fs::canonicalize(root)?;
+        if !root.is_dir() {
+            return Err("authorized source root is not a directory".into());
+        }
+        Ok(Self { root })
+    }
+
+    fn resolve(&self, relative_path: &str) -> Result<PathBuf, ContainerError> {
+        astra_platform::validate_safe_relative_path(relative_path)
+            .map_err(|_| ContainerError::Crypto("authorized source path is unsafe".into()))?;
+        let path = fs::canonicalize(self.root.join(relative_path))
+            .map_err(|_| ContainerError::Crypto("authorized source entry is unavailable".into()))?;
+        if !path.starts_with(&self.root) || !path.is_file() {
+            return Err(ContainerError::Crypto(
+                "authorized source entry escapes the selected root".into(),
+            ));
+        }
+        Ok(path)
+    }
+}
+
+impl AuthorizedSourceReader for FilesystemSourceReader {
+    fn stat_relative(&mut self, relative_path: &str) -> Result<u64, ContainerError> {
+        fs::metadata(self.resolve(relative_path)?)
+            .map(|metadata| metadata.len())
+            .map_err(|_| ContainerError::Crypto("authorized source stat failed".into()))
+    }
+
+    fn read_relative(
+        &mut self,
+        relative_path: &str,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, ContainerError> {
+        let path = self.resolve(relative_path)?;
+        let length = fs::metadata(&path)
+            .map_err(|_| ContainerError::Crypto("authorized source stat failed".into()))?
+            .len();
+        if length > max_bytes || length > usize::MAX as u64 {
+            return Err(ContainerError::Crypto(
+                "authorized source read exceeds its byte budget".into(),
+            ));
+        }
+        fs::read(path).map_err(|_| ContainerError::Crypto("authorized source read failed".into()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2316,7 +2427,9 @@ fn collect_asset_sidecars(
 fn asset_role_for_path(path: &str, asset_type: &str) -> String {
     let normalized = path.replace('\\', "/").to_ascii_lowercase();
     let parts = normalized.split('/').collect::<Vec<_>>();
-    if parts.contains(&"backgrounds") {
+    if asset_type.starts_with("font.") || parts.contains(&"fonts") {
+        "font".to_string()
+    } else if parts.contains(&"backgrounds") {
         "background".to_string()
     } else if parts.contains(&"characters") {
         "character_sprite".to_string()
@@ -2333,8 +2446,6 @@ fn asset_role_for_path(path: &str, asset_type: &str) -> String {
         "audio".to_string()
     } else if parts.contains(&"movies") {
         "movie".to_string()
-    } else if parts.contains(&"fonts") {
-        "font".to_string()
     } else if asset_type.starts_with("image.") {
         "image".to_string()
     } else if asset_type.starts_with("audio.") {
@@ -2792,6 +2903,7 @@ fn build_package_from_cooked(
     cooked: &std::path::Path,
     manifest: CookManifest,
     target: Option<&str>,
+    source_lock: Option<&SourceLockBuildInputs>,
 ) -> Result<astra_package::ContainerBlob, CliError> {
     let target = target.unwrap_or(&manifest.target);
     if target != manifest.target {
@@ -2844,7 +2956,49 @@ fn build_package_from_cooked(
         &request.cooked_assets,
     )?)?;
     request.release_summary = br#"{"schema":"astra.release_summary.v1","status":"built"}"#.to_vec();
-    PackageBuilder::build(request).map_err(|err| err.to_string().into())
+    if let Some(source_lock) = source_lock {
+        validate_source_lock_coverage(&request, &source_lock.policy)?;
+        request.source_unlock_policy = Some(source_lock.policy.clone());
+        PackageBuilder::build_with_crypto(request, &source_lock.crypto)
+            .map_err(|err| err.to_string().into())
+    } else {
+        PackageBuilder::build(request).map_err(|err| err.to_string().into())
+    }
+}
+
+fn validate_source_lock_coverage(
+    request: &PackageBuildRequest,
+    policy: &SourceUnlockPolicy,
+) -> Result<(), CliError> {
+    let required = request
+        .cooked_assets
+        .iter()
+        .chain(request.extra_sections.iter())
+        .map(|section| section.id.clone())
+        .chain(
+            [
+                "cook.summary",
+                "asset.vfs_manifest",
+                "asset.catalog",
+                "media.manifest",
+                "scenario.refs",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        )
+        .collect::<std::collections::BTreeSet<_>>();
+    let missing = required
+        .difference(&policy.protected_sections)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(format!(
+            "source unlock policy leaves product payload sections plaintext: {}",
+            missing.join(",")
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn production_package_request(
@@ -2958,6 +3112,7 @@ fn production_package_request(
         scenario_refs: serde_json::to_vec(&ScenarioRefsManifest::empty())?,
         platform_eligibility: vec![],
         extra_sections: vec![],
+        source_unlock_policy: None,
     })
 }
 
@@ -3152,12 +3307,21 @@ fn section_codec_name(codec: &SectionCodec) -> &'static str {
 }
 
 fn artifact_media_kind(artifact: &CookedArtifactRef) -> String {
-    artifact
-        .asset_role
-        .as_deref()
-        .or(artifact.asset_type.as_deref())
-        .unwrap_or("data")
-        .to_string()
+    if artifact.font.is_some()
+        || artifact
+            .asset_type
+            .as_deref()
+            .is_some_and(|asset_type| asset_type.starts_with("font."))
+    {
+        "font".to_string()
+    } else {
+        artifact
+            .asset_role
+            .as_deref()
+            .or(artifact.asset_type.as_deref())
+            .unwrap_or("data")
+            .to_string()
+    }
 }
 
 fn asset_tags_for_artifact(artifact: &CookedArtifactRef) -> Vec<&str> {
@@ -3222,7 +3386,50 @@ fn build_standalone_bundle_into(
 ) -> Result<StandaloneBundleManifest, CliError> {
     let platform_name = platform_id_name(platform);
     let package_bytes = fs::read(package)?;
-    let reader = PackageReader::open(&package_bytes)?;
+    let raw_container = astra_package::AstraContainerReader::new(&package_bytes)?;
+    let source_locked = raw_container.has_section("source.unlock");
+    if source_locked && platform != PlatformId::Windows {
+        return Err("source-locked private RC bundles are limited to Windows".into());
+    }
+    let source_profile_bundle_path = "source/source-profile.json";
+    let source_profile_bytes = match (
+        source_locked,
+        artifacts.source_profile.as_deref(),
+        artifacts.source_root.as_deref(),
+    ) {
+        (false, None, None) => None,
+        (false, _, _) => {
+            return Err("source profile/root require a source-locked package".into());
+        }
+        (true, Some(profile_path), Some(_)) => Some(fs::read(profile_path)?),
+        (true, _, _) => {
+            return Err("source-locked bundle requires --source-profile and --source-root".into());
+        }
+    };
+    let reader = if source_locked {
+        let policy: SourceUnlockPolicy = raw_container.decode_postcard("source.unlock")?;
+        let profile: SourceVerificationManifest = serde_json::from_slice(
+            source_profile_bytes
+                .as_deref()
+                .ok_or("source profile bytes are unavailable")?,
+        )?;
+        let mut source_reader = FilesystemSourceReader::open(
+            artifacts
+                .source_root
+                .as_deref()
+                .ok_or("source root is unavailable")?,
+        )?;
+        let crypto =
+            SourceFingerprintCryptoProvider::unlock(&policy, &profile, &mut source_reader)?;
+        PackageReader::open_source_locked(
+            &package_bytes,
+            &policy,
+            "source.unlock",
+            std::sync::Arc::new(crypto),
+        )?
+    } else {
+        PackageReader::open(&package_bytes)?
+    };
     let package_manifest: PackageManifest =
         reader.container().decode_postcard("package.manifest")?;
     if !reader.has_section("platform.profiles") {
@@ -3257,12 +3464,29 @@ fn build_standalone_bundle_into(
     fs::create_dir_all(out.join("package"))?;
     let bundled_package = out.join("package").join("nativevn.astrapkg");
     fs::write(&bundled_package, &package_bytes)?;
-    let scenario_bindings = package_scenario_refs(&reader)?;
+    let scenario_bindings = if source_locked {
+        Vec::new()
+    } else {
+        package_scenario_refs(&reader)?
+    };
     let mut files = vec![bundle_file(
         "package/nativevn.astrapkg",
         "package",
         &package_bytes,
     )];
+    if let Some(profile_bytes) = source_profile_bytes.as_deref() {
+        let relative = validate_bundle_relative_path(source_profile_bundle_path)?;
+        let destination = out.join(&relative);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&destination, profile_bytes)?;
+        files.push(bundle_file(
+            source_profile_bundle_path,
+            "source_verification_profile",
+            profile_bytes,
+        ));
+    }
     let mut mount_policy = bundle_mount_policy(&reader, out, &mut files)?;
     let mut bundle_checks = Vec::new();
     let mut crash_reporter_ref = None;
@@ -3349,6 +3573,7 @@ fn build_standalone_bundle_into(
                 &display_config,
                 &locale_config,
                 ui_components.as_ref(),
+                source_locked.then_some(source_profile_bundle_path),
             )?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
@@ -3380,6 +3605,7 @@ fn build_standalone_bundle_into(
                 &display_config,
                 &locale_config,
                 ui_components.as_ref(),
+                source_locked.then_some(source_profile_bundle_path),
             )?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
@@ -3443,6 +3669,7 @@ fn build_standalone_bundle_into(
                 &display_config,
                 &locale_config,
                 ui_components.as_ref(),
+                source_locked.then_some(source_profile_bundle_path),
             )?;
             fs::write(resources.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
@@ -3499,6 +3726,7 @@ fn build_standalone_bundle_into(
                 &display_config,
                 &locale_config,
                 ui_components.as_ref(),
+                source_locked.then_some(source_profile_bundle_path),
             )?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
@@ -3587,6 +3815,7 @@ fn build_standalone_bundle_into(
                 &display_config,
                 &locale_config,
                 ui_components.as_ref(),
+                source_locked.then_some(source_profile_bundle_path),
             )?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
@@ -3942,6 +4171,7 @@ fn player_config_bytes(
     display_config: &Option<PlayerDisplayConfig>,
     locale_config: &PlayerLocaleConfig,
     ui_components: Option<&serde_json::Value>,
+    source_unlock_profile: Option<&str>,
 ) -> Result<Vec<u8>, CliError> {
     let observability = if platform_name == "windows" {
         serde_json::json!({
@@ -3972,6 +4202,12 @@ fn player_config_bytes(
     }
     if let Some(components) = ui_components {
         config["ui_components"] = components.clone();
+    }
+    if let Some(source_profile) = source_unlock_profile {
+        config["source_unlock"] = serde_json::json!({
+            "schema": "astra.player_source_unlock.v1",
+            "source_profile": source_profile
+        });
     }
     serde_json::to_vec_pretty(&config).map_err(Into::into)
 }
@@ -4200,5 +4436,42 @@ mod ui_cli_tests {
         assert!(validate_universal_macho(&binary).is_ok());
         binary[7] = 1;
         assert!(validate_universal_macho(&binary).is_err());
+    }
+
+    #[astra_headless_test::test]
+    fn source_lock_policy_must_cover_every_product_payload_section() {
+        let request = PackageBuildRequest::fixture(
+            "com.example.locked",
+            "classic",
+            vec![SectionPayload::raw(
+                "vn.story",
+                "astra.vn.compiled_project.v6",
+                vec![1, 2, 3],
+            )],
+        );
+        let mut policy = SourceUnlockPolicy {
+            schema: "astra.source_unlock_policy.v1".into(),
+            source_profile: "fixture.original.v1".into(),
+            verification_manifest_hash: Hash256::from_sha256(b"manifest"),
+            crypto_provider: astra_package::SOURCE_FINGERPRINT_PROVIDER_ID.into(),
+            protected_sections: std::collections::BTreeSet::new(),
+            max_files: 1,
+            max_file_bytes: 1024,
+            max_total_bytes: 1024,
+        };
+        assert!(validate_source_lock_coverage(&request, &policy).is_err());
+        policy.protected_sections.extend(
+            [
+                "vn.story",
+                "cook.summary",
+                "asset.vfs_manifest",
+                "asset.catalog",
+                "media.manifest",
+                "scenario.refs",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        );
+        validate_source_lock_coverage(&request, &policy).unwrap();
     }
 }

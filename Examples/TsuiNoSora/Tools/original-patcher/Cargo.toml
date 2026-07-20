@@ -1,0 +1,42 @@
+[package]
+name = "tsuinosora-original-patcher"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+
+[[bin]]
+name = "TsuiNoSoraOriginalPatcher"
+path = "src/main.rs"
+
+[lib]
+doctest = false
+
+[dependencies]
+binrw.workspace = true
+clap.workspace = true
+configparser.workspace = true
+dunce.workspace = true
+filetime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+wait-timeout.workspace = true
+walkdir.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+libloading.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[build-dependencies]
+winresource.workspace = true

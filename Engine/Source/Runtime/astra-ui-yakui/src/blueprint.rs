@@ -12,9 +12,7 @@ use astra_ui_core::{
 use yakui_core::geometry::{Color, UVec2, Vec2};
 use yakui_core::paint::{Texture, TextureFormat};
 use yakui_core::{Alignment, CrossAxisAlignment, MainAxisSize, ManagedTextureId, WidgetId};
-use yakui_widgets::widgets::{
-    Align, Checkbox, CountGrid, Image, List, NineSlice, Pad, Slider, Stack,
-};
+use yakui_widgets::widgets::{Align, CountGrid, Image, List, NineSlice, Pad, Slider, Stack};
 
 use crate::{
     AstraNodeProps, AstraNodeWidget, AstraTextMeasureRequest, AstraTextMeasurer, BoundedLru,
@@ -47,10 +45,13 @@ pub struct BlueprintYakuiRenderer {
     accessibility_actions: BTreeMap<String, Vec<(UiEventBinding, Option<UiValue>)>>,
     text_inputs: BTreeMap<String, TextInputState>,
     focused_text_input: Option<String>,
+    semantic_focus_override: Option<String>,
+    backend_focus_request: Option<String>,
     text_input_consumed_sequences: BTreeSet<u64>,
     accessibility_dispatched_events: BTreeSet<(String, String)>,
     image_resources: BTreeMap<String, TextureFrame>,
     managed_textures: BoundedLru<String, ManagedTextureId>,
+    pending_removed_managed_textures: Vec<ManagedTextureId>,
     text_measurer: Option<Arc<dyn AstraTextMeasurer>>,
 }
 
@@ -65,10 +66,13 @@ impl BlueprintYakuiRenderer {
             accessibility_actions: BTreeMap::new(),
             text_inputs: BTreeMap::new(),
             focused_text_input: None,
+            semantic_focus_override: None,
+            backend_focus_request: None,
             text_input_consumed_sequences: BTreeSet::new(),
             accessibility_dispatched_events: BTreeSet::new(),
             image_resources: BTreeMap::new(),
             managed_textures: BoundedLru::new(MAX_MANAGED_IMAGE_TEXTURES, MAX_TEXTURE_BYTES)?,
+            pending_removed_managed_textures: Vec::new(),
             text_measurer: None,
         })
     }
@@ -81,6 +85,27 @@ impl BlueprintYakuiRenderer {
     pub fn with_image_resources(mut self, resources: BTreeMap<String, TextureFrame>) -> Self {
         self.image_resources = resources;
         self
+    }
+
+    pub fn upsert_image_resource(
+        &mut self,
+        asset: String,
+        frame: TextureFrame,
+    ) -> Result<(), UiValidationError> {
+        validate_image_resource(&asset, &frame)?;
+        self.image_resources.insert(asset.clone(), frame);
+        if let Some(managed) = self.managed_textures.remove(&asset) {
+            self.pending_removed_managed_textures.push(managed);
+        }
+        Ok(())
+    }
+
+    pub fn remove_image_resource(&mut self, asset: &str) -> bool {
+        let removed = self.image_resources.remove(asset).is_some();
+        if let Some(managed) = self.managed_textures.remove(&asset.to_string()) {
+            self.pending_removed_managed_textures.push(managed);
+        }
+        removed
     }
 
     fn collect_visual_assets(
@@ -112,19 +137,22 @@ impl BlueprintYakuiRenderer {
                 )
             })?;
             let values = evaluate_collection(&repeat.items, frame, item)?;
+            let state_key = virtual_state_key(frame, node);
+            let viewport_extent = virtual_viewport_extent(node, frame, request)?;
             let range = if node.widget == "virtual_list" {
                 let item_extent =
                     property_number(node, "item_extent", frame, item)?.unwrap_or(56.0);
-                let state = self.virtual_lists.entry(node.local_id.clone()).or_insert(
-                    VirtualListState::new(
+                let state = self
+                    .virtual_lists
+                    .entry(state_key)
+                    .or_insert(VirtualListState::new(
                         values.len(),
                         item_extent,
-                        viewport_height_points(request),
+                        viewport_extent,
                         repeat.overscan as usize,
-                    )?,
-                );
+                    )?);
                 state.set_item_count(values.len())?;
-                state.set_viewport_extent(viewport_height_points(request))?;
+                state.set_viewport_extent(viewport_extent)?;
                 state.visible_range()
             } else {
                 let columns = property_number(node, "columns", frame, item)?
@@ -133,16 +161,17 @@ impl BlueprintYakuiRenderer {
                     .clamp(1.0, 256.0) as usize;
                 let row_extent =
                     property_number(node, "item_extent", frame, item)?.unwrap_or(180.0);
-                let state = self.virtual_grids.entry(node.local_id.clone()).or_insert(
-                    VirtualGridState::new(
+                let state = self
+                    .virtual_grids
+                    .entry(state_key)
+                    .or_insert(VirtualGridState::new(
                         values.len(),
                         columns,
                         row_extent,
-                        viewport_height_points(request),
+                        viewport_extent,
                         repeat.overscan as usize,
-                    )?,
-                );
-                state.configure(values.len(), columns, viewport_height_points(request))?;
+                    )?);
+                state.configure(values.len(), columns, viewport_extent)?;
                 state.visible_items()
             };
             for value in &values[range.start..range.end] {
@@ -214,6 +243,8 @@ impl BlueprintYakuiRenderer {
                 0.0
             }
         });
+        let max_width = property_number(node, "max_width", frame, item)?.unwrap_or(f32::INFINITY);
+        let max_height = property_number(node, "max_height", frame, item)?.unwrap_or(f32::INFINITY);
         let default_fill = if matches!(
             node.widget.as_str(),
             "button" | "select" | "toggle" | "slider" | "text_input"
@@ -222,16 +253,19 @@ impl BlueprintYakuiRenderer {
         } else {
             Color::CLEAR
         };
-        let fill = property_color(node, "background", frame, item, request).unwrap_or(default_fill);
+        let fill =
+            property_color(node, "background", frame, item, request)?.unwrap_or(default_fill);
         if let Some(text_key) = name.as_deref() {
             let text = frame
                 .localization
                 .get(text_key)
                 .map(String::as_str)
                 .unwrap_or(text_key);
-            let max_width = viewport_width_points(request).max(1.0);
+            let viewport_width = viewport_width_points(request).max(1.0);
             let font_size = property_number(node, "font_size", frame, item)?
                 .unwrap_or_else(|| default_ui_font_size(request));
+            let text_padding =
+                non_negative_layout_property(node, "text_padding", frame, item)?.unwrap_or(8.0);
             let max_lines = bounded_u32_property(node, "max_lines", frame, item, 4, 1, 1_024)?;
             let direction = property_string(node, "direction", frame, item)?
                 .unwrap_or_else(|| "auto".to_string());
@@ -244,7 +278,7 @@ impl BlueprintYakuiRenderer {
             let measured = measurer.measure(&AstraTextMeasureRequest {
                 semantic_id: semantic_id.clone(),
                 text: text.to_string(),
-                max_width: (max_width - 16.0).max(1.0),
+                max_width: (max_width.min(viewport_width) - 16.0).max(1.0),
                 font_size,
                 max_lines,
                 direction,
@@ -259,8 +293,14 @@ impl BlueprintYakuiRenderer {
                     "AstraText returned invalid UI layout metrics",
                 ));
             }
-            min_width = min_width.max(measured.width + 16.0);
-            min_height = min_height.max(measured.height + 16.0);
+            min_width = min_width.max(measured.width + text_padding * 2.0);
+            min_height = min_height.max(measured.height + text_padding * 2.0);
+        }
+        if max_width < min_width || max_height < min_height {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_LAYOUT_SIZE_RANGE",
+                "max_width/max_height must contain measured content and min_width/min_height",
+            ));
         }
         let fill_layout = property_bool(node, "fill", frame, item)?.unwrap_or(false);
         let fill_width = fill_layout
@@ -271,6 +311,18 @@ impl BlueprintYakuiRenderer {
             || node.widget == "screen";
         let mut semantic_value = None;
         let mut semantic_properties = semantic_text_properties(node, frame, item)?;
+        let text_color = property_color(node, "text_color", frame, item, request)?.or_else(|| {
+            match request.theme.tokens.get("text.body") {
+                Some(UiThemeValue::Color([r, g, b, a])) => Some(Color::rgba(*r, *g, *b, *a)),
+                _ => None,
+            }
+        });
+        if let Some(color) = text_color {
+            semantic_properties.insert(
+                "text.rgba".into(),
+                format!("{},{},{},{}", color.r, color.g, color.b, color.a),
+            );
+        }
         let accessible_events = node
             .events
             .iter()
@@ -285,6 +337,7 @@ impl BlueprintYakuiRenderer {
         let props = AstraNodeProps {
             semantic_id: semantic_id.clone(),
             min_size: Vec2::new(min_width, min_height),
+            max_size: Vec2::new(max_width, max_height),
             fill,
             interactive,
             fill_width,
@@ -293,6 +346,7 @@ impl BlueprintYakuiRenderer {
                 node.widget.as_str(),
                 "screen" | "stack" | "modal" | "canvas"
             ),
+            clip_children: property_bool(node, "clip_children", frame, item)?.unwrap_or(false),
         };
         let children = node.children.clone();
         let parent = Some(semantic_id.as_str());
@@ -349,30 +403,50 @@ impl BlueprintYakuiRenderer {
             semantic_value = Some(editor.text().to_string());
             name = semantic_value.clone();
         }
+        let gap = non_negative_layout_property(node, "gap", frame, item)?.unwrap_or(0.0);
+        let padding = non_negative_layout_property(node, "padding", frame, item)?.unwrap_or(0.0);
+        let cross_axis_alignment = property_string(node, "cross_align", frame, item)?
+            .map(|value| parse_cross_axis_alignment(&value))
+            .transpose()?
+            .unwrap_or(CrossAxisAlignment::Stretch);
         let build_widget = || -> Result<_, UiValidationError> {
             Ok(match node.widget.as_str() {
                 "row" => AstraNodeWidget::show(props, || {
-                    List::row().main_axis_size(MainAxisSize::Min).show(|| {
-                        child_error = self
-                            .render_children(&children, parent, frame, item, request, actions)
-                            .err();
+                    Pad::all(padding).show(|| {
+                        List::row()
+                            .item_spacing(gap)
+                            .main_axis_size(MainAxisSize::Min)
+                            .show(|| {
+                                child_error = self
+                                    .render_children(
+                                        &children, parent, frame, item, request, actions,
+                                    )
+                                    .err();
+                            });
                     });
                 }),
                 "column" | "scroll" => AstraNodeWidget::show(props, || {
-                    List::column()
-                        .main_axis_size(MainAxisSize::Min)
-                        .cross_axis_alignment(CrossAxisAlignment::Stretch)
-                        .show(|| {
-                            child_error = self
-                                .render_children(&children, parent, frame, item, request, actions)
-                                .err();
-                        });
+                    Pad::all(padding).show(|| {
+                        List::column()
+                            .item_spacing(gap)
+                            .main_axis_size(MainAxisSize::Min)
+                            .cross_axis_alignment(cross_axis_alignment)
+                            .show(|| {
+                                child_error = self
+                                    .render_children(
+                                        &children, parent, frame, item, request, actions,
+                                    )
+                                    .err();
+                            });
+                    });
                 }),
                 "virtual_list" => AstraNodeWidget::show(props, || {
-                    List::column().show(|| {
-                        child_error = self
-                            .render_virtual_list(node, parent, frame, request, actions)
-                            .err();
+                    Pad::all(padding).show(|| {
+                        List::column().item_spacing(gap).show(|| {
+                            child_error = self
+                                .render_virtual_list(node, parent, frame, request, actions)
+                                .err();
+                        });
                     });
                 }),
                 "virtual_grid" => {
@@ -381,18 +455,24 @@ impl BlueprintYakuiRenderer {
                         .round()
                         .clamp(1.0, 256.0) as usize;
                     AstraNodeWidget::show(props, || {
-                        CountGrid::col(columns).show(|| {
-                            child_error = self
-                                .render_virtual_grid(node, parent, frame, request, actions)
-                                .err();
+                        Pad::all(padding).show(|| {
+                            CountGrid::col(columns)
+                                .main_axis_size(MainAxisSize::Min)
+                                .show(|| {
+                                    child_error = self
+                                        .render_virtual_grid(node, parent, frame, request, actions)
+                                        .err();
+                                });
                         });
                     })
                 }
                 "stack" | "modal" | "screen" | "canvas" => AstraNodeWidget::show(props, || {
-                    Stack::new().show(|| {
-                        child_error = self
-                            .render_children(&children, parent, frame, item, request, actions)
-                            .err();
+                    Pad::all(padding).show(|| {
+                        Stack::new().show(|| {
+                            child_error = self
+                                .render_children(&children, parent, frame, item, request, actions)
+                                .err();
+                        });
                     });
                 }),
                 "image" => {
@@ -439,16 +519,16 @@ impl BlueprintYakuiRenderer {
                     })
                 }
                 "slider" => {
-                    let value = property_number(node, "value", frame, item)?.unwrap_or(0.0) as f64;
-                    let min = property_number(node, "min", frame, item)?.unwrap_or(0.0) as f64;
-                    let max = property_number(node, "max", frame, item)?.unwrap_or(1.0) as f64;
+                    let value = property_number_f64(node, "value", frame, item)?.unwrap_or(0.0);
+                    let min = property_number_f64(node, "min", frame, item)?.unwrap_or(0.0);
+                    let max = property_number_f64(node, "max", frame, item)?.unwrap_or(1.0);
                     if min >= max || value < min || value > max {
                         return Err(UiValidationError::invalid(
                             "ASTRA_UI_SLIDER_RANGE",
                             "slider requires min < max and a value inside the range",
                         ));
                     }
-                    let step = property_number(node, "step", frame, item)?.map(f64::from);
+                    let step = property_number_f64(node, "step", frame, item)?;
                     semantic_properties.insert("range.value".into(), value.to_string());
                     semantic_properties.insert("range.min".into(), min.to_string());
                     semantic_properties.insert("range.max".into(), max.to_string());
@@ -476,15 +556,31 @@ impl BlueprintYakuiRenderer {
                 }
                 "toggle" => {
                     let checked = property_bool(node, "checked", frame, item)?.unwrap_or(false);
+                    let indicator_color = if checked {
+                        property_color(node, "indicator_color", frame, item, request)?
+                            .unwrap_or(Color::rgba(196, 158, 67, 255))
+                    } else {
+                        property_color(node, "indicator_off_color", frame, item, request)?
+                            .unwrap_or(Color::rgba(178, 184, 184, 255))
+                    };
                     semantic_checked = Some(checked);
                     AstraNodeWidget::show(props, || {
-                        let next = Checkbox::new(checked).show().checked;
-                        if next != checked {
-                            changed_event = Some(UiValue::Map(BTreeMap::from([
-                                ("checked".to_string(), UiValue::Bool(next)),
-                                ("value".to_string(), UiValue::Bool(next)),
-                            ])));
-                        }
+                        Align::new(Alignment::CENTER_RIGHT).show(|| {
+                            let _ = AstraNodeWidget::show(
+                                AstraNodeProps {
+                                    semantic_id: format!("{semantic_id}.indicator"),
+                                    min_size: Vec2::new(30.0, 30.0),
+                                    max_size: Vec2::INFINITY,
+                                    fill: indicator_color,
+                                    interactive: false,
+                                    fill_width: false,
+                                    fill_height: false,
+                                    loose_children: false,
+                                    clip_children: false,
+                                },
+                                || {},
+                            );
+                        });
                     })
                 }
                 _ => AstraNodeWidget::show(props, || {
@@ -495,7 +591,36 @@ impl BlueprintYakuiRenderer {
             })
         };
         let anchor = property_string(node, "anchor", frame, item)?;
-        let response = if let Some(anchor) = anchor {
+        let position_x = non_negative_layout_property(node, "position_x", frame, item)?;
+        let position_y = non_negative_layout_property(node, "position_y", frame, item)?;
+        let position_right = non_negative_layout_property(node, "position_right", frame, item)?;
+        let position_bottom = non_negative_layout_property(node, "position_bottom", frame, item)?;
+        let has_absolute_position = position_x.is_some()
+            || position_y.is_some()
+            || position_right.is_some()
+            || position_bottom.is_some();
+        if anchor.is_some() && has_absolute_position {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_POSITION_CONFLICT",
+                "absolute position and anchor cannot be specified on the same widget",
+            ));
+        }
+        let response = if has_absolute_position {
+            let mut response = None;
+            Pad {
+                left: position_x.unwrap_or(0.0),
+                top: position_y.unwrap_or(0.0),
+                right: position_right.unwrap_or(0.0),
+                bottom: position_bottom.unwrap_or(0.0),
+            }
+            .show(|| response = Some(build_widget()));
+            response.ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_POSITION_LAYOUT",
+                    "Yakui did not build the absolutely positioned Astra widget",
+                )
+            })??
+        } else if let Some(anchor) = anchor {
             let alignment = parse_alignment(&anchor)?;
             let mut response = None;
             Align::new(alignment).show(|| response = Some(build_widget()));
@@ -510,6 +635,13 @@ impl BlueprintYakuiRenderer {
         };
         if let Some(error) = child_error {
             return Err(error);
+        }
+        if node.widget == "toggle" && response.clicked_semantic_id.is_some() {
+            let next = !semantic_checked.unwrap_or(false);
+            changed_event = Some(UiValue::Map(BTreeMap::from([
+                ("checked".to_string(), UiValue::Bool(next)),
+                ("value".to_string(), UiValue::Bool(next)),
+            ])));
         }
         if let Some(clicked_id) = response.clicked_semantic_id.as_deref() {
             for event in node.events.iter().filter(|event| event.event == "activate") {
@@ -641,17 +773,19 @@ impl BlueprintYakuiRenderer {
         })?;
         let values = evaluate_collection(&repeat.items, frame, None)?;
         let item_extent = property_number(node, "item_extent", frame, None)?.unwrap_or(56.0);
-        let state =
-            self.virtual_lists
-                .entry(node.local_id.clone())
-                .or_insert(VirtualListState::new(
-                    values.len(),
-                    item_extent,
-                    viewport_height_points(request),
-                    repeat.overscan as usize,
-                )?);
+        let viewport_extent = virtual_viewport_extent(node, frame, request)?;
+        let state_key = virtual_state_key(frame, node);
+        let state = self
+            .virtual_lists
+            .entry(state_key)
+            .or_insert(VirtualListState::new(
+                values.len(),
+                item_extent,
+                viewport_extent,
+                repeat.overscan as usize,
+            )?);
         state.set_item_count(values.len())?;
-        state.set_viewport_extent(viewport_height_points(request))?;
+        state.set_viewport_extent(viewport_extent)?;
         let range = state.visible_range();
         let leading = state.visible_leading_extent(range);
         if leading > 0.0 {
@@ -685,17 +819,19 @@ impl BlueprintYakuiRenderer {
             .round()
             .clamp(1.0, 256.0) as usize;
         let row_extent = property_number(node, "item_extent", frame, None)?.unwrap_or(180.0);
-        let state =
-            self.virtual_grids
-                .entry(node.local_id.clone())
-                .or_insert(VirtualGridState::new(
-                    values.len(),
-                    columns,
-                    row_extent,
-                    viewport_height_points(request),
-                    repeat.overscan as usize,
-                )?);
-        state.configure(values.len(), columns, viewport_height_points(request))?;
+        let viewport_extent = virtual_viewport_extent(node, frame, request)?;
+        let state_key = virtual_state_key(frame, node);
+        let state = self
+            .virtual_grids
+            .entry(state_key)
+            .or_insert(VirtualGridState::new(
+                values.len(),
+                columns,
+                row_extent,
+                viewport_extent,
+                repeat.overscan as usize,
+            )?);
+        state.configure(values.len(), columns, viewport_extent)?;
         let range = state.visible_items();
         let leading = state.visible_leading_extent(range);
         if leading > 0.0 {
@@ -715,22 +851,55 @@ fn virtual_leading_space(node: &astra_ui_core::UiNodeBlueprint, extent: f32) {
         AstraNodeProps {
             semantic_id: format!("{}.virtual-leading", node.local_id),
             min_size: Vec2::new(0.0, extent),
+            max_size: Vec2::INFINITY,
             fill: Color::CLEAR,
             interactive: false,
             fill_width: false,
             fill_height: false,
             loose_children: false,
+            clip_children: false,
         },
         || {},
     );
 }
 
+fn virtual_state_key(
+    frame: &UiBlueprintFrameModel,
+    node: &astra_ui_core::UiNodeBlueprint,
+) -> String {
+    format!("{}#{}", frame.view_id, node.source_id)
+}
+
+fn virtual_viewport_extent(
+    node: &astra_ui_core::UiNodeBlueprint,
+    frame: &UiBlueprintFrameModel,
+    request: &UiFrameRequest,
+) -> Result<f32, UiValidationError> {
+    let available = viewport_height_points(request);
+    let requested =
+        non_negative_layout_property(node, "viewport_extent", frame, None)?.unwrap_or(available);
+    if requested <= 0.0 || requested > available {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_VIRTUAL_VIEWPORT_EXTENT",
+            "virtual viewport_extent must be positive and no larger than the UI viewport",
+        ));
+    }
+    Ok(requested)
+}
+
 impl YakuiViewRenderer for BlueprintYakuiRenderer {
+    fn request_focus(&mut self, semantic_id: String) {
+        self.backend_focus_request = Some(semantic_id);
+    }
+
     fn build(
         &mut self,
         yakui: &mut yakui_core::Yakui,
         request: &UiFrameRequest,
     ) -> Result<YakuiViewOutput, UiValidationError> {
+        for managed in self.pending_removed_managed_textures.drain(..) {
+            yakui.paint_dom().textures_mut().remove(managed);
+        }
         let frame: UiBlueprintFrameModel =
             postcard::from_bytes(&request.model_payload).map_err(|error| {
                 UiValidationError::invalid("ASTRA_UI_BLUEPRINT_MODEL_DECODE", error.to_string())
@@ -920,12 +1089,31 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 force_consumed_sequences.insert(input.sequence);
             }
         }
+        let mut active_virtual_view_prefixes = BTreeSet::from([format!("{}#", frame.view_id)]);
+        active_virtual_view_prefixes.extend(
+            frame
+                .modals
+                .iter()
+                .map(|modal| format!("{}#", modal.view_id)),
+        );
         for event in &request.input.events {
             if let UiInputEventKind::Wheel { delta_points } = event.kind {
-                for state in self.virtual_lists.values_mut() {
+                for (key, state) in &mut self.virtual_lists {
+                    if !active_virtual_view_prefixes
+                        .iter()
+                        .any(|prefix| key.starts_with(prefix))
+                    {
+                        continue;
+                    }
                     state.scroll_by(-delta_points.y)?;
                 }
-                for state in self.virtual_grids.values_mut() {
+                for (key, state) in &mut self.virtual_grids {
+                    if !active_virtual_view_prefixes
+                        .iter()
+                        .any(|prefix| key.starts_with(prefix))
+                    {
+                        continue;
+                    }
                     state.scroll_by(-delta_points.y)?;
                 }
             }
@@ -1049,11 +1237,13 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                     AstraNodeProps {
                         semantic_id: semantic_id.clone(),
                         min_size: Vec2::ZERO,
+                        max_size: Vec2::INFINITY,
                         fill: Color::rgba(0, 0, 0, 96),
                         interactive: true,
                         fill_width: true,
                         fill_height: true,
                         loose_children: true,
+                        clip_children: false,
                     },
                     || {
                         child_error = self
@@ -1106,18 +1296,34 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 .then_some(event.sequence)
             }));
         }
+        let backend_focus_request = self.backend_focus_request.take();
         let focus_request = accessibility_focus_request
             .as_ref()
+            .or(backend_focus_request.as_ref())
             .or(frame.focus_request.as_ref());
         let focus_widget = if let Some(focus_request) = focus_request {
+            self.semantic_focus_override = Some(focus_request.clone());
             let target = self
                 .pending
                 .iter()
                 .find(|pending| &pending.id == focus_request)
                 .ok_or_else(|| {
+                    let available = self
+                        .pending
+                        .iter()
+                        .filter(|pending| {
+                            pending.enabled
+                                && pending.actions.contains(&UiSemanticAction::Focus)
+                        })
+                        .map(|pending| pending.id.as_str())
+                        .take(32)
+                        .collect::<Vec<_>>()
+                        .join(",");
                     UiValidationError::invalid(
                         "ASTRA_UI_FOCUS_TARGET_MISSING",
-                        "focus target does not exist in the rendered semantic generation",
+                        format!(
+                            "focus target does not exist in the rendered semantic generation; requested={focus_request}; available={available}"
+                        ),
                     )
                 })?;
             if !target.enabled || !target.actions.contains(&UiSemanticAction::Focus) {
@@ -1157,6 +1363,16 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         yakui: &yakui_core::Yakui,
         request: &UiFrameRequest,
     ) -> Result<UiSemanticSnapshot, UiValidationError> {
+        let focus_override = self.semantic_focus_override.clone();
+        let raw_focused = self
+            .pending
+            .iter()
+            .filter(|pending| pending.focused)
+            .map(|pending| pending.id.as_str())
+            .collect::<Vec<_>>();
+        let focus_settled = focus_override
+            .as_ref()
+            .is_some_and(|expected| raw_focused.as_slice() == [expected.as_str()]);
         let mut nodes = Vec::with_capacity(self.pending.len());
         for pending in &self.pending {
             let layout = yakui.layout_dom().get(pending.widget_id).ok_or_else(|| {
@@ -1185,7 +1401,10 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 value: pending.value.clone(),
                 enabled: pending.enabled,
                 hidden: false,
-                focused: pending.focused,
+                focused: focus_override.as_ref().map_or(
+                    pending.focused && pending.actions.contains(&UiSemanticAction::Focus),
+                    |expected| expected == &pending.id,
+                ),
                 selected: false,
                 checked: pending.checked,
                 actions: pending.actions.clone(),
@@ -1210,8 +1429,46 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         };
         snapshot.hash = snapshot.compute_hash()?;
         snapshot.validate()?;
+        if focus_settled {
+            self.semantic_focus_override = None;
+        }
         Ok(snapshot)
     }
+}
+
+fn validate_image_resource(asset: &str, frame: &TextureFrame) -> Result<(), UiValidationError> {
+    if asset.is_empty() {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_IMAGE_RESOURCE_ID",
+            "UI image resource id must not be empty",
+        ));
+    }
+    let expected = (frame.width as usize)
+        .checked_mul(frame.height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| {
+            UiValidationError::invalid(
+                "ASTRA_UI_IMAGE_RESOURCE_SIZE",
+                "UI image resource dimensions overflow",
+            )
+        })?;
+    if frame.width == 0
+        || frame.height == 0
+        || expected > MAX_TEXTURE_BYTES
+        || frame.rgba8.len() != expected
+    {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_IMAGE_RESOURCE_SIZE",
+            "UI image resource dimensions do not match its bounded RGBA payload",
+        ));
+    }
+    if Hash256::from_sha256(&frame.rgba8) != frame.hash {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_IMAGE_RESOURCE_HASH",
+            "UI image resource payload hash mismatch",
+        ));
+    }
+    Ok(())
 }
 
 fn semantic_role(widget: &str) -> UiSemanticRole {
@@ -1306,6 +1563,19 @@ fn parse_alignment(value: &str) -> Result<Alignment, UiValidationError> {
     }
 }
 
+fn parse_cross_axis_alignment(value: &str) -> Result<CrossAxisAlignment, UiValidationError> {
+    match value {
+        "start" => Ok(CrossAxisAlignment::Start),
+        "center" => Ok(CrossAxisAlignment::Center),
+        "end" => Ok(CrossAxisAlignment::End),
+        "stretch" => Ok(CrossAxisAlignment::Stretch),
+        _ => Err(UiValidationError::invalid(
+            "ASTRA_UI_CROSS_AXIS_ALIGNMENT",
+            "cross_align must be start, center, end, or stretch",
+        )),
+    }
+}
+
 fn property_bool(
     node: &astra_ui_core::UiNodeBlueprint,
     key: &str,
@@ -1343,23 +1613,68 @@ fn property_number(
         .transpose()
 }
 
+fn property_number_f64(
+    node: &astra_ui_core::UiNodeBlueprint,
+    key: &str,
+    frame: &UiBlueprintFrameModel,
+    item: Option<&UiValue>,
+) -> Result<Option<f64>, UiValidationError> {
+    node.properties
+        .get(key)
+        .map(|expr| match evaluate(expr, frame, item, None)? {
+            UiValue::Integer(value) => Ok(value as f64),
+            UiValue::Number(value) if value.is_finite() => Ok(value),
+            _ => Err(UiValidationError::invalid(
+                "ASTRA_UI_PROPERTY_TYPE",
+                format!("property {key} must resolve to number"),
+            )),
+        })
+        .transpose()
+}
+
 fn property_color(
     node: &astra_ui_core::UiNodeBlueprint,
     key: &str,
     frame: &UiBlueprintFrameModel,
     item: Option<&UiValue>,
     request: &UiFrameRequest,
-) -> Option<Color> {
-    let expr = node.properties.get(key)?;
+) -> Result<Option<Color>, UiValidationError> {
+    let Some(expr) = node.properties.get(key) else {
+        return Ok(None);
+    };
     let token = match expr {
         UiValueExpr::ThemeToken { token } => token,
-        _ => return None,
+        _ => {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_COLOR_PROPERTY_TYPE",
+                format!("property {key} must resolve from a theme color token"),
+            ));
+        }
     };
-    let UiThemeValue::Color([r, g, b, a]) = request.theme.tokens.get(token)? else {
-        return None;
+    let Some(UiThemeValue::Color([r, g, b, a])) = request.theme.tokens.get(token) else {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_COLOR_THEME_TOKEN",
+            format!("property {key} references missing or non-color theme token {token}"),
+        ));
     };
     let _ = (frame, item);
-    Some(Color::rgba(*r, *g, *b, *a))
+    Ok(Some(Color::rgba(*r, *g, *b, *a)))
+}
+
+fn non_negative_layout_property(
+    node: &astra_ui_core::UiNodeBlueprint,
+    key: &str,
+    frame: &UiBlueprintFrameModel,
+    item: Option<&UiValue>,
+) -> Result<Option<f32>, UiValidationError> {
+    let value = property_number(node, key, frame, item)?;
+    if value.is_some_and(|value| !(0.0..=4_096.0).contains(&value)) {
+        return Err(UiValidationError::invalid(
+            "ASTRA_UI_LAYOUT_METRIC_RANGE",
+            format!("property {key} must be within 0..=4096"),
+        ));
+    }
+    Ok(value)
 }
 
 fn visual_token(node: &astra_ui_core::UiNodeBlueprint) -> Option<&UiValueExpr> {
@@ -1533,6 +1848,30 @@ fn semantic_text_properties(
             ));
         }
         properties.insert("text.direction".into(), direction);
+    }
+    for (source, target, allowed) in [
+        ("text_align", "text.align", ["start", "center", "end"]),
+        (
+            "vertical_align",
+            "text.vertical_align",
+            ["start", "center", "end"],
+        ),
+    ] {
+        if let Some(expr) = node.properties.get(source) {
+            let UiValue::String(value) = evaluate(expr, frame, item, None)? else {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_UI_TEXT_ALIGNMENT_TYPE",
+                    format!("{source} must resolve to a string"),
+                ));
+            };
+            if !allowed.contains(&value.as_str()) {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_UI_TEXT_ALIGNMENT",
+                    format!("{source} must be start, center or end"),
+                ));
+            }
+            properties.insert(target.into(), value);
+        }
     }
     for (source, target, min, max) in [
         ("max_lines", "text.max_lines", 1.0_f32, 1_024.0_f32),

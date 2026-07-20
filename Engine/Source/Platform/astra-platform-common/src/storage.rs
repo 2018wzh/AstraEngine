@@ -46,6 +46,36 @@ impl AtomicSaveStore {
         fs::read(self.root.join(format!("{slot}.astrasave"))).map_err(|_| io_error("save.read"))
     }
 
+    pub fn list(&self) -> Result<Vec<String>, PlatformError> {
+        let mut slots = Vec::new();
+        for entry in fs::read_dir(&self.root).map_err(|_| io_error("save.list"))? {
+            let entry = entry.map_err(|_| io_error("save.list"))?;
+            if !entry
+                .file_type()
+                .map_err(|_| io_error("save.list"))?
+                .is_file()
+            {
+                continue;
+            }
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| io_error("save.list"))?;
+            let Some(slot) = name.strip_suffix(".astrasave") else {
+                continue;
+            };
+            validate_slot(slot)?;
+            slots.push(slot.to_string());
+        }
+        slots.sort();
+        if slots.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "save.list",
+                "save store contains duplicate slot identities",
+            ));
+        }
+        Ok(slots)
+    }
+
     pub fn delete(&self, slot: &str) -> Result<(), PlatformError> {
         validate_slot(slot)?;
         fs::remove_file(self.root.join(format!("{slot}.astrasave")))

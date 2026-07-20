@@ -1,6 +1,9 @@
 use std::{cell::Cell, collections::BTreeMap, rc::Rc};
 
-use mlua::{Lua, VmState};
+#[cfg(feature = "portable-luau-runtime")]
+use luaur_rt::{Lua, Value, VmState};
+#[cfg(feature = "luau-runtime")]
+use mlua::{Lua, Value, VmState};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +11,12 @@ use crate::{
     PolicyCommandRecord, PolicyError, PolicyExecutionBudget, PolicyQueryRecord, PolicyTraceRecord,
     PolicyValue,
 };
+
+#[cfg(all(feature = "luau-runtime", feature = "portable-luau-runtime"))]
+compile_error!("native and portable Luau runtimes are mutually exclusive");
+
+#[cfg(not(any(feature = "luau-runtime", feature = "portable-luau-runtime")))]
+compile_error!("a Luau runtime feature is required to compile runtime.rs");
 
 pub fn create_sandboxed_lua(budget: PolicyExecutionBudget) -> Result<Lua, PolicyError> {
     budget.validate()?;
@@ -20,7 +29,7 @@ pub fn create_sandboxed_lua(budget: PolicyExecutionBudget) -> Result<Lua, Policy
         let next = counter.get().saturating_add(1);
         counter.set(next);
         if next > budget.interrupt_limit {
-            return Err(mlua::Error::runtime(
+            return Err(lua_runtime_error(
                 "ASTRA_POLICY_INSTRUCTION_BUDGET: policy exceeded interrupt budget",
             ));
         }
@@ -31,7 +40,7 @@ pub fn create_sandboxed_lua(budget: PolicyExecutionBudget) -> Result<Lua, Policy
         "io", "os", "debug", "package", "require", "loadfile", "dofile",
     ] {
         globals
-            .set(name, mlua::Value::Nil)
+            .set(name, Value::Nil)
             .map_err(|error| PolicyError::Runtime(error.to_string()))?;
     }
     drop(globals);
@@ -44,6 +53,16 @@ pub fn create_sandboxed_lua(budget: PolicyExecutionBudget) -> Result<Lua, Policy
         "shared policy sandbox created"
     );
     Ok(lua)
+}
+
+#[cfg(feature = "luau-runtime")]
+fn lua_runtime_error(message: impl std::fmt::Display) -> mlua::Error {
+    mlua::Error::runtime(message)
+}
+
+#[cfg(feature = "portable-luau-runtime")]
+fn lua_runtime_error(message: impl std::fmt::Display) -> luaur_rt::Error {
+    luaur_rt::Error::runtime(message)
 }
 
 /// Host-neutral owner for the shared Luau sandbox and its deterministic limits.

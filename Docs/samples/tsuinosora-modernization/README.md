@@ -33,6 +33,8 @@ classic profile 是验收基线。modern profile 只能增加可关闭的 overla
 
 | Document | Use |
 | --- | --- |
+| [director-to-astravn-production-migration.md](director-to-astravn-production-migration.md) | Director 7 容器、Score、Lingo、cast、media 到 typed IR、`.astra` 和 package 的生产迁移方法 |
+| [Classic 忠实还原设计](../../../Examples/TsuiNoSora/Docs/classic-director-fidelity-design.md) | MENU/POPUP/SAVE/LOAD/GLOBALS、剧情 Score channel 与 Classic UI/行为的证据映射 |
 | [source-research.md](source-research.md) | 原版 Director/Shockwave 与 Remake PFS 资源形态、风险和不可提交内容 |
 | [implementation-plan.md](implementation-plan.md) | 从本地解包转换到 VFS direct-read 的分阶段实施路线 |
 | [conversion-manifest.md](conversion-manifest.md) | 脱敏 inventory、转换 report、modern profile report 和 manual signoff schema |

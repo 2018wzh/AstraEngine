@@ -707,6 +707,9 @@ mod windows {
                     HostCommand::ReadSave { slot, reply } => {
                         let _ = reply.send(self.save_store.read(&slot));
                     }
+                    HostCommand::ListSaves { reply } => {
+                        let _ = reply.send(self.save_store.list());
+                    }
                     HostCommand::DeleteSave { slot, reply } => {
                         let _ = reply.send(self.save_store.delete(&slot));
                     }
@@ -1163,12 +1166,42 @@ mod windows {
                     "WASAPI default output device is unavailable",
                 )
             })?;
+        const PRODUCT_SAMPLE_RATE: u32 = 48_000;
+        const PRODUCT_CHANNELS: u16 = 2;
+        let product_format_supported = device
+            .supported_output_configs()
+            .map_err(|_| host_error("audio.format", "WASAPI output format enumeration failed"))?
+            .any(|range| {
+                range.channels() == PRODUCT_CHANNELS
+                    && range.min_sample_rate() <= PRODUCT_SAMPLE_RATE
+                    && range.max_sample_rate() >= PRODUCT_SAMPLE_RATE
+                    && sample_format_rank(range.sample_format()).is_some()
+            });
+        if product_format_supported {
+            tracing::info!(
+                event = "platform.windows.audio.format.selected",
+                sample_rate = PRODUCT_SAMPLE_RATE,
+                channels = PRODUCT_CHANNELS,
+                selection = "product_canonical",
+                "selected a WASAPI format compatible with the product mixer"
+            );
+            return Ok(astra_platform::AudioOutputFormat {
+                sample_rate: PRODUCT_SAMPLE_RATE,
+                channels: PRODUCT_CHANNELS,
+            });
+        }
         let supported = device.default_output_config().map_err(|_| {
             host_error(
                 "audio.format",
                 "WASAPI default output config is unavailable",
             )
         })?;
+        tracing::warn!(
+            event = "platform.windows.audio.format.canonical_unavailable",
+            sample_rate = supported.sample_rate(),
+            channels = supported.channels(),
+            "WASAPI device does not expose the canonical product mixer format"
+        );
         Ok(astra_platform::AudioOutputFormat {
             sample_rate: supported.sample_rate(),
             channels: supported.channels(),

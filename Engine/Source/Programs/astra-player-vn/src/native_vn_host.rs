@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use astra_asset::{AssetCatalog, VfsManifest, VfsSourceRef};
 use astra_core::{Hash256, SchemaVersion};
@@ -36,15 +36,17 @@ use astra_ui_yakui::{
     AstraYakuiBackend, BlueprintYakuiRenderer,
 };
 use astra_vn_core::{
-    CompiledCommand, CompiledStory, MovieLoopMode, PresentationCommand, StageBlendMode,
-    StageClipPolicy, StageCommand, StageLayerKind, SystemPageKind, TimelineCommand, VnAudioBus,
+    CompiledCommand, CompiledStory, MovieLoopMode, PresentationCommand, ReadingMode,
+    SaveCompletionPolicy, StageBlendMode, StageClipPolicy, StageCommand, StageFitMode,
+    StageLayerKind, SystemPageKind, SystemUiProfilePolicy, TimelineCommand, VnAudioBus,
     VnAudioControlAction, VnAudioSync, VnPlayerCommand, VnRunConfig, VnRuntimeState, VnWaitKind,
+    VN_RUNTIME_STATE_SCHEMA, VN_RUNTIME_STATE_SCHEMA_MAJOR,
 };
 use astra_vn_package::{
     decode_compiled_project, load_localization as load_package_localization,
     load_player_locale_config, load_presentation_provider_manifest, CompiledVnProject,
     ProductStageDirector, ProductStageState, StageDirectorOutput, VnLocalizationTable,
-    VnPresentationProviderManifest,
+    VnPresentationProviderManifest, VnSystemUiProfileManifest,
 };
 use astra_vn_policy::LuauUiControllerHost;
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
@@ -60,9 +62,16 @@ use crate::ui_session::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VnUiHostRequest {
-    Save { slot_id: String },
-    Load { slot_id: String },
-    Delete { slot_id: String },
+    Save {
+        slot_id: String,
+        completion: SaveCompletionPolicy,
+    },
+    Load {
+        slot_id: String,
+    },
+    Delete {
+        slot_id: String,
+    },
 }
 
 pub struct NativeVnHostCommandSource {
@@ -71,8 +80,12 @@ pub struct NativeVnHostCommandSource {
     runtime_state: Option<VnRuntimeState>,
     text_provider: Arc<CosmicTextLayoutProvider>,
     font_families: Vec<String>,
+    available_font_families: Vec<String>,
     text_resources: TextRenderResourceOwner,
     localization: VnLocalizationTable,
+    localizations: BTreeMap<String, VnLocalizationTable>,
+    ui_text_locale: Arc<RwLock<String>>,
+    ui_text_font_families: Arc<RwLock<Vec<String>>>,
     surface: PlayerHostResourceId,
     command_sequence: u64,
     fixed_step: u64,
@@ -102,12 +115,17 @@ pub struct NativeVnHostCommandSource {
     ui_backend: AstraYakuiBackend<BlueprintYakuiRenderer>,
     ui_themes: BTreeMap<String, UiThemeManifest>,
     ui_profile: String,
+    system_ui_policy: SystemUiProfilePolicy,
     ui_generation: u64,
     ui_input_sequence: u64,
     ui_draw: Vec<SceneCommand>,
     ui_semantics: Option<UiSemanticSnapshot>,
     ui_save_slots: BTreeMap<String, SaveSlotViewModel>,
     pending_ui_host_request: Option<VnUiHostRequest>,
+    gameplay_thumbnail_capture: Option<TextureFrame>,
+    pending_save_metadata: Option<NativeVnSaveMetadata>,
+    pending_save_completion: Option<SaveCompletionPolicy>,
+    exit_requested: bool,
     ui_controller_host: LuauUiControllerHost,
     ui_controller_sessions: BTreeMap<String, VnUiSessionState>,
     base_ui_instance_id: Option<String>,
@@ -143,12 +161,19 @@ pub struct NativeVnAudioControlRequest {
     pub command_id: String,
     pub action: String,
     pub target: String,
+    pub duration_ms: Option<u32>,
+    pub fence: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NativeVnAudioOutput {
     Start(NativeVnAudioRequest),
     Control(NativeVnAudioControlRequest),
+}
+
+enum NativeVnOrderedRuntimeOutput {
+    AudioStart(NativeVnAudioRequest),
+    Presentation(PresentationCommand),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,8 +201,27 @@ pub struct NativeVnStepEvidence {
     pub runtime_event_hash: String,
     pub runtime_presentation_hash: String,
     pub current_state_id: Option<String>,
+    pub pending_wait_command_id: Option<String>,
+    pub pending_wait_await_id: Option<String>,
     pub pending_choice_ids: Vec<String>,
     pub terminal_route_ids: std::collections::BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NativeVnProductObservationEvidence {
+    pub schema: String,
+    pub ui_profile: String,
+    pub locale: String,
+    pub active_system_page: Option<SystemPageKind>,
+    pub focused_semantic_id: Option<String>,
+    pub auto_enabled: bool,
+    pub skip_mode: astra_vn_core::SkipMode,
+    pub reading_mode: ReadingMode,
+    pub audio_enabled: bool,
+    pub skip_allowed: bool,
+    pub system_config: BTreeMap<String, String>,
+    pub backlog_count: usize,
+    pub occupied_save_slot_count: usize,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -200,11 +244,13 @@ struct NativeVnPlayerSavePayload {
     slot: String,
     sections: RuntimeSaveSections,
     runtime_state: VnRuntimeState,
+    stage_director: ProductStageDirector,
     step_evidence: NativeVnStepEvidence,
     draw_commands_json: Vec<u8>,
     draw_commands_hash: Hash256,
     product_media_snapshot_json: Option<Vec<u8>>,
     product_media_snapshot_hash: Option<Hash256>,
+    save_metadata: NativeVnSaveMetadata,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -214,10 +260,20 @@ struct NativeVnPlayerSaveEnvelope {
     payload: NativeVnPlayerSavePayload,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct NativeVnSaveMetadata {
+    slot_id: String,
+    thumbnail_asset: String,
+    thumbnail: TextureFrame,
+    timestamp_text: String,
+    playtime_text: String,
+}
+
 struct ProductPresentationBinding {
     textures: BTreeMap<String, TextureFrame>,
     media_assets: BTreeMap<String, PackagedMediaAsset>,
     localization: VnLocalizationTable,
+    localizations: BTreeMap<String, VnLocalizationTable>,
     text_provider: Arc<CosmicTextLayoutProvider>,
     font_families: Vec<String>,
     manifest: VnPresentationProviderManifest,
@@ -228,6 +284,7 @@ struct ProductPackageBinding {
     package_hash: Hash256,
     package_section_ids: Vec<String>,
     presentation: ProductPresentationBinding,
+    system_ui_policy: SystemUiProfilePolicy,
 }
 
 impl NativeVnHostCommandSource {
@@ -249,6 +306,27 @@ impl NativeVnHostCommandSource {
         }
         let compiled = decode_compiled_project(package)
             .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
+        let system_ui_manifest = package
+            .container()
+            .decode_postcard::<VnSystemUiProfileManifest>("vn.system_ui_profile_manifest")
+            .map_err(|error| NativeVnHostError::Package(error.to_string()))?;
+        let validation = system_ui_manifest.validate();
+        if validation.status != astra_vn_core::SystemStoryValidationStatus::Pass {
+            return Err(NativeVnHostError::Package(
+                "ASTRA_PLAYER_SYSTEM_UI_PROFILE_BLOCKED: package system UI policy is invalid"
+                    .into(),
+            ));
+        }
+        let system_ui_policy = system_ui_manifest
+            .profiles
+            .get(&config.profile)
+            .cloned()
+            .ok_or_else(|| {
+                NativeVnHostError::Package(format!(
+                    "ASTRA_PLAYER_SYSTEM_UI_PROFILE_MISSING: profile {} has no declared policy",
+                    config.profile
+                ))
+            })?;
         let textures = load_package_textures(package)?;
         let media_assets = load_package_media_assets(package)?;
         let presentation_manifest =
@@ -257,6 +335,7 @@ impl NativeVnHostCommandSource {
         validate_story_presentation(
             &compiled,
             &textures,
+            &media_assets,
             &presentation_manifest,
             &config.profile,
         )?;
@@ -272,8 +351,20 @@ impl NativeVnHostCommandSource {
                 config.locale
             )));
         }
-        let localization = load_package_localization(package, &config.locale, 16 * 1024 * 1024)
-            .map_err(|error| NativeVnHostError::Localization(error.to_string()))?;
+        let localizations = locale_config
+            .available_locales
+            .iter()
+            .map(|locale| {
+                load_package_localization(package, locale, 16 * 1024 * 1024)
+                    .map(|table| (locale.clone(), table))
+                    .map_err(|error| NativeVnHostError::Localization(error.to_string()))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let localization = localizations.get(&config.locale).cloned().ok_or_else(|| {
+            NativeVnHostError::Localization(
+                "ASTRA_PLAYER_LOCALE_TABLE_MISSING: declared locale has no loaded table".into(),
+            )
+        })?;
         let text_provider = Arc::new(CosmicTextLayoutProvider::from_package(
             package,
             "media.font_manifest",
@@ -310,10 +401,12 @@ impl NativeVnHostCommandSource {
                     textures,
                     media_assets,
                     localization,
+                    localizations,
                     text_provider,
                     font_families,
                     manifest: presentation_manifest,
                 },
+                system_ui_policy,
             },
         )
     }
@@ -360,10 +453,18 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_UI_THEME_MISSING: compiled project has no packaged UI theme".into(),
             ));
         }
+        let ui_text_locale = Arc::new(RwLock::new(
+            binding.presentation.localization.locale.clone(),
+        ));
+        let ordered_font_families = ordered_ui_font_families(
+            &binding.presentation.font_families,
+            &binding.presentation.localization.locale,
+        );
+        let ui_text_font_families = Arc::new(RwLock::new(ordered_font_families.clone()));
         let ui_text_measurer = Arc::new(NativeUiTextMeasurer {
             provider: Arc::clone(&binding.presentation.text_provider),
-            font_families: binding.presentation.font_families.clone(),
-            locale: binding.presentation.localization.locale.clone(),
+            font_families: Arc::clone(&ui_text_font_families),
+            locale: Arc::clone(&ui_text_locale),
         });
         let ui_renderer = BlueprintYakuiRenderer::new(compiled.ui_blueprints.clone())?
             .with_image_resources(binding.presentation.textures.clone())
@@ -467,9 +568,13 @@ impl NativeVnHostCommandSource {
             session_id: open.session_id,
             runtime_state: None,
             text_provider: binding.presentation.text_provider,
-            font_families: binding.presentation.font_families,
+            font_families: ordered_font_families,
+            available_font_families: binding.presentation.font_families,
             text_resources: TextRenderResourceOwner::default(),
             localization: binding.presentation.localization,
+            localizations: binding.presentation.localizations,
+            ui_text_locale,
+            ui_text_font_families,
             surface,
             command_sequence: 0,
             fixed_step: 0,
@@ -510,12 +615,17 @@ impl NativeVnHostCommandSource {
             ui_backend,
             ui_themes: compiled.themes,
             ui_profile,
+            system_ui_policy: binding.system_ui_policy.clone(),
             ui_generation: 1,
             ui_input_sequence: 0,
             ui_draw: Vec::new(),
             ui_semantics: None,
-            ui_save_slots: default_save_slots(),
+            ui_save_slots: save_slots_for_policy(&binding.system_ui_policy),
             pending_ui_host_request: None,
+            gameplay_thumbnail_capture: None,
+            pending_save_metadata: None,
+            pending_save_completion: None,
+            exit_requested: false,
             ui_controller_host,
             ui_controller_sessions: BTreeMap::new(),
             base_ui_instance_id: None,
@@ -586,7 +696,7 @@ impl NativeVnHostCommandSource {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let previous = std::mem::replace(&mut self.stage_director, next);
-        match self.render(&[]) {
+        match self.render(&[], 0) {
             Ok(batch) => {
                 self.pending_stage_completions.extend(completions);
                 Ok(Some(batch))
@@ -602,19 +712,249 @@ impl NativeVnHostCommandSource {
         self.pending_ui_host_request.take()
     }
 
+    pub fn should_capture_gameplay_surface(&self, event: &UiInputEventKind) -> bool {
+        self.runtime_state.as_ref().is_some_and(|state| {
+            state.system_stack.is_empty()
+                && matches!(
+                    event,
+                    UiInputEventKind::PointerButton {
+                        button: astra_ui_core::UiPointerButton::Secondary,
+                        state: UiButtonState::Pressed,
+                        ..
+                    }
+                )
+        })
+    }
+
+    pub fn prepare_surface_capture(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::CaptureSurface {
+                sequence: self.next_command_sequence()?,
+                surface: self.surface,
+            },
+        ])?)
+    }
+
+    pub fn has_gameplay_thumbnail_capture(&self) -> bool {
+        self.gameplay_thumbnail_capture.is_some()
+    }
+
+    pub fn cache_gameplay_surface(
+        &mut self,
+        width: u32,
+        height: u32,
+        rgba8: Vec<u8>,
+    ) -> Result<(), NativeVnHostError> {
+        const THUMBNAIL_WIDTH: u32 = 160;
+        const THUMBNAIL_HEIGHT: u32 = 120;
+        if width == 0 || height == 0 || width > 8192 || height > 8192 {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_CAPTURE_DIMENSIONS: captured gameplay surface dimensions are invalid"
+                    .into(),
+            ));
+        }
+        let expected = usize::try_from(width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| {
+                NativeVnHostError::Save(
+                    "ASTRA_PLAYER_SAVE_CAPTURE_SIZE: captured gameplay surface size overflowed"
+                        .into(),
+                )
+            })?;
+        if rgba8.len() != expected {
+            return Err(NativeVnHostError::Save(format!(
+                "ASTRA_PLAYER_SAVE_CAPTURE_BYTES: captured gameplay surface expected {expected} bytes but received {}",
+                rgba8.len()
+            )));
+        }
+        let source = image::RgbaImage::from_raw(width, height, rgba8).ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_CAPTURE_IMAGE: captured gameplay surface could not form an RGBA image"
+                    .into(),
+            )
+        })?;
+        let thumbnail = image::imageops::resize(
+            &source,
+            THUMBNAIL_WIDTH,
+            THUMBNAIL_HEIGHT,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let rgba8 = thumbnail.into_raw();
+        self.gameplay_thumbnail_capture = Some(TextureFrame {
+            width: THUMBNAIL_WIDTH,
+            height: THUMBNAIL_HEIGHT,
+            hash: Hash256::from_sha256(&rgba8),
+            rgba8,
+        });
+        tracing::debug!(
+            event = "player.vn.save.thumbnail_cached",
+            width = THUMBNAIL_WIDTH,
+            height = THUMBNAIL_HEIGHT,
+            "cached a bounded gameplay thumbnail from the final composed surface"
+        );
+        Ok(())
+    }
+
+    pub fn prepare_save_metadata(
+        &mut self,
+        slot_id: &str,
+        timestamp_text: String,
+        playtime_ms: u64,
+    ) -> Result<(), NativeVnHostError> {
+        if !self.ui_save_slots.contains_key(slot_id) {
+            return Err(NativeVnHostError::Save(format!(
+                "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
+            )));
+        }
+        if timestamp_text.trim().is_empty() || timestamp_text.len() > 64 {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_TIMESTAMP: save timestamp must be a bounded non-empty string"
+                    .into(),
+            ));
+        }
+        let thumbnail = self.gameplay_thumbnail_capture.clone().ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_THUMBNAIL_MISSING: no gameplay surface was captured before opening the save UI"
+                    .into(),
+            )
+        })?;
+        self.pending_save_metadata = Some(NativeVnSaveMetadata {
+            slot_id: slot_id.to_string(),
+            thumbnail_asset: format!("astra.internal.save_thumbnail.{slot_id}"),
+            thumbnail,
+            timestamp_text,
+            playtime_text: format_playtime(playtime_ms),
+        });
+        if self.pending_save_completion.is_none()
+            && self.system_ui_policy.quick_slot_id.as_deref() == Some(slot_id)
+        {
+            self.pending_save_completion = Some(SaveCompletionPolicy::Stay);
+        }
+        Ok(())
+    }
+
+    pub fn exit_requested(&self) -> bool {
+        self.exit_requested
+    }
+
     pub fn ui_semantics(&self) -> Option<&UiSemanticSnapshot> {
         self.ui_semantics.as_ref()
     }
 
-    pub fn mark_save_committed(&mut self, slot_id: &str) -> Result<(), NativeVnHostError> {
-        let slot = self.ui_save_slots.get_mut(slot_id).ok_or_else(|| {
-            NativeVnHostError::Save(format!(
-                "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
-            ))
+    pub fn product_observation_evidence(
+        &self,
+    ) -> Result<NativeVnProductObservationEvidence, NativeVnHostError> {
+        let state = self.runtime_state.as_ref().ok_or_else(|| {
+            NativeVnHostError::RuntimeEvidence(
+                "ASTRA_PLAYER_VN_STATE_MISSING: product observation requires runtime state".into(),
+            )
         })?;
-        slot.occupied = true;
-        slot.can_load = true;
-        slot.migration_status = "current".to_string();
+        Ok(NativeVnProductObservationEvidence {
+            schema: "astra.player_vn_product_observation.v2".into(),
+            ui_profile: self.ui_profile.clone(),
+            locale: state.locale.clone(),
+            active_system_page: state.system_stack.last().map(|frame| frame.page),
+            focused_semantic_id: self.ui_semantics.as_ref().and_then(|snapshot| {
+                snapshot
+                    .nodes
+                    .iter()
+                    .find(|node| node.focused)
+                    .map(|node| node.id.clone())
+            }),
+            auto_enabled: state.system.auto_enabled,
+            skip_mode: state.system.skip_mode,
+            reading_mode: state.system.reading_mode,
+            audio_enabled: state.system.audio_enabled,
+            skip_allowed: state.system.skip_allowed,
+            system_config: state.system.config.clone(),
+            backlog_count: state.backlog.len(),
+            occupied_save_slot_count: self
+                .ui_save_slots
+                .values()
+                .filter(|slot| slot.occupied)
+                .count(),
+        })
+    }
+
+    pub fn mark_save_committed(
+        &mut self,
+        slot_id: &str,
+    ) -> Result<Option<PlayerHostCommandBatch>, NativeVnHostError> {
+        let metadata = self.pending_save_metadata.take().ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_METADATA_MISSING: committed save has no prepared metadata"
+                    .into(),
+            )
+        })?;
+        if metadata.slot_id != slot_id {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_METADATA_SLOT: prepared metadata belongs to another slot".into(),
+            ));
+        }
+        {
+            let slot = self.ui_save_slots.get_mut(slot_id).ok_or_else(|| {
+                NativeVnHostError::Save(format!(
+                    "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
+                ))
+            })?;
+            slot.occupied = true;
+            slot.thumbnail_asset = Some(metadata.thumbnail_asset.clone());
+            slot.has_thumbnail = true;
+            slot.timestamp_text = Some(metadata.timestamp_text.clone());
+            slot.playtime_text = Some(metadata.playtime_text.clone());
+            slot.metadata_text = Some(format!(
+                "{} | {}",
+                metadata.timestamp_text, metadata.playtime_text
+            ));
+            slot.can_load = true;
+            slot.migration_status = "current".to_string();
+        }
+        self.ui_backend
+            .renderer_mut()
+            .upsert_image_resource(metadata.thumbnail_asset.clone(), metadata.thumbnail.clone())?;
+        self.textures
+            .insert(metadata.thumbnail_asset, metadata.thumbnail);
+        match self.pending_save_completion.take().ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_COMPLETION_MISSING: committed save has no declared completion policy".into(),
+            )
+        })? {
+            SaveCompletionPolicy::Stay => Ok(None),
+            SaveCompletionPolicy::ReturnSystem => self
+                .command(VnPlayerCommand::ReturnSystem)
+                .map(Some),
+        }
+    }
+
+    pub fn mark_save_failed(&mut self, slot_id: &str) -> Result<(), NativeVnHostError> {
+        let metadata = self.pending_save_metadata.take().ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_METADATA_MISSING: failed save has no prepared metadata".into(),
+            )
+        })?;
+        if metadata.slot_id != slot_id {
+            self.pending_save_metadata = Some(metadata);
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_METADATA_SLOT: failed save belongs to another slot".into(),
+            ));
+        }
+        self.pending_save_completion.take().ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_COMPLETION_MISSING: failed save has no declared completion policy"
+                    .into(),
+            )
+        })?;
+        tracing::warn!(
+            event = "vn.save.persistence_failed",
+            slot_id,
+            "save persistence failed; the current system page remains open"
+        );
         Ok(())
     }
 
@@ -624,13 +964,21 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_SAVE_SLOT_UNKNOWN: UI requested undeclared slot {slot_id}"
             ))
         })?;
+        let thumbnail_asset = slot.thumbnail_asset.take();
         slot.occupied = false;
         slot.can_load = false;
-        slot.thumbnail_asset = None;
+        slot.has_thumbnail = false;
         slot.title_key = None;
         slot.timestamp_text = None;
         slot.playtime_text = None;
+        slot.metadata_text = None;
         slot.migration_status = "empty".to_string();
+        if let Some(thumbnail_asset) = thumbnail_asset {
+            self.ui_backend
+                .renderer_mut()
+                .remove_image_resource(&thumbnail_asset);
+            self.textures.remove(&thumbnail_asset);
+        }
         Ok(())
     }
 
@@ -734,7 +1082,7 @@ impl NativeVnHostCommandSource {
                 self.pending_stage_completions.push(fence.clone());
             }
         }
-        self.render(&[])
+        self.render(&[], 0)
     }
 
     pub(crate) fn complete_video_fence(&mut self, request: &NativeVnVideoRequest) {
@@ -786,7 +1134,7 @@ impl NativeVnHostCommandSource {
         if let Some(fence) = &request.fence {
             self.pending_stage_completions.push(fence.clone());
         }
-        self.render(&[])
+        self.render(&[], 0)
     }
 
     pub fn prepare_audio_playback(
@@ -994,21 +1342,34 @@ impl NativeVnHostCommandSource {
         let product_media_snapshot_hash = product_media_snapshot_json
             .as_ref()
             .map(|bytes| Hash256::from_sha256(bytes));
+        let save_metadata = self.pending_save_metadata.clone().ok_or_else(|| {
+            NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_METADATA_MISSING: save serialization requires prepared metadata"
+                    .into(),
+            )
+        })?;
+        if save_metadata.slot_id != slot {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_METADATA_SLOT: prepared metadata belongs to another slot".into(),
+            ));
+        }
         let payload = NativeVnPlayerSavePayload {
-            schema: "astra.player.native_vn_save_payload.v2".into(),
+            schema: "astra.player.native_vn_save_payload.v4".into(),
             slot,
             sections,
             runtime_state,
+            stage_director: self.stage_director.clone(),
             step_evidence,
             draw_commands_hash: Hash256::from_sha256(&draw_commands_json),
             draw_commands_json,
             product_media_snapshot_json,
             product_media_snapshot_hash,
+            save_metadata,
         };
         let payload_bytes = postcard::to_allocvec(&payload)
             .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
         postcard::to_allocvec(&NativeVnPlayerSaveEnvelope {
-            schema: "astra.player.native_vn_save.v2".into(),
+            schema: "astra.player.native_vn_save.v4".into(),
             payload_hash: Hash256::from_sha256(&payload_bytes),
             payload,
         })
@@ -1016,29 +1377,19 @@ impl NativeVnHostCommandSource {
     }
 
     pub fn restore(&mut self, bytes: &[u8]) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        let envelope: NativeVnPlayerSaveEnvelope =
-            postcard::from_bytes(bytes).map_err(|error| {
-                NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
-            })?;
-        if envelope.schema != "astra.player.native_vn_save.v2"
-            || envelope.payload.schema != "astra.player.native_vn_save_payload.v2"
-        {
-            return Err(NativeVnHostError::Save(
-                "ASTRA_PLAYER_SAVE_VERSION_UNSUPPORTED: save schema is not supported".into(),
-            ));
-        }
-        let payload_bytes = postcard::to_allocvec(&envelope.payload)
-            .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
-        if Hash256::from_sha256(&payload_bytes) != envelope.payload_hash {
-            return Err(NativeVnHostError::Save(
-                "ASTRA_PLAYER_SAVE_INTEGRITY: save payload hash mismatch".into(),
-            ));
-        }
+        let envelope = decode_save_envelope(bytes)?;
         if envelope.payload.sections.session_id != self.session_id {
             return Err(NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_SESSION_MISMATCH: save belongs to another runtime session"
                     .into(),
             ));
+        }
+        validate_save_metadata(&envelope.payload.save_metadata, &envelope.payload.slot)?;
+        let restored_locale = envelope.payload.runtime_state.locale.clone();
+        if !self.localizations.contains_key(&restored_locale) {
+            return Err(NativeVnHostError::Localization(format!(
+                "ASTRA_PLAYER_RESTORE_LOCALE_UNAVAILABLE: locale {restored_locale} is not packaged"
+            )));
         }
         validate_saved_runtime_state(&envelope.payload.sections)?;
         let report = self.host.restore(RuntimeRestoreRequest {
@@ -1078,10 +1429,14 @@ impl NativeVnHostCommandSource {
             serde_json::from_slice(&envelope.payload.draw_commands_json).map_err(|error| {
                 NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
             })?;
+        let save_metadata = envelope.payload.save_metadata;
         self.runtime_state = Some(envelope.payload.runtime_state);
+        self.activate_locale(&restored_locale)?;
+        self.stage_director = envelope.payload.stage_director;
         self.last_draw = draw_commands;
         self.last_step_evidence = Some(envelope.payload.step_evidence);
         self.restored_product_media_snapshot = envelope.payload.product_media_snapshot_json;
+        self.apply_save_metadata(save_metadata)?;
         self.ui_controller_sessions.clear();
         self.base_ui_instance_id = None;
         self.base_ui_theme_id = None;
@@ -1090,6 +1445,11 @@ impl NativeVnHostCommandSource {
         self.pending_ui_focus = None;
         self.ui_semantics = None;
         self.ui_animations.clear();
+        let mut restore_lifecycle = Vec::new();
+        for layout_id in self.live_layout_ids.iter().cloned().collect::<Vec<_>>() {
+            restore_lifecycle.extend(self.text_resources.remove_layout(&layout_id)?);
+        }
+        self.live_layout_ids.clear();
         self.ui_generation = self
             .ui_generation
             .checked_add(1)
@@ -1097,21 +1457,16 @@ impl NativeVnHostCommandSource {
         self.ui_backend
             .context_restored(&format!("vn.ui.{}", self.session_id.0), self.ui_generation)
             .map_err(NativeVnHostError::Ui)?;
-        self.command_sequence = self
-            .command_sequence
-            .checked_add(1)
-            .ok_or(NativeVnHostError::SequenceOverflow)?;
-        Ok(PlayerHostCommandBatch::new(vec![
-            PlayerHostCommand::PresentScene {
-                sequence: self.command_sequence,
-                surface: self.surface,
-                width: self.width,
-                height: self.height,
-                clear_rgba: [8, 10, 16, 255],
-                commands: self.last_draw.clone(),
-                semantics: None,
-            },
-        ])?)
+        let mut batch = self.render(&[], 0)?;
+        let [PlayerHostCommand::PresentScene { commands, .. }] = batch.commands.as_mut_slice()
+        else {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_RESTORE_PRESENTATION_BATCH: restore render must emit exactly one scene"
+                    .into(),
+            ));
+        };
+        commands.splice(0..0, restore_lifecycle);
+        Ok(batch)
     }
 
     pub fn prepare_save_transaction(
@@ -1180,6 +1535,66 @@ impl NativeVnHostCommandSource {
         ])?)
     }
 
+    pub fn list_saves(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        Ok(PlayerHostCommandBatch::new(vec![
+            PlayerHostCommand::ListSaves {
+                sequence: self.next_command_sequence()?,
+            },
+        ])?)
+    }
+
+    pub fn ingest_save_catalog_entry(
+        &mut self,
+        expected_slot: &str,
+        bytes: &[u8],
+    ) -> Result<(), NativeVnHostError> {
+        let envelope = decode_save_envelope(bytes)?;
+        if envelope.payload.slot != expected_slot
+            || envelope.payload.sections.session_id != self.session_id
+        {
+            return Err(NativeVnHostError::Save(
+                "ASTRA_PLAYER_SAVE_CATALOG_IDENTITY: catalog entry does not belong to the requested slot and session"
+                    .into(),
+            ));
+        }
+        validate_save_metadata(&envelope.payload.save_metadata, expected_slot)?;
+        self.apply_save_metadata(envelope.payload.save_metadata)
+    }
+
+    fn apply_save_metadata(
+        &mut self,
+        metadata: NativeVnSaveMetadata,
+    ) -> Result<(), NativeVnHostError> {
+        {
+            let slot = self
+                .ui_save_slots
+                .get_mut(&metadata.slot_id)
+                .ok_or_else(|| {
+                    NativeVnHostError::Save(
+                        "ASTRA_PLAYER_SAVE_METADATA_SLOT: metadata references an undeclared slot"
+                            .into(),
+                    )
+                })?;
+            slot.occupied = true;
+            slot.thumbnail_asset = Some(metadata.thumbnail_asset.clone());
+            slot.has_thumbnail = true;
+            slot.timestamp_text = Some(metadata.timestamp_text.clone());
+            slot.playtime_text = Some(metadata.playtime_text.clone());
+            slot.metadata_text = Some(format!(
+                "{} | {}",
+                metadata.timestamp_text, metadata.playtime_text
+            ));
+            slot.can_load = true;
+            slot.migration_status = "current".into();
+        }
+        self.ui_backend
+            .renderer_mut()
+            .upsert_image_resource(metadata.thumbnail_asset.clone(), metadata.thumbnail.clone())?;
+        self.textures
+            .insert(metadata.thumbnail_asset, metadata.thumbnail);
+        Ok(())
+    }
+
     pub fn delete_save(
         &mut self,
         slot: impl Into<String>,
@@ -1244,7 +1659,16 @@ impl NativeVnHostCommandSource {
         self.apply_ui_resize_events(&events)?;
         let fallback_events = events.clone();
         if !self.has_active_ui_surface() {
-            return if let Some(command) = self.bubbled_ui_command(&fallback_events) {
+            let semantic_snapshot_hash = self
+                .ui_semantics
+                .as_ref()
+                .map(|snapshot| snapshot.hash)
+                .unwrap_or_else(|| astra_core::Hash256::from_sha256(b""));
+            return if let Some(action) =
+                self.bubbled_ui_action(&fallback_events, semantic_snapshot_hash)
+            {
+                self.dispatch_ui_action(&action)
+            } else if let Some(command) = self.bubbled_ui_command(&fallback_events) {
                 self.command(command)
             } else {
                 self.present_current_scene(self.ui_draw.clone())
@@ -1264,6 +1688,9 @@ impl NativeVnHostCommandSource {
             .iter()
             .any(|item| item.disposition == UiInputDispositionKind::Consumed);
         if !consumed {
+            if let Some(action) = self.bubbled_ui_action(&fallback_events, output.semantics.hash) {
+                return self.dispatch_ui_action(&action);
+            }
             if let Some(command) = self.bubbled_ui_command(&fallback_events) {
                 return self.command(command);
             }
@@ -1327,15 +1754,69 @@ impl NativeVnHostCommandSource {
                 } if state.pending_choice.is_none() && state.system_stack.is_empty() => {
                     return Some(VnPlayerCommand::Advance);
                 }
+                UiInputEventKind::PointerButton {
+                    button: astra_ui_core::UiPointerButton::Primary,
+                    state: UiButtonState::Pressed,
+                    ..
+                } if state.pending_choice.is_none() && state.system_stack.is_empty() => {
+                    return Some(VnPlayerCommand::Advance);
+                }
                 UiInputEventKind::Navigation {
                     action: astra_ui_core::UiNavigationAction::Cancel,
                 } if !state.system_stack.is_empty() => {
+                    return Some(VnPlayerCommand::ReturnSystem);
+                }
+                UiInputEventKind::Keyboard {
+                    logical_key,
+                    state: UiButtonState::Pressed,
+                    ..
+                } if !state.system_stack.is_empty()
+                    && matches!(logical_key.as_str(), "Escape" | "Esc") =>
+                {
                     return Some(VnPlayerCommand::ReturnSystem);
                 }
                 _ => {}
             }
         }
         None
+    }
+
+    fn bubbled_ui_action(
+        &self,
+        events: &[UiInputEvent],
+        semantic_snapshot_hash: astra_core::Hash256,
+    ) -> Option<astra_ui_core::UiActionEnvelope> {
+        let state = self.runtime_state.as_ref()?;
+        if !state.system_stack.is_empty() {
+            return None;
+        }
+        let event = events.iter().rev().find(|event| {
+            matches!(
+                event.kind,
+                UiInputEventKind::PointerButton {
+                    button: astra_ui_core::UiPointerButton::Secondary,
+                    state: UiButtonState::Pressed,
+                    ..
+                }
+            )
+        })?;
+        let page = "quick_panel";
+        tracing::info!(
+            event = "vn.ui.secondary_shortcut",
+            input_sequence = event.sequence,
+            semantic_target_id = "root",
+            page,
+            profile = %self.ui_profile,
+            "secondary pointer input resolved through the UI action router"
+        );
+        Some(astra_ui_core::UiActionEnvelope {
+            schema: "astra.ui_action_envelope.v1".into(),
+            input_sequence: event.sequence,
+            semantic_target_id: "root".into(),
+            action_id: "vn.open_system".into(),
+            arguments: BTreeMap::from([("page".into(), UiValue::String(page.into()))]),
+            semantic_snapshot_hash,
+        })
     }
 
     fn dispatch_ui_action(
@@ -1389,7 +1870,11 @@ impl NativeVnHostCommandSource {
             "vn.open_system" => VnUiAction::OpenSystem {
                 page: SystemPageKind::parse(ui_string_argument(action, "page")?),
             },
+            "vn.switch_system" => VnUiAction::SwitchSystemPage {
+                page: SystemPageKind::parse(ui_string_argument(action, "page")?),
+            },
             "vn.return_system" => VnUiAction::ReturnSystem,
+            "vn.request_exit" => VnUiAction::RequestExit,
             "vn.set_config" => VnUiAction::SetConfig {
                 key: ui_string_argument(action, "key")?.to_string(),
                 value: action.arguments.get("value").cloned().ok_or_else(|| {
@@ -1398,10 +1883,47 @@ impl NativeVnHostCommandSource {
                     )
                 })?,
             },
+            "vn.set_auto" => VnUiAction::SetAuto {
+                enabled: ui_bool_argument(action, "enabled")?,
+            },
+            "vn.set_skip" => VnUiAction::SetSkip {
+                mode: match ui_string_argument(action, "mode")? {
+                    "none" => astra_vn_core::SkipMode::None,
+                    "read" => astra_vn_core::SkipMode::Read,
+                    "all" => astra_vn_core::SkipMode::All,
+                    _ => {
+                        return Err(NativeVnHostError::Input(
+                            "ASTRA_PLAYER_UI_ACTION_ARGUMENT: skip mode must be none, read or all"
+                                .into(),
+                        ))
+                    }
+                },
+            },
+            "vn.set_reading_mode" => VnUiAction::SetReadingMode {
+                mode: match ui_string_argument(action, "mode")? {
+                    "hidden" => ReadingMode::Hidden,
+                    "manual" => ReadingMode::Manual,
+                    "fast_forward" => ReadingMode::FastForward,
+                    _ => {
+                        return Err(NativeVnHostError::Input(
+                            "ASTRA_PLAYER_READING_MODE_UNKNOWN: reading mode must be hidden, manual or fast_forward".into(),
+                        ))
+                    }
+                },
+            },
+            "vn.set_audio_enabled" => VnUiAction::SetAudioEnabled {
+                enabled: ui_bool_argument(action, "enabled")?,
+            },
+            "vn.invoke_system_action" => VnUiAction::InvokeSystemAction {
+                action_id: ui_string_argument(action, "action_id")?.to_string(),
+            },
             "vn.replay_voice" => VnUiAction::ReplayVoice {
                 voice_id: ui_string_argument(action, "voice_id")?.to_string(),
             },
             "vn.request_save" => VnUiAction::RequestSave {
+                slot_id: ui_string_argument(action, "slot_id")?.to_string(),
+            },
+            "vn.request_save_confirmed" => VnUiAction::RequestSaveConfirmed {
                 slot_id: ui_string_argument(action, "slot_id")?.to_string(),
             },
             "vn.request_load" => VnUiAction::RequestLoad {
@@ -1432,6 +1954,25 @@ impl NativeVnHostCommandSource {
                 )))
             }
         };
+        if self.active_ui_controller.is_none() {
+            return match typed_action {
+                VnUiAction::OpenSystem { page } => {
+                    self.require_system_page(page)?;
+                    tracing::info!(
+                        event = "vn.ui.global_action.forwarded",
+                        action_id = "vn.open_system",
+                        semantic_target_id = %action.semantic_target_id,
+                        input_sequence = action.input_sequence,
+                        "forwarded an explicitly allowed global UI action without a page controller"
+                    );
+                    self.command(VnPlayerCommand::OpenSystem { page })
+                }
+                _ => Err(NativeVnHostError::Input(
+                    "ASTRA_PLAYER_UI_CONTROLLER_CONTEXT: only the global open-system action is allowed without a live controller context"
+                        .into(),
+                )),
+            };
+        }
         let controller = self.active_ui_controller.clone().ok_or_else(|| {
             NativeVnHostError::Input(
                 "ASTRA_PLAYER_UI_CONTROLLER_CONTEXT: action arrived without a live controller context"
@@ -1452,22 +1993,89 @@ impl NativeVnHostCommandSource {
             .map_err(|error| NativeVnHostError::Input(error.to_string()))?;
         let forwarded =
             self.apply_ui_controller_effects(&controller.controller_id, effects, true)?;
-        let Some(action) = forwarded else {
+        let Some(product_action) = forwarded else {
             return self.present_current_scene(self.ui_draw.clone());
         };
-        let command = match action {
+        tracing::info!(
+            event = "vn.ui.action.forwarded",
+            action_id = %action.action_id,
+            semantic_target_id = %action.semantic_target_id,
+            stable_target_id = %product_action.stable_target(),
+            controller_id = %controller.controller_id,
+            input_sequence = action.input_sequence,
+            "forwarded a typed UI action to the product command router"
+        );
+        let requested_locale = match &product_action {
+            VnUiAction::SetConfig { key, value } if key == "display.language" => {
+                Some(ui_value_to_scalar(value)?)
+            }
+            _ => None,
+        };
+        if matches!(product_action, VnUiAction::RequestExit) {
+            self.exit_requested = true;
+            tracing::info!(
+                event = "player.vn.exit.requested",
+                controller_id = %controller.controller_id,
+                input_sequence = action.input_sequence,
+                "accepted a typed UI request to close the Player session"
+            );
+            return self.present_current_scene(self.ui_draw.clone());
+        }
+        let command = match product_action {
             VnUiAction::Advance => VnPlayerCommand::Advance,
             VnUiAction::Choose { option_id } => VnPlayerCommand::Choose { option_id },
-            VnUiAction::OpenSystem { page } => VnPlayerCommand::OpenSystem { page },
+            VnUiAction::OpenSystem { page } => {
+                self.require_system_page(page)?;
+                VnPlayerCommand::OpenSystem { page }
+            }
+            VnUiAction::SwitchSystemPage { page } => {
+                self.require_system_page(page)?;
+                VnPlayerCommand::SwitchSystemPage { page }
+            }
             VnUiAction::ReturnSystem => VnPlayerCommand::ReturnSystem,
+            VnUiAction::RequestExit => {
+                unreachable!("exit requests are handled before runtime routing")
+            }
             VnUiAction::SetConfig { key, value } => VnPlayerCommand::SetConfig {
                 key,
                 value: ui_value_to_scalar(&value)?,
             },
+            VnUiAction::SetAuto { enabled } => VnPlayerCommand::SetAuto { enabled },
+            VnUiAction::SetSkip { mode } => VnPlayerCommand::SetSkip { mode },
+            VnUiAction::SetReadingMode { mode } => {
+                if !self.system_ui_policy.reading_modes.contains(&mode) {
+                    return Err(NativeVnHostError::Input(
+                        "ASTRA_PLAYER_READING_MODE_UNDECLARED: UI requested a reading mode outside the bound profile"
+                            .into(),
+                    ));
+                }
+                VnPlayerCommand::SetReadingMode { mode }
+            }
+            VnUiAction::SetAudioEnabled { enabled } => {
+                if !self.system_ui_policy.audio_toggle {
+                    return Err(NativeVnHostError::Input(
+                        "ASTRA_PLAYER_AUDIO_TOGGLE_UNDECLARED: UI requested audio enable state outside the bound profile"
+                            .into(),
+                    ));
+                }
+                VnPlayerCommand::SetAudioEnabled { enabled }
+            }
+            VnUiAction::InvokeSystemAction { action_id } => {
+                if !self.system_ui_policy.custom_action_ids.contains(&action_id) {
+                    return Err(NativeVnHostError::Input(format!(
+                        "ASTRA_PLAYER_SYSTEM_ACTION_UNDECLARED: action {action_id} is not declared by profile {}",
+                        self.ui_profile
+                    )));
+                }
+                VnPlayerCommand::InvokeSystemAction { action_id }
+            }
             VnUiAction::ReplayVoice { voice_id } => {
                 VnPlayerCommand::ReplayVoice { voice: voice_id }
             }
             VnUiAction::RequestSave { slot_id } => {
+                return self.queue_ui_save_request(slot_id, true)
+            }
+            VnUiAction::RequestSaveConfirmed { slot_id } => {
                 return self.queue_ui_save_request(slot_id, true)
             }
             VnUiAction::RequestLoad { slot_id } => {
@@ -1486,7 +2094,53 @@ impl NativeVnHostCommandSource {
                 VnPlayerCommand::SubmitText { input_id, value }
             }
         };
-        self.command(command)
+        let previous_locale = if let Some(locale) = requested_locale.as_deref() {
+            let previous = self.localization.locale.clone();
+            self.activate_locale(locale)?;
+            Some(previous)
+        } else {
+            None
+        };
+        match self.command(command) {
+            Ok(batch) => {
+                if let Some(locale) = requested_locale {
+                    tracing::info!(
+                        event = "player.vn.locale.changed",
+                        locale,
+                        "activated a packaged locale through the typed config action"
+                    );
+                }
+                Ok(batch)
+            }
+            Err(error) => {
+                if let Some(previous) = previous_locale {
+                    self.activate_locale(&previous)?;
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn activate_locale(&mut self, locale: &str) -> Result<(), NativeVnHostError> {
+        let localization = self.localizations.get(locale).cloned().ok_or_else(|| {
+            NativeVnHostError::Localization(format!(
+                "ASTRA_PLAYER_LOCALE_UNDECLARED: locale {locale} is not packaged"
+            ))
+        })?;
+        *self.ui_text_locale.write().map_err(|_| {
+            NativeVnHostError::Localization(
+                "ASTRA_PLAYER_LOCALE_LOCK: UI text locale state was poisoned".into(),
+            )
+        })? = locale.to_string();
+        let font_families = ordered_ui_font_families(&self.available_font_families, locale);
+        *self.ui_text_font_families.write().map_err(|_| {
+            NativeVnHostError::Localization(
+                "ASTRA_PLAYER_FONT_FALLBACK_LOCK: UI font fallback state was poisoned".into(),
+            )
+        })? = font_families.clone();
+        self.font_families = font_families;
+        self.localization = localization;
+        Ok(())
     }
 
     fn apply_ui_controller_effects(
@@ -1710,11 +2364,25 @@ impl NativeVnHostCommandSource {
             ));
         }
         self.pending_ui_host_request = Some(if saving {
-            VnUiHostRequest::Save { slot_id }
+            self.pending_save_completion = Some(self.system_ui_policy.save_completion);
+            VnUiHostRequest::Save {
+                slot_id,
+                completion: self.system_ui_policy.save_completion,
+            }
         } else {
             VnUiHostRequest::Load { slot_id }
         });
         self.present_current_scene(self.ui_draw.clone())
+    }
+
+    fn require_system_page(&self, page: SystemPageKind) -> Result<(), NativeVnHostError> {
+        if page == SystemPageKind::Unknown || !self.system_ui_policy.allowed_pages.contains(&page) {
+            return Err(NativeVnHostError::Input(format!(
+                "ASTRA_PLAYER_SYSTEM_PAGE_UNDECLARED: page {page:?} is not allowed by profile {}",
+                self.ui_profile
+            )));
+        }
+        Ok(())
     }
 
     fn queue_ui_delete_request(
@@ -1753,8 +2421,11 @@ impl NativeVnHostCommandSource {
             [8, 10, 16, 255],
         )];
         commands.extend(self.scene_draw.iter().cloned());
-        commands.extend(ui_draw);
-        self.ui_draw = commands.clone();
+        commands.extend(ui_draw.iter().cloned());
+        // Retain only the UI layer. Keeping the fully composed frame here caused
+        // every resize/focus repaint to recursively append the previous clear and
+        // scene layers, producing duplicate resource identities on the WGPU path.
+        self.ui_draw = ui_draw;
         Ok(PlayerHostCommandBatch::new(vec![
             PlayerHostCommand::PresentScene {
                 sequence: self.next_command_sequence()?,
@@ -1789,20 +2460,25 @@ impl NativeVnHostCommandSource {
             localization_keys: &localization_keys,
         };
         let (surface, system_page, model) = if state.pending_choice.is_some() {
-            ("choice", None, model_to_ui_value(&context.build_choice()?)?)
+            (
+                "choice".to_string(),
+                None,
+                model_to_ui_value(&context.build_choice()?)?,
+            )
         } else if let Some(frame) = state.system_stack.last() {
             let page_model = context.build_system_page(frame.page)?;
             (
-                "system",
+                "system".to_string(),
                 Some(system_page_binding_key(frame.page)?),
                 page_model.to_ui_value()?,
             )
         } else {
-            (
-                "message",
-                None,
-                model_to_ui_value(&context.build_message()?)?,
-            )
+            let message = context.build_message()?;
+            let surface = message
+                .window
+                .clone()
+                .unwrap_or_else(|| "message".to_string());
+            (surface, None, model_to_ui_value(&message)?)
         };
         let binding = resolve_binding(
             &self.ui_bindings,
@@ -1812,7 +2488,7 @@ impl NativeVnHostCommandSource {
                     .as_ref()
                     .map(|wait| wait.command_id.as_str()),
                 system_page,
-                surface: Some(surface),
+                surface: Some(&surface),
                 profile: &self.ui_profile,
             },
         )?
@@ -1858,7 +2534,13 @@ impl NativeVnHostCommandSource {
         let instance_source = state
             .pending_wait
             .as_ref()
-            .map(|wait| wait.command_id.clone())
+            .map(|wait| {
+                format!(
+                    "{}.{}",
+                    wait.command_id,
+                    wait.await_id.as_deref().unwrap_or("unbound")
+                )
+            })
             .unwrap_or_else(|| {
                 system_page
                     .map(str::to_owned)
@@ -2004,6 +2686,26 @@ impl NativeVnHostCommandSource {
         }
         self.ui_performance
             .record(output.performance.clone(), stable_frame)?;
+        let root_bounds = output
+            .semantics
+            .nodes
+            .iter()
+            .find(|node| node.id == "root")
+            .map(|node| node.bounds_points);
+        tracing::debug!(
+            event = "player.vn.ui.frame_layout",
+            view_id = %active_view_id,
+            generation = self.ui_generation,
+            active_changed,
+            semantic_count = output.semantics.nodes.len(),
+            primitive_count = output.render.primitives.len(),
+            texture_upload_count = output.render.textures.uploads.len(),
+            root_min_x = root_bounds.map_or(-1.0, |bounds| bounds.min.x),
+            root_min_y = root_bounds.map_or(-1.0, |bounds| bounds.min.y),
+            root_max_x = root_bounds.map_or(-1.0, |bounds| bounds.max.x),
+            root_max_y = root_bounds.map_or(-1.0, |bounds| bounds.max.y),
+            "rendered a traceable AstraVN UI semantic generation"
+        );
         let draw = ui_frame_to_scene_commands(&output.render)?;
         let mut next_text_resources = self.text_resources.clone();
         let mut next_layout_ids = BTreeSet::new();
@@ -2191,13 +2893,13 @@ impl NativeVnHostCommandSource {
             .iter()
             .filter(|envelope| envelope.domain == RuntimeOutputDomain::Trace)
         {
-            if trace.schema == "astra.vn.runtime_state.v1" {
+            if trace.schema == VN_RUNTIME_STATE_SCHEMA {
                 self.runtime_state = Some(
                     trace
                         .decode_postcard(
                             RuntimeOutputDomain::Trace,
-                            "astra.vn.runtime_state.v1",
-                            SchemaVersion::new(1, 0, 0),
+                            VN_RUNTIME_STATE_SCHEMA,
+                            SchemaVersion::new(VN_RUNTIME_STATE_SCHEMA_MAJOR, 0, 0),
                         )
                         .map_err(|err| NativeVnHostError::Serialize(err.to_string()))?,
                 );
@@ -2209,7 +2911,7 @@ impl NativeVnHostCommandSource {
             )
         })?;
         self.last_step_evidence = Some(NativeVnStepEvidence {
-            schema: "astra.player_vn_step_evidence.v1".to_string(),
+            schema: "astra.player_vn_step_evidence.v2".to_string(),
             fixed_step,
             coverage_reached: effect.coverage_reached,
             vn_state_hash_before: effect.state_hash_before_advance,
@@ -2221,6 +2923,14 @@ impl NativeVnHostCommandSource {
                 .cursor
                 .as_ref()
                 .map(|cursor| cursor.state_id.clone()),
+            pending_wait_command_id: runtime_state
+                .pending_wait
+                .as_ref()
+                .map(|wait| wait.command_id.clone()),
+            pending_wait_await_id: runtime_state
+                .pending_wait
+                .as_ref()
+                .and_then(|wait| wait.await_id.clone()),
             pending_choice_ids: runtime_state
                 .pending_choice
                 .as_ref()
@@ -2255,95 +2965,164 @@ impl NativeVnHostCommandSource {
                 .map_err(|error| NativeVnHostError::RuntimeEvidence(error.to_string()))?;
             self.pending_timeline.push(player_timeline_task(task)?);
         }
-        for envelope in output.outputs.iter().filter(|envelope| {
-            envelope.domain == RuntimeOutputDomain::Audio
-                && envelope.schema == "astra.vn.audio_command.v2"
-        }) {
-            let command = envelope
-                .decode_postcard::<astra_vn_core::VnAudioCommand>(
-                    RuntimeOutputDomain::Audio,
-                    "astra.vn.audio_command.v2",
-                    SchemaVersion::new(2, 0, 0),
-                )
-                .map_err(|error| NativeVnHostError::RuntimeEvidence(error.to_string()))?;
-            let asset_id = command.cue.asset.clone();
-            let asset = self.media_assets.get(&asset_id).ok_or_else(|| {
-                NativeVnHostError::Asset(format!("ASTRA_PLAYER_AUDIO_ASSET_MISSING: {asset_id}"))
-            })?;
-            let command_kind = match command.cue.bus {
-                VnAudioBus::Voice => "voice",
-                VnAudioBus::Bgm => "bgm",
-                VnAudioBus::Se => "se",
-                VnAudioBus::Movie => "movie",
-            };
-            let mut attributes = BTreeMap::from([
-                ("asset".to_string(), asset_id.clone()),
-                ("loop".to_string(), command.cue.looped.to_string()),
-                ("fade".to_string(), command.cue.fade_ms.to_string()),
-            ]);
-            match &command.cue.sync {
-                VnAudioSync::None => {}
-                VnAudioSync::Text => {
-                    attributes.insert("sync".to_string(), "text".to_string());
+        let mut ordered_outputs = Vec::new();
+        let mut presentation_count = 0_usize;
+        for envelope in &output.outputs {
+            match envelope.domain {
+                RuntimeOutputDomain::Audio if envelope.schema == "astra.vn.audio_command.v2" => {
+                    let command = envelope
+                        .decode_postcard::<astra_vn_core::VnAudioCommand>(
+                            RuntimeOutputDomain::Audio,
+                            "astra.vn.audio_command.v2",
+                            SchemaVersion::new(2, 0, 0),
+                        )
+                        .map_err(|error| NativeVnHostError::RuntimeEvidence(error.to_string()))?;
+                    let asset_id = command.cue.asset.clone();
+                    let asset = self.media_assets.get(&asset_id).ok_or_else(|| {
+                        NativeVnHostError::Asset(format!(
+                            "ASTRA_PLAYER_AUDIO_ASSET_MISSING: {asset_id}"
+                        ))
+                    })?;
+                    let command_kind = match command.cue.bus {
+                        VnAudioBus::Voice => "voice",
+                        VnAudioBus::Bgm => "bgm",
+                        VnAudioBus::Se => "se",
+                        VnAudioBus::Movie => "movie",
+                    };
+                    let mut attributes = BTreeMap::from([
+                        ("asset".to_string(), asset_id.clone()),
+                        ("loop".to_string(), command.cue.looped.to_string()),
+                        ("fade".to_string(), command.cue.fade_ms.to_string()),
+                    ]);
+                    match &command.cue.sync {
+                        VnAudioSync::None => {}
+                        VnAudioSync::Text => {
+                            attributes.insert("sync".to_string(), "text".to_string());
+                        }
+                        VnAudioSync::Fence(fence) => {
+                            attributes.insert("sync".to_string(), "fence".to_string());
+                            attributes.insert("fence".to_string(), fence.clone());
+                        }
+                    }
+                    ordered_outputs.push(NativeVnOrderedRuntimeOutput::AudioStart(
+                        NativeVnAudioRequest {
+                            command_id: command.command_id,
+                            command: command_kind.to_string(),
+                            attributes,
+                            asset_id,
+                            codec: asset.codec.clone(),
+                            encoded_bytes: asset.bytes.clone(),
+                            encoded_hash: asset.hash,
+                        },
+                    ));
                 }
-                VnAudioSync::Fence(fence) => {
-                    attributes.insert("sync".to_string(), "fence".to_string());
-                    attributes.insert("fence".to_string(), fence.clone());
+                RuntimeOutputDomain::Presentation => {
+                    let command = envelope
+                        .decode_postcard(
+                            RuntimeOutputDomain::Presentation,
+                            "astra.vn.presentation_command.v2",
+                            SchemaVersion::new(2, 0, 0),
+                        )
+                        .map_err(|err| NativeVnHostError::Serialize(err.to_string()))?;
+                    presentation_count += 1;
+                    ordered_outputs.push(NativeVnOrderedRuntimeOutput::Presentation(command));
                 }
+                _ => {}
             }
-            self.pending_audio
-                .push(NativeVnAudioOutput::Start(NativeVnAudioRequest {
-                    command_id: command.command_id,
-                    command: command_kind.to_string(),
-                    attributes,
-                    asset_id,
-                    codec: asset.codec.clone(),
-                    encoded_bytes: asset.bytes.clone(),
-                    encoded_hash: asset.hash,
-                }));
         }
-        let presentation = output
-            .outputs
-            .iter()
-            .filter(|envelope| envelope.domain == RuntimeOutputDomain::Presentation)
-            .map(|envelope| {
-                envelope
-                    .decode_postcard(
-                        RuntimeOutputDomain::Presentation,
-                        "astra.vn.presentation_command.v2",
-                        SchemaVersion::new(2, 0, 0),
-                    )
-                    .map_err(|err| NativeVnHostError::Serialize(err.to_string()))
-            })
-            .collect::<Result<Vec<PresentationCommand>, _>>()?;
-        self.render(&presentation)
+        tracing::info!(
+            event = "player.vn.runtime.step_applied",
+            fixed_step,
+            presentation_count,
+            pending_wait_command_id = runtime_state
+                .pending_wait
+                .as_ref()
+                .map(|wait| wait.command_id.as_str())
+                .unwrap_or("none"),
+            pending_choice_count = runtime_state
+                .pending_choice
+                .as_ref()
+                .map_or(0, |choice| choice.options.len()),
+            pending_choice_enabled_count = runtime_state
+                .pending_choice
+                .as_ref()
+                .map_or(0, |choice| choice.enabled_option_ids.len()),
+            "applied runtime output before presentation rendering"
+        );
+        self.render(&ordered_outputs, presentation_count)
     }
 
     fn render(
         &mut self,
-        presentation: &[PresentationCommand],
+        ordered_outputs: &[NativeVnOrderedRuntimeOutput],
+        presentation_count: usize,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         let mut next_stage_director = self.stage_director.clone();
-        let mut next_audio_controls = Vec::new();
-        for command in presentation {
+        let mut next_audio = Vec::new();
+        for output in ordered_outputs {
+            if let NativeVnOrderedRuntimeOutput::AudioStart(request) = output {
+                next_audio.push(NativeVnAudioOutput::Start(request.clone()));
+                continue;
+            }
+            let NativeVnOrderedRuntimeOutput::Presentation(command) = output else {
+                continue;
+            };
             if let PresentationCommand::Stage(stage) = command {
                 let outputs = next_stage_director
                     .apply(stage)
                     .map_err(stage_director_error)?;
                 for output in outputs {
                     match output {
+                        StageDirectorOutput::Preload { asset } => {
+                            if !self.textures.contains_key(&asset)
+                                && !self.media_assets.contains_key(&asset)
+                            {
+                                return Err(NativeVnHostError::Asset(format!(
+                                    "ASTRA_PLAYER_PRELOAD_ASSET_MISSING: {asset}"
+                                )));
+                            }
+                        }
                         StageDirectorOutput::Audio(_) => {}
                         StageDirectorOutput::AudioControl(control) => {
-                            next_audio_controls.push(NativeVnAudioOutput::Control(
+                            next_audio.push(NativeVnAudioOutput::Control(
                                 NativeVnAudioControlRequest {
                                     command_id: control.id,
-                                    action: match control.action {
+                                    action: match &control.action {
                                         VnAudioControlAction::Pause => "pause",
                                         VnAudioControlAction::Resume => "resume",
                                         VnAudioControlAction::Stop => "stop",
+                                        VnAudioControlAction::FadeStop { .. } => "fade_stop",
                                     }
                                     .to_string(),
                                     target: control.target,
+                                    duration_ms: match &control.action {
+                                        VnAudioControlAction::FadeStop { duration_ms, .. } => {
+                                            Some(*duration_ms)
+                                        }
+                                        _ => None,
+                                    },
+                                    fence: match control.action {
+                                        VnAudioControlAction::FadeStop { fence, .. } => Some(fence),
+                                        _ => None,
+                                    },
+                                },
+                            ));
+                        }
+                        StageDirectorOutput::AudioBusEnabled { bus, enabled } => {
+                            let target = match bus {
+                                VnAudioBus::Bgm => "bgm",
+                                VnAudioBus::Se => "se",
+                                VnAudioBus::Voice => "voice",
+                                VnAudioBus::Movie => "movie_audio",
+                            };
+                            next_audio.push(NativeVnAudioOutput::Control(
+                                NativeVnAudioControlRequest {
+                                    command_id: format!("audio.bus.{target}.enabled"),
+                                    action: if enabled { "enable_bus" } else { "disable_bus" }
+                                        .to_string(),
+                                    target: target.to_string(),
+                                    duration_ms: None,
+                                    fence: None,
                                 },
                             ));
                         }
@@ -2383,6 +3162,9 @@ impl NativeVnHostCommandSource {
             self.height,
         )?;
 
+        // Preload is package/decode readiness, not an unbounded GPU residency
+        // lease.  Only resources referenced by the retained scene stay live on
+        // the surface; a later draw uploads a prevalidated asset on demand.
         let next_texture_ids = scene_texture_ids(&next_scene_draw);
         let mut lifecycle = Vec::new();
         for asset_id in self.live_texture_ids.difference(&next_texture_ids) {
@@ -2397,7 +3179,10 @@ impl NativeVnHostCommandSource {
             });
         }
 
-        for command in presentation {
+        for command in ordered_outputs.iter().filter_map(|output| match output {
+            NativeVnOrderedRuntimeOutput::Presentation(command) => Some(command),
+            NativeVnOrderedRuntimeOutput::AudioStart(_) => None,
+        }) {
             match command {
                 PresentationCommand::Dialogue { .. }
                 | PresentationCommand::Choice { .. }
@@ -2449,7 +3234,7 @@ impl NativeVnHostCommandSource {
         tracing::trace!(
             event = "player.vn.runtime.command.emit",
             sequence = self.command_sequence,
-            presentation_count = presentation.len(),
+            presentation_count,
             scene_command_count = lifecycle.len(),
             "emitted AstraVN Player host command"
         );
@@ -2458,7 +3243,15 @@ impl NativeVnHostCommandSource {
         self.stage_director = next_stage_director;
         self.live_texture_ids = next_texture_ids;
         self.ui_draw = ui_draw;
-        self.pending_audio.extend(next_audio_controls);
+        if !next_audio.is_empty() {
+            tracing::info!(
+                event = "player.vn.audio_sequence.queued",
+                fixed_step = self.fixed_step,
+                media_command_count = next_audio.len(),
+                "queued audio starts and controls in Runtime output order"
+            );
+        }
+        self.pending_audio.extend(next_audio);
         Ok(PlayerHostCommandBatch::new(vec![
             PlayerHostCommand::PresentScene {
                 sequence: self.command_sequence,
@@ -2880,10 +3673,26 @@ fn stage_scene_commands(
             },
         });
     }
+    if let Some(color) = state.backdrop_color {
+        commands.push(SceneCommand::rect(
+            "vn.scene.backdrop",
+            0,
+            0,
+            width,
+            height,
+            color,
+        ));
+    }
     let mut entities = state
         .entities
         .values()
-        .filter(|entity| entity.visible)
+        .filter(|entity| {
+            entity.visible
+                && state
+                    .layers
+                    .get(&entity.layer)
+                    .is_some_and(|layer| layer.visible)
+        })
         .collect::<Vec<_>>();
     entities.sort_by(|left, right| {
         let left_z = state
@@ -2925,6 +3734,7 @@ fn stage_scene_commands(
             entity_destination(
                 state,
                 texture,
+                entity.fit,
                 entity.x.millionths,
                 entity.y.millionths,
                 width,
@@ -2942,6 +3752,32 @@ fn stage_scene_commands(
         if clip.is_some() {
             commands.push(SceneCommand::PopClip);
         }
+    }
+    if state.shade_opacity.millionths > 0 {
+        let shade_alpha = u8::try_from(
+            state
+                .shade_opacity
+                .millionths
+                .checked_mul(255)
+                .ok_or_else(|| {
+                    NativeVnHostError::Asset("ASTRA_PLAYER_SHADE_ALPHA_OVERFLOW".into())
+                })?
+                / 1_000_000,
+        )
+        .map_err(|_| NativeVnHostError::Asset("ASTRA_PLAYER_SHADE_ALPHA_RANGE".into()))?;
+        commands.push(SceneCommand::rect(
+            "vn.scene.shade",
+            0,
+            0,
+            width,
+            height,
+            [
+                state.shade_color[0],
+                state.shade_color[1],
+                state.shade_color[2],
+                shade_alpha,
+            ],
+        ));
     }
     let mut movies = state.movies.values().collect::<Vec<_>>();
     movies.sort_by(|left, right| {
@@ -3030,6 +3866,7 @@ fn effect_filter_graph(
 fn entity_destination(
     state: &ProductStageState,
     texture: &TextureFrame,
+    fit: StageFitMode,
     entity_x: i64,
     entity_y: i64,
     width: u32,
@@ -3041,12 +3878,38 @@ fn entity_destination(
             "ASTRA_PLAYER_CAMERA_ZOOM: camera zoom must remain positive".to_string(),
         ));
     }
-    let base_height = height.saturating_mul(9) / 10;
-    let base_width = ((u64::from(base_height) * u64::from(texture.width))
-        / u64::from(texture.height))
-    .min(u64::from(width));
+    let (base_width, base_height) = match fit {
+        StageFitMode::ContainHeight => {
+            let height_fit = height.saturating_mul(9) / 10;
+            let width_fit =
+                (u64::from(height_fit) * u64::from(texture.width)) / u64::from(texture.height);
+            if width_fit <= u64::from(width) {
+                (width_fit, u64::from(height_fit))
+            } else {
+                (
+                    u64::from(width),
+                    u64::from(width) * u64::from(texture.height) / u64::from(texture.width),
+                )
+            }
+        }
+        StageFitMode::Native => {
+            let viewport_width = u64::from(state.viewport.width);
+            let viewport_height = u64::from(state.viewport.height);
+            if viewport_width == 0 || viewport_height == 0 {
+                return Err(stage_coordinate_error());
+            }
+            let scale_numerator =
+                (u64::from(width) * viewport_height).min(u64::from(height) * viewport_width);
+            (
+                (u64::from(texture.width) * scale_numerator / viewport_width / viewport_height)
+                    .max(1),
+                (u64::from(texture.height) * scale_numerator / viewport_width / viewport_height)
+                    .max(1),
+            )
+        }
+    };
     let destination_width = scale_dimension(base_width, zoom)?;
-    let destination_height = scale_dimension(u64::from(base_height), zoom)?;
+    let destination_height = scale_dimension(base_height, zoom)?;
     let center_x = camera_coordinate(
         entity_x,
         state.camera.x.millionths + state.camera.shake_x.millionths,
@@ -3186,10 +4049,13 @@ fn append_text_value(
     x: u32,
     y: u32,
     max_width: u32,
+    max_height: u32,
     font_size: f32,
     max_lines: u32,
     direction: TextDirection,
     rgba: [u8; 4],
+    horizontal_align: UiTextAlignment,
+    vertical_align: UiTextAlignment,
 ) -> Result<(), NativeVnHostError> {
     let request = text_request(TextRequestSpec {
         key,
@@ -3202,13 +4068,17 @@ fn append_text_value(
         direction,
     });
     let layout = provider.layout(&request)?;
+    let layout_width = layout.width.ceil().clamp(0.0, max_width as f32) as u32;
+    let layout_height = layout.height.ceil().clamp(0.0, max_height as f32) as u32;
+    let aligned_x = x.saturating_add(horizontal_align.offset(max_width, layout_width));
+    let aligned_y = y.saturating_add(vertical_align.offset(max_height, layout_height));
     let commands = owner.update_layout(layout_id, &layout, rgba)?;
     for command in commands {
         match command {
             SceneCommand::UploadGlyph { .. } | SceneCommand::ReleaseResource { .. } => {
                 lifecycle.push(command);
             }
-            command => draw.push(translate_text_command(command, x, y)?),
+            command => draw.push(translate_text_command(command, aligned_x, aligned_y)?),
         }
     }
     if !layout_ids.insert(layout_id.to_string()) {
@@ -3256,7 +4126,14 @@ fn append_ui_semantic_text(
         let width =
             non_negative_coord(node.bounds_points.max.x - node.bounds_points.min.x, "width")?
                 .max(1);
+        let height = non_negative_coord(
+            node.bounds_points.max.y - node.bounds_points.min.y,
+            "height",
+        )?
+        .max(1);
         let direction = parse_text_direction(node.properties.get("text.direction"))?;
+        let horizontal_align = parse_ui_text_alignment(node.properties.get("text.align"))?;
+        let vertical_align = parse_ui_text_alignment(node.properties.get("text.vertical_align"))?;
         let max_lines = parse_bounded_u32_property(node, "text.max_lines", 4, 1, 1_024)?;
         let font_size = parse_bounded_f32_property(
             node,
@@ -3265,6 +4142,7 @@ fn append_ui_semantic_text(
             6.0,
             256.0,
         )?;
+        let rgba = parse_ui_text_rgba(node.properties.get("text.rgba"))?;
         append_text_value(
             owner,
             provider,
@@ -3279,19 +4157,158 @@ fn append_ui_semantic_text(
             x.saturating_add(8),
             y.saturating_add(8),
             width.saturating_sub(16).max(1),
+            height.saturating_sub(16).max(1),
             font_size,
             max_lines,
             direction,
-            [255; 4],
+            rgba,
+            horizontal_align,
+            vertical_align,
         )?;
     }
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiTextAlignment {
+    Start,
+    Center,
+    End,
+}
+
+impl UiTextAlignment {
+    fn offset(self, available: u32, content: u32) -> u32 {
+        let remaining = available.saturating_sub(content);
+        match self {
+            Self::Start => 0,
+            Self::Center => remaining / 2,
+            Self::End => remaining,
+        }
+    }
+}
+
+fn parse_ui_text_alignment(value: Option<&String>) -> Result<UiTextAlignment, NativeVnHostError> {
+    match value.map(String::as_str).unwrap_or("start") {
+        "start" => Ok(UiTextAlignment::Start),
+        "center" => Ok(UiTextAlignment::Center),
+        "end" => Ok(UiTextAlignment::End),
+        _ => Err(NativeVnHostError::Asset(
+            "ASTRA_PLAYER_UI_TEXT_ALIGNMENT: alignment must be start, center or end".into(),
+        )),
+    }
+}
+
+fn parse_ui_text_rgba(value: Option<&String>) -> Result<[u8; 4], NativeVnHostError> {
+    let Some(value) = value else {
+        return Ok([255; 4]);
+    };
+    let channels = value
+        .split(',')
+        .map(|channel| {
+            channel.parse::<u8>().map_err(|_| {
+                NativeVnHostError::Asset(
+                    "ASTRA_PLAYER_UI_TEXT_COLOR: text.rgba must contain four u8 channels".into(),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    channels.try_into().map_err(|_| {
+        NativeVnHostError::Asset(
+            "ASTRA_PLAYER_UI_TEXT_COLOR: text.rgba must contain exactly four channels".into(),
+        )
+    })
+}
+
+fn ordered_ui_font_families(font_families: &[String], locale: &str) -> Vec<String> {
+    let mut ordered = font_families.to_vec();
+    ordered.sort_by_key(|family| {
+        let normalized = family.to_ascii_lowercase();
+        let preferred = if locale.starts_with("zh") {
+            normalized.contains("sans sc")
+        } else {
+            normalized.contains("sans jp")
+        };
+        (!preferred, normalized)
+    });
+    ordered
+}
+
+#[cfg(test)]
+mod font_fallback_tests {
+    use super::{
+        ordered_ui_font_families, parse_ui_text_alignment, save_slots_for_policy, ReadingMode,
+        SaveCompletionPolicy, SystemPageKind, SystemUiProfilePolicy, UiTextAlignment,
+    };
+    use std::collections::BTreeSet;
+
+    fn packaged_families() -> Vec<String> {
+        vec![
+            "Noto Sans JP".to_string(),
+            "Noto Sans SC".to_string(),
+            "Astra Symbols".to_string(),
+        ]
+    }
+
+    #[astra_headless_test::test]
+    fn locale_selects_the_matching_cjk_font_without_dropping_fallbacks() {
+        let japanese = ordered_ui_font_families(&packaged_families(), "ja");
+        let simplified_chinese = ordered_ui_font_families(&packaged_families(), "zh-Hans");
+
+        assert_eq!(japanese[0], "Noto Sans JP");
+        assert_eq!(simplified_chinese[0], "Noto Sans SC");
+        assert_eq!(japanese.len(), 3);
+        assert_eq!(simplified_chinese.len(), 3);
+    }
+
+    #[astra_headless_test::test]
+    fn non_cjk_locale_uses_the_packaged_japanese_baseline_deterministically() {
+        let first = ordered_ui_font_families(&packaged_families(), "en");
+        let second = ordered_ui_font_families(&packaged_families(), "en");
+
+        assert_eq!(first[0], "Noto Sans JP");
+        assert_eq!(first, second);
+    }
+
+    #[astra_headless_test::test]
+    fn semantic_text_alignment_uses_bounded_container_offsets() {
+        assert_eq!(UiTextAlignment::Start.offset(754, 320), 0);
+        assert_eq!(UiTextAlignment::Center.offset(754, 320), 217);
+        assert_eq!(UiTextAlignment::End.offset(754, 320), 434);
+        assert_eq!(UiTextAlignment::Center.offset(320, 754), 0);
+    }
+
+    #[astra_headless_test::test]
+    fn invalid_semantic_text_alignment_is_blocking() {
+        let invalid = "middle".to_string();
+        let error = parse_ui_text_alignment(Some(&invalid)).unwrap_err();
+        assert!(error.to_string().contains("ASTRA_PLAYER_UI_TEXT_ALIGNMENT"));
+    }
+
+    #[astra_headless_test::test]
+    fn save_slot_view_model_is_created_only_from_the_bound_profile_policy() {
+        let policy = SystemUiProfilePolicy {
+            profile_id: "classic".into(),
+            save_slot_ids: (1..=8).map(|index| format!("slot.{index:02}")).collect(),
+            quick_slot_id: None,
+            allowed_pages: BTreeSet::from([SystemPageKind::Save, SystemPageKind::Load]),
+            reading_modes: BTreeSet::from([ReadingMode::Manual]),
+            audio_toggle: true,
+            save_completion: SaveCompletionPolicy::ReturnSystem,
+            custom_action_ids: BTreeSet::new(),
+        };
+        let slots = save_slots_for_policy(&policy);
+        assert_eq!(slots.len(), 8);
+        assert!(slots.contains_key("slot.01"));
+        assert!(slots.contains_key("slot.08"));
+        assert!(!slots.contains_key("slot.09"));
+        assert!(!slots.contains_key("slot.quick"));
+    }
+}
+
 struct NativeUiTextMeasurer {
     provider: Arc<CosmicTextLayoutProvider>,
-    font_families: Vec<String>,
-    locale: String,
+    font_families: Arc<RwLock<Vec<String>>>,
+    locale: Arc<RwLock<String>>,
 }
 
 impl AstraTextMeasurer for NativeUiTextMeasurer {
@@ -3302,12 +4319,24 @@ impl AstraTextMeasurer for NativeUiTextMeasurer {
         let direction = parse_text_direction(Some(&request.direction)).map_err(|error| {
             UiValidationError::invalid("ASTRA_UI_TEXT_DIRECTION", error.to_string())
         })?;
+        let locale = self.locale.read().map_err(|_| {
+            UiValidationError::invalid(
+                "ASTRA_UI_TEXT_LOCALE_LOCK",
+                "UI text locale state was poisoned",
+            )
+        })?;
+        let font_families = self.font_families.read().map_err(|_| {
+            UiValidationError::invalid(
+                "ASTRA_UI_TEXT_FONT_FALLBACK_LOCK",
+                "UI font fallback state was poisoned",
+            )
+        })?;
         let key = format!("ui.measure.{}", request.semantic_id);
         let layout_request = text_request(TextRequestSpec {
             key: &key,
             text: &request.text,
-            locale: &self.locale,
-            font_families: &self.font_families,
+            locale: &locale,
+            font_families: &font_families,
             max_width: request.max_width.max(1.0).round() as u32,
             font_size: request.font_size,
             max_lines: request.max_lines,
@@ -3480,6 +4509,7 @@ fn translate_text_command(
 fn system_page_localization_key(page: SystemPageKind) -> Result<&'static str, NativeVnHostError> {
     match page {
         SystemPageKind::Title => Ok("system.title"),
+        SystemPageKind::QuickPanel => Ok("system.quick_panel"),
         SystemPageKind::Save => Ok("system.save"),
         SystemPageKind::Load => Ok("system.load"),
         SystemPageKind::Config => Ok("system.config"),
@@ -3489,16 +4519,19 @@ fn system_page_localization_key(page: SystemPageKind) -> Result<&'static str, Na
         SystemPageKind::RouteChart => Ok("system.route_chart"),
         SystemPageKind::Backlog => Ok("system.backlog"),
         SystemPageKind::LocalizationPreview => Ok("system.localization_preview"),
+        SystemPageKind::Custom => Ok("system.custom"),
         SystemPageKind::Unknown => Err(NativeVnHostError::Input(
             "ASTRA_PLAYER_SYSTEM_PAGE: unknown system page".to_string(),
         )),
     }
 }
 
-fn default_save_slots() -> BTreeMap<String, SaveSlotViewModel> {
-    (1..=24)
-        .map(|index| {
-            let slot_id = format!("slot.{index:02}");
+fn save_slots_for_policy(policy: &SystemUiProfilePolicy) -> BTreeMap<String, SaveSlotViewModel> {
+    policy
+        .save_slot_ids
+        .iter()
+        .cloned()
+        .map(|slot_id| {
             (
                 slot_id.clone(),
                 SaveSlotViewModel {
@@ -3509,6 +4542,7 @@ fn default_save_slots() -> BTreeMap<String, SaveSlotViewModel> {
                     title_key: None,
                     timestamp_text: None,
                     playtime_text: None,
+                    metadata_text: None,
                     can_write: true,
                     can_load: false,
                     migration_status: "empty".to_string(),
@@ -3518,9 +4552,79 @@ fn default_save_slots() -> BTreeMap<String, SaveSlotViewModel> {
         .collect()
 }
 
+fn format_playtime(playtime_ms: u64) -> String {
+    let total_seconds = playtime_ms / 1_000;
+    let hours = total_seconds / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
+    let seconds = total_seconds % 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+fn decode_save_envelope(bytes: &[u8]) -> Result<NativeVnPlayerSaveEnvelope, NativeVnHostError> {
+    let envelope: NativeVnPlayerSaveEnvelope = postcard::from_bytes(bytes).map_err(|error| {
+        NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
+    })?;
+    if envelope.schema != "astra.player.native_vn_save.v4"
+        || envelope.payload.schema != "astra.player.native_vn_save_payload.v4"
+    {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_VERSION_UNSUPPORTED: save schema is not supported".into(),
+        ));
+    }
+    let payload_bytes = postcard::to_allocvec(&envelope.payload)
+        .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
+    if Hash256::from_sha256(&payload_bytes) != envelope.payload_hash {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_INTEGRITY: save payload hash mismatch".into(),
+        ));
+    }
+    Ok(envelope)
+}
+
+fn validate_save_metadata(
+    metadata: &NativeVnSaveMetadata,
+    expected_slot: &str,
+) -> Result<(), NativeVnHostError> {
+    if metadata.slot_id != expected_slot
+        || metadata.thumbnail_asset != format!("astra.internal.save_thumbnail.{expected_slot}")
+    {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_METADATA_IDENTITY: save metadata identity does not match its slot"
+                .into(),
+        ));
+    }
+    if metadata.timestamp_text.trim().is_empty()
+        || metadata.timestamp_text.len() > 64
+        || metadata.playtime_text.len() != 8
+    {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_METADATA_TEXT: save metadata text is invalid".into(),
+        ));
+    }
+    let expected_bytes = usize::try_from(metadata.thumbnail.width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(metadata.thumbnail.height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(4));
+    if metadata.thumbnail.width != 160
+        || metadata.thumbnail.height != 120
+        || expected_bytes != Some(metadata.thumbnail.rgba8.len())
+        || Hash256::from_sha256(&metadata.thumbnail.rgba8) != metadata.thumbnail.hash
+    {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_METADATA_THUMBNAIL: save thumbnail integrity check failed".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn system_page_binding_key(page: SystemPageKind) -> Result<&'static str, NativeVnHostError> {
     match page {
         SystemPageKind::Title => Ok("title"),
+        SystemPageKind::QuickPanel => Ok("quick_panel"),
         SystemPageKind::Save => Ok("save"),
         SystemPageKind::Load => Ok("load"),
         SystemPageKind::Config => Ok("config"),
@@ -3530,6 +4634,7 @@ fn system_page_binding_key(page: SystemPageKind) -> Result<&'static str, NativeV
         SystemPageKind::RouteChart => Ok("route_chart"),
         SystemPageKind::Backlog => Ok("backlog"),
         SystemPageKind::LocalizationPreview => Ok("localization_preview"),
+        SystemPageKind::Custom => Ok("custom"),
         SystemPageKind::Unknown => Err(NativeVnHostError::Input(
             "ASTRA_PLAYER_SYSTEM_PAGE: unknown system page has no UI binding".into(),
         )),
@@ -3544,6 +4649,19 @@ fn ui_string_argument<'a>(
         Some(UiValue::String(value)) if !value.is_empty() => Ok(value),
         _ => Err(NativeVnHostError::Input(format!(
             "ASTRA_PLAYER_UI_ACTION_ARGUMENT: action {} requires string argument {name}",
+            action.action_id
+        ))),
+    }
+}
+
+fn ui_bool_argument(
+    action: &astra_ui_core::UiActionEnvelope,
+    name: &str,
+) -> Result<bool, NativeVnHostError> {
+    match action.arguments.get(name) {
+        Some(UiValue::Bool(value)) => Ok(*value),
+        _ => Err(NativeVnHostError::Input(format!(
+            "ASTRA_PLAYER_UI_ACTION_ARGUMENT: action {} requires boolean argument {name}",
             action.action_id
         ))),
     }
@@ -3643,6 +4761,7 @@ fn validate_story_text(
 fn validate_story_presentation(
     compiled: &CompiledStory,
     textures: &BTreeMap<String, TextureFrame>,
+    media_assets: &BTreeMap<String, PackagedMediaAsset>,
     manifest: &VnPresentationProviderManifest,
     profile: &str,
 ) -> Result<(), NativeVnHostError> {
@@ -3659,6 +4778,13 @@ fn validate_story_presentation(
             PresentationCommand::Stage(stage) => {
                 validate_stage_command_policy(stage, manifest, profile)?;
                 match stage {
+                    StageCommand::Preload { asset } => {
+                        if !textures.contains_key(asset) && !media_assets.contains_key(asset) {
+                            return Err(NativeVnHostError::Asset(format!(
+                                "ASTRA_PLAYER_PRELOAD_ASSET_MISSING: {asset}"
+                            )));
+                        }
+                    }
                     StageCommand::Background { asset: asset_id, .. }
                     | StageCommand::Show {
                         asset: asset_id, ..
@@ -3669,9 +4795,15 @@ fn validate_story_presentation(
                     }
                     StageCommand::Configure { .. }
                     | StageCommand::Hide { .. }
+                    | StageCommand::ClearLayer { .. }
+                    | StageCommand::SetLayerVisibility { .. }
+                    | StageCommand::Backdrop { .. }
+                    | StageCommand::Shade { .. }
+                    | StageCommand::SetSkipAllowed { .. }
                     | StageCommand::Move { .. }
                     | StageCommand::Audio(_)
                     | StageCommand::AudioControl(_)
+                    | StageCommand::SetAudioBusEnabled { .. }
                     | StageCommand::Timeline(_)
                     | StageCommand::Transition { .. }
                     | StageCommand::Shake { .. } => {}

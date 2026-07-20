@@ -29,20 +29,28 @@ impl Default for CommandRegistry {
             "choice",
             "option",
             "jump",
+            "branch",
             "call",
             "return",
             "mutate",
             "system_page",
             "wait",
+            "input_wait",
         ] {
             registry
                 .commands
                 .insert(command.into(), CommandProvider::Core);
         }
         for command in [
+            "preload",
             "background",
             "show",
             "hide",
+            "clear_layer",
+            "layer_visibility",
+            "backdrop",
+            "shade",
+            "skip_allowed",
             "move",
             "camera",
             "movie",

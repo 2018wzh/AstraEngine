@@ -1,0 +1,307 @@
+{
+  "schema": "tsuinosora.original_ui_reference_public_manifest.v1",
+  "transform": "tsuinosora.reference_crop.v1",
+  "desktop_size": [
+    3839,
+    2399
+  ],
+  "crop_box": [
+    1220,
+    674,
+    2620,
+    1724
+  ],
+  "output_size": [
+    800,
+    600
+  ],
+  "resampler": "pillow_lanczos",
+  "reference_count": 15,
+  "references": [
+    {
+      "id": "TSUI1999-UI-001",
+      "role": "title",
+      "input_kind": "client_identity",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "c272d21d5fda79f50e539df329e84d0427e2275cf83357d19ec6315f8a1c990e",
+      "crop_box": null,
+      "crop_sha256": "ce2ecfeaac1073019f980dc139561ebbae6d38c1a396508cea961cf13d361c5a",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "ce2ecfeaac1073019f980dc139561ebbae6d38c1a396508cea961cf13d361c5a"
+    },
+    {
+      "id": "TSUI1999-UI-002",
+      "role": "opening-staggered-text",
+      "input_kind": "client_border_crop",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "856071ac8624f0b70f93a77d38c3d0203fab0e13324f2f53f540e13aed32ab3f",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "crop_sha256": "e941b7c3b1d9c2e0a6b160cd6ad97a00bf5be15088823a8ed6d332ea92936b2f",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "e941b7c3b1d9c2e0a6b160cd6ad97a00bf5be15088823a8ed6d332ea92936b2f"
+    },
+    {
+      "id": "TSUI1999-UI-003",
+      "role": "opening-centered-text",
+      "input_kind": "client_border_crop",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "b0e811ba35818b08161af1d4014857aa80e909273fd4621d1821c0e04e5dd0c3",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "crop_sha256": "35c1a7e8495948e5db34ba08b24e3ca9f70f5c0c68d7154b75405dc56bf84897",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "35c1a7e8495948e5db34ba08b24e3ca9f70f5c0c68d7154b75405dc56bf84897"
+    },
+    {
+      "id": "TSUI1999-UI-004",
+      "role": "stage-background",
+      "input_kind": "desktop_crop",
+      "raw_size": [
+        3839,
+        2399
+      ],
+      "raw_sha256": "6a6b6b1ffdf1ee12ae4838b6caaac95f7c864387bc0a3242a510f1b067a1a2cd",
+      "crop_box": [
+        1220,
+        674,
+        2620,
+        1724
+      ],
+      "crop_sha256": "675e2cd4a1dff167709bb3ad83ce697b503d0bb75c7b1de79f864abaa16acce9",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "279d7b8248af1bb32aa218b3328ee7dfc3f502189542bebaabd6dd6116121138"
+    },
+    {
+      "id": "TSUI1999-UI-005",
+      "role": "dialogue-background-only",
+      "input_kind": "client_border_crop",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "37c8a1c07d687b94aa7bc8027a00b05d16e2e3847a204e5bf41bc45532032d70",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "crop_sha256": "1e786d8e01de4cb24aed302a727b6acb0104c1d043223aaf35c2b8d825558084",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "1e786d8e01de4cb24aed302a727b6acb0104c1d043223aaf35c2b8d825558084"
+    },
+    {
+      "id": "TSUI1999-UI-006",
+      "role": "dialogue-character-overflow",
+      "input_kind": "client_identity",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "20b239533ee6769a43d20e7ac96807fd6ea2697ffddbd4aeb64159b13e740fe9",
+      "crop_box": null,
+      "crop_sha256": "48be7f129d0f18f4318b2e62b2ee6e7e7f93bc97f94a0f0380d009674760be59",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "48be7f129d0f18f4318b2e62b2ee6e7e7f93bc97f94a0f0380d009674760be59"
+    },
+    {
+      "id": "TSUI1999-UI-007",
+      "role": "dialogue-two-characters-overflow",
+      "input_kind": "client_identity",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "577491adb139a7cd30642b86a0e41ada9fda4e52af41a0b133b102c666cc7d26",
+      "crop_box": null,
+      "crop_sha256": "14b5302a9405d8c7b88766b81f5ca0d599a5cd8a8cffa4f819eef94c81563a53",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "14b5302a9405d8c7b88766b81f5ca0d599a5cd8a8cffa4f819eef94c81563a53"
+    },
+    {
+      "id": "TSUI1999-UI-008",
+      "role": "stage-centered-monologue",
+      "input_kind": "client_identity",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "55489cc77e884b2be05b19720b991b7a6ffdb0673bfdd08ffb9342ac6ff76df3",
+      "crop_box": null,
+      "crop_sha256": "d06554f24946a61488c403771d9100864db04afda304c64292ef7af7025bcfb1",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "d06554f24946a61488c403771d9100864db04afda304c64292ef7af7025bcfb1"
+    },
+    {
+      "id": "TSUI1999-UI-009",
+      "role": "stage-choice",
+      "input_kind": "client_border_crop",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "2fbb2716c9435460fb02cd7d7ee904d02c2530b8fd7010eae796c44c6046dbb8",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "crop_sha256": "10d3e4d4f3bb03c8bea9f0c17f46720e0b8b5f2351a44c3a6d3dee50baac2d35",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "10d3e4d4f3bb03c8bea9f0c17f46720e0b8b5f2351a44c3a6d3dee50baac2d35"
+    },
+    {
+      "id": "TSUI1999-UI-010",
+      "role": "title-load",
+      "input_kind": "client_identity",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "9ff59de9f6b152b1c911511b147de6c8bc34c6e88fe5b1ef403ea3a28a52abb7",
+      "crop_box": null,
+      "crop_sha256": "7d7c77d28c55235254afb069ccd8c71ad68c10372b5a69cdea541f8d00ac7d59",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "7d7c77d28c55235254afb069ccd8c71ad68c10372b5a69cdea541f8d00ac7d59"
+    },
+    {
+      "id": "TSUI1999-UI-011",
+      "role": "system-popup",
+      "input_kind": "client_identity",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "224191e1598b061bf61e398fc5b14c8be918fc74cd7350b91f09b2de8a3c641f",
+      "crop_box": null,
+      "crop_sha256": "600eb3b10640edd70162da38d8aa73da994bf6727052734076c54145cc6eb2cd",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "600eb3b10640edd70162da38d8aa73da994bf6727052734076c54145cc6eb2cd"
+    },
+    {
+      "id": "TSUI1999-UI-012",
+      "role": "system-config",
+      "input_kind": "client_identity",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "224191e1598b061bf61e398fc5b14c8be918fc74cd7350b91f09b2de8a3c641f",
+      "crop_box": null,
+      "crop_sha256": "600eb3b10640edd70162da38d8aa73da994bf6727052734076c54145cc6eb2cd",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "600eb3b10640edd70162da38d8aa73da994bf6727052734076c54145cc6eb2cd"
+    },
+    {
+      "id": "TSUI1999-UI-013",
+      "role": "system-load",
+      "input_kind": "client_identity",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "fb4b9452f41cfdc1b41b6d1ce334629a6b3bb0908ead933d0dbe95701b0692b9",
+      "crop_box": null,
+      "crop_sha256": "d07a9407cac61b57e12140ad8e4e39484504bd8ed5437b591b5d6c34c1194c71",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "d07a9407cac61b57e12140ad8e4e39484504bd8ed5437b591b5d6c34c1194c71"
+    },
+    {
+      "id": "TSUI1999-UI-014",
+      "role": "system-save",
+      "input_kind": "client_identity",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "a6dd6254e1b0e89d54e99681981146a7347de433b5b99d7c6e5395753b0378ca",
+      "crop_box": null,
+      "crop_sha256": "a0de8921431fac8abb921a0586d0363710c95b018df1ffcaefeed3d2547cfa8a",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "a0de8921431fac8abb921a0586d0363710c95b018df1ffcaefeed3d2547cfa8a"
+    },
+    {
+      "id": "TSUI1999-UI-015",
+      "role": "legacy-game",
+      "input_kind": "legacy_normalized",
+      "raw_size": [
+        1403,
+        1053
+      ],
+      "raw_sha256": "1c4ddf68fa15fd6a76db259b155366456198bd551c49de8a9ede9ca0f2be9d84",
+      "crop_box": [
+        1,
+        1,
+        1401,
+        1051
+      ],
+      "crop_sha256": "549a9bbb0945e9c017d464fef924efceb645050343656c3956203f32c59964cb",
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "f23d60640fdfa365b29b2953f9b59ec831564acce026107290df1febab1f00fe"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
 use astra_vn_package::{
-    load_presentation_provider_manifest, package_sections_for_project,
-    VN_PRESENTATION_PROVIDER_MANIFEST_SCHEMA,
+    decode_compiled_project, load_presentation_provider_manifest, package_sections_for_project,
+    VnCompiledProjectRoot, VN_PRESENTATION_PROVIDER_MANIFEST_SCHEMA,
 };
 use astra_vn_script::{compile_astra_project, AstraSource};
 
@@ -40,6 +40,56 @@ fn package_persists_profile_bound_presentation_policy() {
             .to_string(),
         "ASTRA_VN_PRESENTATION_PROFILE_UNDECLARED: requested presentation profile is not declared by the package"
     );
+}
+
+#[astra_headless_test::test]
+fn compiled_project_v3_requires_the_v2_root_without_reader_fallback() {
+    let project = compiled_story();
+    let mut sections =
+        package_sections_for_project(&project, &["classic".to_string()], "game").unwrap();
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
+        "compiled.project.v3",
+        "classic",
+        sections.clone(),
+    ))
+    .unwrap();
+    let package = PackageReader::open(blob.as_bytes()).unwrap();
+    let root: VnCompiledProjectRoot = package
+        .container()
+        .decode_postcard("vn.compiled_project")
+        .unwrap();
+    assert_eq!(root.schema, "astra.vn.compiled_project_root.v2");
+    assert_eq!(root.compiled_project_schema, "astra.vn.compiled_project.v3");
+    assert_eq!(
+        decode_compiled_project(&package).unwrap().schema,
+        "astra.vn.compiled_project.v3"
+    );
+
+    let legacy_root = VnCompiledProjectRoot {
+        schema: "astra.vn.compiled_project_root.v1".to_string(),
+        compiled_project_schema: "astra.vn.compiled_project.v2".to_string(),
+        ..root
+    };
+    sections.retain(|section| section.id != "vn.compiled_project");
+    sections.push(
+        SectionPayload::postcard(
+            "vn.compiled_project",
+            "astra.vn.compiled_project_root.v1",
+            &legacy_root,
+        )
+        .unwrap(),
+    );
+    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
+        "compiled.project.legacy",
+        "classic",
+        sections,
+    ))
+    .unwrap();
+    let package = PackageReader::open(blob.as_bytes()).unwrap();
+    assert!(decode_compiled_project(&package)
+        .unwrap_err()
+        .to_string()
+        .contains("ASTRA_VN_COMPILED_PROJECT_ROOT"));
 }
 
 #[astra_headless_test::test]

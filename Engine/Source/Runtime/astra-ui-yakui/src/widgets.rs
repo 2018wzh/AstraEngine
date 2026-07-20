@@ -10,11 +10,13 @@ use yakui_core::{Response, WidgetId};
 pub struct AstraNodeProps {
     pub semantic_id: String,
     pub min_size: Vec2,
+    pub max_size: Vec2,
     pub fill: Color,
     pub interactive: bool,
     pub fill_width: bool,
     pub fill_height: bool,
     pub loose_children: bool,
+    pub clip_children: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -52,11 +54,13 @@ impl Widget for AstraNodeWidget {
             props: AstraNodeProps {
                 semantic_id: "ui.uninitialized".into(),
                 min_size: Vec2::ZERO,
+                max_size: Vec2::INFINITY,
                 fill: Color::CLEAR,
                 interactive: false,
                 fill_width: false,
                 fill_height: false,
                 loose_children: false,
+                clip_children: false,
             },
             pressed: false,
             clicked_semantic_id: None,
@@ -65,6 +69,10 @@ impl Widget for AstraNodeWidget {
     }
 
     fn update(&mut self, props: Self::Props<'_>) -> Self::Response {
+        if self.props.semantic_id != props.semantic_id {
+            self.pressed = false;
+            self.clicked_semantic_id = None;
+        }
         self.props = props;
         AstraNodeResponse {
             semantic_id: self.props.semantic_id.clone(),
@@ -75,12 +83,19 @@ impl Widget for AstraNodeWidget {
     }
 
     fn layout(&self, mut ctx: LayoutContext<'_>, constraints: Constraints) -> Vec2 {
+        if self.props.clip_children {
+            ctx.layout.enable_clipping(ctx.dom);
+        }
         let node = ctx.dom.get_current();
         let mut size = self.props.min_size;
+        let bounded_max = constraints.max.min(self.props.max_size);
         let child_constraints = if self.props.loose_children {
-            Constraints::loose(constraints.max)
+            Constraints::loose(bounded_max)
         } else {
-            constraints
+            Constraints {
+                min: constraints.min.min(bounded_max),
+                max: bounded_max,
+            }
         };
         for child in &node.children {
             size = size.max(ctx.calculate_layout(*child, child_constraints));
@@ -91,7 +106,10 @@ impl Widget for AstraNodeWidget {
         if self.props.fill_height && constraints.max.y.is_finite() {
             size.y = constraints.max.y;
         }
-        constraints.constrain_min(size)
+        constraints
+            .constrain(size)
+            .min(self.props.max_size)
+            .max(self.props.min_size)
     }
 
     fn paint(&self, mut ctx: PaintContext<'_>) {

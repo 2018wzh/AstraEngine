@@ -43,7 +43,7 @@ fn compiles_route_graph_source_map_and_stable_hash() {
     )
     .unwrap();
 
-    assert_eq!(compiled.schema, "astra.vn.compiled_project.v1");
+    assert_eq!(compiled.schema, "astra.vn.compiled_project.v3");
     assert_eq!(compiled.stories.len(), 2);
     assert_eq!(compiled.route_graph.nodes.len(), 5);
     assert!(compiled
@@ -103,7 +103,7 @@ fn compiled_story_exposes_system_story_manifest() {
 
     assert_eq!(
         compiled.system_story_manifest.schema,
-        "astra.vn.system_story_manifest.v1"
+        "astra.vn.system_story_manifest.v2"
     );
     let title = compiled
         .system_story_manifest

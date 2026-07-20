@@ -93,6 +93,8 @@ pub enum PhysicalInput {
     Await {
         observation: ObservationPredicate,
         timeout_ticks: u32,
+        #[serde(default)]
+        continue_at_match: bool,
     },
     Checkpoint {
         id: String,
@@ -139,6 +141,7 @@ impl PhysicalInput {
             Self::Await {
                 observation,
                 timeout_ticks,
+                ..
             } => {
                 if *timeout_ticks == 0 {
                     return Err(ProtocolError::invalid(

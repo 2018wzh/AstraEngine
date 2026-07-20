@@ -25,7 +25,6 @@ astra-platform = { path = "../../Platform/astra-platform" }
 astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
 astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider", default-features = false }
 astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
-astra-vn-policy = { path = "../../Modules/AstraVN/astra-vn-policy" }
 astra-vn-presentation = { path = "../../Modules/AstraVN/astra-vn-presentation" }
 astra-vn-system = { path = "../../Modules/AstraVN/astra-vn-system" }
 astra-vn-ui = { path = "../../Modules/AstraVN/astra-vn-ui" }
@@ -35,6 +34,12 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+astra-vn-policy = { path = "../../Modules/AstraVN/astra-vn-policy", default-features = false, features = ["luau-runtime"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+astra-vn-policy = { path = "../../Modules/AstraVN/astra-vn-policy", default-features = false, features = ["portable-luau-runtime"] }
 
 [dev-dependencies]
 astra-headless-test = { path = "../../Developer/astra-headless-test" }

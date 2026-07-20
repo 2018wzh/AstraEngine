@@ -1,0 +1,23 @@
+{
+  "schema": "tsuinosora.ui_profile_manifest.v1",
+  "default_profile": "modern",
+  "profiles": [
+    {
+      "id": "classic",
+      "design_width": 800,
+      "design_height": 600,
+      "aspect_policy": "strict_letterbox",
+      "secondary_pointer_action": "save",
+      "core_state_authority": "shared"
+    },
+    {
+      "id": "modern",
+      "design_width": 800,
+      "design_height": 600,
+      "aspect_policy": "strict_letterbox",
+      "secondary_pointer_action": "quick_panel",
+      "core_state_authority": "shared"
+    }
+  ],
+  "excluded_systems": ["gallery", "replay", "route_chart", "voice_replay", "remake_portraits"]
+}

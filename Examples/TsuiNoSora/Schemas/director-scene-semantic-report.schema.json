@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.director_scene_semantic_report.v1.json",
+  "title": "TsuiNoSora Director Scene Semantic Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "scene_count",
+    "source_operation_count",
+    "semantic_operation_count",
+    "semantic_kind_counts",
+    "scene_semantic_sha256",
+    "diagnostics",
+    "redaction"
+  ],
+  "properties": {
+    "schema": { "const": "tsuinosora.director_scene_semantic_report.v1" },
+    "status": { "enum": ["pass", "blocked"] },
+    "scene_count": { "type": "integer", "minimum": 0 },
+    "source_operation_count": { "type": "integer", "minimum": 0 },
+    "semantic_operation_count": { "type": "integer", "minimum": 0 },
+    "semantic_kind_counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "scene_semantic_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "diagnostics": { "type": "array", "items": { "type": "object" } },
+    "redaction": { "type": "object", "additionalProperties": { "type": "string" } }
+  }
+}

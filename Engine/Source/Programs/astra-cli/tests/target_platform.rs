@@ -85,6 +85,7 @@ fn run_nativevn_headless(
                         value_hash: active_video_hash,
                     },
                     timeout_ticks: 1,
+                    continue_at_match: false,
                 },
             ),
             (32, keyboard("Enter")),
@@ -97,6 +98,7 @@ fn run_nativevn_headless(
                         value_hash: active_voice_hash,
                     },
                     timeout_ticks: 1,
+                    continue_at_match: false,
                 },
             ),
             (
@@ -107,6 +109,7 @@ fn run_nativevn_headless(
                         value_hash: inactive_voice_hash,
                     },
                     timeout_ticks: 300,
+                    continue_at_match: false,
                 },
             ),
             (335, keyboard("Enter")),
@@ -118,6 +121,7 @@ fn run_nativevn_headless(
                         value_hash: pending_choices_hash,
                     },
                     timeout_ticks: 60,
+                    continue_at_match: false,
                 },
             ),
             (396, keyboard(choice_key)),
@@ -142,6 +146,7 @@ fn run_nativevn_headless(
                         value_hash: pending_choices_hash,
                     },
                     timeout_ticks: 300,
+                    continue_at_match: false,
                 },
             ),
             (602, keyboard(choice_key)),
@@ -724,9 +729,23 @@ fn write_nativevn_minimal_fixture(root: &Path, case_dir: &Path) -> PathBuf {
         nativevn_minimal_story(),
     )
     .unwrap();
-    fs::copy(
-        root.join("Examples/NativeVN/UI/flagship.astra"),
+    let flagship_ui = fs::read_to_string(root.join("Examples/NativeVN/UI/flagship.astra"))
+        .expect("checked-in flagship UI fixture")
+        .lines()
+        .map(|line| {
+            if line.starts_with("ui_bind ") && !line.contains(" profile:") {
+                line.replacen("ui_bind ", "ui_bind profile:minimal ", 1)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(
         case_dir.join("UI/flagship.astra"),
+        format!(
+            "ui_policy profile:minimal save_slots:\"slot.quick,slot.01,slot.02,slot.03,slot.04,slot.05,slot.06,slot.07,slot.08\" quick_slot:slot.quick allowed_pages:\"title,save,load,config,backlog,gallery,replay,voice_replay,route_chart,localization_preview\" reading_modes:\"manual\" audio_toggle:true save_completion:stay custom_actions:\"\" #@id ui.policy.minimal\n{flagship_ui}"
+        ),
     )
     .unwrap();
     fs::copy(

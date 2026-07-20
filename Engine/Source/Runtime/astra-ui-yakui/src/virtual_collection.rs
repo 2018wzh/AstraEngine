@@ -341,6 +341,12 @@ impl<K: Ord + Clone, V> BoundedLru<K, V> {
         Ok(evicted)
     }
 
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        let entry = self.entries.remove(key)?;
+        self.current_bytes = self.current_bytes.saturating_sub(entry.bytes);
+        Some(entry.value)
+    }
+
     pub fn current_bytes(&self) -> usize {
         self.current_bytes
     }

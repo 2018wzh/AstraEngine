@@ -4,7 +4,7 @@ use astra_platform::{
     AudioPacket, DecodeKind, DecodeOutput, PackageCachePolicy, PackageSourcePolicy,
     PackageSourceRequest, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
 };
-use js_sys::{Function, Promise, Reflect, Uint8Array};
+use js_sys::{Array, Function, Promise, Reflect, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Response, Url};
@@ -555,6 +555,27 @@ pub(crate) async fn read_save(package_id: &str, slot: &str) -> Result<Vec<u8>, P
     ))
     .await?;
     Ok(Uint8Array::new(&value).to_vec())
+}
+
+pub(crate) async fn list_saves(package_id: &str) -> Result<Vec<String>, PlatformError> {
+    let function = Function::new_with_args(
+        "packageId",
+        "return (async () => { const root = await navigator.storage.getDirectory(); let dir; try { dir = await root.getDirectoryHandle(packageId); } catch (error) { if (error && error.name === 'NotFoundError') return []; throw error; } const slots = []; for await (const [name, handle] of dir.entries()) { if (handle.kind === 'file' && name.endsWith('.save')) slots.push(name.slice(0, -5)); } slots.sort(); return slots; })();",
+    );
+    let value =
+        await_promise(function.call1(&JsValue::NULL, &JsValue::from_str(package_id))).await?;
+    let values = Array::from(&value);
+    let mut slots = Vec::with_capacity(values.length() as usize);
+    for value in values.iter() {
+        slots.push(value.as_string().ok_or_else(|| {
+            PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "save.list",
+                "Web save store returned a non-string slot identity",
+            )
+        })?);
+    }
+    Ok(slots)
 }
 
 pub(crate) async fn delete_save(package_id: &str, slot: &str) -> Result<(), PlatformError> {

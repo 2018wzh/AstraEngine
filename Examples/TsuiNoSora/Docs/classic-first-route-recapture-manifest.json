@@ -1,0 +1,662 @@
+{
+  "schema": "tsuinosora.original_ui_recapture_public_manifest.v2",
+  "transform": "tsuinosora.client_capture_normalization.v2",
+  "accepted_inputs": [
+    {
+      "size": [
+        800,
+        600
+      ],
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null
+    },
+    {
+      "size": [
+        802,
+        602
+      ],
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "border_rgba": [
+        100,
+        100,
+        100,
+        255
+      ]
+    }
+  ],
+  "output_size": [
+    800,
+    600
+  ],
+  "resampler": "none",
+  "capture_count": 30,
+  "canonical_reference_count": 13,
+  "stable_pairs": [
+    [
+      "ui001.title.a",
+      "ui001.title.b"
+    ],
+    [
+      "ui005.equation.a",
+      "ui005.equation.b"
+    ],
+    [
+      "ui005.dialogue.target.a",
+      "ui005.dialogue.target.b"
+    ],
+    [
+      "ui006.character.a",
+      "ui006.character.b"
+    ],
+    [
+      "ui007.two_characters.a",
+      "ui007.two_characters.b"
+    ],
+    [
+      "ui008.monologue.a",
+      "ui008.monologue.b"
+    ],
+    [
+      "ui009.choice.a",
+      "ui009.choice.b"
+    ],
+    [
+      "ui010.title_load.a",
+      "ui010.title_load.b"
+    ],
+    [
+      "ui011.popup.a",
+      "ui011.popup.b"
+    ],
+    [
+      "ui012.config.a",
+      "ui012.config.b"
+    ],
+    [
+      "ui013.load.a",
+      "ui013.load.b"
+    ],
+    [
+      "ui014.save.a",
+      "ui014.save.b"
+    ]
+  ],
+  "captures": [
+    {
+      "capture_id": "ui001.title.a",
+      "role": "title",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "c272d21d5fda79f50e539df329e84d0427e2275cf83357d19ec6315f8a1c990e",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "ce2ecfeaac1073019f980dc139561ebbae6d38c1a396508cea961cf13d361c5a",
+      "reference_id": "TSUI1999-UI-001"
+    },
+    {
+      "capture_id": "ui001.title.b",
+      "role": "title-stable",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "c272d21d5fda79f50e539df329e84d0427e2275cf83357d19ec6315f8a1c990e",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "ce2ecfeaac1073019f980dc139561ebbae6d38c1a396508cea961cf13d361c5a",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui005.opening.bitmap.04",
+      "role": "opening-bitmap-04",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "856071ac8624f0b70f93a77d38c3d0203fab0e13324f2f53f540e13aed32ab3f",
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "e941b7c3b1d9c2e0a6b160cd6ad97a00bf5be15088823a8ed6d332ea92936b2f",
+      "reference_id": "TSUI1999-UI-002"
+    },
+    {
+      "capture_id": "ui005.viewpoint",
+      "role": "opening-viewpoint",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "573271c2e7bab24dce025c8cfff1857438d9ecda8663837baed66d3b3c994776",
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "b88a9bcf91295edf8a12ec030fc31fe56e423251dea3cefe457addf9de3e5e86",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui005.equation.a",
+      "role": "opening-equation",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "b0e811ba35818b08161af1d4014857aa80e909273fd4621d1821c0e04e5dd0c3",
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "35c1a7e8495948e5db34ba08b24e3ca9f70f5c0c68d7154b75405dc56bf84897",
+      "reference_id": "TSUI1999-UI-003"
+    },
+    {
+      "capture_id": "ui005.equation.b",
+      "role": "opening-equation-stable",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "b0e811ba35818b08161af1d4014857aa80e909273fd4621d1821c0e04e5dd0c3",
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "35c1a7e8495948e5db34ba08b24e3ca9f70f5c0c68d7154b75405dc56bf84897",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui005.dialogue.first",
+      "role": "dialogue-first",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "fc7999f9b512f2f0051112171d83fb09e672f6a51b4499ef94a87de3a3a42443",
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "7f31b7e0b8b1b90ef2688f4082430d9dd878c8ff8fcfcb8affea3737f91b03e1",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui005.dialogue.target.a",
+      "role": "dialogue-target",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "37c8a1c07d687b94aa7bc8027a00b05d16e2e3847a204e5bf41bc45532032d70",
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "1e786d8e01de4cb24aed302a727b6acb0104c1d043223aaf35c2b8d825558084",
+      "reference_id": "TSUI1999-UI-005"
+    },
+    {
+      "capture_id": "ui005.dialogue.target.b",
+      "role": "dialogue-target-stable",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "37c8a1c07d687b94aa7bc8027a00b05d16e2e3847a204e5bf41bc45532032d70",
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "1e786d8e01de4cb24aed302a727b6acb0104c1d043223aaf35c2b8d825558084",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui005.dialogue.next",
+      "role": "dialogue-next",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "17ea5cdc10ab16e32cab5084f4e7eddabace20aaaee9e53f1431c4d2ab8c772f",
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "6714e8d5addde783172f17327cafb9bb021514e553a447ec615ef143abef45ba",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui006.character.a",
+      "role": "dialogue-character-overflow",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "20b239533ee6769a43d20e7ac96807fd6ea2697ffddbd4aeb64159b13e740fe9",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "48be7f129d0f18f4318b2e62b2ee6e7e7f93bc97f94a0f0380d009674760be59",
+      "reference_id": "TSUI1999-UI-006"
+    },
+    {
+      "capture_id": "ui006.character.b",
+      "role": "dialogue-character-overflow-stable",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "20b239533ee6769a43d20e7ac96807fd6ea2697ffddbd4aeb64159b13e740fe9",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "48be7f129d0f18f4318b2e62b2ee6e7e7f93bc97f94a0f0380d009674760be59",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui007.two_characters.a",
+      "role": "dialogue-two-characters-overflow",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "577491adb139a7cd30642b86a0e41ada9fda4e52af41a0b133b102c666cc7d26",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "14b5302a9405d8c7b88766b81f5ca0d599a5cd8a8cffa4f819eef94c81563a53",
+      "reference_id": "TSUI1999-UI-007"
+    },
+    {
+      "capture_id": "ui007.two_characters.b",
+      "role": "dialogue-two-characters-overflow-stable",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "577491adb139a7cd30642b86a0e41ada9fda4e52af41a0b133b102c666cc7d26",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "14b5302a9405d8c7b88766b81f5ca0d599a5cd8a8cffa4f819eef94c81563a53",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui008.monologue.a",
+      "role": "stage-centered-monologue",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "55489cc77e884b2be05b19720b991b7a6ffdb0673bfdd08ffb9342ac6ff76df3",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "d06554f24946a61488c403771d9100864db04afda304c64292ef7af7025bcfb1",
+      "reference_id": "TSUI1999-UI-008"
+    },
+    {
+      "capture_id": "ui008.monologue.b",
+      "role": "stage-centered-monologue-stable",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "55489cc77e884b2be05b19720b991b7a6ffdb0673bfdd08ffb9342ac6ff76df3",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "d06554f24946a61488c403771d9100864db04afda304c64292ef7af7025bcfb1",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui009.pre_choice",
+      "role": "choice-predecessor",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "6653666dc9577749d2708e6bca47c5fb182e0859ab652e0c501014e645d938ce",
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "1f1d7cf7885eb7746d40b2dc0be94c0bbb72bba1f11a976349bd9d360ace9835",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui009.choice.a",
+      "role": "choice-target",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "2fbb2716c9435460fb02cd7d7ee904d02c2530b8fd7010eae796c44c6046dbb8",
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "10d3e4d4f3bb03c8bea9f0c17f46720e0b8b5f2351a44c3a6d3dee50baac2d35",
+      "reference_id": "TSUI1999-UI-009"
+    },
+    {
+      "capture_id": "ui009.choice.b",
+      "role": "choice-target-stable",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "2fbb2716c9435460fb02cd7d7ee904d02c2530b8fd7010eae796c44c6046dbb8",
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "10d3e4d4f3bb03c8bea9f0c17f46720e0b8b5f2351a44c3a6d3dee50baac2d35",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui009.post_select",
+      "role": "choice-successor",
+      "raw_size": [
+        802,
+        602
+      ],
+      "raw_sha256": "d348f5a7ff7fe71ef3e7ae17a156f238cdc67d15b1c3a972dd7ac2addfa3d926",
+      "normalization": "tsuinosora.client_border_crop.v1",
+      "crop_box": [
+        1,
+        1,
+        801,
+        601
+      ],
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "0946c6d9e1f3b4418a21249d2222aa2cbee54fcad6a64f621898593d533de137",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui010.title_load.a",
+      "role": "title-load",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "9ff59de9f6b152b1c911511b147de6c8bc34c6e88fe5b1ef403ea3a28a52abb7",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "7d7c77d28c55235254afb069ccd8c71ad68c10372b5a69cdea541f8d00ac7d59",
+      "reference_id": "TSUI1999-UI-010"
+    },
+    {
+      "capture_id": "ui010.title_load.b",
+      "role": "title-load-stable",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "9ff59de9f6b152b1c911511b147de6c8bc34c6e88fe5b1ef403ea3a28a52abb7",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "7d7c77d28c55235254afb069ccd8c71ad68c10372b5a69cdea541f8d00ac7d59",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui011.popup.a",
+      "role": "system-popup",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "224191e1598b061bf61e398fc5b14c8be918fc74cd7350b91f09b2de8a3c641f",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "600eb3b10640edd70162da38d8aa73da994bf6727052734076c54145cc6eb2cd",
+      "reference_id": "TSUI1999-UI-011"
+    },
+    {
+      "capture_id": "ui011.popup.b",
+      "role": "system-popup-stable",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "224191e1598b061bf61e398fc5b14c8be918fc74cd7350b91f09b2de8a3c641f",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "600eb3b10640edd70162da38d8aa73da994bf6727052734076c54145cc6eb2cd",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui012.config.a",
+      "role": "system-config",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "224191e1598b061bf61e398fc5b14c8be918fc74cd7350b91f09b2de8a3c641f",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "600eb3b10640edd70162da38d8aa73da994bf6727052734076c54145cc6eb2cd",
+      "reference_id": "TSUI1999-UI-012"
+    },
+    {
+      "capture_id": "ui012.config.b",
+      "role": "system-config-stable",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "224191e1598b061bf61e398fc5b14c8be918fc74cd7350b91f09b2de8a3c641f",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "600eb3b10640edd70162da38d8aa73da994bf6727052734076c54145cc6eb2cd",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui013.load.a",
+      "role": "system-load",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "fb4b9452f41cfdc1b41b6d1ce334629a6b3bb0908ead933d0dbe95701b0692b9",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "d07a9407cac61b57e12140ad8e4e39484504bd8ed5437b591b5d6c34c1194c71",
+      "reference_id": "TSUI1999-UI-013"
+    },
+    {
+      "capture_id": "ui013.load.b",
+      "role": "system-load-stable",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "fb4b9452f41cfdc1b41b6d1ce334629a6b3bb0908ead933d0dbe95701b0692b9",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "d07a9407cac61b57e12140ad8e4e39484504bd8ed5437b591b5d6c34c1194c71",
+      "reference_id": null
+    },
+    {
+      "capture_id": "ui014.save.a",
+      "role": "system-save",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "a6dd6254e1b0e89d54e99681981146a7347de433b5b99d7c6e5395753b0378ca",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "a0de8921431fac8abb921a0586d0363710c95b018df1ffcaefeed3d2547cfa8a",
+      "reference_id": "TSUI1999-UI-014"
+    },
+    {
+      "capture_id": "ui014.save.b",
+      "role": "system-save-stable",
+      "raw_size": [
+        800,
+        600
+      ],
+      "raw_sha256": "a6dd6254e1b0e89d54e99681981146a7347de433b5b99d7c6e5395753b0378ca",
+      "normalization": "tsuinosora.client_capture_identity.v1",
+      "crop_box": null,
+      "output_size": [
+        800,
+        600
+      ],
+      "output_sha256": "a0de8921431fac8abb921a0586d0363710c95b018df1ffcaefeed3d2547cfa8a",
+      "reference_id": null
+    }
+  ]
+}

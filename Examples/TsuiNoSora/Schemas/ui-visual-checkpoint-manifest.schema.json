@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.ui_visual_checkpoint_manifest.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "profile", "checkpoints"],
+  "properties": {
+    "schema": { "const": "tsuinosora.ui_visual_checkpoint_manifest.v1" },
+    "profile": { "enum": ["classic", "modern"] },
+    "checkpoints": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["checkpoint_id", "route_id", "regions", "required_review"],
+        "properties": {
+          "checkpoint_id": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+          "route_id": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+          "regions": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" } },
+          "required_review": { "const": true }
+        }
+      }
+    }
+  }
+}

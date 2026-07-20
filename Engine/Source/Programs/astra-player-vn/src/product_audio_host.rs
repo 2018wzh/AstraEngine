@@ -6,15 +6,25 @@ use astra_media::{
 };
 use astra_player_core::{PlayerDecodedAudio, PlayerHostCommandResult, PlayerMixedAudio};
 
-#[derive(Default)]
 pub struct NativeVnProductAudioHost {
     mixer: Option<ProductionAudioMixer>,
     assets: ProductPcmAssets,
     output: Option<astra_player_core::PlayerHostResourceId>,
+    output_sample_rate: u32,
+    output_channels: u16,
     next_packet_sequence: u64,
     voice_kinds: BTreeMap<String, String>,
+    known_bgm_targets: BTreeSet<String>,
+    pending_fade_stops: BTreeMap<String, NativeVnPendingFadeStop>,
     last_meter: Option<NativeVnAudioMeterSnapshot>,
     submitted_timeline: Vec<f32>,
+    retain_submitted_timeline: bool,
+}
+
+impl Default for NativeVnProductAudioHost {
+    fn default() -> Self {
+        Self::new(true)
+    }
 }
 
 #[derive(Default)]
@@ -48,13 +58,43 @@ pub struct NativeVnProductAudioSnapshot {
     pub output: Option<u64>,
     pub next_packet_sequence: u64,
     pub voice_kinds: BTreeMap<String, String>,
+    #[serde(default)]
+    pub known_bgm_targets: BTreeSet<String>,
+    pub pending_fade_stops: BTreeMap<String, NativeVnPendingFadeStop>,
     pub last_meter: Option<NativeVnAudioMeterSnapshot>,
+    #[serde(default)]
+    pub output_sample_rate: u32,
+    #[serde(default)]
+    pub output_channels: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NativeVnPendingFadeStop {
+    pub voice_id: String,
+    pub fence: String,
 }
 
 impl NativeVnProductAudioHost {
     const BUFFERED_FRAMES: u32 = 4_096;
     const MAX_VOICES: usize = 64;
     const MAX_CONVERTED_SAMPLES: usize = 20_000_000;
+
+    pub fn new(retain_submitted_timeline: bool) -> Self {
+        Self {
+            mixer: None,
+            assets: ProductPcmAssets::default(),
+            output: None,
+            output_sample_rate: 0,
+            output_channels: 0,
+            next_packet_sequence: 0,
+            voice_kinds: BTreeMap::new(),
+            known_bgm_targets: BTreeSet::new(),
+            pending_fade_stops: BTreeMap::new(),
+            last_meter: None,
+            submitted_timeline: Vec::new(),
+            retain_submitted_timeline,
+        }
+    }
 
     pub fn is_active(&self) -> bool {
         self.mixer
@@ -76,12 +116,16 @@ impl NativeVnProductAudioHost {
 
     pub fn snapshot(&self) -> NativeVnProductAudioSnapshot {
         NativeVnProductAudioSnapshot {
-            schema: "astra.player.native_vn_audio_snapshot.v1".into(),
+            schema: "astra.player.native_vn_audio_snapshot.v4".into(),
             mixer: self.mixer.as_ref().map(ProductionAudioMixer::snapshot),
             output: self.output.map(|output| output.0),
             next_packet_sequence: self.next_packet_sequence,
             voice_kinds: self.voice_kinds.clone(),
+            known_bgm_targets: self.known_bgm_targets.clone(),
+            pending_fade_stops: self.pending_fade_stops.clone(),
             last_meter: self.last_meter,
+            output_sample_rate: self.output_sample_rate,
+            output_channels: self.output_channels,
         }
     }
 
@@ -91,10 +135,40 @@ impl NativeVnProductAudioHost {
     ) -> Result<(), astra_platform::PlatformError> {
         let has_mixer = snapshot.mixer.is_some();
         let has_output = snapshot.output.is_some();
-        if snapshot.schema != "astra.player.native_vn_audio_snapshot.v1"
-            || has_mixer != has_output
+        if !matches!(
+            snapshot.schema.as_str(),
+            "astra.player.native_vn_audio_snapshot.v2"
+                | "astra.player.native_vn_audio_snapshot.v3"
+                | "astra.player.native_vn_audio_snapshot.v4"
+        ) || has_mixer != has_output
             || (has_mixer && snapshot.next_packet_sequence == 0)
             || (!has_mixer && !snapshot.voice_kinds.is_empty())
+            || (!has_mixer && !snapshot.pending_fade_stops.is_empty())
+            || snapshot.pending_fade_stops.values().any(|pending| {
+                !snapshot.voice_kinds.contains_key(&pending.voice_id) || pending.fence.is_empty()
+            })
+            || (matches!(
+                snapshot.schema.as_str(),
+                "astra.player.native_vn_audio_snapshot.v3"
+                    | "astra.player.native_vn_audio_snapshot.v4"
+            ) && snapshot.voice_kinds.iter().any(|(voice_id, kind)| {
+                kind == "bgm" && !snapshot.known_bgm_targets.contains(voice_id)
+            }))
+            || (snapshot.schema == "astra.player.native_vn_audio_snapshot.v4"
+                && if has_output {
+                    snapshot.output_sample_rate != CANONICAL_SAMPLE_RATE
+                        || !(CANONICAL_CHANNELS..=32).contains(&snapshot.output_channels)
+                } else {
+                    snapshot.output_sample_rate != 0 || snapshot.output_channels != 0
+                })
+            || snapshot.pending_fade_stops.iter().any(|(fade_id, _)| {
+                !snapshot.mixer.as_ref().is_some_and(|mixer| {
+                    mixer
+                        .buses
+                        .values()
+                        .any(|bus| bus.fade.as_ref().is_some_and(|fade| fade.id == *fade_id))
+                })
+            })
         {
             return Err(player_platform_error(
                 "player.audio.restore",
@@ -106,12 +180,33 @@ impl NativeVnProductAudioHost {
             .map(|snapshot| ProductionAudioMixer::restore(snapshot, &self.assets, Self::MAX_VOICES))
             .transpose()
             .map_err(|error| player_platform_error("player.audio.restore", error))?;
+        let mut known_bgm_targets = snapshot.known_bgm_targets;
+        known_bgm_targets.extend(
+            snapshot
+                .voice_kinds
+                .iter()
+                .filter(|(_, kind)| kind.as_str() == "bgm")
+                .map(|(voice_id, _)| voice_id.clone()),
+        );
         self.mixer = mixer;
         self.output = snapshot.output.map(astra_player_core::PlayerHostResourceId);
+        let has_restored_output = self.output.is_some();
+        self.output_sample_rate = match (has_restored_output, snapshot.output_sample_rate) {
+            (false, _) => 0,
+            (true, 0) => CANONICAL_SAMPLE_RATE,
+            (true, sample_rate) => sample_rate,
+        };
+        self.output_channels = match (has_restored_output, snapshot.output_channels) {
+            (false, _) => 0,
+            (true, 0) => CANONICAL_CHANNELS,
+            (true, channels) => channels,
+        };
         // The mixer timeline is replay state, while packet sequence belongs to the
         // already-open host output and must never move backwards across load.
         self.next_packet_sequence = self.next_packet_sequence.max(snapshot.next_packet_sequence);
         self.voice_kinds = snapshot.voice_kinds;
+        self.known_bgm_targets = known_bgm_targets;
+        self.pending_fade_stops = snapshot.pending_fade_stops;
         self.last_meter = snapshot.last_meter;
         Ok(())
     }
@@ -133,22 +228,30 @@ impl NativeVnProductAudioHost {
             .execute_batch(query)
             .await
             .map_err(|error| player_platform_error("player.audio.format", error))?;
-        if !matches!(
-            result.as_slice(),
+        let (output_sample_rate, output_channels) = match result.as_slice() {
             [PlayerHostCommandResult::AudioFormat {
-                sample_rate: CANONICAL_SAMPLE_RATE,
-                channels: CANONICAL_CHANNELS
-            }]
-        ) {
+                sample_rate,
+                channels,
+            }] if *sample_rate == CANONICAL_SAMPLE_RATE && *channels >= CANONICAL_CHANNELS => {
+                (*sample_rate, *channels)
+            }
+            _ => {
+                return Err(player_platform_error(
+                    "player.audio.format",
+                    "ASTRA_PLAYER_AUDIO_CANONICAL_RATE_OR_STEREO_OUTPUT_REQUIRED",
+                ));
+            }
+        };
+        if output_channels > 32 {
             return Err(player_platform_error(
                 "player.audio.format",
-                "ASTRA_PLAYER_AUDIO_CANONICAL_FORMAT_REQUIRED",
+                "ASTRA_PLAYER_AUDIO_OUTPUT_CHANNEL_LIMIT",
             ));
         }
         let (output, open) = source
             .prepare_persistent_audio_open(
-                CANONICAL_SAMPLE_RATE,
-                CANONICAL_CHANNELS,
+                output_sample_rate,
+                output_channels,
                 Self::BUFFERED_FRAMES,
             )
             .map_err(|error| player_platform_error("player.audio.open.prepare", error))?;
@@ -164,6 +267,8 @@ impl NativeVnProductAudioHost {
             ));
         }
         self.output = Some(output);
+        self.output_sample_rate = output_sample_rate;
+        self.output_channels = output_channels;
         self.mixer = Some(
             ProductionAudioMixer::new(Self::MAX_VOICES)
                 .map_err(|error| player_platform_error("player.audio.mixer.create", error))?,
@@ -181,6 +286,7 @@ impl NativeVnProductAudioHost {
         >,
         request: &crate::NativeVnAudioRequest,
         audio: PlayerDecodedAudio,
+        completed_signals: &mut BTreeSet<String>,
     ) -> Result<(), astra_platform::PlatformError> {
         let looping = parse_audio_bool(request, "loop", request.command == "bgm")?;
         let gain = parse_audio_f32(request, "gain", 1.0)?;
@@ -189,6 +295,14 @@ impl NativeVnProductAudioHost {
             .get("bus")
             .cloned()
             .unwrap_or_else(|| request.command.clone());
+        completed_signals.remove(&request.command_id);
+        completed_signals.remove(&format!("{}.end", request.command_id));
+        if request.command == "voice" {
+            completed_signals.remove("voice_end");
+        }
+        if let Some(fence) = request.attributes.get("fence") {
+            completed_signals.remove(fence);
+        }
         let audio = audio
             .convert_to(
                 CANONICAL_SAMPLE_RATE,
@@ -220,6 +334,41 @@ impl NativeVnProductAudioHost {
             .mixer
             .as_mut()
             .ok_or_else(|| player_platform_error("player.audio.mixer", "mixer is missing"))?;
+        if let Some(fade_id) = mixer.active_bus_fade_id(&bus).map(str::to_owned) {
+            if self.pending_fade_stops.contains_key(&fade_id) {
+                return Err(player_platform_error(
+                    "player.audio.replace",
+                    "ASTRA_PLAYER_AUDIO_START_DURING_FADE_STOP",
+                ));
+            }
+            mixer
+                .apply(AudioCommand::CancelFade { fade_id }, &self.assets)
+                .map_err(|error| player_platform_error("player.audio.replace.fade", error))?;
+        }
+        if let Some(existing_bus) = mixer.voice_bus(&request.command_id).map(str::to_owned) {
+            mixer
+                .apply(
+                    AudioCommand::StopVoice {
+                        voice_id: request.command_id.clone(),
+                    },
+                    &self.assets,
+                )
+                .map_err(|error| player_platform_error("player.audio.replace.stop", error))?;
+            self.voice_kinds
+                .remove(&request.command_id)
+                .ok_or_else(|| {
+                    player_platform_error(
+                        "player.audio.replace",
+                        "ASTRA_PLAYER_AUDIO_REPLACEMENT_OWNER_MISSING",
+                    )
+                })?;
+            tracing::info!(
+                event = "astra.player.audio.voice_replaced",
+                command_id = %request.command_id,
+                bus = %existing_bus,
+                "Player atomically replaced an active authored audio voice"
+            );
+        }
         mixer
             .apply(
                 AudioCommand::SetBusGain {
@@ -271,6 +420,9 @@ impl NativeVnProductAudioHost {
         }
         self.voice_kinds
             .insert(request.command_id.clone(), request.command.clone());
+        if request.command == "bgm" {
+            self.known_bgm_targets.insert(request.command_id.clone());
+        }
         tracing::info!(
             event = "astra.player.audio.voice_bound",
             command_id = %request.command_id,
@@ -303,9 +455,10 @@ impl NativeVnProductAudioHost {
             .execute_batch(query)
             .await
             .map_err(|error| player_platform_error("player.audio.query", error))?;
-        match state.as_slice() {
+        let queued_frames = match state.as_slice() {
             [PlayerHostCommandResult::AudioState {
                 output: actual,
+                queued_frames,
                 callback_count,
                 submitted_samples,
                 consumed_samples,
@@ -322,6 +475,7 @@ impl NativeVnProductAudioHost {
                     peak_dbfs_bits: *peak_dbfs_bits,
                     rms_dbfs_bits: *rms_dbfs_bits,
                 });
+                *queued_frames
             }
             _ => {
                 return Err(player_platform_error(
@@ -329,6 +483,17 @@ impl NativeVnProductAudioHost {
                     "ASTRA_PLAYER_AUDIO_QUERY_RESULT",
                 ))
             }
+        };
+        let tick_frames = u64::try_from(CANONICAL_FRAMES_PER_TICK)
+            .map_err(|_| player_platform_error("player.audio.pump", "tick frame overflowed"))?;
+        if queued_frames.saturating_add(tick_frames) > u64::from(Self::BUFFERED_FRAMES) {
+            tracing::trace!(
+                event = "astra.player.audio.buffer_sufficient",
+                queued_frames,
+                buffered_frames = Self::BUFFERED_FRAMES,
+                "Player deferred mixer advancement until the hardware queue has capacity"
+            );
+            return Ok(());
         }
         let mixed = self
             .mixer
@@ -342,10 +507,22 @@ impl NativeVnProductAudioHost {
                 "ASTRA_PLAYER_AUDIO_TICK_FRAME_COUNT",
             ));
         }
+        let output_channels = self.output_channels;
+        if self.output_sample_rate != CANONICAL_SAMPLE_RATE || output_channels < CANONICAL_CHANNELS
+        {
+            return Err(player_platform_error(
+                "player.audio.render",
+                "ASTRA_PLAYER_AUDIO_OUTPUT_FORMAT_STATE_INVALID",
+            ));
+        }
+        if self.retain_submitted_timeline {
+            self.submitted_timeline.extend_from_slice(&mixed.samples);
+        }
+        let samples = upmix_canonical_stereo(&mixed.samples, output_channels)?;
         let packet = PlayerMixedAudio {
-            sample_rate: CANONICAL_SAMPLE_RATE,
-            channels: CANONICAL_CHANNELS,
-            samples: mixed.samples,
+            sample_rate: self.output_sample_rate,
+            channels: output_channels,
+            samples,
             completed: Vec::new(),
         };
         let submit = source
@@ -355,7 +532,6 @@ impl NativeVnProductAudioHost {
             .execute_batch(submit)
             .await
             .map_err(|error| player_platform_error("player.audio.submit", error))?;
-        self.submitted_timeline.extend_from_slice(&packet.samples);
         self.next_packet_sequence = self
             .next_packet_sequence
             .checked_add(1)
@@ -387,6 +563,51 @@ impl NativeVnProductAudioHost {
                 "Player production mixer completed a voice"
             );
         }
+        for fade_id in mixed.completed_fades {
+            let Some(pending) = self.pending_fade_stops.remove(&fade_id) else {
+                if !fade_id.starts_with("fade.") {
+                    return Err(player_platform_error(
+                        "player.audio.fade.complete",
+                        "completed fade has no recognized owner",
+                    ));
+                }
+                tracing::debug!(
+                    event = "astra.player.audio.start_fade_completed",
+                    fade_id,
+                    "Player completed an authored audio start fade"
+                );
+                continue;
+            };
+            self.mixer
+                .as_mut()
+                .ok_or_else(|| player_platform_error("player.audio.mixer", "mixer is missing"))?
+                .apply(
+                    AudioCommand::StopVoice {
+                        voice_id: pending.voice_id.clone(),
+                    },
+                    &self.assets,
+                )
+                .map_err(|error| player_platform_error("player.audio.fade_stop.stop", error))?;
+            let kind = self.voice_kinds.remove(&pending.voice_id).ok_or_else(|| {
+                player_platform_error(
+                    "player.audio.fade_stop.complete",
+                    "completion owner is missing",
+                )
+            })?;
+            completed_signals.insert(pending.voice_id.clone());
+            completed_signals.insert(format!("{}.end", pending.voice_id));
+            completed_signals.insert(pending.fence.clone());
+            if kind == "voice" {
+                completed_signals.insert("voice_end".into());
+            }
+            tracing::info!(
+                event = "astra.player.audio.fade_stop_completed",
+                fade_id,
+                voice_id = %pending.voice_id,
+                fence = %pending.fence,
+                "Player completed a sample-accurate fade-stop"
+            );
+        }
         Ok(())
     }
 
@@ -395,10 +616,214 @@ impl NativeVnProductAudioHost {
         request: &crate::NativeVnAudioControlRequest,
         completed_signals: &mut BTreeSet<String>,
     ) -> Result<(), astra_platform::PlatformError> {
+        if matches!(request.action.as_str(), "enable_bus" | "disable_bus") {
+            if !matches!(request.target.as_str(), "bgm" | "se")
+                || request.duration_ms.is_some()
+                || request.fence.is_some()
+            {
+                return Err(player_platform_error(
+                    "player.audio.bus_enabled",
+                    "ASTRA_PLAYER_AUDIO_BUS_ENABLED_CONTRACT",
+                ));
+            }
+            let mixer = self.mixer.as_mut().ok_or_else(|| {
+                player_platform_error("player.audio.bus_enabled", "mixer is missing")
+            })?;
+            if let Some(active_fade_id) =
+                mixer.active_bus_fade_id(&request.target).map(str::to_owned)
+            {
+                mixer
+                    .apply(
+                        AudioCommand::CancelFade {
+                            fade_id: active_fade_id,
+                        },
+                        &self.assets,
+                    )
+                    .map_err(|error| {
+                        player_platform_error("player.audio.bus_enabled.cancel_fade", error)
+                    })?;
+            }
+            mixer
+                .apply(
+                    AudioCommand::set_bus_gain(
+                        request.target.clone(),
+                        if request.action == "enable_bus" {
+                            1.0
+                        } else {
+                            0.0
+                        },
+                    ),
+                    &self.assets,
+                )
+                .map_err(|error| player_platform_error("player.audio.bus_enabled", error))?;
+            tracing::info!(
+                event = "astra.player.audio.bus_enabled",
+                bus = %request.target,
+                enabled = request.action == "enable_bus",
+                "Player applied a typed VN audio bus enabled state"
+            );
+            return Ok(());
+        }
+        if request.action == "fade_stop" {
+            let duration_ms = request
+                .duration_ms
+                .filter(|duration| *duration > 0)
+                .ok_or_else(|| {
+                    player_platform_error(
+                        "player.audio.fade_stop",
+                        "ASTRA_PLAYER_AUDIO_FADE_STOP_DURATION",
+                    )
+                })?;
+            let fence = request
+                .fence
+                .clone()
+                .filter(|fence| !fence.is_empty())
+                .ok_or_else(|| {
+                    player_platform_error(
+                        "player.audio.fade_stop",
+                        "ASTRA_PLAYER_AUDIO_FADE_STOP_FENCE",
+                    )
+                })?;
+            match self.voice_kinds.get(&request.target).map(String::as_str) {
+                Some("bgm") => {}
+                Some(_) => {
+                    return Err(player_platform_error(
+                        "player.audio.fade_stop",
+                        "ASTRA_PLAYER_AUDIO_FADE_STOP_REQUIRES_BGM",
+                    ));
+                }
+                None if self.known_bgm_targets.contains(&request.target) => {
+                    completed_signals.insert(request.target.clone());
+                    completed_signals.insert(format!("{}.end", request.target));
+                    completed_signals.insert(fence.clone());
+                    tracing::info!(
+                        event = "astra.player.audio.fade_stop_already_complete",
+                        command_id = %request.command_id,
+                        target = %request.target,
+                        fence = %fence,
+                        "Player preserved an authored idempotent BGM fade-stop"
+                    );
+                    return Ok(());
+                }
+                None => {
+                    return Err(player_platform_error(
+                        "player.audio.fade_stop",
+                        "ASTRA_PLAYER_AUDIO_CONTROL_TARGET_UNKNOWN",
+                    ));
+                }
+            }
+            let mixer = self
+                .mixer
+                .as_mut()
+                .ok_or_else(|| player_platform_error("player.audio.control", "mixer is missing"))?;
+            completed_signals.remove(&request.target);
+            completed_signals.remove(&format!("{}.end", request.target));
+            completed_signals.remove(&fence);
+            let bus = mixer
+                .voice_bus(&request.target)
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    player_platform_error(
+                        "player.audio.fade_stop",
+                        "ASTRA_PLAYER_AUDIO_CONTROL_TARGET_UNKNOWN",
+                    )
+                })?;
+            if let Some(active_fade_id) = mixer.active_bus_fade_id(&bus).map(str::to_owned) {
+                if self.pending_fade_stops.contains_key(&active_fade_id) {
+                    return Err(player_platform_error(
+                        "player.audio.fade_stop",
+                        "ASTRA_PLAYER_AUDIO_FADE_STOP_CONFLICT",
+                    ));
+                }
+                mixer
+                    .apply(
+                        AudioCommand::CancelFade {
+                            fade_id: active_fade_id,
+                        },
+                        &self.assets,
+                    )
+                    .map_err(|error| {
+                        player_platform_error("player.audio.fade_stop.cancel_start", error)
+                    })?;
+            }
+            let fade_id = format!("fade-stop.{}", request.command_id);
+            if self.pending_fade_stops.contains_key(&fade_id) {
+                return Err(player_platform_error(
+                    "player.audio.fade_stop",
+                    "ASTRA_PLAYER_AUDIO_FADE_STOP_DUPLICATE",
+                ));
+            }
+            mixer
+                .apply(
+                    AudioCommand::FadeBus {
+                        fade_id: fade_id.clone(),
+                        bus,
+                        target_gain: 0.0,
+                        duration_ms: u64::from(duration_ms),
+                    },
+                    &self.assets,
+                )
+                .map_err(|error| player_platform_error("player.audio.fade_stop", error))?;
+            tracing::info!(
+                event = "astra.player.audio.fade_stop_scheduled",
+                command_id = %request.command_id,
+                target = %request.target,
+                duration_ms,
+                fence = %fence,
+                fade_id,
+                "Player scheduled a sample-accurate fade-stop"
+            );
+            self.pending_fade_stops.insert(
+                fade_id,
+                NativeVnPendingFadeStop {
+                    voice_id: request.target.clone(),
+                    fence,
+                },
+            );
+            return Ok(());
+        }
         let mixer = self
             .mixer
             .as_mut()
             .ok_or_else(|| player_platform_error("player.audio.control", "mixer is missing"))?;
+        if request.duration_ms.is_some() || request.fence.is_some() {
+            return Err(player_platform_error(
+                "player.audio.control",
+                "ASTRA_PLAYER_AUDIO_CONTROL_UNEXPECTED_TIMING",
+            ));
+        }
+        if request.action == "stop" && mixer.voice_bus(&request.target).is_none() {
+            if self.voice_kinds.contains_key(&request.target) {
+                return Err(player_platform_error(
+                    "player.audio.stop",
+                    "ASTRA_PLAYER_AUDIO_STOP_OWNER_WITHOUT_VOICE",
+                ));
+            }
+            completed_signals.insert(request.target.clone());
+            completed_signals.insert(format!("{}.end", request.target));
+            tracing::debug!(
+                event = "astra.player.audio.stop_already_complete",
+                command_id = %request.command_id,
+                target = %request.target,
+                "Player preserved the authored idempotent stop state"
+            );
+            return Ok(());
+        }
+        let stopped_kind = if request.action == "stop" {
+            Some(
+                self.voice_kinds
+                    .get(&request.target)
+                    .cloned()
+                    .ok_or_else(|| {
+                        player_platform_error(
+                            "player.audio.stop",
+                            "ASTRA_PLAYER_AUDIO_STOP_VOICE_WITHOUT_OWNER",
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
         let command = match request.action.as_str() {
             "pause" => AudioCommand::PauseVoice {
                 voice_id: request.target.clone(),
@@ -420,12 +845,10 @@ impl NativeVnProductAudioHost {
             .apply(command, &self.assets)
             .map_err(|error| player_platform_error("player.audio.control", error))?;
         if request.action == "stop" {
-            let kind = self.voice_kinds.remove(&request.target).ok_or_else(|| {
-                player_platform_error("player.audio.stop", "completion owner is missing")
-            })?;
+            self.voice_kinds.remove(&request.target);
             completed_signals.insert(request.target.clone());
             completed_signals.insert(format!("{}.end", request.target));
-            if kind == "voice" {
+            if stopped_kind.as_deref() == Some("voice") {
                 completed_signals.insert("voice_end".into());
             }
         }
@@ -492,10 +915,51 @@ impl NativeVnProductAudioHost {
             ));
         }
         self.mixer = None;
+        self.output = None;
+        self.output_sample_rate = 0;
+        self.output_channels = 0;
         self.assets.assets.clear();
         self.voice_kinds.clear();
+        self.known_bgm_targets.clear();
         Ok(())
     }
+}
+
+fn upmix_canonical_stereo(
+    canonical: &[f32],
+    output_channels: u16,
+) -> Result<Vec<f32>, astra_platform::PlatformError> {
+    if output_channels < CANONICAL_CHANNELS
+        || !canonical
+            .len()
+            .is_multiple_of(usize::from(CANONICAL_CHANNELS))
+    {
+        return Err(player_platform_error(
+            "player.audio.upmix",
+            "ASTRA_PLAYER_AUDIO_UPMIX_FORMAT_INVALID",
+        ));
+    }
+    if output_channels == CANONICAL_CHANNELS {
+        return Ok(canonical.to_vec());
+    }
+    let frame_count = canonical.len() / usize::from(CANONICAL_CHANNELS);
+    let sample_count = frame_count
+        .checked_mul(usize::from(output_channels))
+        .ok_or_else(|| {
+            player_platform_error(
+                "player.audio.upmix",
+                "ASTRA_PLAYER_AUDIO_UPMIX_SIZE_OVERFLOW",
+            )
+        })?;
+    let mut output = vec![0.0; sample_count];
+    for (input, output) in canonical
+        .chunks_exact(usize::from(CANONICAL_CHANNELS))
+        .zip(output.chunks_exact_mut(usize::from(output_channels)))
+    {
+        output[0] = input[0];
+        output[1] = input[1];
+    }
+    Ok(output)
 }
 
 fn parse_audio_bool(
@@ -543,4 +1007,43 @@ fn player_platform_error(
         operation,
         error.to_string(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{upmix_canonical_stereo, NativeVnProductAudioHost, CANONICAL_SAMPLE_RATE};
+
+    #[astra_headless_test::test]
+    fn canonical_stereo_upmix_preserves_front_channels_and_silences_surround_channels() {
+        let output = upmix_canonical_stereo(&[0.25, -0.5, 0.75, -1.0], 8).unwrap();
+
+        assert_eq!(output.len(), 16);
+        assert_eq!(&output[..8], &[0.25, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(&output[8..], &[0.75, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[astra_headless_test::test]
+    fn version_four_snapshot_rejects_output_format_without_a_live_output() {
+        let mut host = NativeVnProductAudioHost::new(false);
+        let mut snapshot = host.snapshot();
+        snapshot.output_sample_rate = CANONICAL_SAMPLE_RATE;
+
+        let error = host.restore(snapshot).unwrap_err();
+
+        assert_eq!(error.operation, "player.audio.restore");
+    }
+
+    #[astra_headless_test::test]
+    fn legacy_empty_snapshot_restores_to_a_valid_version_four_snapshot() {
+        let mut host = NativeVnProductAudioHost::new(false);
+        let mut snapshot = host.snapshot();
+        snapshot.schema = "astra.player.native_vn_audio_snapshot.v3".into();
+
+        host.restore(snapshot).unwrap();
+
+        let restored = host.snapshot();
+        assert_eq!(restored.output, None);
+        assert_eq!(restored.output_sample_rate, 0);
+        assert_eq!(restored.output_channels, 0);
+    }
 }

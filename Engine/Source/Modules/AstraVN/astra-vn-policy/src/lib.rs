@@ -4,7 +4,7 @@
 mod luau;
 mod policy_bundle;
 mod state;
-#[cfg(feature = "luau-runtime")]
+#[cfg(any(feature = "luau-runtime", feature = "portable-luau-runtime"))]
 mod ui_controller;
 
 pub use astra_vn_script::*;
@@ -12,5 +12,5 @@ pub use astra_vn_script::*;
 pub use luau::*;
 pub use policy_bundle::*;
 pub use state::*;
-#[cfg(feature = "luau-runtime")]
+#[cfg(any(feature = "luau-runtime", feature = "portable-luau-runtime"))]
 pub use ui_controller::*;

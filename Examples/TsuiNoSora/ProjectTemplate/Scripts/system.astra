@@ -1,0 +1,61 @@
+system_action switch_page:custom #@id tsui.classic.test.open
+system_action mutation:global,mode,set,0 #@id tsui.classic.test.mode.ayana
+system_action mutation:global,mode,set,1 #@id tsui.classic.test.mode.kotomi
+system_action mutation:global,panty,set,0 #@id tsui.classic.test.panty.off
+system_action mutation:global,panty,set,1 #@id tsui.classic.test.panty.on
+system_action jump:director.y.0020 #@id tsui.classic.test.jump.y13
+system_action jump:director.y.0246 #@id tsui.classic.test.jump.y14
+system_action jump:director.y.0405 #@id tsui.classic.test.jump.y15
+system_action jump:director.y.0524 #@id tsui.classic.test.jump.y16
+system_action jump:director.y.0667 #@id tsui.classic.test.jump.y17
+system_action jump:director.y.0775 #@id tsui.classic.test.jump.y17_18
+system_action jump:director.y.0922 #@id tsui.classic.test.jump.y18_19
+system_action jump:director.y.1030 #@id tsui.classic.test.jump.y20
+system_action jump:director.k.0015 #@id tsui.classic.test.jump.k12
+system_action jump:director.k.0126 #@id tsui.classic.test.jump.k13
+system_action jump:director.k.0249 #@id tsui.classic.test.jump.k14
+system_action jump:director.k.0312 #@id tsui.classic.test.jump.k15
+system_action jump:director.k.0387 #@id tsui.classic.test.jump.k16
+system_action jump:director.k.0456 #@id tsui.classic.test.jump.k1701
+system_action jump:director.k.0543 #@id tsui.classic.test.jump.k1801
+system_action jump:director.z.0015 #@id tsui.classic.test.jump.z09
+system_action jump:director.z.0060 #@id tsui.classic.test.jump.z10
+system_action jump:director.z.0087 #@id tsui.classic.test.jump.z11
+system_action jump:director.z.0126 #@id tsui.classic.test.jump.z12
+system_action jump:director.t.0018 #@id tsui.classic.test.jump.t13
+system_action jump:director.t.0111 #@id tsui.classic.test.jump.t14
+system_action jump:director.t.0216 #@id tsui.classic.test.jump.t15
+system_action jump:director.t.0309 #@id tsui.classic.test.jump.t16
+system_action jump:director.t.0408 #@id tsui.classic.test.jump.t17
+system_action jump:director.t.0453 #@id tsui.classic.test.jump.t17_18
+system_action jump:director.t.0498 #@id tsui.classic.test.jump.t19
+
+story system #@id story.system
+
+state title #@id state.system.title
+  scene title #@id scene.system.title
+    system_page kind:title policy:tsui.policy.ui #@id page.title
+
+state quick_panel #@id state.system.quick_panel
+  scene quick_panel #@id scene.system.quick_panel
+    system_page kind:quick_panel policy:tsui.policy.ui #@id page.quick_panel
+
+state save #@id state.system.save
+  scene save #@id scene.system.save
+    system_page kind:save policy:tsui.policy.ui #@id page.save
+
+state load #@id state.system.load
+  scene load #@id scene.system.load
+    system_page kind:load policy:tsui.policy.ui #@id page.load
+
+state config #@id state.system.config
+  scene config #@id scene.system.config
+    system_page kind:config policy:tsui.policy.ui #@id page.config
+
+state backlog #@id state.system.backlog
+  scene backlog #@id scene.system.backlog
+    system_page kind:backlog policy:tsui.policy.ui #@id page.backlog
+
+state custom #@id state.system.custom
+  scene custom #@id scene.system.custom
+    system_page kind:custom policy:tsui.policy.ui #@id page.custom

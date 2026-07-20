@@ -1,5 +1,6 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use astra_core::Hash256;
 use astra_platform::{PlatformError, PlatformErrorCode};
 use astra_player_core::{
     PlatformCommandSink, PlayerDecodedAudio, PlayerHostCommandExecutor, PlayerTimelineCompletion,
@@ -16,8 +17,18 @@ pub struct NativeVnProductMediaHost {
     completed_signals: BTreeSet<String>,
     active_videos: Vec<ActiveVideoStream>,
     restored_videos: Vec<NativeVnVideoStreamSnapshot>,
+    decoded_audio_cache: BTreeMap<Hash256, CachedDecodedAudio>,
+    decoded_audio_lru: VecDeque<Hash256>,
+    decoded_audio_cache_bytes: u64,
     max_video_frames: u64,
     max_decode_output_bytes: u64,
+}
+
+#[derive(Clone)]
+struct CachedDecodedAudio {
+    audio: PlayerDecodedAudio,
+    decoded_hash: String,
+    byte_size: u64,
 }
 
 struct ActiveVideoStream {
@@ -67,12 +78,22 @@ impl NativeVnProductMediaHost {
     const MAX_DECODED_AUDIO_SAMPLES: usize = 10_000_000;
 
     pub fn new(max_timeline_tasks: usize) -> Self {
+        Self::with_audio_timeline_retention(max_timeline_tasks, true)
+    }
+
+    pub fn with_audio_timeline_retention(
+        max_timeline_tasks: usize,
+        retain_audio_timeline: bool,
+    ) -> Self {
         Self {
-            audio: NativeVnProductAudioHost::default(),
+            audio: NativeVnProductAudioHost::new(retain_audio_timeline),
             timeline: PlayerTimelineScheduler::new(max_timeline_tasks),
             completed_signals: BTreeSet::new(),
             active_videos: Vec::new(),
             restored_videos: Vec::new(),
+            decoded_audio_cache: BTreeMap::new(),
+            decoded_audio_lru: VecDeque::new(),
+            decoded_audio_cache_bytes: 0,
             max_video_frames: 18_000,
             max_decode_output_bytes: 512 * 1024 * 1024,
         }
@@ -82,6 +103,7 @@ impl NativeVnProductMediaHost {
         max_timeline_tasks: usize,
         max_video_frames: u64,
         max_decode_output_bytes: u64,
+        retain_audio_timeline: bool,
     ) -> Result<Self, PlatformError> {
         if max_video_frames == 0 || max_decode_output_bytes == 0 {
             return Err(media_error(
@@ -89,7 +111,8 @@ impl NativeVnProductMediaHost {
                 "ASTRA_PLAYER_VIDEO_LIMIT_INVALID",
             ));
         }
-        let mut host = Self::new(max_timeline_tasks);
+        let mut host =
+            Self::with_audio_timeline_retention(max_timeline_tasks, retain_audio_timeline);
         host.max_video_frames = max_video_frames;
         host.max_decode_output_bytes = max_decode_output_bytes;
         Ok(host)
@@ -269,27 +292,44 @@ impl NativeVnProductMediaHost {
                     }
                     NativeVnAudioOutput::Start(request) => request,
                 };
-                let decode = source
-                    .prepare_audio_decode(&request)
-                    .map_err(|error| media_error("player.audio.decode.prepare", error))?;
-                let decoded = executor
-                    .execute_decode_lifecycle(decode)
-                    .await
-                    .map_err(|error| media_error("player.audio.decode", error))?;
-                let audio = PlayerDecodedAudio::parse(
-                    &decoded.format,
-                    &decoded.bytes,
-                    Self::MAX_DECODED_AUDIO_SAMPLES,
-                )
-                .map_err(|error| media_error("player.audio.contract", error))?;
-                self.audio.start(source, executor, &request, audio).await?;
+                let (audio, decoded_hash, cache_hit) =
+                    if let Some(cached) = self.cached_audio(&request.encoded_hash) {
+                        (cached.audio, cached.decoded_hash, true)
+                    } else {
+                        let decode = source
+                            .prepare_audio_decode(&request)
+                            .map_err(|error| media_error("player.audio.decode.prepare", error))?;
+                        let decoded = executor
+                            .execute_decode_lifecycle(decode)
+                            .await
+                            .map_err(|error| media_error("player.audio.decode", error))?;
+                        let audio = PlayerDecodedAudio::parse(
+                            &decoded.format,
+                            &decoded.bytes,
+                            Self::MAX_DECODED_AUDIO_SAMPLES,
+                        )
+                        .map_err(|error| media_error("player.audio.contract", error))?;
+                        let decoded_hash = decoded.hash;
+                        self.cache_audio(request.encoded_hash, audio.clone(), decoded_hash.clone());
+                        (audio, decoded_hash, false)
+                    };
+                self.audio
+                    .start(
+                        source,
+                        executor,
+                        &request,
+                        audio,
+                        &mut self.completed_signals,
+                    )
+                    .await?;
                 tracing::info!(
                     event = "astra.player.audio.started",
                     command_id = %request.command_id,
                     command = %request.command,
                     asset_id = %request.asset_id,
                     encoded_hash = %request.encoded_hash,
-                    decoded_hash = %decoded.hash,
+                    decoded_hash = %decoded_hash,
+                    cache_hit,
                     "Player started packaged audio in the persistent mixer"
                 );
             }
@@ -454,6 +494,67 @@ impl NativeVnProductMediaHost {
             });
         }
         Ok(())
+    }
+
+    fn cached_audio(&mut self, encoded_hash: &Hash256) -> Option<CachedDecodedAudio> {
+        let cached = self.decoded_audio_cache.get(encoded_hash)?.clone();
+        self.decoded_audio_lru.retain(|hash| hash != encoded_hash);
+        self.decoded_audio_lru.push_back(*encoded_hash);
+        Some(cached)
+    }
+
+    fn cache_audio(
+        &mut self,
+        encoded_hash: Hash256,
+        audio: PlayerDecodedAudio,
+        decoded_hash: String,
+    ) {
+        let byte_size =
+            (audio.samples.len() as u64).saturating_mul(std::mem::size_of::<f32>() as u64);
+        if byte_size > self.max_decode_output_bytes {
+            tracing::debug!(
+                event = "astra.player.audio.cache.bypass",
+                encoded_hash = %encoded_hash,
+                byte_size,
+                cache_budget_bytes = self.max_decode_output_bytes,
+                "decoded audio exceeded the bounded session cache budget"
+            );
+            return;
+        }
+        if let Some(previous) = self.decoded_audio_cache.remove(&encoded_hash) {
+            self.decoded_audio_cache_bytes = self
+                .decoded_audio_cache_bytes
+                .saturating_sub(previous.byte_size);
+            self.decoded_audio_lru.retain(|hash| hash != &encoded_hash);
+        }
+        while self.decoded_audio_cache_bytes.saturating_add(byte_size)
+            > self.max_decode_output_bytes
+        {
+            let Some(evicted_hash) = self.decoded_audio_lru.pop_front() else {
+                break;
+            };
+            if let Some(evicted) = self.decoded_audio_cache.remove(&evicted_hash) {
+                self.decoded_audio_cache_bytes = self
+                    .decoded_audio_cache_bytes
+                    .saturating_sub(evicted.byte_size);
+                tracing::debug!(
+                    event = "astra.player.audio.cache.evicted",
+                    encoded_hash = %evicted_hash,
+                    byte_size = evicted.byte_size,
+                    "evicted least-recently-used decoded audio from the session cache"
+                );
+            }
+        }
+        self.decoded_audio_cache.insert(
+            encoded_hash,
+            CachedDecodedAudio {
+                audio,
+                decoded_hash,
+                byte_size,
+            },
+        );
+        self.decoded_audio_lru.push_back(encoded_hash);
+        self.decoded_audio_cache_bytes = self.decoded_audio_cache_bytes.saturating_add(byte_size);
     }
 
     async fn present_due_video_frames(

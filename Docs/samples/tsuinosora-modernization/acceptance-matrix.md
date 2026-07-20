@@ -14,8 +14,10 @@
 | Movie and wait | movie、wait、skip 和 resume 行为可确定 | movie wait report、save/load from wait hash | 关键影片复核 | movie 不可恢复、wait state 丢失、skip 破坏 route |
 | Input rhythm | 左键推进和右键存档的 classic 语义保留 | input scenario、state hash | 实机节奏复核 | 输入映射错误、save 入口不可用 |
 | Save/load/replay | 任意 wait state 可保存、读取并 replay | save/load hash、replay report | 抽样复核 | replay 非确定、save 恢复位置错误 |
+| Director system UI | MENU/POPUP/SAVE/LOAD/GLOBALS 的页面、8 槽、Config、Exit 和隐藏测试入口保持原行为 | profile v2、system action manifest、system-frame hash、slot/page/action rejection tests | 原版系统窗口并排复核 | 任意 action/slot、嵌套页面栈、底层画面丢失、保存失败仍返回 |
+| Classic special surfaces | 两种 Opening、stage monologue、choice 和人物越框按 Score 合成 | 18 个 `wgpu_offscreen` checkpoint、15 项 v3 比较中的 13 项通过、layer/clip snapshot、具名色彩 tolerance approval | `005/009` 必须补原版连续两帧，模型查看全部五联图 | CPU fallback、stage 裁错、shade/choice/modal 几何偏离、reference 取证冲突 |
 
-classic profile 的目标是流程与感知等价。像素级和采样级差异记录为诊断，只有内容缺失、流程错误、不可恢复或证据不完整时才阻断。
+classic profile 的目标是可观察行为忠实。几何、layer、clip、shade 和系统窗口结构属于阻断约束；捕获颜色与字体 raster 差异只能由具名 comparison policy 与 hash-bound human approval 限定批准。当前 v43 比较复用同一份 18-checkpoint GPU capture identity，15 项归一化参考中 13 项通过；`006` 仅按不可修改的 `capture_palette_v1` 通过，仍执行 2 px 几何门禁。`005/009` 的失败来自 reference/source 或 transition 稳定捕获证据不足，保持 blocking。
 
 ## Modern Profile
 

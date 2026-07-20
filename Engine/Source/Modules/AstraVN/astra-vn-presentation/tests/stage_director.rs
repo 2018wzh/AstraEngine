@@ -1,7 +1,8 @@
 use astra_vn_presentation::{
     AspectRatio, FixedScalar, ProductStageDirector, StageBlendMode, StageClipPolicy, StageCommand,
-    StageLayerKind, StagePlacement, StageViewport, TimelineCommand, TimelineSpec,
-    VnPresentationProviderManifest, VnTimelineJoinPolicy, VnTimelineKeyframe, VnTimelineTrack,
+    StageFitMode, StageLayerKind, StagePlacement, StageViewport, TimelineCommand, TimelineSpec,
+    VnAudioBus, VnPresentationProviderManifest, VnTimelineJoinPolicy, VnTimelineKeyframe,
+    VnTimelineTrack,
 };
 
 fn fixed(value: i64) -> FixedScalar {
@@ -45,6 +46,64 @@ fn configure(director: &mut ProductStageDirector) {
         .unwrap();
 }
 
+#[astra_headless_test::test]
+fn stage_backdrop_is_authoritative_serializable_and_explicitly_clearable() {
+    let mut director = director();
+    let black = [0, 0, 0, 255];
+    director
+        .apply(&StageCommand::Backdrop { color: black })
+        .unwrap();
+    assert_eq!(director.state().backdrop_color, Some(black));
+
+    let snapshot = director.snapshot().unwrap();
+    let restored = ProductStageDirector::restore(
+        VnPresentationProviderManifest::standard(),
+        "advanced-vn",
+        &snapshot,
+    )
+    .unwrap();
+    assert_eq!(restored.state().backdrop_color, Some(black));
+
+    director
+        .apply(&StageCommand::Backdrop {
+            color: [0, 0, 0, 0],
+        })
+        .unwrap();
+    assert_eq!(director.state().backdrop_color, None);
+}
+
+#[astra_headless_test::test]
+fn stage_shade_color_and_coverage_are_authoritative_and_serializable() {
+    let mut director = director();
+    let color = [0x22, 0x24, 0x20, 0xff];
+    director
+        .apply(&StageCommand::Shade {
+            color,
+            opacity: fixed(920_000),
+        })
+        .unwrap();
+    assert_eq!(director.state().shade_color, color);
+    assert_eq!(director.state().shade_opacity, fixed(920_000));
+
+    let snapshot = director.snapshot().unwrap();
+    let restored = ProductStageDirector::restore(
+        VnPresentationProviderManifest::standard(),
+        "advanced-vn",
+        &snapshot,
+    )
+    .unwrap();
+    assert_eq!(restored.state().shade_color, color);
+    assert_eq!(restored.state().shade_opacity, fixed(920_000));
+
+    let error = director
+        .apply(&StageCommand::Shade {
+            color: [0x22, 0x24, 0x20, 0x80],
+            opacity: fixed(920_000),
+        })
+        .unwrap_err();
+    assert_eq!(error.code(), "ASTRA_VN_STAGE_SHADE_COLOR_ALPHA");
+}
+
 fn show_hero(director: &mut ProductStageDirector) {
     director
         .apply(&StageCommand::Show {
@@ -53,6 +112,8 @@ fn show_hero(director: &mut ProductStageDirector) {
             pose: Some("normal".to_string()),
             layer: "characters".to_string(),
             placement: StagePlacement::Center,
+            fit: StageFitMode::ContainHeight,
+            opacity: FixedScalar::ONE,
             preset: Some("hero_enter".to_string()),
         })
         .unwrap();
@@ -70,6 +131,8 @@ fn stage_director_applies_profile_bound_tween_without_partial_failure() {
             pose: None,
             layer: "missing".to_string(),
             placement: StagePlacement::Center,
+            fit: StageFitMode::ContainHeight,
+            opacity: FixedScalar::ONE,
             preset: Some("hero_enter".to_string()),
         })
         .unwrap_err();
@@ -84,6 +147,84 @@ fn stage_director_applies_profile_bound_tween_without_partial_failure() {
     assert!(midpoint > 0 && midpoint < 1_000_000);
     director.tick(150_000_000).unwrap();
     assert_eq!(director.state().entities["hero"].opacity, FixedScalar::ONE);
+}
+
+#[astra_headless_test::test]
+fn stage_director_tracks_preload_and_layer_authority_in_snapshot_state() {
+    let mut director = director();
+    let output = director
+        .apply(&StageCommand::Preload {
+            asset: "asset:/character/hero".to_string(),
+        })
+        .unwrap();
+    assert_eq!(
+        output,
+        vec![astra_vn_presentation::StageDirectorOutput::Preload {
+            asset: "asset:/character/hero".to_string(),
+        }]
+    );
+    assert!(director
+        .state()
+        .preloaded_assets
+        .contains("asset:/character/hero"));
+    assert!(director
+        .apply(&StageCommand::Preload {
+            asset: "asset:/character/hero".to_string(),
+        })
+        .unwrap()
+        .is_empty());
+
+    configure(&mut director);
+    director
+        .apply(&StageCommand::Show {
+            id: "half".to_string(),
+            asset: "asset:/character/hero".to_string(),
+            pose: None,
+            layer: "characters".to_string(),
+            placement: StagePlacement::Center,
+            fit: StageFitMode::ContainHeight,
+            opacity: fixed(500_000),
+            preset: None,
+        })
+        .unwrap();
+    assert_eq!(director.state().entities["half"].opacity, fixed(500_000));
+    director
+        .apply(&StageCommand::SetLayerVisibility {
+            layer: "characters".to_string(),
+            visible: false,
+        })
+        .unwrap();
+    assert!(!director.state().layers["characters"].visible);
+    director
+        .apply(&StageCommand::ClearLayer {
+            layer: "characters".to_string(),
+            duration_ms: 0,
+        })
+        .unwrap();
+    assert!(director.state().entities.is_empty());
+}
+
+#[astra_headless_test::test]
+fn stage_director_can_clear_an_empty_video_layer() {
+    let mut director = director();
+    configure(&mut director);
+    director
+        .apply(&StageCommand::DeclareLayer {
+            id: "video".to_string(),
+            kind: StageLayerKind::Video,
+            z: 200,
+            blend: StageBlendMode::Normal,
+            clip: Some(StageClipPolicy::Stage),
+            input: None,
+        })
+        .unwrap();
+
+    director
+        .apply(&StageCommand::ClearLayer {
+            layer: "video".to_string(),
+            duration_ms: 0,
+        })
+        .unwrap();
 }
 
 #[astra_headless_test::test]
@@ -211,4 +352,37 @@ fn stage_director_rejects_invalid_tick_and_timeline_without_mutation() {
         .unwrap_err();
     assert_eq!(error.code(), "ASTRA_VN_STAGE_TIMELINE_ORDER");
     assert_eq!(director.state().stable_hash().unwrap(), initial);
+}
+
+#[astra_headless_test::test]
+fn audio_bus_enabled_state_is_typed_and_snapshot_stable() {
+    let manifest = VnPresentationProviderManifest::standard();
+    let mut director = ProductStageDirector::new(
+        manifest.clone(),
+        "advanced-vn",
+        StageViewport {
+            width: 1280,
+            height: 720,
+        },
+    )
+    .unwrap();
+    let output = director
+        .apply(&StageCommand::SetAudioBusEnabled {
+            bus: VnAudioBus::Bgm,
+            enabled: false,
+        })
+        .unwrap();
+    assert!(matches!(
+        output.as_slice(),
+        [
+            astra_vn_presentation::StageDirectorOutput::AudioBusEnabled {
+                bus: VnAudioBus::Bgm,
+                enabled: false
+            }
+        ]
+    ));
+    assert!(!director.state().audio_bus_enabled[&VnAudioBus::Bgm]);
+    let snapshot = director.snapshot().unwrap();
+    let restored = ProductStageDirector::restore(manifest, "advanced-vn", &snapshot).unwrap();
+    assert_eq!(restored.state(), director.state());
 }

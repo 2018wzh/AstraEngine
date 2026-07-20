@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.director_story_program_report.v1.json",
+  "title": "TsuiNoSora Director Story Program Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "movie_count", "node_count", "source_statement_count", "program_operation_count", "program_kind_counts", "story_program_sha256", "diagnostics", "redaction"],
+  "properties": {
+    "schema": { "const": "tsuinosora.director_story_program_report.v1" },
+    "status": { "enum": ["pass", "blocked"] },
+    "movie_count": { "type": "integer", "minimum": 0 },
+    "node_count": { "type": "integer", "minimum": 0 },
+    "source_statement_count": { "type": "integer", "minimum": 0 },
+    "program_operation_count": { "type": "integer", "minimum": 0 },
+    "program_kind_counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+    "story_program_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "diagnostics": { "type": "array", "items": { "type": "object" } },
+    "redaction": { "type": "object", "additionalProperties": { "type": "string" } }
+  }
+}

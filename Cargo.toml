@@ -58,6 +58,7 @@ members = [
     "Engine/Source/Programs/astra-player-android",
     "Engine/Source/Programs/astra-crash-reporter",
     "Engine/Source/Programs/astra-ui-component-host",
+    "Examples/TsuiNoSora/Tools/original-patcher",
     "Engine/Plugins/Fixtures/headless-presentation-provider",
     "Engine/Plugins/Fixtures/vn-extension-provider",
     "Engine/Plugins/Fixtures/ui-component-provider",
@@ -88,23 +89,29 @@ rust-version = "1.92"
 version = "0.1.0"
 
 [workspace.dependencies]
+aes-gcm-siv = "0.11"
 accesskit = "=0.24.1"
 accesskit_android = { version = "=0.7.5", features = ["embedded-dex"] }
 accesskit_winit = { version = "=0.33.1", default-features = false, features = ["rwh_06"] }
 abi_stable = "0.11"
 ashpd = { version = "=0.12.3", default-features = false, features = ["tokio"] }
 base64 = "0.22"
+binrw = "0.15"
 blake3 = "1"
 camino = { version = "1", features = ["serde1"] }
 clap = { version = "4", features = ["derive"] }
+configparser = "3"
 cosmic-text = "=0.18.2"
 cpal = "0.17"
 directories = "6"
+dunce = "1"
 ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["fast"] }
 encoding_rs = "0.8"
+filetime = "0.2"
 ffmpeg-next = "8.1"
 futures-util = "0.3"
 hex = "0.4"
+hkdf = "0.12"
 hound = "3.5"
 evdev = "=0.13.2"
 gilrs = { version = "0.11.2", default-features = false }
@@ -125,6 +132,7 @@ libloading = "0.8"
 libc = "0.2"
 logos = "0.16.1"
 mlua = { version = "0.10", features = ["luau", "vendored", "serialize"] }
+luaur-rt = { version = "=0.1.8", default-features = false, features = ["serde"] }
 objc2 = "0.6.4"
 objc2-av-foundation = { version = "0.3.2", default-features = false }
 objc2-core-media = { version = "0.3.2", default-features = false }
@@ -165,9 +173,14 @@ tempfile = "3"
 ctrlc = "3"
 text-size = "1.1.1"
 thiserror = "1"
+wait-timeout = "0.2"
+walkdir = "2"
+windows-sys = "0.61"
+winresource = "0.1"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tokio-rustls = "0.26"
 tracing = "0.1"
+zeroize = { version = "1", features = ["derive"] }
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = [
     "env-filter",

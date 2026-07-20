@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.director_story_source_report.v1.json",
+  "title": "TsuiNoSora Director Story Source Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "movie_count",
+    "frame_count",
+    "label_count",
+    "out_of_score_label_count",
+    "label_action_binding_count",
+    "frame_action_binding_count",
+    "scene_text_binding_count",
+    "named_text_member_count",
+    "script_resource_count",
+    "story_source_sha256",
+    "movie_coverage",
+    "diagnostics",
+    "redaction"
+  ],
+  "properties": {
+    "schema": { "const": "tsuinosora.director_story_source_report.v1" },
+    "status": { "enum": ["pass", "blocked"] },
+    "movie_count": { "type": "integer", "minimum": 0 },
+    "frame_count": { "type": "integer", "minimum": 0 },
+    "label_count": { "type": "integer", "minimum": 0 },
+    "out_of_score_label_count": { "type": "integer", "minimum": 0 },
+    "label_action_binding_count": { "type": "integer", "minimum": 0 },
+    "frame_action_binding_count": { "type": "integer", "minimum": 0 },
+    "scene_text_binding_count": { "type": "integer", "minimum": 0 },
+    "named_text_member_count": { "type": "integer", "minimum": 0 },
+    "script_resource_count": { "type": "integer", "minimum": 0 },
+    "story_source_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "movie_coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "movie_id",
+          "frame_count",
+          "label_count",
+          "label_action_binding_count",
+          "frame_action_binding_count",
+          "distinct_action_script_count",
+          "scene_text_binding_count",
+          "named_text_member_count",
+          "out_of_score_label_count"
+        ],
+        "properties": {
+          "movie_id": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+          "frame_count": { "type": "integer", "minimum": 0 },
+          "label_count": { "type": "integer", "minimum": 0 },
+          "label_action_binding_count": { "type": "integer", "minimum": 0 },
+          "frame_action_binding_count": { "type": "integer", "minimum": 0 },
+          "distinct_action_script_count": { "type": "integer", "minimum": 0 },
+          "scene_text_binding_count": { "type": "integer", "minimum": 0 },
+          "named_text_member_count": { "type": "integer", "minimum": 0 },
+          "out_of_score_label_count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "diagnostics": { "type": "array", "items": { "type": "object" } },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  }
+}

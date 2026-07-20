@@ -5,7 +5,7 @@
   "renderer": "wgpu_hardware.glyph_atlas",
   "font_fixture_revision": "ec0464b978de222073645d6d3366f3fdf03376d8",
   "layout_hash": "sha256:6abab23736dbc8ed5eb00a962cbd40d7254617e449eb8355276a4067003f28c9",
-  "capture_hash": "sha256:26a73c2821d7030266c2957aa3466c323bd9915d1ce1b1538d50e196892fae65",
+  "capture_hash": "sha256:c217e3d3aecbbf287440f38af53fabde7304436dd3f8d11910d0b69ddcd5481d",
   "minimum_changed_pixels": 1000,
   "background_rgba": [12, 18, 28, 255]
 }

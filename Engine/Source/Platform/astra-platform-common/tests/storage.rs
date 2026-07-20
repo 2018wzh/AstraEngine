@@ -28,6 +28,7 @@ fn save_transaction_commits_reopens_and_aborts_without_partial_files() {
     dotted.write(&[7]).unwrap();
     dotted.commit().unwrap();
     assert_eq!(store.read("slot.01").unwrap(), [7]);
+    assert_eq!(store.list().unwrap(), ["slot.01"]);
 
     let mut aborted = store.begin("slot-2").unwrap();
     aborted.write(&[9, 9]).unwrap();
@@ -41,6 +42,24 @@ fn save_transaction_commits_reopens_and_aborts_without_partial_files() {
         .file_name()
         .to_string_lossy()
         .contains("tmp")));
+}
+
+#[test]
+fn save_catalog_is_sorted_and_rejects_unsafe_owned_entries() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = AtomicSaveStore::new(temp.path(), "com.example.game").unwrap();
+    for slot in ["slot.10", "slot.02", "slot.quick"] {
+        let mut transaction = store.begin(slot).unwrap();
+        transaction.write(slot.as_bytes()).unwrap();
+        transaction.commit().unwrap();
+    }
+    assert_eq!(store.list().unwrap(), ["slot.02", "slot.10", "slot.quick"]);
+
+    fs::write(store.root().join("unsafe name.astrasave"), [1]).unwrap();
+    assert_eq!(
+        store.list().unwrap_err().code,
+        PlatformErrorCode::PermissionDenied
+    );
 }
 
 #[test]

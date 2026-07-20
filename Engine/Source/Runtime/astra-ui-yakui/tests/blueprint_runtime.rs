@@ -3,10 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use astra_core::Hash256;
 use astra_media_core::TextureFrame;
 use astra_ui_core::{
-    UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiCapability,
-    UiEventBinding, UiFrameRequest, UiInputDispositionKind, UiInputEvent, UiInputEventKind,
-    UiInputFrame, UiInsets, UiNodeBlueprint, UiRepeatBinding, UiSemanticAction, UiSemanticRole,
-    UiThemeManifest, UiThemeValue, UiValue, UiValueExpr, UiViewBlueprint, UiViewport,
+    UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState,
+    UiCapability, UiEventBinding, UiFrameRequest, UiInputDispositionKind, UiInputEvent,
+    UiInputEventKind, UiInputFrame, UiInsets, UiNodeBlueprint, UiRepeatBinding, UiSemanticAction,
+    UiSemanticRole, UiThemeManifest, UiThemeValue, UiValue, UiValueExpr, UiViewBlueprint,
+    UiViewport,
 };
 use astra_ui_yakui::{AstraYakuiBackend, BlueprintYakuiRenderer};
 
@@ -24,6 +25,117 @@ fn node(id: &str, widget: &str) -> UiNodeBlueprint {
 }
 
 #[astra_headless_test::test]
+fn explicit_max_size_bounds_an_absolutely_positioned_window() {
+    let mut window = node("window", "column");
+    for (key, value) in [
+        ("min_width", 336.0),
+        ("max_width", 336.0),
+        ("min_height", 242.0),
+        ("max_height", 242.0),
+        ("position_x", 232.0),
+        ("position_y", 166.0),
+    ] {
+        window.properties.insert(
+            key.into(),
+            UiValueExpr::Literal {
+                value: UiValue::Number(value),
+            },
+        );
+    }
+    window.properties.insert(
+        "clip_children".into(),
+        UiValueExpr::Literal {
+            value: UiValue::Bool(true),
+        },
+    );
+    let mut oversized = node("oversized", "panel");
+    oversized.properties.insert(
+        "min_height".into(),
+        UiValueExpr::Literal {
+            value: UiValue::Number(320.0),
+        },
+    );
+    window.children.push(oversized);
+    let mut root = node("root", "screen");
+    root.children.push(window);
+    let view = UiViewBlueprint {
+        id: "ui.fixed_window".into(),
+        source_id: "ui.fixed_window".into(),
+        model_schema: "model.fixed_window.v1".into(),
+        theme_id: "theme.classic".into(),
+        required_capabilities: Vec::new(),
+        root,
+    };
+    let mut bundle = UiBlueprintBundle {
+        schema: "astra.ui_blueprint_bundle.v1".into(),
+        views: BTreeMap::from([(view.id.clone(), view)]),
+        hash: Hash256::from_sha256(&[]),
+    };
+    bundle.hash = bundle.compute_hash().expect("bundle hash");
+    let mut theme = UiThemeManifest {
+        schema: "astra.ui_theme_manifest.v1".into(),
+        id: "theme.classic".into(),
+        parent: None,
+        tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
+        high_contrast_tokens: BTreeMap::new(),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash().expect("theme hash");
+    let frame = UiBlueprintFrameModel {
+        schema: "astra.ui_blueprint_frame_model.v1".into(),
+        view_id: "ui.fixed_window".into(),
+        model: UiValue::Map(BTreeMap::new()),
+        state: UiValue::Map(BTreeMap::new()),
+        modals: Vec::new(),
+        focus_request: None,
+        localization: BTreeMap::new(),
+    };
+    let request = UiFrameRequest {
+        schema: "astra.ui_frame_request.v1".into(),
+        session_id: "session.fixed_window".into(),
+        generation: 1,
+        viewport: UiViewport {
+            physical_width: 800,
+            physical_height: 600,
+            scale_factor: 1.0,
+            font_scale: 1.0,
+            safe_area_points: UiInsets {
+                left: 0.0,
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+            },
+        },
+        fixed_time_ns: 0,
+        input: UiInputFrame {
+            schema: "astra.ui_input_frame.v1".into(),
+            events: Vec::new(),
+        },
+        theme,
+        model_schema: "model.fixed_window.v1".into(),
+        model_payload: postcard::to_allocvec(&frame).expect("frame encode"),
+    };
+    let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
+    let mut backend =
+        AstraYakuiBackend::new(renderer, Hash256::from_sha256(b"test")).expect("backend");
+    let output = backend.render_frame(request).expect("render");
+    let window = output
+        .semantics
+        .nodes
+        .iter()
+        .find(|node| node.id == "root/window")
+        .expect("window semantics");
+    assert_eq!(
+        window.bounds_points.max.x - window.bounds_points.min.x,
+        336.0
+    );
+    assert_eq!(
+        window.bounds_points.max.y - window.bounds_points.min.y,
+        242.0
+    );
+}
+
+#[astra_headless_test::test]
 fn modal_stack_is_rendered_as_bounded_dialog_semantics() {
     let mut base_root = node("root", "screen");
     base_root.children.push(node("content", "panel"));
@@ -36,7 +148,20 @@ fn modal_stack_is_rendered_as_bounded_dialog_semantics() {
         root: base_root,
     };
     let mut dialog_root = node("dialog", "modal");
-    dialog_root.children.push(node("message", "text"));
+    let mut message = node("message", "text");
+    message.properties.insert(
+        "text_align".into(),
+        UiValueExpr::Literal {
+            value: UiValue::String("center".into()),
+        },
+    );
+    message.properties.insert(
+        "vertical_align".into(),
+        UiValueExpr::Literal {
+            value: UiValue::String("end".into()),
+        },
+    );
+    dialog_root.children.push(message);
     let dialog = UiViewBlueprint {
         id: "ui.dialog".into(),
         source_id: "ui.dialog".into(),
@@ -113,6 +238,23 @@ fn modal_stack_is_rendered_as_bounded_dialog_semantics() {
         .nodes
         .iter()
         .any(|node| node.id == "root/modal.0/dialog/message"));
+    let message = output
+        .semantics
+        .nodes
+        .iter()
+        .find(|node| node.id == "root/modal.0/dialog/message")
+        .expect("message semantic node");
+    assert_eq!(
+        message.properties.get("text.align").map(String::as_str),
+        Some("center")
+    );
+    assert_eq!(
+        message
+            .properties
+            .get("text.vertical_align")
+            .map(String::as_str),
+        Some("end")
+    );
     assert_eq!(output.semantics.root_id, "root");
 }
 
@@ -369,8 +511,33 @@ fn thousand_gallery_images_are_virtualized_and_bounded_by_lru() {
     assert!(first.performance.instantiated_nodes <= 64);
     assert!(first.performance.active_texture_bytes <= 128 * 4);
 
-    let mut observed_release = false;
-    for sequence in 1..40 {
+    let replacement_rgba8 = vec![255, 32, 16, 255];
+    backend
+        .renderer_mut()
+        .upsert_image_resource(
+            "fixture.thumbnail.0".into(),
+            TextureFrame {
+                width: 1,
+                height: 1,
+                hash: Hash256::from_sha256(&replacement_rgba8),
+                rgba8: replacement_rgba8,
+            },
+        )
+        .expect("replace live texture resource");
+    let replaced = backend
+        .render_frame(request(1, false))
+        .expect("render replaced texture");
+    assert!(
+        !replaced.render.textures.releases.is_empty(),
+        "replacing a live resource must release the superseded Yakui texture"
+    );
+    assert!(
+        !replaced.render.textures.uploads.is_empty(),
+        "replacing a visible resource must upload the replacement texture"
+    );
+
+    let mut observed_release = true;
+    for sequence in 2..40 {
         let output = backend
             .render_frame(request(sequence, true))
             .expect("scrolled frame");
@@ -437,7 +604,7 @@ fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
         model: UiValue::Map(BTreeMap::new()),
         state: UiValue::Map(BTreeMap::new()),
         modals: Vec::new(),
-        focus_request: None,
+        focus_request: Some("root/volume".into()),
         localization: BTreeMap::new(),
     };
     let request = |events| UiFrameRequest {
@@ -497,6 +664,22 @@ fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
     );
     assert_eq!(second.actions.len(), 1);
     assert_eq!(second.actions[0].action_id, "vn.set_config");
+
+    let keyboard = backend
+        .render_frame(request(vec![UiInputEvent {
+            sequence: 2,
+            kind: UiInputEventKind::Keyboard {
+                logical_key: "ArrowLeft".into(),
+                physical_key: "ArrowLeft".into(),
+                state: UiButtonState::Pressed,
+                repeat: false,
+                modifiers: 0,
+            },
+        }]))
+        .expect("keyboard slider frame");
+    assert_eq!(keyboard.actions.len(), 1);
+    assert_eq!(keyboard.actions[0].action_id, "vn.set_config");
+    assert_eq!(keyboard.actions[0].arguments["value"], UiValue::Number(0.4));
     let UiValue::Number(value) = second.actions[0]
         .arguments
         .get("value")
@@ -505,4 +688,256 @@ fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
         panic!("range action value must be numeric");
     };
     assert!((value - 0.6).abs() < 1e-6);
+}
+
+#[astra_headless_test::test]
+fn requested_focus_activates_a_button_without_prior_navigation() {
+    let mut button = node("confirm", "button");
+    button.events.push(UiEventBinding {
+        event: "activate".into(),
+        action_id: "vn.advance".into(),
+        arguments: BTreeMap::new(),
+    });
+    let mut alternate = node("alternate", "button");
+    alternate.events = button.events.clone();
+    let mut root = node("root", "screen");
+    root.children.push(button);
+    root.children.push(alternate);
+    let view = UiViewBlueprint {
+        id: "ui.focus".into(),
+        source_id: "ui.focus".into(),
+        model_schema: "model.focus.v1".into(),
+        theme_id: "theme.focus".into(),
+        required_capabilities: Vec::new(),
+        root,
+    };
+    let mut bundle = UiBlueprintBundle {
+        schema: "astra.ui_blueprint_bundle.v1".into(),
+        views: BTreeMap::from([(view.id.clone(), view)]),
+        hash: Hash256::from_sha256(&[]),
+    };
+    bundle.hash = bundle.compute_hash().expect("bundle hash");
+    let mut theme = UiThemeManifest {
+        schema: "astra.ui_theme_manifest.v1".into(),
+        id: "theme.focus".into(),
+        parent: None,
+        tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
+        high_contrast_tokens: BTreeMap::new(),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash().expect("theme hash");
+    let request = |focus_request, events| {
+        let frame = UiBlueprintFrameModel {
+            schema: "astra.ui_blueprint_frame_model.v1".into(),
+            view_id: "ui.focus".into(),
+            model: UiValue::Map(BTreeMap::new()),
+            state: UiValue::Map(BTreeMap::new()),
+            modals: Vec::new(),
+            focus_request,
+            localization: BTreeMap::new(),
+        };
+        UiFrameRequest {
+            schema: "astra.ui_frame_request.v1".into(),
+            session_id: "session.focus".into(),
+            generation: 1,
+            viewport: UiViewport {
+                physical_width: 800,
+                physical_height: 600,
+                scale_factor: 1.0,
+                font_scale: 1.0,
+                safe_area_points: UiInsets {
+                    left: 0.0,
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: 0.0,
+                },
+            },
+            fixed_time_ns: 0,
+            input: UiInputFrame {
+                schema: "astra.ui_input_frame.v1".into(),
+                events,
+            },
+            theme: theme.clone(),
+            model_schema: "model.focus.v1".into(),
+            model_payload: postcard::to_allocvec(&frame).expect("frame encode"),
+        }
+    };
+    let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
+    let mut backend =
+        AstraYakuiBackend::new(renderer, Hash256::from_sha256(b"focus-test")).expect("backend");
+    let focused = backend
+        .render_frame(request(Some("root/confirm".into()), Vec::new()))
+        .expect("focus frame");
+    assert_eq!(
+        focused
+            .semantics
+            .nodes
+            .iter()
+            .filter(|node| node.focused)
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root/confirm"]
+    );
+    let activated = backend
+        .render_frame(request(
+            None,
+            vec![UiInputEvent {
+                sequence: 1,
+                kind: UiInputEventKind::Keyboard {
+                    logical_key: "Enter".into(),
+                    physical_key: "Enter".into(),
+                    state: UiButtonState::Pressed,
+                    repeat: false,
+                    modifiers: 0,
+                },
+            }],
+        ))
+        .expect("activate frame");
+    assert_eq!(activated.actions.len(), 1);
+    assert_eq!(activated.actions[0].action_id, "vn.advance");
+    assert_eq!(activated.actions[0].semantic_target_id, "root/confirm");
+
+    backend
+        .render_frame(request(
+            None,
+            vec![UiInputEvent {
+                sequence: 2,
+                kind: UiInputEventKind::Keyboard {
+                    logical_key: "Enter".into(),
+                    physical_key: "Enter".into(),
+                    state: UiButtonState::Released,
+                    repeat: false,
+                    modifiers: 0,
+                },
+            }],
+        ))
+        .expect("release frame");
+    let navigated = backend
+        .render_frame(request(
+            None,
+            vec![UiInputEvent {
+                sequence: 3,
+                kind: UiInputEventKind::Keyboard {
+                    logical_key: "ArrowDown".into(),
+                    physical_key: "ArrowDown".into(),
+                    state: UiButtonState::Pressed,
+                    repeat: false,
+                    modifiers: 0,
+                },
+            }],
+        ))
+        .expect("navigation frame");
+    assert!(navigated
+        .semantics
+        .nodes
+        .iter()
+        .any(|node| node.id == "root/alternate" && node.focused));
+    backend
+        .render_frame(request(
+            None,
+            vec![UiInputEvent {
+                sequence: 4,
+                kind: UiInputEventKind::Keyboard {
+                    logical_key: "ArrowDown".into(),
+                    physical_key: "ArrowDown".into(),
+                    state: UiButtonState::Released,
+                    repeat: false,
+                    modifiers: 0,
+                },
+            }],
+        ))
+        .expect("navigation release frame");
+    let alternate = backend
+        .render_frame(request(
+            None,
+            vec![UiInputEvent {
+                sequence: 5,
+                kind: UiInputEventKind::Keyboard {
+                    logical_key: "Enter".into(),
+                    physical_key: "Enter".into(),
+                    state: UiButtonState::Pressed,
+                    repeat: false,
+                    modifiers: 0,
+                },
+            }],
+        ))
+        .expect("alternate activate frame");
+    assert_eq!(alternate.actions.len(), 1);
+    assert_eq!(alternate.actions[0].semantic_target_id, "root/alternate");
+}
+
+#[astra_headless_test::test]
+fn missing_focus_target_reports_bounded_focusable_semantic_ids() {
+    let mut confirm = node("confirm", "button");
+    confirm.events.push(UiEventBinding {
+        event: "activate".into(),
+        action_id: "vn.advance".into(),
+        arguments: BTreeMap::new(),
+    });
+    let mut root = node("root", "screen");
+    root.children.push(confirm);
+    let view = UiViewBlueprint {
+        id: "ui.focus.missing".into(),
+        source_id: "ui.focus.missing".into(),
+        model_schema: "model.focus.v1".into(),
+        theme_id: "theme.focus".into(),
+        required_capabilities: Vec::new(),
+        root,
+    };
+    let mut bundle = UiBlueprintBundle {
+        schema: "astra.ui_blueprint_bundle.v1".into(),
+        views: BTreeMap::from([(view.id.clone(), view)]),
+        hash: Hash256::from_sha256(&[]),
+    };
+    bundle.hash = bundle.compute_hash().expect("bundle hash");
+    let mut theme = UiThemeManifest {
+        schema: "astra.ui_theme_manifest.v1".into(),
+        id: "theme.focus".into(),
+        parent: None,
+        tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
+        high_contrast_tokens: BTreeMap::new(),
+        content_hash: Hash256::from_sha256(&[]),
+    };
+    theme.content_hash = theme.compute_hash().expect("theme hash");
+    let frame = UiBlueprintFrameModel {
+        schema: "astra.ui_blueprint_frame_model.v1".into(),
+        view_id: "ui.focus.missing".into(),
+        model: UiValue::Map(BTreeMap::new()),
+        state: UiValue::Map(BTreeMap::new()),
+        modals: Vec::new(),
+        focus_request: Some("root/missing".into()),
+        localization: BTreeMap::new(),
+    };
+    let request = UiFrameRequest {
+        schema: "astra.ui_frame_request.v1".into(),
+        session_id: "session.focus.missing".into(),
+        generation: 1,
+        viewport: UiViewport {
+            physical_width: 800,
+            physical_height: 600,
+            scale_factor: 1.0,
+            font_scale: 1.0,
+            safe_area_points: UiInsets {
+                left: 0.0,
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+            },
+        },
+        fixed_time_ns: 0,
+        input: UiInputFrame {
+            schema: "astra.ui_input_frame.v1".into(),
+            events: Vec::new(),
+        },
+        theme,
+        model_schema: "model.focus.v1".into(),
+        model_payload: postcard::to_allocvec(&frame).expect("frame encode"),
+    };
+    let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
+    let mut backend = AstraYakuiBackend::new(renderer, Hash256::from_sha256(b"missing-focus-test"))
+        .expect("backend");
+    let error = backend.render_frame(request).expect_err("missing target");
+    let message = error.to_string();
+    assert!(message.contains("requested=root/missing"));
+    assert!(message.contains("available=root/confirm"));
 }

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.headless_route_matrix_report.v1.json",
+  "title": "TsuiNoSora Headless route matrix report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "build_fingerprint", "package_hash", "route_count", "passed_route_count", "failed_route_count", "terminal_observation_required", "routes", "matrix_hash", "diagnostics", "redaction"],
+  "properties": {
+    "schema": { "const": "tsuinosora.headless_route_matrix_report.v1" },
+    "status": { "enum": ["pass", "blocked"] },
+    "build_fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "package_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "route_count": { "type": "integer", "minimum": 1 },
+    "passed_route_count": { "type": "integer", "minimum": 0 },
+    "failed_route_count": { "type": "integer", "minimum": 0 },
+    "terminal_observation_required": { "const": true },
+    "matrix_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["route_id", "terminal_id", "choice_count", "choice_selection_count", "choice_signature_hash", "session_id", "build_fingerprint", "package_hash", "input_sequence_hash", "manifest_hash", "completed_sequence", "frame_count", "audio_frame_count", "duration_ns", "checkpoint_id", "checkpoint_observation_hash", "status"],
+        "properties": {
+          "route_id": { "type": "string", "pattern": "^route\\.coverage\\.[0-9]{3}$" },
+          "terminal_id": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+          "choice_count": { "type": "integer", "minimum": 0 },
+          "choice_selection_count": { "type": "integer", "minimum": 0 },
+          "choice_signature_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "session_id": { "type": "string", "pattern": "^tsui\\.route\\.coverage\\.[0-9]{3}$" },
+          "build_fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "package_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "input_sequence_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "manifest_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "completed_sequence": { "type": "integer", "minimum": 1 },
+          "frame_count": { "type": "integer", "minimum": 1 },
+          "audio_frame_count": { "type": "integer", "minimum": 0 },
+          "duration_ns": { "type": "integer", "minimum": 0 },
+          "checkpoint_id": { "type": "string", "pattern": "^checkpoint\\.route\\.coverage\\.[0-9]{3}$" },
+          "checkpoint_observation_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "status": { "const": "passed" }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "route_id", "message"],
+        "properties": {
+          "code": { "const": "TSUI_HEADLESS_ROUTE_FAILED" },
+          "route_id": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      }
+    },
+    "redaction": { "type": "object" }
+  }
+}

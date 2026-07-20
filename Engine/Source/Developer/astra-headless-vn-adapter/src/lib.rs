@@ -1,6 +1,8 @@
 use astra_core::Hash256;
 use astra_headless_protocol::{ButtonState, GamepadControl, PhysicalInput, TouchPhase};
-use astra_package::PackageReader;
+use astra_package::{
+    AstraContainerReader, ContainerCryptoProvider, PackageReader, SourceUnlockPolicy,
+};
 use astra_platform::{SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest};
 use astra_player_core::{
     PlatformCommandSink, PlayerHostCommandExecutor, PlayerHostCommandResult, PlayerHostResourceId,
@@ -13,11 +15,22 @@ use astra_ui_core::{
     UiButtonState, UiInputEventKind, UiNavigationAction, UiPoint, UiPointerButton, UiTouchPhase,
 };
 use astra_vn_core::VnRunConfig;
+use std::sync::Arc;
 
-use astra_player_vn::{NativeVnHostCommandSource, NativeVnProductMediaHost};
+use astra_player_vn::{NativeVnHostCommandSource, NativeVnProductMediaHost, VnUiHostRequest};
 
-#[derive(Debug, Default)]
-pub struct NativeVnProductAdapterFactory;
+#[derive(Default)]
+pub struct NativeVnProductAdapterFactory {
+    package_crypto: Option<Arc<dyn ContainerCryptoProvider>>,
+}
+
+impl NativeVnProductAdapterFactory {
+    pub fn with_package_crypto(package_crypto: Arc<dyn ContainerCryptoProvider>) -> Self {
+        Self {
+            package_crypto: Some(package_crypto),
+        }
+    }
+}
 
 impl ProductAdapterFactory for NativeVnProductAdapterFactory {
     fn binding_id(&self) -> &str {
@@ -28,6 +41,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
         &'a self,
         request: ProductOpenRequest,
     ) -> ProductFuture<'a, Result<Box<dyn ProductSession>, ProductHostError>> {
+        let package_crypto = self.package_crypto.clone();
         Box::pin(async move {
             tracing::info!(
                 event = "headless.product.native_vn.open",
@@ -35,8 +49,36 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 profile = %request.profile,
                 "opening NativeVN through the generic Headless product host"
             );
-            let package = PackageReader::open(&request.package_bytes)
-                .map_err(|error| binding("package.open", error))?;
+            let raw = AstraContainerReader::new(&request.package_bytes)
+                .map_err(|error| binding("package.inspect", error))?;
+            let source_locked = raw.has_section("source.unlock");
+            let package = match (source_locked, package_crypto) {
+                (false, None) => PackageReader::open(&request.package_bytes),
+                (false, Some(_)) => {
+                    return Err(ProductHostError::Binding(
+                        "package.unlock: plaintext package received unexpected crypto provider"
+                            .into(),
+                    ));
+                }
+                (true, None) => {
+                    return Err(ProductHostError::Binding(
+                        "package.unlock: source-locked package requires verified source input"
+                            .into(),
+                    ));
+                }
+                (true, Some(crypto)) => {
+                    let policy: SourceUnlockPolicy = raw
+                        .decode_postcard("source.unlock")
+                        .map_err(|error| binding("package.unlock_policy", error))?;
+                    PackageReader::open_source_locked(
+                        &request.package_bytes,
+                        &policy,
+                        "source.unlock",
+                        crypto,
+                    )
+                }
+            }
+            .map_err(|error| binding("package.open", error))?;
             let locale = match request.locale {
                 Some(locale) => locale,
                 None => {
@@ -80,6 +122,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 logical_surface,
             )
             .map_err(|error| binding("runtime.open", error))?;
+            hydrate_save_catalog(&mut source, &mut executor).await?;
             executor
                 .execute_batch(
                     source
@@ -92,6 +135,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 256,
                 request.max_video_frames,
                 request.max_decode_output_bytes,
+                request.retain_audio_timeline,
             )
             .map_err(|error| binding("media.create", error))?;
             media
@@ -119,6 +163,55 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
             }) as Box<dyn ProductSession>)
         })
     }
+}
+
+async fn hydrate_save_catalog(
+    source: &mut NativeVnHostCommandSource,
+    executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
+) -> Result<(), ProductHostError> {
+    let results = executor
+        .execute_batch(
+            source
+                .list_saves()
+                .map_err(|error| binding("save.list.prepare", error))?,
+        )
+        .await
+        .map_err(|error| binding("save.list", error))?;
+    let slots = match results.as_slice() {
+        [PlayerHostCommandResult::SaveList { slots }] => slots.clone(),
+        _ => {
+            return Err(ProductHostError::Binding(
+                "ASTRA_HEADLESS_SAVE_LIST_RESULT_INVALID".into(),
+            ));
+        }
+    };
+    for slot in &slots {
+        let results = executor
+            .execute_batch(
+                source
+                    .read_save(slot)
+                    .map_err(|error| binding("save.catalog.read.prepare", error))?,
+            )
+            .await
+            .map_err(|error| binding("save.catalog.read", error))?;
+        let bytes = match results.as_slice() {
+            [PlayerHostCommandResult::SaveRead { bytes }] => bytes,
+            _ => {
+                return Err(ProductHostError::Binding(
+                    "ASTRA_HEADLESS_SAVE_CATALOG_RESULT_INVALID".into(),
+                ));
+            }
+        };
+        source
+            .ingest_save_catalog_entry(slot, bytes)
+            .map_err(|error| binding("save.catalog.ingest", error))?;
+    }
+    tracing::info!(
+        event = "headless.product.native_vn.save_catalog_hydrated",
+        slot_count = slots.len(),
+        "hydrated validated save metadata before launching NativeVN"
+    );
+    Ok(())
 }
 
 struct NativeVnHeadlessSession {
@@ -169,12 +262,12 @@ impl ProductSession for NativeVnHeadlessSession {
                     physical_key,
                     state: ButtonState::Pressed,
                     ..
-                } if physical_key == "F5" => self.save("slot-quick").await?,
+                } if physical_key == "F5" => self.save("slot.quick").await?,
                 PhysicalInput::Keyboard {
                     physical_key,
                     state: ButtonState::Pressed,
                     ..
-                } if physical_key == "F9" => self.load("slot-quick").await?,
+                } if physical_key == "F9" => self.load("slot.quick").await?,
                 PhysicalInput::Keyboard {
                     physical_key,
                     logical_key,
@@ -370,6 +463,9 @@ impl NativeVnHeadlessSession {
                 return Ok(());
             }
         }
+        if self.source()?.should_capture_gameplay_surface(&event) {
+            self.capture_gameplay_surface().await?;
+        }
         let batch = self
             .source()?
             .dispatch_ui_event(event)
@@ -378,6 +474,50 @@ impl NativeVnHeadlessSession {
             .execute_batch(batch)
             .await
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
+        self.process_ui_host_request().await?;
+        Ok(())
+    }
+
+    async fn process_ui_host_request(&mut self) -> Result<(), ProductHostError> {
+        let Some(request) = self.source()?.take_ui_host_request() else {
+            return Ok(());
+        };
+        match request {
+            VnUiHostRequest::Save { slot_id, .. } => {
+                if let Err(error) = self.save(&slot_id).await {
+                    self.source()?
+                        .mark_save_failed(&slot_id)
+                        .map_err(|cleanup_error| {
+                            ProductHostError::Input(cleanup_error.to_string())
+                        })?;
+                    return Err(error);
+                }
+                if let Some(batch) = self
+                    .source()?
+                    .mark_save_committed(&slot_id)
+                    .map_err(|error| ProductHostError::Input(error.to_string()))?
+                {
+                    self.executor
+                        .execute_batch(batch)
+                        .await
+                        .map_err(|error| ProductHostError::Input(error.to_string()))?;
+                }
+            }
+            VnUiHostRequest::Load { slot_id } => self.load(&slot_id).await?,
+            VnUiHostRequest::Delete { slot_id } => {
+                let batch = self
+                    .source()?
+                    .delete_save(&slot_id)
+                    .map_err(|error| ProductHostError::Input(error.to_string()))?;
+                self.executor
+                    .execute_batch(batch)
+                    .await
+                    .map_err(|error| ProductHostError::Input(error.to_string()))?;
+                self.source()?
+                    .mark_save_deleted(&slot_id)
+                    .map_err(|error| ProductHostError::Input(error.to_string()))?;
+            }
+        }
         Ok(())
     }
 
@@ -428,6 +568,24 @@ impl NativeVnHeadlessSession {
         let transaction = PlayerHostResourceId(self.next_save_transaction);
         let media_snapshot = serde_json::to_vec(&self.media.snapshot())
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
+        if !self.source()?.has_gameplay_thumbnail_capture() {
+            self.capture_gameplay_surface().await?;
+        }
+        let last_tick = self.last_tick;
+        let playtime_ms = canonical_ms(last_tick)?;
+        let total_seconds = playtime_ms / 1_000;
+        self.source()?
+            .prepare_save_metadata(
+                slot,
+                format!(
+                    "T+{:02}:{:02}:{:02}",
+                    total_seconds / 3_600,
+                    (total_seconds / 60) % 60,
+                    total_seconds % 60
+                ),
+                playtime_ms,
+            )
+            .map_err(|error| ProductHostError::Input(error.to_string()))?;
         let plan = self
             .source()?
             .prepare_save_transaction_with_product_media_snapshot(
@@ -440,6 +598,34 @@ impl NativeVnHeadlessSession {
             .execute_save_transaction(plan)
             .await
             .map_err(|error| ProductHostError::Input(error.to_string()))
+    }
+
+    async fn capture_gameplay_surface(&mut self) -> Result<(), ProductHostError> {
+        let batch = self
+            .source()?
+            .prepare_surface_capture()
+            .map_err(|error| ProductHostError::Output(error.to_string()))?;
+        let results = self
+            .executor
+            .execute_batch(batch)
+            .await
+            .map_err(|error| ProductHostError::Output(error.to_string()))?;
+        let (width, height, rgba8) = match results.as_slice() {
+            [PlayerHostCommandResult::Captured {
+                width,
+                height,
+                rgba8,
+                ..
+            }] => (*width, *height, rgba8.clone()),
+            _ => {
+                return Err(ProductHostError::Output(
+                    "captured gameplay surface result is invalid".into(),
+                ));
+            }
+        };
+        self.source()?
+            .cache_gameplay_surface(width, height, rgba8)
+            .map_err(|error| ProductHostError::Output(error.to_string()))
     }
 
     async fn load(&mut self, slot: &str) -> Result<(), ProductHostError> {
@@ -486,13 +672,15 @@ impl NativeVnHeadlessSession {
     }
 
     fn refresh_observations(&mut self) -> Result<(), ProductHostError> {
-        let evidence = self
-            .source
-            .as_ref()
-            .and_then(NativeVnHostCommandSource::last_step_evidence)
-            .ok_or_else(|| {
-                ProductHostError::Output("runtime step has no observation evidence".into())
-            })?;
+        let source = self.source.as_ref().ok_or_else(|| {
+            ProductHostError::Output("runtime source is unavailable for observation".into())
+        })?;
+        let evidence = source.last_step_evidence().ok_or_else(|| {
+            ProductHostError::Output("runtime step has no observation evidence".into())
+        })?;
+        let product = source
+            .product_observation_evidence()
+            .map_err(|error| binding("product.observe", error))?;
         self.observations = vec![
             Observation {
                 key: "runtime.state_hash".into(),
@@ -507,8 +695,25 @@ impl NativeVnHeadlessSession {
                 value_hash: evidence.runtime_presentation_hash.clone(),
             },
             hashed_observation("vn.current_state", &evidence.current_state_id)?,
+            hashed_observation("vn.pending_wait_command", &evidence.pending_wait_command_id)?,
+            hashed_observation("vn.pending_wait_await_id", &evidence.pending_wait_await_id)?,
             hashed_observation("vn.pending_choices", &evidence.pending_choice_ids)?,
             hashed_observation("vn.terminal_routes", &evidence.terminal_route_ids)?,
+            hashed_observation("vn.ui_profile", &product.ui_profile)?,
+            hashed_observation("vn.locale", &product.locale)?,
+            hashed_observation("vn.system_page", &product.active_system_page)?,
+            hashed_observation("vn.focused_semantic_id", &product.focused_semantic_id)?,
+            hashed_observation("vn.auto_enabled", &product.auto_enabled)?,
+            hashed_observation("vn.skip_mode", &product.skip_mode)?,
+            hashed_observation("vn.reading_mode", &product.reading_mode)?,
+            hashed_observation("vn.audio_enabled", &product.audio_enabled)?,
+            hashed_observation("vn.skip_allowed", &product.skip_allowed)?,
+            hashed_observation("vn.system_config", &product.system_config)?,
+            hashed_observation("vn.backlog_count", &product.backlog_count)?,
+            hashed_observation(
+                "vn.occupied_save_slot_count",
+                &product.occupied_save_slot_count,
+            )?,
             hashed_observation("media.active_video", &self.media.has_active_video())?,
             hashed_observation("media.active_voice", &self.media.has_active_voice())?,
         ];

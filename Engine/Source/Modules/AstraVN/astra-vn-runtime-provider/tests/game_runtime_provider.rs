@@ -4,8 +4,9 @@ use astra_plugin_abi::{
     GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID,
 };
 use astra_vn_runtime_provider::{
-    compile_astra_project, AstraSource, NativeVnRuntimeProvider, PresentationCommand,
-    TimelineCommand, VnRunConfig, VnTimelineTask,
+    compile_astra_project, AstraSource, NativeVnRuntimeProvider, PresentationCommand, StageCommand,
+    SystemPageKind, TimelineCommand, VnAudioCommand, VnAudioControlAction, VnPlayerCommand,
+    VnRunConfig, VnTimelineTask,
 };
 
 const STORY: &str = r#"
@@ -35,6 +36,215 @@ fn native_vn_provider_descriptor_declares_game_runtime_slot_contract() {
     assert!(descriptor
         .release_checks
         .contains(&"runtime_provider.native_vn".to_string()));
+}
+
+#[astra_headless_test::test]
+fn native_vn_provider_routes_v2_system_switch_and_hidden_reading_without_losing_awaits() {
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "system-v2.astra",
+            r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    text key:line.one #@id line.one
+    text key:line.two #@id line.two
+
+story system #@id story.system
+state save #@id state.system.save
+  scene save #@id scene.system.save
+    system_page kind:save #@id page.save
+state load #@id state.system.load
+  scene load #@id scene.system.load
+    system_page kind:load #@id page.load
+"#,
+        )],
+        Default::default(),
+    )
+    .unwrap();
+    let mut provider = NativeVnRuntimeProvider::default();
+    let open = provider
+        .open_compiled_story(
+            compiled,
+            VnRunConfig::classic("ja"),
+            RuntimeOpenRequest {
+                target_id: "system-v2".into(),
+                profile: "classic".into(),
+                locale: "ja".into(),
+                seed: 3,
+                package_hash: "sha256:fixture".into(),
+                sections: vec![],
+            },
+        )
+        .unwrap();
+    let step = |provider: &mut NativeVnRuntimeProvider,
+                fixed_step: u64,
+                command: Option<VnPlayerCommand>| {
+        provider
+            .step(RuntimeStepInput {
+                session_id: open.session_id.clone(),
+                fixed_step,
+                delta_ns: 16_666_667,
+                session_seed: 3,
+                mode: RuntimeStepMode::Live,
+                action: if command.is_some() {
+                    "command".into()
+                } else {
+                    "launch_default".into()
+                },
+                payload: command
+                    .map(|command| serde_json::to_value(command).unwrap())
+                    .unwrap_or_else(|| serde_json::json!({})),
+            })
+            .unwrap();
+    };
+
+    step(&mut provider, 1, None);
+    step(
+        &mut provider,
+        2,
+        Some(VnPlayerCommand::OpenSystem {
+            page: SystemPageKind::Save,
+        }),
+    );
+    step(
+        &mut provider,
+        3,
+        Some(VnPlayerCommand::SwitchSystemPage {
+            page: SystemPageKind::Load,
+        }),
+    );
+    assert_eq!(
+        provider
+            .runtime_snapshot(&open.session_id)
+            .unwrap()
+            .awaits
+            .pending()
+            .len(),
+        2
+    );
+    step(&mut provider, 4, Some(VnPlayerCommand::ReturnSystem));
+    assert_eq!(
+        provider
+            .runtime_snapshot(&open.session_id)
+            .unwrap()
+            .awaits
+            .pending()
+            .len(),
+        1
+    );
+    step(
+        &mut provider,
+        5,
+        Some(VnPlayerCommand::SetReadingMode {
+            mode: astra_vn_runtime_provider::ReadingMode::Hidden,
+        }),
+    );
+    let hidden_wait = provider
+        .state(&open.session_id)
+        .unwrap()
+        .pending_wait
+        .clone();
+    step(&mut provider, 6, Some(VnPlayerCommand::Advance));
+    assert_eq!(
+        provider.state(&open.session_id).unwrap().pending_wait,
+        hidden_wait
+    );
+    assert_eq!(
+        provider
+            .runtime_snapshot(&open.session_id)
+            .unwrap()
+            .awaits
+            .pending()
+            .len(),
+        1
+    );
+    step(&mut provider, 7, Some(VnPlayerCommand::Advance));
+    assert_eq!(
+        provider
+            .state(&open.session_id)
+            .unwrap()
+            .pending_wait
+            .as_ref()
+            .map(|wait| wait.command_id.as_str()),
+        Some("line.two")
+    );
+}
+
+#[astra_headless_test::test]
+fn native_vn_provider_preserves_audio_and_stage_control_order() {
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "audio-order.astra",
+            r#"
+story main #@id story.main
+state start #@id state.start
+  scene start #@id scene.start
+    bgm id:bgm.main asset:asset:/bgm/main loop:true fade:500 #@id bgm.start
+    audio action:fade_stop target:bgm.main duration:1000 fence:bgm.main.end #@id bgm.stop
+    wait fence:bgm.main.end #@id wait.bgm
+"#,
+        )],
+        Default::default(),
+    )
+    .unwrap();
+    let mut provider = NativeVnRuntimeProvider::default();
+    let open = provider
+        .open_compiled_story(
+            compiled,
+            VnRunConfig::classic("ja"),
+            RuntimeOpenRequest {
+                target_id: "audio-order".into(),
+                profile: "classic".into(),
+                locale: "ja".into(),
+                seed: 1,
+                package_hash: "sha256:fixture".into(),
+                sections: vec![],
+            },
+        )
+        .unwrap();
+
+    let output = provider
+        .step(RuntimeStepInput {
+            session_id: open.session_id,
+            fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed: 1,
+            mode: RuntimeStepMode::Live,
+            action: "launch_default".into(),
+            payload: serde_json::json!({}),
+        })
+        .unwrap();
+    let audio_index = output
+        .outputs
+        .iter()
+        .position(|envelope| {
+            matches!(
+                envelope.decode_postcard::<VnAudioCommand>(
+                    RuntimeOutputDomain::Audio,
+                    "astra.vn.audio_command.v2",
+                    SchemaVersion::new(2, 0, 0),
+                ),
+                Ok(command) if command.command_id == "bgm.main"
+            )
+        })
+        .unwrap();
+    let stop_index = output
+        .outputs
+        .iter()
+        .position(|envelope| {
+            matches!(
+                envelope.decode_postcard::<PresentationCommand>(
+                    RuntimeOutputDomain::Presentation,
+                    "astra.vn.presentation_command.v2",
+                    SchemaVersion::new(2, 0, 0),
+                ),
+                Ok(PresentationCommand::Stage(StageCommand::AudioControl(control)))
+                    if matches!(control.action, VnAudioControlAction::FadeStop { .. })
+            )
+        })
+        .unwrap();
+    assert!(audio_index < stop_index);
 }
 
 #[astra_headless_test::test]
@@ -88,6 +298,11 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
         })
         .unwrap();
     assert_eq!(first.status, "blocked");
+    assert!(first.outputs.iter().any(|value| {
+        value.domain == RuntimeOutputDomain::Trace
+            && value.schema == "astra.vn.runtime_state.v2"
+            && value.version == SchemaVersion::new(2, 0, 0)
+    }));
     assert!(first.outputs.iter().any(|value| {
         matches!(
             value.decode_postcard::<PresentationCommand>(

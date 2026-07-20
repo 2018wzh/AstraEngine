@@ -152,6 +152,83 @@ fn provider() -> CosmicTextLayoutProvider {
     .unwrap()
 }
 
+#[astra_headless_test::test]
+fn overlapping_cjk_fallback_honors_the_explicit_family_order() {
+    let jp_bytes =
+        include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf")
+            .to_vec();
+    let jp = PackagedFont {
+        asset_id: "asset:/font/fallback/noto-sans-jp".into(),
+        family: "Noto Sans JP".into(),
+        face_index: 0,
+        hash: Hash256::from_sha256(&jp_bytes),
+        license_id: "OFL-1.1".into(),
+        subset: None,
+        coverage: vec![
+            UnicodeRange {
+                start: 32,
+                end: 126,
+            },
+            UnicodeRange {
+                start: 0x3000,
+                end: 0x9fff,
+            },
+        ],
+        targets: vec!["windows".into()],
+        profiles: vec!["classic".into()],
+        bytes: jp_bytes,
+    };
+    let sc = fixture_font(
+        "asset:/font/fallback/noto-sans-sc",
+        "Noto Sans SC",
+        "NotoSansSC-Variable.ttf",
+        vec![
+            UnicodeRange {
+                start: 32,
+                end: 126,
+            },
+            UnicodeRange {
+                start: 0x3000,
+                end: 0x9fff,
+            },
+        ],
+    );
+    let provider = CosmicTextLayoutProvider::new(
+        FontBindingContext {
+            target: "windows".into(),
+            profile: "classic".into(),
+            default_locale: "ja".into(),
+        },
+        vec![jp, sc],
+        TextLayoutConfig::production_defaults(),
+    )
+    .unwrap();
+    let sample = "CONFIG SAVE LOAD EXIT　設定文字を隠す通常早送り音声ありなし";
+    for character in sample.chars() {
+        let mut request = request(&character.to_string());
+        request.runs[0].language = "ja".into();
+        request.runs[0].script = Some("Jpan".into());
+        request.font_families = vec!["Noto Sans JP".into(), "Noto Sans SC".into()];
+        provider.layout(&request).unwrap_or_else(|error| {
+            panic!(
+                "CJK fallback failed for U+{:04X}: {error}",
+                character as u32
+            )
+        });
+    }
+    let mut sample_request = request(sample);
+    sample_request.runs[0].language = "ja".into();
+    sample_request.runs[0].script = Some("Jpan".into());
+    sample_request.font_families = vec!["Noto Sans JP".into(), "Noto Sans SC".into()];
+    provider.layout(&sample_request).unwrap();
+
+    let mut short_request = request("設定");
+    short_request.runs[0].language = "ja".into();
+    short_request.runs[0].script = Some("Jpan".into());
+    short_request.font_families = vec!["Noto Sans JP".into(), "Noto Sans SC".into()];
+    provider.layout(&short_request).unwrap();
+}
+
 fn request(text: &str) -> TextLayoutRequest {
     TextLayoutRequest {
         key: "line.production".into(),

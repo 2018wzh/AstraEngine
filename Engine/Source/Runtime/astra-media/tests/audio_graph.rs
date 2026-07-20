@@ -79,6 +79,9 @@ fn audio_graph_rejects_invalid_and_conflicting_commands_without_partial_state() 
     assert!(graph
         .apply(AudioCommand::fade_bus("fade.2", "voice", 1.0, 100))
         .is_err());
+    assert!(graph
+        .apply(AudioCommand::set_bus_gain("voice", 1.0))
+        .is_err());
     assert_eq!(graph.deterministic_hash().unwrap(), before_conflict);
     assert!(graph.tick(0).is_err());
     assert_eq!(graph.deterministic_hash().unwrap(), before_conflict);

@@ -12,7 +12,9 @@ use astra_plugin_abi::{
     ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
     PROVIDER_POLICY_SCHEMA,
 };
-use astra_ui_core::{UiButtonState, UiInputEventKind, UiInsets, UiViewport, ValidateUi};
+use astra_ui_core::{
+    UiButtonState, UiInputEventKind, UiInsets, UiPointerButton, UiViewport, ValidateUi,
+};
 use astra_vn_core::{compile_astra_project, AstraSource, CompileAstraProjectOptions, VnRunConfig};
 use astra_vn_package::{package_sections_for_project, PLAYER_LOCALE_CONFIG_SCHEMA};
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
@@ -26,15 +28,19 @@ state start #@id state.start
 "#;
 
 const TEST_UI: &str = r#"
-ui_bind surface:message view:ui.test.message controller:test.message policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.message
-ui_bind surface:choice view:ui.test.choice controller:test.choice policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.choice
-ui_bind system_page:save view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.save
-ui_bind system_page:load view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.load
-ui_bind system_page:config view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.config
-ui_view ui.test.message model:astra.vn.ui_model.message.v1 theme:astra.vn.theme.classic #@id ui.test.message
+ui_policy profile:classic save_slots:"slot.01" quick_slot:"" allowed_pages:"quick_panel,save,load,config" reading_modes:"manual" audio_toggle:false save_completion:stay custom_actions:"" #@id ui.policy.test.classic
+ui_bind profile:classic surface:message view:ui.test.message controller:test.message policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.message
+ui_bind profile:classic surface:choice view:ui.test.choice controller:test.choice policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.choice
+ui_bind profile:classic system_page:quick_panel view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.quick_panel
+ui_bind profile:classic system_page:save view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.save
+ui_bind profile:classic system_page:load view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.load
+ui_bind profile:classic system_page:config view:ui.test.system controller:test.system policy:astra.policy.standard theme:astra.vn.theme.classic #@id bind.config
+ui_view ui.test.message model:astra.vn.ui_model.message.v2 theme:astra.vn.theme.classic #@id ui.test.message
   screen id:root
     panel id:advance fill:true
       on activate -> vn.advance
+    button id:exit min_width:48 min_height:48
+      on activate -> vn.request_exit
     text id:body value:$model.text_key
 ui_view ui.test.choice model:astra.vn.ui_model.choice.v1 theme:astra.vn.theme.classic #@id ui.test.choice
   screen id:root
@@ -78,6 +84,286 @@ fn advance(source: &mut NativeVnHostCommandSource) -> astra_player_core::PlayerH
             modifiers: 0,
         })
         .unwrap()
+}
+
+fn prepare_test_save_metadata(source: &mut NativeVnHostCommandSource, slot: &str) {
+    source
+        .cache_gameplay_surface(320, 180, vec![0x40; 320 * 180 * 4])
+        .expect("cache gameplay surface");
+    source
+        .prepare_save_metadata(slot, "2000-01-01T00:00:00Z".into(), 3_723_000)
+        .expect("prepare save metadata");
+}
+
+#[astra_headless_test::test]
+fn typed_ui_exit_request_stays_host_owned_and_observable() {
+    let mut source = source_for(STORY);
+    source.launch().expect("launch");
+    assert!(!source.exit_requested());
+
+    source
+        .dispatch_ui_event(UiInputEventKind::AccessibilityAction {
+            semantic_id: "root/exit".into(),
+            action: "activate".into(),
+            value: None,
+        })
+        .expect("typed exit request");
+
+    assert!(source.exit_requested());
+    assert_eq!(
+        source.pending_wait().expect("dialogue wait").command_id,
+        "line.one"
+    );
+}
+
+#[astra_headless_test::test]
+fn secondary_pointer_opens_system_ui_without_advancing_dialogue() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    text key:line.one speaker:hero #@id line.one
+
+story system #@id story.system
+state popup #@id state.system.popup
+  scene popup #@id scene.system.popup
+    system_page kind:quick_panel #@id page.popup
+"#;
+    let mut source = source_for(story);
+    source.launch().expect("launch");
+    let wait_before = source
+        .pending_wait()
+        .expect("dialogue wait")
+        .command_id
+        .clone();
+
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerButton {
+            button: UiPointerButton::Secondary,
+            state: UiButtonState::Pressed,
+            position: astra_ui_core::UiPoint { x: 12.0, y: 12.0 },
+        })
+        .expect("secondary pointer dispatch");
+
+    assert_eq!(
+        source.pending_wait().expect("system page wait").command_id,
+        "page.popup"
+    );
+    assert_ne!(source.pending_wait().unwrap().command_id, wait_before);
+    assert!(source
+        .ui_semantics()
+        .expect("system semantics")
+        .nodes
+        .iter()
+        .any(|node| node.id == "root/back"));
+
+    source
+        .dispatch_ui_event(UiInputEventKind::Keyboard {
+            logical_key: "Escape".to_string(),
+            physical_key: "Escape".to_string(),
+            state: UiButtonState::Pressed,
+            repeat: false,
+            modifiers: 0,
+        })
+        .expect("Escape returns from system UI");
+    assert_eq!(
+        source
+            .pending_wait()
+            .expect("restored dialogue wait")
+            .command_id,
+        wait_before
+    );
+
+    source.release_resources().expect("release");
+    source.shutdown().expect("shutdown");
+}
+
+#[astra_headless_test::test]
+fn secondary_pointer_round_trips_the_same_choice_occurrence() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    choice key:line.one #@id choice.prompt
+      option key:line.one target:first #@id option.first
+      option key:line.one target:second #@id option.second
+
+state first #@id state.first
+  scene first #@id scene.first
+    input_wait #@id wait.first
+
+state second #@id state.second
+  scene second #@id scene.second
+    input_wait #@id wait.second
+
+story system #@id story.system
+state popup #@id state.system.popup
+  scene popup #@id scene.system.popup
+    system_page kind:quick_panel #@id page.popup
+"#;
+    let mut source = source_for(story);
+    source.launch().expect("launch");
+    let choice_wait = source.pending_wait().expect("choice wait").clone();
+    let choice = source
+        .last_step_evidence()
+        .expect("choice evidence")
+        .pending_choice_ids
+        .clone();
+
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerButton {
+            button: UiPointerButton::Secondary,
+            state: UiButtonState::Pressed,
+            position: astra_ui_core::UiPoint { x: 12.0, y: 12.0 },
+        })
+        .expect("secondary pointer dispatch");
+    assert_eq!(
+        source.pending_wait().expect("system page wait").command_id,
+        "page.popup"
+    );
+
+    source
+        .dispatch_ui_event(UiInputEventKind::Keyboard {
+            logical_key: "Escape".to_string(),
+            physical_key: "Escape".to_string(),
+            state: UiButtonState::Pressed,
+            repeat: false,
+            modifiers: 0,
+        })
+        .expect("Escape returns from system UI");
+    assert_eq!(source.pending_wait(), Some(&choice_wait));
+    assert_eq!(
+        source
+            .last_step_evidence()
+            .expect("restored choice evidence")
+            .pending_choice_ids,
+        choice
+    );
+}
+
+#[astra_headless_test::test]
+fn product_observation_reports_system_ui_without_exposing_content() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    text key:line.one speaker:hero #@id line.one
+
+story system #@id story.system
+state popup #@id state.system.popup
+  scene popup #@id scene.system.popup
+    system_page kind:quick_panel #@id page.popup
+"#;
+    let mut source = source_for(story);
+    source.launch().expect("launch");
+
+    let initial = source
+        .product_observation_evidence()
+        .expect("initial product observation");
+    assert_eq!(initial.schema, "astra.player_vn_product_observation.v2");
+    assert_eq!(initial.ui_profile, "classic");
+    assert_eq!(initial.locale, "en");
+    assert_eq!(initial.active_system_page, None);
+    assert_eq!(initial.focused_semantic_id.as_deref(), Some("root/advance"));
+    assert!(initial.skip_allowed);
+    assert_eq!(initial.backlog_count, 1);
+    assert_eq!(initial.occupied_save_slot_count, 0);
+
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerButton {
+            button: UiPointerButton::Secondary,
+            state: UiButtonState::Pressed,
+            position: astra_ui_core::UiPoint { x: 12.0, y: 12.0 },
+        })
+        .expect("secondary pointer dispatch");
+    let system = source
+        .product_observation_evidence()
+        .expect("system product observation");
+    assert_eq!(
+        system.active_system_page,
+        Some(astra_vn_core::SystemPageKind::QuickPanel)
+    );
+    assert_eq!(system.focused_semantic_id.as_deref(), Some("root/back"));
+    assert_eq!(system.backlog_count, 1);
+
+    source.release_resources().expect("release");
+    source.shutdown().expect("shutdown");
+}
+
+#[astra_headless_test::test]
+fn secondary_pointer_opens_system_ui_while_story_wait_has_no_ui_surface() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    wait fence:opening.audio.end #@id wait.opening.audio
+    text key:line.one speaker:hero #@id line.one
+
+story system #@id story.system
+state popup #@id state.system.popup
+  scene popup #@id scene.system.popup
+    system_page kind:quick_panel #@id page.popup
+"#;
+    let mut source = source_for(story);
+    source.launch().expect("launch");
+    assert_eq!(
+        source.pending_wait().expect("opening wait").command_id,
+        "wait.opening.audio"
+    );
+
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerButton {
+            button: UiPointerButton::Secondary,
+            state: UiButtonState::Pressed,
+            position: astra_ui_core::UiPoint { x: 12.0, y: 12.0 },
+        })
+        .expect("secondary pointer dispatch");
+
+    assert_eq!(
+        source.pending_wait().expect("system page wait").command_id,
+        "page.popup"
+    );
+    source.release_resources().expect("release");
+    source.shutdown().expect("shutdown");
+}
+
+#[astra_headless_test::test]
+fn primary_pointer_advances_input_wait_without_fabricating_message_ui() {
+    let story = r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    input_wait #@id wait.input
+    text key:line.one speaker:hero #@id line.one
+"#;
+    let mut source = source_for(story);
+    source.launch().expect("launch");
+    assert_eq!(
+        source.pending_wait().expect("input wait").command_id,
+        "wait.input"
+    );
+    assert!(source.ui_semantics().is_none());
+
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerButton {
+            button: UiPointerButton::Primary,
+            state: UiButtonState::Pressed,
+            position: astra_ui_core::UiPoint { x: 12.0, y: 12.0 },
+        })
+        .expect("primary pointer dispatch");
+
+    assert_eq!(
+        source.pending_wait().expect("dialogue wait").command_id,
+        "line.one"
+    );
+    assert!(source
+        .ui_semantics()
+        .expect("message semantics")
+        .nodes
+        .iter()
+        .any(|node| node.id == "root/advance"));
+    source.release_resources().expect("release");
+    source.shutdown().expect("shutdown");
 }
 
 fn product_package_with_request(
@@ -147,7 +433,10 @@ fn product_package_with_request(
                 "line.one":"First production line.",
                 "line.two":"Second production line.",
                 "line.after":"Line after wait.",
-                "speaker.hero":"Hero"
+                "speaker.hero":"Hero",
+                "system.back":"Back",
+                "system.save":"Save",
+                "system.quick_panel":"Quick Panel"
             }
         }"#
         .to_vec(),
@@ -268,7 +557,7 @@ fn test_controller_options(mut options: CompileAstraProjectOptions) -> CompileAs
 fn test_controller_source() -> String {
     r#"
 local controllers = {
-  { "test.message", "ui.test.message", "astra.vn.ui_model.message.v1" },
+  { "test.message", "ui.test.message", "astra.vn.ui_model.message.v2" },
   { "test.choice", "ui.test.choice", "astra.vn.ui_model.choice.v1" },
   { "test.system", "ui.test.system", "astra.vn.ui_model.system.v1" },
 }
@@ -552,6 +841,46 @@ state start #@id state.start
 }
 
 #[astra_headless_test::test]
+fn packaged_native_vn_preload_does_not_create_an_unbounded_gpu_residency_lease() {
+    let bytes = product_package_for(
+        r#"
+story main #@id story.main
+state start #@id state.start
+  scene room #@id scene.room
+    preload asset:asset:/background/apartment-night #@id preload.background
+    text key:line.one speaker:hero #@id line.one
+"#,
+    );
+    let package = PackageReader::open(&bytes).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        640,
+        360,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+
+    let frame = source.launch().unwrap();
+    assert!(!scene_commands(&frame).iter().any(|command| {
+        matches!(
+            command,
+            SceneCommand::UploadTexture { resource_id, .. }
+                if resource_id == "asset:/background/apartment-night"
+        )
+    }));
+    let shutdown = source.release_resources().unwrap();
+    assert!(!scene_commands(&shutdown).iter().any(|command| {
+        matches!(
+            command,
+            SceneCommand::ReleaseResource { resource_id }
+                if resource_id == "asset:/background/apartment-night"
+        )
+    }));
+    source.shutdown().unwrap();
+}
+
+#[astra_headless_test::test]
 fn package_open_blocks_undeclared_localization() {
     let bytes = product_package();
     let package = PackageReader::open(&bytes).unwrap();
@@ -722,13 +1051,24 @@ fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
     source.launch().unwrap();
     let evidence = source.last_step_evidence().expect("launch evidence");
 
-    assert_eq!(evidence.schema, "astra.player_vn_step_evidence.v1");
+    assert_eq!(evidence.schema, "astra.player_vn_step_evidence.v2");
     assert_eq!(evidence.fixed_step, 1);
     assert!(evidence.coverage_reached.contains("state.start"));
     assert!(evidence.runtime_state_hash.starts_with("hash128:"));
     assert!(evidence.runtime_event_hash.starts_with("hash128:"));
     assert!(evidence.runtime_presentation_hash.starts_with("hash128:"));
     assert_eq!(evidence.current_state_id.as_deref(), Some("state.start"));
+    assert_eq!(
+        evidence.pending_wait_command_id.as_deref(),
+        Some("line.one")
+    );
+    assert!(
+        evidence
+            .pending_wait_await_id
+            .as_deref()
+            .is_some_and(|await_id| astra_core::StableId::parse(await_id).is_ok()),
+        "runtime wait occurrence must expose its serialized AwaitToken identity"
+    );
 
     advance(&mut source);
     advance(&mut source);
@@ -745,7 +1085,8 @@ fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
     advance(&mut source);
-    let saved = source.save("slot.main").unwrap();
+    prepare_test_save_metadata(&mut source, "slot.01");
+    let saved = source.save("slot.01").unwrap();
 
     advance(&mut source);
     let uninterrupted = source
@@ -755,6 +1096,13 @@ fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
         .clone();
 
     source.restore(&saved).unwrap();
+    assert_eq!(
+        source
+            .product_observation_evidence()
+            .unwrap()
+            .occupied_save_slot_count,
+        1
+    );
     advance(&mut source);
     assert_eq!(
         source.last_step_evidence().unwrap().vn_state_hash_after,
@@ -766,7 +1114,8 @@ fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
 fn native_vn_source_rejects_tampered_save_before_restore() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
-    let mut saved = source.save("slot.main").unwrap();
+    prepare_test_save_metadata(&mut source, "slot.01");
+    let mut saved = source.save("slot.01").unwrap();
     let last = saved.len() - 1;
     saved[last] ^= 0x5a;
 
@@ -776,12 +1125,54 @@ fn native_vn_source_rejects_tampered_save_before_restore() {
 }
 
 #[astra_headless_test::test]
+fn native_vn_source_hydrates_validated_save_metadata_before_launch() {
+    let mut writer = source_for(STORY);
+    writer.launch().unwrap();
+    prepare_test_save_metadata(&mut writer, "slot.01");
+    let saved = writer.save("slot.01").unwrap();
+
+    let mut reopened = source_for(STORY);
+    assert!(matches!(
+        reopened.list_saves().unwrap().commands.as_slice(),
+        [PlayerHostCommand::ListSaves { .. }]
+    ));
+    reopened
+        .ingest_save_catalog_entry("slot.01", &saved)
+        .unwrap();
+    reopened.launch().unwrap();
+
+    assert_eq!(
+        reopened
+            .product_observation_evidence()
+            .unwrap()
+            .occupied_save_slot_count,
+        1
+    );
+}
+
+#[astra_headless_test::test]
+fn native_vn_source_rejects_catalog_slot_identity_mismatch() {
+    let mut writer = source_for(STORY);
+    writer.launch().unwrap();
+    prepare_test_save_metadata(&mut writer, "slot.01");
+    let saved = writer.save("slot.01").unwrap();
+
+    let mut reopened = source_for(STORY);
+    assert!(reopened
+        .ingest_save_catalog_entry("slot.02", &saved)
+        .unwrap_err()
+        .to_string()
+        .contains("ASTRA_PLAYER_SAVE_CATALOG_IDENTITY"));
+}
+
+#[astra_headless_test::test]
 fn native_vn_source_builds_atomic_platform_save_transaction() {
     let mut source = source_for(STORY);
     source.launch().unwrap();
+    prepare_test_save_metadata(&mut source, "slot.01");
 
     let plan = source
-        .prepare_save_transaction("slot.main", PlayerHostResourceId(20))
+        .prepare_save_transaction("slot.01", PlayerHostResourceId(20))
         .unwrap();
 
     assert!(matches!(

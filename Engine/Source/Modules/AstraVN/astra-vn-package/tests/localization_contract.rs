@@ -24,7 +24,7 @@ fn package(localization: Vec<u8>, config: Vec<u8>) -> Vec<u8> {
 #[astra_headless_test::test]
 fn package_locale_config_validates_every_declared_localization() {
     let bytes = package(
-        br#"{"schema":"astra.vn.localization_table.v1","locale":"en","strings":{"line.one":"Hello"}}"#.to_vec(),
+        br#"{"schema":"astra.vn.localization_table.v1","locale":"en","strings":{"choice.prompt":"","line.one":"Hello"}}"#.to_vec(),
         br#"{"schema":"astra.player_locale_config.v1","default_locale":"en","available_locales":["en"]}"#.to_vec(),
     );
     let reader = PackageReader::open(&bytes).unwrap();
@@ -36,6 +36,13 @@ fn package_locale_config_validates_every_declared_localization() {
             .resolve("line.one")
             .unwrap(),
         "Hello"
+    );
+    assert_eq!(
+        load_localization(&reader, "en", 1024)
+            .unwrap()
+            .resolve("choice.prompt")
+            .unwrap(),
+        ""
     );
 }
 

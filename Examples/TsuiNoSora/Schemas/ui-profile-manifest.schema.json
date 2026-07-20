@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.ui_profile_manifest.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "default_profile", "profiles", "excluded_systems"],
+  "properties": {
+    "schema": { "const": "tsuinosora.ui_profile_manifest.v1" },
+    "default_profile": { "const": "modern" },
+    "profiles": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "design_width", "design_height", "aspect_policy", "secondary_pointer_action", "core_state_authority"],
+        "properties": {
+          "id": { "enum": ["classic", "modern"] },
+          "design_width": { "const": 800 },
+          "design_height": { "const": 600 },
+          "aspect_policy": { "const": "strict_letterbox" },
+          "secondary_pointer_action": { "enum": ["save", "quick_panel"] },
+          "core_state_authority": { "const": "shared" }
+        }
+      }
+    },
+    "excluded_systems": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["gallery", "replay", "route_chart", "voice_replay", "remake_portraits"] }
+    }
+  }
+}

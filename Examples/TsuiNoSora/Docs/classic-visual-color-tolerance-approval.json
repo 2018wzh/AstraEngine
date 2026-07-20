@@ -1,0 +1,11 @@
+{
+  "schema": "astra.headless_tolerance_approval.v2",
+  "approval_id": "tsui.classic.capture_palette_v1",
+  "approver_kind": "human",
+  "approver_identity": "project_owner",
+  "approved_tolerance_hash": "sha256:784f36f2870cef7572a755f538375d0667e529429c3f16e291cadec437e52521",
+  "previous_config_hash": null,
+  "reason_codes": [
+    "capture_color_state_unproven"
+  ]
+}

@@ -302,3 +302,56 @@ state prologue #@id state.prologue
     .unwrap_err();
     assert_eq!(option_error.code(), "ASTRA_VN_OPTION_CONTEXT");
 }
+
+#[astra_headless_test::test]
+fn system_story_definitions_are_authoritative_over_gameplay_page_triggers() {
+    let compiled = compile_astra_project(
+        [AstraSource::story(
+            "system_authority.astra",
+            r#"
+story main #@id story.main
+state checkpoint #@id state.checkpoint
+  scene checkpoint #@id scene.checkpoint
+    system_page kind:save #@id gameplay.save
+
+story system #@id story.system
+state save #@id state.system.save
+  scene save #@id scene.system.save
+    system_page kind:save policy:astra.policy.standard #@id page.save
+"#,
+        )],
+        Default::default(),
+    )
+    .unwrap();
+
+    let entry = compiled
+        .story
+        .system_story_manifest
+        .entries
+        .get(&astra_vn_script::SystemPageKind::Save)
+        .expect("save system story entry");
+    assert_eq!(entry.story_id, "story.system");
+    assert_eq!(entry.state_id, "state.system.save");
+    assert_eq!(entry.source_id, "page.save");
+}
+
+#[astra_headless_test::test]
+fn duplicate_system_story_page_definitions_are_blocking() {
+    let error = compile_astra_project(
+        [AstraSource::story(
+            "duplicate_system_page.astra",
+            r#"
+story system #@id story.system
+state save_one #@id state.system.save_one
+  scene save_one #@id scene.system.save_one
+    system_page kind:save #@id page.save.one
+state save_two #@id state.system.save_two
+  scene save_two #@id scene.system.save_two
+    system_page kind:save #@id page.save.two
+"#,
+        )],
+        Default::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), "ASTRA_VN_SYSTEM_PAGE_DUPLICATE");
+}

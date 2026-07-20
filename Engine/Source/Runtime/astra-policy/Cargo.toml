@@ -7,10 +7,12 @@ version.workspace = true
 [features]
 default = ["luau-runtime"]
 luau-runtime = ["dep:mlua"]
+portable-luau-runtime = ["dep:luaur-rt"]
 
 [dependencies]
 astra-core = { path = "../astra-core" }
 mlua = { workspace = true, optional = true }
+luaur-rt = { workspace = true, optional = true }
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true

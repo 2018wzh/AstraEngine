@@ -5,13 +5,19 @@ use astra_core::Diagnostic;
 use crate::{
     lower::ParsedLine, AspectRatio, AudioControl, AudioCue, ExtensionCommandDescriptor,
     ExtensionFieldKind, ExtensionPresentationCommand, ExtensionValue, FixedScalar, MovieLoopMode,
-    StageBlendMode, StageClipPolicy, StageCommand, StageLayerKind, StagePlacement, StageViewport,
-    TimelineCommand, TimelineSpec, VnAudioBus, VnAudioControlAction, VnAudioSync, VnError,
-    VnMovieEndBehavior, VnTimelineJoinPolicy, VnTimelineKeyframe, VnTimelineTrack,
+    StageBlendMode, StageClipPolicy, StageCommand, StageFitMode, StageLayerKind, StagePlacement,
+    StageViewport, TimelineCommand, TimelineSpec, VnAudioBus, VnAudioControlAction, VnAudioSync,
+    VnError, VnMovieEndBehavior, VnTimelineJoinPolicy, VnTimelineKeyframe, VnTimelineTrack,
 };
 
 pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, VnError> {
     match line.keyword.as_str() {
+        "preload" => {
+            validate_attrs(line, &["asset"], &["asset"])?;
+            Ok(StageCommand::Preload {
+                asset: asset_uri(line, "asset")?,
+            })
+        }
         "stage" => {
             validate_attrs(line, &["viewport", "safe_area"], &["viewport", "safe_area"])?;
             Ok(StageCommand::Configure {
@@ -53,7 +59,9 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
         "show" => {
             validate_attrs(
                 line,
-                &["id", "asset", "pose", "layer", "at", "preset"],
+                &[
+                    "id", "asset", "pose", "layer", "at", "fit", "opacity", "preset",
+                ],
                 &["id", "asset", "layer"],
             )?;
             Ok(StageCommand::Show {
@@ -67,6 +75,14 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
                     "right" => StagePlacement::Right,
                     value => return Err(invalid_value(line, "at", value, "left,center,right")),
                 },
+                fit: match line.attr("fit").unwrap_or("contain_height") {
+                    "contain_height" => StageFitMode::ContainHeight,
+                    "native" => StageFitMode::Native,
+                    value => {
+                        return Err(invalid_value(line, "fit", value, "contain_height,native"))
+                    }
+                },
+                opacity: opacity(line, "opacity")?,
                 preset: optional_symbol(line, "preset")?,
             })
         }
@@ -76,6 +92,51 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
                 id: symbol(line, "id")?,
                 preset: optional_symbol(line, "preset")?,
                 duration_ms: optional_u32(line, "duration", 0)?,
+            })
+        }
+        "clear_layer" => {
+            validate_attrs(line, &["layer", "duration"], &["layer"])?;
+            Ok(StageCommand::ClearLayer {
+                layer: symbol(line, "layer")?,
+                duration_ms: optional_u32(line, "duration", 0)?,
+            })
+        }
+        "layer_visibility" => {
+            validate_attrs(line, &["layer", "visible"], &["layer", "visible"])?;
+            Ok(StageCommand::SetLayerVisibility {
+                layer: symbol(line, "layer")?,
+                visible: parse_bool(line, "visible", required(line, "visible")?)?,
+            })
+        }
+        "backdrop" => {
+            validate_attrs(line, &["color"], &["color"])?;
+            Ok(StageCommand::Backdrop {
+                color: parse_rgba(line, required(line, "color")?)?,
+            })
+        }
+        "shade" => {
+            validate_attrs(line, &["color", "opacity"], &["opacity"])?;
+            let color = match line.attrs.get("color") {
+                Some(value) => parse_rgba(line, value)?,
+                None => [0, 0, 0, 255],
+            };
+            if color[3] != 255 {
+                return Err(invalid_value(
+                    line,
+                    "color",
+                    line.attr("color").unwrap_or(""),
+                    "an opaque #RRGGBB or #RRGGBBAA color",
+                ));
+            }
+            Ok(StageCommand::Shade {
+                color,
+                opacity: opacity(line, "opacity")?,
+            })
+        }
+        "skip_allowed" => {
+            validate_attrs(line, &["allowed"], &["allowed"])?;
+            Ok(StageCommand::SetSkipAllowed {
+                allowed: parse_bool(line, "allowed", required(line, "allowed")?)?,
             })
         }
         "move" => {
@@ -168,16 +229,35 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
 }
 
 fn compile_audio_control(line: &ParsedLine) -> Result<StageCommand, VnError> {
-    validate_attrs(line, &["action", "target"], &["action", "target"])?;
+    validate_attrs(
+        line,
+        &["action", "target", "duration", "fence"],
+        &["action", "target"],
+    )?;
     let action = match required(line, "action")? {
         "pause" => VnAudioControlAction::Pause,
         "resume" => VnAudioControlAction::Resume,
         "stop" => VnAudioControlAction::Stop,
+        "fade_stop" => {
+            let duration_ms = optional_u32(line, "duration", 0)?;
+            if duration_ms == 0 {
+                return Err(invalid_value(
+                    line,
+                    "duration",
+                    "0",
+                    "a positive millisecond duration",
+                ));
+            }
+            VnAudioControlAction::FadeStop {
+                duration_ms,
+                fence: symbol(line, "fence")?,
+            }
+        }
         value => {
             return Err(VnError::Diagnostic(
                 Diagnostic::blocking(
                     "ASTRA_VN_AUDIO_CONTROL_ACTION",
-                    "audio control action must be pause, resume, or stop",
+                    "audio control action must be pause, resume, stop, or fade_stop",
                 )
                 .with_source(line.source_ref())
                 .with_field("action", value),
@@ -554,6 +634,19 @@ fn parse_aspect(line: &ParsedLine, value: &str) -> Result<AspectRatio, VnError> 
     Ok(AspectRatio { width, height })
 }
 
+fn parse_rgba(line: &ParsedLine, value: &str) -> Result<[u8; 4], VnError> {
+    if value.len() != 8 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(invalid_value(line, "color", value, "RRGGBBAA"));
+    }
+    let mut color = [0_u8; 4];
+    for (index, component) in color.iter_mut().enumerate() {
+        let start = index * 2;
+        *component = u8::from_str_radix(&value[start..start + 2], 16)
+            .map_err(|_| invalid_value(line, "color", value, "RRGGBBAA"))?;
+    }
+    Ok(color)
+}
+
 fn parse_layer_kind(line: &ParsedLine, value: &str) -> Result<StageLayerKind, VnError> {
     match value {
         "background" => Ok(StageLayerKind::Background),
@@ -662,6 +755,19 @@ fn optional_fixed(
     line.attr(key)
         .map(|value| parse_fixed(line, key, value))
         .unwrap_or(Ok(default))
+}
+
+fn opacity(line: &ParsedLine, key: &str) -> Result<FixedScalar, VnError> {
+    let value = optional_fixed(line, key, FixedScalar::ONE)?;
+    if !(0..=1_000_000).contains(&value.millionths) {
+        return Err(invalid_value(
+            line,
+            key,
+            line.attr(key).unwrap_or(""),
+            "0..1",
+        ));
+    }
+    Ok(value)
 }
 
 fn parse_fixed(line: &ParsedLine, key: &str, value: &str) -> Result<FixedScalar, VnError> {

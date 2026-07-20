@@ -182,6 +182,12 @@ impl AudioGraph {
             AudioCommand::SetBusGain { bus, gain } => {
                 validate_symbol(&bus, "ASTRA_AUDIO_BUS_ID")?;
                 validate_gain(gain)?;
+                if self.fades.values().any(|fade| fade.bus == bus) {
+                    return Err(audio_error(
+                        "ASTRA_AUDIO_BUS_GAIN_DURING_FADE",
+                        "an active fade must be cancelled before setting its bus gain",
+                    ));
+                }
                 if !self.buses.contains_key(&bus) && self.buses.len() == self.config.max_buses {
                     return Err(audio_error(
                         "ASTRA_AUDIO_BUS_BUDGET",

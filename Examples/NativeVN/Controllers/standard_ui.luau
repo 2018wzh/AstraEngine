@@ -1,5 +1,5 @@
 local controllers = {
-    { "message.classic", "ui.message.classic", "astra.vn.ui_model.message.v1" },
+    { "message.classic", "ui.message.classic", "astra.vn.ui_model.message.v2" },
     { "choice.classic", "ui.choice.classic", "astra.vn.ui_model.choice.v1" },
     { "system.standard", "ui.system.title", "astra.vn.ui_model.title.v1" },
     { "system.save", "ui.system.save", "astra.vn.ui_model.save.v1" },
@@ -11,7 +11,7 @@ local controllers = {
     { "system.voice", "ui.system.voice_replay", "astra.vn.ui_model.voice_replay.v1" },
     { "system.route", "ui.system.route_chart", "astra.vn.ui_model.route_chart.v1" },
     { "system.localization", "ui.system.localization", "astra.vn.ui_model.localization_preview.v1" },
-    { "message.modern", "ui.message.modern", "astra.vn.ui_model.message.v1" },
+    { "message.modern", "ui.message.modern", "astra.vn.ui_model.message.v2" },
     { "choice.modern", "ui.choice.modern", "astra.vn.ui_model.choice.v1" },
     { "system.modern", "ui.system.title", "astra.vn.ui_model.title.v1" },
     { "system.save.modern", "ui.system.save", "astra.vn.ui_model.save.v1" },

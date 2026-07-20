@@ -217,7 +217,11 @@ impl NativeVnRuntimeProvider {
                     "astra.vn.runtime_step_trace.v1",
                     1,
                 ),
-                output_schema(RuntimeOutputDomain::Trace, "astra.vn.runtime_state.v1", 1),
+                output_schema(
+                    RuntimeOutputDomain::Trace,
+                    VN_RUNTIME_STATE_SCHEMA,
+                    VN_RUNTIME_STATE_SCHEMA_MAJOR,
+                ),
                 output_schema(
                     RuntimeOutputDomain::DirtySaveSection,
                     "astra.runtime.dirty_save_section.v1",
@@ -306,7 +310,7 @@ impl NativeVnRuntimeProvider {
         .map_err(|err| CoreVnError::message(err.to_string()))?;
         let owner = world.create_actor("astra.vn.runtime", vec!["gameplay_runtime".to_string()]);
         let vn_component = world
-            .attach_component(owner, "astra.vn.runtime_state.v1", initial_runtime.state())
+            .attach_component(owner, VN_RUNTIME_STATE_SCHEMA, initial_runtime.state())
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         world
             .attach_component(owner, "astra.vn.policy_state.v1", &VnPolicyState::default())
@@ -422,7 +426,12 @@ impl NativeVnRuntimeProvider {
             .read_component::<VnRuntimeState>(session.vn_component)
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         let mut ingress = Vec::new();
-        if command_resolves_wait(&command, state.pending_wait.as_ref().map(|wait| wait.kind)) {
+        if command_resolves_wait(
+            &command,
+            state.pending_wait.as_ref().map(|wait| wait.kind),
+            state.system.reading_mode,
+            &session.compiled,
+        ) {
             let await_id = state
                 .pending_wait
                 .as_ref()
@@ -496,32 +505,45 @@ impl NativeVnRuntimeProvider {
             .world
             .read_component::<VnRuntimeState>(session.vn_component)
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let presentation = output
-            .presentation
-            .iter()
-            .map(|command| {
+        // Audio cues are also typed presentation commands. Preserve their position
+        // relative to stage audio controls instead of grouping output by domain:
+        // a BGM start followed by fade-stop must never be observed in reverse.
+        let mut media = Vec::with_capacity(output.presentation.len() + output.audio.len());
+        let mut audio = output.audio.iter();
+        for command in &output.presentation {
+            media.push(
                 RuntimeOutputEnvelope::postcard(
                     RuntimeOutputDomain::Presentation,
                     "astra.vn.presentation_command.v2",
                     SchemaVersion::new(2, 0, 0),
                     command,
                 )
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let audio = output
-            .audio
-            .iter()
-            .map(|command| {
-                RuntimeOutputEnvelope::postcard(
-                    RuntimeOutputDomain::Audio,
-                    "astra.vn.audio_command.v2",
-                    SchemaVersion::new(2, 0, 0),
-                    command,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
+                .map_err(|err| CoreVnError::message(err.to_string()))?,
+            );
+            if matches!(command, PresentationCommand::Stage(StageCommand::Audio(_))) {
+                let audio_command = audio.next().ok_or_else(|| {
+                    CoreVnError::diagnostic(
+                        "ASTRA_NATIVE_VN_AUDIO_ORDER_MISSING",
+                        "typed audio presentation has no matching audio output",
+                    )
+                })?;
+                media.push(
+                    RuntimeOutputEnvelope::postcard(
+                        RuntimeOutputDomain::Audio,
+                        "astra.vn.audio_command.v2",
+                        SchemaVersion::new(2, 0, 0),
+                        audio_command,
+                    )
+                    .map_err(|err| CoreVnError::message(err.to_string()))?,
+                );
+            }
+        }
+        if audio.next().is_some() {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_AUDIO_ORDER_EXTRA",
+                "audio output has no matching typed presentation command",
+            ));
+        }
         let awaits = output
             .awaits
             .iter()
@@ -573,8 +595,8 @@ impl NativeVnRuntimeProvider {
             .map_err(|err| CoreVnError::message(err.to_string()))?,
             RuntimeOutputEnvelope::postcard(
                 RuntimeOutputDomain::Trace,
-                "astra.vn.runtime_state.v1",
-                SchemaVersion::new(1, 0, 0),
+                VN_RUNTIME_STATE_SCHEMA,
+                SchemaVersion::new(VN_RUNTIME_STATE_SCHEMA_MAJOR, 0, 0),
                 &current_state,
             )
             .map_err(|err| CoreVnError::message(err.to_string()))?,
@@ -599,15 +621,14 @@ impl NativeVnRuntimeProvider {
         .map_err(|err| CoreVnError::message(err.to_string()))?];
         Ok(RuntimeStepOutput {
             session_id,
-            status: if presentation.is_empty() {
+            status: if output.presentation.is_empty() {
                 "idle".to_string()
             } else {
                 "blocked".to_string()
             },
             outputs: effects
                 .into_iter()
-                .chain(presentation)
-                .chain(audio)
+                .chain(media)
                 .chain(timeline)
                 .chain(awaits)
                 .chain(observations)
@@ -922,14 +943,21 @@ impl RuntimeAction for VnStepAction {
                 .map_err(|err| RuntimeError::message(err.to_string()))?;
         if state.pending_wait != previous_wait {
             if let Some(wait) = state.pending_wait.as_mut() {
-                let token = ctx.create_await(astra_runtime::AwaitKind::Custom(format!(
-                    "vn.{:?}",
-                    wait.kind
-                )));
-                wait.await_id = Some(token.token_id.0.to_string());
                 output.wait = Some(wait.clone());
-                output.awaits.push(token.token_id.0.to_string());
-                ctx.push_await(token)?;
+                let has_runtime_await_id = wait
+                    .await_id
+                    .as_deref()
+                    .is_some_and(|await_id| astra_core::StableId::parse(await_id).is_ok());
+                if !has_runtime_await_id {
+                    let token = ctx.create_await(astra_runtime::AwaitKind::Custom(format!(
+                        "vn.{:?}",
+                        wait.kind
+                    )));
+                    wait.await_id = Some(token.token_id.0.to_string());
+                    output.wait = Some(wait.clone());
+                    output.awaits.push(token.token_id.0.to_string());
+                    ctx.push_await(token)?;
+                }
             }
         }
         ctx.replace_component(self.component, &state)?;
@@ -1102,10 +1130,14 @@ fn vn_event_kind(command: &CoreVnPlayerCommand) -> &'static str {
         CoreVnPlayerCommand::Advance => "player.advance",
         CoreVnPlayerCommand::Choose { .. } => "choice.selected",
         CoreVnPlayerCommand::OpenSystem { .. } => "system.open",
+        CoreVnPlayerCommand::SwitchSystemPage { .. } => "system.switch",
         CoreVnPlayerCommand::ReturnSystem => "system.return",
         CoreVnPlayerCommand::ReplayVoice { .. } => "voice.replay",
         CoreVnPlayerCommand::SetAuto { .. } => "system.auto",
         CoreVnPlayerCommand::SetSkip { .. } => "system.skip",
+        CoreVnPlayerCommand::SetReadingMode { .. } => "system.reading_mode",
+        CoreVnPlayerCommand::SetAudioEnabled { .. } => "system.audio_enabled",
+        CoreVnPlayerCommand::InvokeSystemAction { .. } => "system.action",
         CoreVnPlayerCommand::SetConfig { .. } => "system.config",
         CoreVnPlayerCommand::StartReplay { .. } => "system.replay.start",
         CoreVnPlayerCommand::PreviewGallery { .. } => "system.gallery.preview",
@@ -1117,16 +1149,20 @@ fn vn_event_kind(command: &CoreVnPlayerCommand) -> &'static str {
     }
 }
 
-fn vn_runtime_event_kinds() -> [&'static str; 16] {
+fn vn_runtime_event_kinds() -> [&'static str; 20] {
     [
         "vn.launch",
         "player.advance",
         "choice.selected",
         "system.open",
+        "system.switch",
         "system.return",
         "voice.replay",
         "system.auto",
         "system.skip",
+        "system.reading_mode",
+        "system.audio_enabled",
+        "system.action",
         "system.config",
         "system.replay.start",
         "system.gallery.preview",
@@ -1138,14 +1174,33 @@ fn vn_runtime_event_kinds() -> [&'static str; 16] {
     ]
 }
 
-fn command_resolves_wait(command: &CoreVnPlayerCommand, wait: Option<VnWaitKind>) -> bool {
+fn command_resolves_wait(
+    command: &CoreVnPlayerCommand,
+    wait: Option<VnWaitKind>,
+    reading_mode: astra_vn_core::ReadingMode,
+    compiled: &astra_vn_core::CompiledStory,
+) -> bool {
+    if matches!(command, CoreVnPlayerCommand::Advance)
+        && matches!(wait, Some(VnWaitKind::Dialogue | VnWaitKind::Input))
+    {
+        return reading_mode != astra_vn_core::ReadingMode::Hidden;
+    }
     matches!(
         (command, wait),
-        (CoreVnPlayerCommand::Advance, Some(VnWaitKind::Dialogue))
-            | (CoreVnPlayerCommand::Choose { .. }, Some(VnWaitKind::Choice))
+        (CoreVnPlayerCommand::Choose { .. }, Some(VnWaitKind::Choice))
             | (
                 CoreVnPlayerCommand::ReturnSystem,
                 Some(VnWaitKind::SystemPage)
+            )
+            | (
+                CoreVnPlayerCommand::SwitchSystemPage { .. },
+                Some(VnWaitKind::SystemPage)
+            )
+            | (
+                CoreVnPlayerCommand::SetReadingMode {
+                    mode: astra_vn_core::ReadingMode::FastForward,
+                },
+                Some(VnWaitKind::Dialogue | VnWaitKind::Input)
             )
             | (
                 CoreVnPlayerCommand::StartReplay { .. }
@@ -1163,6 +1218,21 @@ fn command_resolves_wait(command: &CoreVnPlayerCommand, wait: Option<VnWaitKind>
                         | VnWaitKind::VoiceEnd
                 )
             )
+    ) || matches!(
+        (command, wait),
+        (
+            CoreVnPlayerCommand::InvokeSystemAction { action_id },
+            Some(VnWaitKind::SystemPage)
+        ) if compiled
+            .system_story_manifest
+            .actions
+            .get(action_id)
+            .is_some_and(|action| action.effects.iter().any(|effect| matches!(
+                effect,
+                astra_vn_core::SystemActionEffect::Jump { .. }
+                    | astra_vn_core::SystemActionEffect::SwitchSystemPage { .. }
+                    | astra_vn_core::SystemActionEffect::ReturnSystem
+            )))
     )
 }
 

@@ -3,8 +3,10 @@ use std::time::Instant;
 
 use astra_core::{Diagnostic, Hash256};
 use astra_ui_core::{
-    UiActionEnvelope, UiBackend, UiBackendDescriptor, UiCapability, UiFrameOutput, UiFrameRequest,
-    UiPerformanceSample, UiSemanticSnapshot, UiValidationError, ValidateUi,
+    UiActionEnvelope, UiBackend, UiBackendDescriptor, UiButtonState, UiCapability, UiFrameOutput,
+    UiFrameRequest, UiInputDisposition, UiInputDispositionKind, UiInputEvent, UiInputEventKind,
+    UiNavigationAction, UiPerformanceSample, UiSemanticAction, UiSemanticNode, UiSemanticSnapshot,
+    UiValidationError, ValidateUi,
 };
 use yakui_core::geometry::{Rect, Vec2};
 use yakui_core::{WidgetId, Yakui};
@@ -22,6 +24,8 @@ pub struct YakuiViewOutput {
 }
 
 pub trait YakuiViewRenderer: Send {
+    fn request_focus(&mut self, semantic_id: String);
+
     fn build(
         &mut self,
         yakui: &mut Yakui,
@@ -43,6 +47,7 @@ pub struct AstraYakuiBackend<R> {
     renderer: R,
     live_session: Option<String>,
     live_generation: u64,
+    last_semantics: Option<UiSemanticSnapshot>,
     shutdown: bool,
 }
 
@@ -89,8 +94,13 @@ impl<R: YakuiViewRenderer> AstraYakuiBackend<R> {
             renderer,
             live_session: None,
             live_generation: 0,
+            last_semantics: None,
             shutdown: false,
         })
+    }
+
+    pub fn renderer_mut(&mut self) -> &mut R {
+        &mut self.renderer
     }
 
     fn ensure_live(&self) -> Result<(), UiValidationError> {
@@ -115,6 +125,50 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
     ) -> Result<UiFrameOutput, UiValidationError> {
         self.ensure_live()?;
         request.validate()?;
+        let mut request = request;
+        if let Some(semantics) = self.last_semantics.as_ref() {
+            if let Some(focused) = semantics.nodes.iter().find(|node| node.focused) {
+                for event in &mut request.input.events {
+                    let action = match &event.kind {
+                        UiInputEventKind::Keyboard {
+                            physical_key,
+                            state: UiButtonState::Pressed,
+                            repeat: false,
+                            ..
+                        } if focused.role == astra_ui_core::UiSemanticRole::Slider => {
+                            match physical_key.as_str() {
+                                "ArrowLeft" | "ArrowDown" => Some("decrement"),
+                                "ArrowRight" | "ArrowUp" => Some("increment"),
+                                _ => None,
+                            }
+                        }
+                        UiInputEventKind::Keyboard {
+                            physical_key,
+                            state: UiButtonState::Pressed,
+                            repeat: false,
+                            ..
+                        } if focused.role == astra_ui_core::UiSemanticRole::Toggle
+                            && matches!(physical_key.as_str(), "Enter" | "Space") =>
+                        {
+                            Some("activate")
+                        }
+                        UiInputEventKind::Navigation {
+                            action: UiNavigationAction::Activate,
+                        } if focused.role == astra_ui_core::UiSemanticRole::Toggle => {
+                            Some("activate")
+                        }
+                        _ => None,
+                    };
+                    if let Some(action) = action {
+                        event.kind = UiInputEventKind::AccessibilityAction {
+                            semantic_id: focused.id.clone(),
+                            action: action.to_string(),
+                            value: None,
+                        };
+                    }
+                }
+            }
+        }
         if self
             .live_session
             .as_deref()
@@ -159,7 +213,40 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
         let update_started = Instant::now();
         let mut dispositions = Vec::with_capacity(request.input.events.len());
         for event in &request.input.events {
-            dispositions.push(self.input.route(&mut self.yakui, event)?);
+            if let Some(action) = navigation_action(event) {
+                let semantic_target_id = if matches!(
+                    event_button_state(event),
+                    Some(UiButtonState::Pressed) | None
+                ) {
+                    let target = self
+                        .last_semantics
+                        .as_ref()
+                        .and_then(|semantics| navigate_semantics(semantics, action))
+                        .ok_or_else(|| {
+                            UiValidationError::invalid(
+                                "ASTRA_UI_NAVIGATION_TARGET_MISSING",
+                                "navigation input requires a focused semantic target and a reachable focus candidate",
+                            )
+                        })?;
+                    self.renderer.request_focus(target.clone());
+                    Some(target)
+                } else {
+                    self.last_semantics.as_ref().and_then(|semantics| {
+                        semantics
+                            .nodes
+                            .iter()
+                            .find(|node| node.focused)
+                            .map(|node| node.id.clone())
+                    })
+                };
+                dispositions.push(UiInputDisposition {
+                    sequence: event.sequence,
+                    disposition: UiInputDispositionKind::Consumed,
+                    semantic_target_id,
+                });
+            } else {
+                dispositions.push(self.input.route(&mut self.yakui, event)?);
+            }
         }
         self.yakui.start();
         let view = self.renderer.build(&mut self.yakui, &request);
@@ -177,6 +264,7 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
             }
         }
         let semantics = self.renderer.semantics(&self.yakui, &request)?;
+        self.last_semantics = Some(semantics.clone());
         let update_layout_ns = update_started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
 
         let paint_started = Instant::now();
@@ -275,4 +363,137 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
         self.live_session = None;
         Ok(())
     }
+}
+
+fn event_button_state(event: &UiInputEvent) -> Option<UiButtonState> {
+    match &event.kind {
+        UiInputEventKind::Keyboard { state, .. } => Some(*state),
+        _ => None,
+    }
+}
+
+fn navigation_action(event: &UiInputEvent) -> Option<UiNavigationAction> {
+    match &event.kind {
+        UiInputEventKind::Keyboard {
+            physical_key,
+            repeat: false,
+            ..
+        } => match physical_key.as_str() {
+            "ArrowUp" => Some(UiNavigationAction::Up),
+            "ArrowDown" => Some(UiNavigationAction::Down),
+            "ArrowLeft" => Some(UiNavigationAction::Left),
+            "ArrowRight" => Some(UiNavigationAction::Right),
+            "Tab" => Some(UiNavigationAction::Next),
+            _ => None,
+        },
+        UiInputEventKind::Navigation { action }
+            if !matches!(
+                action,
+                UiNavigationAction::Activate
+                    | UiNavigationAction::Cancel
+                    | UiNavigationAction::PagePrevious
+                    | UiNavigationAction::PageNext
+            ) =>
+        {
+            Some(*action)
+        }
+        _ => None,
+    }
+}
+
+fn navigate_semantics(
+    semantics: &UiSemanticSnapshot,
+    action: UiNavigationAction,
+) -> Option<String> {
+    let focusable = semantics
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.enabled && !node.hidden && node.actions.contains(&UiSemanticAction::Focus)
+        })
+        .collect::<Vec<_>>();
+    if focusable.is_empty() {
+        return None;
+    }
+    let current = semantics
+        .nodes
+        .iter()
+        .find(|node| node.focused && node.actions.contains(&UiSemanticAction::Focus));
+    let Some(current_index) = current.and_then(|node| {
+        focusable
+            .iter()
+            .position(|candidate| candidate.id == node.id)
+    }) else {
+        return match action {
+            UiNavigationAction::Previous | UiNavigationAction::Up | UiNavigationAction::Left => {
+                focusable.last().map(|node| node.id.clone())
+            }
+            _ => focusable.first().map(|node| node.id.clone()),
+        };
+    };
+    let current = focusable[current_index];
+    match action {
+        UiNavigationAction::Next => focusable
+            .get((current_index + 1) % focusable.len())
+            .map(|node| node.id.clone()),
+        UiNavigationAction::Previous => focusable
+            .get((current_index + focusable.len() - 1) % focusable.len())
+            .map(|node| node.id.clone()),
+        UiNavigationAction::Up
+        | UiNavigationAction::Down
+        | UiNavigationAction::Left
+        | UiNavigationAction::Right => directional_semantic(current, &focusable, action),
+        UiNavigationAction::Activate
+        | UiNavigationAction::Cancel
+        | UiNavigationAction::PagePrevious
+        | UiNavigationAction::PageNext => None,
+    }
+}
+
+fn directional_semantic(
+    current: &UiSemanticNode,
+    focusable: &[&UiSemanticNode],
+    action: UiNavigationAction,
+) -> Option<String> {
+    let current_center = (
+        (current.bounds_points.min.x + current.bounds_points.max.x) * 0.5,
+        (current.bounds_points.min.y + current.bounds_points.max.y) * 0.5,
+    );
+    let directional = focusable
+        .iter()
+        .copied()
+        .filter(|candidate| candidate.id != current.id)
+        .filter_map(|candidate| {
+            let center = (
+                (candidate.bounds_points.min.x + candidate.bounds_points.max.x) * 0.5,
+                (candidate.bounds_points.min.y + candidate.bounds_points.max.y) * 0.5,
+            );
+            let delta = (center.0 - current_center.0, center.1 - current_center.1);
+            let (primary, secondary) = match action {
+                UiNavigationAction::Up if delta.1 < 0.0 => (-delta.1, delta.0.abs()),
+                UiNavigationAction::Down if delta.1 > 0.0 => (delta.1, delta.0.abs()),
+                UiNavigationAction::Left if delta.0 < 0.0 => (-delta.0, delta.1.abs()),
+                UiNavigationAction::Right if delta.0 > 0.0 => (delta.0, delta.1.abs()),
+                _ => return None,
+            };
+            Some((primary, secondary, candidate.id.as_str()))
+        })
+        .min_by(|left, right| {
+            left.0
+                .total_cmp(&right.0)
+                .then_with(|| left.1.total_cmp(&right.1))
+                .then_with(|| left.2.cmp(right.2))
+        })
+        .map(|(_, _, id)| id.to_string());
+    directional.or_else(|| {
+        let current_index = focusable.iter().position(|node| node.id == current.id)?;
+        let fallback_index = match action {
+            UiNavigationAction::Down | UiNavigationAction::Right => {
+                (current_index + 1).min(focusable.len() - 1)
+            }
+            UiNavigationAction::Up | UiNavigationAction::Left => current_index.saturating_sub(1),
+            _ => current_index,
+        };
+        Some(focusable[fallback_index].id.clone())
+    })
 }

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astraengine.local/schemas/tsuinosora.director_lingo_report.v1.json",
+  "title": "TsuiNoSora Director Lingo Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "source_resource_count",
+    "converted_resource_count",
+    "handler_count",
+    "source_line_count",
+    "encoding_counts",
+    "statement_counts",
+    "lingo_ir_sha256",
+    "diagnostics",
+    "redaction"
+  ],
+  "properties": {
+    "schema": { "const": "tsuinosora.director_lingo_report.v1" },
+    "status": { "enum": ["pass", "blocked"] },
+    "source_resource_count": { "type": "integer", "minimum": 0 },
+    "converted_resource_count": { "type": "integer", "minimum": 0 },
+    "handler_count": { "type": "integer", "minimum": 0 },
+    "source_line_count": { "type": "integer", "minimum": 0 },
+    "encoding_counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "statement_counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "lingo_ir_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "diagnostics": { "type": "array", "items": { "type": "object" } },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  }
+}

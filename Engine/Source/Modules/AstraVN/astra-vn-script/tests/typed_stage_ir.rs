@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use astra_vn_script::{
     compile_astra_project, AstraSource, CompileAstraProjectOptions, CompiledCommand,
     ExtensionCommandDescriptor, ExtensionFieldContract, ExtensionFieldKind, ExtensionValue,
-    PresentationCommand, StageCommand, TimelineCommand, VnTimelineJoinPolicy,
+    PresentationCommand, StageCommand, StageFitMode, TimelineCommand, VnAudioControlAction,
+    VnTimelineJoinPolicy,
 };
 
 fn source(command: &str) -> AstraSource {
@@ -13,6 +14,30 @@ fn source(command: &str) -> AstraSource {
             "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    {command}\n"
         ),
     )
+}
+
+#[astra_headless_test::test]
+fn fade_stop_requires_duration_and_completion_fence() {
+    let command = first_presentation(
+        "audio action:fade_stop target:bgm.main duration:4000 fence:bgm.main.end #@id audio.fade",
+    );
+    let PresentationCommand::Stage(StageCommand::AudioControl(control)) = command else {
+        panic!("expected typed audio control")
+    };
+    assert_eq!(
+        control.action,
+        VnAudioControlAction::FadeStop {
+            duration_ms: 4_000,
+            fence: "bgm.main.end".into(),
+        }
+    );
+
+    for invalid in [
+        "audio action:fade_stop target:bgm.main fence:bgm.main.end",
+        "audio action:fade_stop target:bgm.main duration:4000",
+    ] {
+        assert!(compile_astra_project([source(invalid)], Default::default()).is_err());
+    }
 }
 
 fn first_presentation(command: &str) -> PresentationCommand {
@@ -43,6 +68,33 @@ fn standard_commands_lower_to_typed_fixed_point_ir() {
     assert_eq!(y.millionths, 4_250_000);
     assert_eq!(zoom.millionths, 1_062_500);
     assert_eq!(duration_ms, 480);
+
+    let command = first_presentation(
+        "show id:sky asset:asset:/stage/sky layer:sky at:center fit:native opacity:1 #@id show.sky",
+    );
+    let PresentationCommand::Stage(StageCommand::Show { fit, .. }) = command else {
+        panic!("expected typed show command")
+    };
+    assert_eq!(fit, StageFitMode::Native);
+}
+
+#[astra_headless_test::test]
+fn shade_has_a_typed_opaque_color_and_separate_coverage() {
+    let command = first_presentation("shade color:222420ff opacity:0.92 #@id shade.scene");
+    let PresentationCommand::Stage(StageCommand::Shade { color, opacity }) = command else {
+        panic!("expected typed shade command")
+    };
+    assert_eq!(color, [0x22, 0x24, 0x20, 0xff]);
+    assert_eq!(opacity.millionths, 920_000);
+
+    let error = compile_astra_project(
+        [source(
+            "shade color:22242080 opacity:0.92 #@id shade.invalid",
+        )],
+        Default::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), "ASTRA_VN_STAGE_ATTRIBUTE_INVALID");
 }
 
 #[astra_headless_test::test]
@@ -78,7 +130,7 @@ fn timeline_requires_real_ordered_keyframes_and_blocking_fence() {
 fn standard_commands_reject_unknown_fields_and_noncanonical_assets() {
     let unknown = compile_astra_project(
         [source(
-            "show id:hero asset:asset:/character/hero layer:characters opacity:1",
+            "show id:hero asset:asset:/character/hero layer:characters unknown:1",
         )],
         Default::default(),
     )
