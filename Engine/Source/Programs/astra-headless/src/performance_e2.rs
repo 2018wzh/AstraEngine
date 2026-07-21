@@ -621,6 +621,56 @@ fn record_measured_frame(
             )
         })
         .and_then(|_| {
+            trace.complete(
+                "renderer.cpu",
+                "scene.commands",
+                1,
+                Some(pending.index),
+                frame_timestamp_ns,
+                submission.scene_command_cpu_ns,
+            )
+        })
+        .and_then(|_| {
+            trace.complete(
+                "renderer.cpu",
+                "scene.atlas",
+                1,
+                Some(pending.index),
+                frame_timestamp_ns,
+                submission.scene_atlas_cpu_ns,
+            )
+        })
+        .and_then(|_| {
+            trace.complete(
+                "renderer.cpu",
+                "scene.geometry",
+                1,
+                Some(pending.index),
+                frame_timestamp_ns,
+                submission.scene_geometry_cpu_ns,
+            )
+        })
+        .and_then(|_| {
+            trace.complete(
+                "renderer.cpu",
+                "scene.vertex_upload",
+                1,
+                Some(pending.index),
+                frame_timestamp_ns,
+                submission.scene_vertex_upload_cpu_ns,
+            )
+        })
+        .and_then(|_| {
+            trace.complete(
+                "renderer.cpu",
+                "scene.render_submit",
+                1,
+                Some(pending.index),
+                frame_timestamp_ns,
+                submission.scene_render_submit_cpu_ns,
+            )
+        })
+        .and_then(|_| {
             trace.flow(
                 "frame.flow",
                 "scene_to_gpu",

@@ -158,6 +158,11 @@ pub struct WgpuProfiledSubmission {
     pub gpu_duration_ns: u64,
     pub scene_cpu_ns: u64,
     pub filter_cpu_ns: u64,
+    pub scene_command_cpu_ns: u64,
+    pub scene_atlas_cpu_ns: u64,
+    pub scene_geometry_cpu_ns: u64,
+    pub scene_vertex_upload_cpu_ns: u64,
+    pub scene_render_submit_cpu_ns: u64,
     pub atlas_upload_gpu_ns: u64,
     pub scene_gpu_ns: u64,
     pub filter_gpu_ns: u64,
@@ -168,6 +173,11 @@ pub struct WgpuPendingProfile {
     cpu_submit_ns: u64,
     scene_cpu_ns: u64,
     filter_cpu_ns: u64,
+    scene_command_cpu_ns: u64,
+    scene_atlas_cpu_ns: u64,
+    scene_geometry_cpu_ns: u64,
+    scene_vertex_upload_cpu_ns: u64,
+    scene_render_submit_cpu_ns: u64,
     query_count: u32,
     timer_slot: usize,
     profiled_atlas_upload: bool,
@@ -411,6 +421,11 @@ impl WgpuOffscreenRenderer {
             gpu_duration_ns,
             scene_cpu_ns: pending.scene_cpu_ns,
             filter_cpu_ns: pending.filter_cpu_ns,
+            scene_command_cpu_ns: pending.scene_command_cpu_ns,
+            scene_atlas_cpu_ns: pending.scene_atlas_cpu_ns,
+            scene_geometry_cpu_ns: pending.scene_geometry_cpu_ns,
+            scene_vertex_upload_cpu_ns: pending.scene_vertex_upload_cpu_ns,
+            scene_render_submit_cpu_ns: pending.scene_render_submit_cpu_ns,
             atlas_upload_gpu_ns,
             scene_gpu_ns,
             filter_gpu_ns,
@@ -495,6 +510,7 @@ impl WgpuOffscreenRenderer {
             self.scene_renderer
                 .render(&self.device, &self.queue, frame)?
         };
+        let scene_cpu_profile = prepared.cpu_profile;
         let mut texture = self.scene_renderer.commit(prepared);
         let scene_cpu_ns = elapsed_ns(scene_started, "offscreen.scene.cpu")?;
         let filter_started = Instant::now();
@@ -574,6 +590,11 @@ impl WgpuOffscreenRenderer {
                 cpu_submit_ns,
                 scene_cpu_ns,
                 filter_cpu_ns,
+                scene_command_cpu_ns: scene_cpu_profile.command_ns,
+                scene_atlas_cpu_ns: scene_cpu_profile.atlas_ns,
+                scene_geometry_cpu_ns: scene_cpu_profile.geometry_ns,
+                scene_vertex_upload_cpu_ns: scene_cpu_profile.vertex_upload_ns,
+                scene_render_submit_cpu_ns: scene_cpu_profile.render_submit_ns,
                 query_count,
                 timer_slot,
                 profiled_atlas_upload: profile_atlas_upload,

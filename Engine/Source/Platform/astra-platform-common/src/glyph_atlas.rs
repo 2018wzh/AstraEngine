@@ -2,6 +2,7 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
+    time::Instant,
 };
 
 use astra_media_core::{
@@ -43,8 +44,18 @@ struct CachedOutput {
 
 pub(crate) struct PreparedGlyphFrame {
     pub(crate) texture: wgpu::Texture,
+    pub(crate) cpu_profile: GlyphCpuProfile,
     next_resources: Option<BTreeMap<String, AtlasResource>>,
     next_atlas: Option<GpuAtlas>,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct GlyphCpuProfile {
+    pub(crate) command_ns: u64,
+    pub(crate) atlas_ns: u64,
+    pub(crate) geometry_ns: u64,
+    pub(crate) vertex_upload_ns: u64,
+    pub(crate) render_submit_ns: u64,
 }
 
 pub(crate) struct GlyphProfileQueries<'a> {
@@ -65,6 +76,7 @@ type PreparedRender = (
     wgpu::Texture,
     Option<BTreeMap<String, AtlasResource>>,
     Option<GpuAtlas>,
+    GlyphCpuProfile,
 );
 
 #[derive(Clone, PartialEq, Eq)]
@@ -224,10 +236,11 @@ impl WgpuGlyphAtlasRenderer {
         queue: &wgpu::Queue,
         frame: &SceneFrame,
     ) -> Result<PreparedGlyphFrame, PlatformError> {
-        let (texture, next_resources, next_atlas) =
+        let (texture, next_resources, next_atlas, cpu_profile) =
             self.render_internal(device, queue, frame, true, None, None)?;
         Ok(PreparedGlyphFrame {
             texture,
+            cpu_profile,
             next_resources,
             next_atlas,
         })
@@ -240,7 +253,7 @@ impl WgpuGlyphAtlasRenderer {
         frame: &SceneFrame,
         queries: GlyphProfileQueries<'_>,
     ) -> Result<PreparedGlyphFrame, PlatformError> {
-        let (texture, next_resources, next_atlas) = self.render_internal(
+        let (texture, next_resources, next_atlas, cpu_profile) = self.render_internal(
             device,
             queue,
             frame,
@@ -252,6 +265,7 @@ impl WgpuGlyphAtlasRenderer {
         )?;
         Ok(PreparedGlyphFrame {
             texture,
+            cpu_profile,
             next_resources,
             next_atlas,
         })
@@ -264,7 +278,7 @@ impl WgpuGlyphAtlasRenderer {
         frame: &SceneFrame,
     ) -> Result<wgpu::Texture, PlatformError> {
         self.render_internal(device, queue, frame, false, None, None)
-            .map(|(texture, _, _)| texture)
+            .map(|(texture, _, _, _)| texture)
     }
 
     pub(crate) fn commit(&mut self, prepared: PreparedGlyphFrame) -> wgpu::Texture {
@@ -333,6 +347,8 @@ impl WgpuGlyphAtlasRenderer {
         atlas_upload_query: Option<(&wgpu::QuerySet, u32, u32)>,
         timestamp_query: Option<(&wgpu::QuerySet, u32, u32)>,
     ) -> Result<PreparedRender, PlatformError> {
+        let profile_cpu = timestamp_query.is_some();
+        let command_started = Instant::now();
         let engine_allocation_before = astra_observability::allocation_snapshot();
         let mut resources: Option<BTreeMap<String, AtlasResource>> = None;
         macro_rules! resources {
@@ -807,7 +823,9 @@ impl WgpuGlyphAtlasRenderer {
             return Err(invalid("GPU scene command stacks are not balanced"));
         }
         validate_resource_budget(resources!())?;
+        let command_ns = profiled_elapsed_ns(profile_cpu, command_started)?;
 
+        let atlas_started = Instant::now();
         let (next_atlas, upload_bytes) = if resources_changed {
             update_gpu_atlas(
                 AtlasUpdateContext {
@@ -824,11 +842,13 @@ impl WgpuGlyphAtlasRenderer {
         } else {
             (None, 0)
         };
+        let atlas_ns = profiled_elapsed_ns(profile_cpu, atlas_started)?;
         self.last_upload_bytes = upload_bytes;
         let active_atlas = next_atlas
             .as_ref()
             .or(self.atlas.as_ref())
             .ok_or_else(|| invalid("glyph atlas is unavailable"))?;
+        let geometry_started = Instant::now();
         self.vertex_bytes.clear();
         self.draw_batches.clear();
         build_vertices(
@@ -840,6 +860,7 @@ impl WgpuGlyphAtlasRenderer {
             &mut self.vertex_bytes,
             &mut self.draw_batches,
         )?;
+        let geometry_ns = profiled_elapsed_ns(profile_cpu, geometry_started)?;
         let engine_allocation_after = astra_observability::allocation_snapshot();
         self.last_engine_allocation_bytes = engine_allocation_after
             .allocated_bytes
@@ -847,6 +868,7 @@ impl WgpuGlyphAtlasRenderer {
         self.last_engine_allocation_count = engine_allocation_after
             .allocation_count
             .saturating_sub(engine_allocation_before.allocation_count);
+        let vertex_upload_started = Instant::now();
         if !self.vertex_bytes.is_empty() {
             let required = self.vertex_bytes.len() as u64;
             if self.vertex_capacity < required {
@@ -870,6 +892,8 @@ impl WgpuGlyphAtlasRenderer {
                 &self.vertex_bytes,
             );
         }
+        let vertex_upload_ns = profiled_elapsed_ns(profile_cpu, vertex_upload_started)?;
+        let render_submit_started = Instant::now();
         if self
             .output
             .as_ref()
@@ -958,8 +982,31 @@ impl WgpuGlyphAtlasRenderer {
         for resource_id in transient_resources {
             resources_mut!().remove(&resource_id);
         }
-        Ok((output, resources, next_atlas))
+        let render_submit_ns = profiled_elapsed_ns(profile_cpu, render_submit_started)?;
+        Ok((
+            output,
+            resources,
+            next_atlas,
+            GlyphCpuProfile {
+                command_ns,
+                atlas_ns,
+                geometry_ns,
+                vertex_upload_ns,
+                render_submit_ns,
+            },
+        ))
     }
+}
+
+fn profiled_elapsed_ns(enabled: bool, started: Instant) -> Result<u64, PlatformError> {
+    if !enabled {
+        return Ok(0);
+    }
+    started
+        .elapsed()
+        .as_nanos()
+        .try_into()
+        .map_err(|_| invalid("glyph CPU profile duration overflowed"))
 }
 
 fn validate_resource_budget(

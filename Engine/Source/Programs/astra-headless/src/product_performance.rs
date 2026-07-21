@@ -466,6 +466,56 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
                     sample.cpu_submit_ns,
                 )
             })
+            .and_then(|_| {
+                state.trace.complete(
+                    "renderer.cpu",
+                    "scene.commands",
+                    1,
+                    Some(sample.sequence),
+                    start_ns,
+                    sample.scene_command_cpu_ns,
+                )
+            })
+            .and_then(|_| {
+                state.trace.complete(
+                    "renderer.cpu",
+                    "scene.atlas",
+                    1,
+                    Some(sample.sequence),
+                    start_ns,
+                    sample.scene_atlas_cpu_ns,
+                )
+            })
+            .and_then(|_| {
+                state.trace.complete(
+                    "renderer.cpu",
+                    "scene.geometry",
+                    1,
+                    Some(sample.sequence),
+                    start_ns,
+                    sample.scene_geometry_cpu_ns,
+                )
+            })
+            .and_then(|_| {
+                state.trace.complete(
+                    "renderer.cpu",
+                    "scene.vertex_upload",
+                    1,
+                    Some(sample.sequence),
+                    start_ns,
+                    sample.scene_vertex_upload_cpu_ns,
+                )
+            })
+            .and_then(|_| {
+                state.trace.complete(
+                    "renderer.cpu",
+                    "scene.render_submit",
+                    1,
+                    Some(sample.sequence),
+                    start_ns,
+                    sample.scene_render_submit_cpu_ns,
+                )
+            })
             .and_then(|_| match active_flow {
                 Some(flow_id) => state.trace.flow(
                     "frame.flow",
@@ -639,6 +689,11 @@ mod tests {
             gpu_duration_ns: 30,
             scene_cpu_ns: 15,
             filter_cpu_ns: 5,
+            scene_command_cpu_ns: 3,
+            scene_atlas_cpu_ns: 0,
+            scene_geometry_cpu_ns: 4,
+            scene_vertex_upload_cpu_ns: 3,
+            scene_render_submit_cpu_ns: 5,
             atlas_upload_gpu_ns: 0,
             scene_gpu_ns: 20,
             filter_gpu_ns: 10,
