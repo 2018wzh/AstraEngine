@@ -81,6 +81,12 @@ impl RuntimeComponentPayload {
     }
 
     pub fn decode<T: DeserializeOwned>(&self) -> Result<T, RuntimeError> {
+        let bytes = self.validated_postcard_bytes()?;
+        postcard::from_bytes(&bytes)
+            .map_err(|err| RuntimeError::message(format!("decode runtime component: {err}")))
+    }
+
+    pub fn validated_postcard_bytes(&self) -> Result<Arc<[u8]>, RuntimeError> {
         if Hash256::from_sha256(&self.bytes) != self.hash {
             return Err(RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
                 "ASTRA_RUNTIME_COMPONENT_HASH",
@@ -88,8 +94,7 @@ impl RuntimeComponentPayload {
             )));
         }
         match self.codec {
-            RuntimePayloadCodec::Postcard => postcard::from_bytes(&self.bytes)
-                .map_err(|err| RuntimeError::message(format!("decode runtime component: {err}"))),
+            RuntimePayloadCodec::Postcard => Ok(Arc::clone(&self.bytes)),
         }
     }
 }

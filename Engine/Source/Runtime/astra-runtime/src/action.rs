@@ -254,6 +254,19 @@ impl<'a> DeterministicActionContext<'a> {
         component.payload.decode()
     }
 
+    pub fn read_component_postcard_bytes(
+        &self,
+        component_id: ComponentId,
+    ) -> Result<Arc<[u8]>, RuntimeError> {
+        let component = self.actors.component(component_id).ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_MISSING",
+                "runtime component does not exist",
+            ))
+        })?;
+        component.payload.validated_postcard_bytes()
+    }
+
     pub fn replace_component<T: Serialize>(
         &mut self,
         component_id: ComponentId,

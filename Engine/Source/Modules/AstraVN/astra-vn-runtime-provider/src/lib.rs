@@ -36,8 +36,8 @@ use astra_runtime::{
 };
 pub use astra_vn_core::*;
 use astra_vn_core::{
-    CompiledStory as CoreCompiledStory, VnError as CoreVnError,
-    VnPlayerCommand as CoreVnPlayerCommand, VnRuntime as CoreVnRuntime,
+    CompiledStory as CoreCompiledStory, ValidatedVnRuntimeState as CoreValidatedVnRuntimeState,
+    VnError as CoreVnError, VnPlayerCommand as CoreVnPlayerCommand, VnRuntime as CoreVnRuntime,
     VnRuntimeIndex as CoreVnRuntimeIndex,
 };
 pub use astra_vn_editor::*;
@@ -954,9 +954,11 @@ impl RuntimeAction for VnStepAction {
         };
         let command: CoreVnPlayerCommand = postcard::from_bytes(&command_bytes)
             .map_err(|err| RuntimeError::message(format!("decode VN step command: {err}")))?;
-        let previous_state = ctx.read_component::<VnRuntimeState>(self.component)?;
-        let previous_wait = previous_state.pending_wait.clone();
-        let (mut state, mut output) = astra_vn_core::reduce_vn_step_indexed(
+        let previous_state_bytes = ctx.read_component_postcard_bytes(self.component)?;
+        let previous_state = CoreValidatedVnRuntimeState::decode_postcard(&previous_state_bytes)
+            .map_err(|err| RuntimeError::message(err.to_string()))?;
+        let previous_wait = previous_state.state().pending_wait.clone();
+        let (mut state, mut output) = astra_vn_core::reduce_vn_step_indexed_validated(
             Arc::clone(&self.compiled),
             Arc::clone(&self.runtime_index),
             previous_state,

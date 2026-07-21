@@ -23,6 +23,33 @@ pub struct VnRuntime {
 }
 
 #[derive(Debug)]
+pub struct ValidatedVnRuntimeState {
+    state: VnRuntimeState,
+    state_hash: Hash128,
+}
+
+impl ValidatedVnRuntimeState {
+    pub fn decode_postcard(bytes: &[u8]) -> Result<Self, VnError> {
+        let state: VnRuntimeState = postcard::from_bytes(bytes)
+            .map_err(|error| VnError::message(format!("decode VN runtime state: {error}")))?;
+        if state.schema != VN_RUNTIME_STATE_SCHEMA {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_RUNTIME_STATE_SCHEMA",
+                "VN runtime state schema is invalid",
+            ));
+        }
+        Ok(Self {
+            state,
+            state_hash: Hash128::from_blake3(bytes),
+        })
+    }
+
+    pub fn state(&self) -> &VnRuntimeState {
+        &self.state
+    }
+}
+
+#[derive(Debug)]
 pub struct VnRuntimeIndex {
     story_hash: Hash128,
     commands_by_state: BTreeMap<String, Vec<(usize, usize)>>,
@@ -210,6 +237,14 @@ impl VnRuntime {
 
     pub fn apply(&mut self, command: VnPlayerCommand) -> Result<VnStepOutput, VnError> {
         let before = self.state_hash();
+        self.apply_with_state_hash(command, before)
+    }
+
+    fn apply_with_state_hash(
+        &mut self,
+        command: VnPlayerCommand,
+        before: Hash128,
+    ) -> Result<VnStepOutput, VnError> {
         tracing::trace!(
             event = "vn.runtime.command.start",
             before_state_hash = %before,
@@ -1210,6 +1245,17 @@ pub fn reduce_vn_step_indexed(
 ) -> Result<(VnRuntimeState, VnStepOutput), VnError> {
     let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
     let output = runtime.apply(command)?;
+    Ok((runtime.state, output))
+}
+
+pub fn reduce_vn_step_indexed_validated(
+    compiled: Arc<CompiledStory>,
+    index: Arc<VnRuntimeIndex>,
+    validated: ValidatedVnRuntimeState,
+    command: VnPlayerCommand,
+) -> Result<(VnRuntimeState, VnStepOutput), VnError> {
+    let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, validated.state)?;
+    let output = runtime.apply_with_state_hash(command, validated.state_hash)?;
     Ok((runtime.state, output))
 }
 
