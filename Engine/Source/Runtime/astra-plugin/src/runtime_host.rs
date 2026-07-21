@@ -132,22 +132,20 @@ impl RuntimeHostSchemaRegistry {
     fn validate(
         &self,
         domain: RuntimeOutputDomain,
-        envelopes: &[RuntimeOutputEnvelope],
+        envelope: &RuntimeOutputEnvelope,
     ) -> Result<(), RuntimeHostError> {
         let allowed = self.schemas.get(&domain);
-        for envelope in envelopes {
-            let Some((schema, version)) = allowed
-                .and_then(|schemas| schemas.get(&(envelope.schema.clone(), envelope.version)))
-            else {
-                return Err(RuntimeHostError::new(
-                    "ASTRA_RUNTIME_HOST_ENVELOPE_SCHEMA",
-                    format!("unknown {:?} output schema {}", domain, envelope.schema),
-                ));
-            };
-            envelope
-                .validate_binding(domain, schema, *version)
-                .map_err(|err| RuntimeHostError::new(err.code(), err.to_string()))?;
-        }
+        let Some((schema, version)) =
+            allowed.and_then(|schemas| schemas.get(&(envelope.schema.clone(), envelope.version)))
+        else {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_HOST_ENVELOPE_SCHEMA",
+                format!("unknown {:?} output schema {}", domain, envelope.schema),
+            ));
+        };
+        envelope
+            .validate_binding(domain, schema, *version)
+            .map_err(|err| RuntimeHostError::new(err.code(), err.to_string()))?;
         Ok(())
     }
 
@@ -728,22 +726,8 @@ impl ProductRuntimeHost {
 
     fn validate_output(&self, output: &RuntimeStepOutput) -> Result<(), RuntimeHostError> {
         self.schemas.validate_output_bounds(output)?;
-        for domain in [
-            RuntimeOutputDomain::Effect,
-            RuntimeOutputDomain::Presentation,
-            RuntimeOutputDomain::Audio,
-            RuntimeOutputDomain::Await,
-            RuntimeOutputDomain::Observation,
-            RuntimeOutputDomain::Trace,
-            RuntimeOutputDomain::DirtySaveSection,
-        ] {
-            let envelopes = output
-                .outputs
-                .iter()
-                .filter(|envelope| envelope.domain == domain)
-                .cloned()
-                .collect::<Vec<_>>();
-            self.schemas.validate(domain, &envelopes)?;
+        for envelope in &output.outputs {
+            self.schemas.validate(envelope.domain, envelope)?;
         }
         Ok(())
     }
