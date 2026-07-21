@@ -649,6 +649,15 @@ impl NativeVnHeadlessSession {
                 sample.ui_present_scene_ns = sample
                     .ui_present_scene_ns
                     .saturating_add(ui_host_sample.present_scene_ns);
+                sample.ui_runtime_host_step_ns = sample
+                    .ui_runtime_host_step_ns
+                    .saturating_add(ui_host_sample.runtime_host_step_ns);
+                sample.ui_runtime_output_decode_ns = sample
+                    .ui_runtime_output_decode_ns
+                    .saturating_add(ui_host_sample.runtime_output_decode_ns);
+                sample.ui_runtime_render_ns = sample
+                    .ui_runtime_render_ns
+                    .saturating_add(ui_host_sample.runtime_render_ns);
             }
         })?;
         self.flush_performance_sample()?;

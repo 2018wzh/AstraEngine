@@ -211,6 +211,9 @@ pub struct NativeVnUiHostPerformanceSample {
     pub text_scene_ns: u64,
     pub action_dispatch_ns: u64,
     pub present_scene_ns: u64,
+    pub runtime_host_step_ns: u64,
+    pub runtime_output_decode_ns: u64,
+    pub runtime_render_ns: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1771,7 +1774,9 @@ impl NativeVnHostCommandSource {
         events: Vec<UiInputEvent>,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         self.last_ui_performance_sample = None;
-        self.last_ui_host_performance_sample = None;
+        self.last_ui_host_performance_sample = self
+            .ui_host_performance_sampling_enabled
+            .then(NativeVnUiHostPerformanceSample::default);
         self.apply_ui_resize_events(&events)?;
         let fallback_events = events.clone();
         if !self.has_active_ui_surface() {
@@ -2569,6 +2574,35 @@ impl NativeVnHostCommandSource {
         ])?)
     }
 
+    fn accumulate_ui_host_performance(&mut self, incoming: NativeVnUiHostPerformanceSample) {
+        let Some(sample) = self.last_ui_host_performance_sample.as_mut() else {
+            return;
+        };
+        sample.model_binding_ns = sample
+            .model_binding_ns
+            .saturating_add(incoming.model_binding_ns);
+        sample.controller_ns = sample.controller_ns.saturating_add(incoming.controller_ns);
+        sample.frame_model_ns = sample
+            .frame_model_ns
+            .saturating_add(incoming.frame_model_ns);
+        sample.text_scene_ns = sample.text_scene_ns.saturating_add(incoming.text_scene_ns);
+        sample.action_dispatch_ns = sample
+            .action_dispatch_ns
+            .saturating_add(incoming.action_dispatch_ns);
+        sample.present_scene_ns = sample
+            .present_scene_ns
+            .saturating_add(incoming.present_scene_ns);
+        sample.runtime_host_step_ns = sample
+            .runtime_host_step_ns
+            .saturating_add(incoming.runtime_host_step_ns);
+        sample.runtime_output_decode_ns = sample
+            .runtime_output_decode_ns
+            .saturating_add(incoming.runtime_output_decode_ns);
+        sample.runtime_render_ns = sample
+            .runtime_render_ns
+            .saturating_add(incoming.runtime_render_ns);
+    }
+
     fn render_ui(
         &mut self,
         events: Vec<UiInputEvent>,
@@ -2853,9 +2887,6 @@ impl NativeVnHostCommandSource {
                         performance.texture_update_bytes = 0;
                         self.ui_performance.record(performance.clone(), true)?;
                         self.last_ui_performance_sample = Some(performance);
-                        if self.ui_host_performance_sampling_enabled {
-                            self.last_ui_host_performance_sample = Some(host_performance);
-                        }
                         tracing::trace!(
                             event = "player.vn.ui.frame.reused",
                             view_id = %active_view_id,
@@ -2864,7 +2895,7 @@ impl NativeVnHostCommandSource {
                             semantic_hash = %semantics.hash,
                             "reused an unchanged NativeVN UI frame"
                         );
-                        return Ok(NativeVnUiFrameResult {
+                        let result = NativeVnUiFrameResult {
                             actions: Vec::new(),
                             dispositions: request
                                 .input
@@ -2878,7 +2909,9 @@ impl NativeVnHostCommandSource {
                                 .collect(),
                             semantics: semantics.clone(),
                             draw: self.ui_draw.clone(),
-                        });
+                        };
+                        self.accumulate_ui_host_performance(host_performance);
+                        return Ok(result);
                     }
                 }
             }
@@ -2995,9 +3028,7 @@ impl NativeVnHostCommandSource {
             None
         };
         host_performance.text_scene_ns = performance_phase_duration(text_scene_started)?;
-        if self.ui_host_performance_sampling_enabled {
-            self.last_ui_host_performance_sample = Some(host_performance);
-        }
+        self.accumulate_ui_host_performance(host_performance);
         Ok(NativeVnUiFrameResult {
             actions: output.actions,
             dispositions: output.dispositions,
@@ -3085,6 +3116,8 @@ impl NativeVnHostCommandSource {
             .fixed_step
             .checked_add(1)
             .ok_or(NativeVnHostError::SequenceOverflow)?;
+        let runtime_step_started =
+            performance_phase_started(self.ui_host_performance_sampling_enabled);
         let output = self.host.step(RuntimeStepInput {
             session_id: self.session_id.clone(),
             fixed_step,
@@ -3094,6 +3127,14 @@ impl NativeVnHostCommandSource {
             action: action.to_string(),
             payload,
         })?;
+        let runtime_host_step_ns = performance_phase_duration(runtime_step_started)?;
+        if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
+            sample.runtime_host_step_ns = sample
+                .runtime_host_step_ns
+                .saturating_add(runtime_host_step_ns);
+        }
+        let output_decode_started =
+            performance_phase_started(self.ui_host_performance_sampling_enabled);
         self.fixed_step = fixed_step;
         self.next_step_mode = RuntimeStepMode::Live;
         let effect = output
@@ -3289,7 +3330,19 @@ impl NativeVnHostCommandSource {
                 .map_or(0, |choice| choice.enabled_option_ids.len()),
             "applied runtime output before presentation rendering"
         );
-        self.render(&ordered_outputs, presentation_count)
+        let runtime_output_decode_ns = performance_phase_duration(output_decode_started)?;
+        if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
+            sample.runtime_output_decode_ns = sample
+                .runtime_output_decode_ns
+                .saturating_add(runtime_output_decode_ns);
+        }
+        let render_started = performance_phase_started(self.ui_host_performance_sampling_enabled);
+        let result = self.render(&ordered_outputs, presentation_count);
+        let runtime_render_ns = performance_phase_duration(render_started)?;
+        if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
+            sample.runtime_render_ns = sample.runtime_render_ns.saturating_add(runtime_render_ns);
+        }
+        result
     }
 
     fn render(
