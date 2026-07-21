@@ -243,15 +243,7 @@ impl WgpuOffscreenRenderer {
             );
             unavailable("offscreen.device", "GPU device creation failed")
         })?;
-        let identity = RendererExecutionIdentity {
-            provider: "wgpu_offscreen".into(),
-            backend: backend_name(info.backend).into(),
-            device_type: device_type_name(info.device_type).into(),
-            vendor_id: info.vendor,
-            device_id: info.device,
-            adapter_name_hash: hash(info.name.as_bytes()),
-            driver_identity_hash: hash(format!("{}:{}", info.driver, info.driver_info).as_bytes()),
-        };
+        let identity = renderer_execution_identity(&info);
         identity
             .validate()
             .map_err(|_| unavailable("offscreen.identity", "GPU identity is invalid"))?;
@@ -666,18 +658,55 @@ async fn select_adapter(
 }
 
 fn adapter_policy_identity(info: &wgpu::AdapterInfo) -> String {
-    hash(
-        format!(
-            "{}:{}:{}:{}:{}:{}",
-            backend_name(info.backend),
-            device_type_name(info.device_type),
-            info.vendor,
-            info.device,
-            info.name,
-            info.driver_info
-        )
-        .as_bytes(),
-    )
+    renderer_execution_identity(info)
+        .hash()
+        .expect("a WGPU renderer identity is canonical and hashable")
+}
+
+fn renderer_execution_identity(info: &wgpu::AdapterInfo) -> RendererExecutionIdentity {
+    RendererExecutionIdentity {
+        provider: "wgpu_offscreen".into(),
+        backend: backend_name(info.backend).into(),
+        device_type: device_type_name(info.device_type).into(),
+        vendor_id: info.vendor,
+        device_id: info.device,
+        adapter_name_hash: hash(info.name.as_bytes()),
+        driver_identity_hash: hash(format!("{}:{}", info.driver, info.driver_info).as_bytes()),
+    }
+}
+
+#[cfg(test)]
+mod adapter_identity_tests {
+    use super::*;
+
+    fn adapter_info(driver_info: &str) -> wgpu::AdapterInfo {
+        wgpu::AdapterInfo {
+            name: "bounded-test-adapter".into(),
+            vendor: 0x1002,
+            device: 0x150e,
+            device_type: wgpu::DeviceType::IntegratedGpu,
+            device_pci_bus_id: String::new(),
+            driver: "test-driver".into(),
+            driver_info: driver_info.into(),
+            backend: wgpu::Backend::Dx12,
+            subgroup_min_size: 32,
+            subgroup_max_size: 64,
+            transient_saves_memory: false,
+        }
+    }
+
+    #[test]
+    fn policy_identity_is_the_reported_renderer_identity_hash() {
+        let info = adapter_info("1.2.3");
+        assert_eq!(
+            adapter_policy_identity(&info),
+            renderer_execution_identity(&info).hash().unwrap()
+        );
+        assert_ne!(
+            adapter_policy_identity(&info),
+            adapter_policy_identity(&adapter_info("1.2.4"))
+        );
+    }
 }
 
 fn backend_matches(backend: wgpu::Backend, policy: GpuBackendPolicy) -> bool {
