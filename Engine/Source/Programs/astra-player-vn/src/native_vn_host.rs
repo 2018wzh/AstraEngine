@@ -1784,7 +1784,9 @@ impl NativeVnHostCommandSource {
     }
 
     pub fn launch(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        self.step("launch_default", serde_json::json!({}))
+        let batch = self.step("launch_default", serde_json::json!({}))?;
+        self.queue_default_gameplay_story_audio_preloads()?;
+        Ok(batch)
     }
 
     pub fn take_audio_preload_requests(&mut self) -> Vec<NativeVnAudioPreloadRequest> {
@@ -1792,8 +1794,6 @@ impl NativeVnHostCommandSource {
     }
 
     fn queue_current_story_audio_preloads(&mut self) -> Result<(), NativeVnHostError> {
-        const MAX_ENTRY_AUDIO_PRELOADS: usize = 4_096;
-
         let Some(story_id) = self
             .runtime_state
             .as_ref()
@@ -1802,7 +1802,36 @@ impl NativeVnHostCommandSource {
         else {
             return Ok(());
         };
-        if self.audio_preload_story_ids.contains(&story_id) {
+        self.queue_story_audio_preloads(&story_id)
+    }
+
+    fn queue_default_gameplay_story_audio_preloads(&mut self) -> Result<(), NativeVnHostError> {
+        let system_story_ids = self
+            .story
+            .system_story_manifest
+            .entries
+            .values()
+            .map(|entry| entry.story_id.as_str())
+            .collect::<BTreeSet<_>>();
+        let story_id = self
+            .story
+            .story_manifest
+            .stories
+            .iter()
+            .find(|story| !system_story_ids.contains(story.id.as_str()))
+            .map(|story| story.id.clone())
+            .ok_or_else(|| {
+                NativeVnHostError::RuntimeEvidence(
+                    "ASTRA_PLAYER_AUDIO_PRELOAD_GAMEPLAY_STORY_MISSING".into(),
+                )
+            })?;
+        self.queue_story_audio_preloads(&story_id)
+    }
+
+    fn queue_story_audio_preloads(&mut self, story_id: &str) -> Result<(), NativeVnHostError> {
+        const MAX_ENTRY_AUDIO_PRELOADS: usize = 4_096;
+
+        if self.audio_preload_story_ids.contains(story_id) {
             return Ok(());
         }
         let mut asset_ids = BTreeSet::new();
@@ -1858,7 +1887,7 @@ impl NativeVnHostCommandSource {
                 .into_iter()
                 .filter(|request| !pending_hashes.contains(&request.encoded_hash)),
         );
-        self.audio_preload_story_ids.insert(story_id);
+        self.audio_preload_story_ids.insert(story_id.to_string());
         Ok(())
     }
 
