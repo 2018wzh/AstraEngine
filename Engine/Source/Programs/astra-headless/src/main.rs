@@ -1298,6 +1298,9 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
             checkpoint_results.push(result);
         }
     }
+    if let Some(observer) = &performance_observer {
+        observer.stop_gpu_measurement()?;
+    }
     product
         .shutdown()
         .await

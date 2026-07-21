@@ -38,6 +38,8 @@ struct RecorderState {
     start_sequence: u64,
     armed: bool,
     first_gpu_sequence: Option<u64>,
+    last_paced_gpu_sequence: Option<u64>,
+    gpu_measurement_cutoff: Option<u64>,
 }
 
 struct ActiveInputFlow {
@@ -96,6 +98,8 @@ impl ProductPerformanceRecorder {
                 start_sequence,
                 armed: false,
                 first_gpu_sequence: None,
+                last_paced_gpu_sequence: None,
+                gpu_measurement_cutoff: None,
             })),
             decoded_cache_bytes: AtomicU64::new(0),
         })
@@ -160,6 +164,8 @@ impl ProductPerformanceRecorder {
             state.paced_frame_count = 0;
             state.measurement_started = (state.warmup_frames_remaining == 0).then_some(started);
             state.first_gpu_sequence = None;
+            state.last_paced_gpu_sequence = None;
+            state.gpu_measurement_cutoff = None;
             state.armed = true;
         }
         if state.active_input_flow.is_some() {
@@ -216,6 +222,28 @@ impl ProductPerformanceRecorder {
                 )
                 .map_err(|error| error.to_string())?;
         }
+        Ok(())
+    }
+
+    pub fn stop_gpu_measurement(&self) -> Result<(), String> {
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| "ASTRA_PERFORMANCE_RECORDER_POISONED")?;
+        let state = guard
+            .as_mut()
+            .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
+        if !state.armed {
+            return Err("ASTRA_PERFORMANCE_START_SEQUENCE_NOT_REACHED".into());
+        }
+        if state.gpu_measurement_cutoff.is_some() {
+            return Err("ASTRA_PERFORMANCE_GPU_MEASUREMENT_ALREADY_STOPPED".into());
+        }
+        state.gpu_measurement_cutoff = Some(
+            state
+                .last_paced_gpu_sequence
+                .ok_or("ASTRA_PERFORMANCE_GPU_MEASUREMENT_EMPTY")?,
+        );
         Ok(())
     }
 
@@ -318,6 +346,9 @@ impl ProductPerformanceRecorder {
         if !state.armed {
             return Err("ASTRA_PERFORMANCE_START_SEQUENCE_NOT_REACHED".into());
         }
+        if state.gpu_measurement_cutoff.is_none() {
+            return Err("ASTRA_PERFORMANCE_GPU_MEASUREMENT_NOT_STOPPED".into());
+        }
         let duration_us = state
             .measurement_started
             .ok_or("ASTRA_PERFORMANCE_MEASUREMENT_NOT_STARTED")?
@@ -397,7 +428,11 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
             if !state.armed {
                 return Ok(());
             }
+            if state.gpu_measurement_cutoff.is_some() {
+                return Ok(());
+            }
             state.first_gpu_sequence.get_or_insert(sequence);
+            state.last_paced_gpu_sequence = Some(sequence);
             state.paced_frame_count = state
                 .paced_frame_count
                 .checked_add(1)
@@ -422,6 +457,7 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
             .as_mut()
             .ok_or_else(|| performance_error("recorder already finished"))?;
         if !state.armed
+            || state.gpu_measurement_cutoff.is_some()
             || state
                 .first_gpu_sequence
                 .is_none_or(|first| sequence < first)
@@ -450,6 +486,9 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
             || state
                 .first_gpu_sequence
                 .is_none_or(|first| sample.sequence < first)
+            || state
+                .gpu_measurement_cutoff
+                .is_some_and(|cutoff| sample.sequence > cutoff)
         {
             return Ok(());
         }
@@ -867,6 +906,7 @@ mod tests {
         recorder.pace_gpu_frame(2).unwrap();
         recorder.record_gpu_frame(sample).unwrap();
         recorder.end_input_flow(1).unwrap();
+        recorder.stop_gpu_measurement().unwrap();
         recorder
             .finish(
                 PerformanceRunIdentity {
