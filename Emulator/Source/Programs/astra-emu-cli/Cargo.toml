@@ -25,6 +25,7 @@ astra-emu-manager-core = { path = "../../Manager/astra-emu-manager-core" }
 astra-emu-minori = { path = "../../Families/astra-emu-minori" }
 astra-headless-protocol = { path = "../../../../Engine/Source/Runtime/astra-headless-protocol" }
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
+astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
 astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
 astra-platform-headless = { path = "../../../../Engine/Source/Platform/astra-platform-headless" }

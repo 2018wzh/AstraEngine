@@ -217,6 +217,8 @@ pub struct MinoriSystemUiState {
 pub enum MinoriVmEvent {
     Wait(MinoriWaitState),
     Message {
+        presentation_sequence: u64,
+        capture_sequence: u64,
         text: String,
         speaker: Option<String>,
         wait: MinoriWaitState,
@@ -1282,12 +1284,15 @@ fn execute_message(
         // deterministic state and no resource URI is guessed.
         voice_hash: voice.map(|value| Hash256::from_sha256(value.as_bytes())),
     });
-    next_effect_sequence(state)?;
+    let presentation_sequence = next_effect_sequence(state)?;
+    let capture_sequence = next_effect_sequence(state)?;
     let wait = MinoriWaitState::Input {
         token_id: format!("minori.message.{}", state.instruction_count),
     };
     state.wait = Some(wait.clone());
     Ok(Some(MinoriVmEvent::Message {
+        presentation_sequence,
+        capture_sequence,
         text,
         speaker,
         wait,
@@ -1610,6 +1615,8 @@ mod tests {
         )
         .unwrap();
         let Some(MinoriVmEvent::Message {
+            presentation_sequence,
+            capture_sequence,
             text,
             speaker,
             wait: MinoriWaitState::Input { token_id },
@@ -1619,11 +1626,55 @@ mod tests {
         };
         assert_eq!(text, "hello world");
         assert_eq!(speaker.as_deref(), Some("speaker"));
+        assert_eq!(presentation_sequence, 1);
+        assert_eq!(capture_sequence, 2);
         assert_eq!(token_id, "minori.message.1");
         let state = vm.state().message.as_ref().unwrap();
         assert_eq!(state.message_id, 42);
         assert_eq!(state.text_hash, Hash256::from_sha256(b"hello world"));
         assert_eq!(state.voice_hash, Some(Hash256::from_sha256(b"voice")));
+    }
+
+    #[test]
+    fn message_preserves_empty_voice_and_speaker_positions() {
+        let source = b".message 42   body words\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1, 4).unwrap() else {
+            panic!("expected message input wait")
+        };
+        assert_eq!(text, "body words");
+        assert!(speaker.is_none());
+        let state = vm.state().message.as_ref().unwrap();
+        assert_eq!(state.message_id, 42);
+        assert_eq!(state.text_hash, Hash256::from_sha256(b"body words"));
+        assert!(state.voice_hash.is_none());
+        assert!(state.speaker_hash.is_none());
+    }
+
+    #[test]
+    fn message_preserves_empty_voice_before_speaker() {
+        let source = b".message 42  speaker body\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1, 4).unwrap() else {
+            panic!("expected message input wait")
+        };
+        assert_eq!(text, "body");
+        assert_eq!(speaker.as_deref(), Some("speaker"));
+        assert!(vm.state().message.as_ref().unwrap().voice_hash.is_none());
     }
 
     #[test]

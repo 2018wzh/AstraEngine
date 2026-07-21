@@ -16,8 +16,8 @@
 | `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command/29 token，unknown opcode 0；`select` operand 语义仍 unknown |
 | ANI/SQZ container 与 `bg`/`bgm` census | adapter 已实现 | 2655 PNG、1951 ANI/6723 frames、9 SQZ/224 frames、49 Ogg 真实读取通过；渲染/播放尚未验收 |
 | Minori deterministic VM state 与 control-flow slice | E2 slice | `set/setglobal/label/goto/if/wait/message`、BGM/SE stop、`playvoice *`、`transition`、无 stand `stage`、`chain/end`、budget、一次性文本 lease、连续 tick、尾链 VFS 切换和 postcard snapshot/restore；select、普通 voice、stand 与主要演出仍 blocking |
-| Minori runtime provider / `cdylib` ABI | E2 slice | 签名动态 plugin 经通用 `--family minori --mount-profile` composition 启动；真实八包 5-tick Headless 产生 2 个 frame、2 个 checkpoint、音频 evidence 和 snapshot round-trip |
-| Minori 演出、系统 UI、完整模拟 | 未完成 | 只验证黑底与竖排标题资源；尚未到首条 message，transition 动画、人物、UI、存储和路线仍开放 |
+| Minori runtime provider / `cdylib` ABI | E2 slice | 签名动态 plugin 经通用 `--family minori --mount-profile` composition 启动；真实八包 Headless 到达首条可见 message，共 372 tick、8 个 frame、5 个 checkpoint，音频 evidence 与 snapshot round-trip 通过 |
+| Minori 演出、系统 UI、完整模拟 | 未完成 | 已验证黑场、竖排标题、CrossFade2、message panel 和首条日文正文；transition 动画、人物、UI、存储和路线仍开放 |
 
 当前合法样本包含八个非空逻辑 archive 和 18 个物理文件。纯 Rust GARbro scheme importer 生成的私有补丁已完成八包 manifest v2 full verify：14502 个 entry、43818 次 range read、6624958365 个 decoded bytes。验证轮显式关闭 cache；启用 cache 的运行因平台缓存卷空间不足阻断，因此新的八包 cache identity 仍没有第二轮命中实证。89 个脚本的 payload-free census 已通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。
 
@@ -32,14 +32,14 @@
 
 ## Script
 
-- [x] 从 `scr.paz` 与原程序候选确认显式入口 `test.sc`；多脚本时 CLI 仍要求 `--entry`，不隐式选择。
+- [x] 从 `scr.paz` 与原程序候选确认入口文件 `test.sc`；多脚本时 CLI 要求完整稳定 URI `--entry minori:/scr/test.sc`，不接受裸文件名，也不隐式选择。
 - [ ] 拆分 select、普通 voice、stand 与其余演出 operand；音频 `*`、message、BGM/SE、变量、wait、`label/goto/if` CFG、transition/stage 前部和 `chain` 尾链语义已确认。
 - [x] 未确认 command/operand 保留 raw bytes、source span 和 `Unknown`。
 - [ ] 完成全部资源引用映射；BGM/SE、stage 前景/背景和 stand role 已有严格映射。
 
 ## Runtime
 
-- [ ] boot 到首个 message。
+- [x] boot 到首个 message；正文经一次性 lease、CosmicText 和 Renderer2D 形成真实 checkpoint，未进入 snapshot/report。
 - [ ] 用户推进、auto、skip、backlog 不破坏 pc。
 - [ ] choice 写入变量并跳转。
 - [ ] save/load 后 state/event/presentation hash 一致。

@@ -480,18 +480,14 @@ fn decode_control_flow(
 }
 
 pub(crate) fn tokenize_operands(bytes: &[u8], offset: usize) -> Result<Vec<String>, ScParseError> {
+    if bytes.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut tokens = Vec::new();
-    let mut cursor = 0usize;
-    while cursor < bytes.len() {
-        while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t') {
-            cursor += 1;
-        }
-        if cursor == bytes.len() {
-            break;
-        }
-        let start = cursor;
-        while cursor < bytes.len() && !matches!(bytes[cursor], b' ' | b'\t') {
-            cursor += 1;
+    let mut start = 0usize;
+    for cursor in 0..=bytes.len() {
+        if cursor != bytes.len() && !matches!(bytes[cursor], b' ' | b'\t') {
+            continue;
         }
         let Some(decoded) =
             SHIFT_JIS.decode_without_bom_handling_and_without_replacement(&bytes[start..cursor])
@@ -499,6 +495,7 @@ pub(crate) fn tokenize_operands(bytes: &[u8], offset: usize) -> Result<Vec<Strin
             return Err(ScParseError::Encoding(offset + start));
         };
         tokens.push(decoded.into_owned());
+        start = cursor + 1;
     }
     Ok(tokens)
 }
@@ -613,5 +610,18 @@ mod tests {
     fn tokenizer_matches_the_observed_engine_space_tab_contract() {
         let tokens = tokenize_operands(b"one, two\t\"three four\" 'five'", 0).unwrap();
         assert_eq!(tokens, vec!["one,", "two", "\"three", "four\"", "'five'"]);
+    }
+
+    #[test]
+    fn tokenizer_preserves_empty_positional_operands() {
+        assert_eq!(
+            tokenize_operands(b"100   body", 0).unwrap(),
+            vec!["100", "", "", "body"]
+        );
+        assert_eq!(
+            tokenize_operands(b"100\t\tspeaker\tbody", 0).unwrap(),
+            vec!["100", "", "speaker", "body"]
+        );
+        assert_eq!(tokenize_operands(b"", 0).unwrap(), Vec::<String>::new());
     }
 }

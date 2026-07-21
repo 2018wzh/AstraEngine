@@ -8,7 +8,9 @@
 
 `wait` 的整数单位已经确认是 10 ms timer tick。VM 在 family state 中同时保存原始 tick 和换算后的 milliseconds，提交给公共 Await contract 时使用后者；换算溢出直接阻断。Await request 是边沿事件，只在创建等待时提交一次；后续等待 tick 不重发相同 token，避免把持续状态误当作新的公共 request。
 
-`message` 按原程序的 space/tab tokenizer 和 handler contract 解析：四个起始字段依次为 integer id、voice identity、speaker 和正文首段，余下 operand 用单个 ASCII space 拼回正文。少于四个 operand 时也执行原程序的空默认更新，不把坏输入悄悄跳过。确定性 state 只保存 id 与正文、speaker、voice 的 hash；正文和 speaker 通过 `LegacyEffect::TextCapture` 的单次有界 lease 交给 host，取走后立即失效，不进入 snapshot、report 或日志。消息提交后建立非零物理输入 mask 的 await，等待 confirm、space 或主指针输入。
+`message` 按原程序的 space/tab tokenizer 和 handler contract 解析：每个分隔符都产生一个位置，连续分隔符保留为空字段。四个起始字段依次为 integer id、voice identity、speaker 和正文首段，余下 operand 用单个 ASCII space 拼回正文。因此 `id` 后的三空格表示 voice、speaker 都为空，而不是可折叠的排版空白。少于四个 operand 时仍执行原程序的空默认更新，不把坏输入悄悄跳过。确定性 state 只保存 id 与正文、speaker、voice 的 hash；正文和 speaker 通过 `LegacyEffect::TextCapture` 的单次有界 lease 交给 host，取走后立即失效，不进入 snapshot、report 或日志。
+
+同一 effect batch 先用 `astra.emu.text_presentation.v1` 提交不含正文的 `LegacyTextPresentationV1`，再按 lease id 与 `TextCapture` 关联。这个结构保留现有 `LegacyEffect` v1 wire layout，避免在 ABI fingerprint 不变时偷偷改变 postcard 数据。Minori 只声明语言、字体 family、文字区域、字号、行高、最大行数与颜色，Host 必须用显式绑定的 `cosmic_text_cpu` 和仓库内 Noto Sans JP 完成 shaping，再交给 Astra `Renderer2D` 合成。缺 provider、字体绑定不一致、stage 不是 1280×720、区域越界、重复或悬空 layout、shaping diagnostic 都会阻断；没有系统字体或字符宽度估算 fallback。消息提交后建立非零物理输入 mask 的 await，等待 confirm、space 或主指针输入。
 
 音频资源后缀按原程序的 `resource[volume,pan]` 规则解析。普通 BGM/SE 引用生成稳定 `minori:/...` URI，并在发出公共 `LegacyAudioCommandV1` 前由绑定 VFS `stat` 核对存在性和大小；host 后续仍通过 session resource channel 读取，商业字节不进入 effect。BGM 使用固定 loop stream，三个 SE command 使用独立 bus；非循环 SE 使用确定性 stream id。`*` 停止对应固定 stream，并保留原程序的 fade-out 参数。
 
@@ -18,7 +20,7 @@
 
 `.panel` 已确认调用 `CMessagePanel`。第一个整数是 `!panel_Mode`，资源名以 `!panel_Filename` 保存；原程序的 mode 1 分支选择 `msgPanel.png`。当前 runtime 只接受精确的 `.panel 1`，把 `minori:/sys/msgPanel.png` 作为最上层 resource-frame，并与最后实际显示的 CrossFade2 frame 合成。mode 1 的 x 使用 panel 全局坐标，y 按 `viewport_height - image_height + 64` 计算；超出 viewport 的底部 64 px 由 renderer clip。mode 0、2–10、第二个过渡参数和自定义文件名仍缺完整语义，统一返回 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。
 
-全包 census 已确认 89 个脚本、33728 行、33695 个 command 和 29 个 command token，catalog 范围内 unknown opcode 为 0。资源契约迁移后，签名动态 Minori plugin 已通过真实八包 Headless E2 的前 371 个 fixed tick：入口 tail-chain、BGM、SE、黑底 stage、竖排标题 stage、6 秒 wait、可见 CrossFade2 和 `.panel 1` 都成功。运行实际提交 7 帧，形成 4 个不同 checkpoint，snapshot round-trip 成立且 diagnostic 为 0。人工检查确认 panel 的底部位置和 clipping；证据仍结束于首条 message 之前，更不代表完整 effect 周期、路线、系统 UI 或 transition 动画完成。
+全包 census 已确认 89 个脚本、33728 行、33695 个 command 和 29 个 command token，catalog 范围内 unknown opcode 为 0。资源契约迁移后，签名动态 Minori plugin 已通过真实八包 Headless E2 的前 372 个 fixed tick：入口 tail-chain、BGM、SE、黑底 stage、竖排标题 stage、6 秒 wait、可见 CrossFade2、`.panel 1` 和首条 message 都成功。运行实际提交 8 帧，形成 5 个不同 checkpoint，snapshot round-trip 成立且 diagnostic 为 0。人工检查确认 panel 的底部位置和 clipping，首条日文正文也没有缺字、横向裁剪或拉伸。该证据不代表完整 effect 周期、路线、系统 UI 或 transition 动画完成。
 
 ## VM State
 

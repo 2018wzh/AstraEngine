@@ -566,6 +566,110 @@ pub enum LegacyEffect {
     },
 }
 
+/// Host-neutral, plaintext-free layout contract for an ephemeral text lease.
+/// The family owns the original layout semantics while the host owns shaping,
+/// glyph resources, and rendering through its explicitly selected providers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyTextPresentationV1 {
+    pub layout_id: String,
+    pub language: String,
+    pub font_families: Vec<String>,
+    pub body: LegacyTextRegionV1,
+    pub speaker: Option<LegacyTextRegionV1>,
+    pub rgba: [u8; 4],
+}
+
+/// Associates a plaintext-free layout with the single-use text lease emitted
+/// in the same ordered effect batch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyTextPresentationLeaseV1 {
+    pub lease_id: String,
+    pub presentation: LegacyTextPresentationV1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyTextRegionV1 {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub max_lines: u32,
+}
+
+impl LegacyTextPresentationV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        validate_symbol("text_layout_id", &self.layout_id)?;
+        if self.language.trim().is_empty()
+            || self.language.len() > 64
+            || self.font_families.is_empty()
+            || self.font_families.len() > 8
+            || self.font_families.iter().any(|family| {
+                family.trim().is_empty()
+                    || family.len() > 128
+                    || family.chars().any(char::is_control)
+            })
+        {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_LAYOUT_BINDING",
+                "text language or explicit font family binding is invalid",
+            ));
+        }
+        self.body.validate("body")?;
+        if let Some(speaker) = self.speaker {
+            speaker.validate("speaker")?;
+        }
+        if self.rgba[3] == 0 {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_LAYOUT_COLOR",
+                "text color must have non-zero alpha",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl LegacyTextPresentationLeaseV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        validate_symbol("text_presentation_lease_id", &self.lease_id)?;
+        self.presentation.validate()
+    }
+}
+
+impl LegacyTextRegionV1 {
+    fn validate(self, region: &'static str) -> Result<(), LegacyProviderError> {
+        if self.x < 0
+            || self.y < 0
+            || self.width == 0
+            || self.height == 0
+            || self.width > 16_384
+            || self.height > 16_384
+            || !self.font_size.is_finite()
+            || !self.line_height.is_finite()
+            || !(1.0..=512.0).contains(&self.font_size)
+            || self.line_height < self.font_size
+            || self.line_height > 1024.0
+            || self.max_lines == 0
+            || self.max_lines > 256
+        {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_LAYOUT_REGION",
+                format!("text {region} layout region is invalid"),
+            ));
+        }
+        let right = i64::from(self.x) + i64::from(self.width);
+        let bottom = i64::from(self.y) + i64::from(self.height);
+        if right > i64::from(i32::MAX) || bottom > i64::from(i32::MAX) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_LAYOUT_REGION",
+                format!("text {region} layout region overflows"),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Host-neutral GPU presentation packet. Family providers may emit this as the postcard payload
 /// of a `Presentation` effect whose command is `astra.emu.render_frame.v1`. It deliberately owns
 /// no window, device, queue, texture, or callback; the host uploads resource deltas to its own
@@ -1567,6 +1671,54 @@ mod tests {
                 playback_id: "movie.test".into(),
             },
         ]);
+    }
+
+    #[test]
+    fn text_presentation_requires_explicit_bounded_font_and_regions() {
+        let valid = LegacyTextPresentationV1 {
+            layout_id: "family.message".into(),
+            language: "ja-JP".into(),
+            font_families: vec!["Noto Sans JP".into()],
+            body: LegacyTextRegionV1 {
+                x: 160,
+                y: 568,
+                width: 960,
+                height: 112,
+                font_size: 26.0,
+                line_height: 32.0,
+                max_lines: 3,
+            },
+            speaker: None,
+            rgba: [255, 255, 255, 255],
+        };
+        valid.validate().unwrap();
+        LegacyTextPresentationLeaseV1 {
+            lease_id: "lease.test".into(),
+            presentation: valid.clone(),
+        }
+        .validate()
+        .unwrap();
+
+        let mut missing_font = valid.clone();
+        missing_font.font_families.clear();
+        assert_eq!(
+            missing_font.validate().unwrap_err().code(),
+            "ASTRA_EMU_TEXT_LAYOUT_BINDING"
+        );
+
+        let mut transparent = valid.clone();
+        transparent.rgba[3] = 0;
+        assert_eq!(
+            transparent.validate().unwrap_err().code(),
+            "ASTRA_EMU_TEXT_LAYOUT_COLOR"
+        );
+
+        let mut invalid_region = valid;
+        invalid_region.body.line_height = 20.0;
+        assert_eq!(
+            invalid_region.validate().unwrap_err().code(),
+            "ASTRA_EMU_TEXT_LAYOUT_REGION"
+        );
     }
 
     #[test]

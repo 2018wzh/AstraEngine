@@ -8,6 +8,7 @@ use astra_emu_family_api::{
     LegacyProviderError, LegacyRenderResourceFrameV1, LegacyRestoreReport, LegacyRuntimeHostCtx,
     LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacyShutdownReport,
     LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepInput, LegacyStepOutput,
+    LegacyTextPresentationLeaseV1, LegacyTextPresentationV1, LegacyTextRegionV1,
     LegacyTextureFormat, LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1,
     LegacyVfsReader, LegacyWaitRequest, LEGACY_FAMILY_ABI_FINGERPRINT,
 };
@@ -24,6 +25,43 @@ const MAX_SCRIPT_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_RESOURCE_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_EPHEMERAL_TEXT_BYTES: usize = 64 * 1024;
 const MESSAGE_INPUT_MASK: u64 = (1 << 0) | (1 << 6) | (1 << 7);
+
+fn minori_message_presentation(
+    stage_size: Option<(u32, u32)>,
+) -> Result<LegacyTextPresentationV1, LegacyProviderError> {
+    if stage_size != Some((1280, 720)) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_TEXT_STAGE_IDENTITY",
+            "the verified Minori message layout requires the 1280x720 reference stage",
+        ));
+    }
+    let presentation = LegacyTextPresentationV1 {
+        layout_id: "minori.message".into(),
+        language: "ja-JP".into(),
+        font_families: vec!["Noto Sans JP".into()],
+        body: LegacyTextRegionV1 {
+            x: 160,
+            y: 568,
+            width: 960,
+            height: 112,
+            font_size: 26.0,
+            line_height: 32.0,
+            max_lines: 3,
+        },
+        speaker: Some(LegacyTextRegionV1 {
+            x: 160,
+            y: 528,
+            width: 960,
+            height: 32,
+            font_size: 26.0,
+            line_height: 32.0,
+            max_lines: 1,
+        }),
+        rgba: [255, 255, 255, 255],
+    };
+    presentation.validate()?;
+    Ok(presentation)
+}
 
 struct MinoriSession {
     case_fingerprint: Hash256,
@@ -361,6 +399,8 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             }
         }
         if let Some(MinoriVmEvent::Message {
+            presentation_sequence,
+            capture_sequence,
             text,
             speaker,
             wait: _,
@@ -377,8 +417,27 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     "message or speaker exceeds the ephemeral text channel bound",
                 ));
             }
-            let sequence = session.vm.state().effect_sequence;
-            let lease_id = format!("minori.text.{}.{}", input.tick_index, sequence);
+            let lease_id = format!("minori.text.{}.{}", input.tick_index, capture_sequence);
+            let presentation = LegacyTextPresentationLeaseV1 {
+                lease_id: lease_id.clone(),
+                presentation: match minori_message_presentation(session.stage_size) {
+                    Ok(presentation) => presentation,
+                    Err(error) => {
+                        session.poisoned = true;
+                        return Err(error);
+                    }
+                },
+            };
+            presentation.validate().inspect_err(|_| {
+                session.poisoned = true;
+            })?;
+            let presentation_payload = postcard::to_allocvec(&presentation).map_err(|_| {
+                session.poisoned = true;
+                invalid(
+                    "ASTRA_EMU_MINORI_TEXT_PRESENTATION_ENCODE",
+                    "message presentation could not be encoded",
+                )
+            })?;
             if session
                 .ephemeral_text
                 .insert(
@@ -397,8 +456,13 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     "ephemeral text lease id is duplicated",
                 ));
             }
+            effects.push(LegacyEffect::Presentation {
+                sequence: *presentation_sequence,
+                command: "astra.emu.text_presentation.v1".into(),
+                payload: presentation_payload,
+            });
             effects.push(LegacyEffect::TextCapture {
-                sequence,
+                sequence: *capture_sequence,
                 lease_id,
                 text_hash: Hash256::from_sha256(text.as_bytes()),
                 byte_len: text.len().try_into().map_err(|_| {
@@ -1529,7 +1593,10 @@ mod tests {
                     fixed_delta_ns: 16_666_667,
                     session_seed: 7,
                     compatibility_profile: "minori.reference".into(),
-                    family_options: BTreeMap::new(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                    ]),
                 },
             )
             .unwrap();
@@ -1537,17 +1604,38 @@ mod tests {
             .step(&ctx, &session, step_input(1, Vec::new()))
             .unwrap();
         assert_eq!(output.status, LegacyRuntimeStatus::Awaiting);
+        let LegacyEffect::Presentation {
+            sequence,
+            command,
+            payload,
+        } = &output.effects[0]
+        else {
+            panic!("expected text presentation effect")
+        };
+        assert_eq!(*sequence, 1);
+        assert_eq!(command, "astra.emu.text_presentation.v1");
+        let presentation: LegacyTextPresentationLeaseV1 =
+            postcard::from_bytes(payload).expect("presentation payload must decode");
         let LegacyEffect::TextCapture {
+            sequence,
             lease_id,
             text_hash,
             speaker_hash,
             ..
-        } = &output.effects[0]
+        } = &output.effects[1]
         else {
             panic!("expected text capture effect")
         };
+        assert_eq!(*sequence, 2);
+        assert_eq!(presentation.lease_id, *lease_id);
         assert_eq!(*text_hash, Hash256::from_sha256(b"hello world"));
         assert_eq!(*speaker_hash, Some(Hash256::from_sha256(b"speaker")));
+        let presentation = &presentation.presentation;
+        assert_eq!(presentation.layout_id, "minori.message");
+        assert_eq!(presentation.language, "ja-JP");
+        assert_eq!(presentation.font_families, ["Noto Sans JP"]);
+        assert_eq!(presentation.body.font_size, 26.0);
+        assert_eq!(presentation.body.max_lines, 3);
         let text = provider
             .take_ephemeral_text(&ctx, &session, lease_id)
             .unwrap()
@@ -1562,6 +1650,38 @@ mod tests {
             output.waits.as_slice(),
             [LegacyWaitRequest::Input { mask, .. }] if *mask == MESSAGE_INPUT_MASK
         ));
+    }
+
+    #[test]
+    fn provider_blocks_message_without_the_verified_reference_stage() {
+        let script = b".message 42 voice speaker body\r\n.end\r\n".to_vec();
+        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
+            scripts: BTreeMap::from([("minori:/scr/test.sc".into(), script)]),
+        }));
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId(
+                        "session.message.invalid-stage".into(),
+                    ),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::new(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            provider
+                .step(&ctx, &session, step_input(1, Vec::new()))
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_MINORI_TEXT_STAGE_IDENTITY"
+        );
     }
 
     #[test]

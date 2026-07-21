@@ -4,7 +4,7 @@
 
 当前样本的 `.sc` 不是二进制 framed bytecode，而是 CP932、CRLF 行式源码。89 个文件共 33728 行，其中 33695 行为 `.command operands`，另有 28 行注释和 5 行空白；旧的 `opcode:u16 + operand_size:u16` 假设已被样本否定并删除。
 
-parser 逐字节保留原始行与换行，同时记录 command ordinal、source span、ASCII command token 和 raw operand。原程序 tokenizer 只把 ASCII space 和 tab 当作 operand 分隔符；逗号、单双引号都属于普通字节，不承担 quoting 或 escaping。当前 parser 已按这一 contract 修正。只有显式 `ScOpcodeCatalog` 中登记且经结构验证的 command 才获得控制流语义；未知 command 或未确认的 `select` 分支语义保留为 `Unknown`。
+parser 逐字节保留原始行与换行，同时记录 command ordinal、source span、ASCII command token 和 raw operand。原程序 tokenizer 把每个 ASCII space 和 tab 当作一个 operand 分隔符，连续分隔符产生空的 positional operand；逗号、单双引号都属于普通字节，不承担 quoting 或 escaping。当前 parser 已按这一 contract 修正。只有显式 `ScOpcodeCatalog` 中登记且经结构验证的 command 才获得控制流语义；未知 command 或未确认的 `select` 分支语义保留为 `Unknown`。
 
 已实现的阻断项包括非法 CP932、重复 command spec、重复 label、无效本地 jump target、operand schema mismatch 和 lossless source invariant。`encode_sc(parse_sc(bytes))` 是 round-trip 门禁。完整正文与近源码 disassembly 只写 ignored 私有研究目录。
 
@@ -40,7 +40,7 @@ Minori 脚本研究以 `scr.paz` 中解出的 `.sc` 为核心。`perseus_chs.mys
 - `CommandSet` 与 `CommandSetGlobal` 使用同一 assignment evaluator，但分别绑定两个 store。变量解析先查 local store，再查 global store。
 - assignment handler 接受 3 个或 5 个 token。3-token 形式直接赋值；5-token 形式还会计算 `|`、`&`、`+`、`-`、`*`、`/`、`%`。变量读取顺序已经确认；字符串赋值和除零行为还需结合真实 operand census 验证，当前 VM 不扩大支持范围。
 - `CommandWait` 把整数写入引擎 timer slot；multimedia timer 以 10 ms 为基本周期递减该值。因此 `.wait 20` 表示 20 个 timer tick，也就是 200 ms，不是 20 ms。
-- `CommandMessage` 在 operand 不少于四个时，把第一个 operand 解析为 message id，第二个保存为 voice identity，第三个保存为 speaker，第四个起以单个 ASCII space 重新连接为正文。operand 不足四个时，parse handler 不写字段，但 execute 仍以构造器默认值 `id=-1` 和三个空字符串提交一次空消息更新。
+- `CommandMessage` 在 positional operand 不少于四个时，把第一个 operand 解析为 message id，第二个保存为 voice identity，第三个保存为 speaker，第四个起以单个 ASCII space 重新连接为正文。连续分隔符形成的空 voice/speaker 必须保留。operand 不足四个时，parse handler 不写字段，但 execute 仍以构造器默认值 `id=-1` 和三个空字符串提交一次空消息更新。
 - `CommandTransition` 接收 integer、string、integer 三个 operand，并把它们保存为后续 stage 的 mode、可选资源与 duration tick。单字符 `*` 走原程序的默认 transition 分支；具名 transition 的像素时序仍未接入 host，因此不能声明转场动画完成。
 - `CommandStage` 的顺序已经由 parser 和 stage core 调用共同确认：前景资源、可选前景 `x/y`、背景资源、背景 `x/y`，随后是最多十组 `stand resource[,offset] + position`。`*` 表示该层无资源。背景和前景绑定 `bg` role；stand 绑定 `st` role。stand position 是引擎参数，不是像素坐标，当前遇到 stand 时继续阻断。
 - `CommandPlayBGM` 与三个 SE command 已确认各自 parse/execute handler。资源 operand 不能原样拼成 URI，必须先经过下一条所述的 metadata 解析，再做精确 VFS 绑定。
