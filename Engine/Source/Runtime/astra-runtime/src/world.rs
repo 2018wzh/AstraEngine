@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{cell::RefCell, collections::BTreeMap, sync::Arc, time::Instant};
 
 use astra_core::{
     Diagnostic, Hash128, Hash256, SchemaId, SchemaMigrationRegistry, SchemaVersion, StableId,
@@ -14,10 +14,11 @@ use crate::{
     ActionRegistry, ActorId, ActorRecord, ActorSnapshot, ActorStore, AwaitQueue, AwaitResult,
     AwaitToken, Blackboard, ComponentId, ComponentRecord, ComponentSnapshot, CreateAwaitAction,
     DelayedEventId, DelayedEventQueue, EmitEventAction, EventId, EventPayload, EventQueue,
-    EventSource, PresentationAction, PresentationCommand, PresentationRecord, ProviderReplayOutput,
-    RuntimeAction, RuntimeComponentPayload, RuntimeEffectRecord, RuntimeEvent,
-    RuntimeMutationRecord, RuntimeReplayTranscript, SaveBlob, SaveRequest, ScheduledEvent,
-    SetBlackboardAction, StateMachineDefinition, StateMachineSnapshot, StateMachineStore,
+    EventQueueCheckpoint, EventSource, PresentationAction, PresentationCommand, PresentationRecord,
+    ProviderReplayOutput, RuntimeAction, RuntimeComponentPayload, RuntimeEffectRecord,
+    RuntimeEvent, RuntimeMutationRecord, RuntimeReplayTranscript, SaveBlob, SaveRequest,
+    ScheduledEvent, SetBlackboardAction, StateMachineDefinition, StateMachineSnapshot,
+    StateMachineStore,
 };
 
 #[derive(Debug, Error)]
@@ -314,22 +315,115 @@ pub struct RuntimeSnapshot {
     pub step: u64,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct HistoryChain {
+    count: usize,
+    hash: Hash128,
+}
+
+impl HistoryChain {
+    fn empty(domain: &'static str) -> Self {
+        Self {
+            count: 0,
+            hash: Hash128::from_blake3(domain.as_bytes()),
+        }
+    }
+
+    fn append<T: Serialize>(&mut self, domain: &'static str, value: &T) {
+        let bytes =
+            postcard::to_allocvec(&(domain, self.count as u64, self.hash.as_bytes(), value))
+                .expect("runtime history entry must serialize for deterministic hashing");
+        self.hash = Hash128::from_blake3(&bytes);
+        self.count += 1;
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RuntimeHistoryDigests {
+    events: HistoryChain,
+    presentation: HistoryChain,
+    mutations: HistoryChain,
+    effects: HistoryChain,
+}
+
+impl Default for RuntimeHistoryDigests {
+    fn default() -> Self {
+        Self {
+            events: HistoryChain::empty("astra.runtime.events.chain.v2"),
+            presentation: HistoryChain::empty("astra.runtime.presentation.chain.v2"),
+            mutations: HistoryChain::empty("astra.runtime.mutations.chain.v2"),
+            effects: HistoryChain::empty("astra.runtime.effects.chain.v2"),
+        }
+    }
+}
+
+impl RuntimeHistoryDigests {
+    fn refresh<T: Serialize>(chain: &mut HistoryChain, domain: &'static str, values: &[T]) {
+        if chain.count > values.len() {
+            *chain = HistoryChain::empty(domain);
+        }
+        for value in &values[chain.count..] {
+            chain.append(domain, value);
+        }
+    }
+
+    fn refresh_from_world(&mut self, world: &RuntimeWorld) {
+        Self::refresh(
+            &mut self.events,
+            "astra.runtime.events.chain.v2",
+            world.events.trace(),
+        );
+        Self::refresh(
+            &mut self.presentation,
+            "astra.runtime.presentation.chain.v2",
+            &world.presentation,
+        );
+        Self::refresh(
+            &mut self.mutations,
+            "astra.runtime.mutations.chain.v2",
+            &world.mutations,
+        );
+        Self::refresh(
+            &mut self.effects,
+            "astra.runtime.effects.chain.v2",
+            &world.effects,
+        );
+    }
+}
+
 #[derive(Serialize)]
-struct RuntimeSnapshotRef<'a> {
+struct RuntimeStateDigestV2<'a> {
+    schema: &'static str,
     config: &'a RuntimeConfig,
     package: &'a PackageHandle,
     id_source: &'a StableIdGenerator,
-    actors: &'a ActorStore,
+    actors: Hash128,
     blackboard: &'a Blackboard,
     machines: &'a StateMachineStore,
     awaits: &'a AwaitQueue,
     delayed_events: &'a DelayedEventQueue,
-    events: &'a EventQueue,
-    presentation: &'a Vec<PresentationRecord>,
-    mutations: &'a Vec<RuntimeMutationRecord>,
-    effects: &'a Vec<RuntimeEffectRecord>,
+    event_pending: Hash128,
+    event_history: Hash128,
+    presentation_history: Hash128,
+    mutation_history: Hash128,
+    effect_history: Hash128,
     mounted_modules: &'a BTreeMap<String, ModuleBindingSnapshot>,
     step: u64,
+}
+
+struct RuntimeTransactionCheckpoint {
+    id_source: StableIdGenerator,
+    actors: ActorStore,
+    blackboard: Blackboard,
+    machines: StateMachineStore,
+    awaits: AwaitQueue,
+    delayed_events: DelayedEventQueue,
+    events: EventQueueCheckpoint,
+    presentation_len: usize,
+    mutations_len: usize,
+    effects_len: usize,
+    step: u64,
+    required_tick_mode: TickMode,
 }
 
 pub struct RuntimeWorld {
@@ -350,6 +444,7 @@ pub struct RuntimeWorld {
     mounted_modules: BTreeMap<String, ModuleBindingSnapshot>,
     step: u64,
     required_tick_mode: TickMode,
+    history_digests: RefCell<RuntimeHistoryDigests>,
 }
 
 impl RuntimeWorld {
@@ -384,6 +479,7 @@ impl RuntimeWorld {
             mounted_modules: BTreeMap::new(),
             step: 0,
             required_tick_mode: TickMode::Live,
+            history_digests: RefCell::new(RuntimeHistoryDigests::default()),
         })
     }
 
@@ -777,7 +873,7 @@ impl RuntimeWorld {
     pub fn tick(&mut self, request: TickRequest) -> Result<TickReport, RuntimeError> {
         self.validate_tick_request(&request)?;
         let checkpoint_started = Instant::now();
-        let checkpoint = self.snapshot();
+        let checkpoint = self.transaction_checkpoint();
         let checkpoint_ns = checkpoint_started.elapsed().as_nanos() as u64;
         let diagnostics = self.diagnostics.clone();
         let performance_step = request.timing.fixed_step;
@@ -814,7 +910,7 @@ impl RuntimeWorld {
         match result {
             Ok(report) => Ok(report),
             Err(error) => {
-                self.restore_snapshot(checkpoint);
+                self.restore_transaction_checkpoint(checkpoint);
                 self.diagnostics = diagnostics;
                 Err(error)
             }
@@ -1084,6 +1180,7 @@ impl RuntimeWorld {
         self.effects = snapshot.effects;
         self.mounted_modules = snapshot.mounted_modules;
         self.step = snapshot.step;
+        *self.history_digests.get_mut() = RuntimeHistoryDigests::default();
     }
 
     pub fn replay(
@@ -1164,44 +1261,82 @@ impl RuntimeWorld {
     }
 
     pub fn state_hash(&self) -> Hash128 {
-        let snapshot = RuntimeSnapshotRef {
+        let mut history = self.history_digests.borrow_mut();
+        history.refresh_from_world(self);
+        let digest = RuntimeStateDigestV2 {
+            schema: "astra.runtime.state_digest.v2",
             config: &self.config,
             package: &self.package,
             id_source: &self.id_source,
-            actors: &self.actors,
+            actors: self.actors.deterministic_fingerprint(),
             blackboard: &self.blackboard,
             machines: &self.machines,
             awaits: &self.awaits,
             delayed_events: &self.delayed_events,
-            events: &self.events,
-            presentation: &self.presentation,
-            mutations: &self.mutations,
-            effects: &self.effects,
+            event_pending: self.events.deterministic_pending_fingerprint(),
+            event_history: history.events.hash,
+            presentation_history: history.presentation.hash,
+            mutation_history: history.mutations.hash,
+            effect_history: history.effects.hash,
             mounted_modules: &self.mounted_modules,
             step: self.step,
         };
-        let bytes = postcard::to_allocvec(&snapshot)
-            .expect("borrowed runtime snapshot must serialize for state hash");
-        debug_assert_eq!(
-            bytes,
-            postcard::to_allocvec(&self.snapshot())
-                .expect("owned runtime snapshot must serialize for state hash compatibility")
-        );
+        let bytes = postcard::to_allocvec(&digest)
+            .expect("runtime state digest must serialize for state hash");
         Hash128::from_blake3(&bytes)
     }
 
     pub fn event_hash(&self) -> Hash128 {
-        Hash128::from_blake3(
-            &postcard::to_allocvec(self.events.trace())
-                .expect("runtime event trace must serialize for event hash"),
-        )
+        let mut history = self.history_digests.borrow_mut();
+        history.refresh_from_world(self);
+        history.events.hash
     }
 
     pub fn presentation_hash(&self) -> Hash128 {
+        let mut history = self.history_digests.borrow_mut();
+        history.refresh_from_world(self);
         Hash128::from_blake3(
-            &postcard::to_allocvec(&(&self.presentation, &self.effects))
-                .expect("runtime presentation trace must serialize for presentation hash"),
+            &postcard::to_allocvec(&(
+                "astra.runtime.presentation_effect_digest.v2",
+                history.presentation.hash,
+                history.effects.hash,
+            ))
+            .expect("runtime presentation digest must serialize for presentation hash"),
         )
+    }
+
+    fn transaction_checkpoint(&self) -> RuntimeTransactionCheckpoint {
+        RuntimeTransactionCheckpoint {
+            id_source: self.id_source.clone(),
+            actors: self.actors.clone(),
+            blackboard: self.blackboard.clone(),
+            machines: self.machines.clone(),
+            awaits: self.awaits.clone(),
+            delayed_events: self.delayed_events.clone(),
+            events: self.events.transaction_checkpoint(),
+            presentation_len: self.presentation.len(),
+            mutations_len: self.mutations.len(),
+            effects_len: self.effects.len(),
+            step: self.step,
+            required_tick_mode: self.required_tick_mode,
+        }
+    }
+
+    fn restore_transaction_checkpoint(&mut self, checkpoint: RuntimeTransactionCheckpoint) {
+        self.id_source = checkpoint.id_source;
+        self.actors = checkpoint.actors;
+        self.blackboard = checkpoint.blackboard;
+        self.machines = checkpoint.machines;
+        self.awaits = checkpoint.awaits;
+        self.delayed_events = checkpoint.delayed_events;
+        self.events
+            .restore_transaction_checkpoint(checkpoint.events);
+        self.presentation.truncate(checkpoint.presentation_len);
+        self.mutations.truncate(checkpoint.mutations_len);
+        self.effects.truncate(checkpoint.effects_len);
+        self.step = checkpoint.step;
+        self.required_tick_mode = checkpoint.required_tick_mode;
+        *self.history_digests.get_mut() = RuntimeHistoryDigests::default();
     }
 
     fn next_id(&mut self) -> StableId {

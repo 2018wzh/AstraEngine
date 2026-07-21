@@ -53,7 +53,35 @@ pub struct EventQueue {
     next_sequence: u64,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct EventQueueCheckpoint {
+    queued: Vec<RuntimeEvent>,
+    trace_len: usize,
+    next_sequence: u64,
+}
+
 impl EventQueue {
+    pub(crate) fn transaction_checkpoint(&self) -> EventQueueCheckpoint {
+        EventQueueCheckpoint {
+            queued: self.queued.clone(),
+            trace_len: self.trace.len(),
+            next_sequence: self.next_sequence,
+        }
+    }
+
+    pub(crate) fn restore_transaction_checkpoint(&mut self, checkpoint: EventQueueCheckpoint) {
+        self.queued = checkpoint.queued;
+        self.trace.truncate(checkpoint.trace_len);
+        self.next_sequence = checkpoint.next_sequence;
+    }
+
+    pub(crate) fn deterministic_pending_fingerprint(&self) -> astra_core::Hash128 {
+        astra_core::Hash128::from_blake3(
+            &postcard::to_allocvec(&(&self.queued, self.next_sequence))
+                .expect("event queue pending state must serialize for deterministic hashing"),
+        )
+    }
+
     pub fn push(&mut self, mut event: RuntimeEvent) {
         event.sequence = self.next_sequence;
         self.next_sequence += 1;
