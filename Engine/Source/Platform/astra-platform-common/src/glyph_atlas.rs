@@ -17,6 +17,7 @@ const ATLAS_SIDE: u32 = 4096;
 const ATLAS_PADDING: u32 = 1;
 const MAX_GLYPH_RESOURCES: usize = 65_536;
 const MAX_GLYPH_BYTES: usize = 64 * 1024 * 1024;
+const MAX_ATLAS_UPLOAD_BYTES: usize = ATLAS_SIDE as usize * ATLAS_SIDE as usize * 4;
 const VERTEX_STRIDE: wgpu::BufferAddress = 32;
 
 pub(crate) struct WgpuGlyphAtlasRenderer {
@@ -35,6 +36,7 @@ pub(crate) struct WgpuGlyphAtlasRenderer {
     vertex_bytes: Vec<u8>,
     uploaded_vertex_bytes: Vec<u8>,
     draw_batches: Vec<DrawBatch>,
+    atlas_upload_pixels: Vec<u8>,
 }
 
 struct CachedOutput {
@@ -216,6 +218,7 @@ impl WgpuGlyphAtlasRenderer {
             vertex_bytes: Vec::new(),
             uploaded_vertex_bytes: Vec::new(),
             draw_batches: Vec::new(),
+            atlas_upload_pixels: Vec::with_capacity(MAX_ATLAS_UPLOAD_BYTES),
         }
     }
 
@@ -843,6 +846,7 @@ impl WgpuGlyphAtlasRenderer {
                 self.atlas.as_ref(),
                 &self.resources,
                 resources!(),
+                &mut self.atlas_upload_pixels,
             )?
         } else {
             (None, 0)
@@ -1206,6 +1210,7 @@ fn update_gpu_atlas(
     current: Option<&GpuAtlas>,
     old_resources: &BTreeMap<String, AtlasResource>,
     new_resources: &BTreeMap<String, AtlasResource>,
+    upload_pixels: &mut Vec<u8>,
 ) -> Result<(Option<GpuAtlas>, u64), PlatformError> {
     let Some(current) = current else {
         let atlas = create_full_gpu_atlas(
@@ -1215,6 +1220,7 @@ fn update_gpu_atlas(
             context.sampler,
             new_resources,
             context.timestamp_query,
+            upload_pixels,
         )?;
         return Ok((
             Some(atlas),
@@ -1274,6 +1280,7 @@ fn update_gpu_atlas(
                     context.sampler,
                     new_resources,
                     context.timestamp_query,
+                    upload_pixels,
                 )?;
                 return Ok((
                     Some(atlas),
@@ -1290,6 +1297,7 @@ fn update_gpu_atlas(
             &current.texture,
             resource,
             placement,
+            upload_pixels,
         )?;
         upload_bytes = upload_bytes
             .checked_add(
@@ -1322,13 +1330,14 @@ fn create_full_gpu_atlas(
     sampler: &wgpu::Sampler,
     resources: &BTreeMap<String, AtlasResource>,
     timestamp_query: Option<(&wgpu::QuerySet, u32, u32)>,
+    upload_pixels: &mut Vec<u8>,
 ) -> Result<GpuAtlas, PlatformError> {
     let packed = pack_atlas(resources)?;
-    let pixels = build_atlas_pixels(resources, &packed)?;
+    build_atlas_pixels(resources, &packed, upload_pixels)?;
     let texture = upload_atlas(
         device,
         queue,
-        &pixels,
+        upload_pixels,
         packed.width,
         packed.height,
         timestamp_query,
@@ -1442,17 +1451,21 @@ fn upload_resource_rect(
     texture: &wgpu::Texture,
     resource: &AtlasResource,
     placement: AtlasPlacement,
+    upload_pixels: &mut Vec<u8>,
 ) -> Result<(), PlatformError> {
     let width = resource.width() + ATLAS_PADDING * 2;
     let height = resource.height() + ATLAS_PADDING * 2;
-    let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
+    prepare_upload_pixels(upload_pixels, width, height)?;
+    let mut destination = 0usize;
     for padded_row in -1_i32..=resource.height() as i32 {
         for padded_column in -1_i32..=resource.width() as i32 {
-            pixels.extend_from_slice(&resource_pixel(
+            let pixel = resource_pixel(
                 resource,
                 padded_column.clamp(0, resource.width() as i32 - 1) as usize,
                 padded_row.clamp(0, resource.height() as i32 - 1) as usize,
-            ));
+            );
+            upload_pixels[destination..destination + 4].copy_from_slice(&pixel);
+            destination += 4;
         }
     }
     let origin = wgpu::Origin3d {
@@ -1461,7 +1474,15 @@ fn upload_resource_rect(
         z: 0,
     };
     if let Some(encoder) = encoder {
-        encode_texture_upload(device, encoder, texture, &pixels, width, height, origin)?;
+        encode_texture_upload(
+            device,
+            encoder,
+            texture,
+            upload_pixels,
+            width,
+            height,
+            origin,
+        )?;
     } else {
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -1470,7 +1491,7 @@ fn upload_resource_rect(
                 origin,
                 aspect: wgpu::TextureAspect::All,
             },
-            &pixels,
+            upload_pixels,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width * 4),
@@ -1489,9 +1510,11 @@ fn upload_resource_rect(
 fn build_atlas_pixels(
     resources: &BTreeMap<String, AtlasResource>,
     atlas: &PackedAtlas,
-) -> Result<Vec<u8>, PlatformError> {
-    let mut pixels = vec![0; atlas.width as usize * atlas.height as usize * 4];
-    pixels[..4].copy_from_slice(&[255; 4]);
+    upload_pixels: &mut Vec<u8>,
+) -> Result<(), PlatformError> {
+    prepare_upload_pixels(upload_pixels, atlas.width, atlas.height)?;
+    upload_pixels.fill(0);
+    upload_pixels[..4].copy_from_slice(&[255; 4]);
     for (resource_id, resource) in resources {
         let placement = atlas
             .placements
@@ -1504,7 +1527,7 @@ fn build_atlas_pixels(
                 let destination_row = (placement.y as i32 + padded_row) as usize;
                 let destination_column = (placement.x as i32 + padded_column) as usize;
                 let destination = (destination_row * atlas.width as usize + destination_column) * 4;
-                pixels[destination..destination + 4].copy_from_slice(&resource_pixel(
+                upload_pixels[destination..destination + 4].copy_from_slice(&resource_pixel(
                     resource,
                     source_column,
                     source_row,
@@ -1512,7 +1535,26 @@ fn build_atlas_pixels(
             }
         }
     }
-    Ok(pixels)
+    Ok(())
+}
+
+fn prepare_upload_pixels(
+    upload_pixels: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+) -> Result<(), PlatformError> {
+    let required = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| invalid("glyph atlas upload byte count overflowed"))?;
+    if required > MAX_ATLAS_UPLOAD_BYTES || upload_pixels.capacity() < required {
+        return Err(invalid(
+            "glyph atlas upload exceeds the reserved staging budget",
+        ));
+    }
+    upload_pixels.clear();
+    upload_pixels.resize(required, 0);
+    Ok(())
 }
 
 fn resource_pixel(resource: &AtlasResource, column: usize, row: usize) -> [u8; 4] {
@@ -2130,10 +2172,12 @@ struct VertexOutput {
 #[cfg(test)]
 mod tests {
     use super::{
-        allocate_atlas_slot, pack_atlas, release_atlas_slot, vertex_upload_required, AtlasResource,
+        allocate_atlas_slot, pack_atlas, prepare_upload_pixels, release_atlas_slot,
+        vertex_upload_required, AtlasResource, ATLAS_SIDE, MAX_ATLAS_UPLOAD_BYTES,
     };
     use astra_core::Hash256;
     use astra_media_core::TextureFrame;
+    use astra_platform::PlatformErrorCode;
     use std::{collections::BTreeMap, sync::Arc};
 
     #[test]
@@ -2190,5 +2234,22 @@ mod tests {
         assert!(!vertex_upload_required(&uploaded, &uploaded, false));
         assert!(vertex_upload_required(&[1, 2, 3, 5], &uploaded, false));
         assert!(vertex_upload_required(&uploaded, &uploaded, true));
+    }
+
+    #[test]
+    fn reserved_atlas_staging_reuses_storage_across_upload_sizes() {
+        let mut pixels = Vec::with_capacity(MAX_ATLAS_UPLOAD_BYTES);
+        let storage = pixels.as_ptr();
+
+        prepare_upload_pixels(&mut pixels, 800, 600).unwrap();
+        assert_eq!(pixels.len(), 800 * 600 * 4);
+        assert_eq!(pixels.as_ptr(), storage);
+
+        prepare_upload_pixels(&mut pixels, 1280, 720).unwrap();
+        assert_eq!(pixels.len(), 1280 * 720 * 4);
+        assert_eq!(pixels.as_ptr(), storage);
+
+        let error = prepare_upload_pixels(&mut pixels, ATLAS_SIDE + 1, ATLAS_SIDE).unwrap_err();
+        assert_eq!(error.code, PlatformErrorCode::InvalidState);
     }
 }
