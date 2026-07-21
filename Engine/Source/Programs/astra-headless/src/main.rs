@@ -32,6 +32,7 @@ use sha2::{Digest, Sha256};
 mod compare;
 mod performance_e2;
 mod product_performance;
+mod product_performance_input;
 
 #[global_allocator]
 static ASTRA_ALLOCATOR: astra_observability::TrackingAllocator =
@@ -81,6 +82,8 @@ enum Command {
         performance_trace_manifest: Option<PathBuf>,
         #[arg(long, default_value_t = 0, requires = "performance_budget")]
         performance_warmup_frames: u64,
+        #[arg(long, default_value_t = 1, requires = "performance_budget")]
+        performance_start_sequence: u64,
     },
     Serve {
         #[arg(long)]
@@ -192,6 +195,28 @@ enum Command {
         #[arg(long)]
         adapter_identity_hash: Option<String>,
     },
+    PrepareProductPerformanceInput {
+        #[arg(long)]
+        prefix: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = 1_200)]
+        warmup_frames: u64,
+        #[arg(long, default_value_t = 72_000)]
+        measurement_frames: u64,
+        #[arg(long)]
+        viewport_width: u32,
+        #[arg(long)]
+        viewport_height: u32,
+        #[arg(long)]
+        point_a_x: u32,
+        #[arg(long)]
+        point_a_y: u32,
+        #[arg(long)]
+        point_b_x: u32,
+        #[arg(long)]
+        point_b_y: u32,
+    },
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -233,6 +258,7 @@ async fn main() {
             performance_trace,
             performance_trace_manifest,
             performance_warmup_frames,
+            performance_start_sequence,
         } => {
             run(RunRequest {
                 profile_path: &profile,
@@ -249,6 +275,7 @@ async fn main() {
                 performance_trace: performance_trace.as_deref(),
                 performance_trace_manifest: performance_trace_manifest.as_deref(),
                 performance_warmup_frames,
+                performance_start_sequence,
             })
             .await
         }
@@ -348,6 +375,29 @@ async fn main() {
             backend,
             device_type,
             adapter_identity_hash,
+        ),
+        Command::PrepareProductPerformanceInput {
+            prefix,
+            output,
+            warmup_frames,
+            measurement_frames,
+            viewport_width,
+            viewport_height,
+            point_a_x,
+            point_a_y,
+            point_b_x,
+            point_b_y,
+        } => product_performance_input::prepare(
+            product_performance_input::ProductPerformanceInputRequest {
+                prefix: &prefix,
+                output: &output,
+                warmup_frames,
+                measurement_frames,
+                viewport_width,
+                viewport_height,
+                point_a: (point_a_x, point_a_y),
+                point_b: (point_b_x, point_b_y),
+            },
         ),
     };
     if let Err(error) = result {
@@ -864,6 +914,7 @@ struct RunRequest<'a> {
     performance_trace: Option<&'a Path>,
     performance_trace_manifest: Option<&'a Path>,
     performance_warmup_frames: u64,
+    performance_start_sequence: u64,
 }
 
 async fn run(request: RunRequest<'_>) -> Result<(), String> {
@@ -1006,6 +1057,7 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         performance_trace,
         performance_trace_manifest,
         performance_warmup_frames,
+        performance_start_sequence,
     } = request;
     let identity_hash = read_identity_hash(build_identity)?;
     let profile = read_profile(profile_path, &identity_hash)?;
@@ -1023,6 +1075,8 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
                     budget,
                     trace_path,
                     performance_warmup_frames,
+                    profile.presentation_rate_hz,
+                    performance_start_sequence,
                 )?,
             ))
         }
@@ -2469,6 +2523,7 @@ async fn open_product(
                     astra_platform::HeadlessArtifactRetention::ManifestOnly
                 ),
                 performance_profiling,
+                presentation_rate_hz: profile.presentation_rate_hz,
                 platform: host.client.clone(),
             },
         )

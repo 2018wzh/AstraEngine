@@ -15,6 +15,7 @@ fn performance_profile_requires_v3_hardware_policy_and_timestamp_queries() {
     let mut profile =
         HeadlessHostProfile::reference("nativevn-game", "com.example.game", hash('a'), hash('b'));
     profile.providers.renderer = "wgpu_offscreen".into();
+    profile.presentation_rate_hz = astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ;
     profile.render_policy = HeadlessRenderPolicy::All;
     profile.readback_policy = HeadlessReadbackPolicy::CheckpointsOnly;
     profile.gpu_adapter = Some(GpuAdapterPolicy {
@@ -24,6 +25,10 @@ fn performance_profile_requires_v3_hardware_policy_and_timestamp_queries() {
         adapter_identity_hash: Some(hash('c')),
     });
     validate_headless_performance_profile(&profile).unwrap();
+
+    profile.presentation_rate_hz = astra_platform::HEADLESS_PRESENTATION_RATE_HZ;
+    assert!(validate_headless_performance_profile(&profile).is_err());
+    profile.presentation_rate_hz = astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ;
 
     profile
         .gpu_adapter
@@ -38,6 +43,14 @@ fn performance_profile_requires_v3_hardware_policy_and_timestamp_queries() {
         .require_timestamp_query = true;
     profile.schema = "astra.headless_host_profile.v2".into();
     assert!(validate_headless_performance_profile(&profile).is_err());
+}
+
+#[test]
+fn ordinary_headless_profile_cannot_enable_performance_cadence() {
+    let mut profile =
+        HeadlessHostProfile::reference("nativevn-game", "com.example.game", hash('a'), hash('b'));
+    profile.presentation_rate_hz = astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ;
+    assert!(validate_headless_host_profile(&profile).is_err());
 }
 
 #[test]

@@ -41,6 +41,7 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
             max_decoded_cache_bytes,
             retain_audio_timeline: true,
             performance_profiling: true,
+            presentation_rate_hz: astra_platform::HEADLESS_PRESENTATION_RATE_HZ,
             platform: host.client.clone(),
         })
         .await

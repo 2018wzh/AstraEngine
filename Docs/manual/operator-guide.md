@@ -68,7 +68,7 @@ astra-headless validate-review \
 
 GPU job 必须先把 profile renderer 绑定为 `wgpu_offscreen`，再给 `run` 或 `serve` 传 `--gpu`；CPU profile 与 flag 混用会阻断。workspace test job 通过 `ASTRA_HEADLESS_GPU=1 cargo test ...` 让 `HeadlessTestContext` 生成 GPU profile 并启动 `serve --gpu`。该模式固定 Windows/DX12、Linux/Vulkan、macOS/Metal；Windows DX12 使用 build-locked static DXC，不读取 PATH 中的动态 DXC。所有平台都要求 hardware adapter，不回退软件 adapter或其他 backend。
 
-正式性能运行在 v3 profile 的 `gpu_adapter` 中精确声明 backend、device type 和 `require_timestamp_query: true`。`astra-headless performance-e2` 只接受 clean Release build、匹配的 package/budget/profile/build identity，并固定执行 1,200 帧 warmup 与 72,000 帧 measurement。产品 workload 通过 `run --performance-budget --performance-report --performance-trace --performance-trace-manifest` 复用同一 package bootstrap 和物理输入，不能用 synthetic report 替代产品路线证据。
+正式性能运行在 v3 profile 的 `gpu_adapter` 中精确声明 backend、device type 和 `require_timestamp_query: true`，同时设置 `presentation_rate_hz: 120`。Runtime 仍以 60 Hz 固定步长推进，Headless 只把 presentation 分成两个 substep；普通 v2/v3 功能 profile 保持 60 Hz。`astra-headless performance-e2` 只接受 clean Release build、匹配的 package/budget/profile/build identity，并固定执行 1,200 帧 warmup 与 72,000 帧 measurement。产品 workload 通过 `run --performance-budget --performance-report --performance-trace --performance-trace-manifest --performance-start-sequence` 复用同一 package bootstrap 和物理输入，不能用 synthetic report 替代产品路线证据。
 
 先从已校验的普通 Headless profile 派生性能 profile，再由工具写入固定阈值预算。不要手写或在运行后修改 JSON：
 
@@ -97,7 +97,7 @@ astra-headless performance-e2 \
   --run-index 1
 ```
 
-800×600 产品压力使用 `product-stress`，完整路线使用 `product-route`，并给 `run` 传对应的 `--performance-*` 参数。压力运行还必须传 `--performance-warmup-frames 1200`；路线不伪造 72,000 个输入 sample，而是按实际 GPU submission 数生成固定预算。三次集显压力报告必须全部通过。独显 profile 和报告放在单独对照目录，不能参与 release decision。
+800×600 产品压力使用 `product-stress`，完整路线使用 `product-route`，并给 `run` 传对应的 `--performance-*` 参数。先用 `prepare-product-performance-input` 读取已经验收的 Title 导航前缀，再生成 1,200 + 72,000 个 presentation sample；生成器会保留物理输入与 `Await` 的真实 tick 语义。压力运行还必须传 `--performance-warmup-frames 1200`，并把生成器返回的 start sequence 原样传给 `run`。完整路线不伪造 72,000 个输入 sample，而是按实际 GPU submission 数生成固定预算。三次集显压力报告必须全部通过。独显 profile 和报告放在单独对照目录，不能参与 release decision。
 
 Trace 写入 ignored 目录后，Codex 通过外部 `perfetto-mcp==0.1.4` 的 `find_slices` 和 `execute_sql_query` 查看热点。不要把第三方 MCP 放进仓库，也不要修改 `astra-mcp`。设备名、本地路径和原始 trace 不进入文档、package 或 report。性能报告只证明所声明 adapter、workload 和 E2 identity；Windows E3 仍需另行验收。
 

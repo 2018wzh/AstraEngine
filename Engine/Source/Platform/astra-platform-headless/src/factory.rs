@@ -76,6 +76,7 @@ pub struct HeadlessGpuFrameSample {
 }
 
 pub trait HeadlessPerformanceObserver: Debug + Send + Sync {
+    fn pace_gpu_frame(&self, sequence: u64) -> Result<(), PlatformError>;
     fn bind_gpu_frame(&self, sequence: u64) -> Result<Option<u64>, PlatformError>;
     fn record_gpu_frame(&self, sample: HeadlessGpuFrameSample) -> Result<(), PlatformError>;
 }
@@ -484,6 +485,7 @@ impl HostState {
                     semantics: pending.semantics,
                 };
                 if let Some(observer) = &self.performance_observer {
+                    observer.pace_gpu_frame(pending.sequence)?;
                     let pending_profile = renderer.submit_frame_timestamped(&frame)?;
                     let captured = if capture {
                         renderer.capture_checkpoint()?

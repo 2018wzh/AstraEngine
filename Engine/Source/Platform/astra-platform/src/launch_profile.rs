@@ -10,6 +10,8 @@ use crate::{
 
 pub const HEADLESS_HOST_PROFILE_SCHEMA: &str = "astra.headless_host_profile.v3";
 pub const HEADLESS_HOST_PROFILE_V2_SCHEMA: &str = "astra.headless_host_profile.v2";
+pub const HEADLESS_PRESENTATION_RATE_HZ: u32 = 60;
+pub const HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ: u32 = 120;
 pub const HEADLESS_INPUT_POLICY_SCHEMA: &str = "astra.headless_input_policy.v1";
 pub const USER_INPUT_SEQUENCE_SCHEMA: &str = "astra.user_input_sequence.v1";
 pub const HEADLESS_PROTOCOL_SCHEMA: &str = "astra.headless_protocol.v1";
@@ -138,6 +140,8 @@ pub struct HeadlessHostProfile {
     pub viewport_width: u32,
     pub viewport_height: u32,
     pub tick_duration_ns: u64,
+    #[serde(default = "default_headless_presentation_rate_hz")]
+    pub presentation_rate_hz: u32,
     pub frame_format: String,
     pub image_artifact_format: String,
     pub audio_sample_rate: u32,
@@ -169,6 +173,10 @@ const fn default_decoded_cache_bytes() -> u64 {
 
 const fn default_gpu_resource_bytes() -> u64 {
     256 * 1024 * 1024
+}
+
+const fn default_headless_presentation_rate_hz() -> u32 {
+    HEADLESS_PRESENTATION_RATE_HZ
 }
 
 impl HeadlessHostProfile {
@@ -203,6 +211,7 @@ impl HeadlessHostProfile {
             render_policy: HeadlessRenderPolicy::Checkpoints,
             readback_policy: HeadlessReadbackPolicy::RasterizedFrames,
             tick_duration_ns: HEADLESS_TICK_DURATION_NS,
+            presentation_rate_hz: HEADLESS_PRESENTATION_RATE_HZ,
             frame_format: "rgba8_srgb".to_string(),
             image_artifact_format: "png".to_string(),
             audio_sample_rate: HEADLESS_AUDIO_SAMPLE_RATE,
@@ -360,6 +369,10 @@ pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(
         ));
     }
     if profile.tick_duration_ns != HEADLESS_TICK_DURATION_NS
+        || !matches!(
+            profile.presentation_rate_hz,
+            HEADLESS_PRESENTATION_RATE_HZ | HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ
+        )
         || profile.frame_format != "rgba8_srgb"
         || profile.image_artifact_format != "png"
         || profile.audio_sample_rate != HEADLESS_AUDIO_SAMPLE_RATE
@@ -439,6 +452,27 @@ pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(
             "headless v2 profile cannot declare a v3 GPU adapter policy",
         ));
     }
+    if profile.schema == HEADLESS_HOST_PROFILE_V2_SCHEMA
+        && profile.presentation_rate_hz != HEADLESS_PRESENTATION_RATE_HZ
+    {
+        return Err(invalid_headless_profile(
+            "headless v2 profile cannot change the canonical presentation rate",
+        ));
+    }
+    if profile.presentation_rate_hz == HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ
+        && (profile.schema != HEADLESS_HOST_PROFILE_SCHEMA
+            || profile.providers.renderer != "wgpu_offscreen"
+            || profile.render_policy != HeadlessRenderPolicy::All
+            || profile.readback_policy != HeadlessReadbackPolicy::CheckpointsOnly
+            || !profile
+                .gpu_adapter
+                .as_ref()
+                .is_some_and(|policy| policy.require_timestamp_query))
+    {
+        return Err(invalid_headless_profile(
+            "120 Hz presentation is reserved for timestamped headless performance E2",
+        ));
+    }
     if let Some(policy) = &profile.gpu_adapter {
         if policy
             .adapter_identity_hash
@@ -507,6 +541,7 @@ pub fn validate_headless_performance_profile(
     })?;
     if profile.schema != HEADLESS_HOST_PROFILE_SCHEMA
         || profile.providers.renderer != "wgpu_offscreen"
+        || profile.presentation_rate_hz != HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ
         || !policy.require_timestamp_query
         || profile.render_policy != HeadlessRenderPolicy::All
         || profile.readback_policy != HeadlessReadbackPolicy::CheckpointsOnly
@@ -514,7 +549,7 @@ pub fn validate_headless_performance_profile(
         || profile.max_gpu_resource_bytes > 256 * 1024 * 1024
     {
         return Err(invalid_headless_profile(
-            "performance E2 requires headless v3, all-frame GPU submission, checkpoint-only readback, and timestamp queries",
+            "performance E2 requires headless v3, 120 Hz presentation, all-frame GPU submission, checkpoint-only readback, and timestamp queries",
         ));
     }
     Ok(policy)

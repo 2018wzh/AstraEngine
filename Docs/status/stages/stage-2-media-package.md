@@ -8,7 +8,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **Goal:** 用同一 package、profile、input 和 build identity 量化 package、Runtime/UI、Scene2D、GPU 与内存热点，并在集显上关闭 120 Hz E2 预算。
 
-**Implemented:** `astra.performance_trace_manifest.v1`、Headless profile v3 `GpuAdapterPolicy`、bounded Trace Event writer、CPU/GPU scope/counter/flow、lazy source-locked package、decoded asset LRU、retained atlas mutation、pipeline/output/buffer 复用、timestamp/readback ring 和逐帧 allocator counter。外部分析固定使用 `perfetto-mcp==0.1.4`，不修改 `astra-mcp`。
+**Implemented:** `astra.performance_trace_manifest.v1`、Headless profile v3 `GpuAdapterPolicy`、60 Hz Runtime 与 120 Hz presentation 分离、无累计截断误差的 deadline pacing、物理输入压力序列生成、bounded Trace Event writer、CPU/GPU scope/counter/flow、lazy source-locked package、decoded asset LRU、retained atlas mutation、pipeline/output/buffer 复用、timestamp/readback ring 和逐帧 allocator counter。外部分析固定使用 `perfetto-mcp==0.1.4`，不修改 `astra-mcp`。
 
 **Blocking Evidence:** 800×600 产品压力、1920×1080 Scene2D 压力和完整产品路线必须在 clean Release build 上通过预算与正确性回归。集显 workload 各跑三次；独显报告只作对照。缺 timestamp query、deadline miss、资源超限、trace 不连续或 report blocked 都不能把本项标为 `DONE`。
 

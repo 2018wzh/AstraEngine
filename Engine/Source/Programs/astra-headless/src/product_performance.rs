@@ -6,7 +6,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Mutex,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use astra_core::{
@@ -29,8 +29,15 @@ struct RecorderState {
     last_memory_sample: Option<(u64, u64)>,
     memory_baseline: Option<(u64, u64)>,
     active_input_flow: Option<ActiveInputFlow>,
+    warmup_frames: u64,
     warmup_frames_remaining: u64,
     measurement_started: Option<Instant>,
+    pacing_started: Instant,
+    paced_frame_count: u64,
+    presentation_rate_hz: u32,
+    start_sequence: u64,
+    armed: bool,
+    first_gpu_sequence: Option<u64>,
 }
 
 struct ActiveInputFlow {
@@ -56,9 +63,18 @@ impl ProductPerformanceRecorder {
         budget: PerformanceBudget,
         trace_path: &Path,
         warmup_frames: u64,
+        presentation_rate_hz: u32,
+        start_sequence: u64,
     ) -> Result<Self, String> {
         budget.validate().map_err(|error| error.to_string())?;
         validate_product_budget(&budget)?;
+        if presentation_rate_hz != astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ {
+            return Err("ASTRA_PERFORMANCE_PRESENTATION_RATE_INVALID".into());
+        }
+        if start_sequence == 0 {
+            return Err("ASTRA_PERFORMANCE_START_SEQUENCE_INVALID".into());
+        }
+        let started = Instant::now();
         Ok(Self {
             state: Mutex::new(Some(RecorderState {
                 recorder: PerformanceRecorder::new(budget).map_err(|error| error.to_string())?,
@@ -67,12 +83,19 @@ impl ProductPerformanceRecorder {
                     "astra-headless-product",
                 ))
                 .map_err(|error| error.to_string())?,
-                started: Instant::now(),
+                started,
                 last_memory_sample: None,
                 memory_baseline: None,
                 active_input_flow: None,
+                warmup_frames,
                 warmup_frames_remaining: warmup_frames,
                 measurement_started: (warmup_frames == 0).then(Instant::now),
+                pacing_started: started,
+                paced_frame_count: 0,
+                presentation_rate_hz,
+                start_sequence,
+                armed: false,
+                first_gpu_sequence: None,
             })),
             decoded_cache_bytes: AtomicU64::new(0),
         })
@@ -94,6 +117,9 @@ impl ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
+        if !state.armed {
+            return Ok(());
+        }
         let timestamp_ns = elapsed_ns(state.started)?;
         for (domain, name, duration_ns) in [
             ("runtime.cpu", "runtime.tick_action", sample.runtime_tick_ns),
@@ -121,6 +147,21 @@ impl ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
+        if !state.armed {
+            if sequence < state.start_sequence {
+                return Ok(());
+            }
+            if sequence > state.start_sequence {
+                return Err("ASTRA_PERFORMANCE_START_SEQUENCE_MISSED".into());
+            }
+            let started = Instant::now();
+            state.started = started;
+            state.pacing_started = started;
+            state.paced_frame_count = 0;
+            state.measurement_started = (state.warmup_frames_remaining == 0).then_some(started);
+            state.first_gpu_sequence = None;
+            state.armed = true;
+        }
         if state.active_input_flow.is_some() {
             return Err("ASTRA_PERFORMANCE_INPUT_FLOW_ALREADY_ACTIVE".into());
         }
@@ -151,6 +192,9 @@ impl ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
+        if !state.armed {
+            return Ok(());
+        }
         let active = state
             .active_input_flow
             .take()
@@ -189,6 +233,9 @@ impl ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
+        if !state.armed {
+            return Ok(());
+        }
         let end_ns = elapsed_ns(state.started)?;
         let duration_ns: u64 = started
             .elapsed()
@@ -221,6 +268,9 @@ impl ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
+        if !state.armed {
+            return Ok(());
+        }
         let timestamp_ns = elapsed_ns(state.started)?;
         state
             .trace
@@ -241,6 +291,9 @@ impl ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
+        if !state.armed {
+            return Ok(());
+        }
         let timestamp_ns = elapsed_ns(state.started)?;
         state
             .trace
@@ -262,6 +315,9 @@ impl ProductPerformanceRecorder {
             .lock()
             .map_err(|_| "ASTRA_PERFORMANCE_RECORDER_POISONED")?;
         let state = guard.take().ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
+        if !state.armed {
+            return Err("ASTRA_PERFORMANCE_START_SEQUENCE_NOT_REACHED".into());
+        }
         let duration_us = state
             .measurement_started
             .ok_or("ASTRA_PERFORMANCE_MEASUREMENT_NOT_STARTED")?
@@ -329,7 +385,35 @@ fn validate_product_budget(budget: &PerformanceBudget) -> Result<(), String> {
 }
 
 impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
-    fn bind_gpu_frame(&self, _sequence: u64) -> Result<Option<u64>, PlatformError> {
+    fn pace_gpu_frame(&self, sequence: u64) -> Result<(), PlatformError> {
+        let deadline = {
+            let mut guard = self
+                .state
+                .lock()
+                .map_err(|_| performance_error("recorder mutex poisoned"))?;
+            let state = guard
+                .as_mut()
+                .ok_or_else(|| performance_error("recorder already finished"))?;
+            if !state.armed {
+                return Ok(());
+            }
+            state.first_gpu_sequence.get_or_insert(sequence);
+            state.paced_frame_count = state
+                .paced_frame_count
+                .checked_add(1)
+                .ok_or_else(|| performance_error("paced frame count overflowed"))?;
+            let offset = frame_deadline_offset(state.paced_frame_count, state.presentation_rate_hz)
+                .map_err(performance_error)?;
+            state
+                .pacing_started
+                .checked_add(offset)
+                .ok_or_else(|| performance_error("frame deadline overflowed"))?
+        };
+        pace_until(deadline);
+        Ok(())
+    }
+
+    fn bind_gpu_frame(&self, sequence: u64) -> Result<Option<u64>, PlatformError> {
         let mut guard = self
             .state
             .lock()
@@ -337,6 +421,13 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or_else(|| performance_error("recorder already finished"))?;
+        if !state.armed
+            || state
+                .first_gpu_sequence
+                .is_none_or(|first| sequence < first)
+        {
+            return Ok(None);
+        }
         Ok(state
             .active_input_flow
             .as_mut()
@@ -355,6 +446,13 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or_else(|| performance_error("recorder already finished"))?;
+        if !state.armed
+            || state
+                .first_gpu_sequence
+                .is_none_or(|first| sample.sequence < first)
+        {
+            return Ok(());
+        }
         if state.warmup_frames_remaining > 0 {
             if let Some(flow_id) = sample.input_flow_id {
                 let timestamp_ns: u64 = state
@@ -377,7 +475,14 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
             }
             state.warmup_frames_remaining -= 1;
             if state.warmup_frames_remaining == 0 {
-                state.measurement_started = Some(Instant::now());
+                let offset = frame_deadline_offset(state.warmup_frames, state.presentation_rate_hz)
+                    .map_err(performance_error)?;
+                state.measurement_started = Some(
+                    state
+                        .pacing_started
+                        .checked_add(offset)
+                        .ok_or_else(|| performance_error("measurement deadline overflowed"))?,
+                );
                 state.last_memory_sample = None;
                 state.memory_baseline = None;
             }
@@ -612,6 +717,39 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
     }
 }
 
+fn frame_deadline_offset(
+    frame_count: u64,
+    presentation_rate_hz: u32,
+) -> Result<Duration, &'static str> {
+    if presentation_rate_hz == 0 {
+        return Err("presentation rate must be non-zero");
+    }
+    let nanoseconds = u128::from(frame_count)
+        .checked_mul(1_000_000_000)
+        .ok_or("frame deadline offset overflowed")?
+        / u128::from(presentation_rate_hz);
+    let nanoseconds: u64 = nanoseconds
+        .try_into()
+        .map_err(|_| "frame deadline offset overflowed")?;
+    Ok(Duration::from_nanos(nanoseconds))
+}
+
+fn pace_until(deadline: Instant) {
+    const SPIN_WINDOW: Duration = Duration::from_micros(200);
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return;
+        }
+        let remaining = deadline.duration_since(now);
+        if remaining > SPIN_WINDOW {
+            std::thread::sleep(remaining - SPIN_WINDOW);
+        } else {
+            std::hint::spin_loop();
+        }
+    }
+}
+
 fn performance_error(message: &str) -> PlatformError {
     PlatformError::new(
         astra_platform::PlatformErrorCode::InvalidState,
@@ -634,6 +772,19 @@ mod tests {
     use astra_core::{
         Hash256, PerformanceMetricBudget, PerformanceUnit, PERFORMANCE_BUDGET_SCHEMA,
     };
+
+    #[test]
+    fn frame_deadlines_do_not_accumulate_fractional_rate_drift() {
+        assert_eq!(
+            frame_deadline_offset(120, 120).unwrap(),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            frame_deadline_offset(72_000, 120).unwrap(),
+            Duration::from_secs(600)
+        );
+        assert!(frame_deadline_offset(1, 0).is_err());
+    }
 
     #[test]
     fn product_recorder_writes_identity_bound_report_and_trace_manifest() {
@@ -679,8 +830,11 @@ mod tests {
             },
             &temp.path().join("trace.json"),
             1,
+            astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ,
+            1,
         )
         .unwrap();
+        recorder.begin_input_flow(1).unwrap();
         let mut sample = HeadlessGpuFrameSample {
             sequence: 1,
             input_flow_id: None,
@@ -707,9 +861,12 @@ mod tests {
             heap_allocation_bytes: 0,
             heap_allocation_count: 0,
         };
+        recorder.pace_gpu_frame(1).unwrap();
         recorder.record_gpu_frame(sample).unwrap();
         sample.sequence = 2;
+        recorder.pace_gpu_frame(2).unwrap();
         recorder.record_gpu_frame(sample).unwrap();
+        recorder.end_input_flow(1).unwrap();
         recorder
             .finish(
                 PerformanceRunIdentity {

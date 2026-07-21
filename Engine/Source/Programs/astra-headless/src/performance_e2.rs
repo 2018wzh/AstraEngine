@@ -113,6 +113,7 @@ pub fn prepare_profile(
         profile.schema = astra_platform::HEADLESS_HOST_PROFILE_SCHEMA.into();
     }
     profile.providers.renderer = "wgpu_offscreen".into();
+    profile.presentation_rate_hz = astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ;
     profile.render_policy = astra_platform::HeadlessRenderPolicy::All;
     profile.readback_policy = astra_platform::HeadlessReadbackPolicy::CheckpointsOnly;
     profile.gpu_adapter = Some(astra_platform::GpuAdapterPolicy {
@@ -1115,6 +1116,7 @@ mod tests {
             hash,
         );
         profile.providers.renderer = "wgpu_offscreen".into();
+        profile.presentation_rate_hz = astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ;
         profile.gpu_adapter = Some(GpuAdapterPolicy {
             backend: GpuBackendPolicy::Dx12,
             device_type: GpuDeviceTypePolicy::Integrated,
@@ -1161,6 +1163,7 @@ mod tests {
             hash,
         );
         profile.providers.renderer = "wgpu_offscreen".into();
+        profile.presentation_rate_hz = astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ;
         profile.gpu_adapter = Some(GpuAdapterPolicy {
             backend: GpuBackendPolicy::Dx12,
             device_type: GpuDeviceTypePolicy::Integrated,

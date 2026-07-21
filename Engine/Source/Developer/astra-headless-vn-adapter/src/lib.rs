@@ -3,7 +3,9 @@ use astra_headless_protocol::{ButtonState, GamepadControl, PhysicalInput, TouchP
 use astra_package::{
     AstraContainerReader, ContainerCryptoProvider, PackageReader, SourceUnlockPolicy,
 };
-use astra_platform::{SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest};
+use astra_platform::{
+    SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest, HEADLESS_PRESENTATION_RATE_HZ,
+};
 use astra_player_core::{
     PlatformCommandSink, PlayerHostCommandExecutor, PlayerHostCommandResult, PlayerHostResourceId,
 };
@@ -43,6 +45,18 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
     ) -> ProductFuture<'a, Result<Box<dyn ProductSession>, ProductHostError>> {
         let package_crypto = self.package_crypto.clone();
         Box::pin(async move {
+            if request.presentation_rate_hz < HEADLESS_PRESENTATION_RATE_HZ
+                || !request
+                    .presentation_rate_hz
+                    .is_multiple_of(HEADLESS_PRESENTATION_RATE_HZ)
+            {
+                return Err(ProductHostError::Binding(
+                    "presentation rate must be an integer multiple of the authoritative Runtime tick rate"
+                        .into(),
+                ));
+            }
+            let presentation_substeps =
+                request.presentation_rate_hz / HEADLESS_PRESENTATION_RATE_HZ;
             tracing::info!(
                 event = "headless.product.native_vn.open",
                 target = %request.target,
@@ -178,6 +192,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 resumed: false,
                 focused: false,
                 last_tick: 0,
+                presentation_substeps,
                 performance: request
                     .performance_profiling
                     .then(ProductPerformanceSample::default),
@@ -249,6 +264,7 @@ struct NativeVnHeadlessSession {
     resumed: bool,
     focused: bool,
     last_tick: u64,
+    presentation_substeps: u32,
     performance: Option<ProductPerformanceSample>,
 }
 
@@ -592,17 +608,24 @@ impl NativeVnHeadlessSession {
                 .ok_or_else(|| ProductHostError::Input("tick sequence overflowed".into()))?;
             let now_ms = canonical_ms(self.last_tick)?;
             let vn_started = self.profile_started();
-            let present = self
-                .source
-                .as_mut()
-                .ok_or_else(|| ProductHostError::Input("product session is shut down".into()))?
-                .tick_presentation(astra_headless_protocol::TICK_DURATION_NS)
-                .map_err(|error| ProductHostError::Output(error.to_string()))?;
-            if let Some(present) = present {
-                self.executor
-                    .execute_batch(present)
-                    .await
+            for substep in 0..self.presentation_substeps {
+                let delta_ns = presentation_substep_duration_ns(
+                    astra_headless_protocol::TICK_DURATION_NS,
+                    self.presentation_substeps,
+                    substep,
+                );
+                let present = self
+                    .source
+                    .as_mut()
+                    .ok_or_else(|| ProductHostError::Input("product session is shut down".into()))?
+                    .tick_presentation(delta_ns)
                     .map_err(|error| ProductHostError::Output(error.to_string()))?;
+                if let Some(present) = present {
+                    self.executor
+                        .execute_batch(present)
+                        .await
+                        .map_err(|error| ProductHostError::Output(error.to_string()))?;
+                }
             }
             self.add_profile_duration(vn_started, |sample, duration| {
                 sample.vn_step_ns = sample.vn_step_ns.saturating_add(duration);
@@ -809,6 +832,12 @@ impl NativeVnHeadlessSession {
     }
 }
 
+fn presentation_substep_duration_ns(tick_duration_ns: u64, substeps: u32, substep: u32) -> u64 {
+    let base = tick_duration_ns / u64::from(substeps);
+    let remainder = tick_duration_ns % u64::from(substeps);
+    base + u64::from(substep + 1 == substeps) * remainder
+}
+
 fn hashed_observation(
     key: &str,
     value: &impl serde::Serialize,
@@ -895,4 +924,19 @@ fn requires_active_input(input: &PhysicalInput) -> bool {
 
 fn binding(operation: &str, error: impl std::fmt::Display) -> ProductHostError {
     ProductHostError::Binding(format!("{operation}: {error}"))
+}
+
+#[cfg(test)]
+mod cadence_tests {
+    use super::presentation_substep_duration_ns;
+
+    #[test]
+    fn presentation_substeps_preserve_the_authoritative_tick_duration() {
+        let tick = astra_headless_protocol::TICK_DURATION_NS;
+        let first = presentation_substep_duration_ns(tick, 2, 0);
+        let second = presentation_substep_duration_ns(tick, 2, 1);
+        assert_eq!(first, 8_333_333);
+        assert_eq!(second, 8_333_334);
+        assert_eq!(first + second, tick);
+    }
 }

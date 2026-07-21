@@ -49,6 +49,9 @@ pub struct ProductOpenRequest {
     /// this disabled so the product path does not sample clocks or allocate
     /// profiling state.
     pub performance_profiling: bool,
+    /// Headless-only presentation cadence. The authoritative Runtime tick remains
+    /// fixed; performance E2 may request deterministic presentation substeps.
+    pub presentation_rate_hz: u32,
     pub platform: PlatformHostClient,
 }
 
