@@ -124,7 +124,12 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
         request: UiFrameRequest,
     ) -> Result<UiFrameOutput, UiValidationError> {
         self.ensure_live()?;
+        let request_validation_started = Instant::now();
         request.validate()?;
+        let request_validation_ns = request_validation_started
+            .elapsed()
+            .as_nanos()
+            .min(u64::MAX as u128) as u64;
         let mut request = request;
         if let Some(semantics) = self.last_semantics.as_ref() {
             if let Some(focused) = semantics.nodes.iter().find(|node| node.focused) {
@@ -291,13 +296,15 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
         for action in &mut actions {
             action.semantic_snapshot_hash = semantics.hash;
         }
-        let output = UiFrameOutput {
+        let mut output = UiFrameOutput {
             schema: "astra.ui_frame_output.v1".to_string(),
             dispositions,
             actions,
             performance: UiPerformanceSample {
+                request_validation_ns,
                 update_layout_ns,
                 paint_conversion_ns,
+                output_validation_ns: 0,
                 texture_update_bytes,
                 draw_calls: render.primitives.len() as u32,
                 vertices,
@@ -309,7 +316,12 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
             repaint_after_ns: view.repaint_after_ns,
             diagnostics: view.diagnostics,
         };
+        let output_validation_started = Instant::now();
         output.validate()?;
+        output.performance.output_validation_ns = output_validation_started
+            .elapsed()
+            .as_nanos()
+            .min(u64::MAX as u128) as u64;
         tracing::trace!(
             event = "ui.backend.frame.complete",
             provider_id = %self.descriptor.provider_id,

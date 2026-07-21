@@ -608,17 +608,25 @@ impl NativeVnHeadlessSession {
         self.add_profile_duration(profile_started, |sample, duration| {
             sample.ui_layout_paint_ns = sample.ui_layout_paint_ns.saturating_add(duration);
             if let Some(ui_sample) = ui_sample {
+                sample.ui_request_validation_ns = sample
+                    .ui_request_validation_ns
+                    .saturating_add(ui_sample.request_validation_ns);
                 sample.ui_update_layout_ns = sample
                     .ui_update_layout_ns
                     .saturating_add(ui_sample.update_layout_ns);
                 sample.ui_paint_conversion_ns = sample
                     .ui_paint_conversion_ns
                     .saturating_add(ui_sample.paint_conversion_ns);
+                sample.ui_output_validation_ns = sample
+                    .ui_output_validation_ns
+                    .saturating_add(ui_sample.output_validation_ns);
                 sample.ui_host_scene_ns = sample.ui_host_scene_ns.saturating_add(
                     duration.saturating_sub(
                         ui_sample
-                            .update_layout_ns
-                            .saturating_add(ui_sample.paint_conversion_ns),
+                            .request_validation_ns
+                            .saturating_add(ui_sample.update_layout_ns)
+                            .saturating_add(ui_sample.paint_conversion_ns)
+                            .saturating_add(ui_sample.output_validation_ns),
                     ),
                 );
             }

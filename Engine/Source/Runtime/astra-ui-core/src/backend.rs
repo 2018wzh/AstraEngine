@@ -97,8 +97,10 @@ impl ValidateUi for UiFrameRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UiPerformanceSample {
+    pub request_validation_ns: u64,
     pub update_layout_ns: u64,
     pub paint_conversion_ns: u64,
+    pub output_validation_ns: u64,
     pub texture_update_bytes: u64,
     pub draw_calls: u32,
     pub vertices: u32,
@@ -182,8 +184,10 @@ impl ValidateUi for UiFrameOutput {
                 "performance resource counters exceed the UI hard limits",
             ));
         }
-        if self.performance.update_layout_ns > 60_000_000_000
+        if self.performance.request_validation_ns > 60_000_000_000
+            || self.performance.update_layout_ns > 60_000_000_000
             || self.performance.paint_conversion_ns > 60_000_000_000
+            || self.performance.output_validation_ns > 60_000_000_000
         {
             return Err(UiValidationError::invalid(
                 "ASTRA_UI_PERFORMANCE_DURATION_LIMIT",

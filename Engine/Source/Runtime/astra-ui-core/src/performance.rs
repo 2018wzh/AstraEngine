@@ -167,8 +167,10 @@ mod tests {
 
     fn sample(update_layout_ns: u64, paint_conversion_ns: u64) -> UiPerformanceSample {
         UiPerformanceSample {
+            request_validation_ns: 0,
             update_layout_ns,
             paint_conversion_ns,
+            output_validation_ns: 0,
             texture_update_bytes: 0,
             draw_calls: 1,
             vertices: 4,

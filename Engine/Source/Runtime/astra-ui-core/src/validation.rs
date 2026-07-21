@@ -75,14 +75,14 @@ pub(crate) fn validate_string(field: &'static str, value: &str) -> Result<(), Ui
 }
 
 pub fn validate_serialized_size<T: serde::Serialize>(value: &T) -> Result<(), UiValidationError> {
-    let bytes = postcard::to_allocvec(value)
+    let serialized_size = postcard::experimental::serialized_size(value)
         .map_err(|error| UiValidationError::invalid("ASTRA_UI_DTO_ENCODE", error.to_string()))?;
-    if bytes.len() > MAX_DTO_BYTES {
+    if serialized_size > MAX_DTO_BYTES {
         return Err(UiValidationError::invalid(
             "ASTRA_UI_DTO_LIMIT",
             format!(
                 "serialized DTO is {} bytes; limit is {MAX_DTO_BYTES}",
-                bytes.len()
+                serialized_size
             ),
         ));
     }
