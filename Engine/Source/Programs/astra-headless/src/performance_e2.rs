@@ -372,12 +372,11 @@ pub async fn run(request: PerformanceE2Request<'_>) -> Result<(), String> {
     if renderer.performance_counters().upload_bytes != 0 {
         return Err("ASTRA_PERFORMANCE_STABLE_FRAME_REUPLOAD".into());
     }
+    let (profiler_overhead_ppm, profiler_working_set_bytes) =
+        validate_profiler_overhead(&mut renderer, &mut frame, request.trace)?;
     let memory_baseline = sample_process_memory()
         .map_err(|error| format!("ASTRA_PERFORMANCE_MEMORY_SAMPLE_FAILED: {error}"))?;
     let allocation_baseline = super::ASTRA_ALLOCATOR.snapshot();
-
-    let (profiler_overhead_ppm, profiler_working_set_bytes) =
-        validate_profiler_overhead(&mut renderer, &mut frame, request.trace)?;
 
     let mut trace = PerfettoTraceWriter::create(PerfettoTraceConfig::production(
         request.trace,
