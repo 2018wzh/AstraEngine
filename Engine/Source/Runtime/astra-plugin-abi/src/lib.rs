@@ -7,7 +7,8 @@ use abi_stable::{
 };
 use astra_core::{Hash256, SchemaVersion};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
+use std::sync::Arc;
 
 pub const GAME_RUNTIME_PROVIDER_SLOT: &str = "game_runtime_provider";
 pub const NATIVE_VN_RUNTIME_ID: &str = "native_vn";
@@ -731,14 +732,46 @@ pub struct RuntimeOutputSchemaDescriptor {
     pub codec: RuntimeOutputCodec,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct RuntimeOutputEnvelope {
     pub domain: RuntimeOutputDomain,
     pub schema: String,
     pub version: SchemaVersion,
     pub codec: RuntimeOutputCodec,
     pub hash: Hash256,
-    pub bytes: Vec<u8>,
+    bytes: Arc<[u8]>,
+}
+
+#[derive(Deserialize)]
+struct RuntimeOutputEnvelopeWire {
+    domain: RuntimeOutputDomain,
+    schema: String,
+    version: SchemaVersion,
+    codec: RuntimeOutputCodec,
+    hash: Hash256,
+    bytes: Arc<[u8]>,
+}
+
+impl<'de> Deserialize<'de> for RuntimeOutputEnvelope {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = RuntimeOutputEnvelopeWire::deserialize(deserializer)?;
+        if Hash256::from_sha256(&wire.bytes) != wire.hash {
+            return Err(D::Error::custom(
+                "ASTRA_RUNTIME_ENVELOPE_HASH: runtime output envelope hash does not match payload",
+            ));
+        }
+        Ok(Self {
+            domain: wire.domain,
+            schema: wire.schema,
+            version: wire.version,
+            codec: wire.codec,
+            hash: wire.hash,
+            bytes: wire.bytes,
+        })
+    }
 }
 
 impl RuntimeOutputEnvelope {
@@ -760,8 +793,28 @@ impl RuntimeOutputEnvelope {
             version,
             codec: RuntimeOutputCodec::Postcard,
             hash: Hash256::from_sha256(&payload),
-            bytes: payload,
+            bytes: payload.into(),
         })
+    }
+
+    pub fn postcard_bytes(
+        domain: RuntimeOutputDomain,
+        schema: impl Into<String>,
+        version: SchemaVersion,
+        bytes: Arc<[u8]>,
+    ) -> Self {
+        Self {
+            domain,
+            schema: schema.into(),
+            version,
+            codec: RuntimeOutputCodec::Postcard,
+            hash: Hash256::from_sha256(&bytes),
+            bytes,
+        }
+    }
+
+    pub fn bytes(&self) -> &Arc<[u8]> {
+        &self.bytes
     }
 
     pub fn decode_postcard<T: for<'de> Deserialize<'de>>(
@@ -792,12 +845,6 @@ impl RuntimeOutputEnvelope {
             return Err(RuntimeEnvelopeError::new(
                 "ASTRA_RUNTIME_ENVELOPE_CODEC",
                 "runtime output envelope codec does not match consumer",
-            ));
-        }
-        if Hash256::from_sha256(&self.bytes) != self.hash {
-            return Err(RuntimeEnvelopeError::new(
-                "ASTRA_RUNTIME_ENVELOPE_HASH",
-                "runtime output envelope hash does not match payload",
             ));
         }
         postcard::from_bytes(&self.bytes).map_err(|err| {
@@ -836,12 +883,6 @@ impl RuntimeOutputEnvelope {
             return Err(RuntimeEnvelopeError::new(
                 "ASTRA_RUNTIME_ENVELOPE_CODEC",
                 "runtime output envelope codec does not match consumer",
-            ));
-        }
-        if Hash256::from_sha256(&self.bytes) != self.hash {
-            return Err(RuntimeEnvelopeError::new(
-                "ASTRA_RUNTIME_ENVELOPE_HASH",
-                "runtime output envelope hash does not match payload",
             ));
         }
         Ok(())

@@ -157,7 +157,7 @@ impl RuntimeHostSchemaRegistry {
             ));
         }
         let bytes = output.outputs.iter().try_fold(0usize, |total, envelope| {
-            total.checked_add(envelope.bytes.len()).ok_or_else(|| {
+            total.checked_add(envelope.bytes().len()).ok_or_else(|| {
                 RuntimeHostError::new(
                     "ASTRA_RUNTIME_HOST_OUTPUT_BYTES",
                     "runtime provider output byte count overflowed",

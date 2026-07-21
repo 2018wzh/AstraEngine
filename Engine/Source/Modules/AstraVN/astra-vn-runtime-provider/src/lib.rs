@@ -521,9 +521,9 @@ impl NativeVnRuntimeProvider {
                     "astra.vn.step did not produce an output",
                 )
             })?;
-        let current_state = session
+        let (_, current_state_bytes) = session
             .world
-            .read_component::<VnRuntimeState>(session.vn_component)
+            .read_component_postcard_payload(session.vn_component)
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         // Audio cues are also typed presentation commands. Preserve their position
         // relative to stage audio controls instead of grouping output by domain:
@@ -613,13 +613,12 @@ impl NativeVnRuntimeProvider {
                 },
             )
             .map_err(|err| CoreVnError::message(err.to_string()))?,
-            RuntimeOutputEnvelope::postcard(
+            RuntimeOutputEnvelope::postcard_bytes(
                 RuntimeOutputDomain::Trace,
                 VN_RUNTIME_STATE_SCHEMA,
                 SchemaVersion::new(VN_RUNTIME_STATE_SCHEMA_MAJOR, 0, 0),
-                &current_state,
-            )
-            .map_err(|err| CoreVnError::message(err.to_string()))?,
+                current_state_bytes,
+            ),
         ];
         let observations = vec![RuntimeOutputEnvelope::postcard(
             RuntimeOutputDomain::Observation,
