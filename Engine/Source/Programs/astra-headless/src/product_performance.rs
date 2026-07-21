@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fmt,
     path::Path,
     sync::{
@@ -30,6 +30,8 @@ struct RecorderState {
     memory_baseline: Option<(u64, u64)>,
     allocation_baseline: astra_observability::AllocationSnapshot,
     active_input_flow: Option<ActiveInputFlow>,
+    product_cpu_by_flow: BTreeMap<u64, u64>,
+    pending_gpu_by_flow: BTreeMap<u64, HeadlessGpuFrameSample>,
     warmup_frames: u64,
     warmup_frames_remaining: u64,
     measurement_started: Option<Instant>,
@@ -98,6 +100,8 @@ impl ProductPerformanceRecorder {
                 memory_baseline: None,
                 allocation_baseline: astra_observability::allocation_snapshot(),
                 active_input_flow: None,
+                product_cpu_by_flow: BTreeMap::new(),
+                pending_gpu_by_flow: BTreeMap::new(),
                 warmup_frames,
                 warmup_frames_remaining: warmup_frames,
                 measurement_started: (warmup_frames == 0).then(Instant::now),
@@ -157,6 +161,25 @@ impl ProductPerformanceRecorder {
                 .complete(domain, name, 1, Some(sequence), timestamp_ns, duration_ns)
                 .map_err(|error| error.to_string())?;
         }
+        let product_cpu_ns = sample
+            .runtime_tick_ns
+            .checked_add(sample.ui_layout_paint_ns)
+            .and_then(|value| value.checked_add(sample.media_decode_ns))
+            .and_then(|value| value.checked_add(sample.save_load_ns))
+            .ok_or("ASTRA_PERFORMANCE_PRODUCT_CPU_OVERFLOW")?;
+        if let Some(pending) = state.pending_gpu_by_flow.remove(&sequence) {
+            self.record_gpu_frame_sample(state, pending, product_cpu_ns)
+                .map_err(|error| error.to_string())?;
+        } else if state
+            .product_cpu_by_flow
+            .insert(sequence, product_cpu_ns)
+            .is_some()
+        {
+            return Err("ASTRA_PERFORMANCE_PRODUCT_FLOW_DUPLICATE".into());
+        }
+        if state.product_cpu_by_flow.len() > 1_024 || state.pending_gpu_by_flow.len() > 1_024 {
+            return Err("ASTRA_PERFORMANCE_CORRELATION_CAPACITY_EXCEEDED".into());
+        }
         Ok(())
     }
 
@@ -184,6 +207,8 @@ impl ProductPerformanceRecorder {
             state.first_gpu_sequence = None;
             state.last_paced_gpu_sequence = None;
             state.gpu_measurement_cutoff = None;
+            state.product_cpu_by_flow.clear();
+            state.pending_gpu_by_flow.clear();
             state.armed = true;
         }
         if state.active_input_flow.is_some() {
@@ -227,6 +252,10 @@ impl ProductPerformanceRecorder {
             return Err("ASTRA_PERFORMANCE_INPUT_FLOW_SEQUENCE_MISMATCH".into());
         }
         if !active.gpu_seen {
+            state.product_cpu_by_flow.remove(&sequence);
+            if state.pending_gpu_by_flow.remove(&sequence).is_some() {
+                return Err("ASTRA_PERFORMANCE_GPU_FLOW_WITHOUT_SUBMISSION".into());
+            }
             let timestamp_ns = elapsed_ns(state.started)?;
             state
                 .trace
@@ -563,6 +592,32 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
         {
             return Ok(());
         }
+        let product_cpu_ns = match sample.input_flow_id {
+            Some(flow_id) => match state.product_cpu_by_flow.remove(&flow_id) {
+                Some(duration) => duration,
+                None => {
+                    if state.pending_gpu_by_flow.insert(flow_id, sample).is_some() {
+                        return Err(performance_error("duplicate pending GPU flow"));
+                    }
+                    if state.pending_gpu_by_flow.len() > 1_024 {
+                        return Err(performance_error("GPU flow correlation capacity exceeded"));
+                    }
+                    return Ok(());
+                }
+            },
+            None => 0,
+        };
+        self.record_gpu_frame_sample(state, sample, product_cpu_ns)
+    }
+}
+
+impl ProductPerformanceRecorder {
+    fn record_gpu_frame_sample(
+        &self,
+        state: &mut RecorderState,
+        sample: HeadlessGpuFrameSample,
+        product_cpu_ns: u64,
+    ) -> Result<(), PlatformError> {
         if state.warmup_frames_remaining > 0 {
             if let Some(flow_id) = sample.input_flow_id {
                 let timestamp_ns: u64 = state
@@ -604,9 +659,9 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
             .as_nanos()
             .try_into()
             .map_err(|_| performance_error("trace timestamp overflowed"))?;
-        let cpu_ns = sample
-            .scene_build_ns
-            .checked_add(sample.cpu_submit_ns)
+        let cpu_ns = product_cpu_ns
+            .checked_add(sample.scene_build_ns)
+            .and_then(|value| value.checked_add(sample.cpu_submit_ns))
             .ok_or_else(|| performance_error("CPU frame duration overflowed"))?;
         let end_to_end_ns = cpu_ns
             .checked_add(sample.gpu_duration_ns)
@@ -984,7 +1039,7 @@ mod tests {
         recorder.begin_input_flow(1).unwrap();
         let mut sample = HeadlessGpuFrameSample {
             sequence: 1,
-            input_flow_id: None,
+            input_flow_id: Some(1),
             scene_build_ns: 10,
             cpu_submit_ns: 20,
             gpu_duration_ns: 30,
@@ -1010,10 +1065,25 @@ mod tests {
         };
         recorder.pace_gpu_frame(1).unwrap();
         recorder.record_gpu_frame(sample).unwrap();
+        let product_sample = ProductPerformanceSample {
+            runtime_tick_ns: 5,
+            vn_step_ns: 2,
+            ui_layout_paint_ns: 40,
+            ui_update_layout_ns: 10,
+            ui_paint_conversion_ns: 5,
+            ui_host_scene_ns: 25,
+            media_decode_ns: 6,
+            save_load_ns: 7,
+        };
+        recorder.record_product_sample(1, product_sample).unwrap();
+        recorder.end_input_flow(1).unwrap();
+        recorder.begin_input_flow(2).unwrap();
         sample.sequence = 2;
+        sample.input_flow_id = Some(2);
         recorder.pace_gpu_frame(2).unwrap();
         recorder.record_gpu_frame(sample).unwrap();
-        recorder.end_input_flow(1).unwrap();
+        recorder.record_product_sample(2, product_sample).unwrap();
+        recorder.end_input_flow(2).unwrap();
         recorder.stop_gpu_measurement().unwrap();
         recorder
             .finish(
@@ -1037,6 +1107,15 @@ mod tests {
         assert!(temp.path().join("trace.json").is_file());
         assert!(temp.path().join("report.json").is_file());
         assert!(temp.path().join("trace-manifest.json").is_file());
+        let report: astra_core::PerformanceReport =
+            serde_json::from_slice(&std::fs::read(temp.path().join("report.json")).unwrap())
+                .unwrap();
+        let cpu = report
+            .metrics
+            .iter()
+            .find(|metric| metric.id == "frame.cpu_ns")
+            .unwrap();
+        assert_eq!(cpu.p95, 88);
     }
 
     fn hash(bytes: &[u8]) -> String {
