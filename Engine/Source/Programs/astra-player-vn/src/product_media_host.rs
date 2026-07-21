@@ -12,8 +12,9 @@ use astra_player_core::{
 };
 
 use crate::{
-    NativeVnAudioOutput, NativeVnAudioPreloadRequest, NativeVnHostCommandSource,
-    NativeVnProductAudioHost, NativeVnVideoRequest,
+    NativeVnAudioOutput, NativeVnAudioPreloadRequest, NativeVnDecodedCacheBudget,
+    NativeVnHostCommandSource, NativeVnProductAudioHost, NativeVnVideoRequest,
+    DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES,
 };
 
 pub struct NativeVnProductMediaHost {
@@ -99,6 +100,9 @@ impl NativeVnProductMediaHost {
         max_timeline_tasks: usize,
         retain_audio_timeline: bool,
     ) -> Self {
+        let cache_budget =
+            NativeVnDecodedCacheBudget::partition(DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES)
+                .expect("the built-in NativeVN decoded-cache budget must be partitionable");
         Self {
             audio: NativeVnProductAudioHost::new(retain_audio_timeline),
             timeline: PlayerTimelineScheduler::new(max_timeline_tasks),
@@ -110,7 +114,7 @@ impl NativeVnProductMediaHost {
             decoded_audio_cache_bytes: 0,
             max_video_frames: 18_000,
             max_decode_output_bytes: 512 * 1024 * 1024,
-            max_decoded_cache_bytes: 64 * 1024 * 1024,
+            max_decoded_cache_bytes: cache_budget.audio_bytes,
             performance: None,
         }
     }

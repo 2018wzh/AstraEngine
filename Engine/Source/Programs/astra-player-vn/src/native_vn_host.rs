@@ -62,6 +62,30 @@ use crate::ui_session::{
     controller_state_value, ActiveUiAnimation, ActiveUiController, ActiveUiModal,
 };
 
+pub const DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES: u64 = 192 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NativeVnDecodedCacheBudget {
+    pub asset_bytes: u64,
+    pub audio_bytes: u64,
+}
+
+impl NativeVnDecodedCacheBudget {
+    pub fn partition(total_bytes: u64) -> Result<Self, NativeVnHostError> {
+        let asset_bytes = total_bytes / 4;
+        let audio_bytes = total_bytes.saturating_sub(asset_bytes);
+        if asset_bytes == 0 || audio_bytes == 0 {
+            return Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_DECODED_CACHE_BUDGET_TOO_SMALL".into(),
+            ));
+        }
+        Ok(Self {
+            asset_bytes,
+            audio_bytes,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VnUiHostRequest {
     Save {
@@ -375,13 +399,14 @@ impl NativeVnHostCommandSource {
         height: u32,
         surface: PlayerHostResourceId,
     ) -> Result<Self, NativeVnHostError> {
+        let budget = NativeVnDecodedCacheBudget::partition(DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES)?;
         Self::from_package_with_asset_cache(
             package,
             config,
             width,
             height,
             surface,
-            128 * 1024 * 1024,
+            budget.asset_bytes,
         )
     }
 
@@ -1819,12 +1844,13 @@ impl NativeVnHostCommandSource {
             .stories
             .iter()
             .find(|story| !system_story_ids.contains(story.id.as_str()))
-            .map(|story| story.id.clone())
-            .ok_or_else(|| {
-                NativeVnHostError::RuntimeEvidence(
-                    "ASTRA_PLAYER_AUDIO_PRELOAD_GAMEPLAY_STORY_MISSING".into(),
-                )
-            })?;
+            .map(|story| story.id.clone());
+        let Some(story_id) = story_id else {
+            // A system-only package is a valid product shape (for example the
+            // minimal NativeVN contract fixture). The current system story was
+            // already queued by `step`, so there is no gameplay story to warm.
+            return Ok(());
+        };
         self.queue_story_audio_preloads(&story_id)
     }
 
@@ -4630,11 +4656,12 @@ fn ordered_ui_font_families(font_families: &[String], locale: &str) -> Vec<Strin
 }
 
 #[cfg(test)]
-mod font_fallback_tests {
+mod native_vn_host_tests {
     use super::{
         frame_localization_subset, ordered_ui_font_families, parse_ui_text_alignment,
-        save_slots_for_policy, ReadingMode, SaveCompletionPolicy, SystemPageKind,
-        SystemUiProfilePolicy, UiBlueprintModalFrameModel, UiTextAlignment, UiValue,
+        save_slots_for_policy, NativeVnDecodedCacheBudget, ReadingMode, SaveCompletionPolicy,
+        SystemPageKind, SystemUiProfilePolicy, UiBlueprintModalFrameModel, UiTextAlignment,
+        UiValue, DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -4664,6 +4691,19 @@ mod font_fallback_tests {
 
         assert_eq!(first[0], "Noto Sans JP");
         assert_eq!(first, second);
+    }
+
+    #[astra_headless_test::test]
+    fn decoded_cache_partition_preserves_the_profile_bound() {
+        let budget =
+            NativeVnDecodedCacheBudget::partition(DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES).unwrap();
+        assert_eq!(budget.asset_bytes, 48 * 1024 * 1024);
+        assert_eq!(budget.audio_bytes, 144 * 1024 * 1024);
+        assert_eq!(
+            budget.asset_bytes + budget.audio_bytes,
+            DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES
+        );
+        assert!(NativeVnDecodedCacheBudget::partition(3).is_err());
     }
 
     #[astra_headless_test::test]

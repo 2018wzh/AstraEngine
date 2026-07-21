@@ -20,7 +20,10 @@ use astra_ui_core::{
 use astra_vn_core::VnRunConfig;
 use std::{sync::Arc, time::Instant};
 
-use astra_player_vn::{NativeVnHostCommandSource, NativeVnProductMediaHost, VnUiHostRequest};
+use astra_player_vn::{
+    NativeVnDecodedCacheBudget, NativeVnHostCommandSource, NativeVnProductMediaHost,
+    VnUiHostRequest,
+};
 
 #[derive(Default)]
 pub struct NativeVnProductAdapterFactory {
@@ -134,15 +137,11 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 .map_err(|error| binding("surface.create", error))?;
             record_open_phase(&performance_observer, "product.surface_created")?;
             let logical_surface = PlayerHostResourceId(1);
-            let asset_cache_bytes = request.max_decoded_cache_bytes.saturating_mul(2) / 3;
-            let audio_cache_bytes = request
-                .max_decoded_cache_bytes
-                .saturating_sub(asset_cache_bytes);
-            if asset_cache_bytes == 0 || audio_cache_bytes == 0 {
-                return Err(ProductHostError::Binding(
-                    "decoded cache budget is too small to partition by resource domain".into(),
-                ));
-            }
+            let cache_budget =
+                NativeVnDecodedCacheBudget::partition(request.max_decoded_cache_bytes)
+                    .map_err(|error| ProductHostError::Binding(error.to_string()))?;
+            let asset_cache_bytes = cache_budget.asset_bytes;
+            let audio_cache_bytes = cache_budget.audio_bytes;
             let mut sink = PlatformCommandSink::new(request.platform.clone());
             sink.bind_surface(logical_surface, surface)
                 .map_err(|error| binding("surface.bind", error))?;
