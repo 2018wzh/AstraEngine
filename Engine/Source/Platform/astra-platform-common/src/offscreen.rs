@@ -229,10 +229,10 @@ impl WgpuOffscreenRenderer {
                 "selected GPU adapter does not support timestamp queries",
             ));
         }
-        let mut descriptor = wgpu::DeviceDescriptor::default();
-        if policy.is_some_and(|policy| policy.require_timestamp_query) {
-            descriptor.required_features |= required_timestamp_features;
-        }
+        let descriptor = device_descriptor(
+            policy.is_some_and(|policy| policy.require_timestamp_query),
+            required_timestamp_features,
+        );
         let (device, queue) = adapter.request_device(&descriptor).await.map_err(|error| {
             tracing::error!(
                 event = "platform.offscreen.device_create.failed",
@@ -675,6 +675,20 @@ fn renderer_execution_identity(info: &wgpu::AdapterInfo) -> RendererExecutionIde
     }
 }
 
+fn device_descriptor(
+    require_timestamp_query: bool,
+    timestamp_features: wgpu::Features,
+) -> wgpu::DeviceDescriptor<'static> {
+    let mut descriptor = wgpu::DeviceDescriptor {
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
+        ..wgpu::DeviceDescriptor::default()
+    };
+    if require_timestamp_query {
+        descriptor.required_features |= timestamp_features;
+    }
+    descriptor
+}
+
 #[cfg(test)]
 mod adapter_identity_tests {
     use super::*;
@@ -706,6 +720,18 @@ mod adapter_identity_tests {
             adapter_policy_identity(&info),
             adapter_policy_identity(&adapter_info("1.2.4"))
         );
+    }
+
+    #[test]
+    fn offscreen_device_uses_bounded_memory_allocation_hints() {
+        let timestamp_features =
+            wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+        let descriptor = device_descriptor(true, timestamp_features);
+        assert!(matches!(
+            descriptor.memory_hints,
+            wgpu::MemoryHints::MemoryUsage
+        ));
+        assert!(descriptor.required_features.contains(timestamp_features));
     }
 }
 
