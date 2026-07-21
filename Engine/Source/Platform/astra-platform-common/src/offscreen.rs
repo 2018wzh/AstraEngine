@@ -4,7 +4,7 @@ use std::{
         atomic::{AtomicBool, AtomicU8, Ordering},
         mpsc, Arc,
     },
-    thread::{self, JoinHandle},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -32,7 +32,6 @@ pub struct WgpuOffscreenRenderer {
     filter_pipelines: BTreeMap<String, CachedFilterPipeline>,
     filter_outputs: Vec<CachedFilterOutput>,
     gpu_timer: Option<GpuTimer>,
-    _gpu_poll_worker: Option<GpuPollWorker>,
     readback_ring: ReadbackRing,
     last_readback_bytes: u64,
     last_queue_submissions: u64,
@@ -81,7 +80,7 @@ struct ReadbackRing {
 const MAX_GPU_TIMESTAMP_QUERIES: u32 = 64;
 // Keep resolve/copy batches below the profiler's p95 sampling frequency while
 // retaining a fixed upper bound on mapped timestamp buffers.
-pub const WGPU_TIMESTAMP_RING_SIZE: usize = 32;
+pub const WGPU_TIMESTAMP_RING_SIZE: usize = 64;
 
 struct GpuTimer {
     slots: Vec<GpuTimerSlot>,
@@ -105,41 +104,6 @@ enum PendingTimestampRead {
         submission: wgpu::SubmissionIndex,
         query_count: u32,
     },
-}
-
-struct GpuPollWorker {
-    stop: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl GpuPollWorker {
-    fn start(device: wgpu::Device) -> Self {
-        let stop = Arc::new(AtomicBool::new(false));
-        let worker_stop = Arc::clone(&stop);
-        let thread = thread::Builder::new()
-            .name("astra-wgpu-poll".into())
-            .spawn(move || {
-                while !worker_stop.load(Ordering::Acquire) {
-                    let _ = device.poll(wgpu::PollType::Poll);
-                    thread::sleep(Duration::from_millis(1));
-                }
-                let _ = device.poll(wgpu::PollType::Poll);
-            })
-            .expect("bounded WGPU poll worker must start");
-        Self {
-            stop,
-            thread: Some(thread),
-        }
-    }
-}
-
-impl Drop for GpuPollWorker {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
 }
 
 const GPU_MAP_PENDING: u8 = 0;
@@ -293,9 +257,6 @@ impl WgpuOffscreenRenderer {
         };
         let device_lost = Arc::new(AtomicBool::new(false));
         install_device_lost_callback(&device, Arc::clone(&device_lost));
-        let gpu_poll_worker = policy
-            .is_some_and(|policy| policy.require_timestamp_query)
-            .then(|| GpuPollWorker::start(device.clone()));
         Ok(Self {
             _instance: instance,
             device,
@@ -307,7 +268,6 @@ impl WgpuOffscreenRenderer {
             filter_pipelines: BTreeMap::new(),
             filter_outputs: Vec::new(),
             gpu_timer,
-            _gpu_poll_worker: gpu_poll_worker,
             readback_ring: ReadbackRing::default(),
             last_readback_bytes: 0,
             last_queue_submissions: 0,
