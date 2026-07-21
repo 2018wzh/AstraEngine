@@ -68,8 +68,8 @@ impl PlayerDecodedAudio {
     ) -> Result<Self, PlayerAudioContractError> {
         use rubato::{
             audioadapter::Adapter, audioadapter_buffers::direct::SequentialSliceOfVecs, Async,
-            FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
-            WindowFunction,
+            FixedAsync, PolynomialDegree, Resampler, SincInterpolationParameters,
+            SincInterpolationType, WindowFunction,
         };
 
         if !(8_000..=384_000).contains(&sample_rate) || !(1..=8).contains(&channels) {
@@ -89,26 +89,47 @@ impl PlayerDecodedAudio {
             planar
         } else {
             let ratio = f64::from(sample_rate) / f64::from(self.sample_rate);
-            let mut resampler = Async::<f32>::new_sinc(
-                ratio,
-                1.0,
-                &SincInterpolationParameters {
-                    sinc_len: 128,
-                    f_cutoff: Some(0.95),
-                    interpolation: SincInterpolationType::Cubic,
-                    oversampling_factor: 256,
-                    window: WindowFunction::BlackmanHarris2,
-                },
-                1_024,
-                usize::from(channels),
-                FixedAsync::Input,
-            )
-            .map_err(|error| {
-                PlayerAudioContractError::new(
-                    "ASTRA_PLAYER_AUDIO_RESAMPLER_CREATE",
-                    error.to_string(),
+            let mut resampler: Box<dyn Resampler<f32>> = if sample_rate > self.sample_rate {
+                Box::new(
+                    Async::<f32>::new_poly(
+                        ratio,
+                        1.0,
+                        PolynomialDegree::Septic,
+                        1_024,
+                        usize::from(channels),
+                        FixedAsync::Input,
+                    )
+                    .map_err(|error| {
+                        PlayerAudioContractError::new(
+                            "ASTRA_PLAYER_AUDIO_RESAMPLER_CREATE",
+                            error.to_string(),
+                        )
+                    })?,
                 )
-            })?;
+            } else {
+                Box::new(
+                    Async::<f32>::new_sinc(
+                        ratio,
+                        1.0,
+                        &SincInterpolationParameters {
+                            sinc_len: 128,
+                            f_cutoff: Some(0.95),
+                            interpolation: SincInterpolationType::Cubic,
+                            oversampling_factor: 256,
+                            window: WindowFunction::BlackmanHarris2,
+                        },
+                        1_024,
+                        usize::from(channels),
+                        FixedAsync::Input,
+                    )
+                    .map_err(|error| {
+                        PlayerAudioContractError::new(
+                            "ASTRA_PLAYER_AUDIO_RESAMPLER_CREATE",
+                            error.to_string(),
+                        )
+                    })?,
+                )
+            };
             let input =
                 SequentialSliceOfVecs::new(&planar, usize::from(channels), self.frame_count())
                     .map_err(|error| {
