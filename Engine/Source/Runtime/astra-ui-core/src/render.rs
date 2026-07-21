@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use astra_core::Hash256;
 use schemars::JsonSchema;
@@ -37,7 +37,7 @@ pub struct UiTextureUpload {
     pub width: u32,
     pub height: u32,
     pub format: UiTextureFormat,
-    pub pixels: Vec<u8>,
+    pub pixels: Arc<[u8]>,
     pub content_hash: Hash256,
 }
 

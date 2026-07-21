@@ -223,7 +223,7 @@ fn texture_upload(
         height: size.y,
         format,
         content_hash: Hash256::from_sha256(&pixels),
-        pixels,
+        pixels: pixels.into(),
     })
 }
 
@@ -341,7 +341,7 @@ mod tests {
             height: 1,
             format: UiTextureFormat::R8Unorm,
             content_hash: Hash256::from_sha256(&[64, 255]),
-            pixels: vec![64, 255],
+            pixels: vec![64, 255].into(),
         };
 
         assert_eq!(
@@ -359,7 +359,7 @@ mod tests {
             height: 1,
             format: UiTextureFormat::Rgba8SrgbPremultiplied,
             content_hash: Hash256::from_sha256(&[100, 50, 25, 128, 0, 0, 0, 0]),
-            pixels: vec![100, 50, 25, 128, 0, 0, 0, 0],
+            pixels: vec![100, 50, 25, 128, 0, 0, 0, 0].into(),
         };
 
         assert_eq!(
