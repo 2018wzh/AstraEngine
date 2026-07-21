@@ -63,6 +63,9 @@ pub struct ProductPerformanceSample {
     pub runtime_tick_ns: u64,
     pub vn_step_ns: u64,
     pub ui_layout_paint_ns: u64,
+    pub ui_update_layout_ns: u64,
+    pub ui_paint_conversion_ns: u64,
+    pub ui_host_scene_ns: u64,
     pub media_decode_ns: u64,
     pub save_load_ns: u64,
 }

@@ -144,6 +144,14 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
             + performance.save_load_ns
             > 0
     );
+    assert!(performance.ui_update_layout_ns > 0);
+    assert!(performance.ui_paint_conversion_ns > 0);
+    assert!(
+        performance.ui_update_layout_ns
+            + performance.ui_paint_conversion_ns
+            + performance.ui_host_scene_ns
+            <= performance.ui_layout_paint_ns
+    );
     product.shutdown().await.unwrap();
     host.client.shutdown().await.unwrap();
     assert!(root.path().join("artifact-manifest.json").is_file());

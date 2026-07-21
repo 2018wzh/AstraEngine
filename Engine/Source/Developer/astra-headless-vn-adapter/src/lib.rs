@@ -581,8 +581,24 @@ impl NativeVnHeadlessSession {
             .source()?
             .dispatch_ui_event(event)
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
+        let ui_sample = self.source()?.take_last_ui_performance_sample();
         self.add_profile_duration(profile_started, |sample, duration| {
             sample.ui_layout_paint_ns = sample.ui_layout_paint_ns.saturating_add(duration);
+            if let Some(ui_sample) = ui_sample {
+                sample.ui_update_layout_ns = sample
+                    .ui_update_layout_ns
+                    .saturating_add(ui_sample.update_layout_ns);
+                sample.ui_paint_conversion_ns = sample
+                    .ui_paint_conversion_ns
+                    .saturating_add(ui_sample.paint_conversion_ns);
+                sample.ui_host_scene_ns = sample.ui_host_scene_ns.saturating_add(
+                    duration.saturating_sub(
+                        ui_sample
+                            .update_layout_ns
+                            .saturating_add(ui_sample.paint_conversion_ns),
+                    ),
+                );
+            }
         })?;
         self.executor
             .execute_batch(batch)

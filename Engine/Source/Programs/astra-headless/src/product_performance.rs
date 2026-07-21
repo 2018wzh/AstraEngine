@@ -139,6 +139,13 @@ impl ProductPerformanceRecorder {
             ("runtime.cpu", "runtime.tick_action", sample.runtime_tick_ns),
             ("vn.cpu", "vn.step", sample.vn_step_ns),
             ("ui.cpu", "ui.layout_paint", sample.ui_layout_paint_ns),
+            ("ui.cpu", "ui.update_layout", sample.ui_update_layout_ns),
+            (
+                "ui.cpu",
+                "ui.paint_conversion",
+                sample.ui_paint_conversion_ns,
+            ),
+            ("ui.cpu", "ui.host_scene", sample.ui_host_scene_ns),
             ("media.cpu", "media.decode_mix", sample.media_decode_ns),
             ("save.cpu", "save_load", sample.save_load_ns),
         ] {

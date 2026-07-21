@@ -26,9 +26,9 @@ use astra_plugin_abi::{
 use astra_ui_core::{
     UiBackend, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState, UiFrameRequest,
     UiInputDispositionKind, UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets,
-    UiPerformanceBudget, UiPerformanceGate, UiPerformanceReport, UiSemanticNode, UiSemanticRole,
-    UiSemanticSnapshot, UiThemeManifest, UiThemeValue, UiValidationError, UiValue, UiViewport,
-    ValidateUi, MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
+    UiPerformanceBudget, UiPerformanceGate, UiPerformanceReport, UiPerformanceSample,
+    UiSemanticNode, UiSemanticRole, UiSemanticSnapshot, UiThemeManifest, UiThemeValue,
+    UiValidationError, UiValue, UiViewport, ValidateUi, MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
 };
 use astra_ui_yakui::{
     ui_frame_to_scene_commands, AstraTextMeasureRequest, AstraTextMeasureResult, AstraTextMeasurer,
@@ -134,6 +134,7 @@ pub struct NativeVnHostCommandSource {
     pending_ui_focus: Option<String>,
     ui_animations: BTreeMap<String, ActiveUiAnimation>,
     ui_performance: UiPerformanceGate,
+    last_ui_performance_sample: Option<UiPerformanceSample>,
     shutdown_started: bool,
 }
 
@@ -640,6 +641,7 @@ impl NativeVnHostCommandSource {
             pending_ui_focus: None,
             ui_animations: BTreeMap::new(),
             ui_performance: UiPerformanceGate::new(UiPerformanceBudget::production()),
+            last_ui_performance_sample: None,
             shutdown_started: false,
         })
     }
@@ -650,6 +652,10 @@ impl NativeVnHostCommandSource {
 
     pub fn ui_performance_report(&self) -> UiPerformanceReport {
         self.ui_performance.report()
+    }
+
+    pub fn take_last_ui_performance_sample(&mut self) -> Option<UiPerformanceSample> {
+        self.last_ui_performance_sample.take()
     }
 
     pub fn session_id(&self) -> &str {
@@ -1661,6 +1667,7 @@ impl NativeVnHostCommandSource {
         &mut self,
         events: Vec<UiInputEvent>,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        self.last_ui_performance_sample = None;
         self.apply_ui_resize_events(&events)?;
         let fallback_events = events.clone();
         if !self.has_active_ui_surface() {
@@ -2692,6 +2699,7 @@ impl NativeVnHostCommandSource {
         }
         self.ui_performance
             .record(output.performance.clone(), stable_frame)?;
+        self.last_ui_performance_sample = Some(output.performance.clone());
         let root_bounds = output
             .semantics
             .nodes
