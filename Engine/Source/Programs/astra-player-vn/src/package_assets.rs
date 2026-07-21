@@ -239,6 +239,12 @@ impl PackageAssetStore {
         })
     }
 
+    pub fn contains_audio(&self, asset_id: &str) -> bool {
+        self.descriptors
+            .get(asset_id)
+            .is_some_and(|descriptor| descriptor.kind == AssetKind::Audio)
+    }
+
     pub fn cache_bytes(&self) -> u64 {
         self.cache
             .lock()

@@ -106,6 +106,7 @@ pub struct NativeVnHostCommandSource {
     terminal_routes: std::collections::BTreeSet<String>,
     pending_timeline: Vec<PlayerTimelineTask>,
     pending_audio: Vec<NativeVnAudioOutput>,
+    pending_audio_preloads: Vec<NativeVnAudioPreloadRequest>,
     pending_video: Vec<NativeVnVideoRequest>,
     pending_stage_completions: Vec<String>,
     next_media_resource_id: u64,
@@ -221,6 +222,14 @@ pub struct NativeVnAudioRequest {
     pub command_id: String,
     pub command: String,
     pub attributes: BTreeMap<String, String>,
+    pub asset_id: String,
+    pub codec: String,
+    pub encoded_bytes: Arc<[u8]>,
+    pub encoded_hash: Hash256,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeVnAudioPreloadRequest {
     pub asset_id: String,
     pub codec: String,
     pub encoded_bytes: Arc<[u8]>,
@@ -697,6 +706,7 @@ impl NativeVnHostCommandSource {
             terminal_routes,
             pending_timeline: Vec::new(),
             pending_audio: Vec::new(),
+            pending_audio_preloads: Vec::new(),
             pending_video: Vec::new(),
             pending_stage_completions: Vec::new(),
             next_media_resource_id: 10_000,
@@ -1108,12 +1118,37 @@ impl NativeVnHostCommandSource {
         &mut self,
         request: &NativeVnAudioRequest,
     ) -> Result<PlayerDecodeLifecyclePlan, NativeVnHostError> {
-        if request.encoded_bytes.is_empty()
-            || Hash256::from_sha256(&request.encoded_bytes) != request.encoded_hash
-        {
+        self.prepare_audio_asset_decode(
+            &request.asset_id,
+            &request.codec,
+            Arc::clone(&request.encoded_bytes),
+            request.encoded_hash,
+        )
+    }
+
+    pub fn prepare_audio_preload_decode(
+        &mut self,
+        request: &NativeVnAudioPreloadRequest,
+    ) -> Result<PlayerDecodeLifecyclePlan, NativeVnHostError> {
+        self.prepare_audio_asset_decode(
+            &request.asset_id,
+            &request.codec,
+            Arc::clone(&request.encoded_bytes),
+            request.encoded_hash,
+        )
+    }
+
+    fn prepare_audio_asset_decode(
+        &mut self,
+        asset_id: &str,
+        codec: &str,
+        encoded_bytes: Arc<[u8]>,
+        encoded_hash: Hash256,
+    ) -> Result<PlayerDecodeLifecyclePlan, NativeVnHostError> {
+        if encoded_bytes.is_empty() || Hash256::from_sha256(&encoded_bytes) != encoded_hash {
             return Err(NativeVnHostError::Asset(format!(
                 "ASTRA_PLAYER_AUDIO_ENCODED_HASH: {}",
-                request.asset_id
+                asset_id
             )));
         }
         let session = self.next_media_resource()?;
@@ -1129,14 +1164,14 @@ impl NativeVnHostCommandSource {
                 request_sequence: 1,
                 session,
                 kind: PlayerDecodeKind::Audio,
-                codec: request.codec.clone(),
+                codec: codec.to_string(),
                 description: Vec::new(),
                 sample_rate: None,
                 channels: None,
                 coded_width: None,
                 coded_height: None,
                 keyframe: true,
-                bytes: request.encoded_bytes.as_ref().to_vec(),
+                bytes: encoded_bytes.as_ref().to_vec(),
             }])?,
             close: PlayerHostCommandBatch::new(vec![PlayerHostCommand::CloseDecode {
                 sequence: self.next_command_sequence()?,
@@ -1747,7 +1782,71 @@ impl NativeVnHostCommandSource {
     }
 
     pub fn launch(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        self.step("launch_default", serde_json::json!({}))
+        let batch = self.step("launch_default", serde_json::json!({}))?;
+        self.queue_entry_story_audio_preloads()?;
+        Ok(batch)
+    }
+
+    pub fn take_audio_preload_requests(&mut self) -> Vec<NativeVnAudioPreloadRequest> {
+        std::mem::take(&mut self.pending_audio_preloads)
+    }
+
+    fn queue_entry_story_audio_preloads(&mut self) -> Result<(), NativeVnHostError> {
+        const MAX_ENTRY_AUDIO_PRELOADS: usize = 4_096;
+
+        let Some(story_id) = self
+            .runtime_state
+            .as_ref()
+            .and_then(|state| state.cursor.as_ref())
+            .map(|cursor| cursor.story_id.as_str())
+        else {
+            return Ok(());
+        };
+        let mut asset_ids = BTreeSet::new();
+        for state in self
+            .story
+            .states
+            .values()
+            .filter(|state| state.story_id == story_id)
+        {
+            for scene in &state.scenes {
+                for command in &scene.commands {
+                    let CompiledCommand::Presentation {
+                        command: PresentationCommand::Stage(StageCommand::Audio(cue)),
+                        ..
+                    } = command
+                    else {
+                        continue;
+                    };
+                    if matches!(cue.bus, VnAudioBus::Bgm | VnAudioBus::Se) {
+                        asset_ids.insert(cue.asset.clone());
+                    }
+                }
+            }
+        }
+        if asset_ids.len() > MAX_ENTRY_AUDIO_PRELOADS {
+            return Err(NativeVnHostError::Asset(format!(
+                "ASTRA_PLAYER_AUDIO_PRELOAD_COUNT_EXCEEDED: {} > {MAX_ENTRY_AUDIO_PRELOADS}",
+                asset_ids.len()
+            )));
+        }
+        let mut requests = Vec::with_capacity(asset_ids.len());
+        for asset_id in asset_ids {
+            if !self.asset_store.contains_audio(&asset_id) {
+                return Err(NativeVnHostError::Asset(format!(
+                    "ASTRA_PLAYER_AUDIO_PRELOAD_ASSET_KIND: {asset_id}"
+                )));
+            }
+            let asset = self.asset_store.load_media(&asset_id)?;
+            requests.push(NativeVnAudioPreloadRequest {
+                asset_id,
+                codec: asset.codec,
+                encoded_bytes: asset.bytes,
+                encoded_hash: asset.hash,
+            });
+        }
+        self.pending_audio_preloads = requests;
+        Ok(())
     }
 
     pub fn dispatch_ui_event(

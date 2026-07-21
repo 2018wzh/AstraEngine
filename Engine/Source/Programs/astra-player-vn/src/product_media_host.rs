@@ -12,7 +12,8 @@ use astra_player_core::{
 };
 
 use crate::{
-    NativeVnAudioOutput, NativeVnHostCommandSource, NativeVnProductAudioHost, NativeVnVideoRequest,
+    NativeVnAudioOutput, NativeVnAudioPreloadRequest, NativeVnHostCommandSource,
+    NativeVnProductAudioHost, NativeVnVideoRequest,
 };
 
 pub struct NativeVnProductMediaHost {
@@ -240,7 +241,8 @@ impl NativeVnProductMediaHost {
         source: &mut NativeVnHostCommandSource,
         executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
     ) -> Result<(), PlatformError> {
-        self.audio.ensure_open(source, executor).await
+        self.audio.ensure_open(source, executor).await?;
+        self.prewarm_pending_audio(source, executor).await
     }
 
     pub async fn poll_and_process(
@@ -287,6 +289,7 @@ impl NativeVnProductMediaHost {
         mut completed: Vec<PlayerTimelineCompletion>,
         render_audio_tick: bool,
     ) -> Result<(), PlatformError> {
+        self.prewarm_pending_audio(source, executor).await?;
         self.restore_video_streams(source, executor).await?;
         for _ in 0..Self::MAX_COMPLETION_CHAIN {
             let tasks = source.take_timeline_tasks();
@@ -328,51 +331,32 @@ impl NativeVnProductMediaHost {
                     }
                     NativeVnAudioOutput::Start(request) => request,
                 };
-                let (audio, decoded_hash, cache_hit) = if let Some(cached) =
-                    self.cached_audio(&request.encoded_hash)
-                {
-                    (
-                        cached.asset.with_identity(request.asset_id.clone()),
-                        cached.decoded_hash,
-                        true,
-                    )
-                } else {
-                    let decode_started = self.performance.as_ref().map(|_| Instant::now());
-                    let decode = source
-                        .prepare_audio_decode(&request)
-                        .map_err(|error| media_error("player.audio.decode.prepare", error))?;
-                    let decoded = executor
-                        .execute_decode_lifecycle(decode)
-                        .await
-                        .map_err(|error| media_error("player.audio.decode", error))?;
-                    self.add_profile_duration(decode_started, |sample, duration| {
-                        sample.provider_decode_ns =
-                            sample.provider_decode_ns.saturating_add(duration);
-                    })?;
-                    let convert_started = self.performance.as_ref().map(|_| Instant::now());
-                    let audio = PlayerDecodedAudio::parse(
-                        &decoded.format,
-                        &decoded.bytes,
-                        Self::MAX_DECODED_AUDIO_SAMPLES,
-                    )
-                    .map_err(|error| media_error("player.audio.contract", error))?;
-                    let audio = audio
-                        .into_converted(
-                            CANONICAL_SAMPLE_RATE,
-                            CANONICAL_CHANNELS,
-                            crate::NativeVnProductAudioHost::MAX_CONVERTED_SAMPLES,
+                let (audio, decoded_hash, cache_hit) =
+                    if let Some(cached) = self.cached_audio(&request.encoded_hash) {
+                        (
+                            cached.asset.with_identity(request.asset_id.clone()),
+                            cached.decoded_hash,
+                            true,
                         )
-                        .map_err(|error| media_error("player.audio.convert", error))?;
-                    let asset =
-                        PcmAsset::from_canonical_samples(request.asset_id.clone(), audio.samples)
-                            .map_err(|error| media_error("player.audio.asset", error))?;
-                    self.add_profile_duration(convert_started, |sample, duration| {
-                        sample.parse_convert_ns = sample.parse_convert_ns.saturating_add(duration);
-                    })?;
-                    let decoded_hash = decoded.hash;
-                    self.cache_audio(request.encoded_hash, asset.clone(), decoded_hash.clone());
-                    (asset, decoded_hash, false)
-                };
+                    } else {
+                        let cached = self
+                            .decode_audio(
+                                source,
+                                executor,
+                                &NativeVnAudioPreloadRequest {
+                                    asset_id: request.asset_id.clone(),
+                                    codec: request.codec.clone(),
+                                    encoded_bytes: request.encoded_bytes.clone(),
+                                    encoded_hash: request.encoded_hash,
+                                },
+                            )
+                            .await?;
+                        (
+                            cached.asset.with_identity(request.asset_id.clone()),
+                            cached.decoded_hash,
+                            false,
+                        )
+                    };
                 let mixer_started = self.performance.as_ref().map(|_| Instant::now());
                 self.audio
                     .start_canonical(
@@ -594,6 +578,90 @@ impl NativeVnProductMediaHost {
         self.decoded_audio_lru.retain(|hash| hash != encoded_hash);
         self.decoded_audio_lru.push_back(*encoded_hash);
         Some(cached)
+    }
+
+    async fn prewarm_pending_audio(
+        &mut self,
+        source: &mut NativeVnHostCommandSource,
+        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
+    ) -> Result<(), PlatformError> {
+        let requests = source.take_audio_preload_requests();
+        if requests.is_empty() {
+            return Ok(());
+        }
+        let mut required_hashes = BTreeSet::new();
+        for request in &requests {
+            required_hashes.insert(request.encoded_hash);
+            if self.cached_audio(&request.encoded_hash).is_none() {
+                self.decode_audio(source, executor, request).await?;
+            }
+        }
+        if required_hashes
+            .iter()
+            .any(|hash| !self.decoded_audio_cache.contains_key(hash))
+        {
+            return Err(media_error(
+                "player.audio.prewarm",
+                "ASTRA_PLAYER_AUDIO_PREWARM_BUDGET_EXCEEDED",
+            ));
+        }
+        tracing::info!(
+            event = "astra.player.audio.prewarm.completed",
+            asset_count = required_hashes.len(),
+            decoded_cache_bytes = self.decoded_audio_cache_bytes,
+            cache_budget_bytes = self.max_decoded_cache_bytes,
+            "prewarmed reusable entry-story audio into the bounded decoded cache"
+        );
+        Ok(())
+    }
+
+    async fn decode_audio(
+        &mut self,
+        source: &mut NativeVnHostCommandSource,
+        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
+        request: &NativeVnAudioPreloadRequest,
+    ) -> Result<CachedDecodedAudio, PlatformError> {
+        let decode_started = self.performance.as_ref().map(|_| Instant::now());
+        let decode = source
+            .prepare_audio_preload_decode(request)
+            .map_err(|error| media_error("player.audio.decode.prepare", error))?;
+        let decoded = executor
+            .execute_decode_lifecycle(decode)
+            .await
+            .map_err(|error| media_error("player.audio.decode", error))?;
+        self.add_profile_duration(decode_started, |sample, duration| {
+            sample.provider_decode_ns = sample.provider_decode_ns.saturating_add(duration);
+        })?;
+        let convert_started = self.performance.as_ref().map(|_| Instant::now());
+        let audio = PlayerDecodedAudio::parse(
+            &decoded.format,
+            &decoded.bytes,
+            Self::MAX_DECODED_AUDIO_SAMPLES,
+        )
+        .map_err(|error| media_error("player.audio.contract", error))?
+        .into_converted(
+            CANONICAL_SAMPLE_RATE,
+            CANONICAL_CHANNELS,
+            crate::NativeVnProductAudioHost::MAX_CONVERTED_SAMPLES,
+        )
+        .map_err(|error| media_error("player.audio.convert", error))?;
+        let asset = PcmAsset::from_canonical_samples(request.asset_id.clone(), audio.samples)
+            .map_err(|error| media_error("player.audio.asset", error))?;
+        self.add_profile_duration(convert_started, |sample, duration| {
+            sample.parse_convert_ns = sample.parse_convert_ns.saturating_add(duration);
+        })?;
+        let cached = CachedDecodedAudio {
+            byte_size: (asset.samples.len() as u64)
+                .saturating_mul(std::mem::size_of::<f32>() as u64),
+            asset,
+            decoded_hash: decoded.hash,
+        };
+        self.cache_audio(
+            request.encoded_hash,
+            cached.asset.clone(),
+            cached.decoded_hash.clone(),
+        );
+        Ok(cached)
     }
 
     fn cache_audio(&mut self, encoded_hash: Hash256, asset: PcmAsset, decoded_hash: String) {

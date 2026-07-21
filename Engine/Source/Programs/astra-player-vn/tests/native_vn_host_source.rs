@@ -1318,7 +1318,7 @@ fn packaged_native_vn_source_exposes_hash_validated_audio_requests() {
 story main #@id story.main
 state start #@id state.start
   scene room #@id scene.room
-    voice asset:asset:/voice/hero/0001 #@id voice.hero.0001
+    bgm asset:asset:/voice/hero/0001 #@id bgm.hero.0001
     text key:line.after #@id line.after
 "#;
     let encoded = b"ID3\x04\x00\x00\x00\x00\x00\x00fixture".to_vec();
@@ -1375,6 +1375,10 @@ state start #@id state.start
     .unwrap();
 
     source.launch().unwrap();
+    let preloads = source.take_audio_preload_requests();
+    assert_eq!(preloads.len(), 1);
+    assert_eq!(preloads[0].asset_id, "asset:/voice/hero/0001");
+    assert_eq!(preloads[0].encoded_hash, encoded_hash);
     let audio = source.take_audio_requests();
 
     assert_eq!(audio.len(), 1);
