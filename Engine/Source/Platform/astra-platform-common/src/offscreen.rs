@@ -79,7 +79,9 @@ struct ReadbackRing {
 }
 
 const MAX_GPU_TIMESTAMP_QUERIES: u32 = 64;
-pub const WGPU_TIMESTAMP_RING_SIZE: usize = 8;
+// Keep resolve/copy batches below the profiler's p95 sampling frequency while
+// retaining a fixed upper bound on mapped timestamp buffers.
+pub const WGPU_TIMESTAMP_RING_SIZE: usize = 32;
 
 struct GpuTimer {
     slots: Vec<GpuTimerSlot>,
@@ -95,9 +97,14 @@ struct GpuTimerSlot {
     pending: Option<PendingTimestampRead>,
 }
 
-struct PendingTimestampRead {
-    submission: wgpu::SubmissionIndex,
-    query_count: u32,
+enum PendingTimestampRead {
+    Recorded {
+        query_count: u32,
+    },
+    Submitted {
+        submission: wgpu::SubmissionIndex,
+        query_count: u32,
+    },
 }
 
 struct GpuPollWorker {
@@ -399,6 +406,7 @@ impl WgpuOffscreenRenderer {
             .ok_or_else(|| unavailable("offscreen.timestamp_query", "GPU timer is unavailable"))?;
         let Some((atlas_upload_gpu_ns, scene_gpu_ns, filter_gpu_ns)) = resolve_gpu_timestamps(
             &self.device,
+            &self.queue,
             timer,
             pending.timer_slot,
             pending.query_count,
@@ -581,8 +589,8 @@ impl WgpuOffscreenRenderer {
             let timer = self.gpu_timer.as_mut().ok_or_else(|| {
                 unavailable("offscreen.timestamp_query", "GPU timer is unavailable")
             })?;
-            begin_gpu_timestamp_read(&self.device, &self.queue, timer, timer_slot, query_count)?;
-            self.last_queue_submissions = 2 + u64::from(profile_atlas_upload) + filter_stage as u64;
+            mark_gpu_timestamp_recorded(timer, timer_slot, query_count)?;
+            self.last_queue_submissions = 1 + u64::from(profile_atlas_upload) + filter_stage as u64;
             timer.next_slot = (timer_slot + 1) % timer.slots.len();
             Ok(Some(WgpuPendingProfile {
                 cpu_submit_ns,
@@ -906,9 +914,7 @@ fn apply_filter(
     Ok(output)
 }
 
-fn begin_gpu_timestamp_read(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+fn mark_gpu_timestamp_recorded(
     timer: &mut GpuTimer,
     timer_slot: usize,
     query_count: u32,
@@ -925,35 +931,67 @@ fn begin_gpu_timestamp_read(
             "GPU timestamp slot was reused before resolution",
         ));
     }
-    let byte_length = u64::from(query_count) * 8;
+    slot.pending = Some(PendingTimestampRead::Recorded { query_count });
+    Ok(())
+}
+
+fn submit_recorded_timestamp_reads(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    timer: &mut GpuTimer,
+) -> Result<(), PlatformError> {
+    let recorded = timer
+        .slots
+        .iter()
+        .enumerate()
+        .filter_map(|(index, slot)| match slot.pending.as_ref() {
+            Some(PendingTimestampRead::Recorded { query_count }) => Some((index, *query_count)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if recorded.is_empty() {
+        return Err(invalid(
+            "offscreen.timestamp_query",
+            "timestamp resolve batch contains no recorded slots",
+        ));
+    }
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("astra-offscreen-performance-resolve-encoder"),
     });
-    encoder.resolve_query_set(&slot.query_set, 0..query_count, &slot.resolve_buffer, 0);
-    encoder.copy_buffer_to_buffer(&slot.resolve_buffer, 0, &slot.read_buffer, 0, byte_length);
+    for (index, query_count) in &recorded {
+        let slot = &timer.slots[*index];
+        let byte_length = u64::from(*query_count) * 8;
+        encoder.resolve_query_set(&slot.query_set, 0..*query_count, &slot.resolve_buffer, 0);
+        encoder.copy_buffer_to_buffer(&slot.resolve_buffer, 0, &slot.read_buffer, 0, byte_length);
+    }
     let submission = queue.submit([encoder.finish()]);
-    let slice = slot.read_buffer.slice(..byte_length);
-    slot.map_status.store(GPU_MAP_PENDING, Ordering::Release);
-    let map_status = Arc::clone(&slot.map_status);
-    slice.map_async(wgpu::MapMode::Read, move |result| {
-        map_status.store(
-            if result.is_ok() {
-                GPU_MAP_SUCCEEDED
-            } else {
-                GPU_MAP_FAILED
-            },
-            Ordering::Release,
-        );
-    });
-    slot.pending = Some(PendingTimestampRead {
-        submission,
-        query_count,
-    });
+    for (index, query_count) in recorded {
+        let slot = &mut timer.slots[index];
+        let byte_length = u64::from(query_count) * 8;
+        let slice = slot.read_buffer.slice(..byte_length);
+        slot.map_status.store(GPU_MAP_PENDING, Ordering::Release);
+        let map_status = Arc::clone(&slot.map_status);
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            map_status.store(
+                if result.is_ok() {
+                    GPU_MAP_SUCCEEDED
+                } else {
+                    GPU_MAP_FAILED
+                },
+                Ordering::Release,
+            );
+        });
+        slot.pending = Some(PendingTimestampRead::Submitted {
+            submission: submission.clone(),
+            query_count,
+        });
+    }
     Ok(())
 }
 
 fn resolve_gpu_timestamps(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     timer: &mut GpuTimer,
     timer_slot: usize,
     query_count: u32,
@@ -961,6 +999,23 @@ fn resolve_gpu_timestamps(
     wait: bool,
 ) -> Result<Option<(u64, u64, u64)>, PlatformError> {
     let timestamp_period_ns = timer.timestamp_period_ns;
+    let recorded_query_count =
+        timer
+            .slots
+            .get(timer_slot)
+            .and_then(|slot| match slot.pending.as_ref() {
+                Some(PendingTimestampRead::Recorded { query_count }) => Some(*query_count),
+                _ => None,
+            });
+    if let Some(recorded_query_count) = recorded_query_count {
+        if recorded_query_count != query_count {
+            return Err(invalid(
+                "offscreen.timestamp_query",
+                "GPU timestamp query count changed before resolution",
+            ));
+        }
+        submit_recorded_timestamp_reads(device, queue, timer)?;
+    }
     let slot = timer.slots.get_mut(timer_slot).ok_or_else(|| {
         invalid(
             "offscreen.timestamp_query",
@@ -973,16 +1028,27 @@ fn resolve_gpu_timestamps(
             "GPU timestamp submission was already resolved",
         )
     })?;
-    if pending.query_count != query_count {
+    let PendingTimestampRead::Submitted {
+        submission,
+        query_count: pending_query_count,
+    } = pending
+    else {
+        return Err(invalid(
+            "offscreen.timestamp_query",
+            "GPU timestamp resolve batch was not submitted",
+        ));
+    };
+    if *pending_query_count != query_count {
         return Err(invalid(
             "offscreen.timestamp_query",
             "GPU timestamp query count changed before resolution",
         ));
     }
     if wait {
+        let callback_deadline = Instant::now() + READBACK_TIMEOUT;
         device
             .poll(wgpu::PollType::Wait {
-                submission_index: Some(pending.submission.clone()),
+                submission_index: Some(submission.clone()),
                 timeout: Some(READBACK_TIMEOUT),
             })
             .map_err(|_| {
@@ -991,19 +1057,31 @@ fn resolve_gpu_timestamps(
                     "GPU timestamp read exceeded its bounded timeout",
                 )
             })?;
-        match slot.map_status.load(Ordering::Acquire) {
-            GPU_MAP_SUCCEEDED => {}
-            GPU_MAP_FAILED => {
-                return Err(unavailable(
-                    "offscreen.timestamp_query",
-                    "GPU timestamp map failed",
-                ));
-            }
-            _ => {
-                return Err(unavailable(
-                    "offscreen.timestamp_query",
-                    "GPU timestamp callback was lost",
-                ));
+        loop {
+            match slot.map_status.load(Ordering::Acquire) {
+                GPU_MAP_SUCCEEDED => break,
+                GPU_MAP_FAILED => {
+                    return Err(unavailable(
+                        "offscreen.timestamp_query",
+                        "GPU timestamp map failed",
+                    ));
+                }
+                GPU_MAP_PENDING if Instant::now() < callback_deadline => {
+                    device.poll(wgpu::PollType::Poll).map_err(|_| {
+                        unavailable(
+                            "offscreen.timestamp_query",
+                            "GPU timestamp callback polling failed",
+                        )
+                    })?;
+                    thread::yield_now();
+                }
+                GPU_MAP_PENDING => {
+                    return Err(unavailable(
+                        "offscreen.timestamp_query",
+                        "GPU timestamp map callback exceeded its bounded timeout",
+                    ));
+                }
+                _ => unreachable!("GPU timestamp callback uses a closed status set"),
             }
         }
     } else {
