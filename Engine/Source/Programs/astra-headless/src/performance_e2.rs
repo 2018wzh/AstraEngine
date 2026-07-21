@@ -338,6 +338,8 @@ pub async fn run(request: PerformanceE2Request<'_>) -> Result<(), String> {
         package_hash,
     )
     .map_err(|error| format!("ASTRA_PERFORMANCE_PACKAGE_VERIFY_FAILED: {error}"))?;
+    let performance_scheduling =
+        super::performance_scheduling::PerformanceSchedulingGuard::activate()?;
 
     let mut renderer = WgpuOffscreenRenderer::new_with_policy(gpu_policy)
         .await
@@ -513,6 +515,7 @@ pub async fn run(request: PerformanceE2Request<'_>) -> Result<(), String> {
     };
     manifest.validate().map_err(|error| error.to_string())?;
     write_json(request.trace_manifest, &manifest)?;
+    performance_scheduling.restore()?;
     if !matches!(report.status, astra_core::PerformanceStatus::Pass) {
         return Err("ASTRA_PERFORMANCE_BUDGET_BLOCKED".into());
     }
@@ -1050,17 +1053,18 @@ fn draw_commands() -> Vec<SceneCommand> {
 
 fn animate(frame: &mut SceneFrame, sequence: u64) -> Result<(), String> {
     frame.sequence = sequence + 1;
-    let phase = (sequence % 240) as f32 / 240.0;
-    let transform = frame
+    if !frame
         .commands
-        .iter_mut()
-        .find_map(|command| match command {
-            SceneCommand::SetCamera { transform } => Some(transform),
-            _ => None,
-        })
-        .ok_or_else(|| "ASTRA_PERFORMANCE_CAMERA_COMMAND_MISSING".to_string())?;
-    transform.tx = phase * 2.0;
-    transform.ty = (1.0 - phase) * 2.0;
+        .iter()
+        .any(|command| matches!(command, SceneCommand::SetCamera { .. }))
+    {
+        return Err("ASTRA_PERFORMANCE_CAMERA_COMMAND_MISSING".into());
+    }
+    // Keep the texture, glyph, mesh, clip, transform, opacity, and FilterGraph geometry stable
+    // so this workload proves that persistent GPU resources are not streamed again. The clear
+    // color pulse still changes every submitted frame and therefore prevents a static-frame
+    // elision from turning the 120 Hz renderer workload into a no-op.
+    frame.clear_rgba[0] = 4 + (sequence % 16) as u8;
     Ok(())
 }
 
@@ -1173,6 +1177,16 @@ mod tests {
                 .max_p99,
             Some(FRAME_PERIOD_NS)
         );
+    }
+
+    #[test]
+    fn scene2d_animation_changes_output_without_mutating_draw_geometry() {
+        let (_, mut frame) = scene2d_workload();
+        let commands = frame.commands.clone();
+        let clear = frame.clear_rgba;
+        animate(&mut frame, 7).unwrap();
+        assert_ne!(frame.clear_rgba, clear);
+        assert_eq!(frame.commands, commands);
     }
 
     #[test]

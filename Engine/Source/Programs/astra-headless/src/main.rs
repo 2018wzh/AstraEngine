@@ -31,6 +31,7 @@ use sha2::{Digest, Sha256};
 
 mod compare;
 mod performance_e2;
+mod performance_scheduling;
 mod product_performance;
 mod product_performance_input;
 
@@ -1083,6 +1084,10 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         (None, None) if performance_warmup_frames == 0 => None,
         _ => return Err("ASTRA_PERFORMANCE_ARGUMENT_SET_INCOMPLETE".into()),
     };
+    let performance_scheduling = performance_observer
+        .as_ref()
+        .map(|_| performance_scheduling::PerformanceSchedulingGuard::activate())
+        .transpose()?;
     fs::create_dir_all(artifact_root).map_err(|e| e.to_string())?;
     let input_bytes =
         fs::read(input_path).map_err(|e| format!("ASTRA_HEADLESS_INPUT_OPEN_FAILED: {e}"))?;
@@ -1428,6 +1433,9 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         "{}",
         serde_json::to_string(&report).map_err(|error| error.to_string())?
     );
+    if let Some(scheduling) = performance_scheduling {
+        scheduling.restore()?;
+    }
     Ok(())
 }
 
