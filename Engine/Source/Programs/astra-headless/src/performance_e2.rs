@@ -116,6 +116,7 @@ pub fn prepare_profile(
     profile.presentation_rate_hz = astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ;
     profile.render_policy = astra_platform::HeadlessRenderPolicy::All;
     profile.readback_policy = astra_platform::HeadlessReadbackPolicy::CheckpointsOnly;
+    profile.artifacts.retention = astra_platform::HeadlessArtifactRetention::ManifestOnly;
     profile.gpu_adapter = Some(astra_platform::GpuAdapterPolicy {
         backend: match backend {
             PerformanceGpuBackend::Dx12 => astra_platform::GpuBackendPolicy::Dx12,
@@ -672,6 +673,26 @@ fn record_measured_frame(
             )
         })
         .and_then(|_| {
+            trace.complete(
+                "renderer.cpu",
+                "scene.render_encode",
+                1,
+                Some(pending.index),
+                frame_timestamp_ns,
+                submission.scene_render_encode_cpu_ns,
+            )
+        })
+        .and_then(|_| {
+            trace.complete(
+                "renderer.cpu",
+                "scene.queue_submit",
+                1,
+                Some(pending.index),
+                frame_timestamp_ns,
+                submission.scene_queue_submit_cpu_ns,
+            )
+        })
+        .and_then(|_| {
             trace.flow(
                 "frame.flow",
                 "scene_to_gpu",
@@ -1102,8 +1123,8 @@ fn hash_file(path: &Path) -> Result<String, String> {
 mod tests {
     use super::*;
     use astra_platform::{
-        GpuAdapterPolicy, GpuBackendPolicy, GpuDeviceTypePolicy, HeadlessReadbackPolicy,
-        HeadlessRenderPolicy,
+        GpuAdapterPolicy, GpuBackendPolicy, GpuDeviceTypePolicy, HeadlessArtifactRetention,
+        HeadlessReadbackPolicy, HeadlessRenderPolicy,
     };
 
     #[test]
@@ -1125,6 +1146,7 @@ mod tests {
         });
         profile.render_policy = HeadlessRenderPolicy::All;
         profile.readback_policy = HeadlessReadbackPolicy::CheckpointsOnly;
+        profile.artifacts.retention = HeadlessArtifactRetention::ManifestOnly;
         let temp = tempfile::tempdir().unwrap();
         let profile_path = temp.path().join("profile.json");
         let budget_path = temp.path().join("budget.json");
@@ -1172,6 +1194,7 @@ mod tests {
         });
         profile.render_policy = HeadlessRenderPolicy::All;
         profile.readback_policy = HeadlessReadbackPolicy::CheckpointsOnly;
+        profile.artifacts.retention = HeadlessArtifactRetention::ManifestOnly;
         let temp = tempfile::tempdir().unwrap();
         let profile_path = temp.path().join("profile.json");
         let budget_path = temp.path().join("budget.json");

@@ -56,6 +56,8 @@ pub(crate) struct GlyphCpuProfile {
     pub(crate) atlas_ns: u64,
     pub(crate) geometry_ns: u64,
     pub(crate) vertex_upload_ns: u64,
+    pub(crate) render_encode_ns: u64,
+    pub(crate) queue_submit_ns: u64,
     pub(crate) render_submit_ns: u64,
 }
 
@@ -995,7 +997,11 @@ impl WgpuGlyphAtlasRenderer {
                 }
             }
         }
-        queue.submit([encoder.finish()]);
+        let command_buffer = encoder.finish();
+        let render_encode_ns = profiled_elapsed_ns(profile_cpu, render_submit_started)?;
+        let queue_submit_started = Instant::now();
+        queue.submit([command_buffer]);
+        let queue_submit_ns = profiled_elapsed_ns(profile_cpu, queue_submit_started)?;
         self.last_draw_calls = self.draw_batches.len() as u64;
         for resource_id in transient_resources {
             resources_mut!().remove(&resource_id);
@@ -1010,6 +1016,8 @@ impl WgpuGlyphAtlasRenderer {
                 atlas_ns,
                 geometry_ns,
                 vertex_upload_ns,
+                render_encode_ns,
+                queue_submit_ns,
                 render_submit_ns,
             },
         ))

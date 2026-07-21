@@ -60,6 +60,8 @@ pub struct HeadlessGpuFrameSample {
     pub scene_atlas_cpu_ns: u64,
     pub scene_geometry_cpu_ns: u64,
     pub scene_vertex_upload_cpu_ns: u64,
+    pub scene_render_encode_cpu_ns: u64,
+    pub scene_queue_submit_cpu_ns: u64,
     pub scene_render_submit_cpu_ns: u64,
     pub atlas_upload_gpu_ns: u64,
     pub scene_gpu_ns: u64,
@@ -511,6 +513,8 @@ impl HostState {
                             scene_atlas_cpu_ns: 0,
                             scene_geometry_cpu_ns: 0,
                             scene_vertex_upload_cpu_ns: 0,
+                            scene_render_encode_cpu_ns: 0,
+                            scene_queue_submit_cpu_ns: 0,
                             scene_render_submit_cpu_ns: 0,
                             atlas_upload_gpu_ns: 0,
                             scene_gpu_ns: 0,
@@ -1614,6 +1618,8 @@ fn complete_gpu_sample(
     sample.scene_atlas_cpu_ns = submission.scene_atlas_cpu_ns;
     sample.scene_geometry_cpu_ns = submission.scene_geometry_cpu_ns;
     sample.scene_vertex_upload_cpu_ns = submission.scene_vertex_upload_cpu_ns;
+    sample.scene_render_encode_cpu_ns = submission.scene_render_encode_cpu_ns;
+    sample.scene_queue_submit_cpu_ns = submission.scene_queue_submit_cpu_ns;
     sample.scene_render_submit_cpu_ns = submission.scene_render_submit_cpu_ns;
     sample.atlas_upload_gpu_ns = submission.atlas_upload_gpu_ns;
     sample.scene_gpu_ns = submission.scene_gpu_ns;

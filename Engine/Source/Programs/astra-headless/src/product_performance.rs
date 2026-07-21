@@ -772,6 +772,18 @@ impl ProductPerformanceRecorder {
                 sample.scene_render_submit_cpu_ns,
             ),
             (
+                "renderer.cpu",
+                "scene.render_encode",
+                1,
+                sample.scene_render_encode_cpu_ns,
+            ),
+            (
+                "renderer.cpu",
+                "scene.queue_submit",
+                1,
+                sample.scene_queue_submit_cpu_ns,
+            ),
+            (
                 "renderer.gpu",
                 "atlas.upload",
                 2,
@@ -1093,6 +1105,8 @@ mod tests {
             scene_atlas_cpu_ns: 0,
             scene_geometry_cpu_ns: 4,
             scene_vertex_upload_cpu_ns: 3,
+            scene_render_encode_cpu_ns: 2,
+            scene_queue_submit_cpu_ns: 3,
             scene_render_submit_cpu_ns: 5,
             atlas_upload_gpu_ns: 0,
             scene_gpu_ns: 20,
