@@ -26,11 +26,11 @@ use astra_plugin_abi::{
 };
 use astra_ui_core::{
     UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState,
-    UiFrameRequest, UiInputDispositionKind, UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets,
-    UiNodeBlueprint, UiPerformanceBudget, UiPerformanceGate, UiPerformanceReport,
-    UiPerformanceSample, UiSemanticNode, UiSemanticRole, UiSemanticSnapshot, UiThemeManifest,
-    UiThemeValue, UiValidationError, UiValue, UiValueExpr, UiViewport, ValidateUi,
-    MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
+    UiFrameRequest, UiInputDisposition, UiInputDispositionKind, UiInputEvent, UiInputEventKind,
+    UiInputFrame, UiInsets, UiNodeBlueprint, UiPerformanceBudget, UiPerformanceGate,
+    UiPerformanceReport, UiPerformanceSample, UiPoint, UiSemanticNode, UiSemanticRole,
+    UiSemanticSnapshot, UiThemeManifest, UiThemeValue, UiValidationError, UiValue, UiValueExpr,
+    UiViewport, ValidateUi, MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
 };
 use astra_ui_yakui::{
     ui_frame_to_scene_commands, AstraTextMeasureRequest, AstraTextMeasureResult, AstraTextMeasurer,
@@ -139,6 +139,7 @@ pub struct NativeVnHostCommandSource {
     ui_animations: BTreeMap<String, ActiveUiAnimation>,
     ui_performance: UiPerformanceGate,
     last_ui_performance_sample: Option<UiPerformanceSample>,
+    ui_frame_reuse: Option<NativeVnUiFrameReuse>,
     ui_text_layout_cache: BTreeMap<String, CachedUiTextLayout>,
     ui_host_performance_sampling_enabled: bool,
     last_ui_host_performance_sample: Option<NativeVnUiHostPerformanceSample>,
@@ -148,6 +149,58 @@ pub struct NativeVnHostCommandSource {
 struct CachedUiTextLayout {
     request_hash: Hash256,
     layout: Arc<TextLayoutResult>,
+}
+
+struct NativeVnUiFrameResult {
+    actions: Vec<astra_ui_core::UiActionEnvelope>,
+    dispositions: Vec<UiInputDisposition>,
+    semantics: UiSemanticSnapshot,
+    draw: Vec<SceneCommand>,
+}
+
+#[derive(Clone, PartialEq)]
+struct NativeVnUiFrameReuseKey {
+    session_id: String,
+    generation: u64,
+    instance_id: String,
+    viewport: UiViewport,
+    theme_hash: Hash256,
+    model_schema: String,
+    model_payload: Vec<u8>,
+}
+
+impl NativeVnUiFrameReuseKey {
+    // `fixed_time_ns` is intentionally excluded. A time-driven view must return
+    // `repaint_after_ns`; only outputs that explicitly declare no repaint are
+    // admitted to this cache. Controller animation progress is already part of
+    // the serialized model payload.
+    fn from_request(request: &UiFrameRequest, instance_id: &str) -> Self {
+        Self {
+            session_id: request.session_id.clone(),
+            generation: request.generation,
+            instance_id: instance_id.to_string(),
+            viewport: request.viewport.clone(),
+            theme_hash: request.theme.content_hash,
+            model_schema: request.model_schema.clone(),
+            model_payload: request.model_payload.clone(),
+        }
+    }
+
+    fn matches(&self, request: &UiFrameRequest, instance_id: &str) -> bool {
+        self.session_id == request.session_id
+            && self.generation == request.generation
+            && self.instance_id == instance_id
+            && self.viewport == request.viewport
+            && self.theme_hash == request.theme.content_hash
+            && self.model_schema == request.model_schema
+            && self.model_payload == request.model_payload
+    }
+}
+
+struct NativeVnUiFrameReuse {
+    key: NativeVnUiFrameReuseKey,
+    pointer_position: Option<UiPoint>,
+    performance: UiPerformanceSample,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -672,6 +725,7 @@ impl NativeVnHostCommandSource {
             ui_animations: BTreeMap::new(),
             ui_performance: UiPerformanceGate::new(UiPerformanceBudget::production()),
             last_ui_performance_sample: None,
+            ui_frame_reuse: None,
             ui_text_layout_cache: BTreeMap::new(),
             ui_host_performance_sampling_enabled: false,
             last_ui_host_performance_sample: None,
@@ -1734,28 +1788,28 @@ impl NativeVnHostCommandSource {
                 self.present_current_scene(self.ui_draw.clone())
             };
         }
-        let (output, ui_draw) = self.render_ui(events)?;
-        if output.actions.len() > 1 {
+        let frame = self.render_ui(events)?;
+        if frame.actions.len() > 1 {
             return Err(NativeVnHostError::Input(
                 "ASTRA_PLAYER_UI_ACTION_AMBIGUOUS: one input frame emitted multiple actions".into(),
             ));
         }
-        if let Some(action) = output.actions.first() {
+        if let Some(action) = frame.actions.first() {
             return self.dispatch_ui_action(action);
         }
-        let consumed = output
+        let consumed = frame
             .dispositions
             .iter()
             .any(|item| item.disposition == UiInputDispositionKind::Consumed);
         if !consumed {
-            if let Some(action) = self.bubbled_ui_action(&fallback_events, output.semantics.hash) {
+            if let Some(action) = self.bubbled_ui_action(&fallback_events, frame.semantics.hash) {
                 return self.dispatch_ui_action(&action);
             }
             if let Some(command) = self.bubbled_ui_command(&fallback_events) {
                 return self.command(command);
             }
         }
-        self.present_current_scene(ui_draw)
+        self.present_current_scene(frame.draw)
     }
 
     fn apply_ui_resize_events(&mut self, events: &[UiInputEvent]) -> Result<(), NativeVnHostError> {
@@ -2504,7 +2558,7 @@ impl NativeVnHostCommandSource {
     fn render_ui(
         &mut self,
         events: Vec<UiInputEvent>,
-    ) -> Result<(astra_ui_core::UiFrameOutput, Vec<SceneCommand>), NativeVnHostError> {
+    ) -> Result<NativeVnUiFrameResult, NativeVnHostError> {
         let model_binding_started =
             performance_phase_started(self.ui_host_performance_sampling_enabled);
         let mut host_performance = NativeVnUiHostPerformanceSample::default();
@@ -2749,8 +2803,79 @@ impl NativeVnHostCommandSource {
             model_schema: view.model_schema.clone(),
             model_payload,
         };
+        let active = self.ui_modals.last().map_or(
+            ActiveUiController {
+                instance_id: instance_id.clone(),
+                controller_id: active_controller_id.clone(),
+                view_id: active_view_id.clone(),
+                model_schema: active_model_schema.clone(),
+                model: active_model.clone(),
+            },
+            |modal| ActiveUiController {
+                instance_id: modal.instance_id.clone(),
+                controller_id: modal.controller_id.clone(),
+                view_id: modal.view_id.clone(),
+                model_schema: modal.model_schema.clone(),
+                model: modal.model.clone(),
+            },
+        );
+        self.active_ui_controller = Some(active);
         let stable_frame = request.input.events.is_empty() && !active_changed;
         host_performance.frame_model_ns = performance_phase_duration(frame_model_started)?;
+        if !active_changed {
+            if let (Some(reuse), Some(semantics)) =
+                (self.ui_frame_reuse.as_mut(), self.ui_semantics.as_ref())
+            {
+                if reuse.key.matches(&request, &instance_id) {
+                    if let Some(pointer_position) = reusable_pointer_position(
+                        reuse.pointer_position,
+                        &request.input.events,
+                        semantics,
+                    ) {
+                        reuse.pointer_position = pointer_position;
+                        let mut performance = reuse.performance.clone();
+                        performance.update_layout_ns = 0;
+                        performance.paint_conversion_ns = 0;
+                        performance.texture_update_bytes = 0;
+                        self.ui_performance.record(performance.clone(), true)?;
+                        self.last_ui_performance_sample = Some(performance);
+                        if self.ui_host_performance_sampling_enabled {
+                            self.last_ui_host_performance_sample = Some(host_performance);
+                        }
+                        tracing::trace!(
+                            event = "player.vn.ui.frame.reused",
+                            view_id = %active_view_id,
+                            generation = self.ui_generation,
+                            input_count = request.input.events.len(),
+                            semantic_hash = %semantics.hash,
+                            "reused an unchanged NativeVN UI frame"
+                        );
+                        return Ok(NativeVnUiFrameResult {
+                            actions: Vec::new(),
+                            dispositions: request
+                                .input
+                                .events
+                                .iter()
+                                .map(|event| UiInputDisposition {
+                                    sequence: event.sequence,
+                                    disposition: UiInputDispositionKind::Bubble,
+                                    semantic_target_id: None,
+                                })
+                                .collect(),
+                            semantics: semantics.clone(),
+                            draw: self.ui_draw.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        let reuse_key = NativeVnUiFrameReuseKey::from_request(&request, &instance_id);
+        let pointer_position = pointer_position_after_events(
+            self.ui_frame_reuse
+                .as_ref()
+                .and_then(|reuse| reuse.pointer_position),
+            &request.input.events,
+        );
         let mut output = self.ui_backend.render_frame(request)?;
         let text_scene_started =
             performance_phase_started(self.ui_host_performance_sampling_enabled);
@@ -2846,28 +2971,25 @@ impl NativeVnHostCommandSource {
             );
         }
         self.ui_semantics = Some(output.semantics.clone());
+        self.ui_frame_reuse = if output.repaint_after_ns.is_none() && output.actions.is_empty() {
+            Some(NativeVnUiFrameReuse {
+                key: reuse_key,
+                pointer_position,
+                performance: output.performance.clone(),
+            })
+        } else {
+            None
+        };
         host_performance.text_scene_ns = performance_phase_duration(text_scene_started)?;
-        let active = self.ui_modals.last().map_or(
-            ActiveUiController {
-                instance_id,
-                controller_id: active_controller_id,
-                view_id: active_view_id,
-                model_schema: active_model_schema,
-                model: active_model,
-            },
-            |modal| ActiveUiController {
-                instance_id: modal.instance_id.clone(),
-                controller_id: modal.controller_id.clone(),
-                view_id: modal.view_id.clone(),
-                model_schema: modal.model_schema.clone(),
-                model: modal.model.clone(),
-            },
-        );
-        self.active_ui_controller = Some(active);
         if self.ui_host_performance_sampling_enabled {
             self.last_ui_host_performance_sample = Some(host_performance);
         }
-        Ok((output, composed_draw))
+        Ok(NativeVnUiFrameResult {
+            actions: output.actions,
+            dispositions: output.dispositions,
+            semantics: output.semantics,
+            draw: composed_draw,
+        })
     }
 
     pub fn release_resources(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
@@ -2877,6 +2999,7 @@ impl NativeVnHostCommandSource {
             ));
         }
         self.ui_text_layout_cache.clear();
+        self.ui_frame_reuse = None;
         let mut commands = self.text_resources.shutdown();
         commands.extend(self.live_texture_ids.iter().map(|resource_id| {
             SceneCommand::ReleaseResource {
@@ -3330,7 +3453,7 @@ impl NativeVnHostCommandSource {
             [8, 10, 16, 255],
         ));
         lifecycle.extend(next_scene_draw.iter().cloned());
-        let ui_draw = ui_frame.map_or_else(Vec::new, |(_, draw)| draw);
+        let ui_draw = ui_frame.map_or_else(Vec::new, |frame| frame.draw);
         lifecycle.extend(ui_draw.iter().cloned());
         self.command_sequence = self
             .command_sequence
@@ -4599,6 +4722,61 @@ fn performance_phase_duration(started: Option<Instant>) -> Result<u64, NativeVnH
                     .into(),
             )
         })
+    })
+}
+
+fn reusable_pointer_position(
+    mut current: Option<UiPoint>,
+    events: &[UiInputEvent],
+    semantics: &UiSemanticSnapshot,
+) -> Option<Option<UiPoint>> {
+    for event in events {
+        match &event.kind {
+            UiInputEventKind::FixedTime { .. } => {}
+            UiInputEventKind::PointerMove { position } => {
+                if !same_semantic_hit_region(semantics, current, Some(*position)) {
+                    return None;
+                }
+                current = Some(*position);
+            }
+            _ => return None,
+        }
+    }
+    Some(current)
+}
+
+fn pointer_position_after_events(
+    mut current: Option<UiPoint>,
+    events: &[UiInputEvent],
+) -> Option<UiPoint> {
+    for event in events {
+        match &event.kind {
+            UiInputEventKind::PointerMove { position }
+            | UiInputEventKind::PointerButton { position, .. } => current = Some(*position),
+            UiInputEventKind::Focus { focused: false } => current = None,
+            _ => {}
+        }
+    }
+    current
+}
+
+fn same_semantic_hit_region(
+    semantics: &UiSemanticSnapshot,
+    before: Option<UiPoint>,
+    after: Option<UiPoint>,
+) -> bool {
+    semantics
+        .nodes
+        .iter()
+        .all(|node| semantic_node_contains(node, before) == semantic_node_contains(node, after))
+}
+
+fn semantic_node_contains(node: &UiSemanticNode, point: Option<UiPoint>) -> bool {
+    point.is_some_and(|point| {
+        point.x >= node.bounds_points.min.x
+            && point.x < node.bounds_points.max.x
+            && point.y >= node.bounds_points.min.y
+            && point.y < node.bounds_points.max.y
     })
 }
 

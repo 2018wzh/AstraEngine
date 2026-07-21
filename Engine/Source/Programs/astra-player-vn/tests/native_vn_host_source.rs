@@ -13,7 +13,7 @@ use astra_plugin_abi::{
     PROVIDER_POLICY_SCHEMA,
 };
 use astra_ui_core::{
-    UiButtonState, UiInputEventKind, UiInsets, UiPointerButton, UiViewport, ValidateUi,
+    UiButtonState, UiInputEventKind, UiInsets, UiPoint, UiPointerButton, UiViewport, ValidateUi,
 };
 use astra_vn_core::{compile_astra_project, AstraSource, CompileAstraProjectOptions, VnRunConfig};
 use astra_vn_package::{package_sections_for_project, PLAYER_LOCALE_CONFIG_SCHEMA};
@@ -614,6 +614,67 @@ fn product_source_records_bounded_ui_performance_samples() {
     assert!(report.peak_draw_calls <= 128);
     assert!(report.peak_vertices <= 250_000);
     assert!(report.peak_active_texture_bytes <= 64 * 1024 * 1024);
+}
+
+#[astra_headless_test::test]
+fn stable_pointer_motion_reuses_ui_until_the_semantic_hit_region_changes() {
+    let mut source = source_for(STORY);
+    source.launch().expect("launch");
+    let semantics = source.ui_semantics().expect("semantic snapshot").clone();
+    let exit = semantics
+        .nodes
+        .iter()
+        .find(|node| node.id == "root/exit")
+        .expect("exit semantics");
+    let inside_exit = UiPoint {
+        x: (exit.bounds_points.min.x + exit.bounds_points.max.x) * 0.5,
+        y: (exit.bounds_points.min.y + exit.bounds_points.max.y) * 0.5,
+    };
+    let outside_exit = UiPoint {
+        x: if exit.bounds_points.min.x >= 2.0 {
+            exit.bounds_points.min.x - 2.0
+        } else {
+            exit.bounds_points.max.x + 2.0
+        },
+        y: inside_exit.y,
+    };
+    let outside_exit_neighbour = UiPoint {
+        x: outside_exit.x + 0.25,
+        y: outside_exit.y,
+    };
+
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerMove {
+            position: outside_exit,
+        })
+        .expect("first pointer frame");
+    source
+        .take_last_ui_performance_sample()
+        .expect("first performance sample");
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerMove {
+            position: outside_exit_neighbour,
+        })
+        .expect("stable pointer frame");
+    let reused = source
+        .take_last_ui_performance_sample()
+        .expect("reused performance sample");
+    assert_eq!(reused.update_layout_ns, 0);
+    assert_eq!(reused.paint_conversion_ns, 0);
+    assert_eq!(reused.texture_update_bytes, 0);
+
+    source
+        .dispatch_ui_event(UiInputEventKind::PointerMove {
+            position: inside_exit,
+        })
+        .expect("changed hit region");
+    let invalidated = source
+        .take_last_ui_performance_sample()
+        .expect("invalidated performance sample");
+    assert_ne!(invalidated.update_layout_ns, 0);
+
+    source.release_resources().expect("release");
+    source.shutdown().expect("shutdown");
 }
 
 #[astra_headless_test::test]
