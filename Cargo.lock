@@ -899,7 +899,9 @@ dependencies = [
 name = "astra-emu-family-support"
 version = "0.1.0"
 dependencies = [
+ "astra-byte-source",
  "astra-core",
+ "astra-emu-family-api",
  "astra-emu-family-core",
  "astra-media",
  "blowfish",
@@ -1126,7 +1128,10 @@ dependencies = [
 name = "astra-emu-minori"
 version = "0.1.0"
 dependencies = [
+ "abi_stable",
+ "astra-byte-source",
  "astra-core",
+ "astra-emu-family-api",
  "astra-emu-family-core",
  "astra-emu-family-support",
  "blowfish",
@@ -1134,7 +1139,9 @@ dependencies = [
  "directories",
  "encoding_rs",
  "flate2",
+ "image 0.25.10",
  "lru",
+ "postcard",
  "rc4",
  "schemars",
  "serde",
@@ -1156,6 +1163,7 @@ dependencies = [
  "astra-observability",
  "clap",
  "flate2",
+ "image 0.25.10",
  "serde",
  "serde_json",
  "serde_yaml",

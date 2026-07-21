@@ -201,6 +201,19 @@ pub fn validate_legacy_vfs_uri(prefix: &str, uri: &str) -> Result<(), LegacyCore
     Ok(())
 }
 
+/// Validates a directory URI without weakening the file URI contract.
+///
+/// Directory callers may address the mount root and may include one trailing
+/// slash. Interior empty components, traversal and alternate separators remain
+/// invalid.
+pub fn validate_legacy_vfs_directory_uri(prefix: &str, uri: &str) -> Result<(), LegacyCoreError> {
+    if uri == prefix {
+        return Ok(());
+    }
+    let canonical = uri.strip_suffix('/').unwrap_or(uri);
+    validate_legacy_vfs_uri(prefix, canonical)
+}
+
 fn safe_symbol(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -302,6 +315,19 @@ mod tests {
         );
         assert_eq!(
             validate_legacy_vfs_uri("fixture:/", "other:/secret")
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_VFS_URI"
+        );
+    }
+
+    #[test]
+    fn directory_uri_accepts_mount_root_and_one_trailing_slash() {
+        validate_legacy_vfs_directory_uri("fixture:/", "fixture:/").unwrap();
+        validate_legacy_vfs_directory_uri("fixture:/", "fixture:/scr").unwrap();
+        validate_legacy_vfs_directory_uri("fixture:/", "fixture:/scr/").unwrap();
+        assert_eq!(
+            validate_legacy_vfs_directory_uri("fixture:/", "fixture:/scr//nested")
                 .unwrap_err()
                 .code(),
             "ASTRA_EMU_VFS_URI"

@@ -894,18 +894,25 @@ impl HostState {
             HostCommand::DestroySurface { surface, reply } => {
                 let capture =
                     self.profile.readback_policy == HeadlessReadbackPolicy::RasterizedFrames;
-                let result = self
-                    .materialize_surface(surface, capture)
-                    .and_then(|_| self.flush_gpu_profile(surface))
-                    .and_then(|_| self.surfaces.remove(surface))
-                    .and_then(|s| {
-                        let window = self.windows.get_mut(s.window)?;
-                        window.surface_count =
-                            window.surface_count.checked_sub(1).ok_or_else(|| {
-                                invalid("surface.destroy", "window surface count underflow")
-                            })?;
-                        Ok(())
-                    });
+                let result = (|| {
+                    let has_submission = {
+                        let state = self.surfaces.get(surface)?;
+                        state.frame.is_some() || state.pending.is_some()
+                    };
+                    if has_submission {
+                        self.materialize_surface(surface, capture)?;
+                        self.flush_gpu_profile(surface)?;
+                    }
+                    self.surfaces.remove(surface)
+                })()
+                .and_then(|s| {
+                    let window = self.windows.get_mut(s.window)?;
+                    window.surface_count =
+                        window.surface_count.checked_sub(1).ok_or_else(|| {
+                            invalid("surface.destroy", "window surface count underflow")
+                        })?;
+                    Ok(())
+                });
                 let _ = reply.send(result);
             }
             HostCommand::DestroyWindow { window, reply } => {

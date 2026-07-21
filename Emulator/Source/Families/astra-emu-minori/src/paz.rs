@@ -9,12 +9,12 @@ use std::{
 
 use astra_core::Hash256;
 use astra_emu_family_core::{
-    validate_decrypt_output, validate_decrypt_request, validate_legacy_vfs_uri, LegacyCoreError,
-    LegacyDecryptPhase, LegacyDecryptProvider, LegacyDecryptRequest, LegacyDecryptTransport,
-    LegacyMountedVfs, LegacyOpaqueDescriptor, LegacyPackManifest, LegacyVfsEntry, LegacyVfsNode,
-    LegacyVfsNodeKind, LegacyVfsReadResult, LegacyVfsSource, LegacyVfsStat, LegacyVfsStream,
-    LEGACY_DECRYPT_CHUNK_BYTES, LEGACY_DECRYPT_MAX_BATCH_BYTES, LEGACY_PACK_MANIFEST_SCHEMA,
-    LEGACY_VFS_MAX_READ_BYTES,
+    validate_decrypt_output, validate_decrypt_request, validate_legacy_vfs_directory_uri,
+    validate_legacy_vfs_uri, LegacyCoreError, LegacyDecryptPhase, LegacyDecryptProvider,
+    LegacyDecryptRequest, LegacyDecryptTransport, LegacyMountedVfs, LegacyOpaqueDescriptor,
+    LegacyPackManifest, LegacyVfsEntry, LegacyVfsNode, LegacyVfsNodeKind, LegacyVfsReadResult,
+    LegacyVfsSource, LegacyVfsStat, LegacyVfsStream, LEGACY_DECRYPT_CHUNK_BYTES,
+    LEGACY_DECRYPT_MAX_BATCH_BYTES, LEGACY_PACK_MANIFEST_SCHEMA, LEGACY_VFS_MAX_READ_BYTES,
 };
 use blowfish::cipher::{BlockCipherDecrypt, KeyInit};
 use blowfish::Blowfish;
@@ -24,13 +24,14 @@ use rc4::{Rc4, StreamCipher};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use astra_emu_family_support::{CacheIdentity, PlaintextCache};
+use astra_emu_family_support::{CacheIdentity, PlaintextCache, PlaintextCacheError};
 
 use crate::{MINORI_DECRYPT_DESCRIPTOR_SCHEMA, MINORI_DECRYPT_PROVIDER_ID, MINORI_READER_ID};
 
 type PazError = LegacyCoreError;
 
-pub const REQUIRED_ARCHIVE_ROLES: [&str; 6] = ["scr", "st", "sys", "se", "voice", "mov"];
+pub const REQUIRED_ARCHIVE_ROLES: [&str; 8] =
+    ["bg", "bgm", "scr", "st", "sys", "se", "voice", "mov"];
 pub const MAX_INDEX_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
 
@@ -496,7 +497,7 @@ impl MinoriMountedVfs {
                 source_offset: entry.descriptor.offset,
                 stored_size: entry.descriptor.aligned_size,
                 decoded_size: entry.descriptor.unpacked_size,
-                source_hash: entry.encrypted_hash,
+                source_hash: archives[entry.archive].hash,
                 content_hash: None,
                 method: entry_method(&entry.descriptor).into(),
                 media_kind: media_kind(&entry.descriptor.name).into(),
@@ -541,7 +542,7 @@ impl MinoriMountedVfs {
         verify_source_unchanged(archive)?;
         let identity = CacheIdentity {
             family_id: "minori".into(),
-            source_hash: entry.encrypted_hash,
+            source_hash: archive.hash,
             entry_id: entry.descriptor.entry_id.clone(),
             private_profile_hash: self.decrypt_provider.private_profile_hash(),
             decrypt_provider_id: self.decrypt_provider.provider_id().into(),
@@ -558,7 +559,7 @@ impl MinoriMountedVfs {
             .as_ref()
             .map(|cache| cache.get(&identity))
             .transpose()
-            .map_err(|_| error("ASTRA_EMU_MINORI_CACHE_READ", "plaintext cache read failed"))?
+            .map_err(cache_error)?
             .flatten()
         {
             if bytes.len() as u64 != entry.descriptor.unpacked_size {
@@ -627,12 +628,7 @@ impl MinoriMountedVfs {
             ));
         }
         if let Some(cache) = &self.cache {
-            cache.put(&identity, &decoded).map_err(|_| {
-                error(
-                    "ASTRA_EMU_MINORI_CACHE_WRITE",
-                    "plaintext cache write failed",
-                )
-            })?;
+            cache.put(&identity, &decoded).map_err(cache_error)?;
         }
         Ok((decoded, false))
     }
@@ -667,7 +663,7 @@ impl LegacyMountedVfs for MinoriMountedVfs {
     }
 
     fn read_dir(&self, uri: &str) -> Result<Vec<LegacyVfsNode>, PazError> {
-        validate_legacy_vfs_uri(&self.prefix, uri)?;
+        validate_legacy_vfs_directory_uri(&self.prefix, uri)?;
         let base = if uri.ends_with('/') {
             uri.to_owned()
         } else {
@@ -805,7 +801,7 @@ fn validate_role_set(configs: &[PazArchiveConfig]) -> Result<(), PazError> {
     {
         return Err(error(
             "ASTRA_EMU_MINORI_ARCHIVE_MISSING",
-            "all six required PAZ roles must be supplied",
+            "all required PAZ roles must be supplied",
         ));
     }
     Ok(())
@@ -1317,6 +1313,26 @@ fn error(code: &'static str, message: impl Into<String>) -> PazError {
     PazError::invalid(code, message)
 }
 
+fn cache_error(error_value: PlaintextCacheError) -> PazError {
+    match error_value {
+        PlaintextCacheError::EntryLimit => error(
+            "ASTRA_EMU_MINORI_CACHE_ENTRY_LIMIT",
+            "plaintext cache entry exceeds its configured budget",
+        ),
+        PlaintextCacheError::Corrupt => error(
+            "ASTRA_EMU_MINORI_CACHE_CORRUPT",
+            "plaintext cache metadata or content is corrupt",
+        ),
+        PlaintextCacheError::Permission(_) => error(
+            "ASTRA_EMU_MINORI_CACHE_PERMISSION",
+            "plaintext cache privacy permissions could not be enforced",
+        ),
+        PlaintextCacheError::Io(_) => {
+            error("ASTRA_EMU_MINORI_CACHE_IO", "plaintext cache I/O failed")
+        }
+    }
+}
+
 fn validate_blowfish_key(key: &[u8]) -> Result<(), PazError> {
     if !(4..=56).contains(&key.len()) {
         return Err(error(
@@ -1499,6 +1515,20 @@ mod tests {
         }
         let vfs = mount_fixture(temp.path(), 0);
         assert_eq!(vfs.manifest().entries.len(), REQUIRED_ARCHIVE_ROLES.len());
+        for entry in &vfs.manifest().entries {
+            let source = vfs
+                .manifest()
+                .sources
+                .iter()
+                .find(|source| source.source_id == entry.source_id)
+                .unwrap();
+            assert_eq!(entry.source_hash, source.source_hash);
+        }
+        let root = vfs.read_dir("minori:/").unwrap();
+        assert_eq!(root.len(), REQUIRED_ARCHIVE_ROLES.len());
+        assert!(root
+            .iter()
+            .all(|node| node.kind == LegacyVfsNodeKind::Directory));
         let read = vfs.read_range("minori:/scr/scr.bin", 3, 4).unwrap();
         assert_eq!(read.bytes, b"ture");
         assert!(!read.cache_hit);

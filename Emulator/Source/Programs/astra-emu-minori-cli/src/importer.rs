@@ -353,11 +353,10 @@ fn extract_roles(
     let arc_keys = object_member(graph, record, &["ArcKeys", "arc_keys"])
         .ok_or("ASTRA_EMU_GARBRO_ARC_KEYS")?;
     let arc_entries = dictionary_entries(graph, arc_keys)?;
-    if arc_entries.len() > REQUIRED_ARCHIVE_ROLES.len() + 2
+    if arc_entries.len() > REQUIRED_ARCHIVE_ROLES.len()
         || arc_entries.iter().any(|(role, _)| {
             !REQUIRED_ARCHIVE_ROLES
                 .iter()
-                .chain([&"bg", &"bgm"])
                 .any(|expected| role.eq_ignore_ascii_case(expected))
         })
     {

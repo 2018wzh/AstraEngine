@@ -634,12 +634,13 @@ impl DecodeProvider for ImageDecodeProvider {
     fn capability(&self) -> DecodeCapability {
         DecodeCapability {
             provider_id: "astra.decode.image".to_string(),
-            priority: ProviderPriority::Fallback,
+            priority: ProviderPriority::Platform,
             kinds: vec![DecodeKind::Image],
             codecs: vec![
                 "png".to_string(),
                 "jpeg".to_string(),
                 "jpg".to_string(),
+                "bmp".to_string(),
                 "webp".to_string(),
             ],
             feature_gated: false,

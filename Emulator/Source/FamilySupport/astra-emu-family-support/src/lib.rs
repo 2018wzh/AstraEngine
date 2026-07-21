@@ -8,6 +8,7 @@ mod fuse;
 mod private_profile;
 mod profile;
 mod registry;
+mod runtime_vfs;
 #[cfg(test)]
 mod test_support;
 mod verify;
@@ -21,6 +22,7 @@ pub use fuse::*;
 pub use private_profile::*;
 pub use profile::*;
 pub use registry::*;
+pub use runtime_vfs::*;
 pub use verify::*;
 pub use viewer::*;
 

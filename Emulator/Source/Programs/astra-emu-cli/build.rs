@@ -36,6 +36,11 @@ fn main() {
         "cargo:rustc-env=ASTRA_EMU_FVP_FEATURE_FINGERPRINT=sha256.{}",
         hex_sha256(features.as_bytes())
     );
+    let minori_features = "garbro=b09ee4570ccb1daf6ac56710ee8934dc0b8baeb0;features=none";
+    println!(
+        "cargo:rustc-env=ASTRA_EMU_MINORI_FEATURE_FINGERPRINT=sha256.{}",
+        hex_sha256(minori_features.as_bytes())
+    );
     println!(
         "cargo:rustc-env=ASTRA_EMU_TARGET={}",
         env::var("TARGET").expect("ASTRA_EMU_CLI_BUILD_TARGET_MISSING")
