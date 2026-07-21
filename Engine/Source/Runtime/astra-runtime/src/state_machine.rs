@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use astra_core::{Diagnostic, DiagnosticSeverity, SourceRef, StableId, StableIdGenerator};
 use schemars::JsonSchema;
@@ -53,7 +56,7 @@ pub enum GuardExpr {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateMachineInstance {
-    pub definition: StateMachineDefinition,
+    pub definition: Arc<StateMachineDefinition>,
     pub current_state: StableId,
     pub completed: bool,
 }
@@ -66,7 +69,7 @@ impl StateMachineInstance {
             .any(|state| state.id == definition.initial_state && state.terminal);
         Self {
             current_state: definition.initial_state,
-            definition,
+            definition: Arc::new(definition),
             completed,
         }
     }
