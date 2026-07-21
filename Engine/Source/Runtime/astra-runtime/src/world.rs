@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Instant};
 
 use astra_core::{
     Diagnostic, Hash128, Hash256, SchemaId, SchemaMigrationRegistry, SchemaVersion, StableId,
@@ -742,8 +742,12 @@ impl RuntimeWorld {
 
     pub fn tick(&mut self, request: TickRequest) -> Result<TickReport, RuntimeError> {
         self.validate_tick_request(&request)?;
+        let checkpoint_started = Instant::now();
         let checkpoint = self.snapshot();
+        let checkpoint_ns = checkpoint_started.elapsed().as_nanos() as u64;
         let diagnostics = self.diagnostics.clone();
+        let performance_step = request.timing.fixed_step;
+        let transaction_started = Instant::now();
         let result = (|| {
             for ingress in request.ingress {
                 match ingress.payload {
@@ -764,6 +768,15 @@ impl RuntimeWorld {
             };
             Ok(report)
         })();
+        let transaction_ns = transaction_started.elapsed().as_nanos() as u64;
+        trace!(
+            event = "runtime.tick.transaction.performance",
+            step = performance_step,
+            checkpoint_ns,
+            transaction_ns,
+            succeeded = result.is_ok(),
+            "measured RuntimeWorld tick transaction phases"
+        );
         match result {
             Ok(report) => Ok(report),
             Err(error) => {
@@ -914,6 +927,7 @@ impl RuntimeWorld {
             count = ready.len(),
             "runtime.event.drain"
         );
+        let machine_started = Instant::now();
         let output = self.machines.tick(
             input.fixed_step,
             &ready,
@@ -922,6 +936,7 @@ impl RuntimeWorld {
             &self.actions,
             &mut self.id_source,
         );
+        let machine_ns = machine_started.elapsed().as_nanos() as u64;
         for diagnostic in &output.diagnostics {
             warn!(
                 step = input.fixed_step,
@@ -957,21 +972,35 @@ impl RuntimeWorld {
                 envelope,
             });
         }
+        let state_hash_started = Instant::now();
+        let state_hash = self.state_hash();
+        let state_hash_ns = state_hash_started.elapsed().as_nanos() as u64;
+        let event_hash_started = Instant::now();
+        let event_hash = self.event_hash();
+        let event_hash_ns = event_hash_started.elapsed().as_nanos() as u64;
+        let presentation_hash_started = Instant::now();
+        let presentation_hash = self.presentation_hash();
+        let presentation_hash_ns = presentation_hash_started.elapsed().as_nanos() as u64;
         let report = TickReport {
             step: input.fixed_step,
-            state_hash: self.state_hash(),
-            event_hash: self.event_hash(),
-            presentation_hash: self.presentation_hash(),
+            state_hash,
+            event_hash,
+            presentation_hash,
             diagnostics: self.diagnostics.clone(),
         };
         trace!(
+            event = "runtime.tick.performance",
             step = report.step,
             state_hash = %report.state_hash,
             event_hash = %report.event_hash,
             presentation_hash = %report.presentation_hash,
             diagnostic_count = report.diagnostics.len(),
             output_diagnostic_count,
-            "runtime.tick"
+            machine_ns,
+            state_hash_ns,
+            event_hash_ns,
+            presentation_hash_ns,
+            "measured RuntimeWorld tick phases"
         );
         Ok(report)
     }
