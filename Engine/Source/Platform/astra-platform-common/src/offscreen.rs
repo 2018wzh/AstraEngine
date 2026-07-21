@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         mpsc, Arc,
     },
     time::{Duration, Instant},
@@ -89,14 +89,18 @@ struct GpuTimerSlot {
     query_set: wgpu::QuerySet,
     resolve_buffer: wgpu::Buffer,
     read_buffer: wgpu::Buffer,
+    map_status: Arc<AtomicU8>,
     pending: Option<PendingTimestampRead>,
 }
 
 struct PendingTimestampRead {
-    receiver: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
     submission: wgpu::SubmissionIndex,
     query_count: u32,
 }
+
+const GPU_MAP_PENDING: u8 = 0;
+const GPU_MAP_SUCCEEDED: u8 = 1;
+const GPU_MAP_FAILED: u8 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WgpuFramePerformanceCounters {
@@ -227,6 +231,7 @@ impl WgpuOffscreenRenderer {
                             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                             mapped_at_creation: false,
                         }),
+                        map_status: Arc::new(AtomicU8::new(GPU_MAP_PENDING)),
                         pending: None,
                     })
                     .collect(),
@@ -849,12 +854,19 @@ fn begin_gpu_timestamp_read(
     encoder.copy_buffer_to_buffer(&slot.resolve_buffer, 0, &slot.read_buffer, 0, byte_length);
     let submission = queue.submit([encoder.finish()]);
     let slice = slot.read_buffer.slice(..byte_length);
-    let (sender, receiver) = mpsc::sync_channel(1);
+    slot.map_status.store(GPU_MAP_PENDING, Ordering::Release);
+    let map_status = Arc::clone(&slot.map_status);
     slice.map_async(wgpu::MapMode::Read, move |result| {
-        let _ = sender.send(result);
+        map_status.store(
+            if result.is_ok() {
+                GPU_MAP_SUCCEEDED
+            } else {
+                GPU_MAP_FAILED
+            },
+            Ordering::Release,
+        );
     });
     slot.pending = Some(PendingTimestampRead {
-        receiver,
         submission,
         query_count,
     });
@@ -900,16 +912,21 @@ fn resolve_gpu_timestamps(
                     "GPU timestamp read exceeded its bounded timeout",
                 )
             })?;
-        pending
-            .receiver
-            .recv_timeout(READBACK_TIMEOUT)
-            .map_err(|_| {
-                unavailable(
+        match slot.map_status.load(Ordering::Acquire) {
+            GPU_MAP_SUCCEEDED => {}
+            GPU_MAP_FAILED => {
+                return Err(unavailable(
+                    "offscreen.timestamp_query",
+                    "GPU timestamp map failed",
+                ));
+            }
+            _ => {
+                return Err(unavailable(
                     "offscreen.timestamp_query",
                     "GPU timestamp callback was lost",
-                )
-            })?
-            .map_err(|_| unavailable("offscreen.timestamp_query", "GPU timestamp map failed"))?;
+                ));
+            }
+        }
     } else {
         device.poll(wgpu::PollType::Poll).map_err(|_| {
             unavailable(
@@ -917,20 +934,19 @@ fn resolve_gpu_timestamps(
                 "GPU timestamp device poll failed",
             )
         })?;
-        match pending.receiver.try_recv() {
-            Ok(result) => result.map_err(|_| {
-                unavailable("offscreen.timestamp_query", "GPU timestamp map failed")
-            })?,
-            Err(mpsc::TryRecvError::Empty) => return Ok(None),
-            Err(mpsc::TryRecvError::Disconnected) => {
+        match slot.map_status.load(Ordering::Acquire) {
+            GPU_MAP_SUCCEEDED => {}
+            GPU_MAP_PENDING => return Ok(None),
+            GPU_MAP_FAILED => {
                 return Err(unavailable(
                     "offscreen.timestamp_query",
-                    "GPU timestamp callback was lost",
+                    "GPU timestamp map failed",
                 ));
             }
+            _ => unreachable!("GPU timestamp callback uses a closed status set"),
         }
     }
-    let pending = slot.pending.take().ok_or_else(|| {
+    slot.pending.take().ok_or_else(|| {
         invalid(
             "offscreen.timestamp_query",
             "GPU timestamp submission was already resolved",
@@ -985,7 +1001,6 @@ fn resolve_gpu_timestamps(
     }
     drop(mapped);
     slot.read_buffer.unmap();
-    drop(pending);
     Ok(Some((atlas_upload_gpu_ns, scene_gpu_ns, filter_gpu_ns)))
 }
 
