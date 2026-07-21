@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use astra_core::Hash128;
 
@@ -15,7 +18,71 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct VnRuntime {
     compiled: Arc<CompiledStory>,
+    index: Arc<VnRuntimeIndex>,
     state: VnRuntimeState,
+}
+
+#[derive(Debug)]
+pub struct VnRuntimeIndex {
+    story_hash: Hash128,
+    commands_by_state: BTreeMap<String, Vec<(usize, usize)>>,
+    story_by_state: BTreeMap<String, String>,
+}
+
+impl VnRuntimeIndex {
+    pub fn build(compiled: &CompiledStory) -> Result<Self, VnError> {
+        let mut story_by_state = BTreeMap::new();
+        for story in &compiled.stories {
+            for state_id in &story.states {
+                if !compiled.states.contains_key(state_id) {
+                    return Err(VnError::diagnostic(
+                        "ASTRA_VN_RUNTIME_INDEX_STATE_MISSING",
+                        format!("story {} references missing state {state_id}", story.id),
+                    ));
+                }
+                if story_by_state
+                    .insert(state_id.clone(), story.id.clone())
+                    .is_some()
+                {
+                    return Err(VnError::diagnostic(
+                        "ASTRA_VN_RUNTIME_INDEX_STATE_OWNER_CONFLICT",
+                        format!("state {state_id} belongs to multiple stories"),
+                    ));
+                }
+            }
+        }
+        let commands_by_state = compiled
+            .states
+            .iter()
+            .map(|(state_id, state)| {
+                let commands = state
+                    .scenes
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(scene_index, scene)| {
+                        (0..scene.commands.len())
+                            .map(move |command_index| (scene_index, command_index))
+                    })
+                    .collect();
+                (state_id.clone(), commands)
+            })
+            .collect();
+        Ok(Self {
+            story_hash: compiled.story_hash,
+            commands_by_state,
+            story_by_state,
+        })
+    }
+
+    fn validate_story(&self, compiled: &CompiledStory) -> Result<(), VnError> {
+        if self.story_hash != compiled.story_hash {
+            return Err(VnError::diagnostic(
+                "ASTRA_VN_RUNTIME_INDEX_STORY_MISMATCH",
+                "runtime index does not belong to the compiled story",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl VnRuntime {
@@ -24,6 +91,16 @@ impl VnRuntime {
     }
 
     pub fn new_shared(compiled: Arc<CompiledStory>, config: VnRunConfig) -> Result<Self, VnError> {
+        let index = Arc::new(VnRuntimeIndex::build(&compiled)?);
+        Self::new_shared_indexed(compiled, index, config)
+    }
+
+    pub fn new_shared_indexed(
+        compiled: Arc<CompiledStory>,
+        index: Arc<VnRuntimeIndex>,
+        config: VnRunConfig,
+    ) -> Result<Self, VnError> {
+        index.validate_story(&compiled)?;
         tracing::info!(
             event = "vn.runtime.create",
             profile = %config.profile,
@@ -33,6 +110,7 @@ impl VnRuntime {
         );
         Ok(Self {
             compiled,
+            index,
             state: VnRuntimeState {
                 schema: VN_RUNTIME_STATE_SCHEMA.to_string(),
                 instance_id: "vn.default".to_string(),
@@ -66,13 +144,27 @@ impl VnRuntime {
         compiled: Arc<CompiledStory>,
         state: VnRuntimeState,
     ) -> Result<Self, VnError> {
+        let index = Arc::new(VnRuntimeIndex::build(&compiled)?);
+        Self::from_shared_state_indexed(compiled, index, state)
+    }
+
+    pub fn from_shared_state_indexed(
+        compiled: Arc<CompiledStory>,
+        index: Arc<VnRuntimeIndex>,
+        state: VnRuntimeState,
+    ) -> Result<Self, VnError> {
         if state.schema != VN_RUNTIME_STATE_SCHEMA {
             return Err(VnError::diagnostic(
                 "ASTRA_VN_RUNTIME_STATE_SCHEMA",
                 "VN runtime state schema is invalid",
             ));
         }
-        Ok(Self { compiled, state })
+        index.validate_story(&compiled)?;
+        Ok(Self {
+            compiled,
+            index,
+            state,
+        })
     }
 
     pub fn state(&self) -> &VnRuntimeState {
@@ -123,7 +215,7 @@ impl VnRuntime {
             before_state_hash = %before,
             "AstraVN player command started"
         );
-        let before_state = self.state.clone();
+        let before_variables = self.state.variables.clone();
         let mut presentation = Vec::new();
         let mut reached = BTreeSet::new();
         match command {
@@ -437,7 +529,7 @@ impl VnRuntime {
             .collect();
         let audio = presentation.iter().filter_map(vn_audio_command).collect();
         let timeline_tasks = presentation.iter().filter_map(vn_timeline_task).collect();
-        let mutations = variable_mutations(&before_state, &self.state);
+        let mutations = variable_mutations(&before_variables, &self.state.variables);
         Ok(VnStepOutput {
             schema: "astra.vn.step_output.v1".to_string(),
             next_cursor: self.state.cursor.clone(),
@@ -797,13 +889,13 @@ impl VnRuntime {
     }
 
     fn command_at_cursor(&self, cursor: &VnCommandCursor) -> Option<&CompiledCommand> {
-        self.compiled
-            .states
+        let state = self.compiled.states.get(&cursor.state_id)?;
+        let (scene_index, command_index) = *self
+            .index
+            .commands_by_state
             .get(&cursor.state_id)?
-            .scenes
-            .iter()
-            .flat_map(|scene| &scene.commands)
-            .nth(cursor.ordinal)
+            .get(cursor.ordinal)?;
+        state.scenes.get(scene_index)?.commands.get(command_index)
     }
 
     fn choice_option_enabled(&self, option: &ChoiceOption) -> Result<bool, VnError> {
@@ -897,16 +989,19 @@ impl VnRuntime {
                 format!("cursor state {state_id} is not compiled"),
             )
         })?;
-        let command = state
-            .scenes
-            .iter()
-            .flat_map(|scene| {
-                scene
-                    .commands
-                    .iter()
-                    .map(move |command| (scene.id.as_str(), command))
-            })
-            .nth(ordinal);
+        let command = self
+            .index
+            .commands_by_state
+            .get(state_id)
+            .and_then(|commands| commands.get(ordinal))
+            .and_then(|(scene_index, command_index)| {
+                state.scenes.get(*scene_index).and_then(|scene| {
+                    scene
+                        .commands
+                        .get(*command_index)
+                        .map(|command| (scene.id.as_str(), command))
+                })
+            });
         let (scene_id, command_id) = command
             .map(|(scene_id, command)| (scene_id.to_string(), compiled_command_id(command)))
             .unwrap_or_else(|| {
@@ -938,11 +1033,10 @@ impl VnRuntime {
     }
 
     fn story_for_state(&self, state_id: &str) -> Result<String, VnError> {
-        self.compiled
-            .stories
-            .iter()
-            .find(|story| story.states.iter().any(|state| state == state_id))
-            .map(|story| story.id.clone())
+        self.index
+            .story_by_state
+            .get(state_id)
+            .cloned()
             .ok_or_else(|| {
                 VnError::diagnostic(
                     "ASTRA_VN_CURSOR_STORY",
@@ -1104,7 +1198,17 @@ pub fn reduce_vn_step(
     state: &VnRuntimeState,
     command: VnPlayerCommand,
 ) -> Result<(VnRuntimeState, VnStepOutput), VnError> {
-    let mut runtime = VnRuntime::from_shared_state(compiled, state.clone())?;
+    let index = Arc::new(VnRuntimeIndex::build(&compiled)?);
+    reduce_vn_step_indexed(compiled, index, state.clone(), command)
+}
+
+pub fn reduce_vn_step_indexed(
+    compiled: Arc<CompiledStory>,
+    index: Arc<VnRuntimeIndex>,
+    state: VnRuntimeState,
+    command: VnPlayerCommand,
+) -> Result<(VnRuntimeState, VnStepOutput), VnError> {
+    let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
     let output = runtime.apply(command)?;
     Ok((runtime.state, output))
 }
@@ -1150,25 +1254,22 @@ fn vn_timeline_task(command: &PresentationCommand) -> Option<crate::VnTimelineTa
 }
 
 fn variable_mutations(
-    before: &VnRuntimeState,
-    after: &VnRuntimeState,
+    before: &BTreeMap<String, BTreeMap<String, i64>>,
+    after: &BTreeMap<String, BTreeMap<String, i64>>,
 ) -> Vec<crate::VnMutationRecord> {
     let scopes = before
-        .variables
         .keys()
-        .chain(after.variables.keys())
+        .chain(after.keys())
         .cloned()
         .collect::<BTreeSet<_>>();
     let mut mutations = Vec::new();
     for scope in scopes {
         let keys = before
-            .variables
             .get(&scope)
             .into_iter()
             .flat_map(|values| values.keys())
             .chain(
                 after
-                    .variables
                     .get(&scope)
                     .into_iter()
                     .flat_map(|values| values.keys()),
@@ -1177,12 +1278,10 @@ fn variable_mutations(
             .collect::<BTreeSet<_>>();
         for key in keys {
             let previous = before
-                .variables
                 .get(&scope)
                 .and_then(|values| values.get(&key))
                 .copied();
             let current = after
-                .variables
                 .get(&scope)
                 .and_then(|values| values.get(&key))
                 .copied();

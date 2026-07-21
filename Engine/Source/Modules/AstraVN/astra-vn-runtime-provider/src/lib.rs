@@ -38,6 +38,7 @@ pub use astra_vn_core::*;
 use astra_vn_core::{
     CompiledStory as CoreCompiledStory, VnError as CoreVnError,
     VnPlayerCommand as CoreVnPlayerCommand, VnRuntime as CoreVnRuntime,
+    VnRuntimeIndex as CoreVnRuntimeIndex,
 };
 pub use astra_vn_editor::*;
 pub use astra_vn_package::*;
@@ -166,12 +167,14 @@ struct NativeVnSession {
     world: RuntimeWorld,
     vn_component: ComponentId,
     compiled: Arc<CoreCompiledStory>,
+    runtime_index: Arc<CoreVnRuntimeIndex>,
     output: Arc<Mutex<Option<VnStepOutput>>>,
 }
 
 struct VnStepAction {
     component: ComponentId,
     compiled: Arc<CoreCompiledStory>,
+    runtime_index: Arc<CoreVnRuntimeIndex>,
     output: Arc<Mutex<Option<VnStepOutput>>>,
 }
 
@@ -279,6 +282,7 @@ impl NativeVnRuntimeProvider {
         request: RuntimeOpenRequest,
     ) -> Result<RuntimeOpenReport, CoreVnError> {
         let compiled = Arc::new(compiled.into());
+        let runtime_index = Arc::new(CoreVnRuntimeIndex::build(&compiled)?);
         tracing::info!(
             event = "vn.provider.session.open.start",
             target_id = %request.target_id,
@@ -295,7 +299,11 @@ impl NativeVnRuntimeProvider {
                 "runtime session id is already open",
             ));
         }
-        let initial_runtime = CoreVnRuntime::new_shared(Arc::clone(&compiled), config)?;
+        let initial_runtime = CoreVnRuntime::new_shared_indexed(
+            Arc::clone(&compiled),
+            Arc::clone(&runtime_index),
+            config,
+        )?;
         let mut world = RuntimeWorld::create(
             RuntimeConfig {
                 seed: request.seed,
@@ -322,6 +330,7 @@ impl NativeVnRuntimeProvider {
                 VnStepAction {
                     component: vn_component,
                     compiled: Arc::clone(&compiled),
+                    runtime_index: Arc::clone(&runtime_index),
                     output: Arc::clone(&output),
                 },
             )
@@ -363,6 +372,7 @@ impl NativeVnRuntimeProvider {
                 world,
                 vn_component,
                 compiled,
+                runtime_index,
                 output,
             },
         );
@@ -392,7 +402,7 @@ impl NativeVnRuntimeProvider {
                 .world
                 .read_component::<VnRuntimeState>(session.vn_component)
                 .map_err(|err| CoreVnError::message(err.to_string()))?;
-            runtime_command_from_input(&session.compiled, &state, &input)?
+            runtime_command_from_input(&session.compiled, &session.runtime_index, &state, &input)?
         };
         self.apply_command_at_step(
             input.session_id,
@@ -647,14 +657,18 @@ impl NativeVnRuntimeProvider {
             .world
             .read_component::<VnRuntimeState>(session.vn_component)
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        CoreVnRuntime::from_shared_state(Arc::clone(&session.compiled), state)?
-            .default_launch_command()
-            .ok_or_else(|| {
-                CoreVnError::diagnostic(
-                    "ASTRA_NATIVE_VN_LAUNCH_MISSING",
-                    "compiled story has no launchable state",
-                )
-            })
+        CoreVnRuntime::from_shared_state_indexed(
+            Arc::clone(&session.compiled),
+            Arc::clone(&session.runtime_index),
+            state,
+        )?
+        .default_launch_command()
+        .ok_or_else(|| {
+            CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_LAUNCH_MISSING",
+                "compiled story has no launchable state",
+            )
+        })
     }
 
     pub fn state(&self, session_id: &GameRuntimeSessionId) -> Result<VnRuntimeState, CoreVnError> {
@@ -874,20 +888,25 @@ impl NativeVnRuntimeProvider {
 
 fn runtime_command_from_input(
     compiled: &Arc<CoreCompiledStory>,
+    runtime_index: &Arc<CoreVnRuntimeIndex>,
     state: &VnRuntimeState,
     input: &RuntimeStepInput,
 ) -> Result<CoreVnPlayerCommand, CoreVnError> {
     match input.action.as_str() {
         "command" => serde_json::from_value(input.payload.clone())
             .map_err(|err| CoreVnError::message(format!("decode VN player command: {err}"))),
-        "launch_default" => CoreVnRuntime::from_shared_state(Arc::clone(compiled), state.clone())?
-            .default_launch_command()
-            .ok_or_else(|| {
-                CoreVnError::diagnostic(
-                    "ASTRA_NATIVE_VN_LAUNCH_MISSING",
-                    "compiled story has no launchable state",
-                )
-            }),
+        "launch_default" => CoreVnRuntime::from_shared_state_indexed(
+            Arc::clone(compiled),
+            Arc::clone(runtime_index),
+            state.clone(),
+        )?
+        .default_launch_command()
+        .ok_or_else(|| {
+            CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_LAUNCH_MISSING",
+                "compiled story has no launchable state",
+            )
+        }),
         "advance" => Ok(CoreVnPlayerCommand::Advance),
         "choose" => Ok(CoreVnPlayerCommand::Choose {
             option_id: required_payload_string(&input.payload, "option_id")?,
@@ -937,9 +956,13 @@ impl RuntimeAction for VnStepAction {
             .map_err(|err| RuntimeError::message(format!("decode VN step command: {err}")))?;
         let previous_state = ctx.read_component::<VnRuntimeState>(self.component)?;
         let previous_wait = previous_state.pending_wait.clone();
-        let (mut state, mut output) =
-            astra_vn_core::reduce_vn_step(Arc::clone(&self.compiled), &previous_state, command)
-                .map_err(|err| RuntimeError::message(err.to_string()))?;
+        let (mut state, mut output) = astra_vn_core::reduce_vn_step_indexed(
+            Arc::clone(&self.compiled),
+            Arc::clone(&self.runtime_index),
+            previous_state,
+            command,
+        )
+        .map_err(|err| RuntimeError::message(err.to_string()))?;
         if state.pending_wait != previous_wait {
             if let Some(wait) = state.pending_wait.as_mut() {
                 output.wait = Some(wait.clone());
