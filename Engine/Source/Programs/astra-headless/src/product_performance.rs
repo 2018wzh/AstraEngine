@@ -262,10 +262,12 @@ impl ProductPerformanceRecorder {
             .and_then(|value| value.checked_add(sample.media_decode_ns))
             .and_then(|value| value.checked_add(sample.save_load_ns))
             .ok_or("ASTRA_PERFORMANCE_PRODUCT_CPU_OVERFLOW")?;
-        state.pending_product_cpu_ns = state
-            .pending_product_cpu_ns
-            .checked_add(product_cpu_ns)
-            .ok_or("ASTRA_PERFORMANCE_PRODUCT_CPU_OVERFLOW")?;
+        if sample.bind_to_next_presentation {
+            state.pending_product_cpu_ns = state
+                .pending_product_cpu_ns
+                .checked_add(product_cpu_ns)
+                .ok_or("ASTRA_PERFORMANCE_PRODUCT_CPU_OVERFLOW")?;
+        }
         Ok(())
     }
 
@@ -1189,6 +1191,7 @@ mod tests {
             heap_allocation_count: 0,
         };
         let product_sample = ProductPerformanceSample {
+            bind_to_next_presentation: true,
             runtime_tick_ns: 5,
             vn_step_ns: 2,
             ui_layout_paint_ns: 40,
@@ -1216,6 +1219,17 @@ mod tests {
             media_audio_completion_ns: 1,
             save_load_ns: 7,
         };
+        recorder
+            .record_product_sample(
+                1,
+                ProductPerformanceSample {
+                    bind_to_next_presentation: false,
+                    runtime_tick_ns: 100_000,
+                    media_decode_ns: 100_000,
+                    ..ProductPerformanceSample::default()
+                },
+            )
+            .unwrap();
         recorder.record_product_sample(1, product_sample).unwrap();
         recorder.pace_gpu_frame(1).unwrap();
         assert_eq!(recorder.bind_gpu_frame(1).unwrap(), Some(1));

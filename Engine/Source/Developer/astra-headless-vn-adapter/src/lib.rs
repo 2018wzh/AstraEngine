@@ -7,7 +7,8 @@ use astra_platform::{
     SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest, HEADLESS_PRESENTATION_RATE_HZ,
 };
 use astra_player_core::{
-    PlatformCommandSink, PlayerHostCommandExecutor, PlayerHostCommandResult, PlayerHostResourceId,
+    PlatformCommandSink, PlayerHostCommand, PlayerHostCommandBatch, PlayerHostCommandExecutor,
+    PlayerHostCommandResult, PlayerHostResourceId,
 };
 use astra_product_host::{
     CanonicalAudioSnapshot, Observation, ProductAdapterFactory, ProductFuture, ProductHostError,
@@ -535,11 +536,14 @@ impl NativeVnHeadlessSession {
         Ok(())
     }
 
-    fn flush_performance_sample(&mut self) -> Result<(), ProductHostError> {
+    fn flush_performance_sample(
+        &mut self,
+        bind_to_next_presentation: bool,
+    ) -> Result<(), ProductHostError> {
         let Some(observer) = self.performance_observer.as_ref() else {
             return Ok(());
         };
-        let sample = self
+        let mut sample = self
             .performance
             .as_mut()
             .map(std::mem::take)
@@ -548,6 +552,7 @@ impl NativeVnHeadlessSession {
                     "performance observer exists without profiling state".into(),
                 )
             })?;
+        sample.bind_to_next_presentation = bind_to_next_presentation;
         observer
             .record_sample(sample)
             .map_err(ProductHostError::Output)
@@ -659,7 +664,7 @@ impl NativeVnHeadlessSession {
                     .saturating_add(ui_host_sample.runtime_render_ns);
             }
         })?;
-        self.flush_performance_sample()?;
+        self.flush_performance_sample(batch_presents_scene(&batch))?;
         self.executor
             .execute_batch(batch)
             .await
@@ -746,7 +751,7 @@ impl NativeVnHeadlessSession {
                     sample.runtime_tick_ns = sample.runtime_tick_ns.saturating_add(duration);
                 }
                 if let Some(present) = present {
-                    self.flush_performance_sample()?;
+                    self.flush_performance_sample(batch_presents_scene(&present))?;
                     self.executor
                         .execute_batch(present)
                         .await
@@ -785,7 +790,7 @@ impl NativeVnHeadlessSession {
                     .media_audio_completion_ns
                     .saturating_add(media_sample.audio_completion_ns);
             })?;
-            self.flush_performance_sample()?;
+            self.flush_performance_sample(false)?;
         }
         Ok(())
     }
@@ -823,7 +828,7 @@ impl NativeVnHeadlessSession {
                 .media_audio_completion_ns
                 .saturating_add(media_sample.audio_completion_ns);
         })?;
-        self.flush_performance_sample()
+        self.flush_performance_sample(false)
     }
 
     async fn save(&mut self, slot: &str) -> Result<(), ProductHostError> {
@@ -868,7 +873,7 @@ impl NativeVnHeadlessSession {
         self.add_profile_duration(profile_started, |sample, duration| {
             sample.save_load_ns = sample.save_load_ns.saturating_add(duration);
         })?;
-        self.flush_performance_sample()
+        self.flush_performance_sample(false)
     }
 
     async fn capture_gameplay_surface(&mut self) -> Result<(), ProductHostError> {
@@ -943,7 +948,7 @@ impl NativeVnHeadlessSession {
         self.add_profile_duration(profile_started, |sample, duration| {
             sample.save_load_ns = sample.save_load_ns.saturating_add(duration);
         })?;
-        self.flush_performance_sample()
+        self.flush_performance_sample(false)
     }
 
     fn refresh_observations(&mut self) -> Result<(), ProductHostError> {
@@ -994,6 +999,13 @@ impl NativeVnHeadlessSession {
         ];
         Ok(())
     }
+}
+
+fn batch_presents_scene(batch: &PlayerHostCommandBatch) -> bool {
+    batch
+        .commands
+        .iter()
+        .any(|command| matches!(command, PlayerHostCommand::PresentScene { .. }))
 }
 
 fn presentation_substep_duration_ns(tick_duration_ns: u64, substeps: u32, substep: u32) -> u64 {

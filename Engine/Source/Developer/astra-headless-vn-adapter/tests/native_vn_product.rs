@@ -167,6 +167,12 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
                 total
             },
         );
+    assert!(performance_observer
+        .samples
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|sample| sample.bind_to_next_presentation));
     assert!(
         performance.runtime_tick_ns
             + performance.vn_step_ns

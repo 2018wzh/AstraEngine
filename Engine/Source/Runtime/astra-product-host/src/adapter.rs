@@ -65,6 +65,11 @@ pub struct ProductOpenRequest {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ProductPerformanceSample {
+    /// True only when this sample directly produced a presentation command
+    /// that will be submitted immediately after the observer receives it.
+    /// Non-presenting deterministic ticks remain visible in the trace but are
+    /// not accumulated into a later, unrelated GPU frame.
+    pub bind_to_next_presentation: bool,
     pub runtime_tick_ns: u64,
     pub vn_step_ns: u64,
     pub ui_layout_paint_ns: u64,
