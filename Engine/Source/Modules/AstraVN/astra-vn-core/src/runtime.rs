@@ -1248,6 +1248,18 @@ pub fn reduce_vn_step_indexed(
     Ok((runtime.state, output))
 }
 
+pub fn reduce_vn_step_indexed_prehashed(
+    compiled: Arc<CompiledStory>,
+    index: Arc<VnRuntimeIndex>,
+    state: VnRuntimeState,
+    state_hash: Hash128,
+    command: VnPlayerCommand,
+) -> Result<(VnRuntimeState, VnStepOutput), VnError> {
+    let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
+    let output = runtime.apply_with_state_hash(command, state_hash)?;
+    Ok((runtime.state, output))
+}
+
 pub fn reduce_vn_step_indexed_validated(
     compiled: Arc<CompiledStory>,
     index: Arc<VnRuntimeIndex>,

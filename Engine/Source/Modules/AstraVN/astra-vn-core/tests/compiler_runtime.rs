@@ -1,7 +1,9 @@
 use astra_vn_core::{
-    compile_astra_project, reduce_vn_step, AstraSource, PresentationCommand, SystemPageKind,
-    VnPlayerCommand, VnRunConfig, VnRuntime, VnWaitKind,
+    compile_astra_project, reduce_vn_step, reduce_vn_step_indexed,
+    reduce_vn_step_indexed_prehashed, AstraSource, PresentationCommand, SystemPageKind,
+    VnPlayerCommand, VnRunConfig, VnRuntime, VnRuntimeIndex, VnWaitKind,
 };
+use std::sync::Arc;
 
 const MAIN: &str = r#"
 story main #@id story.main
@@ -31,6 +33,39 @@ story system.title #@id system.title
     system_page kind:title policy:astra.policy.standard #@id page.title
     option key:system.start -> story.main:state.prologue #@id system.start
 "#;
+
+#[astra_headless_test::test]
+fn prehashed_reducer_preserves_canonical_step_output() {
+    let compiled = Arc::new(
+        compile_astra_project([AstraSource::story("main.astra", MAIN)], Default::default())
+            .unwrap()
+            .story,
+    );
+    let index = Arc::new(VnRuntimeIndex::build(&compiled).unwrap());
+    let runtime = VnRuntime::new_shared_indexed(
+        Arc::clone(&compiled),
+        Arc::clone(&index),
+        VnRunConfig::classic("ja"),
+    )
+    .unwrap();
+    let state = runtime.state().clone();
+    let state_hash = astra_core::Hash128::from_blake3(&postcard::to_allocvec(&state).unwrap());
+    let command = VnPlayerCommand::Launch {
+        story_id: "story.main".into(),
+        state_id: "state.prologue".into(),
+    };
+
+    let regular = reduce_vn_step_indexed(
+        Arc::clone(&compiled),
+        Arc::clone(&index),
+        state.clone(),
+        command.clone(),
+    )
+    .unwrap();
+    let prehashed =
+        reduce_vn_step_indexed_prehashed(compiled, index, state, state_hash, command).unwrap();
+    assert_eq!(prehashed, regular);
+}
 
 #[astra_headless_test::test]
 fn compiles_route_graph_source_map_and_stable_hash() {

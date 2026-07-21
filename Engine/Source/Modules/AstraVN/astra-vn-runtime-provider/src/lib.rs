@@ -182,6 +182,7 @@ struct VnStepAction {
 
 struct VnStepStateCache {
     payload_hash: Hash256,
+    state_hash: Hash128,
     state: VnRuntimeState,
 }
 
@@ -1001,10 +1002,11 @@ impl RuntimeAction for VnStepAction {
         let state_decode_ns = profile_elapsed_ns(state_started);
         let reduce_started = profile.then(Instant::now);
         let (mut state, mut output) = if let Some(cached) = cached_state {
-            astra_vn_core::reduce_vn_step_indexed(
+            astra_vn_core::reduce_vn_step_indexed_prehashed(
                 Arc::clone(&self.compiled),
                 Arc::clone(&self.runtime_index),
                 cached.state,
+                cached.state_hash,
                 command,
             )
         } else {
@@ -1039,7 +1041,8 @@ impl RuntimeAction for VnStepAction {
         }
         let await_ns = profile_elapsed_ns(await_started);
         let replace_started = profile.then(Instant::now);
-        let (next_payload_hash, _) = ctx.replace_component_hashed(self.component, &state)?;
+        let (next_payload_hash, next_state_hash) =
+            ctx.replace_component_hashed(self.component, &state)?;
         let replace_component_ns = profile_elapsed_ns(replace_started);
         let output_started = profile.then(Instant::now);
         for event in &output.events {
@@ -1087,6 +1090,7 @@ impl RuntimeAction for VnStepAction {
             .map_err(|_| RuntimeError::message("VN step state cache lock is poisoned"))? =
             Some(VnStepStateCache {
                 payload_hash: next_payload_hash,
+                state_hash: next_state_hash,
                 state,
             });
         let trace_store_ns = profile_elapsed_ns(trace_started);
