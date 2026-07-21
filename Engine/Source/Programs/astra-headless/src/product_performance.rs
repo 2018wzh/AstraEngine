@@ -21,6 +21,13 @@ use astra_platform_headless::{HeadlessGpuFrameSample, HeadlessPerformanceObserve
 use astra_product_host::{ProductPerformanceObserver, ProductPerformanceSample};
 
 const FRAME_DEADLINE_NS: u64 = 8_333_333;
+const TRACE_COUNTER_HEARTBEAT_FRAMES: u64 = 120;
+
+#[derive(Clone, Copy)]
+struct TraceCounterSample {
+    value: u64,
+    paced_frame: u64,
+}
 
 struct RecorderState {
     recorder: PerformanceRecorder,
@@ -44,6 +51,8 @@ struct RecorderState {
     first_gpu_sequence: Option<u64>,
     last_paced_gpu_sequence: Option<u64>,
     gpu_measurement_cutoff: Option<u64>,
+    trace_counters: BTreeMap<(&'static str, &'static str), TraceCounterSample>,
+    deadline_miss_count: u64,
 }
 
 struct ActiveInputFlow {
@@ -114,6 +123,8 @@ impl ProductPerformanceRecorder {
                 first_gpu_sequence: None,
                 last_paced_gpu_sequence: None,
                 gpu_measurement_cutoff: None,
+                trace_counters: BTreeMap::new(),
+                deadline_miss_count: 0,
             })),
             decoded_cache_bytes: AtomicU64::new(0),
         })
@@ -211,6 +222,8 @@ impl ProductPerformanceRecorder {
             state.first_gpu_sequence = None;
             state.last_paced_gpu_sequence = None;
             state.gpu_measurement_cutoff = None;
+            state.trace_counters.clear();
+            state.deadline_miss_count = 0;
             state.product_cpu_by_flow.clear();
             state.pending_gpu_by_flow.clear();
             state.armed = true;
@@ -670,6 +683,10 @@ impl ProductPerformanceRecorder {
         let end_to_end_ns = cpu_ns
             .checked_add(sample.gpu_duration_ns)
             .ok_or_else(|| performance_error("frame duration overflowed"))?;
+        state.deadline_miss_count = state
+            .deadline_miss_count
+            .checked_add(u64::from(end_to_end_ns > FRAME_DEADLINE_NS))
+            .ok_or_else(|| performance_error("deadline miss counter overflowed"))?;
         if sample.sequence == 1
             || sample.sequence.is_multiple_of(60)
             || state.last_memory_sample.is_none()
@@ -721,206 +738,211 @@ impl ProductPerformanceRecorder {
         let start_ns = timestamp_ns;
         let gpu_start_ns = timestamp_ns;
         let active_flow = sample.input_flow_id;
-        state
-            .trace
-            .complete(
-                "runtime.cpu",
-                "scene.build",
+        for (domain, name, thread_id, duration_ns) in [
+            ("runtime.cpu", "scene.build", 1, sample.scene_build_ns),
+            (
+                "renderer.cpu",
+                "wgpu.prepare_submit",
                 1,
-                Some(sample.sequence),
-                start_ns,
-                sample.scene_build_ns,
+                sample.cpu_submit_ns,
+            ),
+            (
+                "renderer.cpu",
+                "scene.commands",
+                1,
+                sample.scene_command_cpu_ns,
+            ),
+            ("renderer.cpu", "scene.atlas", 1, sample.scene_atlas_cpu_ns),
+            (
+                "renderer.cpu",
+                "scene.geometry",
+                1,
+                sample.scene_geometry_cpu_ns,
+            ),
+            (
+                "renderer.cpu",
+                "scene.vertex_upload",
+                1,
+                sample.scene_vertex_upload_cpu_ns,
+            ),
+            (
+                "renderer.cpu",
+                "scene.render_submit",
+                1,
+                sample.scene_render_submit_cpu_ns,
+            ),
+            (
+                "renderer.gpu",
+                "atlas.upload",
+                2,
+                sample.atlas_upload_gpu_ns,
+            ),
+            ("renderer.gpu", "scene.pass", 2, sample.scene_gpu_ns),
+            ("renderer.gpu", "filter.pass", 2, sample.filter_gpu_ns),
+        ] {
+            trace_complete_nonzero(
+                &mut state.trace,
+                domain,
+                name,
+                thread_id,
+                sample.sequence,
+                if thread_id == 1 {
+                    start_ns
+                } else {
+                    gpu_start_ns
+                },
+                duration_ns,
             )
-            .and_then(|_| {
-                state.trace.complete(
-                    "renderer.cpu",
-                    "wgpu.prepare_submit",
-                    1,
-                    Some(sample.sequence),
-                    start_ns,
-                    sample.cpu_submit_ns,
-                )
-            })
-            .and_then(|_| {
-                state.trace.complete(
-                    "renderer.cpu",
-                    "scene.commands",
-                    1,
-                    Some(sample.sequence),
-                    start_ns,
-                    sample.scene_command_cpu_ns,
-                )
-            })
-            .and_then(|_| {
-                state.trace.complete(
-                    "renderer.cpu",
-                    "scene.atlas",
-                    1,
-                    Some(sample.sequence),
-                    start_ns,
-                    sample.scene_atlas_cpu_ns,
-                )
-            })
-            .and_then(|_| {
-                state.trace.complete(
-                    "renderer.cpu",
-                    "scene.geometry",
-                    1,
-                    Some(sample.sequence),
-                    start_ns,
-                    sample.scene_geometry_cpu_ns,
-                )
-            })
-            .and_then(|_| {
-                state.trace.complete(
-                    "renderer.cpu",
-                    "scene.vertex_upload",
-                    1,
-                    Some(sample.sequence),
-                    start_ns,
-                    sample.scene_vertex_upload_cpu_ns,
-                )
-            })
-            .and_then(|_| {
-                state.trace.complete(
-                    "renderer.cpu",
-                    "scene.render_submit",
-                    1,
-                    Some(sample.sequence),
-                    start_ns,
-                    sample.scene_render_submit_cpu_ns,
-                )
-            })
-            .and_then(|_| match active_flow {
-                Some(flow_id) => state.trace.flow(
+            .map_err(|error| performance_error(&error))?;
+        }
+        if let Some(flow_id) = active_flow {
+            state
+                .trace
+                .flow(
                     "frame.flow",
                     "physical_input_to_gpu",
                     2,
                     flow_id,
                     gpu_start_ns,
                     PerfettoFlowPhase::Step,
-                ),
-                None => Ok(()),
-            })
-            .and_then(|_| {
-                state.trace.complete(
-                    "renderer.gpu",
-                    "atlas.upload",
-                    2,
-                    Some(sample.sequence),
-                    gpu_start_ns,
-                    sample.atlas_upload_gpu_ns,
                 )
-            })
-            .and_then(|_| {
-                state.trace.complete(
-                    "renderer.gpu",
-                    "scene.pass",
-                    2,
-                    Some(sample.sequence),
-                    gpu_start_ns,
-                    sample.scene_gpu_ns,
-                )
-            })
-            .and_then(|_| {
-                state.trace.complete(
-                    "renderer.gpu",
-                    "filter.pass",
-                    2,
-                    Some(sample.sequence),
-                    gpu_start_ns,
-                    sample.filter_gpu_ns,
-                )
-            })
-            .and_then(|_| match active_flow {
-                Some(flow_id) => state.trace.flow(
-                    "frame.flow",
-                    "physical_input_to_gpu",
-                    2,
-                    flow_id,
-                    gpu_start_ns,
-                    PerfettoFlowPhase::End,
-                ),
-                None => Ok(()),
-            })
-            .and_then(|_| {
-                state
-                    .trace
-                    .counter("memory", "working_set.bytes", timestamp_ns, working_set)
-            })
-            .and_then(|_| {
-                state
-                    .trace
-                    .counter("memory", "private.bytes", timestamp_ns, private_bytes)
-            })
-            .and_then(|_| {
-                state.trace.counter(
-                    "renderer",
-                    "gpu_resource.bytes",
-                    timestamp_ns,
-                    sample.gpu_resource_bytes,
-                )
-            })
-            .and_then(|_| {
-                state
-                    .trace
-                    .counter("renderer", "atlas.bytes", timestamp_ns, sample.atlas_bytes)
-            })
-            .and_then(|_| {
-                state.trace.counter(
-                    "renderer",
-                    "upload.bytes",
-                    timestamp_ns,
-                    sample.upload_bytes,
-                )
-            })
-            .and_then(|_| {
-                state.trace.counter(
-                    "allocator",
-                    "frame.bytes",
-                    timestamp_ns,
-                    sample.heap_allocation_bytes,
-                )
-            })
-            .and_then(|_| {
-                state.trace.counter(
-                    "allocator",
-                    "live.bytes",
-                    timestamp_ns,
-                    allocation.live_bytes,
-                )
-            })
-            .and_then(|_| {
-                state.trace.counter(
-                    "allocator",
-                    "peak_live.bytes",
-                    timestamp_ns,
-                    allocation.peak_live_bytes,
-                )
-            })
-            .and_then(|_| {
-                state.trace.counter(
-                    "allocator",
-                    "allocated_since_arm.bytes",
-                    timestamp_ns,
-                    allocation
-                        .allocated_bytes
-                        .saturating_sub(state.allocation_baseline.allocated_bytes),
-                )
-            })
-            .and_then(|_| {
-                state.trace.counter(
-                    "allocator",
-                    "allocations_since_arm.count",
-                    timestamp_ns,
-                    allocation
-                        .allocation_count
-                        .saturating_sub(state.allocation_baseline.allocation_count),
-                )
-            })
-            .map_err(|error| performance_error(&error.to_string()))?;
+                .and_then(|_| {
+                    state.trace.flow(
+                        "frame.flow",
+                        "physical_input_to_gpu",
+                        2,
+                        flow_id,
+                        gpu_start_ns,
+                        PerfettoFlowPhase::End,
+                    )
+                })
+                .map_err(|error| performance_error(&error.to_string()))?;
+        }
+        for (domain, name, value, emit_on_change) in [
+            ("memory", "working_set.bytes", working_set, false),
+            ("memory", "private.bytes", private_bytes, false),
+            ("cache", "decoded.bytes", cache_bytes, true),
+            (
+                "renderer",
+                "gpu_resource.bytes",
+                sample.gpu_resource_bytes,
+                true,
+            ),
+            ("renderer", "atlas.bytes", sample.atlas_bytes, true),
+            ("renderer", "upload.bytes", sample.upload_bytes, true),
+            ("renderer", "readback.bytes", sample.readback_bytes, true),
+            ("renderer", "draw_calls.count", sample.draw_calls, true),
+            (
+                "renderer",
+                "queue_submissions.count",
+                sample.queue_submissions,
+                true,
+            ),
+            ("renderer", "pipeline.count", sample.pipeline_count, true),
+            ("deadline", "miss.count", state.deadline_miss_count, true),
+            (
+                "allocator",
+                "frame.bytes",
+                sample.heap_allocation_bytes,
+                true,
+            ),
+            ("allocator", "live.bytes", allocation.live_bytes, false),
+            (
+                "allocator",
+                "peak_live.bytes",
+                allocation.peak_live_bytes,
+                false,
+            ),
+            (
+                "allocator",
+                "allocated_since_arm.bytes",
+                allocation
+                    .allocated_bytes
+                    .saturating_sub(state.allocation_baseline.allocated_bytes),
+                false,
+            ),
+            (
+                "allocator",
+                "allocations_since_arm.count",
+                allocation
+                    .allocation_count
+                    .saturating_sub(state.allocation_baseline.allocation_count),
+                false,
+            ),
+        ] {
+            trace_counter_journaled(state, domain, name, timestamp_ns, value, emit_on_change)
+                .map_err(|error| performance_error(&error))?;
+        }
         Ok(())
     }
+}
+
+fn trace_complete_nonzero(
+    trace: &mut PerfettoTraceWriter,
+    domain: &'static str,
+    name: &'static str,
+    thread_id: u32,
+    sequence: u64,
+    timestamp_ns: u64,
+    duration_ns: u64,
+) -> Result<(), String> {
+    if duration_ns == 0 {
+        return Ok(());
+    }
+    trace
+        .complete(
+            domain,
+            name,
+            thread_id,
+            Some(sequence),
+            timestamp_ns,
+            duration_ns,
+        )
+        .map_err(|error| error.to_string())
+}
+
+fn trace_counter_journaled(
+    state: &mut RecorderState,
+    domain: &'static str,
+    name: &'static str,
+    timestamp_ns: u64,
+    value: u64,
+    emit_on_change: bool,
+) -> Result<(), String> {
+    let key = (domain, name);
+    let should_emit = should_emit_trace_counter(
+        state.trace_counters.get(&key).copied(),
+        state.paced_frame_count,
+        value,
+        emit_on_change,
+    );
+    if !should_emit {
+        return Ok(());
+    }
+    state
+        .trace
+        .counter(domain, name, timestamp_ns, value)
+        .map_err(|error| error.to_string())?;
+    state.trace_counters.insert(
+        key,
+        TraceCounterSample {
+            value,
+            paced_frame: state.paced_frame_count,
+        },
+    );
+    Ok(())
+}
+
+fn should_emit_trace_counter(
+    previous: Option<TraceCounterSample>,
+    paced_frame: u64,
+    value: u64,
+    emit_on_change: bool,
+) -> bool {
+    previous.is_none_or(|previous| {
+        (emit_on_change && previous.value != value)
+            || paced_frame.saturating_sub(previous.paced_frame) >= TRACE_COUNTER_HEARTBEAT_FRAMES
+    })
 }
 
 fn frame_deadline_offset(
@@ -990,6 +1012,24 @@ mod tests {
             Duration::from_secs(600)
         );
         assert!(frame_deadline_offset(1, 0).is_err());
+    }
+
+    #[test]
+    fn trace_counters_emit_changes_and_bounded_heartbeats() {
+        let previous = TraceCounterSample {
+            value: 42,
+            paced_frame: 10,
+        };
+        assert!(should_emit_trace_counter(None, 10, 42, true));
+        assert!(!should_emit_trace_counter(Some(previous), 11, 42, true));
+        assert!(should_emit_trace_counter(Some(previous), 11, 43, true));
+        assert!(!should_emit_trace_counter(Some(previous), 11, 43, false));
+        assert!(should_emit_trace_counter(
+            Some(previous),
+            10 + TRACE_COUNTER_HEARTBEAT_FRAMES,
+            42,
+            false,
+        ));
     }
 
     #[test]
