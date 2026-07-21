@@ -5,8 +5,8 @@ use astra_media::{
     LayoutConstraint, OpenTypeFeature, OverflowPolicy, PackagedFont, RubySpan, SourceRange,
     TextDirection, TextLayoutBindingIdentity, TextLayoutConfig, TextLayoutProvider,
     TextLayoutReplayInput, TextLayoutReplayLimits, TextLayoutReplaySession,
-    TextLayoutReplaySnapshot, TextLayoutRequest, TextRenderResourceOwner, TextRun, UnicodeRange,
-    VoiceReplayRef, WrapPolicy, FONT_PACKAGE_MANIFEST_SCHEMA,
+    TextLayoutReplaySnapshot, TextLayoutRequest, TextRenderLayoutUpdate, TextRenderResourceOwner,
+    TextRun, UnicodeRange, VoiceReplayRef, WrapPolicy, FONT_PACKAGE_MANIFEST_SCHEMA,
 };
 use astra_media_core::{
     CpuRendererProvider, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest,
@@ -19,6 +19,105 @@ fn open_font_fixture(file: &str) -> Vec<u8> {
         .join("../../../Fixtures/PublicDomainFonts")
         .join(file);
     std::fs::read(path).unwrap()
+}
+
+#[astra_headless_test::test]
+fn frame_resource_journal_is_incremental_shared_and_transactional() {
+    let provider = provider();
+    let layout = provider.layout(&request("shared frame glyphs")).unwrap();
+    let mut owner = TextRenderResourceOwner::default();
+    let initial = owner
+        .update_frame(
+            &[
+                TextRenderLayoutUpdate {
+                    layout_id: "frame.a",
+                    layout: &layout,
+                    rgba: [255; 4],
+                },
+                TextRenderLayoutUpdate {
+                    layout_id: "frame.b",
+                    layout: &layout,
+                    rgba: [255; 4],
+                },
+            ],
+            &[],
+        )
+        .unwrap();
+    assert_eq!(initial.layouts.len(), 2);
+    assert_eq!(
+        initial
+            .lifecycle
+            .iter()
+            .filter(|command| matches!(command, SceneCommand::UploadGlyph { .. }))
+            .count(),
+        layout.glyph_resources.len()
+    );
+
+    let stable = owner
+        .update_frame(
+            &[
+                TextRenderLayoutUpdate {
+                    layout_id: "frame.a",
+                    layout: &layout,
+                    rgba: [255; 4],
+                },
+                TextRenderLayoutUpdate {
+                    layout_id: "frame.b",
+                    layout: &layout,
+                    rgba: [255; 4],
+                },
+            ],
+            &[],
+        )
+        .unwrap();
+    assert!(stable.lifecycle.is_empty());
+
+    let mut conflicting = layout.clone();
+    std::sync::Arc::make_mut(&mut conflicting.glyph_resources[0].bitmap.pixels)[0] ^= 0xff;
+    conflicting.glyph_resources[0].bitmap.hash =
+        Hash256::from_sha256(&conflicting.glyph_resources[0].bitmap.pixels);
+    let error = owner
+        .update_frame(
+            &[TextRenderLayoutUpdate {
+                layout_id: "frame.a",
+                layout: &conflicting,
+                rgba: [255; 4],
+            }],
+            &["frame.b"],
+        )
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("ASTRA_TEXT_RENDER_RESOURCE_CONFLICT"));
+
+    let after_failure = owner
+        .update_frame(
+            &[
+                TextRenderLayoutUpdate {
+                    layout_id: "frame.a",
+                    layout: &layout,
+                    rgba: [255; 4],
+                },
+                TextRenderLayoutUpdate {
+                    layout_id: "frame.b",
+                    layout: &layout,
+                    rgba: [255; 4],
+                },
+            ],
+            &[],
+        )
+        .unwrap();
+    assert!(after_failure.lifecycle.is_empty());
+
+    let removed = owner.update_frame(&[], &["frame.a", "frame.b"]).unwrap();
+    assert_eq!(
+        removed
+            .lifecycle
+            .iter()
+            .filter(|command| matches!(command, SceneCommand::ReleaseResource { .. }))
+            .count(),
+        layout.glyph_resources.len()
+    );
 }
 
 fn fixture_font(

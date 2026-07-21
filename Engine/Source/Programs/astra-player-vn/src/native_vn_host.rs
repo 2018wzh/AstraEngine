@@ -4,8 +4,8 @@ use std::sync::{Arc, RwLock};
 use astra_core::{Hash256, SchemaVersion};
 use astra_media::{
     CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, TextDirection,
-    TextLayoutConfig, TextLayoutProvider, TextLayoutRequest, TextRenderResourceOwner, TextRun,
-    WrapPolicy,
+    TextLayoutConfig, TextLayoutProvider, TextLayoutRequest, TextLayoutResult,
+    TextRenderLayoutUpdate, TextRenderResourceOwner, TextRun, WrapPolicy,
 };
 use astra_media_core::{
     BlendMode, FilterGraph, FilterNode, FilterParam, FilterTarget, MediaError, RectI, SceneCommand,
@@ -2737,29 +2737,51 @@ impl NativeVnHostCommandSource {
             "rendered a traceable AstraVN UI semantic generation"
         );
         let draw = ui_frame_to_scene_commands(&output.render)?;
-        let mut next_text_resources = self.text_resources.clone();
         let mut next_layout_ids = BTreeSet::new();
-        let mut text_lifecycle = Vec::new();
-        let mut text_draw = Vec::new();
+        let mut pending_text = Vec::new();
         let body_font_size = (self.height as f32 / 30.0).clamp(18.0, 34.0);
         append_ui_semantic_text(
-            &mut next_text_resources,
             &self.text_provider,
             &self.font_families,
             &self.localization,
             &mut next_layout_ids,
-            &mut text_lifecycle,
-            &mut text_draw,
+            &mut pending_text,
             &output.semantics,
             body_font_size,
         )?;
-        for layout_id in self.live_layout_ids.difference(&next_layout_ids) {
-            text_lifecycle.extend(next_text_resources.remove_layout(layout_id)?);
+        let removals = self
+            .live_layout_ids
+            .difference(&next_layout_ids)
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let updates = pending_text
+            .iter()
+            .map(|pending| TextRenderLayoutUpdate {
+                layout_id: &pending.layout_id,
+                layout: &pending.layout,
+                rgba: pending.rgba,
+            })
+            .collect::<Vec<_>>();
+        let text_frame = self.text_resources.update_frame(&updates, &removals)?;
+        let mut text_draw = Vec::new();
+        for (pending, draw) in pending_text.iter().zip(text_frame.layouts) {
+            if pending.layout_id != draw.layout_id {
+                return Err(NativeVnHostError::Asset(
+                    "ASTRA_PLAYER_LAYOUT_ORDER: text resource owner changed frame draw order"
+                        .into(),
+                ));
+            }
+            for command in draw.commands {
+                text_draw.push(translate_text_command(
+                    command,
+                    pending.aligned_x,
+                    pending.aligned_y,
+                )?);
+            }
         }
-        let mut composed_draw = text_lifecycle;
+        let mut composed_draw = text_frame.lifecycle;
         composed_draw.extend(draw);
         composed_draw.extend(text_draw);
-        self.text_resources = next_text_resources;
         self.live_layout_ids = next_layout_ids;
         if self
             .ui_animations
@@ -3234,12 +3256,13 @@ impl NativeVnHostCommandSource {
             None
         };
         if ui_frame.is_none() && !self.live_layout_ids.is_empty() {
-            let mut next_text_resources = self.text_resources.clone();
             let layout_ids = self.live_layout_ids.iter().cloned().collect::<Vec<_>>();
-            for layout_id in layout_ids {
-                lifecycle.extend(next_text_resources.remove_layout(&layout_id)?);
-            }
-            self.text_resources = next_text_resources;
+            let removal_refs = layout_ids.iter().map(String::as_str).collect::<Vec<_>>();
+            lifecycle.extend(
+                self.text_resources
+                    .update_frame(&[], &removal_refs)?
+                    .lifecycle,
+            );
             self.live_layout_ids.clear();
         }
         lifecycle.push(SceneCommand::rect(
@@ -4003,13 +4026,11 @@ fn scene_texture_ids(draw: &[SceneCommand]) -> BTreeSet<String> {
 
 #[allow(clippy::too_many_arguments)]
 fn append_text_value(
-    owner: &mut TextRenderResourceOwner,
     provider: &CosmicTextLayoutProvider,
     font_families: &[String],
     locale: &str,
     layout_ids: &mut BTreeSet<String>,
-    lifecycle: &mut Vec<SceneCommand>,
-    draw: &mut Vec<SceneCommand>,
+    pending: &mut Vec<PendingUiTextLayout>,
     layout_id: &str,
     key: &str,
     text: &str,
@@ -4039,32 +4060,37 @@ fn append_text_value(
     let layout_height = layout.height.ceil().clamp(0.0, max_height as f32) as u32;
     let aligned_x = x.saturating_add(horizontal_align.offset(max_width, layout_width));
     let aligned_y = y.saturating_add(vertical_align.offset(max_height, layout_height));
-    let commands = owner.update_layout(layout_id, &layout, rgba)?;
-    for command in commands {
-        match command {
-            SceneCommand::UploadGlyph { .. } | SceneCommand::ReleaseResource { .. } => {
-                lifecycle.push(command);
-            }
-            command => draw.push(translate_text_command(command, aligned_x, aligned_y)?),
-        }
-    }
+    validate_text_translation(&layout, aligned_x, aligned_y)?;
     if !layout_ids.insert(layout_id.to_string()) {
         return Err(NativeVnHostError::Asset(format!(
             "ASTRA_PLAYER_LAYOUT_DUPLICATE: layout id {layout_id} was emitted twice"
         )));
     }
+    pending.push(PendingUiTextLayout {
+        layout_id: layout_id.to_string(),
+        layout,
+        rgba,
+        aligned_x,
+        aligned_y,
+    });
     Ok(())
+}
+
+struct PendingUiTextLayout {
+    layout_id: String,
+    layout: TextLayoutResult,
+    rgba: [u8; 4],
+    aligned_x: u32,
+    aligned_y: u32,
 }
 
 #[allow(clippy::too_many_arguments)]
 fn append_ui_semantic_text(
-    owner: &mut TextRenderResourceOwner,
     provider: &CosmicTextLayoutProvider,
     font_families: &[String],
     localization: &VnLocalizationTable,
     layout_ids: &mut BTreeSet<String>,
-    lifecycle: &mut Vec<SceneCommand>,
-    draw: &mut Vec<SceneCommand>,
+    pending: &mut Vec<PendingUiTextLayout>,
     semantics: &UiSemanticSnapshot,
     body_font_size: f32,
 ) -> Result<(), NativeVnHostError> {
@@ -4111,13 +4137,11 @@ fn append_ui_semantic_text(
         )?;
         let rgba = parse_ui_text_rgba(node.properties.get("text.rgba"))?;
         append_text_value(
-            owner,
             provider,
             font_families,
             &localization.locale,
             layout_ids,
-            lifecycle,
-            draw,
+            pending,
             &format!("ui.text.{}", node.id),
             name,
             text,
@@ -4488,6 +4512,50 @@ fn text_request(spec: TextRequestSpec<'_>) -> TextLayoutRequest {
         font_families: spec.font_families.to_vec(),
         features: Vec::new(),
     }
+}
+
+fn validate_text_translation(
+    layout: &TextLayoutResult,
+    x: u32,
+    y: u32,
+) -> Result<(), NativeVnHostError> {
+    let x = i32::try_from(x).map_err(|_| {
+        NativeVnHostError::Asset("ASTRA_PLAYER_LAYOUT_COORDINATE: x exceeds i32".to_string())
+    })?;
+    let y = i32::try_from(y).map_err(|_| {
+        NativeVnHostError::Asset("ASTRA_PLAYER_LAYOUT_COORDINATE: y exceeds i32".to_string())
+    })?;
+    for glyph in layout.shaped_runs.iter().flat_map(|run| &run.glyphs) {
+        if glyph.resource_id.is_some() {
+            if let Some(glyph_x) = glyph.render_x {
+                glyph_x.checked_add(x).ok_or_else(|| {
+                    NativeVnHostError::Asset(
+                        "ASTRA_PLAYER_LAYOUT_COORDINATE: glyph x overflowed".to_string(),
+                    )
+                })?;
+            }
+            if let Some(glyph_y) = glyph.render_y {
+                glyph_y.checked_add(y).ok_or_else(|| {
+                    NativeVnHostError::Asset(
+                        "ASTRA_PLAYER_LAYOUT_COORDINATE: glyph y overflowed".to_string(),
+                    )
+                })?;
+            }
+        }
+    }
+    if let Some(clip) = layout.clip {
+        clip.x.checked_add(x).ok_or_else(|| {
+            NativeVnHostError::Asset(
+                "ASTRA_PLAYER_LAYOUT_COORDINATE: clip x overflowed".to_string(),
+            )
+        })?;
+        clip.y.checked_add(y).ok_or_else(|| {
+            NativeVnHostError::Asset(
+                "ASTRA_PLAYER_LAYOUT_COORDINATE: clip y overflowed".to_string(),
+            )
+        })?;
+    }
+    Ok(())
 }
 
 fn translate_text_command(

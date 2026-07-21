@@ -323,153 +323,268 @@ pub struct TextRenderResourceOwner {
     layouts: BTreeMap<String, BTreeSet<String>>,
 }
 
+pub struct TextRenderLayoutUpdate<'a> {
+    pub layout_id: &'a str,
+    pub layout: &'a TextLayoutResult,
+    pub rgba: [u8; 4],
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextRenderLayoutDraw {
+    pub layout_id: String,
+    pub commands: Vec<SceneCommand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TextRenderFrameCommands {
+    pub lifecycle: Vec<SceneCommand>,
+    pub layouts: Vec<TextRenderLayoutDraw>,
+}
+
+struct PreparedTextLayout {
+    layout_id: String,
+    next_ids: BTreeSet<String>,
+    glyphs: Vec<GlyphInstance>,
+    clip: Option<LayoutClip>,
+    rgba: [u8; 4],
+}
+
 impl TextRenderResourceOwner {
+    pub fn update_frame(
+        &mut self,
+        updates: &[TextRenderLayoutUpdate<'_>],
+        removals: &[&str],
+    ) -> Result<TextRenderFrameCommands, MediaError> {
+        let mut affected_layouts = BTreeSet::new();
+        let mut prepared = Vec::with_capacity(updates.len());
+        let mut new_bitmaps = BTreeMap::new();
+        let mut reference_changes = BTreeMap::<String, (usize, usize)>::new();
+
+        for update in updates {
+            if update.layout_id.trim().is_empty() || update.layout.schema != TEXT_LAYOUT_SCHEMA {
+                return Err(MediaError::message(
+                    "ASTRA_TEXT_RENDER_BINDING: layout id or schema is invalid",
+                ));
+            }
+            if !affected_layouts.insert(update.layout_id) {
+                return Err(MediaError::message(
+                    "ASTRA_TEXT_RENDER_LAYOUT_DUPLICATE: frame updates a layout more than once",
+                ));
+            }
+            let declared = update
+                .layout
+                .glyph_resources
+                .iter()
+                .map(|resource| (resource.resource_id.as_str(), resource))
+                .collect::<BTreeMap<_, _>>();
+            if declared.len() != update.layout.glyph_resources.len() {
+                return Err(MediaError::message(
+                    "ASTRA_TEXT_RENDER_RESOURCE_DUPLICATE: layout contains duplicate glyph resources",
+                ));
+            }
+            let glyphs = update.layout.glyph_instances();
+            let next_ids = glyphs
+                .iter()
+                .map(|instance| instance.resource_id.clone())
+                .collect::<BTreeSet<_>>();
+            if next_ids
+                .iter()
+                .any(|id| !declared.contains_key(id.as_str()))
+            {
+                return Err(MediaError::message(
+                    "ASTRA_TEXT_RENDER_RESOURCE_MISSING: glyph instance has no declared bitmap",
+                ));
+            }
+            for id in &next_ids {
+                let bitmap = &declared
+                    .get(id.as_str())
+                    .expect("next resource was validated")
+                    .bitmap;
+                if let Some(owned) = self.resources.get(id) {
+                    if owned.bitmap != *bitmap {
+                        return Err(MediaError::message(
+                            "ASTRA_TEXT_RENDER_RESOURCE_CONFLICT: content-addressed glyph id changed bitmap",
+                        ));
+                    }
+                } else if let Some(previous) = new_bitmaps.get(id) {
+                    if previous != bitmap {
+                        return Err(MediaError::message(
+                            "ASTRA_TEXT_RENDER_RESOURCE_CONFLICT: frame declares conflicting glyph bitmaps",
+                        ));
+                    }
+                } else {
+                    new_bitmaps.insert(id.clone(), bitmap.clone());
+                }
+            }
+
+            let previous_ids = self
+                .layouts
+                .get(update.layout_id)
+                .cloned()
+                .unwrap_or_default();
+            self.validate_layout_resources(&previous_ids)?;
+            for id in previous_ids.difference(&next_ids) {
+                increment_reference_change(&mut reference_changes, id, true)?;
+            }
+            for id in next_ids.difference(&previous_ids) {
+                increment_reference_change(&mut reference_changes, id, false)?;
+            }
+            prepared.push(PreparedTextLayout {
+                layout_id: update.layout_id.to_string(),
+                next_ids,
+                glyphs,
+                clip: update.layout.clip,
+                rgba: update.rgba,
+            });
+        }
+
+        for layout_id in removals {
+            if layout_id.trim().is_empty() || !affected_layouts.insert(*layout_id) {
+                return Err(MediaError::message(
+                    "ASTRA_TEXT_RENDER_LAYOUT_DUPLICATE: frame removes an invalid or updated layout",
+                ));
+            }
+            let ids = self.layouts.get(*layout_id).ok_or_else(|| {
+                MediaError::message("ASTRA_TEXT_RENDER_LAYOUT_UNKNOWN: layout is not bound")
+            })?;
+            self.validate_layout_resources(ids)?;
+            for id in ids {
+                increment_reference_change(&mut reference_changes, id, true)?;
+            }
+        }
+
+        let mut next_reference_counts = BTreeMap::new();
+        for (id, (removed, added)) in &reference_changes {
+            let current = self
+                .resources
+                .get(id)
+                .map_or(0, |resource| resource.references);
+            let next = current
+                .checked_sub(*removed)
+                .and_then(|value| value.checked_add(*added))
+                .ok_or_else(|| {
+                    MediaError::message(
+                        "ASTRA_TEXT_RENDER_STATE: glyph reference count overflow or underflow",
+                    )
+                })?;
+            if current == 0 && next > 0 && !new_bitmaps.contains_key(id) {
+                return Err(MediaError::message(
+                    "ASTRA_TEXT_RENDER_STATE: new glyph resource has no declared bitmap",
+                ));
+            }
+            next_reference_counts.insert(id.clone(), next);
+        }
+
+        let mut lifecycle = Vec::new();
+        for (id, next) in &next_reference_counts {
+            if *next == 0 {
+                self.resources.remove(id);
+                lifecycle.push(SceneCommand::ReleaseResource {
+                    resource_id: id.clone(),
+                });
+            } else if let Some(resource) = self.resources.get_mut(id) {
+                resource.references = *next;
+            } else {
+                let bitmap = new_bitmaps
+                    .remove(id)
+                    .expect("new resource bitmap was prevalidated");
+                self.resources.insert(
+                    id.clone(),
+                    OwnedGlyphResource {
+                        bitmap: bitmap.clone(),
+                        references: *next,
+                    },
+                );
+                lifecycle.push(SceneCommand::UploadGlyph {
+                    resource_id: id.clone(),
+                    glyph: bitmap,
+                });
+            }
+        }
+        for layout_id in removals {
+            self.layouts.remove(*layout_id);
+        }
+
+        let mut layouts = Vec::with_capacity(prepared.len());
+        for layout in prepared {
+            self.layouts
+                .insert(layout.layout_id.clone(), layout.next_ids);
+            let mut commands = Vec::with_capacity(3);
+            if let Some(clip) = layout.clip {
+                commands.push(SceneCommand::PushClip {
+                    rect: RectI::new(clip.x, clip.y, clip.width, clip.height),
+                });
+            }
+            commands.push(SceneCommand::GlyphRun {
+                id: layout.layout_id.clone(),
+                glyphs: layout.glyphs,
+                rgba: layout.rgba,
+                opacity: 1.0,
+                blend: BlendMode::Alpha,
+            });
+            if layout.clip.is_some() {
+                commands.push(SceneCommand::PopClip);
+            }
+            layouts.push(TextRenderLayoutDraw {
+                layout_id: layout.layout_id,
+                commands,
+            });
+        }
+        tracing::debug!(
+            target: "astra_media::text",
+            event = "text.render_resources.frame_updated",
+            layout_count = self.layouts.len(),
+            resource_count = self.resources.len(),
+            lifecycle_count = lifecycle.len(),
+            draw_count = layouts.len(),
+        );
+        Ok(TextRenderFrameCommands { lifecycle, layouts })
+    }
+
     pub fn update_layout(
         &mut self,
         layout_id: &str,
         layout: &TextLayoutResult,
         rgba: [u8; 4],
     ) -> Result<Vec<SceneCommand>, MediaError> {
-        if layout_id.trim().is_empty() || layout.schema != TEXT_LAYOUT_SCHEMA {
-            return Err(MediaError::message(
-                "ASTRA_TEXT_RENDER_BINDING: layout id or schema is invalid",
-            ));
-        }
-        let declared = layout
-            .glyph_resources
-            .iter()
-            .map(|resource| (resource.resource_id.clone(), resource))
-            .collect::<BTreeMap<_, _>>();
-        if declared.len() != layout.glyph_resources.len() {
-            return Err(MediaError::message(
-                "ASTRA_TEXT_RENDER_RESOURCE_DUPLICATE: layout contains duplicate glyph resources",
-            ));
-        }
-        let next_ids = layout
-            .glyph_instances()
-            .into_iter()
-            .map(|instance| instance.resource_id)
-            .collect::<BTreeSet<_>>();
-        if next_ids.iter().any(|id| !declared.contains_key(id)) {
-            return Err(MediaError::message(
-                "ASTRA_TEXT_RENDER_RESOURCE_MISSING: glyph instance has no declared bitmap",
-            ));
-        }
-        for id in &next_ids {
-            if let Some(owned) = self.resources.get(id) {
-                let declared_resource = declared.get(id).expect("next resource was validated");
-                if owned.bitmap != declared_resource.bitmap {
-                    return Err(MediaError::message(
-                        "ASTRA_TEXT_RENDER_RESOURCE_CONFLICT: content-addressed glyph id changed bitmap",
-                    ));
-                }
-            }
-        }
-
-        let mut resources = self.resources.clone();
-        let mut layouts = self.layouts.clone();
-        let previous_ids = layouts.remove(layout_id).unwrap_or_default();
-        let mut commands = Vec::new();
-        for id in previous_ids.difference(&next_ids) {
-            let resource = resources.get_mut(id).ok_or_else(|| {
-                MediaError::message(
-                    "ASTRA_TEXT_RENDER_STATE: layout referenced an unowned glyph resource",
-                )
-            })?;
-            resource.references = resource.references.checked_sub(1).ok_or_else(|| {
-                MediaError::message("ASTRA_TEXT_RENDER_STATE: glyph reference count underflow")
-            })?;
-            if resource.references == 0 {
-                resources.remove(id);
-                commands.push(SceneCommand::ReleaseResource {
-                    resource_id: id.clone(),
-                });
-            }
-        }
-        for id in next_ids.difference(&previous_ids) {
-            let declared_resource = declared.get(id).expect("next resource was validated");
-            if let Some(resource) = resources.get_mut(id) {
-                if resource.bitmap != declared_resource.bitmap {
-                    return Err(MediaError::message(
-                        "ASTRA_TEXT_RENDER_RESOURCE_CONFLICT: content-addressed glyph id changed bitmap",
-                    ));
-                }
-                resource.references = resource.references.checked_add(1).ok_or_else(|| {
-                    MediaError::message("ASTRA_TEXT_RENDER_STATE: glyph reference count overflow")
-                })?;
-            } else {
-                resources.insert(
-                    id.clone(),
-                    OwnedGlyphResource {
-                        bitmap: declared_resource.bitmap.clone(),
-                        references: 1,
-                    },
-                );
-                commands.push(SceneCommand::UploadGlyph {
-                    resource_id: id.clone(),
-                    glyph: declared_resource.bitmap.clone(),
-                });
-            }
-        }
-        layouts.insert(layout_id.to_string(), next_ids);
-        if let Some(clip) = layout.clip {
-            commands.push(SceneCommand::PushClip {
-                rect: RectI::new(clip.x, clip.y, clip.width, clip.height),
-            });
-        }
-        commands.push(SceneCommand::GlyphRun {
-            id: layout_id.to_string(),
-            glyphs: layout.glyph_instances(),
-            rgba,
-            opacity: 1.0,
-            blend: BlendMode::Alpha,
-        });
-        if layout.clip.is_some() {
-            commands.push(SceneCommand::PopClip);
-        }
-        self.resources = resources;
-        self.layouts = layouts;
-        tracing::debug!(
-            target: "astra_media::text",
-            event = "text.render_resources.updated",
-            layout_count = self.layouts.len(),
-            resource_count = self.resources.len(),
-            command_count = commands.len(),
+        let frame = self.update_frame(
+            &[TextRenderLayoutUpdate {
+                layout_id,
+                layout,
+                rgba,
+            }],
+            &[],
+        )?;
+        let mut commands = frame.lifecycle;
+        commands.extend(
+            frame
+                .layouts
+                .into_iter()
+                .next()
+                .expect("single layout update must produce a draw")
+                .commands,
         );
         Ok(commands)
     }
 
     pub fn remove_layout(&mut self, layout_id: &str) -> Result<Vec<SceneCommand>, MediaError> {
-        let mut resources = self.resources.clone();
-        let mut layouts = self.layouts.clone();
-        let ids = layouts.remove(layout_id).ok_or_else(|| {
-            MediaError::message("ASTRA_TEXT_RENDER_LAYOUT_UNKNOWN: layout is not bound")
-        })?;
-        let mut commands = Vec::new();
+        Ok(self.update_frame(&[], &[layout_id])?.lifecycle)
+    }
+
+    fn validate_layout_resources(&self, ids: &BTreeSet<String>) -> Result<(), MediaError> {
         for id in ids {
-            let resource = resources.get_mut(&id).ok_or_else(|| {
+            let resource = self.resources.get(id).ok_or_else(|| {
                 MediaError::message(
                     "ASTRA_TEXT_RENDER_STATE: layout referenced an unowned glyph resource",
                 )
             })?;
-            resource.references = resource.references.checked_sub(1).ok_or_else(|| {
-                MediaError::message("ASTRA_TEXT_RENDER_STATE: glyph reference count underflow")
-            })?;
             if resource.references == 0 {
-                resources.remove(&id);
-                commands.push(SceneCommand::ReleaseResource { resource_id: id });
+                return Err(MediaError::message(
+                    "ASTRA_TEXT_RENDER_STATE: glyph resource has no references",
+                ));
             }
         }
-        self.resources = resources;
-        self.layouts = layouts;
-        tracing::debug!(
-            target: "astra_media::text",
-            event = "text.render_resources.layout_removed",
-            layout_count = self.layouts.len(),
-            resource_count = self.resources.len(),
-            release_count = commands.len(),
-        );
-        Ok(commands)
+        Ok(())
     }
 
     pub fn shutdown(&mut self) -> Vec<SceneCommand> {
@@ -489,6 +604,19 @@ impl TextRenderResourceOwner {
         );
         commands
     }
+}
+
+fn increment_reference_change(
+    changes: &mut BTreeMap<String, (usize, usize)>,
+    resource_id: &str,
+    remove: bool,
+) -> Result<(), MediaError> {
+    let change = changes.entry(resource_id.to_string()).or_default();
+    let value = if remove { &mut change.0 } else { &mut change.1 };
+    *value = value.checked_add(1).ok_or_else(|| {
+        MediaError::message("ASTRA_TEXT_RENDER_STATE: frame reference journal overflow")
+    })?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
