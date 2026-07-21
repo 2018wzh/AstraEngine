@@ -1107,6 +1107,9 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         messages.push(message);
     }
     let input_hash = hash_input_messages(&messages)?;
+    if let Some(observer) = &performance_observer {
+        observer.record_memory_snapshot("input.loaded")?;
+    }
     if !matches!(
         messages.last().map(|message| &message.event),
         Some(PhysicalInput::Shutdown)
@@ -1145,6 +1148,9 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         .start(profile.clone().into())
         .await
         .map_err(|error| error.to_string())?;
+    if let Some(observer) = &performance_observer {
+        observer.record_memory_snapshot("host.started")?;
+    }
     let package_verify_started = Instant::now();
     let package = host
         .client
@@ -1161,11 +1167,15 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
             None,
             package_verify_started,
         )?;
+        observer.record_memory_snapshot("package.storage_verified")?;
     }
     host.client
         .close_package(package)
         .await
         .map_err(|error| error.to_string())?;
+    if let Some(observer) = &performance_observer {
+        observer.record_memory_snapshot("package.verifier_closed")?;
+    }
     let package_storage_hash = profile
         .package_hash
         .parse::<astra_core::Hash256>()
@@ -1187,6 +1197,7 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
             None,
             package_open_started,
         )?;
+        observer.record_memory_snapshot("package.table_opened")?;
     }
     let package_unlock_started = Instant::now();
     let package_crypto = source_package_crypto(&package_container, source_profile, source_root)?;
@@ -1197,6 +1208,7 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
             None,
             package_unlock_started,
         )?;
+        observer.record_memory_snapshot("package.source_unlocked")?;
         observer.begin_cpu_scope("product.cpu", "product.open", None)?;
     }
     let registry = product_registry(package_crypto)?;
@@ -1210,6 +1222,7 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
     .await?;
     if let Some(observer) = &performance_observer {
         observer.end_cpu_scope("product.cpu", "product.open", None)?;
+        observer.record_memory_snapshot("product.opened")?;
     }
     let mut checkpoint_results = Vec::new();
     let mut checkpoint_frames = BTreeMap::new();

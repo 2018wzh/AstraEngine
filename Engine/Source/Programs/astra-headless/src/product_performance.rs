@@ -292,6 +292,56 @@ impl ProductPerformanceRecorder {
             .map_err(|error| error.to_string())
     }
 
+    pub fn record_memory_snapshot(&self, name: &str) -> Result<(), String> {
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| "ASTRA_PERFORMANCE_RECORDER_POISONED")?;
+        let state = guard
+            .as_mut()
+            .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
+        let timestamp_ns = elapsed_ns(state.started)?;
+        let memory = sample_process_memory()
+            .map_err(|_| "ASTRA_PERFORMANCE_PROCESS_MEMORY_SAMPLE_FAILED")?;
+        let allocation = astra_observability::allocation_snapshot();
+        state
+            .trace
+            .complete("memory.phase", name, 1, None, timestamp_ns, 0)
+            .and_then(|_| {
+                state.trace.counter(
+                    "memory",
+                    "working_set.bytes",
+                    timestamp_ns,
+                    memory.working_set_bytes,
+                )
+            })
+            .and_then(|_| {
+                state.trace.counter(
+                    "memory",
+                    "private.bytes",
+                    timestamp_ns,
+                    memory.private_bytes,
+                )
+            })
+            .and_then(|_| {
+                state.trace.counter(
+                    "allocator",
+                    "live.bytes",
+                    timestamp_ns,
+                    allocation.live_bytes,
+                )
+            })
+            .and_then(|_| {
+                state.trace.counter(
+                    "allocator",
+                    "peak_live.bytes",
+                    timestamp_ns,
+                    allocation.peak_live_bytes,
+                )
+            })
+            .map_err(|error| error.to_string())
+    }
+
     pub fn begin_cpu_scope(
         &self,
         domain: &str,
