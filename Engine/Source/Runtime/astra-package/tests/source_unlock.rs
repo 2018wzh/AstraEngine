@@ -10,29 +10,39 @@ use astra_package::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-struct MemorySource(BTreeMap<String, Vec<u8>>);
+struct MemorySource {
+    files: BTreeMap<String, Vec<u8>>,
+    max_range_read: u64,
+}
 
 impl AuthorizedSourceReader for MemorySource {
     fn stat_relative(&mut self, relative_path: &str) -> Result<u64, ContainerError> {
-        self.0
+        self.files
             .get(relative_path)
             .map(|bytes| bytes.len() as u64)
             .ok_or_else(|| ContainerError::Crypto("source file is missing".into()))
     }
 
-    fn read_relative(
+    fn read_relative_range(
         &mut self,
         relative_path: &str,
+        offset: u64,
+        length: u64,
         max_bytes: u64,
     ) -> Result<Vec<u8>, ContainerError> {
         let bytes = self
-            .0
+            .files
             .get(relative_path)
             .ok_or_else(|| ContainerError::Crypto("source file is missing".into()))?;
-        if bytes.len() as u64 > max_bytes {
+        let end = offset
+            .checked_add(length)
+            .ok_or_else(|| ContainerError::Crypto("source range overflowed".into()))?;
+        if length == 0 || length > max_bytes || end > bytes.len() as u64 {
             return Err(ContainerError::Crypto("source read exceeds bound".into()));
         }
-        Ok(bytes.clone())
+        let output = bytes[offset as usize..end as usize].to_vec();
+        self.max_range_read = self.max_range_read.max(length);
+        Ok(output)
     }
 }
 
@@ -61,7 +71,10 @@ fn fixture() -> (SourceUnlockPolicy, SourceVerificationManifest, MemorySource) {
             max_total_bytes: 1024,
         },
         manifest,
-        MemorySource(BTreeMap::from([("GAME.DAT".into(), bytes)])),
+        MemorySource {
+            files: BTreeMap::from([("GAME.DAT".into(), bytes)]),
+            max_range_read: 0,
+        },
     )
 }
 
@@ -94,9 +107,43 @@ fn source_fingerprint_provider_roundtrips_and_authenticates() {
 }
 
 #[test]
+fn source_fingerprint_streams_large_files_in_bounded_ranges() {
+    let bytes = vec![0x5a; 9 * 1024 * 1024 + 17];
+    let mut manifest = SourceVerificationManifest {
+        schema: "astra.source_verification_manifest.v1".into(),
+        profile_id: "fixture.large.v1".into(),
+        manifest_hash: Hash256::from_bytes([0; 32]),
+        entries: vec![SourceVerificationEntry {
+            relative_path: "LARGE.DAT".into(),
+            byte_length: bytes.len() as u64,
+            sha256: Hash256::from_sha256(&bytes),
+        }],
+    };
+    manifest.manifest_hash = manifest.computed_hash();
+    let policy = SourceUnlockPolicy {
+        schema: "astra.source_unlock_policy.v1".into(),
+        source_profile: manifest.profile_id.clone(),
+        verification_manifest_hash: manifest.manifest_hash,
+        crypto_provider: SOURCE_FINGERPRINT_PROVIDER_ID.into(),
+        protected_sections: BTreeSet::from(["story.main".into()]),
+        max_files: 1,
+        max_file_bytes: bytes.len() as u64,
+        max_total_bytes: bytes.len() as u64,
+    };
+    let mut source = MemorySource {
+        files: BTreeMap::from([("LARGE.DAT".into(), bytes)]),
+        max_range_read: 0,
+    };
+
+    SourceFingerprintCryptoProvider::unlock(&policy, &manifest, &mut source).unwrap();
+
+    assert_eq!(source.max_range_read, 4 * 1024 * 1024);
+}
+
+#[test]
 fn modified_or_unsafe_source_fails_before_key_creation() {
     let (policy, mut manifest, mut source) = fixture();
-    source.0.get_mut("GAME.DAT").unwrap()[0] ^= 1;
+    source.files.get_mut("GAME.DAT").unwrap()[0] ^= 1;
     assert!(SourceFingerprintCryptoProvider::unlock(&policy, &manifest, &mut source).is_err());
 
     let (_, _, mut source) = fixture();

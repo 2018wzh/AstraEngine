@@ -1425,21 +1425,34 @@ impl AuthorizedSourceReader for FilesystemSourceReader {
             .map_err(|_| ContainerError::Crypto("authorized source stat failed".into()))
     }
 
-    fn read_relative(
+    fn read_relative_range(
         &mut self,
         relative_path: &str,
+        offset: u64,
+        length: u64,
         max_bytes: u64,
     ) -> Result<Vec<u8>, ContainerError> {
         let path = self.resolve(relative_path)?;
-        let length = fs::metadata(&path)
+        let file_length = fs::metadata(&path)
             .map_err(|_| ContainerError::Crypto("authorized source stat failed".into()))?
             .len();
-        if length > max_bytes || length > usize::MAX as u64 {
+        let end = offset
+            .checked_add(length)
+            .ok_or_else(|| ContainerError::Crypto("authorized source range overflowed".into()))?;
+        if length == 0 || length > max_bytes || end > file_length || length > usize::MAX as u64 {
             return Err(ContainerError::Crypto(
-                "authorized source read exceeds its byte budget".into(),
+                "authorized source range exceeds its byte budget".into(),
             ));
         }
-        fs::read(path).map_err(|_| ContainerError::Crypto("authorized source read failed".into()))
+        let mut file = fs::File::open(path)
+            .map_err(|_| ContainerError::Crypto("authorized source open failed".into()))?;
+        use std::io::{Read, Seek, SeekFrom};
+        file.seek(SeekFrom::Start(offset))
+            .and_then(|_| {
+                let mut bytes = vec![0_u8; length as usize];
+                file.read_exact(&mut bytes).map(|_| bytes)
+            })
+            .map_err(|_| ContainerError::Crypto("authorized source range read failed".into()))
     }
 }
 

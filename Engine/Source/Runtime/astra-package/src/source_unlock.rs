@@ -47,12 +47,16 @@ pub struct SourceVerificationManifest {
 pub trait AuthorizedSourceReader {
     fn stat_relative(&mut self, relative_path: &str) -> Result<u64, ContainerError>;
 
-    fn read_relative(
+    fn read_relative_range(
         &mut self,
         relative_path: &str,
+        offset: u64,
+        length: u64,
         max_bytes: u64,
     ) -> Result<Vec<u8>, ContainerError>;
 }
+
+const SOURCE_FINGERPRINT_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
 
 pub struct SourceFingerprintCryptoProvider {
     key: Zeroizing<[u8; 32]>,
@@ -182,21 +186,42 @@ impl SourceFingerprintCryptoProvider {
             if reader.stat_relative(&entry.relative_path)? != entry.byte_length {
                 return Err(ContainerError::Crypto("source file length mismatch".into()));
             }
-            let mut bytes =
-                Zeroizing::new(reader.read_relative(&entry.relative_path, entry.byte_length)?);
-            if bytes.len() as u64 != entry.byte_length
-                || Hash256::from_sha256(bytes.as_slice()) != entry.sha256
-            {
+            let mut file_hash = Sha256::new();
+            fingerprint.update((entry.relative_path.len() as u64).to_le_bytes());
+            fingerprint.update(entry.relative_path.as_bytes());
+            fingerprint.update(entry.byte_length.to_le_bytes());
+            let mut offset = 0_u64;
+            while offset < entry.byte_length {
+                let length = (entry.byte_length - offset).min(SOURCE_FINGERPRINT_CHUNK_BYTES);
+                let mut bytes = Zeroizing::new(reader.read_relative_range(
+                    &entry.relative_path,
+                    offset,
+                    length,
+                    SOURCE_FINGERPRINT_CHUNK_BYTES,
+                )?);
+                if bytes.len() as u64 != length {
+                    bytes.zeroize();
+                    return Err(ContainerError::Crypto(
+                        "source file range length mismatch".into(),
+                    ));
+                }
+                file_hash.update(bytes.as_slice());
+                fingerprint.update(bytes.as_slice());
                 bytes.zeroize();
+                offset = offset.checked_add(length).ok_or_else(|| {
+                    ContainerError::Crypto("source fingerprint offset overflow".into())
+                })?;
+            }
+            if Hash256::from_bytes(file_hash.finalize().into()) != entry.sha256 {
                 return Err(ContainerError::Crypto(
                     "source file fingerprint mismatch".into(),
                 ));
             }
-            fingerprint.update((entry.relative_path.len() as u64).to_le_bytes());
-            fingerprint.update(entry.relative_path.as_bytes());
-            fingerprint.update(entry.byte_length.to_le_bytes());
-            fingerprint.update(bytes.as_slice());
-            bytes.zeroize();
+            if reader.stat_relative(&entry.relative_path)? != entry.byte_length {
+                return Err(ContainerError::Crypto(
+                    "source file changed during fingerprinting".into(),
+                ));
+            }
         }
         let digest = fingerprint.finalize();
         let mut source_material = Zeroizing::new([0_u8; 64]);

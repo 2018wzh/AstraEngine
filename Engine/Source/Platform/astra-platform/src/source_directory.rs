@@ -9,6 +9,13 @@ pub trait AuthorizedSourceDirectoryBackend: Send {
     fn stat_relative(&self, relative_path: &str)
         -> Result<AuthorizedSourceFileStat, PlatformError>;
     fn read_relative(&self, relative_path: &str, max_bytes: u64) -> Result<Vec<u8>, PlatformError>;
+    fn read_relative_range(
+        &self,
+        relative_path: &str,
+        offset: u64,
+        length: u64,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, PlatformError>;
 }
 
 pub struct AuthorizedSourceDirectory {
@@ -47,6 +54,32 @@ impl AuthorizedSourceDirectory {
                 PlatformErrorCode::IntegrityMismatch,
                 "source_directory.read",
                 "authorized source backend exceeded the requested byte bound",
+            ));
+        }
+        Ok(bytes)
+    }
+
+    pub fn read_relative_range(
+        &self,
+        relative_path: &str,
+        offset: u64,
+        length: u64,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, PlatformError> {
+        validate_safe_relative_path(relative_path)?;
+        if length == 0 || length > max_bytes || offset.checked_add(length).is_none() {
+            return Err(source_error(
+                "authorized source range must be non-empty and bounded",
+            ));
+        }
+        let bytes = self
+            .backend
+            .read_relative_range(relative_path, offset, length, max_bytes)?;
+        if bytes.len() as u64 != length {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "source_directory.read_range",
+                "authorized source backend returned a short or oversized range",
             ));
         }
         Ok(bytes)

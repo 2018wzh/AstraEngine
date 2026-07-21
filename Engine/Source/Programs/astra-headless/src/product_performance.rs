@@ -28,6 +28,7 @@ struct RecorderState {
     started: Instant,
     last_memory_sample: Option<(u64, u64)>,
     memory_baseline: Option<(u64, u64)>,
+    allocation_baseline: astra_observability::AllocationSnapshot,
     active_input_flow: Option<ActiveInputFlow>,
     warmup_frames: u64,
     warmup_frames_remaining: u64,
@@ -89,6 +90,7 @@ impl ProductPerformanceRecorder {
                 started,
                 last_memory_sample: None,
                 memory_baseline: None,
+                allocation_baseline: astra_observability::allocation_snapshot(),
                 active_input_flow: None,
                 warmup_frames,
                 warmup_frames_remaining: warmup_frames,
@@ -161,11 +163,11 @@ impl ProductPerformanceRecorder {
                 return Err("ASTRA_PERFORMANCE_START_SEQUENCE_MISSED".into());
             }
             let started = Instant::now();
-            state.started = started;
             state.pacing_started = started;
             state.paced_frame_count = 0;
             state.measurement_started = (state.warmup_frames_remaining == 0).then_some(started);
             state.measurement_stopped = None;
+            state.allocation_baseline = astra_observability::allocation_snapshot();
             state.first_gpu_sequence = None;
             state.last_paced_gpu_sequence = None;
             state.gpu_measurement_cutoff = None;
@@ -271,9 +273,6 @@ impl ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
-        if !state.armed {
-            return Ok(());
-        }
         let end_ns = elapsed_ns(state.started)?;
         let duration_ns: u64 = started
             .elapsed()
@@ -306,9 +305,6 @@ impl ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
-        if !state.armed {
-            return Ok(());
-        }
         let timestamp_ns = elapsed_ns(state.started)?;
         state
             .trace
@@ -329,9 +325,6 @@ impl ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
-        if !state.armed {
-            return Ok(());
-        }
         let timestamp_ns = elapsed_ns(state.started)?;
         state
             .trace
@@ -572,6 +565,7 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
             .saturating_sub(baseline_working_set)
             .max(private_bytes.saturating_sub(baseline_private));
         let cache_bytes = self.decoded_cache_bytes.load(Ordering::Relaxed);
+        let allocation = astra_observability::allocation_snapshot();
         for (metric, value) in [
             ("frame.cpu_ns", cpu_ns),
             ("frame.gpu_ns", sample.gpu_duration_ns),
@@ -764,6 +758,42 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
                     "frame.bytes",
                     timestamp_ns,
                     sample.heap_allocation_bytes,
+                )
+            })
+            .and_then(|_| {
+                state.trace.counter(
+                    "allocator",
+                    "live.bytes",
+                    timestamp_ns,
+                    allocation.live_bytes,
+                )
+            })
+            .and_then(|_| {
+                state.trace.counter(
+                    "allocator",
+                    "peak_live.bytes",
+                    timestamp_ns,
+                    allocation.peak_live_bytes,
+                )
+            })
+            .and_then(|_| {
+                state.trace.counter(
+                    "allocator",
+                    "allocated_since_arm.bytes",
+                    timestamp_ns,
+                    allocation
+                        .allocated_bytes
+                        .saturating_sub(state.allocation_baseline.allocated_bytes),
+                )
+            })
+            .and_then(|_| {
+                state.trace.counter(
+                    "allocator",
+                    "allocations_since_arm.count",
+                    timestamp_ns,
+                    allocation
+                        .allocation_count
+                        .saturating_sub(state.allocation_baseline.allocation_count),
                 )
             })
             .map_err(|error| performance_error(&error.to_string()))?;

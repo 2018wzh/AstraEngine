@@ -2,7 +2,10 @@ use astra_platform::{
     AuthorizedSourceDirectory, AuthorizedSourceDirectoryBackend, AuthorizedSourceFileStat,
     PlatformError, PlatformErrorCode, UserAuthorizedSourceDirectoryProvider,
 };
-use std::path::{Path, PathBuf};
+use std::{
+    io::{Read, Seek, SeekFrom},
+    path::{Path, PathBuf},
+};
 
 pub struct WindowsSourceDirectoryProvider;
 
@@ -63,6 +66,45 @@ impl AuthorizedSourceDirectoryBackend for WindowsSourceDirectory {
         }
         std::fs::read(path)
             .map_err(|_| error(PlatformErrorCode::Io, "authorized source file read failed"))
+    }
+
+    fn read_relative_range(
+        &self,
+        relative_path: &str,
+        offset: u64,
+        length: u64,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, PlatformError> {
+        let path = self.resolve(relative_path)?;
+        let metadata = path
+            .metadata()
+            .map_err(|_| error(PlatformErrorCode::Io, "authorized source file is missing"))?;
+        let end = offset.checked_add(length).ok_or_else(|| {
+            error(
+                PlatformErrorCode::IntegrityMismatch,
+                "authorized source range overflowed",
+            )
+        })?;
+        if !metadata.is_file() || length == 0 || length > max_bytes || end > metadata.len() {
+            return Err(error(
+                PlatformErrorCode::IntegrityMismatch,
+                "authorized source range exceeds its read bound",
+            ));
+        }
+        let length: usize = length.try_into().map_err(|_| {
+            error(
+                PlatformErrorCode::IntegrityMismatch,
+                "authorized source range exceeds addressable memory",
+            )
+        })?;
+        let mut file = std::fs::File::open(path)
+            .map_err(|_| error(PlatformErrorCode::Io, "authorized source file open failed"))?;
+        file.seek(SeekFrom::Start(offset))
+            .and_then(|_| {
+                let mut bytes = vec![0_u8; length];
+                file.read_exact(&mut bytes).map(|_| bytes)
+            })
+            .map_err(|_| error(PlatformErrorCode::Io, "authorized source range read failed"))
     }
 }
 

@@ -22,6 +22,8 @@ pub struct PlatformHostSession {
 
 `PlatformHostClient` 通过 Future 提交 window/surface/present/capture、audio、decode、save transaction、package range 和 shutdown 命令。OS/browser event loop 在本地主线程 executor 持有 `!Send` 资源，Tokio 只负责编排。
 
+用户授权原版目录只暴露安全相对路径的 stat/range read。source fingerprint 固定按 4 MiB range 流式读取，同时计算公开文件 SHA-256 与不落盘的私有 key material；单个原版大文件不得通过 whole-file `fs::read` 进入 Player、Headless 或 CLI。每次 range 都校验 offset、length、最大读取量和文件边界，fingerprint 前后再次 stat，长度或内容变化立即阻断。
+
 所有资源使用不可序列化的 `{slot, generation}` typed handle：`WindowHandle`、`SurfaceHandle`、`AudioOutputHandle`、`DecodeSessionHandle`、`MediaFrameHandle`、`SaveTransactionHandle` 与 `PackageSourceHandle`。stale handle、重复 close、越界 range、乱序 completion、队列溢出和 shutdown leak 必须显式报错。
 
 Headless 的 `HttpsRange` source 只接受 allowlist 中不含 credential/fragment 的 HTTPS URL，禁止 redirect 与压缩传输。后端要求严格 `206 Content-Range`，在 open 阶段按有界 block 扫描完整对象并绑定 package hash，read 阶段重新请求并校验覆盖区间的 block identity；不支持 byte range 的服务端直接阻断。

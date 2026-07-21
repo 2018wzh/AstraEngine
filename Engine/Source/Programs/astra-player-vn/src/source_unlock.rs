@@ -69,16 +69,18 @@ impl AuthorizedSourceReader for PlatformSourceReader<'_> {
             })
     }
 
-    fn read_relative(
+    fn read_relative_range(
         &mut self,
         relative_path: &str,
+        offset: u64,
+        length: u64,
         max_bytes: u64,
     ) -> Result<Vec<u8>, ContainerError> {
         self.source
-            .read_relative(relative_path, max_bytes)
+            .read_relative_range(relative_path, offset, length, max_bytes)
             .map_err(|error| {
                 ContainerError::Crypto(format!(
-                    "authorized source read failed: code={:?}",
+                    "authorized source range read failed: code={:?}",
                     error.code
                 ))
             })
