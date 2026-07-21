@@ -24,8 +24,9 @@ use astra_emu_manager_core::{
 };
 use astra_emu_minori::MinoriVfsFamilyFactory;
 use astra_headless_protocol::{
-    ArtifactEntry, ArtifactManifest, ButtonState, GamepadControl, InputMessage,
-    ObservationPredicate, PhysicalInput, PointerButton, TouchPhase,
+    ArtifactEntry, ArtifactManifest, ButtonState, CheckpointResult, Diagnostic, GamepadControl,
+    InputMessage, ObservationPredicate, PhysicalInput, PointerButton, RunReport, RunStatus,
+    TouchPhase, HEADLESS_RUN_REPORT_SCHEMA as STANDARD_HEADLESS_RUN_REPORT_SCHEMA,
 };
 use astra_media::{
     open_symphonia_audio_stream, DecodeBindingContext, DecodeOutput as MediaDecodeOutput,
@@ -51,7 +52,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    family_host::CliFamilyHostConfig, input::read_input_sequence, rasterizer::CpuStageRasterizer,
+    family_host::CliFamilyHostConfig,
+    input::{read_input_sequence, ValidatedInputSequence},
+    rasterizer::CpuStageRasterizer,
     text_presentation::BoundTextPresenter,
 };
 
@@ -807,9 +810,26 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV2,
     {
         return Err("ASTRA_EMU_HEADLESS_ARTIFACT_IDENTITY".into());
     }
+    let artifact_manifest_hash = Hash256::from_sha256(&manifest_bytes);
+    let standard_report = standard_headless_run_report(
+        &host_profile,
+        &manifest,
+        artifact_manifest_hash,
+        &input,
+        &execution,
+    )?;
+    write_atomic_json(
+        &launch.artifact_root.join("run-report.json"),
+        &standard_report,
+    )?;
+    let status = if execution.diagnostics.is_empty() {
+        "passed"
+    } else {
+        "blocked"
+    };
     let report = HeadlessRunReportV2 {
         schema: HEADLESS_RUN_REPORT_SCHEMA.into(),
-        status: "passed".into(),
+        status: status.into(),
         family_id: launch.family_id.clone(),
         runtime_provider_id: "astra.emu.runtime_provider".into(),
         family_provider_id,
@@ -824,7 +844,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV2,
         visual_trace_hash: Hash256::from_sha256(&execution.visual_trace),
         audio_meter_hash: Hash256::from_sha256(&execution.audio_trace),
         runtime_state_trace_hash: Hash256::from_sha256(&execution.state_trace),
-        artifact_manifest_hash: Hash256::from_sha256(&manifest_bytes),
+        artifact_manifest_hash,
         fixed_steps: execution.fixed_step,
         presented_frames: execution.present_sequence,
         consumed_input_messages: input.messages.len() as u64,
@@ -851,6 +871,75 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV2,
     };
     let report_path = launch.artifact_root.join("astra-emu-headless-run.json");
     write_atomic_json(&report_path, &report)?;
+    Ok(report)
+}
+
+fn standard_headless_run_report(
+    profile: &HeadlessHostProfile,
+    manifest: &ArtifactManifest,
+    manifest_hash: Hash256,
+    input: &ValidatedInputSequence,
+    execution: &ExecutionEvidence,
+) -> Result<RunReport, String> {
+    let diagnostics = execution
+        .diagnostics
+        .iter()
+        .map(|code| Diagnostic {
+            code: code.clone(),
+            operation: "astra.emu.runtime".into(),
+            message: "family runtime emitted a blocking diagnostic".into(),
+        })
+        .collect::<Vec<_>>();
+    let report = RunReport {
+        schema: STANDARD_HEADLESS_RUN_REPORT_SCHEMA.into(),
+        run_id: manifest.run_id.clone(),
+        build_fingerprint: manifest.build_fingerprint.clone(),
+        package_hash: manifest.package_hash.clone(),
+        input_sequence_hash: manifest.input_sequence_hash.clone(),
+        checkpoint_config_hash: Hash256::from_sha256(&[]).to_string(),
+        profile_id: profile.id.clone(),
+        session_id: input.session.clone(),
+        scenario: "default".into(),
+        target: profile.target.clone(),
+        content_identity: profile.package_id.clone(),
+        status: if diagnostics.is_empty() {
+            RunStatus::Passed
+        } else {
+            RunStatus::Blocked
+        },
+        manifest_hash: manifest_hash.to_string(),
+        renderer_identity_hash: manifest.renderer_identity_hash.clone(),
+        render_policy: manifest.render_policy.clone(),
+        submitted_frame_count: manifest.submitted_frame_count,
+        rasterized_frame_count: manifest.rasterized_frame_count,
+        submitted_scene_stream_hash: manifest.submitted_scene_stream_hash.clone(),
+        rasterized_frame_stream_hash: manifest.rasterized_frame_stream_hash.clone(),
+        audio_frame_count: manifest.audio_frame_count,
+        duration_ns: input
+            .final_tick
+            .checked_mul(profile.tick_duration_ns)
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_DURATION_OVERFLOW".to_owned())?,
+        completed_sequence: input
+            .messages
+            .last()
+            .map(|message| message.sequence)
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_INPUT_EMPTY".to_owned())?,
+        checkpoint_results: execution
+            .checkpoints
+            .iter()
+            .map(|checkpoint| CheckpointResult {
+                id: checkpoint.checkpoint_id.clone(),
+                passed: true,
+                observation_hash: checkpoint.observation_hash.to_string(),
+                image_metrics: None,
+                audio_metrics: None,
+            })
+            .collect(),
+        diagnostics,
+    };
+    report
+        .validate()
+        .map_err(|_| "ASTRA_EMU_HEADLESS_STANDARD_REPORT_INVALID".to_owned())?;
     Ok(report)
 }
 
@@ -3187,6 +3276,99 @@ fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod native_tests {
     use super::*;
+
+    fn test_hash(label: &[u8]) -> String {
+        Hash256::from_sha256(label).to_string()
+    }
+
+    #[test]
+    fn standard_headless_report_is_review_tool_compatible() {
+        let mut profile = HeadlessHostProfile::reference(
+            "headless-test",
+            "astra.emu.quick_case",
+            test_hash(b"build"),
+            test_hash(b"package"),
+        );
+        profile.id = "astra-emu-cli-headless".into();
+        let renderer_identity = astra_headless_protocol::RendererExecutionIdentity::cpu_reference();
+        let manifest = ArtifactManifest {
+            schema: astra_headless_protocol::HEADLESS_ARTIFACT_MANIFEST_SCHEMA.into(),
+            run_id: "review-run".into(),
+            build_fingerprint: profile.build_fingerprint.clone(),
+            package_hash: profile.package_hash.clone(),
+            input_sequence_hash: test_hash(b"input"),
+            provider_identity_hash: test_hash(b"providers"),
+            renderer_identity_hash: renderer_identity.hash().unwrap(),
+            renderer_identity,
+            render_policy: "checkpoints".into(),
+            submitted_frame_count: 1,
+            rasterized_frame_count: 1,
+            audio_frame_count: 0,
+            submitted_scene_stream_hash: test_hash(b"scenes"),
+            rasterized_frame_stream_hash: test_hash(b"frames"),
+            audio_stream_hash: test_hash(b"audio"),
+            audio_peak_dbfs: None,
+            audio_rms_dbfs: None,
+            silence: true,
+            clipping: false,
+            artifacts: Vec::new(),
+        };
+        let input = ValidatedInputSequence {
+            session: "review-run".into(),
+            hash: Hash256::from_sha256(b"input"),
+            messages: vec![InputMessage {
+                schema: astra_headless_protocol::USER_INPUT_SEQUENCE_SCHEMA.into(),
+                session: "review-run".into(),
+                sequence: 7,
+                tick: 12,
+                event: PhysicalInput::Shutdown,
+            }],
+            final_tick: 12,
+        };
+        let zero = duration_distribution(Vec::new());
+        let execution = ExecutionEvidence {
+            input_trace: Vec::new(),
+            visual_trace: Vec::new(),
+            audio_trace: Vec::new(),
+            state_trace: Vec::new(),
+            checkpoints: vec![HeadlessCheckpointEvidenceV1 {
+                checkpoint_id: "message".into(),
+                fixed_step: 12,
+                frame_hash: Hash256::from_sha256(b"frame"),
+                observation_hash: Hash256::from_sha256(b"observation"),
+            }],
+            checkpoint_frames: Vec::new(),
+            diagnostics: BTreeSet::new(),
+            fixed_step: 12,
+            present_sequence: 1,
+            snapshot_verified: true,
+            terminal: false,
+            phase_timings: HeadlessPhaseTimingEvidenceV1 {
+                step_total: zero,
+                runtime_step: zero,
+                effect_dispatch: zero,
+                raster: zero,
+                media: zero,
+                present: zero,
+            },
+        };
+
+        let report = standard_headless_run_report(
+            &profile,
+            &manifest,
+            Hash256::from_sha256(b"manifest"),
+            &input,
+            &execution,
+        )
+        .unwrap();
+
+        assert_eq!(report.schema, STANDARD_HEADLESS_RUN_REPORT_SCHEMA);
+        assert_eq!(report.status, RunStatus::Passed);
+        assert_eq!(report.completed_sequence, 7);
+        assert_eq!(report.checkpoint_results.len(), 1);
+        assert_eq!(report.checkpoint_results[0].id, "message");
+        report.validate().unwrap();
+    }
 
     #[test]
     fn duration_distribution_uses_deterministic_nearest_rank_percentiles() {
