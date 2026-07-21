@@ -36,6 +36,7 @@ use astra_emu_family_api::{
     LegacyVideoCommandV1, LegacyWaitRequest,
 };
 use astra_emu_family_support::LegacyVfsFamilyRegistry;
+use astra_emu_fvp::FvpVfsFamilyFactory;
 use astra_emu_manager::family_host::FamilyHostConfig;
 use astra_emu_manager::{run_manager_with_initial_state, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
@@ -1033,6 +1034,9 @@ impl AstraEmuManagerController {
             Library::open(data_dir.join("library.sqlite3")).map_err(|error| error.to_string())?;
         let vfs = Arc::new(VfsRegistry::default());
         let mut family_vfs_registry = LegacyVfsFamilyRegistry::default();
+        family_vfs_registry
+            .register(Arc::new(FvpVfsFamilyFactory))
+            .map_err(|error| error.to_string())?;
         family_vfs_registry
             .register(Arc::new(MinoriVfsFamilyFactory))
             .map_err(|error| error.to_string())?;

@@ -47,6 +47,41 @@ mod frame_tests {
         assert_ne!(restored.get_input_down(), 0);
         assert_ne!(restored.get_input_state(), 0);
     }
+
+    #[test]
+    fn mouse_release_uses_click_mode_and_preserves_pointer_coordinates() {
+        let mut input = InputManager::new();
+        input.notify_mouse_move(1135, 110);
+        input.set_mouse_in(true);
+        input.notify_mouse_down(KeyCode::MouseLeft);
+        assert!(input.get_event().is_none());
+        input.notify_mouse_up(KeyCode::MouseLeft);
+
+        let event = input.get_event().expect("release click must be queued");
+        assert_eq!(event.get_keycode(), KeyCode::LeftClick as u8);
+        assert!(event.get_in_screen());
+        assert_eq!(event.get_x(), 1135);
+        assert_eq!(event.get_y(), 110);
+    }
+
+    #[test]
+    fn control_mask_matches_rfvp_and_does_not_hide_shift() {
+        let mut input = InputManager::default();
+        input.notify_keycode_down(KeyCode::Ctrl, false);
+        input.notify_keycode_down(KeyCode::Shift, false);
+        input.begin_frame();
+        assert_ne!(input.get_input_state() & (1 << KeyCode::Ctrl as u8), 0);
+        assert_ne!(input.get_input_state() & (1 << KeyCode::Shift as u8), 0);
+
+        input.set_control_mask(true);
+        input.begin_frame();
+        assert_eq!(input.get_input_state() & (1 << KeyCode::Ctrl as u8), 0);
+        assert_ne!(input.get_input_state() & (1 << KeyCode::Shift as u8), 0);
+
+        input.set_control_mask(false);
+        input.begin_frame();
+        assert_ne!(input.get_input_state() & (1 << KeyCode::Ctrl as u8), 0);
+    }
 }
 
 impl CriticalSection {
@@ -209,9 +244,7 @@ pub struct InputManagerSnapshotV1 {
 
 impl Default for InputManager {
     fn default() -> Self {
-        let mut s = Self::new();
-        s.control_is_masked = true;
-        s
+        Self::new()
     }
 }
 
@@ -503,10 +536,6 @@ impl InputManager {
         {
             let _g = self.cs.enter();
 
-            if self.control_is_masked && matches!(keycode, KeyCode::Shift | KeyCode::Ctrl) {
-                return;
-            }
-
             prev_bits = self.new_input_state;
             let mask = Self::bit_for(keycode.clone());
 
@@ -530,10 +559,6 @@ impl InputManager {
         let prev_bits;
         {
             let _g = self.cs.enter();
-
-            if self.control_is_masked && matches!(keycode, KeyCode::Shift | KeyCode::Ctrl) {
-                return;
-            }
 
             prev_bits = self.new_input_state;
             let mask = Self::bit_for(keycode.clone());
@@ -674,7 +699,7 @@ impl InputManager {
         v
     }
 
-    // ignore both control and shift when masked
+    // RFVP masks only Ctrl. Shift remains visible to the script.
     pub fn set_control_mask(&mut self, mask: bool) {
         self.control_is_masked = mask;
     }
@@ -700,7 +725,6 @@ impl InputManager {
         Self::apply_virtual_click_state(&mut self.input_state);
 
         if self.control_is_masked {
-            self.input_state &= !Self::bit_for(KeyCode::Shift);
             self.input_state &= !Self::bit_for(KeyCode::Ctrl);
         }
 

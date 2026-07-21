@@ -1,6 +1,8 @@
 use std::{collections::BTreeSet, sync::Arc};
 
-use astra_byte_source::{ByteRange, ByteSourceStat, SourceRevision, DEFAULT_MAX_RANGE_BYTES};
+use astra_byte_source::{
+    BoundedByteSource, ByteRange, ByteSourceStat, SourceRevision, DEFAULT_MAX_RANGE_BYTES,
+};
 use astra_core::Hash256;
 use astra_emu_family_api::LegacyProviderError;
 use astra_emu_family_core::{
@@ -30,6 +32,10 @@ enum ArchiveStorage {
         reader: Arc<dyn astra_emu_family_api::LegacyVfsReader>,
         mount_set_id: String,
         uri: String,
+        stat: ByteSourceStat,
+    },
+    Source {
+        source: Arc<dyn BoundedByteSource>,
         stat: ByteSourceStat,
     },
 }
@@ -122,6 +128,59 @@ impl FvpArchive {
                 uri,
                 stat,
             },
+            &metadata,
+            stat,
+            nls,
+            max_entries,
+            false,
+        )
+    }
+
+    pub fn open_source(
+        source: Arc<dyn BoundedByteSource>,
+        nls: FvpNls,
+        max_entries: usize,
+    ) -> Result<Self, LegacyProviderError> {
+        let stat = source.stat().map_err(byte_source_error)?;
+        let header = read_source_range(source.as_ref(), stat, ByteRange { offset: 0, len: 8 })?;
+        if header.len() < 8 {
+            return Err(error(
+                "ASTRA_FVP_ARCHIVE_HEADER",
+                "archive header is truncated",
+            ));
+        }
+        let count = u32::from_le_bytes(header[0..4].try_into().unwrap()) as usize;
+        let names_size = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
+        let metadata_len = 8usize
+            .checked_add(count.checked_mul(12).ok_or_else(|| {
+                error(
+                    "ASTRA_FVP_ARCHIVE_TABLE_OVERFLOW",
+                    "entry table size overflowed",
+                )
+            })?)
+            .and_then(|value| value.checked_add(names_size))
+            .ok_or_else(|| {
+                error(
+                    "ASTRA_FVP_ARCHIVE_NAMES_OVERFLOW",
+                    "archive metadata size overflowed",
+                )
+            })?;
+        if metadata_len as u64 > DEFAULT_MAX_RANGE_BYTES {
+            return Err(error(
+                "ASTRA_FVP_ARCHIVE_METADATA_BOUNDS",
+                "archive metadata exceeds the bounded range limit",
+            ));
+        }
+        let metadata = read_source_range(
+            source.as_ref(),
+            stat,
+            ByteRange {
+                offset: 0,
+                len: metadata_len as u64,
+            },
+        )?;
+        Self::parse_metadata(
+            ArchiveStorage::Source { source, stat },
             &metadata,
             stat,
             nls,
@@ -266,8 +325,38 @@ impl FvpArchive {
                     len: entry.size,
                 },
             ),
+            ArchiveStorage::Source { source, stat } => read_source_range(
+                source.as_ref(),
+                *stat,
+                ByteRange {
+                    offset: entry.offset,
+                    len: entry.size,
+                },
+            ),
         }
     }
+
+    pub(crate) fn stat(&self) -> ByteSourceStat {
+        match &self.storage {
+            ArchiveStorage::Memory(bytes) => ByteSourceStat {
+                len: bytes.len() as u64,
+                revision: SourceRevision(Hash256::from_sha256(bytes)),
+            },
+            ArchiveStorage::Host { stat, .. } | ArchiveStorage::Source { stat, .. } => *stat,
+        }
+    }
+
+    pub(crate) fn source(&self) -> Option<&Arc<dyn BoundedByteSource>> {
+        match &self.storage {
+            ArchiveStorage::Source { source, .. } => Some(source),
+            ArchiveStorage::Memory(_) | ArchiveStorage::Host { .. } => None,
+        }
+    }
+
+    pub(crate) fn entry(&self, index: usize) -> Option<&FvpArchiveEntry> {
+        self.entries.get(index)
+    }
+
     pub fn manifest(
         &self,
         mount_id: &str,
@@ -276,7 +365,9 @@ impl FvpArchive {
     ) -> Result<LegacyPackManifest, LegacyProviderError> {
         let (source_size, source_hash) = match &self.storage {
             ArchiveStorage::Memory(bytes) => (bytes.len() as u64, Hash256::from_sha256(bytes)),
-            ArchiveStorage::Host { stat, .. } => (stat.len, stat.revision.0),
+            ArchiveStorage::Host { stat, .. } | ArchiveStorage::Source { stat, .. } => {
+                (stat.len, stat.revision.0)
+            }
         };
         let mut entries = Vec::with_capacity(self.entries.len());
         for entry in &self.entries {
@@ -321,6 +412,65 @@ impl FvpArchive {
         })?;
         Ok(manifest)
     }
+}
+
+fn read_source_range(
+    source: &dyn BoundedByteSource,
+    stat: ByteSourceStat,
+    range: ByteRange,
+) -> Result<Vec<u8>, LegacyProviderError> {
+    let end = range.offset.checked_add(range.len).ok_or_else(|| {
+        error(
+            "ASTRA_FVP_ARCHIVE_ENTRY_OVERFLOW",
+            "archive range overflowed",
+        )
+    })?;
+    if end > stat.len {
+        return Err(error(
+            "ASTRA_FVP_ARCHIVE_ENTRY_BOUNDS",
+            "archive range is out of bounds",
+        ));
+    }
+    let capacity = usize::try_from(range.len).map_err(|_| {
+        error(
+            "ASTRA_FVP_ARCHIVE_ENTRY_BOUNDS",
+            "archive range cannot fit in memory",
+        )
+    })?;
+    let mut bytes = Vec::with_capacity(capacity);
+    let mut offset = range.offset;
+    while offset < end {
+        let len = (end - offset).min(DEFAULT_MAX_RANGE_BYTES);
+        let result = source
+            .read_range(
+                stat.revision,
+                ByteRange { offset, len },
+                DEFAULT_MAX_RANGE_BYTES,
+            )
+            .map_err(byte_source_error)?;
+        bytes.extend_from_slice(&result.bytes);
+        offset = offset.checked_add(len).ok_or_else(|| {
+            error(
+                "ASTRA_FVP_ARCHIVE_ENTRY_OVERFLOW",
+                "archive range overflowed",
+            )
+        })?;
+    }
+    Ok(bytes)
+}
+
+fn byte_source_error(source: astra_byte_source::ByteSourceError) -> LegacyProviderError {
+    let code = match source {
+        astra_byte_source::ByteSourceError::RangeLimit => "ASTRA_EMU_VFS_READ_LIMIT",
+        astra_byte_source::ByteSourceError::RangeOverflow => "ASTRA_EMU_VFS_READ_OVERFLOW",
+        astra_byte_source::ByteSourceError::RangeBounds => "ASTRA_EMU_VFS_READ_BOUNDS",
+        astra_byte_source::ByteSourceError::RevisionMismatch => "ASTRA_EMU_VFS_SOURCE_CHANGED",
+        astra_byte_source::ByteSourceError::ShortRead => "ASTRA_EMU_VFS_SHORT_READ",
+        astra_byte_source::ByteSourceError::RepeatMismatch => "ASTRA_EMU_VFS_REPEAT_READ_CHANGED",
+        astra_byte_source::ByteSourceError::Poisoned => "ASTRA_EMU_VFS_SOURCE_POISONED",
+        astra_byte_source::ByteSourceError::Io(_) => "ASTRA_EMU_VFS_SOURCE_IO",
+    };
+    error(code, "bounded archive source read failed")
 }
 
 fn read_host_range(
@@ -390,7 +540,7 @@ fn normalize_name(value: &str) -> Result<String, LegacyProviderError> {
     }
     Ok(value)
 }
-fn classify(bytes: &[u8]) -> &'static str {
+pub(crate) fn classify(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(b"OggS") {
         "audio.ogg"
     } else if bytes.starts_with(b"RIFF") {
@@ -400,7 +550,7 @@ fn classify(bytes: &[u8]) -> &'static str {
     } else if bytes.starts_with(&[0x30, 0x26, 0xb2, 0x75]) {
         "video.asf"
     } else {
-        "application/octet-stream"
+        "application.octet_stream"
     }
 }
 fn error(code: &'static str, message: &str) -> LegacyProviderError {

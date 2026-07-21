@@ -72,6 +72,12 @@ enum CliCommand {
         /// Stream and hash every visible resource after the gameplay run.
         #[arg(long, default_value_t = false)]
         audit_all_resources: bool,
+        /// Restore an identity-bound local-private Headless continuation snapshot.
+        #[arg(long)]
+        resume_snapshot: Option<PathBuf>,
+        /// Atomically export an identity-bound local-private continuation snapshot.
+        #[arg(long)]
+        snapshot_output: Option<PathBuf>,
     },
 }
 
@@ -125,6 +131,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             verify_snapshot,
             artifact_retention,
             audit_all_resources,
+            resume_snapshot,
+            snapshot_output,
         } => {
             tracing::info!(
                 event = "astra_emu_cli_headless_started",
@@ -145,6 +153,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 verify_snapshot,
                 artifact_retention,
                 audit_all_resources,
+                resume_snapshot,
+                snapshot_output,
             })
             .await?;
             tracing::info!(

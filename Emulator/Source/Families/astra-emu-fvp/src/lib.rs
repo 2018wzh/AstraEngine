@@ -1,12 +1,16 @@
 //! FVP legacy family provider. This crate is licensed under MPL-2.0.
 
 mod archive;
+mod factory;
+#[cfg(feature = "dynamic-plugin-export")]
 mod ffi;
 mod hcb;
 mod media_decode;
 mod provider;
+mod vfs_audit;
 
 pub use archive::*;
+pub use factory::*;
 pub use hcb::*;
 pub use media_decode::*;
 pub use provider::*;

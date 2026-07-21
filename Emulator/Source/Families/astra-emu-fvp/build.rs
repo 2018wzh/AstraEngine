@@ -31,6 +31,7 @@ fn main() {
 
     let mut features = env::vars()
         .filter_map(|(name, _)| name.strip_prefix("CARGO_FEATURE_").map(str::to_owned))
+        .filter(|name| name != "DYNAMIC_PLUGIN_EXPORT")
         .collect::<Vec<_>>();
     features.sort();
     let feature_identity = if features.is_empty() {

@@ -1146,17 +1146,25 @@ fn apply_inputs(
             "wheel" => session
                 .runtime
                 .inject_wheel(input_i32(edge.value, "wheel")?),
+            "pointer.primary" | "pointer.secondary" => {
+                let button = if edge.control == "pointer.primary" {
+                    KeyCode::MouseLeft
+                } else {
+                    KeyCode::MouseRight
+                };
+                session.runtime.inject_pointer_button(button, edge.pressed);
+            }
             control => {
                 let key = match control {
                     "confirm" => KeyCode::Enter,
                     "cancel" => KeyCode::Esc,
-                    "pointer.primary" => KeyCode::MouseLeft,
-                    "pointer.secondary" => KeyCode::MouseRight,
                     "up" => KeyCode::UpArrow,
                     "down" => KeyCode::DownArrow,
                     "left" => KeyCode::LeftArrow,
                     "right" => KeyCode::RightArrow,
                     "space" => KeyCode::Space,
+                    "shift" => KeyCode::Shift,
+                    "control" => KeyCode::Ctrl,
                     _ => {
                         return Err(invalid(
                             "ASTRA_FVP_INPUT_CONTROL",
@@ -1485,6 +1493,117 @@ mod tests {
                 bytes,
             })
         }
+    }
+
+    #[test]
+    fn pointer_button_edges_use_rfvp_mouse_semantics() {
+        let script = terminal_hcb();
+        let fingerprint = Hash256::from_sha256(&script);
+        let ctx = host_ctx();
+
+        let mut routed = FvpRuntimeProvider::with_vfs(Arc::new(MemoryReader {
+            script: script.clone(),
+        }));
+        let routed_id = LegacyRuntimeSessionId("session.pointer.routed".into());
+        open_fixture(&mut routed, &ctx, &routed_id, fingerprint);
+        let routed_output = routed
+            .step(
+                &ctx,
+                &routed_id,
+                step_input(
+                    1,
+                    vec![
+                        LegacyInputEdge {
+                            control: "pointer.x".into(),
+                            pressed: true,
+                            value: 1135.0,
+                            sequence: 1,
+                        },
+                        LegacyInputEdge {
+                            control: "pointer.y".into(),
+                            pressed: true,
+                            value: 110.0,
+                            sequence: 2,
+                        },
+                        LegacyInputEdge {
+                            control: "pointer.primary".into(),
+                            pressed: true,
+                            value: 1.0,
+                            sequence: 3,
+                        },
+                    ],
+                ),
+            )
+            .unwrap();
+
+        let mut direct = FvpRuntimeProvider::with_vfs(Arc::new(MemoryReader { script }));
+        let direct_id = LegacyRuntimeSessionId("session.pointer.direct".into());
+        open_fixture(&mut direct, &ctx, &direct_id, fingerprint);
+        let runtime = &mut direct.sessions.get_mut(&direct_id.0).unwrap().runtime;
+        runtime.inject_pointer(1135, 0, true);
+        runtime.inject_pointer(1135, 110, true);
+        runtime.inject_pointer_button(KeyCode::MouseLeft, true);
+        let direct_output = direct
+            .step(&ctx, &direct_id, step_input(1, Vec::new()))
+            .unwrap();
+
+        assert_eq!(routed_output.state_hash, direct_output.state_hash);
+        assert_eq!(
+            postcard::to_allocvec(&routed_output.trace).unwrap(),
+            postcard::to_allocvec(&direct_output.trace).unwrap()
+        );
+    }
+
+    #[test]
+    fn modifier_edges_use_rfvp_key_semantics() {
+        let script = terminal_hcb();
+        let fingerprint = Hash256::from_sha256(&script);
+        let ctx = host_ctx();
+
+        let mut routed = FvpRuntimeProvider::with_vfs(Arc::new(MemoryReader {
+            script: script.clone(),
+        }));
+        let routed_id = LegacyRuntimeSessionId("session.modifier.routed".into());
+        open_fixture(&mut routed, &ctx, &routed_id, fingerprint);
+        let routed_output = routed
+            .step(
+                &ctx,
+                &routed_id,
+                step_input(
+                    1,
+                    vec![
+                        LegacyInputEdge {
+                            control: "shift".into(),
+                            pressed: true,
+                            value: 1.0,
+                            sequence: 1,
+                        },
+                        LegacyInputEdge {
+                            control: "control".into(),
+                            pressed: true,
+                            value: 1.0,
+                            sequence: 2,
+                        },
+                    ],
+                ),
+            )
+            .unwrap();
+
+        let mut direct = FvpRuntimeProvider::with_vfs(Arc::new(MemoryReader { script }));
+        let direct_id = LegacyRuntimeSessionId("session.modifier.direct".into());
+        open_fixture(&mut direct, &ctx, &direct_id, fingerprint);
+        let runtime = &mut direct.sessions.get_mut(&direct_id.0).unwrap().runtime;
+        runtime.inject_key(KeyCode::Shift, true, false);
+        runtime.inject_key(KeyCode::Ctrl, true, false);
+        let direct_output = direct
+            .step(&ctx, &direct_id, step_input(1, Vec::new()))
+            .unwrap();
+
+        assert_eq!(routed_output.state_hash, direct_output.state_hash);
+        assert_eq!(
+            postcard::to_allocvec(&routed_output.trace).unwrap(),
+            postcard::to_allocvec(&direct_output.trace).unwrap()
+        );
     }
 
     #[test]

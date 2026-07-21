@@ -1,6 +1,7 @@
 //! Minori PAZ virtual filesystem and lossless script research parser.
 
 mod factory;
+#[cfg(feature = "dynamic-plugin-export")]
 mod ffi;
 mod image_container;
 mod paz;

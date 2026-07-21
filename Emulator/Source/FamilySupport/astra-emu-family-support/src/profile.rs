@@ -19,7 +19,8 @@ pub struct LegacyVfsMountProfile {
     pub family_id: String,
     pub mount_id: String,
     pub prefix: String,
-    pub private_patch: PathBuf,
+    #[serde(default)]
+    pub private_patch: Option<PathBuf>,
     pub family_options_schema: String,
     pub family_options: serde_json::Value,
 }
@@ -45,14 +46,19 @@ impl LoadedMountProfile {
         let game_root = game_root
             .canonicalize()
             .map_err(|_| invalid("ASTRA_EMU_VFS_GAME_ROOT", "game root could not be resolved"))?;
-        let private_patch = resolve_relative(&game_root, &self.profile.private_patch)?;
+        let private_patch = self
+            .profile
+            .private_patch
+            .as_deref()
+            .map(|path| resolve_relative(&game_root, path))
+            .transpose()?;
         Ok(LegacyVfsMountContext {
             game_root,
             profile_id: self.profile.profile_id.clone(),
             profile_hash: self.profile_hash,
             mount_id: self.profile.mount_id.clone(),
             prefix: self.profile.prefix.clone(),
-            private_patch: Some(private_patch),
+            private_patch,
             family_config: self.family_config.clone(),
         })
     }
@@ -115,7 +121,10 @@ fn validate_profile(profile: &LegacyVfsMountProfile) -> Result<(), LegacyCoreErr
             "mount profile identity is invalid",
         ));
     }
-    validate_relative(&profile.private_patch)
+    if let Some(private_patch) = &profile.private_patch {
+        validate_relative(private_patch)?;
+    }
+    Ok(())
 }
 
 pub fn validate_relative(path: &Path) -> Result<(), LegacyCoreError> {
@@ -194,5 +203,19 @@ mod tests {
                 .code(),
             "ASTRA_EMU_VFS_PROFILE_PATH"
         );
+
+        let no_patch = root.path().join("no-patch.yaml");
+        std::fs::write(
+            &no_patch,
+            "schema: astra.emu.vfs_mount_profile.v1\nprofile_id: p\nfamily_id: fvp\nmount_id: m\nprefix: 'fvp:/'\nfamily_options_schema: astra.emu.fvp_vfs_options.v1\nfamily_options: {}\n",
+        )
+        .unwrap();
+        let loaded = load_mount_profile(&no_patch).unwrap();
+        assert!(loaded.profile.private_patch.is_none());
+        assert!(loaded
+            .mount_context(root.path())
+            .unwrap()
+            .private_patch
+            .is_none());
     }
 }

@@ -270,6 +270,26 @@ mod tests {
             ] if uri == "bgm/restore-only.ogg"
         ));
     }
+
+    #[test]
+    fn loading_an_occupied_rfvp_slot_replaces_it_without_destroy_command() {
+        let audio_manager = Arc::new(AudioManager::new());
+        let mut player = BgmPlayer::new(Arc::clone(&audio_manager));
+        let vfs = Vfs::default();
+
+        player.load_named(0, "bgm/first.ogg", &vfs).unwrap();
+        player.load_named(0, "bgm/second.ogg", &vfs).unwrap();
+
+        let mut commands = Vec::new();
+        audio_manager.drain_commands(&mut commands);
+        assert!(matches!(
+            commands.as_slice(),
+            [
+                AudioCommand::LoadResource { id: first, uri: first_uri, .. },
+                AudioCommand::LoadResource { id: second, uri: second_uri, .. }
+            ] if first == second && first_uri == "bgm/first.ogg" && second_uri == "bgm/second.ogg"
+        ));
+    }
 }
 
 pub struct BgmDebugSummary;

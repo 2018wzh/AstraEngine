@@ -175,7 +175,10 @@ impl ArtifactRecorder {
             self.final_frame = Some((sequence, width, height, rgba8.to_vec()));
             return Ok(());
         }
-        if self.policy.retention == HeadlessArtifactRetention::ManifestOnly {
+        if matches!(
+            self.policy.retention,
+            HeadlessArtifactRetention::Checkpoints | HeadlessArtifactRetention::ManifestOnly
+        ) {
             return Ok(());
         }
         let mut bytes = Vec::new();

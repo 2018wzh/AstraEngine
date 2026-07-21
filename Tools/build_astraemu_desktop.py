@@ -140,13 +140,18 @@ def cargo_build(
     target_root: pathlib.Path,
     environment: dict[str, str],
 ) -> pathlib.Path:
-    command = [
+    host_command = [
         "cargo", "build", "--locked", "--release", "--target", target,
-        "-p", "astra-emu-fvp", "-p", "astra-emu-manager", "-p", "astra-emu-cli",
+        "-p", "astra-emu-manager", "-p", "astra-emu-cli",
+    ]
+    run(host_command, root, environment)
+    family_command = [
+        "cargo", "build", "--locked", "--release", "--target", target,
+        "-p", "astra-emu-fvp", "--features", "dynamic-plugin-export",
         "--message-format=json-render-diagnostics",
     ]
     process = subprocess.Popen(
-        command,
+        family_command,
         cwd=root,
         env=environment,
         text=True,

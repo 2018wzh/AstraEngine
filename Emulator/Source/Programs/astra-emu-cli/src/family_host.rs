@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use astra_core::Hash256;
 use astra_emu_family_api::{LegacyRuntimeProvider, LegacyVfsReader, LEGACY_FAMILY_ABI_FINGERPRINT};
 use astra_emu_manager_core::{
     DynamicFamilyLoader, Ed25519FamilySignatureVerifier, FamilyPluginGate, FamilyPluginManifest,
@@ -47,6 +48,14 @@ impl CliFamilyHostConfig {
         &self,
         vfs: Arc<dyn LegacyVfsReader>,
     ) -> Result<Box<dyn LegacyRuntimeProvider>, String> {
+        self.create_provider_with_identity(vfs)
+            .map(|(provider, _)| provider)
+    }
+
+    pub fn create_provider_with_identity(
+        &self,
+        vfs: Arc<dyn LegacyVfsReader>,
+    ) -> Result<(Box<dyn LegacyRuntimeProvider>, Hash256), String> {
         let metadata =
             fs::metadata(&self.manifest_path).map_err(|_| "ASTRA_EMU_FAMILY_MANIFEST_READ")?;
         if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_MANIFEST_BYTES {
@@ -80,6 +89,7 @@ impl CliFamilyHostConfig {
             },
             Arc::new(verifier),
         );
+        let binary_hash = manifest.binary_hash;
         loader
             .load(
                 &self.library_path,
@@ -87,7 +97,12 @@ impl CliFamilyHostConfig {
                 format!("astra.emu.cli.family.{}", self.family_id),
                 vfs,
             )
-            .map(|provider| Box::new(provider) as Box<dyn LegacyRuntimeProvider>)
+            .map(|provider| {
+                (
+                    Box::new(provider) as Box<dyn LegacyRuntimeProvider>,
+                    binary_hash,
+                )
+            })
             .map_err(|error| error.to_string())
     }
 }

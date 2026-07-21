@@ -120,7 +120,7 @@ pub fn import(
         family_id: "minori".into(),
         mount_id: "minori-main".into(),
         prefix: "minori:/".into(),
-        private_patch: PATCH_NAME.into(),
+        private_patch: Some(PATCH_NAME.into()),
         family_options_schema: MINORI_FAMILY_OPTIONS_SCHEMA.into(),
         family_options: serde_json::to_value(options)?,
     };

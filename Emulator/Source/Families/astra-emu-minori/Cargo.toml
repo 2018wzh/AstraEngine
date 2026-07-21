@@ -8,6 +8,10 @@ license.workspace = true
 crate-type = ["rlib", "cdylib"]
 doctest = false
 
+[features]
+default = []
+dynamic-plugin-export = []
+
 [dependencies]
 abi_stable.workspace = true
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }

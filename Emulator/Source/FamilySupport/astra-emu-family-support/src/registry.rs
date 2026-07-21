@@ -129,7 +129,7 @@ mod tests {
                 family_id: family.into(),
                 mount_id: "fixture-mount".into(),
                 prefix: "fixture:/".into(),
-                private_patch: "private.luau".into(),
+                private_patch: Some("private.luau".into()),
                 family_options_schema: "fixture.options.v1".into(),
                 family_options: serde_json::json!({}),
             },

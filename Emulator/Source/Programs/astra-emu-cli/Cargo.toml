@@ -22,6 +22,7 @@ astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
 astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-support" }
 astra-emu-manager-core = { path = "../../Manager/astra-emu-manager-core" }
+astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }
 astra-emu-minori = { path = "../../Families/astra-emu-minori" }
 astra-headless-protocol = { path = "../../../../Engine/Source/Runtime/astra-headless-protocol" }
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }

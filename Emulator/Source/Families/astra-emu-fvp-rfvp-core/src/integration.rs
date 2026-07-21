@@ -320,6 +320,10 @@ impl RuntimeSession {
         self.game.inject_pointer_position(x, y, in_screen);
     }
 
+    pub fn inject_pointer_button(&mut self, button: KeyCode, pressed: bool) {
+        self.game.inject_pointer_button(button, pressed);
+    }
+
     pub fn inject_wheel(&mut self, value: i32) {
         self.game.inject_wheel(value);
     }
