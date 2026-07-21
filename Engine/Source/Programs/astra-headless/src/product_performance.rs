@@ -32,6 +32,7 @@ struct RecorderState {
     warmup_frames: u64,
     warmup_frames_remaining: u64,
     measurement_started: Option<Instant>,
+    measurement_stopped: Option<Instant>,
     pacing_started: Instant,
     paced_frame_count: u64,
     presentation_rate_hz: u32,
@@ -92,6 +93,7 @@ impl ProductPerformanceRecorder {
                 warmup_frames,
                 warmup_frames_remaining: warmup_frames,
                 measurement_started: (warmup_frames == 0).then(Instant::now),
+                measurement_stopped: None,
                 pacing_started: started,
                 paced_frame_count: 0,
                 presentation_rate_hz,
@@ -163,6 +165,7 @@ impl ProductPerformanceRecorder {
             state.pacing_started = started;
             state.paced_frame_count = 0;
             state.measurement_started = (state.warmup_frames_remaining == 0).then_some(started);
+            state.measurement_stopped = None;
             state.first_gpu_sequence = None;
             state.last_paced_gpu_sequence = None;
             state.gpu_measurement_cutoff = None;
@@ -243,6 +246,13 @@ impl ProductPerformanceRecorder {
             state
                 .last_paced_gpu_sequence
                 .ok_or("ASTRA_PERFORMANCE_GPU_MEASUREMENT_EMPTY")?,
+        );
+        let offset = frame_deadline_offset(state.paced_frame_count, state.presentation_rate_hz)?;
+        state.measurement_stopped = Some(
+            state
+                .pacing_started
+                .checked_add(offset)
+                .ok_or("ASTRA_PERFORMANCE_MEASUREMENT_DEADLINE_OVERFLOW")?,
         );
         Ok(())
     }
@@ -349,10 +359,15 @@ impl ProductPerformanceRecorder {
         if state.gpu_measurement_cutoff.is_none() {
             return Err("ASTRA_PERFORMANCE_GPU_MEASUREMENT_NOT_STOPPED".into());
         }
-        let duration_us = state
+        let measurement_started = state
             .measurement_started
-            .ok_or("ASTRA_PERFORMANCE_MEASUREMENT_NOT_STARTED")?
-            .elapsed()
+            .ok_or("ASTRA_PERFORMANCE_MEASUREMENT_NOT_STARTED")?;
+        let measurement_stopped = state
+            .measurement_stopped
+            .ok_or("ASTRA_PERFORMANCE_MEASUREMENT_NOT_STOPPED")?;
+        let duration_us = measurement_stopped
+            .checked_duration_since(measurement_started)
+            .ok_or("ASTRA_PERFORMANCE_MEASUREMENT_TIME_REVERSED")?
             .as_micros()
             .try_into()
             .map_err(|_| "ASTRA_PERFORMANCE_DURATION_OVERFLOW")?;
