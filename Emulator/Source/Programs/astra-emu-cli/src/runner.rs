@@ -10,8 +10,9 @@ use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioSampleFormat, LegacyAwaitResult,
     LegacyEffect, LegacyInputEdge, LegacyProbeRequest, LegacyRenderFrameV1,
-    LegacyRenderResourceFrameV1, LegacyRuntimeHostCtx, LegacyStepBudget, LegacyTextureFormat,
-    LegacyTextureUpdateV1, LegacyVfsReader, LegacyVideoCommandV1, LegacyWaitRequest,
+    LegacyRenderResourceFrameV1, LegacyRuntimeHostCtx, LegacyStepBudget,
+    LegacyTextPresentationLeaseV1, LegacyTextureFormat, LegacyTextureUpdateV1, LegacyVfsReader,
+    LegacyVideoCommandV1, LegacyWaitRequest,
 };
 use astra_emu_family_support::{
     verify_vfs, LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry,
@@ -51,6 +52,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     family_host::CliFamilyHostConfig, input::read_input_sequence, rasterizer::CpuStageRasterizer,
+    text_presentation::BoundTextPresenter,
 };
 
 pub const HEADLESS_RUN_REPORT_SCHEMA: &str = "astra.emu.headless_run_report.v2";
@@ -493,11 +495,18 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     let mut driver = RuntimeDriver::new(
         &mut runtime,
         open.session_id.clone(),
-        seed,
-        profile.fixed_delta_ns,
         &host.client,
         surface,
-        launch.enable_audio,
+        RuntimeDriverConfig {
+            seed,
+            delta_ns: profile.fixed_delta_ns,
+            audio_enabled: launch.enable_audio,
+            text: TextProviderBinding {
+                provider_id: "cosmic_text_cpu",
+                target: "windows",
+                profile: &format!("{}-v1", launch.family_id),
+            },
+        },
     )?;
     let mut viewport = NativeViewport {
         window_width: stage_width,
@@ -699,7 +708,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV2,
         .map_err(|_| "ASTRA_EMU_HEADLESS_PROFILE_HASH".to_owned())?;
     let host = HeadlessPlatformFactory::new(&launch.artifact_root, &game_root)
         .with_input_sequence_hash(input.hash.to_string())
-        .start(host_profile.into())
+        .start(host_profile.clone().into())
         .await
         .map_err(|error| error.to_string())?;
     let window = host
@@ -731,6 +740,11 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV2,
             seed,
             delta_ns: profile.fixed_delta_ns,
             verify_snapshot: launch.verify_snapshot,
+            text: TextProviderBinding {
+                provider_id: &host_profile.providers.text,
+                target: &host_profile.target,
+                profile: &host_profile.product_profile,
+            },
         },
     )
     .await;
@@ -1236,6 +1250,8 @@ struct RuntimeDriver<'a> {
     pending_waits: BTreeMap<String, PendingWait>,
     rasterizer: CpuStageRasterizer,
     image_decoders: DecodeProviderRegistry,
+    text_presenter: BoundTextPresenter,
+    underlay_frame: Option<(u32, u32, Vec<u8>)>,
     base_frame: Option<(u32, u32, Vec<u8>)>,
     latest_frame: Option<(u32, u32, Vec<u8>)>,
     present_sequence: u64,
@@ -1258,10 +1274,25 @@ struct RuntimeDriver<'a> {
     present_timings_ns: Vec<u64>,
 }
 
-struct ExecutionConfig {
+#[derive(Clone, Copy)]
+struct TextProviderBinding<'a> {
+    provider_id: &'a str,
+    target: &'a str,
+    profile: &'a str,
+}
+
+struct RuntimeDriverConfig<'a> {
+    seed: u64,
+    delta_ns: u64,
+    audio_enabled: bool,
+    text: TextProviderBinding<'a>,
+}
+
+struct ExecutionConfig<'a> {
     seed: u64,
     delta_ns: u64,
     verify_snapshot: bool,
+    text: TextProviderBinding<'a>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1463,16 +1494,19 @@ async fn execute_sequence(
     platform: &PlatformHostClient,
     surface: SurfaceHandle,
     messages: &[InputMessage],
-    config: ExecutionConfig,
+    config: ExecutionConfig<'_>,
 ) -> Result<ExecutionEvidence, String> {
     let mut driver = RuntimeDriver::new(
         runtime,
         session_id,
-        config.seed,
-        config.delta_ns,
         platform,
         surface,
-        true,
+        RuntimeDriverConfig {
+            seed: config.seed,
+            delta_ns: config.delta_ns,
+            audio_enabled: true,
+            text: config.text,
+        },
     )?;
     let mut checkpoints = Vec::new();
     let mut checkpoint_frames = Vec::new();
@@ -1616,11 +1650,9 @@ impl<'a> RuntimeDriver<'a> {
     fn new(
         runtime: &'a mut AstraEmuRuntimeProvider,
         session_id: GameRuntimeSessionId,
-        seed: u64,
-        delta_ns: u64,
         platform: &'a PlatformHostClient,
         surface: SurfaceHandle,
-        audio_enabled: bool,
+        config: RuntimeDriverConfig<'_>,
     ) -> Result<RuntimeDriver<'a>, String> {
         let mut image_decoders = DecodeProviderRegistry::default();
         image_decoders
@@ -1629,8 +1661,8 @@ impl<'a> RuntimeDriver<'a> {
         Ok(RuntimeDriver {
             runtime,
             session_id,
-            seed,
-            delta_ns,
+            seed: config.seed,
+            delta_ns: config.delta_ns,
             platform,
             surface,
             fixed_step: 0,
@@ -1641,6 +1673,12 @@ impl<'a> RuntimeDriver<'a> {
             pending_waits: BTreeMap::new(),
             rasterizer: CpuStageRasterizer::default(),
             image_decoders,
+            text_presenter: BoundTextPresenter::new(
+                config.text.provider_id,
+                config.text.target,
+                config.text.profile,
+            )?,
+            underlay_frame: None,
             base_frame: None,
             latest_frame: None,
             present_sequence: 0,
@@ -1654,7 +1692,7 @@ impl<'a> RuntimeDriver<'a> {
             state_trace: Vec::new(),
             diagnostics: BTreeSet::new(),
             active_touch: None,
-            audio_enabled,
+            audio_enabled: config.audio_enabled,
             step_timings_ns: Vec::new(),
             runtime_timings_ns: Vec::new(),
             effect_timings_ns: Vec::new(),
@@ -1860,6 +1898,7 @@ impl<'a> RuntimeDriver<'a> {
         self.next_step_mode = RuntimeStepMode::Live;
         self.fixed_step = next_step;
         let mut rendered = false;
+        let mut text_presentations = BTreeMap::new();
         let effect_started = Instant::now();
         for envelope in &output.outputs {
             if envelope.domain == RuntimeOutputDomain::Presentation
@@ -1877,7 +1916,9 @@ impl<'a> RuntimeDriver<'a> {
                 let raster_started = Instant::now();
                 let rgba8 = self.rasterizer.render(frame)?;
                 self.raster_timings_ns.push(elapsed_ns(raster_started)?);
-                self.base_frame = Some((width, height, rgba8));
+                let frame = (width, height, rgba8);
+                self.underlay_frame = Some(frame.clone());
+                self.base_frame = Some(frame);
                 rendered = true;
                 continue;
             }
@@ -1915,7 +1956,9 @@ impl<'a> RuntimeDriver<'a> {
                         let raster_started = Instant::now();
                         let rgba8 = self.rasterizer.render(frame)?;
                         self.raster_timings_ns.push(elapsed_ns(raster_started)?);
-                        self.base_frame = Some((width, height, rgba8));
+                        let frame = (width, height, rgba8);
+                        self.underlay_frame = Some(frame.clone());
+                        self.base_frame = Some(frame);
                         rendered = true;
                     }
                     LegacyEffect::Presentation {
@@ -1928,8 +1971,25 @@ impl<'a> RuntimeDriver<'a> {
                         let raster_started = Instant::now();
                         let rgba8 = self.rasterizer.render(frame)?;
                         self.raster_timings_ns.push(elapsed_ns(raster_started)?);
-                        self.base_frame = Some((width, height, rgba8));
+                        let frame = (width, height, rgba8);
+                        self.underlay_frame = Some(frame.clone());
+                        self.base_frame = Some(frame);
                         rendered = true;
+                    }
+                    LegacyEffect::Presentation {
+                        command, payload, ..
+                    } if command == "astra.emu.text_presentation.v1" => {
+                        let binding: LegacyTextPresentationLeaseV1 = postcard::from_bytes(&payload)
+                            .map_err(|_| {
+                                "ASTRA_EMU_HEADLESS_TEXT_PRESENTATION_DECODE".to_owned()
+                            })?;
+                        binding.validate().map_err(|error| error.to_string())?;
+                        if text_presentations
+                            .insert(binding.lease_id, binding.presentation)
+                            .is_some()
+                        {
+                            return Err("ASTRA_EMU_HEADLESS_TEXT_PRESENTATION_DUPLICATE".into());
+                        }
                     }
                     LegacyEffect::Presentation {
                         command, payload, ..
@@ -1994,7 +2054,8 @@ impl<'a> RuntimeDriver<'a> {
                             .runtime
                             .take_ephemeral_text(&self.session_id, &lease_id)?
                             .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXT_LEASE_MISSING".to_owned())?;
-                        if text.text.len() != byte_len as usize
+                        if text.lease_id != lease_id
+                            || text.text.len() != byte_len as usize
                             || Hash256::from_sha256(text.text.as_bytes()) != text_hash
                             || text
                                 .speaker
@@ -2003,6 +2064,23 @@ impl<'a> RuntimeDriver<'a> {
                                 != speaker_hash
                         {
                             return Err("ASTRA_EMU_HEADLESS_TEXT_LEASE_IDENTITY".into());
+                        }
+                        if let Some(presentation) = text_presentations.remove(&lease_id) {
+                            let underlay = self.underlay_frame.clone().ok_or_else(|| {
+                                "ASTRA_EMU_HEADLESS_TEXT_UNDERLAY_MISSING".to_owned()
+                            })?;
+                            let text_started = Instant::now();
+                            let presented =
+                                self.text_presenter
+                                    .render(&underlay, &text, &presentation)?;
+                            self.raster_timings_ns.push(elapsed_ns(text_started)?);
+                            for hash in presented.layout_hashes {
+                                self.state_trace
+                                    .extend_from_slice(hash.to_string().as_bytes());
+                                self.state_trace.push(b'\n');
+                            }
+                            self.base_frame = Some((underlay.0, underlay.1, presented.rgba8));
+                            rendered = true;
                         }
                     }
                     _ => {}
@@ -2014,6 +2092,9 @@ impl<'a> RuntimeDriver<'a> {
                     return Err("ASTRA_EMU_HEADLESS_WAIT_DUPLICATE".into());
                 }
             }
+        }
+        if !text_presentations.is_empty() {
+            return Err("ASTRA_EMU_HEADLESS_TEXT_PRESENTATION_ORPHANED".into());
         }
         self.effect_timings_ns.push(elapsed_ns(effect_started)?);
         let media_started = Instant::now();

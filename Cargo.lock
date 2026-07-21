@@ -807,6 +807,7 @@ dependencies = [
  "astra-emu-minori",
  "astra-headless-protocol",
  "astra-media",
+ "astra-media-core",
  "astra-observability",
  "astra-platform",
  "astra-platform-headless",
