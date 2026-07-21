@@ -571,22 +571,17 @@ fn record_measured_frame(
             .record(metric, value)
             .map_err(|error| error.to_string())?;
     }
-    let frame_start_ns = pending
-        .submitted_timestamp_ns
-        .saturating_sub(submission.cpu_submit_ns);
-    let cpu_end_ns = frame_start_ns.saturating_add(submission.cpu_submit_ns);
-    let gpu_upload_end_ns = cpu_end_ns.saturating_add(submission.atlas_upload_gpu_ns);
-    let gpu_scene_end_ns = gpu_upload_end_ns.saturating_add(submission.scene_gpu_ns);
-    let trace_event_end_ns = gpu_scene_end_ns
-        .saturating_add(submission.filter_gpu_ns)
-        .max(pending.submitted_timestamp_ns);
+    // WGPU timestamp queries provide durations but do not share the host's
+    // monotonic clock epoch. Anchor every correlated slice to the measured
+    // frame timestamp instead of inventing an absolute GPU timeline.
+    let frame_timestamp_ns = pending.submitted_timestamp_ns;
     trace
         .flow(
             "frame.flow",
             "scene_to_gpu",
             1,
             pending.index,
-            frame_start_ns,
+            frame_timestamp_ns,
             PerfettoFlowPhase::Start,
         )
         .and_then(|_| {
@@ -595,7 +590,7 @@ fn record_measured_frame(
                 "scene.prepare_submit",
                 1,
                 Some(pending.index),
-                frame_start_ns,
+                frame_timestamp_ns,
                 submission.scene_cpu_ns,
             )
         })
@@ -605,7 +600,7 @@ fn record_measured_frame(
                 "filter.prepare_submit",
                 1,
                 Some(pending.index),
-                frame_start_ns.saturating_add(submission.scene_cpu_ns),
+                frame_timestamp_ns,
                 submission.filter_cpu_ns,
             )
         })
@@ -615,7 +610,7 @@ fn record_measured_frame(
                 "scene_to_gpu",
                 2,
                 pending.index,
-                cpu_end_ns,
+                frame_timestamp_ns,
                 PerfettoFlowPhase::Step,
             )
         })
@@ -625,7 +620,7 @@ fn record_measured_frame(
                 "atlas.upload",
                 2,
                 Some(pending.index),
-                cpu_end_ns,
+                frame_timestamp_ns,
                 submission.atlas_upload_gpu_ns,
             )
         })
@@ -635,7 +630,7 @@ fn record_measured_frame(
                 "scene.pass",
                 2,
                 Some(pending.index),
-                gpu_upload_end_ns,
+                frame_timestamp_ns,
                 submission.scene_gpu_ns,
             )
         })
@@ -645,7 +640,7 @@ fn record_measured_frame(
                 "filter.pass",
                 2,
                 Some(pending.index),
-                gpu_scene_end_ns,
+                frame_timestamp_ns,
                 submission.filter_gpu_ns,
             )
         })
@@ -655,7 +650,7 @@ fn record_measured_frame(
                 "scene_to_gpu",
                 2,
                 pending.index,
-                gpu_scene_end_ns.saturating_add(submission.filter_gpu_ns),
+                frame_timestamp_ns,
                 PerfettoFlowPhase::End,
             )
         })
@@ -663,7 +658,7 @@ fn record_measured_frame(
             trace.counter(
                 "memory",
                 "working_set.bytes",
-                trace_event_end_ns,
+                frame_timestamp_ns,
                 pending.memory.working_set_bytes,
             )
         })
@@ -671,7 +666,7 @@ fn record_measured_frame(
             trace.counter(
                 "memory",
                 "private.bytes",
-                trace_event_end_ns,
+                frame_timestamp_ns,
                 pending.memory.private_bytes,
             )
         })
@@ -679,11 +674,11 @@ fn record_measured_frame(
             trace.counter(
                 "renderer",
                 "gpu_resource.bytes",
-                trace_event_end_ns,
+                frame_timestamp_ns,
                 pending.counters.gpu_resource_bytes,
             )
         })
-        .and_then(|_| trace.counter("allocator", "frame.bytes", trace_event_end_ns, allocated))
+        .and_then(|_| trace.counter("allocator", "frame.bytes", frame_timestamp_ns, allocated))
         .map_err(|error| error.to_string())?;
     Ok(deadline_miss)
 }
