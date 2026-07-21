@@ -314,7 +314,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     .await
     .unwrap();
     assert!(!signals.contains("bgm.main.end"));
-    host.pump(&mut source, &mut executor, &mut signals)
+    host.pump(&mut source, &mut executor, &mut signals, false)
         .await
         .unwrap();
     assert_eq!(host.last_meter().unwrap().underflow_count, 64);
@@ -351,17 +351,17 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
         &mut signals,
     )
     .unwrap();
-    host.pump(&mut source, &mut executor, &mut signals)
+    host.pump(&mut source, &mut executor, &mut signals, false)
         .await
         .unwrap();
     let snapshot = host.snapshot();
     host.restore(snapshot).unwrap();
     assert!(host.is_active());
-    host.pump(&mut source, &mut executor, &mut signals)
+    host.pump(&mut source, &mut executor, &mut signals, false)
         .await
         .unwrap();
     assert!(!signals.contains("bgm.fade.complete"));
-    host.pump(&mut source, &mut executor, &mut signals)
+    host.pump(&mut source, &mut executor, &mut signals, false)
         .await
         .unwrap();
     assert!(signals.contains("bgm.main.end"));

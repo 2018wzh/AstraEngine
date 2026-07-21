@@ -226,6 +226,26 @@ impl ProductPerformanceRecorder {
                 sample.media_parse_convert_ns,
             ),
             ("media.cpu", "media.mixer", sample.media_mixer_ns),
+            (
+                "media.audio",
+                "media.audio_query",
+                sample.media_audio_query_ns,
+            ),
+            (
+                "media.audio",
+                "media.audio_render",
+                sample.media_audio_render_ns,
+            ),
+            (
+                "media.audio",
+                "media.audio_submit",
+                sample.media_audio_submit_ns,
+            ),
+            (
+                "media.audio",
+                "media.audio_completion",
+                sample.media_audio_completion_ns,
+            ),
             ("save.cpu", "save_load", sample.save_load_ns),
         ] {
             if duration_ns == 0 {
@@ -1190,6 +1210,10 @@ mod tests {
             media_provider_decode_ns: 3,
             media_parse_convert_ns: 2,
             media_mixer_ns: 1,
+            media_audio_query_ns: 1,
+            media_audio_render_ns: 1,
+            media_audio_submit_ns: 1,
+            media_audio_completion_ns: 1,
             save_load_ns: 7,
         };
         recorder.record_product_sample(1, product_sample).unwrap();

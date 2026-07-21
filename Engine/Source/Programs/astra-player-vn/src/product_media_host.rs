@@ -37,6 +37,10 @@ pub struct NativeVnMediaPerformanceSample {
     pub provider_decode_ns: u64,
     pub parse_convert_ns: u64,
     pub mixer_ns: u64,
+    pub audio_query_ns: u64,
+    pub audio_render_ns: u64,
+    pub audio_submit_ns: u64,
+    pub audio_completion_ns: u64,
 }
 
 #[derive(Clone)]
@@ -468,11 +472,28 @@ impl NativeVnProductMediaHost {
 
             if render_audio_tick {
                 let mixer_started = self.performance.as_ref().map(|_| Instant::now());
-                self.audio
-                    .pump(source, executor, &mut self.completed_signals)
+                let audio_sample = self
+                    .audio
+                    .pump(
+                        source,
+                        executor,
+                        &mut self.completed_signals,
+                        self.performance.is_some(),
+                    )
                     .await?;
                 self.add_profile_duration(mixer_started, |sample, duration| {
                     sample.mixer_ns = sample.mixer_ns.saturating_add(duration);
+                    sample.audio_query_ns =
+                        sample.audio_query_ns.saturating_add(audio_sample.query_ns);
+                    sample.audio_render_ns = sample
+                        .audio_render_ns
+                        .saturating_add(audio_sample.render_ns);
+                    sample.audio_submit_ns = sample
+                        .audio_submit_ns
+                        .saturating_add(audio_sample.submit_ns);
+                    sample.audio_completion_ns = sample
+                        .audio_completion_ns
+                        .saturating_add(audio_sample.completion_ns);
                 })?;
             }
             if let Some(fence) = source.pending_wait().map(|wait| wait.fence.clone()) {

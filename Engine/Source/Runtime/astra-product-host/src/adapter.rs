@@ -86,6 +86,10 @@ pub struct ProductPerformanceSample {
     pub media_provider_decode_ns: u64,
     pub media_parse_convert_ns: u64,
     pub media_mixer_ns: u64,
+    pub media_audio_query_ns: u64,
+    pub media_audio_render_ns: u64,
+    pub media_audio_submit_ns: u64,
+    pub media_audio_completion_ns: u64,
     pub save_load_ns: u64,
 }
 

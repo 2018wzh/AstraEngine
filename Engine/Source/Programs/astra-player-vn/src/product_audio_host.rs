@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Instant,
+};
 
 use astra_media::{
     AudioCommand, PcmAsset, PcmAssetResolver, ProductionAudioMixer, ProductionMixerSnapshot,
@@ -19,6 +22,14 @@ pub struct NativeVnProductAudioHost {
     last_meter: Option<NativeVnAudioMeterSnapshot>,
     submitted_timeline: Vec<f32>,
     retain_submitted_timeline: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NativeVnAudioPerformanceSample {
+    pub query_ns: u64,
+    pub render_ns: u64,
+    pub submit_ns: u64,
+    pub completion_ns: u64,
 }
 
 impl Default for NativeVnProductAudioHost {
@@ -452,13 +463,16 @@ impl NativeVnProductAudioHost {
             astra_player_core::PlatformCommandSink,
         >,
         completed_signals: &mut BTreeSet<String>,
-    ) -> Result<(), astra_platform::PlatformError> {
+        profile: bool,
+    ) -> Result<NativeVnAudioPerformanceSample, astra_platform::PlatformError> {
+        let mut performance = NativeVnAudioPerformanceSample::default();
         if self.output.is_none() {
-            return Ok(());
+            return Ok(performance);
         }
         let output = self
             .output
             .ok_or_else(|| player_platform_error("player.audio.pump", "output is missing"))?;
+        let query_started = profile.then(Instant::now);
         let query = source
             .prepare_persistent_audio_query(output)
             .map_err(|error| player_platform_error("player.audio.query.prepare", error))?;
@@ -495,6 +509,7 @@ impl NativeVnProductAudioHost {
                 ))
             }
         };
+        performance.query_ns = elapsed_ns(query_started, "player.audio.performance.query")?;
         let tick_frames = u64::try_from(CANONICAL_FRAMES_PER_TICK)
             .map_err(|_| player_platform_error("player.audio.pump", "tick frame overflowed"))?;
         if queued_frames.saturating_add(tick_frames) > u64::from(Self::BUFFERED_FRAMES) {
@@ -504,8 +519,9 @@ impl NativeVnProductAudioHost {
                 buffered_frames = Self::BUFFERED_FRAMES,
                 "Player deferred mixer advancement until the hardware queue has capacity"
             );
-            return Ok(());
+            return Ok(performance);
         }
+        let render_started = profile.then(Instant::now);
         let mixed = self
             .mixer
             .as_mut()
@@ -536,6 +552,8 @@ impl NativeVnProductAudioHost {
             samples,
             completed: Vec::new(),
         };
+        performance.render_ns = elapsed_ns(render_started, "player.audio.performance.render")?;
+        let submit_started = profile.then(Instant::now);
         let submit = source
             .prepare_persistent_audio_submit(output, self.next_packet_sequence, &packet)
             .map_err(|error| player_platform_error("player.audio.submit.prepare", error))?;
@@ -543,6 +561,8 @@ impl NativeVnProductAudioHost {
             .execute_batch(submit)
             .await
             .map_err(|error| player_platform_error("player.audio.submit", error))?;
+        performance.submit_ns = elapsed_ns(submit_started, "player.audio.performance.submit")?;
+        let completion_started = profile.then(Instant::now);
         self.next_packet_sequence = self
             .next_packet_sequence
             .checked_add(1)
@@ -619,7 +639,9 @@ impl NativeVnProductAudioHost {
                 "Player completed a sample-accurate fade-stop"
             );
         }
-        Ok(())
+        performance.completion_ns =
+            elapsed_ns(completion_started, "player.audio.performance.completion")?;
+        Ok(performance)
     }
 
     pub fn control(
@@ -934,6 +956,21 @@ impl NativeVnProductAudioHost {
         self.known_bgm_targets.clear();
         Ok(())
     }
+}
+
+fn elapsed_ns(
+    started: Option<Instant>,
+    operation: &'static str,
+) -> Result<u64, astra_platform::PlatformError> {
+    let Some(started) = started else {
+        return Ok(0);
+    };
+    u64::try_from(started.elapsed().as_nanos()).map_err(|_| {
+        player_platform_error(
+            operation,
+            "ASTRA_PLAYER_AUDIO_PERFORMANCE_DURATION_OVERFLOW",
+        )
+    })
 }
 
 fn upmix_canonical_stereo(

@@ -772,6 +772,18 @@ impl NativeVnHeadlessSession {
                     .media_parse_convert_ns
                     .saturating_add(media_sample.parse_convert_ns);
                 sample.media_mixer_ns = sample.media_mixer_ns.saturating_add(media_sample.mixer_ns);
+                sample.media_audio_query_ns = sample
+                    .media_audio_query_ns
+                    .saturating_add(media_sample.audio_query_ns);
+                sample.media_audio_render_ns = sample
+                    .media_audio_render_ns
+                    .saturating_add(media_sample.audio_render_ns);
+                sample.media_audio_submit_ns = sample
+                    .media_audio_submit_ns
+                    .saturating_add(media_sample.audio_submit_ns);
+                sample.media_audio_completion_ns = sample
+                    .media_audio_completion_ns
+                    .saturating_add(media_sample.audio_completion_ns);
             })?;
             self.flush_performance_sample()?;
         }
@@ -798,6 +810,18 @@ impl NativeVnHeadlessSession {
                 .media_parse_convert_ns
                 .saturating_add(media_sample.parse_convert_ns);
             sample.media_mixer_ns = sample.media_mixer_ns.saturating_add(media_sample.mixer_ns);
+            sample.media_audio_query_ns = sample
+                .media_audio_query_ns
+                .saturating_add(media_sample.audio_query_ns);
+            sample.media_audio_render_ns = sample
+                .media_audio_render_ns
+                .saturating_add(media_sample.audio_render_ns);
+            sample.media_audio_submit_ns = sample
+                .media_audio_submit_ns
+                .saturating_add(media_sample.audio_submit_ns);
+            sample.media_audio_completion_ns = sample
+                .media_audio_completion_ns
+                .saturating_add(media_sample.audio_completion_ns);
         })?;
         self.flush_performance_sample()
     }
