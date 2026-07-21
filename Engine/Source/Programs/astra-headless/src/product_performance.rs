@@ -150,6 +150,10 @@ impl ProductPerformanceRecorder {
                 sample.ui_paint_conversion_ns,
             ),
             ("ui.cpu", "ui.host_scene", sample.ui_host_scene_ns),
+            ("ui.cpu", "ui.model_binding", sample.ui_model_binding_ns),
+            ("ui.cpu", "ui.controller", sample.ui_controller_ns),
+            ("ui.cpu", "ui.frame_model", sample.ui_frame_model_ns),
+            ("ui.cpu", "ui.text_scene", sample.ui_text_scene_ns),
             ("media.cpu", "media.decode_mix", sample.media_decode_ns),
             ("save.cpu", "save_load", sample.save_load_ns),
         ] {
@@ -1072,6 +1076,10 @@ mod tests {
             ui_update_layout_ns: 10,
             ui_paint_conversion_ns: 5,
             ui_host_scene_ns: 25,
+            ui_model_binding_ns: 4,
+            ui_controller_ns: 3,
+            ui_frame_model_ns: 2,
+            ui_text_scene_ns: 1,
             media_decode_ns: 6,
             save_load_ns: 7,
         };

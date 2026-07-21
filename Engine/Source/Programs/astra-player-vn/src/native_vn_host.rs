@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
 use astra_core::{Hash256, SchemaVersion};
 use astra_media::{
@@ -139,12 +140,22 @@ pub struct NativeVnHostCommandSource {
     ui_performance: UiPerformanceGate,
     last_ui_performance_sample: Option<UiPerformanceSample>,
     ui_text_layout_cache: BTreeMap<String, CachedUiTextLayout>,
+    ui_host_performance_sampling_enabled: bool,
+    last_ui_host_performance_sample: Option<NativeVnUiHostPerformanceSample>,
     shutdown_started: bool,
 }
 
 struct CachedUiTextLayout {
     request_hash: Hash256,
     layout: Arc<TextLayoutResult>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NativeVnUiHostPerformanceSample {
+    pub model_binding_ns: u64,
+    pub controller_ns: u64,
+    pub frame_model_ns: u64,
+    pub text_scene_ns: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -662,6 +673,8 @@ impl NativeVnHostCommandSource {
             ui_performance: UiPerformanceGate::new(UiPerformanceBudget::production()),
             last_ui_performance_sample: None,
             ui_text_layout_cache: BTreeMap::new(),
+            ui_host_performance_sampling_enabled: false,
+            last_ui_host_performance_sample: None,
             shutdown_started: false,
         })
     }
@@ -676,6 +689,19 @@ impl NativeVnHostCommandSource {
 
     pub fn take_last_ui_performance_sample(&mut self) -> Option<UiPerformanceSample> {
         self.last_ui_performance_sample.take()
+    }
+
+    pub fn set_ui_host_performance_sampling_enabled(&mut self, enabled: bool) {
+        self.ui_host_performance_sampling_enabled = enabled;
+        if !enabled {
+            self.last_ui_host_performance_sample = None;
+        }
+    }
+
+    pub fn take_last_ui_host_performance_sample(
+        &mut self,
+    ) -> Option<NativeVnUiHostPerformanceSample> {
+        self.last_ui_host_performance_sample.take()
     }
 
     pub fn session_id(&self) -> &str {
@@ -1689,6 +1715,7 @@ impl NativeVnHostCommandSource {
         events: Vec<UiInputEvent>,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         self.last_ui_performance_sample = None;
+        self.last_ui_host_performance_sample = None;
         self.apply_ui_resize_events(&events)?;
         let fallback_events = events.clone();
         if !self.has_active_ui_surface() {
@@ -2478,6 +2505,9 @@ impl NativeVnHostCommandSource {
         &mut self,
         events: Vec<UiInputEvent>,
     ) -> Result<(astra_ui_core::UiFrameOutput, Vec<SceneCommand>), NativeVnHostError> {
+        let model_binding_started =
+            performance_phase_started(self.ui_host_performance_sampling_enabled);
+        let mut host_performance = NativeVnUiHostPerformanceSample::default();
         let state = self.runtime_state.as_ref().ok_or_else(|| {
             NativeVnHostError::Input("ASTRA_PLAYER_STATE: runtime has not launched".into())
         })?;
@@ -2594,6 +2624,9 @@ impl NativeVnHostCommandSource {
             self.base_ui_instance_id = Some(instance_id.clone());
         }
         self.base_ui_theme_id = Some(binding.theme_id.clone());
+        host_performance.model_binding_ns = performance_phase_duration(model_binding_started)?;
+        let controller_started =
+            performance_phase_started(self.ui_host_performance_sampling_enabled);
         let lifecycle_effects = if active_changed {
             self.ui_controller_host.invoke_open(
                 &active_controller_id,
@@ -2649,6 +2682,9 @@ impl NativeVnHostCommandSource {
             self.apply_ui_controller_effects(&modal.controller_id, effects, false)?;
         }
 
+        host_performance.controller_ns = performance_phase_duration(controller_started)?;
+        let frame_model_started =
+            performance_phase_started(self.ui_host_performance_sampling_enabled);
         let fixed_time_ns = self.fixed_step.saturating_mul(16_666_667);
         let state_value = controller_state_value(
             self.ui_controller_sessions
@@ -2714,7 +2750,10 @@ impl NativeVnHostCommandSource {
             model_payload,
         };
         let stable_frame = request.input.events.is_empty() && !active_changed;
+        host_performance.frame_model_ns = performance_phase_duration(frame_model_started)?;
         let mut output = self.ui_backend.render_frame(request)?;
+        let text_scene_started =
+            performance_phase_started(self.ui_host_performance_sampling_enabled);
         if !output.diagnostics.is_empty() {
             return Err(NativeVnHostError::Input(format!(
                 "ASTRA_PLAYER_UI_DIAGNOSTIC: UI frame returned {} diagnostics",
@@ -2807,6 +2846,7 @@ impl NativeVnHostCommandSource {
             );
         }
         self.ui_semantics = Some(output.semantics.clone());
+        host_performance.text_scene_ns = performance_phase_duration(text_scene_started)?;
         let active = self.ui_modals.last().map_or(
             ActiveUiController {
                 instance_id,
@@ -2824,6 +2864,9 @@ impl NativeVnHostCommandSource {
             },
         );
         self.active_ui_controller = Some(active);
+        if self.ui_host_performance_sampling_enabled {
+            self.last_ui_host_performance_sample = Some(host_performance);
+        }
         Ok((output, composed_draw))
     }
 
@@ -4542,6 +4585,21 @@ fn text_request(spec: TextRequestSpec<'_>) -> TextLayoutRequest {
         font_families: spec.font_families.to_vec(),
         features: Vec::new(),
     }
+}
+
+fn performance_phase_started(enabled: bool) -> Option<Instant> {
+    enabled.then(Instant::now)
+}
+
+fn performance_phase_duration(started: Option<Instant>) -> Result<u64, NativeVnHostError> {
+    started.map_or(Ok(0), |started| {
+        u64::try_from(started.elapsed().as_nanos()).map_err(|_| {
+            NativeVnHostError::Input(
+                "ASTRA_PLAYER_PERFORMANCE_DURATION_OVERFLOW: UI phase exceeded u64 nanoseconds"
+                    .into(),
+            )
+        })
+    })
 }
 
 fn validate_text_translation(

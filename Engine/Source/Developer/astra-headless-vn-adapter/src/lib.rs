@@ -159,6 +159,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 asset_cache_bytes,
             )
             .map_err(|error| binding("runtime.open", error))?;
+            source.set_ui_host_performance_sampling_enabled(performance_observer.is_some());
             record_open_phase(&performance_observer, "product.runtime_opened")?;
             hydrate_save_catalog(&mut source, &mut executor).await?;
             record_open_phase(&performance_observer, "product.save_catalog_hydrated")?;
@@ -582,6 +583,7 @@ impl NativeVnHeadlessSession {
             .dispatch_ui_event(event)
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
         let ui_sample = self.source()?.take_last_ui_performance_sample();
+        let ui_host_sample = self.source()?.take_last_ui_host_performance_sample();
         self.add_profile_duration(profile_started, |sample, duration| {
             sample.ui_layout_paint_ns = sample.ui_layout_paint_ns.saturating_add(duration);
             if let Some(ui_sample) = ui_sample {
@@ -598,6 +600,20 @@ impl NativeVnHeadlessSession {
                             .saturating_add(ui_sample.paint_conversion_ns),
                     ),
                 );
+            }
+            if let Some(ui_host_sample) = ui_host_sample {
+                sample.ui_model_binding_ns = sample
+                    .ui_model_binding_ns
+                    .saturating_add(ui_host_sample.model_binding_ns);
+                sample.ui_controller_ns = sample
+                    .ui_controller_ns
+                    .saturating_add(ui_host_sample.controller_ns);
+                sample.ui_frame_model_ns = sample
+                    .ui_frame_model_ns
+                    .saturating_add(ui_host_sample.frame_model_ns);
+                sample.ui_text_scene_ns = sample
+                    .ui_text_scene_ns
+                    .saturating_add(ui_host_sample.text_scene_ns);
             }
         })?;
         self.executor
