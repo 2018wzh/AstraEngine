@@ -198,8 +198,12 @@ fn reducer_advances_from_an_explicit_runtime_state_without_hidden_session_state(
         })
         .unwrap();
 
-    let (state, output) =
-        reduce_vn_step(&compiled, runtime.state(), VnPlayerCommand::Advance).unwrap();
+    let (state, output) = reduce_vn_step(
+        std::sync::Arc::new(compiled.into()),
+        runtime.state(),
+        VnPlayerCommand::Advance,
+    )
+    .unwrap();
 
     assert!(matches!(
         output.presentation.last(),

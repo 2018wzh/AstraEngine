@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use astra_core::Hash128;
 
@@ -14,13 +14,16 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct VnRuntime {
-    compiled: CompiledStory,
+    compiled: Arc<CompiledStory>,
     state: VnRuntimeState,
 }
 
 impl VnRuntime {
     pub fn new(compiled: impl Into<CompiledStory>, config: VnRunConfig) -> Result<Self, VnError> {
-        let compiled = compiled.into();
+        Self::new_shared(Arc::new(compiled.into()), config)
+    }
+
+    pub fn new_shared(compiled: Arc<CompiledStory>, config: VnRunConfig) -> Result<Self, VnError> {
         tracing::info!(
             event = "vn.runtime.create",
             profile = %config.profile,
@@ -56,7 +59,13 @@ impl VnRuntime {
         compiled: impl Into<CompiledStory>,
         state: VnRuntimeState,
     ) -> Result<Self, VnError> {
-        let compiled = compiled.into();
+        Self::from_shared_state(Arc::new(compiled.into()), state)
+    }
+
+    pub fn from_shared_state(
+        compiled: Arc<CompiledStory>,
+        state: VnRuntimeState,
+    ) -> Result<Self, VnError> {
         if state.schema != VN_RUNTIME_STATE_SCHEMA {
             return Err(VnError::diagnostic(
                 "ASTRA_VN_RUNTIME_STATE_SCHEMA",
@@ -1091,11 +1100,11 @@ impl VnRuntime {
 }
 
 pub fn reduce_vn_step(
-    compiled: &CompiledStory,
+    compiled: Arc<CompiledStory>,
     state: &VnRuntimeState,
     command: VnPlayerCommand,
 ) -> Result<(VnRuntimeState, VnStepOutput), VnError> {
-    let mut runtime = VnRuntime::from_state(compiled.clone(), state.clone())?;
+    let mut runtime = VnRuntime::from_shared_state(compiled, state.clone())?;
     let output = runtime.apply(command)?;
     Ok((runtime.state, output))
 }

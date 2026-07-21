@@ -278,7 +278,7 @@ impl NativeVnRuntimeProvider {
         config: VnRunConfig,
         request: RuntimeOpenRequest,
     ) -> Result<RuntimeOpenReport, CoreVnError> {
-        let compiled = compiled.into();
+        let compiled = Arc::new(compiled.into());
         tracing::info!(
             event = "vn.provider.session.open.start",
             target_id = %request.target_id,
@@ -295,7 +295,7 @@ impl NativeVnRuntimeProvider {
                 "runtime session id is already open",
             ));
         }
-        let initial_runtime = CoreVnRuntime::new(compiled.clone(), config)?;
+        let initial_runtime = CoreVnRuntime::new_shared(Arc::clone(&compiled), config)?;
         let mut world = RuntimeWorld::create(
             RuntimeConfig {
                 seed: request.seed,
@@ -315,7 +315,6 @@ impl NativeVnRuntimeProvider {
         world
             .attach_component(owner, "astra.vn.policy_state.v1", &VnPolicyState::default())
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let compiled = Arc::new(compiled);
         let output = Arc::new(Mutex::new(None));
         world
             .register_action(
@@ -648,7 +647,7 @@ impl NativeVnRuntimeProvider {
             .world
             .read_component::<VnRuntimeState>(session.vn_component)
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        CoreVnRuntime::from_state((*session.compiled).clone(), state)?
+        CoreVnRuntime::from_shared_state(Arc::clone(&session.compiled), state)?
             .default_launch_command()
             .ok_or_else(|| {
                 CoreVnError::diagnostic(
@@ -874,14 +873,14 @@ impl NativeVnRuntimeProvider {
 }
 
 fn runtime_command_from_input(
-    compiled: &CoreCompiledStory,
+    compiled: &Arc<CoreCompiledStory>,
     state: &VnRuntimeState,
     input: &RuntimeStepInput,
 ) -> Result<CoreVnPlayerCommand, CoreVnError> {
     match input.action.as_str() {
         "command" => serde_json::from_value(input.payload.clone())
             .map_err(|err| CoreVnError::message(format!("decode VN player command: {err}"))),
-        "launch_default" => CoreVnRuntime::from_state(compiled.clone(), state.clone())?
+        "launch_default" => CoreVnRuntime::from_shared_state(Arc::clone(compiled), state.clone())?
             .default_launch_command()
             .ok_or_else(|| {
                 CoreVnError::diagnostic(
@@ -939,7 +938,7 @@ impl RuntimeAction for VnStepAction {
         let previous_state = ctx.read_component::<VnRuntimeState>(self.component)?;
         let previous_wait = previous_state.pending_wait.clone();
         let (mut state, mut output) =
-            astra_vn_core::reduce_vn_step(&self.compiled, &previous_state, command)
+            astra_vn_core::reduce_vn_step(Arc::clone(&self.compiled), &previous_state, command)
                 .map_err(|err| RuntimeError::message(err.to_string()))?;
         if state.pending_wait != previous_wait {
             if let Some(wait) = state.pending_wait.as_mut() {
