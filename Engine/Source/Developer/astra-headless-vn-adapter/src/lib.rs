@@ -11,7 +11,8 @@ use astra_player_core::{
 };
 use astra_product_host::{
     CanonicalAudioSnapshot, Observation, ProductAdapterFactory, ProductFuture, ProductHostError,
-    ProductOpenRequest, ProductPackageSource, ProductPerformanceSample, ProductSession,
+    ProductOpenRequest, ProductPackageSource, ProductPerformanceObserver, ProductPerformanceSample,
+    ProductSession,
 };
 use astra_ui_core::{
     UiButtonState, UiInputEventKind, UiNavigationAction, UiPoint, UiPointerButton, UiTouchPhase,
@@ -45,6 +46,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
     ) -> ProductFuture<'a, Result<Box<dyn ProductSession>, ProductHostError>> {
         let package_crypto = self.package_crypto.clone();
         Box::pin(async move {
+            let performance_observer = request.performance_observer.clone();
             if request.presentation_rate_hz < HEADLESS_PRESENTATION_RATE_HZ
                 || !request
                     .presentation_rate_hz
@@ -100,6 +102,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 }
             }
             .map_err(|error| binding("package.open", error))?;
+            record_open_phase(&performance_observer, "product.package_opened")?;
             let locale = match request.locale {
                 Some(locale) => locale,
                 None => {
@@ -108,6 +111,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                         .default_locale
                 }
             };
+            record_open_phase(&performance_observer, "product.locale_loaded")?;
             let window = request
                 .platform
                 .create_window(WindowRequest {
@@ -118,6 +122,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 })
                 .await
                 .map_err(|error| binding("window.create", error))?;
+            record_open_phase(&performance_observer, "product.window_created")?;
             let surface = request
                 .platform
                 .create_surface(SurfaceRequest {
@@ -127,6 +132,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 })
                 .await
                 .map_err(|error| binding("surface.create", error))?;
+            record_open_phase(&performance_observer, "product.surface_created")?;
             let logical_surface = PlayerHostResourceId(1);
             let asset_cache_bytes = request.max_decoded_cache_bytes.saturating_mul(2) / 3;
             let audio_cache_bytes = request
@@ -153,7 +159,9 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 asset_cache_bytes,
             )
             .map_err(|error| binding("runtime.open", error))?;
+            record_open_phase(&performance_observer, "product.runtime_opened")?;
             hydrate_save_catalog(&mut source, &mut executor).await?;
+            record_open_phase(&performance_observer, "product.save_catalog_hydrated")?;
             executor
                 .execute_batch(
                     source
@@ -162,6 +170,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 )
                 .await
                 .map_err(|error| binding("host.launch", error))?;
+            record_open_phase(&performance_observer, "product.runtime_launched")?;
             let mut media = NativeVnProductMediaHost::with_video_limits(
                 256,
                 request.max_video_frames,
@@ -170,14 +179,17 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 request.retain_audio_timeline,
             )
             .map_err(|error| binding("media.create", error))?;
+            record_open_phase(&performance_observer, "product.media_created")?;
             media
                 .initialize(&mut source, &mut executor)
                 .await
                 .map_err(|error| binding("media.initialize", error))?;
+            record_open_phase(&performance_observer, "product.media_initialized")?;
             media
                 .process(&mut source, &mut executor, 0, Vec::new())
                 .await
                 .map_err(|error| binding("media.launch", error))?;
+            record_open_phase(&performance_observer, "product.media_launched")?;
             Ok(Box::new(NativeVnHeadlessSession {
                 platform: request.platform,
                 window,
@@ -193,12 +205,24 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 focused: false,
                 last_tick: 0,
                 presentation_substeps,
-                performance: request
-                    .performance_profiling
+                performance: performance_observer
+                    .is_some()
                     .then(ProductPerformanceSample::default),
             }) as Box<dyn ProductSession>)
         })
     }
+}
+
+fn record_open_phase(
+    observer: &Option<Arc<dyn ProductPerformanceObserver>>,
+    name: &str,
+) -> Result<(), ProductHostError> {
+    observer
+        .as_ref()
+        .map(|observer| observer.record_phase(name))
+        .transpose()
+        .map_err(ProductHostError::Output)?;
+    Ok(())
 }
 
 async fn hydrate_save_catalog(

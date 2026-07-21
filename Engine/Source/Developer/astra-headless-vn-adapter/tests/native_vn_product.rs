@@ -4,7 +4,15 @@ use astra_headless_protocol::{ButtonState, PhysicalInput, PointerButton};
 use astra_headless_vn_adapter::NativeVnProductAdapterFactory;
 use astra_platform::{HeadlessHostProfile, PlatformHostFactory};
 use astra_platform_headless::HeadlessPlatformFactory;
-use astra_product_host::{ProductAdapterFactory, ProductOpenRequest};
+use astra_product_host::{ProductAdapterFactory, ProductOpenRequest, ProductPerformanceObserver};
+
+struct TestPerformanceObserver;
+
+impl ProductPerformanceObserver for TestPerformanceObserver {
+    fn record_phase(&self, _name: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
 
 #[astra_headless_test::tokio_test]
 async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() {
@@ -40,7 +48,7 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
             max_decode_output_bytes,
             max_decoded_cache_bytes,
             retain_audio_timeline: true,
-            performance_profiling: true,
+            performance_observer: Some(Arc::new(TestPerformanceObserver)),
             presentation_rate_hz: astra_platform::HEADLESS_PRESENTATION_RATE_HZ,
             platform: host.client.clone(),
         })

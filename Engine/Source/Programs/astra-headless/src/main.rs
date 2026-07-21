@@ -526,7 +526,7 @@ async fn serve(build_identity: &Path, gpu: bool) -> Result<(), String> {
                             .map_err(|error| {
                                 format!("ASTRA_HEADLESS_PACKAGE_INVALID: {error}")
                             })?;
-                        Some(open_product(&registry, &profile, &host, container, false).await?)
+                        Some(open_product(&registry, &profile, &host, container, None).await?)
                     }
                     None => None,
                 };
@@ -1217,7 +1217,9 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         &profile,
         &host,
         package_container,
-        performance_observer.is_some(),
+        performance_observer
+            .clone()
+            .map(|observer| observer as Arc<dyn astra_product_host::ProductPerformanceObserver>),
     )
     .await?;
     if let Some(observer) = &performance_observer {
@@ -2534,7 +2536,7 @@ async fn open_product(
     profile: &HeadlessHostProfile,
     host: &PlatformHostSession,
     container: astra_package::AstraContainerReader,
-    performance_profiling: bool,
+    performance_observer: Option<Arc<dyn astra_product_host::ProductPerformanceObserver>>,
 ) -> Result<Box<dyn ProductSession>, String> {
     registry
         .open(
@@ -2553,7 +2555,7 @@ async fn open_product(
                     profile.artifacts.retention,
                     astra_platform::HeadlessArtifactRetention::ManifestOnly
                 ),
-                performance_profiling,
+                performance_observer,
                 presentation_rate_hz: profile.presentation_rate_hz,
                 platform: host.client.clone(),
             },

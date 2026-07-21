@@ -18,7 +18,7 @@ use astra_observability::{
 };
 use astra_platform::PlatformError;
 use astra_platform_headless::{HeadlessGpuFrameSample, HeadlessPerformanceObserver};
-use astra_product_host::ProductPerformanceSample;
+use astra_product_host::{ProductPerformanceObserver, ProductPerformanceSample};
 
 const FRAME_DEADLINE_NS: u64 = 8_333_333;
 
@@ -59,6 +59,12 @@ impl fmt::Debug for ProductPerformanceRecorder {
         formatter
             .debug_struct("ProductPerformanceRecorder")
             .finish_non_exhaustive()
+    }
+}
+
+impl ProductPerformanceObserver for ProductPerformanceRecorder {
+    fn record_phase(&self, name: &str) -> Result<(), String> {
+        self.record_memory_snapshot(name)
     }
 }
 

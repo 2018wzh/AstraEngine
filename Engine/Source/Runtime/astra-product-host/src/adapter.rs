@@ -17,6 +17,10 @@ pub enum ProductPackageSource {
 
 pub type ProductFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
+pub trait ProductPerformanceObserver: Send + Sync {
+    fn record_phase(&self, name: &str) -> Result<(), String>;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
     pub key: String,
@@ -45,10 +49,9 @@ pub struct ProductOpenRequest {
     /// Manifest-only behavior runs disable this while preserving mixer state,
     /// meters, completion fences, and deterministic observations.
     pub retain_audio_timeline: bool,
-    /// Enables host-consumed performance phase timing. Shipping sessions keep
-    /// this disabled so the product path does not sample clocks or allocate
-    /// profiling state.
-    pub performance_profiling: bool,
+    /// Host-owned performance observer. Shipping sessions keep this absent so
+    /// the product path does not sample clocks or allocate profiling state.
+    pub performance_observer: Option<Arc<dyn ProductPerformanceObserver>>,
     /// Headless-only presentation cadence. The authoritative Runtime tick remains
     /// fixed; performance E2 may request deterministic presentation substeps.
     pub presentation_rate_hz: u32,
