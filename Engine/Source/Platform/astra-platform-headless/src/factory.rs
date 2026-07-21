@@ -28,6 +28,7 @@ use astra_platform::{
     PlatformHostFactory, PlatformHostSession, RgbaFrame, SaveTransactionHandle, SurfaceHandle,
     WindowHandle,
 };
+use astra_platform_common::WGPU_TIMESTAMP_RING_SIZE;
 use astra_platform_common::{
     AtomicSaveStore, FilePackageSource, ResourceTable, SaveTransaction, WgpuOffscreenRenderer,
     WgpuPendingProfile, WgpuProfiledSubmission,
@@ -429,26 +430,31 @@ impl HostState {
         let captured = {
             let state = self.surfaces.get_mut(surface)?;
             if let Some(renderer) = &mut state.gpu_renderer {
-                if let Some(profile) = state.pending_gpu_profiles.front() {
-                    if let Some(submission) =
-                        renderer.try_resolve_profiled_submission(profile.pending)?
-                    {
-                        let profile = state
-                            .pending_gpu_profiles
-                            .pop_front()
-                            .expect("profile queue is not empty");
-                        self.performance_observer
-                            .as_ref()
-                            .ok_or_else(|| {
-                                invalid(
-                                    "surface.performance",
-                                    "pending GPU profile has no performance observer",
-                                )
-                            })?
-                            .record_gpu_frame(complete_gpu_sample(profile.sample, submission))?;
+                if state.pending_gpu_profiles.len() >= WGPU_TIMESTAMP_RING_SIZE - 1 {
+                    if let Some(profile) = state.pending_gpu_profiles.front() {
+                        if let Some(submission) =
+                            renderer.try_resolve_profiled_submission(profile.pending)?
+                        {
+                            let profile = state
+                                .pending_gpu_profiles
+                                .pop_front()
+                                .expect("profile queue is not empty");
+                            self.performance_observer
+                                .as_ref()
+                                .ok_or_else(|| {
+                                    invalid(
+                                        "surface.performance",
+                                        "pending GPU profile has no performance observer",
+                                    )
+                                })?
+                                .record_gpu_frame(complete_gpu_sample(
+                                    profile.sample,
+                                    submission,
+                                ))?;
+                        }
                     }
                 }
-                if state.pending_gpu_profiles.len() == 4 {
+                if state.pending_gpu_profiles.len() == WGPU_TIMESTAMP_RING_SIZE {
                     let profile = state
                         .pending_gpu_profiles
                         .pop_front()
@@ -611,7 +617,7 @@ impl HostState {
                         pending: None,
                         materialized_sequence: None,
                         gpu_renderer,
-                        pending_gpu_profiles: VecDeque::with_capacity(4),
+                        pending_gpu_profiles: VecDeque::with_capacity(WGPU_TIMESTAMP_RING_SIZE),
                         deferred_gpu_resource_commands: Vec::new(),
                     })?;
                     window.surface_count += 1;

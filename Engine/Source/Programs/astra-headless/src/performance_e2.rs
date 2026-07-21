@@ -23,6 +23,7 @@ use astra_package::AstraContainerReader;
 use astra_platform::{validate_headless_performance_profile, HeadlessHostProfile, SceneFrame};
 use astra_platform_common::{
     WgpuFramePerformanceCounters, WgpuOffscreenRenderer, WgpuPendingProfile,
+    WGPU_TIMESTAMP_RING_SIZE,
 };
 use clap::ValueEnum;
 use serde::Deserialize;
@@ -388,13 +389,14 @@ pub async fn run(request: PerformanceE2Request<'_>) -> Result<(), String> {
     let measured_started = Instant::now();
     let mut deadline_misses = 0u64;
     let mut last_memory = memory_baseline;
-    let mut pending_frames: VecDeque<PendingMeasuredFrame> = VecDeque::with_capacity(4);
+    let mut pending_frames: VecDeque<PendingMeasuredFrame> =
+        VecDeque::with_capacity(WGPU_TIMESTAMP_RING_SIZE);
     for index in 0..MEASURED_FRAMES {
         let scheduled = measured_started + Duration::from_nanos(FRAME_PERIOD_NS * index);
         if let Some(remaining) = scheduled.checked_duration_since(Instant::now()) {
             thread::sleep(remaining);
         }
-        if pending_frames.len() >= 3 {
+        if pending_frames.len() >= WGPU_TIMESTAMP_RING_SIZE - 1 {
             let oldest = pending_frames
                 .front()
                 .expect("bounded performance queue is not empty");
@@ -413,7 +415,7 @@ pub async fn run(request: PerformanceE2Request<'_>) -> Result<(), String> {
                 )?);
             }
         }
-        if pending_frames.len() == 4 {
+        if pending_frames.len() == WGPU_TIMESTAMP_RING_SIZE {
             let pending = pending_frames
                 .pop_front()
                 .expect("bounded performance queue is not empty");
@@ -459,6 +461,10 @@ pub async fn run(request: PerformanceE2Request<'_>) -> Result<(), String> {
             &mut recorder,
             &mut trace,
         )?);
+    }
+    let required_duration = Duration::from_nanos(FRAME_PERIOD_NS * MEASURED_FRAMES);
+    if let Some(remaining) = required_duration.checked_sub(measured_started.elapsed()) {
+        thread::sleep(remaining);
     }
     let measured_duration_ns = duration_ns(measured_started.elapsed())?;
     if deadline_misses != 0 {
@@ -584,6 +590,16 @@ fn record_measured_frame(
             frame_timestamp_ns,
             PerfettoFlowPhase::Start,
         )
+        .and_then(|_| {
+            trace.complete(
+                "renderer.cpu",
+                "wgpu.prepare_submit",
+                1,
+                Some(pending.index),
+                frame_timestamp_ns,
+                submission.cpu_submit_ns,
+            )
+        })
         .and_then(|_| {
             trace.complete(
                 "renderer.cpu",
@@ -735,7 +751,7 @@ fn validate_profiler_overhead(
     .map_err(|error| error.to_string())?;
     let mut enabled = Vec::with_capacity(PROFILER_OVERHEAD_FRAMES as usize);
     let trace_started = Instant::now();
-    let mut pending = VecDeque::with_capacity(3);
+    let mut pending = VecDeque::with_capacity(WGPU_TIMESTAMP_RING_SIZE);
     for index in 0..PROFILER_OVERHEAD_FRAMES {
         let scheduled = trace_started + Duration::from_nanos(FRAME_PERIOD_NS * index);
         if let Some(remaining) = scheduled.checked_duration_since(Instant::now()) {
@@ -744,7 +760,7 @@ fn validate_profiler_overhead(
         animate(frame, WARMUP_FRAMES + PROFILER_OVERHEAD_FRAMES + index + 1)?;
         let started = Instant::now();
         let mut resolved_gpu_ns = None;
-        if pending.len() >= 3 {
+        if pending.len() >= WGPU_TIMESTAMP_RING_SIZE - 1 {
             let oldest = *pending
                 .front()
                 .expect("bounded timestamp queue is not empty");
@@ -756,7 +772,7 @@ fn validate_profiler_overhead(
                 resolved_gpu_ns = Some(previous.gpu_duration_ns);
             }
         }
-        if pending.len() == 4 {
+        if pending.len() == WGPU_TIMESTAMP_RING_SIZE {
             let previous = renderer
                 .resolve_profiled_submission(
                     pending
