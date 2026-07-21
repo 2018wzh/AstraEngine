@@ -49,7 +49,7 @@ fn map(entries: &[(&str, BlackboardValue)]) -> BlackboardValue {
 fn payload_hash(value: &BlackboardValue) -> Hash256 {
     RuntimeComponentPayload::postcard("astra.test.hash", SchemaVersion::default(), value)
         .unwrap()
-        .hash
+        .hash()
 }
 
 fn install_machine(

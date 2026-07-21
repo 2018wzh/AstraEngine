@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use astra_core::{Diagnostic, Hash256, SchemaId, SchemaVersion, StableId};
+use astra_core::{Diagnostic, Hash128, Hash256, SchemaId, SchemaVersion, StableId};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -267,11 +267,36 @@ impl<'a> DeterministicActionContext<'a> {
         component.payload.validated_postcard_bytes()
     }
 
+    pub fn read_component_postcard_payload(
+        &self,
+        component_id: ComponentId,
+    ) -> Result<(Hash256, Arc<[u8]>), RuntimeError> {
+        let component = self.actors.component(component_id).ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_MISSING",
+                "runtime component does not exist",
+            ))
+        })?;
+        Ok((
+            component.payload.hash,
+            component.payload.validated_postcard_bytes()?,
+        ))
+    }
+
     pub fn replace_component<T: Serialize>(
         &mut self,
         component_id: ComponentId,
         data: &T,
     ) -> Result<(), RuntimeError> {
+        self.replace_component_hashed(component_id, data)
+            .map(|_| ())
+    }
+
+    pub fn replace_component_hashed<T: Serialize>(
+        &mut self,
+        component_id: ComponentId,
+        data: &T,
+    ) -> Result<(Hash256, Hash128), RuntimeError> {
         let component = self.actors.component_mut(component_id).ok_or_else(|| {
             RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_COMPONENT_MISSING",
@@ -286,6 +311,7 @@ impl<'a> DeterministicActionContext<'a> {
             data,
         )?;
         let after_hash = payload.hash;
+        let state_hash = Hash128::from_blake3(&payload.bytes);
         component.payload = payload;
         self.mutations.push(RuntimeMutationRecord {
             step: self.step,
@@ -295,7 +321,7 @@ impl<'a> DeterministicActionContext<'a> {
             after_hash,
             source: self.source.clone(),
         });
-        Ok(())
+        Ok((after_hash, state_hash))
     }
 
     fn resolve_component(&self, selector: &ComponentSelector) -> Result<ComponentId, RuntimeError> {

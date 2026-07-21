@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 #[cfg(feature = "ffi")]
@@ -176,6 +177,12 @@ struct VnStepAction {
     compiled: Arc<CoreCompiledStory>,
     runtime_index: Arc<CoreVnRuntimeIndex>,
     output: Arc<Mutex<Option<VnStepOutput>>>,
+    state_cache: Mutex<Option<VnStepStateCache>>,
+}
+
+struct VnStepStateCache {
+    payload_hash: Hash256,
+    state: VnRuntimeState,
 }
 
 impl NativeVnRuntimeProvider {
@@ -332,6 +339,7 @@ impl NativeVnRuntimeProvider {
                     compiled: Arc::clone(&compiled),
                     runtime_index: Arc::clone(&runtime_index),
                     output: Arc::clone(&output),
+                    state_cache: Mutex::new(None),
                 },
             )
             .map_err(|err| CoreVnError::message(err.to_string()))?;
@@ -396,7 +404,10 @@ impl NativeVnRuntimeProvider {
             fixed_step = input.fixed_step,
             "AstraVN runtime session step started"
         );
-        let command = {
+        let command = if input.action == "command" {
+            serde_json::from_value(input.payload.clone())
+                .map_err(|err| CoreVnError::message(format!("decode VN player command: {err}")))?
+        } else {
             let session = self.session(&input.session_id)?;
             let state = session
                 .world
@@ -893,8 +904,10 @@ fn runtime_command_from_input(
     input: &RuntimeStepInput,
 ) -> Result<CoreVnPlayerCommand, CoreVnError> {
     match input.action.as_str() {
-        "command" => serde_json::from_value(input.payload.clone())
-            .map_err(|err| CoreVnError::message(format!("decode VN player command: {err}"))),
+        "command" => Err(CoreVnError::diagnostic(
+            "ASTRA_NATIVE_VN_COMMAND_DISPATCH",
+            "generic command input must be decoded before state-dependent command resolution",
+        )),
         "launch_default" => CoreVnRuntime::from_shared_state_indexed(
             Arc::clone(compiled),
             Arc::clone(runtime_index),
@@ -936,6 +949,8 @@ impl RuntimeAction for VnStepAction {
         ctx: &mut DeterministicActionContext<'_>,
         input: &BTreeMap<String, BlackboardValue>,
     ) -> Result<ActionTrace, RuntimeError> {
+        let profile = tracing::enabled!(tracing::Level::TRACE);
+        let command_started = profile.then(Instant::now);
         let event = ctx.trigger_event().ok_or_else(|| {
             RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
                 "ASTRA_VN_STEP_TRIGGER_MISSING",
@@ -954,17 +969,54 @@ impl RuntimeAction for VnStepAction {
         };
         let command: CoreVnPlayerCommand = postcard::from_bytes(&command_bytes)
             .map_err(|err| RuntimeError::message(format!("decode VN step command: {err}")))?;
-        let previous_state_bytes = ctx.read_component_postcard_bytes(self.component)?;
-        let previous_state = CoreValidatedVnRuntimeState::decode_postcard(&previous_state_bytes)
-            .map_err(|err| RuntimeError::message(err.to_string()))?;
-        let previous_wait = previous_state.state().pending_wait.clone();
-        let (mut state, mut output) = astra_vn_core::reduce_vn_step_indexed_validated(
-            Arc::clone(&self.compiled),
-            Arc::clone(&self.runtime_index),
-            previous_state,
-            command,
-        )
+        let command_decode_ns = profile_elapsed_ns(command_started);
+        let state_started = profile.then(Instant::now);
+        let (payload_hash, previous_state_bytes) =
+            ctx.read_component_postcard_payload(self.component)?;
+        let cached_state = self
+            .state_cache
+            .lock()
+            .map_err(|_| RuntimeError::message("VN step state cache lock is poisoned"))?
+            .take()
+            .filter(|cached| cached.payload_hash == payload_hash);
+        let decoded_state = if cached_state.is_none() {
+            Some(
+                CoreValidatedVnRuntimeState::decode_postcard(&previous_state_bytes)
+                    .map_err(|err| RuntimeError::message(err.to_string()))?,
+            )
+        } else {
+            None
+        };
+        let previous_wait = if let Some(cached) = &cached_state {
+            cached.state.pending_wait.clone()
+        } else {
+            decoded_state
+                .as_ref()
+                .expect("cache miss must decode the authoritative VN state")
+                .state()
+                .pending_wait
+                .clone()
+        };
+        let state_decode_ns = profile_elapsed_ns(state_started);
+        let reduce_started = profile.then(Instant::now);
+        let (mut state, mut output) = if let Some(cached) = cached_state {
+            astra_vn_core::reduce_vn_step_indexed(
+                Arc::clone(&self.compiled),
+                Arc::clone(&self.runtime_index),
+                cached.state,
+                command,
+            )
+        } else {
+            astra_vn_core::reduce_vn_step_indexed_validated(
+                Arc::clone(&self.compiled),
+                Arc::clone(&self.runtime_index),
+                decoded_state.expect("cache miss must decode the authoritative VN state"),
+                command,
+            )
+        }
         .map_err(|err| RuntimeError::message(err.to_string()))?;
+        let reduce_ns = profile_elapsed_ns(reduce_started);
+        let await_started = profile.then(Instant::now);
         if state.pending_wait != previous_wait {
             if let Some(wait) = state.pending_wait.as_mut() {
                 output.wait = Some(wait.clone());
@@ -984,7 +1036,11 @@ impl RuntimeAction for VnStepAction {
                 }
             }
         }
-        ctx.replace_component(self.component, &state)?;
+        let await_ns = profile_elapsed_ns(await_started);
+        let replace_started = profile.then(Instant::now);
+        let (next_payload_hash, _) = ctx.replace_component_hashed(self.component, &state)?;
+        let replace_component_ns = profile_elapsed_ns(replace_started);
+        let output_started = profile.then(Instant::now);
         for event in &output.events {
             ctx.emit_event(
                 astra_runtime::EventSource::StateMachine,
@@ -1005,6 +1061,8 @@ impl RuntimeAction for VnStepAction {
         for task in &output.timeline_tasks {
             ctx.emit_serialized_effect("timeline", "astra.vn.timeline_task.v2", task)?;
         }
+        let output_emit_ns = profile_elapsed_ns(output_started);
+        let trace_started = profile.then(Instant::now);
         let mut trace_payload = input.clone();
         trace_payload.insert(
             "event_kind".to_string(),
@@ -1022,11 +1080,38 @@ impl RuntimeAction for VnStepAction {
             .output
             .lock()
             .map_err(|_| RuntimeError::message("VN step output lock is poisoned"))? = Some(output);
+        *self
+            .state_cache
+            .lock()
+            .map_err(|_| RuntimeError::message("VN step state cache lock is poisoned"))? =
+            Some(VnStepStateCache {
+                payload_hash: next_payload_hash,
+                state,
+            });
+        let trace_store_ns = profile_elapsed_ns(trace_started);
+        tracing::trace!(
+            event = "vn.step.performance",
+            command_decode_ns,
+            state_decode_ns,
+            reduce_ns,
+            await_ns,
+            replace_component_ns,
+            output_emit_ns,
+            trace_store_ns,
+            "measured NativeVN RuntimeAction phases"
+        );
         Ok(ActionTrace {
             action_id: self.descriptor().id,
             payload: trace_payload,
         })
     }
+}
+
+fn profile_elapsed_ns(started: Option<Instant>) -> u64 {
+    started.map_or(0, |started| {
+        u64::try_from(started.elapsed().as_nanos())
+            .expect("NativeVN performance phase duration must fit in u64 nanoseconds")
+    })
 }
 
 fn runtime_presentation(

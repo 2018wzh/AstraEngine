@@ -4,7 +4,7 @@ use astra_core::{Hash128, Hash256, SchemaId, SchemaVersion, StableId};
 use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 
 use crate::RuntimeError;
 
@@ -54,13 +54,43 @@ pub enum RuntimePayloadCodec {
     Postcard,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct RuntimeComponentPayload {
-    pub schema: SchemaId,
-    pub version: SchemaVersion,
-    pub codec: RuntimePayloadCodec,
-    pub hash: Hash256,
-    pub bytes: Arc<[u8]>,
+    pub(crate) schema: SchemaId,
+    pub(crate) version: SchemaVersion,
+    pub(crate) codec: RuntimePayloadCodec,
+    pub(crate) hash: Hash256,
+    pub(crate) bytes: Arc<[u8]>,
+}
+
+#[derive(Deserialize)]
+struct RuntimeComponentPayloadWire {
+    schema: SchemaId,
+    version: SchemaVersion,
+    codec: RuntimePayloadCodec,
+    hash: Hash256,
+    bytes: Arc<[u8]>,
+}
+
+impl<'de> Deserialize<'de> for RuntimeComponentPayload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = RuntimeComponentPayloadWire::deserialize(deserializer)?;
+        if Hash256::from_sha256(&wire.bytes) != wire.hash {
+            return Err(D::Error::custom(
+                "ASTRA_RUNTIME_COMPONENT_HASH: runtime component payload hash does not match its bytes",
+            ));
+        }
+        Ok(Self {
+            schema: wire.schema,
+            version: wire.version,
+            codec: wire.codec,
+            hash: wire.hash,
+            bytes: wire.bytes,
+        })
+    }
 }
 
 impl RuntimeComponentPayload {
@@ -87,15 +117,29 @@ impl RuntimeComponentPayload {
     }
 
     pub fn validated_postcard_bytes(&self) -> Result<Arc<[u8]>, RuntimeError> {
-        if Hash256::from_sha256(&self.bytes) != self.hash {
-            return Err(RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
-                "ASTRA_RUNTIME_COMPONENT_HASH",
-                "runtime component payload hash does not match its bytes",
-            )));
-        }
         match self.codec {
             RuntimePayloadCodec::Postcard => Ok(Arc::clone(&self.bytes)),
         }
+    }
+
+    pub fn schema(&self) -> &SchemaId {
+        &self.schema
+    }
+
+    pub fn version(&self) -> SchemaVersion {
+        self.version
+    }
+
+    pub fn codec(&self) -> RuntimePayloadCodec {
+        self.codec
+    }
+
+    pub fn hash(&self) -> Hash256 {
+        self.hash
+    }
+
+    pub fn bytes(&self) -> &Arc<[u8]> {
+        &self.bytes
     }
 }
 

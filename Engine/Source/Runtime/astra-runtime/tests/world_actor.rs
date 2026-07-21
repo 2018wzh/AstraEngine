@@ -118,7 +118,7 @@ fn world_actor_rejects_component_for_missing_actor() {
 
 #[astra_headless_test::test]
 fn component_payload_rejects_hash_mismatch() {
-    let mut payload = RuntimeComponentPayload::postcard(
+    let payload = RuntimeComponentPayload::postcard(
         "astra.test.component",
         SchemaVersion::default(),
         &TestComponent {
@@ -127,9 +127,14 @@ fn component_payload_rejects_hash_mismatch() {
         },
     )
     .unwrap();
-    Arc::make_mut(&mut payload.bytes)[0] ^= 0x01;
-
-    let error = payload.decode::<TestComponent>().unwrap_err();
+    let mut wire = serde_json::to_value(payload).unwrap();
+    let bytes = wire
+        .get_mut("bytes")
+        .and_then(serde_json::Value::as_array_mut)
+        .unwrap();
+    let value = bytes[0].as_u64().unwrap();
+    bytes[0] = serde_json::Value::from(value ^ 1);
+    let error = serde_json::from_value::<RuntimeComponentPayload>(wire).unwrap_err();
     assert!(error.to_string().contains("ASTRA_RUNTIME_COMPONENT_HASH"));
 }
 
@@ -146,10 +151,10 @@ fn component_payload_clone_shares_wire_compatible_immutable_bytes() {
     .unwrap();
     let cloned = payload.clone();
 
-    assert!(Arc::ptr_eq(&payload.bytes, &cloned.bytes));
+    assert!(Arc::ptr_eq(payload.bytes(), cloned.bytes()));
     assert_eq!(
-        postcard::to_allocvec(&payload.bytes).unwrap(),
-        postcard::to_allocvec(&payload.bytes.to_vec()).unwrap()
+        postcard::to_allocvec(payload.bytes()).unwrap(),
+        postcard::to_allocvec(&payload.bytes().to_vec()).unwrap()
     );
     assert_eq!(
         cloned.decode::<TestComponent>().unwrap(),
