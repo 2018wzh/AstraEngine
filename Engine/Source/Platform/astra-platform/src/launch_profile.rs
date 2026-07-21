@@ -545,11 +545,12 @@ pub fn validate_headless_performance_profile(
         || !policy.require_timestamp_query
         || profile.render_policy != HeadlessRenderPolicy::All
         || profile.readback_policy != HeadlessReadbackPolicy::CheckpointsOnly
+        || profile.artifacts.retention != HeadlessArtifactRetention::ManifestOnly
         || profile.max_decoded_cache_bytes > 192 * 1024 * 1024
         || profile.max_gpu_resource_bytes > 256 * 1024 * 1024
     {
         return Err(invalid_headless_profile(
-            "performance E2 requires headless v3, 120 Hz presentation, all-frame GPU submission, checkpoint-only readback, and timestamp queries",
+            "performance E2 requires headless v3, 120 Hz presentation, all-frame GPU submission, checkpoint-only readback, manifest-only artifact streaming, and timestamp queries",
         ));
     }
     Ok(policy)
