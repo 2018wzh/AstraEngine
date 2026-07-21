@@ -75,6 +75,8 @@ pub struct ProductPerformanceSample {
     pub ui_controller_ns: u64,
     pub ui_frame_model_ns: u64,
     pub ui_text_scene_ns: u64,
+    pub ui_action_dispatch_ns: u64,
+    pub ui_present_scene_ns: u64,
     pub media_decode_ns: u64,
     pub media_provider_decode_ns: u64,
     pub media_parse_convert_ns: u64,

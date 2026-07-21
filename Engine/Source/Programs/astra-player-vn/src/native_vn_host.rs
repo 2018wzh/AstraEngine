@@ -209,6 +209,8 @@ pub struct NativeVnUiHostPerformanceSample {
     pub controller_ns: u64,
     pub frame_model_ns: u64,
     pub text_scene_ns: u64,
+    pub action_dispatch_ns: u64,
+    pub present_scene_ns: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1795,7 +1797,13 @@ impl NativeVnHostCommandSource {
             ));
         }
         if let Some(action) = frame.actions.first() {
-            return self.dispatch_ui_action(action);
+            let started = performance_phase_started(self.ui_host_performance_sampling_enabled);
+            let result = self.dispatch_ui_action(action);
+            let duration = performance_phase_duration(started)?;
+            if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
+                sample.action_dispatch_ns = sample.action_dispatch_ns.saturating_add(duration);
+            }
+            return result;
         }
         let consumed = frame
             .dispositions
@@ -1809,7 +1817,13 @@ impl NativeVnHostCommandSource {
                 return self.command(command);
             }
         }
-        self.present_current_scene(frame.draw)
+        let started = performance_phase_started(self.ui_host_performance_sampling_enabled);
+        let result = self.present_current_scene(frame.draw);
+        let duration = performance_phase_duration(started)?;
+        if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
+            sample.present_scene_ns = sample.present_scene_ns.saturating_add(duration);
+        }
+        result
     }
 
     fn apply_ui_resize_events(&mut self, events: &[UiInputEvent]) -> Result<(), NativeVnHostError> {

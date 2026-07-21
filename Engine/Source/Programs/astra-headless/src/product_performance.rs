@@ -191,6 +191,8 @@ impl ProductPerformanceRecorder {
             ("ui.cpu", "ui.controller", sample.ui_controller_ns),
             ("ui.cpu", "ui.frame_model", sample.ui_frame_model_ns),
             ("ui.cpu", "ui.text_scene", sample.ui_text_scene_ns),
+            ("ui.cpu", "ui.action_dispatch", sample.ui_action_dispatch_ns),
+            ("ui.cpu", "ui.present_scene", sample.ui_present_scene_ns),
             ("media.cpu", "media.decode_mix", sample.media_decode_ns),
             (
                 "media.cpu",
@@ -1156,6 +1158,8 @@ mod tests {
             ui_controller_ns: 3,
             ui_frame_model_ns: 2,
             ui_text_scene_ns: 1,
+            ui_action_dispatch_ns: 1,
+            ui_present_scene_ns: 1,
             media_decode_ns: 6,
             media_provider_decode_ns: 3,
             media_parse_convert_ns: 2,
