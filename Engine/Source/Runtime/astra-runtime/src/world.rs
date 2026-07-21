@@ -314,6 +314,24 @@ pub struct RuntimeSnapshot {
     pub step: u64,
 }
 
+#[derive(Serialize)]
+struct RuntimeSnapshotRef<'a> {
+    config: &'a RuntimeConfig,
+    package: &'a PackageHandle,
+    id_source: &'a StableIdGenerator,
+    actors: &'a ActorStore,
+    blackboard: &'a Blackboard,
+    machines: &'a StateMachineStore,
+    awaits: &'a AwaitQueue,
+    delayed_events: &'a DelayedEventQueue,
+    events: &'a EventQueue,
+    presentation: &'a Vec<PresentationRecord>,
+    mutations: &'a Vec<RuntimeMutationRecord>,
+    effects: &'a Vec<RuntimeEffectRecord>,
+    mounted_modules: &'a BTreeMap<String, ModuleBindingSnapshot>,
+    step: u64,
+}
+
 pub struct RuntimeWorld {
     config: RuntimeConfig,
     package: PackageHandle,
@@ -1130,10 +1148,30 @@ impl RuntimeWorld {
     }
 
     pub fn state_hash(&self) -> Hash128 {
-        Hash128::from_blake3(
-            &postcard::to_allocvec(&self.snapshot())
-                .expect("runtime snapshot must serialize for state hash"),
-        )
+        let snapshot = RuntimeSnapshotRef {
+            config: &self.config,
+            package: &self.package,
+            id_source: &self.id_source,
+            actors: &self.actors,
+            blackboard: &self.blackboard,
+            machines: &self.machines,
+            awaits: &self.awaits,
+            delayed_events: &self.delayed_events,
+            events: &self.events,
+            presentation: &self.presentation,
+            mutations: &self.mutations,
+            effects: &self.effects,
+            mounted_modules: &self.mounted_modules,
+            step: self.step,
+        };
+        let bytes = postcard::to_allocvec(&snapshot)
+            .expect("borrowed runtime snapshot must serialize for state hash");
+        debug_assert_eq!(
+            bytes,
+            postcard::to_allocvec(&self.snapshot())
+                .expect("owned runtime snapshot must serialize for state hash compatibility")
+        );
+        Hash128::from_blake3(&bytes)
     }
 
     pub fn event_hash(&self) -> Hash128 {

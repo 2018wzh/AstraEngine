@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use astra_core::{Hash256, SchemaId, SchemaVersion, StableId};
+use astra_core::{Hash128, Hash256, SchemaId, SchemaVersion, StableId};
 use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -101,6 +101,23 @@ pub struct ActorStore {
 }
 
 impl ActorStore {
+    pub(crate) fn deterministic_fingerprint(&self) -> Hash128 {
+        let components = self.components.values().map(|component| {
+            (
+                component.component_id,
+                component.actor_id,
+                &component.payload.schema,
+                component.payload.version,
+                component.payload.codec,
+                component.payload.hash,
+            )
+        });
+        Hash128::from_blake3(
+            &postcard::to_allocvec(&(&self.actors, components.collect::<Vec<_>>()))
+                .expect("actor store metadata must serialize for deterministic fingerprinting"),
+        )
+    }
+
     pub fn insert_actor(&mut self, actor: ActorRecord) {
         self.actors.insert(actor.actor_id, actor);
     }

@@ -464,11 +464,12 @@ fn machine_fingerprint(
     id_source: &StableIdGenerator,
     events: &[RuntimeEvent],
 ) -> astra_core::Hash128 {
+    let actor_fingerprint = actors.deterministic_fingerprint();
     astra_core::Hash128::from_blake3(
         &postcard::to_allocvec(&(
             machine.current_state,
             machine.completed,
-            actors,
+            actor_fingerprint,
             blackboard,
             id_source,
             events,
