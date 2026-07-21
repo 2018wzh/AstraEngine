@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 use astra_policy::{create_sandboxed_lua, PolicyExecutionBudget};
 use astra_ui_core::{UiValue, MAX_EFFECTS_PER_CALL};
@@ -33,7 +33,31 @@ pub enum LuauUiControllerError {
 
 struct RegisteredController {
     manifest: VnUiControllerManifest,
-    source: String,
+    handlers: ControllerHandlerSet,
+    source: Arc<str>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LoadedController {
+    manifest: VnUiControllerManifest,
+    handlers: ControllerHandlerSet,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ControllerHandlerSet {
+    on_open: bool,
+    on_action: bool,
+    on_update: bool,
+}
+
+impl ControllerHandlerSet {
+    fn supports(self, invocation: ControllerInvocation<'_>) -> bool {
+        match invocation {
+            ControllerInvocation::Open => self.on_open,
+            ControllerInvocation::Action(_) => self.on_action,
+            ControllerInvocation::Update(_) => self.on_update,
+        }
+    }
 }
 
 /// Deterministic host for project-authored UI controllers.
@@ -64,28 +88,30 @@ impl LuauUiControllerHost {
         &mut self,
         source: impl Into<String>,
     ) -> Result<(), LuauUiControllerError> {
-        let source = source.into();
+        let source: Arc<str> = Arc::from(source.into());
         let (_, registrations) = load_controller_source(&source, self.budget)?;
         if registrations.is_empty() {
             return Err(LuauUiControllerError::Registration(
                 "a controller source must register at least one controller".into(),
             ));
         }
-        for manifest in registrations.values() {
-            manifest
+        for loaded in registrations.values() {
+            loaded
+                .manifest
                 .validate()
                 .map_err(|error| LuauUiControllerError::Registration(error.to_string()))?;
-            if self.controllers.contains_key(&manifest.id) {
+            if self.controllers.contains_key(&loaded.manifest.id) {
                 return Err(LuauUiControllerError::Duplicate);
             }
         }
         self.controllers
-            .extend(registrations.into_iter().map(|(id, manifest)| {
+            .extend(registrations.into_iter().map(|(id, loaded)| {
                 (
                     id,
                     RegisteredController {
-                        manifest,
-                        source: source.clone(),
+                        manifest: loaded.manifest,
+                        handlers: loaded.handlers,
+                        source: Arc::clone(&source),
                     },
                 )
             }));
@@ -101,7 +127,7 @@ impl LuauUiControllerHost {
     }
 
     pub fn source(&self, id: &str) -> Option<&str> {
-        self.controllers.get(id).map(|entry| entry.source.as_str())
+        self.controllers.get(id).map(|entry| entry.source.as_ref())
     }
 
     pub fn invoke_action(
@@ -165,15 +191,21 @@ impl LuauUiControllerHost {
                 "controller model schema does not match the bound view model".into(),
             ));
         }
+        let (handler_name, required) = invocation.handler();
+        if !registered.handlers.supports(invocation) {
+            debug_assert!(!required, "required controller handler was not registered");
+            return Ok(Vec::new());
+        }
         let (lua, registrations) = load_controller_source(&registered.source, self.budget)?;
         let loaded = registrations.get(id).ok_or_else(|| {
             LuauUiControllerError::Registration(
                 "controller source did not reproduce its registered identity".into(),
             )
         })?;
-        if loaded != &registered.manifest {
+        if loaded.manifest != registered.manifest || loaded.handlers != registered.handlers {
             return Err(LuauUiControllerError::Registration(
-                "controller manifest changed between registration and invocation".into(),
+                "controller manifest or handler set changed between registration and invocation"
+                    .into(),
             ));
         }
         let registry: Table = lua
@@ -181,7 +213,6 @@ impl LuauUiControllerHost {
             .get("__astra_ui_controllers")
             .map_err(runtime_error)?;
         let handlers: Table = registry.get(id).map_err(runtime_error)?;
-        let (handler_name, required) = invocation.handler();
         let handler_value: Value = handlers.get(handler_name).map_err(runtime_error)?;
         let handler = match handler_value {
             Value::Function(handler) => handler,
@@ -248,7 +279,7 @@ impl ControllerInvocation<'_> {
 fn load_controller_source(
     source: &str,
     budget: PolicyExecutionBudget,
-) -> Result<(Lua, BTreeMap<String, VnUiControllerManifest>), LuauUiControllerError> {
+) -> Result<(Lua, BTreeMap<String, LoadedController>), LuauUiControllerError> {
     let lua = create_sandboxed_lua(budget)
         .map_err(|error| LuauUiControllerError::Registration(error.to_string()))?;
     let registrations = Rc::new(RefCell::new(BTreeMap::new()));
@@ -263,7 +294,7 @@ fn load_controller_source(
 
 fn install_ui_api(
     lua: &Lua,
-    registrations: Rc<RefCell<BTreeMap<String, VnUiControllerManifest>>>,
+    registrations: Rc<RefCell<BTreeMap<String, LoadedController>>>,
 ) -> Result<(), LuauUiControllerError> {
     let registry = create_table(lua).map_err(runtime_error)?;
     lua.globals()
@@ -284,12 +315,20 @@ fn install_ui_api(
                 manifest
                     .validate()
                     .map_err(|error| mlua::Error::runtime(error.to_string()))?;
-                validate_handler(&handlers, "on_action", true)?;
-                validate_handler(&handlers, "on_open", false)?;
-                validate_handler(&handlers, "on_update", false)?;
+                let handler_set = ControllerHandlerSet {
+                    on_action: validate_handler(&handlers, "on_action", true)?,
+                    on_open: validate_handler(&handlers, "on_open", false)?,
+                    on_update: validate_handler(&handlers, "on_update", false)?,
+                };
                 if registrations
                     .borrow_mut()
-                    .insert(id.clone(), manifest)
+                    .insert(
+                        id.clone(),
+                        LoadedController {
+                            manifest,
+                            handlers: handler_set,
+                        },
+                    )
                     .is_some()
                 {
                     return Err(mlua::Error::runtime(
@@ -439,10 +478,10 @@ fn lua_value_to_ui_value(value: Value, depth: usize) -> mlua::Result<UiValue> {
     }
 }
 
-fn validate_handler(handlers: &Table, name: &str, required: bool) -> mlua::Result<()> {
+fn validate_handler(handlers: &Table, name: &str, required: bool) -> mlua::Result<bool> {
     match handlers.get::<Value>(name)? {
-        Value::Function(_) => Ok(()),
-        Value::Nil if !required => Ok(()),
+        Value::Function(_) => Ok(true),
+        Value::Nil if !required => Ok(false),
         Value::Nil => Err(mlua::Error::runtime(format!(
             "ASTRA_VN_UI_CONTROLLER_HANDLER_MISSING: {name} is required"
         ))),
@@ -661,6 +700,45 @@ astra.ui.controller.register("controller.test", {
             )
             .expect("update")
             .is_empty());
+    }
+
+    #[astra_headless_test::test]
+    fn missing_optional_handler_does_not_reexecute_controller_source() {
+        let mut host = LuauUiControllerHost::new(PolicyExecutionBudget::default()).expect("host");
+        host.register_source(
+            r#"
+astra.ui.controller.register("controller.test", {
+    schema = "astra.vn.ui_controller.v1",
+    view = "ui.test",
+    model_schema = "astra.vn.ui_model.test.v1",
+    snapshot = "none",
+}, {
+    on_action = function(ctx, model, action)
+        return { astra.ui.effect.forward(action) }
+    end,
+})
+"#,
+        )
+        .expect("register");
+        host.controllers
+            .get_mut("controller.test")
+            .expect("registered controller")
+            .source = Arc::from("this is not valid Luau");
+
+        let effects = host
+            .invoke_update(
+                "controller.test",
+                "astra.vn.ui_model.test.v1",
+                &UiValue::Map(BTreeMap::new()),
+                &VnUiControllerUpdate {
+                    fixed_time_ns: 100,
+                    delta_ns: 16,
+                    generation: 1,
+                },
+                &mut VnUiSessionState::default(),
+            )
+            .expect("missing optional handler must bypass the VM");
+        assert!(effects.is_empty());
     }
 
     #[astra_headless_test::test]
