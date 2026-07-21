@@ -19,6 +19,11 @@ pub type ProductFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
 pub trait ProductPerformanceObserver: Send + Sync {
     fn record_phase(&self, name: &str) -> Result<(), String>;
+
+    /// Records product CPU work before the next presentation submission.
+    fn record_sample(&self, _sample: ProductPerformanceSample) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

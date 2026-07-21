@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use astra_headless_protocol::{ButtonState, PhysicalInput, PointerButton};
 use astra_headless_vn_adapter::NativeVnProductAdapterFactory;
@@ -6,10 +6,21 @@ use astra_platform::{HeadlessHostProfile, PlatformHostFactory};
 use astra_platform_headless::HeadlessPlatformFactory;
 use astra_product_host::{ProductAdapterFactory, ProductOpenRequest, ProductPerformanceObserver};
 
-struct TestPerformanceObserver;
+#[derive(Default)]
+struct TestPerformanceObserver {
+    samples: Mutex<Vec<astra_product_host::ProductPerformanceSample>>,
+}
 
 impl ProductPerformanceObserver for TestPerformanceObserver {
     fn record_phase(&self, _name: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn record_sample(
+        &self,
+        sample: astra_product_host::ProductPerformanceSample,
+    ) -> Result<(), String> {
+        self.samples.lock().unwrap().push(sample);
         Ok(())
     }
 }
@@ -36,6 +47,7 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
         .start(profile.into())
         .await
         .unwrap();
+    let performance_observer = Arc::new(TestPerformanceObserver::default());
     let mut product = NativeVnProductAdapterFactory::default()
         .open(ProductOpenRequest {
             package: astra_product_host::ProductPackageSource::InMemory(Arc::from(package)),
@@ -48,7 +60,7 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
             max_decode_output_bytes,
             max_decoded_cache_bytes,
             retain_audio_timeline: true,
-            performance_observer: Some(Arc::new(TestPerformanceObserver)),
+            performance_observer: Some(performance_observer.clone()),
             presentation_rate_hz: astra_platform::HEADLESS_PRESENTATION_RATE_HZ,
             platform: host.client.clone(),
         })
@@ -135,7 +147,26 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
     let frame = product.capture_frame().await.unwrap();
     assert_eq!((frame.width, frame.height), (320, 180));
     assert!(frame.rgba8.iter().any(|byte| *byte != 0));
-    let performance = product.take_performance_sample();
+    let performance = performance_observer
+        .samples
+        .lock()
+        .unwrap()
+        .iter()
+        .copied()
+        .fold(
+            astra_product_host::ProductPerformanceSample::default(),
+            |mut total, sample| {
+                total.runtime_tick_ns += sample.runtime_tick_ns;
+                total.vn_step_ns += sample.vn_step_ns;
+                total.ui_layout_paint_ns += sample.ui_layout_paint_ns;
+                total.ui_update_layout_ns += sample.ui_update_layout_ns;
+                total.ui_paint_conversion_ns += sample.ui_paint_conversion_ns;
+                total.ui_host_scene_ns += sample.ui_host_scene_ns;
+                total.media_decode_ns += sample.media_decode_ns;
+                total.save_load_ns += sample.save_load_ns;
+                total
+            },
+        );
     assert!(
         performance.runtime_tick_ns
             + performance.vn_step_ns

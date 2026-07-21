@@ -206,6 +206,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 focused: false,
                 last_tick: 0,
                 presentation_substeps,
+                performance_observer: performance_observer.clone(),
                 performance: performance_observer
                     .is_some()
                     .then(ProductPerformanceSample::default),
@@ -290,6 +291,7 @@ struct NativeVnHeadlessSession {
     focused: bool,
     last_tick: u64,
     presentation_substeps: u32,
+    performance_observer: Option<Arc<dyn ProductPerformanceObserver>>,
     performance: Option<ProductPerformanceSample>,
 }
 
@@ -533,6 +535,24 @@ impl NativeVnHeadlessSession {
         Ok(())
     }
 
+    fn flush_performance_sample(&mut self) -> Result<(), ProductHostError> {
+        let Some(observer) = self.performance_observer.as_ref() else {
+            return Ok(());
+        };
+        let sample = self
+            .performance
+            .as_mut()
+            .map(std::mem::take)
+            .ok_or_else(|| {
+                ProductHostError::Output(
+                    "performance observer exists without profiling state".into(),
+                )
+            })?;
+        observer
+            .record_sample(sample)
+            .map_err(ProductHostError::Output)
+    }
+
     fn profile_duration(&self, started: Option<Instant>) -> Result<Option<u64>, ProductHostError> {
         let Some(started) = started else {
             return Ok(None);
@@ -616,6 +636,7 @@ impl NativeVnHeadlessSession {
                     .saturating_add(ui_host_sample.text_scene_ns);
             }
         })?;
+        self.flush_performance_sample()?;
         self.executor
             .execute_batch(batch)
             .await
@@ -702,6 +723,7 @@ impl NativeVnHeadlessSession {
                     sample.runtime_tick_ns = sample.runtime_tick_ns.saturating_add(duration);
                 }
                 if let Some(present) = present {
+                    self.flush_performance_sample()?;
                     self.executor
                         .execute_batch(present)
                         .await
@@ -720,6 +742,7 @@ impl NativeVnHeadlessSession {
             self.add_profile_duration(media_started, |sample, duration| {
                 sample.media_decode_ns = sample.media_decode_ns.saturating_add(duration);
             })?;
+            self.flush_performance_sample()?;
         }
         Ok(())
     }
@@ -736,7 +759,8 @@ impl NativeVnHeadlessSession {
             .map_err(|error| ProductHostError::Output(error.to_string()))?;
         self.add_profile_duration(media_started, |sample, duration| {
             sample.media_decode_ns = sample.media_decode_ns.saturating_add(duration);
-        })
+        })?;
+        self.flush_performance_sample()
     }
 
     async fn save(&mut self, slot: &str) -> Result<(), ProductHostError> {
@@ -780,7 +804,8 @@ impl NativeVnHeadlessSession {
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
         self.add_profile_duration(profile_started, |sample, duration| {
             sample.save_load_ns = sample.save_load_ns.saturating_add(duration);
-        })
+        })?;
+        self.flush_performance_sample()
     }
 
     async fn capture_gameplay_surface(&mut self) -> Result<(), ProductHostError> {
@@ -854,7 +879,8 @@ impl NativeVnHeadlessSession {
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
         self.add_profile_duration(profile_started, |sample, duration| {
             sample.save_load_ns = sample.save_load_ns.saturating_add(duration);
-        })
+        })?;
+        self.flush_performance_sample()
     }
 
     fn refresh_observations(&mut self) -> Result<(), ProductHostError> {
