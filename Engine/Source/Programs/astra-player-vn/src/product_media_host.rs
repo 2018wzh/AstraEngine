@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use astra_core::Hash256;
+use astra_media::{PcmAsset, CANONICAL_CHANNELS, CANONICAL_SAMPLE_RATE};
 use astra_platform::{PlatformError, PlatformErrorCode};
 use astra_player_core::{
     PlatformCommandSink, PlayerDecodedAudio, PlayerHostCommandExecutor, PlayerTimelineCompletion,
@@ -27,7 +28,7 @@ pub struct NativeVnProductMediaHost {
 
 #[derive(Clone)]
 struct CachedDecodedAudio {
-    audio: PlayerDecodedAudio,
+    asset: PcmAsset,
     decoded_hash: String,
     byte_size: u64,
 }
@@ -304,29 +305,44 @@ impl NativeVnProductMediaHost {
                     }
                     NativeVnAudioOutput::Start(request) => request,
                 };
-                let (audio, decoded_hash, cache_hit) =
-                    if let Some(cached) = self.cached_audio(&request.encoded_hash) {
-                        (cached.audio, cached.decoded_hash, true)
-                    } else {
-                        let decode = source
-                            .prepare_audio_decode(&request)
-                            .map_err(|error| media_error("player.audio.decode.prepare", error))?;
-                        let decoded = executor
-                            .execute_decode_lifecycle(decode)
-                            .await
-                            .map_err(|error| media_error("player.audio.decode", error))?;
-                        let audio = PlayerDecodedAudio::parse(
-                            &decoded.format,
-                            &decoded.bytes,
-                            Self::MAX_DECODED_AUDIO_SAMPLES,
+                let (audio, decoded_hash, cache_hit) = if let Some(cached) =
+                    self.cached_audio(&request.encoded_hash)
+                {
+                    (
+                        cached.asset.with_identity(request.asset_id.clone()),
+                        cached.decoded_hash,
+                        true,
+                    )
+                } else {
+                    let decode = source
+                        .prepare_audio_decode(&request)
+                        .map_err(|error| media_error("player.audio.decode.prepare", error))?;
+                    let decoded = executor
+                        .execute_decode_lifecycle(decode)
+                        .await
+                        .map_err(|error| media_error("player.audio.decode", error))?;
+                    let audio = PlayerDecodedAudio::parse(
+                        &decoded.format,
+                        &decoded.bytes,
+                        Self::MAX_DECODED_AUDIO_SAMPLES,
+                    )
+                    .map_err(|error| media_error("player.audio.contract", error))?;
+                    let audio = audio
+                        .into_converted(
+                            CANONICAL_SAMPLE_RATE,
+                            CANONICAL_CHANNELS,
+                            crate::NativeVnProductAudioHost::MAX_CONVERTED_SAMPLES,
                         )
-                        .map_err(|error| media_error("player.audio.contract", error))?;
-                        let decoded_hash = decoded.hash;
-                        self.cache_audio(request.encoded_hash, audio.clone(), decoded_hash.clone());
-                        (audio, decoded_hash, false)
-                    };
+                        .map_err(|error| media_error("player.audio.convert", error))?;
+                    let asset =
+                        PcmAsset::from_canonical_samples(request.asset_id.clone(), audio.samples)
+                            .map_err(|error| media_error("player.audio.asset", error))?;
+                    let decoded_hash = decoded.hash;
+                    self.cache_audio(request.encoded_hash, asset.clone(), decoded_hash.clone());
+                    (asset, decoded_hash, false)
+                };
                 self.audio
-                    .start(
+                    .start_canonical(
                         source,
                         executor,
                         &request,
@@ -515,14 +531,9 @@ impl NativeVnProductMediaHost {
         Some(cached)
     }
 
-    fn cache_audio(
-        &mut self,
-        encoded_hash: Hash256,
-        audio: PlayerDecodedAudio,
-        decoded_hash: String,
-    ) {
+    fn cache_audio(&mut self, encoded_hash: Hash256, asset: PcmAsset, decoded_hash: String) {
         let byte_size =
-            (audio.samples.len() as u64).saturating_mul(std::mem::size_of::<f32>() as u64);
+            (asset.samples.len() as u64).saturating_mul(std::mem::size_of::<f32>() as u64);
         if byte_size > self.max_decoded_cache_bytes {
             tracing::debug!(
                 event = "astra.player.audio.cache.bypass",
@@ -560,7 +571,7 @@ impl NativeVnProductMediaHost {
         self.decoded_audio_cache.insert(
             encoded_hash,
             CachedDecodedAudio {
-                audio,
+                asset,
                 decoded_hash,
                 byte_size,
             },

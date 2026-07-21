@@ -1,8 +1,9 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use astra_core::Hash256;
 use astra_media::{
-    AudioCommand, PcmAsset, PcmAssetResolver, ProductionAudioMixer, CANONICAL_FRAMES_PER_TICK,
+    AudioCommand, PcmAsset, PcmAssetResolver, PlayerDecodedAudio, ProductionAudioMixer,
+    CANONICAL_FRAMES_PER_TICK,
 };
 
 struct Resolver(BTreeMap<String, PcmAsset>);
@@ -22,6 +23,30 @@ fn asset(id: &str, frames: usize, value: f32) -> PcmAsset {
         .flat_map(|sample| sample.to_le_bytes())
         .collect::<Vec<_>>();
     PcmAsset::new(id, Hash256::from_sha256(&bytes), samples).unwrap()
+}
+
+#[astra_headless_test::test]
+fn canonical_pcm_rebinding_reuses_the_same_sample_storage() {
+    let original = PcmAsset::from_canonical_samples("voice.original", vec![0.25; 1_600])
+        .expect("canonical asset");
+    let rebound = original.with_identity("voice.rebound");
+    assert_eq!(rebound.identity, "voice.rebound");
+    assert_eq!(rebound.hash, original.hash);
+    assert!(Arc::ptr_eq(&original.samples, &rebound.samples));
+}
+
+#[astra_headless_test::test]
+fn canonical_audio_conversion_transfers_the_existing_sample_buffer() {
+    let audio = PlayerDecodedAudio {
+        sample_rate: 48_000,
+        channels: 2,
+        samples: vec![0.125; 1_600],
+    };
+    let pointer = audio.samples.as_ptr();
+    let converted = audio
+        .into_converted(48_000, 2, 1_600)
+        .expect("canonical conversion");
+    assert_eq!(converted.samples.as_ptr(), pointer);
 }
 
 #[astra_headless_test::test]

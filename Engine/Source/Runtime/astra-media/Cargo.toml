@@ -26,6 +26,7 @@ symphonia.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 rubato.workspace = true
+sha2.workspace = true
 unicode-segmentation.workspace = true
 
 [target.'cfg(windows)'.dependencies]

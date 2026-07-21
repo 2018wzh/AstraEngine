@@ -173,6 +173,28 @@ impl PlayerDecodedAudio {
             samples,
         })
     }
+
+    pub fn into_converted(
+        self,
+        sample_rate: u32,
+        channels: u16,
+        max_output_samples: usize,
+    ) -> Result<Self, PlayerAudioContractError> {
+        if self.sample_rate == sample_rate && self.channels == channels {
+            if self.samples.is_empty()
+                || self.samples.len() > max_output_samples
+                || !self.samples.len().is_multiple_of(usize::from(channels))
+                || self.samples.iter().any(|sample| !sample.is_finite())
+            {
+                return Err(PlayerAudioContractError::new(
+                    "ASTRA_PLAYER_AUDIO_CONVERSION_BUDGET",
+                    "canonical audio is invalid or exceeds the configured sample budget",
+                ));
+            }
+            return Ok(self);
+        }
+        self.convert_to(sample_rate, channels, max_output_samples)
+    }
 }
 
 fn map_channels(

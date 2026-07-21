@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use astra_core::Hash256;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{AudioCommand, AudioGraph, MediaError};
 
@@ -23,17 +24,9 @@ impl PcmAsset {
         hash: Hash256,
         samples: Vec<f32>,
     ) -> Result<Self, MediaError> {
-        if samples.is_empty()
-            || !samples
-                .len()
-                .is_multiple_of(usize::from(CANONICAL_CHANNELS))
-            || samples.iter().any(|sample| !sample.is_finite())
-            || Hash256::from_sha256(&pcm_bytes(&samples)) != hash
-        {
-            return Err(mixer_error(
-                "ASTRA_AUDIO_ASSET_INVALID",
-                "canonical PCM asset is empty, misaligned, non-finite, or hash-mismatched",
-            ));
+        validate_canonical_samples(&samples)?;
+        if canonical_pcm_hash(&samples) != hash {
+            return Err(invalid_pcm_asset());
         }
         Ok(Self {
             identity: identity.into(),
@@ -41,9 +34,57 @@ impl PcmAsset {
             samples: samples.into(),
         })
     }
+
+    pub fn from_canonical_samples(
+        identity: impl Into<String>,
+        samples: Vec<f32>,
+    ) -> Result<Self, MediaError> {
+        validate_canonical_samples(&samples)?;
+        let hash = canonical_pcm_hash(&samples);
+        Ok(Self {
+            identity: identity.into(),
+            hash,
+            samples: samples.into(),
+        })
+    }
+
+    pub fn with_identity(&self, identity: impl Into<String>) -> Self {
+        Self {
+            identity: identity.into(),
+            hash: self.hash,
+            samples: Arc::clone(&self.samples),
+        }
+    }
     pub fn frame_count(&self) -> usize {
         self.samples.len() / usize::from(CANONICAL_CHANNELS)
     }
+}
+
+fn validate_canonical_samples(samples: &[f32]) -> Result<(), MediaError> {
+    if samples.is_empty()
+        || !samples
+            .len()
+            .is_multiple_of(usize::from(CANONICAL_CHANNELS))
+        || samples.iter().any(|sample| !sample.is_finite())
+    {
+        return Err(invalid_pcm_asset());
+    }
+    Ok(())
+}
+
+fn invalid_pcm_asset() -> MediaError {
+    mixer_error(
+        "ASTRA_AUDIO_ASSET_INVALID",
+        "canonical PCM asset is empty, misaligned, non-finite, or hash-mismatched",
+    )
+}
+
+fn canonical_pcm_hash(samples: &[f32]) -> Hash256 {
+    let mut hasher = Sha256::new();
+    for sample in samples {
+        hasher.update(sample.to_le_bytes());
+    }
+    Hash256::from_bytes(hasher.finalize().into())
 }
 
 pub trait PcmAssetResolver {
@@ -503,12 +544,6 @@ fn frames_from_ms(ms: u64) -> Result<usize, MediaError> {
             "audio frame count overflows host",
         )
     })
-}
-fn pcm_bytes(samples: &[f32]) -> Vec<u8> {
-    samples
-        .iter()
-        .flat_map(|sample| sample.to_le_bytes())
-        .collect()
 }
 fn db(value: f32) -> f32 {
     if value == 0.0 {

@@ -77,7 +77,7 @@ pub struct NativeVnPendingFadeStop {
 impl NativeVnProductAudioHost {
     const BUFFERED_FRAMES: u32 = 4_096;
     const MAX_VOICES: usize = 64;
-    const MAX_CONVERTED_SAMPLES: usize = 20_000_000;
+    pub(crate) const MAX_CONVERTED_SAMPLES: usize = 20_000_000;
 
     pub fn new(retain_submitted_timeline: bool) -> Self {
         Self {
@@ -288,6 +288,29 @@ impl NativeVnProductAudioHost {
         audio: PlayerDecodedAudio,
         completed_signals: &mut BTreeSet<String>,
     ) -> Result<(), astra_platform::PlatformError> {
+        let audio = audio
+            .into_converted(
+                CANONICAL_SAMPLE_RATE,
+                CANONICAL_CHANNELS,
+                Self::MAX_CONVERTED_SAMPLES,
+            )
+            .map_err(|error| player_platform_error("player.audio.convert", error))?;
+        let asset = PcmAsset::from_canonical_samples(request.asset_id.clone(), audio.samples)
+            .map_err(|error| player_platform_error("player.audio.asset", error))?;
+        self.start_canonical(source, executor, request, asset, completed_signals)
+            .await
+    }
+
+    pub async fn start_canonical(
+        &mut self,
+        source: &mut crate::NativeVnHostCommandSource,
+        executor: &mut astra_player_core::PlayerHostCommandExecutor<
+            astra_player_core::PlatformCommandSink,
+        >,
+        request: &crate::NativeVnAudioRequest,
+        asset: PcmAsset,
+        completed_signals: &mut BTreeSet<String>,
+    ) -> Result<(), astra_platform::PlatformError> {
         let looping = parse_audio_bool(request, "loop", request.command == "bgm")?;
         let gain = parse_audio_f32(request, "gain", 1.0)?;
         let bus = request
@@ -303,26 +326,14 @@ impl NativeVnProductAudioHost {
         if let Some(fence) = request.attributes.get("fence") {
             completed_signals.remove(fence);
         }
-        let audio = audio
-            .convert_to(
-                CANONICAL_SAMPLE_RATE,
-                CANONICAL_CHANNELS,
-                Self::MAX_CONVERTED_SAMPLES,
-            )
-            .map_err(|error| player_platform_error("player.audio.convert", error))?;
         self.ensure_open(source, executor).await?;
         let asset_id = request.asset_id.clone();
-        let bytes = audio
-            .samples
-            .iter()
-            .flat_map(|sample| sample.to_le_bytes())
-            .collect::<Vec<_>>();
-        let asset = PcmAsset::new(
-            asset_id.clone(),
-            astra_core::Hash256::from_sha256(&bytes),
-            audio.samples,
-        )
-        .map_err(|error| player_platform_error("player.audio.asset", error))?;
+        if asset.identity != asset_id {
+            return Err(player_platform_error(
+                "player.audio.asset",
+                "ASTRA_PLAYER_AUDIO_ASSET_IDENTITY_MISMATCH",
+            ));
+        }
         let frame_count = asset.frame_count();
         let duration_ms = (frame_count as u64)
             .checked_mul(1_000)
