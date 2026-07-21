@@ -78,7 +78,7 @@ pub struct SurfaceRequest {
 pub struct CapturedFrame {
     pub width: u32,
     pub height: u32,
-    pub rgba8: Vec<u8>,
+    pub rgba8: Arc<[u8]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

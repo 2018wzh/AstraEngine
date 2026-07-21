@@ -178,7 +178,7 @@ async fn platform_sink_forwards_renderer_ready_glyph_commands_without_cpu_frames
                 width: 2,
                 height: 2,
                 format: GlyphBitmapFormat::Alpha8,
-                pixels,
+                pixels: pixels.into(),
                 hash,
             },
         },

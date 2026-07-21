@@ -124,7 +124,8 @@ Migration 11 Headless 测试格式已经由 Rust 类型实现，仍不得进入 
 
 | Schema | Status | Purpose |
 | --- | --- | --- |
-| `astra.headless_host_profile.v2` | `CONTRACT_DONE` | v2 固化 `all/checkpoints` render policy、CPU/WGPU flag-binding、双帧预算、canonical submitted stream 与 provider/backend/adapter identity；缺字段和旧 shape 直接阻断，shipping API/graph 拒绝 |
+| `astra.headless_host_profile.v3` | `CONTRACT_DONE` | v3 固化 `all/checkpoints` render policy、CPU/WGPU flag-binding、双帧与 cache 预算、canonical submitted stream、GPU backend/device/timestamp policy 与 provider/adapter identity；v2 只允许普通功能运行显式迁移，性能和 shipping API/graph 拒绝 |
+| `astra.performance_trace_manifest.v1` | `CONTRACT_DONE` | 绑定 clean source/build/package/profile/workload/session、adapter/driver、report/trace hash、event/byte count 与 monotonic/truncation 状态；丢事件、截断、时间戳回退和身份漂移 blocking |
 | `astra.user_input_sequence.v1` | `IN_PROGRESS` | 已实现平台无关物理输入、固定 tick/time、await、checkpoint 和 shutdown；没有产品语义 variant |
 | `astra.headless_protocol.v1` | `IN_PROGRESS` | 已实现文件和 stdio 共用的双向 JSONL envelope、session 与严格 sequence 校验 |
 | `astra.headless_checkpoint_config.v2` | `IN_PROGRESS` | checkpoint、observation/baseline、受控宽松默认容差、approval 与 renderer identity binding；完整 config hash 写入 run report |

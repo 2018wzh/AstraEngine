@@ -1,4 +1,4 @@
 mod artifact;
 mod factory;
 
-pub use factory::HeadlessPlatformFactory;
+pub use factory::{HeadlessGpuFrameSample, HeadlessPerformanceObserver, HeadlessPlatformFactory};

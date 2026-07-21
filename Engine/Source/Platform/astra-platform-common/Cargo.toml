@@ -12,11 +12,13 @@ platform-test-driver = []
 astra-core = { path = "../../Runtime/astra-core" }
 astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
 astra-media-core = { path = "../../Runtime/astra-media-core" }
+astra-observability = { path = "../../Developer/astra-observability" }
 astra-platform = { path = "../astra-platform" }
 tempfile.workspace = true
 tracing.workspace = true
 rtrb.workspace = true
 sha2.workspace = true
+smallvec.workspace = true
 wgpu.workspace = true
 serde.workspace = true
 serde_json.workspace = true

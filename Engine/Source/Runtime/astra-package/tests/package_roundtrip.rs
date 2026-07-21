@@ -46,6 +46,39 @@ fn container_v2_streaming_reader_requires_external_content_root() {
 }
 
 #[astra_headless_test::test]
+fn storage_verified_reader_streams_audit_and_rejects_wrong_storage_identity() {
+    let blob = AstraContainerBuilder::new(ContainerKind::Package)
+        .add_section(SectionPayload::raw(
+            "large.payload",
+            "schema.large",
+            vec![0x5a; 4 * 1024 * 1024],
+        ))
+        .write()
+        .unwrap();
+    let storage_hash = Hash256::from_sha256(blob.as_bytes());
+    let source: Arc<dyn astra_byte_source::BoundedByteSource> = Arc::new(
+        astra_byte_source::MemoryByteSource::new(blob.as_bytes().to_vec()),
+    );
+    let reader =
+        AstraContainerReader::open_storage_verified_source(source.clone(), storage_hash).unwrap();
+    assert_eq!(
+        reader
+            .read_bounded("large.payload", 4 * 1024 * 1024)
+            .unwrap()
+            .len(),
+        4 * 1024 * 1024
+    );
+
+    assert!(AstraContainerReader::open_storage_verified_source(
+        source,
+        Hash256::from_sha256(b"wrong")
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("storage hash"));
+}
+
+#[astra_headless_test::test]
 fn package_roundtrip_verifies_hash_bounds_and_schema_registry() {
     let payload = FixturePayload {
         name: "stage2".to_string(),

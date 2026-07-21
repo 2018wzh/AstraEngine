@@ -7,22 +7,15 @@ use std::{
     time::Instant,
 };
 
-use astra_core::Hash256;
 use astra_headless_protocol::{
     ArtifactEntry, ArtifactManifest, CheckpointConfig, CheckpointResult, Envelope, JsonlReader,
     JsonlWriter, Message, ObservationPredicate, PhysicalInput, PlatformRunIdentity, PreflightLink,
-    RenderPerformanceReport, RendererExecutionIdentity, ReviewArtifactRole,
-    ReviewArtifactSelection, ReviewBundle, ReviewRecord, RunReport, RunStatus, SequenceValidator,
-    HEADLESS_PREFLIGHT_LINK_SCHEMA, HEADLESS_PROTOCOL_SCHEMA, HEADLESS_RENDER_PERFORMANCE_SCHEMA,
-    HEADLESS_REVIEW_BUNDLE_SCHEMA, HEADLESS_RUN_REPORT_SCHEMA, MIN_CPU_SPARSE_SPEEDUP,
-    MIN_GPU_ALL_SPEEDUP, TICK_DURATION_NS,
+    RendererExecutionIdentity, ReviewArtifactRole, ReviewArtifactSelection, ReviewBundle,
+    ReviewRecord, RunReport, RunStatus, SequenceValidator, HEADLESS_PREFLIGHT_LINK_SCHEMA,
+    HEADLESS_PROTOCOL_SCHEMA, HEADLESS_REVIEW_BUNDLE_SCHEMA, HEADLESS_RUN_REPORT_SCHEMA,
+    TICK_DURATION_NS,
 };
 use astra_headless_vn_adapter::NativeVnProductAdapterFactory;
-use astra_media_core::{
-    BlendMode, CpuRendererProvider, FilterGraph, FilterNode, FilterParam, FilterTarget,
-    GlyphBitmap, GlyphBitmapFormat, MeshMaterial2D, MeshVertex2D, RectI, RenderTargetFormat,
-    Renderer2DProvider, RendererCreateRequest, SceneCommand, TextureFrame,
-};
 use astra_package::{
     AuthorizedSourceReader, ContainerCryptoProvider, ContainerError,
     SourceFingerprintCryptoProvider, SourceUnlockPolicy, SourceVerificationManifest,
@@ -30,7 +23,6 @@ use astra_package::{
 use astra_platform::{
     HeadlessHostProfile, PackageSourceRequest, PlatformHostFactory, PlatformHostSession,
 };
-use astra_platform_common::WgpuOffscreenRenderer;
 use astra_platform_headless::HeadlessPlatformFactory;
 use astra_product_host::{ProductAdapterRegistry, ProductOpenRequest, ProductSession};
 use clap::{Parser, Subcommand};
@@ -38,6 +30,12 @@ use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 use sha2::{Digest, Sha256};
 
 mod compare;
+mod performance_e2;
+mod product_performance;
+
+#[global_allocator]
+static ASTRA_ALLOCATOR: astra_observability::TrackingAllocator =
+    astra_observability::TrackingAllocator::new();
 
 struct CheckpointCapture {
     sequence: u64,
@@ -73,6 +71,16 @@ enum Command {
         source_profile: Option<PathBuf>,
         #[arg(long, requires = "source_profile")]
         source_root: Option<PathBuf>,
+        #[arg(long, requires_all = ["performance_report", "performance_trace", "performance_trace_manifest"])]
+        performance_budget: Option<PathBuf>,
+        #[arg(long, requires_all = ["performance_budget", "performance_trace", "performance_trace_manifest"])]
+        performance_report: Option<PathBuf>,
+        #[arg(long, requires_all = ["performance_budget", "performance_report", "performance_trace_manifest"])]
+        performance_trace: Option<PathBuf>,
+        #[arg(long, requires_all = ["performance_budget", "performance_report", "performance_trace"])]
+        performance_trace_manifest: Option<PathBuf>,
+        #[arg(long, default_value_t = 0, requires = "performance_budget")]
+        performance_warmup_frames: u64,
     },
     Serve {
         #[arg(long)]
@@ -136,13 +144,53 @@ enum Command {
         #[arg(long)]
         output: PathBuf,
     },
-    BenchmarkRender {
+    PerformanceE2 {
+        #[arg(long)]
+        profile: PathBuf,
+        #[arg(long)]
+        package: PathBuf,
+        #[arg(long)]
+        budget: PathBuf,
+        #[arg(long)]
+        report: PathBuf,
+        #[arg(long)]
+        trace: PathBuf,
+        #[arg(long)]
+        trace_manifest: PathBuf,
+        #[arg(long)]
+        build_identity: PathBuf,
+        #[arg(long, value_enum)]
+        workload: performance_e2::PerformanceWorkload,
+        #[arg(long, value_parser = clap::value_parser!(u8).range(1..=3))]
+        run_index: u8,
+    },
+    PreparePerformanceBudget {
+        #[arg(long)]
+        profile: PathBuf,
         #[arg(long)]
         output: PathBuf,
         #[arg(long)]
-        build_identity: PathBuf,
+        budget_id: String,
+        #[arg(long, default_value_t = 72_000)]
+        min_samples: usize,
+        #[arg(long, default_value_t = 72_000)]
+        max_samples: usize,
+        #[arg(long, default_value_t = 600_000_000)]
+        min_run_duration_us: u64,
+        #[arg(long, value_enum, default_value_t = performance_e2::PerformanceBudgetKind::RendererStress)]
+        kind: performance_e2::PerformanceBudgetKind,
+    },
+    PreparePerformanceProfile {
         #[arg(long)]
-        gpu: bool,
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, value_enum)]
+        backend: performance_e2::PerformanceGpuBackend,
+        #[arg(long, value_enum)]
+        device_type: performance_e2::PerformanceGpuDeviceType,
+        #[arg(long)]
+        adapter_identity_hash: Option<String>,
     },
 }
 
@@ -180,6 +228,11 @@ async fn main() {
             build_identity,
             source_profile,
             source_root,
+            performance_budget,
+            performance_report,
+            performance_trace,
+            performance_trace_manifest,
+            performance_warmup_frames,
         } => {
             run(RunRequest {
                 profile_path: &profile,
@@ -191,6 +244,11 @@ async fn main() {
                 gpu,
                 source_profile: source_profile.as_deref(),
                 source_root: source_root.as_deref(),
+                performance_budget: performance_budget.as_deref(),
+                performance_report: performance_report.as_deref(),
+                performance_trace: performance_trace.as_deref(),
+                performance_trace_manifest: performance_trace_manifest.as_deref(),
+                performance_warmup_frames,
             })
             .await
         }
@@ -237,11 +295,60 @@ async fn main() {
             platform_run_identity,
             output,
         } => link_preflight(&headless_run_report, &platform_run_identity, &output),
-        Command::BenchmarkRender {
-            output,
+        Command::PerformanceE2 {
+            profile,
+            package,
+            budget,
+            report,
+            trace,
+            trace_manifest,
             build_identity,
-            gpu,
-        } => benchmark_render(&output, &build_identity, gpu).await,
+            workload,
+            run_index,
+        } => {
+            performance_e2::run(performance_e2::PerformanceE2Request {
+                profile: &profile,
+                package: &package,
+                budget: &budget,
+                report: &report,
+                trace: &trace,
+                trace_manifest: &trace_manifest,
+                build_identity: &build_identity,
+                workload,
+                run_index,
+            })
+            .await
+        }
+        Command::PreparePerformanceBudget {
+            profile,
+            output,
+            budget_id,
+            min_samples,
+            max_samples,
+            min_run_duration_us,
+            kind,
+        } => performance_e2::prepare_budget(
+            &profile,
+            &output,
+            budget_id,
+            min_samples,
+            max_samples,
+            min_run_duration_us,
+            kind,
+        ),
+        Command::PreparePerformanceProfile {
+            input,
+            output,
+            backend,
+            device_type,
+            adapter_identity_hash,
+        } => performance_e2::prepare_profile(
+            &input,
+            &output,
+            backend,
+            device_type,
+            adapter_identity_hash,
+        ),
     };
     if let Err(error) = result {
         tracing::error!(
@@ -346,25 +453,31 @@ async fn serve(build_identity: &Path, gpu: bool) -> Result<(), String> {
                     })
                     .await
                     .map_err(|e| e.to_string())?;
-                let package_size = fs::metadata(&package_file)
-                    .map_err(|e| format!("ASTRA_HEADLESS_PACKAGE_METADATA_FAILED: {e}"))?
-                    .len();
-                let bytes = read_verified_package(
-                    &host,
-                    package,
-                    package_size,
-                    profile.limits.max_package_read_bytes,
-                )
-                .await?;
-                if astra_core::Hash256::from_sha256(&bytes).to_string() != profile.package_hash {
-                    return Err("ASTRA_HEADLESS_EMPTY_PACKAGE_HASH_MISMATCH".into());
-                }
                 host.client
                     .close_package(package)
                     .await
                     .map_err(|e| e.to_string())?;
                 let product = match package_path {
-                    Some(_) => Some(open_product(&registry, &profile, &host, bytes).await?),
+                    Some(_) => {
+                        let storage_hash = profile
+                            .package_hash
+                            .parse::<astra_core::Hash256>()
+                            .map_err(|_| "ASTRA_HEADLESS_PACKAGE_HASH_INVALID".to_string())?;
+                        let source: Arc<dyn astra_byte_source::BoundedByteSource> = Arc::new(
+                            astra_byte_source::FileByteSource::open(&package_file).map_err(
+                                |error| format!("ASTRA_HEADLESS_PACKAGE_OPEN_FAILED: {error}"),
+                            )?,
+                        );
+                        let container =
+                            astra_package::AstraContainerReader::open_storage_verified_source(
+                                source,
+                                storage_hash,
+                            )
+                            .map_err(|error| {
+                                format!("ASTRA_HEADLESS_PACKAGE_INVALID: {error}")
+                            })?;
+                        Some(open_product(&registry, &profile, &host, container, false).await?)
+                    }
                     None => None,
                 };
                 let profile_hash = profile.hash().map_err(|e| e.to_string())?;
@@ -467,6 +580,7 @@ async fn serve(build_identity: &Path, gpu: bool) -> Result<(), String> {
                     &session.profile,
                     &session.checkpoint_captures,
                     &mut manifest,
+                    None,
                 )?;
                 apply_audio_comparisons(
                     session.checkpoint_config.as_ref(),
@@ -745,6 +859,11 @@ struct RunRequest<'a> {
     gpu: bool,
     source_profile: Option<&'a Path>,
     source_root: Option<&'a Path>,
+    performance_budget: Option<&'a Path>,
+    performance_report: Option<&'a Path>,
+    performance_trace: Option<&'a Path>,
+    performance_trace_manifest: Option<&'a Path>,
+    performance_warmup_frames: u64,
 }
 
 async fn run(request: RunRequest<'_>) -> Result<(), String> {
@@ -882,9 +1001,34 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         gpu,
         source_profile,
         source_root,
+        performance_budget,
+        performance_report,
+        performance_trace,
+        performance_trace_manifest,
+        performance_warmup_frames,
     } = request;
     let identity_hash = read_identity_hash(build_identity)?;
     let profile = read_profile(profile_path, &identity_hash)?;
+    let performance_observer = match (performance_budget, performance_trace) {
+        (Some(budget_path), Some(trace_path)) => {
+            astra_platform::validate_headless_performance_profile(&profile)
+                .map_err(|error| format!("ASTRA_PERFORMANCE_PROFILE_INVALID: {error}"))?;
+            let budget: astra_core::PerformanceBudget = serde_json::from_slice(
+                &fs::read(budget_path)
+                    .map_err(|error| format!("ASTRA_PERFORMANCE_BUDGET_READ_FAILED: {error}"))?,
+            )
+            .map_err(|error| format!("ASTRA_PERFORMANCE_BUDGET_INVALID: {error}"))?;
+            Some(Arc::new(
+                product_performance::ProductPerformanceRecorder::create(
+                    budget,
+                    trace_path,
+                    performance_warmup_frames,
+                )?,
+            ))
+        }
+        (None, None) if performance_warmup_frames == 0 => None,
+        _ => return Err("ASTRA_PERFORMANCE_ARGUMENT_SET_INCOMPLETE".into()),
+    };
     fs::create_dir_all(artifact_root).map_err(|e| e.to_string())?;
     let input_bytes =
         fs::read(input_path).map_err(|e| format!("ASTRA_HEADLESS_INPUT_OPEN_FAILED: {e}"))?;
@@ -937,12 +1081,17 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         .file_name()
         .and_then(|value| value.to_str())
         .ok_or_else(|| "ASTRA_HEADLESS_PACKAGE_PATH_INVALID".to_string())?;
-    let host = HeadlessPlatformFactory::new(artifact_root, package_root)
+    let mut host_factory = HeadlessPlatformFactory::new(artifact_root, package_root)
         .with_gpu(gpu)
-        .with_input_sequence_hash(input_hash.clone())
+        .with_input_sequence_hash(input_hash.clone());
+    if let Some(observer) = &performance_observer {
+        host_factory = host_factory.with_performance_observer(observer.clone());
+    }
+    let host = host_factory
         .start(profile.clone().into())
         .await
         .map_err(|error| error.to_string())?;
+    let package_verify_started = Instant::now();
     let package = host
         .client
         .open_package(PackageSourceRequest::Bundled {
@@ -951,26 +1100,63 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         })
         .await
         .map_err(|error| error.to_string())?;
-    let package_size = fs::metadata(package_path)
-        .map_err(|error| format!("ASTRA_HEADLESS_PACKAGE_METADATA_FAILED: {error}"))?
-        .len();
-    let package_bytes = read_verified_package(
-        &host,
-        package,
-        package_size,
-        profile.limits.max_package_read_bytes,
-    )
-    .await?;
+    if let Some(observer) = &performance_observer {
+        observer.record_cpu_slice(
+            "package.cpu",
+            "package.storage_verify",
+            None,
+            package_verify_started,
+        )?;
+    }
     host.client
         .close_package(package)
         .await
         .map_err(|error| error.to_string())?;
-    if astra_core::Hash256::from_sha256(&package_bytes).to_string() != profile.package_hash {
-        return Err("ASTRA_HEADLESS_PRODUCT_PACKAGE_HASH_MISMATCH".into());
+    let package_storage_hash = profile
+        .package_hash
+        .parse::<astra_core::Hash256>()
+        .map_err(|_| "ASTRA_HEADLESS_PRODUCT_PACKAGE_HASH_INVALID".to_string())?;
+    let package_open_started = Instant::now();
+    let package_source: Arc<dyn astra_byte_source::BoundedByteSource> = Arc::new(
+        astra_byte_source::FileByteSource::open(package_path)
+            .map_err(|error| format!("ASTRA_HEADLESS_PRODUCT_PACKAGE_OPEN_FAILED: {error}"))?,
+    );
+    let package_container = astra_package::AstraContainerReader::open_storage_verified_source(
+        package_source,
+        package_storage_hash,
+    )
+    .map_err(|error| format!("ASTRA_HEADLESS_PRODUCT_PACKAGE_INVALID: {error}"))?;
+    if let Some(observer) = &performance_observer {
+        observer.record_cpu_slice(
+            "package.cpu",
+            "package.table_open",
+            None,
+            package_open_started,
+        )?;
     }
-    let package_crypto = source_package_crypto(&package_bytes, source_profile, source_root)?;
+    let package_unlock_started = Instant::now();
+    let package_crypto = source_package_crypto(&package_container, source_profile, source_root)?;
+    if let Some(observer) = &performance_observer {
+        observer.record_cpu_slice(
+            "package.cpu",
+            "package.source_unlock",
+            None,
+            package_unlock_started,
+        )?;
+        observer.begin_cpu_scope("product.cpu", "product.open", None)?;
+    }
     let registry = product_registry(package_crypto)?;
-    let mut product = open_product(&registry, &profile, &host, package_bytes).await?;
+    let mut product = open_product(
+        &registry,
+        &profile,
+        &host,
+        package_container,
+        performance_observer.is_some(),
+    )
+    .await?;
+    if let Some(observer) = &performance_observer {
+        observer.end_cpu_scope("product.cpu", "product.open", None)?;
+    }
     let mut checkpoint_results = Vec::new();
     let mut checkpoint_frames = BTreeMap::new();
     let mut completed_sequence = 0;
@@ -986,6 +1172,14 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         if matches!(message.event, PhysicalInput::Shutdown) {
             break;
         }
+        if let Some(observer) = &performance_observer {
+            observer.begin_input_flow(message.sequence)?;
+            observer.begin_cpu_scope(
+                "runtime.cpu",
+                "physical_input.consume",
+                Some(message.sequence),
+            )?;
+        }
         let (observations, await_advanced_ticks) =
             consume_input(product.as_mut(), effective_tick, &message.event)
                 .await
@@ -997,6 +1191,16 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
                         physical_input_kind(&message.event)
                     )
                 })?;
+        if let Some(observer) = &performance_observer {
+            observer.end_cpu_scope(
+                "runtime.cpu",
+                "physical_input.consume",
+                Some(message.sequence),
+            )?;
+            observer.record_product_sample(message.sequence, product.take_performance_sample())?;
+            observer.end_input_flow(message.sequence)?;
+            observer.set_decoded_cache_bytes(product.decoded_cache_bytes());
+        }
         if let PhysicalInput::Await {
             timeout_ticks,
             continue_at_match: true,
@@ -1058,7 +1262,13 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
     {
         return Err("ASTRA_HEADLESS_CHECKPOINT_RENDERER_IDENTITY_MISMATCH".into());
     }
-    append_checkpoint_artifacts(artifact_root, &profile, &checkpoint_frames, &mut manifest)?;
+    append_checkpoint_artifacts(
+        artifact_root,
+        &profile,
+        &checkpoint_frames,
+        &mut manifest,
+        performance_observer.as_deref(),
+    )?;
     apply_audio_comparisons(
         checkpoint_config.as_ref(),
         checkpoint_config_root.as_deref(),
@@ -1111,6 +1321,37 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
     };
     report.validate().map_err(|error| error.to_string())?;
     write_atomic_json(&artifact_root.join("run-report.json"), &report)?;
+    if let Some(observer) = performance_observer {
+        let report_path = performance_report.ok_or("ASTRA_PERFORMANCE_REPORT_PATH_MISSING")?;
+        let manifest_path =
+            performance_trace_manifest.ok_or("ASTRA_PERFORMANCE_TRACE_MANIFEST_PATH_MISSING")?;
+        let build = read_performance_build_identity(build_identity)?;
+        let performance_identity = astra_core::PerformanceRunIdentity {
+            source_revision: build.checkout_id,
+            dirty: build.dirty,
+            target: profile.target.clone(),
+            profile: profile.product_profile.clone(),
+            profile_hash: profile.hash().map_err(|error| error.to_string())?,
+            package_hash: profile.package_hash.clone(),
+            build_fingerprint: profile.build_fingerprint.clone(),
+            session_id: report.session_id.clone(),
+        };
+        performance_identity
+            .validate()
+            .map_err(|error| error.to_string())?;
+        let adapter_identity_hash = astra_core::Hash256::from_sha256(
+            &serde_json::to_vec(&manifest.renderer_identity).map_err(|error| error.to_string())?,
+        )
+        .to_string();
+        observer.finish(
+            performance_identity,
+            &report.scenario,
+            adapter_identity_hash,
+            manifest.renderer_identity.driver_identity_hash.clone(),
+            report_path,
+            manifest_path,
+        )?;
+    }
     println!(
         "{}",
         serde_json::to_string(&report).map_err(|error| error.to_string())?
@@ -1161,262 +1402,6 @@ fn diagnostic_code(error: &str) -> String {
         .to_string()
 }
 
-async fn benchmark_render(
-    output: &Path,
-    build_identity: &Path,
-    include_gpu: bool,
-) -> Result<(), String> {
-    const WIDTH: u32 = 1920;
-    const HEIGHT: u32 = 1080;
-    const WARMUP: u32 = 60;
-    const MEASURED: u32 = 600;
-
-    let build_fingerprint = read_identity_hash(build_identity)?;
-    let commands = benchmark_commands();
-    let scenario_hash = format!(
-        "sha256:{}",
-        sha256_hex(
-            &serde_json::to_vec(&(WIDTH, HEIGHT, WARMUP, MEASURED, &commands))
-                .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_SERIALIZE_FAILED: {error}"))?
-        )
-    );
-    let request = RendererCreateRequest {
-        width: WIDTH,
-        height: HEIGHT,
-        format: RenderTargetFormat::Rgba8Srgb,
-        profile: "headless-performance".into(),
-    };
-
-    let mut cpu_all = CpuRendererProvider
-        .create(request.clone())
-        .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_CPU_CREATE_FAILED: {error}"))?;
-    for _ in 0..WARMUP {
-        cpu_all
-            .capture_frame(&commands)
-            .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_CPU_WARMUP_FAILED: {error}"))?;
-    }
-    let (cpu_all_duration_ns, cpu_all_samples) =
-        measure_frames(MEASURED, || cpu_all.capture_frame(&commands).map(|_| ()))?;
-
-    let mut cpu_sparse = CpuRendererProvider
-        .create(request)
-        .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_CPU_CREATE_FAILED: {error}"))?;
-    for _ in 0..WARMUP {
-        cpu_sparse
-            .submit_frame(&commands)
-            .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_SPARSE_WARMUP_FAILED: {error}"))?;
-    }
-    let mut sparse_index = 0_u32;
-    let (cpu_sparse_duration_ns, cpu_sparse_samples) = measure_frames(MEASURED, || {
-        let selected =
-            sparse_index == 0 || sparse_index == MEASURED / 2 || sparse_index + 1 == MEASURED;
-        sparse_index += 1;
-        if selected {
-            let mut snapshot = cpu_sparse.clone();
-            snapshot.capture_frame(&commands).map(|_| ())
-        } else {
-            cpu_sparse.submit_frame(&commands)
-        }
-    })?;
-    let cpu_sparse_speedup = cpu_all_duration_ns as f64 / cpu_sparse_duration_ns as f64;
-    let (cpu_all_p50_frame_ns, cpu_all_p95_frame_ns) = percentiles(cpu_all_samples);
-    let (cpu_sparse_p50_frame_ns, cpu_sparse_p95_frame_ns) = percentiles(cpu_sparse_samples);
-
-    let mut gpu_all_duration_ns = None;
-    let mut gpu_all_p50_frame_ns = None;
-    let mut gpu_all_p95_frame_ns = None;
-    let mut gpu_all_speedup = None;
-    let mut gpu_identity = None;
-    if include_gpu {
-        let mut renderer = WgpuOffscreenRenderer::new()
-            .await
-            .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_GPU_REQUIRED: {error}"))?;
-        let mut sequence = 0_u64;
-        for _ in 0..WARMUP {
-            sequence += 1;
-            renderer
-                .render(&benchmark_scene(sequence, commands.clone()))
-                .map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_GPU_WARMUP_FAILED: {error}"))?;
-        }
-        let (duration, samples) = measure_platform_frames(MEASURED, || {
-            sequence += 1;
-            renderer
-                .render(&benchmark_scene(sequence, commands.clone()))
-                .map(|_| ())
-        })?;
-        let (p50, p95) = percentiles(samples);
-        gpu_all_duration_ns = Some(duration);
-        gpu_all_p50_frame_ns = Some(p50);
-        gpu_all_p95_frame_ns = Some(p95);
-        gpu_all_speedup = Some(cpu_all_duration_ns as f64 / duration as f64);
-        gpu_identity = Some(renderer.identity().clone());
-    }
-
-    let mut diagnostics = Vec::new();
-    if cpu_sparse_speedup < MIN_CPU_SPARSE_SPEEDUP {
-        diagnostics.push("ASTRA_HEADLESS_CPU_SPARSE_SPEEDUP_BELOW_THRESHOLD".into());
-    }
-    if gpu_all_speedup.is_some_and(|speedup| speedup < MIN_GPU_ALL_SPEEDUP) {
-        diagnostics.push("ASTRA_HEADLESS_GPU_SPEEDUP_BELOW_THRESHOLD".into());
-    }
-    let status = if diagnostics.is_empty() {
-        RunStatus::Passed
-    } else {
-        RunStatus::Blocked
-    };
-    let report = RenderPerformanceReport {
-        schema: HEADLESS_RENDER_PERFORMANCE_SCHEMA.into(),
-        status,
-        build_fingerprint,
-        scenario_hash,
-        width: WIDTH,
-        height: HEIGHT,
-        warmup_frames: WARMUP,
-        measured_frames: MEASURED,
-        cpu_all_duration_ns,
-        cpu_all_p50_frame_ns,
-        cpu_all_p95_frame_ns,
-        cpu_sparse_duration_ns,
-        cpu_sparse_p50_frame_ns,
-        cpu_sparse_p95_frame_ns,
-        cpu_sparse_speedup,
-        gpu_all_duration_ns,
-        gpu_all_p50_frame_ns,
-        gpu_all_p95_frame_ns,
-        gpu_all_speedup,
-        gpu_identity,
-        diagnostics,
-    };
-    report.validate().map_err(|error| error.to_string())?;
-    write_atomic_json(output, &report)?;
-    if report.status == RunStatus::Blocked {
-        return Err("ASTRA_HEADLESS_BENCHMARK_THRESHOLD_BLOCKED".into());
-    }
-    Ok(())
-}
-
-fn benchmark_scene(sequence: u64, commands: Vec<SceneCommand>) -> astra_platform::SceneFrame {
-    astra_platform::SceneFrame {
-        sequence,
-        width: 1920,
-        height: 1080,
-        clear_rgba: [4, 8, 16, 255],
-        commands,
-        semantics: None,
-    }
-}
-
-fn benchmark_commands() -> Vec<SceneCommand> {
-    let texture_bytes = [64_u8, 128, 224, 255].repeat(64 * 64);
-    let glyph_bytes = vec![192_u8; 32 * 32];
-    let mut fade_params = BTreeMap::new();
-    fade_params.insert("amount".into(), FilterParam::Float(0.92));
-    vec![
-        SceneCommand::Texture {
-            id: "benchmark.texture".into(),
-            frame: TextureFrame {
-                width: 64,
-                height: 64,
-                hash: Hash256::from_sha256(&texture_bytes),
-                rgba8: texture_bytes,
-            },
-            destination: RectI::new(64, 64, 1024, 640),
-            opacity: 1.0,
-            blend: BlendMode::Alpha,
-        },
-        SceneCommand::Glyph {
-            id: "benchmark.glyph".into(),
-            glyph: GlyphBitmap {
-                width: 32,
-                height: 32,
-                format: GlyphBitmapFormat::Alpha8,
-                hash: Hash256::from_sha256(&glyph_bytes),
-                pixels: glyph_bytes,
-            },
-            x: 128,
-            y: 128,
-            rgba: [255, 240, 220, 255],
-            opacity: 1.0,
-            blend: BlendMode::Alpha,
-        },
-        SceneCommand::Mesh2D {
-            id: "benchmark.mesh".into(),
-            vertices: vec![
-                MeshVertex2D {
-                    position: [960.0, 128.0],
-                    uv: [0.0, 0.0],
-                    premultiplied_rgba: [240, 80, 80, 255],
-                },
-                MeshVertex2D {
-                    position: [1760.0, 900.0],
-                    uv: [1.0, 1.0],
-                    premultiplied_rgba: [80, 240, 80, 255],
-                },
-                MeshVertex2D {
-                    position: [720.0, 900.0],
-                    uv: [0.0, 1.0],
-                    premultiplied_rgba: [80, 80, 240, 255],
-                },
-            ],
-            indices: vec![0, 1, 2],
-            material: MeshMaterial2D::Solid,
-            texture_id: None,
-            opacity: 0.9,
-            blend: BlendMode::Alpha,
-        },
-        SceneCommand::FilterGraph {
-            graph: FilterGraph {
-                schema: "astra.filter_graph.v1".into(),
-                nodes: vec![FilterNode {
-                    id: "benchmark.fade".into(),
-                    kind: "astra.filter.fade".into(),
-                    input: FilterTarget::Final,
-                    output: FilterTarget::Final,
-                    params: fade_params,
-                    deterministic: true,
-                    allow_cpu_fallback: true,
-                }],
-            },
-        },
-    ]
-}
-
-fn measure_frames<E>(
-    count: u32,
-    mut frame: impl FnMut() -> Result<(), E>,
-) -> Result<(u64, Vec<u64>), String>
-where
-    E: std::fmt::Display,
-{
-    let total = Instant::now();
-    let mut samples = Vec::with_capacity(count as usize);
-    for _ in 0..count {
-        let started = Instant::now();
-        frame().map_err(|error| format!("ASTRA_HEADLESS_BENCHMARK_CPU_FAILED: {error}"))?;
-        samples.push(duration_ns(started.elapsed()));
-    }
-    Ok((duration_ns(total.elapsed()), samples))
-}
-
-fn measure_platform_frames(
-    count: u32,
-    frame: impl FnMut() -> Result<(), astra_platform::PlatformError>,
-) -> Result<(u64, Vec<u64>), String> {
-    measure_frames(count, frame)
-}
-
-fn duration_ns(duration: std::time::Duration) -> u64 {
-    u64::try_from(duration.as_nanos())
-        .unwrap_or(u64::MAX)
-        .max(1)
-}
-
-fn percentiles(mut samples: Vec<u64>) -> (u64, u64) {
-    samples.sort_unstable();
-    let index = |percent: usize| ((samples.len() - 1) * percent) / 100;
-    (samples[index(50)], samples[index(95)])
-}
-
 fn read_identity_hash(path: &Path) -> Result<String, String> {
     let value: serde_json::Value = serde_json::from_slice(
         &fs::read(path).map_err(|e| format!("ASTRA_BUILD_IDENTITY_READ_FAILED: {e}"))?,
@@ -1433,6 +1418,34 @@ fn read_identity_hash(path: &Path) -> Result<String, String> {
         return Err("ASTRA_BUILD_IDENTITY_HASH_INVALID".into());
     }
     Ok(hash.to_owned())
+}
+
+struct PerformanceBuildIdentity {
+    checkout_id: String,
+    dirty: bool,
+}
+
+fn read_performance_build_identity(path: &Path) -> Result<PerformanceBuildIdentity, String> {
+    let value: serde_json::Value = serde_json::from_slice(
+        &fs::read(path).map_err(|error| format!("ASTRA_BUILD_IDENTITY_READ_FAILED: {error}"))?,
+    )
+    .map_err(|error| format!("ASTRA_BUILD_IDENTITY_INVALID: {error}"))?;
+    let checkout_id = value
+        .get("checkout_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or("ASTRA_BUILD_IDENTITY_CHECKOUT_INVALID")?;
+    let dirty = value
+        .get("dirty")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or("ASTRA_BUILD_IDENTITY_DIRTY_STATE_MISSING")?;
+    if dirty {
+        return Err("ASTRA_PERFORMANCE_DIRTY_CHECKOUT_BLOCKED".into());
+    }
+    Ok(PerformanceBuildIdentity {
+        checkout_id: checkout_id.into(),
+        dirty,
+    })
 }
 
 fn update_input_digest(
@@ -1687,6 +1700,7 @@ fn append_checkpoint_artifacts(
     profile: &HeadlessHostProfile,
     captures: &BTreeMap<String, CheckpointCapture>,
     manifest: &mut ArtifactManifest,
+    performance_observer: Option<&product_performance::ProductPerformanceRecorder>,
 ) -> Result<(), String> {
     if matches!(
         profile.artifacts.retention,
@@ -1703,6 +1717,9 @@ fn append_checkpoint_artifacts(
         }
         _ => captures.iter().collect::<Vec<_>>(),
     };
+    if let Some(observer) = performance_observer {
+        observer.begin_cpu_scope("artifact.cpu", "checkpoint.encode_write", None)?;
+    }
     for (id, capture) in selected {
         let frame = &capture.frame;
         let mut bytes = Vec::new();
@@ -1774,6 +1791,9 @@ fn append_checkpoint_artifacts(
                 .ok_or_else(|| "ASTRA_HEADLESS_CHECKPOINT_AUDIO_DURATION_OVERFLOW".to_string())?,
             checkpoint: Some(id.clone()),
         });
+    }
+    if let Some(observer) = performance_observer {
+        observer.end_cpu_scope("artifact.cpu", "checkpoint.encode_write", None)?;
     }
     Ok(())
 }
@@ -2261,10 +2281,14 @@ fn prepare_product_profile(
         return Err("ASTRA_HEADLESS_PREPARE_PROFILE_ARGUMENT_INVALID".into());
     }
     let identity_hash = read_identity_hash(build_identity)?;
-    let package_bytes = fs::read(package_path)
-        .map_err(|error| format!("ASTRA_HEADLESS_PREPARE_PROFILE_PACKAGE_READ_FAILED: {error}"))?;
-    let reader = astra_package::AstraContainerReader::new(&package_bytes)
-        .map_err(|error| format!("ASTRA_HEADLESS_PREPARE_PROFILE_PACKAGE_INVALID: {error}"))?;
+    let package_source: Arc<dyn astra_byte_source::BoundedByteSource> = Arc::new(
+        astra_byte_source::FileByteSource::open(package_path).map_err(|error| {
+            format!("ASTRA_HEADLESS_PREPARE_PROFILE_PACKAGE_READ_FAILED: {error}")
+        })?,
+    );
+    let (reader, package_storage_hash) =
+        astra_package::AstraContainerReader::open_storage_audited_source(package_source)
+            .map_err(|error| format!("ASTRA_HEADLESS_PREPARE_PROFILE_PACKAGE_INVALID: {error}"))?;
     let manifest: astra_package::PackageManifest = reader
         .decode_postcard("package.manifest")
         .map_err(|error| format!("ASTRA_HEADLESS_PREPARE_PROFILE_MANIFEST_INVALID: {error}"))?;
@@ -2278,7 +2302,7 @@ fn prepare_product_profile(
         // Platform package sources verify the complete stored container bytes. The
         // package content root is an internal section identity and can differ from
         // the storage hash when container metadata is present.
-        astra_core::Hash256::from_sha256(&package_bytes).to_string(),
+        package_storage_hash.to_string(),
     );
     profile.id = id.to_string();
     profile.product_profile = product_profile.to_string();
@@ -2324,12 +2348,10 @@ fn product_registry(
 }
 
 fn source_package_crypto(
-    package_bytes: &[u8],
+    raw: &astra_package::AstraContainerReader,
     source_profile: Option<&Path>,
     source_root: Option<&Path>,
 ) -> Result<Option<Arc<dyn ContainerCryptoProvider>>, String> {
-    let raw = astra_package::AstraContainerReader::new(package_bytes)
-        .map_err(|error| format!("ASTRA_HEADLESS_PACKAGE_INSPECT_FAILED: {error}"))?;
     let source_locked = raw.has_section("source.unlock");
     match (source_locked, source_profile, source_root) {
         (false, None, None) => Ok(None),
@@ -2426,16 +2448,14 @@ async fn open_product(
     registry: &ProductAdapterRegistry,
     profile: &HeadlessHostProfile,
     host: &PlatformHostSession,
-    bytes: Vec<u8>,
+    container: astra_package::AstraContainerReader,
+    performance_profiling: bool,
 ) -> Result<Box<dyn ProductSession>, String> {
-    if astra_core::Hash256::from_sha256(&bytes).to_string() != profile.package_hash {
-        return Err("ASTRA_HEADLESS_PRODUCT_PACKAGE_HASH_MISMATCH".into());
-    }
     registry
         .open(
             &profile.providers.product_adapter,
             ProductOpenRequest {
-                package_bytes: bytes.into(),
+                package: astra_product_host::ProductPackageSource::VerifiedContainer(container),
                 profile: profile.product_profile.clone(),
                 target: profile.target.clone(),
                 locale: None,
@@ -2443,47 +2463,17 @@ async fn open_product(
                 height: profile.viewport_height,
                 max_video_frames: profile.max_video_frames,
                 max_decode_output_bytes: profile.max_decode_output_bytes,
+                max_decoded_cache_bytes: profile.max_decoded_cache_bytes,
                 retain_audio_timeline: !matches!(
                     profile.artifacts.retention,
                     astra_platform::HeadlessArtifactRetention::ManifestOnly
                 ),
+                performance_profiling,
                 platform: host.client.clone(),
             },
         )
         .await
         .map_err(|error| error.to_string())
-}
-
-async fn read_verified_package(
-    host: &PlatformHostSession,
-    handle: astra_platform::PackageSourceHandle,
-    total_size: u64,
-    max_range: usize,
-) -> Result<Vec<u8>, String> {
-    if total_size == 0 || max_range == 0 {
-        return Err("ASTRA_HEADLESS_PACKAGE_SIZE_INVALID".into());
-    }
-    let capacity = usize::try_from(total_size)
-        .map_err(|_| "ASTRA_HEADLESS_PACKAGE_SIZE_OVERFLOW".to_string())?;
-    let mut bytes = Vec::with_capacity(capacity);
-    let mut offset = 0_u64;
-    while offset < total_size {
-        let remaining = usize::try_from((total_size - offset).min(max_range as u64))
-            .map_err(|_| "ASTRA_HEADLESS_PACKAGE_RANGE_OVERFLOW".to_string())?;
-        let chunk = host
-            .client
-            .read_package_range(handle, offset, remaining)
-            .await
-            .map_err(|error| error.to_string())?;
-        if chunk.len() != remaining {
-            return Err("ASTRA_HEADLESS_PACKAGE_RANGE_TRUNCATED".into());
-        }
-        bytes.extend_from_slice(&chunk);
-        offset = offset
-            .checked_add(chunk.len() as u64)
-            .ok_or_else(|| "ASTRA_HEADLESS_PACKAGE_RANGE_OVERFLOW".to_string())?;
-    }
-    Ok(bytes)
 }
 
 #[cfg(test)]

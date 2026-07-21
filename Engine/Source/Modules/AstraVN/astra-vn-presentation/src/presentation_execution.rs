@@ -191,7 +191,7 @@ fn layer_draw_commands(
     let frame = TextureFrame {
         width: asset.width,
         height: asset.height,
-        rgba8: asset.bytes.clone(),
+        rgba8: asset.bytes.clone().into(),
         hash: asset.hash,
     };
     let destination = RectI::new(x as i32, y as i32, width, height);

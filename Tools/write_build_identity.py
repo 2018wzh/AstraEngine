@@ -120,12 +120,13 @@ def ui_toolchain_identity(root: pathlib.Path) -> dict[str, object] | None:
 def build_identity(root: pathlib.Path, cargo_args: Iterable[str]) -> dict[str, object]:
     git_head = run_output(["git", "rev-parse", "HEAD"], root).decode("utf-8").strip()
     git_diff = run_output(["git", "diff", "--binary", "HEAD"], root)
+    untracked = sorted(untracked_files(root), key=lambda item: item[0])
     rustc_version = run_output(["rustc", "-Vv"], root).decode("utf-8")
     checkout_digest = hashlib.sha256()
     checkout_digest.update(git_head.encode("utf-8"))
     checkout_digest.update(b"\0")
     checkout_digest.update(git_diff)
-    for relative, payload in sorted(untracked_files(root), key=lambda item: item[0]):
+    for relative, payload in untracked:
         encoded = relative.encode("utf-8")
         checkout_digest.update(len(encoded).to_bytes(8, "big"))
         checkout_digest.update(encoded)
@@ -134,6 +135,7 @@ def build_identity(root: pathlib.Path, cargo_args: Iterable[str]) -> dict[str, o
     identity: dict[str, object] = {
         "schema": SCHEMA,
         "checkout_id": git_head,
+        "dirty": bool(git_diff or untracked),
         "checkout_state_hash": "sha256:" + checkout_digest.hexdigest(),
         "workspace_manifest_hash": manifest_hash(root),
         "dependency_lock_hash": sha256((root / "Cargo.lock").read_bytes()),

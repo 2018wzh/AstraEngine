@@ -819,7 +819,10 @@ state start #@id state.start
     )
     .unwrap();
 
+    assert_eq!(source.decoded_asset_cache_bytes(), 0);
     let launch = source.launch().unwrap();
+    assert!(source.decoded_asset_cache_bytes() > 0);
+    assert!(source.decoded_asset_cache_bytes() <= 128 * 1024 * 1024);
     let commands = scene_commands(&launch);
     assert!(commands.iter().any(|command| matches!(
         command,

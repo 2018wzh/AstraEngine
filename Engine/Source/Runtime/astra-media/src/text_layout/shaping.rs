@@ -322,6 +322,6 @@ pub(super) fn glyph_bitmap(image: &cosmic_text::SwashImage) -> Result<GlyphBitma
         height: image.placement.height,
         format,
         hash: Hash256::from_sha256(&pixels),
-        pixels,
+        pixels: pixels.into(),
     })
 }

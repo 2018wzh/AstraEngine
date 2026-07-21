@@ -23,13 +23,14 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
     profile.viewport_height = 180;
     let max_video_frames = profile.max_video_frames;
     let max_decode_output_bytes = profile.max_decode_output_bytes;
+    let max_decoded_cache_bytes = profile.max_decoded_cache_bytes;
     let host = HeadlessPlatformFactory::new(root.path(), root.path())
         .start(profile.into())
         .await
         .unwrap();
     let mut product = NativeVnProductAdapterFactory::default()
         .open(ProductOpenRequest {
-            package_bytes: Arc::from(package),
+            package: astra_product_host::ProductPackageSource::InMemory(Arc::from(package)),
             profile: "classic".into(),
             target: "nativevn-game".into(),
             locale: Some("en".into()),
@@ -37,7 +38,9 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
             height: 180,
             max_video_frames,
             max_decode_output_bytes,
+            max_decoded_cache_bytes,
             retain_audio_timeline: true,
+            performance_profiling: true,
             platform: host.client.clone(),
         })
         .await
@@ -123,6 +126,15 @@ async fn real_native_vn_package_accepts_physical_input_and_produces_cpu_frame() 
     let frame = product.capture_frame().await.unwrap();
     assert_eq!((frame.width, frame.height), (320, 180));
     assert!(frame.rgba8.iter().any(|byte| *byte != 0));
+    let performance = product.take_performance_sample();
+    assert!(
+        performance.runtime_tick_ns
+            + performance.vn_step_ns
+            + performance.ui_layout_paint_ns
+            + performance.media_decode_ns
+            + performance.save_load_ns
+            > 0
+    );
     product.shutdown().await.unwrap();
     host.client.shutdown().await.unwrap();
     assert!(root.path().join("artifact-manifest.json").is_file());

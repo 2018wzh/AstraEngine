@@ -13,6 +13,7 @@ ffmpeg-vcpkg = ["astra-platform-headless/ffmpeg-vcpkg"]
 [dependencies]
 astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
 astra-core = { path = "../../Runtime/astra-core" }
+astra-byte-source = { path = "../../Runtime/astra-byte-source" }
 astra-observability = { path = "../../Developer/astra-observability" }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-platform-headless = { path = "../../Platform/astra-platform-headless" }

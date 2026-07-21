@@ -5,6 +5,16 @@ use astra_platform::PlatformHostClient;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[derive(Clone)]
+pub enum ProductPackageSource {
+    InMemory(Arc<[u8]>),
+    VerifiedContainer(astra_package::AstraContainerReader),
+    StorageVerified {
+        source: Arc<dyn astra_byte_source::BoundedByteSource>,
+        storage_hash: astra_core::Hash256,
+    },
+}
+
 pub type ProductFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,7 +32,7 @@ pub struct CanonicalAudioSnapshot {
 
 #[derive(Clone)]
 pub struct ProductOpenRequest {
-    pub package_bytes: Arc<[u8]>,
+    pub package: ProductPackageSource,
     pub profile: String,
     pub target: String,
     pub locale: Option<String>,
@@ -30,11 +40,25 @@ pub struct ProductOpenRequest {
     pub height: u32,
     pub max_video_frames: u64,
     pub max_decode_output_bytes: u64,
+    pub max_decoded_cache_bytes: u64,
     /// Whether the adapter must retain the full canonical mixed-audio timeline.
     /// Manifest-only behavior runs disable this while preserving mixer state,
     /// meters, completion fences, and deterministic observations.
     pub retain_audio_timeline: bool,
+    /// Enables host-consumed performance phase timing. Shipping sessions keep
+    /// this disabled so the product path does not sample clocks or allocate
+    /// profiling state.
+    pub performance_profiling: bool,
     pub platform: PlatformHostClient,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProductPerformanceSample {
+    pub runtime_tick_ns: u64,
+    pub vn_step_ns: u64,
+    pub ui_layout_paint_ns: u64,
+    pub media_decode_ns: u64,
+    pub save_load_ns: u64,
 }
 
 #[derive(Debug, Error)]
@@ -68,6 +92,10 @@ pub trait ProductSession {
         &'a self,
     ) -> ProductFuture<'a, Result<astra_platform::CapturedFrame, ProductHostError>>;
     fn capture_audio(&self) -> Result<CanonicalAudioSnapshot, ProductHostError>;
+    fn decoded_cache_bytes(&self) -> u64;
+    fn take_performance_sample(&mut self) -> ProductPerformanceSample {
+        ProductPerformanceSample::default()
+    }
     fn shutdown<'a>(&'a mut self) -> ProductFuture<'a, Result<(), ProductHostError>>;
 }
 

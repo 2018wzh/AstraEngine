@@ -6,6 +6,7 @@ use std::{
 
 use astra_core::Hash256;
 use astra_platform::{PlatformError, PlatformErrorCode};
+use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 
 #[derive(Debug, Clone)]
@@ -165,10 +166,20 @@ impl FilePackageSource {
     pub fn open(path: impl AsRef<Path>, expected_hash: &str) -> Result<Self, PlatformError> {
         let mut file = File::open(path.as_ref()).map_err(|_| io_error("package.open"))?;
         let len = file.metadata().map_err(|_| io_error("package.open"))?.len();
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
-            .map_err(|_| io_error("package.open"))?;
-        let hash = Hash256::from_sha256(&bytes).to_string();
+        let mut digest = Sha256::new();
+        // Keep the bounded audit buffer on the heap. A 1 MiB stack array can
+        // exhaust the default Windows process stack before the host opens.
+        let mut buffer = vec![0_u8; 1024 * 1024];
+        loop {
+            let read = file
+                .read(&mut buffer)
+                .map_err(|_| io_error("package.open"))?;
+            if read == 0 {
+                break;
+            }
+            digest.update(&buffer[..read]);
+        }
+        let hash = Hash256::from_bytes(digest.finalize().into()).to_string();
         if hash != expected_hash {
             return Err(PlatformError::new(
                 PlatformErrorCode::IntegrityMismatch,

@@ -64,9 +64,42 @@ astra-headless validate-review \
   --review target/headless/full-playthrough/review.json
 ```
 
-文件与 stdio 使用同一双向 JSONL 协议。Headless profile v2 默认 `render_policy: checkpoints`：所有 scene 都校验并进入 submitted hash，仅首帧、具名 checkpoint 和末帧产生 RGBA；逐帧视觉验证显式使用 `all`。`max_submitted_frames` 与 `max_rasterized_frames` 任一超限都会阻断。stdout 只输出协议或 report，日志只写 stderr。
+文件与 stdio 使用同一双向 JSONL 协议。普通功能运行可显式迁移 Headless profile v2；正式性能运行只接受 v3。`render_policy: checkpoints` 会校验所有 scene 并写入 submitted hash，仅首帧、具名 checkpoint 和末帧产生 RGBA；逐帧视觉验证显式使用 `all`。`max_submitted_frames` 与 `max_rasterized_frames` 任一超限都会阻断。stdout 只输出协议或 report，日志只写 stderr。
 
-GPU job 必须先把 profile renderer 绑定为 `wgpu_offscreen`，再给 `run` 或 `serve` 传 `--gpu`；CPU profile 与 flag 混用会阻断。workspace test job 通过 `ASTRA_HEADLESS_GPU=1 cargo test ...` 让 `HeadlessTestContext` 生成 GPU profile 并启动 `serve --gpu`。该模式固定 Windows/DX12、Linux/Vulkan、macOS/Metal；Windows DX12 使用 build-locked static DXC，不读取 PATH 中的动态 DXC。所有平台都要求 hardware adapter，不回退软件 adapter或其他 backend。可用 `astra-headless benchmark-render --build-identity ... --output ... --gpu` 生成固定 1920x1080、60 帧预热、600 帧测量的性能报告。
+GPU job 必须先把 profile renderer 绑定为 `wgpu_offscreen`，再给 `run` 或 `serve` 传 `--gpu`；CPU profile 与 flag 混用会阻断。workspace test job 通过 `ASTRA_HEADLESS_GPU=1 cargo test ...` 让 `HeadlessTestContext` 生成 GPU profile 并启动 `serve --gpu`。该模式固定 Windows/DX12、Linux/Vulkan、macOS/Metal；Windows DX12 使用 build-locked static DXC，不读取 PATH 中的动态 DXC。所有平台都要求 hardware adapter，不回退软件 adapter或其他 backend。
+
+正式性能运行在 v3 profile 的 `gpu_adapter` 中精确声明 backend、device type 和 `require_timestamp_query: true`。`astra-headless performance-e2` 只接受 clean Release build、匹配的 package/budget/profile/build identity，并固定执行 1,200 帧 warmup 与 72,000 帧 measurement。产品 workload 通过 `run --performance-budget --performance-report --performance-trace --performance-trace-manifest` 复用同一 package bootstrap 和物理输入，不能用 synthetic report 替代产品路线证据。
+
+先从已校验的普通 Headless profile 派生性能 profile，再由工具写入固定阈值预算。不要手写或在运行后修改 JSON：
+
+```bash
+astra-headless prepare-performance-profile \
+  --input profiles/headless.json \
+  --output evidence/profile-integrated.json \
+  --backend dx12 \
+  --device-type integrated
+
+astra-headless prepare-performance-budget \
+  --profile evidence/profile-integrated.json \
+  --output evidence/scene2d-budget.json \
+  --budget-id scene2d.120hz.run-1 \
+  --kind renderer-stress
+
+astra-headless performance-e2 \
+  --profile evidence/profile-integrated.json \
+  --package evidence/product.astrapkg \
+  --budget evidence/scene2d-budget.json \
+  --report evidence/scene2d-report.json \
+  --trace evidence/scene2d-trace.json \
+  --trace-manifest evidence/scene2d-trace-manifest.json \
+  --build-identity evidence/build-identity.json \
+  --workload scene2d1080p \
+  --run-index 1
+```
+
+800×600 产品压力使用 `product-stress`，完整路线使用 `product-route`，并给 `run` 传对应的 `--performance-*` 参数。压力运行还必须传 `--performance-warmup-frames 1200`；路线不伪造 72,000 个输入 sample，而是按实际 GPU submission 数生成固定预算。三次集显压力报告必须全部通过。独显 profile 和报告放在单独对照目录，不能参与 release decision。
+
+Trace 写入 ignored 目录后，Codex 通过外部 `perfetto-mcp==0.1.4` 的 `find_slices` 和 `execute_sql_query` 查看热点。不要把第三方 MCP 放进仓库，也不要修改 `astra-mcp`。设备名、本地路径和原始 trace 不进入文档、package 或 report。性能报告只证明所声明 adapter、workload 和 E2 identity；Windows E3 仍需另行验收。
 
 产品、Player、样例或 full-playthrough 必须先通过自动比较，再运行 `prepare-review`。模型或具名人工只能按 bundle 查看 required checkpoint、首尾帧、最大差异帧、失败邻近帧和完整 WAV，不得自行省略条目。音频要检查波形、频谱、响度、静音、削波、声道和时长；涉及语音内容或音画同步时还要试听。完成的 `astra.headless_review.v2` 必须再通过 `validate-review`；模型不能覆盖自动失败或自行放宽容差。
 

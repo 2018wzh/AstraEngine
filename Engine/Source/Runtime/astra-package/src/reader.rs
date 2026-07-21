@@ -43,6 +43,12 @@ impl PackageReader {
         Self::finish_open(AstraContainerReader::new(bytes)?)
     }
 
+    pub fn open_verified_container(
+        container: AstraContainerReader,
+    ) -> Result<Self, ContainerError> {
+        Self::finish_open(container)
+    }
+
     pub fn open_with_crypto(
         bytes: &[u8],
         crypto: Arc<dyn crate::ContainerCryptoProvider>,
@@ -80,6 +86,38 @@ impl PackageReader {
     ) -> Result<Self, ContainerError> {
         let container = AstraContainerReader::open_source(source, expected_content_root)?;
         Self::finish_open(container)
+    }
+
+    pub fn open_storage_verified_source(
+        source: Arc<dyn astra_byte_source::BoundedByteSource>,
+        expected_storage_hash: Hash256,
+    ) -> Result<Self, ContainerError> {
+        let container =
+            AstraContainerReader::open_storage_verified_source(source, expected_storage_hash)?;
+        Self::finish_open(container)
+    }
+
+    pub fn open_source_locked_source(
+        source: Arc<dyn astra_byte_source::BoundedByteSource>,
+        expected_storage_hash: Hash256,
+        policy: &crate::SourceUnlockPolicy,
+        bootstrap_section_id: &str,
+        crypto: Arc<dyn crate::ContainerCryptoProvider>,
+    ) -> Result<Self, ContainerError> {
+        let container =
+            AstraContainerReader::open_storage_verified_source(source, expected_storage_hash)?;
+        crate::validate_source_locked_container(&container, policy, bootstrap_section_id)?;
+        Self::finish_open(container.with_crypto_provider(crypto))
+    }
+
+    pub fn open_source_locked_container(
+        container: AstraContainerReader,
+        policy: &crate::SourceUnlockPolicy,
+        bootstrap_section_id: &str,
+        crypto: Arc<dyn crate::ContainerCryptoProvider>,
+    ) -> Result<Self, ContainerError> {
+        crate::validate_source_locked_container(&container, policy, bootstrap_section_id)?;
+        Self::finish_open(container.with_crypto_provider(crypto))
     }
 
     fn finish_open(container: AstraContainerReader) -> Result<Self, ContainerError> {

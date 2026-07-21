@@ -331,7 +331,7 @@ impl PlatformCommandSink {
                     surface: *surface,
                     width: frame.width,
                     height: frame.height,
-                    rgba8: frame.rgba8,
+                    rgba8: frame.rgba8.to_vec(),
                 })
             }
         }

@@ -1254,7 +1254,7 @@ async fn execute_sequence(
                         .map_err(|error| error.to_string())?;
                     if captured.width != *width
                         || captured.height != *height
-                        || captured.rgba8 != *rgba8
+                        || captured.rgba8.as_ref() != rgba8.as_slice()
                     {
                         return Err("ASTRA_EMU_HEADLESS_CHECKPOINT_CAPTURE_MISMATCH".into());
                     }

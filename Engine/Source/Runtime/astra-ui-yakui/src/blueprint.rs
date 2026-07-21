@@ -22,6 +22,10 @@ use crate::{
 
 const MAX_MANAGED_IMAGE_TEXTURES: usize = 128;
 
+pub trait UiImageResourceProvider: Send + Sync {
+    fn load_image(&self, asset: &str) -> Result<TextureFrame, UiValidationError>;
+}
+
 #[derive(Debug, Clone)]
 struct PendingSemantic {
     id: String,
@@ -50,6 +54,7 @@ pub struct BlueprintYakuiRenderer {
     text_input_consumed_sequences: BTreeSet<u64>,
     accessibility_dispatched_events: BTreeSet<(String, String)>,
     image_resources: BTreeMap<String, TextureFrame>,
+    image_resource_provider: Option<Arc<dyn UiImageResourceProvider>>,
     managed_textures: BoundedLru<String, ManagedTextureId>,
     pending_removed_managed_textures: Vec<ManagedTextureId>,
     text_measurer: Option<Arc<dyn AstraTextMeasurer>>,
@@ -71,6 +76,7 @@ impl BlueprintYakuiRenderer {
             text_input_consumed_sequences: BTreeSet::new(),
             accessibility_dispatched_events: BTreeSet::new(),
             image_resources: BTreeMap::new(),
+            image_resource_provider: None,
             managed_textures: BoundedLru::new(MAX_MANAGED_IMAGE_TEXTURES, MAX_TEXTURE_BYTES)?,
             pending_removed_managed_textures: Vec::new(),
             text_measurer: None,
@@ -84,6 +90,14 @@ impl BlueprintYakuiRenderer {
 
     pub fn with_image_resources(mut self, resources: BTreeMap<String, TextureFrame>) -> Self {
         self.image_resources = resources;
+        self
+    }
+
+    pub fn with_image_resource_provider(
+        mut self,
+        provider: Arc<dyn UiImageResourceProvider>,
+    ) -> Self {
+        self.image_resource_provider = Some(provider);
         self
     }
 
@@ -1176,16 +1190,23 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
             if self.managed_textures.get(&asset).is_some() {
                 continue;
             }
-            let frame = self.image_resources.get(&asset).ok_or_else(|| {
-                UiValidationError::invalid(
-                    "ASTRA_UI_IMAGE_RESOURCE_MISSING",
-                    format!("UI blueprint references unavailable packaged asset {asset}"),
-                )
-            })?;
+            let frame = match self.image_resources.get(&asset) {
+                Some(frame) => frame.clone(),
+                None => self
+                    .image_resource_provider
+                    .as_ref()
+                    .ok_or_else(|| {
+                        UiValidationError::invalid(
+                            "ASTRA_UI_IMAGE_RESOURCE_MISSING",
+                            format!("UI blueprint references unavailable packaged asset {asset}"),
+                        )
+                    })?
+                    .load_image(&asset)?,
+            };
             let texture = Texture::new(
                 TextureFormat::Rgba8Srgb,
                 UVec2::new(frame.width, frame.height),
-                frame.rgba8.clone(),
+                frame.rgba8.as_ref().to_vec(),
             );
             let byte_len = frame.rgba8.len();
             let managed = yakui.add_texture(texture);

@@ -254,7 +254,7 @@ pub fn ui_frame_to_scene_commands(
                 width: upload.width,
                 height: upload.height,
                 hash: Hash256::from_sha256(&rgba8),
-                rgba8,
+                rgba8: rgba8.into(),
             },
         });
     }

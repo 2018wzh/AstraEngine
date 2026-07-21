@@ -11,6 +11,7 @@ headless-test-fixtures = []
 
 [dependencies]
 astra-core = { path = "../../Runtime/astra-core" }
+astra-byte-source = { path = "../../Runtime/astra-byte-source" }
 astra-asset = { path = "../../Runtime/astra-asset" }
 astra-media-core = { path = "../../Runtime/astra-media-core" }
 astra-media = { path = "../../Runtime/astra-media" }

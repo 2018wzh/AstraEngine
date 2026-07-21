@@ -341,7 +341,7 @@ fn shaped_clusters_fonts_ruby_voice_and_glyph_bitmaps_reach_renderer() {
     assert_eq!(redraw.len(), 1);
     renderer.capture_frame(&redraw).unwrap();
     let mut conflicting = layout.clone();
-    conflicting.glyph_resources[0].bitmap.pixels[0] ^= 0xff;
+    std::sync::Arc::make_mut(&mut conflicting.glyph_resources[0].bitmap.pixels)[0] ^= 0xff;
     conflicting.glyph_resources[0].bitmap.hash =
         Hash256::from_sha256(&conflicting.glyph_resources[0].bitmap.pixels);
     assert!(resource_owner
@@ -1025,7 +1025,8 @@ fn layout_replay_blocks_request_provider_and_payload_drift_without_advancing() {
     assert!(error.to_string().contains("ASTRA_TEXT_PROVIDER_DRIFT"));
 
     let mut decoded: TextLayoutReplaySnapshot = postcard::from_bytes(&bytes).unwrap();
-    decoded.records[0].layout.glyph_resources[0].bitmap.pixels[0] ^= 0xff;
+    std::sync::Arc::make_mut(&mut decoded.records[0].layout.glyph_resources[0].bitmap.pixels)[0] ^=
+        0xff;
     let tampered = postcard::to_allocvec(&decoded).unwrap();
     let error =
         TextLayoutReplaySession::restore_replay(&tampered, &binding, limits.max_snapshot_bytes)

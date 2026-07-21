@@ -31,7 +31,7 @@ fn commands() -> Vec<SceneCommand> {
                 height: 2,
                 format: GlyphBitmapFormat::Alpha8,
                 hash: Hash256::from_sha256(&pixels),
-                pixels,
+                pixels: pixels.into(),
             },
         },
         SceneCommand::GlyphRun {
@@ -70,7 +70,7 @@ fn live_presentation_report_binds_command_and_capture_identity() {
         &CapturedFrame {
             width: 2,
             height: 2,
-            rgba8: vec![255; 16],
+            rgba8: vec![255; 16].into(),
         },
         [0; 4],
     )
@@ -92,7 +92,7 @@ fn presentation_report_rejects_headless_identity_and_empty_visual_output() {
         &CapturedFrame {
             width: 2,
             height: 2,
-            rgba8: vec![255; 16],
+            rgba8: vec![255; 16].into(),
         },
         [0; 4],
     )
@@ -105,7 +105,7 @@ fn presentation_report_rejects_headless_identity_and_empty_visual_output() {
         &CapturedFrame {
             width: 2,
             height: 2,
-            rgba8: vec![0; 16],
+            rgba8: vec![0; 16].into(),
         },
         [0; 4],
     )

@@ -48,13 +48,16 @@ async fn client_exposes_surface_audio_save_and_package_commands() {
                 .send(Ok(CapturedFrame {
                     width: 1,
                     height: 1,
-                    rgba8: vec![1, 2, 3, 255],
+                    rgba8: vec![1, 2, 3, 255].into(),
                 }))
                 .unwrap();
         }
         other => panic!("unexpected command: {}", other.operation()),
     }
-    assert_eq!(capture.await.unwrap().unwrap().rgba8, [1, 2, 3, 255]);
+    assert_eq!(
+        capture.await.unwrap().unwrap().rgba8.as_ref(),
+        [1, 2, 3, 255]
+    );
 
     let format = tokio::spawn({
         let client = client.clone();

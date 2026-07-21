@@ -1,4 +1,11 @@
-use std::path::{Component, Path, PathBuf};
+use std::{
+    collections::VecDeque,
+    fmt::Debug,
+    io::Write,
+    path::{Component, Path, PathBuf},
+    sync::Arc,
+    time::Instant,
+};
 
 use crate::artifact::ArtifactRecorder;
 use astra_media::{
@@ -16,12 +23,14 @@ use astra_media_core::{
 use astra_platform::{
     host_channel, AudioDeviceFormat, AudioMeter, AudioOutputHandle, AudioOutputState,
     AudioOutputStatus, CapturedFrame, DecodeKind, DecodeOutput, DecodeSessionHandle,
-    HeadlessHostProfile, HeadlessRenderPolicy, HostCommand, HostLaunchProfile, PackageSourceHandle,
-    PackageSourceRequest, PlatformError, PlatformErrorCode, PlatformHostFactory,
-    PlatformHostSession, RgbaFrame, SaveTransactionHandle, SurfaceHandle, WindowHandle,
+    HeadlessHostProfile, HeadlessReadbackPolicy, HeadlessRenderPolicy, HostCommand,
+    HostLaunchProfile, PackageSourceHandle, PackageSourceRequest, PlatformError, PlatformErrorCode,
+    PlatformHostFactory, PlatformHostSession, RgbaFrame, SaveTransactionHandle, SurfaceHandle,
+    WindowHandle,
 };
 use astra_platform_common::{
     AtomicSaveStore, FilePackageSource, ResourceTable, SaveTransaction, WgpuOffscreenRenderer,
+    WgpuPendingProfile, WgpuProfiledSubmission,
 };
 use reqwest::header::{ACCEPT_ENCODING, CONTENT_RANGE, RANGE};
 use sha2::{Digest, Sha256};
@@ -34,6 +43,35 @@ pub struct HeadlessPlatformFactory {
     input_sequence_hash: String,
     https_root_certificates: Vec<Vec<u8>>,
     gpu_enabled: bool,
+    performance_observer: Option<Arc<dyn HeadlessPerformanceObserver>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeadlessGpuFrameSample {
+    pub sequence: u64,
+    pub input_flow_id: Option<u64>,
+    pub scene_build_ns: u64,
+    pub cpu_submit_ns: u64,
+    pub gpu_duration_ns: u64,
+    pub scene_cpu_ns: u64,
+    pub filter_cpu_ns: u64,
+    pub atlas_upload_gpu_ns: u64,
+    pub scene_gpu_ns: u64,
+    pub filter_gpu_ns: u64,
+    pub gpu_resource_bytes: u64,
+    pub atlas_bytes: u64,
+    pub upload_bytes: u64,
+    pub readback_bytes: u64,
+    pub draw_calls: u64,
+    pub queue_submissions: u64,
+    pub pipeline_count: u64,
+    pub heap_allocation_bytes: u64,
+    pub heap_allocation_count: u64,
+}
+
+pub trait HeadlessPerformanceObserver: Debug + Send + Sync {
+    fn bind_gpu_frame(&self, sequence: u64) -> Result<Option<u64>, PlatformError>;
+    fn record_gpu_frame(&self, sample: HeadlessGpuFrameSample) -> Result<(), PlatformError>;
 }
 
 impl HeadlessPlatformFactory {
@@ -45,10 +83,18 @@ impl HeadlessPlatformFactory {
             input_sequence_hash: astra_core::Hash256::from_sha256(&[]).to_string(),
             https_root_certificates: Vec::new(),
             gpu_enabled: false,
+            performance_observer: None,
         }
     }
     pub fn with_gpu(mut self, enabled: bool) -> Self {
         self.gpu_enabled = enabled;
+        self
+    }
+    pub fn with_performance_observer(
+        mut self,
+        observer: Arc<dyn HeadlessPerformanceObserver>,
+    ) -> Self {
+        self.performance_observer = Some(observer);
         self
     }
     pub fn with_input_sequence_hash(mut self, hash: impl Into<String>) -> Self {
@@ -72,6 +118,9 @@ impl PlatformHostFactory for HeadlessPlatformFactory {
             let profile = launch.require_headless()?.clone();
             launch.validate()?;
             validate_provider_bindings(&profile, factory.gpu_enabled)?;
+            if factory.performance_observer.is_some() {
+                astra_platform::validate_headless_performance_profile(&profile)?;
+            }
             let (client, backend, events) = host_channel(
                 launch.clone(),
                 profile.limits.command_queue_capacity,
@@ -199,21 +248,27 @@ struct SurfaceState {
     width: u32,
     height: u32,
     last_sequence: u64,
-    frame: Option<Vec<u8>>,
+    frame: Option<Arc<[u8]>>,
     pending: Option<PendingScene>,
     materialized_sequence: Option<u64>,
     gpu_renderer: Option<WgpuOffscreenRenderer>,
+    pending_gpu_profiles: VecDeque<PendingGpuProfile>,
+    deferred_gpu_resource_commands: Vec<SceneCommand>,
 }
-#[derive(Clone)]
+struct PendingGpuProfile {
+    pending: WgpuPendingProfile,
+    sample: HeadlessGpuFrameSample,
+}
 struct PendingScene {
     sequence: u64,
     width: u32,
     height: u32,
-    renderer: HeadlessRenderer,
+    renderer: Option<HeadlessRenderer>,
     commands: Vec<SceneCommand>,
     gpu_commands: Vec<SceneCommand>,
     clear_rgba: [u8; 4],
     semantics: Option<astra_ui_core::UiSemanticSnapshot>,
+    scene_build_ns: u64,
 }
 struct AudioState {
     channels: u16,
@@ -258,6 +313,7 @@ struct HostState {
     user_authorized_package: Option<PathBuf>,
     artifacts: ArtifactRecorder,
     https_root_certificates: Vec<Vec<u8>>,
+    performance_observer: Option<Arc<dyn HeadlessPerformanceObserver>>,
 }
 
 impl HostState {
@@ -286,6 +342,7 @@ impl HostState {
             user_authorized_package: factory.user_authorized_package,
             artifacts,
             https_root_certificates: factory.https_root_certificates,
+            performance_observer: factory.performance_observer,
         })
     }
 
@@ -299,65 +356,212 @@ impl HostState {
         }
     }
 
+    fn flush_gpu_profile(&mut self, surface: SurfaceHandle) -> Result<(), PlatformError> {
+        let state = self.surfaces.get_mut(surface)?;
+        if state.pending_gpu_profiles.is_empty() {
+            return Ok(());
+        }
+        let renderer = state.gpu_renderer.as_mut().ok_or_else(|| {
+            invalid(
+                "surface.performance",
+                "pending GPU profile has no GPU renderer",
+            )
+        })?;
+        let observer = self.performance_observer.as_ref().ok_or_else(|| {
+            invalid(
+                "surface.performance",
+                "pending GPU profile has no performance observer",
+            )
+        })?;
+        while let Some(profile) = state.pending_gpu_profiles.pop_front() {
+            let submission = renderer.resolve_profiled_submission(profile.pending)?;
+            observer.record_gpu_frame(complete_gpu_sample(profile.sample, submission))?;
+        }
+        Ok(())
+    }
+
     fn materialize_surface(
         &mut self,
         surface: SurfaceHandle,
+        capture: bool,
     ) -> Result<CapturedFrame, PlatformError> {
         if let Some(cached) = {
             let state = self.surfaces.get(surface)?;
             state.frame.as_ref().map(|rgba8| CapturedFrame {
                 width: state.width,
                 height: state.height,
-                rgba8: rgba8.clone(),
+                rgba8: Arc::clone(rgba8),
             })
         } {
             return Ok(cached);
         }
-        let pending = self
+        if self.surfaces.get(surface)?.pending.is_none() {
+            if !capture {
+                let state = self.surfaces.get(surface)?;
+                return Ok(CapturedFrame {
+                    width: state.width,
+                    height: state.height,
+                    rgba8: Arc::<[u8]>::from([]),
+                });
+            }
+            let state = self.surfaces.get_mut(surface)?;
+            let renderer = state.gpu_renderer.as_mut().ok_or_else(|| {
+                invalid("surface.capture", "surface has no pending GPU checkpoint")
+            })?;
+            let captured = renderer.capture_checkpoint()?;
+            self.artifacts.record_rasterized_frame(
+                state.materialized_sequence.ok_or_else(|| {
+                    invalid("surface.capture", "surface has no materialized sequence")
+                })?,
+                captured.width,
+                captured.height,
+                &captured.rgba8,
+            )?;
+            state.frame = Some(Arc::clone(&captured.rgba8));
+            return Ok(captured);
+        }
+        let mut pending = self
             .surfaces
-            .get(surface)?
+            .get_mut(surface)?
             .pending
-            .clone()
+            .take()
             .ok_or_else(|| invalid("surface.capture", "surface has not submitted a scene"))?;
         let captured = {
             let state = self.surfaces.get_mut(surface)?;
             if let Some(renderer) = &mut state.gpu_renderer {
-                renderer.render(&astra_platform::SceneFrame {
+                if let Some(profile) = state.pending_gpu_profiles.front() {
+                    if let Some(submission) =
+                        renderer.try_resolve_profiled_submission(profile.pending)?
+                    {
+                        let profile = state
+                            .pending_gpu_profiles
+                            .pop_front()
+                            .expect("profile queue is not empty");
+                        self.performance_observer
+                            .as_ref()
+                            .ok_or_else(|| {
+                                invalid(
+                                    "surface.performance",
+                                    "pending GPU profile has no performance observer",
+                                )
+                            })?
+                            .record_gpu_frame(complete_gpu_sample(profile.sample, submission))?;
+                    }
+                }
+                if state.pending_gpu_profiles.len() == 4 {
+                    let profile = state
+                        .pending_gpu_profiles
+                        .pop_front()
+                        .expect("profile queue is not empty");
+                    let submission = renderer.resolve_profiled_submission(profile.pending)?;
+                    self.performance_observer
+                        .as_ref()
+                        .ok_or_else(|| {
+                            invalid(
+                                "surface.performance",
+                                "pending GPU profile has no performance observer",
+                            )
+                        })?
+                        .record_gpu_frame(complete_gpu_sample(profile.sample, submission))?;
+                }
+                let frame = astra_platform::SceneFrame {
                     sequence: pending.sequence,
                     width: pending.width,
                     height: pending.height,
                     clear_rgba: pending.clear_rgba,
-                    commands: pending.gpu_commands.clone(),
-                    semantics: pending.semantics.clone(),
-                })?
+                    commands: pending.gpu_commands,
+                    semantics: pending.semantics,
+                };
+                if let Some(observer) = &self.performance_observer {
+                    let pending_profile = renderer.submit_frame_timestamped(&frame)?;
+                    let captured = if capture {
+                        renderer.capture_checkpoint()?
+                    } else {
+                        CapturedFrame {
+                            width: pending.width,
+                            height: pending.height,
+                            rgba8: Arc::<[u8]>::from([]),
+                        }
+                    };
+                    let counters = renderer.performance_counters();
+                    state.pending_gpu_profiles.push_back(PendingGpuProfile {
+                        pending: pending_profile,
+                        sample: HeadlessGpuFrameSample {
+                            sequence: pending.sequence,
+                            input_flow_id: observer.bind_gpu_frame(pending.sequence)?,
+                            scene_build_ns: pending.scene_build_ns,
+                            cpu_submit_ns: 0,
+                            gpu_duration_ns: 0,
+                            scene_cpu_ns: 0,
+                            filter_cpu_ns: 0,
+                            atlas_upload_gpu_ns: 0,
+                            scene_gpu_ns: 0,
+                            filter_gpu_ns: 0,
+                            gpu_resource_bytes: counters.gpu_resource_bytes,
+                            atlas_bytes: counters.atlas_bytes,
+                            upload_bytes: counters.upload_bytes,
+                            readback_bytes: counters.readback_bytes,
+                            draw_calls: counters.draw_calls,
+                            queue_submissions: counters.queue_submissions,
+                            pipeline_count: counters.pipeline_count,
+                            heap_allocation_bytes: counters.engine_allocation_bytes,
+                            heap_allocation_count: counters.engine_allocation_count,
+                        },
+                    });
+                    captured
+                } else if capture {
+                    renderer.render(&frame)?
+                } else {
+                    renderer.submit_frame(&frame)?;
+                    CapturedFrame {
+                        width: pending.width,
+                        height: pending.height,
+                        rgba8: Arc::<[u8]>::from([]),
+                    }
+                }
             } else {
-                let mut renderer = pending.renderer.clone();
+                let mut renderer = pending.renderer.take().ok_or_else(|| {
+                    invalid("surface.capture", "CPU pending renderer is unavailable")
+                })?;
                 let output = renderer
                     .capture_frame(&pending.commands)
                     .map_err(media_error)?;
                 CapturedFrame {
                     width: output.width,
                     height: output.height,
-                    rgba8: output.bytes,
+                    rgba8: output.bytes.into(),
                 }
             }
         };
+        if let Some(renderer) = &self.surfaces.get(surface)?.gpu_renderer {
+            if renderer.performance_counters().gpu_resource_bytes
+                > self.profile.max_gpu_resource_bytes
+            {
+                return Err(invalid(
+                    "surface.capture",
+                    "GPU resources exceed the profile-bound residency budget",
+                ));
+            }
+        }
         if captured.width != pending.width || captured.height != pending.height {
             return Err(invalid(
                 "surface.capture",
                 "materialized frame dimensions do not match the submitted scene",
             ));
         }
-        self.artifacts.record_rasterized_frame(
-            pending.sequence,
-            captured.width,
-            captured.height,
-            &captured.rgba8,
-        )?;
+        if capture {
+            self.artifacts.record_rasterized_frame(
+                pending.sequence,
+                captured.width,
+                captured.height,
+                &captured.rgba8,
+            )?;
+        }
         let state = self.surfaces.get_mut(surface)?;
-        state.frame = Some(captured.rgba8.clone());
+        state.frame = capture.then(|| Arc::clone(&captured.rgba8));
         state.pending = None;
         state.materialized_sequence = Some(pending.sequence);
+        state.deferred_gpu_resource_commands.clear();
         Ok(captured)
     }
 
@@ -368,7 +572,12 @@ impl HostState {
             }
             HostCommand::CreateSurface { request, reply } => {
                 let gpu_renderer = if self.profile.providers.renderer == "wgpu_offscreen" {
-                    match WgpuOffscreenRenderer::new().await {
+                    let renderer = if let Some(policy) = &self.profile.gpu_adapter {
+                        WgpuOffscreenRenderer::new_with_policy(policy).await
+                    } else {
+                        WgpuOffscreenRenderer::new().await
+                    };
+                    match renderer {
                         Ok(renderer) => Some(renderer),
                         Err(error) => {
                             let _ = reply.send(Err(error));
@@ -402,6 +611,8 @@ impl HostState {
                         pending: None,
                         materialized_sequence: None,
                         gpu_renderer,
+                        pending_gpu_profiles: VecDeque::with_capacity(4),
+                        deferred_gpu_resource_commands: Vec::new(),
                     })?;
                     window.surface_count += 1;
                     Ok(handle)
@@ -409,7 +620,7 @@ impl HostState {
                 let _ = reply.send(result);
             }
             HostCommand::CaptureSurface { surface, reply } => {
-                let result = self.materialize_surface(surface);
+                let result = self.materialize_surface(surface, true);
                 let _ = reply.send(result);
             }
             HostCommand::PresentRgba {
@@ -426,7 +637,7 @@ impl HostState {
                             "frame dimensions do not match surface",
                         ));
                     }
-                    let canonical = serde_json::to_vec(&(
+                    let canonical = canonical_json_digest(&(
                         frame.sequence,
                         frame.width,
                         frame.height,
@@ -451,8 +662,9 @@ impl HostState {
                 reply,
             } => {
                 let result = (|| {
+                    let scene_build_started = Instant::now();
                     let sequence = frame.sequence;
-                    let canonical = serde_json::to_vec(&(
+                    let canonical = canonical_json_digest(&(
                         frame.sequence,
                         frame.width,
                         frame.height,
@@ -461,7 +673,7 @@ impl HostState {
                         &frame.semantics,
                     ))
                     .map_err(|_| invalid("surface.present_scene", "scene serialization failed"))?;
-                    let (renderer, pending, materialize) = {
+                    let (journal, pending, deferred_resources, materialize) = {
                         let s = self.surfaces.get(surface)?;
                         ensure_increasing(
                             s.last_sequence,
@@ -474,30 +686,56 @@ impl HostState {
                                 "frame dimensions do not match surface",
                             ));
                         }
-                        let renderer_before_submission = s.renderer.clone();
-                        let mut gpu_commands =
-                            renderer_before_submission.retained_resource_commands();
-                        gpu_commands.extend(frame.commands.clone());
                         let mut commands = Vec::with_capacity(frame.commands.len() + 1);
                         commands.push(SceneCommand::Clear {
                             rgba: frame.clear_rgba,
                         });
                         commands.extend(frame.commands);
-                        let mut renderer = s.renderer.clone();
-                        renderer.submit_frame(&commands).map_err(media_error)?;
+                        let journal = s.renderer.validate_frame(&commands).map_err(media_error)?;
+                        let deferred_resources: Vec<_> = commands
+                            .iter()
+                            .filter(|command| {
+                                matches!(
+                                    command,
+                                    SceneCommand::UploadTexture { .. }
+                                        | SceneCommand::UploadGlyph { .. }
+                                        | SceneCommand::ReleaseResource { .. }
+                                )
+                            })
+                            .cloned()
+                            .collect();
+                        let (pending_renderer, commands, gpu_commands) = if s.gpu_renderer.is_some()
+                        {
+                            let mut gpu_commands = s.deferred_gpu_resource_commands.clone();
+                            gpu_commands.extend(commands.into_iter().skip(1));
+                            (None, Vec::new(), gpu_commands)
+                        } else {
+                            (Some(s.renderer.clone()), commands, Vec::new())
+                        };
                         let pending = PendingScene {
                             sequence,
                             width: frame.width,
                             height: frame.height,
-                            renderer: renderer_before_submission,
+                            renderer: pending_renderer,
                             commands,
                             gpu_commands,
                             clear_rgba: frame.clear_rgba,
-                            semantics: frame.semantics.clone(),
+                            semantics: frame.semantics,
+                            scene_build_ns: scene_build_started
+                                .elapsed()
+                                .as_nanos()
+                                .try_into()
+                                .map_err(|_| {
+                                    invalid(
+                                        "surface.present_scene",
+                                        "scene build duration overflowed",
+                                    )
+                                })?,
                         };
                         (
-                            renderer,
+                            journal,
                             pending,
+                            deferred_resources,
                             self.profile.render_policy == HeadlessRenderPolicy::All
                                 || sequence == 1,
                         )
@@ -508,22 +746,30 @@ impl HostState {
                     self.artifacts.record_submission(sequence, &canonical)?;
                     {
                         let s = self.surfaces.get_mut(surface)?;
-                        s.renderer = renderer;
+                        s.renderer.commit_frame(journal);
                         s.pending = Some(pending);
                         s.frame = None;
                         s.materialized_sequence = None;
                         s.last_sequence = sequence;
+                        if s.gpu_renderer.is_some() {
+                            s.deferred_gpu_resource_commands.extend(deferred_resources);
+                        }
                     }
                     if materialize {
-                        self.materialize_surface(surface)?;
+                        let capture = self.profile.readback_policy
+                            == HeadlessReadbackPolicy::RasterizedFrames;
+                        self.materialize_surface(surface, capture)?;
                     }
                     Ok(())
                 })();
                 let _ = reply.send(result);
             }
             HostCommand::DestroySurface { surface, reply } => {
+                let capture =
+                    self.profile.readback_policy == HeadlessReadbackPolicy::RasterizedFrames;
                 let result = self
-                    .materialize_surface(surface)
+                    .materialize_surface(surface, capture)
+                    .and_then(|_| self.flush_gpu_profile(surface))
                     .and_then(|_| self.surfaces.remove(surface))
                     .and_then(|s| {
                         let window = self.windows.get_mut(s.window)?;
@@ -899,7 +1145,7 @@ fn present_rgba(surface: &mut SurfaceState, frame: RgbaFrame) -> Result<(), Plat
             "frame dimensions do not match surface",
         ));
     }
-    surface.frame = Some(frame.rgba8);
+    surface.frame = Some(frame.rgba8.into());
     surface.pending = None;
     surface.materialized_sequence = Some(frame.sequence);
     surface.last_sequence = frame.sequence;
@@ -1338,6 +1584,20 @@ fn parse_content_range(value: &str) -> Result<(u64, u64, u64), PlatformError> {
     }
     Ok((start, end, total))
 }
+fn complete_gpu_sample(
+    mut sample: HeadlessGpuFrameSample,
+    submission: WgpuProfiledSubmission,
+) -> HeadlessGpuFrameSample {
+    sample.cpu_submit_ns = submission.cpu_submit_ns;
+    sample.gpu_duration_ns = submission.gpu_duration_ns;
+    sample.scene_cpu_ns = submission.scene_cpu_ns;
+    sample.filter_cpu_ns = submission.filter_cpu_ns;
+    sample.atlas_upload_gpu_ns = submission.atlas_upload_gpu_ns;
+    sample.scene_gpu_ns = submission.scene_gpu_ns;
+    sample.filter_gpu_ns = submission.filter_gpu_ns;
+    sample
+}
+
 fn safe_join(root: &Path, relative: &str) -> Result<PathBuf, PlatformError> {
     let path = Path::new(relative);
     if path.is_absolute()
@@ -1353,6 +1613,26 @@ fn safe_join(root: &Path, relative: &str) -> Result<PathBuf, PlatformError> {
     }
     Ok(root.join(path))
 }
+
+struct Sha256Writer<'a>(&'a mut Sha256);
+
+impl Write for Sha256Writer<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn canonical_json_digest(value: &impl serde::Serialize) -> Result<[u8; 32], serde_json::Error> {
+    let mut digest = Sha256::new();
+    serde_json::to_writer(Sha256Writer(&mut digest), value)?;
+    Ok(digest.finalize().into())
+}
+
 fn invalid(operation: &'static str, message: &'static str) -> PlatformError {
     PlatformError::new(PlatformErrorCode::InvalidState, operation, message)
 }

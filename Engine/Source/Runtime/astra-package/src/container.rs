@@ -1,4 +1,6 @@
-use astra_byte_source::{BoundedByteSource, ByteRange, ByteSourceStat, DEFAULT_MAX_RANGE_BYTES};
+use astra_byte_source::{
+    audit_source, BoundedByteSource, ByteRange, ByteSourceStat, DEFAULT_MAX_RANGE_BYTES,
+};
 use astra_core::{Hash256, SchemaVersion};
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -286,7 +288,7 @@ impl AstraContainerBuilder {
 pub struct AstraContainerReader {
     kind: ContainerKind,
     entries: Vec<SectionEntry>,
-    bytes: Vec<u8>,
+    bytes: Arc<[u8]>,
     source: Option<(Arc<dyn BoundedByteSource>, ByteSourceStat)>,
     content_root: Hash256,
     crypto: Option<Arc<dyn ContainerCryptoProvider>>,
@@ -326,6 +328,57 @@ impl AstraContainerReader {
         expected_content_root: Hash256,
     ) -> Result<Self, ContainerError> {
         read_container_source(source, expected_content_root)
+    }
+
+    pub fn open_storage_verified_source(
+        source: Arc<dyn BoundedByteSource>,
+        expected_storage_hash: Hash256,
+    ) -> Result<Self, ContainerError> {
+        let (reader, actual_storage_hash) = Self::open_storage_audited_source(source)?;
+        if actual_storage_hash != expected_storage_hash {
+            return Err(ContainerError::message(
+                "container storage hash does not match launch identity",
+            ));
+        }
+        Ok(reader)
+    }
+
+    pub fn open_storage_audited_source(
+        source: Arc<dyn BoundedByteSource>,
+    ) -> Result<(Self, Hash256), ContainerError> {
+        let before = source
+            .stat()
+            .map_err(|error| ContainerError::message(error.to_string()))?;
+        let actual_storage_hash = audit_source(source.as_ref())
+            .map_err(|error| ContainerError::message(error.to_string()))?;
+        let after = source
+            .stat()
+            .map_err(|error| ContainerError::message(error.to_string()))?;
+        if before != after {
+            return Err(ContainerError::message(
+                "container byte source changed during storage verification",
+            ));
+        }
+        if after.len < FOOTER_LEN as u64 {
+            return Err(ContainerError::message("invalid Astra container length"));
+        }
+        let footer = read_source_range(
+            source.as_ref(),
+            after,
+            ByteRange {
+                offset: after.len - FOOTER_LEN as u64,
+                len: FOOTER_LEN as u64,
+            },
+        )?;
+        if &footer[..8] != FOOTER_MAGIC {
+            return Err(ContainerError::message(
+                "invalid Astra container v2 footer magic",
+            ));
+        }
+        let expected_content_root =
+            Hash256::from_bytes(footer[96..128].try_into().expect("content root"));
+        let reader = read_container_source(source, expected_content_root)?;
+        Ok((reader, actual_storage_hash))
     }
 
     pub fn with_crypto_provider(mut self, crypto: Arc<dyn ContainerCryptoProvider>) -> Self {
@@ -760,7 +813,7 @@ fn read_container(bytes: &[u8]) -> Result<AstraContainerReader, ContainerError> 
     Ok(AstraContainerReader {
         kind,
         entries,
-        bytes: bytes.to_vec(),
+        bytes: Arc::from(bytes),
         source: None,
         content_root,
         crypto: None,
@@ -931,7 +984,7 @@ fn read_container_source(
     Ok(AstraContainerReader {
         kind,
         entries,
-        bytes: Vec::new(),
+        bytes: Arc::from([]),
         source: Some((source, stat)),
         content_root,
         crypto: None,
@@ -1168,6 +1221,26 @@ fn hex_prefix(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[astra_headless_test::test]
+    fn in_memory_reader_clones_share_immutable_container_storage() {
+        let blob = AstraContainerBuilder::new(ContainerKind::Package)
+            .add_section(SectionPayload::raw(
+                "alpha",
+                "schema.alpha",
+                vec![0x5a; 1024 * 1024],
+            ))
+            .write()
+            .unwrap();
+        let reader = AstraContainerReader::new(blob.as_bytes()).unwrap();
+        let clone = reader.clone();
+
+        assert!(Arc::ptr_eq(&reader.bytes, &clone.bytes));
+        assert_eq!(
+            reader.read_section("alpha").unwrap(),
+            vec![0x5a; 1024 * 1024]
+        );
+    }
 
     #[astra_headless_test::test]
     fn reader_rejects_duplicate_ids_from_a_tampered_authority_table() {

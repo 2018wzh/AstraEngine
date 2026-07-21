@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use astra_core::Hash256;
 use schemars::JsonSchema;
@@ -151,7 +151,7 @@ impl Transform2D {
 pub struct TextureFrame {
     pub width: u32,
     pub height: u32,
-    pub rgba8: Vec<u8>,
+    pub rgba8: Arc<[u8]>,
     pub hash: Hash256,
 }
 
@@ -167,7 +167,7 @@ pub struct GlyphBitmap {
     pub width: u32,
     pub height: u32,
     pub format: GlyphBitmapFormat,
-    pub pixels: Vec<u8>,
+    pub pixels: Arc<[u8]>,
     pub hash: Hash256,
 }
 
@@ -393,11 +393,20 @@ impl HeadlessRenderer {
     }
 
     /// Validates and transactionally commits the retained resource state without
-    /// allocating or rasterizing a render target. A later materialization can use
-    /// a clone taken before this call plus the same command stream.
+    /// cloning the retained maps or rasterizing a render target.
     pub fn submit_frame(&mut self, commands: &[DrawCommand]) -> Result<(), MediaError> {
-        let mut textures = self.textures.clone();
-        let mut glyphs = self.glyphs.clone();
+        let journal = self.validate_frame(commands)?;
+        self.commit_frame(journal);
+        Ok(())
+    }
+
+    /// Builds an immutable mutation journal after validating the complete scene.
+    /// Pixel payloads remain shared through `Arc`; retained state is untouched.
+    pub fn validate_frame(
+        &self,
+        commands: &[DrawCommand],
+    ) -> Result<RetainedResourceJournal, MediaError> {
+        let mut mutations = Vec::new();
         let mut clip_depth = 1_usize;
         let mut transform_depth = 1_usize;
         let mut opacity_depth = 1_usize;
@@ -405,31 +414,44 @@ impl HeadlessRenderer {
             match command {
                 DrawCommand::UploadTexture { resource_id, frame } => {
                     validate_texture(frame)?;
-                    if textures
-                        .insert(resource_id.clone(), frame.clone())
-                        .is_some()
-                    {
+                    if retained_resource_exists(
+                        &self.textures,
+                        &self.glyphs,
+                        &mutations,
+                        resource_id,
+                    ) {
                         return Err(MediaError::message(
                             "ASTRA_MEDIA_RESOURCE_DUPLICATE: texture resource is already uploaded",
                         ));
                     }
+                    mutations.push(RetainedResourceMutation::UploadTexture { resource_id, frame });
                 }
                 DrawCommand::UploadGlyph { resource_id, glyph } => {
                     validate_glyph(glyph)?;
-                    if glyphs.insert(resource_id.clone(), glyph.clone()).is_some() {
+                    if retained_resource_exists(
+                        &self.textures,
+                        &self.glyphs,
+                        &mutations,
+                        resource_id,
+                    ) {
                         return Err(MediaError::message(
                             "ASTRA_MEDIA_RESOURCE_DUPLICATE: glyph resource is already uploaded",
                         ));
                     }
+                    mutations.push(RetainedResourceMutation::UploadGlyph { resource_id, glyph });
                 }
                 DrawCommand::ReleaseResource { resource_id } => {
-                    if !(textures.remove(resource_id).is_some()
-                        | glyphs.remove(resource_id).is_some())
-                    {
+                    if !retained_resource_exists(
+                        &self.textures,
+                        &self.glyphs,
+                        &mutations,
+                        resource_id,
+                    ) {
                         return Err(MediaError::message(
                             "ASTRA_MEDIA_RESOURCE_UNKNOWN: released resource is not uploaded",
                         ));
                     }
+                    mutations.push(RetainedResourceMutation::Release { resource_id });
                 }
                 DrawCommand::Sprite {
                     texture_id,
@@ -438,11 +460,12 @@ impl HeadlessRenderer {
                     ..
                 } => {
                     validate_opacity(*opacity)?;
-                    let texture = textures.get(texture_id).ok_or_else(|| {
-                        MediaError::message(
-                            "ASTRA_MEDIA_RESOURCE_UNKNOWN: sprite texture is not uploaded",
-                        )
-                    })?;
+                    let texture = retained_texture(&self.textures, &mutations, texture_id)
+                        .ok_or_else(|| {
+                            MediaError::message(
+                                "ASTRA_MEDIA_RESOURCE_UNKNOWN: sprite texture is not uploaded",
+                            )
+                        })?;
                     if let Some(source) = source {
                         validate_source_rect(texture, *source)?;
                     }
@@ -454,7 +477,8 @@ impl HeadlessRenderer {
                 } => {
                     validate_opacity(*opacity)?;
                     for instance in instances {
-                        if !glyphs.contains_key(&instance.resource_id) {
+                        if retained_glyph(&self.glyphs, &mutations, &instance.resource_id).is_none()
+                        {
                             return Err(MediaError::message(
                                 "ASTRA_MEDIA_RESOURCE_UNKNOWN: glyph resource is not uploaded",
                             ));
@@ -488,7 +512,7 @@ impl HeadlessRenderer {
                     match (material, texture_id) {
                         (MeshMaterial2D::Solid, None) => {}
                         (MeshMaterial2D::ColorTexture | MeshMaterial2D::GlyphMask, Some(id))
-                            if textures.contains_key(id) => {}
+                            if retained_texture(&self.textures, &mutations, id).is_some() => {}
                         _ => {
                             return Err(MediaError::message(
                                 "ASTRA_MEDIA_MESH_MATERIAL: mesh material and texture mismatch",
@@ -555,10 +579,158 @@ impl HeadlessRenderer {
                 "ASTRA_MEDIA_SCENE_STACK: scene command stacks are unbalanced",
             ));
         }
-        self.textures = textures;
-        self.glyphs = glyphs;
-        Ok(())
+        Ok(RetainedResourceJournal {
+            mutations: mutations
+                .into_iter()
+                .map(OwnedRetainedResourceMutation::from)
+                .collect(),
+        })
     }
+
+    /// Commits a journal produced by `validate_frame` without another validation
+    /// or retained-map copy.
+    pub fn commit_frame(&mut self, journal: RetainedResourceJournal) {
+        for mutation in journal.mutations {
+            match mutation {
+                OwnedRetainedResourceMutation::UploadTexture { resource_id, frame } => {
+                    self.textures.insert(resource_id, frame);
+                }
+                OwnedRetainedResourceMutation::UploadGlyph { resource_id, glyph } => {
+                    self.glyphs.insert(resource_id, glyph);
+                }
+                OwnedRetainedResourceMutation::Release { resource_id } => {
+                    self.textures.remove(&resource_id);
+                    self.glyphs.remove(&resource_id);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct RetainedResourceJournal {
+    mutations: Vec<OwnedRetainedResourceMutation>,
+}
+
+#[derive(Debug)]
+enum OwnedRetainedResourceMutation {
+    UploadTexture {
+        resource_id: String,
+        frame: TextureFrame,
+    },
+    UploadGlyph {
+        resource_id: String,
+        glyph: GlyphBitmap,
+    },
+    Release {
+        resource_id: String,
+    },
+}
+
+#[derive(Debug)]
+enum RetainedResourceMutation<'a> {
+    UploadTexture {
+        resource_id: &'a str,
+        frame: &'a TextureFrame,
+    },
+    UploadGlyph {
+        resource_id: &'a str,
+        glyph: &'a GlyphBitmap,
+    },
+    Release {
+        resource_id: &'a str,
+    },
+}
+
+impl From<RetainedResourceMutation<'_>> for OwnedRetainedResourceMutation {
+    fn from(value: RetainedResourceMutation<'_>) -> Self {
+        match value {
+            RetainedResourceMutation::UploadTexture { resource_id, frame } => Self::UploadTexture {
+                resource_id: resource_id.to_owned(),
+                frame: frame.clone(),
+            },
+            RetainedResourceMutation::UploadGlyph { resource_id, glyph } => Self::UploadGlyph {
+                resource_id: resource_id.to_owned(),
+                glyph: glyph.clone(),
+            },
+            RetainedResourceMutation::Release { resource_id } => Self::Release {
+                resource_id: resource_id.to_owned(),
+            },
+        }
+    }
+}
+
+fn retained_resource_exists(
+    textures: &BTreeMap<String, TextureFrame>,
+    glyphs: &BTreeMap<String, GlyphBitmap>,
+    mutations: &[RetainedResourceMutation<'_>],
+    resource_id: &str,
+) -> bool {
+    for mutation in mutations.iter().rev() {
+        match mutation {
+            RetainedResourceMutation::UploadTexture {
+                resource_id: candidate,
+                ..
+            }
+            | RetainedResourceMutation::UploadGlyph {
+                resource_id: candidate,
+                ..
+            } if *candidate == resource_id => return true,
+            RetainedResourceMutation::Release {
+                resource_id: candidate,
+            } if *candidate == resource_id => return false,
+            _ => {}
+        }
+    }
+    textures.contains_key(resource_id) || glyphs.contains_key(resource_id)
+}
+
+fn retained_texture<'a>(
+    textures: &'a BTreeMap<String, TextureFrame>,
+    mutations: &'a [RetainedResourceMutation<'a>],
+    resource_id: &str,
+) -> Option<&'a TextureFrame> {
+    for mutation in mutations.iter().rev() {
+        match mutation {
+            RetainedResourceMutation::UploadTexture {
+                resource_id: candidate,
+                frame,
+            } if *candidate == resource_id => return Some(frame),
+            RetainedResourceMutation::UploadGlyph {
+                resource_id: candidate,
+                ..
+            }
+            | RetainedResourceMutation::Release {
+                resource_id: candidate,
+            } if *candidate == resource_id => return None,
+            _ => {}
+        }
+    }
+    textures.get(resource_id)
+}
+
+fn retained_glyph<'a>(
+    glyphs: &'a BTreeMap<String, GlyphBitmap>,
+    mutations: &'a [RetainedResourceMutation<'a>],
+    resource_id: &str,
+) -> Option<&'a GlyphBitmap> {
+    for mutation in mutations.iter().rev() {
+        match mutation {
+            RetainedResourceMutation::UploadGlyph {
+                resource_id: candidate,
+                glyph,
+            } if *candidate == resource_id => return Some(glyph),
+            RetainedResourceMutation::UploadTexture {
+                resource_id: candidate,
+                ..
+            }
+            | RetainedResourceMutation::Release {
+                resource_id: candidate,
+            } if *candidate == resource_id => return None,
+            _ => {}
+        }
+    }
+    glyphs.get(resource_id)
 }
 
 fn validate_source_rect(frame: &TextureFrame, source: RectI) -> Result<(), MediaError> {
@@ -994,7 +1166,7 @@ fn crop_texture(frame: &TextureFrame, source: RectI) -> Result<TextureFrame, Med
         width: source.width,
         height: source.height,
         hash: Hash256::from_sha256(&rgba8),
-        rgba8,
+        rgba8: rgba8.into(),
     })
 }
 
@@ -1013,7 +1185,7 @@ fn draw_solid(
     let frame = TextureFrame {
         width: 1,
         height: 1,
-        rgba8: rgba.to_vec(),
+        rgba8: rgba.to_vec().into(),
         hash: Hash256::from_sha256(&rgba),
     };
     draw_texture(
@@ -1106,7 +1278,7 @@ fn draw_glyph(
     let mut rgba8 = Vec::with_capacity(glyph.width as usize * glyph.height as usize * 4);
     match glyph.format {
         GlyphBitmapFormat::Alpha8 => {
-            for alpha in &glyph.pixels {
+            for alpha in glyph.pixels.iter() {
                 rgba8.extend_from_slice(&[
                     rgba[0],
                     rgba[1],
@@ -1130,7 +1302,7 @@ fn draw_glyph(
         width: glyph.width,
         height: glyph.height,
         hash: Hash256::from_sha256(&rgba8),
-        rgba8,
+        rgba8: rgba8.into(),
     };
     let frame = rotate_texture_clockwise(frame, rotation_quadrants % 4);
     draw_texture(
@@ -1164,7 +1336,7 @@ fn rotate_texture_clockwise(mut frame: TextureFrame, quadrants: u8) -> TextureFr
             width: frame.height,
             height: frame.width,
             hash: Hash256::from_sha256(&rotated),
-            rgba8: rotated,
+            rgba8: rotated.into(),
         };
     }
     frame

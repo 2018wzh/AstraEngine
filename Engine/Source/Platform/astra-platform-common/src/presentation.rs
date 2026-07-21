@@ -594,7 +594,7 @@ impl WgpuReadback {
         Ok(CapturedFrame {
             width: self.width,
             height: self.height,
-            rgba8,
+            rgba8: rgba8.into(),
         })
     }
 }

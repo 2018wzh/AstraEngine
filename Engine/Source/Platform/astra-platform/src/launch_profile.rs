@@ -8,7 +8,8 @@ use crate::{
     PlatformHostProfile, PlatformId,
 };
 
-pub const HEADLESS_HOST_PROFILE_SCHEMA: &str = "astra.headless_host_profile.v2";
+pub const HEADLESS_HOST_PROFILE_SCHEMA: &str = "astra.headless_host_profile.v3";
+pub const HEADLESS_HOST_PROFILE_V2_SCHEMA: &str = "astra.headless_host_profile.v2";
 pub const HEADLESS_INPUT_POLICY_SCHEMA: &str = "astra.headless_input_policy.v1";
 pub const USER_INPUT_SEQUENCE_SCHEMA: &str = "astra.user_input_sequence.v1";
 pub const HEADLESS_PROTOCOL_SCHEMA: &str = "astra.headless_protocol.v1";
@@ -37,6 +38,43 @@ pub enum HeadlessArtifactRetention {
 pub enum HeadlessRenderPolicy {
     All,
     Checkpoints,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HeadlessReadbackPolicy {
+    RasterizedFrames,
+    CheckpointsOnly,
+}
+
+const fn default_headless_readback_policy() -> HeadlessReadbackPolicy {
+    HeadlessReadbackPolicy::RasterizedFrames
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GpuBackendPolicy {
+    Dx12,
+    Vulkan,
+    Metal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GpuDeviceTypePolicy {
+    Integrated,
+    Discrete,
+    AnyHardware,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GpuAdapterPolicy {
+    pub backend: GpuBackendPolicy,
+    pub device_type: GpuDeviceTypePolicy,
+    pub require_timestamp_query: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter_identity_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -107,14 +145,30 @@ pub struct HeadlessHostProfile {
     pub audio_sample_format: String,
     pub audio_artifact_format: String,
     pub providers: HeadlessProviderBindings,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_adapter: Option<GpuAdapterPolicy>,
     pub render_policy: HeadlessRenderPolicy,
+    #[serde(default = "default_headless_readback_policy")]
+    pub readback_policy: HeadlessReadbackPolicy,
     pub input: HeadlessInputPolicy,
     pub artifacts: HeadlessArtifactPolicy,
     pub package_sources: Vec<PackageSourcePolicy>,
     pub max_package_bytes: u64,
     pub max_decode_output_bytes: u64,
+    #[serde(default = "default_decoded_cache_bytes")]
+    pub max_decoded_cache_bytes: u64,
+    #[serde(default = "default_gpu_resource_bytes")]
+    pub max_gpu_resource_bytes: u64,
     pub max_video_frames: u64,
     pub limits: HostLimits,
+}
+
+const fn default_decoded_cache_bytes() -> u64 {
+    192 * 1024 * 1024
+}
+
+const fn default_gpu_resource_bytes() -> u64 {
+    256 * 1024 * 1024
 }
 
 impl HeadlessHostProfile {
@@ -145,7 +199,9 @@ impl HeadlessHostProfile {
                 package: "verified_bounded".to_string(),
                 product_adapter: "astra.native_vn".to_string(),
             },
+            gpu_adapter: None,
             render_policy: HeadlessRenderPolicy::Checkpoints,
+            readback_policy: HeadlessReadbackPolicy::RasterizedFrames,
             tick_duration_ns: HEADLESS_TICK_DURATION_NS,
             frame_format: "rgba8_srgb".to_string(),
             image_artifact_format: "png".to_string(),
@@ -176,6 +232,8 @@ impl HeadlessHostProfile {
             package_sources: vec![PackageSourcePolicy::Bundled],
             max_package_bytes: 8 * 1024 * 1024 * 1024,
             max_decode_output_bytes: 512 * 1024 * 1024,
+            max_decoded_cache_bytes: 192 * 1024 * 1024,
+            max_gpu_resource_bytes: 256 * 1024 * 1024,
             max_video_frames: 18_000,
             limits: HostLimits::default(),
         }
@@ -291,8 +349,10 @@ impl HostLaunchProfile {
 }
 
 pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(), PlatformError> {
-    if profile.schema != HEADLESS_HOST_PROFILE_SCHEMA
-        || profile.input.schema != HEADLESS_INPUT_POLICY_SCHEMA
+    if !matches!(
+        profile.schema.as_str(),
+        HEADLESS_HOST_PROFILE_SCHEMA | HEADLESS_HOST_PROFILE_V2_SCHEMA
+    ) || profile.input.schema != HEADLESS_INPUT_POLICY_SCHEMA
         || profile.input.protocol_schema != USER_INPUT_SEQUENCE_SCHEMA
     {
         return Err(invalid_headless_profile(
@@ -374,6 +434,22 @@ pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(
             );
         }
     }
+    if profile.schema == HEADLESS_HOST_PROFILE_V2_SCHEMA && profile.gpu_adapter.is_some() {
+        return Err(invalid_headless_profile(
+            "headless v2 profile cannot declare a v3 GPU adapter policy",
+        ));
+    }
+    if let Some(policy) = &profile.gpu_adapter {
+        if policy
+            .adapter_identity_hash
+            .as_deref()
+            .is_some_and(|value| !is_sha256(value))
+        {
+            return Err(invalid_headless_profile(
+                "headless GPU adapter identity must be a full sha256 value",
+            ));
+        }
+    }
     if profile.input.max_messages == 0
         || profile.input.max_tick == 0
         || profile.input.transports.is_empty()
@@ -408,6 +484,9 @@ pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(
     if profile.package_sources.is_empty()
         || profile.max_package_bytes == 0
         || profile.max_decode_output_bytes == 0
+        || profile.max_decoded_cache_bytes == 0
+        || profile.max_decoded_cache_bytes > profile.max_decode_output_bytes
+        || profile.max_gpu_resource_bytes == 0
         || profile.max_video_frames == 0
         || profile.max_package_bytes < profile.limits.max_package_read_bytes as u64
     {
@@ -417,6 +496,28 @@ pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(
     }
     validate_headless_package_sources(&profile.package_sources)?;
     validate_host_limits(&profile.limits)
+}
+
+pub fn validate_headless_performance_profile(
+    profile: &HeadlessHostProfile,
+) -> Result<&GpuAdapterPolicy, PlatformError> {
+    validate_headless_host_profile(profile)?;
+    let policy = profile.gpu_adapter.as_ref().ok_or_else(|| {
+        invalid_headless_profile("performance E2 requires an explicit GPU adapter policy")
+    })?;
+    if profile.schema != HEADLESS_HOST_PROFILE_SCHEMA
+        || profile.providers.renderer != "wgpu_offscreen"
+        || !policy.require_timestamp_query
+        || profile.render_policy != HeadlessRenderPolicy::All
+        || profile.readback_policy != HeadlessReadbackPolicy::CheckpointsOnly
+        || profile.max_decoded_cache_bytes > 192 * 1024 * 1024
+        || profile.max_gpu_resource_bytes > 256 * 1024 * 1024
+    {
+        return Err(invalid_headless_profile(
+            "performance E2 requires headless v3, all-frame GPU submission, checkpoint-only readback, and timestamp queries",
+        ));
+    }
+    Ok(policy)
 }
 
 fn validate_headless_package_sources(

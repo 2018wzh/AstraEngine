@@ -2,12 +2,13 @@ use std::fs;
 use std::sync::Arc;
 
 use astra_headless_protocol::ArtifactManifest;
+use astra_media_core::{BlendMode, RectI, SceneCommand, TextureFrame};
 #[cfg(feature = "ffmpeg-vcpkg")]
 use astra_platform::DecodeOutput;
 use astra_platform::{
-    AudioOutputRequest, AudioPacket, DecodeKind, HeadlessHostProfile, PackageSourcePolicy,
-    PackageSourceRequest, PlatformDecodeRequest, PlatformErrorCode, PlatformHostFactory, RgbaFrame,
-    SceneFrame, SurfaceRequest, WindowRequest,
+    AudioOutputRequest, AudioPacket, DecodeKind, HeadlessHostProfile, HeadlessReadbackPolicy,
+    HeadlessRenderPolicy, PackageSourcePolicy, PackageSourceRequest, PlatformDecodeRequest,
+    PlatformErrorCode, PlatformHostFactory, RgbaFrame, SceneFrame, SurfaceRequest, WindowRequest,
 };
 use astra_platform_headless::HeadlessPlatformFactory;
 use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
@@ -257,6 +258,172 @@ async fn gpu_profile_renders_captures_and_records_native_backend_identity() {
     ));
 }
 
+#[tokio::test]
+#[ignore = "requires a native hardware GPU runner"]
+async fn gpu_sparse_frames_defer_retained_resource_mutations_until_materialization() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut profile = HeadlessHostProfile::reference(
+        "headless-gpu-test",
+        "com.example.gpu-retained",
+        hash(b"build"),
+        hash(b"package"),
+    );
+    profile.providers.renderer = "wgpu_offscreen".into();
+    let session = HeadlessPlatformFactory::new(temp.path().join("artifacts"), temp.path())
+        .with_gpu(true)
+        .start(profile.into())
+        .await
+        .unwrap();
+    let client = session.client;
+    let window = client
+        .create_window(WindowRequest {
+            title: "Retained".into(),
+            width: 2,
+            height: 2,
+            visible: false,
+        })
+        .await
+        .unwrap();
+    let surface = client
+        .create_surface(SurfaceRequest {
+            window,
+            width: 2,
+            height: 2,
+        })
+        .await
+        .unwrap();
+    client
+        .present_scene(
+            surface,
+            SceneFrame {
+                sequence: 1,
+                width: 2,
+                height: 2,
+                clear_rgba: [0, 0, 0, 255],
+                commands: Vec::new(),
+                semantics: None,
+            },
+        )
+        .await
+        .unwrap();
+    let pixels: Arc<[u8]> = [255, 0, 0, 255].repeat(4).into();
+    client
+        .present_scene(
+            surface,
+            SceneFrame {
+                sequence: 2,
+                width: 2,
+                height: 2,
+                clear_rgba: [0, 0, 0, 255],
+                commands: vec![SceneCommand::UploadTexture {
+                    resource_id: "retained.texture".into(),
+                    frame: TextureFrame {
+                        width: 2,
+                        height: 2,
+                        hash: astra_core::Hash256::from_sha256(&pixels),
+                        rgba8: pixels,
+                    },
+                }],
+                semantics: None,
+            },
+        )
+        .await
+        .unwrap();
+    client
+        .present_scene(
+            surface,
+            SceneFrame {
+                sequence: 3,
+                width: 2,
+                height: 2,
+                clear_rgba: [0, 0, 0, 255],
+                commands: vec![SceneCommand::Sprite {
+                    id: "retained.sprite".into(),
+                    texture_id: "retained.texture".into(),
+                    source: None,
+                    destination: RectI::new(0, 0, 2, 2),
+                    opacity: 1.0,
+                    blend: BlendMode::Alpha,
+                }],
+                semantics: None,
+            },
+        )
+        .await
+        .unwrap();
+    let captured = client.capture_surface(surface).await.unwrap();
+    assert!(captured
+        .rgba8
+        .chunks_exact(4)
+        .all(|pixel| pixel == [255, 0, 0, 255]));
+    client.destroy_surface(surface).await.unwrap();
+    client.destroy_window(window).await.unwrap();
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires a native hardware GPU runner"]
+async fn performance_gpu_submits_every_frame_but_reads_back_only_checkpoints() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut profile = HeadlessHostProfile::reference(
+        "headless-performance-test",
+        "com.example.performance",
+        hash(b"build"),
+        hash(b"package"),
+    );
+    profile.providers.renderer = "wgpu_offscreen".into();
+    profile.render_policy = HeadlessRenderPolicy::All;
+    profile.readback_policy = HeadlessReadbackPolicy::CheckpointsOnly;
+    let root = temp.path().join("artifacts");
+    let session = HeadlessPlatformFactory::new(&root, temp.path())
+        .with_gpu(true)
+        .start(profile.into())
+        .await
+        .unwrap();
+    let client = session.client;
+    let window = client
+        .create_window(WindowRequest {
+            title: "GPU performance".into(),
+            width: 8,
+            height: 8,
+            visible: false,
+        })
+        .await
+        .unwrap();
+    let surface = client
+        .create_surface(SurfaceRequest {
+            window,
+            width: 8,
+            height: 8,
+        })
+        .await
+        .unwrap();
+    for sequence in 1..=2 {
+        client
+            .present_scene(
+                surface,
+                SceneFrame {
+                    sequence,
+                    width: 8,
+                    height: 8,
+                    clear_rgba: [sequence as u8, 8, 16, 255],
+                    commands: Vec::new(),
+                    semantics: None,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let capture = client.capture_surface(surface).await.unwrap();
+    assert_eq!(capture.rgba8.len(), 8 * 8 * 4);
+    client.destroy_surface(surface).await.unwrap();
+    client.destroy_window(window).await.unwrap();
+    client.shutdown().await.unwrap();
+    let manifest: ArtifactManifest =
+        serde_json::from_slice(&fs::read(root.join("artifact-manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest.submitted_frame_count, 2);
+    assert_eq!(manifest.rasterized_frame_count, 1);
+}
+
 fn expected_gpu_backend() -> &'static str {
     if cfg!(target_os = "windows") {
         "dx12"
@@ -427,7 +594,15 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
         )
         .await
         .unwrap();
-    assert_eq!(client.capture_surface(surface).await.unwrap().rgba8, pixels);
+    assert_eq!(
+        client
+            .capture_surface(surface)
+            .await
+            .unwrap()
+            .rgba8
+            .as_ref(),
+        pixels.as_slice()
+    );
     client
         .present_scene(
             surface,

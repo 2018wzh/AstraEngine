@@ -52,7 +52,7 @@ fn cpu_reference_compositor_executes_texture_glyph_clip_transform_and_blend() {
         width: 2,
         height: 1,
         hash: Hash256::from_sha256(&texture_bytes),
-        rgba8: texture_bytes,
+        rgba8: texture_bytes.into(),
     };
     let commands = vec![
         DrawCommand::clear([0, 0, 32, 255]),
@@ -75,7 +75,7 @@ fn cpu_reference_compositor_executes_texture_glyph_clip_transform_and_blend() {
                 width: 2,
                 height: 2,
                 format: GlyphBitmapFormat::Alpha8,
-                pixels: vec![255, 0, 0, 255],
+                pixels: vec![255, 0, 0, 255].into(),
                 hash: Hash256::from_sha256(&[255, 0, 0, 255]),
             },
             x: 0,
@@ -112,7 +112,7 @@ fn scene_resources_are_uploaded_reused_cropped_and_released_explicitly() {
         width: 2,
         height: 1,
         hash: Hash256::from_sha256(&rgba8),
-        rgba8,
+        rgba8: rgba8.into(),
     };
     let rendered = renderer
         .capture_frame(&[
@@ -162,7 +162,7 @@ fn compositor_blocks_corrupt_texture_and_unbalanced_state() {
     let corrupt = TextureFrame {
         width: 1,
         height: 1,
-        rgba8: vec![1, 2, 3, 4],
+        rgba8: vec![1, 2, 3, 4].into(),
         hash: Hash256::from_sha256(b"wrong"),
     };
     assert!(renderer
@@ -199,7 +199,7 @@ fn resource_updates_are_transactional_and_color_glyphs_preserve_rgba() {
         height: 1,
         format: GlyphBitmapFormat::Rgba8,
         hash: Hash256::from_sha256(&color),
-        pixels: color,
+        pixels: color.into(),
     };
     let failure = renderer
         .capture_frame(&[

@@ -3386,6 +3386,7 @@ fn build_standalone_bundle_into(
 ) -> Result<StandaloneBundleManifest, CliError> {
     let platform_name = platform_id_name(platform);
     let package_bytes = fs::read(package)?;
+    let package_storage_hash = Hash256::from_sha256(&package_bytes).to_string();
     let raw_container = astra_package::AstraContainerReader::new(&package_bytes)?;
     let source_locked = raw_container.has_section("source.unlock");
     if source_locked && platform != PlatformId::Windows {
@@ -3570,6 +3571,7 @@ fn build_standalone_bundle_into(
                 target,
                 profile,
                 platform_name,
+                &package_storage_hash,
                 &display_config,
                 &locale_config,
                 ui_components.as_ref(),
@@ -3602,6 +3604,7 @@ fn build_standalone_bundle_into(
                 target,
                 profile,
                 platform_name,
+                &package_storage_hash,
                 &display_config,
                 &locale_config,
                 ui_components.as_ref(),
@@ -3666,6 +3669,7 @@ fn build_standalone_bundle_into(
                 target,
                 profile,
                 platform_name,
+                &package_storage_hash,
                 &display_config,
                 &locale_config,
                 ui_components.as_ref(),
@@ -3723,6 +3727,7 @@ fn build_standalone_bundle_into(
                 target,
                 profile,
                 platform_name,
+                &package_storage_hash,
                 &display_config,
                 &locale_config,
                 ui_components.as_ref(),
@@ -3812,6 +3817,7 @@ fn build_standalone_bundle_into(
                 target,
                 profile,
                 platform_name,
+                &package_storage_hash,
                 &display_config,
                 &locale_config,
                 ui_components.as_ref(),
@@ -3846,7 +3852,7 @@ fn build_standalone_bundle_into(
         profile: profile.to_string(),
         platform: platform_name.to_string(),
         entrypoint,
-        package_hash: Hash256::from_sha256(&package_bytes).to_string(),
+        package_hash: package_storage_hash,
         package: if platform == PlatformId::Macos {
             "Contents/Resources/package/nativevn.astrapkg".to_string()
         } else {
@@ -4168,6 +4174,7 @@ fn player_config_bytes(
     target: &str,
     profile: &str,
     platform_name: &str,
+    package_storage_hash: &str,
     display_config: &Option<PlayerDisplayConfig>,
     locale_config: &PlayerLocaleConfig,
     ui_components: Option<&serde_json::Value>,
@@ -4195,6 +4202,7 @@ fn player_config_bytes(
         "platform": platform_name,
         "locale": locale_config.default_locale,
         "package": "package/nativevn.astrapkg",
+        "package_storage_hash": package_storage_hash,
         "observability": observability
     });
     if let Some(display) = display_config {

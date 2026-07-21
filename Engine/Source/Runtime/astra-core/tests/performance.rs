@@ -1,7 +1,7 @@
 use astra_core::{
     validate_performance_report, PerformanceBudget, PerformanceMetricBudget, PerformanceRecorder,
-    PerformanceRunIdentity, PerformanceStatus, PerformanceThresholds, PerformanceUnit,
-    PERFORMANCE_BUDGET_SCHEMA,
+    PerformanceRunIdentity, PerformanceStatus, PerformanceThresholds, PerformanceTraceManifest,
+    PerformanceUnit, PERFORMANCE_BUDGET_SCHEMA, PERFORMANCE_TRACE_MANIFEST_SCHEMA,
 };
 
 fn identity() -> PerformanceRunIdentity {
@@ -15,6 +15,31 @@ fn identity() -> PerformanceRunIdentity {
         build_fingerprint: format!("sha256:{}", "d".repeat(64)),
         session_id: "session.native.1".into(),
     }
+}
+
+#[astra_headless_test::test]
+fn trace_manifest_rejects_loss_truncation_and_identity_drift() {
+    let mut manifest = PerformanceTraceManifest {
+        schema: PERFORMANCE_TRACE_MANIFEST_SCHEMA.into(),
+        identity: identity(),
+        workload_id: "demo.800x600.120hz".into(),
+        adapter_identity_hash: format!("sha256:{}", "1".repeat(64)),
+        driver_identity_hash: format!("sha256:{}", "2".repeat(64)),
+        report_hash: format!("sha256:{}", "3".repeat(64)),
+        trace_hash: format!("sha256:{}", "4".repeat(64)),
+        event_count: 12,
+        dropped_event_count: 0,
+        byte_length: 1024,
+        truncated: false,
+        timestamps_monotonic: true,
+    };
+    manifest.validate().unwrap();
+
+    manifest.dropped_event_count = 1;
+    assert!(manifest.validate().is_err());
+    manifest.dropped_event_count = 0;
+    manifest.truncated = true;
+    assert!(manifest.validate().is_err());
 }
 
 fn budget() -> PerformanceBudget {

@@ -7,6 +7,9 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+astra-byte-source = { path = "../astra-byte-source" }
+astra-core = { path = "../astra-core" }
+astra-package = { path = "../astra-package" }
 astra-headless-protocol = { path = "../astra-headless-protocol" }
 astra-platform = { path = "../../Platform/astra-platform" }
 astra-plugin-abi = { path = "../astra-plugin-abi" }

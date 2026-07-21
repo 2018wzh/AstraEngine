@@ -8,6 +8,7 @@ use crate::{Diagnostic, DiagnosticSeverity, Hash256};
 
 pub const PERFORMANCE_BUDGET_SCHEMA: &str = "astra.performance_budget.v1";
 pub const PERFORMANCE_REPORT_SCHEMA: &str = "astra.performance_report.v1";
+pub const PERFORMANCE_TRACE_MANIFEST_SCHEMA: &str = "astra.performance_trace_manifest.v1";
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PerformanceError {
@@ -26,10 +27,50 @@ pub enum PerformanceError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PerformanceUnit {
+    Nanoseconds,
     Microseconds,
     Bytes,
     Count,
     ItemsPerSecond,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PerformanceTraceManifest {
+    pub schema: String,
+    pub identity: PerformanceRunIdentity,
+    pub workload_id: String,
+    pub adapter_identity_hash: String,
+    pub driver_identity_hash: String,
+    pub report_hash: String,
+    pub trace_hash: String,
+    pub event_count: u64,
+    pub dropped_event_count: u64,
+    pub byte_length: u64,
+    pub truncated: bool,
+    pub timestamps_monotonic: bool,
+}
+
+impl PerformanceTraceManifest {
+    pub fn validate(&self) -> Result<(), PerformanceError> {
+        self.identity.validate()?;
+        if self.schema != PERFORMANCE_TRACE_MANIFEST_SCHEMA
+            || !safe_symbol(&self.workload_id)
+            || !sha256_identity(&self.adapter_identity_hash)
+            || !sha256_identity(&self.driver_identity_hash)
+            || !sha256_identity(&self.report_hash)
+            || !sha256_identity(&self.trace_hash)
+            || self.event_count == 0
+            || self.byte_length == 0
+            || self.dropped_event_count != 0
+            || self.truncated
+            || !self.timestamps_monotonic
+        {
+            return Err(PerformanceError::InvalidReport(
+                "performance trace identity, bounds, or continuity is invalid".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

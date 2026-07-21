@@ -1112,6 +1112,7 @@ dependencies = [
 name = "astra-headless"
 version = "0.1.0"
 dependencies = [
+ "astra-byte-source",
  "astra-core",
  "astra-headless-protocol",
  "astra-headless-test",
@@ -1243,6 +1244,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 1.0.69",
  "time",
@@ -1329,6 +1331,7 @@ dependencies = [
  "astra-core",
  "astra-headless-protocol",
  "astra-media-core",
+ "astra-observability",
  "astra-platform",
  "directories",
  "futures-util",
@@ -1337,6 +1340,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "smallvec",
  "tempfile",
  "tokio",
  "tracing",
@@ -1359,6 +1363,7 @@ dependencies = [
  "image 0.25.10",
  "rcgen",
  "reqwest 0.13.4",
+ "serde",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
@@ -1481,6 +1486,7 @@ name = "astra-player"
 version = "0.1.0"
 dependencies = [
  "astra-asset",
+ "astra-byte-source",
  "astra-core",
  "astra-headless-test",
  "astra-media",
@@ -1554,6 +1560,7 @@ name = "astra-player-vn"
 version = "0.1.0"
 dependencies = [
  "astra-asset",
+ "astra-byte-source",
  "astra-core",
  "astra-headless-test",
  "astra-media",
@@ -1660,7 +1667,10 @@ dependencies = [
 name = "astra-product-host"
 version = "0.1.0"
 dependencies = [
+ "astra-byte-source",
+ "astra-core",
  "astra-headless-protocol",
+ "astra-package",
  "astra-platform",
  "astra-plugin-abi",
  "serde",

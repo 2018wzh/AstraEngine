@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, RwLock};
 
-use astra_asset::{AssetCatalog, VfsManifest, VfsSourceRef};
 use astra_core::{Hash256, SchemaVersion};
 use astra_media::{
     CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, TextDirection,
@@ -56,6 +55,7 @@ use astra_vn_ui::{
     VnUiSessionState,
 };
 
+use crate::package_assets::PackageAssetStore;
 use crate::ui_session::{
     controller_state_value, ActiveUiAnimation, ActiveUiController, ActiveUiModal,
 };
@@ -95,14 +95,13 @@ pub struct NativeVnHostCommandSource {
     height: u32,
     ui_viewport: UiViewport,
     textures: BTreeMap<String, TextureFrame>,
+    asset_store: Arc<PackageAssetStore>,
     live_texture_ids: BTreeSet<String>,
     live_layout_ids: BTreeSet<String>,
     scene_draw: Vec<SceneCommand>,
-    last_draw: Vec<SceneCommand>,
     last_step_evidence: Option<NativeVnStepEvidence>,
     terminal_routes: std::collections::BTreeSet<String>,
     pending_timeline: Vec<PlayerTimelineTask>,
-    media_assets: BTreeMap<String, PackagedMediaAsset>,
     pending_audio: Vec<NativeVnAudioOutput>,
     pending_video: Vec<NativeVnVideoRequest>,
     pending_stage_completions: Vec<String>,
@@ -136,13 +135,6 @@ pub struct NativeVnHostCommandSource {
     ui_animations: BTreeMap<String, ActiveUiAnimation>,
     ui_performance: UiPerformanceGate,
     shutdown_started: bool,
-}
-
-#[derive(Debug, Clone)]
-struct PackagedMediaAsset {
-    codec: String,
-    bytes: Vec<u8>,
-    hash: Hash256,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -270,8 +262,7 @@ struct NativeVnSaveMetadata {
 }
 
 struct ProductPresentationBinding {
-    textures: BTreeMap<String, TextureFrame>,
-    media_assets: BTreeMap<String, PackagedMediaAsset>,
+    asset_store: Arc<PackageAssetStore>,
     localization: VnLocalizationTable,
     localizations: BTreeMap<String, VnLocalizationTable>,
     text_provider: Arc<CosmicTextLayoutProvider>,
@@ -294,6 +285,24 @@ impl NativeVnHostCommandSource {
         width: u32,
         height: u32,
         surface: PlayerHostResourceId,
+    ) -> Result<Self, NativeVnHostError> {
+        Self::from_package_with_asset_cache(
+            package,
+            config,
+            width,
+            height,
+            surface,
+            128 * 1024 * 1024,
+        )
+    }
+
+    pub fn from_package_with_asset_cache(
+        package: &astra_package::PackageReader,
+        config: VnRunConfig,
+        width: u32,
+        height: u32,
+        surface: PlayerHostResourceId,
+        max_asset_cache_bytes: u64,
     ) -> Result<Self, NativeVnHostError> {
         validate_product_provider_bindings(package)?;
         let runtime_provider = package.runtime_provider_selection().clone();
@@ -327,15 +336,13 @@ impl NativeVnHostCommandSource {
                     config.profile
                 ))
             })?;
-        let textures = load_package_textures(package)?;
-        let media_assets = load_package_media_assets(package)?;
+        let asset_store = PackageAssetStore::index(package, max_asset_cache_bytes)?;
         let presentation_manifest =
             load_presentation_provider_manifest(package, &config.profile)
                 .map_err(|error| NativeVnHostError::Package(error.to_string()))?;
         validate_story_presentation(
             &compiled,
-            &textures,
-            &media_assets,
+            &asset_store,
             &presentation_manifest,
             &config.profile,
         )?;
@@ -398,8 +405,7 @@ impl NativeVnHostCommandSource {
                     .map(|entry| entry.id.clone())
                     .collect(),
                 presentation: ProductPresentationBinding {
-                    textures,
-                    media_assets,
+                    asset_store,
                     localization,
                     localizations,
                     text_provider,
@@ -467,7 +473,7 @@ impl NativeVnHostCommandSource {
             locale: Arc::clone(&ui_text_locale),
         });
         let ui_renderer = BlueprintYakuiRenderer::new(compiled.ui_blueprints.clone())?
-            .with_image_resources(binding.presentation.textures.clone())
+            .with_image_resource_provider(binding.presentation.asset_store.clone())
             .with_text_measurer(ui_text_measurer);
         let ui_backend = AstraYakuiBackend::new(ui_renderer, compiled.project_hash)?;
         let mut ui_controller_host = LuauUiControllerHost::with_default_budget()
@@ -594,15 +600,14 @@ impl NativeVnHostCommandSource {
                     bottom: 0.0,
                 },
             },
-            textures: binding.presentation.textures,
+            textures: BTreeMap::new(),
+            asset_store: binding.presentation.asset_store,
             live_texture_ids: BTreeSet::new(),
             live_layout_ids: BTreeSet::new(),
             scene_draw: Vec::new(),
-            last_draw: Vec::new(),
             last_step_evidence: None,
             terminal_routes,
             pending_timeline: Vec::new(),
-            media_assets: binding.presentation.media_assets,
             pending_audio: Vec::new(),
             pending_video: Vec::new(),
             pending_stage_completions: Vec::new(),
@@ -790,7 +795,7 @@ impl NativeVnHostCommandSource {
             width: THUMBNAIL_WIDTH,
             height: THUMBNAIL_HEIGHT,
             hash: Hash256::from_sha256(&rgba8),
-            rgba8,
+            rgba8: rgba8.into(),
         });
         tracing::debug!(
             event = "player.vn.save.thumbnail_cached",
@@ -1095,12 +1100,7 @@ impl NativeVnHostCommandSource {
         &self,
         snapshot: &crate::NativeVnVideoStreamSnapshot,
     ) -> Result<NativeVnVideoRequest, NativeVnHostError> {
-        let asset = self.media_assets.get(&snapshot.asset_id).ok_or_else(|| {
-            NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_VIDEO_RESTORE_ASSET_MISSING: {}",
-                snapshot.asset_id
-            ))
-        })?;
+        let asset = self.asset_store.load_media(&snapshot.asset_id)?;
         if asset.hash != snapshot.encoded_hash {
             return Err(NativeVnHostError::Asset(format!(
                 "ASTRA_PLAYER_VIDEO_RESTORE_HASH_MISMATCH: {}",
@@ -1111,7 +1111,7 @@ impl NativeVnHostCommandSource {
             layer: snapshot.layer.clone(),
             asset_id: snapshot.asset_id.clone(),
             codec: asset.codec.clone(),
-            encoded_bytes: asset.bytes.clone(),
+            encoded_bytes: asset.bytes.as_ref().to_vec(),
             encoded_hash: asset.hash,
             alpha_millionths: snapshot.alpha_millionths,
             looping: snapshot.looping,
@@ -1128,7 +1128,7 @@ impl NativeVnHostCommandSource {
         let fallback = request.fallback_asset_id.as_deref().ok_or_else(|| {
             NativeVnHostError::Asset("ASTRA_PLAYER_VIDEO_FALLBACK_MISSING".into())
         })?;
-        if !self.textures.contains_key(fallback) {
+        if !self.textures.contains_key(fallback) && !self.asset_store.contains_image(fallback) {
             return Err(missing_texture(fallback));
         }
         if let Some(fence) = &request.fence {
@@ -1324,19 +1324,25 @@ impl NativeVnHostCommandSource {
             slot: slot.clone(),
         })?;
         validate_saved_runtime_state(&sections)?;
-        let retained_draw = self
-            .last_draw
-            .iter()
-            .filter(|command| {
-                !matches!(
-                    command,
-                    SceneCommand::UploadTexture { .. }
-                        | SceneCommand::UploadGlyph { .. }
-                        | SceneCommand::ReleaseResource { .. }
-                )
-            })
-            .cloned()
-            .collect::<Vec<_>>();
+        let retained_draw = std::iter::once(SceneCommand::rect(
+            "vn.frame.clear",
+            0,
+            0,
+            self.width,
+            self.height,
+            [8, 10, 16, 255],
+        ))
+        .chain(self.scene_draw.iter().cloned())
+        .chain(self.ui_draw.iter().cloned())
+        .filter(|command| {
+            !matches!(
+                command,
+                SceneCommand::UploadTexture { .. }
+                    | SceneCommand::UploadGlyph { .. }
+                    | SceneCommand::ReleaseResource { .. }
+            )
+        })
+        .collect::<Vec<_>>();
         let draw_commands_json = serde_json::to_vec(&retained_draw)
             .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
         let product_media_snapshot_hash = product_media_snapshot_json
@@ -1425,15 +1431,14 @@ impl NativeVnHostCommandSource {
                 ));
             }
         }
-        let draw_commands =
-            serde_json::from_slice(&envelope.payload.draw_commands_json).map_err(|error| {
+        let _: Vec<SceneCommand> = serde_json::from_slice(&envelope.payload.draw_commands_json)
+            .map_err(|error| {
                 NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
             })?;
         let save_metadata = envelope.payload.save_metadata;
         self.runtime_state = Some(envelope.payload.runtime_state);
         self.activate_locale(&restored_locale)?;
         self.stage_director = envelope.payload.stage_director;
-        self.last_draw = draw_commands;
         self.last_step_evidence = Some(envelope.payload.step_evidence);
         self.restored_product_media_snapshot = envelope.payload.product_media_snapshot_json;
         self.apply_save_metadata(save_metadata)?;
@@ -1713,6 +1718,7 @@ impl NativeVnHostCommandSource {
                 height: viewport.physical_height,
             })
             .map_err(stage_director_error)?;
+        self.ensure_stage_textures(next_stage_director.state())?;
         let next_scene_draw = stage_scene_commands(
             next_stage_director.state(),
             &self.textures,
@@ -2978,11 +2984,7 @@ impl NativeVnHostCommandSource {
                         )
                         .map_err(|error| NativeVnHostError::RuntimeEvidence(error.to_string()))?;
                     let asset_id = command.cue.asset.clone();
-                    let asset = self.media_assets.get(&asset_id).ok_or_else(|| {
-                        NativeVnHostError::Asset(format!(
-                            "ASTRA_PLAYER_AUDIO_ASSET_MISSING: {asset_id}"
-                        ))
-                    })?;
+                    let asset = self.asset_store.load_media(&asset_id)?;
                     let command_kind = match command.cue.bus {
                         VnAudioBus::Voice => "voice",
                         VnAudioBus::Bgm => "bgm",
@@ -3011,7 +3013,7 @@ impl NativeVnHostCommandSource {
                             attributes,
                             asset_id,
                             codec: asset.codec.clone(),
-                            encoded_bytes: asset.bytes.clone(),
+                            encoded_bytes: asset.bytes.as_ref().to_vec(),
                             encoded_hash: asset.hash,
                         },
                     ));
@@ -3075,7 +3077,8 @@ impl NativeVnHostCommandSource {
                     match output {
                         StageDirectorOutput::Preload { asset } => {
                             if !self.textures.contains_key(&asset)
-                                && !self.media_assets.contains_key(&asset)
+                                && !self.asset_store.contains_image(&asset)
+                                && !self.asset_store.contains_media(&asset)
                             {
                                 return Err(NativeVnHostError::Asset(format!(
                                     "ASTRA_PLAYER_PRELOAD_ASSET_MISSING: {asset}"
@@ -3127,17 +3130,12 @@ impl NativeVnHostCommandSource {
                             ));
                         }
                         StageDirectorOutput::Movie(movie) => {
-                            let asset = self.media_assets.get(&movie.asset).ok_or_else(|| {
-                                NativeVnHostError::Asset(format!(
-                                    "ASTRA_PLAYER_VIDEO_ASSET_MISSING: {}",
-                                    movie.asset
-                                ))
-                            })?;
+                            let asset = self.asset_store.load_media(&movie.asset)?;
                             self.pending_video.push(NativeVnVideoRequest {
                                 layer: movie.layer,
                                 asset_id: movie.asset,
                                 codec: asset.codec.clone(),
-                                encoded_bytes: asset.bytes.clone(),
+                                encoded_bytes: asset.bytes.as_ref().to_vec(),
                                 encoded_hash: asset.hash,
                                 alpha_millionths: movie.alpha.millionths,
                                 looping: matches!(movie.loop_mode, MovieLoopMode::Loop),
@@ -3155,6 +3153,7 @@ impl NativeVnHostCommandSource {
                 }
             }
         }
+        self.ensure_stage_textures(next_stage_director.state())?;
         let next_scene_draw = stage_scene_commands(
             next_stage_director.state(),
             &self.textures,
@@ -3178,6 +3177,9 @@ impl NativeVnHostCommandSource {
                 frame: self.texture(asset_id)?.clone(),
             });
         }
+        self.textures.retain(|asset_id, _| {
+            next_texture_ids.contains(asset_id) || !self.asset_store.contains_image(asset_id)
+        });
 
         for command in ordered_outputs.iter().filter_map(|output| match output {
             NativeVnOrderedRuntimeOutput::Presentation(command) => Some(command),
@@ -3238,7 +3240,6 @@ impl NativeVnHostCommandSource {
             scene_command_count = lifecycle.len(),
             "emitted AstraVN Player host command"
         );
-        self.last_draw = lifecycle.clone();
         self.scene_draw = next_scene_draw;
         self.stage_director = next_stage_director;
         self.live_texture_ids = next_texture_ids;
@@ -3263,6 +3264,36 @@ impl NativeVnHostCommandSource {
                 semantics: self.ui_semantics.clone(),
             },
         ])?)
+    }
+
+    fn ensure_stage_textures(
+        &mut self,
+        state: &ProductStageState,
+    ) -> Result<(), NativeVnHostError> {
+        let mut required = state
+            .entities
+            .values()
+            .filter(|entity| entity.visible)
+            .map(|entity| entity.asset.clone())
+            .collect::<BTreeSet<_>>();
+        for movie in state.movies.values() {
+            if !self.textures.contains_key(&movie.asset) {
+                if let Some(fallback) = &movie.fallback {
+                    required.insert(fallback.clone());
+                }
+            }
+        }
+        for asset_id in required {
+            if !self.textures.contains_key(&asset_id) {
+                let frame = self.asset_store.load_image(&asset_id)?;
+                self.textures.insert(asset_id, frame);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn decoded_asset_cache_bytes(&self) -> u64 {
+        self.asset_store.cache_bytes()
     }
 
     fn texture(&self, asset_id: &str) -> Result<&TextureFrame, NativeVnHostError> {
@@ -3454,198 +3485,6 @@ fn cleanup_runtime_host(
         Err(cleanup_error) => NativeVnHostError::Package(format!(
             "ASTRA_PLAYER_RUNTIME_CLEANUP_FAILED: {error}; cleanup failed: {cleanup_error}"
         )),
-    }
-}
-
-fn load_package_textures(
-    package: &astra_package::PackageReader,
-) -> Result<BTreeMap<String, TextureFrame>, NativeVnHostError> {
-    let catalog: AssetCatalog = serde_json::from_slice(
-        &package
-            .container()
-            .read_section("asset.catalog")
-            .map_err(|err| NativeVnHostError::Package(err.to_string()))?,
-    )
-    .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
-    let manifest: VfsManifest = serde_json::from_slice(
-        &package
-            .container()
-            .read_section("asset.vfs_manifest")
-            .map_err(|err| NativeVnHostError::Package(err.to_string()))?,
-    )
-    .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
-    let mut textures = BTreeMap::new();
-    for asset in catalog.assets {
-        if !catalog_asset_has_type(&asset, "image.") {
-            continue;
-        }
-        let entry = manifest
-            .entries
-            .iter()
-            .find(|entry| entry.uri == asset.uri)
-            .ok_or_else(|| {
-                NativeVnHostError::Asset(format!(
-                    "ASTRA_PLAYER_ASSET_VFS_MISSING: catalog asset {} has no VFS entry",
-                    asset.asset_id
-                ))
-            })?;
-        let VfsSourceRef::PackageSection { section_id } = &entry.source else {
-            return Err(NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_ASSET_SOURCE: asset {} is not package-backed",
-                asset.asset_id
-            )));
-        };
-        let encoded = package
-            .container()
-            .read_section(section_id)
-            .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
-        if Hash256::from_sha256(&encoded) != entry.hash {
-            return Err(NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_ASSET_HASH: asset {} failed VFS hash validation",
-                asset.asset_id
-            )));
-        }
-        let decoded = image::load_from_memory(&encoded)
-            .map_err(|err| NativeVnHostError::Asset(format!("ASTRA_PLAYER_ASSET_DECODE: {err}")))?
-            .to_rgba8();
-        let (width, height) = decoded.dimensions();
-        let rgba8 = decoded.into_raw();
-        textures.insert(
-            asset.asset_id,
-            TextureFrame {
-                width,
-                height,
-                hash: Hash256::from_sha256(&rgba8),
-                rgba8,
-            },
-        );
-    }
-    Ok(textures)
-}
-
-fn load_package_media_assets(
-    package: &astra_package::PackageReader,
-) -> Result<BTreeMap<String, PackagedMediaAsset>, NativeVnHostError> {
-    const MAX_ENCODED_MEDIA_BYTES: usize = 512 * 1024 * 1024;
-    let catalog: AssetCatalog = serde_json::from_slice(
-        &package
-            .container()
-            .read_bounded("asset.catalog", 16 * 1024 * 1024)
-            .map_err(|err| NativeVnHostError::Package(err.to_string()))?,
-    )
-    .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
-    let manifest: VfsManifest = serde_json::from_slice(
-        &package
-            .container()
-            .read_bounded("asset.vfs_manifest", 32 * 1024 * 1024)
-            .map_err(|err| NativeVnHostError::Package(err.to_string()))?,
-    )
-    .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
-    let mut assets = BTreeMap::new();
-    for asset in catalog.assets.into_iter().filter(|asset| {
-        catalog_asset_has_type(asset, "audio.")
-            || catalog_asset_has_type(asset, "voice")
-            || catalog_asset_has_type(asset, "video.")
-    }) {
-        let matches = manifest
-            .entries
-            .iter()
-            .filter(|entry| entry.uri == asset.uri)
-            .collect::<Vec<_>>();
-        let [entry] = matches.as_slice() else {
-            return Err(NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_ASSET_VFS_AMBIGUOUS: catalog asset {} must resolve to one VFS entry",
-                asset.asset_id
-            )));
-        };
-        let VfsSourceRef::PackageSection { section_id } = &entry.source else {
-            return Err(NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_ASSET_SOURCE: asset {} is not package-backed",
-                asset.asset_id
-            )));
-        };
-        let bytes = package
-            .container()
-            .read_bounded(section_id, MAX_ENCODED_MEDIA_BYTES)
-            .map_err(|err| NativeVnHostError::Package(err.to_string()))?;
-        let hash = Hash256::from_sha256(&bytes);
-        if hash != entry.hash {
-            return Err(NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_ASSET_HASH: asset {} failed VFS hash validation",
-                asset.asset_id
-            )));
-        }
-        let video = catalog_asset_has_type(&asset, "video.");
-        let codec = if video {
-            sniff_video_codec(&bytes)
-        } else {
-            sniff_audio_codec(&bytes)
-        }
-        .ok_or_else(|| {
-            NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_MEDIA_CODEC_UNSUPPORTED: {}",
-                asset.asset_id
-            ))
-        })?;
-        if assets
-            .insert(
-                asset.asset_id.clone(),
-                PackagedMediaAsset {
-                    codec: codec.to_string(),
-                    bytes,
-                    hash,
-                },
-            )
-            .is_some()
-        {
-            return Err(NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_ASSET_ID_DUPLICATE: {}",
-                asset.asset_id
-            )));
-        }
-    }
-    Ok(assets)
-}
-
-fn catalog_asset_has_type(asset: &astra_asset::AssetCatalogEntry, prefix: &str) -> bool {
-    let mime_prefix = prefix.strip_suffix('.').map(|value| format!("{value}/"));
-    asset.media_kind.starts_with(prefix)
-        || mime_prefix
-            .as_deref()
-            .is_some_and(|prefix| asset.media_kind.starts_with(prefix))
-        || asset.tags.iter().any(|tag| {
-            tag.starts_with(prefix)
-                || mime_prefix
-                    .as_deref()
-                    .is_some_and(|prefix| tag.starts_with(prefix))
-        })
-}
-
-fn sniff_audio_codec(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(b"ID3")
-        || bytes
-            .get(..2)
-            .is_some_and(|prefix| prefix[0] == 0xff && prefix[1] & 0xe0 == 0xe0)
-    {
-        Some("mp3")
-    } else if bytes.starts_with(b"OggS") {
-        Some("ogg")
-    } else if bytes.starts_with(b"fLaC") {
-        Some("flac")
-    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE") {
-        Some("wav")
-    } else {
-        None
-    }
-}
-
-fn sniff_video_codec(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) {
-        Some("webm")
-    } else if bytes.get(4..8) == Some(b"ftyp") {
-        Some("mp4")
-    } else {
-        None
     }
 }
 
@@ -4760,8 +4599,7 @@ fn validate_story_text(
 
 fn validate_story_presentation(
     compiled: &CompiledStory,
-    textures: &BTreeMap<String, TextureFrame>,
-    media_assets: &BTreeMap<String, PackagedMediaAsset>,
+    assets: &PackageAssetStore,
     manifest: &VnPresentationProviderManifest,
     profile: &str,
 ) -> Result<(), NativeVnHostError> {
@@ -4779,7 +4617,7 @@ fn validate_story_presentation(
                 validate_stage_command_policy(stage, manifest, profile)?;
                 match stage {
                     StageCommand::Preload { asset } => {
-                        if !textures.contains_key(asset) && !media_assets.contains_key(asset) {
+                        if !assets.contains_image(asset) && !assets.contains_media(asset) {
                             return Err(NativeVnHostError::Asset(format!(
                                 "ASTRA_PLAYER_PRELOAD_ASSET_MISSING: {asset}"
                             )));
@@ -4789,7 +4627,7 @@ fn validate_story_presentation(
                     | StageCommand::Show {
                         asset: asset_id, ..
                     } => {
-                        if !textures.contains_key(asset_id) {
+                        if !assets.contains_image(asset_id) {
                             return Err(missing_texture(asset_id));
                         }
                     }
@@ -4813,7 +4651,7 @@ fn validate_story_presentation(
                     StageCommand::Camera { .. } => {}
                     StageCommand::Movie { fallback, .. } => {
                         if let Some(fallback) = fallback {
-                            if !textures.contains_key(fallback) {
+                            if !assets.contains_image(fallback) {
                                 return Err(missing_texture(fallback));
                             }
                         }

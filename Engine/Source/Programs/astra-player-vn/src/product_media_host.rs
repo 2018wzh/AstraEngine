@@ -22,6 +22,7 @@ pub struct NativeVnProductMediaHost {
     decoded_audio_cache_bytes: u64,
     max_video_frames: u64,
     max_decode_output_bytes: u64,
+    max_decoded_cache_bytes: u64,
 }
 
 #[derive(Clone)]
@@ -96,6 +97,7 @@ impl NativeVnProductMediaHost {
             decoded_audio_cache_bytes: 0,
             max_video_frames: 18_000,
             max_decode_output_bytes: 512 * 1024 * 1024,
+            max_decoded_cache_bytes: 64 * 1024 * 1024,
         }
     }
 
@@ -103,9 +105,14 @@ impl NativeVnProductMediaHost {
         max_timeline_tasks: usize,
         max_video_frames: u64,
         max_decode_output_bytes: u64,
+        max_decoded_cache_bytes: u64,
         retain_audio_timeline: bool,
     ) -> Result<Self, PlatformError> {
-        if max_video_frames == 0 || max_decode_output_bytes == 0 {
+        if max_video_frames == 0
+            || max_decode_output_bytes == 0
+            || max_decoded_cache_bytes == 0
+            || max_decoded_cache_bytes > max_decode_output_bytes
+        {
             return Err(media_error(
                 "player.media.create",
                 "ASTRA_PLAYER_VIDEO_LIMIT_INVALID",
@@ -115,6 +122,7 @@ impl NativeVnProductMediaHost {
             Self::with_audio_timeline_retention(max_timeline_tasks, retain_audio_timeline);
         host.max_video_frames = max_video_frames;
         host.max_decode_output_bytes = max_decode_output_bytes;
+        host.max_decoded_cache_bytes = max_decoded_cache_bytes;
         Ok(host)
     }
 
@@ -124,6 +132,10 @@ impl NativeVnProductMediaHost {
 
     pub fn has_active_video(&self) -> bool {
         !self.active_videos.is_empty()
+    }
+
+    pub fn decoded_cache_bytes(&self) -> u64 {
+        self.decoded_audio_cache_bytes
     }
 
     pub fn skip_active_videos(&mut self, source: &mut NativeVnHostCommandSource) -> bool {
@@ -511,12 +523,12 @@ impl NativeVnProductMediaHost {
     ) {
         let byte_size =
             (audio.samples.len() as u64).saturating_mul(std::mem::size_of::<f32>() as u64);
-        if byte_size > self.max_decode_output_bytes {
+        if byte_size > self.max_decoded_cache_bytes {
             tracing::debug!(
                 event = "astra.player.audio.cache.bypass",
                 encoded_hash = %encoded_hash,
                 byte_size,
-                cache_budget_bytes = self.max_decode_output_bytes,
+                cache_budget_bytes = self.max_decoded_cache_bytes,
                 "decoded audio exceeded the bounded session cache budget"
             );
             return;
@@ -528,7 +540,7 @@ impl NativeVnProductMediaHost {
             self.decoded_audio_lru.retain(|hash| hash != &encoded_hash);
         }
         while self.decoded_audio_cache_bytes.saturating_add(byte_size)
-            > self.max_decode_output_bytes
+            > self.max_decoded_cache_bytes
         {
             let Some(evicted_hash) = self.decoded_audio_lru.pop_front() else {
                 break;
@@ -707,7 +719,7 @@ fn decoded_bgra_frame(
         width,
         height,
         hash: astra_core::Hash256::from_sha256(&rgba8),
-        rgba8,
+        rgba8: rgba8.into(),
     })
 }
 

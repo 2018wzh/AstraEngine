@@ -1,11 +1,43 @@
 use astra_platform::{
-    validate_headless_host_profile, HeadlessHostProfile, HostKind, HostLaunchProfile,
-    PlatformErrorCode, PlatformHostFactory, PlatformHostProfile, PlatformId,
-    UnavailablePlatformFactory, HEADLESS_HOST_PROFILE_SCHEMA, USER_INPUT_SEQUENCE_SCHEMA,
+    validate_headless_host_profile, validate_headless_performance_profile, GpuAdapterPolicy,
+    GpuBackendPolicy, GpuDeviceTypePolicy, HeadlessHostProfile, HeadlessReadbackPolicy,
+    HeadlessRenderPolicy, HostKind, HostLaunchProfile, PlatformErrorCode, PlatformHostFactory,
+    PlatformHostProfile, PlatformId, UnavailablePlatformFactory, HEADLESS_HOST_PROFILE_SCHEMA,
+    USER_INPUT_SEQUENCE_SCHEMA,
 };
 
 fn hash(byte: char) -> String {
     format!("sha256:{}", byte.to_string().repeat(64))
+}
+
+#[test]
+fn performance_profile_requires_v3_hardware_policy_and_timestamp_queries() {
+    let mut profile =
+        HeadlessHostProfile::reference("nativevn-game", "com.example.game", hash('a'), hash('b'));
+    profile.providers.renderer = "wgpu_offscreen".into();
+    profile.render_policy = HeadlessRenderPolicy::All;
+    profile.readback_policy = HeadlessReadbackPolicy::CheckpointsOnly;
+    profile.gpu_adapter = Some(GpuAdapterPolicy {
+        backend: GpuBackendPolicy::Dx12,
+        device_type: GpuDeviceTypePolicy::Integrated,
+        require_timestamp_query: true,
+        adapter_identity_hash: Some(hash('c')),
+    });
+    validate_headless_performance_profile(&profile).unwrap();
+
+    profile
+        .gpu_adapter
+        .as_mut()
+        .unwrap()
+        .require_timestamp_query = false;
+    assert!(validate_headless_performance_profile(&profile).is_err());
+    profile
+        .gpu_adapter
+        .as_mut()
+        .unwrap()
+        .require_timestamp_query = true;
+    profile.schema = "astra.headless_host_profile.v2".into();
+    assert!(validate_headless_performance_profile(&profile).is_err());
 }
 
 #[test]

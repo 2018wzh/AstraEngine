@@ -245,6 +245,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         platform: String,
         locale: String,
         package: String,
+        package_storage_hash: String,
         #[serde(default)]
         source_unlock: Option<SourceUnlockConfig>,
         display: DisplayConfig,
@@ -304,9 +305,20 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     if config.ui_components.is_some() {
         return Err("native Player UI components are not implemented on this platform".into());
     }
-    let package_bytes = fs::read(resource_root.join(&config.package))?;
-    let package_storage_hash = Hash256::from_sha256(&package_bytes).to_string();
-    let container = astra_package::AstraContainerReader::new(&package_bytes)?;
+    astra_platform::validate_safe_relative_path(&config.package)?;
+    let expected_package_storage_hash = config
+        .package_storage_hash
+        .parse::<Hash256>()
+        .map_err(|_| "Player config package_storage_hash is invalid")?;
+    let package_source: std::sync::Arc<dyn astra_byte_source::BoundedByteSource> =
+        std::sync::Arc::new(astra_byte_source::FileByteSource::open(
+            resource_root.join(&config.package),
+        )?);
+    let container = astra_package::AstraContainerReader::open_storage_verified_source(
+        package_source,
+        expected_package_storage_hash,
+    )?;
+    let package_storage_hash = expected_package_storage_hash.to_string();
     let package = if container.has_section("source.unlock") {
         let unlock = config
             .source_unlock
@@ -325,8 +337,8 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
             use astra_platform::UserAuthorizedSourceDirectoryProvider;
             let source = astra_platform_windows::WindowsSourceDirectoryProvider
                 .authorize_source_directory()?;
-            astra_player_vn::open_source_locked_package(
-                &package_bytes,
+            astra_player_vn::open_source_locked_verified_container(
+                container,
                 &policy,
                 &source_manifest,
                 &source,
@@ -340,7 +352,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
         if config.source_unlock.is_some() {
             return Err("Player source_unlock config requires a source-locked package".into());
         }
-        PackageReader::open(&package_bytes)?
+        PackageReader::open_verified_container(container)?
     };
     let manifest: PackageManifest = package.container().decode_postcard("package.manifest")?;
     if manifest.profile != config.profile {

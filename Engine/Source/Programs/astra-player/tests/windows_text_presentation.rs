@@ -293,7 +293,7 @@ async fn player_command_path_presents_packaged_layout_and_records_live_gpu_ident
     let capture = astra_platform::CapturedFrame {
         width: *width,
         height: *height,
-        rgba8: rgba8.clone(),
+        rgba8: rgba8.clone().into(),
     };
     assert_eq!(
         golden["capture_hash"],

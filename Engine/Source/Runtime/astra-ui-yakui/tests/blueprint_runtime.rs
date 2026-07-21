@@ -461,7 +461,7 @@ fn thousand_gallery_images_are_virtualized_and_bounded_by_lru() {
                     width: 1,
                     height: 1,
                     hash: Hash256::from_sha256(&rgba8),
-                    rgba8,
+                    rgba8: rgba8.into(),
                 },
             )
         })
@@ -520,7 +520,7 @@ fn thousand_gallery_images_are_virtualized_and_bounded_by_lru() {
                 width: 1,
                 height: 1,
                 hash: Hash256::from_sha256(&replacement_rgba8),
-                rgba8: replacement_rgba8,
+                rgba8: replacement_rgba8.into(),
             },
         )
         .expect("replace live texture resource");

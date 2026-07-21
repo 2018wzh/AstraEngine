@@ -9,13 +9,13 @@ use astra_player_core::{
 };
 use astra_product_host::{
     CanonicalAudioSnapshot, Observation, ProductAdapterFactory, ProductFuture, ProductHostError,
-    ProductOpenRequest, ProductSession,
+    ProductOpenRequest, ProductPackageSource, ProductPerformanceSample, ProductSession,
 };
 use astra_ui_core::{
     UiButtonState, UiInputEventKind, UiNavigationAction, UiPoint, UiPointerButton, UiTouchPhase,
 };
 use astra_vn_core::VnRunConfig;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use astra_player_vn::{NativeVnHostCommandSource, NativeVnProductMediaHost, VnUiHostRequest};
 
@@ -49,11 +49,18 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 profile = %request.profile,
                 "opening NativeVN through the generic Headless product host"
             );
-            let raw = AstraContainerReader::new(&request.package_bytes)
-                .map_err(|error| binding("package.inspect", error))?;
+            let raw = match request.package {
+                ProductPackageSource::InMemory(bytes) => AstraContainerReader::new(&bytes),
+                ProductPackageSource::VerifiedContainer(container) => Ok(container),
+                ProductPackageSource::StorageVerified {
+                    source,
+                    storage_hash,
+                } => AstraContainerReader::open_storage_verified_source(source, storage_hash),
+            }
+            .map_err(|error| binding("package.inspect", error))?;
             let source_locked = raw.has_section("source.unlock");
             let package = match (source_locked, package_crypto) {
-                (false, None) => PackageReader::open(&request.package_bytes),
+                (false, None) => PackageReader::open_verified_container(raw),
                 (false, Some(_)) => {
                     return Err(ProductHostError::Binding(
                         "package.unlock: plaintext package received unexpected crypto provider"
@@ -70,8 +77,8 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                     let policy: SourceUnlockPolicy = raw
                         .decode_postcard("source.unlock")
                         .map_err(|error| binding("package.unlock_policy", error))?;
-                    PackageReader::open_source_locked(
-                        &request.package_bytes,
+                    PackageReader::open_source_locked_container(
+                        raw,
                         &policy,
                         "source.unlock",
                         crypto,
@@ -107,11 +114,20 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 .await
                 .map_err(|error| binding("surface.create", error))?;
             let logical_surface = PlayerHostResourceId(1);
+            let asset_cache_bytes = request.max_decoded_cache_bytes.saturating_mul(2) / 3;
+            let audio_cache_bytes = request
+                .max_decoded_cache_bytes
+                .saturating_sub(asset_cache_bytes);
+            if asset_cache_bytes == 0 || audio_cache_bytes == 0 {
+                return Err(ProductHostError::Binding(
+                    "decoded cache budget is too small to partition by resource domain".into(),
+                ));
+            }
             let mut sink = PlatformCommandSink::new(request.platform.clone());
             sink.bind_surface(logical_surface, surface)
                 .map_err(|error| binding("surface.bind", error))?;
             let mut executor = PlayerHostCommandExecutor::new(sink);
-            let mut source = NativeVnHostCommandSource::from_package(
+            let mut source = NativeVnHostCommandSource::from_package_with_asset_cache(
                 &package,
                 VnRunConfig {
                     profile: request.profile,
@@ -120,6 +136,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 request.width,
                 request.height,
                 logical_surface,
+                asset_cache_bytes,
             )
             .map_err(|error| binding("runtime.open", error))?;
             hydrate_save_catalog(&mut source, &mut executor).await?;
@@ -135,6 +152,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 256,
                 request.max_video_frames,
                 request.max_decode_output_bytes,
+                audio_cache_bytes,
                 request.retain_audio_timeline,
             )
             .map_err(|error| binding("media.create", error))?;
@@ -160,6 +178,9 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 resumed: false,
                 focused: false,
                 last_tick: 0,
+                performance: request
+                    .performance_profiling
+                    .then(ProductPerformanceSample::default),
             }) as Box<dyn ProductSession>)
         })
     }
@@ -228,6 +249,7 @@ struct NativeVnHeadlessSession {
     resumed: bool,
     focused: bool,
     last_tick: u64,
+    performance: Option<ProductPerformanceSample>,
 }
 
 impl ProductSession for NativeVnHeadlessSession {
@@ -394,6 +416,21 @@ impl ProductSession for NativeVnHeadlessSession {
         })
     }
 
+    fn decoded_cache_bytes(&self) -> u64 {
+        self.media.decoded_cache_bytes().saturating_add(
+            self.source
+                .as_ref()
+                .map_or(0, NativeVnHostCommandSource::decoded_asset_cache_bytes),
+        )
+    }
+
+    fn take_performance_sample(&mut self) -> ProductPerformanceSample {
+        self.performance
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
     fn shutdown<'a>(&'a mut self) -> ProductFuture<'a, Result<(), ProductHostError>> {
         Box::pin(async move {
             let source = self
@@ -434,6 +471,27 @@ impl ProductSession for NativeVnHeadlessSession {
 }
 
 impl NativeVnHeadlessSession {
+    fn profile_started(&self) -> Option<Instant> {
+        self.performance.as_ref().map(|_| Instant::now())
+    }
+
+    fn add_profile_duration(
+        &mut self,
+        started: Option<Instant>,
+        update: impl FnOnce(&mut ProductPerformanceSample, u64),
+    ) -> Result<(), ProductHostError> {
+        let (Some(started), Some(sample)) = (started, self.performance.as_mut()) else {
+            return Ok(());
+        };
+        let duration_ns = started
+            .elapsed()
+            .as_nanos()
+            .try_into()
+            .map_err(|_| ProductHostError::Output("performance duration overflowed".into()))?;
+        update(sample, duration_ns);
+        Ok(())
+    }
+
     fn source(&mut self) -> Result<&mut NativeVnHostCommandSource, ProductHostError> {
         self.source
             .as_mut()
@@ -441,6 +499,7 @@ impl NativeVnHeadlessSession {
     }
 
     async fn dispatch_ui(&mut self, event: UiInputEventKind) -> Result<(), ProductHostError> {
+        let profile_started = self.profile_started();
         let activates = matches!(
             &event,
             UiInputEventKind::Keyboard {
@@ -475,6 +534,9 @@ impl NativeVnHeadlessSession {
             .await
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
         self.process_ui_host_request().await?;
+        self.add_profile_duration(profile_started, |sample, duration| {
+            sample.ui_layout_paint_ns = sample.ui_layout_paint_ns.saturating_add(duration);
+        })?;
         Ok(())
     }
 
@@ -523,33 +585,49 @@ impl NativeVnHeadlessSession {
 
     async fn advance_through(&mut self, target_tick: u64) -> Result<(), ProductHostError> {
         while self.last_tick < target_tick {
+            let tick_started = self.profile_started();
             self.last_tick = self
                 .last_tick
                 .checked_add(1)
                 .ok_or_else(|| ProductHostError::Input("tick sequence overflowed".into()))?;
             let now_ms = canonical_ms(self.last_tick)?;
-            let source = self
+            let vn_started = self.profile_started();
+            let present = self
                 .source
                 .as_mut()
-                .ok_or_else(|| ProductHostError::Input("product session is shut down".into()))?;
-            if let Some(present) = source
+                .ok_or_else(|| ProductHostError::Input("product session is shut down".into()))?
                 .tick_presentation(astra_headless_protocol::TICK_DURATION_NS)
-                .map_err(|error| ProductHostError::Output(error.to_string()))?
-            {
+                .map_err(|error| ProductHostError::Output(error.to_string()))?;
+            if let Some(present) = present {
                 self.executor
                     .execute_batch(present)
                     .await
                     .map_err(|error| ProductHostError::Output(error.to_string()))?;
             }
+            self.add_profile_duration(vn_started, |sample, duration| {
+                sample.vn_step_ns = sample.vn_step_ns.saturating_add(duration);
+            })?;
+            let media_started = self.profile_started();
+            let source = self
+                .source
+                .as_mut()
+                .ok_or_else(|| ProductHostError::Input("product session is shut down".into()))?;
             self.media
                 .poll_and_process_with_audio_tick(source, &mut self.executor, now_ms, true)
                 .await
                 .map_err(|error| ProductHostError::Output(error.to_string()))?;
+            self.add_profile_duration(media_started, |sample, duration| {
+                sample.media_decode_ns = sample.media_decode_ns.saturating_add(duration);
+            })?;
+            self.add_profile_duration(tick_started, |sample, duration| {
+                sample.runtime_tick_ns = sample.runtime_tick_ns.saturating_add(duration);
+            })?;
         }
         Ok(())
     }
 
     async fn process_without_audio_tick(&mut self, now_ms: u64) -> Result<(), ProductHostError> {
+        let media_started = self.profile_started();
         let source = self
             .source
             .as_mut()
@@ -557,10 +635,14 @@ impl NativeVnHeadlessSession {
         self.media
             .poll_and_process_with_audio_tick(source, &mut self.executor, now_ms, false)
             .await
-            .map_err(|error| ProductHostError::Output(error.to_string()))
+            .map_err(|error| ProductHostError::Output(error.to_string()))?;
+        self.add_profile_duration(media_started, |sample, duration| {
+            sample.media_decode_ns = sample.media_decode_ns.saturating_add(duration);
+        })
     }
 
     async fn save(&mut self, slot: &str) -> Result<(), ProductHostError> {
+        let profile_started = self.profile_started();
         self.next_save_transaction = self
             .next_save_transaction
             .checked_add(1)
@@ -597,7 +679,10 @@ impl NativeVnHeadlessSession {
         self.executor
             .execute_save_transaction(plan)
             .await
-            .map_err(|error| ProductHostError::Input(error.to_string()))
+            .map_err(|error| ProductHostError::Input(error.to_string()))?;
+        self.add_profile_duration(profile_started, |sample, duration| {
+            sample.save_load_ns = sample.save_load_ns.saturating_add(duration);
+        })
     }
 
     async fn capture_gameplay_surface(&mut self) -> Result<(), ProductHostError> {
@@ -629,6 +714,7 @@ impl NativeVnHeadlessSession {
     }
 
     async fn load(&mut self, slot: &str) -> Result<(), ProductHostError> {
+        let profile_started = self.profile_started();
         let read = self
             .source()?
             .read_save(slot)
@@ -668,7 +754,9 @@ impl NativeVnHeadlessSession {
         self.media
             .restore(media_snapshot)
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
-        Ok(())
+        self.add_profile_duration(profile_started, |sample, duration| {
+            sample.save_load_ns = sample.save_load_ns.saturating_add(duration);
+        })
     }
 
     fn refresh_observations(&mut self) -> Result<(), ProductHostError> {

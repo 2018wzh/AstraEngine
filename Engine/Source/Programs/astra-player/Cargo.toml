@@ -25,6 +25,7 @@ path = "src/main.rs"
 tracing.workspace = true
 base64.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }
+astra-byte-source = { path = "../../Runtime/astra-byte-source" }
 astra-observability = { path = "../../Developer/astra-observability" }
 astra-package = { path = "../../Runtime/astra-package" }
 astra-platform = { path = "../../Platform/astra-platform" }

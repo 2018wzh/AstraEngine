@@ -288,6 +288,10 @@
     "ui-component-provider": {
       "status": "not_applicable",
       "reason": "pure fixture facade for signed UI component ABI validation"
+    },
+    "tsuinosora-original-patcher": {
+      "status": "not_applicable",
+      "reason": "pure offline original-game patch transformation tool outside engine runtime and host sessions"
     }
   }
 }

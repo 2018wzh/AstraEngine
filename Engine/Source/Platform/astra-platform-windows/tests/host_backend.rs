@@ -91,7 +91,7 @@ async fn windows_host_owns_window_surface_present_capture_and_shutdown() {
         .capture_surface(surface)
         .await
         .expect("capture GPU-uploaded frame");
-    assert_eq!(capture.rgba8, rgba8);
+    assert_eq!(capture.rgba8.as_ref(), rgba8.as_slice());
     let resized = [8, 16, 32, 255].repeat(32 * 48);
     session
         .client
@@ -108,7 +108,7 @@ async fn windows_host_owns_window_surface_present_capture_and_shutdown() {
         .expect("present resized frame");
     let resized_capture = session.client.capture_surface(surface).await.unwrap();
     assert_eq!((resized_capture.width, resized_capture.height), (32, 48));
-    assert_eq!(resized_capture.rgba8, resized);
+    assert_eq!(resized_capture.rgba8.as_ref(), resized.as_slice());
     session.client.destroy_surface(surface).await.unwrap();
     session.client.destroy_window(window).await.unwrap();
     session.client.shutdown().await.unwrap();
