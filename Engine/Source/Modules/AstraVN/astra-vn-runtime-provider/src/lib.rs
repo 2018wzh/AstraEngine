@@ -404,16 +404,29 @@ impl NativeVnRuntimeProvider {
             fixed_step = input.fixed_step,
             "AstraVN runtime session step started"
         );
-        let command = if input.action == "command" {
-            serde_json::from_value(input.payload.clone())
-                .map_err(|err| CoreVnError::message(format!("decode VN player command: {err}")))?
-        } else {
-            let session = self.session(&input.session_id)?;
-            let state = session
-                .world
-                .read_component::<VnRuntimeState>(session.vn_component)
-                .map_err(|err| CoreVnError::message(err.to_string()))?;
-            runtime_command_from_input(&session.compiled, &session.runtime_index, &state, &input)?
+        let command = match input.action.as_str() {
+            "command" => serde_json::from_value(input.payload.clone())
+                .map_err(|err| CoreVnError::message(format!("decode VN player command: {err}")))?,
+            "launch_default" => {
+                let session = self.session(&input.session_id)?;
+                let state = session
+                    .world
+                    .read_component::<VnRuntimeState>(session.vn_component)
+                    .map_err(|err| CoreVnError::message(err.to_string()))?;
+                CoreVnRuntime::from_shared_state_indexed(
+                    Arc::clone(&session.compiled),
+                    Arc::clone(&session.runtime_index),
+                    state,
+                )?
+                .default_launch_command()
+                .ok_or_else(|| {
+                    CoreVnError::diagnostic(
+                        "ASTRA_NATIVE_VN_LAUNCH_MISSING",
+                        "compiled story has no launchable state",
+                    )
+                })?
+            }
+            _ => runtime_command_from_input(&input)?,
         };
         self.apply_command_at_step(
             input.session_id,
@@ -897,9 +910,6 @@ impl NativeVnRuntimeProvider {
 }
 
 fn runtime_command_from_input(
-    compiled: &Arc<CoreCompiledStory>,
-    runtime_index: &Arc<CoreVnRuntimeIndex>,
-    state: &VnRuntimeState,
     input: &RuntimeStepInput,
 ) -> Result<CoreVnPlayerCommand, CoreVnError> {
     match input.action.as_str() {
@@ -907,18 +917,10 @@ fn runtime_command_from_input(
             "ASTRA_NATIVE_VN_COMMAND_DISPATCH",
             "generic command input must be decoded before state-dependent command resolution",
         )),
-        "launch_default" => CoreVnRuntime::from_shared_state_indexed(
-            Arc::clone(compiled),
-            Arc::clone(runtime_index),
-            state.clone(),
-        )?
-        .default_launch_command()
-        .ok_or_else(|| {
-            CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_LAUNCH_MISSING",
-                "compiled story has no launchable state",
-            )
-        }),
+        "launch_default" => Err(CoreVnError::diagnostic(
+            "ASTRA_NATIVE_VN_LAUNCH_DISPATCH",
+            "default launch must be resolved with authoritative session state",
+        )),
         "advance" => Ok(CoreVnPlayerCommand::Advance),
         "choose" => Ok(CoreVnPlayerCommand::Choose {
             option_id: required_payload_string(&input.payload, "option_id")?,
