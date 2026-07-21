@@ -180,6 +180,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 request.retain_audio_timeline,
             )
             .map_err(|error| binding("media.create", error))?;
+            media.set_performance_profiling(performance_observer.is_some());
             record_open_phase(&performance_observer, "product.media_created")?;
             media
                 .initialize(&mut source, &mut executor)
@@ -739,8 +740,16 @@ impl NativeVnHeadlessSession {
                 .poll_and_process_with_audio_tick(source, &mut self.executor, now_ms, true)
                 .await
                 .map_err(|error| ProductHostError::Output(error.to_string()))?;
+            let media_sample = self.media.take_performance_sample();
             self.add_profile_duration(media_started, |sample, duration| {
                 sample.media_decode_ns = sample.media_decode_ns.saturating_add(duration);
+                sample.media_provider_decode_ns = sample
+                    .media_provider_decode_ns
+                    .saturating_add(media_sample.provider_decode_ns);
+                sample.media_parse_convert_ns = sample
+                    .media_parse_convert_ns
+                    .saturating_add(media_sample.parse_convert_ns);
+                sample.media_mixer_ns = sample.media_mixer_ns.saturating_add(media_sample.mixer_ns);
             })?;
             self.flush_performance_sample()?;
         }
@@ -757,8 +766,16 @@ impl NativeVnHeadlessSession {
             .poll_and_process_with_audio_tick(source, &mut self.executor, now_ms, false)
             .await
             .map_err(|error| ProductHostError::Output(error.to_string()))?;
+        let media_sample = self.media.take_performance_sample();
         self.add_profile_duration(media_started, |sample, duration| {
             sample.media_decode_ns = sample.media_decode_ns.saturating_add(duration);
+            sample.media_provider_decode_ns = sample
+                .media_provider_decode_ns
+                .saturating_add(media_sample.provider_decode_ns);
+            sample.media_parse_convert_ns = sample
+                .media_parse_convert_ns
+                .saturating_add(media_sample.parse_convert_ns);
+            sample.media_mixer_ns = sample.media_mixer_ns.saturating_add(media_sample.mixer_ns);
         })?;
         self.flush_performance_sample()
     }

@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    time::Instant,
+};
 
 use astra_core::Hash256;
 use astra_media::{PcmAsset, CANONICAL_CHANNELS, CANONICAL_SAMPLE_RATE};
@@ -24,6 +27,14 @@ pub struct NativeVnProductMediaHost {
     max_video_frames: u64,
     max_decode_output_bytes: u64,
     max_decoded_cache_bytes: u64,
+    performance: Option<NativeVnMediaPerformanceSample>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NativeVnMediaPerformanceSample {
+    pub provider_decode_ns: u64,
+    pub parse_convert_ns: u64,
+    pub mixer_ns: u64,
 }
 
 #[derive(Clone)]
@@ -99,6 +110,7 @@ impl NativeVnProductMediaHost {
             max_video_frames: 18_000,
             max_decode_output_bytes: 512 * 1024 * 1024,
             max_decoded_cache_bytes: 64 * 1024 * 1024,
+            performance: None,
         }
     }
 
@@ -125,6 +137,17 @@ impl NativeVnProductMediaHost {
         host.max_decode_output_bytes = max_decode_output_bytes;
         host.max_decoded_cache_bytes = max_decoded_cache_bytes;
         Ok(host)
+    }
+
+    pub fn set_performance_profiling(&mut self, enabled: bool) {
+        self.performance = enabled.then(NativeVnMediaPerformanceSample::default);
+    }
+
+    pub fn take_performance_sample(&mut self) -> NativeVnMediaPerformanceSample {
+        self.performance
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
     }
 
     pub fn is_active(&self) -> bool {
@@ -314,6 +337,7 @@ impl NativeVnProductMediaHost {
                         true,
                     )
                 } else {
+                    let decode_started = self.performance.as_ref().map(|_| Instant::now());
                     let decode = source
                         .prepare_audio_decode(&request)
                         .map_err(|error| media_error("player.audio.decode.prepare", error))?;
@@ -321,6 +345,11 @@ impl NativeVnProductMediaHost {
                         .execute_decode_lifecycle(decode)
                         .await
                         .map_err(|error| media_error("player.audio.decode", error))?;
+                    self.add_profile_duration(decode_started, |sample, duration| {
+                        sample.provider_decode_ns =
+                            sample.provider_decode_ns.saturating_add(duration);
+                    })?;
+                    let convert_started = self.performance.as_ref().map(|_| Instant::now());
                     let audio = PlayerDecodedAudio::parse(
                         &decoded.format,
                         &decoded.bytes,
@@ -337,10 +366,14 @@ impl NativeVnProductMediaHost {
                     let asset =
                         PcmAsset::from_canonical_samples(request.asset_id.clone(), audio.samples)
                             .map_err(|error| media_error("player.audio.asset", error))?;
+                    self.add_profile_duration(convert_started, |sample, duration| {
+                        sample.parse_convert_ns = sample.parse_convert_ns.saturating_add(duration);
+                    })?;
                     let decoded_hash = decoded.hash;
                     self.cache_audio(request.encoded_hash, asset.clone(), decoded_hash.clone());
                     (asset, decoded_hash, false)
                 };
+                let mixer_started = self.performance.as_ref().map(|_| Instant::now());
                 self.audio
                     .start_canonical(
                         source,
@@ -350,6 +383,9 @@ impl NativeVnProductMediaHost {
                         &mut self.completed_signals,
                     )
                     .await?;
+                self.add_profile_duration(mixer_started, |sample, duration| {
+                    sample.mixer_ns = sample.mixer_ns.saturating_add(duration);
+                })?;
                 tracing::info!(
                     event = "astra.player.audio.started",
                     command_id = %request.command_id,
@@ -443,9 +479,13 @@ impl NativeVnProductMediaHost {
                 .await?;
 
             if render_audio_tick {
+                let mixer_started = self.performance.as_ref().map(|_| Instant::now());
                 self.audio
                     .pump(source, executor, &mut self.completed_signals)
                     .await?;
+                self.add_profile_duration(mixer_started, |sample, duration| {
+                    sample.mixer_ns = sample.mixer_ns.saturating_add(duration);
+                })?;
             }
             if let Some(fence) = source.pending_wait().map(|wait| wait.fence.clone()) {
                 if self.completed_signals.remove(&fence) {
@@ -465,6 +505,31 @@ impl NativeVnProductMediaHost {
             "player.media.process",
             "ASTRA_PLAYER_MEDIA_COMPLETION_LOOP: completion chain exceeded its bound",
         ))
+    }
+
+    fn add_profile_duration(
+        &mut self,
+        started: Option<Instant>,
+        update: impl FnOnce(&mut NativeVnMediaPerformanceSample, u64),
+    ) -> Result<(), PlatformError> {
+        let Some(started) = started else {
+            return Ok(());
+        };
+        let elapsed = started.elapsed().as_nanos();
+        let duration = u64::try_from(elapsed).map_err(|_| {
+            media_error(
+                "player.media.performance",
+                "ASTRA_PLAYER_MEDIA_PERFORMANCE_DURATION_OVERFLOW",
+            )
+        })?;
+        let sample = self.performance.as_mut().ok_or_else(|| {
+            media_error(
+                "player.media.performance",
+                "ASTRA_PLAYER_MEDIA_PERFORMANCE_STATE_MISSING",
+            )
+        })?;
+        update(sample, duration);
+        Ok(())
     }
 
     pub async fn shutdown(

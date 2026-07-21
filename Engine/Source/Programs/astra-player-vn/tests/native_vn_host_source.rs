@@ -1383,7 +1383,7 @@ state start #@id state.start
     };
     assert_eq!(audio.asset_id, "asset:/voice/hero/0001");
     assert_eq!(audio.codec, "mp3");
-    assert_eq!(audio.encoded_bytes, encoded);
+    assert_eq!(audio.encoded_bytes.as_ref(), encoded.as_slice());
     assert_eq!(audio.encoded_hash, encoded_hash);
     assert_eq!(audio.attributes.get("asset"), Some(&audio.asset_id));
     let decode = source.prepare_audio_decode(audio).unwrap();

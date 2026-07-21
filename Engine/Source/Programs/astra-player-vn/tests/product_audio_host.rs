@@ -284,7 +284,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
         attributes: BTreeMap::from([("loop".into(), "true".into()), ("fade".into(), "40".into())]),
         asset_id: "asset:/bgm/main".into(),
         codec: "wav".into(),
-        encoded_bytes: vec![1],
+        encoded_bytes: vec![1].into(),
         encoded_hash: Hash256::from_sha256(&[1]),
     };
     let audio = PlayerDecodedAudio {

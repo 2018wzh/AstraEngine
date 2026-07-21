@@ -218,7 +218,7 @@ pub struct NativeVnAudioRequest {
     pub attributes: BTreeMap<String, String>,
     pub asset_id: String,
     pub codec: String,
-    pub encoded_bytes: Vec<u8>,
+    pub encoded_bytes: Arc<[u8]>,
     pub encoded_hash: Hash256,
 }
 
@@ -247,7 +247,7 @@ pub struct NativeVnVideoRequest {
     pub layer: String,
     pub asset_id: String,
     pub codec: String,
-    pub encoded_bytes: Vec<u8>,
+    pub encoded_bytes: Arc<[u8]>,
     pub encoded_hash: Hash256,
     pub alpha_millionths: i64,
     pub looping: bool,
@@ -1131,7 +1131,7 @@ impl NativeVnHostCommandSource {
                 coded_width: None,
                 coded_height: None,
                 keyframe: true,
-                bytes: request.encoded_bytes.clone(),
+                bytes: request.encoded_bytes.as_ref().to_vec(),
             }])?,
             close: PlayerHostCommandBatch::new(vec![PlayerHostCommand::CloseDecode {
                 sequence: self.next_command_sequence()?,
@@ -1172,7 +1172,7 @@ impl NativeVnHostCommandSource {
                 coded_width: None,
                 coded_height: None,
                 keyframe: true,
-                bytes: request.encoded_bytes.clone(),
+                bytes: request.encoded_bytes.as_ref().to_vec(),
             }])?,
             close: PlayerHostCommandBatch::new(vec![PlayerHostCommand::CloseDecode {
                 sequence: self.next_command_sequence()?,
@@ -1217,7 +1217,7 @@ impl NativeVnHostCommandSource {
             layer: snapshot.layer.clone(),
             asset_id: snapshot.asset_id.clone(),
             codec: asset.codec.clone(),
-            encoded_bytes: asset.bytes.as_ref().to_vec(),
+            encoded_bytes: Arc::clone(&asset.bytes),
             encoded_hash: asset.hash,
             alpha_millionths: snapshot.alpha_millionths,
             looping: snapshot.looping,
@@ -3237,7 +3237,7 @@ impl NativeVnHostCommandSource {
                             attributes,
                             asset_id,
                             codec: asset.codec.clone(),
-                            encoded_bytes: asset.bytes.as_ref().to_vec(),
+                            encoded_bytes: Arc::clone(&asset.bytes),
                             encoded_hash: asset.hash,
                         },
                     ));
@@ -3359,7 +3359,7 @@ impl NativeVnHostCommandSource {
                                 layer: movie.layer,
                                 asset_id: movie.asset,
                                 codec: asset.codec.clone(),
-                                encoded_bytes: asset.bytes.as_ref().to_vec(),
+                                encoded_bytes: Arc::clone(&asset.bytes),
                                 encoded_hash: asset.hash,
                                 alpha_millionths: movie.alpha.millionths,
                                 looping: matches!(movie.loop_mode, MovieLoopMode::Loop),

@@ -192,6 +192,17 @@ impl ProductPerformanceRecorder {
             ("ui.cpu", "ui.frame_model", sample.ui_frame_model_ns),
             ("ui.cpu", "ui.text_scene", sample.ui_text_scene_ns),
             ("media.cpu", "media.decode_mix", sample.media_decode_ns),
+            (
+                "media.cpu",
+                "media.provider_decode",
+                sample.media_provider_decode_ns,
+            ),
+            (
+                "media.cpu",
+                "media.parse_convert",
+                sample.media_parse_convert_ns,
+            ),
+            ("media.cpu", "media.mixer", sample.media_mixer_ns),
             ("save.cpu", "save_load", sample.save_load_ns),
         ] {
             if duration_ns == 0 {
@@ -1146,6 +1157,9 @@ mod tests {
             ui_frame_model_ns: 2,
             ui_text_scene_ns: 1,
             media_decode_ns: 6,
+            media_provider_decode_ns: 3,
+            media_parse_convert_ns: 2,
+            media_mixer_ns: 1,
             save_load_ns: 7,
         };
         recorder.record_product_sample(1, product_sample).unwrap();
