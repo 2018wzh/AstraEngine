@@ -689,52 +689,6 @@ fn device_descriptor(
     descriptor
 }
 
-#[cfg(test)]
-mod adapter_identity_tests {
-    use super::*;
-
-    fn adapter_info(driver_info: &str) -> wgpu::AdapterInfo {
-        wgpu::AdapterInfo {
-            name: "bounded-test-adapter".into(),
-            vendor: 0x1002,
-            device: 0x150e,
-            device_type: wgpu::DeviceType::IntegratedGpu,
-            device_pci_bus_id: String::new(),
-            driver: "test-driver".into(),
-            driver_info: driver_info.into(),
-            backend: wgpu::Backend::Dx12,
-            subgroup_min_size: 32,
-            subgroup_max_size: 64,
-            transient_saves_memory: false,
-        }
-    }
-
-    #[test]
-    fn policy_identity_is_the_reported_renderer_identity_hash() {
-        let info = adapter_info("1.2.3");
-        assert_eq!(
-            adapter_policy_identity(&info),
-            renderer_execution_identity(&info).hash().unwrap()
-        );
-        assert_ne!(
-            adapter_policy_identity(&info),
-            adapter_policy_identity(&adapter_info("1.2.4"))
-        );
-    }
-
-    #[test]
-    fn offscreen_device_uses_bounded_memory_allocation_hints() {
-        let timestamp_features =
-            wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
-        let descriptor = device_descriptor(true, timestamp_features);
-        assert!(matches!(
-            descriptor.memory_hints,
-            wgpu::MemoryHints::MemoryUsage
-        ));
-        assert!(descriptor.required_features.contains(timestamp_features));
-    }
-}
-
 fn backend_matches(backend: wgpu::Backend, policy: GpuBackendPolicy) -> bool {
     matches!(
         (backend, policy),
@@ -1325,4 +1279,50 @@ fn invalid(operation: &'static str, message: &'static str) -> PlatformError {
 
 fn unavailable(operation: &'static str, message: &'static str) -> PlatformError {
     PlatformError::new(PlatformErrorCode::ProviderUnavailable, operation, message)
+}
+
+#[cfg(test)]
+mod adapter_identity_tests {
+    use super::*;
+
+    fn adapter_info(driver_info: &str) -> wgpu::AdapterInfo {
+        wgpu::AdapterInfo {
+            name: "bounded-test-adapter".into(),
+            vendor: 0x1002,
+            device: 0x150e,
+            device_type: wgpu::DeviceType::IntegratedGpu,
+            device_pci_bus_id: String::new(),
+            driver: "test-driver".into(),
+            driver_info: driver_info.into(),
+            backend: wgpu::Backend::Dx12,
+            subgroup_min_size: 32,
+            subgroup_max_size: 64,
+            transient_saves_memory: false,
+        }
+    }
+
+    #[test]
+    fn policy_identity_is_the_reported_renderer_identity_hash() {
+        let info = adapter_info("1.2.3");
+        assert_eq!(
+            adapter_policy_identity(&info),
+            renderer_execution_identity(&info).hash().unwrap()
+        );
+        assert_ne!(
+            adapter_policy_identity(&info),
+            adapter_policy_identity(&adapter_info("1.2.4"))
+        );
+    }
+
+    #[test]
+    fn offscreen_device_uses_bounded_memory_allocation_hints() {
+        let timestamp_features =
+            wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+        let descriptor = device_descriptor(true, timestamp_features);
+        assert!(matches!(
+            descriptor.memory_hints,
+            wgpu::MemoryHints::MemoryUsage
+        ));
+        assert!(descriptor.required_features.contains(timestamp_features));
+    }
 }

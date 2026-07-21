@@ -33,6 +33,7 @@ pub(crate) struct WgpuGlyphAtlasRenderer {
     last_engine_allocation_bytes: u64,
     last_engine_allocation_count: u64,
     vertex_bytes: Vec<u8>,
+    uploaded_vertex_bytes: Vec<u8>,
     draw_batches: Vec<DrawBatch>,
 }
 
@@ -211,6 +212,7 @@ impl WgpuGlyphAtlasRenderer {
             last_engine_allocation_bytes: 0,
             last_engine_allocation_count: 0,
             vertex_bytes: Vec::new(),
+            uploaded_vertex_bytes: Vec::new(),
             draw_batches: Vec::new(),
         }
     }
@@ -224,6 +226,7 @@ impl WgpuGlyphAtlasRenderer {
         self.output = None;
         self.vertex_buffer = None;
         self.vertex_capacity = 0;
+        self.uploaded_vertex_bytes.clear();
         self.last_upload_bytes = 0;
         self.last_draw_calls = 0;
         self.last_engine_allocation_bytes = 0;
@@ -871,6 +874,7 @@ impl WgpuGlyphAtlasRenderer {
         let vertex_upload_started = Instant::now();
         if !self.vertex_bytes.is_empty() {
             let required = self.vertex_bytes.len() as u64;
+            let mut vertex_buffer_recreated = false;
             if self.vertex_capacity < required {
                 let capacity = required
                     .max(4096)
@@ -883,14 +887,28 @@ impl WgpuGlyphAtlasRenderer {
                     mapped_at_creation: false,
                 }));
                 self.vertex_capacity = capacity;
+                vertex_buffer_recreated = true;
             }
-            queue.write_buffer(
-                self.vertex_buffer
-                    .as_ref()
-                    .ok_or_else(|| invalid("glyph vertex buffer is unavailable"))?,
-                0,
+            if vertex_upload_required(
                 &self.vertex_bytes,
-            );
+                &self.uploaded_vertex_bytes,
+                vertex_buffer_recreated,
+            ) {
+                queue.write_buffer(
+                    self.vertex_buffer
+                        .as_ref()
+                        .ok_or_else(|| invalid("glyph vertex buffer is unavailable"))?,
+                    0,
+                    &self.vertex_bytes,
+                );
+                self.last_upload_bytes = self
+                    .last_upload_bytes
+                    .checked_add(required)
+                    .ok_or_else(|| invalid("GPU upload byte counter overflowed"))?;
+                self.uploaded_vertex_bytes.clear();
+                self.uploaded_vertex_bytes
+                    .extend_from_slice(&self.vertex_bytes);
+            }
         }
         let vertex_upload_ns = profiled_elapsed_ns(profile_cpu, vertex_upload_started)?;
         let render_submit_started = Instant::now();
@@ -1007,6 +1025,10 @@ fn profiled_elapsed_ns(enabled: bool, started: Instant) -> Result<u64, PlatformE
         .as_nanos()
         .try_into()
         .map_err(|_| invalid("glyph CPU profile duration overflowed"))
+}
+
+fn vertex_upload_required(current: &[u8], uploaded: &[u8], buffer_recreated: bool) -> bool {
+    buffer_recreated || current != uploaded
 }
 
 fn validate_resource_budget(
@@ -2099,7 +2121,9 @@ struct VertexOutput {
 
 #[cfg(test)]
 mod tests {
-    use super::{allocate_atlas_slot, pack_atlas, release_atlas_slot, AtlasResource};
+    use super::{
+        allocate_atlas_slot, pack_atlas, release_atlas_slot, vertex_upload_required, AtlasResource,
+    };
     use astra_core::Hash256;
     use astra_media_core::TextureFrame;
     use std::{collections::BTreeMap, sync::Arc};
@@ -2150,5 +2174,13 @@ mod tests {
         let reused = allocate_atlas_slot(&mut packed, 32, 32).unwrap();
         assert_eq!((reused.x, reused.y), (original.x, original.y));
         assert_eq!(packed.freed_area, 0);
+    }
+
+    #[test]
+    fn stable_vertex_payload_skips_upload_until_bytes_or_buffer_change() {
+        let uploaded = [1_u8, 2, 3, 4];
+        assert!(!vertex_upload_required(&uploaded, &uploaded, false));
+        assert!(vertex_upload_required(&[1, 2, 3, 5], &uploaded, false));
+        assert!(vertex_upload_required(&uploaded, &uploaded, true));
     }
 }
