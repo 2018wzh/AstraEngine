@@ -444,14 +444,16 @@ impl MinoriMountedVfs {
             prepared.push((config, source, parsed));
         }
         for (config, mut source, parsed) in prepared {
-            source.hash = hash_parts(&source.parts)?;
+            let (source_hash, encrypted_hashes) =
+                hash_parts_and_entries(&source.parts, source.length, &parsed)?;
+            source.hash = source_hash;
             tracing::info!(
                 event = "astra_emu_minori_archive_hashed",
                 archive_role = %config.role,
                 archive_hash = %source.hash
             );
             let archive_index = archives.len();
-            for entry in parsed {
+            for (entry, encrypted_hash) in parsed.into_iter().zip(encrypted_hashes) {
                 let uri = format!(
                     "{}{}/{}",
                     prefix,
@@ -465,8 +467,6 @@ impl MinoriMountedVfs {
                         "PAZ set contains a duplicate URI or entry id",
                     ));
                 }
-                let encrypted = read_source_range(&source, entry.offset, entry.aligned_size)?;
-                let encrypted_hash = Hash256::from_sha256(&encrypted);
                 entries.insert(
                     uri.clone(),
                     MountedEntry {
@@ -1062,18 +1062,67 @@ fn read_source_range(
     Ok(output)
 }
 
-fn hash_parts(parts: &[ArchivePart]) -> Result<Hash256, PazError> {
-    let mut hasher = Sha256::new();
+fn hash_parts_and_entries(
+    parts: &[ArchivePart],
+    source_length: u64,
+    entries: &[PazEntryDescriptor],
+) -> Result<(Hash256, Vec<Hash256>), PazError> {
+    let mut ranges = Vec::with_capacity(entries.len());
+    let mut entry_hashes = vec![None; entries.len()];
+    for (index, entry) in entries.iter().enumerate() {
+        let end = entry
+            .offset
+            .checked_add(entry.aligned_size)
+            .ok_or_else(|| {
+                error(
+                    "ASTRA_EMU_MINORI_ENTRY_BOUNDS",
+                    "entry encrypted range overflowed",
+                )
+            })?;
+        if end > source_length {
+            return Err(error(
+                "ASTRA_EMU_MINORI_ENTRY_BOUNDS",
+                "entry encrypted range exceeds the archive",
+            ));
+        }
+        if entry.aligned_size == 0 {
+            entry_hashes[index] = Some(Hash256::from_sha256(&[]));
+        } else {
+            ranges.push((entry.offset, end, index));
+        }
+    }
+    ranges.sort_unstable_by_key(|(start, end, index)| (*start, *end, *index));
+    for pair in ranges.windows(2) {
+        if pair[1].0 < pair[0].1 {
+            return Err(error(
+                "ASTRA_EMU_MINORI_ENTRY_OVERLAP",
+                "PAZ encrypted entry ranges overlap",
+            ));
+        }
+    }
+
+    let mut source_hasher = Sha256::new();
+    let mut active_entry = None::<Sha256>;
+    let mut range_index = 0usize;
+    let mut logical_offset = 0u64;
     // Windows reserves a relatively small main-thread stack. Archive hashing is a
     // normal host operation, so its MiB-sized scratch area belongs on the heap.
     let mut buffer = vec![0u8; 1024 * 1024];
     for part in parts {
-        let mut file = File::open(&part.path).map_err(|_| {
+        let file = File::open(&part.path).map_err(|_| {
             error(
                 "ASTRA_EMU_MINORI_ARCHIVE_OPEN",
                 "PAZ archive cannot be opened",
             )
         })?;
+        let read_bound = part.length.checked_add(1).ok_or_else(|| {
+            error(
+                "ASTRA_EMU_MINORI_ARCHIVE_SIZE",
+                "archive part read bound overflowed",
+            )
+        })?;
+        let mut file = file.take(read_bound);
+        let mut part_bytes = 0u64;
         loop {
             let count = file.read(&mut buffer).map_err(|_| {
                 error(
@@ -1084,10 +1133,115 @@ fn hash_parts(parts: &[ArchivePart]) -> Result<Hash256, PazError> {
             if count == 0 {
                 break;
             }
-            hasher.update(&buffer[..count]);
+            part_bytes = part_bytes.checked_add(count as u64).ok_or_else(|| {
+                error(
+                    "ASTRA_EMU_MINORI_ARCHIVE_SIZE",
+                    "archive part read size overflowed",
+                )
+            })?;
+            source_hasher.update(&buffer[..count]);
+            let chunk_end = logical_offset.checked_add(count as u64).ok_or_else(|| {
+                error(
+                    "ASTRA_EMU_MINORI_ARCHIVE_SIZE",
+                    "archive logical offset overflowed",
+                )
+            })?;
+            while let Some(&(range_start, range_end, original_index)) = ranges.get(range_index) {
+                if range_start >= chunk_end {
+                    break;
+                }
+                if range_end <= logical_offset {
+                    return Err(error(
+                        "ASTRA_EMU_MINORI_ENTRY_HASH",
+                        "entry encrypted range was not covered by the archive stream",
+                    ));
+                }
+                let overlap_start = range_start.max(logical_offset);
+                let overlap_end = range_end.min(chunk_end);
+                let start = usize::try_from(overlap_start - logical_offset).map_err(|_| {
+                    error(
+                        "ASTRA_EMU_MINORI_ENTRY_HASH",
+                        "entry chunk start exceeds host bounds",
+                    )
+                })?;
+                let end = usize::try_from(overlap_end - logical_offset).map_err(|_| {
+                    error(
+                        "ASTRA_EMU_MINORI_ENTRY_HASH",
+                        "entry chunk end exceeds host bounds",
+                    )
+                })?;
+                active_entry
+                    .get_or_insert_with(Sha256::new)
+                    .update(&buffer[start..end]);
+                if overlap_end != range_end {
+                    break;
+                }
+                let digest = active_entry.take().ok_or_else(|| {
+                    error("ASTRA_EMU_MINORI_ENTRY_HASH", "entry hash state is missing")
+                })?;
+                entry_hashes[original_index] = Some(Hash256::from_bytes(digest.finalize().into()));
+                range_index += 1;
+            }
+            logical_offset = chunk_end;
+        }
+        if part_bytes != part.length {
+            return Err(error(
+                "ASTRA_EMU_MINORI_SOURCE_CHANGED",
+                "archive part size changed while hashing",
+            ));
         }
     }
-    Ok(Hash256::from_bytes(hasher.finalize().into()))
+    if logical_offset != source_length
+        || range_index != ranges.len()
+        || active_entry.is_some()
+        || entry_hashes.iter().any(Option::is_none)
+    {
+        return Err(error(
+            "ASTRA_EMU_MINORI_ARCHIVE_SHORT_READ",
+            "archive stream did not cover every declared byte and entry",
+        ));
+    }
+    for part in parts {
+        let metadata = std::fs::metadata(&part.path).map_err(|_| {
+            error(
+                "ASTRA_EMU_MINORI_SOURCE_CHANGED",
+                "archive part disappeared while hashing",
+            )
+        })?;
+        if metadata.len() != part.length || metadata.modified().ok() != part.modified {
+            return Err(error(
+                "ASTRA_EMU_MINORI_SOURCE_CHANGED",
+                "archive part metadata changed while hashing",
+            ));
+        }
+    }
+    let entry_hashes = entry_hashes
+        .into_iter()
+        .map(|hash| {
+            hash.ok_or_else(|| {
+                error(
+                    "ASTRA_EMU_MINORI_ENTRY_HASH",
+                    "entry hash was not finalized",
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((
+        Hash256::from_bytes(source_hasher.finalize().into()),
+        entry_hashes,
+    ))
+}
+
+fn hash_parts(parts: &[ArchivePart]) -> Result<Hash256, PazError> {
+    let source_length = parts.iter().try_fold(0u64, |total, part| {
+        total.checked_add(part.length).ok_or_else(|| {
+            error(
+                "ASTRA_EMU_MINORI_ARCHIVE_SIZE",
+                "multipart PAZ size overflowed",
+            )
+        })
+    })?;
+    hash_parts_and_entries(parts, source_length, &[]).map(|(hash, _)| hash)
 }
 
 fn verify_source_unchanged(source: &ArchiveSource) -> Result<(), PazError> {
@@ -1481,6 +1635,78 @@ mod tests {
             block[4..].reverse();
         }
         bytes
+    }
+
+    fn hash_fixture_entry(id: &str, offset: u64, size: u64) -> PazEntryDescriptor {
+        PazEntryDescriptor {
+            archive_role: "bg".into(),
+            entry_id: id.into(),
+            name: format!("{id}.bin"),
+            offset,
+            unpacked_size: size,
+            stored_size: size,
+            aligned_size: size,
+            packed: false,
+            video_key: None,
+        }
+    }
+
+    #[test]
+    fn archive_and_entry_hashes_share_one_ordered_stream() {
+        let temp = tempfile::tempdir().unwrap();
+        let bytes = (0u8..100).collect::<Vec<_>>();
+        let first = temp.path().join("archive.paz");
+        let second = temp.path().join("archive.pazA");
+        fs::write(&first, &bytes[..47]).unwrap();
+        fs::write(&second, &bytes[47..]).unwrap();
+        let parts = [&first, &second]
+            .into_iter()
+            .map(|path| {
+                let metadata = fs::metadata(path).unwrap();
+                ArchivePart {
+                    path: path.clone(),
+                    length: metadata.len(),
+                    modified: metadata.modified().ok(),
+                }
+            })
+            .collect::<Vec<_>>();
+        let entries = vec![
+            hash_fixture_entry("first", 3, 17),
+            hash_fixture_entry("cross-part", 40, 20),
+            hash_fixture_entry("empty", 80, 0),
+        ];
+
+        let (source_hash, entry_hashes) =
+            hash_parts_and_entries(&parts, bytes.len() as u64, &entries).unwrap();
+
+        assert_eq!(source_hash, Hash256::from_sha256(&bytes));
+        assert_eq!(entry_hashes[0], Hash256::from_sha256(&bytes[3..20]));
+        assert_eq!(entry_hashes[1], Hash256::from_sha256(&bytes[40..60]));
+        assert_eq!(entry_hashes[2], Hash256::from_sha256(&[]));
+    }
+
+    #[test]
+    fn overlapping_encrypted_entry_ranges_are_blocking() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("archive.paz");
+        fs::write(&path, [0u8; 32]).unwrap();
+        let metadata = fs::metadata(&path).unwrap();
+        let parts = vec![ArchivePart {
+            path,
+            length: metadata.len(),
+            modified: metadata.modified().ok(),
+        }];
+        let entries = vec![
+            hash_fixture_entry("first", 0, 16),
+            hash_fixture_entry("second", 8, 16),
+        ];
+
+        assert_eq!(
+            hash_parts_and_entries(&parts, 32, &entries)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_MINORI_ENTRY_OVERLAP"
+        );
     }
 
     #[test]

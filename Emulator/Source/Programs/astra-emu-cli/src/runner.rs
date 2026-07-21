@@ -1935,22 +1935,23 @@ impl<'a> RuntimeDriver<'a> {
         {
             return Err("ASTRA_EMU_HEADLESS_WAIT_UNSUPPORTED".into());
         }
-        let input_mask = self
-            .pending_inputs
-            .iter()
-            .fold(0_u64, |mask, edge| mask | input_control_mask(&edge.control));
+        let input_mask = pressed_input_mask(&self.pending_inputs);
         let ready = self
             .pending_waits
             .iter()
-            .filter(|(_, wait)| match wait {
-                PendingWait::DueStep(due) => *due <= next_step,
-                PendingWait::Input(mask) => input_mask & *mask != 0,
-                _ => false,
+            .filter_map(|(token, wait)| match wait {
+                PendingWait::DueStep(due) if *due <= next_step => Some((token.clone(), 0)),
+                PendingWait::Input(mask) if input_mask & *mask != 0 => {
+                    Some((token.clone(), input_mask & *mask))
+                }
+                _ => None,
             })
-            .map(|(token, _)| token.clone())
             .collect::<Vec<_>>();
+        let consumed_input_mask = ready
+            .iter()
+            .fold(0u64, |mask, (_, consumed)| mask | consumed);
         let mut await_results = Vec::new();
-        for token_id in ready {
+        for (token_id, _) in ready {
             self.pending_waits.remove(&token_id);
             self.await_sequence = self
                 .await_sequence
@@ -1963,6 +1964,10 @@ impl<'a> RuntimeDriver<'a> {
                 sequence: self.await_sequence,
             });
         }
+        let input_edges = retain_unconsumed_input_edges(
+            std::mem::take(&mut self.pending_inputs),
+            consumed_input_mask,
+        );
         let runtime_started = Instant::now();
         let output = self.runtime.step(RuntimeStepInput {
             session_id: self.session_id.clone(),
@@ -1972,7 +1977,7 @@ impl<'a> RuntimeDriver<'a> {
             mode: self.next_step_mode,
             action: "emu.step".into(),
             payload: serde_json::to_value(EmuStepPayload {
-                input_edges: std::mem::take(&mut self.pending_inputs),
+                input_edges,
                 await_results,
                 provider_results: Vec::new(),
                 budget: LegacyStepBudget {
@@ -3228,6 +3233,23 @@ fn input_control_mask(control: &str) -> u64 {
     }
 }
 
+fn pressed_input_mask(edges: &[LegacyInputEdge]) -> u64 {
+    edges
+        .iter()
+        .filter(|edge| edge.pressed)
+        .fold(0, |mask, edge| mask | input_control_mask(&edge.control))
+}
+
+fn retain_unconsumed_input_edges(
+    edges: Vec<LegacyInputEdge>,
+    consumed_mask: u64,
+) -> Vec<LegacyInputEdge> {
+    edges
+        .into_iter()
+        .filter(|edge| input_control_mask(&edge.control) & consumed_mask == 0)
+        .collect()
+}
+
 fn composite_bgra(
     target: &mut [u8],
     target_width: u32,
@@ -3434,6 +3456,39 @@ mod native_tests {
         );
         assert_eq!(native_key_control(None, "Space"), Some("space"));
         assert_eq!(native_key_control(Some("F12"), "F12"), None);
+    }
+
+    #[test]
+    fn input_await_consumes_matching_press_and_release_edges() {
+        let edges = vec![
+            LegacyInputEdge {
+                control: "confirm".into(),
+                pressed: true,
+                value: 1.0,
+                sequence: 1,
+            },
+            LegacyInputEdge {
+                control: "confirm".into(),
+                pressed: false,
+                value: 0.0,
+                sequence: 2,
+            },
+            LegacyInputEdge {
+                control: "left".into(),
+                pressed: true,
+                value: 1.0,
+                sequence: 3,
+            },
+        ];
+        assert_eq!(
+            pressed_input_mask(&edges),
+            input_control_mask("confirm") | input_control_mask("left")
+        );
+
+        let retained = retain_unconsumed_input_edges(edges, input_control_mask("confirm"));
+
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].control, "left");
     }
 
     #[test]
