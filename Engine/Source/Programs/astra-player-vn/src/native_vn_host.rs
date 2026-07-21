@@ -107,6 +107,7 @@ pub struct NativeVnHostCommandSource {
     pending_timeline: Vec<PlayerTimelineTask>,
     pending_audio: Vec<NativeVnAudioOutput>,
     pending_audio_preloads: Vec<NativeVnAudioPreloadRequest>,
+    audio_preload_story_ids: BTreeSet<String>,
     pending_video: Vec<NativeVnVideoRequest>,
     pending_stage_completions: Vec<String>,
     next_media_resource_id: u64,
@@ -707,6 +708,7 @@ impl NativeVnHostCommandSource {
             pending_timeline: Vec::new(),
             pending_audio: Vec::new(),
             pending_audio_preloads: Vec::new(),
+            audio_preload_story_ids: BTreeSet::new(),
             pending_video: Vec::new(),
             pending_stage_completions: Vec::new(),
             next_media_resource_id: 10_000,
@@ -1782,26 +1784,27 @@ impl NativeVnHostCommandSource {
     }
 
     pub fn launch(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        let batch = self.step("launch_default", serde_json::json!({}))?;
-        self.queue_entry_story_audio_preloads()?;
-        Ok(batch)
+        self.step("launch_default", serde_json::json!({}))
     }
 
     pub fn take_audio_preload_requests(&mut self) -> Vec<NativeVnAudioPreloadRequest> {
         std::mem::take(&mut self.pending_audio_preloads)
     }
 
-    fn queue_entry_story_audio_preloads(&mut self) -> Result<(), NativeVnHostError> {
+    fn queue_current_story_audio_preloads(&mut self) -> Result<(), NativeVnHostError> {
         const MAX_ENTRY_AUDIO_PRELOADS: usize = 4_096;
 
         let Some(story_id) = self
             .runtime_state
             .as_ref()
             .and_then(|state| state.cursor.as_ref())
-            .map(|cursor| cursor.story_id.as_str())
+            .map(|cursor| cursor.story_id.clone())
         else {
             return Ok(());
         };
+        if self.audio_preload_story_ids.contains(&story_id) {
+            return Ok(());
+        }
         let mut asset_ids = BTreeSet::new();
         for state in self
             .story
@@ -1845,7 +1848,17 @@ impl NativeVnHostCommandSource {
                 encoded_hash: asset.hash,
             });
         }
-        self.pending_audio_preloads = requests;
+        let pending_hashes = self
+            .pending_audio_preloads
+            .iter()
+            .map(|request| request.encoded_hash)
+            .collect::<BTreeSet<_>>();
+        self.pending_audio_preloads.extend(
+            requests
+                .into_iter()
+                .filter(|request| !pending_hashes.contains(&request.encoded_hash)),
+        );
+        self.audio_preload_story_ids.insert(story_id);
         Ok(())
     }
 
@@ -3289,6 +3302,7 @@ impl NativeVnHostCommandSource {
                 );
             }
         }
+        self.queue_current_story_audio_preloads()?;
         let runtime_state = self.runtime_state.as_ref().ok_or_else(|| {
             NativeVnHostError::RuntimeEvidence(
                 "ASTRA_PLAYER_VN_STATE_MISSING: runtime state trace is required".into(),
