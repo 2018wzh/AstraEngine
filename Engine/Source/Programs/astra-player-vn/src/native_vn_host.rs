@@ -24,11 +24,12 @@ use astra_plugin_abi::{
     ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
 };
 use astra_ui_core::{
-    UiBackend, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState, UiFrameRequest,
-    UiInputDispositionKind, UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets,
-    UiPerformanceBudget, UiPerformanceGate, UiPerformanceReport, UiPerformanceSample,
-    UiSemanticNode, UiSemanticRole, UiSemanticSnapshot, UiThemeManifest, UiThemeValue,
-    UiValidationError, UiValue, UiViewport, ValidateUi, MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
+    UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState,
+    UiFrameRequest, UiInputDispositionKind, UiInputEvent, UiInputEventKind, UiInputFrame, UiInsets,
+    UiNodeBlueprint, UiPerformanceBudget, UiPerformanceGate, UiPerformanceReport,
+    UiPerformanceSample, UiSemanticNode, UiSemanticRole, UiSemanticSnapshot, UiThemeManifest,
+    UiThemeValue, UiValidationError, UiValue, UiValueExpr, UiViewport, ValidateUi,
+    MAX_EFFECTS_PER_CALL, MAX_MODAL_DEPTH,
 };
 use astra_ui_yakui::{
     ui_frame_to_scene_commands, AstraTextMeasureRequest, AstraTextMeasureResult, AstraTextMeasurer,
@@ -83,6 +84,7 @@ pub struct NativeVnHostCommandSource {
     available_font_families: Vec<String>,
     text_resources: TextRenderResourceOwner,
     localization: VnLocalizationTable,
+    localization_keys: Vec<String>,
     localizations: BTreeMap<String, VnLocalizationTable>,
     ui_text_locale: Arc<RwLock<String>>,
     ui_text_font_families: Arc<RwLock<Vec<String>>>,
@@ -110,6 +112,7 @@ pub struct NativeVnHostCommandSource {
     restored_product_media_snapshot: Option<Vec<u8>>,
     story: CompiledStory,
     ui_blueprints: astra_ui_core::UiBlueprintBundle,
+    ui_view_localization_keys: BTreeMap<String, BTreeSet<String>>,
     ui_bindings: astra_ui_core::UiBindingManifest,
     ui_backend: AstraYakuiBackend<BlueprintYakuiRenderer>,
     ui_themes: BTreeMap<String, UiThemeManifest>,
@@ -570,6 +573,14 @@ impl NativeVnHostCommandSource {
             height,
             "opened AstraVN Player command source through ProductRuntimeHost"
         );
+        let localization_keys = binding
+            .presentation
+            .localization
+            .strings
+            .keys()
+            .cloned()
+            .collect();
+        let ui_view_localization_keys = blueprint_view_localization_keys(&compiled.ui_blueprints);
         Ok(Self {
             host,
             session_id: open.session_id,
@@ -579,6 +590,7 @@ impl NativeVnHostCommandSource {
             available_font_families: binding.presentation.font_families,
             text_resources: TextRenderResourceOwner::default(),
             localization: binding.presentation.localization,
+            localization_keys,
             localizations: binding.presentation.localizations,
             ui_text_locale,
             ui_text_font_families,
@@ -617,6 +629,7 @@ impl NativeVnHostCommandSource {
             restored_product_media_snapshot: None,
             story: compiled.story,
             ui_blueprints: compiled.ui_blueprints,
+            ui_view_localization_keys,
             ui_bindings: compiled.ui_bindings,
             ui_backend,
             ui_themes: compiled.themes,
@@ -2153,6 +2166,7 @@ impl NativeVnHostCommandSource {
         })? = font_families.clone();
         self.font_families = font_families;
         self.localization = localization;
+        self.localization_keys = self.localization.strings.keys().cloned().collect();
         Ok(())
     }
 
@@ -2459,18 +2473,12 @@ impl NativeVnHostCommandSource {
         let state = self.runtime_state.as_ref().ok_or_else(|| {
             NativeVnHostError::Input("ASTRA_PLAYER_STATE: runtime has not launched".into())
         })?;
-        let localization_keys = self
-            .localization
-            .strings
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
         let save_slots = self.ui_save_slots.values().cloned().collect::<Vec<_>>();
         let context = VnUiModelContext {
             runtime: state,
             story: &self.story,
             save_slots: &save_slots,
-            localization_keys: &localization_keys,
+            localization_keys: &self.localization_keys,
         };
         let (surface, system_page, model) = if state.pending_choice.is_some() {
             (
@@ -2664,6 +2672,14 @@ impl NativeVnHostCommandSource {
                 }
             })
             .collect::<Vec<_>>();
+        let localization = frame_localization_subset(
+            &self.localization.strings,
+            &self.ui_view_localization_keys,
+            &binding.view_id,
+            &model,
+            &state_value,
+            &modal_frames,
+        )?;
         let frame = UiBlueprintFrameModel {
             schema: "astra.ui_blueprint_frame_model.v1".to_string(),
             view_id: binding.view_id,
@@ -2671,7 +2687,7 @@ impl NativeVnHostCommandSource {
             state: state_value,
             modals: modal_frames,
             focus_request: self.pending_ui_focus.take(),
-            localization: self.localization.strings.clone(),
+            localization,
         };
         let model_payload = postcard::to_allocvec(&frame)
             .map_err(|error| NativeVnHostError::Serialize(error.to_string()))?;
@@ -3862,6 +3878,110 @@ fn stage_coordinate_error() -> NativeVnHostError {
     )
 }
 
+fn blueprint_view_localization_keys(
+    bundle: &UiBlueprintBundle,
+) -> BTreeMap<String, BTreeSet<String>> {
+    bundle
+        .views
+        .iter()
+        .map(|(id, view)| {
+            let mut keys = BTreeSet::new();
+            collect_node_localization_keys(&view.root, &mut keys);
+            (id.clone(), keys)
+        })
+        .collect()
+}
+
+fn collect_node_localization_keys(node: &UiNodeBlueprint, keys: &mut BTreeSet<String>) {
+    for expression in node.properties.values() {
+        collect_expression_localization_keys(expression, keys);
+    }
+    for event in &node.events {
+        for expression in event.arguments.values() {
+            collect_expression_localization_keys(expression, keys);
+        }
+    }
+    if let Some(repeat) = &node.repeat {
+        collect_expression_localization_keys(&repeat.items, keys);
+    }
+    for child in &node.children {
+        collect_node_localization_keys(child, keys);
+    }
+}
+
+fn collect_expression_localization_keys(expression: &UiValueExpr, keys: &mut BTreeSet<String>) {
+    match expression {
+        UiValueExpr::LocalizationKey { key } => {
+            keys.insert(key.clone());
+        }
+        UiValueExpr::Literal { .. }
+        | UiValueExpr::Binding { .. }
+        | UiValueExpr::AssetRef { .. }
+        | UiValueExpr::ThemeToken { .. } => {}
+    }
+}
+
+fn collect_value_strings(value: &UiValue, keys: &mut BTreeSet<String>) {
+    match value {
+        UiValue::String(value) => {
+            keys.insert(value.clone());
+        }
+        UiValue::List(values) => {
+            for value in values {
+                collect_value_strings(value, keys);
+            }
+        }
+        UiValue::Map(values) => {
+            for value in values.values() {
+                collect_value_strings(value, keys);
+            }
+        }
+        UiValue::Null | UiValue::Bool(_) | UiValue::Integer(_) | UiValue::Number(_) => {}
+    }
+}
+
+fn frame_localization_subset(
+    dictionary: &BTreeMap<String, String>,
+    view_keys: &BTreeMap<String, BTreeSet<String>>,
+    view_id: &str,
+    model: &UiValue,
+    state: &UiValue,
+    modals: &[UiBlueprintModalFrameModel],
+) -> Result<BTreeMap<String, String>, NativeVnHostError> {
+    let mut static_required = view_keys.get(view_id).cloned().ok_or_else(|| {
+        NativeVnHostError::Localization(format!(
+            "ASTRA_PLAYER_UI_LOCALIZATION_VIEW_MISSING: view {view_id} has no localization projection"
+        ))
+    })?;
+    for modal in modals {
+        static_required.extend(view_keys.get(&modal.view_id).cloned().ok_or_else(|| {
+            NativeVnHostError::Localization(format!(
+                "ASTRA_PLAYER_UI_LOCALIZATION_VIEW_MISSING: modal view {} has no localization projection",
+                modal.view_id
+            ))
+        })?);
+    }
+    if let Some(missing) = static_required
+        .iter()
+        .find(|key| !dictionary.contains_key(*key))
+    {
+        return Err(NativeVnHostError::Localization(format!(
+            "ASTRA_PLAYER_UI_LOCALIZATION_MISSING: projected key {missing} is absent"
+        )));
+    }
+    let mut required = static_required;
+    collect_value_strings(model, &mut required);
+    collect_value_strings(state, &mut required);
+    for modal in modals {
+        collect_value_strings(&modal.model, &mut required);
+        collect_value_strings(&modal.state, &mut required);
+    }
+    Ok(required
+        .into_iter()
+        .filter_map(|key| dictionary.get(&key).cloned().map(|value| (key, value)))
+        .collect())
+}
+
 fn stage_director_error(error: astra_vn_package::VnError) -> NativeVnHostError {
     NativeVnHostError::Asset(format!("{}: {error}", error.code()))
 }
@@ -4083,10 +4203,11 @@ fn ordered_ui_font_families(font_families: &[String], locale: &str) -> Vec<Strin
 #[cfg(test)]
 mod font_fallback_tests {
     use super::{
-        ordered_ui_font_families, parse_ui_text_alignment, save_slots_for_policy, ReadingMode,
-        SaveCompletionPolicy, SystemPageKind, SystemUiProfilePolicy, UiTextAlignment,
+        frame_localization_subset, ordered_ui_font_families, parse_ui_text_alignment,
+        save_slots_for_policy, ReadingMode, SaveCompletionPolicy, SystemPageKind,
+        SystemUiProfilePolicy, UiBlueprintModalFrameModel, UiTextAlignment, UiValue,
     };
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     fn packaged_families() -> Vec<String> {
         vec![
@@ -4149,6 +4270,71 @@ mod font_fallback_tests {
         assert!(slots.contains_key("slot.08"));
         assert!(!slots.contains_key("slot.09"));
         assert!(!slots.contains_key("slot.quick"));
+    }
+
+    #[astra_headless_test::test]
+    fn frame_localization_projects_only_static_and_live_model_keys() {
+        let dictionary = BTreeMap::from([
+            ("ui.title".into(), "Title".into()),
+            ("story.current".into(), "Current line".into()),
+            ("story.unused".into(), "Unused line".into()),
+        ]);
+        let view_keys = BTreeMap::from([("view.main".into(), BTreeSet::from(["ui.title".into()]))]);
+        let model = UiValue::Map(BTreeMap::from([(
+            "text".into(),
+            UiValue::String("story.current".into()),
+        )]));
+        let projected = frame_localization_subset(
+            &dictionary,
+            &view_keys,
+            "view.main",
+            &model,
+            &UiValue::Null,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(projected.len(), 2);
+        assert_eq!(projected["ui.title"], "Title");
+        assert_eq!(projected["story.current"], "Current line");
+        assert!(!projected.contains_key("story.unused"));
+    }
+
+    #[astra_headless_test::test]
+    fn frame_localization_rejects_missing_static_or_modal_projection() {
+        let dictionary = BTreeMap::new();
+        let view_keys =
+            BTreeMap::from([("view.main".into(), BTreeSet::from(["ui.missing".into()]))]);
+        let error = frame_localization_subset(
+            &dictionary,
+            &view_keys,
+            "view.main",
+            &UiValue::Null,
+            &UiValue::Null,
+            &[],
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("ASTRA_PLAYER_UI_LOCALIZATION_MISSING"));
+
+        let modal = UiBlueprintModalFrameModel {
+            view_id: "view.modal".into(),
+            model_schema: "ui.modal.v1".into(),
+            model: UiValue::Null,
+            state: UiValue::Null,
+        };
+        let error = frame_localization_subset(
+            &BTreeMap::new(),
+            &BTreeMap::from([("view.main".into(), BTreeSet::new())]),
+            "view.main",
+            &UiValue::Null,
+            &UiValue::Null,
+            &[modal],
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("ASTRA_PLAYER_UI_LOCALIZATION_VIEW_MISSING"));
     }
 }
 
