@@ -139,7 +139,7 @@ impl FilterValidator {
                 "filter graph validation completed with warnings"
             );
         } else {
-            tracing::info!(
+            tracing::trace!(
                 event = "media.filter.validate.complete",
                 node_count = graph.nodes.len(),
                 "filter graph validation completed"

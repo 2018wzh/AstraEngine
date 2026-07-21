@@ -11,6 +11,8 @@
 
 性能 trace 与普通日志分离。`astra-observability` 的 Perfetto writer 只接收 safe domain/name、frame correlation、计数和耗时，使用固定事件缓冲和有界流式文件；正文、资源 payload、设备名、本地路径和 secret 不进入 trace。Headless product observer 把 package、Runtime/UI、Scene2D、WGPU 与内存/allocator counter 关联到同一 frame flow。trace 丢失、截断、时间戳回退或身份漂移由 `astra.performance_trace_manifest.v1` 阻断，不能降级为 WARN。
 
+逐帧成功的 FilterGraph 校验属于 TRACE；只有带 diagnostic 的降级使用 WARN，blocking validation 由拥有处置权的边界记录 ERROR。性能门禁不得以 INFO 重复输出稳定帧成功事件。
+
 Windows native crash 只对 `astra-crash-reporter` 和 Windows bundled Player 生效。Android 的 GameActivity lifecycle、provider selection、JNI bridge 与 Player entrypoint 已列为 `instrumented`，但当前不声明 native dump；Web 与其他平台的 logging/ring/fatal tail 继续按各自 host 边界记录。
 
 ```bash
