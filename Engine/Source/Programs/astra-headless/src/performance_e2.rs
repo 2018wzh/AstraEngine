@@ -108,6 +108,9 @@ pub fn prepare_profile(
     adapter_identity_hash: Option<String>,
 ) -> Result<(), String> {
     let mut profile: HeadlessHostProfile = read_json(input, "PROFILE")?;
+    if profile.schema == astra_platform::HEADLESS_HOST_PROFILE_V2_SCHEMA {
+        profile.schema = astra_platform::HEADLESS_HOST_PROFILE_SCHEMA.into();
+    }
     profile.providers.renderer = "wgpu_offscreen".into();
     profile.render_policy = astra_platform::HeadlessRenderPolicy::All;
     profile.readback_policy = astra_platform::HeadlessReadbackPolicy::CheckpointsOnly;
@@ -1133,12 +1136,13 @@ mod tests {
     #[test]
     fn prepared_performance_profile_requires_timestamped_hardware_gpu() {
         let hash = Hash256::from_sha256(b"fixture").to_string();
-        let profile = HeadlessHostProfile::reference(
+        let mut profile = HeadlessHostProfile::reference(
             "windows-x64",
             "performance.fixture",
             hash.clone(),
             hash,
         );
+        profile.schema = astra_platform::HEADLESS_HOST_PROFILE_V2_SCHEMA.into();
         let temp = tempfile::tempdir().unwrap();
         let input = temp.path().join("input.json");
         let output = temp.path().join("output.json");
