@@ -496,16 +496,28 @@ impl NativeVnHeadlessSession {
         started: Option<Instant>,
         update: impl FnOnce(&mut ProductPerformanceSample, u64),
     ) -> Result<(), ProductHostError> {
-        let (Some(started), Some(sample)) = (started, self.performance.as_mut()) else {
+        let Some(duration_ns) = self.profile_duration(started)? else {
             return Ok(());
         };
-        let duration_ns = started
+        let Some(sample) = self.performance.as_mut() else {
+            return Err(ProductHostError::Output(
+                "performance timer exists without profiling state".into(),
+            ));
+        };
+        update(sample, duration_ns);
+        Ok(())
+    }
+
+    fn profile_duration(&self, started: Option<Instant>) -> Result<Option<u64>, ProductHostError> {
+        let Some(started) = started else {
+            return Ok(None);
+        };
+        started
             .elapsed()
             .as_nanos()
             .try_into()
-            .map_err(|_| ProductHostError::Output("performance duration overflowed".into()))?;
-        update(sample, duration_ns);
-        Ok(())
+            .map(Some)
+            .map_err(|_| ProductHostError::Output("performance duration overflowed".into()))
     }
 
     fn source(&mut self) -> Result<&mut NativeVnHostCommandSource, ProductHostError> {
@@ -515,7 +527,6 @@ impl NativeVnHeadlessSession {
     }
 
     async fn dispatch_ui(&mut self, event: UiInputEventKind) -> Result<(), ProductHostError> {
-        let profile_started = self.profile_started();
         let activates = matches!(
             &event,
             UiInputEventKind::Keyboard {
@@ -541,18 +552,19 @@ impl NativeVnHeadlessSession {
         if self.source()?.should_capture_gameplay_surface(&event) {
             self.capture_gameplay_surface().await?;
         }
+        let profile_started = self.profile_started();
         let batch = self
             .source()?
             .dispatch_ui_event(event)
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
+        self.add_profile_duration(profile_started, |sample, duration| {
+            sample.ui_layout_paint_ns = sample.ui_layout_paint_ns.saturating_add(duration);
+        })?;
         self.executor
             .execute_batch(batch)
             .await
             .map_err(|error| ProductHostError::Input(error.to_string()))?;
         self.process_ui_host_request().await?;
-        self.add_profile_duration(profile_started, |sample, duration| {
-            sample.ui_layout_paint_ns = sample.ui_layout_paint_ns.saturating_add(duration);
-        })?;
         Ok(())
     }
 
@@ -607,19 +619,32 @@ impl NativeVnHeadlessSession {
                 .checked_add(1)
                 .ok_or_else(|| ProductHostError::Input("tick sequence overflowed".into()))?;
             let now_ms = canonical_ms(self.last_tick)?;
-            let vn_started = self.profile_started();
+            self.add_profile_duration(tick_started, |sample, duration| {
+                sample.runtime_tick_ns = sample.runtime_tick_ns.saturating_add(duration);
+            })?;
             for substep in 0..self.presentation_substeps {
                 let delta_ns = presentation_substep_duration_ns(
                     astra_headless_protocol::TICK_DURATION_NS,
                     self.presentation_substeps,
                     substep,
                 );
+                let vn_started = self.profile_started();
                 let present = self
                     .source
                     .as_mut()
                     .ok_or_else(|| ProductHostError::Input("product session is shut down".into()))?
                     .tick_presentation(delta_ns)
                     .map_err(|error| ProductHostError::Output(error.to_string()))?;
+                let vn_duration = self.profile_duration(vn_started)?;
+                if let Some(duration) = vn_duration {
+                    let sample = self.performance.as_mut().ok_or_else(|| {
+                        ProductHostError::Output(
+                            "performance timer exists without profiling state".into(),
+                        )
+                    })?;
+                    sample.vn_step_ns = sample.vn_step_ns.saturating_add(duration);
+                    sample.runtime_tick_ns = sample.runtime_tick_ns.saturating_add(duration);
+                }
                 if let Some(present) = present {
                     self.executor
                         .execute_batch(present)
@@ -627,9 +652,6 @@ impl NativeVnHeadlessSession {
                         .map_err(|error| ProductHostError::Output(error.to_string()))?;
                 }
             }
-            self.add_profile_duration(vn_started, |sample, duration| {
-                sample.vn_step_ns = sample.vn_step_ns.saturating_add(duration);
-            })?;
             let media_started = self.profile_started();
             let source = self
                 .source
@@ -641,9 +663,6 @@ impl NativeVnHeadlessSession {
                 .map_err(|error| ProductHostError::Output(error.to_string()))?;
             self.add_profile_duration(media_started, |sample, duration| {
                 sample.media_decode_ns = sample.media_decode_ns.saturating_add(duration);
-            })?;
-            self.add_profile_duration(tick_started, |sample, duration| {
-                sample.runtime_tick_ns = sample.runtime_tick_ns.saturating_add(duration);
             })?;
         }
         Ok(())
