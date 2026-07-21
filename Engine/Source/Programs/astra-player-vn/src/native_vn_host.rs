@@ -138,7 +138,13 @@ pub struct NativeVnHostCommandSource {
     ui_animations: BTreeMap<String, ActiveUiAnimation>,
     ui_performance: UiPerformanceGate,
     last_ui_performance_sample: Option<UiPerformanceSample>,
+    ui_text_layout_cache: BTreeMap<String, CachedUiTextLayout>,
     shutdown_started: bool,
+}
+
+struct CachedUiTextLayout {
+    request_hash: Hash256,
+    layout: Arc<TextLayoutResult>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -655,6 +661,7 @@ impl NativeVnHostCommandSource {
             ui_animations: BTreeMap::new(),
             ui_performance: UiPerformanceGate::new(UiPerformanceBudget::production()),
             last_ui_performance_sample: None,
+            ui_text_layout_cache: BTreeMap::new(),
             shutdown_started: false,
         })
     }
@@ -1469,6 +1476,7 @@ impl NativeVnHostCommandSource {
         self.pending_ui_focus = None;
         self.ui_semantics = None;
         self.ui_animations.clear();
+        self.ui_text_layout_cache.clear();
         let mut restore_lifecycle = Vec::new();
         for layout_id in self.live_layout_ids.iter().cloned().collect::<Vec<_>>() {
             restore_lifecycle.extend(self.text_resources.remove_layout(&layout_id)?);
@@ -2744,6 +2752,7 @@ impl NativeVnHostCommandSource {
             &self.text_provider,
             &self.font_families,
             &self.localization,
+            &mut self.ui_text_layout_cache,
             &mut next_layout_ids,
             &mut pending_text,
             &output.semantics,
@@ -2758,7 +2767,7 @@ impl NativeVnHostCommandSource {
             .iter()
             .map(|pending| TextRenderLayoutUpdate {
                 layout_id: &pending.layout_id,
-                layout: &pending.layout,
+                layout: pending.layout.as_ref(),
                 rgba: pending.rgba,
             })
             .collect::<Vec<_>>();
@@ -2783,6 +2792,8 @@ impl NativeVnHostCommandSource {
         composed_draw.extend(draw);
         composed_draw.extend(text_draw);
         self.live_layout_ids = next_layout_ids;
+        self.ui_text_layout_cache
+            .retain(|layout_id, _| self.live_layout_ids.contains(layout_id));
         if self
             .ui_animations
             .values()
@@ -2822,6 +2833,7 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_SHUTDOWN_REPEATED: resource shutdown already started".to_string(),
             ));
         }
+        self.ui_text_layout_cache.clear();
         let mut commands = self.text_resources.shutdown();
         commands.extend(self.live_texture_ids.iter().map(|resource_id| {
             SceneCommand::ReleaseResource {
@@ -3264,6 +3276,7 @@ impl NativeVnHostCommandSource {
                     .lifecycle,
             );
             self.live_layout_ids.clear();
+            self.ui_text_layout_cache.clear();
         }
         lifecycle.push(SceneCommand::rect(
             "vn.frame.clear",
@@ -4029,6 +4042,7 @@ fn append_text_value(
     provider: &CosmicTextLayoutProvider,
     font_families: &[String],
     locale: &str,
+    cache: &mut BTreeMap<String, CachedUiTextLayout>,
     layout_ids: &mut BTreeSet<String>,
     pending: &mut Vec<PendingUiTextLayout>,
     layout_id: &str,
@@ -4055,12 +4069,26 @@ fn append_text_value(
         max_lines,
         direction,
     });
-    let layout = provider.layout(&request)?;
+    let request_hash = provider.request_hash(&request)?;
+    let layout = match cache.get(layout_id) {
+        Some(cached) if cached.request_hash == request_hash => Arc::clone(&cached.layout),
+        _ => {
+            let layout = Arc::new(provider.layout(&request)?);
+            cache.insert(
+                layout_id.to_string(),
+                CachedUiTextLayout {
+                    request_hash,
+                    layout: Arc::clone(&layout),
+                },
+            );
+            layout
+        }
+    };
     let layout_width = layout.width.ceil().clamp(0.0, max_width as f32) as u32;
     let layout_height = layout.height.ceil().clamp(0.0, max_height as f32) as u32;
     let aligned_x = x.saturating_add(horizontal_align.offset(max_width, layout_width));
     let aligned_y = y.saturating_add(vertical_align.offset(max_height, layout_height));
-    validate_text_translation(&layout, aligned_x, aligned_y)?;
+    validate_text_translation(layout.as_ref(), aligned_x, aligned_y)?;
     if !layout_ids.insert(layout_id.to_string()) {
         return Err(NativeVnHostError::Asset(format!(
             "ASTRA_PLAYER_LAYOUT_DUPLICATE: layout id {layout_id} was emitted twice"
@@ -4078,7 +4106,7 @@ fn append_text_value(
 
 struct PendingUiTextLayout {
     layout_id: String,
-    layout: TextLayoutResult,
+    layout: Arc<TextLayoutResult>,
     rgba: [u8; 4],
     aligned_x: u32,
     aligned_y: u32,
@@ -4089,6 +4117,7 @@ fn append_ui_semantic_text(
     provider: &CosmicTextLayoutProvider,
     font_families: &[String],
     localization: &VnLocalizationTable,
+    cache: &mut BTreeMap<String, CachedUiTextLayout>,
     layout_ids: &mut BTreeSet<String>,
     pending: &mut Vec<PendingUiTextLayout>,
     semantics: &UiSemanticSnapshot,
@@ -4140,6 +4169,7 @@ fn append_ui_semantic_text(
             provider,
             font_families,
             &localization.locale,
+            cache,
             layout_ids,
             pending,
             &format!("ui.text.{}", node.id),
