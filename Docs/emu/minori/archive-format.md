@@ -36,7 +36,7 @@ PAZ reader 采用三段式：
 | 当前样本八包可完成 mount preflight | 本地样本 | 已成立，共 14502 个 entry；`bg` 的 11 卷连续读取通过 |
 | 当前样本八包 decoded full verify | 本地样本 | 已通过；43818 次 range read、6624958365 个 decoded bytes，cache 关闭 |
 
-mount 使用 `minori:/<role>/<entry>`。绝对路径、`..`、重复 URI/entry id、短读、越界、未对齐 block、未知 version、源文件 metadata/hash 变化都返回稳定 diagnostic。
+mount 使用 `minori:/<role>/<entry>`。source hash 与各 entry encrypted hash 在同一次有界顺序流中计算，避免先哈希全包再逐 entry 随机重读；跨分卷 entry 仍保持同一逻辑范围。绝对路径、`..`、重复 URI/entry id、重叠 encrypted range、短读、越界、未对齐 block、未知 version、源文件 metadata/hash 变化都返回稳定 diagnostic。
 
 ## Lookup
 

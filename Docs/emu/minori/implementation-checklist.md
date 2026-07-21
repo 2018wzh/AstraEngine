@@ -16,7 +16,7 @@
 | `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command/29 token，unknown opcode 0；`select` operand 语义仍 unknown |
 | ANI/SQZ container 与 `bg`/`bgm` census | adapter 已实现 | 2655 PNG、1951 ANI/6723 frames、9 SQZ/224 frames、49 Ogg 真实读取通过；渲染/播放尚未验收 |
 | Minori deterministic VM state 与 control-flow slice | E2 slice | `set/setglobal/label/goto/if/wait/message`、BGM/SE stop、`playvoice *`、`transition`、无 stand `stage`、`chain/end`、budget、一次性文本 lease、连续 tick、尾链 VFS 切换和 postcard snapshot/restore；select、普通 voice、stand 与主要演出仍 blocking |
-| Minori runtime provider / `cdylib` ABI | E2 slice | 签名动态 plugin 经通用 `--family minori --mount-profile` composition 启动；真实八包 Headless 到达首条可见 message，共 372 tick、8 个 frame、5 个 checkpoint，音频 evidence 与 snapshot round-trip 通过 |
+| Minori runtime provider / `cdylib` ABI | E2 slice | 签名动态 plugin 经通用 `--family minori --mount-profile` composition 启动；真实八包 Headless 到达第二条可见 message，共 373 tick、9 个 frame、6 个 checkpoint，音频 evidence、snapshot round-trip 与公共 review 流程通过 |
 | Minori 演出、系统 UI、完整模拟 | 未完成 | 已验证黑场、竖排标题、CrossFade2、message panel 和首条日文正文；transition 动画、人物、UI、存储和路线仍开放 |
 
 当前合法样本包含八个非空逻辑 archive 和 18 个物理文件。纯 Rust GARbro scheme importer 生成的私有补丁已完成八包 manifest v2 full verify：14502 个 entry、43818 次 range read、6624958365 个 decoded bytes。验证轮显式关闭 cache；启用 cache 的运行因平台缓存卷空间不足阻断，因此新的八包 cache identity 仍没有第二轮命中实证。89 个脚本的 payload-free census 已通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。

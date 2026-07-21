@@ -20,7 +20,7 @@
 
 `.panel` 已确认调用 `CMessagePanel`。第一个整数是 `!panel_Mode`，资源名以 `!panel_Filename` 保存；原程序的 mode 1 分支选择 `msgPanel.png`。当前 runtime 只接受精确的 `.panel 1`，把 `minori:/sys/msgPanel.png` 作为最上层 resource-frame，并与最后实际显示的 CrossFade2 frame 合成。mode 1 的 x 使用 panel 全局坐标，y 按 `viewport_height - image_height + 64` 计算；超出 viewport 的底部 64 px 由 renderer clip。mode 0、2–10、第二个过渡参数和自定义文件名仍缺完整语义，统一返回 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。
 
-全包 census 已确认 89 个脚本、33728 行、33695 个 command 和 29 个 command token，catalog 范围内 unknown opcode 为 0。资源契约迁移后，签名动态 Minori plugin 已通过真实八包 Headless E2 的前 372 个 fixed tick：入口 tail-chain、BGM、SE、黑底 stage、竖排标题 stage、6 秒 wait、可见 CrossFade2、`.panel 1` 和首条 message 都成功。运行实际提交 8 帧，形成 5 个不同 checkpoint，snapshot round-trip 成立且 diagnostic 为 0。人工检查确认 panel 的底部位置和 clipping，首条日文正文也没有缺字、横向裁剪或拉伸。该证据不代表完整 effect 周期、路线、系统 UI 或 transition 动画完成。
+全包 census 已确认 89 个脚本、33728 行、33695 个 command 和 29 个 command token，catalog 范围内 unknown opcode 为 0。资源契约迁移后，签名动态 Minori plugin 已通过真实八包 Headless E2 的前 373 个 fixed tick：入口 tail-chain、BGM、SE、黑底 stage、竖排标题 stage、6 秒 wait、可见 CrossFade2、`.panel 1` 和前两条 message 都成功。运行实际提交 9 帧，形成 6 个不同 checkpoint，snapshot round-trip 成立且 diagnostic 为 0。用于完成 input await 的物理按键会在 Host 生成唯一 await result 后被消费，不再重复进入尚未验证的 family raw-input channel。人工检查确认两条日文正文没有缺字、横向裁剪、拉伸或旧文本残留。该证据不代表完整 effect 周期、路线、系统 UI 或 transition 动画完成。
 
 ## VM State
 
