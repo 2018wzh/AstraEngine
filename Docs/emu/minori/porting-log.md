@@ -65,7 +65,7 @@
 - 首次八包挂载会读取约 5.74 GiB source，并为 entry 建立完整性身份；当前一次挂载耗时数分钟。后续需在不削弱 source mutation 检测的前提下合并顺序 hash 工作，不能通过跳过校验提速。
 - `stage` 已覆盖无 stand 的普通图像路径，但 stand position 不能按名称猜成像素坐标；遇到 stand 时返回稳定 blocker。transition 配置已保存，动画插值和 fence 尚未接入。
 - 真实 Headless 已到首条可见 message，但只检查了选定帧，没有完成整个 effect 周期的逐帧节奏比较。`select`、普通 voice、其他 panel/effect 和后续主要演出仍需逐项确认；assignment 的字符串值和除零行为也仍需脱敏 census。
-- AstraEMU runner 当前输出 `astra.emu.headless_run_report.v2` 与公共 artifact manifest，但通用 `prepare-review` 只接受 `astra.headless_run_report.v2`，因此正式 review bundle/`validate-review` 尚未闭合。不能用本次模型查看覆盖这个 contract blocker。
+- AstraEMU runner 现在同时输出专用 `astra.emu.headless_run_report.v2` 和公共 `astra.headless_run_report.v2`；两者绑定同一 manifest hash、输入、checkpoint 和 diagnostic 状态。公共 report 已通过 protocol 定向测试，但尚未在真实八包运行后交给 `prepare-review`/`validate-review`，因此正式 review 仍未闭合。不能用本次模型查看覆盖这项真实 evidence。
 - 尚无首条完整路线、全 movie codec inventory、完整 required checkpoint 集合或 Windows E3 证据。
 
 ### 本次测试
@@ -86,6 +86,6 @@ python Tools/check_docs.py
 ### 下一步
 
 1. 在具备足够空间的私有缓存卷复核 cache identity，并对 49 个 Ogg 与 5 个 movie 做 provider-level codec inventory。
-2. 让 AstraEMU Headless run 产出可被公共 `prepare-review` 接受的标准 run report，再生成并验证正式 review bundle。
+2. 在下一次真实路线运行中验证公共 run report，并生成、检查、验证正式 review bundle。
 3. 继续复核 `CrossFade2` 完整周期并确认 stand position；通过显式 provider binding 接入人物 ANI、MediaPlayback 和平台存储。
 4. 扩展物理输入序列到首条完整路线，补齐 required checkpoint；自动门禁通过后再做完整模型视觉审查。
