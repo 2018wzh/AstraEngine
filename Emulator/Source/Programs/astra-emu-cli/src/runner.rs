@@ -86,6 +86,7 @@ pub struct HeadlessLaunch {
     pub video_provider: String,
     pub verify_snapshot: bool,
     pub artifact_retention: String,
+    pub frame_sample_interval: u64,
     pub audit_all_resources: bool,
     pub resume_snapshot: Option<PathBuf>,
     pub snapshot_output: Option<PathBuf>,
@@ -174,6 +175,7 @@ pub struct HeadlessRunReportV2 {
     pub artifact_manifest_hash: Hash256,
     pub fixed_steps: u64,
     pub presented_frames: u64,
+    pub frame_sample_interval: u64,
     pub consumed_input_messages: u64,
     pub snapshot_round_trip_verified: bool,
     pub resumed_from_fixed_step: Option<u64>,
@@ -576,7 +578,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         surface,
         RuntimeDriverConfig {
             seed,
-            delta_ns: profile.fixed_delta_ns,
+            delta_ns: probe.runtime.fixed_delta_ns,
             audio_enabled: launch.enable_audio,
             text: TextProviderBinding {
                 provider_id: "cosmic_text_cpu",
@@ -584,6 +586,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                 profile: &format!("{}-v1", launch.family_id),
             },
             resume: None,
+            frame_sample_interval: 1,
         },
     )?;
     let mut viewport = NativeViewport {
@@ -870,6 +873,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV2,
             },
             resume_driver: resume.as_ref().map(|snapshot| snapshot.driver.clone()),
             export_snapshot: launch.snapshot_output.is_some(),
+            frame_sample_interval: launch.frame_sample_interval,
         },
     )
     .await;
@@ -997,6 +1001,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV2,
         artifact_manifest_hash,
         fixed_steps: execution.fixed_step,
         presented_frames: execution.present_sequence,
+        frame_sample_interval: launch.frame_sample_interval,
         consumed_input_messages: input.messages.len() as u64,
         snapshot_round_trip_verified: execution.snapshot_verified,
         resumed_from_fixed_step,
@@ -1106,6 +1111,7 @@ fn validate_launch(launch: &HeadlessLaunch) -> Result<(), String> {
         || !(240..=8192).contains(&launch.viewport_height)
         || !matches!(launch.video_provider.as_str(), "disabled" | "ffmpeg-vcpkg")
         || parse_artifact_retention(&launch.artifact_retention).is_err()
+        || !(1..=10_000).contains(&launch.frame_sample_interval)
     {
         return Err("ASTRA_EMU_HEADLESS_PROFILE_INVALID".into());
     }
@@ -1119,6 +1125,11 @@ fn validate_launch(launch: &HeadlessLaunch) -> Result<(), String> {
         {
             return Err("ASTRA_EMU_HEADLESS_RESUME_OUTPUT_INVALID".into());
         }
+    }
+    if launch.frame_sample_interval != 1
+        && (launch.resume_snapshot.is_some() || launch.snapshot_output.is_some())
+    {
+        return Err("ASTRA_EMU_HEADLESS_SAMPLED_RESUME_UNSUPPORTED".into());
     }
     Ok(())
 }
@@ -1695,6 +1706,8 @@ struct RuntimeDriver<'a> {
     pending_inputs: Vec<LegacyInputEdge>,
     pending_waits: BTreeMap<String, PendingWait>,
     rasterizer: CpuStageRasterizer,
+    pending_render_frame: Option<LegacyRenderFrameV1>,
+    visual_dirty: bool,
     image_decoders: DecodeProviderRegistry,
     text_presenter: BoundTextPresenter,
     underlay_frame: Option<(u32, u32, Vec<u8>)>,
@@ -1714,6 +1727,7 @@ struct RuntimeDriver<'a> {
     diagnostics: BTreeSet<String>,
     active_touch: Option<u64>,
     audio_enabled: bool,
+    frame_sample_interval: u64,
     step_timings_ns: Vec<u64>,
     runtime_timings_ns: Vec<u64>,
     effect_timings_ns: Vec<u64>,
@@ -1735,6 +1749,7 @@ struct RuntimeDriverConfig<'a> {
     audio_enabled: bool,
     text: TextProviderBinding<'a>,
     resume: Option<HeadlessDriverResumeV1>,
+    frame_sample_interval: u64,
 }
 
 struct ExecutionConfig<'a> {
@@ -1744,6 +1759,7 @@ struct ExecutionConfig<'a> {
     text: TextProviderBinding<'a>,
     resume_driver: Option<HeadlessDriverResumeV1>,
     export_snapshot: bool,
+    frame_sample_interval: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1960,6 +1976,7 @@ async fn execute_sequence(
             audio_enabled: true,
             text: config.text,
             resume: config.resume_driver,
+            frame_sample_interval: config.frame_sample_interval,
         },
     )?;
     driver.restore_pending_video().await?;
@@ -2143,6 +2160,8 @@ impl<'a> RuntimeDriver<'a> {
             pending_inputs: Vec::new(),
             pending_waits: BTreeMap::new(),
             rasterizer: CpuStageRasterizer::default(),
+            pending_render_frame: None,
+            visual_dirty: false,
             image_decoders,
             text_presenter: BoundTextPresenter::new(
                 config.text.provider_id,
@@ -2166,6 +2185,7 @@ impl<'a> RuntimeDriver<'a> {
             diagnostics: BTreeSet::new(),
             active_touch: None,
             audio_enabled: config.audio_enabled,
+            frame_sample_interval: config.frame_sample_interval,
             step_timings_ns: Vec::new(),
             runtime_timings_ns: Vec::new(),
             effect_timings_ns: Vec::new(),
@@ -2430,14 +2450,7 @@ impl<'a> RuntimeDriver<'a> {
                         SchemaVersion::new(1, 0, 0),
                     )
                     .map_err(|error| error.to_string())?;
-                let width = frame.width;
-                let height = frame.height;
-                let raster_started = Instant::now();
-                let rgba8 = self.rasterizer.render(frame)?;
-                self.raster_timings_ns.push(elapsed_ns(raster_started)?);
-                let frame = (width, height, rgba8);
-                self.underlay_frame = Some(frame.clone());
-                self.base_frame = Some(frame);
+                self.queue_render_frame(frame)?;
                 rendered = true;
                 continue;
             }
@@ -2470,14 +2483,7 @@ impl<'a> RuntimeDriver<'a> {
                                 "ASTRA_EMU_HEADLESS_RENDER_RESOURCE_FRAME_DECODE".to_owned()
                             })?;
                         let frame = self.materialize_resource_frame(resource_frame)?;
-                        let width = frame.width;
-                        let height = frame.height;
-                        let raster_started = Instant::now();
-                        let rgba8 = self.rasterizer.render(frame)?;
-                        self.raster_timings_ns.push(elapsed_ns(raster_started)?);
-                        let frame = (width, height, rgba8);
-                        self.underlay_frame = Some(frame.clone());
-                        self.base_frame = Some(frame);
+                        self.queue_render_frame(frame)?;
                         rendered = true;
                     }
                     LegacyEffect::Presentation {
@@ -2485,14 +2491,7 @@ impl<'a> RuntimeDriver<'a> {
                     } if command == "astra.emu.render_frame.v1" => {
                         let frame: LegacyRenderFrameV1 = postcard::from_bytes(&payload)
                             .map_err(|_| "ASTRA_EMU_HEADLESS_RENDER_FRAME_DECODE".to_owned())?;
-                        let width = frame.width;
-                        let height = frame.height;
-                        let raster_started = Instant::now();
-                        let rgba8 = self.rasterizer.render(frame)?;
-                        self.raster_timings_ns.push(elapsed_ns(raster_started)?);
-                        let frame = (width, height, rgba8);
-                        self.underlay_frame = Some(frame.clone());
-                        self.base_frame = Some(frame);
+                        self.queue_render_frame(frame)?;
                         rendered = true;
                     }
                     LegacyEffect::Presentation {
@@ -2622,10 +2621,27 @@ impl<'a> RuntimeDriver<'a> {
         }
         let video_changed = self.advance_video().await?;
         self.media_timings_ns.push(elapsed_ns(media_started)?);
-        if rendered || video_changed {
+        let presentation_changed = rendered || video_changed;
+        let sample_due = self.fixed_step.is_multiple_of(self.frame_sample_interval);
+        if sample_due && (self.visual_dirty || video_changed) {
+            if self.visual_dirty {
+                let frame = self
+                    .pending_render_frame
+                    .as_ref()
+                    .ok_or_else(|| "ASTRA_EMU_HEADLESS_PENDING_FRAME_MISSING".to_owned())?;
+                let width = frame.width;
+                let height = frame.height;
+                let raster_started = Instant::now();
+                let rgba8 = self.rasterizer.render_prepared(frame)?;
+                self.raster_timings_ns.push(elapsed_ns(raster_started)?);
+                self.base_frame = Some((width, height, rgba8));
+                self.visual_dirty = false;
+            }
             let present_started = Instant::now();
             self.present().await?;
             self.present_timings_ns.push(elapsed_ns(present_started)?);
+        }
+        if presentation_changed {
             for wait in self.pending_waits.values_mut() {
                 if matches!(wait, PendingWait::Presentation) {
                     *wait = PendingWait::DueStep(next_step.saturating_add(1));
@@ -2634,6 +2650,12 @@ impl<'a> RuntimeDriver<'a> {
         }
         self.terminal = output.status == "terminal";
         self.step_timings_ns.push(elapsed_ns(step_started)?);
+        Ok(())
+    }
+
+    fn queue_render_frame(&mut self, frame: LegacyRenderFrameV1) -> Result<(), String> {
+        self.pending_render_frame = Some(self.rasterizer.prepare(frame)?);
+        self.visual_dirty = true;
         Ok(())
     }
 
@@ -4232,6 +4254,7 @@ mod native_tests {
                 media: zero,
                 present: zero,
             },
+            resume_snapshot: None,
         };
 
         let report = standard_headless_run_report(

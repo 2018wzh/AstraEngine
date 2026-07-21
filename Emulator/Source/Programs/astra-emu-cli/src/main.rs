@@ -69,6 +69,9 @@ enum CliCommand {
             value_parser = ["all", "checkpoints", "final", "manifest-only"]
         )]
         artifact_retention: String,
+        /// Raster and present one out of every N fixed steps; parity runs must use 1.
+        #[arg(long, default_value_t = 1)]
+        frame_sample_interval: u64,
         /// Stream and hash every visible resource after the gameplay run.
         #[arg(long, default_value_t = false)]
         audit_all_resources: bool,
@@ -130,6 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             video_provider,
             verify_snapshot,
             artifact_retention,
+            frame_sample_interval,
             audit_all_resources,
             resume_snapshot,
             snapshot_output,
@@ -152,6 +156,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 video_provider,
                 verify_snapshot,
                 artifact_retention,
+                frame_sample_interval,
                 audit_all_resources,
                 resume_snapshot,
                 snapshot_output,
