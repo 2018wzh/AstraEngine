@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use astra_core::{Hash256, SchemaId, SchemaVersion, StableId};
 use indexmap::IndexMap;
 use schemars::JsonSchema;
@@ -58,7 +60,7 @@ pub struct RuntimeComponentPayload {
     pub version: SchemaVersion,
     pub codec: RuntimePayloadCodec,
     pub hash: Hash256,
-    pub bytes: Vec<u8>,
+    pub bytes: Arc<[u8]>,
 }
 
 impl RuntimeComponentPayload {
@@ -74,7 +76,7 @@ impl RuntimeComponentPayload {
             version,
             codec: RuntimePayloadCodec::Postcard,
             hash: Hash256::from_sha256(&bytes),
-            bytes,
+            bytes: bytes.into(),
         })
     }
 

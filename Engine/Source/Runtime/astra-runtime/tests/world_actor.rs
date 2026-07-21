@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use astra_core::{SchemaVersion, StableId};
 use astra_runtime::{
     ActorId, EngineModuleSlot, ModuleBindingContext, PackageHandle, RuntimeComponentPayload,
@@ -125,8 +127,35 @@ fn component_payload_rejects_hash_mismatch() {
         },
     )
     .unwrap();
-    payload.bytes[0] ^= 0x01;
+    Arc::make_mut(&mut payload.bytes)[0] ^= 0x01;
 
     let error = payload.decode::<TestComponent>().unwrap_err();
     assert!(error.to_string().contains("ASTRA_RUNTIME_COMPONENT_HASH"));
+}
+
+#[test]
+fn component_payload_clone_shares_wire_compatible_immutable_bytes() {
+    let payload = RuntimeComponentPayload::postcard(
+        "astra.test.shared_payload",
+        SchemaVersion::default(),
+        &TestComponent {
+            status: "shared".to_string(),
+            count: 7,
+        },
+    )
+    .unwrap();
+    let cloned = payload.clone();
+
+    assert!(Arc::ptr_eq(&payload.bytes, &cloned.bytes));
+    assert_eq!(
+        postcard::to_allocvec(&payload.bytes).unwrap(),
+        postcard::to_allocvec(&payload.bytes.to_vec()).unwrap()
+    );
+    assert_eq!(
+        cloned.decode::<TestComponent>().unwrap(),
+        TestComponent {
+            status: "shared".to_string(),
+            count: 7,
+        }
+    );
 }
