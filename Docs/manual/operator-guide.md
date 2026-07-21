@@ -158,17 +158,18 @@ cargo run -p astra-emu-family-package -- native-sign \
 同一分发目录包含 `astra-emu-cli`。`run` 用于不受 Manager/overlay 影响的原生视觉验收：它会校验显式 family、授权目录、唯一 case、签名 manifest 和动态库 identity，随后直接创建 `AstraEmuRuntimeProvider` session 与 Windows platform host。窗口只显示 family 输出的 legacy 舞台，键盘、鼠标、触摸和手柄事件按舞台宽高比映射回 runtime。该模式默认静音，避免音频设备配置影响纯视觉对照；需要同时检查原生音频时显式传入 `--enable-audio`。
 
 ```bash
-astra-emu-cli run --engine fvp --game-dir ./Games/Example --entry Game.hcb
+astra-emu-cli run --family fvp --game-dir ./Games/Example --mount-profile ./private/fvp.mount.yaml --entry Game.hcb
 ```
 
 `run` 不启动 Slint，也不读取 Manager Library、translation、patch 或 FilterGraph 配置。关闭窗口会依次 shutdown session、surface、window 和 platform host。Linux、macOS、iOS、Android 与 Web 尚未接入该原生 CLI host 时必须返回稳定的 `PLATFORM_NOT_IMPLEMENTED`，不能回退到 Manager 或 Headless 冒充原生验收。
 
-自动化入口直接复用 `AstraEmuRuntimeProvider`、`RuntimeWorld` 和 `astra-platform-headless`，不启动 Slint，也不提供产品语义快捷命令。输入必须是有序、连续且以 `Shutdown` 结束的 `astra.user_input_sequence.v1` JSONL；只接受键盘、鼠标、触摸、手柄、IME、固定 tick 推进、物理观察等待和 checkpoint。输出目录包含真实 PNG/WAV artifact manifest 与 `astra.emu.headless_run_report.v1`，报告只保留 identity/hash/count/diagnostic：
+自动化入口直接复用 `AstraEmuRuntimeProvider`、`RuntimeWorld` 和 `astra-platform-headless`，不启动 Slint，也不提供产品语义快捷命令。输入必须是有序、连续且以 `Shutdown` 结束的 `astra.user_input_sequence.v1` JSONL；只接受键盘、鼠标、触摸、手柄、IME、固定 tick 推进、物理观察等待和 checkpoint。输出目录包含真实 PNG/WAV artifact manifest 与 `astra.emu.headless_run_report.v2`，报告只保留 identity/hash/count/diagnostic：
 
 ```bash
 astra-emu-cli headless \
-  --engine fvp \
+  --family fvp \
   --game-dir ./Games/Example \
+  --mount-profile ./private/fvp.mount.yaml \
   --entry Game.hcb \
   --input ./Automation/example-input.jsonl \
   --artifacts ./Build/AstraEMU-Evidence

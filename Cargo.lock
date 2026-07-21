@@ -250,7 +250,7 @@ checksum = "ae0784134ba9375416d469ec31e7c5f9fa94405049cf08c5ce5b4698be673e0d"
 dependencies = [
  "aead",
  "aes",
- "cipher",
+ "cipher 0.4.4",
  "ctr",
  "polyval",
  "subtle",
@@ -903,7 +903,9 @@ dependencies = [
 name = "astra-emu-family-support"
 version = "0.1.0"
 dependencies = [
+ "astra-byte-source",
  "astra-core",
+ "astra-emu-family-api",
  "astra-emu-family-core",
  "astra-media",
  "blowfish",
@@ -1130,7 +1132,10 @@ dependencies = [
 name = "astra-emu-minori"
 version = "0.1.0"
 dependencies = [
+ "abi_stable",
+ "astra-byte-source",
  "astra-core",
+ "astra-emu-family-api",
  "astra-emu-family-core",
  "astra-emu-family-support",
  "blowfish",
@@ -1138,7 +1143,9 @@ dependencies = [
  "directories",
  "encoding_rs",
  "flate2",
+ "image 0.25.10",
  "lru",
+ "postcard",
  "rc4",
  "schemars",
  "serde",
@@ -1160,6 +1167,7 @@ dependencies = [
  "astra-observability",
  "clap",
  "flate2",
+ "image 0.25.10",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -3600,7 +3608,7 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
 dependencies = [
- "cipher",
+ "cipher 0.4.4",
 ]
 
 [[package]]

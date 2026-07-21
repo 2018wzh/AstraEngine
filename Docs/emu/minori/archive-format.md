@@ -4,6 +4,8 @@ Minori 游戏以多个 `.paz` archive 分区保存资源。`夏空のペルセ�
 
 | Archive | 观测大小 | 预期内容 |
 | --- | ---: | --- |
+| `bg.paz` + A–J | 3347405076 | 背景资源；主包加十个连续分卷 |
+| `bgm.paz` | 285294348 | BGM |
 | `scr.paz` | 1914452 | 脚本 `.sc`、流程和文本引用 |
 | `st.paz` | 852999948 | 背景、立绘和事件图 |
 | `sys.paz` | 32418204 | UI、字体、系统图 |
@@ -23,15 +25,16 @@ PAZ reader 采用三段式：
 
 | 结论 | 来源 | 状态 |
 | --- | --- | --- |
-| v1+ index size 位于 `0x20`，经 scheme XOR 后必须 8 字节对齐；index 使用 Blowfish | GARbro `ArcPAZ` contract | 已实现，并由六个真实 index 复核 |
+| v1+ index size 位于 `0x20`，经 scheme XOR 后必须 8 字节对齐；index 使用 Blowfish | GARbro `ArcPAZ` contract | 已实现，并由八个真实 index 复核 |
 | entry descriptor 含 name、offset、unpacked/stored/aligned size 和 packed flag | GARbro contract | 已实现并做 bounds/duplicate 检查 |
 | v1/v2 使用 CP932 派生 entry key，v2 按 CRC32 派生 RC4 skip | GARbro contract | 纯 Rust `MinoriPazDecryptProvider` 已实现 |
 | packed entry 解密后执行 zlib | GARbro contract | 已实现 |
 | `.pazA` 至 `.pazZ` 是连续逻辑分卷 | GARbro contract | 已实现；空分卷和后缀缺口阻断 |
-| Blowfish block 由两个 little-endian `u32` word 组成 | GARbro contract + 本地样本 | 已实现，并由六个真实 index 复核 |
+| Blowfish block 由两个 little-endian `u32` word 组成 | GARbro contract + 本地样本 | 已实现，并由八个真实 index 复核 |
 | `mov` entry 不要求 8 字节对齐；movie 分支使用独立 transform | GARbro contract + 本地样本 | 已实现，5 个真实 descriptor 通过 |
 | packed entry 解压结果可能带不超过 16 字节的全零尾部 | 本地样本观察 | 仅在可证明全零时裁剪；非零或更长尾部阻断 |
-| 当前样本六包可完整挂载和读取 | 本地样本 | 已成立，共 9837 个 entry；第二轮 29720 次 range read 全部命中 cache |
+| 当前样本八包可完成 mount preflight | 本地样本 | 已成立，共 14502 个 entry；`bg` 的 11 卷连续读取通过 |
+| 当前样本八包 decoded full verify | 本地样本 | 已通过；43818 次 range read、6624958365 个 decoded bytes，cache 关闭 |
 
 mount 使用 `minori:/<role>/<entry>`。绝对路径、`..`、重复 URI/entry id、短读、越界、未对齐 block、未知 version、源文件 metadata/hash 变化都返回稳定 diagnostic。
 
@@ -41,6 +44,8 @@ Core 按 archive role 建立 VFS：
 
 ```text
 script -> scr.paz
+background -> bg.paz + volumes
+bgm -> bgm.paz
 stage/image -> st.paz
 system -> sys.paz
 se -> se.paz

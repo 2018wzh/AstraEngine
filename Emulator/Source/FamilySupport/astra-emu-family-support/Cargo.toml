@@ -9,6 +9,8 @@ doctest = false
 
 [dependencies]
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
 blowfish.workspace = true

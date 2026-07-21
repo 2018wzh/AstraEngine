@@ -20,7 +20,18 @@ pub struct ScCommand {
     pub known: bool,
     pub span: SourceSpan,
     pub raw_operands: Vec<u8>,
+    pub operands: Vec<ScOperand>,
     pub control_flow: ScControlFlow,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ScOperand {
+    Integer { value: i64 },
+    Boolean { value: bool },
+    Operator { value: String },
+    Symbol { value: String },
+    Text { value: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -30,7 +41,7 @@ pub enum ScControlFlow {
     Label { id: String },
     Jump { target: String },
     ConditionalJump { target: String },
-    Call { target: String, local: bool },
+    Chain { target: String },
     Return,
     Terminate,
     Choice { targets: Vec<String> },
@@ -73,7 +84,7 @@ pub enum ScControlFlowKind {
     LabelSymbol { operand: usize },
     JumpSymbol { operand: usize },
     ConditionalJumpSymbol { operand: usize },
-    CallSymbol { operand: usize, local: bool },
+    ChainSymbol { operand: usize },
     Return,
     Terminate,
     ChoiceSymbols { operands: Vec<usize> },
@@ -144,13 +155,7 @@ impl ScOpcodeCatalog {
                 "if",
                 ScControlFlowKind::ConditionalJumpSymbol { operand: 3 },
             ),
-            (
-                "chain",
-                ScControlFlowKind::CallSymbol {
-                    operand: 0,
-                    local: false,
-                },
-            ),
+            ("chain", ScControlFlowKind::ChainSymbol { operand: 0 }),
             ("end", ScControlFlowKind::Terminate),
             ("select", ScControlFlowKind::Unknown),
         ] {
@@ -249,6 +254,9 @@ pub struct ScCensus {
     pub line_count: u64,
     pub command_count: u64,
     pub opcode_counts: BTreeMap<String, u64>,
+    pub opcode_arity_counts: BTreeMap<String, BTreeMap<u32, u64>>,
+    pub opcode_whitespace_arity_counts: BTreeMap<String, BTreeMap<u32, u64>>,
+    pub opcode_operand_kind_counts: BTreeMap<String, BTreeMap<u32, BTreeMap<String, u64>>>,
     pub operand_size_counts: BTreeMap<u32, u64>,
     pub unknown_opcode_count: u64,
 }
@@ -260,6 +268,9 @@ impl ScCensus {
             line_count: 0,
             command_count: 0,
             opcode_counts: BTreeMap::new(),
+            opcode_arity_counts: BTreeMap::new(),
+            opcode_whitespace_arity_counts: BTreeMap::new(),
+            opcode_operand_kind_counts: BTreeMap::new(),
             operand_size_counts: BTreeMap::new(),
             unknown_opcode_count: 0,
         };
@@ -276,6 +287,34 @@ impl ScCensus {
                     .entry(command.opcode.clone())
                     .or_default() += 1;
                 *result
+                    .opcode_arity_counts
+                    .entry(command.opcode.clone())
+                    .or_default()
+                    .entry(command.operands.len() as u32)
+                    .or_default() += 1;
+                let whitespace_arity = command
+                    .raw_operands
+                    .split(|byte| matches!(byte, b' ' | b'\t'))
+                    .filter(|part| !part.is_empty())
+                    .count() as u32;
+                *result
+                    .opcode_whitespace_arity_counts
+                    .entry(command.opcode.clone())
+                    .or_default()
+                    .entry(whitespace_arity)
+                    .or_default() += 1;
+                let positions = result
+                    .opcode_operand_kind_counts
+                    .entry(command.opcode.clone())
+                    .or_default();
+                for (position, operand) in command.operands.iter().enumerate() {
+                    *positions
+                        .entry(position as u32)
+                        .or_default()
+                        .entry(operand.kind_name().into())
+                        .or_default() += 1;
+                }
+                *result
                     .operand_size_counts
                     .entry(command.raw_operands.len() as u32)
                     .or_default() += 1;
@@ -285,6 +324,18 @@ impl ScCensus {
             }
         }
         result
+    }
+}
+
+impl ScOperand {
+    fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Integer { .. } => "integer",
+            Self::Boolean { .. } => "boolean",
+            Self::Operator { .. } => "operator",
+            Self::Symbol { .. } => "symbol",
+            Self::Text { .. } => "text",
+        }
     }
 }
 
@@ -343,6 +394,10 @@ fn parse_line(
         .map_or(trimmed.len(), |relative| token_end + relative);
     let raw_operands = trimmed[operand_start..].to_vec();
     let spec = catalog.specs.get(&opcode);
+    let operands = tokenize_operands(&raw_operands, span.offset as usize)?
+        .into_iter()
+        .map(classify_operand)
+        .collect();
     let control_flow = spec.map_or(Ok(ScControlFlow::Unknown), |spec| {
         decode_control_flow(&spec.control_flow, &raw_operands, span.offset as usize)
     })?;
@@ -353,9 +408,29 @@ fn parse_line(
             known: spec.is_some(),
             span,
             raw_operands,
+            operands,
             control_flow,
         },
     })
+}
+
+fn classify_operand(value: String) -> ScOperand {
+    if let Ok(value) = value.parse::<i64>() {
+        ScOperand::Integer { value }
+    } else if matches!(value.as_str(), "t" | "true") {
+        ScOperand::Boolean { value: true }
+    } else if matches!(value.as_str(), "f" | "false") {
+        ScOperand::Boolean { value: false }
+    } else if matches!(
+        value.as_str(),
+        "=" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "+" | "-" | "*" | "/" | "%" | "|" | "&"
+    ) {
+        ScOperand::Operator { value }
+    } else if safe_symbol(&value) {
+        ScOperand::Symbol { value }
+    } else {
+        ScOperand::Text { value }
+    }
 }
 
 fn decode_control_flow(
@@ -389,9 +464,8 @@ fn decode_control_flow(
         ScControlFlowKind::ConditionalJumpSymbol { operand } => ScControlFlow::ConditionalJump {
             target: symbol(*operand)?,
         },
-        ScControlFlowKind::CallSymbol { operand, local } => ScControlFlow::Call {
+        ScControlFlowKind::ChainSymbol { operand } => ScControlFlow::Chain {
             target: symbol(*operand)?,
-            local: *local,
         },
         ScControlFlowKind::Return => unreachable!("handled before operand tokenization"),
         ScControlFlowKind::Terminate => unreachable!("handled before operand tokenization"),
@@ -405,46 +479,24 @@ fn decode_control_flow(
     })
 }
 
-fn tokenize_operands(bytes: &[u8], offset: usize) -> Result<Vec<String>, ScParseError> {
+pub(crate) fn tokenize_operands(bytes: &[u8], offset: usize) -> Result<Vec<String>, ScParseError> {
     let mut tokens = Vec::new();
     let mut cursor = 0usize;
     while cursor < bytes.len() {
-        while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t' | b',') {
+        while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t') {
             cursor += 1;
         }
         if cursor == bytes.len() {
             break;
         }
         let start = cursor;
-        let quote = matches!(bytes[cursor], b'\'' | b'"').then_some(bytes[cursor]);
-        if quote.is_some() {
+        while cursor < bytes.len() && !matches!(bytes[cursor], b' ' | b'\t') {
             cursor += 1;
         }
-        let content_start = cursor;
-        while cursor < bytes.len() {
-            if bytes[cursor] == b'\\' && cursor + 1 < bytes.len() {
-                cursor += 2;
-                continue;
-            }
-            if quote.is_some_and(|quote| bytes[cursor] == quote) {
-                break;
-            }
-            if quote.is_none() && matches!(bytes[cursor], b' ' | b'\t' | b',') {
-                break;
-            }
-            cursor += 1;
-        }
-        let content_end = cursor;
-        if quote.is_some() {
-            if cursor == bytes.len() {
-                return Err(ScParseError::OperandSchema(offset + start));
-            }
-            cursor += 1;
-        }
-        let Some(decoded) = SHIFT_JIS.decode_without_bom_handling_and_without_replacement(
-            &bytes[content_start..content_end],
-        ) else {
-            return Err(ScParseError::Encoding(offset + content_start));
+        let Some(decoded) =
+            SHIFT_JIS.decode_without_bom_handling_and_without_replacement(&bytes[start..cursor])
+        else {
+            return Err(ScParseError::Encoding(offset + start));
         };
         tokens.push(decoded.into_owned());
     }
@@ -465,10 +517,6 @@ fn validate_cfg(lines: &[ScLine]) -> Result<(), ScParseError> {
             ScControlFlow::Jump { target } | ScControlFlow::ConditionalJump { target } => {
                 vec![target]
             }
-            ScControlFlow::Call {
-                target,
-                local: true,
-            } => vec![target],
             ScControlFlow::Choice { targets } => targets.iter().collect(),
             _ => Vec::new(),
         };
@@ -535,5 +583,35 @@ mod tests {
             catalog.insert("WAIT", spec).unwrap_err(),
             ScParseError::DuplicateOpcode("wait".into())
         );
+    }
+
+    #[test]
+    fn operands_are_typed_without_discarding_raw_source() {
+        let source =
+            b".movie 9989 op.avi 1280 720 t\r\n.if flag == 1 done\r\n.label done\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let ScLineKind::Command { command } = &script.lines[0].kind else {
+            panic!("first line must be a command");
+        };
+        assert_eq!(
+            command.operands,
+            vec![
+                ScOperand::Integer { value: 9989 },
+                ScOperand::Symbol {
+                    value: "op.avi".into()
+                },
+                ScOperand::Integer { value: 1280 },
+                ScOperand::Integer { value: 720 },
+                ScOperand::Boolean { value: true },
+            ]
+        );
+        assert_eq!(command.raw_operands, b"9989 op.avi 1280 720 t");
+        assert_eq!(encode_sc(&script).unwrap(), source);
+    }
+
+    #[test]
+    fn tokenizer_matches_the_observed_engine_space_tab_contract() {
+        let tokens = tokenize_operands(b"one, two\t\"three four\" 'five'", 0).unwrap();
+        assert_eq!(tokens, vec!["one,", "two", "\"three", "four\"", "'five'"]);
     }
 }

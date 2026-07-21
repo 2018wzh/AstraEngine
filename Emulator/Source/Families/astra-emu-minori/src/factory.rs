@@ -7,7 +7,7 @@ use astra_core::Hash256;
 use astra_emu_family_core::{
     LegacyCoreError, LegacyMountedVfs, LegacyVfsFamilyFactory, LegacyVfsMountContext,
 };
-use astra_emu_family_support::{load_private_profile, PlaintextCache};
+use astra_emu_family_support::{load_private_profile, PlaintextCache, PlaintextCacheError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -147,12 +147,7 @@ impl LegacyVfsFamilyFactory for MinoriVfsFamilyFactory {
                 .join(context.profile_hash.to_hex());
             Some(
                 PlaintextCache::new(root, options.cache.total_bytes, options.cache.entry_bytes)
-                    .map_err(|_| {
-                        invalid(
-                            "ASTRA_EMU_MINORI_CACHE_INIT",
-                            "Minori plaintext cache initialization failed",
-                        )
-                    })?,
+                    .map_err(cache_init_error)?,
             )
         } else {
             None
@@ -187,7 +182,7 @@ impl MinoriPrivateProfilePayload {
         if roles != REQUIRED_ARCHIVE_ROLES.into_iter().collect() {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_PRIVATE_ROLES",
-                "Minori private payload does not contain exactly six archive roles",
+                "Minori private payload does not contain the required archive roles",
             ));
         }
         self.roles
@@ -260,4 +255,24 @@ fn validate_options(options: &MinoriFamilyOptions) -> Result<(), LegacyCoreError
 
 fn invalid(code: &'static str, message: &'static str) -> LegacyCoreError {
     LegacyCoreError::invalid(code, message)
+}
+
+fn cache_init_error(error: PlaintextCacheError) -> LegacyCoreError {
+    match error {
+        PlaintextCacheError::EntryLimit => invalid(
+            "ASTRA_EMU_MINORI_CACHE_ENTRY_LIMIT",
+            "Minori cache quotas are invalid",
+        ),
+        PlaintextCacheError::Corrupt => invalid(
+            "ASTRA_EMU_MINORI_CACHE_CORRUPT",
+            "Minori cache metadata is corrupt",
+        ),
+        PlaintextCacheError::Permission(_) => invalid(
+            "ASTRA_EMU_MINORI_CACHE_PERMISSION",
+            "Minori cache privacy permissions could not be enforced",
+        ),
+        PlaintextCacheError::Io(_) => {
+            invalid("ASTRA_EMU_MINORI_CACHE_IO", "Minori cache I/O failed")
+        }
+    }
 }

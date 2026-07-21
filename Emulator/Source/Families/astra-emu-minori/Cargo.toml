@@ -5,10 +5,14 @@ edition.workspace = true
 license.workspace = true
 
 [lib]
+crate-type = ["rlib", "cdylib"]
 doctest = false
 
 [dependencies]
+abi_stable.workspace = true
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
 astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-support" }
 blowfish.workspace = true
@@ -16,7 +20,9 @@ crc32fast = "1.5"
 directories.workspace = true
 encoding_rs.workspace = true
 flate2.workspace = true
+image.workspace = true
 lru.workspace = true
+postcard.workspace = true
 rc4.workspace = true
 schemars.workspace = true
 serde.workspace = true
@@ -27,3 +33,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[build-dependencies]
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+serde_json.workspace = true
+sha2.workspace = true

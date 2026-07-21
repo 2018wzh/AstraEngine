@@ -17,13 +17,19 @@ cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --mount
 Minori 专用导入与脚本研究放在独立 CLI：
 
 ```sh
+cargo run -p astra-emu-minori-cli -- scan-archives --game-dir <case-root>
 cargo run -p astra-emu-minori-cli -- import-garbro-scheme --formats <Formats.dat> --title <title> --game-dir <case-root>
 cargo run -p astra-emu-minori-cli -- census-scripts --game-dir <case-root> --mount-profile <profile.yaml>
+cargo run -p astra-emu-minori-cli -- census-media --game-dir <case-root> --mount-profile <profile.yaml>
 ```
+
+`scan-archives` 递归识别 `.paz` 与 `.pazA` 至 `.pazZ`，阻断 symlink、空文件、重复 role/part 和不连续分卷。输出只包含 role、文件数、字节数和 inventory hash，不写本地路径或 payload。当前样本结果为 8 个逻辑 archive、18 个物理文件、5742470010 bytes，required role set 完整匹配。
 
 `import-garbro-scheme` 使用纯 Rust 两阶段 NRBF reader，只接受预期的 Musica/PAZ graph。它原子生成 data-only `astraemu.patch.luau` 与 `astraemu.minori.mount.yaml`；任一目标或临时文件已存在即阻断，成对提交失败会回滚本次新文件。Luau 只调用 `astra.family.register_private_profile` 注册 opaque key/policy payload，不参与 index 或 entry 解密。key 不进入 YAML、stdout、report 或日志。
 
-当前合法样本已通过真实导入、六包 9837 entry 的 manifest v2 全量 verify，以及 89 脚本的 payload-free census。同 identity Release 复核的 29720 次 range read 全部命中 cache，聚合 hash 与前次一致。补丁、key、输入数据库、明文 cache、导出内容和 disassembly 都留在本地私有目录。
+当前合法样本已通过真实导入、八包 14502-entry manifest v2 full verify，以及 89 脚本的 payload-free census。full verify 共执行 43818 次 range read、读取 6624958365 个 decoded bytes；该轮显式关闭 cache。八包 cache identity 复核因平台缓存卷空间不足保持 blocking。补丁、key、输入数据库、明文 cache、导出内容和 disassembly 都留在本地私有目录。
+
+`census-media` 只检查 `bg`、`bgm`，逐 frame 调用生产 ANI/SQZ adapter，并用 `image` 验证 PNG。报告仅含格式、entry/frame、像素和尺寸聚合计数；不含 URI、文件名或像素。当前样本通过 4665-entry census：2655 PNG、1951 ANI（6723 frames）、9 SQZ（224 frames）、49 Ogg 和 1 个 metadata database。
 
 ## 辅助研究脚本
 

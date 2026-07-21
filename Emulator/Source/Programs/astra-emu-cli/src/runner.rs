@@ -9,21 +9,27 @@ use std::{
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioSampleFormat, LegacyAwaitResult,
-    LegacyEffect, LegacyInputEdge, LegacyProbeRequest, LegacyRenderFrameV1, LegacyRuntimeHostCtx,
-    LegacyStepBudget, LegacyVideoCommandV1, LegacyWaitRequest,
+    LegacyEffect, LegacyInputEdge, LegacyProbeRequest, LegacyRenderFrameV1,
+    LegacyRenderResourceFrameV1, LegacyRuntimeHostCtx, LegacyStepBudget, LegacyTextureFormat,
+    LegacyTextureUpdateV1, LegacyVfsReader, LegacyVideoCommandV1, LegacyWaitRequest,
+};
+use astra_emu_family_support::{
+    verify_vfs, LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry,
 };
 use astra_emu_manager_core::{
     AstraEmuRuntimeProvider, CancellationToken, CaseRecord, DesktopGrantedSource,
     DesktopVfsRegistry, EmuCaseProfile, EmuStepPayload, Library, LibraryScanner, ScanLimits,
     SourceGrant,
 };
+use astra_emu_minori::MinoriVfsFamilyFactory;
 use astra_headless_protocol::{
     ArtifactEntry, ArtifactManifest, ButtonState, GamepadControl, InputMessage,
     ObservationPredicate, PhysicalInput, PointerButton, TouchPhase,
 };
 use astra_media::{
-    open_symphonia_audio_stream, DecodedVideoStream, MediaError, SymphoniaAudioStreamDecoder,
-    DECODED_VIDEO_STREAM_SCHEMA,
+    open_symphonia_audio_stream, DecodeBindingContext, DecodeOutput as MediaDecodeOutput,
+    DecodeProviderRegistry, DecodeRequest, DecodedVideoStream, ImageDecodeProvider, MediaError,
+    SymphoniaAudioStreamDecoder, DECODED_VIDEO_STREAM_SCHEMA,
 };
 use astra_platform::{
     AudioOutputHandle, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput,
@@ -47,13 +53,15 @@ use crate::{
     family_host::CliFamilyHostConfig, input::read_input_sequence, rasterizer::CpuStageRasterizer,
 };
 
-pub const HEADLESS_RUN_REPORT_SCHEMA: &str = "astra.emu.headless_run_report.v1";
+pub const HEADLESS_RUN_REPORT_SCHEMA: &str = "astra.emu.headless_run_report.v2";
 const FIXED_DELTA_NS: u64 = 16_666_667;
 const MAX_STREAM_DECODED_AUDIO_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct HeadlessLaunch {
+    pub family_id: String,
     pub game_dir: PathBuf,
+    pub mount_profile: PathBuf,
     pub entry: Option<String>,
     pub input_path: PathBuf,
     pub artifact_root: PathBuf,
@@ -69,7 +77,9 @@ pub struct HeadlessLaunch {
 
 #[derive(Debug, Clone)]
 pub struct NativeLaunch {
+    pub family_id: String,
     pub game_dir: PathBuf,
+    pub mount_profile: PathBuf,
     pub entry: Option<String>,
     pub family_manifest: Option<PathBuf>,
     pub family_library: Option<PathBuf>,
@@ -128,10 +138,10 @@ pub struct HeadlessPhaseTimingEvidenceV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct HeadlessRunReportV1 {
+pub struct HeadlessRunReportV2 {
     pub schema: String,
     pub status: String,
-    pub engine_id: String,
+    pub family_id: String,
     pub runtime_provider_id: String,
     pub family_provider_id: String,
     pub host_kind: String,
@@ -159,6 +169,205 @@ pub struct HeadlessRunReportV1 {
     pub diagnostic_codes: Vec<String>,
 }
 
+struct PreparedFamilyCase {
+    family_id: String,
+    case_identity: String,
+    package_hash: Hash256,
+    entry_uri: String,
+    reader: Arc<dyn LegacyVfsReader>,
+    evidence: VfsEvidenceBackend,
+}
+
+enum VfsEvidenceBackend {
+    Desktop {
+        registry: Arc<DesktopVfsRegistry>,
+        mount_set_id: String,
+    },
+    Mounted(Arc<LegacyMountedVfsReaderAdapter>),
+}
+
+impl VfsEvidenceBackend {
+    fn access_metrics(&self) -> Result<HeadlessVfsAccessEvidenceV1, String> {
+        match self {
+            Self::Desktop {
+                registry,
+                mount_set_id,
+            } => {
+                let access = registry.access_metrics(mount_set_id)?;
+                Ok(HeadlessVfsAccessEvidenceV1 {
+                    resource_count: access.resource_count,
+                    unique_range_count: access.unique_range_count,
+                    read_count: access.read_count,
+                    bytes_read: access.bytes_read,
+                    max_range_bytes: access.max_range_bytes,
+                })
+            }
+            Self::Mounted(adapter) => {
+                let access = adapter
+                    .access_metrics()
+                    .map_err(|error| error.to_string())?;
+                Ok(HeadlessVfsAccessEvidenceV1 {
+                    resource_count: access.resource_count,
+                    unique_range_count: access.unique_range_count,
+                    read_count: access.read_count,
+                    bytes_read: access.bytes_read,
+                    max_range_bytes: access.max_range_bytes,
+                })
+            }
+        }
+    }
+
+    fn audit(&self) -> Result<HeadlessResourceAuditEvidenceV1, String> {
+        match self {
+            Self::Desktop {
+                registry,
+                mount_set_id,
+            } => {
+                let audit = registry.audit_mount(mount_set_id)?;
+                Ok(HeadlessResourceAuditEvidenceV1 {
+                    resource_count: audit.resource_count,
+                    range_count: audit.range_count,
+                    bytes_read: audit.bytes_read,
+                    max_range_bytes: audit.max_range_bytes,
+                    manifest_hash: audit.manifest_hash,
+                })
+            }
+            Self::Mounted(adapter) => {
+                let report = verify_vfs(adapter.mounted_vfs().as_ref())
+                    .map_err(|error| error.to_string())?;
+                let max_range_bytes = adapter
+                    .mounted_vfs()
+                    .manifest()
+                    .entries
+                    .iter()
+                    .map(|entry| entry.decoded_size.min(4 * 1024 * 1024))
+                    .max()
+                    .unwrap_or(0);
+                Ok(HeadlessResourceAuditEvidenceV1 {
+                    resource_count: report.entry_count,
+                    range_count: report.range_count,
+                    bytes_read: report.byte_count,
+                    max_range_bytes,
+                    manifest_hash: report.aggregate_hash,
+                })
+            }
+        }
+    }
+
+    fn cleanup(&self) {
+        if let Self::Desktop {
+            registry,
+            mount_set_id,
+        } = self
+        {
+            registry.unbind(mount_set_id);
+        }
+    }
+}
+
+fn prepare_family_case(
+    family_id: &str,
+    game_root: &Path,
+    mount_profile: &Path,
+    entry: Option<&str>,
+    mount_set_id: &str,
+) -> Result<PreparedFamilyCase, String> {
+    match family_id {
+        "fvp" => prepare_fvp_case(game_root, mount_profile, entry, mount_set_id),
+        "minori" => prepare_minori_case(game_root, mount_profile, entry, mount_set_id),
+        _ => Err("ASTRA_EMU_CLI_FAMILY_UNSUPPORTED".into()),
+    }
+}
+
+fn prepare_fvp_case(
+    game_root: &Path,
+    mount_profile: &Path,
+    entry: Option<&str>,
+    mount_set_id: &str,
+) -> Result<PreparedFamilyCase, String> {
+    let loaded = astra_emu_family_support::load_mount_profile(mount_profile)
+        .map_err(|error| error.to_string())?;
+    if loaded.profile.family_id != "fvp" {
+        return Err("ASTRA_EMU_VFS_FAMILY_MISMATCH".into());
+    }
+    let case = scan_case(game_root, entry)?;
+    let package_hash: Hash256 = case
+        .content_hash
+        .parse()
+        .map_err(|_| "ASTRA_EMU_CASE_FINGERPRINT_INVALID".to_owned())?;
+    let registry = Arc::new(DesktopVfsRegistry::default());
+    registry.bind(mount_set_id, &game_root.to_string_lossy())?;
+    Ok(PreparedFamilyCase {
+        family_id: "fvp".into(),
+        case_identity: case.case_identity,
+        package_hash,
+        entry_uri: case.relative_path,
+        reader: registry.clone(),
+        evidence: VfsEvidenceBackend::Desktop {
+            registry,
+            mount_set_id: mount_set_id.into(),
+        },
+    })
+}
+
+fn prepare_minori_case(
+    game_root: &Path,
+    mount_profile: &Path,
+    entry: Option<&str>,
+    mount_set_id: &str,
+) -> Result<PreparedFamilyCase, String> {
+    let mut registry = LegacyVfsFamilyRegistry::default();
+    registry
+        .register(Arc::new(MinoriVfsFamilyFactory))
+        .map_err(|error| error.to_string())?;
+    let loaded = registry
+        .load_profile(mount_profile)
+        .map_err(|error| error.to_string())?;
+    let mounted = registry
+        .mount("minori", game_root, &loaded)
+        .map_err(|error| error.to_string())?;
+    let entry_uri = match entry {
+        Some(uri)
+            if mounted
+                .manifest()
+                .entries
+                .iter()
+                .any(|candidate| candidate.uri == uri && candidate.media_kind == "script") =>
+        {
+            uri.to_owned()
+        }
+        Some(_) => return Err("ASTRA_EMU_MINORI_ENTRY_INVALID".into()),
+        None => {
+            let scripts = mounted
+                .manifest()
+                .entries
+                .iter()
+                .filter(|candidate| candidate.media_kind == "script")
+                .map(|candidate| candidate.uri.clone())
+                .collect::<Vec<_>>();
+            if scripts.len() != 1 {
+                return Err("ASTRA_EMU_MINORI_ENTRY_REQUIRED".into());
+            }
+            scripts[0].clone()
+        }
+    };
+    let manifest_bytes = postcard::to_allocvec(mounted.manifest())
+        .map_err(|_| "ASTRA_EMU_VFS_MANIFEST_HASH".to_owned())?;
+    let package_hash = Hash256::from_sha256(&manifest_bytes);
+    let adapter = Arc::new(
+        LegacyMountedVfsReaderAdapter::new(mount_set_id, mounted)
+            .map_err(|error| error.to_string())?,
+    );
+    Ok(PreparedFamilyCase {
+        family_id: "minori".into(),
+        case_identity: format!("minori-{}", &package_hash.to_string()[7..23]),
+        package_hash,
+        entry_uri,
+        reader: adapter.clone(),
+        evidence: VfsEvidenceBackend::Mounted(adapter),
+    })
+}
+
 pub async fn run_native(launch: NativeLaunch) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -178,52 +387,61 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     if !game_root.is_dir() {
         return Err("ASTRA_EMU_CLI_GAME_DIR_INVALID".into());
     }
-    let case = scan_case(&game_root, launch.entry.as_deref())?;
-    let game_identity_hash: Hash256 = case
-        .content_hash
-        .parse()
-        .map_err(|_| "ASTRA_EMU_CASE_FINGERPRINT_INVALID".to_owned())?;
     let executable = std::env::current_exe().map_err(|_| "ASTRA_EMU_EXECUTABLE_PATH".to_owned())?;
-    let vfs = Arc::new(DesktopVfsRegistry::default());
-    let mount_set_id = format!("native-{}", &game_identity_hash.to_string()[7..39]);
-    vfs.bind(&mount_set_id, &game_root.to_string_lossy())?;
+    let mount_seed = Hash256::from_sha256(
+        format!("{}\0{}", launch.family_id, game_root.to_string_lossy()).as_bytes(),
+    );
+    let mount_set_id = format!("native-{}", &mount_seed.to_string()[7..39]);
+    let prepared = prepare_family_case(
+        &launch.family_id,
+        &game_root,
+        &launch.mount_profile,
+        launch.entry.as_deref(),
+        &mount_set_id,
+    )?;
+    let game_identity_hash = prepared.package_hash;
     let family_config = match (&launch.family_manifest, &launch.family_library) {
         (Some(manifest), Some(library)) => {
-            CliFamilyHostConfig::with_paths(manifest.clone(), library.clone())
+            CliFamilyHostConfig::with_paths(&launch.family_id, manifest.clone(), library.clone())?
         }
-        (None, None) => CliFamilyHostConfig::installed_for_executable(&executable)?,
+        (None, None) => {
+            CliFamilyHostConfig::installed_for_executable(&executable, &launch.family_id)?
+        }
         _ => return Err("ASTRA_EMU_CLI_FAMILY_PATH_PAIR_REQUIRED".into()),
     };
-    let family = family_config.create_provider(vfs.clone())?;
+    let family = family_config.create_provider(prepared.reader.clone())?;
     let mut runtime = AstraEmuRuntimeProvider::new(family)?;
     runtime.create_instance(ProviderInstanceId("astra.emu.cli.native.instance".into()))?;
     let profile = probe_profile(
         &runtime,
-        &case,
-        &mount_set_id,
-        game_identity_hash,
-        "windows",
-        "astra.platform.windows.media",
-        "astra.emu.cli.native.report",
+        &prepared,
+        ProbeProfileRequest {
+            mount_set_id: &mount_set_id,
+            package_hash: game_identity_hash,
+            target: "windows",
+            media_service_id: "astra.platform.windows.media",
+            report_sink_id: "astra.emu.cli.native.report",
+            stage_size: (1280, 720),
+        },
     )?;
     let stage_width = profile
         .family_options
-        .get("fvp.stage_width")
+        .get("astra.stage_width")
         .and_then(|value| value.parse::<u32>().ok())
-        .ok_or_else(|| "ASTRA_EMU_FVP_PROBE_STAGE_INVALID".to_owned())?;
+        .ok_or_else(|| "ASTRA_EMU_PROBE_STAGE_INVALID".to_owned())?;
     let stage_height = profile
         .family_options
-        .get("fvp.stage_height")
+        .get("astra.stage_height")
         .and_then(|value| value.parse::<u32>().ok())
-        .ok_or_else(|| "ASTRA_EMU_FVP_PROBE_STAGE_INVALID".to_owned())?;
-    let section = case_profile_section(&case, &profile, &mount_set_id, game_identity_hash)?;
+        .ok_or_else(|| "ASTRA_EMU_PROBE_STAGE_INVALID".to_owned())?;
+    let section = case_profile_section(&prepared, &profile, &mount_set_id)?;
     let seed = u64::from_le_bytes(game_identity_hash.as_bytes()[..8].try_into().unwrap());
     let open = runtime.open(RuntimeOpenRequest {
         target_id: "astra-emu-native-case".into(),
-        profile: "fvp-v1".into(),
+        profile: format!("{}-v1", launch.family_id),
         locale: "und".into(),
         seed,
-        package_hash: case.content_hash.clone(),
+        package_hash: game_identity_hash.to_string(),
         sections: vec![section],
     })?;
 
@@ -248,7 +466,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     let window = host
         .client
         .create_window(WindowRequest {
-            title: "AstraEMU FVP".into(),
+            title: format!("AstraEMU {}", launch.family_id),
             width: stage_width,
             height: stage_height,
             visible: true,
@@ -266,7 +484,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     tracing::info!(
         event = "astra_emu_cli_native_session_opened",
-        family = "fvp",
+        family = launch.family_id.as_str(),
         stage_width,
         stage_height,
         audio_enabled = launch.enable_audio
@@ -280,7 +498,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         &host.client,
         surface,
         launch.enable_audio,
-    );
+    )?;
     let mut viewport = NativeViewport {
         window_width: stage_width,
         window_height: stage_height,
@@ -336,7 +554,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         .shutdown()
         .await
         .map_err(|error| error.to_string());
-    vfs.unbind(&mount_set_id);
+    prepared.evidence.cleanup();
     let cleanup_errors = [
         ("audio", audio_cleanup),
         ("runtime", runtime_cleanup),
@@ -366,12 +584,12 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     tracing::info!(
         event = "astra_emu_cli_native_session_closed",
         fixed_step,
-        family = "fvp"
+        family = launch.family_id.as_str()
     );
     Ok(())
 }
 
-pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV1, String> {
+pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV2, String> {
     validate_launch(&launch)?;
     let input = read_input_sequence(&launch.input_path)?;
     let game_root = fs::canonicalize(&launch.game_dir)
@@ -379,56 +597,65 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV1,
     if !game_root.is_dir() {
         return Err("ASTRA_EMU_HEADLESS_GAME_DIR_INVALID".into());
     }
-    let case = scan_case(&game_root, launch.entry.as_deref())?;
-    let game_identity_hash: Hash256 = case
-        .content_hash
-        .parse()
-        .map_err(|_| "ASTRA_EMU_CASE_FINGERPRINT_INVALID".to_owned())?;
     let executable = std::env::current_exe().map_err(|_| "ASTRA_EMU_EXECUTABLE_PATH".to_owned())?;
     let executable_bytes =
         fs::read(&executable).map_err(|_| "ASTRA_EMU_EXECUTABLE_READ".to_owned())?;
     let build_identity_hash = Hash256::from_sha256(&executable_bytes);
-    let vfs = Arc::new(DesktopVfsRegistry::default());
-    let mount_set_id = format!("headless-{}", &game_identity_hash.to_string()[7..39]);
-    vfs.bind(&mount_set_id, &game_root.to_string_lossy())?;
+    let mount_seed = Hash256::from_sha256(
+        format!("{}\0{}", launch.family_id, game_root.to_string_lossy()).as_bytes(),
+    );
+    let mount_set_id = format!("headless-{}", &mount_seed.to_string()[7..39]);
+    let prepared = prepare_family_case(
+        &launch.family_id,
+        &game_root,
+        &launch.mount_profile,
+        launch.entry.as_deref(),
+        &mount_set_id,
+    )?;
+    let game_identity_hash = prepared.package_hash;
     let family_config = match (&launch.family_manifest, &launch.family_library) {
         (Some(manifest), Some(library)) => {
-            CliFamilyHostConfig::with_paths(manifest.clone(), library.clone())
+            CliFamilyHostConfig::with_paths(&launch.family_id, manifest.clone(), library.clone())?
         }
-        (None, None) => CliFamilyHostConfig::installed_for_executable(&executable)?,
+        (None, None) => {
+            CliFamilyHostConfig::installed_for_executable(&executable, &launch.family_id)?
+        }
         _ => return Err("ASTRA_EMU_HEADLESS_FAMILY_PATH_PAIR".into()),
     };
-    let family = family_config.create_provider(vfs.clone())?;
+    let family = family_config.create_provider(prepared.reader.clone())?;
     let family_provider_id = family.descriptor().provider_id.clone();
     let mut runtime = AstraEmuRuntimeProvider::new(family)?;
     runtime.create_instance(ProviderInstanceId("astra.emu.cli.headless.instance".into()))?;
     let profile = probe_profile(
         &runtime,
-        &case,
-        &mount_set_id,
-        game_identity_hash,
-        "headless-test",
-        "astra.platform.headless.media",
-        "astra.emu.cli.headless.report",
+        &prepared,
+        ProbeProfileRequest {
+            mount_set_id: &mount_set_id,
+            package_hash: game_identity_hash,
+            target: "headless-test",
+            media_service_id: "astra.platform.headless.media",
+            report_sink_id: "astra.emu.cli.headless.report",
+            stage_size: (launch.viewport_width, launch.viewport_height),
+        },
     )?;
     let stage_width = profile
         .family_options
-        .get("fvp.stage_width")
+        .get("astra.stage_width")
         .and_then(|value| value.parse::<u32>().ok())
-        .ok_or_else(|| "ASTRA_EMU_FVP_PROBE_STAGE_INVALID".to_owned())?;
+        .ok_or_else(|| "ASTRA_EMU_PROBE_STAGE_INVALID".to_owned())?;
     let stage_height = profile
         .family_options
-        .get("fvp.stage_height")
+        .get("astra.stage_height")
         .and_then(|value| value.parse::<u32>().ok())
-        .ok_or_else(|| "ASTRA_EMU_FVP_PROBE_STAGE_INVALID".to_owned())?;
-    let section = case_profile_section(&case, &profile, &mount_set_id, game_identity_hash)?;
+        .ok_or_else(|| "ASTRA_EMU_PROBE_STAGE_INVALID".to_owned())?;
+    let section = case_profile_section(&prepared, &profile, &mount_set_id)?;
     let seed = u64::from_le_bytes(game_identity_hash.as_bytes()[..8].try_into().unwrap());
     let open = runtime.open(RuntimeOpenRequest {
         target_id: "astra-emu-headless-case".into(),
-        profile: "fvp-v1".into(),
+        profile: format!("{}-v1", launch.family_id),
         locale: "und".into(),
         seed,
-        package_hash: case.content_hash.clone(),
+        package_hash: game_identity_hash.to_string(),
         sections: vec![section],
     })?;
     let session_id_hash = Hash256::from_sha256(open.session_id.0.as_bytes());
@@ -439,7 +666,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV1,
         game_identity_hash.to_string(),
     );
     host_profile.id = "astra-emu-cli-headless".into();
-    host_profile.product_profile = "fvp-v1".into();
+    host_profile.product_profile = format!("{}-v1", launch.family_id);
     host_profile.viewport_width = launch.viewport_width;
     host_profile.viewport_height = launch.viewport_height;
     host_profile.tick_duration_ns = profile.fixed_delta_ns;
@@ -508,10 +735,10 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV1,
     )
     .await;
     let result = execution_result.and_then(|execution| {
-        let access = vfs.access_metrics(&mount_set_id)?;
+        let access = prepared.evidence.access_metrics()?;
         let audit = launch
             .audit_all_resources
-            .then(|| vfs.audit_mount(&mount_set_id))
+            .then(|| prepared.evidence.audit())
             .transpose()?;
         Ok((execution, access, audit))
     });
@@ -531,7 +758,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV1,
             .map_err(|error| error.to_string())
     }
     .await;
-    vfs.unbind(&mount_set_id);
+    prepared.evidence.cleanup();
     let (execution, vfs_access, resource_audit) = match (result, cleanup) {
         (Ok(evidence), Ok(())) => evidence,
         (Err(error), Ok(())) => return Err(error),
@@ -566,17 +793,17 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV1,
     {
         return Err("ASTRA_EMU_HEADLESS_ARTIFACT_IDENTITY".into());
     }
-    let report = HeadlessRunReportV1 {
+    let report = HeadlessRunReportV2 {
         schema: HEADLESS_RUN_REPORT_SCHEMA.into(),
         status: "passed".into(),
-        engine_id: "fvp".into(),
+        family_id: launch.family_id.clone(),
         runtime_provider_id: "astra.emu.runtime_provider".into(),
         family_provider_id,
         host_kind: "headless".into(),
         build_identity_hash,
         profile_hash,
         game_identity_hash,
-        entry_identity_hash: Hash256::from_sha256(case.relative_path.as_bytes()),
+        entry_identity_hash: Hash256::from_sha256(prepared.entry_uri.as_bytes()),
         session_id_hash,
         input_sequence_hash: input.hash,
         consumed_input_trace_hash: Hash256::from_sha256(&execution.input_trace),
@@ -589,20 +816,8 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV1,
         consumed_input_messages: input.messages.len() as u64,
         snapshot_round_trip_verified: execution.snapshot_verified,
         terminal_reached: execution.terminal,
-        vfs_access: HeadlessVfsAccessEvidenceV1 {
-            resource_count: vfs_access.resource_count,
-            unique_range_count: vfs_access.unique_range_count,
-            read_count: vfs_access.read_count,
-            bytes_read: vfs_access.bytes_read,
-            max_range_bytes: vfs_access.max_range_bytes,
-        },
-        resource_audit: resource_audit.map(|audit| HeadlessResourceAuditEvidenceV1 {
-            resource_count: audit.resource_count,
-            range_count: audit.range_count,
-            bytes_read: audit.bytes_read,
-            max_range_bytes: audit.max_range_bytes,
-            manifest_hash: audit.manifest_hash,
-        }),
+        vfs_access,
+        resource_audit,
         phase_timings: execution.phase_timings,
         checkpoints: execution.checkpoints,
         lifecycle_steps: {
@@ -831,40 +1046,72 @@ fn scan_case(root: &Path, entry: Option<&str>) -> Result<CaseRecord, String> {
     Ok(cases.remove(0))
 }
 
+struct ProbeProfileRequest<'a> {
+    mount_set_id: &'a str,
+    package_hash: Hash256,
+    target: &'a str,
+    media_service_id: &'a str,
+    report_sink_id: &'a str,
+    stage_size: (u32, u32),
+}
+
 fn probe_profile(
     runtime: &AstraEmuRuntimeProvider,
-    case: &CaseRecord,
-    mount_set_id: &str,
-    package_hash: Hash256,
-    target: &str,
-    media_service_id: &str,
-    report_sink_id: &str,
+    case: &PreparedFamilyCase,
+    request: ProbeProfileRequest<'_>,
 ) -> Result<astra_emu_manager_core::CaseRuntimeProfileRecord, String> {
+    let (requested_stage_width, requested_stage_height) = request.stage_size;
     let report = runtime.probe_family(
         &LegacyRuntimeHostCtx {
             case_id: case.case_identity.clone(),
             package_id: "astra-emu-headless-case".into(),
-            package_hash,
-            mount_set_id: mount_set_id.into(),
-            media_service_ids: vec![media_service_id.into()],
+            package_hash: request.package_hash,
+            mount_set_id: request.mount_set_id.into(),
+            media_service_ids: vec![request.media_service_id.into()],
             permission_policy_id: "astra.emu.cli.explicit_directory.v1".into(),
-            report_sink_id: report_sink_id.into(),
-            target: target.into(),
-            profile: "fvp-v1".into(),
+            report_sink_id: request.report_sink_id.into(),
+            target: request.target.into(),
+            profile: format!("{}-v1", case.family_id),
         },
         LegacyProbeRequest {
-            root_mount_id: mount_set_id.into(),
-            candidate_uris: vec![case.relative_path.clone()],
-            marker_hashes: vec![package_hash],
+            root_mount_id: request.mount_set_id.into(),
+            candidate_uris: vec![case.entry_uri.clone()],
+            marker_hashes: (case.family_id == "fvp")
+                .then_some(request.package_hash)
+                .into_iter()
+                .collect(),
             max_entries: 1,
             max_metadata_bytes: 512 * 1024 * 1024,
         },
     )?;
-    if report.family_id.0 != "fvp"
+    if report.family_id.0 != case.family_id
         || report.confidence_permyriad != 10_000
         || !report.blockers.is_empty()
     {
-        return Err("ASTRA_EMU_FVP_PROBE_BLOCKED".into());
+        return Err("ASTRA_EMU_FAMILY_PROBE_BLOCKED".into());
+    }
+    if case.family_id == "minori" {
+        if requested_stage_width == 0 || requested_stage_height == 0 {
+            return Err("ASTRA_EMU_MINORI_PROBE_STAGE_INVALID".into());
+        }
+        return Ok(astra_emu_manager_core::CaseRuntimeProfileRecord {
+            case_identity: case.case_identity.clone(),
+            family_id: case.family_id.clone(),
+            fixed_delta_ns: FIXED_DELTA_NS,
+            compatibility_profile: "minori.reference".into(),
+            family_options: [
+                (
+                    "astra.stage_width".into(),
+                    requested_stage_width.to_string(),
+                ),
+                (
+                    "astra.stage_height".into(),
+                    requested_stage_height.to_string(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        });
     }
     let marker = |prefix: &str| -> Result<String, String> {
         let values = report
@@ -896,8 +1143,10 @@ fn probe_profile(
         compatibility_profile: "rfvp-v1".into(),
         family_options: [
             ("fvp.nls".into(), nls),
-            ("fvp.stage_width".into(), width),
-            ("fvp.stage_height".into(), height),
+            ("fvp.stage_width".into(), width.clone()),
+            ("fvp.stage_height".into(), height.clone()),
+            ("astra.stage_width".into(), width),
+            ("astra.stage_height".into(), height),
             ("patch.mode".into(), "no_patch".into()),
         ]
         .into_iter()
@@ -906,16 +1155,15 @@ fn probe_profile(
 }
 
 fn case_profile_section(
-    case: &CaseRecord,
+    case: &PreparedFamilyCase,
     profile: &astra_emu_manager_core::CaseRuntimeProfileRecord,
     mount_set_id: &str,
-    case_fingerprint: Hash256,
 ) -> Result<RuntimeSectionPayload, String> {
     let value = EmuCaseProfile {
         schema: "astra.emu.case_profile.v1".into(),
-        family_id: "fvp".into(),
-        case_fingerprint,
-        script_uri: case.relative_path.clone(),
+        family_id: case.family_id.clone(),
+        case_fingerprint: case.package_hash,
+        script_uri: case.entry_uri.clone(),
         fixed_delta_ns: profile.fixed_delta_ns,
         compatibility_profile: profile.compatibility_profile.clone(),
         mount_set_id: mount_set_id.into(),
@@ -987,6 +1235,7 @@ struct RuntimeDriver<'a> {
     pending_inputs: Vec<LegacyInputEdge>,
     pending_waits: BTreeMap<String, PendingWait>,
     rasterizer: CpuStageRasterizer,
+    image_decoders: DecodeProviderRegistry,
     base_frame: Option<(u32, u32, Vec<u8>)>,
     latest_frame: Option<(u32, u32, Vec<u8>)>,
     present_sequence: u64,
@@ -1224,7 +1473,7 @@ async fn execute_sequence(
         platform,
         surface,
         true,
-    );
+    )?;
     let mut checkpoints = Vec::new();
     let mut checkpoint_frames = Vec::new();
     let mut snapshot_verified = false;
@@ -1372,8 +1621,12 @@ impl<'a> RuntimeDriver<'a> {
         platform: &'a PlatformHostClient,
         surface: SurfaceHandle,
         audio_enabled: bool,
-    ) -> RuntimeDriver<'a> {
-        RuntimeDriver {
+    ) -> Result<RuntimeDriver<'a>, String> {
+        let mut image_decoders = DecodeProviderRegistry::default();
+        image_decoders
+            .register(Box::new(ImageDecodeProvider))
+            .map_err(|error| error.to_string())?;
+        Ok(RuntimeDriver {
             runtime,
             session_id,
             seed,
@@ -1387,6 +1640,7 @@ impl<'a> RuntimeDriver<'a> {
             pending_inputs: Vec::new(),
             pending_waits: BTreeMap::new(),
             rasterizer: CpuStageRasterizer::default(),
+            image_decoders,
             base_frame: None,
             latest_frame: None,
             present_sequence: 0,
@@ -1407,7 +1661,7 @@ impl<'a> RuntimeDriver<'a> {
             raster_timings_ns: Vec::new(),
             media_timings_ns: Vec::new(),
             present_timings_ns: Vec::new(),
-        }
+        })
     }
 
     fn queue_input(&mut self, control: &str, pressed: bool, value: f32) -> Result<(), String> {
@@ -1650,6 +1904,22 @@ impl<'a> RuntimeDriver<'a> {
                 match effect {
                     LegacyEffect::Presentation {
                         command, payload, ..
+                    } if command == "astra.emu.render_resource_frame.v1" => {
+                        let resource_frame: LegacyRenderResourceFrameV1 =
+                            postcard::from_bytes(&payload).map_err(|_| {
+                                "ASTRA_EMU_HEADLESS_RENDER_RESOURCE_FRAME_DECODE".to_owned()
+                            })?;
+                        let frame = self.materialize_resource_frame(resource_frame)?;
+                        let width = frame.width;
+                        let height = frame.height;
+                        let raster_started = Instant::now();
+                        let rgba8 = self.rasterizer.render(frame)?;
+                        self.raster_timings_ns.push(elapsed_ns(raster_started)?);
+                        self.base_frame = Some((width, height, rgba8));
+                        rendered = true;
+                    }
+                    LegacyEffect::Presentation {
+                        command, payload, ..
                     } if command == "astra.emu.render_frame.v1" => {
                         let frame: LegacyRenderFrameV1 = postcard::from_bytes(&payload)
                             .map_err(|_| "ASTRA_EMU_HEADLESS_RENDER_FRAME_DECODE".to_owned())?;
@@ -1765,6 +2035,81 @@ impl<'a> RuntimeDriver<'a> {
         self.terminal = output.status == "terminal";
         self.step_timings_ns.push(elapsed_ns(step_started)?);
         Ok(())
+    }
+
+    fn materialize_resource_frame(
+        &mut self,
+        resource_frame: LegacyRenderResourceFrameV1,
+    ) -> Result<LegacyRenderFrameV1, String> {
+        resource_frame
+            .validate()
+            .map_err(|error| error.to_string())?;
+        let mut texture_updates = Vec::with_capacity(resource_frame.texture_resources.len());
+        for resource in resource_frame.texture_resources {
+            if resource.decoded_format != LegacyTextureFormat::Rgba8 {
+                return Err("ASTRA_EMU_HEADLESS_IMAGE_FORMAT_UNSUPPORTED".into());
+            }
+            let bytes = self.runtime.read_session_resource(
+                &self.session_id,
+                &resource.resource_uri,
+                1024 * 1024 * 1024,
+            )?;
+            if Hash256::from_sha256(&bytes) != resource.encoded_hash {
+                return Err("ASTRA_EMU_HEADLESS_IMAGE_RESOURCE_IDENTITY".into());
+            }
+            let profile = "emu-headless-image-v1";
+            let decoded = self
+                .image_decoders
+                .decode(
+                    &DecodeRequest {
+                        kind: astra_media::DecodeKind::Image,
+                        codec: resource.codec,
+                        bytes,
+                        profile: profile.into(),
+                    },
+                    &DecodeBindingContext::shipping("astra.decode.image", "headless", profile),
+                )
+                .map_err(|error| error.to_string())?;
+            let MediaDecodeOutput::CpuBuffer {
+                bytes,
+                format,
+                hash,
+            } = decoded.output
+            else {
+                return Err("ASTRA_EMU_HEADLESS_IMAGE_CPU_BUFFER_REQUIRED".into());
+            };
+            if format != "rgba8" || Hash256::from_sha256(&bytes) != hash {
+                return Err("ASTRA_EMU_HEADLESS_IMAGE_DECODE_IDENTITY".into());
+            }
+            let expected = usize::try_from(resource.decoded_width)
+                .ok()
+                .and_then(|width| {
+                    usize::try_from(resource.decoded_height)
+                        .ok()
+                        .and_then(|height| width.checked_mul(height))
+                })
+                .and_then(|pixels| pixels.checked_mul(4))
+                .ok_or_else(|| "ASTRA_EMU_HEADLESS_IMAGE_DIMENSION_OVERFLOW".to_owned())?;
+            if bytes.len() != expected {
+                return Err("ASTRA_EMU_HEADLESS_IMAGE_DIMENSION_MISMATCH".into());
+            }
+            texture_updates.push(LegacyTextureUpdateV1 {
+                texture_id: resource.texture_id,
+                width: resource.decoded_width,
+                height: resource.decoded_height,
+                format: resource.decoded_format,
+                content_hash: hash,
+                pixels: bytes,
+            });
+        }
+        let frame = LegacyRenderFrameV1 {
+            width: resource_frame.width,
+            height: resource_frame.height,
+            texture_updates,
+            draws: resource_frame.draws,
+        };
+        frame.validate().map_err(|error| error.to_string())?;
+        Ok(frame)
     }
 
     async fn present(&mut self) -> Result<(), String> {

@@ -20,10 +20,13 @@ sys.paz
 se.paz
 voice.paz
 mov.paz
+bg.paz
+bg.pazA ... bg.pazJ
+bgm.paz
 汉化补丁单独备份/
 ```
 
-当前六个 archive 均非空；`mov.paz` 含 5 个 entry。文件名、计数和大小可以进入脱敏研究记录，key、payload、完整脚本文本与导出内容只保存在 ignored 私有目录。
+当前样本有八个非空逻辑 archive、18 个物理文件。`bg` 由主包和 A–J 十个连续分卷组成；`bgm` 是独立主包。文件名、计数和大小可以进入脱敏研究记录，key、payload、完整脚本文本与导出内容只保存在 ignored 私有目录。
 
 ## 参考文件
 
@@ -36,4 +39,4 @@ mov.paz
 
 ## 资料可信度
 
-PAZ 结论按 GARbro contract、本地样本观察和推测分开记录。六个真实 index 与 9837 个 entry 全读已用于复核 header、TOC、entry bounds、archive role 和 decode/cache；89 个 `.sc` 的全包 census 已确认 CP932 行式结构与 command token。未确认的 operand 语义不从文件名或文本形态猜测。
+PAZ 结论按 GARbro contract、本地样本观察和推测分开记录。八个真实 index、14502 个 entry 和 18 个物理文件已完成 decoded full verify，用于复核 header、TOC、分卷、entry bounds、archive role 和首尾随机复读。该轮明确关闭 cache，因此不构成 cache hit 证据。89 个 `.sc` 的全包 census 已确认 CP932 行式结构与 command token。未确认的 operand 语义不从文件名或文本形态猜测。
