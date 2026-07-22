@@ -1128,6 +1128,17 @@ fn resolve_gpu_timestamps(
             }
         }
     } else {
+        // `map_async` callbacks advance only while the device is polled.  The
+        // performance runner deliberately uses this non-blocking path before
+        // the bounded readback ring fills; without a poll, every slot stays
+        // pending until the ring forces a synchronous wait, creating periodic
+        // multi-frame CPU stalls on integrated DX12 adapters.
+        device.poll(wgpu::PollType::Poll).map_err(|_| {
+            unavailable(
+                "offscreen.timestamp_query",
+                "GPU timestamp callback polling failed",
+            )
+        })?;
         match slot.map_status.load(Ordering::Acquire) {
             GPU_MAP_SUCCEEDED => {}
             GPU_MAP_PENDING => return Ok(None),
