@@ -374,7 +374,7 @@ impl PackageAssetStore {
             .map_err(|error| {
                 NativeVnHostError::Asset(format!("ASTRA_PLAYER_ASSET_DECODE: {error}"))
             })?
-            .to_rgba8();
+            .into_rgba8();
         let (width, height) = decoded.dimensions();
         let rgba8: Arc<[u8]> = decoded.into_raw().into();
         Ok(TextureFrame {
