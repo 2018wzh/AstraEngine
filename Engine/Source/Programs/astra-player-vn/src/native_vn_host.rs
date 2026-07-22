@@ -2893,11 +2893,11 @@ impl NativeVnHostCommandSource {
             },
         )?
         .clone();
-        let view = self
+        let (active_view_id, active_model_schema) = self
             .ui_blueprints
             .views
             .get(&binding.view_id)
-            .cloned()
+            .map(|view| (view.id.clone(), view.model_schema.clone()))
             .ok_or_else(|| {
                 NativeVnHostError::Input(format!(
                     "ASTRA_PLAYER_UI_VIEW_MISSING: view {} is not packaged",
@@ -2924,7 +2924,7 @@ impl NativeVnHostCommandSource {
                 ))
             })?;
         if controller_manifest.view != binding.view_id
-            || controller_manifest.model_schema != view.model_schema
+            || controller_manifest.model_schema != active_model_schema
         {
             return Err(NativeVnHostError::Input(
                 "ASTRA_PLAYER_UI_CONTROLLER_BINDING: controller manifest does not match the selected view"
@@ -2952,8 +2952,6 @@ impl NativeVnHostCommandSource {
         );
         let active_model = model.clone();
         let active_controller_id = binding.controller_id.clone();
-        let active_model_schema = view.model_schema.clone();
-        let active_view_id = view.id.clone();
         let active_changed = self
             .base_ui_instance_id
             .as_ref()
@@ -3087,7 +3085,7 @@ impl NativeVnHostCommandSource {
                 events,
             },
             theme,
-            model_schema: view.model_schema.clone(),
+            model_schema: active_model_schema.clone(),
             model_payload,
         };
         let active = self.ui_modals.last().map_or(
