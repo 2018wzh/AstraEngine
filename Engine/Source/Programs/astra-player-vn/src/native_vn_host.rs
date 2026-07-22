@@ -3534,15 +3534,24 @@ impl NativeVnHostCommandSource {
         ordered_outputs: &[NativeVnOrderedRuntimeOutput],
         presentation_count: usize,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        let (next_stage_director, stage_outputs) = self
-            .stage_director
-            .prepare_batch(ordered_outputs.iter().filter_map(|output| match output {
+        let stage_commands = ordered_outputs
+            .iter()
+            .filter_map(|output| match output {
                 NativeVnOrderedRuntimeOutput::Presentation(PresentationCommand::Stage(stage)) => {
                     Some(stage)
                 }
                 _ => None,
-            }))
-            .map_err(stage_director_error)?;
+            })
+            .collect::<Vec<_>>();
+        let (next_stage_director, stage_outputs) = if stage_commands.is_empty() {
+            (None, Vec::new())
+        } else {
+            let (director, outputs) = self
+                .stage_director
+                .prepare_batch(stage_commands)
+                .map_err(stage_director_error)?;
+            (Some(director), outputs)
+        };
         let mut stage_outputs = stage_outputs.into_iter();
         let mut next_audio = Vec::new();
         for output in ordered_outputs {
@@ -3628,7 +3637,16 @@ impl NativeVnHostCommandSource {
                                 looping: matches!(movie.loop_mode, MovieLoopMode::Loop),
                                 fence: movie.fence,
                                 fallback_asset_id: movie.fallback,
-                                allow_fallback: next_stage_director.state().profile
+                                allow_fallback: next_stage_director
+                                    .as_ref()
+                                    .ok_or_else(|| {
+                                        NativeVnHostError::Asset(
+                                            "ASTRA_PLAYER_STAGE_BATCH_DIRECTOR_MISSING: movie output requires a prepared stage transaction"
+                                                .into(),
+                                        )
+                                    })?
+                                    .state()
+                                    .profile
                                     != "advanced-vn",
                             });
                         }
@@ -3646,33 +3664,34 @@ impl NativeVnHostCommandSource {
                     .into(),
             ));
         }
-        self.ensure_stage_textures(next_stage_director.state())?;
-        let next_scene_draw = stage_scene_commands(
-            next_stage_director.state(),
-            &self.textures,
-            self.width,
-            self.height,
-        )?;
-
-        // Preload is package/decode readiness, not an unbounded GPU residency
-        // lease.  Only resources referenced by the retained scene stay live on
-        // the surface; a later draw uploads a prevalidated asset on demand.
-        let next_texture_ids = scene_texture_ids(&next_scene_draw);
         let mut lifecycle = Vec::new();
-        for asset_id in self.live_texture_ids.difference(&next_texture_ids) {
-            lifecycle.push(SceneCommand::ReleaseResource {
-                resource_id: asset_id.clone(),
+        let next_stage_scene = if let Some(director) = next_stage_director.as_ref() {
+            self.ensure_stage_textures(director.state())?;
+            let scene_draw =
+                stage_scene_commands(director.state(), &self.textures, self.width, self.height)?;
+
+            // Preload is package/decode readiness, not an unbounded GPU residency
+            // lease. Only resources referenced by the retained scene stay live on
+            // the surface; a later draw uploads a prevalidated asset on demand.
+            let texture_ids = scene_texture_ids(&scene_draw);
+            for asset_id in self.live_texture_ids.difference(&texture_ids) {
+                lifecycle.push(SceneCommand::ReleaseResource {
+                    resource_id: asset_id.clone(),
+                });
+            }
+            for asset_id in texture_ids.difference(&self.live_texture_ids) {
+                lifecycle.push(SceneCommand::UploadTexture {
+                    resource_id: asset_id.clone(),
+                    frame: self.texture(asset_id)?.clone(),
+                });
+            }
+            self.textures.retain(|asset_id, _| {
+                texture_ids.contains(asset_id) || !self.asset_store.contains_image(asset_id)
             });
-        }
-        for asset_id in next_texture_ids.difference(&self.live_texture_ids) {
-            lifecycle.push(SceneCommand::UploadTexture {
-                resource_id: asset_id.clone(),
-                frame: self.texture(asset_id)?.clone(),
-            });
-        }
-        self.textures.retain(|asset_id, _| {
-            next_texture_ids.contains(asset_id) || !self.asset_store.contains_image(asset_id)
-        });
+            Some((scene_draw, texture_ids))
+        } else {
+            None
+        };
 
         for command in ordered_outputs.iter().filter_map(|output| match output {
             NativeVnOrderedRuntimeOutput::Presentation(command) => Some(command),
@@ -3721,7 +3740,15 @@ impl NativeVnHostCommandSource {
             self.height,
             [8, 10, 16, 255],
         ));
-        lifecycle.extend(next_scene_draw.iter().cloned());
+        lifecycle.extend(
+            next_stage_scene
+                .as_ref()
+                .map_or(self.scene_draw.as_slice(), |(scene_draw, _)| {
+                    scene_draw.as_slice()
+                })
+                .iter()
+                .cloned(),
+        );
         let ui_draw = ui_frame.map_or_else(Vec::new, |frame| frame.draw);
         lifecycle.extend(ui_draw.iter().cloned());
         self.command_sequence = self
@@ -3735,9 +3762,13 @@ impl NativeVnHostCommandSource {
             scene_command_count = lifecycle.len(),
             "emitted AstraVN Player host command"
         );
-        self.scene_draw = next_scene_draw;
-        self.stage_director = next_stage_director;
-        self.live_texture_ids = next_texture_ids;
+        if let Some((scene_draw, texture_ids)) = next_stage_scene {
+            self.scene_draw = scene_draw;
+            self.live_texture_ids = texture_ids;
+        }
+        if let Some(stage_director) = next_stage_director {
+            self.stage_director = stage_director;
+        }
         self.ui_draw = ui_draw;
         if !next_audio.is_empty() {
             tracing::info!(
