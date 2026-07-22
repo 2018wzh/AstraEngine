@@ -1,16 +1,16 @@
 # Stage 2 Media + Package Work
 
-Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS、shared UI backend contract 和 release gate。生产完备度审查已将本 Stage 重开为 `IN_PROGRESS`：Package/VFS 权威校验、Cook 批次事务、bounded text layout replay、Windows hardware glyph golden、Windows native media 恢复/资源生命周期、measured performance contract 和 release same-run validator 已完成加固。Headless v3 的 lazy package、bounded cache、retained Scene2D、异步 timestamp/readback 和 Perfetto trace 已接入，正式集显三次 120 Hz、产品路线与 final trace 仍在取证。Migration 12 的 shared UI backend、Scene2D/Mesh2D 与功能 E2 已落地，Windows/Web UI E3 尚待最终闭合。Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是本轮完成前置。
+Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media provider、Windows/Web platform capability、Provider URI Asset VFS、shared UI backend contract 和 release gate。生产完备度审查已将本 Stage 重开为 `IN_PROGRESS`：Package/VFS 权威校验、Cook 批次事务、bounded text layout replay、Windows hardware glyph golden、Windows native media 恢复/资源生命周期、measured performance contract 和 release same-run validator 已完成加固。Headless v3 的 lazy package、bounded cache、retained Scene2D、异步 timestamp/readback 和 Perfetto trace 已接入。TsuiNoSora Demo 的集显三次 120 Hz E2、完整 Y 路线与 final trace 已完成；Migration 12 的 shared UI backend、Scene2D/Mesh2D 与功能 E2 也已落地。Windows/Web UI E3 尚待最终闭合。Linux、macOS、iOS、Android 移到 [Stage 6 Platform Completion](stage-6-platform-completion.md)。legacy pack reader 仍按 Stage 5 建设，不是本轮完成前置。
 
 ## S2-HEADLESS-PERFORMANCE-01 全链路性能跟踪
 
-**Status:** `IN_PROGRESS`
+**Status:** `E2_DONE_E3_IN_PROGRESS`
 
 **Goal:** 用同一 package、profile、input 和 build identity 量化 package、Runtime/UI、Scene2D、GPU 与内存热点，并在集显上关闭 120 Hz E2 预算。
 
 **Implemented:** `astra.performance_trace_manifest.v1`、Headless profile v3 `GpuAdapterPolicy`、60 Hz Runtime 与 120 Hz presentation 分离、无累计截断误差的 deadline pacing、物理输入压力序列生成、bounded Trace Event writer、CPU/GPU scope/counter/flow、lazy source-locked package、4 MiB 原版 fingerprint range streaming、decoded asset LRU、retained atlas mutation、pipeline/output/buffer 复用、timestamp/readback ring 和逐帧/全局 allocator counter。外部分析固定使用 `perfetto-mcp==0.1.4`，不修改 `astra-mcp`。
 
-**Blocking Evidence:** 800×600 产品压力、1920×1080 Scene2D 压力和完整产品路线必须在 clean Release build 上通过预算与正确性回归。集显 workload 各跑三次；独显报告只作对照。缺 timestamp query、deadline miss、资源超限、trace 不连续或 report blocked 都不能把本项标为 `DONE`。
+**Current Evidence:** 800×600 产品压力和 1920×1080 Scene2D 压力均在 clean Release build 上完成三次集显运行；完整 Y 路线通过物理输入抵达 Y→K 边界，视觉回归和 trace 完整性同时通过。缺 timestamp query、deadline miss、资源超限、trace 不连续或 report blocked 都会使后续同类验收失败。Windows Player E3 与跨平台性能证据仍未完成。
 
 **Linked Test IDs:** `T-S2-HEADLESS-CLI-01`、`T-S3-TSUI-GATE-01`
 
