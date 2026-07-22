@@ -458,19 +458,39 @@ impl NativeVnRuntimeProvider {
             .map_err(|_| CoreVnError::message("VN step output lock is poisoned"))? = None;
         let event_kind = vn_event_kind(&command).to_string();
         let command_bytes = postcard::to_allocvec(&command)?;
-        let state = session
+        let (component_payload_hash, _) = session
             .world
-            .read_component::<VnRuntimeState>(session.vn_component)
+            .read_component_postcard_payload(session.vn_component)
             .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let cached_command_state = session
+            .state_cache
+            .lock()
+            .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))?
+            .as_ref()
+            .filter(|cached| cached.payload_hash == component_payload_hash)
+            .map(|cached| {
+                (
+                    cached.state.pending_wait.clone(),
+                    cached.state.system.reading_mode,
+                )
+            });
+        let (pending_wait, reading_mode) = if let Some(cached) = cached_command_state {
+            cached
+        } else {
+            let state = session
+                .world
+                .read_component::<VnRuntimeState>(session.vn_component)
+                .map_err(|err| CoreVnError::message(err.to_string()))?;
+            (state.pending_wait, state.system.reading_mode)
+        };
         let mut ingress = Vec::new();
         if command_resolves_wait(
             &command,
-            state.pending_wait.as_ref().map(|wait| wait.kind),
-            state.system.reading_mode,
+            pending_wait.as_ref().map(|wait| wait.kind),
+            reading_mode,
             &session.compiled,
         ) {
-            let await_id = state
-                .pending_wait
+            let await_id = pending_wait
                 .as_ref()
                 .and_then(|wait| wait.await_id.as_deref())
                 .ok_or_else(|| {
