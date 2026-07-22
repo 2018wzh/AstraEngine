@@ -778,6 +778,18 @@ fn requested_focus_activates_a_button_without_prior_navigation() {
             .collect::<Vec<_>>(),
         vec!["root/confirm"]
     );
+    let retained = backend
+        .renderer_mut()
+        .resolve_retained_activation(focused.semantics.hash, "root/confirm", 1)
+        .expect("retained activation");
+    assert_eq!(retained.action_id, "vn.advance");
+    assert_eq!(retained.semantic_target_id, "root/confirm");
+    assert_eq!(retained.semantic_snapshot_hash, focused.semantics.hash);
+    let stale = backend
+        .renderer_mut()
+        .resolve_retained_activation(Hash256::from_sha256(b"stale"), "root/confirm", 1)
+        .expect_err("stale retained activation");
+    assert_eq!(stale.code(), "ASTRA_UI_RETAINED_SEMANTIC_STALE");
     let activated = backend
         .render_frame(request(
             None,

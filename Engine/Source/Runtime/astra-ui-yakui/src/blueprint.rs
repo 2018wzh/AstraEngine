@@ -47,6 +47,8 @@ pub struct BlueprintYakuiRenderer {
     virtual_lists: BTreeMap<String, VirtualListState>,
     virtual_grids: BTreeMap<String, VirtualGridState>,
     accessibility_actions: BTreeMap<String, Vec<(UiEventBinding, Option<UiValue>)>>,
+    retained_frame: Option<UiBlueprintFrameModel>,
+    retained_semantic_hash: Option<Hash256>,
     text_inputs: BTreeMap<String, TextInputState>,
     focused_text_input: Option<String>,
     semantic_focus_override: Option<String>,
@@ -69,6 +71,8 @@ impl BlueprintYakuiRenderer {
             virtual_lists: BTreeMap::new(),
             virtual_grids: BTreeMap::new(),
             accessibility_actions: BTreeMap::new(),
+            retained_frame: None,
+            retained_semantic_hash: None,
             text_inputs: BTreeMap::new(),
             focused_text_input: None,
             semantic_focus_override: None,
@@ -99,6 +103,73 @@ impl BlueprintYakuiRenderer {
     ) -> Self {
         self.image_resource_provider = Some(provider);
         self
+    }
+
+    pub fn resolve_retained_activation(
+        &self,
+        semantic_snapshot_hash: Hash256,
+        semantic_target_id: &str,
+        input_sequence: u64,
+    ) -> Result<UiActionEnvelope, UiValidationError> {
+        if self.retained_semantic_hash != Some(semantic_snapshot_hash) {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_RETAINED_SEMANTIC_STALE",
+                "retained activation does not match the live semantic generation",
+            ));
+        }
+        let frame = self.retained_frame.as_ref().ok_or_else(|| {
+            UiValidationError::invalid(
+                "ASTRA_UI_RETAINED_FRAME_MISSING",
+                "retained activation requires a validated frame model",
+            )
+        })?;
+        let target = self
+            .pending
+            .iter()
+            .find(|pending| pending.id == semantic_target_id)
+            .ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_RETAINED_TARGET_MISSING",
+                    "retained activation target is absent from the live semantic generation",
+                )
+            })?;
+        if !target.enabled || !target.actions.contains(&UiSemanticAction::Activate) {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_RETAINED_TARGET_DISABLED",
+                "retained activation target is disabled or not activatable",
+            ));
+        }
+        let bindings = self
+            .accessibility_actions
+            .get(semantic_target_id)
+            .ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_RETAINED_BINDING_MISSING",
+                    "retained activation target has no typed action binding",
+                )
+            })?;
+        let matching = bindings
+            .iter()
+            .filter(|(binding, _)| binding.event == "activate")
+            .collect::<Vec<_>>();
+        if matching.len() != 1 {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_RETAINED_BINDING_AMBIGUOUS",
+                "retained activation must map to exactly one typed action binding",
+            ));
+        }
+        let (binding, item) = matching[0];
+        let mut action = action_from_event_sequence(
+            binding,
+            semantic_target_id,
+            input_sequence,
+            frame,
+            item.as_ref(),
+            None,
+        )?;
+        action.semantic_snapshot_hash = semantic_snapshot_hash;
+        action.validate()?;
+        Ok(action)
     }
 
     pub fn upsert_image_resource(
@@ -1357,6 +1428,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         } else {
             None
         };
+        self.retained_frame = Some(frame.clone());
         Ok(YakuiViewOutput {
             actions,
             repaint_after_ns: None,
@@ -1450,6 +1522,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         };
         snapshot.hash = snapshot.compute_hash()?;
         snapshot.validate()?;
+        self.retained_semantic_hash = Some(snapshot.hash);
         if focus_settled {
             self.semantic_focus_override = None;
         }
@@ -1993,6 +2066,17 @@ fn action_from_event(
         .last()
         .map(|event| event.sequence)
         .unwrap_or(0);
+    action_from_event_sequence(event, target, input_sequence, frame, item, event_value)
+}
+
+fn action_from_event_sequence(
+    event: &UiEventBinding,
+    target: &str,
+    input_sequence: u64,
+    frame: &UiBlueprintFrameModel,
+    item: Option<&UiValue>,
+    event_value: Option<&UiValue>,
+) -> Result<UiActionEnvelope, UiValidationError> {
     let mut arguments = BTreeMap::new();
     for (name, expr) in &event.arguments {
         arguments.insert(name.clone(), evaluate(expr, frame, item, event_value)?);

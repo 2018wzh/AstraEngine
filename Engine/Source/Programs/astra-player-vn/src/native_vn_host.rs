@@ -1969,6 +1969,15 @@ impl NativeVnHostCommandSource {
                 self.present_current_scene(self.ui_draw.clone())
             };
         }
+        if let Some(action) = self.retained_ui_activation(&events)? {
+            let started = performance_phase_started(self.ui_host_performance_sampling_enabled);
+            let result = self.dispatch_ui_action(&action);
+            let duration = performance_phase_duration(started)?;
+            if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
+                sample.action_dispatch_ns = sample.action_dispatch_ns.saturating_add(duration);
+            }
+            return result;
+        }
         let frame = self.render_ui(events)?;
         if frame.actions.len() > 1 {
             return Err(NativeVnHostError::Input(
@@ -2003,6 +2012,62 @@ impl NativeVnHostCommandSource {
             sample.present_scene_ns = sample.present_scene_ns.saturating_add(duration);
         }
         result
+    }
+
+    fn retained_ui_activation(
+        &mut self,
+        events: &[UiInputEvent],
+    ) -> Result<Option<astra_ui_core::UiActionEnvelope>, NativeVnHostError> {
+        let [event] = events else {
+            return Ok(None);
+        };
+        let explicit_target = match &event.kind {
+            UiInputEventKind::AccessibilityAction {
+                semantic_id,
+                action,
+                ..
+            } if matches!(action.as_str(), "activate" | "invoke") => Some(semantic_id.as_str()),
+            UiInputEventKind::Keyboard {
+                logical_key,
+                state: UiButtonState::Pressed,
+                repeat: false,
+                ..
+            } if matches!(logical_key.as_str(), "Enter" | " " | "Space") => None,
+            UiInputEventKind::Navigation {
+                action: astra_ui_core::UiNavigationAction::Activate,
+            } => None,
+            _ => return Ok(None),
+        };
+        let semantics = self.ui_semantics.as_ref().ok_or_else(|| {
+            NativeVnHostError::Input(
+                "ASTRA_PLAYER_UI_RETAINED_SEMANTICS_MISSING: active UI surface has no semantic snapshot"
+                    .into(),
+            )
+        })?;
+        let target = if let Some(explicit_target) = explicit_target {
+            semantics
+                .nodes
+                .iter()
+                .find(|node| node.id == explicit_target)
+        } else {
+            semantics.nodes.iter().find(|node| node.focused)
+        };
+        let Some(target) = target else {
+            return Ok(None);
+        };
+        if !target.enabled
+            || target.hidden
+            || !target
+                .actions
+                .contains(&astra_ui_core::UiSemanticAction::Activate)
+        {
+            return Ok(None);
+        }
+        self.ui_backend
+            .renderer_mut()
+            .resolve_retained_activation(semantics.hash, &target.id, event.sequence)
+            .map(Some)
+            .map_err(NativeVnHostError::Ui)
     }
 
     fn apply_ui_resize_events(&mut self, events: &[UiInputEvent]) -> Result<(), NativeVnHostError> {
