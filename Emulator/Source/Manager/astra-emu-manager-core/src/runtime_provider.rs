@@ -747,14 +747,12 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             .map(|effect| match effect {
                 LegacyEffect::Presentation {
                     command, payload, ..
-                } => RuntimeOutputEnvelope {
-                    domain: RuntimeOutputDomain::Presentation,
-                    schema: command,
-                    version: SchemaVersion::new(1, 0, 0),
-                    codec: RuntimeOutputCodec::Postcard,
-                    hash: Hash256::from_sha256(&payload),
-                    bytes: payload,
-                },
+                } => RuntimeOutputEnvelope::postcard_bytes(
+                    RuntimeOutputDomain::Presentation,
+                    command,
+                    SchemaVersion::new(1, 0, 0),
+                    payload.into(),
+                ),
                 _ => unreachable!("matched render presentation effect"),
             });
         let mut outputs = vec![RuntimeOutputEnvelope::postcard(
@@ -1229,7 +1227,7 @@ mod tests {
         let output_hashes = output
             .outputs
             .iter()
-            .map(|envelope| Hash256::from_sha256(&envelope.bytes))
+            .map(|envelope| Hash256::from_sha256(envelope.bytes()))
             .collect::<Vec<_>>();
         let saved = provider
             .save(RuntimeSaveRequest {
