@@ -1144,8 +1144,17 @@ impl RuntimeAction for VnStepAction {
         } else {
             encoded_state
         };
-        let (next_payload_hash, next_state_hash) =
-            ctx.replace_component_encoded_postcard(self.component, encoded_state)?;
+        // The host-owned await identity is part of the authoritative state.
+        // Reuse this exact byte hash at the Runtime component boundary instead
+        // of hashing the growing VN state twice on every input frame.
+        let authoritative_state_hash = Hash128::from_blake3(&encoded_state);
+        output.state_hash_after_advance = authoritative_state_hash;
+        let (next_payload_hash, next_state_hash) = ctx
+            .replace_component_encoded_postcard_prehashed(
+                self.component,
+                encoded_state,
+                authoritative_state_hash,
+            )?;
         let replace_component_ns = profile_elapsed_ns(replace_started);
         let output_started = profile.then(Instant::now);
         for event in &output.events {
