@@ -110,6 +110,20 @@ impl RuntimeComponentPayload {
         })
     }
 
+    pub(crate) fn encoded_postcard(
+        schema: impl Into<SchemaId>,
+        version: SchemaVersion,
+        bytes: Arc<[u8]>,
+    ) -> Self {
+        Self {
+            schema: schema.into(),
+            version,
+            codec: RuntimePayloadCodec::Postcard,
+            hash: Hash256::from_sha256(&bytes),
+            bytes,
+        }
+    }
+
     pub fn decode<T: DeserializeOwned>(&self) -> Result<T, RuntimeError> {
         let bytes = self.validated_postcard_bytes()?;
         postcard::from_bytes(&bytes)

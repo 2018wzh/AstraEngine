@@ -47,6 +47,10 @@ impl ValidatedVnRuntimeState {
     pub fn state(&self) -> &VnRuntimeState {
         &self.state
     }
+
+    pub fn into_state_and_hash(self) -> (VnRuntimeState, Hash128) {
+        (self.state, self.state_hash)
+    }
 }
 
 #[derive(Debug)]
@@ -245,6 +249,15 @@ impl VnRuntime {
         command: VnPlayerCommand,
         before: Hash128,
     ) -> Result<VnStepOutput, VnError> {
+        self.apply_with_state_hash_encoded(command, before)
+            .map(|(output, _)| output)
+    }
+
+    fn apply_with_state_hash_encoded(
+        &mut self,
+        command: VnPlayerCommand,
+        before: Hash128,
+    ) -> Result<(VnStepOutput, Arc<[u8]>), VnError> {
         tracing::trace!(
             event = "vn.runtime.command.start",
             before_state_hash = %before,
@@ -565,20 +578,27 @@ impl VnRuntime {
         let audio = presentation.iter().filter_map(vn_audio_command).collect();
         let timeline_tasks = presentation.iter().filter_map(vn_timeline_task).collect();
         let mutations = variable_mutations(&before_variables, &self.state.variables);
-        Ok(VnStepOutput {
-            schema: "astra.vn.step_output.v1".to_string(),
-            next_cursor: self.state.cursor.clone(),
-            wait: self.state.pending_wait.clone(),
-            awaits: Vec::new(),
-            events,
-            presentation,
-            audio,
-            timeline_tasks,
-            mutations,
-            coverage: VnCoverage { reached },
-            state_hash_before_advance: before,
-            state_hash_after_advance: self.state_hash(),
-        })
+        let encoded_state: Arc<[u8]> = postcard::to_allocvec(&self.state)
+            .expect("AstraVN runtime state must serialize for hashing")
+            .into();
+        let state_hash_after_advance = Hash128::from_blake3(&encoded_state);
+        Ok((
+            VnStepOutput {
+                schema: "astra.vn.step_output.v1".to_string(),
+                next_cursor: self.state.cursor.clone(),
+                wait: self.state.pending_wait.clone(),
+                awaits: Vec::new(),
+                events,
+                presentation,
+                audio,
+                timeline_tasks,
+                mutations,
+                coverage: VnCoverage { reached },
+                state_hash_before_advance: before,
+                state_hash_after_advance,
+            },
+            encoded_state,
+        ))
     }
 
     pub fn save_slot(&self, slot: impl Into<String>) -> Result<VnSaveBlob, VnError> {
@@ -1258,6 +1278,18 @@ pub fn reduce_vn_step_indexed_prehashed(
     let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
     let output = runtime.apply_with_state_hash(command, state_hash)?;
     Ok((runtime.state, output))
+}
+
+pub fn reduce_vn_step_indexed_prehashed_encoded(
+    compiled: Arc<CompiledStory>,
+    index: Arc<VnRuntimeIndex>,
+    state: VnRuntimeState,
+    state_hash: Hash128,
+    command: VnPlayerCommand,
+) -> Result<(VnRuntimeState, VnStepOutput, Arc<[u8]>), VnError> {
+    let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
+    let (output, encoded_state) = runtime.apply_with_state_hash_encoded(command, state_hash)?;
+    Ok((runtime.state, output, encoded_state))
 }
 
 pub fn reduce_vn_step_indexed_validated(

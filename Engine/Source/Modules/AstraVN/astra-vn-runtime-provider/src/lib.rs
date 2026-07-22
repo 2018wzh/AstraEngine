@@ -1065,8 +1065,8 @@ impl RuntimeAction for VnStepAction {
         };
         let state_decode_ns = profile_elapsed_ns(state_started);
         let reduce_started = profile.then(Instant::now);
-        let (mut state, mut output) = if let Some(cached) = cached_state {
-            astra_vn_core::reduce_vn_step_indexed_prehashed(
+        let (mut state, mut output, encoded_state) = if let Some(cached) = cached_state {
+            astra_vn_core::reduce_vn_step_indexed_prehashed_encoded(
                 Arc::clone(&self.compiled),
                 Arc::clone(&self.runtime_index),
                 cached.state,
@@ -1074,10 +1074,14 @@ impl RuntimeAction for VnStepAction {
                 command,
             )
         } else {
-            astra_vn_core::reduce_vn_step_indexed_validated(
+            let validated =
+                decoded_state.expect("cache miss must decode the authoritative VN state");
+            let (state, state_hash) = validated.into_state_and_hash();
+            astra_vn_core::reduce_vn_step_indexed_prehashed_encoded(
                 Arc::clone(&self.compiled),
                 Arc::clone(&self.runtime_index),
-                decoded_state.expect("cache miss must decode the authoritative VN state"),
+                state,
+                state_hash,
                 command,
             )
         }
@@ -1106,7 +1110,7 @@ impl RuntimeAction for VnStepAction {
         let await_ns = profile_elapsed_ns(await_started);
         let replace_started = profile.then(Instant::now);
         let (next_payload_hash, next_state_hash) =
-            ctx.replace_component_hashed(self.component, &state)?;
+            ctx.replace_component_encoded_postcard(self.component, encoded_state)?;
         let replace_component_ns = profile_elapsed_ns(replace_started);
         let output_started = profile.then(Instant::now);
         for event in &output.events {

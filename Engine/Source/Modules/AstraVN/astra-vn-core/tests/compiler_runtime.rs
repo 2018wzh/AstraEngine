@@ -1,7 +1,8 @@
 use astra_vn_core::{
     compile_astra_project, reduce_vn_step, reduce_vn_step_indexed,
-    reduce_vn_step_indexed_prehashed, AstraSource, PresentationCommand, SystemPageKind,
-    VnPlayerCommand, VnRunConfig, VnRuntime, VnRuntimeIndex, VnWaitKind,
+    reduce_vn_step_indexed_prehashed, reduce_vn_step_indexed_prehashed_encoded, AstraSource,
+    PresentationCommand, SystemPageKind, VnPlayerCommand, VnRunConfig, VnRuntime, VnRuntimeIndex,
+    VnWaitKind,
 };
 use std::sync::Arc;
 
@@ -62,9 +63,27 @@ fn prehashed_reducer_preserves_canonical_step_output() {
         command.clone(),
     )
     .unwrap();
-    let prehashed =
-        reduce_vn_step_indexed_prehashed(compiled, index, state, state_hash, command).unwrap();
+    let prehashed = reduce_vn_step_indexed_prehashed(
+        Arc::clone(&compiled),
+        Arc::clone(&index),
+        state.clone(),
+        state_hash,
+        command.clone(),
+    )
+    .unwrap();
     assert_eq!(prehashed, regular);
+    let encoded =
+        reduce_vn_step_indexed_prehashed_encoded(compiled, index, state, state_hash, command)
+            .unwrap();
+    assert_eq!((&encoded.0, &encoded.1), (&regular.0, &regular.1));
+    assert_eq!(
+        encoded.2.as_ref(),
+        postcard::to_allocvec(&regular.0).unwrap()
+    );
+    assert_eq!(
+        astra_core::Hash128::from_blake3(&encoded.2),
+        encoded.1.state_hash_after_advance
+    );
 }
 
 #[astra_headless_test::test]

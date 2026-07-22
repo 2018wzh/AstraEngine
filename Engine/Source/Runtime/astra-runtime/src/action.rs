@@ -324,6 +324,38 @@ impl<'a> DeterministicActionContext<'a> {
         Ok((after_hash, state_hash))
     }
 
+    pub fn replace_component_encoded_postcard(
+        &mut self,
+        component_id: ComponentId,
+        bytes: Arc<[u8]>,
+    ) -> Result<(Hash256, Hash128), RuntimeError> {
+        let component = self.actors.component_mut(component_id).ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_MISSING",
+                "runtime component does not exist",
+            ))
+        })?;
+        let before_hash = component.payload.hash;
+        let schema = component.payload.schema.clone();
+        let payload = crate::RuntimeComponentPayload::encoded_postcard(
+            component.payload.schema.clone(),
+            component.payload.version,
+            bytes,
+        );
+        let after_hash = payload.hash;
+        let state_hash = Hash128::from_blake3(&payload.bytes);
+        component.payload = payload;
+        self.mutations.push(RuntimeMutationRecord {
+            step: self.step,
+            component_id,
+            schema,
+            before_hash,
+            after_hash,
+            source: self.source.clone(),
+        });
+        Ok((after_hash, state_hash))
+    }
+
     fn resolve_component(&self, selector: &ComponentSelector) -> Result<ComponentId, RuntimeError> {
         match selector {
             ComponentSelector::ComponentId { component_id } => self
