@@ -47,6 +47,48 @@ fn configure(director: &mut ProductStageDirector) {
 }
 
 #[astra_headless_test::test]
+fn stage_batch_prepares_one_atomic_next_state_without_mutating_source() {
+    let director = director();
+    let initial = director.state().stable_hash().unwrap();
+    let commands = [
+        StageCommand::Backdrop {
+            color: [12, 24, 36, 255],
+        },
+        StageCommand::Shade {
+            color: [0, 0, 0, 255],
+            opacity: fixed(500_000),
+        },
+    ];
+
+    let (next, outputs) = director.prepare_batch(commands.iter()).unwrap();
+
+    assert_eq!(director.state().stable_hash().unwrap(), initial);
+    assert_eq!(outputs.len(), commands.len());
+    assert_eq!(next.state().backdrop_color, Some([12, 24, 36, 255]));
+    assert_eq!(next.state().shade_opacity, fixed(500_000));
+}
+
+#[astra_headless_test::test]
+fn stage_batch_failure_discards_every_preceding_mutation() {
+    let director = director();
+    let initial = director.state().stable_hash().unwrap();
+    let commands = [
+        StageCommand::Backdrop {
+            color: [12, 24, 36, 255],
+        },
+        StageCommand::Shade {
+            color: [0, 0, 0, 128],
+            opacity: fixed(500_000),
+        },
+    ];
+
+    let error = director.prepare_batch(commands.iter()).unwrap_err();
+
+    assert_eq!(error.code(), "ASTRA_VN_STAGE_SHADE_COLOR_ALPHA");
+    assert_eq!(director.state().stable_hash().unwrap(), initial);
+}
+
+#[astra_headless_test::test]
 fn stage_backdrop_is_authoritative_serializable_and_explicitly_clearable() {
     let mut director = director();
     let black = [0, 0, 0, 255];

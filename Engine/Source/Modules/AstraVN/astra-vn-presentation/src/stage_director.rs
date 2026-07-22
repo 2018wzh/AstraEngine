@@ -209,10 +209,24 @@ impl ProductStageDirector {
     }
 
     pub fn apply(&mut self, command: &StageCommand) -> Result<Vec<StageDirectorOutput>, VnError> {
-        let mut next = self.clone();
-        let output = next.apply_inner(command)?;
+        let (next, mut outputs) = self.prepare_batch(std::iter::once(command))?;
         *self = next;
-        Ok(output)
+        Ok(outputs
+            .pop()
+            .expect("single command produces one output group"))
+    }
+
+    pub fn prepare_batch<'a>(
+        &self,
+        commands: impl IntoIterator<Item = &'a StageCommand>,
+    ) -> Result<(Self, Vec<Vec<StageDirectorOutput>>), VnError> {
+        let mut next = self.clone();
+        let mut outputs = Vec::new();
+        for command in commands {
+            outputs.push(next.apply_inner(command)?);
+        }
+        next.validate_state()?;
+        Ok((next, outputs))
     }
 
     pub fn tick(&mut self, delta_ns: u64) -> Result<Vec<StageDirectorOutput>, VnError> {

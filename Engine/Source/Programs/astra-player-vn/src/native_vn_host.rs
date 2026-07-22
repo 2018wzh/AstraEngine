@@ -3534,7 +3534,16 @@ impl NativeVnHostCommandSource {
         ordered_outputs: &[NativeVnOrderedRuntimeOutput],
         presentation_count: usize,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        let mut next_stage_director = self.stage_director.clone();
+        let (next_stage_director, stage_outputs) = self
+            .stage_director
+            .prepare_batch(ordered_outputs.iter().filter_map(|output| match output {
+                NativeVnOrderedRuntimeOutput::Presentation(PresentationCommand::Stage(stage)) => {
+                    Some(stage)
+                }
+                _ => None,
+            }))
+            .map_err(stage_director_error)?;
+        let mut stage_outputs = stage_outputs.into_iter();
         let mut next_audio = Vec::new();
         for output in ordered_outputs {
             if let NativeVnOrderedRuntimeOutput::AudioStart(request) = output {
@@ -3545,9 +3554,12 @@ impl NativeVnHostCommandSource {
                 continue;
             };
             if let PresentationCommand::Stage(stage) = command {
-                let outputs = next_stage_director
-                    .apply(stage)
-                    .map_err(stage_director_error)?;
+                let outputs = stage_outputs.next().ok_or_else(|| {
+                    NativeVnHostError::Asset(format!(
+                        "ASTRA_PLAYER_STAGE_BATCH_OUTPUT_MISSING: {}",
+                        stage.kind()
+                    ))
+                })?;
                 for output in outputs {
                     match output {
                         StageDirectorOutput::Preload { asset } => {
@@ -3627,6 +3639,12 @@ impl NativeVnHostCommandSource {
                     }
                 }
             }
+        }
+        if stage_outputs.next().is_some() {
+            return Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_STAGE_BATCH_OUTPUT_EXCESS: stage output count exceeded command count"
+                    .into(),
+            ));
         }
         self.ensure_stage_textures(next_stage_director.state())?;
         let next_scene_draw = stage_scene_commands(
